@@ -1,4 +1,10 @@
 import React from 'react';
+import { useState } from 'react';
+jest.mock('react', () => {
+  const actual = jest.requireActual('react');
+  return { ...actual, __esModule: true, default: actual, useState: jest.fn(actual.useState) };
+});
+import { Linking } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 jest.mock('../state/theme', () => ({ useTheme: () => require('../ui/theme').getCurrentTheme() }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
@@ -127,10 +133,10 @@ test('work-study filters can narrow by unit, slot and credit with empty-state fe
   expect(view.getByText('第二份工讀')).toBeTruthy();
   expect(view.queryByText('測試用工讀')).toBeNull();
   fireEvent.changeText(view.getByLabelText('篩選時段（例如：週三）'), '週三');
-  expect(view.getByText('沒有符合目前篩選條件的工讀機會。')).toBeTruthy();
+  expect(view.getByText('沒有符合目前篩選條件的職涯機會。')).toBeTruthy();
   fireEvent.changeText(view.getByLabelText('篩選時段（例如：週三）'), '');
   fireEvent.press(view.getByRole('button', { name: '學分：可抵學分' }));
-  expect(view.getByText('沒有符合目前篩選條件的工讀機會。')).toBeTruthy();
+  expect(view.getByText('沒有符合目前篩選條件的職涯機會。')).toBeTruthy();
 });
 test('guest action asks host to log in and never sends a command', async () => {
   const { view, service, onLogin } = setup('student', null);
@@ -321,7 +327,7 @@ test('slow reads coalesce subscription and manual triggers into one latest snaps
     changed();
     changed();
   });
-  fireEvent.press(view.getByRole('button', { name: '重新整理工讀資料' }));
+  fireEvent.press(view.getByRole('button', { name: '重新整理職涯機會' }));
   expect(service.load).toHaveBeenCalledTimes(1);
   await act(async () => {
     finish({ ...snapshot(), opportunities: [{ ...opportunity, title: '過期讀取結果' }] });
@@ -363,7 +369,7 @@ test('account remount and unmount abort pending reads and discard late failures'
       rejectUnmount = reject;
     });
   });
-  fireEvent.press(view.getByRole('button', { name: '重新整理工讀資料' }));
+  fireEvent.press(view.getByRole('button', { name: '重新整理職涯機會' }));
   view.unmount();
   expect(unmountSignal?.aborted).toBe(true);
   await act(async () => {
@@ -463,3 +469,318 @@ test('hides student work-study chrome for teachers without applications and keep
   staff.data.viewerRole = 'teacher';
   await waitFor(() => expect(staff.view.getByText('新增機會')).toBeTruthy());
 });
+
+test('shows every published opportunity type and filters without exposing unpublished records', async () => {
+  const { view, data, changed } = setup();
+  data.opportunities = [
+    opportunity,
+    { ...opportunity, id: 'internship', type: 'internship', title: '測試實習' },
+    { ...opportunity, id: 'fair', type: 'fair', title: '測試校徵' },
+    { ...opportunity, id: 'hidden', type: 'internship', title: '未上架機會', published: false },
+  ];
+  await waitFor(() => expect(view.getByText('測試實習')).toBeTruthy());
+  expect(view.getAllByText('類型：工讀')).toHaveLength(2);
+  expect(view.getAllByText('類型：實習')).toHaveLength(2);
+  expect(view.getAllByText('類型：校徵')).toHaveLength(2);
+  expect(view.queryByText('未上架機會')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '類型：實習' }));
+  expect(view.queryByText('測試用工讀')).toBeNull();
+  expect(view.queryByText('測試校徵')).toBeNull();
+  expect(view.getByText('測試實習')).toBeTruthy();
+  data.opportunities = data.opportunities.filter((o) => o.type !== 'internship');
+  await act(async () => {
+    changed();
+  });
+  await waitFor(() => expect(view.getByText('沒有符合目前篩選條件的職涯機會。')).toBeTruthy());
+});
+
+test.each([
+  ['internship', true],
+  ['fair', true],
+  ['internship', false],
+  ['fair', false],
+] as const)(
+  '%s directs students to the school announcement (source: %s)',
+  async (type, hasSource) => {
+    const { view, data, service } = setup();
+    data.opportunities = [
+      { ...opportunity, type, sourceUrl: hasSource ? opportunity.sourceUrl : '' },
+    ];
+    await view.findByText('此類機會請依校方公告方式報名');
+    expect(view.queryByRole('button', { name: `應徵${opportunity.title}` })).toBeNull();
+    expect(view.queryByText('工讀權益')).toBeNull();
+    expect(view.queryByLabelText('聯絡方式')).toBeNull();
+    expect(view.queryByRole('button', { name: '送出申請' })).toBeNull();
+    if (hasSource) {
+      const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+      try {
+        fireEvent.press(view.getByRole('link', { name: '校方原始公告 ↗' }));
+        expect(openURL).toHaveBeenCalledWith(opportunity.sourceUrl);
+      } finally {
+        openURL.mockRestore();
+      }
+    } else {
+      expect(view.queryByRole('link', { name: '校方原始公告 ↗' })).toBeNull();
+    }
+    expect(service.execute).not.toHaveBeenCalled();
+  },
+);
+
+function pendingExecution(service: WorkstudyService) {
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  jest.mocked(service.execute).mockImplementationOnce(
+    (command) =>
+      new Promise((done, fail) => {
+        resolve = () =>
+          done({
+            id:
+              command.action === 'save'
+                ? command.opportunity.id || 'created-opening'
+                : application.id,
+          });
+        reject = fail;
+      }),
+  );
+  return { resolve: () => resolve(), reject: (error: Error) => reject(error) };
+}
+
+test.each(['title', 'slots', 'deadline', 'unchanged', 'rejected', 'rejected-unchanged'])(
+  'opportunity save only clears the submitted draft (%s)',
+  async (change) => {
+    const { view, service, data } = setup('staff');
+    fireEvent.press(await view.findByRole('button', { name: '編輯測試用工讀' }));
+    fireEvent.changeText(view.getByLabelText('標題'), '送出的標題');
+    const pending = pendingExecution(service);
+    fireEvent.press(view.getByRole('button', { name: '儲存機會' }));
+    expect(service.execute).toHaveBeenCalledWith({
+      action: 'save',
+      opportunity: { ...opportunity, title: '送出的標題' },
+    });
+    const field = change === 'slots' ? /每週時段/ : change === 'deadline' ? /截止時間（/ : '標題';
+    const newer =
+      change === 'slots'
+        ? '4 13:00 15:00'
+        : change === 'deadline'
+          ? '2099-02-01 12:00'
+          : '尚未儲存的新標題';
+    const edited = change !== 'unchanged' && change !== 'rejected-unchanged';
+    const rejected = change.startsWith('rejected');
+    if (edited) fireEvent.changeText(view.getByLabelText(field), newer);
+    if (!rejected) data.opportunities = [{ ...opportunity, title: '送出的標題', revision: 2 }];
+    await act(async () => {
+      if (rejected) pending.reject(new Error('儲存失敗，請重試。'));
+      else pending.resolve();
+    });
+    if (change === 'unchanged') {
+      expect(view.queryByLabelText('標題')).toBeNull();
+      expect(view.getByText('送出的標題')).toBeTruthy();
+    } else {
+      expect(view.getByLabelText(field).props.value).toBe(edited ? newer : '送出的標題');
+      expect(view.getByRole('button', { name: '儲存機會' })).toBeTruthy();
+    }
+    if (rejected) expect(view.getByText('儲存失敗，請重試。')).toBeTruthy();
+    if (edited || rejected) {
+      fireEvent.press(view.getByRole('button', { name: '儲存機會' }));
+      expect(service.execute).toHaveBeenLastCalledWith({
+        action: 'save',
+        opportunity: {
+          ...opportunity,
+          title: edited && change !== 'slots' && change !== 'deadline' ? newer : '送出的標題',
+          revision: rejected ? opportunity.revision : opportunity.revision + 1,
+          ...(change === 'slots' ? { slots: [{ day: 4, start: '13:00', end: '15:00' }] } : {}),
+          ...(change === 'deadline' ? { deadline: '2099-02-01T04:00:00.000Z' } : {}),
+        },
+      });
+    }
+  },
+);
+
+test.each([
+  ['原本的回覆', true, false],
+  ['', true, false],
+  ['原本的回覆', false, false],
+  ['', false, false],
+  ['原本的回覆', true, true],
+  ['原本的回覆', false, true],
+  ['', false, true],
+] as const)(
+  'review preserves newer drafts and unrelated opportunity/reply drafts (%s, newer: %s, rejected: %s)',
+  async (submitted, newer, rejected) => {
+    const { view, service, data } = setup('staff');
+    data.applications = [
+      { ...application, state: 'read', message: '已存回覆' },
+      { ...application, id: 'other-application', opportunityTitle: '另一筆申請', state: 'read' },
+    ];
+    fireEvent.press(await view.findByRole('button', { name: '編輯測試用工讀' }));
+    fireEvent.changeText(view.getByLabelText('標題'), '機會草稿');
+    fireEvent.press(view.getByRole('button', { name: '申請' }));
+    fireEvent.changeText(view.getByLabelText(/給另一筆申請申請人的回覆/), '另一筆回覆草稿');
+    if (submitted) fireEvent.changeText(view.getByLabelText(/給測試用工讀申請人的回覆/), submitted);
+    else fireEvent.press(view.getAllByRole('button', { name: '清除回覆（隨狀態更新儲存）' })[0]);
+    const pending = pendingExecution(service);
+    fireEvent.press(view.getAllByRole('button', { name: '改為錄取' })[0]);
+    expect(service.execute).toHaveBeenCalledWith({
+      action: 'review',
+      applicationId: application.id,
+      revision: application.revision,
+      state: 'accepted',
+      message: submitted,
+    });
+    if (newer)
+      fireEvent.changeText(view.getByLabelText(/給測試用工讀申請人的回覆/), '儲存中新增的回覆');
+    if (!rejected)
+      data.applications[0] = {
+        ...data.applications[0],
+        revision: application.revision + 1,
+        state: 'accepted',
+        message: submitted,
+      };
+    await act(async () => {
+      if (rejected) pending.reject(new Error('儲存失敗，請重試。'));
+      else pending.resolve();
+    });
+    expect(view.getByLabelText('標題').props.value).toBe('機會草稿');
+    expect(view.getByLabelText(/給另一筆申請申請人的回覆/).props.value).toBe('另一筆回覆草稿');
+    expect(view.getByLabelText(/給測試用工讀申請人的回覆/).props.value).toBe(
+      newer ? '儲存中新增的回覆' : submitted,
+    );
+    if (!rejected) {
+      // Removing an unchanged draft must also remove its old revision; newer drafts stay protected.
+      expect(
+        !!view.queryByText('這筆申請已由其他承辦更新，請捨棄草稿並確認最新回覆後再操作。'),
+      ).toBe(newer);
+    }
+  },
+);
+
+test.each(['apply', 'withdraw', 'sources'] as const)(
+  '%s success preserves an already open opportunity draft',
+  async (action) => {
+    // These actions live in different audience views. Seed only the opportunity draft
+    // to check cleanup isolation without changing the component's audience/session.
+    const actualUseState = React.useState;
+    let nullStates = 0;
+    const seed = jest
+      .mocked(useState)
+      .mockImplementation(((initial: unknown) =>
+        actualUseState(
+          initial === null && ++nullStates === 4
+            ? { ...opportunity, title: '保留中的機會草稿' }
+            : initial,
+        )) as typeof React.useState);
+    let result: ReturnType<typeof setup>;
+    try {
+      result = setup(action === 'sources' ? 'ops' : 'student');
+    } finally {
+      seed.mockImplementation(actualUseState);
+    }
+    const { view, data, service } = result;
+    data.sources = { office: true, departments: true, taiwanjobs: true, revision: 0 };
+    if (action === 'withdraw') data.applications = [application];
+    await view.findByLabelText('標題');
+    const pending = pendingExecution(service);
+    if (action === 'sources') {
+      fireEvent.press(await view.findByRole('checkbox', { name: '系所' }));
+    } else if (action === 'withdraw') {
+      fireEvent.press(await view.findByRole('button', { name: '撤回申請' }));
+      fireEvent.press(view.getByRole('button', { name: '確認撤回申請' }));
+    } else {
+      fireEvent.press(await view.findByRole('button', { name: '應徵測試用工讀' }));
+      fireEvent.changeText(view.getByLabelText('聯絡方式'), 'student@example.test');
+      fireEvent.press(view.getByRole('checkbox', { name: '我看過了' }));
+      fireEvent.press(view.getByRole('button', { name: '送出申請' }));
+    }
+    expect(service.execute).toHaveBeenCalledWith(expect.objectContaining({ action }));
+    await act(async () => pending.resolve());
+    expect(view.getByLabelText('標題').props.value).toBe('保留中的機會草稿');
+    if (action === 'apply') expect(view.queryByLabelText('聯絡方式')).toBeNull();
+  },
+);
+
+test.each([false, true])(
+  'new published draft keeps its saved id even if refresh fails: %s',
+  async (refreshFails) => {
+    const { view, service, data } = setup('staff');
+    fireEvent.press(await view.findByRole('button', { name: '新增機會' }));
+    for (const [label, value] of [
+      ['標題', '新增測試工讀'],
+      ['單位', opportunity.unit],
+      ['時薪或待遇', opportunity.pay],
+      ['校方公告網址', opportunity.sourceUrl],
+      ['權益公告標題', opportunity.rightsTitle],
+      ['權益公告網址', opportunity.rightsUrl],
+      ['權益公告內容', opportunity.rightsText],
+    ]) {
+      fireEvent.changeText(view.getByLabelText(label), value);
+    }
+    fireEvent.changeText(view.getByLabelText(/每週時段/), '1 08:30 10:00');
+    fireEvent.changeText(view.getByLabelText(/截止時間（/), '2099-12-01 17:00');
+    fireEvent.press(view.getByRole('checkbox', { name: '上架' }));
+    const pending = pendingExecution(service);
+    fireEvent.press(view.getByRole('button', { name: '儲存機會' }));
+    const first = jest.mocked(service.execute).mock.calls[0][0];
+    if (first.action !== 'save') throw new Error('Expected a save command');
+    expect(first.opportunity).toEqual(
+      expect.objectContaining({ id: '', revision: 0, published: true }),
+    );
+    data.opportunities = [{ ...first.opportunity, id: 'created-opening', revision: 1 }];
+    fireEvent.changeText(view.getByLabelText('標題'), '新增後繼續編輯的標題');
+    if (refreshFails)
+      jest.mocked(service.load).mockRejectedValueOnce(new Error('讀取失敗，請重試。'));
+    await act(async () => pending.resolve());
+    expect(view.getByLabelText('標題').props.value).toBe('新增後繼續編輯的標題');
+    jest.mocked(service.execute).mockImplementationOnce(async (command) => {
+      if (command.action !== 'save') throw new Error('Expected a save command');
+      const existing = data.opportunities.find((o) => o.id === command.opportunity.id);
+      expect(existing?.revision).toBe(command.opportunity.revision);
+      data.opportunities = [{ ...command.opportunity, revision: command.opportunity.revision + 1 }];
+      return { id: command.opportunity.id };
+    });
+    fireEvent.press(view.getByRole('button', { name: '儲存機會' }));
+    await waitFor(() => expect(view.queryByLabelText('標題')).toBeNull());
+    expect(service.execute).toHaveBeenLastCalledWith({
+      action: 'save',
+      opportunity: {
+        ...first.opportunity,
+        id: 'created-opening',
+        revision: 1,
+        title: '新增後繼續編輯的標題',
+      },
+    });
+    expect(data.opportunities).toHaveLength(1);
+    expect(data.opportunities[0].revision).toBe(2);
+  },
+);
+
+test.each(['same', 'other', 'new'])(
+  'save response does not change a switched draft: %s',
+  async (target) => {
+    const { view, service, data } = setup('staff');
+    data.opportunities.push({
+      ...opportunity,
+      id: 'other-opening',
+      title: '另一筆測試工讀',
+      revision: 7,
+    });
+    fireEvent.press(await view.findByRole('button', { name: '編輯測試用工讀' }));
+    const pending = pendingExecution(service);
+    fireEvent.press(view.getByRole('button', { name: '儲存機會' }));
+    const label =
+      target === 'same' ? '編輯測試用工讀' : target === 'other' ? '編輯另一筆測試工讀' : '新增機會';
+    fireEvent.press(view.getByRole('button', { name: label }));
+    await act(async () => pending.resolve());
+    expect(view.getByLabelText('標題').props.value).toBe(
+      target === 'same' ? opportunity.title : target === 'other' ? '另一筆測試工讀' : '',
+    );
+    fireEvent.changeText(view.getByLabelText(/截止時間（/), '2099-12-01 17:00');
+    fireEvent.press(view.getByRole('button', { name: '儲存機會' }));
+    expect(service.execute).toHaveBeenLastCalledWith({
+      action: 'save',
+      opportunity: expect.objectContaining({
+        id: target === 'same' ? opportunity.id : target === 'other' ? 'other-opening' : '',
+        revision: target === 'same' ? opportunity.revision : target === 'other' ? 7 : 0,
+      }),
+    });
+  },
+);

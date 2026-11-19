@@ -130,6 +130,47 @@ test('opens timetable import from the empty timetable state', async () => {
   expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalImport', { kind: 'timetable' });
 });
 
+test('keeps the assistant usable during the first course load without dropping the draft', async () => {
+  const first = deferred<ReturnType<typeof result>>();
+  jest.mocked(loadStudentHome).mockReturnValueOnce(first.promise);
+  const view = render(<StudentTodayScreen />);
+  expect(view.getByTestId('today-skeleton')).toBeTruthy();
+  const input = view.getByLabelText('說出或輸入想做的事');
+  fireEvent.changeText(input, '想找等一下的教室');
+  await act(async () => first.resolve(result()));
+  expect(view.queryByTestId('today-skeleton')).toBeNull();
+  expect(view.getByLabelText('說出或輸入想做的事')).toBe(input);
+  expect(view.getByDisplayValue('想找等一下的教室')).toBeTruthy();
+  expect(askCampusAssistant).not.toHaveBeenCalled();
+});
+
+test('keeps an in-flight question and draft while retrying coursework in the same scope', async () => {
+  const answer = deferred<Awaited<ReturnType<typeof askCampusAssistant>>>();
+  const retry = deferred<ReturnType<typeof result>>();
+  jest.mocked(askCampusAssistant).mockReturnValueOnce(answer.promise);
+  const view = render(<StudentTodayScreen />);
+  await view.findAllByText('繳交期末報告');
+  const input = view.getByLabelText('說出或輸入想做的事');
+  fireEvent.changeText(input, '我的下一堂課在哪裡？');
+  fireEvent.press(view.getByLabelText('詢問手機助理'));
+  const request = jest.mocked(askCampusAssistant).mock.lastCall![0];
+  jest.mocked(loadStudentHome).mockRejectedValueOnce(new Error('unavailable'));
+  fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
+  await view.findByText('無法讀取校務課程。請確認登入狀態與網路連線後重試。');
+  jest.mocked(loadStudentHome).mockReturnValueOnce(retry.promise);
+  fireEvent.press(view.getByText(TODAY_COPY.retry));
+  expect(view.getByTestId('today-skeleton')).toBeTruthy();
+  expect(view.getByLabelText('說出或輸入想做的事')).toBe(input);
+  expect(view.getByDisplayValue('我的下一堂課在哪裡？')).toBeTruthy();
+  expect(request.signal?.aborted).toBe(false);
+  await act(async () => answer.resolve({ content: '下一堂在主顧樓 302。', source: 'device', hasActions: false }));
+  expect(view.getByText('下一堂在主顧樓 302。')).toBeTruthy();
+  await act(async () => retry.resolve(result()));
+  expect(view.queryByTestId('today-skeleton')).toBeNull();
+  expect(view.getByText('下一堂在主顧樓 302。')).toBeTruthy();
+  expect(askCampusAssistant).toHaveBeenCalledTimes(1);
+});
+
 test.each(['assignment', 'quiz'] as const)('opens the course from a %s todo row', async (kind) => {
   const data = result();
   data.tasks[0].kind = kind;

@@ -1,10 +1,15 @@
 import { Linking } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NuniWorkspaceScreen } from '../screens/NuniWorkspaceScreen';
+import { safeNavigate } from '../utils/safeNavigate';
+import type { PreAuthStackParamList } from '../screens/preAuthTypes';
 import { NuniError } from '@campus/shared/src/nuni';
 import type { NativeNuniState } from '../services/nuniSessionController';
 
 const mockCapability = jest.fn();
+jest.mock('@react-navigation/native', () => jest.requireActual('@react-navigation/native'));
 const mockClearFoodPending = jest.fn();
 let mockAuth: NativeNuniState & {
   signIn: jest.Mock;
@@ -133,6 +138,73 @@ test('preserves course drafts across tabs, but resets them and account data when
   view.rerender(<NuniWorkspaceScreen />);
   expect(view.getByTestId('course-draft').props.value).toBe('');
   await waitFor(() => expect(mockAuth.request).toHaveBeenCalledWith('memberships', 'account-b'));
+});
+
+test('a new explicit course entry returns from another tab without clearing drafts or resetting normal tab changes', async () => {
+  mockAuth.session = principal;
+  const route = { params: { tab: 'courses' as const } };
+  const view = render(<NuniWorkspaceScreen route={route} />);
+  fireEvent.changeText(view.getByTestId('course-draft'), '保留這份作業草稿');
+  fireEvent.press(view.getByRole('tab', { name: '店家' }));
+  expect(view.getByRole('tab', { name: '店家' }).props.accessibilityState.selected).toBe(true);
+  view.rerender(<NuniWorkspaceScreen route={route} />);
+  expect(view.getByRole('tab', { name: '店家' }).props.accessibilityState.selected).toBe(true);
+  view.rerender(<NuniWorkspaceScreen route={{ params: { tab: 'courses' } }} />);
+  expect(view.getByRole('tab', { name: '課程' }).props.accessibilityState.selected).toBe(true);
+  expect(view.getByTestId('course-draft').props.value).toBe('保留這份作業草稿');
+  expect(mockAuth.signIn).not.toHaveBeenCalled();
+  expect(mockAuth.logout).not.toHaveBeenCalled();
+  await waitFor(() => expect(mockAuth.request).toHaveBeenCalledWith('memberships', 'account-a'));
+});
+
+test('account intent survives a verified login and its browser fallback returns to account qualifications', async () => {
+  mockCapability.mockReturnValue({ available: false, reason: 'ios-not-configured' });
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  const route = { params: { tab: 'account' as const } };
+  const view = render(<NuniWorkspaceScreen route={route} />);
+  expect(view.getByText('帳號與資格')).toBeTruthy();
+  expect(view.queryByText('從你的課程開始')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('開啟網頁版登入')));
+  expect(open).toHaveBeenCalledWith('https://nuni.tw/login?returnUrl=%2Fclassroom%2Faccount');
+  expect(mockAuth.signIn).not.toHaveBeenCalled();
+  mockAuth.session = principal;
+  view.rerender(<NuniWorkspaceScreen route={route} />);
+  expect(view.getByRole('tab', { name: '帳號' }).props.accessibilityState.selected).toBe(true);
+  expect(await view.findByText(/目前沒有學校資格紀錄/)).toBeTruthy();
+});
+
+test('real navigation reopens the named tab on the existing route without retaining an old course target', async () => {
+  mockAuth.session = principal;
+  const Stack = createNativeStackNavigator<Pick<PreAuthStackParamList, 'NuniWorkspace'>>();
+  const navigation = createNavigationContainerRef<Pick<PreAuthStackParamList, 'NuniWorkspace'>>();
+  const unhandled = jest.fn();
+  const view = render(
+    <NavigationContainer ref={navigation} onUnhandledAction={unhandled}>
+      <Stack.Navigator id={undefined} screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="NuniWorkspace" component={NuniWorkspaceScreen} />
+      </Stack.Navigator>
+    </NavigationContainer>,
+  );
+  await waitFor(() => expect(navigation.isReady()).toBe(true));
+  act(() => navigation.navigate('NuniWorkspace', {
+    tab: 'courses', workspaceId: 'cw_previous', assignmentId: 'cwa_previous',
+  }));
+  expect(view.getByText('workspace:cw_previous')).toBeTruthy();
+  const originalRoute = navigation.getCurrentRoute()?.key;
+  fireEvent.changeText(view.getByTestId('course-draft'), '保留原課程的輸入');
+  fireEvent.press(view.getByRole('tab', { name: '店家' }));
+  expect(view.getByRole('tab', { name: '店家' }).props.accessibilityState.selected).toBe(true);
+  act(() => {
+    expect(safeNavigate(navigation, 'NuniWorkspace', { tab: 'courses' })).toBe(true);
+  });
+  expect(navigation.getCurrentRoute()).toMatchObject({ key: originalRoute, params: { tab: 'courses' } });
+  expect(navigation.getCurrentRoute()?.params).toEqual({ tab: 'courses' });
+  expect(view.getByRole('tab', { name: '課程' }).props.accessibilityState.selected).toBe(true);
+  expect(view.queryByText('workspace:cw_previous')).toBeNull();
+  expect(view.queryByText('assignment:cwa_previous')).toBeNull();
+  expect(view.getByTestId('course-draft').props.value).toBe('保留原課程的輸入');
+  expect(unhandled).not.toHaveBeenCalled();
+  expect(mockAuth.request.mock.calls.filter((call) => call[2])).toEqual([]);
 });
 
 test('shows every membership state without converting it into a global teacher or administrator role', async () => {

@@ -12,7 +12,7 @@
         var dark =
           selectedTheme === 'dark' ||
           (selectedTheme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
-        document.querySelector('meta[name="theme-color"]').content = dark ? '#000000' : '#f8f7f3';
+        document.querySelector('meta[name="theme-color"]').content = dark ? '#000000' : '#f6f7f5';
         if (selectedTheme === 'light' || selectedTheme === 'dark') {
           document.documentElement.setAttribute('data-theme', selectedTheme);
         }
@@ -23,7 +23,7 @@
     <style>
       :root {
         color-scheme: light;
-        --bg: #f8f7f3;
+        --bg: #f6f7f5;
         --surface: #ffffff;
         --text: #243b35;
         --muted: #626e67;

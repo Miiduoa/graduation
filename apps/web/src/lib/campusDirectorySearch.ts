@@ -1,5 +1,5 @@
 import { sanitizeInternalPath } from './navigation';
-import { SERVICE_CATEGORIES, type ServiceCategory } from './campusServices';
+import { CAMPUS_SERVICES, SERVICE_CATEGORIES, type ServiceCategory } from './campusServices';
 
 export const DIRECTORY_SEARCH_STORAGE_KEY = 'campus.directory.search.v1';
 export const DIRECTORY_SEARCH_MAX_QUERY = 160;
@@ -14,9 +14,25 @@ export type DirectorySearchSnapshot = {
   open: boolean;
   /** Optional opaque account/campus binding. Unscoped callers keep their existing behavior. */
   scope?: string;
+  expanded?: string[];
 };
 
 type DirectorySearchStore = Partial<Record<DirectorySearchSource, DirectorySearchSnapshot>>;
+
+const sectionIds = new Set([
+  ...SERVICE_CATEGORIES.map((category) => `group:${category.id}`),
+  ...CAMPUS_SERVICES.map((service) => `service:${service.href}`),
+]);
+
+function safeExpanded(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((id): id is string => typeof id === 'string' && sectionIds.has(id)))].slice(0, 50);
+}
+
+export function expandedDirectorySections(container: Element | null): string[] {
+  return safeExpanded(Array.from(container?.querySelectorAll('details[open][data-directory-section]') ?? [])
+    .map((element) => element.getAttribute('data-directory-section')));
+}
 
 function isCategory(value: unknown): value is ServiceCategory | 'all' {
   return value === 'all' || SERVICE_CATEGORIES.some((item) => item.id === value);
@@ -96,6 +112,7 @@ export function rememberDirectorySearch(
     category?: ServiceCategory | 'all';
     open?: boolean;
     scope?: string;
+    expanded?: string[];
   },
 ): void {
   const path = internalPathname(snapshot.path);
@@ -109,6 +126,7 @@ export function rememberDirectorySearch(
     category: isCategory(snapshot.category) ? snapshot.category : 'all',
     open: snapshot.open !== false,
     ...(snapshot.scope !== undefined ? { scope: snapshot.scope.slice(0, 1024) } : {}),
+    ...(safeExpanded(snapshot.expanded).length ? { expanded: safeExpanded(snapshot.expanded) } : {}),
   };
   writeStore(store);
 }
@@ -147,5 +165,6 @@ export function restoreDirectorySearch(
     category: snapshot.category,
     open: snapshot.open,
     ...(snapshot.scope !== undefined ? { scope: snapshot.scope } : {}),
+    ...(safeExpanded(snapshot.expanded).length ? { expanded: safeExpanded(snapshot.expanded) } : {}),
   };
 }

@@ -1,5 +1,11 @@
+import { readLifeFilters } from '@/app/life/lifeFilters';
 import type { CampusIconName } from '@/components/CampusIcon';
-import { searchCampusServices, type CampusService } from './campusServices';
+import {
+  presentCampusService,
+  searchCampusServices,
+  visibleCampusServices,
+  type CampusService,
+} from './campusServices';
 
 export type ServiceJourney = 'life' | 'connect';
 
@@ -17,7 +23,11 @@ export const SERVICE_JOURNEY_GROUPS = {
   ],
 } as const;
 
-export type JourneyFilters = { query: string; group: string };
+export type JourneyFilters = { query: string; group: string; publicOnly?: boolean };
+
+export function isDirectlyAvailable(service: CampusService) {
+  return service.access === 'public' || service.access === 'device';
+}
 
 export function serviceJourneyGroup(journey: ServiceJourney, service: CampusService): string {
   const href = service.parentHref || service.href;
@@ -36,13 +46,29 @@ export function journeyServices(
   filters: JourneyFilters,
   schoolLmsEnabled = false,
 ) {
-  return searchCampusServices(
-    filters.query,
-    journey === 'life' ? 'campus' : 'connect',
-    schoolLmsEnabled,
-  ).filter(
-    (service) => filters.group === 'all' || serviceJourneyGroup(journey, service) === filters.group,
-  );
+  const category = journey === 'life' ? 'campus' : 'connect';
+  const candidates =
+    filters.publicOnly && !filters.query.trim()
+      ? visibleCampusServices(schoolLmsEnabled)
+          .filter((service) => service.category === category)
+          .map(presentCampusService)
+      : searchCampusServices(filters.query, category, schoolLmsEnabled);
+  const accessible = filters.publicOnly ? candidates.filter(isDirectlyAvailable) : candidates;
+  // A public child such as the cafeteria remains reachable even when its
+  // signed-in parent (ordering) is excluded by the visitor's filter.
+  const availableParents = new Set(accessible.map((service) => service.href));
+  return accessible
+    .filter(
+      (service) =>
+        !filters.publicOnly ||
+        filters.query.trim() ||
+        !service.parentHref ||
+        !availableParents.has(service.parentHref),
+    )
+    .filter(
+      (service) =>
+        filters.group === 'all' || serviceJourneyGroup(journey, service) === filters.group,
+    );
 }
 
 export function readJourneyFilters(
@@ -51,17 +77,28 @@ export function readJourneyFilters(
 ): JourneyFilters {
   const group = params.get('group');
   return {
-    // eslint-disable-next-line no-control-regex -- Remove ASCII control characters from URL search terms.
-    query: (params.get('q') || '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 100),
+    // Remove ASCII control characters from URL search terms.
+    query:
+      journey === 'life'
+        ? readLifeFilters(params).query
+        : (params.get('q') || '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 100),
     group: SERVICE_JOURNEY_GROUPS[journey].some((item) => item.id === group) ? group! : 'all',
+    ...((params.get('access') === 'public' ||
+    (journey === 'life' && readLifeFilters(params).category === 'public'))
+      ? { publicOnly: true }
+      : {}),
   };
 }
 
 export function writeJourneyFilters(params: URLSearchParams, filters: JourneyFilters) {
+  // Old life links keep working; subsequent edits use the shared directory schema.
+  params.delete('category');
   if (filters.query) params.set('q', filters.query);
   else params.delete('q');
   if (filters.group === 'all') params.delete('group');
   else params.set('group', filters.group);
+  if (filters.publicOnly) params.set('access', 'public');
+  else params.delete('access');
 }
 
 const SERVICE_ICONS: Partial<Record<string, CampusIconName>> = {

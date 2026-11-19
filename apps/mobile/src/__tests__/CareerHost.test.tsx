@@ -74,6 +74,15 @@ test('opens the school event list and both event sources on nuni.tw', async () =
   }
 });
 
+test('shows an honest sign-in state for guests before querying opportunities', () => {
+  mockUser = null;
+  const view = render(<CareerHost schoolId="pu" />);
+  expect(view.getByText('登入後查看本校工讀、實習與校徵')).toBeTruthy();
+  expect(view.queryByText(/職產處還沒/)).toBeNull();
+  expect(view.queryByText(/實習工作區/)).toBeNull();
+  mockUser = { uid: 'staff' };
+});
+
 test.each(['pu', 'nthu'])(
   'guest career login preserves %s on both the login form and return task',
   async (schoolId) => {

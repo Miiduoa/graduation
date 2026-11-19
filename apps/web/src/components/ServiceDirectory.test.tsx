@@ -89,6 +89,28 @@ it('Back arrives while the directory is unmounted and restores its original resu
   expect(window.history.state).toEqual(entry);
 });
 
+it('visitors can filter available services, keep the campus and reset without losing input focus', () => {
+  const view = render(<ServiceDirectory journey="life" />);
+  fireEvent.click(screen.getByRole('checkbox', { name: '只看免登入服務' }));
+  expect(screen.getByRole('heading', { name: '免登入服務' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '餐廳' }).getAttribute('href')).toBe(
+    '/cafeteria?campus=pu',
+  );
+  expect(screen.queryByRole('link', { name: '點餐與取餐' })).toBeNull();
+  expect(new URL(window.location.href).searchParams.get('access')).toBe('public');
+  view.unmount();
+  navigation.search = window.location.search.slice(1);
+  render(<ServiceDirectory journey="life" />);
+  expect(
+    (screen.getByRole('checkbox', { name: '只看免登入服務' }) as HTMLInputElement).checked,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '顯示全部服務' }));
+  expect(new URL(window.location.href).searchParams.get('campus')).toBe('pu');
+  expect(new URL(window.location.href).searchParams.has('access')).toBe(false);
+  expect(screen.getByRole('link', { name: '點餐與取餐' })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole('searchbox'));
+});
+
 it('Forward to the service and Back again can restore the same history entry again', () => {
   const entry = leaveLibrary();
   pop(lifeUrl, entry);
@@ -204,7 +226,7 @@ it('keeps Next history data and unrelated fields, but filter edits remove the ol
   expect(window.history.state).toMatchObject(nextHistoryState);
   expect(Object.keys(window.history.state)).toHaveLength(Object.keys(nextHistoryState).length + 1);
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '公車' } });
-  expect(window.history.state).toEqual(nextHistoryState);
+  expect(window.history.state).toEqual({ ...nextHistoryState, __NA: undefined });
   expect(window.location.search).toBe('?campus=pu&q=%E5%85%AC%E8%BB%8A');
 });
 

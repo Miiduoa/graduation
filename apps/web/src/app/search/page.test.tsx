@@ -6,6 +6,24 @@ import SearchPage from './page';
 import { visibleCampusServices } from '@/lib/campusServices';
 import { DIRECTORY_SEARCH_STORAGE_KEY } from '@/lib/campusDirectorySearch';
 
+// jsdom exposes descendants of closed <details> in role queries; check native disclosure state.
+function expandedLinks() {
+  return screen.getAllByRole('link').filter((link) => {
+    let parent = link.parentElement;
+    while (parent) {
+      if (parent instanceof HTMLDetailsElement && !parent.open) return false;
+      parent = parent.parentElement;
+    }
+    return true;
+  });
+}
+
+function expandDirectory() {
+  for (const detail of document.querySelectorAll<HTMLDetailsElement>('main details')) {
+    if (!detail.open) fireEvent.click(detail.querySelector('summary')!);
+  }
+}
+
 const selection = vi.hoisted(() => ({
   current: null as null | {
     selectedSchool: { id: string; code?: string } | null;
@@ -86,6 +104,7 @@ vi.mock('@/components/SiteShell', () => ({
 
 it('keeps every service discoverable without inventing a school selection', () => {
   render(<SearchPage />);
+  expandDirectory();
   expect(screen.getAllByRole('link')).toHaveLength(visibleCampusServices().length);
   expect(screen.getByRole('link', { name: /^學校資訊/ }).getAttribute('href')).toBe('/school-info');
   expect(screen.getByRole('link', { name: /^校園活動/ }).getAttribute('href')).toBe('/events');
@@ -112,6 +131,7 @@ it('combines category filters with keyword search and restores all services afte
   render(<SearchPage />);
   fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
   expect(screen.queryByRole('link', { name: /^課表/ })).toBeNull();
+  expandDirectory();
   expect(screen.getAllByRole('link')).toHaveLength(11);
   expect(screen.queryByRole('link', { name: /^數位學生證/ })).toBeNull();
   fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
@@ -121,6 +141,7 @@ it('combines category filters with keyword search and restores all services afte
   expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
   expect(screen.getByRole('status').textContent).toBe('找到 1 項服務');
   fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  expandDirectory();
   expect(screen.getAllByRole('link')).toHaveLength(visibleCampusServices().length);
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
   fireEvent.click(screen.getByRole('button', { name: '帳號與協助' }));
@@ -135,6 +156,7 @@ it('offers a recovery action when a query has no matching service', () => {
   expect(screen.queryAllByRole('link')).toHaveLength(0);
   expect(screen.getByRole('heading', { name: '沒有符合的服務' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '查看所有服務' }));
+  expandDirectory();
   expect(screen.getAllByRole('link')).toHaveLength(visibleCampusServices().length);
 });
 
@@ -147,6 +169,7 @@ it('matches search aliases without case or surrounding-space sensitivity', () =>
 
 it('keeps the existing course directory alongside the added Nuni classroom', () => {
   render(<SearchPage />);
+  expandDirectory();
   const paths = screen.getAllByRole('link').map((link) => link.getAttribute('href')?.split('?')[0]);
   expect(paths).toContain('/groups');
   expect(paths).toContain('/cafeteria');
@@ -230,6 +253,7 @@ it('uses the current school for feedback when the address still has an earlier c
   };
   window.history.replaceState({}, '', '/search?campus=pu&schoolId=pu&school=PU&session=private');
   render(<SearchPage />);
+  expandDirectory();
   const target = new URL(
     screen.getByRole('link', { name: /^成績回饋/ }).getAttribute('href')!,
     'https://campus.example',
@@ -254,6 +278,9 @@ it.each(['職涯', '實習', '校內工讀'])(
     expect(target.pathname).toBe('/career');
     expect(target.searchParams.get('campus')).toBe('nthu');
     expect(target.searchParams.has('q')).toBe(false);
+    expect(screen.getByRole('link', { name: /^職涯/ }).getAttribute('href')).toBe('/career?campus=nthu');
+    // A matching catalog result already provides the destination; do not
+    // repeat the same career entry as an additional quick action.
     expect(screen.getAllByRole('link')).toHaveLength(1);
   },
 );
@@ -269,6 +296,7 @@ it('finds tasks using separated words and full-width Latin characters', () => {
 });
 it('makes management and school qualifications discoverable without implying authorization', () => {
   render(<SearchPage />);
+  expandDirectory();
   expect(
     screen.getByRole('link', { name: /管理員入口.*需平台管理權限/ }).getAttribute('href'),
   ).toBe('/admin');
@@ -322,6 +350,7 @@ it('restores filters after navigation and ignores unsupported categories', () =>
 
 it('shows a school login limitation before opening a service without hiding its entry', () => {
   const view = render(<SearchPage />);
+  expandDirectory();
   expect(screen.getByRole('link', { name: /^成績 查詢/ }).textContent).toContain('尚未開放登入');
   options.studentId = true;
   view.rerender(<SearchPage />);
@@ -369,6 +398,7 @@ it('hides readonly homework by default and restores it when enabled', () => {
       <SearchPage />
     </SchoolLmsReadonlyProvider>,
   );
+  expandDirectory();
   expect(screen.getByRole('link', { name: /^校方作業與教材/ }).getAttribute('href')).toContain(
     '/school-lms',
   );
@@ -811,3 +841,28 @@ it.each([false, true])(
     }
   },
 );
+
+
+it('shows everyday services first while searchable secondary entries remain reachable', () => {
+  render(<SearchPage />);
+  expect(expandedLinks()).toHaveLength(16);
+  expect(screen.getByRole('link', { name: /^刪除帳號/ }).closest('details')!.open).toBe(false);
+  expect(screen.getByRole('link', { name: /^教材收藏/ }).closest('details')!.open).toBe(false);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '書籤' } });
+  expect(screen.getByRole('link', { name: /^教材收藏/ })).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toBe('找到 1 項服務');
+});
+
+it('returns to the expanded family after opening a secondary service', () => {
+  const view = render(<SearchPage />);
+  fireEvent.click(screen.getByText(/更多學習與課務服務/));
+  fireEvent.click(screen.getByLabelText('成績的相關服務'));
+  fireEvent.click(screen.getByRole('link', { name: /^成績回饋/ }));
+  view.unmount();
+  render(<SearchPage />);
+  const feedback = screen.getByRole('link', { name: /^成績回饋/ });
+  const family = feedback.closest('details')!;
+  expect(family.open).toBe(true);
+  expect(family.parentElement!.closest('details')!.open).toBe(true);
+  expect(feedback.getAttribute('href')).toBe('/grades?tab=feedback');
+});

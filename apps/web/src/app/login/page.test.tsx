@@ -265,7 +265,7 @@ it.each([
   const platform = screen.getByTestId('platform-sign-in');
   const school = container.querySelector('details[aria-label="學校帳號登入"]')!;
   expect(platform.getAttribute('data-return-url')).toBe(destination);
-  expect(screen.getByRole('heading', { name: '一個 Google 帳號，就能開始' })).toBeTruthy();
+  expect(screen.getByText('登入後會回到你原本的頁面，接著完成剛才的事。')).toBeTruthy();
   expect(school.hasAttribute('open')).toBe(false);
   expect(platform.compareDocumentPosition(school) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.queryByRole('textbox', { name: '學號' })).toBeNull();
@@ -931,22 +931,51 @@ it('does not treat another Firebase user as a verified school session', () => {
   expect(replace).not.toHaveBeenCalled();
 });
 
-it('keeps ordinary sign-in first and exposes role-specific entries on request', () => {
+it('puts account sign-in first and reveals specialist work entries on request', () => {
   state.params = new URLSearchParams();
   state.user = null;
   render(<LoginPage />);
-  expect(screen.getByTestId('platform-sign-in')).toBeTruthy();
-  const summary = screen.getByText('店家、教師與管理入口');
-  const disclosure = summary.closest('details')!;
-  expect(disclosure.open).toBe(false);
-  expect(screen.getByTestId('platform-sign-in').compareDocumentPosition(disclosure) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  fireEvent.click(summary);
-  expect(disclosure.open).toBe(true);
+  const roles = screen.getByLabelText('其他身分與工作入口') as HTMLDetailsElement;
+  const platform = screen.getByTestId('platform-sign-in');
+  expect(roles.open).toBe(false);
+  expect(screen.getByRole('link', { name: '第一次申請店家進駐' }).closest('details')).toBe(roles);
+  expect(platform.compareDocumentPosition(roles) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(roles.querySelector('summary')!);
+  expect(roles.open).toBe(true);
   expect(screen.getByRole('link', { name: '第一次申請店家進駐' }).getAttribute('href')).toBe('/merchant/apply');
   expect(screen.getByRole('link', { name: '查看申請或進入門市' }).getAttribute('href')).toBe('/merchant/workspace');
   expect(screen.getByRole('link', { name: '學生與教師進入課程' }).getAttribute('href')).toBe('/classroom');
   expect(screen.getByRole('link', { name: '校方人員登入' }).getAttribute('href')).toBe('/auth/account?method=school');
   expect(screen.getByRole('link', { name: '平台管理員登入' }).getAttribute('href')).toBe('/admin/login');
+  fireEvent.click(roles.querySelector('summary')!);
+  expect(roles.open).toBe(false);
+  expect(screen.getByRole('button', { name: '使用 Google 帳號繼續' })).toBeTruthy();
+});
+
+it.each(['pu', 'ntu'])('keeps public alternatives on the selected %s campus without copying login parameters', (schoolId) => {
+  state.user = null;
+  state.selectedSchoolId = schoolId;
+  state.params = new URLSearchParams({ returnUrl: '/calendar#week', session: 'private-marker' });
+  render(<LoginPage />);
+  for (const name of ['校園地圖', '公車資訊', '公開公告', '校園活動', '餐廳', '圖書館', '學校資訊']) {
+    const target = new URL(screen.getByRole('link', { name }).getAttribute('href')!, 'https://campus.local');
+    expect(target.searchParams.get('schoolId')).toBe(schoolId);
+    expect(target.searchParams.get('campus')).toBe(schoolId);
+    expect(target.searchParams.has('returnUrl')).toBe(false);
+    expect(target.searchParams.has('session')).toBe(false);
+  }
+  expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe('/calendar#week');
+  expect(replace).not.toHaveBeenCalled();
+});
+
+it('preserves an unavailable campus when opening a public alternative from sign-in', () => {
+  state.user = null;
+  state.requestedUnavailable = true;
+  state.params = new URLSearchParams({ schoolId: 'unknown-campus', returnUrl: '/grades?tab=semester' });
+  render(<LoginPage />);
+  expect(screen.getByRole('link', { name: '校園地圖' }).getAttribute('href')).toBe('/map?schoolId=unknown-campus');
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(signIn).not.toHaveBeenCalled();
 });
 
 it.each(['/merchant', '/merchant/apply', '/merchant/workspace'])(

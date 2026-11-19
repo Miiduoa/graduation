@@ -52,6 +52,15 @@ it('keeps 34 navigable voice shortcuts inside the expanded service catalog', () 
   ]);
 });
 
+it.each(['school', 'platform'] as const)(
+  'opens the career service from an explicit request for a %s account',
+  (audience) => {
+    expect(getQuickCampusActions('開啟職涯', false, audience)).toEqual([
+      expect.objectContaining({ href: '/career', destination: '/career', serviceId: 'career', access: 'public' }),
+    ]);
+  },
+);
+
 it.each([
   '打開 WOW Class',
   '查看 TronClass',

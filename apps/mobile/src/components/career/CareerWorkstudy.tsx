@@ -202,12 +202,16 @@ function Workspace({
   const [draft, setDraft] = useState<CareerOpportunity | null>(null);
   const [slotsText, setSlotsText] = useState('');
   const [deadline, setDeadline] = useState('');
+  const draftSession = useRef(0);
+  const opportunityDraft = useRef({ draft, slotsText, deadline });
+  opportunityDraft.current = { draft, slotsText, deadline };
   const [message, setMessage] = useState<Record<string, { value: string; revision: number }>>({});
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmWithdraw, setConfirmWithdraw] = useState<string | null>(null);
   const [tab, setTab] = useState('機會');
+  const [typeFilter, setTypeFilter] = useState<'all' | CareerOpportunity['type']>('all');
   const [unitFilter, setUnitFilter] = useState('');
   const [slotFilter, setSlotFilter] = useState('');
   const [creditFilter, setCreditFilter] = useState<'all' | 'credit' | 'non-credit'>('all');
@@ -300,6 +304,13 @@ function Workspace({
   }, [service, loadCourses]);
   async function execute(command: Exclude<CareerCommand, { action: 'list' }>) {
     if (inFlight.current) return;
+    const submittedDraftSession = draftSession.current;
+    const submittedDraft = JSON.stringify(opportunityDraft.current);
+    const submittedMessage =
+      command.action === 'review'
+        ? (command.message ??
+          snapshot?.applications.find((a) => a.id === command.applicationId)?.message)
+        : undefined;
     inFlight.current = true;
     setBusy(true);
     setError('');
@@ -308,18 +319,36 @@ function Workspace({
     pendingRefresh.current = false;
     readController.current?.abort();
     try {
-      await service.execute(command);
+      const reply = await service.execute(command);
       if (!alive.current) return;
       if (command.action === 'review') {
         setMessage((previous) => {
+          const current = previous[command.applicationId];
+          if (current?.value !== submittedMessage || current?.revision !== command.revision)
+            return previous;
           const next = { ...previous };
           delete next[command.applicationId];
           return next;
         });
       }
-      setSelected(null);
-      setConfirmed(false);
-      setDraft(null);
+      if (command.action === 'apply') {
+        setSelected((current) => (current?.id === command.opportunityId ? null : current));
+        setConfirmed(false);
+      }
+      if (command.action === 'save' && draftSession.current === submittedDraftSession) {
+        if (JSON.stringify(opportunityDraft.current) === submittedDraft) {
+          setDraft(null);
+        } else {
+          // The save transaction increments the submitted revision exactly once.
+          // Keep newer input while advancing this editing session to the saved record.
+          const id = reply.id || command.opportunity.id;
+          if (id) {
+            setDraft((current) =>
+              current ? { ...current, id, revision: command.opportunity.revision + 1 } : current,
+            );
+          }
+        }
+      }
       setNotice(
         command.action === 'apply'
           ? '已送出申請，可在「我的申請」查看進度。'
@@ -337,8 +366,9 @@ function Workspace({
     }
   }
   const displayedOpportunities =
-    snapshot?.opportunities.filter((o) => audience === 'staff' || o.type === 'workstudy') ?? [];
+    snapshot?.opportunities.filter((o) => audience === 'staff' || o.published) ?? [];
   const filteredOpportunities = displayedOpportunities.filter((opportunity) => {
+    if (typeFilter !== 'all' && opportunity.type !== typeFilter) return false;
     if (unitFilter.trim() && !opportunity.unit.includes(unitFilter.trim())) return false;
     if (
       slotFilter.trim() &&
@@ -351,6 +381,7 @@ function Workspace({
   });
   const official = resolveSchoolPublicServices(schoolId)?.services.career;
   function edit(opportunity: CareerOpportunity) {
+    draftSession.current++;
     setDraft({ ...opportunity });
     setSlotsText(opportunity.slots.map((s) => `${s.day} ${s.start} ${s.end}`).join('\n'));
     setDeadline(
@@ -429,7 +460,7 @@ function Workspace({
     <Box>
       <Heading>
         {audience === 'student'
-          ? '校內工讀'
+          ? '校內工讀、實習與校徵'
           : audience === 'staff'
             ? '職涯工作台'
             : '職涯來源與操作紀錄'}
@@ -437,7 +468,7 @@ function Workspace({
       {error && <AlertText>{error}</AlertText>}
       {notice && <StatusText>{notice}</StatusText>}
       <Button
-        label="重新整理工讀資料"
+        label="重新整理職涯機會"
         disabled={busy}
         onPress={() => {
           void refresh();
@@ -450,7 +481,7 @@ function Workspace({
             });
         }}
       />
-      {!snapshot && !error && <Body>正在讀取工讀資料…</Body>}
+      {!snapshot && !error && <Body>正在讀取職涯機會…</Body>}
       {audience === 'staff' && (
         <Box>
           <Body>工作台 › 職涯</Body>
@@ -471,6 +502,22 @@ function Workspace({
           )}
           {snapshot && (
             <>
+              <Row>
+                {(
+                  [
+                    ['all', '全部'],
+                    ['workstudy', '工讀'],
+                    ['internship', '實習'],
+                    ['fair', '校徵'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    label={`${typeFilter === value ? '已選：' : ''}類型：${label}`}
+                    onPress={() => setTypeFilter(value)}
+                  />
+                ))}
+              </Row>
               <Field label="篩選單位" value={unitFilter} onChange={setUnitFilter} />
               <Field label="篩選時段（例如：週三）" value={slotFilter} onChange={setSlotFilter} />
               <Row>
@@ -490,12 +537,12 @@ function Workspace({
           )}
           {snapshot && !displayedOpportunities.length && (
             <Box>
-              <Body>職產處還沒在這裡上架工讀或實習。</Body>
+              <Body>目前沒有已上架的工讀、實習或校徵機會。</Body>
               {official && <External label="前往職產處官網 ↗" url={official.url} />}
             </Box>
           )}
           {snapshot && !!displayedOpportunities.length && !filteredOpportunities.length && (
-            <Body>沒有符合目前篩選條件的工讀機會。</Body>
+            <Body>沒有符合目前篩選條件的職涯機會。</Body>
           )}
           {filteredOpportunities.map((o) => {
             const conflicts = workstudyConflicts(schoolId, o.slots, courses);
@@ -506,6 +553,7 @@ function Workspace({
             return (
               <Card key={o.id}>
                 <Heading>{o.title}</Heading>
+                <Body>類型：{{ workstudy: '工讀', internship: '實習', fair: '校徵' }[o.type]}</Body>
                 <Body>
                   {o.unit} · {o.pay} · {o.places} 名
                 </Body>
@@ -529,9 +577,11 @@ function Workspace({
                 {conflicts.known && !conflicts.names.length && (
                   <Muted>與目前課表沒有衝堂，排班仍請與單位確認。</Muted>
                 )}
-                <External label="校方原始公告 ↗" url={o.sourceUrl} />
+                {o.sourceUrl && <External label="校方原始公告 ↗" url={o.sourceUrl} />}
                 {audience === 'staff' ? (
                   <Button label={`編輯${o.title}`} onPress={() => edit(o)} />
+                ) : o.type !== 'workstudy' ? (
+                  <Body>此類機會請依校方公告方式報名</Body>
                 ) : application ? (
                   <Body>{APPLICATION_LABELS[application.state]}</Body>
                 ) : closed ? (
@@ -778,7 +828,10 @@ function Workspace({
       {audience === 'ops' && snapshot?.canOperate && snapshot.sources && (
         <Card>
           <Heading>資料來源</Heading>
-          <Body>調整來源會留下操作紀錄；公開職涯入口持續保留。</Body>
+          <Body>
+            調整來源會留下操作紀錄；重新整理公開職涯頁後套用，快取可能延遲約 60
+            秒。官方網站連結仍會保留。
+          </Body>
           {(
             [
               ['office', '職產處'],

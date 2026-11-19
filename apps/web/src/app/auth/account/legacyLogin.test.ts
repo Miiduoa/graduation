@@ -316,6 +316,22 @@ it('allows only the exchange landing page on the retained plain-page callback', 
   expect(platformDestination('/connect/private')).toBe('/classroom');
 });
 
+it.each(['/life', '/connect'])('preserves the validated public-only filter through login for %s', (page) => {
+  const path = `${page}?schoolId=pu&access=public`;
+  expect(sanitizeReturnPath(path)).toBe(path);
+  expect(readReturnPath(new URLSearchParams({ next: path }))).toBe(path);
+  const href = campusOneLoginHref(new URLSearchParams({ returnUrl: path }));
+  expect(new URL(href!, 'https://nuni.tw').searchParams.get('returnUrl')).toBe(path);
+  expect(sanitizeReturnPath(`${path}&access=private`)).toBe(path);
+  expect(sanitizeReturnPath(`${page}?access=private&schoolId=pu`)).toBe(`${page}?schoolId=pu`);
+  expect(sanitizeReturnPath(`${page}?access=https%3A%2F%2Fevil.test`)).toBe(page);
+  expect(sanitizeReturnPath(`${page}?access=public%0Atoken`)).toBe(page);
+});
+
+it('does not pass the journey access filter to unrelated destinations', () => {
+  expect(sanitizeReturnPath('/grades?schoolId=pu&access=public')).toBe('/grades?schoolId=pu');
+});
+
 it('drops unknown or cross-section journey groups and unrelated return context', () => {
   expect(sanitizeReturnPath('/connect?group=daily&campus=pu&token=secret&next=%2Fadmin&section=account')).toBe('/connect?campus=pu');
   expect(sanitizeReturnPath('/life?group=topics&q=food&groupId=private')).toBe('/life?q=food');

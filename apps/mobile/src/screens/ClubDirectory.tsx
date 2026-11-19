@@ -45,12 +45,11 @@ export function ClubDirectory({
           }}
         />
       </View>
-      {segment === 'mine' ? (
-        <TextInput
-          accessibilityLabel="搜尋我的社團"
+      <TextInput
+          accessibilityLabel={segment === 'mine' ? '搜尋我的社團' : '搜尋學校社團'}
           value={search}
           onChangeText={setSearch}
-          placeholder="輸入社團名稱"
+          placeholder={segment === 'mine' ? '輸入社團名稱' : '搜尋名稱或類別'}
           placeholderTextColor={theme.colors.muted}
           style={{
             color: theme.colors.text,
@@ -59,14 +58,14 @@ export function ClubDirectory({
             borderColor: theme.colors.border,
             borderRadius: 8,
           }}
-        />
-      ) : null}
+      />
       {segment === 'discover' ? (
         uid && schoolId ? (
           <ClubPortal
             key={`${uid}:${schoolId}`}
             uid={uid}
             schoolId={schoolId}
+            searchQuery={search}
             onOpen={onBrowseClub}
           />
         ) : (

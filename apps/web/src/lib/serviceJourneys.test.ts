@@ -61,7 +61,7 @@ it('返回參數只接受目前目錄的分類，過長搜尋有上限', () => {
   });
   expect(
     readJourneyFilters(new URLSearchParams({ q: 'x'.repeat(200) }), 'life').query,
-  ).toHaveLength(100);
+  ).toHaveLength(80);
 });
 
 it('修改或清除篩選時保留校園資訊與其它網址狀態', () => {
@@ -71,4 +71,33 @@ it('修改或清除篩選時保留校園資訊與其它網址狀態', () => {
   expect(params.get('q')).toBe('公車');
   writeJourneyFilters(params, { query: '', group: 'all' });
   expect(params.toString()).toBe('campus=nthu&schoolId=nthu&extra=keep');
+});
+
+it('免登入目錄保留公開子服務，不帶出需要帳號的父服務與私人訊息', () => {
+  const life = journeyServices('life', { query: '', group: 'all', publicOnly: true });
+  expect(life.some((service) => service.href === '/cafeteria')).toBe(true);
+  expect(life.some((service) => service.href === '/food')).toBe(false);
+  expect(life.some((service) => service.href === '/dormitory')).toBe(true);
+  expect(life.every((service) => ['public', 'device'].includes(service.access))).toBe(true);
+  const connect = journeyServices('connect', { query: '', group: 'all', publicOnly: true });
+  expect(connect.some((service) => ['/dms', '/friends', '/messages'].includes(service.href))).toBe(
+    false,
+  );
+  expect(connect.some((service) => service.href === '/announcements')).toBe(true);
+});
+
+it('免登入搜尋仍遵守服務開關及指定分類，並可由網址恢復與清除', () => {
+  expect(journeyServices('life', { query: '訂單紀錄', group: 'all', publicOnly: true })).toEqual(
+    [],
+  );
+  expect(journeyServices('life', { query: '餐廳', group: 'travel', publicOnly: true })).toEqual([]);
+  const params = new URLSearchParams('campus=pu&group=daily&access=public');
+  const filters = readJourneyFilters(params, 'life');
+  expect(filters).toEqual({ query: '', group: 'daily', publicOnly: true });
+  expect(journeyServices('life', filters).map((service) => service.href)).toEqual([
+    '/cafeteria',
+    '/dormitory',
+  ]);
+  writeJourneyFilters(params, { query: '', group: 'all' });
+  expect(params.toString()).toBe('campus=pu');
 });

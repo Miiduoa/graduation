@@ -139,17 +139,51 @@ function safePromptEvidenceText(value: unknown, maxLength: number, optional = fa
   return true;
 }
 
+// Array#every skips empty slots. Caller-supplied snapshots may be sparse even
+// when their counts claim complete coverage. Inherited numeric entries do not
+// prove that a row exists in the actual student source either.
+function allOwnArrayItems<T>(items: readonly T[], isValid: (item: T) => boolean): boolean {
+  for (let index = 0; index < items.length; index += 1) {
+    // Do not execute a caller-supplied getter: it can return valid evidence
+    // during verification and different private/prompt text when serialized.
+    const own = Object.getOwnPropertyDescriptor(items, index);
+    if (!own || !Object.prototype.hasOwnProperty.call(own, 'value') || !isValid(own.value as T)) return false;
+  }
+  return true;
+}
+
+// A dense array can still contain accessor-backed records. Never invoke a
+// caller-supplied title/ID getter that could change between validation and
+// prompt serialization; live API and JSON-restored records use data fields.
+function hasOwnEvidenceFields(value: unknown, required: readonly string[], optional: readonly string[] = []): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  for (const key of required) {
+    const own = Object.getOwnPropertyDescriptor(value, key);
+    if (!own || !Object.prototype.hasOwnProperty.call(own, 'value')) return false;
+  }
+  for (const key of optional) {
+    const own = Object.getOwnPropertyDescriptor(value, key);
+    if (own && !Object.prototype.hasOwnProperty.call(own, 'value')) return false;
+  }
+  return true;
+}
+
 function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is CampusSenseSnapshot {
   // The scope/freshness check alone uses Date.parse and can normalize invalid
   // calendar dates. A restored campus timestamp must still be unambiguous.
-  if (!value || !isRealTimestamp(value.checkedAt)) return false;
+  if (!value || !hasOwnEvidenceFields(value, ['userId', 'schoolId', 'checkedAt', 'schedule', 'assignments', 'announcements']) ||
+      !isRealTimestamp(value.checkedAt)) return false;
   const schedule = value.schedule;
   const assignments = value?.assignments;
   const announcements = value?.announcements;
   const status = (candidate: unknown) => candidate === 'available' || candidate === 'unavailable';
   const count = (candidate: unknown) => candidate === null ||
     (typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate >= 0);
-  if (!schedule || !assignments || !announcements ||
+  // Restored envelopes may themselves be accessor-backed even when each row
+  // is a plain object. Validate the descriptors before reading totals or lists.
+  if (!hasOwnEvidenceFields(schedule, ['status', 'count']) ||
+      !hasOwnEvidenceFields(assignments, ['status', 'count', 'items'], ['coverage']) ||
+      !hasOwnEvidenceFields(announcements, ['status', 'items']) ||
       !status(schedule.status) || !status(assignments.status) || !status(announcements.status) ||
       !count(schedule.count) || !count(assignments.count) ||
       (schedule.status === 'available' && schedule.count === null) ||
@@ -158,13 +192,18 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
       (assignments.status === 'unavailable' && assignments.count !== null) ||
       !Array.isArray(assignments.items) || assignments.items.length > 400 ||
       (assignments.count !== null && assignments.items.length > assignments.count) ||
+      // A positive authorized pending total always yields a nonempty first page,
+      // even for an older snapshot without coverage metadata. A restored empty
+      // first page cannot prove that no assignments remain.
+      (assignments.status === 'available' && assignments.count !== null &&
+        assignments.count > 0 && assignments.items.length === 0) ||
       !Array.isArray(announcements.items) || announcements.items.length > 12 ||
       (assignments.status === 'unavailable' && assignments.items.length > 0) ||
       (announcements.status === 'unavailable' && announcements.items.length > 0)) return false;
   // Coverage is produced by the paginated authorized reader. A damaged restored
   // flag must not turn a partial task list into evidence that all tasks were read.
   const coverage = assignments.coverage;
-  if (coverage !== undefined && (!coverage || typeof coverage !== 'object' ||
+  if (coverage !== undefined && (!hasOwnEvidenceFields(coverage, ['complete', 'reason', 'pages']) ||
       assignments.status !== 'available' ||
       typeof coverage.complete !== 'boolean' ||
       !['complete', 'legacy-partial', 'read-budget'].includes(coverage.reason) ||
@@ -177,16 +216,26 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
           // metadata cannot claim that 51 rows came from a single page.
           coverage.pages !== Math.max(1, Math.ceil(assignments.items.length / CAMPUS_ASSIGNMENT_PAGE_SIZE))
         : coverage.reason === 'complete' || assignments.count === null ||
-          assignments.items.length >= assignments.count))) return false;
+          assignments.items.length >= assignments.count ||
+          // A legacy server sends at most one 50-row page. The paginated
+          // reader reports a read-budget cutoff only after eight full pages.
+          // Restored metadata must not claim a different source/read shape.
+          (coverage.reason === 'legacy-partial'
+            ? coverage.pages !== 1 || assignments.items.length === 0 ||
+              assignments.items.length > CAMPUS_ASSIGNMENT_PAGE_SIZE
+            : coverage.pages !== CAMPUS_ASSIGNMENT_MAX_PAGES ||
+              assignments.items.length !== CAMPUS_ASSIGNMENT_MAX_PAGES * CAMPUS_ASSIGNMENT_PAGE_SIZE)))) return false;
   // The authorized paginated reader rejects duplicate assignment identities.
   // A JSON-restored snapshot can bypass that reader; two distinct titles with
   // the same original assignment ID are not two separate student tasks.
   const seenAssignmentSources = new Set<string>();
-  const assignmentsValid = assignments.items.every((item) => {
-    if (!item || !safePromptEvidenceText(item.title, 140) ||
+  const assignmentsValid = allOwnArrayItems(assignments.items, (item) => {
+    if (!hasOwnEvidenceFields(item, ['title', 'groupName', 'dueAt'], ['source']) ||
+        !safePromptEvidenceText(item.title, 140) ||
         !safePromptEvidenceText(item.groupName, 100, true) ||
         !(item.dueAt === null || (isRealTimestamp(item.dueAt) && item.dueAt.length <= 48))) return false;
     if (item.source !== undefined) {
+      if (!hasOwnEvidenceFields(item.source, ['kind', 'groupId', 'assignmentId'])) return false;
       const source = parseCampusAssignmentSource(item.source);
       if (!source) return false;
       const identity = JSON.stringify([source.groupId, source.assignmentId]);
@@ -195,7 +244,8 @@ function safeCampusSenseForPrompt(value: CampusSenseSnapshot | null): value is C
     }
     return true;
   });
-  return assignmentsValid && announcements.items.every((item) => !!item &&
+  return assignmentsValid && allOwnArrayItems(announcements.items, (item) =>
+    hasOwnEvidenceFields(item, ['title', 'publishedAt'], ['source']) &&
     safePromptEvidenceText(item.title, 140) &&
     (item.publishedAt === null || (isRealTimestamp(item.publishedAt) && item.publishedAt.length <= 48)));
 }
@@ -218,7 +268,10 @@ export function formatOnDeviceSchoolPrompt(
   senseSnapshot: CampusSenseSnapshot | null | undefined,
   expectedOwnerUid: string,
 ): string {
-  const context = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) ? snapshot : null;
+  // Reject caller-supplied scope/timetable getters before they are consulted.
+  // Legitimate cached JSON and the live collector always use own data fields.
+  const context = snapshot && hasOwnEvidenceFields(snapshot, ['checkedAt', 'schoolId', 'schoolName', 'timetable'], ['ownerUid'])
+    ? snapshot : null;
   // A missing or malformed campus ID cannot authorize the same account's
   // cached timetable or synchronized assignments from an unknown school.
   const schoolId = checkedSchoolLabel(context?.schoolId, 100);
@@ -253,7 +306,8 @@ export function formatOnDeviceSchoolPrompt(
   // Validate the complete small on-device excerpt before handing any private
   // evidence (including synchronized campus summaries) to the local model.
   const timetable = context?.timetable;
-  const validTimetable = !!timetable &&
+  const validTimetable = !!timetable && hasOwnEvidenceFields(timetable, ['source', 'updatedAt', 'courses'],
+    ['nextClasses', 'currentClasses', 'classGaps']) &&
     ['saved-device-copy', 'not-available', 'unreadable'].includes(timetable.source) &&
     // The saved timetable must predate the context that collected it. Comparing
     // to the current clock alone would accept a source written after checkedAt.
@@ -265,7 +319,8 @@ export function formatOnDeviceSchoolPrompt(
     // A restored contradiction must not authorize unrelated private summaries.
     (timetable.source === 'saved-device-copy' ||
       (timetable.updatedAt === null && timetable.courses.length === 0)) &&
-    timetable.courses.every((course) => !!course &&
+    allOwnArrayItems(timetable.courses, (course) =>
+      hasOwnEvidenceFields(course, ['name', 'day', 'start', 'end'], ['room']) &&
       // The offline copy may bypass the regular title parser. Newline or
       // line-separator controls in a course name can masquerade as model instructions.
       safePromptEvidenceText(course.name, 48) &&
@@ -296,7 +351,9 @@ const sampleCourses = owned && timetable
     : '目前沒有可確認的本機個人課表，因此無法回答正式課程安排。';
   // A matching campus alone is not permission to disclose another student's data.
   // Recheck ownership and freshness at prompt construction, after async model loading.
-  const candidateSense = owned
+  // Scope checks must not invoke a restored root getter before row validation.
+  const candidateSense = owned && hasOwnEvidenceFields(senseSnapshot,
+    ['userId', 'schoolId', 'checkedAt', 'schedule', 'assignments', 'announcements'])
     ? validCampusSenseSnapshot(senseSnapshot, { uid: expectedOwnerUid, schoolId })
     : null;
   const verifiedSense = safeCampusSenseForPrompt(candidateSense) ? candidateSense : null;
@@ -305,7 +362,7 @@ const sampleCourses = owned && timetable
     ? [
         '以下為使用者主動取得的已授權校園摘要，只代表 ' + verifiedSense.checkedAt + ' 同步時的狀態。',
         '校方課表來源：' + verifiedSense.schedule.status + '；無法取得不能等同今天沒課。',
-        '已接通作業：' + verifiedSense.assignments.status +
+        '已授權待處理作業來源：' + verifiedSense.assignments.status +
           '；來源總數：' + (verifiedSense.assignments.count ?? '無法取得') +
           '；本次已取得：' + verifiedSense.assignments.items.length +
           '；完整性：' + (verifiedSense.assignments.coverage?.complete === true
@@ -316,7 +373,8 @@ const sampleCourses = owned && timetable
           }) => ({ title, groupName, dueAt, ...(source ? { source: parseCampusAssignmentSource(source) } : {}) }))),
         '校園公告：' + verifiedSense.announcements.status +
           '；部分項目：' + JSON.stringify(verifiedSense.announcements.items.slice(0, 4).map(({ title, publishedAt }) => ({ title, publishedAt }))),
-        '即使來源完整，上面仍最多列出 5 項；未列出不代表沒有其他作業，沒有繳交回條也不能斷言未交。請到原作業頁核對，不可把同步資料說成最新結果，不得執行任何寫入。',
+        '上述來源總數與完整性，只涵蓋已授權課程中目前開放且未見已繳交時間的作業，不包括已提交、草稿、關閉或無權存取的作業；不能當成全部作業或歷史繳交清單。',
+        '即使來源完整，上面仍最多列出 5 項；未列出不代表沒有其他作業，沒有繳交回條也不能斷言未交。若要核對全部作業與繳交狀態，請到原課程作業頁核對；不可把同步資料說成最新結果，不得執行任何寫入。',
       ].join('\n')
     : '此回合沒有主動同步且有效的校園資料，不可自行猜測個人作業、公告與申請狀態。';
   return [

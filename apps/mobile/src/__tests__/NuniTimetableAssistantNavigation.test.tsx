@@ -243,7 +243,7 @@ test('a signed-in student can enter the same assistant directly from the workspa
   const screen = render(
     <NuniSessionProvider><NavigationContainer ref={navigation}><PreAuthStack /></NavigationContainer></NuniSessionProvider>,
   );
-  fireEvent.press(await screen.findByRole('button', { name: '回到我的 nuni' }));
+  fireEvent.press(await screen.findByRole('button', { name: '回到我的課程' }));
   expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
   fireEvent.press(await screen.findByRole('button', { name: '問課表' }));
   expect(navigation.getCurrentRoute()?.name).toBe('NuniTimetableAssistant');

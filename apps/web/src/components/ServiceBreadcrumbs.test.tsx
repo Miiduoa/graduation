@@ -97,19 +97,20 @@ it.each(['/groups/club-1/club', '/groups/club-1/club/overview', '/groups/club-1/
   },
 );
 
-it('keeps ordinary group pages inside the coursework journey', () => {
+it('keeps ordinary group pages inside the coursework journey and returns to school groups', () => {
   navigation.pathname = '/groups/group-1';
   render(<ServiceBreadcrumbs title="讀書群" />);
   expect(screen.getByRole('link', { name: '課務' }).getAttribute('href')).toBe(
     '/timetable?campus=nthu',
   );
-  expect(screen.getByRole('link', { name: '課程與作業' }).getAttribute('href')).toBe(
-    '/classroom?campus=nthu',
+  expect(screen.getByRole('link', { name: '課程與群組' }).getAttribute('href')).toBe(
+    '/groups?campus=nthu',
   );
+  expect(screen.queryByRole('link', { name: '課程與作業' })).toBeNull();
   expect(screen.queryByRole('link', { name: '社團活動' })).toBeNull();
 });
 
-it('returns a teaching workspace to courses without directing teachers to appeals', () => {
+it('keeps a teaching workspace in coursework without directing it to Google courses or appeals', () => {
   navigation.pathname = '/teacher/course/cs101';
   navigation.search = 'schoolId=pu&campus=pu&session=private';
   render(<ServiceBreadcrumbs title="資料庫系統" />);
@@ -118,10 +119,11 @@ it('returns a teaching workspace to courses without directing teachers to appeal
     within(nav)
       .getAllByRole('link')
       .map((link) => link.textContent),
-  ).toEqual(['課務', '課程與作業']);
-  expect(within(nav).getByRole('link', { name: '課程與作業' }).getAttribute('href')).toBe(
-    '/classroom?schoolId=pu&campus=pu',
+  ).toEqual(['課務']);
+  expect(within(nav).getByRole('link', { name: '課務' }).getAttribute('href')).toBe(
+    '/timetable?schoolId=pu&campus=pu',
   );
+  expect(within(nav).queryByRole('link', { name: '課程與作業' })).toBeNull();
   expect(within(nav).queryByRole('link', { name: '課務申訴審核' })).toBeNull();
 });
 
@@ -135,8 +137,40 @@ it.each(['attendance', 'gradebook', 'quizzes'])(
       '/teacher/course/course%20one?schoolId=pu&campus=pu',
     );
     expect(screen.queryByRole('link', { name: '課務申訴審核' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '課程與作業' })).toBeNull();
   },
 );
+
+it('returns a school course detail to that course and preserves its campus', () => {
+  navigation.pathname = '/course/course%20one/attendance';
+  navigation.search = 'schoolId=pu&campus=pu&session=private';
+  render(<ServiceBreadcrumbs title="課程出席" />);
+  expect(screen.getByRole('link', { name: '課程內容' }).getAttribute('href')).toBe(
+    '/course/course%20one?schoolId=pu&campus=pu',
+  );
+  expect(screen.queryByRole('link', { name: '課程與作業' })).toBeNull();
+});
+
+it.each(['/groups', '/course/course%20one'])(
+  'does not send a school workspace root %s through Google Classroom',
+  (pathname) => {
+    navigation.pathname = pathname;
+    render(<ServiceBreadcrumbs title="學校工作" />);
+    const nav = screen.getByRole('navigation', { name: '目前位置' });
+    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['課務']);
+    expect(within(nav).queryByRole('link', { name: '課程與作業' })).toBeNull();
+  },
+);
+
+it('keeps the real Google course return inside Google Classroom', () => {
+  navigation.pathname = '/classroom/course/google-course';
+  navigation.search = 'campus=nthu&session=private';
+  render(<ServiceBreadcrumbs title="Google 課程" />);
+  expect(screen.getByRole('link', { name: '課程與作業' }).getAttribute('href')).toBe(
+    '/classroom?campus=nthu',
+  );
+  expect(screen.queryByRole('link', { name: '課程與群組' })).toBeNull();
+});
 
 it('keeps the separate teacher appeals desk in its original place', () => {
   navigation.pathname = '/teacher';

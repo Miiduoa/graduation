@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { CAREER_EMPTY } from '@campus/shared/src/career';
 import { useAuth } from '../../state/auth';
 import { getAuthInstance as getAuth } from '../../firebase';
 import { Linking, Text } from 'react-native';
@@ -53,7 +52,7 @@ function CareerEntry({ uid, schoolId }: { uid?: string; schoolId: string }) {
         <Workspace uid={uid} schoolId={schoolId} onLogin={onLogin} />
       ) : (
         <>
-          <Text style={{ color: theme.colors.text, lineHeight: 22 }}>{CAREER_EMPTY}</Text>
+          <Text style={{ color: theme.colors.text, lineHeight: 22 }}>登入後查看本校工讀、實習與校徵</Text>
           <Text
             accessibilityRole="link"
             style={{ color: theme.colors.accent, paddingVertical: 12, lineHeight: 22 }}
@@ -168,7 +167,9 @@ function createPorts(
     try {
       return await fetch(input, init);
     } catch {
-      throw new Error('職涯服務暫時無法使用，請重新整理。');
+      throw Object.assign(new Error('職涯服務暫時無法使用，請重新整理。'), {
+        code: 'network-request-failed',
+      });
     }
   };
   const workstudy = createWorkstudyService(

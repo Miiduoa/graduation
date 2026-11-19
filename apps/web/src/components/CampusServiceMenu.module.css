@@ -3,7 +3,7 @@
   min-width: 0;
 }
 
-.menu summary {
+.menu > summary {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -24,17 +24,17 @@
     background-color 160ms ease;
 }
 
-.menu summary::-webkit-details-marker {
+.menu > summary::-webkit-details-marker {
   display: none;
 }
 
-.menu summary > svg {
+.menu > summary > svg {
   flex-shrink: 0;
   width: 17px;
   height: 17px;
 }
 
-.menu summary::after {
+.menu > summary::after {
   content: '';
   width: 5px;
   height: 5px;
@@ -46,7 +46,7 @@
 }
 
 .menu[open] > summary,
-.menu summary[aria-current='page'] {
+.menu > summary[aria-current='page'] {
   color: var(--brand);
   background: var(--accent-soft);
 }
@@ -69,7 +69,10 @@
   display: flex;
   flex-direction: column;
   width: 480px;
-  max-height: min(70dvh, 640px);
+  max-height: max(
+    0px,
+    min(70dvh, 640px, calc(100dvh - var(--navigation-header-bottom, 84px) - 24px))
+  );
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -293,7 +296,7 @@
 }
 
 .secondaryService {
-  min-height: 40px !important;
+  min-height: 44px !important;
   padding: 8px 10px 8px 22px !important;
   color: var(--muted);
   font-size: 12px !important;
@@ -341,7 +344,7 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .menu summary:hover,
+  .menu > summary:hover,
   .menuPanel a:hover {
     color: var(--text);
     background: var(--panel);
@@ -353,7 +356,7 @@
 }
 
 @media (max-width: 1150px) {
-  .menu summary {
+  .menu > summary {
     padding-inline: 9px;
   }
 }
@@ -363,7 +366,7 @@
     position: static;
   }
 
-  .menu summary > svg {
+  .menu > summary > svg {
     display: block;
   }
 
@@ -375,19 +378,19 @@
 }
 
 @media (max-width: 760px) {
-  .menu summary {
+  .menu > summary {
     min-width: 44px;
     min-height: 44px;
     padding: 10px;
     -webkit-tap-highlight-color: transparent;
   }
 
-  .menu summary > svg {
+  .menu > summary > svg {
     width: 19px;
     height: 19px;
   }
 
-  .menu summary::after,
+  .menu > summary::after,
   .desktopLabel {
     display: none;
   }
@@ -399,9 +402,15 @@
     left: max(12px, env(safe-area-inset-left, 0px));
     right: max(12px, env(safe-area-inset-right, 0px));
     width: auto;
-    max-height: min(
-      72dvh,
-      calc(100dvh - var(--mobile-nav-offset, 72px) - env(safe-area-inset-top, 0px) - 88px)
+    max-height: max(
+      0px,
+      min(
+        72dvh,
+        calc(
+          100dvh - var(--mobile-nav-offset, 72px) -
+            var(--navigation-header-bottom, calc(68px + env(safe-area-inset-top, 0px))) - 16px
+        )
+      )
     );
     border-radius: 16px;
     animation-name: reveal;
@@ -439,6 +448,20 @@
 
   .menu[open] > summary {
     box-shadow: inset 0 -2px 0 var(--brand);
+  }
+}
+
+@media (max-height: 600px) {
+  /* Landscape and short windows keep controls and every result in one reachable scroller. */
+  .menuPanel {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+
+  .menuContents {
+    flex-shrink: 0;
+    overflow-y: visible;
   }
 }
 
@@ -493,4 +516,54 @@
   color: var(--muted);
   font-size: 11px;
   font-weight: 400;
+}
+
+.related,
+.moreServices {
+  min-width: 0;
+}
+
+.menuPanel :is(.related, .moreServices) > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px;
+  color: var(--muted);
+  font-size: var(--font-label-size);
+  line-height: 1.5;
+  cursor: pointer;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.menuPanel :is(.related, .moreServices) > summary::-webkit-details-marker {
+  display: none;
+}
+
+.menuPanel :is(.related, .moreServices) > summary::after {
+  content: '+';
+  flex-shrink: 0;
+  color: var(--brand);
+}
+
+.menuPanel :is(.related, .moreServices)[open] > summary::after {
+  content: '−';
+}
+
+.menuPanel :is(.related, .moreServices) > summary span {
+  margin-left: auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.related {
+  margin-inline-start: 10px;
+  border-inline-start: 1px solid var(--border);
+}
+
+.moreServices {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
 }

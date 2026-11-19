@@ -30,10 +30,19 @@ export function ServiceBreadcrumbs({ title }: { title?: string }) {
     .sort((first, second) => second.href.length - first.href.length)[0];
   const parentHref = service?.parentHref ?? service?.href;
   const workspacePath = teacherCourseWorkspacePath(pathname);
-  const parent =
-    workspacePath && workspacePath !== pathname
-      ? { href: workspacePath, name: '課程工作台' }
-      : services.find((item) => item.href === parentHref);
+  const schoolCoursePath = pathname.match(/^(\/course\/[^/]+)(?:\/|$)/u)?.[1];
+  const schoolGroups =
+    section.id === 'study' &&
+    (pathname === '/groups' || pathname.startsWith('/groups/'));
+  // Catalog grouping does not change a course's account or data source.
+  // School workspaces must return to their own course/group, not Google Classroom.
+  const parent = workspacePath
+    ? { href: workspacePath, name: '課程工作台' }
+    : schoolCoursePath
+      ? { href: schoolCoursePath, name: '課程內容' }
+      : schoolGroups
+        ? services.find((item) => item.href === '/groups')
+        : services.find((item) => item.href === parentHref);
   const parentPath = parent?.href.split(/[?#]/, 1)[0];
   // Tabs of one page are siblings, not a hierarchy (feedback must not lead into school-only grades).
   const parentIsCurrent = parentPath === pathname;

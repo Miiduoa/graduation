@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 const mockCall = jest.fn();
 let mockUid = 'staff';
 let mockSchoolId = 'pu';
@@ -21,7 +21,7 @@ jest.mock('../ui/aiFirst', () => {
     aiTokens: {},
     AIDetailScreen: ({ children }: { children: React.ReactNode }) => <View>{children}</View>,
     AICard: ({ children }: { children: React.ReactNode }) => <View>{children}</View>,
-    AIButton: ({ label }: { label: string }) => <Text>{label}</Text>,
+    AIButton: ({ label, onPress }: { label: string; onPress: () => void }) => <Text onPress={onPress}>{label}</Text>,
   };
 });
 import { DormStaffHome } from '../screens/DormStaffHome';
@@ -94,3 +94,14 @@ test.each(['account', 'school'])(
     expect(view.queryByText('宿舍服務')).toBeNull();
   },
 );
+
+test('一般帳號可看到工作台說明並前往宿舍頁', async () => {
+  mockUid = 'student';
+  mockCall.mockResolvedValue({ data: { enabled: true, repairs: false, packages: false } });
+  const onOpen = jest.fn();
+  const view = render(<DormStaffHome fallback={(children) => <>{children}</>} onOpen={onOpen} />);
+  expect(await view.findByText('此頁供宿舍輔導員使用；你的帳號目前沒有輔導員工作台；需要服務請到宿舍頁。')).toBeTruthy();
+  fireEvent.press(view.getByText('需要服務請到宿舍頁'));
+  expect(onOpen).toHaveBeenCalledWith('Dormitory');
+  expect(view.queryByText('實際宿舍工作台')).toBeNull();
+});

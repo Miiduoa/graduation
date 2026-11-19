@@ -11,6 +11,7 @@ import { NuniError } from '@campus/shared/src/nuni';
 import * as nuniMessages from '@campus/shared/src/nuni';
 import { TODAY_COPY } from '@campus/shared/src/pickNextAction';
 import { SENSE_EMPTY_TEXT, SENSE_SECTION_TITLE } from '@campus/shared/src/todaySense';
+import { IDENTITY_LOOKUP_FAILED_COPY, IDENTITY_LOOKUP_FAILED_HINT } from '@/lib/accountIdentity';
 
 const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
@@ -18,7 +19,7 @@ const state = vi.hoisted(() => ({
   campusLoading: false,
   schoolRole: null as string | null,
   schoolRoleCalls: [] as Array<[string | null | undefined, string | null | undefined]>,
-  session: null as null | { context: string; platformAccountId: string },
+  session: null as null | { context: string; platformAccountId: string; isPlatformOperator?: boolean },
   sessionLoading: false,
   sessionError: '',
   pendingLogout: false,
@@ -228,6 +229,8 @@ it('uses the Nuni account for home and links directly to pending work', async ()
   render(<HomePage />);
   expect(screen.queryByRole('heading', { name: '我的身分' })).toBeNull();
   const taskLinks = await screen.findAllByRole('link', { name: /週五提案/ });
+  expect(screen.queryByRole('heading', { name: '我的工作' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '申請店家進駐' })).toBeNull();
   expect(
     taskLinks.some(
       (link) => link.getAttribute('href') === '/classroom/course/design#assignment-draft',
@@ -237,7 +240,7 @@ it('uses the Nuni account for home and links directly to pending work', async ()
   expect(screen.getAllByText(/已逾期 \d+ 天/).length).toBeGreaterThan(0);
 });
 
-it('leaves merchant and teacher identity lookups in the account center', async () => {
+it('uses the same identity lookup copy as the account page when the lookup fails', async () => {
   state.uid = null;
   state.session = { context: 'session-a', platformAccountId: 'student-a' };
   vi.mocked(loadNuniHomeSections).mockResolvedValue({
@@ -249,11 +252,11 @@ it('leaves merchant and teacher identity lookups in the account center', async (
     throw new Error('offline');
   });
   render(<HomePage />);
-  await waitFor(() => expect(loadNuniHomeSections).toHaveBeenCalled());
+  expect(await screen.findByText(IDENTITY_LOOKUP_FAILED_COPY)).toBeTruthy();
+  expect(screen.getByText(IDENTITY_LOOKUP_FAILED_HINT)).toBeTruthy();
+  expect(screen.getByRole('button', { name: '再試一次' })).toBeTruthy();
   expect(screen.queryByRole('heading', { name: '我的身分' })).toBeNull();
-  for (const [path] of state.request.mock.calls) {
-    expect(['merchant-applications', 'merchant-workspaces']).not.toContain(path);
-  }
+  expect(state.request.mock.calls.some(([path]) => path === 'class-workspaces')).toBe(false);
 });
 
 it('keeps teaching courses on today and no longer lists studying courses as a grid', async () => {
@@ -654,7 +657,7 @@ it('publishes teaching navigation before work finishes and keeps the previous wo
     });
   });
   render(<HomePage />);
-  expect(await screen.findByRole('heading', { name: '先到的授課' })).toBeTruthy();
+  expect(await screen.findByRole('link', { name: /先到的授課/ })).toBeTruthy();
   expect(screen.getByText(/課程還在讀取/)).toBeTruthy();
   await act(async () => finish(data('完成來源')));
   expect(screen.getAllByText('完成來源 作業').length).toBeGreaterThan(0);
@@ -883,7 +886,9 @@ it.each(['teacher', 'student'])(
     expect(await screen.findByRole('button', { name: '重試校園課程' })).toBeTruthy();
     if (mode === 'teacher') {
       expect(screen.getByTestId('teacher-today')).toBeTruthy();
-      expect(document.getElementById('teaching-courses')).toBeTruthy();
+      expect(within(screen.getByTestId('teacher-today')).getByRole('link', { name: /保留授課/ })).toBeTruthy();
+      expect(screen.getAllByRole('link', { name: /保留授課/ })).toHaveLength(1);
+      expect(document.getElementById('teaching-courses')).toBeNull();
     } else expect(screen.getAllByText('保留修課 作業').length).toBeGreaterThan(0);
   },
 );
@@ -1141,13 +1146,20 @@ it('gives the homepage agent only platform tasks, retaining their exact source I
     ).toBe(true),
   );
   const input = vi.mocked(TodayAgent).mock.calls.at(-1)![0];
-  expect(input).toMatchObject({
-    context: state.session.context,
-    accountId: 'alice-platform',
-    loading: false,
-  });
+  expect(input).toMatchObject({ context: state.session.context, accountId: 'alice-platform', loading: false, compact: true });
   expect(input.tasks).toEqual(platform.tasks);
   expect(input.tasks.some((task) => task.courseName === '學校課程')).toBe(false);
+});
+
+it('keeps the day and its next action before the student card utility', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue(data('今天的課程'));
+  render(<HomePage />);
+  await screen.findByText('今天的課程 作業');
+  const today = screen.getByRole('heading', { level: 1, name: '今天' });
+  const card = screen.getByRole('link', { name: /數位學生證.*開啟卡片/ });
+  expect(today.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByTestId('today-unified-flow').compareDocumentPosition(card) &
+    Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 it('removes the platform agent while its session is uncertain even when school auth remains', async () => {

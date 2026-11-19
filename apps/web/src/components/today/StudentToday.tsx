@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { buildPersonalToday } from '@campus/shared';
@@ -36,6 +36,7 @@ export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigne
 
 type Props = {
   assistant?: ReactNode;
+  workspaces?: ReactNode;
   agent?: ReactNode;
   personalization?: ReactNode;
   scopeKey?: string;
@@ -63,6 +64,7 @@ type Props = {
 
 type BoundProps = {
   assistant?: ReactNode;
+  workspaces?: ReactNode;
   agent?: ReactNode;
   now: Date | null;
   updatedAt: Date | null;
@@ -77,8 +79,6 @@ type BoundProps = {
   onRetryTodos: () => void;
   timetableRefreshKey?: number;
 };
-
-const SCROLL_KEY = 'campus-today-scroll';
 
 export function StudentToday(props: Props) {
   const now = props.now ?? new Date();
@@ -108,28 +108,6 @@ export function StudentToday(props: Props) {
           ? TODAY_COPY.dueToday
           : '明天截止'
         : TODAY_COPY.nextAssignment;
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const stored = sessionStorage.getItem(SCROLL_KEY);
-      if (stored) window.scrollTo(0, Number(stored) || 0);
-    } catch {
-      // The page remains usable when the browser blocks session storage.
-    }
-    const persist = () => {
-      try {
-        sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
-      } catch {
-        // Scroll restoration is optional.
-      }
-    };
-    window.addEventListener('pagehide', persist);
-    return () => {
-      persist();
-      window.removeEventListener('pagehide', persist);
-    };
-  }, []);
 
   const schedule = (
     <TodayClassList
@@ -166,7 +144,7 @@ export function StudentToday(props: Props) {
         <h1 className={styles.title}>今天</h1>
         <p className={styles.date}>{props.now ? formatTodayHeaderDate(props.now) : ''}</p>
       </header>
-      {props.agent}
+      {props.workspaces}
       {showWelcome && (
         <TodayWelcome
           importHref={props.importHref}
@@ -202,7 +180,10 @@ export function StudentToday(props: Props) {
           <Link href={loginHref(campusServiceHref('/', returnSearch))}>登入查看作業與通知</Link>
         </p>
       ) : null}
-      {props.assistant}
+      <div className={styles.assistance} data-testid="today-assistance">
+        {props.agent}
+        {props.assistant}
+      </div>
       {props.personalization}
       {props.updatedAt || props.refreshing ? (
         <p
@@ -421,7 +402,7 @@ function TodoList({
               <li
                 key={item.id}
                 data-testid={primary ? 'next-action' : undefined}
-                className={styles.workItem + (leaving.has(item.id) ? ' ' + styles.leaving : '')}
+                className={styles.workItem + (primary ? ' ' + styles.priority : '') + (leaving.has(item.id) ? ' ' + styles.leaving : '')}
               >
                 <Link
                   href={assignmentHref(item)}
@@ -492,6 +473,7 @@ export function StudentTodayPage(props: BoundProps) {
   return (
     <StudentToday
       assistant={props.assistant}
+      workspaces={props.workspaces}
       agent={props.agent}
       personalization={
         !scope.loading && props.now ? (

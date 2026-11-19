@@ -41,7 +41,7 @@ const destinations: Record<CampusQuickDestination, Omit<MobileQuickAction, 'dest
   '/events': { route: '活動總覽', label: '校園活動', description: '近期活動與講座' },
   '/announcements': { route: '公告總覽', label: '校園公告', description: '查看最新校園消息' },
   '/messages': { route: 'Inbox', label: '通知與訊息', description: '查看本人訊息' },
-  '/lost-found': { route: 'LostFound', label: '失物招領', description: '遺失與拾獲物品' },
+  '/lost-found': { route: 'PlatformLostFound', label: '失物招領', description: '使用 Google 帳號查看、刊登與管理失物' },
   '/friends': { route: 'FriendsManage', label: '好友', description: '尋找及管理好友' },
   '/import': {
     route: 'PersonalImport',

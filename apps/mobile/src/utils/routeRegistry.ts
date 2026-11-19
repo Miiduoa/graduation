@@ -106,6 +106,7 @@ export const ROUTE_TO_TAB: Record<string, TabName> = {
   PoiDetail: '校園',
   ARNavigation: '校園',
   AccessibleRoute: '校園',
+  PlatformLostFound: '校園',
   LostFound: '校園',
   LostFoundDetail: '校園',
   LostFoundPost: '校園',

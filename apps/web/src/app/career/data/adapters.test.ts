@@ -1,4 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
+vi.mock('@/lib/server/firebaseAdmin', () => ({
+  getFirebaseAdmin: async () => ({
+    db: { doc: () => ({ get: async () => ({ data: () => undefined }) }) },
+  }),
+}));
 import {
   careerCalendarUrl,
   careerSoon,

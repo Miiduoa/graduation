@@ -236,7 +236,7 @@ export const CAMPUS_SERVICES = [
     text: '查詢路線與站牌',
     href: '/bus',
     access: 'public',
-    keywords: '交通 bus',
+    keywords: '交通 搭車 車站 車班 時刻表 巴士 transit bus',
     category: 'campus',
   },
   {
@@ -294,12 +294,12 @@ export const CAMPUS_SERVICES = [
     text: '搜尋館藏，前往本人借閱帳號',
     href: '/library',
     access: 'public',
-    keywords: '書籍 借書 續借 library',
+    keywords: '書籍 借書 續借 還書 找書 閱讀 book library',
     category: 'campus',
   },
   {
     name: '職涯',
-    text: '查看職涯截止日、校方公告與附近職缺來源',
+    text: '查看職涯資訊、工讀申請與實習學分進度',
     href: '/career',
     access: 'public',
     keywords: '職涯 校內工讀 實習 學分 校園徵才 就業 工作 career internship',
@@ -315,10 +315,10 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '校園助理',
-    text: '查詢課務與校園服務；排課請用課表裡的幫我安排',
+    text: '查詢課務與校園服務，接續待辦並確認安排',
     href: '/ai-assistant',
     access: 'account',
-    keywords: '問答 安排 課表 assistant',
+    keywords: 'AI agent 問答 助理 代辦 待辦 安排 課表 assistant',
     category: 'account',
   },
   {
@@ -380,6 +380,27 @@ export const CAMPUS_SERVICES = [
 }[];
 
 export type CampusService = (typeof CAMPUS_SERVICES)[number];
+
+/** Stable everyday entry points, shared by the compact menu and full directory. */
+export const EVERYDAY_SERVICE_HREFS: Record<ServiceCategory, readonly string[]> = {
+  study: ['/timetable', '/classroom', '/calendar', '/import'],
+  campus: ['/map', '/bus', '/food', '/dormitory'],
+  connect: ['/announcements', '/messages', '/dms', '/social'],
+  account: ['/profile', '/settings', '/ai-assistant', '/support'],
+};
+
+/** Keep every service reachable while showing a small, consistent first level. */
+export function groupCampusServiceEntries<T extends CampusService>(
+  services: readonly T[],
+  category: ServiceCategory,
+  compact = true,
+) {
+  if (!compact) return { primary: [...services], more: [] as T[] };
+  const preferred = EVERYDAY_SERVICE_HREFS[category];
+  const primary = preferred.flatMap((href) => services.filter((service) => service.href === href));
+  const more = services.filter((service) => !preferred.includes(service.href));
+  return { primary, more };
+}
 
 function isSecondary(service: CampusService) {
   return typeof service.parentHref === 'string' && service.parentHref.length > 0;

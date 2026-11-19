@@ -10,6 +10,7 @@ import { SERVICE_ACCESS, secondaryCampusServices, type CampusService } from '@/l
 import {
   SERVICE_JOURNEY_GROUPS,
   journeyServices,
+  isDirectlyAvailable,
   readJourneyFilters,
   serviceJourneyGroup,
   serviceJourneyIcon,
@@ -83,6 +84,7 @@ function ServiceRow({
   schoolLmsEnabled,
   showChildren,
   recommended,
+  publicOnly,
   onVisit,
 }: {
   service: CampusService;
@@ -90,10 +92,15 @@ function ServiceRow({
   schoolLmsEnabled: boolean;
   showChildren: boolean;
   recommended: boolean;
+  publicOnly: boolean;
   onVisit: (event: MouseEvent<HTMLAnchorElement>, serviceHref: string) => void;
 }) {
   const id = useId();
-  const children = showChildren ? secondaryCampusServices(service.href, schoolLmsEnabled) : [];
+  const children = showChildren
+    ? secondaryCampusServices(service.href, schoolLmsEnabled).filter(
+        (child) => !publicOnly || isDirectlyAvailable(child),
+      )
+    : [];
   return (
     <li className={styles.serviceRow} data-recommended={recommended || undefined}>
       <Link
@@ -161,6 +168,7 @@ export function ServiceDirectory({
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const scope = useCampusNavigationSearch(params);
   const id = useId();
+  const composing = useRef(false);
   const search = useRef<HTMLInputElement>(null);
   const directory = useRef<HTMLDivElement>(null);
   const historyReturn = useSyncExternalStore(
@@ -172,17 +180,41 @@ export function ServiceDirectory({
     queryString,
     journey,
     filters: readJourneyFilters(new URLSearchParams(queryString), journey),
+    pendingUrls: [] as string[],
   }));
+  const acknowledgedIndex = selection.pendingUrls.indexOf(queryString);
   const filters =
-    selection.queryString === queryString && selection.journey === journey
+    selection.journey === journey &&
+    (selection.queryString === queryString || acknowledgedIndex >= 0)
       ? selection.filters
       : readJourneyFilters(new URLSearchParams(queryString), journey);
   if (selection.queryString !== queryString || selection.journey !== journey) {
-    setSelection({ queryString, journey, filters });
+    setSelection({
+      queryString,
+      journey,
+      filters,
+      pendingUrls:
+        selection.journey === journey && acknowledgedIndex >= 0
+          ? selection.pendingUrls.slice(acknowledgedIndex + 1)
+          : [],
+    });
   }
+  useEffect(() => {
+    function restoreHistoryFilters() {
+      const restored = new URLSearchParams(window.location.search);
+      const source = restored.toString();
+      setSelection((current) => ({
+        ...current,
+        filters: readJourneyFilters(restored, journey),
+        pendingUrls: current.queryString === source ? [] : [source],
+      }));
+    }
+    window.addEventListener('popstate', restoreHistoryFilters);
+    return () => window.removeEventListener('popstate', restoreHistoryFilters);
+  }, [journey]);
   const groups = SERVICE_JOURNEY_GROUPS[journey];
   const matches = journeyServices(journey, filters, schoolLmsEnabled);
-  const filtering = Boolean(filters.query.trim() || filters.group !== 'all');
+  const filtering = Boolean(filters.query.trim() || filters.group !== 'all' || filters.publicOnly);
   const searching = Boolean(filters.query.trim());
   const resultsId = `${journey}-service-results`;
 
@@ -249,18 +281,35 @@ export function ServiceDirectory({
     }
   }
 
-  function updateFilters(next: JourneyFilters) {
-    setSelection({ queryString, journey, filters: next });
+  function updateFilters(next: JourneyFilters, persist = true) {
+    const url = new URL(window.location.href);
+    writeJourneyFilters(url.searchParams, next);
+    const destination = `${url.pathname}${url.search}${url.hash}`;
+    const shouldPublish = persist && destination !== currentDirectoryUrl();
+    const pendingUrl = url.searchParams.toString();
+    setSelection((current) => ({
+      queryString,
+      journey,
+      filters: next,
+      pendingUrls: shouldPublish
+        ? [...current.pendingUrls.filter((entry) => entry !== pendingUrl), pendingUrl].slice(-32)
+        : current.pendingUrls,
+    }));
     publishDirectoryReturn(null);
+    if (!shouldPublish) return;
     try {
-      const url = new URL(window.location.href);
-      writeJourneyFilters(url.searchParams, next);
+      // Let Next copy its routing state and observe the URL update. Passing its
+      // private state back skips that notification and can revert input drafts.
       const state = { ...window.history.state };
       delete state[DIRECTORY_RETURN_STATE];
-      // Returning from a service restores the directory filters through browser history.
-      window.history.replaceState(state, '', `${url.pathname}${url.search}${url.hash}`);
+      delete state.__NA;
+      delete state._N;
+      window.history.replaceState(state, '', destination);
     } catch {
-      // Search remains usable when the browser disallows history updates.
+      setSelection((current) => ({
+        ...current,
+        pendingUrls: current.pendingUrls.filter((entry) => entry !== pendingUrl),
+      }));
     }
   }
 
@@ -279,6 +328,7 @@ export function ServiceDirectory({
           schoolLmsEnabled={schoolLmsEnabled}
           showChildren={!searching}
           recommended={!filtering && recommendedHref === service.href}
+          publicOnly={Boolean(filters.publicOnly)}
           onVisit={rememberReturn}
         />
       ))}
@@ -304,9 +354,23 @@ export function ServiceDirectory({
               id={`${id}-search`}
               type="search"
               value={filters.query}
-              onChange={(event) => updateFilters({ ...filters, query: event.target.value })}
+              onChange={(event) =>
+                updateFilters({ ...filters, query: event.target.value }, !composing.current)
+              }
+              onCompositionStart={() => {
+                composing.current = true;
+              }}
+              onCompositionEnd={(event) => {
+                composing.current = false;
+                updateFilters({ ...filters, query: event.currentTarget.value });
+              }}
               onKeyDown={(event) => {
-                if (event.key === 'Escape' && !event.nativeEvent.isComposing && filters.query) {
+                if (
+                  event.key === 'Escape' &&
+                  !event.nativeEvent.isComposing &&
+                  !composing.current &&
+                  filters.query
+                ) {
                   event.preventDefault();
                   updateFilters({ ...filters, query: '' });
                 }
@@ -314,7 +378,7 @@ export function ServiceDirectory({
               placeholder={journey === 'life' ? '借書、公車、取餐…' : '話題、訊息、好友…'}
               autoComplete="off"
               enterKeyHint="search"
-              maxLength={100}
+              maxLength={journey === 'life' ? 80 : 100}
               aria-controls={resultsId}
             />
             {filters.query && (
@@ -346,6 +410,15 @@ export function ServiceDirectory({
               </button>
             ))}
           </div>
+          <label className={styles.publicFilter}>
+            <input
+              type="checkbox"
+              checked={Boolean(filters.publicOnly)}
+              onChange={(event) => updateFilters({ ...filters, publicOnly: event.target.checked })}
+              aria-controls={resultsId}
+            />
+            只看免登入服務
+          </label>
           <p className={styles.resultCount} role="status" aria-live="polite" aria-atomic="true">
             {filtering ? '找到' : '共'} {matches.length} 項服務
           </p>
@@ -357,7 +430,11 @@ export function ServiceDirectory({
           <section aria-labelledby={`${id}-results-title`}>
             <div className={styles.sectionHeading}>
               <h2 id={`${id}-results-title`}>
-                {searching ? '搜尋結果' : groups.find((group) => group.id === filters.group)?.label}
+                {searching
+                  ? '搜尋結果'
+                  : filters.group !== 'all'
+                    ? groups.find((group) => group.id === filters.group)?.label
+                    : '免登入服務'}
               </h2>
               <button type="button" className={styles.resetFilters} onClick={resetFilters}>
                 顯示全部服務

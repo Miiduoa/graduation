@@ -112,6 +112,11 @@
   padding: var(--page-padding-block) var(--page-padding-inline) 28px;
   min-width: 0;
 }
+.personalTools {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
 .mainMap {
   padding-top: 12px;
 }
@@ -1429,6 +1434,8 @@
   white-space: nowrap;
 }
 
+
+/* Keep the Today reading width while using the shared light and dark palette. */
 .todayPage .main {
   max-width: 1008px;
   padding-top: 32px;

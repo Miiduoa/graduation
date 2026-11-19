@@ -94,6 +94,9 @@ async function issueReplacement(
       candidates.some(item => !source.includes(item.source) ||
         item.event.title !== item.source.args.title || item.event.allDay !== item.source.args.allDay))
     return fail('INVALID_PLAN_REVISION');
+  // A pickup time belongs to the original order. Generic calendar revisions
+  // cannot drop that source binding or move it independently of the order.
+  if (source.some(card => card.pickupGuard)) return fail('FOOD_PICKUP_SOURCE_BOUND', 409);
   const events = candidates.map(item => item.event);
 
   // The manifest proves every source was revoked without any dispatched or
