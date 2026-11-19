@@ -307,16 +307,16 @@ export default function StudentTodayScreen() {
             {urgentWorkFirst && todoSection}
             {scheduleSection}
             {!urgentWorkFirst && todoSection}
-            <CampusPersonalization now={now} />
-            <QuickCampusEntry
-              key={scope}
-              uid={uid}
-              schoolId={schoolId}
-              onOpen={openQuickAction}
-              onOpenAssistantRoute={(route) => safeNavigate(navigation, route)}
-            />
           </>
         )}
+        <QuickCampusEntry
+          key={scope}
+          uid={uid}
+          schoolId={schoolId}
+          onOpen={openQuickAction}
+          onOpenAssistantRoute={(route) => safeNavigate(navigation, route)}
+        />
+        <CampusPersonalization now={now} />
       </ScrollView>
     </SafeAreaView>
   );

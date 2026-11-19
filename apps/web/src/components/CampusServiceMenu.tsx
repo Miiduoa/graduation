@@ -13,6 +13,7 @@ import {
   writeCampusServiceFilters,
   countCampusSearchResults,
   secondaryCampusServices,
+  groupCampusServiceEntries,
   type CampusService,
   type ServiceCategory,
 } from '@/lib/campusServices';
@@ -20,6 +21,7 @@ import {
   forgetDirectorySearch,
   rememberDirectorySearch,
   restoreDirectorySearch,
+  expandedDirectorySections,
 } from '@/lib/campusDirectorySearch';
 import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import styles from './CampusServiceMenu.module.css';
@@ -83,15 +85,16 @@ export function CampusServiceMenu() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const pathname = usePathname();
   const params = useSearchParams();
-  const currentService = visibleCampusServices(schoolLmsEnabled).filter((service) =>
-    campusServiceMatches(service.href, pathname, params),
-  ).sort((first, second) => second.href.length - first.href.length)[0]?.href;
+  const currentService = visibleCampusServices(schoolLmsEnabled)
+    .filter((service) => campusServiceMatches(service.href, pathname, params))
+    .sort((first, second) => second.href.length - first.href.length)[0]?.href;
   const menu = useRef<HTMLDetailsElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const results = useRef<HTMLDivElement>(null);
   const skipToggleSideEffects = useRef(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<ServiceCategory | 'all'>('all');
+  const [restoredExpanded, setRestoredExpanded] = useState<string[]>([]);
   const id = useId();
   function assignMenuOpen(open: boolean) {
     const element = menu.current;
@@ -109,11 +112,15 @@ export function CampusServiceMenu() {
   }
   useLayoutEffect(() => {
     const snapshot = restoreDirectorySearch('menu', pathname || '/');
-    if (!snapshot) return;
+    if (!snapshot) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRestoredExpanded([]);
+      return;
+    }
     // Restore filters after history navigation back to this page.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setQuery(snapshot.query.slice(0, 100));
     setCategory(snapshot.category);
+    setRestoredExpanded(snapshot.expanded ?? []);
     if (!snapshot.open) return;
     const previouslyFocused = document.activeElement;
     assignMenuOpen(true);
@@ -171,6 +178,7 @@ export function CampusServiceMenu() {
     assignMenuOpen(false);
     setQuery('');
     setCategory('all');
+    setRestoredExpanded([]);
     menu.current.querySelector('summary')?.focus({ preventScroll: true });
   }
   function dismissMenu() {
@@ -184,6 +192,7 @@ export function CampusServiceMenu() {
       query,
       category,
       open: true,
+      expanded: expandedDirectorySections(results.current),
     });
     closeMenu();
   }
@@ -191,7 +200,46 @@ export function CampusServiceMenu() {
     forgetDirectorySearch('menu');
     setQuery('');
     setCategory('all');
+    setRestoredExpanded([]);
     search.current?.focus({ preventScroll: true });
+  }
+  function renderService(service: CampusService & { note?: string }) {
+    const children = browsing ? secondaryCampusServices(service.href, schoolLmsEnabled) : [];
+    return (
+      <div key={service.href} className={styles.serviceEntry}>
+        <ServiceMenuLink
+          service={service}
+          href={href(service.href)}
+          currentService={currentService}
+          id={id}
+          filtering={filtering}
+          onClose={persistAndClose}
+        />
+        {children.length > 0 && (
+          <details
+            className={styles.related}
+            data-directory-section={`service:${service.href}`}
+            open={restoredExpanded.includes(`service:${service.href}`) || children.some((child) => child.href === currentService) || undefined}
+          >
+            <summary aria-label={`${service.name}的相關服務`}>
+              相關服務 <span>{children.length}</span>
+            </summary>
+            {children.map((child) => (
+              <ServiceMenuLink
+                key={child.href}
+                service={child}
+                href={href(child.href)}
+                currentService={currentService}
+                id={id}
+                filtering={filtering}
+                secondary
+                onClose={persistAndClose}
+              />
+            ))}
+          </details>
+        )}
+      </div>
+    );
   }
   return (
     <details
@@ -200,10 +248,13 @@ export function CampusServiceMenu() {
       className={styles.menu}
       key={pathname}
       onToggle={(event) => {
+        // Nested service disclosures must not reset the surrounding search or menu.
+        if (event.target !== event.currentTarget) return;
         if (skipToggleSideEffects.current) return;
         if (!event.currentTarget.open) {
           setQuery('');
           setCategory('all');
+          setRestoredExpanded([]);
         }
       }}
       onKeyDown={(event) => {
@@ -232,12 +283,9 @@ export function CampusServiceMenu() {
           if (menu.current?.open) forgetDirectorySearch('menu');
         }}
       >
-        <CampusIcon name="services" size={17} />
+        <CampusIcon name="search" size={17} />
         <span className={styles.desktopLabel} aria-hidden="true">
           所有服務
-        </span>
-        <span className={styles.mobileLabel} aria-hidden="true">
-          更多
         </span>
       </summary>
       <div className={styles.menuPanel} id={`${id}-services`}>
@@ -355,38 +403,25 @@ export function CampusServiceMenu() {
           {SERVICE_CATEGORIES.map((group) => {
             const services = matches.filter((service) => service.category === group.id);
             if (!services.length) return null;
+            const entries = groupCampusServiceEntries(services, group.id, !filtering);
+            const currentInMore = entries.more.some((service) =>
+              service.href === currentService ||
+              secondaryCampusServices(service.href, schoolLmsEnabled).some((child) => child.href === currentService),
+            );
             return (
               <section key={group.id} className={styles.menuGroup} aria-label={group.label}>
                 <h2>{group.label}</h2>
-                {services.map((service) => {
-                  const children = browsing
-                    ? secondaryCampusServices(service.href, schoolLmsEnabled)
-                    : [];
-                  return (
-                    <div key={service.href} className={styles.serviceEntry}>
-                      <ServiceMenuLink
-                        service={service}
-                        href={href(service.href)}
-                        currentService={currentService}
-                        id={id}
-                        filtering={filtering}
-                        onClose={persistAndClose}
-                      />
-                      {children.map((child) => (
-                        <ServiceMenuLink
-                          key={child.href}
-                          service={child}
-                          href={href(child.href)}
-                          currentService={currentService}
-                          id={id}
-                          filtering={filtering}
-                          secondary
-                          onClose={persistAndClose}
-                        />
-                      ))}
-                    </div>
-                  );
-                })}
+                {entries.primary.map(renderService)}
+                {entries.more.length > 0 && (
+                  <details
+                    className={styles.moreServices}
+                    data-directory-section={`group:${group.id}`}
+                    open={restoredExpanded.includes(`group:${group.id}`) || currentInMore || undefined}
+                  >
+                    <summary>更多{categoryLabels[group.id]}服務 <span>{entries.more.length}</span></summary>
+                    {entries.more.map(renderService)}
+                  </details>
+                )}
               </section>
             );
           })}

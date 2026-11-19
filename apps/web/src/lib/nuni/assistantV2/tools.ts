@@ -1,3 +1,4 @@
+import { getAssistantServiceCapability } from '@campus/shared/src/assistantTaskPlan';
 import { cartArgs, foodHref, foodOrderIntent, pickupAt, priceCart } from './food';
 import { operationSignal, withOperationSignal } from './operation';
 import { informationKinds } from './information';
@@ -929,6 +930,7 @@ export function createTools(
             label: service.label,
             summary: service.summary,
             access: service.access,
+            capability: getAssistantServiceCapability(service.id),
             href: assistantServiceHref(service.id, binding.schoolId, 'platform'),
           })),
           total: services.length,
