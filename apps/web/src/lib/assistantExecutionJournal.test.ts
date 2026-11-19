@@ -77,6 +77,20 @@ it('accepts matching UI conversation metadata without persisting it twice', () =
   expect(snapshot()).toBe(before);
 });
 
+it('retains source-bound pickup policy across recovery and rejects unknown policies', () => {
+  const value = input();
+  const pickup = { ...value, card: { ...value.card, sourceBound: 'food-pickup' } };
+  saveAssistantExecutionJournal(scope, pickup, active);
+  expect(readAssistantExecutionJournal(scope)[0].card).toMatchObject({
+    token: value.card.token, args: event, sourceBound: 'food-pickup',
+  });
+  const before = snapshot();
+  expect(() => saveAssistantExecutionJournal(scope, { ...value,
+    card: { ...value.card, sourceBound: 'unverified-order' } }, active)).toThrow();
+  expect(() => saveAssistantExecutionJournal(scope, value, active)).toThrow('不同確認內容');
+  expect(snapshot()).toBe(before);
+});
+
 it('reads only the exact owner, school and session key and never enumerates other scopes', () => {
   saveAssistantExecutionJournal(scope, input(), active);
   const oldKey = storedKey();

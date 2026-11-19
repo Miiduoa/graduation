@@ -93,6 +93,10 @@ const services = [
     summary: '查看所選學校的地址、聯絡方式與官方網站。', mobileRoute: 'SchoolInfo',
   },
   {
+    id: 'career', label: '職涯', href: '/career', category: 'campus', access: 'public',
+    summary: '查看所選學校的公開職涯資訊；登入後依校方開放與授權使用工讀申請、實習學分進度及承辦功能，送出需在頁面確認。',
+  },
+  {
     id: 'student-card', label: '數位學生證', href: '/student-card', category: 'campus', access: 'personal',
     summary: '開啟學生證卡面、出示學號，或查找校方證件說明。', mobileRoute: 'StudentCard',
   },
@@ -270,6 +274,7 @@ const aliases: Readonly<Record<AssistantServiceId, readonly string[]>> = {
   map: ['地圖', '校園地圖', 'map', 'campus map'],
   bus: ['公車', '校車', '公車資訊', '公車動態', '交通資訊', 'bus', 'transit'],
   'school-info': ['學校資訊', '校園資訊', '學校聯絡資訊', 'school info'],
+  career: ['職涯', '職涯資訊', '職涯資源', '校內工讀', '實習', '實習學分', '校園徵才', 'career', 'career services', 'internship'],
   'student-card': ['數位學生證', '學生證', '數位證件', '證件', '學生證卡面', 'student card', 'student id card'],
   cafeteria: ['餐廳', '校園餐廳', '學餐', '餐廳總覽', '菜單', 'cafeteria', 'dining', 'restaurants'],
   food: ['點餐與取餐', '點餐', '取餐', '取餐憑證', '餐點訂購', 'food', 'food orders', 'food pickup'],

@@ -19,7 +19,7 @@ function data(schoolId = 'nthu') {
     },
   };
 }
-const reply = (value: unknown, init?: ResponseInit) => new Response(JSON.stringify(value), init);
+const reply = (value: unknown, init?: ResponseInit) => Response.json(value, init);
 const options = { question: '幫我找清大的資料庫課程', schoolId: 'pu', origin: 'web' as const };
 afterEach(() => {
   vi.useRealTimers();
@@ -111,7 +111,8 @@ describe('public course transport', () => {
 
   it.each([
     () => new Response('no', { status: 502 }),
-    () => new Response('{broken'),
+    () => new Response('{broken', { headers: { 'content-type': 'application/json' } }),
+    () => new Response(JSON.stringify(data()), { headers: { 'content-type': 'text/plain' } }),
     () => reply(data('ncnu')),
     () => reply({ ...data(), sourceUrl: 'https://example.test/courses' }),
     () => reply({ ...data(), operation: { ...data().operation, version: 2 } }),

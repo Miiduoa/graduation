@@ -27,8 +27,11 @@ const returnBook = require('./agent/tools/returnBook');
 const renew = require('./agent/tools/renewBook');
 const seat = require('./agent/tools/reserveSeat');
 const washing = require('./agent/tools/reserveWashingMachine');
+const { resolveWashReserveInput } = require('./lib/campusWriteIntentResolve');
 const executeAgentWrite = require('./agent/handlers/executeAgentWrite');
+const { resolveReserveSeatInput } = require('./lib/campusWriteIntentResolve');
 const { libraryLoanVersion } = require('./agent/libraryLoanSource');
+const { createOrderStatusHandlers } = require('./orderTransitions');
 const read = async (path) => (await db.doc(path).get()).data();
 const scope = (uid = 'alice') => ({ uid, schoolId: 'pu' });
 const request = (uid, data) => ({ auth: { uid }, data: { schoolId: 'pu', ...data } });
@@ -162,6 +165,55 @@ test('normal and Agent washing reservations cannot both own the same machine', a
   assert.equal((await read('schools/pu/washingMachines/M1')).reservedBy, reservations.docs[0].data().userId);
 });
 
+async function explicitWashingProposal() {
+  await seed([
+    ['schools/pu/washingMachines/A1', { dormitory: 'A棟', status: 'available' }],
+    ['schools/pu/washingMachines/A2', { dormitory: 'A棟', status: 'available' }],
+    ['users/alice/settings/assistantPermissions', { reserveWashingMachine: true }],
+  ]);
+  const input = await resolveWashReserveInput('幫我預約 A棟洗衣機 A2 2030/01/02 晚上八點', 'pu');
+  assert.equal(input?.machineId, 'A2');
+  assert.equal((await db.collection('schools/pu/washingReservations').get()).size, 0);
+  const action = await proposal(
+    { actionProposals: [{ toolName: 'reserveWashingMachine', input }] },
+    { seedLeavePermission: false },
+  );
+  action.data.toolName = 'reserveWashingMachine';
+  action.data.input = input;
+  return action;
+}
+
+test('an exact washing draft reserves only A2 after confirmation and cannot be replayed', async () => {
+  const action = await explicitWashingProposal();
+  const a1Before = await read('schools/pu/washingMachines/A1');
+  const receipt = await executeAgentWrite.run(action);
+  assert.equal(receipt.success, true);
+  assert.equal(receipt.machineId, 'A2');
+  const reservations = await db.collection('schools/pu/washingReservations').get();
+  assert.equal(reservations.size, 1);
+  const saved = reservations.docs[0].data();
+  assert.equal(saved.machineId, 'A2');
+  assert.equal(saved.userId, 'alice');
+  assert.equal(saved.schoolId, 'pu');
+  assert.equal((await read('schools/pu/washingMachines/A2')).reservedBy, 'alice');
+  assert.deepEqual(await read('schools/pu/washingMachines/A1'), a1Before);
+  await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+  const replayed = await db.collection('schools/pu/washingReservations').get();
+  assert.equal(replayed.size, 1);
+  assert.deepEqual(replayed.docs[0].data(), saved);
+});
+
+test('a machine becoming unavailable after the exact draft never redirects confirmation or retries to A1', async () => {
+  const action = await explicitWashingProposal();
+  const a1Before = await read('schools/pu/washingMachines/A1');
+  await db.doc('schools/pu/washingMachines/A2').update({ status: 'maintenance' });
+  await assert.rejects(executeAgentWrite.run(action), { code: 'failed-precondition' });
+  await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+  assert.equal((await db.collection('schools/pu/washingReservations').get()).size, 0);
+  assert.deepEqual(await read('schools/pu/washingMachines/A1'), a1Before);
+  assert.equal((await read('schools/pu/washingMachines/A2')).status, 'maintenance');
+});
+
 test('cancelling an old washing reservation cannot release a newer reservation', async () => {
   const first = await washing.execute(scope(), washingInput);
   await service.cancelWashingReservation.run(request('alice', { reservationId: first.reservationId }));
@@ -213,6 +265,200 @@ async function proposal(overrides = {}, { seedLeavePermission = true } = {}) {
     context: { schoolId: 'pu', groupId: 'untrusted-foreign-group' },
   } };
 }
+
+// These fixtures exercise nuni's Firebase collections only. They neither call
+// nor claim to reserve a seat in an official library booking system.
+const exactSeatInput = { seatId: 'lib-3F-A15', date: '2026-11-18', startTime: '14:00', endTime: '16:30' };
+const exactSeatMessage = '2026-11-18 圖書館三樓 A15，14:00–16:30 預約座位';
+async function seatProposal(message = exactSeatMessage, expected = exactSeatInput) {
+  const input = resolveReserveSeatInput(message, 'Asia/Taipei');
+  assert.deepEqual(input, expected, 'the proposed interval must preserve the explicit request');
+  await seed([
+    [`schools/pu/librarySeats/${input.seatId}`, { status: 'available' }],
+    ['users/alice/settings/assistantPermissions', { reserveSeat: true }],
+  ]);
+  const action = await proposal({ actionProposals: [{ toolName: 'reserveSeat', input }] },
+    { seedLeavePermission: false });
+  action.data.toolName = 'reserveSeat';
+  action.data.input = input;
+  return action;
+}
+
+async function seatServiceSnapshot() {
+  const paths = [
+    'schools/pu/seatReservations', 'schools/pu/librarySeats', 'schools/pu/serviceWriteGuards',
+    ...['alice', 'bob'].flatMap(uid => [
+      `users/${uid}/schools/pu/seatReservations`, `users/${uid}/schools/pu/serviceWriteGuards`,
+    ]),
+  ];
+  const rows = await Promise.all(paths.map(async path => {
+    const snapshot = await db.collection(path).get();
+    return snapshot.docs.map(doc => ({ path: doc.ref.path, data: doc.data(), updateTime: doc.updateTime }));
+  }));
+  return rows.flat().sort((left, right) => left.path.localeCompare(right.path));
+}
+
+async function assertSeatReceipt(action, receipt) {
+  assert.equal(receipt.success, true);
+  assert.equal(receipt.toolName, 'reserveSeat');
+  for (const field of ['seatId', 'date', 'startTime', 'endTime']) {
+    assert.equal(receipt[field], action.data.input[field], `receipt must retain ${field}`);
+  }
+  const canonical = await read(`schools/pu/seatReservations/${receipt.reservationId}`);
+  assert.deepEqual(canonical, await read(`users/alice/schools/pu/seatReservations/${receipt.reservationId}`));
+  assert.equal(canonical.userId, 'alice');
+  assert.equal(canonical.schoolId, 'pu');
+  assert.equal(canonical.status, 'active');
+  assert.ok(canonical.createdAt instanceof Timestamp);
+  for (const field of ['seatId', 'date', 'startTime', 'endTime']) {
+    assert.equal(canonical[field], action.data.input[field], `canonical record must retain ${field}`);
+  }
+  const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+  assert.equal(run.actionClaims['0'].status, 'completed');
+  assert.deepEqual(run.steps[0].input, action.data.input);
+  assert.deepEqual(run.steps[0].output, receipt);
+}
+
+// The test hook runs only AFTER the real claim transaction has committed. Read
+// failures and commit aborts wrap the real SDK, never a production bypass flag.
+async function afterSeatClaim(action, change, { failSeatRead = false, abortCommit = false } = {}) {
+  const original = db.runTransaction;
+  const runRef = db.doc(`users/alice/agentRuns/${action.data.agentRunId}`);
+  let changed = false;
+  let failedReads = 0;
+  let aborted = false;
+  db.runTransaction = async function(callback, ...options) {
+    const result = await original.call(this, async tx => {
+      const originalGet = tx.get;
+      if (changed && failSeatRead) {
+        tx.get = function(reference, ...args) {
+          if (reference.path === `schools/pu/librarySeats/${action.data.input.seatId}`) {
+            failedReads += 1;
+            return Promise.reject(new HttpsError('unavailable', 'synthetic seat source unavailable'));
+          }
+          return originalGet.call(this, reference, ...args);
+        };
+      }
+      try {
+        const value = await callback(tx);
+        if (changed && abortCommit && !aborted) {
+          aborted = true;
+          throw new HttpsError('unavailable', 'synthetic abort before seat transaction commit');
+        }
+        return value;
+      } finally { tx.get = originalGet; }
+    }, ...options);
+    if (!changed && (await runRef.get()).data()?.actionClaims?.['0']?.status === 'started') {
+      changed = true;
+      await change();
+    }
+    return result;
+  };
+  try { return await executeAgentWrite.run(action); }
+  finally {
+    db.runTransaction = original;
+    assert.equal(changed, true, 'the fault must occur after the real claim commits');
+    if (failSeatRead) assert.ok(failedReads > 0, 'the service transaction must read the source');
+    if (abortCommit) assert.equal(aborted, true, 'the actual service callback must reach pre-commit');
+  }
+}
+
+test('resolved Agent seat proposal preserves 14:00–16:30 through receipt and canonical mirror', async () => {
+  const action = await seatProposal();
+  const receipt = await executeAgentWrite.run(action);
+  await assertSeatReceipt(action, receipt);
+  const beforeReplay = await seatServiceSnapshot();
+  await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+  assert.deepEqual(await seatServiceSnapshot(), beforeReplay);
+  assert.equal((await db.collection('schools/pu/seatReservations').get()).size, 1);
+});
+
+test('resolved 30-minute Agent seat proposal claims once under duplicate confirmation', async () => {
+  const action = await seatProposal('2026-11-18 圖書館三樓 A15，14:00 開始預約 30 分鐘',
+    { ...exactSeatInput, endTime: '14:30' });
+  const results = await Promise.allSettled([executeAgentWrite.run(action), executeAgentWrite.run(action)]);
+  assert.equal(results.filter(row => row.status === 'fulfilled').length, 1);
+  assert.equal(results.find(row => row.status === 'rejected').reason.code, 'already-exists');
+  await assertSeatReceipt(action, results.find(row => row.status === 'fulfilled').value);
+  assert.equal((await db.collection('schools/pu/seatReservations').get()).size, 1);
+});
+
+test('missing seat selection or interval cannot generate an arbitrary Agent seat proposal', async () => {
+  const before = await seatServiceSnapshot();
+  for (const message of [
+    '2026-11-18 14:00–16:30 圖書館三樓隨便一席',
+    '2026-11-18 14:00–16:30 預約座位',
+    '2026-11-18 14:00 圖書館三樓 A15 預約座位',
+  ]) assert.equal(resolveReserveSeatInput(message, 'Asia/Taipei'), null, message);
+  assert.deepEqual(await seatServiceSnapshot(), before);
+  assert.equal((await db.collection('users/alice/agentRuns').get()).size, 0);
+});
+
+for (const fault of [
+  { name: 'source removed', code: 'not-found', apply: action => db.doc(`schools/pu/librarySeats/${action.data.input.seatId}`).delete() },
+  { name: 'source closed', code: 'failed-precondition', apply: action => db.doc(`schools/pu/librarySeats/${action.data.input.seatId}`).update({ status: 'disabled' }) },
+  { name: 'school membership withdrawn', code: 'permission-denied', apply: () => db.doc('schools/pu/members/alice').update({ status: 'inactive' }) },
+  { name: 'source read unavailable', code: 'unavailable', apply: async () => {}, failSeatRead: true },
+  { name: 'transaction commit aborted', code: 'unavailable', apply: async () => {}, abortCommit: true },
+  { name: 'another user reserved the interval', code: 'already-exists', apply: action => seat.execute(scope('bob'), action.data.input) },
+]) {
+  test(`Agent seat ${fault.name} after claim leaves no partial reservation, mirror or guard`, async () => {
+    const action = await seatProposal();
+    let beforeService;
+    await assert.rejects(afterSeatClaim(action, async () => {
+      await fault.apply(action);
+      beforeService = await seatServiceSnapshot();
+    }, fault), { code: fault.code });
+    assert.deepEqual(await seatServiceSnapshot(), beforeService);
+    assert.equal((await db.collection('users/alice/schools/pu/seatReservations').get()).size, 0);
+    const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+    assert.equal(run.actionClaims['0'].status, 'unverified');
+    assert.equal(run.steps[0].output.success, false);
+    if (fault.name === 'school membership withdrawn') {
+      await db.doc('schools/pu/members/alice').update({ status: 'active' });
+    }
+    await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+    assert.deepEqual(await seatServiceSnapshot(), beforeService);
+  });
+}
+
+test('seat proposal tampering cannot claim another interval, seat, date, school or account', async () => {
+  const action = await seatProposal();
+  const before = await seatServiceSnapshot();
+  for (const input of [
+    { ...action.data.input, endTime: '18:00' },
+    { ...action.data.input, seatId: 'S2' },
+    { ...action.data.input, date: '2026-11-19' },
+  ]) await assert.rejects(executeAgentWrite.run({ ...action, data: { ...action.data, input } }), { code: 'permission-denied' });
+  await assert.rejects(executeAgentWrite.run({ ...action, auth: { uid: 'bob' } }), { code: 'permission-denied' });
+  await assert.rejects(executeAgentWrite.run({ ...action, data: { ...action.data, context: { schoolId: 'foreign' } } }), { code: 'permission-denied' });
+  assert.deepEqual(await seatServiceSnapshot(), before);
+  assert.equal((await read(`users/alice/agentRuns/${action.data.agentRunId}`)).actionClaims, undefined);
+  await assertSeatReceipt(action, await executeAgentWrite.run(action));
+});
+
+test('a mismatched seat time receipt remains unverified after the real commit and cannot repeat it', async () => {
+  const action = await seatProposal();
+  const execute = seat.execute;
+  let receipt;
+  seat.execute = async (...args) => ({ ...await execute(...args), endTime: '18:00' });
+  try { receipt = await executeAgentWrite.run(action); }
+  finally { seat.execute = execute; }
+  assert.equal(receipt.success, false);
+  assert.equal(receipt.errorCode, 'unverified_receipt');
+  const reservations = await db.collection('schools/pu/seatReservations').get();
+  assert.equal(reservations.size, 1);
+  const canonical = reservations.docs[0];
+  assert.equal(canonical.data().startTime, '14:00');
+  assert.equal(canonical.data().endTime, '16:30');
+  assert.deepEqual(await read(`users/alice/schools/pu/seatReservations/${canonical.id}`), canonical.data());
+  const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+  assert.equal(run.actionClaims['0'].status, 'unverified');
+  assert.deepEqual(run.steps[0].output, receipt);
+  const beforeReplay = await seatServiceSnapshot();
+  await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+  assert.deepEqual(await seatServiceSnapshot(), beforeReplay);
+});
 
 test('an Agent return with a whitespace-only saved book title confirms its receipt and cannot replenish twice', async () => {
   const blankTitle = ' \t\n ';
@@ -340,18 +586,20 @@ async function runAfterCommittedClaim(action, change) {
         }
         return value;
       };
-      if (!changedAfterClaim || !change.failAccountRead) return execute();
+      if (!changedAfterClaim || (!change.failAccountRead && !change.failPermissionsRead)) return execute();
+      const sourcePath = change.failPermissionsRead
+        ? 'users/alice/settings/assistantPermissions' : 'users/alice';
       const originalGet = tx.get;
       const originalGetAll = tx.getAll;
       tx.get = function (reference, ...args) {
-        if (reference.path === 'users/alice') {
+        if (reference.path === sourcePath) {
           failedAccountReads += 1;
           return Promise.reject(new HttpsError('unavailable', 'test account source unavailable'));
         }
         return originalGet.call(this, reference, ...args);
       };
       tx.getAll = function (...references) {
-        if (references.some((reference) => reference?.path === 'users/alice')) {
+        if (references.some((reference) => reference?.path === sourcePath)) {
           failedAccountReads += 1;
           return Promise.reject(new HttpsError('unavailable', 'test account source unavailable'));
         }
@@ -379,8 +627,102 @@ async function runAfterCommittedClaim(action, change) {
     db.runTransaction = originalRunTransaction;
     assert.equal(changedAfterClaim, true, 'the source change must occur after a committed claim');
     if (change.failAccountRead) assert.ok(failedAccountReads > 0, 'the service transaction must attempt the account read');
+    if (change.failPermissionsRead) assert.ok(failedAccountReads > 0, 'the service transaction must read the tool permission after claim');
     if (change.abortServiceCommit) assert.equal(abortedServiceCommit, true, 'the staged service transaction must abort');
   }
+}
+
+
+async function permissionBoundLibraryProposal(toolName) {
+  if (toolName !== 'borrowBook') {
+    const loan = await borrow.execute(scope(), { bookId: 'B1' });
+    return libraryProposal(toolName, loan.loanId);
+  }
+  const input = { bookId: 'B1' };
+  await db.doc('users/alice/settings/assistantPermissions').set({ borrowBook: true });
+  const action = await proposal(
+    { actionProposals: [{ toolName, input }] },
+    { seedLeavePermission: false },
+  );
+  action.data.toolName = toolName;
+  action.data.input = input;
+  return action;
+}
+
+const libraryWriteTools = ['borrowBook', 'renewBook', 'returnBook'];
+for (const toolName of libraryWriteTools) {
+  for (const permissionState of ['revoked', 'deleted', 'unreadable']) {
+    test(`an Agent ${toolName} rejects ${permissionState} write permission after its committed claim`, async () => {
+      const action = await permissionBoundLibraryProposal(toolName);
+      const before = await serviceRecordSnapshot();
+      const settings = db.doc('users/alice/settings/assistantPermissions');
+      const change = {
+        failPermissionsRead: permissionState === 'unreadable',
+        apply: async () => {
+          if (permissionState === 'deleted') await settings.delete();
+          else if (permissionState === 'revoked') await settings.set({ [toolName]: false });
+        },
+      };
+
+      await assert.rejects(runAfterCommittedClaim(action, change), {
+        code: permissionState === 'unreadable' ? 'unavailable' : 'permission-denied',
+      });
+
+      assert.deepEqual(await serviceRecordSnapshot(), before,
+        'revoked Agent permission must leave canonical loans, mirrors, inventory and service guards unchanged');
+      const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+      assert.equal(run.actionClaims['0'].status, 'unverified');
+      assert.ok(run.actionClaims['0'].startedAt instanceof Timestamp);
+      assert.equal(run.steps.some((step) => step.output?.success === true), false);
+      await settings.set({ [toolName]: true });
+      await assert.rejects(executeAgentWrite.run(action), { code: 'already-exists' });
+      assert.deepEqual(await serviceRecordSnapshot(), before,
+        'granting permission again must not replay the previously attempted confirmation');
+    });
+  }
+  for (const permissionState of ['retained grant', 'other tools revoked']) {
+    test(`an Agent ${toolName} preserves ${permissionState} at service transaction time`, async () => {
+      const action = await permissionBoundLibraryProposal(toolName);
+      const grants = Object.fromEntries(libraryWriteTools.map((name) => [
+        name, permissionState === 'retained grant' || name === toolName,
+      ]));
+
+      const receipt = await runAfterCommittedClaim(action, {
+        apply: () => db.doc('users/alice/settings/assistantPermissions').set(grants),
+      });
+
+      assert.equal(receipt.success, true);
+      assert.equal(receipt.toolName, toolName);
+      const loanId = toolName === 'borrowBook' ? receipt.loanId : action.data.input.loanId;
+      const canonical = await read(`schools/pu/libraryLoans/${loanId}`);
+      assert.equal(canonical.userId, 'alice');
+      assert.deepEqual(await read(`users/alice/schools/pu/libraryLoans/${loanId}`), canonical);
+      assert.equal(canonical.status, toolName === 'returnBook' ? 'returned' : 'borrowed');
+      if (toolName === 'renewBook') assert.equal(canonical.renewCount, 1);
+      const book = await read('schools/pu/libraryBooks/B1');
+      assert.equal(book.availableCopies, toolName === 'returnBook' ? 1 : 0);
+      assert.equal(book.available, book.availableCopies);
+      const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
+      assert.equal(run.actionClaims['0'].status, 'completed');
+    });
+  }
+  test(`the direct ${toolName} callable remains usable with all Agent write permissions disabled`, async () => {
+    const input = toolName === 'borrowBook'
+      ? { bookId: 'B1' }
+      : { loanId: (await borrow.execute(scope(), { bookId: 'B1' })).loanId };
+    await db.doc('users/alice/settings/assistantPermissions').set(
+      Object.fromEntries(libraryWriteTools.map((name) => [name, false])),
+    );
+
+    const receipt = await service[toolName].run(request('alice', input));
+
+    const loanId = toolName === 'borrowBook' ? receipt.loanId : input.loanId;
+    const canonical = await read(`schools/pu/libraryLoans/${loanId}`);
+    assert.equal(canonical.status, toolName === 'returnBook' ? 'returned' : 'borrowed');
+    assert.deepEqual(await read(`users/alice/schools/pu/libraryLoans/${loanId}`), canonical);
+    if (toolName === 'renewBook') assert.equal(canonical.renewCount, 1);
+    assert.equal((await read('schools/pu/libraryBooks/B1')).availableCopies, toolName === 'returnBook' ? 1 : 0);
+  });
 }
 
 const blockedAccountChanges = [
@@ -780,6 +1122,186 @@ for (const change of [
   });
 }
 
+
+async function orderReceiptRaceFixture() {
+  const action = await orderProposal();
+  await db.doc('schools/pu/cafeterias/cafe/operators/bob').set({ status: 'active' });
+  return action;
+}
+
+async function onlyCommittedOrderId() {
+  const orders = await db.collection('schools/pu/orders').get();
+  assert.equal(orders.size, 1);
+  return orders.docs[0].id;
+}
+
+// Real order transition handlers, with only the external notification sender
+// replaced so these synthetic fixture transitions cannot send a notification.
+function receiptRaceTransitions() {
+  return createOrderStatusHandlers({ db, sendPushToUser: async () => ({ status: 'not_requested' }) });
+}
+
+async function completeReceiptFixture(orderId) {
+  const transitions = receiptRaceTransitions();
+  for (const status of ['confirmed', 'preparing', 'ready', 'completed']) {
+    await transitions.updateOrderStatus(request('bob', { orderId, status }));
+  }
+}
+
+const replayProtectedOrderCollections = orderCollections.filter((path) => path !== 'users/alice/schools/pu/orders');
+
+test('createOrder returns the actual cancellation committed before its queue transaction', async () => {
+  const action = await orderReceiptRaceFixture();
+  let afterCancellation;
+
+  const { receipt } = await runAfterOrderCommit(action, {
+    apply: async () => {
+      const orderId = await onlyCommittedOrderId();
+      await service.cancelOrder.run(request('alice', { orderId, reason: 'Cancel before initial number' }));
+      afterCancellation = await collectionRecordSnapshot(orderCollections);
+    },
+  });
+
+  assert.equal(receipt.success, true);
+  assert.equal(receipt.status, 'cancelled');
+  assert.equal(receipt.queueStatus, 'cancelled');
+  assert.equal(receipt.queueNumber, null);
+  assert.equal(receipt.orderOutcome, undefined);
+  assert.equal(receipt.paymentStatus, 'pending');
+  assert.equal((await read(`schools/pu/orders/${receipt.orderId}`)).status, 'cancelled');
+  assert.equal((await db.collection('schools/pu/queueCounters').get()).size, 0);
+  assert.deepEqual(await collectionRecordSnapshot(orderCollections), afterCancellation,
+    'the receipt must reflect the committed cancellation without rewriting or numbering its order');
+});
+
+for (const existingNumber of [false, true]) {
+  test(`createOrder does not adopt another buyer's ${existingNumber ? 'historical' : 'new'} queue after its creation commits`, async () => {
+    const action = await orderReceiptRaceFixture();
+    const observedCollections = [...orderCollections, 'users/bob/schools/pu/orders'];
+    let afterOwnerChange;
+
+    const { receipt } = await runAfterOrderCommit(action, {
+      apply: async () => {
+        const orderId = await onlyCommittedOrderId();
+        // A synthetic canonical integrity fault between two real transactions.
+        await db.doc(`schools/pu/orders/${orderId}`).update({
+          userId: 'bob', status: existingNumber ? 'completed' : 'pending',
+          queueNumber: existingNumber ? 7 : null,
+          queueStatus: existingNumber ? 'assigned' : 'pending_confirmation',
+        });
+        afterOwnerChange = await collectionRecordSnapshot(observedCollections);
+      },
+    });
+
+    assert.equal(receipt.success, true, 'the earlier creation really committed');
+    assert.equal(receipt.userId, 'alice');
+    assert.equal(receipt.status, 'pending');
+    assert.equal(receipt.queueNumber, null);
+    assert.equal(receipt.queueStatus, 'pending_confirmation');
+    assert.equal(receipt.orderOutcome, undefined);
+    assert.deepEqual(await collectionRecordSnapshot(observedCollections), afterOwnerChange,
+      'an owner mismatch must neither allocate a number nor repair either buyer mirror');
+  });
+}
+
+for (const withNumber of [false, true]) {
+  test(`createOrder returns a completed receipt with ${withNumber ? 'its historical number' : 'no number'} after a post-commit transition`, async () => {
+    const action = await orderReceiptRaceFixture();
+    let afterCompletion;
+
+    const { receipt } = await runAfterOrderCommit(action, {
+      apply: async () => {
+        const orderId = await onlyCommittedOrderId();
+        if (withNumber) await service.assignQueueNumber.run(request('alice', { orderId }));
+        await completeReceiptFixture(orderId);
+        afterCompletion = await collectionRecordSnapshot(orderCollections);
+      },
+    });
+
+    assert.equal(receipt.success, true);
+    assert.equal(receipt.status, 'completed');
+    assert.equal(receipt.queueNumber, withNumber ? 1 : null);
+    assert.equal(receipt.queueStatus, withNumber ? 'assigned' : 'completed');
+    assert.equal(receipt.orderOutcome, undefined);
+    assert.equal((await read(`schools/pu/orders/${receipt.orderId}`)).status, 'completed');
+    const counters = await db.collection('schools/pu/queueCounters').get();
+    assert.equal(counters.size, withNumber ? 1 : 0);
+    if (withNumber) assert.equal(counters.docs[0].data().nextSerial, 1);
+    assert.deepEqual(await collectionRecordSnapshot(orderCollections), afterCompletion,
+      'a terminal receipt must neither allocate another number nor rewrite the committed result');
+  });
+}
+
+for (const legacyNumber of [false, true]) {
+  test(`createOrder replays a cancelled order ${legacyNumber ? 'with a leftover legacy number' : 'without a number'} as cancelled`, async () => {
+    const action = await orderReceiptRaceFixture();
+    const created = await service.createOrder.run(request('alice', action.data.input));
+    await service.cancelOrder.run(request('alice', { orderId: created.orderId, reason: 'Already cancelled' }));
+    if (legacyNumber) {
+      const legacy = { queueNumber: 7, queueStatus: 'assigned' };
+      await seed([
+        [`schools/pu/orders/${created.orderId}`, { ...(await read(`schools/pu/orders/${created.orderId}`)), ...legacy }],
+        [`users/alice/schools/pu/orders/${created.orderId}`, { ...(await read(`users/alice/schools/pu/orders/${created.orderId}`)), ...legacy }],
+      ]);
+    }
+    const beforeReplay = await collectionRecordSnapshot(replayProtectedOrderCollections);
+
+    const receipt = await service.createOrder.run(request('alice', action.data.input));
+
+    assert.equal(receipt.success, true);
+    assert.equal(receipt.reused, true);
+    assert.equal(receipt.orderId, created.orderId);
+    assert.equal(receipt.status, 'cancelled');
+    assert.equal(receipt.queueStatus, 'cancelled');
+    assert.equal(receipt.queueNumber, null);
+    assert.equal(receipt.orderOutcome, undefined);
+    assert.deepEqual(await collectionRecordSnapshot(replayProtectedOrderCollections), beforeReplay,
+      'cancelled replay must not revive counters, canonical order state or payment data');
+    assert.deepEqual(await read(`users/alice/schools/pu/orders/${created.orderId}`),
+      await read(`schools/pu/orders/${created.orderId}`));
+  });
+}
+
+test('createOrder preserves a completed replay and its original assigned number', async () => {
+  const action = await orderReceiptRaceFixture();
+  const created = await service.createOrder.run(request('alice', action.data.input));
+  await completeReceiptFixture(created.orderId);
+  const beforeReplay = await collectionRecordSnapshot(replayProtectedOrderCollections);
+
+  const receipt = await service.createOrder.run(request('alice', action.data.input));
+
+  assert.equal(receipt.success, true);
+  assert.equal(receipt.reused, true);
+  assert.equal(receipt.status, 'completed');
+  assert.equal(receipt.queueStatus, 'assigned');
+  assert.equal(receipt.queueNumber, 1);
+  assert.deepEqual(await collectionRecordSnapshot(replayProtectedOrderCollections), beforeReplay);
+  assert.deepEqual(await read(`users/alice/schools/pu/orders/${created.orderId}`),
+    await read(`schools/pu/orders/${created.orderId}`));
+});
+
+test('createOrder carries the current confirmed status from its successful queue transaction', async () => {
+  const action = await orderReceiptRaceFixture();
+
+  const { receipt } = await runAfterOrderCommit(action, {
+    apply: async () => {
+      const orderId = await onlyCommittedOrderId();
+      await receiptRaceTransitions().updateOrderStatus(request('bob', { orderId, status: 'confirmed' }));
+    },
+  });
+
+  assert.equal(receipt.success, true);
+  assert.equal(receipt.status, 'confirmed');
+  assert.equal(receipt.queueStatus, 'assigned');
+  assert.equal(receipt.queueNumber, 1);
+  const canonical = await read(`schools/pu/orders/${receipt.orderId}`);
+  assert.equal(canonical.status, receipt.status);
+  assert.deepEqual(await read(`users/alice/schools/pu/orders/${receipt.orderId}`), canonical);
+  const counters = await db.collection('schools/pu/queueCounters').get();
+  assert.equal(counters.size, 1);
+  assert.equal(counters.docs[0].data().nextSerial, 1);
+});
+
 async function manualQueueFixture(role, hasNumber = false) {
   await orderProposal();
   const uid = role === 'merchant' ? 'bob' : 'alice';
@@ -950,4 +1472,91 @@ test('closed assistant write permission denies before claim and leaves no claim'
   const run = await read(`users/alice/agentRuns/${action.data.agentRunId}`);
   assert.equal(run.actionClaims, undefined);
   assert.equal((await db.collection('leaveRequests').get()).size, 0);
+});
+
+
+// These status-reader regressions use the same guarded localhost demo project as the transaction fixtures above.
+const leaveStatusReader = require('./agent/tools/getLeaveRequestStatus');
+const leaveStatusCreatedAt = (offset) => Timestamp.fromMillis(Date.parse('2030-01-01T00:00:00Z') + offset * 1000);
+
+test('leave status filters by campus before the limit when more than ten newer rows belong to another campus', async () => {
+  await seed([
+    ['leaveRequests/local-old', {
+      uid: 'alice', schoolId: 'pu', date: '2030-02-01', type: '事假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(1),
+    }],
+    ...Array.from({ length: 12 }, (_, index) => [`leaveRequests/foreign-${index}`, {
+      uid: 'alice', schoolId: 'ntu', date: '2099-01-01', type: '他校假別', status: 'rejected',
+      createdAt: leaveStatusCreatedAt(100 + index),
+    }]),
+  ]);
+  const before = await db.collection('leaveRequests').get();
+  const result = await leaveStatusReader.execute(scope(), { limit: 10 });
+  assert.equal(result.count, 1);
+  assert.equal(result.items[0].requestId, 'local-old');
+  const after = await db.collection('leaveRequests').get();
+  assert.equal(after.size, before.size);
+  const original = new Map(before.docs.map((document) => [document.id, document]));
+  for (const document of after.docs) {
+    assert.deepEqual(document.data(), original.get(document.id).data());
+    assert.equal(document.updateTime.isEqual(original.get(document.id).updateTime), true);
+  }
+});
+
+test('leave status keeps same-campus canonical and legacy records without requiring source and excludes unknown campus records', async () => {
+  await seed([
+    ['leaveRequests/canonical', {
+      uid: 'alice', schoolId: 'pu', source: 'campus-one', kind: 'sick', status: 'partial',
+      startDate: '2030-02-01', endDate: '2030-02-02', courses: [{ courseId: 'c1' }],
+      createdAt: leaveStatusCreatedAt(2),
+    }],
+    ['leaveRequests/legacy-no-source', {
+      uid: 'alice', schoolId: 'pu', date: '2030-02-03', type: '事假', status: 'approved',
+      courseId: 'legacy-course', groupId: 'legacy-group', createdAt: leaveStatusCreatedAt(1),
+    }],
+    ['leaveRequests/unknown-campus', {
+      uid: 'alice', source: 'campus-one', date: '2099-01-01', type: '校籍不明',
+      status: 'approved', createdAt: leaveStatusCreatedAt(100),
+    }],
+    ['leaveRequests/empty-campus', {
+      uid: 'alice', schoolId: '', date: '2098-01-01', type: '校籍不明',
+      status: 'approved', createdAt: leaveStatusCreatedAt(101),
+    }],
+  ]);
+  const result = await leaveStatusReader.execute(scope(), {});
+  assert.deepEqual(result, { count: 2, items: [
+    { requestId: 'canonical', date: '2030-02-01 至 2030-02-02', type: '病假', status: 'partial',
+      courseId: 'c1', createdAt: leaveStatusCreatedAt(2).toDate().toISOString() },
+    { requestId: 'legacy-no-source', date: '2030-02-03', type: '事假', status: 'approved',
+      courseId: 'legacy-course', groupId: 'legacy-group', createdAt: leaveStatusCreatedAt(1).toDate().toISOString() },
+  ] });
+});
+
+test('leave status respects selected campus and account while returning the newest local row', async () => {
+  await seed([
+    ['schools/ntu/members/alice', { status: 'active' }],
+    ['leaveRequests/alice-pu', {
+      uid: 'alice', schoolId: 'pu', date: '2030-02-01', type: '事假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(100),
+    }],
+    ['leaveRequests/alice-ntu-old', {
+      uid: 'alice', schoolId: 'ntu', date: '2030-02-02', type: '病假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(1),
+    }],
+    ['leaveRequests/alice-ntu-new', {
+      uid: 'alice', schoolId: 'ntu', date: '2030-02-03', type: '病假', status: 'approved',
+      createdAt: leaveStatusCreatedAt(2),
+    }],
+    ['leaveRequests/bob-pu', {
+      uid: 'bob', schoolId: 'pu', date: '2030-02-04', type: '公假', status: 'pending',
+      createdAt: leaveStatusCreatedAt(200),
+    }],
+  ]);
+  for (const [uid, schoolId, expectedId] of [
+    ['alice', 'pu', 'alice-pu'], ['alice', 'ntu', 'alice-ntu-new'], ['bob', 'pu', 'bob-pu'],
+  ]) {
+    const result = await leaveStatusReader.execute({ uid, schoolId }, { limit: 1 });
+    assert.equal(result.count, 1);
+    assert.equal(result.items[0].requestId, expectedId);
+  }
 });
