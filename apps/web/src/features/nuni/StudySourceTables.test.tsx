@@ -763,6 +763,33 @@ it('does not turn numeric years or identifiers into misleading comparison bars',
   expect(container.querySelectorAll('meter')).toHaveLength(2);
 });
 
+it('keeps room and seat identifiers as locations, not ratio-style bars', () => {
+  for (const header of ['教室', '實驗室', '房號', '宿舍房號', '寢室', '座位',
+    '位置', '地點', 'Room', 'Room Number', 'Classroom', 'Lab No.',
+    'Building', 'Location', 'Seat Number']) {
+    const material = ['| 課程 | ' + header + ' |', '| --- | --- |',
+      '| 資料庫 | 301 |', '| 網路 | 205 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual(['301', '205']);
+    expect(comparisonSummaries(container)).toEqual([]);
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+
+  // Counts of rooms/seats are measures and must not be blocked by the
+  // location-identifier guard above.
+  for (const header of ['教室數', '實驗室數量', '座位數', 'Number of Rooms',
+    'Room Count', 'Classroom Count']) {
+    const material = ['| 校區 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter'))
+      .map((bar) => bar.getAttribute('value'))).toEqual(['2', '4']);
+    unmount();
+  }
+});
+
 it('reads the exact source numeric spelling, rather than inferring a percentage', () => {
   const material = ['| 課程 | 學分 |', '| --- | --- |',
     '| 資料庫 | 3.00 |', '| 網路 | 2.50 |'].join('\n');
