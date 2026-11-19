@@ -101,11 +101,15 @@ function hasTransitStopIdentity(location: CampusMapPlaceLike, school: string): b
   // contain malformed non-string array elements. Treat a nonblank marker
   // conservatively as transit identity; never route it to a classroom.
   const ids: unknown = 'transitStopIds' in location ? location.transitStopIds : undefined;
+  // A malformed scalar (number, boolean, object) is not an absence of stop
+  // metadata. Conservatively reject it rather than risk a false classroom POI.
   const hasMarker = typeof ids === 'string'
     ? ids.trim().length > 0
-    : Array.isArray(ids) && ids.some(
-      (id: unknown) => typeof id === 'string' ? id.trim().length > 0 : id != null,
-    );
+    : Array.isArray(ids)
+      ? ids.some(
+          (id: unknown) => typeof id === 'string' ? id.trim().length > 0 : id != null,
+        )
+      : ids != null;
   return hasMarker || (school === 'pu' && PUBLISHED_PROVIDENCE_BUS_STOP_IDS.has(location.id));
 }
 
