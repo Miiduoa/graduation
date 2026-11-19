@@ -109,6 +109,51 @@ describe('campus spatial benchmark evidence gate', () => {
     expect(validateCampusSpatialBenchmarkRows(routes).issues.join(' ')).toContain('route evidence');
   });
 
+  it.each(['entranceCorrect', 'floorCorrect', 'roomCorrect'] as const)(
+    'excludes building-only evidence claiming %s from complete and reviewable trials',
+    (field) => {
+      const rows = [
+        ...fixture('synthetic-1'), ...fixture('synthetic-2'), ...fixture('synthetic-3'),
+      ];
+      // Exercise both the first and later products in the trial accumulator.
+      for (const trialId of ['synthetic-1', 'synthetic-2']) {
+        const row = rows.find((candidate) => candidate.trialId === trialId &&
+          candidate.product === (trialId === 'synthetic-1' ? 'nuni' : 'unitable'))!;
+        row[field] = true;
+      }
+      const result = validateCampusSpatialBenchmarkRows(rows);
+      expect(result.valid).toBe(false);
+      expect(result.issues.join(' ')).toContain('correctness exceeds verified ground-truth evidence');
+      expect(result.completeTrials).toBe(1);
+      expect(result.reviewableTasks).toEqual([]);
+    },
+  );
+
+  it.each(['correct', 'incorrect', 'unverified'] as const)(
+    'caps each indoor correctness claim by evidence even when the outcome is %s',
+    (outcome) => {
+      const levels = ['none', 'building', 'entrance', 'floor', 'room'] as const;
+      for (const groundTruthLevel of levels) {
+        for (const level of ['entrance', 'floor', 'room'] as const) {
+          const rows = fixture('synthetic-levels');
+          for (const row of rows) {
+            row.groundTruthLevel = groundTruthLevel;
+            row.destinationLevel = groundTruthLevel;
+            row.outcome = outcome;
+            if (groundTruthLevel === 'entrance') row.entranceCorrect = true;
+            if (groundTruthLevel === 'floor') row.floorCorrect = true;
+            if (groundTruthLevel === 'room') row.roomCorrect = true;
+          }
+          rows[0][`${level}Correct`] = true;
+          const result = validateCampusSpatialBenchmarkRows(rows);
+          const supported = levels.indexOf(groundTruthLevel) >= levels.indexOf(level);
+          expect(result.valid).toBe(supported);
+          expect(result.completeTrials).toBe(supported && outcome !== 'unverified' ? 1 : 0);
+        }
+      }
+    },
+  );
+
   it('requires real evidence links, plausible measurements, and a visual rubric', () => {
     const rows = fixture('synthetic-1');
     rows[0] = {

@@ -166,6 +166,12 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
     if (row.roomCorrect === true && row.buildingCorrect !== true) {
       issues.push(`${prefix}: room correctness requires verified building correctness`);
     }
+    const unsupportedIndoorLevels = (['entrance', 'floor', 'room'] as const).filter((level) =>
+      row[`${level}Correct`] === true &&
+      LEVELS.indexOf(row.groundTruthLevel as DestinationLevel) < LEVELS.indexOf(level));
+    for (const level of unsupportedIndoorLevels) {
+      issues.push(`${prefix}: ${level} correctness exceeds verified ground-truth evidence`);
+    }
     if (row.outcome === 'correct' &&
         (row.buildingCorrect !== true ||
           LEVELS.indexOf(row.destinationLevel as DestinationLevel) >
@@ -192,15 +198,16 @@ export function validateCampusSpatialBenchmarkRows(rows: readonly unknown[]): Ca
       }
     }
     const found = trials.get(id as string);
+    const verified = row.outcome !== 'unverified' && unsupportedIndoorLevels.length === 0;
     if (!found) {
       trials.set(id as string, {
         baseline: row, products: new Set([row.product as Product]),
-        verified: row.outcome !== 'unverified',
+        verified,
       });
     } else {
       if (found.products.has(row.product as Product)) issues.push(`${prefix}: duplicate product in trial ${id}`);
       found.products.add(row.product as Product);
-      found.verified &&= row.outcome !== 'unverified';
+      found.verified &&= verified;
       for (const field of CONDITIONS) {
         if (found.baseline[field] !== row[field]) {
           issues.push(`${prefix}: mismatched ${field} in trial ${id}`);
