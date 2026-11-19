@@ -69,4 +69,34 @@ describe('NCNU public course to personal timetable credit handoff', () => {
     expect(meetings?.every(meeting => meeting.startTime && meeting.endTime)).toBe(true);
     expect(ncnuTimetableImportCsv({ ...officialCourse, time })).not.toBeNull();
   });
+
+  it.each(['1ab1b', '3a3a', '1abc2def1c'])(
+    'refuses an overlapping %s period in both preview and import',
+    (time) => {
+      expect(ncnuCourseMeetings(time, '1151')).toBeNull();
+      expect(ncnuTimetableImportCsv({ ...officialCourse, time })).toBeNull();
+    },
+  );
+
+  it('preserves distinct weekday segments when there is no overlapping period', () => {
+    const time = '1ab1d2ef';
+    expect(ncnuCourseMeetings(time, '1151')?.map(meeting => meeting.periodLabel)).toEqual(
+      ['ab', 'd', 'ef'],
+    );
+    expect(ncnuTimetableImportCsv({ ...officialCourse, time })).not.toBeNull();
+  });
+
+  it.each([null, undefined, 3, { value: '3' }])(
+    'rejects a non-string cached credit value %s rather than treating it as valid',
+    (credits) => {
+      expect(ncnuTimetableImportCsv({
+        ...officialCourse,
+        credits: credits as unknown as string,
+      })).toBeNull();
+    },
+  );
+
+  it('rejects an oversized numeric credit string before attempting numeric conversion', () => {
+    expect(ncnuTimetableImportCsv({ ...officialCourse, credits: '0'.repeat(10_000) })).toBeNull();
+  });
 });
