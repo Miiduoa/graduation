@@ -14,17 +14,23 @@ jest.mock('../services/release', () => ({ isFeatureEnabled: () => false }));
 
 let mockUser: { uid: string } | null = { uid: 'alice' };
 let mockProfileUserId = 'alice';
+let mockProfileSchool: string | undefined = 'pu';
+let mockHasProfile = true;
+let mockTokenExpired = false;
+let mockLoginAvailable = true;
+let mockSelectionReady = true;
 let mockProfileLoading = false;
 let mockSchool = 'pu';
 jest.mock('../state/auth', () => ({
   useAuth: () => ({
     user: mockUser,
-    profile: { uid: mockProfileUserId, schoolId: 'pu' },
+    profile: mockHasProfile ? { uid: mockProfileUserId, schoolId: mockProfileSchool } : null,
+    tokenExpired: mockTokenExpired,
     profileLoading: mockProfileLoading,
   }),
 }));
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchool }, selectionReady: true }) }));
-jest.mock('../services/schoolLoginAvailability', () => ({ isStudentIdLoginAvailable: (id: string) => id === 'pu' }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchool }, selectionReady: mockSelectionReady }) }));
+jest.mock('../services/schoolLoginAvailability', () => ({ isStudentIdLoginAvailable: (id: string) => mockLoginAvailable && id === 'pu' }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 
@@ -98,6 +104,11 @@ const placed = { toDate: () => new Date('2026-10-13T04:05:00.000Z') };
 beforeEach(async () => {
   mockUser = { uid: 'alice' };
   mockProfileUserId = 'alice';
+  mockProfileSchool = 'pu';
+  mockHasProfile = true;
+  mockTokenExpired = false;
+  mockLoginAvailable = true;
+  mockSelectionReady = true;
   mockFromCache = false;
   mockProfileLoading = false;
   mockSchool = 'pu';
@@ -280,15 +291,54 @@ test('從生活搜尋取餐號碼，查看訂單後返回原搜尋結果', async
   expect(view.getByText('我的訂單')).toBeTruthy();
 });
 
-test('未登入或瀏覽其他學校時不訂閱私人訂單', () => {
+test('未登入時不訂閱私人訂單', () => {
   mockUser = null;
   const view = render(<MyOrdersScreen />);
   expect(view.getByText('登入後查看訂單')).toBeTruthy();
   expect(mockQueryPaths).toEqual([]);
-  mockUser = { uid: 'alice' };
+});
+
+test.each([
+  ['轉學生查看原校訂單', 'nthu', 'pu', true],
+  ['沒有校別與 status 欄位的舊帳號', undefined, 'pu', true],
+  ['SSO 暫停的既有帳號', 'pu', 'pu', false],
+  ['未開放學號登入學校的既有帳號', 'nthu', 'nthu', false],
+] as const)('%s 仍可讀取本人既有訂單', (_name, profileSchool, browsingSchool, loginAvailable) => {
+  mockProfileSchool = profileSchool;
+  mockSchool = browsingSchool;
+  mockLoginAvailable = loginAvailable;
+  const view = render(<MyOrdersScreen route={{ params: { schoolId: browsingSchool } }} />);
+  expect(mockQueryPaths).toEqual([`users/alice/schools/${browsingSchool}/orders`]);
+  expect(view.getByText('取餐號碼 7')).toBeTruthy();
+});
+
+test.each(['tokenExpired', 'missingProfile', 'selectionPending'])(
+  '%s 時停止訂閱並隱藏上一個 session 的訂單',
+  (state) => {
+    const view = render(<MyOrdersScreen />);
+    expect(view.getByText('取餐號碼 7')).toBeTruthy();
+    if (state === 'tokenExpired') mockTokenExpired = true;
+    if (state === 'missingProfile') mockHasProfile = false;
+    if (state === 'selectionPending') mockSelectionReady = false;
+    view.rerender(<MyOrdersScreen />);
+    expect(mockUnsubscribe).toHaveBeenCalledTimes(1);
+    expect(mockQueryPaths).toHaveLength(1);
+    act(() => mockListeners[0]());
+    expect(view.queryByText('取餐號碼 7')).toBeNull();
+  },
+);
+
+test('切換學校後只讀取本人在該校的訂單，忽略原校晚到的結果', () => {
+  const view = render(<MyOrdersScreen />);
   mockSchool = 'nthu';
+  mockServerRows = [];
   view.rerender(<MyOrdersScreen />);
-  expect(mockQueryPaths).toEqual([]);
+  expect(mockUnsubscribe).toHaveBeenCalledTimes(1);
+  expect(mockQueryPaths).toEqual(['users/alice/schools/pu/orders', 'users/alice/schools/nthu/orders']);
+  mockServerRows = [{ id: 'old', data: { queueNumber: 99, status: 'confirmed' } }];
+  act(() => mockListeners[0]());
+  expect(view.getByText('還沒有訂單')).toBeTruthy();
+  expect(view.queryByText('取餐號碼 99')).toBeNull();
 });
 
 test('通知不在近期清單時，個別訂閱本人訂單並保留可用的清單', () => {
