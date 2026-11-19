@@ -55,37 +55,11 @@ it('updates work navigation when an active membership is revoked or changed', ()
   expect(result.current).toBeNull();
 });
 
-it.each(['student', 'teacher', 'admin', 'editor', 'vendor'])(
-  'preserves the %s role of a server-confirmed legacy membership without status',
-  (role) => {
-    const { result } = renderHook(() => useSchoolRoleState('account-a', 'school-a'));
-    act(() => state.listeners[0].next(snapshot({ role })));
-    expect(result.current).toMatchObject({ status: 'ready', role });
-    act(() => state.listeners[0].next(snapshot({ role, status: 'suspended' })));
-    expect(result.current).toMatchObject({ status: 'ready', role: null });
-  },
-);
-
-it.each(['inactive', 'pending', 'disabled', 'deleted', 'suspended', 'unknown', '', null, false])(
-  'rejects an explicit non-active membership status %s',
-  (status) => {
-    const { result } = renderHook(() => useSchoolRole('account-a', 'school-a'));
-    act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'active' })));
-    expect(result.current).toBe('admin');
-    act(() => state.listeners[0].next(snapshot({ role: 'admin', status })));
-    expect(result.current).toBeNull();
-  },
-);
-
-it('does not expose a work role from missing, malformed, cached, or locally edited membership', () => {
+it('does not expose a work role from pending, missing, cached, or locally edited membership', () => {
   const { result } = renderHook(() => useSchoolRole('account-a', 'school-a'));
   for (const entry of [
     snapshot(null),
-    snapshot({}),
-    snapshot({ role: 1 }),
-    snapshot({ status: 'active' }),
-    snapshot({ role: 'admin' }, true),
-    snapshot({ role: 'admin' }, false, true),
+    snapshot({ role: 'admin', status: 'pending' }),
     snapshot({ role: 'admin', status: 'active' }, true),
     snapshot({ role: 'admin', status: 'active' }, false, true),
   ]) {
@@ -95,6 +69,27 @@ it('does not expose a work role from missing, malformed, cached, or locally edit
   act(() => state.listeners[0].next(snapshot({ role: 'admin', status: 'active' })));
   expect(result.current).toBe('admin');
 });
+
+it.each(['admin', 'editor', 'teacher', 'student'])(
+  'preserves the server-confirmed legacy %s role while honoring explicit revocation',
+  (role) => {
+    const { result } = renderHook(() => useSchoolRoleState('account-a', 'school-a'));
+    act(() => state.listeners[0].next(snapshot({ role }, true)));
+    expect(result.current).toMatchObject({ status: 'loading', role: null });
+    act(() => state.listeners[0].next(snapshot({ role }, false, true)));
+    expect(result.current).toMatchObject({ status: 'loading', role: null });
+    act(() => state.listeners[0].next(snapshot({ role })));
+    expect(result.current).toMatchObject({ status: 'ready', role });
+    for (const status of ['inactive', 'pending', 'disabled', 'deleted', 'suspended']) {
+      act(() => state.listeners[0].next(snapshot({ role, status })));
+      expect(result.current).toMatchObject({ status: 'ready', role: null });
+    }
+    act(() => state.listeners[0].next(snapshot({ role, status: 'active' })));
+    expect(result.current).toMatchObject({ status: 'ready', role });
+    act(() => state.listeners[0].next(snapshot(null)));
+    expect(result.current).toMatchObject({ status: 'ready', role: null });
+  },
+);
 
 it('disposes the previous account and school subscription and ignores its late response', () => {
   const { result, rerender, unmount } = renderHook(

@@ -25,6 +25,8 @@ vi.mock('next/link', () => ({
   default: (props: ComponentProps<'a'>) => <a data-client-navigation="true" {...props} />,
 }));
 
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams() }));
+
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({
     user: state.uid ? { uid: state.uid } : null,
@@ -39,8 +41,9 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
           selectedSchool: { id: state.schoolId, name: '測試校' },
           selectedSchoolId: state.schoolId,
           loading: false,
+          catalogStatus: 'ready',
         }
-      : { selectedSchool: null, selectedSchoolId: null, loading: false },
+      : { selectedSchool: null, selectedSchoolId: null, loading: false, catalogStatus: 'ready' },
 }));
 
 vi.mock('@/lib/firebase', () => ({
@@ -86,7 +89,7 @@ it('shows unsigned empty state without watching when unsigned', () => {
   render(<TodayUnreadNotifications unsigned />);
   expect(screen.getByRole('heading', { name: TODAY_NOTIFY_TITLE })).toBeTruthy();
   expect(screen.getByText(TODAY_NOTIFY_UNSIGNED)).toBeTruthy();
-  expect(screen.getByRole('link', { name: '前往通知匣' }).getAttribute('href')).toBe('/messages');
+  expect(screen.getByRole('link', { name: '前往通知匣' }).getAttribute('href')).toBe('/messages?schoolId=pu&campus=pu&school=PU');
   expect(state.watch).toBeNull();
 });
 
@@ -94,7 +97,7 @@ it('asks to pick a campus when signed in but no school is selected', () => {
   state.schoolId = null;
   render(<TodayUnreadNotifications unsigned={false} />);
   expect(screen.getByText(/先選擇校園後/)).toBeTruthy();
-  expect(screen.getByRole('link', { name: '前往通知匣' }).getAttribute('href')).toBe('/messages');
+  expect(screen.getByRole('link', { name: '前往通知匣' }).getAttribute('href')).toBe('/messages?campus=all');
   expect(state.watch).toBeNull();
 });
 
@@ -106,7 +109,7 @@ it('surfaces watch errors with retry and inbox escape', async () => {
   });
   expect(screen.getByRole('alert').textContent).toContain(TODAY_NOTIFY_ERROR);
   expect(screen.getByRole('button', { name: '重試' })).toBeTruthy();
-  expect(screen.getByRole('link', { name: '前往通知匣' }).getAttribute('href')).toBe('/messages');
+  expect(screen.getByRole('link', { name: '前往通知匣' }).getAttribute('href')).toBe('/messages?schoolId=pu&campus=pu&school=PU');
 });
 
 it('links unread rows to their notification destination', async () => {

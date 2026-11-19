@@ -70,10 +70,11 @@ function LoginForm({
   const campusSearch = useCampusNavigationSearch(params);
   const selectedSchoolId = selection?.selectedSchoolId ?? null;
   const schoolDirectoryReady = !selection || !selection.loading;
-  const importHref =
-    selectedSchoolId && selection?.selectedSchool
-      ? `/import?schoolId=${encodeURIComponent(selectedSchoolId)}`
-      : '/import';
+  const navigationSearch = selection?.requestedUnavailable
+    ? buildCampusNavigationSearch(params)
+    : campusSearch;
+  const href = (path: string) => campusServiceHref(path, navigationSearch);
+  const importHref = href('/import');
   const options = useSignInOptions(selectedSchoolId, schoolDirectoryReady);
   const [studentId, setStudentId] = useState('');
   const [password, setPassword] = useState('');
@@ -97,10 +98,7 @@ function LoginForm({
   const publicDestination = isPublicCampusPath(taskPath);
   const merchantTask =
     !reconnect && ['/merchant', '/merchant/apply', '/merchant/workspace'].includes(taskPath);
-  const guestCampusSearch = selection?.requestedUnavailable
-    ? buildCampusNavigationSearch(params)
-    : campusSearch;
-  const directoryDestination = campusServiceHref('/search', guestCampusSearch);
+  const directoryDestination = href('/search');
   const guestDestination = publicDestination ? destination : directoryDestination;
   useEffect(() => {
     const restore = () => {
@@ -192,7 +190,7 @@ function LoginForm({
           <div className={`${styles.loginLayout} ${loginStyles.methods}`}>
             <NuniSignIn returnUrl={destination} issue={issue} />
           </div>
-          <Link href="/login" className={styles.backLink}>
+          <Link href={href('/login')} className={styles.backLink}>
             查看其他身分入口
           </Link>
         </div>
@@ -243,7 +241,7 @@ function LoginForm({
               <div className={styles.methodHeading}>
                 <div>
                   <span className={styles.methodEyebrow}>學校帳號 · 本人授權</span>
-                  <h2>需要校務資料時再連線</h2>
+                  <h2>{schoolTask ? '確認你的學校帳號' : '需要校務資料時再連線'}</h2>
                 </div>
                 <span className={styles.methodStatus}>依服務開放</span>
               </div>
@@ -281,7 +279,7 @@ function LoginForm({
             ) : schoolAvailable ? (
               <>
                 <p>
-                  學號直接登入目前尚未開放；開通後可用於讀取本人的課表、成績與校務紀錄。學校帳號驗證不會自動取得教師、課班或平台管理權限。
+                  使用所選學校的帳號驗證身分。課程、教師與管理權限依各服務的授權提供。
                 </p>
                 {schoolRequired && (
                   <p>
@@ -292,7 +290,7 @@ function LoginForm({
                 )}
                 <form className={styles.loginForm} onSubmit={login} aria-busy={busy}>
                   <p className={styles.formIntro}>
-                    學號直接登入尚未開放；開通前請先匯入課表與成績，或以 Google 帳號登入平台服務。
+                    輸入學號與密碼，完成後返回原本的頁面。
                   </p>
                   <Input
                     id="student-id"
@@ -349,7 +347,7 @@ function LoginForm({
                 <details className={styles.connectionDetails}>
                   <summary>連線後能看到哪些資料？</summary>
                   <p>
-                    學號直接登入目前尚未開放；開通後可依學校系統當次回應取得個人課表與成績。學校帳號驗證不等於取得平台的教師或管理權限。
+                    依學校當次提供的資料查看個人紀錄。課程成員、教師與平台管理權限會分別確認。
                   </p>
                   <p>
                     密碼會透過加密連線送至驗證服務使用；不會存成個人匯入草稿。忘記密碼請前往學校原本的帳號服務處理。
@@ -376,19 +374,19 @@ function LoginForm({
               </Link>
             </div>
             <div className={styles.helpLinks}>
-              <Link href="/privacy">
+              <Link href={href('/privacy')}>
                 了解資料使用方式 <span aria-hidden="true">↗</span>
               </Link>
-              <Link href="/terms">
+              <Link href={href('/terms')}>
                 閱讀使用條款 <span aria-hidden="true">↗</span>
               </Link>
             </div>
             {schoolTask && (
-              <Link href="/login" className={styles.backLink}>
+              <Link href={href('/login')} className={styles.backLink}>
                 改用一般登入
               </Link>
             )}
-            <Link href="/" className={styles.backLink}>
+            <Link href={href('/')} className={styles.backLink}>
               ← 返回首頁
             </Link>
           </details>
@@ -404,7 +402,7 @@ function LoginForm({
           </Link>
           <nav aria-label="不需登入的校園服務">
             {publicCampusServices.map((service) => (
-              <Link key={service.href} href={campusServiceHref(service.href, guestCampusSearch)}>
+              <Link key={service.href} href={href(service.href)}>
                 {service.title}
               </Link>
             ))}

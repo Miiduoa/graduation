@@ -229,17 +229,17 @@ async def check_short_service_menu(page, report, capture):
               const navigation=document.querySelector('nav[aria-label="主要導覽"]').getBoundingClientRect();
               return panel.top >= header.bottom-1 && panel.bottom <= navigation.top+1;
             }'''), 'Short-window service menu covered the header or bottom navigation'
-            # The task directory keeps secondary entries in disclosures. Exercise
-            # their real keyboard expansion before checking the final destination.
-            for disclosure in await page.locator('details[open] details[data-directory-section]').all():
-                if await disclosure.get_attribute('open') is None:
-                    await disclosure.locator('summary').first.press('Enter')
+            # The task-first menu discloses secondary services progressively.
+            # Expand the real controls before checking keyboard reachability.
+            for summary in await page.locator('details[data-directory-section] > summary').all():
+                if not await summary.evaluate('node => node.parentElement.open'):
+                    await summary.click()
             last = page.locator('[data-service-link]').last
             await last.focus()
             await expect(last).to_be_in_viewport(ratio=1)
             assert await last.evaluate('''node => {
               const link=node.getBoundingClientRect();
-              const panel=node.closest('details[name="campus-navigation-popover"]').querySelector('[aria-label="關閉所有服務"]').parentElement.parentElement.getBoundingClientRect();
+              const panel=node.closest('header').querySelector('[aria-label="關閉所有服務"]').parentElement.parentElement.getBoundingClientRect();
               return link.top >= panel.top-1 && link.bottom <= panel.bottom+1;
             }'''), 'Last service was clipped within its panel'
             await capture(f'services-short-{width}', full_page=False)
@@ -319,7 +319,7 @@ async def scenario(browser, origin, config, reports):
     async def expect_one_popover(voice=False):
         details = page.locator('header[data-campus-navigation] details[name="campus-navigation-popover"][open]')
         await expect(details).to_have_count(0 if voice else 1)
-        await expect(page.get_by_role('dialog', name='校園語音與 AI 快速操作')).to_have_count(1 if voice else 0)
+        await expect(page.get_by_role('dialog', name='校園助理')).to_have_count(1 if voice else 0)
 
     try:
         params = {key: value for key, value in config.items() if key in ('theme', 'role', 'text', 'motion', 'font')}
@@ -338,7 +338,7 @@ async def scenario(browser, origin, config, reports):
             report['checks'].append('Guest starts with timetable import and does not receive an account menu')
 
         account = page.locator('summary[aria-label="帳號"]')
-        voice = page.get_by_role('button', name='開啟校園語音 AI', exact=True)
+        voice = page.get_by_role('button', name='開啟校園助理', exact=True)
         school = page.locator('summary[aria-label="切換校園：靜宜大學"]')
         services = page.locator('summary[aria-label="所有服務"]')
         if config['role'] != 'guest':
@@ -354,7 +354,7 @@ async def scenario(browser, origin, config, reports):
         await voice.click()
         await expect_one_popover(voice=True)
         if config['width'] <= 760:
-            assert await page.get_by_role('dialog', name='校園語音與 AI 快速操作').evaluate('''panel => {
+            assert await page.get_by_role('dialog', name='校園助理').evaluate('''panel => {
               const bounds=panel.getBoundingClientRect();
               const header=document.querySelector('header[data-campus-navigation]').getBoundingClientRect();
               const nav=document.querySelector('nav[aria-label="主要導覽"]').getBoundingClientRect();

@@ -61,15 +61,11 @@ export function useSchoolRoleState(
             return;
           }
           const member = snapshot.exists() ? snapshot.data() : null;
-          // 舊會員可能沒有 status；仍拒絕明確非 active 的狀態。
+          // Legacy memberships predate status; explicit non-active states remain blocked.
+          const active = member && (member.status === undefined || member.status === 'active');
           update({
             status: 'ready',
-            role:
-              member &&
-              (member.status === undefined || member.status === 'active') &&
-              typeof member.role === 'string'
-                ? member.role
-                : null,
+            role: active && typeof member.role === 'string' ? member.role : null,
           });
         },
         () => update({ status: 'error', role: null }),
@@ -89,7 +85,7 @@ export function useSchoolRoleState(
     : { status: state.status, role: null, retry };
 }
 
-/** Display the current account's server-confirmed active or legacy school membership. */
+/** Display only the current account's active, server-confirmed school membership. */
 export function useSchoolRole(
   uid: string | null | undefined,
   schoolId: string | null | undefined,

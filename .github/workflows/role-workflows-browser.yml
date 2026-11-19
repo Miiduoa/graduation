@@ -62,6 +62,7 @@ jobs:
       - name: Install locked workspace dependencies
         run: pnpm install --frozen-lockfile
       - name: Install browser and Chinese fonts
+        timeout-minutes: 10
         run: |
           python -m pip install playwright==1.57.0
           bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk

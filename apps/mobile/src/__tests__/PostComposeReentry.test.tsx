@@ -33,7 +33,11 @@ jest.mock('../ui/aiFirst', () => ({
 const Stack = createNativeStackNavigator();
 const Tabs = createBottomTabNavigator();
 function TodayHome() {
-  return <Pressable onPress={() => rootNavigateNested('Today', 'PostCompose')}><Text>一般發文</Text></Pressable>;
+  return (
+    <Pressable onPress={() => rootNavigateNested('訊息', 'PostCompose')}>
+      <Text>一般發文</Text>
+    </Pressable>
+  );
 }
 function Today() {
   return <Stack.Navigator screenOptions={{ animation: 'none' }}>
@@ -43,14 +47,30 @@ function Today() {
   </Stack.Navigator>;
 }
 
+function Inbox() {
+  return <Text>交流首頁</Text>;
+}
+function Messages() {
+  return (
+    <Stack.Navigator screenOptions={{ animation: 'none' }}>
+      <Stack.Screen name="Inbox" component={Inbox} />
+      <Stack.Screen name="PostCompose" component={PostComposeScreen} />
+      <Stack.Screen name="CreatorPostCompose" component={PostComposeScreen} />
+    </Stack.Navigator>
+  );
+}
+
 test('跨分頁從個人頁發文以署名發布，返回一般入口仍保留匿名草稿', async () => {
   jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-  const screen = render(<NavigationContainer ref={rootNavigationRef}>
-    <Tabs.Navigator screenOptions={{ animation: 'none', headerShown: false }}>
-      <Tabs.Screen name="Today" component={Today} />
-      <Tabs.Screen name="我的" component={MySocialProfileScreen} />
-    </Tabs.Navigator>
-  </NavigationContainer>);
+  const screen = render(
+    <NavigationContainer ref={rootNavigationRef}>
+      <Tabs.Navigator screenOptions={{ animation: 'none', headerShown: false }}>
+        <Tabs.Screen name="Today" component={Today} />
+        <Tabs.Screen name="訊息" component={Messages} />
+        <Tabs.Screen name="我的" component={MySocialProfileScreen} />
+      </Tabs.Navigator>
+    </NavigationContainer>,
+  );
   fireEvent.press(screen.getByText('一般發文'));
   await screen.findByPlaceholderText('一句話描述你的貼文');
   fireEvent.press(await screen.findByText('綜合'));
