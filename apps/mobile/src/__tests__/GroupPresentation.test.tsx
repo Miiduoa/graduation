@@ -48,6 +48,10 @@ const mockComment = {
   generatedBy: 'server',
 };
 
+jest.mock('../services/nuniWebFn', () => ({
+  postNuniWebFn: jest.fn(async () => ({ posts: [mockPost], cursor: null, hasMore: false })),
+}));
+
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn() }));
 
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
@@ -539,3 +543,15 @@ test.each(['upload', 'finalize'])(
     }
   },
 );
+
+test('group feed uses the hosted list and never lists posts through client Firestore', async () => {
+  const firestore = require('firebase/firestore');
+  firestore.getDocs.mockClear();
+  const view = render(<GroupDetailScreen route={{ params: { groupId: 'course-actual' } }} />);
+  await view.findByText('樹狀結構的問題');
+  expect(require('../services/nuniWebFn').postNuniWebFn).toHaveBeenCalledWith(
+    'listGroupDiscussionPage', { groupId: 'course-actual', pageSize: 50 }, 'student-a',
+  );
+  expect(firestore.getDocs.mock.calls.some(([ref]: [{ path: string }]) => ref.path.endsWith('/posts'))).toBe(false);
+});
+

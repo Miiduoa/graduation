@@ -66,7 +66,7 @@ it('lets the emulator win over NEXT_PUBLIC_FUNCTIONS_BASE_URL', () => {
   );
 });
 
-it.each(['prepareDmConversation', 'sendDmText', 'replyToCampusStory'])('recognizes the hosted route for %s', (name) => {
+it.each(['listGroupDiscussionPage', 'prepareDmConversation', 'sendDmText', 'replyToCampusStory'])('recognizes the hosted route for %s', (name) => {
   for (const env of [{}, { NEXT_PUBLIC_FUNCTIONS_BASE_URL: fly }, { NEXT_PUBLIC_USE_FIREBASE_EMULATOR: 'true' }]) {
     expect(getCloudFunctionUrl(name, { env })).toBe('/api/fn/' + name);
   }

@@ -1,13 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import {
-  deleteDoc,
-  getDocsFromServer,
-  limit,
-  orderBy,
-  runTransaction,
-  startAfter,
-  updateDoc,
-} from 'firebase/firestore';
+import { deleteDoc, getDocsFromServer, runTransaction, updateDoc, where } from 'firebase/firestore';
 import { readMemberGroup } from './groupService';
 import {
   canEditPost,
@@ -19,7 +11,7 @@ import {
 } from './groupDiscussionService';
 
 const runtime = vi.hoisted(() => ({
-  user: null as null | { uid: string },
+  user: null as null | { uid: string; getIdToken: () => Promise<string> },
   configured: true,
   revision: 0,
   docs: new Map<string, Record<string, unknown>>(),
@@ -29,6 +21,7 @@ const runtime = vi.hoisted(() => ({
 
 vi.mock('@/lib/firebase', () => ({
   getDb: () => ({}),
+  getCloudFunctionUrl: (name: string) => `/api/fn/${name}`,
   isFirebaseConfigured: () => runtime.configured,
   getAuth: () => ({ currentUser: runtime.user }),
 }));
@@ -44,6 +37,7 @@ vi.mock('firebase/firestore', () => ({
   orderBy: vi.fn((...args: unknown[]) => ({ orderBy: args })),
   limit: vi.fn((n: number) => ({ limit: n })),
   startAfter: vi.fn((cursor: unknown) => ({ startAfter: cursor })),
+  where: vi.fn((...args: unknown[]) => ({ where: args })),
   serverTimestamp: () => 'server-time',
   getDocsFromServer: vi.fn(),
   updateDoc: vi.fn(),
@@ -117,7 +111,7 @@ function installTransaction() {
 beforeEach(() => {
   vi.clearAllMocks();
   runtime.configured = true;
-  runtime.user = { uid: 'alice' };
+  runtime.user = { uid: 'alice', getIdToken: async () => 'test-token' };
   runtime.revision = 0;
   runtime.docs = new Map([
     ['groups/g1/members/alice', { uid: 'alice', status: 'active', schoolId: 'pu', role: 'member' }],
@@ -126,9 +120,19 @@ beforeEach(() => {
   runtime.txnAttempts = 0;
   installTransaction();
   vi.mocked(readMemberGroup).mockResolvedValue(membership);
-  vi.mocked(getDocsFromServer).mockResolvedValue({
-    docs: [postDoc('p1'), postDoc('p2')],
-  } as never);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        result: {
+          posts: [postDoc('p1'), postDoc('p2')].map((doc) => ({ id: doc.id, ...doc.data() })),
+          cursor: { id: 'p2', createdAt: { seconds: 1, nanoseconds: 0 } },
+          hasMore: false,
+        },
+      }),
+    })),
+  );
   vi.mocked(updateDoc).mockResolvedValue(undefined as never);
   vi.mocked(deleteDoc).mockResolvedValue(undefined as never);
 });
@@ -160,28 +164,45 @@ it('uses all 16 cryptographically random bytes as padded hex without randomUUID'
   expect(getRandomValues).toHaveBeenCalledOnce();
 });
 
-it.each([undefined, {}])('rejects publication intent creation without secure randomness (%s)', (crypto) => {
-  vi.stubGlobal('crypto', crypto);
+it.each([undefined, {}])(
+  'rejects publication intent creation without secure randomness (%s)',
+  (crypto) => {
+    vi.stubGlobal('crypto', crypto);
 
-  expect(() => createPublicationIntentId()).toThrow('Cryptographic randomness is unavailable');
-});
+    expect(() => createPublicationIntentId()).toThrow('Cryptographic randomness is unavailable');
+  },
+);
 
 it('loads posts only after membership is confirmed for the school scope', async () => {
   const result = await loadGroupDiscussionPage('alice', 'pu', 'g1', () => true);
   expect(readMemberGroup).toHaveBeenCalledWith('alice', 'pu', 'g1');
-  expect(limit).toHaveBeenCalledWith(20);
-  expect(orderBy).toHaveBeenCalledWith('createdAt', 'desc');
+  expect(fetch).toHaveBeenCalledWith(
+    '/api/fn/listGroupDiscussionPage',
+    expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+      body: JSON.stringify({ data: { groupId: 'g1', pageSize: 20, cursor: null } }),
+    }),
+  );
+  expect(getDocsFromServer).not.toHaveBeenCalled();
+  expect(where).not.toHaveBeenCalled();
   expect(result.group.id).toBe('g1');
   expect(result.page.posts).toHaveLength(2);
   expect(result.page.hasMore).toBe(false);
 });
 
-it('paginates with startAfter and rejects revoked membership before write', async () => {
-  const cursor = postDoc('cursor');
-  await loadGroupDiscussionPage('alice', 'pu', 'g1', () => true, cursor as never);
-  expect(startAfter).toHaveBeenCalledWith(cursor);
+it('paginates with a serializable cursor and rejects revoked membership before write', async () => {
+  const cursor = { id: 'cursor', createdAt: { seconds: 1, nanoseconds: 0 } };
+  await loadGroupDiscussionPage('alice', 'pu', 'g1', () => true, cursor);
+  expect(fetch).toHaveBeenCalledWith(
+    '/api/fn/listGroupDiscussionPage',
+    expect.objectContaining({
+      body: JSON.stringify({ data: { groupId: 'g1', pageSize: 20, cursor } }),
+    }),
+  );
 
-  vi.mocked(readMemberGroup).mockRejectedValueOnce(new Error('Group membership is no longer active'));
+  vi.mocked(readMemberGroup).mockRejectedValueOnce(
+    new Error('Group membership is no longer active'),
+  );
   await expect(
     createGroupDiscussionPost(
       'alice',
@@ -221,6 +242,10 @@ it('blocks announcement posts for regular members and allows managers via transa
     title: '公告',
     body: '內容',
     clientIntentId: 'ann-1',
+    published: true,
+    status: 'published',
+    deleted: false,
+    deletedAt: null,
   });
 });
 
@@ -313,7 +338,11 @@ it('transaction callback re-checks scope and does not overwrite on intervening c
       const value = await callback({
         get: async (ref: { path: string }) => {
           const row = snapshot.get(ref.path);
-          return { id: ref.path.split('/').at(-1), exists: () => row !== undefined, data: () => row };
+          return {
+            id: ref.path.split('/').at(-1),
+            exists: () => row !== undefined,
+            data: () => row,
+          };
         },
         set: (ref: { path: string }, row: Record<string, unknown>) => {
           changes.push({ path: ref.path, row });
@@ -425,5 +454,32 @@ it('enforces author or manager checks for edit and delete', async () => {
 it('rejects malformed path identifiers', async () => {
   await expect(loadGroupDiscussionPage('alice', 'pu', 'g1/../x', () => true)).rejects.toThrow(
     /Invalid group/,
+  );
+});
+
+it('rejects a denied hosted list without returning posts', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      ok: false,
+      json: async () => ({ error: { status: 'PERMISSION_DENIED' } }),
+    })),
+  );
+  await expect(loadGroupDiscussionPage('alice', 'pu', 'g1')).rejects.toThrow('無法載入群組貼文');
+});
+
+it('discards a hosted response when the account changes during loading', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      runtime.user = { uid: 'bob', getIdToken: async () => 'bob-token' };
+      return {
+        ok: true,
+        json: async () => ({ result: { posts: [], cursor: null, hasMore: false } }),
+      };
+    }),
+  );
+  await expect(loadGroupDiscussionPage('alice', 'pu', 'g1')).rejects.toThrow(
+    'Account or connection changed',
   );
 });

@@ -1,0 +1,70 @@
+.panel,
+.compact {
+  min-width: 0;
+  padding: 12px 0;
+  border-block: 1px solid var(--border);
+}
+
+.compact {
+  padding-block: 8px;
+}
+
+.choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  min-width: 0;
+}
+
+.choice label {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.choice select {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 8px 34px 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background-color: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.choice select:focus-visible,
+.links a:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
+
+.purpose {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+  margin-top: 4px;
+}
+
+.links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
