@@ -9,16 +9,17 @@ import { loadNuniHomeSections } from '@/lib/nuniHomeOverview';
 import { FirebaseError } from 'firebase/app';
 import { NuniError } from '@campus/shared/src/nuni';
 import * as nuniMessages from '@campus/shared/src/nuni';
-import { IDENTITY_LOOKUP_FAILED_COPY, IDENTITY_LOOKUP_FAILED_HINT } from '@/lib/accountIdentity';
 import { TODAY_COPY } from '@campus/shared/src/pickNextAction';
 import { SENSE_EMPTY_TEXT, SENSE_SECTION_TITLE } from '@campus/shared/src/todaySense';
+import { IDENTITY_LOOKUP_FAILED_COPY, IDENTITY_LOOKUP_FAILED_HINT } from '@/lib/accountIdentity';
 
 const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
   selectedSchoolId: 'pu' as string | null,
+  campusLoading: false,
   schoolRole: null as string | null,
   schoolRoleCalls: [] as Array<[string | null | undefined, string | null | undefined]>,
-  session: null as null | { context: string; platformAccountId: string },
+  session: null as null | { context: string; platformAccountId: string; isPlatformOperator?: boolean },
   sessionLoading: false,
   sessionError: '',
   pendingLogout: false,
@@ -45,8 +46,18 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@/components/AppHeader', () => ({
-  AppHeader: ({ onOpenVoice }: { onOpenVoice: () => void }) => (
-    <header><button type="button" onClick={onOpenVoice}>頁首語音</button></header>
+  AppHeader: ({
+    onOpenAssistant,
+    assistantExpanded,
+  }: {
+    onOpenAssistant: () => void;
+    assistantExpanded?: boolean;
+  }) => (
+    <header>
+      <button type="button" onClick={onOpenAssistant} aria-expanded={assistantExpanded}>
+        頁首助理
+      </button>
+    </header>
   ),
 }));
 vi.mock('@/components/SiteFooter', () => ({ SiteFooter: () => null }));
@@ -84,7 +95,10 @@ vi.mock('@/components/AuthGuard', () => ({
   }),
 }));
 vi.mock('@/components/SelectedSchoolProvider', () => ({
-  useOptionalSelectedSchool: () => ({ selectedSchoolId: state.selectedSchoolId, loading: false }),
+  useOptionalSelectedSchool: () => ({
+    selectedSchoolId: state.selectedSchoolId,
+    loading: state.campusLoading,
+  }),
 }));
 vi.mock('@/lib/useSchoolRole', async (original) => {
   const actual = await original<typeof import('@/lib/useSchoolRole')>();
@@ -127,6 +141,7 @@ beforeEach(() => {
   window.scrollTo = vi.fn();
   state.uid = 'alice';
   state.selectedSchoolId = 'pu';
+  state.campusLoading = false;
   state.schoolRole = null;
   state.schoolRoleCalls = [];
   state.session = null;
@@ -212,8 +227,10 @@ it('uses the Nuni account for home and links directly to pending work', async ()
     ],
   });
   render(<HomePage />);
-  expect(await screen.findByRole('heading', { name: '我的身分' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '我的身分' })).toBeNull();
   const taskLinks = await screen.findAllByRole('link', { name: /週五提案/ });
+  expect(screen.queryByRole('heading', { name: '我的工作' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '申請店家進駐' })).toBeNull();
   expect(
     taskLinks.some(
       (link) => link.getAttribute('href') === '/classroom/course/design#assignment-draft',
@@ -238,6 +255,8 @@ it('uses the same identity lookup copy as the account page when the lookup fails
   expect(await screen.findByText(IDENTITY_LOOKUP_FAILED_COPY)).toBeTruthy();
   expect(screen.getByText(IDENTITY_LOOKUP_FAILED_HINT)).toBeTruthy();
   expect(screen.getByRole('button', { name: '再試一次' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '我的身分' })).toBeNull();
+  expect(state.request.mock.calls.some(([path]) => path === 'class-workspaces')).toBe(false);
 });
 
 it('keeps teaching courses on today and no longer lists studying courses as a grid', async () => {
@@ -268,7 +287,9 @@ it('does not tell a teacher they have no homework and opens the teacher course w
   expect(within(teacherToday).getByRole('heading', { name: '待批改與授課' })).toBeTruthy();
   // The teacher workspace manages assignments; /course/teach remains the content page.
   expect(
-    within(teacherToday).getByRole('link', { name: /教學實習/ }).getAttribute('href'),
+    within(teacherToday)
+      .getByRole('link', { name: /教學實習/ })
+      .getAttribute('href'),
   ).toBe('/teacher/course/teach');
   expect(screen.queryByRole('heading', { name: /待繳作業/ })).toBeNull();
   expect(screen.queryByTestId('student-today')).toBeNull();
@@ -354,7 +375,8 @@ it('keeps the session error visible when the course session is unavailable', () 
 it('lets a guest browse before signing in and never loads personal courses', () => {
   state.uid = null;
   render(<HomePage />);
-  expect(screen.getAllByText(TODAY_COPY.unsigned).length).toBeGreaterThan(0);
+  expect(screen.getAllByRole('link', { name: '登入查看作業與通知' })).toHaveLength(1);
+  expect(screen.queryByTestId('today-work')).toBeNull();
   expect(loadHomeData).not.toHaveBeenCalled();
   expect(loadNuniHomeSections).not.toHaveBeenCalled();
   expect(screen.queryByText(SENSE_EMPTY_TEXT)).toBeNull();
@@ -405,7 +427,7 @@ it.each([
     render(<HomePage />);
     expect(screen.getByRole('heading', { name: '先把課表放進來。' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: '課表準備好了。' })).toBeNull();
-    expect(screen.getByText(TODAY_COPY.noTimetable)).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: '匯入我的課表' })).toHaveLength(1);
   },
 );
 
@@ -635,7 +657,7 @@ it('publishes teaching navigation before work finishes and keeps the previous wo
     });
   });
   render(<HomePage />);
-  expect(await screen.findByRole('heading', { name: '先到的授課' })).toBeTruthy();
+  expect(await screen.findByRole('link', { name: /先到的授課/ })).toBeTruthy();
   expect(screen.getByText(/課程還在讀取/)).toBeTruthy();
   await act(async () => finish(data('完成來源')));
   expect(screen.getAllByText('完成來源 作業').length).toBeGreaterThan(0);
@@ -864,7 +886,9 @@ it.each(['teacher', 'student'])(
     expect(await screen.findByRole('button', { name: '重試校園課程' })).toBeTruthy();
     if (mode === 'teacher') {
       expect(screen.getByTestId('teacher-today')).toBeTruthy();
-      expect(document.getElementById('teaching-courses')).toBeTruthy();
+      expect(within(screen.getByTestId('teacher-today')).getByRole('link', { name: /保留授課/ })).toBeTruthy();
+      expect(screen.getAllByRole('link', { name: /保留授課/ })).toHaveLength(1);
+      expect(document.getElementById('teaching-courses')).toBeNull();
     } else expect(screen.getAllByText('保留修課 作業').length).toBeGreaterThan(0);
   },
 );
@@ -945,20 +969,29 @@ it.each([
   },
 );
 
-it('starts Today dictation from the header and keeps an active recording running', async () => {
+it('opens the Today text input from the header and starts recording only from its explicit voice control', async () => {
   state.uid = null;
   const start = vi.fn();
-  vi.stubGlobal('SpeechRecognition', class { start = start; abort = vi.fn(); });
+  vi.stubGlobal(
+    'SpeechRecognition',
+    class {
+      start = start;
+      abort = vi.fn();
+    },
+  );
   try {
     render(<HomePage />);
     const panel = screen.getByText('打字或語音詢問').closest('details')!;
     expect(panel.open).toBe(false);
-    const shortcut = screen.getByRole('button', { name: '頁首語音' });
+    const shortcut = screen.getByRole('button', { name: '頁首助理' });
     fireEvent.click(shortcut);
     expect(panel.open).toBe(true);
-    const mic = await screen.findByRole('button', { name: '停止語音輸入' });
+    const input = await screen.findByRole('searchbox');
+    expect(document.activeElement).toBe(input);
+    expect(start).not.toHaveBeenCalled();
+    const mic = await screen.findByRole('button', { name: '使用語音輸入' });
+    fireEvent.click(mic);
     expect(start).toHaveBeenCalledOnce();
-    expect(document.activeElement).toBe(mic);
     fireEvent.click(shortcut);
     expect(start).toHaveBeenCalledOnce();
     expect(mic.getAttribute('aria-pressed')).toBe('true');
@@ -970,22 +1003,115 @@ it('starts Today dictation from the header and keeps an active recording running
 it('focuses the Today input from the header when the browser lacks speech recognition', async () => {
   state.uid = null;
   render(<HomePage />);
-  fireEvent.click(screen.getByRole('button', { name: '頁首語音' }));
+  fireEvent.click(screen.getByRole('button', { name: '頁首助理' }));
   const input = await screen.findByRole('searchbox');
   expect(document.activeElement).toBe(input);
 });
 
+it('keeps the requested Today disclosure open through the first campus resolution', async () => {
+  state.selectedSchoolId = null;
+  state.campusLoading = true;
+  const start = vi.fn();
+  vi.stubGlobal(
+    'SpeechRecognition',
+    class {
+      start = start;
+      abort = vi.fn();
+    },
+  );
+  try {
+    const view = render(<HomePage />);
+    fireEvent.click(screen.getByRole('button', { name: '頁首助理' }));
+    const panel = screen.getByText('打字或語音詢問').closest('details')!;
+    expect(panel.open).toBe(true);
+    await screen.findByText('正在確認瀏覽校園…');
+    expect(screen.queryByRole('searchbox')).toBeNull();
+    state.campusLoading = false;
+    state.selectedSchoolId = 'pu';
+    view.rerender(<HomePage />);
+    const field = await screen.findByRole('searchbox');
+    expect(screen.getByText('打字或語音詢問').closest('details')).toBe(panel);
+    expect(panel.open).toBe(true);
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    expect(start).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('respects closing the Today disclosure before its first campus is ready', async () => {
+  state.selectedSchoolId = null;
+  state.campusLoading = true;
+  const view = render(<HomePage />);
+  const trigger = screen.getByRole('button', { name: '頁首助理' });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const panel = screen.getByText('打字或語音詢問').closest('details')!;
+  await screen.findByText('正在確認瀏覽校園…');
+  fireEvent.keyDown(panel, { key: 'Escape' });
+  state.campusLoading = false;
+  state.selectedSchoolId = 'pu';
+  view.rerender(<HomePage />);
+  await act(async () => {});
+  expect(screen.getByText('打字或語音詢問').closest('details')).toBe(panel);
+  expect(panel.open).toBe(false);
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(trigger);
+});
+
+it('does not revive the confirmed Today draft after PU reloads as the same campus', async () => {
+  const view = render(<HomePage />);
+  const trigger = screen.getByRole('button', { name: '頁首助理' });
+  fireEvent.click(trigger);
+  const field = await screen.findByRole('searchbox');
+  fireEvent.change(field, { target: { value: '已確認 PU 的舊問題' } });
+  state.campusLoading = true;
+  state.selectedSchoolId = null;
+  view.rerender(<HomePage />);
+  expect(screen.getByText('打字或語音詢問').closest('details')!.open).toBe(false);
+  state.campusLoading = false;
+  state.selectedSchoolId = 'pu';
+  view.rerender(<HomePage />);
+  expect(screen.getByText('打字或語音詢問').closest('details')!.open).toBe(false);
+  fireEvent.click(trigger);
+  expect((await screen.findByRole<HTMLInputElement>('searchbox')).value).toBe('');
+});
+
+it.each(['account', 'campus'] as const)(
+  'clears the Today disclosure after the confirmed %s changes',
+  async (changed) => {
+    state.selectedSchoolId = null;
+    const view = render(<HomePage />);
+    fireEvent.click(screen.getByRole('button', { name: '頁首助理' }));
+    const field = await screen.findByRole('searchbox');
+    fireEvent.change(field, { target: { value: '不限校園的問題' } });
+    if (changed === 'account') state.uid = 'bob';
+    else state.selectedSchoolId = 'pu';
+    view.rerender(<HomePage />);
+    expect(screen.getByText('打字或語音詢問').closest('details')!.open).toBe(false);
+    expect(screen.queryByDisplayValue('不限校園的問題')).toBeNull();
+  },
+);
+
 it('keeps the active question on screen while a late course load resolves the teacher view', async () => {
   let finish!: (result: HomeData) => void;
-  vi.mocked(loadHomeData).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  vi.mocked(loadHomeData).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
   render(<HomePage />);
-  fireEvent.click(screen.getByRole('button', { name: '頁首語音' }));
+  fireEvent.click(screen.getByRole('button', { name: '頁首助理' }));
   const question = await screen.findByRole('searchbox');
   fireEvent.change(question, { target: { value: '我今天要去哪間教室？' } });
-  await act(async () => finish(data('資料庫', {
-    courses: [{ id: 'teach', name: '資料庫', role: 'owner-teacher', unreadCount: 0 }],
-    tasks: [],
-  })));
+  await act(async () =>
+    finish(
+      data('資料庫', {
+        courses: [{ id: 'teach', name: '資料庫', role: 'owner-teacher', unreadCount: 0 }],
+        tasks: [],
+      }),
+    ),
+  );
   expect(screen.getByRole('searchbox')).toBe(question);
   expect((question as HTMLInputElement).value).toBe('我今天要去哪間教室？');
   const summary = screen.getByText('打字或語音詢問').closest('summary')!;
@@ -996,18 +1122,44 @@ it('keeps the active question on screen while a late course load resolves the te
 
 it('gives the homepage agent only platform tasks, retaining their exact source IDs', async () => {
   state.session = { context: 'a'.repeat(43), platformAccountId: 'alice-platform' };
-  const platform = data('平台課程', { courses: [{ id: 'platform-course', name: '平台課程', role: 'student', unreadCount: 0 }],
-    tasks: [{ kind: 'quiz', id: 'source-task-id', courseId: 'platform-course', courseName: '平台課程',
-      title: '平台未完成測驗', dueAt: '2099-01-02T12:00:00+08:00' }] });
+  const platform = data('平台課程', {
+    courses: [{ id: 'platform-course', name: '平台課程', role: 'student', unreadCount: 0 }],
+    tasks: [
+      {
+        kind: 'quiz',
+        id: 'source-task-id',
+        courseId: 'platform-course',
+        courseName: '平台課程',
+        title: '平台未完成測驗',
+        dueAt: '2099-01-02T12:00:00+08:00',
+      },
+    ],
+  });
   vi.mocked(loadHomeData).mockResolvedValue(data('學校課程'));
   vi.mocked(loadNuniHomeSections).mockResolvedValue(platform);
   render(<HomePage />);
-  await waitFor(() => expect(vi.mocked(TodayAgent).mock.calls.some(([input]) =>
-    input.tasks.some((task) => task.id === 'source-task-id'))).toBe(true));
+  await waitFor(() =>
+    expect(
+      vi
+        .mocked(TodayAgent)
+        .mock.calls.some(([input]) => input.tasks.some((task) => task.id === 'source-task-id')),
+    ).toBe(true),
+  );
   const input = vi.mocked(TodayAgent).mock.calls.at(-1)![0];
-  expect(input).toMatchObject({ context: state.session.context, accountId: 'alice-platform', loading: false });
+  expect(input).toMatchObject({ context: state.session.context, accountId: 'alice-platform', loading: false, compact: true });
   expect(input.tasks).toEqual(platform.tasks);
   expect(input.tasks.some((task) => task.courseName === '學校課程')).toBe(false);
+});
+
+it('keeps the day and its next action before the student card utility', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue(data('今天的課程'));
+  render(<HomePage />);
+  await screen.findByText('今天的課程 作業');
+  const today = screen.getByRole('heading', { level: 1, name: '今天' });
+  const card = screen.getByRole('link', { name: /數位學生證.*開啟卡片/ });
+  expect(today.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByTestId('today-unified-flow').compareDocumentPosition(card) &
+    Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 it('removes the platform agent while its session is uncertain even when school auth remains', async () => {

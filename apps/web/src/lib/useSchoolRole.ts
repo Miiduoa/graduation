@@ -1,40 +1,96 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
+import { useCallback, useEffect, useState } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { getDb, isFirebaseConfigured } from '@/lib/firebase';
 
 export type SchoolRole = 'student' | 'teacher' | 'admin' | 'editor' | 'vendor' | string;
 
-const cache = new Map<string, SchoolRole | null>();
+type RoleResult =
+  | { status: 'loading' | 'error'; role: null }
+  | { status: 'ready'; role: SchoolRole | null };
 
-/** 自己在這所學校的身分（讀自己的 members 文件）。還沒讀到或讀不到是 null。 */
-export function useSchoolRole(uid: string | null | undefined, schoolId: string | null | undefined): SchoolRole | null {
-  const key = uid && schoolId ? `${schoolId}:${uid}` : '';
-  const [role, setRole] = useState<{ key: string; value: SchoolRole | null }>({ key: '', value: null });
+export type SchoolRoleState = RoleResult & { retry: () => void };
+
+/** Loading, unavailable and confirmed non-membership have different recovery paths. */
+export function useSchoolRoleState(
+  uid: string | null | undefined,
+  schoolId: string | null | undefined,
+): SchoolRoleState {
+  const key = uid && schoolId ? JSON.stringify([schoolId, uid]) : '';
+  const [state, setState] = useState<RoleResult & { key: string; request: number }>(() => ({
+    key,
+    request: 0,
+    status: key ? 'loading' : 'ready',
+    role: null,
+  }));
+  // Record every scope transition, including A -> B -> A before B responds.
+  // A previous role must not reappear before the new subscription confirms it.
+  if (state.key !== key)
+    setState({ key, request: state.request + 1, status: key ? 'loading' : 'ready', role: null });
+  const request = state.request;
+  const retry = useCallback(() => {
+    if (!key) return;
+    setState((current) =>
+      current.key === key && current.request === request
+        ? { key, request: request + 1, status: 'loading', role: null }
+        : current,
+    );
+  }, [key, request]);
 
   useEffect(() => {
-    if (!key || !uid || !schoolId || !isFirebaseConfigured()) return;
-    if (cache.has(key)) {
-      void Promise.resolve().then(() => setRole({ key, value: cache.get(key) ?? null }));
-      return;
-    }
+    if (!key || !uid || !schoolId) return;
     let alive = true;
-    getDoc(doc(getDb(), 'schools', schoolId, 'members', uid))
-      .then((snap) => {
-        const value = snap.exists() ? ((snap.data() as { role?: string }).role ?? null) : null;
-        cache.set(key, value);
-        if (alive) setRole({ key, value });
-      })
-      .catch(() => {
-        if (alive) setRole({ key, value: null });
-      });
+    const update = (result: RoleResult) => {
+      if (alive)
+        setState((current) =>
+          current.key === key && current.request === request
+            ? { key, request, ...result }
+            : current,
+        );
+    };
+    let unsubscribe: (() => void) | undefined;
+    try {
+      if (!isFirebaseConfigured()) throw new Error('School membership unavailable');
+      unsubscribe = onSnapshot(
+        doc(getDb(), 'schools', schoolId, 'members', uid),
+        { includeMetadataChanges: true },
+        (snapshot) => {
+          if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) {
+            update({ status: 'loading', role: null });
+            return;
+          }
+          const member = snapshot.exists() ? snapshot.data() : null;
+          // Legacy memberships predate status; explicit non-active states remain blocked.
+          const active = member && (member.status === undefined || member.status === 'active');
+          update({
+            status: 'ready',
+            role: active && typeof member.role === 'string' ? member.role : null,
+          });
+        },
+        () => update({ status: 'error', role: null }),
+      );
+    } catch {
+      void Promise.resolve().then(() => update({ status: 'error', role: null }));
+    }
     return () => {
       alive = false;
+      unsubscribe?.();
     };
-  }, [key, uid, schoolId]);
+  }, [key, uid, schoolId, request]);
 
-  return role.key === key ? role.value : null;
+  if (state.key !== key) return { status: key ? 'loading' : 'ready', role: null, retry };
+  return state.status === 'ready'
+    ? { status: 'ready', role: state.role, retry }
+    : { status: state.status, role: null, retry };
+}
+
+/** Display only the current account's active, server-confirmed school membership. */
+export function useSchoolRole(
+  uid: string | null | undefined,
+  schoolId: string | null | undefined,
+): SchoolRole | null {
+  return useSchoolRoleState(uid, schoolId).role;
 }
 
 export function isTeacherRole(role: SchoolRole | null) {

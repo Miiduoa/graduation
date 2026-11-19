@@ -32,9 +32,25 @@ function browserSpeech(): SpeechConstructor | null {
   };
   return browser.SpeechRecognition || browser.webkitSpeechRecognition || null;
 }
+
+function microphonePolicyBlocked(): boolean {
+  type Policy = { allowsFeature(feature: string): boolean };
+  const doc = document as Document & { permissionsPolicy?: Policy; featurePolicy?: Policy };
+  try {
+    return (doc.permissionsPolicy ?? doc.featurePolicy)?.allowsFeature('microphone') === false;
+  } catch {
+    // Browsers without this inspection API still report permission errors normally.
+    return false;
+  }
+}
+
+const MICROPHONE_POLICY_HELP = '這個頁面未開放麥克風。可以直接打字，或使用手機鍵盤的語音輸入。';
+
 function describeError(error: string): string {
   if (error === 'not-allowed' || error === 'service-not-allowed')
-    return '無法使用麥克風。請在瀏覽器允許權限，或改用文字輸入。';
+    return microphonePolicyBlocked()
+      ? MICROPHONE_POLICY_HELP
+      : '無法使用麥克風。請在瀏覽器允許權限，或改用文字輸入。';
   if (error === 'no-speech') return '沒有聽到聲音，請再試一次。';
   if (error === 'audio-capture') return '找不到可用的麥克風，請改用文字輸入。';
   if (error === 'network') return '語音辨識暫時無法連線，請改用文字輸入。';
@@ -74,38 +90,41 @@ export function VoiceDictationButton({
     if (restartTimer.current !== null) clearTimeout(restartTimer.current);
     restartTimer.current = null;
   }, []);
-  const finishCapture = useCallback((recognition: SpeechRecognizer, abort = true) => {
-    if (recognitionRef.current !== recognition) return;
-    recognitionRef.current = null;
-    clearRestartTimer();
-    setListening(false);
-    setInterim('');
-    if (pendingStart.current?.recognition === recognition) {
-      pendingStart.current = null;
-      releaseRecognition(recognition, false);
-      return;
-    }
-    releaseRecognition(recognition, false);
-    if (!abort) return;
-    // abort() requests shutdown; the browser releases the capture only at onend.
-    // Keep that completion signal separate from the invalidated transcript session.
-    endingRef.current = recognition;
-    const ended = () => {
-      if (endingRef.current !== recognition) return;
+  const finishCapture = useCallback(
+    (recognition: SpeechRecognizer, abort = true) => {
+      if (recognitionRef.current !== recognition) return;
+      recognitionRef.current = null;
       clearRestartTimer();
+      setListening(false);
+      setInterim('');
+      if (pendingStart.current?.recognition === recognition) {
+        pendingStart.current = null;
+        releaseRecognition(recognition, false);
+        return;
+      }
       releaseRecognition(recognition, false);
-      endingRef.current = null;
-      const pending = pendingStart.current;
-      pendingStart.current = null;
-      if (pending && recognitionRef.current === pending.recognition) pending.start();
-    };
-    recognition.onend = ended;
-    try {
-      recognition.abort();
-    } catch {
-      ended();
-    }
-  }, [clearRestartTimer]);
+      if (!abort) return;
+      // abort() requests shutdown; the browser releases the capture only at onend.
+      // Keep that completion signal separate from the invalidated transcript session.
+      endingRef.current = recognition;
+      const ended = () => {
+        if (endingRef.current !== recognition) return;
+        clearRestartTimer();
+        releaseRecognition(recognition, false);
+        endingRef.current = null;
+        const pending = pendingStart.current;
+        pendingStart.current = null;
+        if (pending && recognitionRef.current === pending.recognition) pending.start();
+      };
+      recognition.onend = ended;
+      try {
+        recognition.abort();
+      } catch {
+        ended();
+      }
+    },
+    [clearRestartTimer],
+  );
 
   useEffect(() => {
     callback.current = onTranscript;
@@ -135,6 +154,12 @@ export function VoiceDictationButton({
     }
     const Constructor = browserSpeech();
     if (!Constructor || disabled) return;
+    // A soft navigation can retain the previous document's policy. Never reload
+    // an unfinished task or ask users to change permissions that cannot help.
+    if (microphonePolicyBlocked()) {
+      setError(MICROPHONE_POLICY_HELP);
+      return;
+    }
     const recognition = new Constructor();
     recognitionRef.current = recognition;
     recognition.lang = 'zh-TW';

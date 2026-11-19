@@ -1,9 +1,43 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
+import { schoolLoginHref } from '@/lib/navigation';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { useAuth } from './AuthGuard';
+
+function TeachingDestinations({ signedIn }: { signedIn: boolean }) {
+  const params = useSearchParams();
+  const campus = useCampusNavigationSearch(params);
+  const classroomHref = campusServiceHref('/classroom', campus);
+  const appealsHref = campusServiceHref('/teacher', campus);
+  return (
+    <nav aria-label="教學工作入口">
+      <ul style={{ display: 'grid', gap: 16, paddingLeft: 20 }}>
+        <li>
+          <Link href={classroomHref}>前往授課課程</Link>
+          <p>從你負責的課程查看教材、作業與點名；各門課依成員資格開放。</p>
+        </li>
+        <li>
+          <Link href={signedIn ? appealsHref : schoolLoginHref(appealsHref)}>
+            {signedIn ? '前往課務申訴審核' : '登入學校帳號後查看課務申訴'}
+          </Link>
+          <p>校方課務申訴需要學校帳號與該課程的審核權限。</p>
+        </li>
+      </ul>
+    </nav>
+  );
+}
+
+function TeachingRecoveryLinks({ signedIn }: { signedIn: boolean }) {
+  return (
+    <Suspense fallback={<p role="status">正在確認工作入口…</p>}>
+      <TeachingDestinations signedIn={signedIn} />
+    </Suspense>
+  );
+}
 
 function TeachingAccess() {
   const client = getSupabaseClient();
@@ -39,23 +73,21 @@ function TeachingAccess() {
       <section className="card" style={{ padding: 24 }}>
         <h2>教學管理尚未開放</h2>
         <p>學校完成服務連結後，具備權限的教職員即可使用。</p>
-        <Link href="/#courses">返回課程</Link>
+        <TeachingRecoveryLinks signedIn />
       </section>
     );
   return (
     <section className="card" style={{ padding: 24 }}>
       <h2>教學管理尚未完成帳號連結</h2>
       <p>
-        這個管理服務尚未與目前的學校帳號完成安全連結，暫時無法開啟。你的課程與點名仍可從課程頁使用。
+        這個管理入口尚未開放。教材、作業與點名請從授課課程開啟；校方申訴另依授權處理。
       </p>
+      <TeachingRecoveryLinks signedIn />
       <button className="btn" disabled={ending} onClick={() => void clearSession()}>
         {ending ? '正在清除…' : '清除先前的教學服務登入'}
       </button>
       {notice && <p role="status">{notice}</p>}
       {error && <p role="alert">{error}</p>}
-      <p>
-        <Link href="/#courses">返回課程</Link>
-      </p>
     </section>
   );
 }
@@ -67,9 +99,9 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
   if (!user)
     return (
       <section className="card" style={{ padding: 24 }}>
-        <h2>請先登入學校帳號</h2>
-        <p>登入後才能確認教學服務是否已開放。</p>
-        <Link href="/login">登入帳號</Link>
+        <h2>選擇要處理的教學工作</h2>
+        <p>這個教學管理入口尚未開放。授課課程與校方申訴各自確認所需帳號及權限。</p>
+        <TeachingRecoveryLinks signedIn={false} />
       </section>
     );
   // No verified identity binding exists. Do not read another identity store or mount its readers.

@@ -25,6 +25,7 @@ export function ClubPortal({
   onChanged,
   onBack,
   searchQuery,
+  onOpen,
 }: {
   uid: string;
   schoolId: string;
@@ -32,6 +33,7 @@ export function ClubPortal({
   onChanged?: () => void;
   onBack?: () => void;
   searchQuery?: string;
+  onOpen?: (groupId: string) => void;
 }) {
   const [view, setView] = useState<ClubPortalView | null>(null),
     [selected, setSelected] = useState(groupId || ''),
@@ -326,7 +328,10 @@ export function ClubPortal({
                   .filter(Boolean)
                   .join(' · ')}
               </Text>
-              <Button text={`查看社團：${c.name}`} onPress={() => setSelected(c.id)} />
+              <Button
+                text={`查看社團：${c.name}`}
+                onPress={() => (onOpen ? onOpen(c.id) : setSelected(c.id))}
+              />
             </View>
           ))}
           {!!view.clubs?.length && !directoryClubs.length && !!directorySearch.trim() && (

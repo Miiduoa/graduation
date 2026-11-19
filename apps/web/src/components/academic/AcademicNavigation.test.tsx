@@ -67,6 +67,7 @@ it.each([
   ['/timetable', '課表', 'timetable'],
   ['/classroom', '課程與作業', 'timetable'],
   ['/classroom/course/cs101', '課程與作業', 'timetable'],
+  ['/classroom/material-bookmarks', '課程與作業', 'timetable'],
   ['/school-courses', '校方課程', 'timetable'],
   ['/school-lms', '校方作業與教材', 'timetable'],
   ['/school-lms/homework/10001/20001', '校方作業與教材', 'timetable'],
@@ -87,9 +88,29 @@ it.each([
       within(nav).getByRole('link', { name: label }),
     ]);
     expect(destination('匯入資料').searchParams.get('kind')).toBe(kind);
+    if (label === '課程與作業') expect(destination(label).pathname).toBe('/classroom');
     expect(screen.getByText('此頁內容')).toBeTruthy();
   },
 );
+
+it.each([
+  '/course/cs101',
+  '/course/cs101/attendance',
+  '/teacher/course/cs101',
+  '/teacher/course/cs101/attendance',
+  '/teacher/course/cs101/gradebook',
+  '/groups',
+  '/groups/group-123',
+  '/groups/group-123/assignments',
+  '/groups/group-123/clubhouse',
+  '/groups/group-123/club-other',
+])('keeps school workspace %s out of the Google course navigation and return flow', (pathname) => {
+  navigation.pathname = pathname;
+  renderShell(true);
+  expect(screen.queryByRole('navigation', { name: '課務導覽' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '課程與作業' })).toBeNull();
+  expect(screen.getByText('此頁內容')).toBeTruthy();
+});
 
 it('uses the current campus selection and passes only destination-specific context', () => {
   navigation.schoolId = 'nthu';
@@ -136,8 +157,19 @@ it.each(['invalid', '115|', '115|1|2'])('does not forward an invalid timetable t
 it.each([
   '/admin',
   '/teacher',
+  '/teacher/course',
+  '/teacher/course-other/cs101',
   '/classroom/grades',
   '/classroom/account',
+  '/classroom/account/settings',
+  '/classroom/login',
+  '/classroom/login/callback',
+  '/classroom/coursework-other',
+  '/course-other/cs101',
+  '/groups-other',
+  '/groups/club-123/club',
+  '/groups/club-123/club/overview',
+  '/groups/club-123/club/members',
   '/timetable/s/shared',
   '/grades-other',
   '/life',

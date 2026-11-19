@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { buildPersonalToday } from '@campus/shared';
 import {
   formatTodayHeaderDate,
@@ -21,11 +22,10 @@ import {
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
 import { TODAY_FLOW_CLASS_TITLE, TODAY_FLOW_WORK_TITLE } from '@/lib/todayCourseWork';
-import {
-  assignmentHref,
-  assignmentSubmitHref,
-  todayClassesFromSchedule,
-} from '@/lib/todayScreen';
+import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigationLinks';
+import { useCampusNavigationSearch } from '@/lib/campusNavigation';
+import { loginHref } from '@/lib/navigation';
+import { assignmentHref, assignmentSubmitHref, todayClassesFromSchedule } from '@/lib/todayScreen';
 import styles from './StudentToday.module.css';
 import { TodayUnreadNotifications } from './TodayUnreadNotifications';
 import { TodayClassRows } from './TodayClassRows';
@@ -36,11 +36,14 @@ export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigne
 
 type Props = {
   assistant?: ReactNode;
+  workspaces?: ReactNode;
   agent?: ReactNode;
   personalization?: ReactNode;
   scopeKey?: string;
   /** The actual personal timetable scope, which can differ from the signed-in school. */
   timetableSchoolId?: string | null;
+  /** Browsing context stays distinct from a timetable whose school is still resolving. */
+  campusSearch?: string;
   now: Date | null;
   updatedAt: Date | null;
   unsigned: boolean;
@@ -61,6 +64,7 @@ type Props = {
 
 type BoundProps = {
   assistant?: ReactNode;
+  workspaces?: ReactNode;
   agent?: ReactNode;
   now: Date | null;
   updatedAt: Date | null;
@@ -85,6 +89,17 @@ export function StudentToday(props: Props) {
   const orderedTodos = primaryTodo
     ? [primaryTodo, ...todos.filter((item) => item.id !== primaryTodo.id)]
     : todos;
+  const showWelcome =
+    !props.skeleton &&
+    props.unsigned &&
+    (props.timetableStatus === 'empty' ||
+      props.timetableStatus === 'unsigned-scope' ||
+      (props.timetableStatus === 'ready' && action.type !== 'class'));
+  const showPlanner =
+    !props.unsigned || !['empty', 'unsigned-scope'].includes(props.timetableStatus);
+  const returnSearch =
+    props.campusSearch ??
+    buildCampusNavigationSearch(new URL(props.timetableHref, 'https://campus.local').searchParams);
   const primaryLabel =
     action.type === 'overdue'
       ? TODAY_COPY.overdue
@@ -119,6 +134,7 @@ export function StudentToday(props: Props) {
       leavingTodoIds={props.leavingTodoIds}
       now={now}
       onRetry={props.onRetryTodos}
+      campusSearch={returnSearch}
     />
   );
 
@@ -128,37 +144,53 @@ export function StudentToday(props: Props) {
         <h1 className={styles.title}>今天</h1>
         <p className={styles.date}>{props.now ? formatTodayHeaderDate(props.now) : ''}</p>
       </header>
-      {props.agent}
-      {!props.skeleton && props.unsigned && action.type !== 'class' && (
+      {props.workspaces}
+      {showWelcome && (
         <TodayWelcome
           importHref={props.importHref}
           timetableHref={props.timetableHref}
           hasTimetable={props.timetableStatus === 'ready'}
+          needsSchool={props.timetableStatus === 'unsigned-scope'}
         />
       )}
-      {!props.skeleton && !props.unsigned && (action.type === 'empty' || action.type === 'allDone') && (
-        <div className={styles.dayStatus} data-testid={primaryTodo ? undefined : 'next-action'}>
-          <TodayStatus
-            finished={action.type === 'allDone'}
-            todosError={props.todosError}
-            timetableStatus={props.timetableStatus}
-            lmsUnconnected={props.lmsUnconnected}
-            weekHref={props.weekHref}
-          />
-        </div>
-      )}
+      {!props.skeleton &&
+        !props.unsigned &&
+        (action.type === 'empty' || action.type === 'allDone') && (
+          <div className={styles.dayStatus} data-testid={primaryTodo ? undefined : 'next-action'}>
+            <TodayStatus
+              finished={action.type === 'allDone'}
+              todosError={props.todosError}
+              timetableStatus={props.timetableStatus}
+              lmsUnconnected={props.lmsUnconnected}
+              weekHref={props.weekHref}
+              classroomHref={campusServiceHref('/classroom', returnSearch)}
+            />
+          </div>
+        )}
       {props.skeleton ? (
         <TodaySkeleton />
-      ) : (
+      ) : showPlanner ? (
         <div className={styles.flow + ' ' + styles.planner} data-testid="today-unified-flow">
-          {primaryTodo ? [work, schedule] : [schedule, work]}
-          <TodayUnreadNotifications unsigned={props.unsigned} />
+          {props.unsigned ? schedule : primaryTodo ? [work, schedule] : [schedule, work]}
+          {!props.unsigned && <TodayUnreadNotifications unsigned={false} />}
         </div>
-      )}
+      ) : null}
+      {!props.skeleton && props.unsigned && !showWelcome ? (
+        <p className={styles.guestAccess}>
+          <Link href={loginHref(campusServiceHref('/', returnSearch))}>登入查看作業與通知</Link>
+        </p>
+      ) : null}
+      <div className={styles.assistance} data-testid="today-assistance">
+        {props.agent}
+        {props.assistant}
+      </div>
       {props.personalization}
-      {props.assistant}
       {props.updatedAt || props.refreshing ? (
-        <p className={styles.updated} role={props.refreshing ? 'status' : undefined} aria-live="polite">
+        <p
+          className={styles.updated}
+          role={props.refreshing ? 'status' : undefined}
+          aria-live="polite"
+        >
           {props.refreshing ? '正在更新課程待辦…' : formatUpdatedAt(props.updatedAt!)}
         </p>
       ) : null}
@@ -183,12 +215,14 @@ function TodayStatus({
   timetableStatus,
   lmsUnconnected,
   weekHref,
+  classroomHref,
 }: {
   finished: boolean;
   todosError: string;
   timetableStatus: TimetableStatus;
   lmsUnconnected: boolean;
   weekHref: string;
+  classroomHref: string;
 }) {
   if (finished) return <p>{TODAY_COPY.allClassesDone}</p>;
   if (todosError || timetableStatus === 'error') {
@@ -204,7 +238,7 @@ function TodayStatus({
     return <p>先加入你的課表，就能查看每天的安排。</p>;
   }
   if (lmsUnconnected) {
-    return <Link href="/classroom">查看我的課程</Link>;
+    return <Link href={classroomHref}>查看我的課程</Link>;
   }
   return (
     <>
@@ -280,7 +314,13 @@ function TodayClassList({
       ) : classes.length === 0 ? (
         <p className={styles.empty}>今天沒有排課。</p>
       ) : (
-        <TodayClassRows classes={classes} primaryId={primaryId} now={now} timetableHref={timetableHref} timetableSchoolId={timetableSchoolId} />
+        <TodayClassRows
+          classes={classes}
+          primaryId={primaryId}
+          now={now}
+          timetableHref={timetableHref}
+          timetableSchoolId={timetableSchoolId}
+        />
       )}
     </section>
   );
@@ -296,6 +336,7 @@ function TodoList({
   leavingTodoIds,
   now,
   onRetry,
+  campusSearch,
 }: {
   todos: TodayTodo[];
   primaryId?: string;
@@ -306,6 +347,7 @@ function TodoList({
   leavingTodoIds?: readonly string[];
   now: Date;
   onRetry: () => void;
+  campusSearch: string;
 }) {
   const leaving = useMemo(() => new Set(leavingTodoIds ?? []), [leavingTodoIds]);
   const [expanded, setExpanded] = useState(false);
@@ -318,14 +360,15 @@ function TodoList({
           {TODAY_FLOW_WORK_TITLE}
         </h2>
         {!unsigned && (
-          <Link className={styles.sectionLink} href="/calendar">
+          <Link className={styles.sectionLink} href={campusServiceHref('/calendar', campusSearch)}>
             查看行事曆
           </Link>
         )}
       </div>
       {unsigned ? (
         <p className={styles.empty}>
-          {TODAY_COPY.unsigned} <Link href="/calendar">也可先查看行事曆與期限</Link>
+          {TODAY_COPY.unsigned}{' '}
+          <Link href={campusServiceHref('/calendar', campusSearch)}>也可先查看行事曆與期限</Link>
         </p>
       ) : error ? (
         <>
@@ -339,22 +382,22 @@ function TodoList({
       ) : null}
       {!unsigned && lmsUnconnected && todos.length === 0 ? (
         <p className={styles.empty}>
-          還沒有 nuni 課程資料。<Link href="/classroom">加入課程</Link>
+          還沒有 nuni 課程資料。
+          <Link href={campusServiceHref('/classroom', campusSearch)}>加入課程</Link>
           ，加入後作業期限會出現在這裡與行事曆。
         </p>
       ) : !unsigned && !error && !lmsUnconnected && todos.length === 0 ? (
-        <p className={styles.empty}>
-          目前沒有今日或即將到期的作業。
-        </p>
+        <p className={styles.empty}>目前沒有今日或即將到期的作業。</p>
       ) : unsigned || todos.length === 0 ? null : (
         <ul id="today-work-items" className={styles.list} data-testid="today-work-list">
           {visible.map((item) => {
             const overdue = isTodoOverdue(item, now);
             const soon = isDueWithinHours(item, now, 6);
             const primary = item.id === primaryId;
-            const dueLine = !overdue && item.dueAt !== null && !isSameTaipeiDay(item.dueAt, now.getTime())
-              ? formatUpcomingDueLine(item)
-              : formatTodoDueLine(item, now);
+            const dueLine =
+              !overdue && item.dueAt !== null && !isSameTaipeiDay(item.dueAt, now.getTime())
+                ? formatUpcomingDueLine(item)
+                : formatTodoDueLine(item, now);
             return (
               <li
                 key={item.id}
@@ -402,6 +445,7 @@ function TodoList({
 export function StudentTodayPage(props: BoundProps) {
   const scope = usePersonalImportScope();
   const records = usePersonalTodayRecords();
+  const campusSearch = useCampusNavigationSearch(useSearchParams());
   const now = props.now ?? new Date();
   const schoolId = records.schoolId || scope.scope.schoolId || 'personal';
   const campusId = schoolId === 'personal' ? 'all' : schoolId;
@@ -429,20 +473,24 @@ export function StudentTodayPage(props: BoundProps) {
   return (
     <StudentToday
       assistant={props.assistant}
+      workspaces={props.workspaces}
       agent={props.agent}
-      personalization={!scope.loading && props.now ? (
-        <CampusPersonalizationSection
-          key={scope.scopeKey}
-          scope={scope.scope}
-          now={props.now}
-          events={records.imported.records}
-          eventsReady={records.imported.ready}
-          eventsError={records.imported.error}
-          schoolName={scope.schoolName}
-        />
-      ) : null}
+      personalization={
+        !scope.loading && props.now ? (
+          <CampusPersonalizationSection
+            key={scope.scopeKey}
+            scope={scope.scope}
+            now={props.now}
+            events={records.imported.records}
+            eventsReady={records.imported.ready}
+            eventsError={records.imported.error}
+            schoolName={scope.schoolName}
+          />
+        ) : null
+      }
       scopeKey={records.scopeKey}
       timetableSchoolId={schoolId}
+      campusSearch={campusSearch}
       now={props.now}
       updatedAt={props.updatedAt}
       unsigned={props.unsigned}

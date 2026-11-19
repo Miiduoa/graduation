@@ -17,6 +17,77 @@
   gap: 24px;
   min-width: 0;
 }
+.sideStack {
+  display: grid;
+  gap: 36px;
+  min-width: 0;
+}
+.section {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+  scroll-margin-top: 150px;
+}
+.sectionTitle {
+  margin: 0;
+  font-size: var(--font-h2-size);
+}
+.sectionDescription {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.sectionNavigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 24px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--border);
+}
+.sectionNavigation a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding-block: 8px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.sectionNavigation a:hover {
+  color: var(--text);
+}
+.sectionNavigation a:focus-visible,
+.studentCard:focus-visible,
+.service:focus-visible,
+.settings:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+}
+.studentCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 24px;
+  margin-bottom: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.studentCard:hover {
+  border-color: var(--border-strong);
+}
+.cardAction {
+  flex-shrink: 0;
+  color: var(--brand);
+  font-size: var(--font-body-sm-size);
+  font-weight: 600;
+}
+.connectionActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
 .panel h2,
 .services h2 {
   font-size: var(--font-h2-size);
@@ -122,6 +193,6 @@
   }
 }
 
-.socialAccess { margin-bottom: 24px; padding: clamp(20px, 3vw, 32px); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
-.socialAccess h2 { margin: 0 0 8px; }
+.socialAccess { padding: clamp(20px, 3vw, 32px); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.socialAccess h3 { margin: 0 0 8px; }
 .socialAccess p { color: var(--muted); margin: 0 0 16px; line-height: 1.7; }
