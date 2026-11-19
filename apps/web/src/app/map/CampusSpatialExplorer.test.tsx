@@ -47,8 +47,14 @@ beforeEach(() => {
     };
   });
   vi.stubGlobal('IntersectionObserver', class {
-    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
-    observe() {}
+    constructor(private callback: IntersectionObserverCallback) { intersection = callback; }
+    // Most existing tests simulate an on-screen dialog. Real browsers deliver
+    // the first observer entry asynchronously; the test fixture reports it
+    // immediately to preserve those tests' existing startup assumptions.
+    observe(target: Element) {
+      this.callback([{ isIntersecting: true, target }] as IntersectionObserverEntry[],
+        this as unknown as IntersectionObserver);
+    }
     disconnect = disconnect;
   });
 });
@@ -64,6 +70,42 @@ async function open() {
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
   return screen.getByRole('dialog', { name: '校園空間導覽' });
 }
+
+it('does not allocate offscreen WebGL or start its deadline until the canvas enters view', async () => {
+  // Override the normal on-screen observer fixture: a scrollable narrow
+  // viewport can open the modal with the graphics below the fold.
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    expect(within(dialog).getByText(/滑動至空間圖後才載入/)).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(timerSpy.mock.calls.some(([, delay]) => delay === 12_000)).toBe(false);
+
+    act(() => intersection?.([{ isIntersecting: false }] as IntersectionObserverEntry[],
+      {} as IntersectionObserver));
+    expect(scene.create).not.toHaveBeenCalled();
+
+    act(() => intersection?.([{ isIntersecting: true }] as IntersectionObserverEntry[],
+      {} as IntersectionObserver));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.create).toHaveBeenCalledTimes(1);
+  } finally {
+    timerSpy.mockRestore();
+  }
+});
 
 it('delays hidden-tab WebGL startup and its 12-second deadline until the tour is visible', async () => {
   Object.defineProperty(document, 'hidden', { configurable: true, value: true });
