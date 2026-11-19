@@ -1257,7 +1257,7 @@ service cloud.firestore {
         // withdrawn it. The author may remove an ordinary visible post only;
         // active managers retain the ability to remove held and legacy drafts.
         allow delete: if canManageGroup(groupId)
-          || (ownsOrdinaryPost() && isCanonicalVisiblePost());
+          || (ownsOrdinaryPost() && isVisiblePostForReactions());
 
         match /comments/{commentId} {
           // Comments are a separate collection path: membership alone must not

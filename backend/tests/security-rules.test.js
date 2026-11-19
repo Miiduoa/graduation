@@ -1658,7 +1658,28 @@ describe('firestore security rules', () => {
       await assertFails(author.update({ title: 'After revocation' }));
     });
 
-    test('unclassified legacy post cannot be promoted, voted or hard-deleted without review', async () => {
+    test('legacy ordinary authors may delete without visibility fields while managers retain draft deletion', async () => {
+      const base = 'groups/course/posts/';
+      await seedFirestore(async (admin) => {
+        await admin.doc('users/bob').set({ status: 'active' });
+        await admin.doc('schools/pu/members/bob').set({ status: 'active' });
+        await admin.doc('groups/course/members/bob').set({ status: 'active', role: 'member' });
+        await admin.doc(base + 'old').set({ authorId: 'alice', body: '歷史貼文' });
+        await admin.doc(base + 'news').set({ authorId: 'teacher', kind: 'announcement' });
+        await admin.doc(base + 'held').set({ authorId: 'alice', status: 'draft' });
+      });
+      const author = testEnv.authenticatedContext('alice').firestore();
+      const peer = testEnv.authenticatedContext('bob').firestore();
+      const manager = testEnv.authenticatedContext('teacher').firestore();
+      await assertFails(peer.doc(base + 'old').delete());
+      await assertFails(author.doc(base + 'news').delete());
+      await assertFails(peer.doc(base + 'news').delete());
+      await assertSucceeds(author.doc(base + 'old').delete());
+      await assertFails(author.doc(base + 'held').delete());
+      await assertSucceeds(manager.doc(base + 'held').delete());
+    });
+
+    test('legacy published authors may delete while publication and voting still require review', async () => {
       const legacy = 'groups/course/posts/legacy-unclassified';
       await seedFirestore(async (admin) => {
         await admin.doc('users/bob').set({ status: 'active', schoolId: 'pu' });
@@ -1680,7 +1701,11 @@ describe('firestore security rules', () => {
       // Previous default-value equality permitted this unauthorized
       // publication of an unclassified legacy parent post.
       await assertFails(author.update({ published: true, deleted: false, deletedAt: null }));
-      await assertFails(author.delete());
+      await assertFails(member.delete());
+      await assertSucceeds(author.delete());
+      await seedFirestore(admin => admin.doc(legacy).set({
+        authorId: 'alice', kind: 'post', status: 'published', title: 'Legacy post', likedBy: [], likes: 0,
+      }));
       await assertSucceeds(author.update({ title: 'Legacy text correction' }));
       // The actual manager may classify/restore the old post deliberately.
       await assertSucceeds(manager.update({

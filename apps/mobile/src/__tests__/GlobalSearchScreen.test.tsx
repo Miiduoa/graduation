@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { FlatList, ScrollView, StyleSheet } from 'react-native';
+import { postNuniWebFn } from '../services/nuniWebFn';
 import { getDocs } from 'firebase/firestore';
 import { GlobalSearchScreen } from '../screens/GlobalSearchScreen';
 import { safeNavigate } from '../utils/safeNavigate';
@@ -40,6 +41,7 @@ jest.mock('../ui/components', () => ({
   Screen: ({ children }: { children: React.ReactNode }) => children,
 }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 118 }));
+jest.mock('../services/nuniWebFn', () => ({ postNuniWebFn: jest.fn() }));
 jest.mock('../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn(() => true) }));
 jest.mock('../services/campusIntentClient', () => ({ interpretMobileCampusRequest: jest.fn() }));
@@ -80,6 +82,7 @@ const announcement = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(postNuniWebFn).mockReset().mockResolvedValue({ posts: [] });
   applyTheme('light');
   mockSchool = { id: 'pu', name: '靜宜大學' };
   mockAuth = {
@@ -184,11 +187,11 @@ test('keeps school aliases but filters explicit records from another school', as
 test.each(['school', 'account', 'logout', 'revalidating', 'expired'])(
   '%s changes discard private content and late responses immediately',
   async (change) => {
-    const pending = deferred<ReturnType<typeof snapshot>>();
+    const pending = deferred<{ posts: { id: string; title: string }[] }>();
+    jest.mocked(postNuniWebFn).mockReturnValue(pending.promise);
     jest.mocked(getDocs).mockImplementation(async (request) => {
       const path = (request as unknown as { path: string }).path;
       if (path === 'users/alice/groups') return snapshot([{ id: 'g1', groupId: 'g1' }]) as never;
-      if (path === 'groups/g1/posts') return (await pending.promise) as never;
       return snapshot() as never;
     });
     const view = render(<GlobalSearchScreen navigation={navigation} />);
@@ -201,45 +204,46 @@ test.each(['school', 'account', 'logout', 'revalidating', 'expired'])(
     if (change === 'expired') mockAuth = { ...mockAuth, tokenExpired: true };
     view.rerender(<GlobalSearchScreen navigation={navigation} />);
     await act(async () => {
-      pending.resolve(snapshot([{ id: 'p1', title: '專題私人草稿' }]));
+      pending.resolve({ posts: [{ id: 'p1', title: '專題私人貼文' }] });
     });
-    expect(view.queryByText('專題私人草稿')).toBeNull();
+    expect(view.queryByText('專題私人貼文')).toBeNull();
     expect(view.queryByDisplayValue('專題')).toBeNull();
     expect(view.getByText('直接開啟')).toBeTruthy();
   },
 );
 
 test('logout removes already loaded private results and guests never read memberships', async () => {
+  jest.mocked(postNuniWebFn).mockResolvedValue({ posts: [{ id: 'p1', title: '專題私人貼文' }] });
   jest.mocked(getDocs).mockImplementation(async (request) => {
     const path = (request as unknown as { path: string }).path;
     if (path === 'users/alice/groups') return snapshot([{ id: 'g1' }]) as never;
-    if (path === 'groups/g1/posts') return snapshot([{ id: 'p1', title: '專題私人草稿' }]) as never;
     return snapshot() as never;
   });
   const view = render(<GlobalSearchScreen navigation={navigation} />);
   await search(view, '專題');
-  expect(view.getByText('專題私人草稿')).toBeTruthy();
+  expect(view.getByText('專題私人貼文')).toBeTruthy();
   mockAuth = { ...mockAuth, user: null };
   view.rerender(<GlobalSearchScreen navigation={navigation} />);
   jest.mocked(getDocs).mockClear();
   await search(view, '專題');
   fireEvent.press(view.getByLabelText('搜尋分類：群組與作業'));
-  expect(view.queryByText('專題私人草稿')).toBeNull();
+  expect(view.queryByText('專題私人貼文')).toBeNull();
   expect(view.getByText('登入後搜尋自己的群組')).toBeTruthy();
   expect(getDocs).not.toHaveBeenCalled();
 });
 
 test('group ids prevent duplicate-key collisions and partial group reads remain retryable', async () => {
+  jest.mocked(postNuniWebFn).mockImplementation(async (_name, input) => ({ posts: [{ id: 'same-id', title: `專題 groups/${(input as { groupId: string }).groupId}/posts` }] }));
   jest.mocked(getDocs).mockImplementation(async (request) => {
     const path = (request as unknown as { path: string }).path;
     if (path === 'users/alice/groups') return snapshot([{ id: 'g1' }, { id: 'g2' }]) as never;
-    if (path.endsWith('/posts'))
-      return snapshot([{ id: 'same-id', title: `專題 ${path}` }]) as never;
     throw new Error('permission-denied');
   });
   const view = render(<GlobalSearchScreen navigation={navigation} />);
   await search(view, '專題');
   expect(view.getByText('專題 groups/g1/posts')).toBeTruthy();
+  expect(postNuniWebFn).toHaveBeenCalledWith('listGroupDiscussionPage', { groupId: 'g1', pageSize: 31 }, 'alice');
+  expect(jest.mocked(getDocs).mock.calls.some(([ref]) => (ref as unknown as { path: string }).path.endsWith('/posts'))).toBe(false);
   expect(view.getByText('專題 groups/g2/posts')).toBeTruthy();
   const results = view.UNSAFE_getByType(FlatList).props.data;
   expect(new Set(results.map((row: { id: string }) => row.id)).size).toBe(2);
@@ -247,13 +251,10 @@ test('group ids prevent duplicate-key collisions and partial group reads remain 
 });
 
 test('bounded group history offers a path to older content instead of promising completeness', async () => {
+  jest.mocked(postNuniWebFn).mockResolvedValue({ posts: Array.from({ length: 31 }, (_, index) => ({ id: `p${index}`, title: `專題 ${index}` })) });
   jest.mocked(getDocs).mockImplementation(async (request) => {
     const path = (request as unknown as { path: string }).path;
     if (path === 'users/alice/groups') return snapshot([{ id: 'g1' }]) as never;
-    if (path.endsWith('/posts'))
-      return snapshot(
-        Array.from({ length: 31 }, (_, index) => ({ id: `p${index}`, title: `專題 ${index}` })),
-      ) as never;
     return snapshot() as never;
   });
   const view = render(<GlobalSearchScreen navigation={navigation} />);

@@ -55,7 +55,6 @@ import { getCloudFunctionUrl as resolveCloudFunctionUrl, getFunctionsBaseUrl } f
 import { areFunctionsConfigured, FunctionsUnconfiguredError } from './functionsUrl';
 import {
   findUniversalDevAccountByEmail,
-  buildGroupCollectionPath,
   buildSchoolCollectionPath,
   buildUserSchoolCollectionPath,
   defaultNotificationPreferences,
@@ -1704,27 +1703,24 @@ export async function fetchGroupPosts(
   }
 
   try {
-    const firestore = getDb();
-    const canonicalSnap = await getDocs(
-      query(
-        collectionFromSegments(firestore, buildGroupCollectionPath(groupId, 'posts')),
-        orderBy('createdAt', 'desc'),
-        limit(maxItems),
-      ),
-    ).catch(() => null);
-    const snap =
-      canonicalSnap && !canonicalSnap.empty
-        ? canonicalSnap
-        : await getDocs(
-            query(
-              collection(firestore, 'groupPosts'),
-              where('groupId', '==', groupId),
-              orderBy('createdAt', 'desc'),
-              limit(maxItems),
-            ),
-          );
+    const user = getAuth()?.currentUser;
+    if (!user) return [];
+    const token = await user.getIdToken();
+    const response = await fetch(getCloudFunctionUrl('listGroupDiscussionPage'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ data: { groupId, pageSize: maxItems } }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(20000),
+    });
+    const payload = await response.json();
+    if (getAuth()?.currentUser !== user) return [];
+    if (!response.ok || payload.error) throw new Error('無法載入群組貼文');
+    const posts = payload.result.posts as Array<Record<string, unknown> & {
+      id: string; createdAt: { seconds: number; nanoseconds: number };
+    }>;
 
-    return snap.docs
+    return posts
       .map((d) =>
         parseDocument<{
           id: string;
@@ -1733,7 +1729,10 @@ export async function fetchGroupPosts(
           authorName?: string;
           content: string;
           createdAt: string;
-        }>({ id: d.id, data: () => d.data() }),
+        }>({ id: d.id, data: () => ({
+          ...d, groupId,
+          createdAt: new Date(d.createdAt.seconds * 1000 + d.createdAt.nanoseconds / 1e6).toISOString(),
+        }) }),
       )
       .filter(
         (

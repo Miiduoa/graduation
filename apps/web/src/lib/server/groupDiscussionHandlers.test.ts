@@ -5,11 +5,12 @@ import { createGroupDiscussionHandlers } from './groupDiscussionHandlers';
 import { dispatchFnRequest, type FnRuntime } from './fnDispatch';
 
 type Row = { id: string; createdAt: Timestamp; [key: string]: unknown };
-function setup(rows: Row[], status: string | null = 'active') {
+function setup(rows: Row[], status: string | null = 'active', options: { profile?: Record<string, unknown> | null; group?: Record<string, unknown> | null; schoolStatus?: string | null } = {}) {
   const writes = vi.fn(() => {
     throw new Error('Listing must not write');
   });
   const reads = vi.fn();
+  const membershipReads = vi.fn();
   const ordered = [...rows].sort(
     (a, b) => b.createdAt.toMillis() - a.createdAt.toMillis() || b.id.localeCompare(a.id),
   );
@@ -47,16 +48,28 @@ function setup(rows: Row[], status: string | null = 'active') {
     };
   }
   const db = {
-    collection: () => ({
-      doc: () => ({
+    collection: (root: string) => ({
+      doc: (parentId: string) => ({
+        get: async () => {
+          const data = root === 'users'
+            ? (options.profile === undefined ? { status: 'active' } : options.profile)
+            : (options.group === undefined ? { schoolId: 'pu' } : options.group);
+          return { exists: data !== null, data: () => data };
+        },
+        set: writes, update: writes, delete: writes,
         collection: (name: string) =>
           name === 'posts'
             ? query()
             : {
-                doc: () => ({
-                  get: async () => ({ exists: status !== null, data: () => ({ status }) }),
-                  set: writes,
-                  update: writes,
+                doc: (uid: string) => ({
+                  get: async () => {
+                    membershipReads(`${root}/${parentId}/${name}/${uid}`);
+                    const value = root === 'schools'
+                      ? (options.schoolStatus === undefined ? 'active' : options.schoolStatus)
+                      : status;
+                    return { exists: value !== null, data: () => ({ status: value }) };
+                  },
+                  set: writes, update: writes, delete: writes,
                 }),
               },
       }),
@@ -64,7 +77,7 @@ function setup(rows: Row[], status: string | null = 'active') {
     runTransaction: writes,
     batch: writes,
   } as unknown as Firestore;
-  return { db, writes, reads, list: createGroupDiscussionHandlers({ db }).listGroupDiscussionPage };
+  return { db, writes, reads, membershipReads, list: createGroupDiscussionHandlers({ db }).listGroupDiscussionPage };
 }
 const row = (id: string, extra: Record<string, unknown> = {}): Row => ({
   id,
@@ -199,3 +212,24 @@ it('dispatches the hosted callable with verified authentication and HTTP denial 
   expect(denied.status).toBe(403);
   expect(await denied.json()).not.toHaveProperty('result');
 });
+
+it.each([
+  ...['disabled', 'suspended', 'deleted', 'inactive'].map((status) => ({ profile: { status } })),
+  { profile: { accountDeletionInProgress: true } },
+  ...[null, 'inactive', 'removed', 'pending', 'left', ''].map((schoolStatus) => ({ schoolStatus })),
+  { group: null }, { group: {} },
+])('denies unavailable accounts or revoked school membership despite active group membership: %j', async (options) => {
+  const { list, reads, writes } = setup([row('secret')], 'active', options);
+  await expect(list(request())).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(reads).not.toHaveBeenCalled();
+  expect(writes).not.toHaveBeenCalled();
+});
+
+it.each([null, {}, { schoolId: 'other', primarySchoolId: 'other' }])(
+  'allows missing/legacy/transfer profiles with active membership in the group school: %j', async (profile) => {
+    const { list, writes, membershipReads } = setup([row('legacy')], 'active', { profile });
+    expect((await list(request())).posts.map((post) => post.id)).toEqual(['legacy']);
+    expect(membershipReads.mock.calls.map(([path]) => path)).toEqual(['groups/g1/members/alice', 'schools/pu/members/alice']);
+    expect(writes).not.toHaveBeenCalled();
+  },
+);

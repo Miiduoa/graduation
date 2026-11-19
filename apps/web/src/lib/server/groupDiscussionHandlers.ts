@@ -1,6 +1,7 @@
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
+import { isAccountUnavailable } from './dmConversationsHandler';
 
 function validId(value: unknown): value is string {
   return typeof value === 'string' && !!value.trim() && value.length <= 160 && !value.includes('/');
@@ -18,8 +19,23 @@ export function createGroupDiscussionHandlers({ db }: { db: Firestore }) {
     }
     const size = Math.min(pageSize as number, 50);
     const group = db.collection('groups').doc(input.groupId);
-    const member = await group.collection('members').doc(uid).get();
-    if (!member.exists || member.data()?.status !== 'active') {
+    const [profile, groupSnapshot, member] = await Promise.all([
+      db.collection('users').doc(uid).get(),
+      group.get(),
+      group.collection('members').doc(uid).get(),
+    ]);
+    const schoolId = groupSnapshot.data()?.schoolId;
+    // Missing legacy profiles are allowed, just as in isSignedIn. School
+    // membership belongs to this group, regardless of the user's current school.
+    if (
+      (profile.exists && isAccountUnavailable(profile.data())) ||
+      !groupSnapshot.exists || !validId(schoolId) ||
+      !member.exists || member.data()?.status !== 'active'
+    ) {
+      throw new HttpsError('permission-denied', '僅限有效群組成員讀取');
+    }
+    const schoolMember = await db.collection('schools').doc(schoolId).collection('members').doc(uid).get();
+    if (!schoolMember.exists || schoolMember.data()?.status !== 'active') {
       throw new HttpsError('permission-denied', '僅限有效群組成員讀取');
     }
     const postsRef = group.collection('posts');
