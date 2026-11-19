@@ -10,7 +10,7 @@ const root = path.resolve(directory, '../../..');
 const output = path.join(root, 'artifacts/selected-pickup');
 await mkdir(output, { recursive: true });
 const modules = {
-  session: `export function useNuniSession(){const c=window.__pickupQA;return {loading:false,pendingLogout:false,error:'',session:{context:c.context,platformAccountId:c.accountId},refresh:async()=>{}};}
+  session: `export function useNuniSession(){const c=window.__pickupQA;return {loading:false,pendingLogout:false,error:'',session:{context:c.context,platformAccountId:c.accountId},refresh:async()=>{}};} export const useOptionalNuniSession=useNuniSession;
     export async function browserRequest(path,context,input,method,query){if(input!==undefined||method&&method!=='GET')throw Error('Fixture forbids customer writes');const r=await fetch('/qa/platform/'+path+(query?'?'+new URLSearchParams(query):''),{cache:'no-store',headers:{'X-Campus-Session':context}});if(!r.ok)throw Error('Fixture customer read failed');return r.json();}`,
   campus: `export const useCampusBrowseContext=()=>({status:'ready',schoolId:window.__pickupQA.schoolId});`,
   enabled: `export const useAssistantEnabled=()=>true;`,
