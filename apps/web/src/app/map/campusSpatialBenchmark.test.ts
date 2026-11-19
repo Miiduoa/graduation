@@ -276,6 +276,33 @@ describe('campus spatial benchmark evidence gate', () => {
     expect(result.issues.join(' ')).toContain('no verified destination');
   });
 
+  it('rejects a five-product pairing recorded across separate testing sessions', () => {
+    const rows = fixture('synthetic-session');
+    // Five apps were allegedly paired under identical controls, but one
+    // observation occurred 90 minutes later. Do not claim a paired trial.
+    rows[4].testedAt = new Date(Date.parse(rows[4].testedAt) + 90 * 60 * 1000).toISOString();
+    const separated = validateCampusSpatialBenchmarkRows(rows);
+    expect(separated.valid).toBe(false);
+    expect(separated.issues.join(' ')).toContain('one-hour paired session');
+    expect(separated.completeTrials).toBe(0);
+    expect(separated.reviewableTasks).toEqual([]);
+
+    // A genuine single-session fixture remains admissible.
+    rows[4].testedAt = new Date(Date.parse(rows[0].testedAt) + 30 * 60 * 1000).toISOString();
+    const paired = validateCampusSpatialBenchmarkRows(rows);
+    expect(paired.valid).toBe(true);
+    expect(paired.completeTrials).toBe(1);
+  });
+
+  it('rejects future-dated benchmark captures even when their URLs are present', () => {
+    const rows = fixture('synthetic-future');
+    rows[0].testedAt = '2099-01-01T00:00:00.000Z';
+    const result = validateCampusSpatialBenchmarkRows(rows);
+    expect(result.valid).toBe(false);
+    expect(result.issues.join(' ')).toContain('invalid testedAt');
+    expect(result.completeTrials).toBe(0);
+  });
+
   it('does not turn missing or unverified observations into a comparative claim', () => {
     expect(validateCampusSpatialBenchmarkRows([]).valid).toBe(false);
     const rows = [...fixture('synthetic-1'), ...fixture('synthetic-2'), ...fixture('synthetic-3')];
