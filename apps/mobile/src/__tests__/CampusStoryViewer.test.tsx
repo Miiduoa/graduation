@@ -2,7 +2,7 @@ import React from 'react';
 import { AppState, Pressable, Text } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { CampusStoryViewer, useCampusStories } from '../screens/social/CampusStoryViewer';
-import type { CampusStoryDoc } from '../services/stories';
+import { markStoryViewed, type CampusStoryDoc } from '../services/stories';
 
 jest.mock('../firebase', () => ({ isFirebaseMockMode: () => false }));
 jest.mock('../services/stories', () => ({
@@ -28,8 +28,68 @@ function Shelf({ rows }: { rows: CampusStoryDoc[] }) {
     </>
   );
 }
+function ScopedShelf({
+  rows,
+  schoolId,
+  uid,
+}: {
+  rows: CampusStoryDoc[];
+  schoolId: string;
+  uid: string;
+}) {
+  const deck = useCampusStories(rows, schoolId, uid);
+  return (
+    <>
+      {deck.groups.map((group) => (
+        <Pressable key={group.authorUid} onPress={() => deck.openGroup(group)}>
+          <Text>開啟{group.authorUid}</Text>
+        </Pressable>
+      ))}
+      <Text>{deck.seen.has('shared') ? '已讀' : '未讀'}</Text>
+      <CampusStoryViewer deck={deck} names={{ bob: '小柏' }} />
+    </>
+  );
+}
+
 const common = { schoolId: 'pu', authorUid: 'bob', kind: 'text' as const };
 describe('story playback clock', () => {
+  test('does not carry story navigation or view markers to another campus or student', () => {
+    jest.mocked(markStoryViewed).mockClear();
+    const expiresAt = Date.now() + 100_000;
+    const rows: CampusStoryDoc[] = [
+      { ...common, id: 'shared', createdAt: 1, text: '甲校活動', expiresAt },
+      { ...common, id: 'shared', schoolId: 'other', createdAt: 2, text: '乙校活動', expiresAt },
+    ];
+    const view = render(<ScopedShelf rows={rows} schoolId="pu" uid="alice" />);
+
+    fireEvent.press(view.getByText('開啟bob'));
+    expect(view.getByText('甲校活動')).toBeTruthy();
+    expect(view.getByText('已讀')).toBeTruthy();
+
+    // The new campus reuses the document ID, but must not inherit an open story.
+    view.rerender(<ScopedShelf rows={rows} schoolId="other" uid="alice" />);
+    expect(view.queryByText('甲校活動')).toBeNull();
+    expect(view.queryByText('乙校活動')).toBeNull();
+    expect(view.getByText('未讀')).toBeTruthy();
+    fireEvent.press(view.getByText('開啟bob'));
+    expect(view.getByText('乙校活動')).toBeTruthy();
+    expect(view.getByText('已讀')).toBeTruthy();
+
+    // Switching student at the same campus must likewise require a fresh open.
+    view.rerender(<ScopedShelf rows={rows} schoolId="other" uid="charlie" />);
+    expect(view.queryByText('乙校活動')).toBeNull();
+    expect(view.getByText('未讀')).toBeTruthy();
+    fireEvent.press(view.getByText('開啟bob'));
+    expect(view.getByText('乙校活動')).toBeTruthy();
+    expect(markStoryViewed).toHaveBeenCalledTimes(3);
+    expect(jest.mocked(markStoryViewed).mock.calls.map((call) => [call[0].schoolId, call[1]])).toEqual([
+      ['pu', 'alice'],
+      ['other', 'alice'],
+      ['other', 'charlie'],
+    ]);
+    view.unmount();
+  });
+
   beforeEach(() => {
     jest.useFakeTimers();
   });

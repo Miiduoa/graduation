@@ -33,9 +33,25 @@ const STORY_DURATION = 7000;
 /** Refresh at the next expiry, also when returning from a suspended app. */
 export function useCampusStories(rows: CampusStoryDoc[], schoolId?: string, uid?: string) {
   const [clock, setClock] = useState(Date.now);
-  const [seen, setSeen] = useState<ReadonlySet<string>>(new Set());
+  // An open story and its read markers belong to one student at one campus.
+  // Different schools can have documents with the same ID.
+  const viewerScope = JSON.stringify([uid ?? null, schoolId ?? null]);
+  const [seenState, setSeenState] = useState<{ scope: string; ids: ReadonlySet<string> }>(
+    () => ({ scope: viewerScope, ids: new Set() }),
+  );
+  const seen = seenState.scope === viewerScope ? seenState.ids : new Set<string>();
   const recorded = React.useRef(new Set<string>());
-  const [selectedId, selectStory] = useState<string | null>(null);
+  const [selected, setSelected] = useState<{ scope: string; id: string } | null>(null);
+  const selectedId = selected?.scope === viewerScope ? selected.id : null;
+  const selectStory = useCallback(
+    (id: string | null) => setSelected(id ? { scope: viewerScope, id } : null),
+    [viewerScope],
+  );
+  useEffect(() => {
+    setSelected(null);
+    setSeenState({ scope: viewerScope, ids: new Set() });
+    recorded.current.clear();
+  }, [viewerScope]);
   const groups = useMemo(() => {
     const now = Math.max(clock, Date.now());
     return groupStoriesByAuthor(
@@ -84,21 +100,27 @@ export function useCampusStories(rows: CampusStoryDoc[], schoolId?: string, uid?
       return;
     }
     if (!uid || !schoolId || !authorUid || !expiresAt || expiresAt <= Date.now()) return;
-    setSeen((previous) => (previous.has(storyId) ? previous : new Set(previous).add(storyId)));
-    if (authorUid === uid || isFirebaseMockMode() || recorded.current.has(storyId)) return;
-    recorded.current.add(storyId);
+    setSeenState((previous) => {
+      const ids = previous.scope === viewerScope ? previous.ids : new Set<string>();
+      return previous.scope === viewerScope && ids.has(storyId)
+        ? previous
+        : { scope: viewerScope, ids: new Set(ids).add(storyId) };
+    });
+    const receiptKey = JSON.stringify([viewerScope, storyId]);
+    if (authorUid === uid || isFirebaseMockMode() || recorded.current.has(receiptKey)) return;
+    recorded.current.add(receiptKey);
     void markStoryViewed({ id: storyId, schoolId, authorUid }, uid).catch(() => {
       // Reopen to retry. A network failure should not reset the local reading position.
-      recorded.current.delete(storyId);
+      recorded.current.delete(receiptKey);
     });
-  }, [selectedId, storyId, authorUid, expiresAt, uid, schoolId]);
+  }, [selectedId, storyId, authorUid, expiresAt, uid, schoolId, viewerScope]);
 
   const openGroup = useCallback(
     (g: StoryAuthorGroup) => {
       const active = g.stories.filter((s) => s.schoolId === schoolId && s.expiresAt! > Date.now());
       selectStory((active.find((s) => !seen.has(s.id)) ?? active[0])?.id ?? null);
     },
-    [schoolId, seen],
+    [schoolId, seen, selectStory],
   );
   return { groups, groupIndex, index, openGroup, selectStory, seen, viewerUid: uid };
 }
