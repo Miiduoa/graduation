@@ -383,12 +383,17 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // (including after the modal closes). Do not reactivate a disposed
           // WebGL scene or issue state updates from the previous dialog.
           if (!active) return;
-          // A fast scroll can queue multiple visibility transitions in one
-          // callback. The last observation is the current state; using the
-          // first can strand a visible map offscreen until another scroll.
-          // Empty callbacks should not erase a previously confirmed state.
-          const latest = entries[entries.length - 1];
+          // A fast scroll can batch several transitions. Real observer
+          // entries expose time; use the most recent timestamp rather than
+          // trusting array order. Keep last-entry fallback for legacy WebViews
+          // or test shims without timestamps; an empty batch changes nothing.
+          let latest = entries[entries.length - 1];
           if (!latest) return;
+          if (Number.isFinite(latest.time)) {
+            for (const entry of entries) {
+              if (Number.isFinite(entry.time) && entry.time > latest.time) latest = entry;
+            }
+          }
           visible = latest.isIntersecting;
           updateVisibility();
           startWhenVisible();
