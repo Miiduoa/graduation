@@ -34,6 +34,7 @@ export function StoryViewer({
   const [hidden, setHidden] = useState(() => document.hidden);
   const [loadedScope, setLoadedScope] = useState<string | null>(null);
   const [failedScope, setFailedScope] = useState<string | null>(null);
+  const [autoPlaybackErrorScope, setAutoPlaybackErrorScope] = useState<string | null>(null);
   const story = viewer.group.stories[viewer.index]!;
   const scope = JSON.stringify([viewer.viewerUid, story.schoolId, story.authorUid, story.id]);
   const readingFocused = readingScope === scope;
@@ -76,7 +77,10 @@ export function StoryViewer({
     function play() {
       void element?.play().catch((error: unknown) => {
         // Pausing (including when the tab hides) may abort a pending play request.
-        if (live && !(error instanceof DOMException && error.name === 'AbortError')) setAuto(false);
+        if (live && !(error instanceof DOMException && error.name === 'AbortError')) {
+          setAutoPlaybackErrorScope(scope);
+          setAuto(false);
+        }
       });
     }
     const saved = beforePanel.current;
@@ -348,6 +352,11 @@ export function StoryViewer({
           )}
           {!viewer.isOwner && <small className={styles.receiptNotice}>作者可查看誰看過</small>}
           {story.poiName && <span className={styles.location}>{story.poiName}</span>}
+          {video && !failedVideo && autoPlaybackErrorScope === scope && (
+            <p role="status" className={styles.playbackNotice}>
+              影片無法自動播放，請使用影片控制項手動播放。
+            </p>
+          )}
           <nav aria-label="限時動態播放控制" className={styles.controls}>
             <button type="button" disabled={!viewer.hasPrevious} onClick={viewer.previous}>
               ‹ 上一則
@@ -358,6 +367,7 @@ export function StoryViewer({
               disabled={failedVideo}
               onClick={() => {
                 // Keep the student's latest playback choice, but defer playing until reading ends.
+                setAutoPlaybackErrorScope(null);
                 if (beforePanel.current) beforePanel.current.playing = !auto;
                 setAuto((v) => !v);
               }}
