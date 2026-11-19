@@ -372,7 +372,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     return () => {
       active = false;
       if (timeout !== null) window.clearTimeout(timeout);
-      intersection?.disconnect();
+      // A broken embedded WebView may throw even on disconnect(). Complete
+      // scene and listener cleanup regardless; never leak a WebGL context.
+      try { intersection?.disconnect(); } catch { /* broken WebView observer teardown */ }
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
@@ -400,7 +402,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
               ? <p>目前位於背景分頁，返回導覽後才會啟動立體畫面；仍可查看地點與步行導航。</p>
               : <>
                 <p>尚未確認立體畫面在可見範圍；滑動至空間圖後才載入，以節省手機效能與電力。若沒有自動載入，可手動開啟。地點資訊與步行導航仍可使用。</p>
-                <button className="btn" type="button" onClick={() => setManualStart(true)}>手動開啟立體畫面</button>
+                <button className="btn" type="button" onClick={() => {
+                  // The launch button disappears as loading begins. Preserve
+                  // keyboard/screen-reader focus on the map instead of body.
+                  host?.focus();
+                  setManualStart(true);
+                }}>手動開啟立體畫面</button>
               </>
           ) : <>
             <p>這次無法顯示立體畫面。你仍可選擇地點，查看資訊與導航。</p>
