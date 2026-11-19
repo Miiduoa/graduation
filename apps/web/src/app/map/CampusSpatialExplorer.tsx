@@ -230,6 +230,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const appearance = useSyncExternalStore(subscribeAppearance, readAppearance, () => 'reduced:light');
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<'loading' | 'deferred' | 'ready' | 'error'>('loading');
+  const [deferredCause, setDeferredCause] = useState<'background' | 'offscreen'>('background');
   const [attempt, setAttempt] = useState(0);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
@@ -251,13 +252,22 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   useEffect(() => {
     if (!host) return;
     let active = true;
-    let visible = true;
+    // Do not allocate a mobile WebGL context until the viewport observer has
+    // actually confirmed that this map is on screen. Without the API, retain
+    // the original eager-start fallback for older WebViews.
+    let visible = typeof IntersectionObserver === 'undefined';
     let pageSuspended = false;
     let scene: CampusSpatialScene | null = null;
     // Safari can fire pagehide before visibilitychange when entering bfcache.
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended || document.hidden;
-    setStatus(isBackgrounded() ? 'deferred' : 'loading');
+    const isDeferred = () => isBackgrounded() || !visible;
+    const defer = () => {
+      setDeferredCause(isBackgrounded() ? 'background' : 'offscreen');
+      setStatus('deferred');
+    };
+    if (isDeferred()) defer();
+    else setStatus('loading');
 
     const updateVisibility = () => scene?.setActive(visible && !isBackgrounded());
     const fail = () => {
@@ -276,10 +286,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // the tab is visible again. Resuming must not duplicate the context.
     const syncPendingStartup = () => {
       if (!active || !started || scene) return;
-      if (isBackgrounded()) {
+      if (isDeferred()) {
         if (timeout !== null) window.clearTimeout(timeout);
         timeout = null;
-        setStatus('deferred');
+        defer();
         return;
       }
       if (timeout === null) timeout = window.setTimeout(fail, 12000);
@@ -287,13 +297,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       pendingCreate?.();
     };
     const startWhenVisible = () => {
-      if (!active || started || isBackgrounded()) return;
+      if (!active || started || isDeferred()) return;
       started = true;
       syncPendingStartup();
       void import('./campusSpatialScene').then(({ createCampusSpatialScene }) => {
         if (!active) return;
         const finishStart = () => {
-          if (!active || isBackgrounded() || scene) return;
+          if (!active || isDeferred() || scene) return;
           pendingCreate = null;
           scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail, footprints });
           if (!active) {
@@ -336,6 +346,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       new IntersectionObserver(([entry]) => {
         visible = entry?.isIntersecting ?? false;
         updateVisibility();
+        startWhenVisible();
+        syncPendingStartup();
       });
     intersection?.observe(host);
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -368,7 +380,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       />
       {status !== 'ready' && (
         <div className={styles.sceneMessage} role="status">
-          {status === 'loading' ? <p>正在開啟空間導覽…</p> : status === 'deferred' ? <p>目前位於背景分頁，返回導覽後才會啟動立體畫面；仍可查看地點與步行導航。</p> : <>
+          {status === 'loading' ? <p>正在開啟空間導覽…</p> : status === 'deferred' ? (
+            deferredCause === 'background'
+              ? <p>目前位於背景分頁，返回導覽後才會啟動立體畫面；仍可查看地點與步行導航。</p>
+              : <p>立體畫面尚未進入可見範圍；滑動至空間圖後才載入，以節省手機效能與電力。地點資訊與步行導航仍可使用。</p>
+          ) : <>
             <p>這次無法顯示立體畫面。你仍可選擇地點，查看資訊與導航。</p>
             <button className="btn" type="button" onClick={() => setAttempt((value) => value + 1)}>
               重試立體畫面
