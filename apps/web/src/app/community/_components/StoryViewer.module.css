@@ -232,3 +232,9 @@
   color: #fff;
   font-size: 0.8rem;
 }
+.playbackNotice {
+  margin: 0 0 8px;
+  color: #fff;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
