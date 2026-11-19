@@ -1,3 +1,4 @@
+import { postNuniWebFn } from '../services/nuniWebFn';
 import { privateFileNonce } from '../services/privateFileNonce';
 import { claimPrivateFile } from '../services/privateFiles';
 import { safePrivateFileName } from '@campus/shared/src/privateFileAccess';
@@ -342,26 +343,15 @@ export function GroupDetailScreen(props: any) {
   } = useAsyncList<Post>(async () => {
     if (isFirebaseMockMode()) return (groupId ? DEMO_POSTS_FOR_GROUP[groupId] : undefined) ?? [];
     if (!groupId) return [];
-    const ref = collection(db, 'groups', groupId, 'posts');
-    const qy = query(
-      ref,
-      where('published', '==', true),
-      where('status', '==', 'published'),
-      where('deleted', '==', false),
-      where('deletedAt', '==', null),
-      orderBy('createdAt', 'desc'),
-      limit(50),
+    if (!auth.user) return [];
+    const page = await postNuniWebFn<{ groupId: string; pageSize: number }, { posts: (Post & { likedBy?: string[] })[] }>(
+      'listGroupDiscussionPage', { groupId, pageSize: 50 }, auth.user.uid,
     );
-    const snap = await getDocs(qy);
-    const rows = snap.docs.map((d) => {
-      const data = d.data() as any;
-      return {
-        id: d.id,
-        ...data,
-        likes: data.likes || 0,
-        userLiked: data.likedBy?.includes(auth.user?.uid) || false,
-      };
-    }) as Post[];
+    const rows = page.posts.map((data) => ({
+      ...data,
+      likes: data.likes || 0,
+      userLiked: data.likedBy?.includes(auth.user?.uid ?? '') || false,
+    }));
     return rows;
   }, [db, groupId, auth.user?.uid]);
 
@@ -433,8 +423,8 @@ export function GroupDetailScreen(props: any) {
       if (a.pinned && !b.pinned) return -1;
       if (!a.pinned && b.pinned) return 1;
       if (a.pinned && b.pinned) {
-        const aTime = (a.pinnedAt?.toMillis?.() ?? 0) as number;
-        const bTime = (b.pinnedAt?.toMillis?.() ?? 0) as number;
+        const aTime = (a.pinnedAt?.toMillis?.() ?? (a.pinnedAt?.seconds ?? 0) * 1000) as number;
+        const bTime = (b.pinnedAt?.toMillis?.() ?? (b.pinnedAt?.seconds ?? 0) * 1000) as number;
         return bTime - aTime;
       }
       return 0;

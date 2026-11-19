@@ -1,22 +1,14 @@
 import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
 import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import {
-  collection,
   deleteDoc,
   doc,
-  getDocsFromServer,
-  limit,
-  orderBy,
-  query,
   runTransaction,
   serverTimestamp,
-  startAfter,
   updateDoc,
-  where,
-  type QueryDocumentSnapshot,
   type DocumentData,
 } from 'firebase/firestore';
-import { getAuth, getDb, isFirebaseConfigured } from '@/lib/firebase';
+import { getAuth, getCloudFunctionUrl, getDb, isFirebaseConfigured } from '@/lib/firebase';
 import { readMemberGroup, type MemberGroup } from './groupService';
 
 export type GroupDiscussionPost = {
@@ -32,9 +24,11 @@ export type GroupDiscussionPost = {
   createdAt: unknown;
 };
 
+export type DiscussionCursor = { id: string; createdAt: { seconds: number; nanoseconds: number } };
+
 export type DiscussionPage = {
   posts: GroupDiscussionPost[];
-  cursor: QueryDocumentSnapshot<DocumentData> | null;
+  cursor: DiscussionCursor | null;
   hasMore: boolean;
 };
 
@@ -126,37 +120,32 @@ export async function loadGroupDiscussionPage(
   schoolId: string,
   groupId: string,
   current: CurrentScope = () => true,
-  cursor: QueryDocumentSnapshot<DocumentData> | null = null,
+  cursor: DiscussionCursor | null = null,
 ): Promise<{ group: MemberGroup; page: DiscussionPage }> {
   assertCurrent(uid, current);
   if (!validId(groupId)) throw new Error('Invalid group identifier');
   const group = await readMemberGroup(uid, schoolId, groupId);
   assertCurrent(uid, current);
-  const postsRef = collection(getDb(), 'groups', groupId, 'posts');
-  // Rules require provably visible candidates; legacy rows without explicit
-  // visibility metadata stay out of member feeds until reviewed/backfilled.
-  const visibleOnly = [
-    where('published', '==', true),
-    where('status', '==', 'published'),
-    where('deleted', '==', false),
-    where('deletedAt', '==', null),
-  ];
-  const pageQuery = cursor
-    ? query(postsRef, ...visibleOnly, orderBy('createdAt', 'desc'), startAfter(cursor), limit(PAGE_SIZE))
-    : query(postsRef, ...visibleOnly, orderBy('createdAt', 'desc'), limit(PAGE_SIZE));
-  const snap = await getDocsFromServer(pageQuery);
+  const user = getAuth()!.currentUser!;
+  const token = await user.getIdToken();
   assertCurrent(uid, current);
-  const posts = snap.docs
-    .map((entry) => mapPost(groupId, entry))
+  if (getAuth()?.currentUser !== user) throw new Error('Login session changed');
+  const response = await fetch(getCloudFunctionUrl('listGroupDiscussionPage'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ data: { groupId, pageSize: PAGE_SIZE, cursor } }),
+    cache: 'no-store',
+    signal: AbortSignal.timeout(20000),
+  });
+  const payload = await response.json();
+  assertCurrent(uid, current);
+  if (getAuth()?.currentUser !== user) throw new Error('Login session changed');
+  if (!response.ok || payload.error) throw new Error('無法載入群組貼文');
+  const page = payload.result as DiscussionPage;
+  const posts = page.posts
+    .map((entry) => mapPost(groupId, { id: entry.id, data: () => entry }))
     .filter((row): row is GroupDiscussionPost => row != null);
-  return {
-    group,
-    page: {
-      posts,
-      cursor: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1]! : null,
-      hasMore: snap.docs.length >= PAGE_SIZE,
-    },
-  };
+  return { group, page: { posts, cursor: page.cursor, hasMore: page.hasMore } };
 }
 
 function assertTxnScope(uid: string, schoolId: string, current: CurrentScope) {
