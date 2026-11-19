@@ -107,6 +107,62 @@ it('does not allocate offscreen WebGL or start its deadline until the canvas ent
   }
 });
 
+it('lets a student manually start 3D if a WebView never reports canvas visibility', async () => {
+  // The API exists and observe() succeeds, but the WebView never invokes its
+  // callback. Avoid an infinite offscreen wait without eagerly allocating GPU.
+  const observerDisconnect = vi.fn();
+  vi.stubGlobal('IntersectionObserver', class {
+    observe() {}
+    disconnect = observerDisconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  expect(scene.create).not.toHaveBeenCalled();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  const manual = within(dialog).getByRole('button', { name: '手動開啟立體畫面' });
+  manual.focus();
+  expect(document.activeElement).toBe(manual);
+
+  fireEvent.click(manual);
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  expect(observerDisconnect).toHaveBeenCalledTimes(1);
+  expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+  fireEvent(window, new Event('pageshow'));
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('still defers manual 3D startup if the tab backgrounds before the WebView import settles', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    observe() {}
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const manual = within(dialog).getByRole('button', { name: '手動開啟立體畫面' });
+  try {
+    await act(async () => {
+      fireEvent.click(manual);
+      Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+      fireEvent(document, new Event('visibilitychange'));
+      await Promise.resolve();
+    });
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(within(dialog).getByText(/目前位於背景分頁，返回導覽後才會啟動立體畫面/)).toBeTruthy();
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    fireEvent(document, new Event('visibilitychange'));
+    fireEvent(window, new Event('pageshow'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.create).toHaveBeenCalledTimes(1);
+  } finally {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  }
+});
+
 it.each(['constructor', 'observe'] as const)(
   'falls back to working 3D and walking navigation when a WebView observer fails at %s',
   async (failurePoint) => {
