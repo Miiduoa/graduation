@@ -104,7 +104,10 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
       ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
         ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN.test(column)) &&
        !SCORE_COUNT_COLUMN.test(column))) return null;
-  if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
+  // A question number identifies an exercise; its magnitude is not a measured result.
+  // Keep the exact table, but never turn "第 2 題" vs "第 4 題" into a 2× bar.
+  if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|題號|題次|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
+      /\b(?:question|problem|exercise|item)\s+(?:id|number|no\.?)(?:\b|$)/iu.test(column) ||
       /^(?:年度|year|date|id|uuid|no\.?|number)$/iu.test(column) ||
       // A number identifying a term, page, floor or class is an ordinal or
       // category, not a comparable measure. Parenthetical source qualifiers

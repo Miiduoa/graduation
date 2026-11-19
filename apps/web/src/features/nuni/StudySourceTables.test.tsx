@@ -647,6 +647,8 @@ it('does not compare numeric ordinals, class levels or pages as quantities', () 
     'Academic Year', 'Academic Term', 'Semester', 'Student ID',
     'Student Number', 'Course Code', 'Course Number', 'Postal Code',
     'ZIP code', 'Page Number', 'Sequence Number', 'Floor Number',
+    '題號', '題次', '題號（試卷）', '作業題號', 'Question ID',
+    'Question Number', 'Question No.', 'Problem Number', 'Exercise ID',
   ]) {
     const material = ['| 名稱 | ' + header + ' |', '| --- | --- |',
       '| 甲 | 1 |', '| 乙 | 2 |'].join('\n');
@@ -658,7 +660,8 @@ it('does not compare numeric ordinals, class levels or pages as quantities', () 
 });
 
 it('still compares actual amounts when an English header mentions a year or course', () => {
-  for (const header of ['Annual Budget', 'Yearly Budget', 'Course Credits', '學期學分']) {
+  for (const header of ['Annual Budget', 'Yearly Budget', 'Course Credits', '學期學分',
+    '練習題數', 'Number of Questions']) {
     const material = ['| 名稱 | ' + header + ' |', '| --- | --- |',
       '| 甲 | 2.50 |', '| 乙 | 3 |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);

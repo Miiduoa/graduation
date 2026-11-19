@@ -1871,3 +1871,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 
 - 原頁自我檢查題仍有 `selected.attempt.trim()`：在學生只輸入零寬字元、盲文空白等不可見內容時，瀏覽器按鈕可能被誤啟用。現在 `CourseStudyPassage` 的按鈕 disabled、`aria-expanded`、參考回答渲染與實際更新事件全使用相同 `hasVisibleStudyAttempt` 門檻；即使舊狀態的 `answerVisible` 為 true，只有有效試答才能顯示答案。
 - 補實際 React DOM 模擬互動回歸，逐一確認不可見內容無法揭答，合法中文／公式／Emoji／附著重音／非空白點字可使用；已揭答後更改答案會重新鎖定。正式 Vitest/CI、iOS Safari／Android Chrome 真機仍須在精確 SHA 重新取得結果，不能視為已驗收。
+
+### 2026-11-19：來源表格的題號不可被誤畫成數量比較
+
+- 修正原文 Markdown 表格中「題號／題次／作業題號」或 `Question ID`、`Question Number`、`Question No.`、`Problem Number`、`Exercise ID` 欄位：即使儲存格是 1、2、3 等可解析數字，這些都是識別題目的序數，不能用以零為起點的長條誤導成相對大小。現在保留原表格逐字可讀，但不提供數值比例圖。
+- 回歸測試涵蓋中英文序數欄位，並確認真正的題目數量「練習題數」與 `Number of Questions` 仍可產生明確數值比較；沒有自動判分、推斷圖片意義或改寫教材。
+- 只改原文表格的衍生圖形條件、測試與本文件；不增加套件／付費 API、不更改學生閱讀 v1/v2 或逐題練習 v1 checkpoint、不外傳私人教材。須按新 SHA 獨立驗證正式 Web/Build/Lint/CodeQL、GitHub App 5504170、Maestro／iOS／Android 真機及 Ahaboard 同教材同題同機比較；PR 保持 Draft，不合併、不部署。
