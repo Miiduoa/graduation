@@ -342,14 +342,26 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       syncPendingStartup();
     };
 
-    const intersection = typeof IntersectionObserver === 'undefined' ? null :
-      new IntersectionObserver(([entry]) => {
-        visible = entry?.isIntersecting ?? false;
-        updateVisibility();
-        startWhenVisible();
-        syncPendingStartup();
-      });
-    intersection?.observe(host);
+    // A few embedded WebViews expose IntersectionObserver but fail during
+    // construction or observe(). Do not strand the tour in offscreen mode:
+    // the safe fallback is the existing eager startup path.
+    let intersection: IntersectionObserver | null = null;
+    if (typeof IntersectionObserver !== 'undefined') {
+      try {
+        intersection = new IntersectionObserver(([entry]) => {
+          visible = entry?.isIntersecting ?? false;
+          updateVisibility();
+          startWhenVisible();
+          syncPendingStartup();
+        });
+        intersection.observe(host);
+      } catch {
+        // observe() may have registered partially before throwing.
+        try { intersection?.disconnect(); } catch { /* broken WebView observer */ }
+        intersection = null;
+        visible = true;
+      }
+    }
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
