@@ -40,6 +40,26 @@ describe('campus spatial benchmark evidence gate', () => {
     expect(result.reviewableTasks).toEqual(['timetable-to-building']);
   });
 
+  it('does not pool different destinations or devices to manufacture three repetitions', () => {
+    const rows = [
+      ...fixture('synthetic-1'), ...fixture('synthetic-2'), ...fixture('synthetic-3'),
+    ];
+    for (const row of rows) {
+      if (row.trialId === 'synthetic-2') row.destinationId = 'another-building';
+      if (row.trialId === 'synthetic-3') row.deviceId = 'another-device';
+    }
+    const result = validateCampusSpatialBenchmarkRows(rows);
+    expect(result.valid).toBe(true);
+    expect(result.completeTrials).toBe(3);
+    expect(result.reviewableTasks).toEqual([]);
+
+    // Two identical scenes and a third different one are still insufficient.
+    for (const row of rows) {
+      if (row.trialId === 'synthetic-3') row.deviceId = 'synthetic-device-A';
+    }
+    expect(validateCampusSpatialBenchmarkRows(rows).reviewableTasks).toEqual([]);
+  });
+
   it('cannot compare a run missing UniTable or with repeated results from one product', () => {
     const incomplete = fixture('synthetic-1').filter((row) => row.product !== 'unitable');
     expect(validateCampusSpatialBenchmarkRows(incomplete).issues.join(' ')).toContain('unitable');
