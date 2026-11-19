@@ -379,6 +379,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     if (!manualStart && typeof IntersectionObserver !== 'undefined') {
       try {
         intersection = new IntersectionObserver((entries) => {
+          // A WebView can deliver an already-queued callback after disconnect
+          // (including after the modal closes). Do not reactivate a disposed
+          // WebGL scene or issue state updates from the previous dialog.
+          if (!active) return;
           // A fast scroll can queue multiple visibility transitions in one
           // callback. The last observation is the current state; using the
           // first can strand a visible map offscreen until another scroll.
