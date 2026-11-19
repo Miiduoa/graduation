@@ -13,6 +13,12 @@ import {
   type CampusService,
 } from '@/lib/campusServices';
 import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
+import {
+  LIFE_QUERY_LIMIT,
+  readLifeFilters,
+  writeLifeFilters,
+  type LifeServiceCategory,
+} from './lifeFilters';
 import styles from './life.module.css';
 
 const GROUPS = [
@@ -33,7 +39,14 @@ const GROUPS = [
 ] as const;
 
 type LifeGroup = (typeof GROUPS)[number]['id'];
-type LifeFilters = { query: string; group: LifeGroup | 'all'; publicOnly: boolean };
+type LifeFilters = {
+  query: string;
+  category: LifeServiceCategory;
+  group: LifeGroup | 'all';
+  publicOnly: boolean;
+  expanded: LifeGroup[];
+};
+const MAX_PENDING_FILTER_URLS = 32;
 
 // 這裡只決定生活頁的排法；服務名稱、說明、權限及開關全部來自全站目錄。
 const TRAVEL_PATHS = new Set(['/map', '/bus', '/school-info']);
@@ -68,7 +81,8 @@ function groupFor(service: CampusService): LifeGroup {
 function readFilters(params: URLSearchParams): LifeFilters {
   const requestedGroup = params.get('group');
   return {
-    query: (params.get('q') ?? '').slice(0, 100),
+    ...readLifeFilters(params),
+    expanded: [...readExpanded(params)],
     group: GROUPS.some((item) => item.id === requestedGroup)
       ? (requestedGroup as LifeGroup)
       : 'all',
@@ -91,12 +105,20 @@ function ServiceLink({ item, href }: { item: CampusService; href: string }) {
       <span className={styles.icon} aria-hidden="true">
         <CampusIcon name={ICONS[item.href] ?? 'services'} size={22} />
       </span>
-      <span className={styles.serviceBody}>
-        <span className={styles.serviceTitle}>{item.name}</span>
-        <span className={styles.serviceDescription}>{item.text}</span>
+      <div className={styles.serviceBody}>
+        <h3 className={styles.serviceTitle}>{item.name}</h3>
+        <p className={styles.serviceDescription}>{item.text}</p>
+        {item.href === '/food' && !isWebOnlineOrderingEnabled() && (
+          <p className={styles.serviceDescription}>餐飲入口；線上點餐開放前可先看餐廳菜單。</p>
+        )}
         <span className={styles.accessNote}>{SERVICE_ACCESS[item.access]}</span>
-      </span>
-      <span className={styles.arrow} aria-hidden="true">
+        {item.href === '/lost-found' && (
+          <span className={styles.accessNote}>
+            校內來源需使用學校帳號登入，查看或刊登遺失與拾獲物品。
+          </span>
+        )}
+      </div>
+      <span className={`${styles.arrow} ${styles.action}`} aria-hidden="true">
         <CampusIcon name="arrow" size={18} />
       </span>
     </Link>
@@ -104,23 +126,54 @@ function ServiceLink({ item, href }: { item: CampusService; href: string }) {
 }
 
 function LifeDirectory() {
+  const searchInput = useRef<HTMLInputElement>(null);
+  const composing = useRef(false);
   const params = useSearchParams();
   const queryString = params.toString();
-  const [filters, setFilters] = useState(() => readFilters(new URLSearchParams(queryString)));
-  const [expanded, setExpanded] = useState(() => readExpanded(new URLSearchParams(queryString)));
-  const searchInput = useRef<HTMLInputElement>(null);
-  const scope = useCampusNavigationSearch(params);
-  const { query, group, publicOnly } = filters;
-
+  const [filterState, setFilterState] = useState(() => ({
+    source: queryString,
+    filters: readFilters(new URLSearchParams(queryString)),
+    pendingUrls: [] as string[],
+  }));
+  // A delayed acknowledgement of our own URL write must not replace a newer input draft.
+  const acknowledgedIndex = filterState.pendingUrls.indexOf(queryString);
+  const filters =
+    filterState.source === queryString || acknowledgedIndex >= 0
+      ? filterState.filters
+      : readFilters(new URLSearchParams(queryString));
+  if (filterState.source !== queryString) {
+    setFilterState({
+      source: queryString,
+      filters,
+      // Other history entries and campus switches remain authoritative.
+      pendingUrls:
+        acknowledgedIndex >= 0 ? filterState.pendingUrls.slice(acknowledgedIndex + 1) : [],
+    });
+  }
   useEffect(() => {
-    // 書籤與上一頁恢復相同搜尋；輸入時以 replaceState 保留目前 history entry。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFilters(readFilters(new URLSearchParams(queryString)));
-    setExpanded(readExpanded(new URLSearchParams(queryString)));
-  }, [queryString]);
-
+    function restoreHistoryFilters() {
+      const restored = new URLSearchParams(window.location.search);
+      const source = restored.toString();
+      setFilterState((current) => ({
+        source: current.source,
+        filters: readFilters(restored),
+        // A real history traversal wins even when its URL matches an unacknowledged write.
+        pendingUrls: current.source === source ? [] : [source],
+      }));
+    }
+    window.addEventListener('popstate', restoreHistoryFilters);
+    return () => window.removeEventListener('popstate', restoreHistoryFilters);
+  }, []);
+  const scope = useCampusNavigationSearch(params);
+  const { query, group, publicOnly, category } = filters;
+  const expanded = new Set(filters.expanded);
   const items = visibleCampusServices()
-    .filter((item) => item.category === 'campus' || item.category === 'connect')
+    .filter(
+      (item) =>
+        item.category === 'campus' ||
+        item.category === 'connect' ||
+        ['/classroom', '/timetable'].includes(item.href),
+    )
     .map(presentCampusService);
   const primaryPaths = new Set([
     '/map',
@@ -132,8 +185,15 @@ function LifeDirectory() {
     '/social',
   ]);
   const terms = normalizeSearch(query).split(/\s+/).filter(Boolean);
-  const filtered = terms.length > 0 || group !== 'all' || publicOnly;
+  const filtered = terms.length > 0 || group !== 'all' || publicOnly || category !== 'all';
   const matches = items.filter((item) => {
+    const serviceCategory =
+      item.access === 'public' || item.access === 'device' || item.href === '/food'
+        ? 'public'
+        : ['/social', '/community', '/friends', '/lost-found'].includes(item.href)
+          ? 'community'
+          : 'personal';
+    if (category !== 'all' && category !== serviceCategory) return false;
     if (group !== 'all' && groupFor(item) !== group) return false;
     if (publicOnly && item.access !== 'public' && item.access !== 'device') return false;
     const content = normalizeSearch(
@@ -142,53 +202,53 @@ function LifeDirectory() {
     return terms.every((term) => content.includes(term));
   });
 
-  function updateFilters(next: LifeFilters) {
-    setFilters(next);
+  function updateFilters(next: LifeFilters, persist = true) {
     const url = new URL(window.location.href);
-    if (next.query) url.searchParams.set('q', next.query);
-    else url.searchParams.delete('q');
+    writeLifeFilters(url.searchParams, next);
     if (next.group !== 'all') url.searchParams.set('group', next.group);
     else url.searchParams.delete('group');
     if (next.publicOnly) url.searchParams.set('access', 'public');
     else url.searchParams.delete('access');
+    if (next.expanded.length) url.searchParams.set('expanded', next.expanded.join(','));
+    else url.searchParams.delete('expanded');
+    const destination = `${url.pathname}${url.search}${url.hash}`;
+    const shouldPublish =
+      persist &&
+      destination !== `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const pendingUrl = url.searchParams.toString();
+    setFilterState((current) => ({
+      source: queryString,
+      filters: next,
+      pendingUrls: shouldPublish
+        ? [...current.pendingUrls.filter((entry) => entry !== pendingUrl), pendingUrl].slice(
+            -MAX_PENDING_FILTER_URLS,
+          )
+        : current.pendingUrls,
+    }));
+    if (!shouldPublish) return;
     try {
-      window.history.replaceState(
-        window.history.state,
-        '',
-        `${url.pathname}${url.search}${url.hash}`,
-      );
+      // Next copies its routing state; passing that private state back would skip URL sync.
+      window.history.replaceState(null, '', destination);
     } catch {
-      // History 不可用時仍可搜尋；服務連結不依賴這次儲存。
+      // Filtering remains usable when the browser denies history changes.
+      setFilterState((current) => ({
+        ...current,
+        pendingUrls: current.pendingUrls.filter((entry) => entry !== pendingUrl),
+      }));
     }
   }
-
   function toggleGroup(groupId: LifeGroup) {
     const next = new Set(expanded);
     if (next.has(groupId)) next.delete(groupId);
     else next.add(groupId);
-    setExpanded(next);
-    const url = new URL(window.location.href);
-    if (next.size)
-      url.searchParams.set(
-        'expanded',
-        GROUPS.filter((item) => next.has(item.id))
-          .map((item) => item.id)
-          .join(','),
-      );
-    else url.searchParams.delete('expanded');
-    try {
-      window.history.replaceState(
-        window.history.state,
-        '',
-        `${url.pathname}${url.search}${url.hash}`,
-      );
-    } catch {
-      // 儲存失敗不影響目前展開操作。
-    }
+    updateFilters({
+      ...filters,
+      expanded: GROUPS.filter((entry) => next.has(entry.id)).map((entry) => entry.id),
+    });
   }
 
   function resetFilters() {
-    updateFilters({ query: '', group: 'all', publicOnly: false });
+    updateFilters({ ...filters, query: '', category: 'all', group: 'all', publicOnly: false });
     searchInput.current?.focus();
   }
 
@@ -218,9 +278,23 @@ function LifeDirectory() {
               id="life-service-search"
               type="search"
               value={query}
-              onChange={(event) => updateFilters({ ...filters, query: event.target.value })}
+              onChange={(event) =>
+                updateFilters({ ...filters, query: event.target.value }, !composing.current)
+              }
+              onCompositionStart={() => {
+                composing.current = true;
+              }}
+              onCompositionEnd={(event) => {
+                composing.current = false;
+                updateFilters({ ...filters, query: event.currentTarget.value });
+              }}
               onKeyDown={(event) => {
-                if (event.key === 'Escape' && !event.nativeEvent.isComposing && query) {
+                if (
+                  event.key === 'Escape' &&
+                  !event.nativeEvent.isComposing &&
+                  !composing.current &&
+                  query
+                ) {
                   event.preventDefault();
                   updateFilters({ ...filters, query: '' });
                 }
@@ -228,7 +302,7 @@ function LifeDirectory() {
               placeholder="借書、教室、公車…"
               autoComplete="off"
               enterKeyHint="search"
-              maxLength={100}
+              maxLength={LIFE_QUERY_LIMIT}
               aria-describedby="life-search-hint"
               aria-controls="life-service-results"
             />
@@ -258,7 +332,31 @@ function LifeDirectory() {
                 type="button"
                 aria-pressed={group === entry.id}
                 aria-controls="life-service-results"
-                onClick={() => updateFilters({ ...filters, group: entry.id })}
+                onClick={() => updateFilters({ ...filters, group: entry.id, category: 'all' })}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+          <div className={styles.categories} role="group" aria-label="服務使用方式">
+            {(
+              [
+                { value: 'public', label: '免登入' },
+                { value: 'community', label: '交流與互助' },
+                { value: 'personal', label: '個人安排' },
+              ] as const
+            ).map((entry) => (
+              <button
+                key={entry.value}
+                type="button"
+                aria-pressed={category === entry.value}
+                aria-controls="life-service-results"
+                onClick={() =>
+                  updateFilters({
+                    ...filters,
+                    category: category === entry.value ? 'all' : entry.value,
+                  })
+                }
               >
                 {entry.label}
               </button>

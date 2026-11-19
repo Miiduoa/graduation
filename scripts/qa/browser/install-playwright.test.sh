@@ -13,6 +13,7 @@ cat > "$mock_dir/bin/python" <<'MOCK'
 set -euo pipefail
 printf 'python:%s\n' "$*" >> "$MOCK_LOG"
 if [[ "$*" == '-m playwright install-deps chromium' ]]; then
+  [[ "${MOCK_ROOT:-0}" == 1 ]]
   count="$(grep -c '^python:-m playwright install-deps chromium$' "$MOCK_LOG" || true)"
   if [[ "${MOCK_PROCESS_TEST:-0}" == 1 ]]; then
     if (( count == 1 )); then
@@ -31,12 +32,15 @@ if [[ "$*" == '-m playwright install-deps chromium' ]]; then
   (( count > MOCK_DEPS_FAILS ))
   exit
 fi
+[[ "$*" == '-m playwright install chromium' && "${MOCK_ROOT:-0}" == 0 ]]
 count="$(grep -c '^python:-m playwright install chromium$' "$MOCK_LOG" || true)"
 (( count > MOCK_PYTHON_FAILS ))
 MOCK
 cat > "$mock_dir/bin/sudo" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
+[[ "$1" == timeout ]]
+export MOCK_ROOT=1
 printf 'sudo:%s\n' "$*" >> "$MOCK_LOG"
 # Model sudo's session boundary without requiring root or touching system apt.
 if [[ "${MOCK_PROCESS_TEST:-0}" == 1 ]]; then
@@ -47,6 +51,7 @@ MOCK
 cat > "$mock_dir/bin/apt-get" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
+[[ "${MOCK_ROOT:-0}" == 1 && "$*" == *'install -y fonts-noto-cjk' ]]
 printf 'apt:%s\n' "$*" >> "$MOCK_LOG"
 count="$(grep -c '^apt:' "$MOCK_LOG" || true)"
 if [[ "${MOCK_SLOW_FONT:-0}" == 1 ]]; then
@@ -57,7 +62,7 @@ MOCK
 cat > "$mock_dir/bin/dpkg" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "$*" == '--configure -a' ]]
+[[ "$*" == '--configure -a' && "${MOCK_ROOT:-0}" == 1 ]]
 printf 'dpkg:%s\n' "$*" >> "$MOCK_LOG"
 if [[ "${MOCK_REPAIR_FAIL:-0}" == 1 ]]; then exit 1; fi
 if [[ "${MOCK_PROCESS_TEST:-0}" == 1 ]]; then

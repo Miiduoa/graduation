@@ -46,6 +46,7 @@ retry_install() {
 
 if [[ "${1:-}" == '--fonts-noto-cjk' ]]; then
   retry_install 'Playwright system dependencies' 180s sudo "$(command -v python)" -m playwright install-deps chromium
+  # Download as the runner user so the browser remains in that user's cache.
   retry_install 'Playwright Chromium' 180s python -m playwright install chromium
   # This package is about 61 MB. A 60-second wall-clock limit can repeatedly
   # interrupt a healthy but slow mirror download before apt finishes it.
