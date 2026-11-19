@@ -1844,3 +1844,38 @@ it('never shows a stale return-to-chart control after the authorized source chan
   expect(document.activeElement?.textContent).toContain('新課程一4');
   expect(screen.getByRole('button', { name: '返回原文第 4 行的圖表' })).toBeTruthy();
 });
+
+it.each([
+  { header: '學分', values: ['3', '2'] },
+  { header: '完成率', values: ['75%', '50%'] },
+])('keeps same-named source rows separately navigable in the $header chart', ({ header, values }) => {
+  const material = [
+    '教材說明',
+    '| 分類 | ' + header + ' |',
+    '| --- | --- |',
+    '| 必修 | ' + values[0] + ' |',
+    '| 必修 | ' + values[1] + ' |',
+  ].join('\\n');
+  const view = render(<StudySourceTables text={material} />);
+  const meters = Array.from(view.container.querySelectorAll('meter'));
+  expect(meters).toHaveLength(2);
+  expect(meters.map((bar) => bar.getAttribute('aria-label'))).toEqual([
+    '必修：' + values[0] + '；教材原文第 4 行',
+    '必修：' + values[1] + '；教材原文第 5 行',
+  ]);
+  // Row identity is the exact source line, not the repeated text label.
+  expect(meters.map((bar) => bar.closest('li')?.textContent)).toEqual([
+    '必修' + values[0] + '原文第 4 行 · 回表格核對',
+    '必修' + values[1] + '原文第 5 行 · 回表格核對',
+  ]);
+  fireEvent.click(screen.getByText(/展開第 2 欄/));
+  const jump = screen.getByRole('button', { name: '原文第 5 行 · 回表格核對' });
+  fireEvent.click(jump);
+  expect(document.activeElement).toBe(view.container.querySelectorAll('tbody tr')[1]);
+  fireEvent.click(screen.getByRole('button', { name: '返回原文第 5 行的圖表' }));
+  expect(document.activeElement).toBe(jump);
+  // The two original source rows remain separate and unchanged.
+  expect(Array.from(view.container.querySelectorAll('tbody tr')).map((row) => row.textContent))
+    .toEqual(['必修' + values[0], '必修' + values[1]]);
+  view.unmount();
+});

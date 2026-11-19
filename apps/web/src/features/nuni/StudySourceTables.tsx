@@ -159,16 +159,14 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   const creditsColumn = /(?:學分|credits?)/iu.test(column);
   let rowFormat: 'plain' | 'credits' | null = null;
   const rows: SourceValueRow[] = [];
-  const labels = new Set<string>();
   for (const [rowIndex, [label, original]] of table.rows.entries()) {
-    if (!label?.trim() || !original || labels.has(label.trim())) return null;
+    if (!label?.trim() || !original) return null;
     const creditMatch = creditsColumn ? creditNumber.exec(original) : null;
     const format = plainNumber.test(original) ? 'plain' : creditMatch ? 'credits' : null;
     if (!format || (rowFormat !== null && format !== rowFormat)) return null;
     rowFormat = format;
     const amount = Number(creditMatch?.[1] ?? original);
     if (!Number.isFinite(amount)) return null;
-    labels.add(label.trim());
     rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
   }
   return rows.some((row) => row.amount > 0) ? rows : null;
@@ -183,17 +181,24 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
   if (!isBoundedPercentageColumn(table.headers[1])) return null;
   const rows: SourceValueRow[] = [];
-  const labels = new Set<string>();
   for (const [rowIndex, [label, original]] of table.rows.entries()) {
     if (!label?.trim() || !original ||
-        !/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[%％]$/u.test(original) ||
-        labels.has(label.trim())) return null;
+        !/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[%％]$/u.test(original)) return null;
     const amount = Number(original.slice(0, -1));
     if (!Number.isFinite(amount) || amount > 100) return null;
-    labels.add(label.trim());
     rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
   }
   return rows;
+}
+
+// Repeated row labels are valid in source textbooks (e.g. two "必修" rows).
+// Distinguish their accessible meters by the exact source line, rather than
+// silently hiding the chart or merging values from different rows.
+function chartRowAccessibleLabel(row: SourceValueRow, rows: SourceValueRow[]): string {
+  const label = row.label + '：' + row.original;
+  return rows.some((other) => other !== row && other.label.trim() === row.label.trim())
+    ? label + '；教材原文第 ' + row.sourceLine + ' 行'
+    : label;
 }
 
 function StudySourcePercentComparison({ table, onJumpToSource }: {
@@ -211,7 +216,7 @@ function StudySourcePercentComparison({ table, onJumpToSource }: {
       </p>
       <ul className={styles.sourceValueList} aria-label={table.headers[1] + ' 原文百分比'}>
         {rows.map((row) => (
-          <li key={row.label}>
+          <li key={row.sourceLine}>
             <div className={styles.sourceValueRow}>
               <span>{row.label}</span>
               <span>{row.original}</span>
@@ -221,7 +226,7 @@ function StudySourcePercentComparison({ table, onJumpToSource }: {
               原文第 {row.sourceLine} 行 · 回表格核對
             </button>
             <meter min={0} max={100} value={row.amount}
-              aria-label={row.label + '：' + row.original}
+              aria-label={chartRowAccessibleLabel(row, rows)}
               aria-valuetext={row.original + '；滿格 100%'} />
           </li>
         ))}
@@ -248,7 +253,7 @@ function StudySourceValueComparison({ table, onJumpToSource }: {
       </p>
       <ul className={styles.sourceValueList} aria-label={table.headers[1] + ' 原文數值比較'}>
         {rows.map((row) => (
-          <li key={row.label}>
+          <li key={row.sourceLine}>
             <div className={styles.sourceValueRow}>
               <span>{row.label}</span>
               <span>{row.original}</span>
@@ -258,7 +263,7 @@ function StudySourceValueComparison({ table, onJumpToSource }: {
               原文第 {row.sourceLine} 行 · 回表格核對
             </button>
             <meter min={0} max={max} value={row.amount}
-              aria-label={row.label + '：' + row.original}
+              aria-label={chartRowAccessibleLabel(row, rows)}
               aria-valuetext={row.original + '；本欄最大值 ' + maxRow.original} />
           </li>
         ))}
