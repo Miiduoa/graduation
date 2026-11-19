@@ -168,6 +168,30 @@ function ownArrayPrefix<T>(items: readonly T[], limit: number): T[] {
   return prefix;
 }
 
+// The authorized reader can return more tasks than a small offline model can
+// display. Choose deadlines from the entire *validated, already-read* excerpt,
+// not merely the server's first five records. Never mutate source order,
+// execute caller-owned array methods, or imply that a partial page is complete.
+function dueOrderedAssignmentExcerpt(
+  items: CampusSenseSnapshot['assignments']['items'],
+  limit: number,
+) {
+  const copied = ownArrayPrefix(items, items.length).map((row, index) => ({
+    index,
+    dueMs: row.dueAt === null ? null : Date.parse(row.dueAt),
+    title: row.title,
+    groupName: row.groupName,
+    dueAt: row.dueAt,
+    ...(row.source ? { source: parseCampusAssignmentSource(row.source) } : {}),
+  }));
+  copied.sort((a, b) => {
+    if (a.dueMs === null) return b.dueMs === null ? a.index - b.index : 1;
+    if (b.dueMs === null) return -1;
+    return a.dueMs - b.dueMs || a.index - b.index;
+  });
+  return copied.slice(0, limit).map(({ index, dueMs, ...evidence }) => evidence);
+}
+
 function hasOwnEvidenceFields(value: unknown, required: readonly string[], optional: readonly string[] = []): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   for (const key of required) {
@@ -381,13 +405,12 @@ const sampleCourses = owned && timetable
           '；完整性：' + (verifiedSense.assignments.coverage?.complete === true
             ? '來源已完整讀取' : verifiedSense.assignments.coverage
               ? '僅讀取部分資料' : '未能核對是否完整') +
-          '；最多列出前 5 項：' + JSON.stringify(ownArrayPrefix(verifiedSense.assignments.items, 5).map(({
-            title, groupName, dueAt, source,
-          }) => ({ title, groupName, dueAt, ...(source ? { source: parseCampusAssignmentSource(source) } : {}) }))),
+          '；依已取得項目的截止時間排序，最多列出期限最早的 5 項：' +
+            JSON.stringify(dueOrderedAssignmentExcerpt(verifiedSense.assignments.items, 5)),
         '校園公告：' + verifiedSense.announcements.status +
           '；部分項目：' + JSON.stringify(ownArrayPrefix(verifiedSense.announcements.items, 4).map(({ title, publishedAt }) => ({ title, publishedAt }))),
         '上述來源總數與完整性，只涵蓋已授權課程中目前開放且未見已繳交時間的作業，不包括已提交、草稿、關閉或無權存取的作業；不能當成全部作業或歷史繳交清單。',
-        '即使來源完整，上面仍最多列出 5 項；未列出不代表沒有其他作業，沒有繳交回條也不能斷言未交。若要核對全部作業與繳交狀態，請到原課程作業頁核對；不可把同步資料說成最新結果，不得執行任何寫入。',
+        '期限排序僅比較本次已取得且有截止時間的作業，無期限項目排在後面；若來源僅部分讀取，不能認定這五項是全部作業中最早截止的五項。即使來源完整，上面仍最多列出 5 項；未列出不代表沒有其他作業，沒有繳交回條也不能斷言未交。若要核對全部作業與繳交狀態，請到原課程作業頁核對；不可把同步資料說成最新結果，不得執行任何寫入。',
       ].join('\n')
     : '此回合沒有主動同步且有效的校園資料，不可自行猜測個人作業、公告與申請狀態。';
   return [
