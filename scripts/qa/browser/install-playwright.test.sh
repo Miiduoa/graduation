@@ -19,11 +19,13 @@ if [[ "$*" == '-m playwright install-deps chromium' ]]; then
       # Simulate apt retaining its lock and ignoring TERM in sudo's session.
       exec flock --no-fork -n "$MOCK_LOCK" bash -c '
         trap "" TERM
+        touch "$MOCK_LOCK.interrupted"
         echo locked >> "$MOCK_LOG"
         while :; do /bin/sleep 1; done
       '
     fi
     flock -n "$MOCK_LOCK" true
+    [[ ! -e "$MOCK_LOCK.interrupted" ]]
     echo recovered >> "$MOCK_LOG"
   fi
   (( count > MOCK_DEPS_FAILS ))
@@ -52,6 +54,17 @@ if [[ "${MOCK_SLOW_FONT:-0}" == 1 ]]; then
 fi
 (( count > MOCK_APT_FAILS ))
 MOCK
+cat > "$mock_dir/bin/dpkg" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == '--configure -a' ]]
+printf 'dpkg:%s\n' "$*" >> "$MOCK_LOG"
+if [[ "${MOCK_REPAIR_FAIL:-0}" == 1 ]]; then exit 1; fi
+if [[ "${MOCK_PROCESS_TEST:-0}" == 1 ]]; then
+  flock -n "$MOCK_LOCK" true
+  rm -f "$MOCK_LOCK.interrupted"
+fi
+MOCK
 cat > "$mock_dir/bin/sleep" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -72,7 +85,9 @@ fi
 if [[ "${MOCK_PROCESS_TEST:-0}" == 1 ]]; then
   exec "$REAL_TIMEOUT" --kill-after=0.2s 1s "$@"
 fi
-count="$(grep -c '^timeout:' "$MOCK_LOG" || true)"
+if [[ "$1" == dpkg ]]; then exec "$@"; fi
+echo install-attempt >> "$MOCK_LOG"
+count="$(grep -c '^install-attempt$' "$MOCK_LOG" || true)"
 if (( count <= ${MOCK_TIMEOUT_FAILS:-0} )); then exit 124; fi
 "$@"
 MOCK
@@ -87,7 +102,9 @@ bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1
 [[ "$(grep -c '^python:-m playwright install-deps chromium$' "$MOCK_LOG")" -eq 2 ]]
 [[ "$(grep -c '^apt:' "$MOCK_LOG")" -eq 2 ]]
 [[ "$(grep -c '^sleep:' "$MOCK_LOG")" -eq 3 ]]
-[[ "$(grep -c '^timeout:180s' "$MOCK_LOG")" -eq 6 ]]
+[[ "$(grep -c '^timeout:180s' "$MOCK_LOG")" -eq 8 ]]
+[[ "$(grep -c '^dpkg:--configure -a$' "$MOCK_LOG")" -eq 2 ]]
+[[ "$(grep -c '^sudo:timeout --kill-after=5s 180s dpkg --configure -a$' "$MOCK_LOG")" -eq 2 ]]
 # Both privileged commands must place timeout inside sudo, preserving Python's path.
 [[ "$(grep -Fc "sudo:timeout --kill-after=5s 180s $mock_dir/bin/python -m playwright install-deps chromium" "$MOCK_LOG")" -eq 2 ]]
 [[ "$(grep -c '^sudo:timeout --kill-after=5s 180s apt-get ' "$MOCK_LOG")" -eq 2 ]]
@@ -96,7 +113,7 @@ bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1
 export MOCK_PYTHON_FAILS=0 MOCK_APT_FAILS=0 MOCK_DEPS_FAILS=0 MOCK_TIMEOUT_FAILS=2
 : > "$MOCK_LOG"
 bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1
-[[ "$(grep -c '^timeout:180s' "$MOCK_LOG")" -eq 5 ]]
+[[ "$(grep -c '^timeout:180s' "$MOCK_LOG")" -eq 7 ]]
 [[ "$(grep -c '^python:' "$MOCK_LOG")" -eq 2 ]]
 [[ "$(grep -c '^sleep:' "$MOCK_LOG")" -eq 2 ]]
 export MOCK_TIMEOUT_FAILS=0
@@ -157,7 +174,7 @@ if bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1; th
 fi
 [[ "$(grep -c '^python:' "$MOCK_LOG")" -eq 2 ]]
 [[ "$(grep -c '^apt:' "$MOCK_LOG")" -eq 3 ]]
-[[ "$(grep -c '^timeout:180s' "$MOCK_LOG")" -eq 5 ]]
+[[ "$(grep -c '^timeout:180s' "$MOCK_LOG")" -eq 7 ]]
 
 # A slow, successful font transfer must finish instead of restarting three times.
 export MOCK_APT_FAILS=0 MOCK_SLOW_FONT=1
@@ -176,7 +193,7 @@ fi
 [[ ! -s "$MOCK_LOG" ]]
 
 # A real timeout must kill the lock holder across the simulated sudo session,
-# allowing the next attempt to acquire the same lock (the CI failure regression).
+# then repair interrupted dpkg state before the next apt attempt can succeed.
 export MOCK_APT_FAILS=0 MOCK_PROCESS_TEST=1 MOCK_LOCK="$mock_dir/apt.lock"
 : > "$MOCK_LOG"
 if ! bash "$script_dir/install-playwright.sh" --fonts-noto-cjk > "$mock_dir/process-output.log" 2>&1; then
@@ -186,6 +203,20 @@ fi
 grep -q '^locked$' "$MOCK_LOG"
 grep -q '^recovered$' "$MOCK_LOG"
 [[ "$(grep -c '^python:-m playwright install-deps chromium$' "$MOCK_LOG")" -eq 2 ]]
+[[ "$(grep -c '^dpkg:--configure -a$' "$MOCK_LOG")" -eq 1 ]]
+[[ ! -e "$MOCK_LOCK.interrupted" ]]
 flock -n "$MOCK_LOCK" true
 
-echo 'Browser installation bounded retry tests: 10/10 passed'
+# Failed recovery must stop before retrying apt or running browser checks.
+export MOCK_PROCESS_TEST=0 MOCK_DEPS_FAILS=1 MOCK_REPAIR_FAIL=1
+: > "$MOCK_LOG"
+if bash "$script_dir/install-playwright.sh" --fonts-noto-cjk > "$mock_dir/repair-output.log" 2>&1; then
+  echo 'Failed package recovery was silently accepted' >&2
+  exit 1
+fi
+[[ "$(grep -c '^python:-m playwright install-deps chromium$' "$MOCK_LOG")" -eq 1 ]]
+[[ "$(grep -c '^dpkg:--configure -a$' "$MOCK_LOG")" -eq 1 ]]
+[[ "$(grep -c '^python:-m playwright install chromium$' "$MOCK_LOG" || true)" -eq 0 ]]
+grep -q 'could not recover interrupted package configuration' "$mock_dir/repair-output.log"
+
+echo 'Browser installation bounded retry tests: 11/11 passed'

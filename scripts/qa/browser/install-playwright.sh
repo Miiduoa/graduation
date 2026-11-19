@@ -30,6 +30,15 @@ retry_install() {
       echo "${label} failed after 3 attempts." >&2
       return 1
     fi
+    if (( ${#elevation[@]} )); then
+      # Killing apt during unpack/configure releases its lock but can leave
+      # dpkg unfinished. Complete pending configuration before apt retries;
+      # otherwise every later attempt fails with "dpkg was interrupted".
+      if ! "${elevation[@]}" timeout --kill-after=5s 180s dpkg --configure -a; then
+        echo "${label}: could not recover interrupted package configuration." >&2
+        return 1
+      fi
+    fi
     echo "${label} attempt ${attempt}/3 failed or timed out; retrying after $((attempt * 15)) seconds." >&2
     sleep "$((attempt * 15))"
   done
