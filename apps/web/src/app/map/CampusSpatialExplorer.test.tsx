@@ -753,6 +753,46 @@ it('keeps WebGL suspended if scroll restoration moves the canvas offscreen befor
   }
 });
 
+it('pauses a ready mobile WebGL scene when viewport resize moves the host offscreen', async () => {
+  // Rotating the device or showing the soft keyboard can change viewport
+  // height before IntersectionObserver delivers its next callback.
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const height = window.innerHeight;
+  const top = height - 50;
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: top, left: 0, top,
+    right: 320, bottom: top + 150, width: 320, height: 150,
+    toJSON: () => ({}),
+  } as DOMRect);
+  try {
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    vi.stubGlobal('innerHeight', height - 100);
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+    vi.stubGlobal('innerHeight', height);
+    act(() => intersection?.([{
+      isIntersecting: true, target: graphics, time: 100,
+      intersectionRect: { width: 320, height: 50 },
+    }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    scene.setActive.mockClear();
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).not.toHaveBeenCalled();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('ignores a late positive viewport notification when Safari restored the host offscreen', async () => {
   // A queued observer event can arrive *after* pageshow with a new timestamp
   // even though its intersection rectangle describes the pre-restore scroll.

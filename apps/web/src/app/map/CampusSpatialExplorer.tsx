@@ -446,6 +446,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       startWhenVisible();
       syncPendingStartup();
     };
+    // Rotating a phone or opening its virtual keyboard can shrink the
+    // visual viewport before IntersectionObserver queues a new entry. Stop
+    // rendering a now-offscreen canvas immediately; a subsequent genuine
+    // intersection (or explicit manual recovery) may resume the same scene.
+    const onViewportResize = () => {
+      if (!active) return;
+      invalidateRestoredOffscreenVisibility();
+      updateVisibility();
+      syncPendingStartup();
+    };
 
     // A few embedded WebViews expose IntersectionObserver but fail during
     // construction or observe(). Do not strand the tour in offscreen mode:
@@ -537,6 +547,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('resize', onViewportResize);
     startWhenVisible();
     return () => {
       active = false;
@@ -547,6 +558,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('resize', onViewportResize);
       pendingCreate = null;
       scene?.dispose();
       runtime.current = null;
