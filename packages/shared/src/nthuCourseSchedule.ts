@@ -134,17 +134,20 @@ export function nthuTimetableImportCsv(course: PublicCatalogCourse): string | nu
     if (!Number.isFinite(Number(credits))) return null;
   }
   // 個人匯入解析器只接受十進位學分。String(Number('0.0000001')) 會變成 1e-7，
-  // 只在這種情況改寫為來源的精確十進位（去除多餘的前導與尾端零），
-  // 不改動共用 CSV 序列化器，也不改變一般學分的輸出。
+  // 只在這種情況把 Number 的最短表示精確展開成十進位（不使用來源的原始字串，
+  // 避免超長小數尾數讓 CSV 超過匯入字數上限）；一般學分輸出與 main 相同。
   const creditCell = (): number | undefined => {
     if (credits === '') return undefined;
     const value = Number(credits);
-    if (!/[eE]/.test(String(value))) return value;
-    const [whole, fraction = ''] = credits.split('.');
-    const integer = whole.replace(/^0+(?=\d)/, '');
-    const decimals = fraction.replace(/0+$/, '');
-    // 字串以數字開頭，CSV 公式前綴防護不受影響；解析器會再轉回同一個數值。
-    return (decimals ? `${integer}.${decimals}` : integer) as unknown as number;
+    const shortest = String(value);
+    const match = /^(\d+)(?:\.(\d+))?e-(\d+)$/.exec(shortest);
+    if (!match) return value;
+    const [, whole, fraction = '', exponent] = match;
+    const digits = (whole + fraction).replace(/^0+(?=\d)/, '');
+    const leadingZeros = Number(exponent) - whole.length;
+    // 0 <= value <= 40，指數記法只會是小於 1e-6 的正數；字串以數字開頭，
+    // CSV 公式前綴防護不受影響，解析器會轉回同一個數值。
+    return `0.${'0'.repeat(leadingZeros)}${digits}` as unknown as number;
   };
   // Multiple official room/time pairs may describe one course. A repeated
   // weekday/period would duplicate or overlap the student's imported timetable;

@@ -34,6 +34,8 @@ describe('NTHU public course credits passed to a personal timetable', () => {
     ['0.0000001', 0.0000001],
     ['0.00000015', 0.00000015],
     ['000.000000100', 0.0000001],
+    ['0.0000001' + '0'.repeat(100_000) + '1', 0.0000001],
+    ['0.000000123456789012345678', 1.2345678901234568e-7],
     // 與 main 相容：可無損轉換的長格式等值表示仍要完整匯入。
     ['3.' + '0'.repeat(31), 3],
     ['0'.repeat(32) + '3', 3],
@@ -50,6 +52,8 @@ describe('NTHU public course credits passed to a personal timetable', () => {
     )).toEqual([]);
     expect(parsed.rows.map(row => row.credits)).toEqual([expected, expected]);
     expect(csv).not.toMatch(/\d[eE][+-]?\d/);
+    // 超長來源字串不可把 CSV 撐過個人匯入的字數上限。
+    expect(csv!.length).toBeLessThan(2_000);
     expect(parsed.rows.map(row => row.location)).toEqual(['BMES醫環618', 'BMES醫環501']);
   });
 
