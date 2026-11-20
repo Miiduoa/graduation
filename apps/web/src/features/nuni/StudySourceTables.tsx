@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { extractStudySourceTables, type StudySourceTable } from './studySourceTables';
+import { hasVisibleStudyContent } from './courseStudySession';
 import styles from './CourseStudyPanel.module.css';
 
 
@@ -230,8 +231,10 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   const creditsColumn = /(?:學分|credits?)/iu.test(column);
   let rowFormat: 'plain' | 'grouped' | 'credits' | null = null;
   const rows: SourceValueRow[] = [];
+  // Invisible row labels cannot identify a derived bar to students or screen readers.
+  // Keep the exact original table, but skip optional graphs without readable keys.
   for (const [rowIndex, [label, original]] of table.rows.entries()) {
-    if (!label?.trim() || !original) return null;
+    if (!hasVisibleStudyContent(label ?? '') || !original) return null;
     const creditMatch = creditsColumn ? creditNumber.exec(original) : null;
     const format = plainNumber.test(original) ? 'plain'
       : groupedNumber.test(original) ? 'grouped' : creditMatch ? 'credits' : null;
@@ -261,8 +264,10 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   const column = table.headers[1];
   if (!isBoundedPercentageColumn(column) || isNonRatioColumn(column)) return null;
   const rows: SourceValueRow[] = [];
+  // Invisible row labels cannot identify a derived bar to students or screen readers.
+  // Keep the exact original table, but skip optional graphs without readable keys.
   for (const [rowIndex, [label, original]] of table.rows.entries()) {
-    if (!label?.trim() || !original ||
+    if (!hasVisibleStudyContent(label ?? '') || !original ||
         !/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[%％]$/u.test(original)) return null;
     const amount = Number(original.slice(0, -1));
     if (!Number.isFinite(amount) || amount > 100) return null;

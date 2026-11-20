@@ -2357,3 +2357,41 @@ it('retains real weekday counts and study-hour quantities as source comparisons'
     unmount();
   }
 });
+
+
+it('keeps the original table but omits derived bars for invisible row labels', () => {
+  for (const label of ['\u200b', '\u2800', '\u0301', '\u200e\u200f']) {
+    for (const [heading, first, second] of [
+      ['學習時數', '3', '5'],
+      ['完成率', '30%', '50%'],
+    ]) {
+      const markdown = [
+        '| 項目 | ' + heading + ' |', '| --- | --- |',
+        '| ' + label + ' | ' + first + ' |', '| 完整標籤 | ' + second + ' |',
+      ].join('\n');
+      const view = render(<StudySourceTables text={markdown} />);
+      expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(3);
+      expect(comparisonSummaries(view.container)).toEqual([]);
+      expect(screen.getByText(second)).toBeTruthy();
+      view.unmount();
+    }
+  }
+});
+
+it('keeps comparisons for visible CJK, emoji, math and Braille row labels', () => {
+  for (const label of ['資料庫', '👩‍💻', '數學−', '⠁']) {
+    for (const [heading, first, second] of [
+      ['學習時數', '3', '5'],
+      ['完成率', '30%', '50%'],
+    ]) {
+      const markdown = [
+        '| 項目 | ' + heading + ' |', '| --- | --- |',
+        '| ' + label + ' | ' + first + ' |', '| 對照 | ' + second + ' |',
+      ].join('\n');
+      const view = render(<StudySourceTables text={markdown} />);
+      expect(comparisonSummaries(view.container)).toHaveLength(1);
+      expect(screen.getByRole('table')).toBeTruthy();
+      view.unmount();
+    }
+  }
+});
