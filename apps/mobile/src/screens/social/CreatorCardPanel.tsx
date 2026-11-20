@@ -55,8 +55,12 @@ function ScopedCreatorCardPanel({
   const [openingLink, setOpeningLink] = useState(false);
   const openingLinkFlight = useRef(false);
   const [linkError, setLinkError] = useState('');
+  // A pending OS handoff belongs to the URL visible when it was pressed.
+  // A later edit may replace that URL before the old handoff rejects.
+  const currentPortfolioLink = useRef('');
   const mounted = useRef(false);
   const [feedback, setFeedback] = useState('');
+  currentPortfolioLink.current = state.status === 'ready' ? state.value?.linkUrl ?? '' : '';
 
   useEffect(() => {
     mounted.current = true;
@@ -91,6 +95,8 @@ function ScopedCreatorCardPanel({
     try {
       const confirmed = await saveCreatorCard(schoolId, ownerUid, draft);
       if (!mounted.current) return;
+      currentPortfolioLink.current = confirmed.linkUrl;
+      setLinkError('');
       setState({ status: 'ready', value: confirmed });
       setEditing(false);
       setFeedback('社群簡介已儲存。');
@@ -117,7 +123,9 @@ function ScopedCreatorCardPanel({
     try {
       await Linking.openURL(url);
     } catch {
-      if (mounted.current) setLinkError('無法開啟作品連結，請稍後再試。');
+      if (mounted.current && currentPortfolioLink.current === url) {
+        setLinkError('無法開啟作品連結，請稍後再試。');
+      }
     } finally {
       if (mounted.current) {
         openingLinkFlight.current = false;
