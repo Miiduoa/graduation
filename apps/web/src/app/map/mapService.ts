@@ -25,6 +25,7 @@ export type MapLocation = {
   building?: string;
   floor?: string;
   facilities?: string[];
+  transitStopIds?: unknown;
 };
 
 function validId(value: string) {
@@ -88,6 +89,7 @@ async function readMapLocations(schoolId: string): Promise<MapLocation[]> {
         ...(place.building ? { building: place.building } : {}),
         ...(place.floor ? { floor: place.floor } : {}),
         ...(place.facilities.length ? { facilities: place.facilities } : {}),
+        ...('transitStopIds' in place ? { transitStopIds: place.transitStopIds } : {}),
       }];
     })
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));

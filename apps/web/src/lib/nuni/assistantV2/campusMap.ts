@@ -84,6 +84,24 @@ export function campusMapSourcePath(schoolId: string, source: CampusMapSource): 
     : source === 'legacy-pois' ? 'pois' : 'bundled/providence-campus';
 }
 
+
+const BOUNDED_TRANSIT_STOP_MARKER = ['1'];
+
+/** Classroom matching only needs a yes/no stop marker. Never copy a raw
+ * Firestore value into a validated assistant result or the tool summary.
+ * Emptiness rules must match the shared resolver: a long array of blank
+ * strings is not a stop marker. */
+export function boundedTransitStopMarker(place: object): { transitStopIds: string[] } | Record<string, never> {
+  if (!Object.prototype.propertyIsEnumerable.call(place, 'transitStopIds')) return {};
+  const ids: unknown = (place as { transitStopIds?: unknown }).transitStopIds;
+  const hasMarker = typeof ids === 'string'
+    ? ids.trim().length > 0
+    : Array.isArray(ids)
+      ? ids.some((id: unknown) => (typeof id === 'string' ? id.trim().length > 0 : id != null))
+      : ids != null;
+  return hasMarker ? { transitStopIds: [...BOUNDED_TRANSIT_STOP_MARKER] } : {};
+}
+
 function comparable(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('zh-TW').replace(/\s+/g, ' ').trim();
 }
@@ -127,7 +145,7 @@ export function parseCampusMapResult(raw: unknown, schoolId: string, requested: 
       : value.unavailable !== undefined) throw new Error('Invalid map availability');
     const items = value.items.map((rawItem): CampusMapItem => {
       const item = object(rawItem, ['id', 'schoolId', 'name', 'category', 'description', 'lat', 'lng', 'building', 'floor',
-        'facilities', 'source', 'sourcePath', 'href', 'match', 'verification', 'sourceUrl']);
+        'facilities', 'source', 'sourcePath', 'href', 'match', 'verification', 'sourceUrl', 'transitStopIds']);
       const id = safeId(item.id);
       if (item.schoolId !== schoolId || ![source, 'bundled-providence'].includes(item.source as CampusMapSource) ||
           (item.source === 'bundled-providence' && schoolId !== 'pu') ||
@@ -136,13 +154,14 @@ export function parseCampusMapResult(raw: unknown, schoolId: string, requested: 
           typeof item.lat !== 'number' || typeof item.lng !== 'number' || !Number.isFinite(item.lat) || !Number.isFinite(item.lng) ||
           Math.abs(item.lat) > 90 || Math.abs(item.lng) > 180 || (item.lat === 0 && item.lng === 0) ||
           !Array.isArray(item.facilities) || item.facilities.length > 12) throw new Error('Invalid map place');
-      const parsed: CampusMapItem = { id, schoolId, name: clean(item.name, 160), category: clean(item.category, 80),
+      const parsed = { id, schoolId, name: clean(item.name, 160), category: clean(item.category, 80),
         description: clean(item.description, 320, true), lat: item.lat, lng: item.lng,
         facilities: item.facilities.map(facility => clean(facility, 80)), source: item.source as CampusMapSource,
         sourcePath: item.sourcePath as string, href: item.href as string,
         match: item.match as CampusMapMatch, verification: item.verification as CampusMapItem['verification'],
         ...(item.building !== undefined ? { building: clean(item.building, 120) } : {}),
-        ...(item.floor !== undefined ? { floor: clean(item.floor, 80) } : {}) };
+        ...(item.floor !== undefined ? { floor: clean(item.floor, 80) } : {}),
+        ...boundedTransitStopMarker(item) } as CampusMapItem;
       if (new Set(parsed.facilities).size !== parsed.facilities.length ||
           parsed.match !== campusMapMatch(schoolId, args.query, parsed)) throw new Error('Invalid map match');
       const sourceUrl = providencePlaceSourceUrl(schoolId, parsed);
