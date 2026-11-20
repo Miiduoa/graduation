@@ -942,3 +942,10 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - 從 `fix/security-legacy-root-post-visibility-20261120` 的精確 `8f94c3670b97d98c6c5ed451626133e87a1a59ad` 另開隔離驗證分支 `feature/security-root-post-emulator-20261120`，保留原修補分支與原主線，不重寫其他進行中的工作。新增真 Firebase Rules Emulator 可執行的相同登入情境：教師被撤銷後不得預覽根草稿與留言、權限恢復後允許；作者校籍欄位衝突時不得借作者權限讀草稿、恢復後允許；Canonical 使用者文件消失但學校／群組會員殘留時不得讀公開貼文或票據，重建有效 profile 後允許。
 - 相關測試併入 `backend/tests/security-rules.test.js` 既有 legacy root 情境，正式執行指令為 `pnpm test:rules`；測試資料為合成，未接 E 校園、正式 GCS、Supabase 或 Firebase 正式資源。此紀錄於觸發驗證前建立，**不得視為 Emulator 已通過**。需查精確提交工作紀錄、CI／CodeQL／Supabase／Python／Mobile Agent／適用 Maestro 與指定 App 5504170；未具該精確 head 核可不得合併、發布。
 - 已確認既有 `.github/workflows/firestore-rules.yml` 針對 `feature/**` push 有獨立 Firestore／Storage Emulator 測試，**不執行 `pnpm/npm audit`**；不建立 PR 來觸發包含外送 audit 的 CI，也不以新工具或代理重送 audit payload。相關其他 CI 沒有新 head 的綠燈不得沿用。
+
+### 2026-11-20｜legacy root postLikes 收據跨帳號 GET（隔離修補候選）
+
+- **缺口：** 根 `postLikes/{id}` 的 `allow get` 只驗父貼文公開及目前學校／群組會員，未綁定收據的 `userId`。同群組使用者若知道他人收據 ID，即可讀取別人的投票識別及興趣；原測試甚至將此情境視為允許。此為原始碼與合成情境中的授權缺口，不是正式資料已曝露的證據。
+- **最小修補：** 精確 GET 增加 `resource.data.get('userId', null) == request.auth.uid`，維持本人的正常查詢、公開父文／校籍／群組／撤銷條件、既有 create/delete 與歷史任意收據 ID 的相容性，不改公開的貼文彙總計數。新 Emulator 案例檢查同群組跨帳號（雙向）與作者讀取其他投票者、正常本人與既有撤權重放。
+- **驗證界線：** JavaScript 回歸來源已完成 V8 語法解析；Firebase Emulator、Web/Mobile/Functions 與各 workflow 需對新 SHA 分別驗證。舊客戶端若有依賴 GET 其他投票者的單筆收據，將受到預期限制，需先確認相容性。Firestore Rules 的成功 GET 會傳回完整文件，無法只遮蔽 userId（[官方說明](https://firebase.google.com/docs/firestore/security/rules-fields)）。
+- **發布／權限：** 未授權 npm/pnpm audit 外送限制持續有效；獨立分支不觸發該 audit，不能因此當作 Security Gates 通過。指定 nuni-merge-gate App 5504170 的精確 head 審查及全套測試前不合併。無正式資料、金鑰、token、migration、E 校園或部署；GCS/Supabase 已簽 URL、真 Storage 競態、PG CI、minimatch 雙鎖檔及回復仍待驗收。

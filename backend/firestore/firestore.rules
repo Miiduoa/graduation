@@ -2410,7 +2410,10 @@ service cloud.firestore {
 
     match /postLikes/{docId} {
       // A vote always needs an explicitly published parent (including delete).
+      // Like receipts disclose a specific member's interests; GET is owner-only.
+      // Aggregate post reactions can remain public without exposing voter receipts.
       allow get: if isSignedIn()
+        && resource.data.get('userId', null) == request.auth.uid
         && resource.data.get('postId', null) is string
         && canReactToRootPost(resource.data.postId);
       allow list: if false;

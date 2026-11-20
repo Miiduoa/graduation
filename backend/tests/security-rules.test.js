@@ -517,7 +517,8 @@ describe('firestore security rules', () => {
     const guest = testEnv.unauthenticatedContext().firestore();
 
     await assertSucceeds(alice.doc('postLikes/pu-like').get());
-    await assertSucceeds(bob.doc('postLikes/pu-like').get());
+    // Same-group peers cannot inspect a known receipt ID belonging to another voter.
+    await assertFails(bob.doc('postLikes/pu-like').get());
     await assertSucceeds(mallory.doc('postLikes/ncku-like').get());
     await assertFails(alice.doc('postLikes/ncku-like').get());
     await assertFails(mallory.doc('postLikes/pu-like').get());
@@ -533,6 +534,8 @@ describe('firestore security rules', () => {
     // Existing exact-vote lifecycle stays available to the member; a voter
     // cannot delete someone else's vote or create one in another school.
     await assertSucceeds(bob.doc('postLikes/bob-pu').set({ postId: 'pu-post', userId: 'bob' }));
+    await assertSucceeds(bob.doc('postLikes/bob-pu').get());
+    await assertFails(alice.doc('postLikes/bob-pu').get());
     await assertFails(bob.doc('postLikes/pu-like').delete());
     await assertFails(alice.doc('postLikes/cross-school').set({ postId: 'ncku-post', userId: 'alice' }));
 
@@ -590,6 +593,7 @@ describe('firestore security rules', () => {
     await assertSucceeds(bob.doc('groupPosts/root-public').get());
     await assertSucceeds(bob.doc('comments/root-public-comment').get());
     await assertSucceeds(bob.doc('postLikes/root-existing-like').get());
+    await assertFails(alice.doc('postLikes/root-existing-like').get());
     await assertFails(guest.doc('groupPosts/root-public').get());
     await assertFails(outsider.doc('groupPosts/root-public').get());
     await assertFails(bob.doc('groupPosts/root-cross').get());
