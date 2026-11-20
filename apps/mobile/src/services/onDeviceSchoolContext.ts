@@ -415,6 +415,14 @@ const sampleCourses = owned && timetable
     ? validCampusSenseSnapshot(senseSnapshot, { uid: expectedOwnerUid, schoolId })
     : null;
   const verifiedSense = safeCampusSenseForPrompt(candidateSense) ? candidateSense : null;
+  // Derive both the small excerpt and its next deadline from one verified,
+  // already-authorized snapshot and one device-clock reading. A small local
+  // model should not have to guess priority from an overdue backlog.
+  const assignmentNowMs = Date.now();
+  const assignmentExcerpt = verifiedSense
+    ? dueOrderedAssignmentExcerpt(verifiedSense.assignments.items, 5, assignmentNowMs) : [];
+  const nearestNotExpired = assignmentExcerpt.find((item) =>
+    item.dueAt !== null && Date.parse(item.dueAt) >= assignmentNowMs) ?? null;
   // Source text is untrusted content. It is evidence for the answer, not a new instruction.
   const sense = verifiedSense
     ? [
@@ -427,7 +435,9 @@ const sampleCourses = owned && timetable
             ? '來源已完整讀取' : verifiedSense.assignments.coverage
               ? '僅讀取部分資料' : '未能核對是否完整') +
           '；依本次已取得的期限排序，最多列出 5 項（過期項目擠滿前五項且本次資料中仍有未到截止點的作業時，保留最近將到期 1 項）：' +
-            JSON.stringify(dueOrderedAssignmentExcerpt(verifiedSense.assignments.items, 5, Date.now())),
+            JSON.stringify(assignmentExcerpt),
+        '本次已取得資料中最近尚未過截止點的作業（僅優先核對原作業頁，不代表仍可繳交；無來源 ID 不可推定導頁）：' +
+          (nearestNotExpired ? JSON.stringify(nearestNotExpired) : '未能從本次資料確認') + '。',
         '校園公告：' + verifiedSense.announcements.status +
           '；部分項目：' + JSON.stringify(ownArrayPrefix(verifiedSense.announcements.items, 4).map(({ title, publishedAt }) => ({ title, publishedAt }))),
         '上述來源總數與完整性，只涵蓋已授權課程中目前開放且未見已繳交時間的作業，不包括已提交、草稿、關閉或無權存取的作業；不能當成全部作業或歷史繳交清單。',

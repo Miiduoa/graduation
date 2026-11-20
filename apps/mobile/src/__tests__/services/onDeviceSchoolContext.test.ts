@@ -676,6 +676,11 @@ test('deadline hints use device time only and never infer submission or closed s
     expect(prompt.indexOf('下一個截止')).toBeLessThan(prompt.indexOf('沒有設定期限'));
     expect(prompt).toContain('"assignmentId":"expired"');
     expect(prompt).toContain('"assignmentId":"exact-deadline"');
+    // At the precise cutoff, highlight the original source ID for verification,
+    // not the older expired assignment or an invented submission state.
+    const focusAtDeadline = prompt.split('\n').find((line) =>
+      line.startsWith('本次已取得資料中最近尚未過截止點的作業'));
+    expect(focusAtDeadline).toContain('"assignmentId":"exact-deadline"');
     expect(prompt).toContain('"assignmentId":"upcoming"');
     expect(prompt).toMatch(/"assignmentId":"exact-deadline"[^\n]*?"deadlineHint":"依裝置時間推估正好到截止點；是否仍可繳交請到原作業頁核對"/);
     expect(prompt).toContain('依裝置時間推估已過截止點；是否仍可繳交請到原作業頁核對');
@@ -719,6 +724,12 @@ test('offline prompt preserves the next upcoming deadline when old overdue work 
     expect(prompt).toContain('過期項目擠滿前五項且本次資料中仍有未到截止點的作業時，保留最近將到期 1 項');
     expect(prompt).toContain('一小時後截止');
     expect(prompt).toContain('"assignmentId":"upcoming-now"');
+    const nextFocus = prompt.split('\n').find((line) =>
+      line.startsWith('本次已取得資料中最近尚未過截止點的作業'));
+    expect(nextFocus).toContain('"assignmentId":"upcoming-now"');
+    expect(nextFocus).toContain('一小時後截止');
+    expect(nextFocus).not.toContain('"assignmentId":"upcoming-tomorrow"');
+    expect(nextFocus).toContain('不代表仍可繳交');
     expect(prompt).toContain('依裝置時間推估尚未到截止點');
     expect(prompt).toContain('舊逾期作業4');
     expect(prompt).not.toContain('舊逾期作業5');
@@ -737,6 +748,9 @@ test('offline prompt preserves the next upcoming deadline when old overdue work 
     } }, 'alice');
     for (let index = 1; index <= 5; index += 1) expect(overduePrompt).toContain(`舊逾期作業${index}`);
     expect(overduePrompt).not.toContain('第六筆逾期作業');
+    const noUpcomingFocus = overduePrompt.split('\n').find((line) =>
+      line.startsWith('本次已取得資料中最近尚未過截止點的作業'));
+    expect(noUpcomingFocus).toContain('未能從本次資料確認');
     expect(overduePrompt).toContain('若沒有這類作業則照原排序列出');
   } finally {
     jest.useRealTimers();
