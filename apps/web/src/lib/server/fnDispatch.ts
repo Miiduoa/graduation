@@ -164,6 +164,10 @@ async function invokeHostedCallable(
   lmsCoursesFetcher?: LmsCoursesFetcher,
   lmsReadonlySource?: LmsReadonlySource,
 ): Promise<unknown> {
+  if (name === 'listGroupDiscussionPage') {
+    const { createGroupDiscussionHandlers } = await import('./groupDiscussionHandlers');
+    return createGroupDiscussionHandlers({ db: db as unknown as Firestore }).listGroupDiscussionPage(request);
+  }
   if (name === 'careerWorkstudy') {
     const { createCareerWorkstudyHandlers } = await import('./careerWorkstudyHandlers');
     return createCareerWorkstudyHandlers({ db: db as unknown as Firestore })(request);

@@ -31,6 +31,12 @@ const card = {
   args: { title: '準備作業：資料結構作業', date: '2026-11-13', allDay: false,
     startTime: '14:00', endTime: '14:30' },
 };
+const recoveryConversationId = 'qa-home-recovery-conversation';
+const recoveryCard = {
+  ...card, token: 'qa-signed-home-calendar-recovery-001', mutationId: 'qa-home-calendar-recovery-001',
+  args: { ...card.args, startTime: '15:30', endTime: '16:00' },
+};
+const recoveryProof = { issuedContext: context, conversationId, token: card.token, args: card.args };
 type RecordRow = ReturnType<typeof createAssistantCalendarReceipt>['record'];
 type RequestRow = {
   action: string;
@@ -58,6 +64,12 @@ type ServerState = {
   tasks: TaskList;
   generation: number;
   loads: number;
+  holdRecoveryPlan: boolean;
+  holdRecoveryConfirm: boolean;
+  pendingRecoveryPlan: boolean;
+  pendingRecoveryConfirm: boolean;
+  recoveryConversationId: string;
+  clock: string;
 };
 // This is the synthetic HTTP server's ledger, deliberately separate from the
 // product's localStorage. Keeping it across reloads proves that the real product
@@ -68,6 +80,10 @@ const server: ServerState = saved ? JSON.parse(saved) : {
   version: 1, mode, requests: [], records: [], writes: [], violations: [], readbacks: 0,
   journalAtConfirm: [], journalRemovals: [], followupStatus: 'scheduled', followupFailure: false,
   activeAccount: accountId, activeContext: context, tasks: 'all', generation: 0, loads: 0,
+  holdRecoveryPlan: false, holdRecoveryConfirm: false,
+  pendingRecoveryPlan: false, pendingRecoveryConfirm: false,
+  recoveryConversationId,
+  clock: now.toISOString(),
 };
 if (server.version !== 1 || server.mode !== mode) throw new Error('Unexpected synthetic server state');
 server.loads += 1;
@@ -97,17 +113,17 @@ Storage.prototype.removeItem = function (key: string) {
   nativeRemoveItem.call(this, key);
 };
 
-function readReceipt(replay: boolean) {
-  const record = server.records.find(row => row.id === card.mutationId) ?? fail('Readback did not find the confirmed record');
+function readReceipt(replay: boolean, selected = card) {
+  const record = server.records.find(row => row.id === selected.mutationId) ?? fail('Readback did not find the confirmed record');
   server.readbacks += 1;
   persist();
-  return createAssistantCalendarReceipt({ schoolId, mutationId: card.mutationId, event: card.args,
-    storage: 'synced', revision: 1, verifiedAt: now.toISOString(), replay, record });
+  return createAssistantCalendarReceipt({ schoolId, mutationId: selected.mutationId, event: selected.args,
+    storage: 'synced', revision: 1, verifiedAt: server.clock, replay, record });
 }
-function followup(): AssistantCourseworkFollowup {
-  const status = server.followupStatus;
+function followup(selected = card): AssistantCourseworkFollowup {
+  const status = selected === card ? server.followupStatus : 'scheduled';
   const checkedAt = status === 'elapsed' ? new Date('2026-11-13T15:00:00+08:00').toISOString()
-    : status === 'in_progress' ? new Date('2026-11-13T14:15:00+08:00').toISOString() : now.toISOString();
+    : status === 'in_progress' ? new Date('2026-11-13T14:15:00+08:00').toISOString() : server.clock;
   const source = {
     title: status === 'source_changed' ? urgent.title + '（已更新）' : urgent.title,
     courseName: urgent.courseName,
@@ -115,12 +131,28 @@ function followup(): AssistantCourseworkFollowup {
     state: status === 'closed' ? 'closed' as const : 'open' as const,
     submitted: status === 'submitted',
   };
-  return { version: 1, operation: 'coursework.followup', schoolId, mutationId: card.mutationId,
+  return { version: 1, operation: 'coursework.followup', schoolId, mutationId: selected.mutationId,
     checkedAt, status, task: status === 'not_coursework' ? null : { ...target, kind: 'assignment' },
     source: status === 'unavailable' || status === 'not_coursework' ? null : source,
     calendar: status === 'event_changed' ? 'changed' : status === 'event_missing' ? 'missing'
       : status === 'unavailable' || status === 'not_coursework' ? 'unavailable' : 'matching',
-    event: { ...card.args } };
+    event: { ...selected.args } };
+}
+
+// Deliberately finish the synthetic response even when the caller's signal is
+// aborted: scope/lifetime checks in the real controller must suppress late data.
+let releaseRecoveryPlan: (() => void) | undefined;
+let releaseRecoveryConfirm: (() => void) | undefined;
+async function holdRecovery(kind: 'Plan' | 'Confirm') {
+  if (!server[`holdRecovery${kind}`]) return;
+  server[`pendingRecovery${kind}`] = true;
+  persist();
+  await new Promise<void>((resolve) => {
+    if (kind === 'Plan') releaseRecoveryPlan = resolve;
+    else releaseRecoveryConfirm = resolve;
+  });
+  server[`pendingRecovery${kind}`] = false;
+  persist();
 }
 
 window.fetch = async (input, init) => {
@@ -138,50 +170,68 @@ window.fetch = async (input, init) => {
   if (action === 'plan') {
     if (server.activeAccount !== accountId || !same(body.task, target))
       fail('Automatic planning did not choose the earliest future task');
-    if (!body.routeToken) return json({ bootstrap: true, conversationId, routeToken: 'qa-route-token' });
-    if (body.routeToken !== 'qa-route-token' || body.conversationId !== conversationId)
+    const recovering = body.recovery !== undefined;
+    if (recovering && (!same(body.recovery, recoveryProof) || server.followupStatus !== 'elapsed' ||
+        !server.records.some(row => row.id === card.mutationId)))
+      fail('Recovery planning did not retain the elapsed original arrangement proof');
+    const selected = recovering ? recoveryCard : card;
+    if (!body.routeToken) return json({ bootstrap: true,
+      conversationId: recovering ? recoveryConversationId : conversationId,
+      routeToken: recovering ? 'qa-recovery-route-token' : 'qa-route-token' });
+    const originalBinding = body.routeToken === 'qa-route-token' && body.conversationId === conversationId;
+    const recoveryBinding = recovering && body.routeToken === 'qa-recovery-route-token' && body.conversationId === recoveryConversationId;
+    if (!originalBinding && !recoveryBinding)
       fail('Plan did not retain the bootstrap owner');
+    if (recovering) {
+      server.recoveryConversationId = String(body.conversationId);
+      persist();
+      await holdRecovery('Plan');
+    }
     return json({ version: 2, dataRead: true, modelCalls: 0, simulation: false,
       // This matches the accepted API contract, not an assertion of a live server.
-      expiresAt: Date.now() + 300000, stopReason: '', cards: [card],
-      answer: '已核對原作業、課表與行程，找到今天 14:00–14:30 的 30 分鐘準備時間。確認後會加入個人行事曆。',
+      expiresAt: Date.now() + 300000, stopReason: '', cards: [selected],
+      answer: `已核對原作業、課表與行程，找到今天 ${selected.args.startTime}–${selected.args.endTime} 的 30 分鐘準備時間。確認後會加入個人行事曆。`,
       steps: [
         { name: 'get_course_work', status: 'ok', summary: '已重新核對作業截止時間與課程資格' },
         { name: 'find_coursework_study_time', status: 'ok', summary: '已核對已同步課表及個人行程，這段時間沒有衝突' },
       ],
     });
   }
-  if (body.conversationId !== conversationId || body.token !== card.token ||
-      !same(body.args, card.args)) fail('Action changed its original signed proposal');
+  const selected = body.token === recoveryCard.token ? recoveryCard : card;
+  const selectedConversation = selected === card ? conversationId : server.recoveryConversationId;
+  if (body.conversationId !== selectedConversation || body.token !== selected.token ||
+      !same(body.args, selected.args)) fail('Action changed its original signed proposal');
   if (action === 'followup') {
     if (server.activeAccount !== accountId || body.issuedContext !== context ||
         !same(Object.keys(body).sort(), ['schoolId', 'conversationId', 'issuedContext', 'token', 'args'].sort()))
       fail('Followup changed the original proof, current account or request contract');
     const proofs = readTodayAgentFollowups(currentScope());
-    if (proofs.length !== 1 || proofs[0].issuedContext !== context ||
-        proofs[0].conversationId !== conversationId || proofs[0].card.mutationId !== card.mutationId ||
-        !same(proofs[0].card.args, card.args) || !server.records.some(row => row.id === card.mutationId))
+    const proof = proofs.find(row => row.card.mutationId === selected.mutationId);
+    if (proofs.length !== server.records.length || proof?.issuedContext !== context ||
+        proof.conversationId !== selectedConversation || !same(proof.card.args, selected.args) ||
+        !server.records.some(row => row.id === selected.mutationId))
       fail('Followup was not backed by the verified persisted arrangement');
     if (server.followupFailure) {
       request.outcome = 'synthetic-read-failed';
       persist();
       return json({ error: 'QA_READ_UNAVAILABLE', message: 'QA：來源暫時無法讀取。' }, 503);
     }
-    request.followup = followup();
+    request.followup = followup(selected);
     request.outcome = request.followup.status;
     persist();
     return json(request.followup);
   }
   if (action === 'confirm') {
     server.journalAtConfirm = readAssistantExecutionJournal(currentJournalScope());
-    if (server.journalAtConfirm.length !== 1 || server.journalAtConfirm[0].card.mutationId !== card.mutationId)
+    if (server.journalAtConfirm.length !== 1 || server.journalAtConfirm[0].card.mutationId !== selected.mutationId)
       fail('Confirmation was dispatched without durable recovery evidence');
-    if (server.records.some(row => row.id === card.mutationId)) fail('The UI issued a second confirmation');
-    const record: RecordRow = { ...card.args, id: card.mutationId, batchId: card.mutationId, kind: 'events',
-      schoolId, academicYear: '', semester: '', importedAt: now.toISOString(),
+    if (server.records.some(row => row.id === selected.mutationId)) fail('The UI issued a second confirmation');
+    const record: RecordRow = { ...selected.args, id: selected.mutationId, batchId: selected.mutationId, kind: 'events',
+      schoolId, academicYear: '', semester: '', importedAt: server.clock,
       source: { type: 'paste', name: '助理確認', line: 1, rawText: '' } };
     server.records.push(record);
     server.writes.push(record);
+    if (selected === recoveryCard) await holdRecovery('Confirm');
     if (mode === 'lost-response') {
       request.outcome = 'committed-response-lost';
       persist();
@@ -189,7 +239,7 @@ window.fetch = async (input, init) => {
     }
   }
   request.outcome = 'readback-verified';
-  return json(readReceipt(action === 'reconcile'));
+  return json(readReceipt(action === 'reconcile', selected));
 };
 
 function clearAutomaticCooldown() {
@@ -200,9 +250,9 @@ const root = createRoot(document.getElementById('root')!);
 function render() {
   const tasks = server.tasks === 'all' ? [later, urgent] : server.tasks === 'urgent' ? [urgent] : [];
   root.render(<main className="fixture-main">
-    <p className="fixture-banner">合成 API 驗證頁｜固定台北時間 2026/11/13 13:00。使用真正的首頁代辦介面與瀏覽器儲存，未連接正式帳號、校園系統或模型。情境：{mode === 'lost-response' ? '確認送出後回應遺失，再唯讀核對' : '預覽、確認與後續追蹤'}。</p>
+    <p className="fixture-banner">合成 API 驗證頁｜受控時間 {server.clock}（畫面顯示台北時間）。使用真正的首頁代辦介面與瀏覽器儲存，未連接正式帳號、校園系統或模型。情境：{mode === 'lost-response' ? '確認送出後回應遺失，再唯讀核對' : '預覽、確認與後續追蹤'}。</p>
     <TodayAgent key={server.generation} context={server.activeContext} accountId={server.activeAccount}
-      now={now} tasks={tasks} />
+      now={new Date(server.clock)} tasks={tasks} />
   </main>);
 }
 function switchSession(account: string, session: string, tasks: TaskList) {
@@ -225,10 +275,15 @@ Object.assign(window, { __todayAgentQA: {
   setFollowupStatus: (status: AssistantCourseworkFollowupStatus) => { server.followupStatus = status; persist(); },
   setFollowupFailure: (failed: boolean) => { server.followupFailure = failed; persist(); },
   setTasks: (tasks: TaskList) => { server.tasks = tasks; persist(); render(); },
+  setClock: (clock: string) => { server.clock = new Date(clock).toISOString(); persist(); render(); },
   clearAutomaticCooldown,
   remount: () => { server.generation += 1; clearAutomaticCooldown(); persist(); render(); },
   relogin: () => switchSession(accountId, 'b'.repeat(43), 'urgent'),
   switchAccount: () => switchSession('qa-agent-other', 'c'.repeat(43), 'none'),
   returnAccount: () => switchSession(accountId, 'd'.repeat(43), 'urgent'),
+  holdRecoveryPlan: () => { server.holdRecoveryPlan = true; persist(); },
+  releaseRecoveryPlan: () => { server.holdRecoveryPlan = false; releaseRecoveryPlan?.(); persist(); },
+  holdRecoveryConfirm: () => { server.holdRecoveryConfirm = true; persist(); },
+  releaseRecoveryConfirm: () => { server.holdRecoveryConfirm = false; releaseRecoveryConfirm?.(); persist(); },
 } });
 render();

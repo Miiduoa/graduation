@@ -228,15 +228,39 @@ test('legacy assignment upload is not visible to the instructor before submissio
   const objectPath = paths().answer;
   assert.equal((await request('POST', objectPath, 'alice')).status, 201);
   assert.equal((await request('GET', objectPath, 'alice')).status, 200);
-  // No attachments list yet: managers keep previous read access.
-  assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
+  // Without a submitted receipt, even the instructor cannot download a draft.
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
   const receipt = db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`);
-  await receipt.set({ userId: 'alice', submittedAt: Date.now(), attachments: [objectPath] });
+  await receipt.set({ userId: 'alice', submittedAt: Date.now() });
+  // A genuinely submitted historical receipt without an array still works.
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
+  await receipt.update({ submittedAt: null });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
+  await receipt.update({ submittedAt: Date.now(), attachments: [objectPath] });
   assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
   await receipt.update({ attachments: [] });
   assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
   await receipt.update({ attachments: [objectPath] });
   await db.doc('schools/pu/members/teacher').update({ status: 'inactive' });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
+});
+
+test('global-only historical submission receipts preserve exact instructor downloads', { timeout: 30_000 }, async () => {
+  const objectPath = paths().answer;
+  assert.equal((await request('POST', objectPath, 'alice')).status, 201);
+  await db.doc(`groups/${groupId}/assignments/${assignmentId}`).delete();
+  const receipt = db.doc(`assignments/${assignmentId}/submissions/alice`);
+  await receipt.set({ userId: 'alice', submittedAt: new Date(), attachments: [objectPath] });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
+  assert.equal((await request('GET', objectPath, 'bob')).status, 403);
+  assert.equal((await request('GET', objectPath.replace('answer.pdf', 'draft.pdf'), 'teacher')).status, 403);
+  await receipt.update({ submittedAt: null });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
+  assert.equal((await request('GET', objectPath, 'alice')).status, 200);
+  await receipt.update({ submittedAt: new Date() });
+  await db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`).set({
+    userId: 'alice', submittedAt: new Date(), attachments: [],
+  });
   assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
 });
 

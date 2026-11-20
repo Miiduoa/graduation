@@ -93,6 +93,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
           node --test scripts/dependency-security-gate.test.cjs scripts/dependency-security-compatibility.test.mjs packages/shared/tests/postLoginRoles.test.cjs scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
           node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-materials-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/nuni-merchant-source.test.mjs scripts/nuni-merchant-native-transport.test.mjs scripts/seed-cafeterias.test.cjs scripts/demo/seed-oral-exam.test.mjs
+          node --test scripts/demo/seed-account-demo.test.mjs
           python3 deploy/nuni-api/food-ordering/build_test.py
           python3 scripts/platform-lost-found/prepare_test.py
           python3 deploy/nuni-api/assistant-permissions/prepare_test.py
@@ -310,7 +311,7 @@ jobs:
         run: node --test --test-concurrency=1 packages/shared/tests/schools.test.cjs packages/shared/tests/ncnuCourseSchedule.test.cjs packages/shared/tests/nthuCourseSchedule.test.cjs packages/shared/tests/personalImportCloud.test.cjs
 
       - name: Test assistant services, academic data and verified execution contracts
-        run: node --test packages/shared/tests/assistantServices.test.cjs packages/shared/tests/assistantRoleProfiles.test.cjs packages/shared/tests/assistantRoleTasks.test.cjs packages/shared/tests/importedAcademicSummary.test.cjs packages/shared/tests/assistantExecution.test.cjs packages/shared/tests/personalImportAcknowledgement.test.cjs
+        run: node --test packages/shared/tests/assistantServices.test.cjs packages/shared/tests/assistantTaskPlan.test.cjs packages/shared/tests/assistantRoleWorkflows.test.cjs packages/shared/tests/assistantRoleProfiles.test.cjs packages/shared/tests/assistantRoleTasks.test.cjs packages/shared/tests/importedAcademicSummary.test.cjs packages/shared/tests/assistantExecution.test.cjs packages/shared/tests/personalImportAcknowledgement.test.cjs
 
       - name: Test PDF and Excel readers with real document fixtures
         run: pnpm test:documents
