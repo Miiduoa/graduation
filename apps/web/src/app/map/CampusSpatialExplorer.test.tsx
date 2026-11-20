@@ -569,6 +569,69 @@ it('fully tears down WebGL and page listeners if WebView observer disconnect thr
 });
 
 it.each(['constructor', 'observe'] as const)(
+  'defers offscreen WebGL when the WebView observer fails at %s and resumes on container scroll',
+  async (failurePoint) => {
+    let onscreen = false;
+    const originalRect = Element.prototype.getBoundingClientRect;
+    const rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: Element) {
+        if (this.getAttribute('aria-label') !== '校園地點空間圖') return originalRect.call(this);
+        const top = onscreen ? 24 : window.innerHeight + 40;
+        return {
+          x: 0, y: top, left: 0, top, right: 300, bottom: top + 180,
+          width: 300, height: 180, toJSON: () => ({}),
+        } as DOMRect;
+      });
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: IntersectionObserverCallback) {
+        intersection = callback;
+        if (failurePoint === 'constructor') throw new Error('unavailable observer');
+      }
+      observe() {
+        if (failurePoint === 'observe') throw new Error('cannot observe host');
+      }
+      disconnect = disconnect;
+    });
+    const timerSpy = vi.spyOn(window, 'setTimeout');
+    try {
+      const { unmount } = render(<CampusSpatialExplorer school="other-school"
+        locations={places} selected={places[0]} onSelect={vi.fn()} />);
+      fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+      const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+      const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+      expect(host.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+      expect(scene.create).not.toHaveBeenCalled();
+      expect(timerSpy.mock.calls.some(([, delay]) => delay === 12_000)).toBe(false);
+      expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+      // Scroll inside the dialog: no resize event and no working observer.
+      onscreen = true;
+      fireEvent.scroll(host.parentElement!);
+      await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+      onscreen = false;
+      fireEvent.scroll(host.parentElement!);
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      onscreen = true;
+      fireEvent.scroll(host.parentElement!);
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
+      expect(scene.create).toHaveBeenCalledTimes(1);
+      expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+      unmount();
+      const calls = scene.setActive.mock.calls.length;
+      fireEvent.scroll(window);
+      expect(scene.setActive).toHaveBeenCalledTimes(calls);
+      expect(scene.dispose).toHaveBeenCalledTimes(1);
+    } finally {
+      timerSpy.mockRestore();
+      rectSpy.mockRestore();
+    }
+  },
+);
+
+it.each(['constructor', 'observe'] as const)(
   'falls back to working 3D and walking navigation when a WebView observer fails at %s',
   async (failurePoint) => {
     const brokenDisconnect = vi.fn();

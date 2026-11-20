@@ -467,6 +467,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // invalidates an already-running scene. Safari may not issue another
     // IntersectionObserver entry after its visual viewport becomes valid.
     let suspendedByViewport = false;
+    // When a broken WebView cannot observe the host, use measurable DOM bounds
+    // instead of eagerly allocating offscreen WebGL. Unknown legacy layouts
+    // retain the prior fallback, and a visible scroll can wake a deferred map.
+    let observerFallback = false;
     // Safari can deliver a *positive* initial observer entry while its visual
     // viewport getters are transiently invalid. Remember that observation,
     // but do not allocate WebGL until a later viewport event proves the host
@@ -544,7 +548,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     const onViewportResize = () => {
       if (!active) return;
       refreshVisualViewportListeners();
-      if (!manualStart && typeof IntersectionObserver !== 'undefined') {
+      if (observerFallback) {
+        const position = hostViewportVisibility();
+        if (position !== 'unknown') visible = position === 'onscreen';
+      } else if (!manualStart && typeof IntersectionObserver !== 'undefined') {
         const position = hostViewportVisibility();
         if (position === 'offscreen' || position === 'invalid-visual-viewport') {
           if (visible && started) suspendedByViewport = true;
@@ -673,13 +680,22 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // constructor/observe(). They must not deactivate the eager fallback.
         observerLive = false;
         intersection = null;
-        visible = true;
+        observerFallback = true;
+        const position = hostViewportVisibility();
+        // A broken observer does not authorize starting a measurable offscreen
+        // host (or one hidden by an invalid iOS VisualViewport). Older WebViews
+        // whose host geometry is unknown still retain their eager fallback.
+        visible = position === 'onscreen' || position === 'unknown';
       }
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('resize', onViewportResize);
+    // With no functioning observer, capture nested container scrolling too:
+    // a mobile map below the fold may enter view without resizing the window.
+    // Scope the extra listener to the exceptional fallback path only.
+    if (observerFallback) window.addEventListener('scroll', onViewportResize, { capture: true, passive: true });
     // Safari's visual viewport can resize/scroll without a layout resize or
     // a timely IntersectionObserver callback. Listen to both dimensions;
     // older WebViews without this optional API keep the window fallback.
@@ -698,6 +714,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('resize', onViewportResize);
+      if (observerFallback) window.removeEventListener('scroll', onViewportResize, true);
       // Always attempt both removals even if the first WebView API throws.
       // Otherwise a retained scroll handler can touch a disposed GPU scene.
       for (const event of ['resize', 'scroll'] as const) {
