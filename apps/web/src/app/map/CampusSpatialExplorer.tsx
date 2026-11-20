@@ -424,8 +424,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           let latest: IntersectionObserverEntry;
           if (timed.length) {
             latest = timed[0];
+            // Equal timestamps can occur when a browser rounds time values.
+            // Entries within one callback are queued in transition order,
+            // so the last tied entry describes the latest state in that batch.
+            // Equal-time records from a DIFFERENT callback remain ambiguous
+            // and are rejected by the strict cross-batch check below.
             for (const entry of timed) {
-              if (entry.time > latest.time) latest = entry;
+              if (entry.time >= latest.time) latest = entry;
             }
             // A delayed older callback may arrive after a newer one, even
             // if it is the sole entry in its own callback.
