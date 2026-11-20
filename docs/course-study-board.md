@@ -1,3 +1,9 @@
+## 2026-11-21：財務／教學季度序號不再誤當倍數圖
+
+- 由有權使用的教材表格顯示「第 1 季／第 4 季」或「Fiscal Quarter 1／4」時，季度是年內位置，不能推論第 4 季是第 1 季的四倍。現在對明確的季度、季別、季次、Quarter／Qtr 等序號欄位只保留可核對的原文表格，不衍生長條圖；真正的「季度數量／Quarter Count／Quarterly Revenue」等量值繼續可比較。
+- 新增 17 個季度序號與 8 個真實計數／量值的 React DOM 正反回歸，核對來源表格數字保持原樣、誤導圖表不存在及真量值圖仍可使用。這只是程式與模擬 DOM 防護，不表示財報圖表理解、真機或競品測試通過。未新增套件、不傳輸私人教材、不更動閱讀／練習 checkpoint。
+- 上一精確 SHA `4c5476d8b15f37b6791d08e067a6430bfe82a5c8` 的 [CI #44811311353](https://github.com/Miiduoa/graduation/actions/runs/44811311353) 確認失敗：Web Tests 有 9 個失敗（19,640 通過／115 略過），其中 8 個為 `Assistant.roleReadBoundary.test.tsx`，另 1 個為其他助理 UI 測試，皆不在本輪白板修改路徑；其 CodeQL、Course access review、Build Web／Mobile、Security Gates、Lint／TypeCheck 等分項成功，不能算完整 CI 通過。新 SHA 仍須逐一驗證，App 5504170 APPROVED、Maestro、iOS／Android 實機、WebGPU 繁中與 Ahaboard 同教材同題同機未驗收前 PR 保持 Draft，不合併、不部署。
+
 ## 2026-11-21：班級與考試排名不再誤呈現為倍數圖
 
 - 發現「期末考排名／班級名次／Class Rank／Exam Ranking」等帶限定詞的欄名，先前未被單字型排名欄位規則攔截，可能把第 4 名誤畫成第 1 名的四倍。這些數字代表**序位**，不是從零起算的量值；現在保留教材原表、逐字行號、選取／複製／TXT，對此類欄位不產生衍生長條圖。

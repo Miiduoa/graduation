@@ -2381,6 +2381,47 @@ it('does not treat English business rates or explicit percent-unit speed rates a
     .toEqual([['20', '100'], ['40', '100']]);
 });
 
+it('keeps fiscal quarter positions as source-only ordinals', () => {
+  for (const header of [
+    '季度', '季別', '季次', '第幾季', '第幾季度', '季度序號',
+    '財務季度', '會計季度', '季度編號', '季度代碼',
+    'Quarter', 'Qtr', 'Quarter Number', 'Quarter ID',
+    'Fiscal Quarter', 'Calendar Quarter', 'Academic Qtr',
+  ]) {
+    const original = [
+      '| 科目 | ' + header + ' |', '| --- | --- |',
+      '| 經濟學 | 1 |', '| 管理學 | 4 |',
+    ].join('\n');
+    const view = render(<StudySourceTables text={original} />);
+    expect(comparisonSummaries(view.container)).toEqual([]);
+    expect(view.container.querySelector('meter')).toBeNull();
+    expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+      .toEqual(['1', '4']);
+    view.unmount();
+  }
+});
+
+it('still compares actual counts of quarters and quarterly quantities', () => {
+  for (const header of [
+    '季度數量', '季度總數', '季度營收', '每季教學時數',
+    'Quarter Count', 'Number of Quarters', 'Quarterly Revenue', 'Fiscal Quarter Total',
+  ]) {
+    const original = [
+      '| 科目 | ' + header + ' |', '| --- | --- |',
+      '| 經濟學 | 2 |', '| 管理學 | 4 |',
+    ].join('\n');
+    const view = render(<StudySourceTables text={original} />);
+    expect(comparisonSummaries(view.container)).toEqual([
+      '展開第 2 欄「' + header + '」的原文數值比較',
+    ]);
+    expect(Array.from(view.container.querySelectorAll('meter')).map((node) =>
+      [node.getAttribute('value'), node.getAttribute('max')])).toEqual([
+      ['2', '4'], ['4', '4'],
+    ]);
+    view.unmount();
+  }
+});
+
 it('does not draw ratio bars from numeric weekdays in class schedules', () => {
   for (const header of [
     '星期', '星期幾', '禮拜幾', '上課星期', '開課週別', '週幾', '周序號',

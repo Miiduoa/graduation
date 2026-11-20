@@ -107,6 +107,12 @@ const DECIBEL_UNIT_COLUMN = /\bdB(?:A|C|FS|m|W)?\b/u;
 const NON_RATIO_WEEKDAY_COLUMN =
   /^(?:(?:上課|開課|考試|測驗|授課)?(?:星期|禮拜|週|周)(?:幾|別|序號|編號|次序)?|(?:class|course|exam)\s+(?:weekday|day[\s-]*of[\s-]*(?:the[\s-]*)?week)|(?:weekday|week[\s-]*day|day[\s-]*of[\s-]*(?:the[\s-]*)?week)(?:\s+(?:number|no\.?|index|code|id))?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 
+// A fiscal/calendar quarter NUMBER is a position in a year, not a quantity.
+// In a lesson table, Q4 must not appear four times Q1. Explicit quarter counts
+// (季度數量 / Quarter Count) still represent measured quantities.
+const NON_RATIO_QUARTER_POSITION_COLUMN =
+  /^(?:(?:(?:會計|財政|財務|營運|學年|曆年)\s*)?(?:季度|季別|季次|第幾季|第幾季度|季序號|季度序號|季度編號|季度代碼)|(?:(?:fiscal|calendar|academic)\s+)?(?:quarter|qtr)(?:\s+(?:number|no\.?|index|code|id))?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+
 // Clock readings and geographic coordinates have conventional origins.
 // Even positive bare figures (8 vs 12 o'clock, 24 vs 25 degrees east)
 // are not ratios; retain the original table without a zero-based chart.
@@ -180,6 +186,7 @@ function isNonRatioColumn(header: string): boolean {
       NON_RATIO_DATABASE_KEY_COLUMN.test(column) ||
       AMBIGUOUS_TIME_COLUMN.test(column) ||
       NON_RATIO_WEEKDAY_COLUMN.test(column) ||
+      NON_RATIO_QUARTER_POSITION_COLUMN.test(column) ||
       NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
       DECIBEL_UNIT_COLUMN.test(column) ||
       NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
