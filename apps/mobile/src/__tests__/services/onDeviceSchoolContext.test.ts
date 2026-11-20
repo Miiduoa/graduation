@@ -683,6 +683,48 @@ test('deadline hints use device time only and never infer submission or closed s
   }
 });
 
+test('offline prompt preserves the next upcoming deadline when old overdue work fills the first five slots', async () => {
+  jest.useFakeTimers().setSystemTime(new Date('2026-11-20T00:00:00.000Z'));
+  try {
+    jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+    const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+    const source = (id: string) => ({
+      kind: 'group-assignment' as const, groupId: 'course-db', assignmentId: id,
+    });
+    const items: CampusSenseSnapshot['assignments']['items'] = [
+      ...Array.from({ length: 5 }, (_, index) => ({
+        title: `舊逾期作業${index + 1}`, groupName: '資料庫',
+        dueAt: `2026-11-0${index + 1}T10:00:00+08:00`,
+        source: source(`old-${index + 1}`),
+      })),
+      { title: '一小時後截止', groupName: '資料庫', dueAt: '2026-11-20T09:00:00+08:00',
+        source: source('upcoming-now') },
+      { title: '明天截止', groupName: '資料庫', dueAt: '2026-11-21T09:00:00+08:00',
+        source: source('upcoming-tomorrow') },
+    ];
+    const authorized: CampusSenseSnapshot = {
+      userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+      schedule: { status: 'available', count: 1 },
+      assignments: { status: 'available', count: items.length, items,
+        coverage: { complete: true, reason: 'complete', pages: 1 } },
+      announcements: { status: 'available', items: [] },
+    };
+    const prompt = formatOnDeviceSchoolPrompt(local, authorized, 'alice');
+    expect(prompt).toContain('過期項目擠滿前五項時保留最近將到期 1 項');
+    expect(prompt).toContain('一小時後截止');
+    expect(prompt).toContain('"assignmentId":"upcoming-now"');
+    expect(prompt).toContain('依裝置時間推估尚未到截止點');
+    expect(prompt).toContain('舊逾期作業4');
+    expect(prompt).not.toContain('舊逾期作業5');
+    expect(prompt).not.toContain('明天截止');
+    expect(prompt).toContain('這不代表其餘過期作業已完成');
+    expect(items[4].title).toBe('舊逾期作業5'); // Source order and IDs stay unchanged.
+    expect(formatOnDeviceSchoolPrompt(local, authorized, 'bob')).not.toContain('一小時後截止');
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test('complete pending-only evidence never implies all assignments or submitted history', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
   const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
