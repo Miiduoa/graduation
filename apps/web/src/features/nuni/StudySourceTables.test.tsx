@@ -937,6 +937,42 @@ it('keeps room and seat identifiers as locations, not ratio-style bars', () => {
   }
 });
 
+it('keeps database keys and VLAN / ASN namespace identifiers as source values, not proportional bars', () => {
+  for (const header of [
+    '主鍵', '外鍵', '候選鍵', '代理鍵', '主鍵值', '主鍵（資料庫）',
+    'Primary Key', 'Foreign Key', 'Candidate Key', 'Surrogate Key',
+    'Primary Key (SQL)', 'Foreign Key Number', 'VLAN', 'VLAN ID',
+    'VLAN 編號', 'ASN', 'AS Number', 'Autonomous System Number',
+    '虛擬區域網路編號', '自治系統號碼',
+  ]) {
+    const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
+      '| 第一筆 | 100 |', '| 第二筆 | 200 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual(['100', '200']);
+    expect(comparisonSummaries(container)).toEqual([]);
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+});
+
+it('still graphs genuine database-key counts and network amounts without guessing identifiers', () => {
+  for (const header of [
+    '主鍵數量', '外鍵總數', '主鍵數', 'Primary Key Count',
+    'Number of Foreign Keys', 'Candidate Key Count',
+    'VLAN Count', 'VLAN Throughput', 'VLAN Bandwidth',
+    'ASN Count', '自治系統數量', '虛擬區域網路數量',
+  ]) {
+    const material = ['| 站點 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter'))
+      .map((bar) => [bar.getAttribute('value'), bar.getAttribute('max')]))
+      .toEqual([['2', '4'], ['4', '4']]);
+    unmount();
+  }
+});
+
 it('keeps network ports, radio channels and protocol layers as identifiers, not ratio bars', () => {
   for (const header of [
     'TCP 埠號', 'UDP 埠號', '來源埠', '目的埠', '連接埠', '服務埠',

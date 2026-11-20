@@ -31,6 +31,14 @@ const NON_RATIO_NETWORK_IDENTIFIER_COLUMN =
   /(?:埠號|連接埠|通訊埠|通信埠|網路埠|服務埠|來源埠|目的埠|頻道(?:編號|號碼|號)?|通道(?:編號|號碼|號)?|網路層級|協定號碼)/u;
 const ENGLISH_NON_RATIO_NETWORK_IDENTIFIER_COLUMN =
   /^(?:(?:(?:tcp|udp|src|dst|source|destination|service|network)\s+)?ports?(?:\s+(?:number|no\.?|id|#))?|(?:(?:wi-?fi|wireless|radio|network)\s+)?channels?(?:\s+(?:number|no\.?|id|#))?|(?:(?:osi|network|protocol)\s+)?layers?(?:\s+(?:number|no\.?|id|#))?|protocol\s+(?:number|no\.?|id))(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+// A VLAN tag / ASN and a database key are identifiers, not measured
+// magnitudes. Numeric key 200 is not twice numeric key 100. Match complete
+// headers to avoid hiding real VLAN traffic or counts of primary keys.
+const NON_RATIO_NETWORK_NAMESPACE_COLUMN =
+  /^(?:vlan(?:\s*(?:id|number|no\.?|#|編號))?|asn|as\s+(?:number|no\.?|id)|autonomous\s+system(?:\s+(?:number|no\.?|id))?|虛擬區域網路?(?:編號|識別碼|號碼|號)?|自治系統(?:編號|號碼|號)?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+const NON_RATIO_DATABASE_KEY_COLUMN =
+  /^(?:(?:主鍵|外鍵|候選鍵|代理鍵)(?:值|編號|識別碼)?|(?:primary|foreign|candidate|surrogate)\s+key(?:\s+(?:id|number|no\.?|value))?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+
 const NETWORK_IDENTIFIER_COUNT_COLUMN =
   /(?:埠(?:號)?(?:數量|總數|個數|數)|通道(?:數量|總數|個數|數)|頻道(?:數量|總數|個數|數)|層(?:數量|總數|個數|數)|\b(?:count|total|number\s+of|quantity)\b)/iu;
 
@@ -132,6 +140,8 @@ function isNonRatioColumn(header: string): boolean {
   if (((NON_RATIO_NETWORK_IDENTIFIER_COLUMN.test(column) ||
          ENGLISH_NON_RATIO_NETWORK_IDENTIFIER_COLUMN.test(column)) &&
         !NETWORK_IDENTIFIER_COUNT_COLUMN.test(column)) ||
+      NON_RATIO_NETWORK_NAMESPACE_COLUMN.test(column) ||
+      NON_RATIO_DATABASE_KEY_COLUMN.test(column) ||
       AMBIGUOUS_TIME_COLUMN.test(column) ||
       NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
       DECIBEL_UNIT_COLUMN.test(column) ||
