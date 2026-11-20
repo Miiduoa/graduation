@@ -781,7 +781,15 @@ it('pauses offscreen WebGL on iOS visual viewport resize and scroll without wind
     expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
+    // Some iOS WebViews never emit a new intersection record when the soft
+    // keyboard closes. A positive viewport measurement must resume the SAME
+    // already-created scene without a new observer callback.
     viewport.height = window.innerHeight;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+
     act(() => intersection?.([{
       isIntersecting: true, target: graphics, time: 100,
       intersectionRect: { width: 320, height: 40 },
@@ -794,6 +802,13 @@ it('pauses offscreen WebGL on iOS visual viewport resize and scroll without wind
     act(() => viewport.dispatchEvent(new Event('scroll')));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
     expect(scene.create).toHaveBeenCalledTimes(1);
+    // Reversing just the visual viewport scroll also has no reliable observer
+    // delivery; this must recover without a manual restart or context reload.
+    viewport.offsetTop = 0;
+    act(() => viewport.dispatchEvent(new Event('scroll')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
     scene.setActive.mockClear();
     viewport.dispatchEvent(new Event('resize'));

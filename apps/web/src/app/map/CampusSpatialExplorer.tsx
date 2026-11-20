@@ -412,7 +412,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // viewport, leaving window.innerHeight unchanged. Its offset is relative
     // to the layout viewport used by getBoundingClientRect().
     const visualViewport = window.visualViewport;
-    const hostDefinitelyOffscreen = () => {
+    // Geometry is only affirmative when both the host and the effective
+    // viewport have valid, positive bounds. Unknown WebView measurements must
+    // never be interpreted as proof that the map is back on screen.
+    const hostViewportVisibility = (): 'onscreen' | 'offscreen' | 'unknown' => {
       try {
         const rect = host.getBoundingClientRect();
         const width = window.innerWidth;
@@ -426,15 +429,17 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         const top = hasVisualBounds ? visualViewport.offsetTop : 0;
         const right = left + (hasVisualBounds ? visualViewport.width : width);
         const bottom = top + (hasVisualBounds ? visualViewport.height : height);
-        return Number.isFinite(rect.width) && rect.width > 0 &&
-          Number.isFinite(rect.height) && rect.height > 0 &&
-          Number.isFinite(width) && width > 0 &&
-          Number.isFinite(height) && height > 0 &&
-          (rect.bottom <= top || rect.top >= bottom || rect.right <= left || rect.left >= right);
+        if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height,
+          width, height, left, top, right, bottom].every(Number.isFinite) ||
+          rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0 ||
+          right <= left || bottom <= top) return 'unknown';
+        return rect.bottom <= top || rect.top >= bottom ||
+          rect.right <= left || rect.left >= right ? 'offscreen' : 'onscreen';
       } catch {
-        return false;
+        return 'unknown';
       }
     };
+    const hostDefinitelyOffscreen = () => hostViewportVisibility() === 'offscreen';
     const invalidateRestoredOffscreenVisibility = () => {
       if (visible && !manualStart && typeof IntersectionObserver !== 'undefined' &&
           hostDefinitelyOffscreen()) {
@@ -459,13 +464,24 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       startWhenVisible();
       syncPendingStartup();
     };
-    // Rotating a phone or opening its virtual keyboard can shrink the
-    // visual viewport before IntersectionObserver queues a new entry. Stop
-    // rendering a now-offscreen canvas immediately; a subsequent genuine
-    // intersection (or explicit manual recovery) may resume the same scene.
+    // iOS VisualViewport can expand/scroll back into view without firing a
+    // second IntersectionObserver callback. Only undo a pause that *this*
+    // viewport listener initiated, on positive and measurable overlap, after
+    // a real observer previously permitted startup. Never bypass the initial
+    // offscreen-import gate or restart an unconfirmed/legacy WebView scene.
+    let suspendedByViewport = false;
     const onViewportResize = () => {
       if (!active) return;
-      invalidateRestoredOffscreenVisibility();
+      if (!manualStart && typeof IntersectionObserver !== 'undefined') {
+        const position = hostViewportVisibility();
+        if (position === 'offscreen') {
+          if (visible && started) suspendedByViewport = true;
+          visible = false;
+        } else if (position === 'onscreen' && suspendedByViewport && started) {
+          visible = true;
+          suspendedByViewport = false;
+        }
+      }
       updateVisibility();
       syncPendingStartup();
     };
@@ -537,6 +553,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           visible = latest.isIntersecting &&
             (!hasMeasuredArea || (rect.width > 0 && rect.height > 0)) &&
             !hostDefinitelyOffscreen();
+          if (visible) suspendedByViewport = false;
           updateVisibility();
           startWhenVisible();
           syncPendingStartup();
