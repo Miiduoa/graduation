@@ -303,28 +303,29 @@ const VERIFIED_CLASSROOM_BUILDING_CODES = [
  * published Providence IDs. A name aliases only that sourced ID; it does not
  * confer identity on an unsourced or relabelled POI.
  */
-const PUBLISHED_PROVIDENCE_ENGLISH_NAMES = new Map<string, string>([
-  ['pu-zhugu', 'Providence Hall'],
-  ['pu-renyuan', 'Anthony Kuo Hall'],
-  ['pu-boduo', 'St. Peter Hall'],
-  ['pu-wenxing', 'Wen Xing Hall'],
-  ['pu-gelun', 'Theodore Guerin Hall'],
-  ['pu-fangji', 'St. Francis Hall'],
-  ['pu-siyuan', 'Si Yuan Hall'],
-  ['pu-jingan', 'Jing An Hall'],
-  ['pu-library', 'Gaesia Library'],
-  ['pu-chapel', 'Chapel'],
-  ['pu-jingyuan', 'Jingyuan Cafeteria'],
-  ['pu-yiyuan', 'Yiyuan Cafeteria'],
-  ['pu-gym', 'John Paul II Sports Hall'],
-  ['pu-health', 'Health Center'],
-  ['pu-parking-moto', 'Motorcycle Parking'],
+const PUBLISHED_PROVIDENCE_ENGLISH_NAMES = new Map<string, readonly string[]>([
+  ['pu-zhugu', ['Providence Hall']],
+  ['pu-renyuan', ['Anthony Kuo Hall']],
+  ['pu-boduo', ['St. Peter Hall']],
+  ['pu-wenxing', ['Wen Xing Hall']],
+  ['pu-gelun', ['Theodore Guerin Hall']],
+  ['pu-fangji', ['St. Francis Hall']],
+  ['pu-siyuan', ['Si Yuan Hall']],
+  ['pu-jingan', ['Jing An Hall']],
+  ['pu-library', ['Gaesia Library']],
+  // campusPois.js uses "Chapel"; the mobile catalog uses the full title.
+  ['pu-chapel', ['Chapel', 'Chapel of Our Lady of Providence']],
+  ['pu-jingyuan', ['Jingyuan Cafeteria']],
+  ['pu-yiyuan', ['Yiyuan Cafeteria']],
+  ['pu-gym', ['John Paul II Sports Hall']],
+  ['pu-health', ['Health Center']],
+  ['pu-parking-moto', ['Motorcycle Parking']],
 ]);
 
 function officialSourcedNames(published: CampusMapPlaceLike): string[] {
   const names = [published.name];
   const catalogEnglish = PUBLISHED_PROVIDENCE_ENGLISH_NAMES.get(published.id);
-  if (catalogEnglish) names.push(catalogEnglish);
+  if (catalogEnglish) names.push(...catalogEnglish);
   if (Object.prototype.propertyIsEnumerable.call(published, 'nameEn')) {
     const nameEn: unknown = (published as { nameEn?: unknown }).nameEn;
     if (typeof nameEn === 'string' && nameEn.trim()) names.push(nameEn);

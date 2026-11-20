@@ -416,6 +416,15 @@ describe('published POI classroom routing never trusts an unrelated Firestore bu
     expect(resolveCampusClassroom({
       schoolId: 'pu', query: '任垣樓 303', locations: [renyuan!],
     }).matches).toEqual([renyuan!]);
+    const chapel = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-chapel');
+    expect(chapel).toBeTruthy();
+    const namedChapel = { ...chapel!, name: 'Chapel of Our Lady of Providence' };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'Chapel of Our Lady of Providence 101', locations: [namedChapel],
+    }).matches).toEqual([namedChapel]);
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'Chapel 101', locations: [{ ...chapel!, name: 'Chapel' }],
+    }).status).toBe('matched');
   });
 
   it('does not redirect a sourced clinic or chapel to PH303 after synthetic building/category corruption', () => {
