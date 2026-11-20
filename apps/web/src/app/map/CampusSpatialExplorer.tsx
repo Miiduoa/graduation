@@ -602,7 +602,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
             pendingInitialViewportConfirmation =
               position === 'invalid-visual-viewport' && confirmedIntersecting;
           }
-          if (position === 'invalid-visual-viewport' && visible && started) {
+          if (!confirmedIntersecting) {
+            // A newer negative observer record revokes the viewport-only
+            // recovery permit. Otherwise a subsequent valid resize can
+            // resurrect a scene the observer has explicitly marked hidden.
+            // Wait for the next genuine positive intersection instead.
+            suspendedByViewport = false;
+          } else if (position === 'invalid-visual-viewport' && visible && started) {
             suspendedByViewport = true;
           }
           visible = confirmedIntersecting &&
