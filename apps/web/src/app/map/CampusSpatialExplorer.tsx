@@ -970,6 +970,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         const invalidContentLength = contentLength !== null &&
           (!/^\d+$/.test(contentLength) ||
             !Number.isSafeInteger(Number(contentLength)) ||
+            // HTTP 200 with a declared empty representation cannot contain
+            // verified OSM geometry, regardless of identity/gzip encoding.
+            // Reject at headers so a stalled WebView body cannot hold the map
+            // for the full 15-second network deadline.
+            Number(contentLength) === 0 ||
             Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
             contentRange !== null || invalidContentLength) {
