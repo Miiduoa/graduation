@@ -127,7 +127,7 @@ export function parseCampusMapResult(raw: unknown, schoolId: string, requested: 
       : value.unavailable !== undefined) throw new Error('Invalid map availability');
     const items = value.items.map((rawItem): CampusMapItem => {
       const item = object(rawItem, ['id', 'schoolId', 'name', 'category', 'description', 'lat', 'lng', 'building', 'floor',
-        'facilities', 'source', 'sourcePath', 'href', 'match', 'verification', 'sourceUrl']);
+        'facilities', 'source', 'sourcePath', 'href', 'match', 'verification', 'sourceUrl', 'transitStopIds']);
       const id = safeId(item.id);
       if (item.schoolId !== schoolId || ![source, 'bundled-providence'].includes(item.source as CampusMapSource) ||
           (item.source === 'bundled-providence' && schoolId !== 'pu') ||
@@ -143,8 +143,11 @@ export function parseCampusMapResult(raw: unknown, schoolId: string, requested: 
         match: item.match as CampusMapMatch, verification: item.verification as CampusMapItem['verification'],
         ...(item.building !== undefined ? { building: clean(item.building, 120) } : {}),
         ...(item.floor !== undefined ? { floor: clean(item.floor, 80) } : {}) };
+      const matchPlace = Object.prototype.propertyIsEnumerable.call(item, 'transitStopIds')
+        ? { ...parsed, transitStopIds: item.transitStopIds } as CampusMapPlaceLike
+        : parsed;
       if (new Set(parsed.facilities).size !== parsed.facilities.length ||
-          parsed.match !== campusMapMatch(schoolId, args.query, parsed)) throw new Error('Invalid map match');
+          parsed.match !== campusMapMatch(schoolId, args.query, matchPlace)) throw new Error('Invalid map match');
       const sourceUrl = providencePlaceSourceUrl(schoolId, parsed);
       const verification = sourceUrl ? isProvidencePendingVerification(schoolId, parsed) ? 'single-source' : 'cross-checked' : 'published';
       if (parsed.verification !== verification || item.sourceUrl !== (sourceUrl ?? undefined) ||

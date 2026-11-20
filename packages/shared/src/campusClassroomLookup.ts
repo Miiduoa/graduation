@@ -6,6 +6,9 @@ import {
 } from './providenceCampus';
 
 export const MAX_CAMPUS_CLASSROOM_QUERY_LENGTH = 120;
+/** Category labels may carry long parenthetical annotations; do not reuse the
+ * 120-character query cap or a trailing `/ Temporary` can be sliced away. */
+export const MAX_CAMPUS_CATEGORY_LENGTH = 2000;
 
 /** Keep the supplied room wording; normalization for matching happens separately. */
 export function normalizeCampusClassroomQuery(value: unknown): string {
@@ -164,6 +167,40 @@ function stripTrailingCategoryQualifiers(value: string): string {
  * Only a complete root category before a separator may exclude a POI.
  */
 
+
+function categoryComparisonText(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const cleaned = value
+    .replace(/[\p{Cc}\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return Array.from(cleaned)
+    .slice(0, MAX_CAMPUS_CATEGORY_LENGTH)
+    .join('')
+    .trim()
+    .normalize('NFKC')
+    .toLocaleLowerCase('zh-TW');
+}
+
+/** If a qualifier was truncated or left unclosed, use the text before the
+ * still-open parenthesis or bracket so "Bus Stop (Campus / Inbound…" still
+ * reduces to bus stop. */
+function prefixBeforeUnclosedQualifier(category: string): string {
+  let depth = 0;
+  let start = -1;
+  for (let index = 0; index < category.length; index += 1) {
+    const char = category[index];
+    if (char === '(' || char === '[') {
+      if (depth === 0) start = index;
+      depth += 1;
+    } else if ((char === ')' || char === ']') && depth > 0) {
+      depth -= 1;
+      if (depth === 0) start = -1;
+    }
+  }
+  return depth > 0 && start >= 0 ? category.slice(0, start).trim() : category;
+}
+
 function firstExternalCategoryAnnotationRoot(category: string): string {
   let depth = 0;
   for (let index = 0; index < category.length; index += 1) {
@@ -182,14 +219,21 @@ function firstExternalCategoryAnnotationRoot(category: string): string {
 }
 
 function isExplicitNonClassroomCategory(value: unknown): boolean {
-  const category = comparisonText(value);
+  const category = categoryComparisonText(value);
+  if (!category) return false;
   if (NON_CLASSROOM_POI_CATEGORIES.has(stripTrailingCategoryQualifiers(category))) return true;
   // Split only on standalone annotation separators outside balanced
   // parentheses or brackets. "Bus Stop (Campus / Inbound) / Temporary"
   // must still reduce to bus stop; a slash inside the qualifier must not.
   // A bare ASCII hyphen within a code/name is not a delimiter.
   const root = firstExternalCategoryAnnotationRoot(category);
-  return root !== category && NON_CLASSROOM_POI_CATEGORIES.has(stripTrailingCategoryQualifiers(root));
+  if (root !== category && NON_CLASSROOM_POI_CATEGORIES.has(stripTrailingCategoryQualifiers(root))) {
+    return true;
+  }
+  // A truncated or unclosed qualifier can hide the trailing annotation;
+  // still honour the explicit root before the still-open group.
+  const unclosed = prefixBeforeUnclosedQualifier(category);
+  return unclosed !== category && NON_CLASSROOM_POI_CATEGORIES.has(stripTrailingCategoryQualifiers(unclosed));
 }
 
 /** Missing school scope is legacy/unscoped even when an importer writes

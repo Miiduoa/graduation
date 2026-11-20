@@ -37,10 +37,16 @@ function safePlace(place: CampusMapPlaceLike): CampusMapPlaceLike | null {
   if (!name) return null;
   const building = place.building ? plain(place.building, 120) : '';
   const floor = place.floor ? plain(place.floor, 80) : '';
+  // Preserve enumerable transit markers without widening CampusMapPlaceLike.
+  // Classroom matching must still see them; the result parser strips them
+  // from the public item after the match has been validated.
+  const transit = Object.prototype.propertyIsEnumerable.call(place, 'transitStopIds')
+    ? { transitStopIds: (place as { transitStopIds?: unknown }).transitStopIds }
+    : {};
   return { id: place.id, name, category: plain(place.category, 80) || '其他',
     description: plain(place.description, 320), lat: place.lat, lng: place.lng,
     facilities: [...new Set((place.facilities ?? []).map(value => plain(value, 80)).filter(Boolean))].slice(0, 12),
-    ...(building ? { building } : {}), ...(floor ? { floor } : {}) };
+    ...(building ? { building } : {}), ...(floor ? { floor } : {}), ...transit } as CampusMapPlaceLike;
 }
 
 export async function readCampusMap(input: {

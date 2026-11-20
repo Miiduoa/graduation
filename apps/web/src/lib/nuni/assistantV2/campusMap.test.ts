@@ -90,6 +90,32 @@ describe('map query and source contract', () => {
     expect(campusMapMatch('pu', '主顧樓501', hall)).toBe('building');
   });
 
+  it('does not treat a teaching-looking POI with transit markers as a classroom building', () => {
+    const hall = PROVIDENCE_CAMPUS_PLACES.find(place => place.id === 'pu-zhugu')!;
+    const spoof = {
+      id: 'synthetic-unrecognized-stop',
+      name: hall.name,
+      category: 'academic',
+      description: '',
+      lat: hall.lat,
+      lng: hall.lng,
+      building: '主顧樓',
+      transitStopIds: ['unknown-stop-1'],
+    };
+    const { transitStopIds: _ignored, ...withoutMarkers } = spoof;
+    expect(campusMapMatch('pu', 'PH303', spoof)).not.toBe('building');
+    expect(campusMapMatch('pu', 'PH303', withoutMarkers)).toBe('building');
+    const value = result('PH303');
+    value.items = [{
+      id: spoof.id, schoolId: 'pu', name: spoof.name, category: spoof.category, description: spoof.description,
+      lat: spoof.lat, lng: spoof.lng, building: spoof.building, facilities: [],
+      source: 'school-pois', sourcePath: 'schools/pu/pois',
+      href: campusMapHref('pu', 'PH303', spoof.id), match: 'building', verification: 'published',
+      transitStopIds: spoof.transitStopIds,
+    } as CampusMapRead['items'][number] & { transitStopIds: string[] }];
+    expect(() => parseCampusMapResult(value, 'pu', { query: 'PH303', limit: 5 })).toThrow('INVALID_CAMPUS_MAP_RESULT');
+  });
+
   it('keeps partial coverage ahead of candidates and the fact that no route was executed', () => {
     const value = result(); value.partial = true; value.resolution = 'partial';
     const text = formatCampusMapRead(read(value));

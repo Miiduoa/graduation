@@ -476,6 +476,33 @@ describe('malformed imported transit stop markers cannot become classroom destin
 });
 
 describe('nested and long POI qualifiers never override classroom destinations', () => {
+  it('still rejects a stop category when a long parenthetical annotation is truncated', () => {
+    // Longer than the 120-character query cap used by comparisonText.
+    const longCategory = `Bus Stop (Campus / Inbound ${'Annex '.repeat(18)}) / Temporary`;
+    expect(Array.from(longCategory).length).toBeGreaterThan(120);
+    const annotatedStop = {
+      ...hall,
+      id: 'synthetic-long-qualified-stop',
+      category: longCategory,
+      building: '主顧樓',
+    };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [annotatedStop],
+    }).status).toBe('unmatched');
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [annotatedStop, hall],
+    }).matches).toEqual([hall]);
+  });
+
+  it('still matches a teaching hall whose long category annotation is truncated', () => {
+    const longCategory = `Academic (North / Wing ${'Annex '.repeat(18)}) / Main`;
+    expect(Array.from(longCategory).length).toBeGreaterThan(120);
+    const annotatedHall = { ...hall, category: longCategory };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [annotatedHall],
+    }).matches).toEqual([annotatedHall]);
+  });
+
   it('still rejects a stop category whose slash sits inside parentheses before a trailing annotation', () => {
     // Synthetic import label, not a published timetable destination.
     const annotatedStop = {
