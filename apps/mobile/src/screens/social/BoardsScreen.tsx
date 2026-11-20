@@ -81,8 +81,10 @@ function BoardsContent() {
   const loadVersion = useRef(0);
   // A pending subscription belongs to this mounted student + school scope.
   const pendingSubscriptionIds = useRef(new Set<string>());
-  // Ignore a list snapshot if a write began or finished after that read started.
+  // Per-board write revision: only boards written after a read started keep
+  // their local state; every other board still takes the server snapshot.
   const subscriptionRevision = useRef(0);
+  const boardWriteRevision = useRef(new Map<string, number>());
   const [pendingSubscriptions, setPendingSubscriptions] = useState<ReadonlySet<string>>(new Set());
   const mounted = useRef(true);
   useEffect(() => {
@@ -109,9 +111,12 @@ function BoardsContent() {
       // A refresh finishing during a pending write must not erase the student's
       // optimistic choice. Reconcile the server snapshot after the write settles.
       setSubscribed((previous) => {
-        if (subscriptionRevision.current !== subscriptionRevisionAtRead) return previous;
         const next = new Set(subs);
-        for (const id of pendingSubscriptionIds.current) {
+        const keepLocal = new Set(pendingSubscriptionIds.current);
+        for (const [id, revision] of boardWriteRevision.current) {
+          if (revision > subscriptionRevisionAtRead) keepLocal.add(id);
+        }
+        for (const id of keepLocal) {
           if (previous.has(id)) next.add(id);
           else next.delete(id);
         }
@@ -183,6 +188,7 @@ function BoardsContent() {
       if (pendingSubscriptionIds.current.has(b.id)) return;
       pendingSubscriptionIds.current.add(b.id);
       subscriptionRevision.current += 1;
+      boardWriteRevision.current.set(b.id, subscriptionRevision.current);
       setPendingSubscriptions(new Set(pendingSubscriptionIds.current));
       const wasSub = subscribed.has(b.id);
       setSubscribed((previous) => {
@@ -209,6 +215,7 @@ function BoardsContent() {
       } finally {
         pendingSubscriptionIds.current.delete(b.id);
         subscriptionRevision.current += 1;
+        boardWriteRevision.current.set(b.id, subscriptionRevision.current);
         if (mounted.current) setPendingSubscriptions(new Set(pendingSubscriptionIds.current));
       }
     },
@@ -341,7 +348,7 @@ function BoardsContent() {
                   accessibilityState={{ disabled: isPending, busy: isPending }}
                   disabled={isPending}
                   onPress={(e) => {
-                    e.stopPropagation?.();
+                    e?.stopPropagation?.();
                     void onToggleSubscribe(b);
                   }}
                   style={[styles.subBtn, isSub && styles.subBtnOn, isPending && { opacity: 0.65 }]}

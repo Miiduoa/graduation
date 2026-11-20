@@ -293,6 +293,50 @@ test('a server refresh started before a write cannot erase the later confirmed s
   expect(subscribeToBoard).toHaveBeenCalledTimes(1);
 });
 
+test('a refresh overlapping one board write still applies server state for other boards', async () => {
+  const otherBoard = { id: 'board-b', name: '攝影社', type: 'topic' };
+  jest.mocked(listBoards).mockResolvedValue([board, otherBoard]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('攝影社');
+
+  let finishRefresh!: (ids: string[]) => void;
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(
+    () => new Promise<string[]>((resolve) => { finishRefresh = resolve; }),
+  );
+  let finishWrite!: () => void;
+  jest.mocked(subscribeToBoard).mockImplementationOnce(
+    () => new Promise<void>((resolve) => { finishWrite = resolve; }),
+  );
+
+  let refreshPromise!: Promise<void>;
+  act(() => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+  // Another device subscribed board-b; the server snapshot predates board A's write.
+  await act(async () => { finishRefresh(['board-b']); await refreshPromise; });
+  expect(view.getByLabelText('取消訂閱攝影社')).toBeTruthy();
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+  await act(async () => { finishWrite(); });
+  expect(view.getByLabelText('取消訂閱攝影社')).toBeTruthy();
+  expect(view.getByLabelText('取消訂閱讀書會').props.accessibilityState.disabled).toBe(false);
+});
+
+test('two native presses before a rerender start only one board write', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  let finish!: () => void;
+  jest.mocked(subscribeToBoard).mockImplementationOnce(
+    () => new Promise<void>((resolve) => { finish = resolve; }),
+  );
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+  const button = view.getByLabelText('訂閱讀書會');
+  // Both presses run inside one act, so React cannot rerender the disabled state in between.
+  act(() => { fireEvent.press(button); fireEvent.press(button); });
+  expect(subscribeToBoard).toHaveBeenCalledTimes(1);
+  expect(unsubscribeFromBoard).not.toHaveBeenCalled();
+  await act(async () => { finish(); });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
 test('failed board subscription rolls back and allows an explicit retry', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   let fail!: (error: Error) => void;
