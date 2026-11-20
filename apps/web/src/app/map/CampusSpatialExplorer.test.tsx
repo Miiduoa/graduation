@@ -1376,6 +1376,44 @@ it('rejects oversized JSON-only WebView bridge payloads even without text()', as
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+// JSON-only WebView fetch bridges have already discarded the HTTP raw bytes.
+// Even a matching serialized byte count cannot prove that the original body
+// satisfied a declared identity Content-Length. Never label those outlines
+// as verified geometry; the existing POIs and directions remain available.
+it('rejects unverifiable identity Content-Length on a JSON-only WebView response', async () => {
+  const { library, body } = sourcedLibraryFootprintFixture();
+  const json = vi.fn().mockResolvedValue(JSON.parse(body));
+  const length = new TextEncoder().encode(body).byteLength;
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200, body: null,
+    headers: { get: (name: string) => name === 'content-length' ? String(length) : null },
+    json,
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(json).not.toHaveBeenCalled();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('keeps the legacy JSON-only bridge usable when no body length was declared', async () => {
+  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  const json = vi.fn().mockResolvedValue(JSON.parse(body));
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, status: 200, body: null,
+    headers: { get: () => null }, json,
+  }));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(json).toHaveBeenCalledTimes(1);
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('accepts a small, valid non-streaming text response for legacy WebViews', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
