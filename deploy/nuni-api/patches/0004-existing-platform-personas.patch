@@ -1,0 +1,553 @@
+From cb57e78aa5f09155ec045ea4b5c130827cdf4fad Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E9=A1=A7=E6=99=89=E7=91=8B?= <demohan513@gmail.com>
+Date: Fri, 9 Oct 2026 02:05:47 +0800
+Subject: [PATCH] =?UTF-8?q?=E6=B2=BF=E7=94=A8=E6=97=A2=E6=9C=89=E5=85=AC?=
+ =?UTF-8?q?=E9=96=8B=E8=BA=AB=E5=88=86=E5=B0=8D=E6=87=89=E4=B8=A6=E4=BF=9D?=
+ =?UTF-8?q?=E8=AD=B7=E4=B8=A6=E7=99=BC=E5=BB=BA=E7=AB=8B?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../src/accounts/platform-account-service.ts  | 104 ++++++++------
+ .../accounts/platform-persona-mapping.test.ts |  96 +++++++++++++
+ .../install-social-event-schemas.test.ts      |  13 +-
+ runtime-grant-matrix.json                     | 134 ++++++++----------
+ 4 files changed, 230 insertions(+), 117 deletions(-)
+ create mode 100644 apps/api/src/accounts/platform-persona-mapping.test.ts
+
+diff --git a/apps/api/src/accounts/platform-account-service.ts b/apps/api/src/accounts/platform-account-service.ts
+index 6a31d7a..ea74d77 100644
+--- a/apps/api/src/accounts/platform-account-service.ts
++++ b/apps/api/src/accounts/platform-account-service.ts
+@@ -699,48 +699,70 @@ export class PlatformAccountService {
+   ): Promise<AuthActor> {
+     const tenantId = tenantIdInput.trim();
+     if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/u.test(tenantId)) throw invalidPublicRealm();
+-    const account = await this.db.query<{ display_name: string; tenant_name: string }>(
+-      `SELECT account.display_name, tenant.display_name AS tenant_name
+-         FROM platform_accounts account
+-         CROSS JOIN tenants tenant
+-        WHERE account.id=$1 AND account.state='active'
+-          AND tenant.id=$2 AND tenant.state IN ('provisioned','open')
+-          AND (NOT $3::boolean OR EXISTS (
+-            SELECT 1 FROM platform_operator_assignments assignment
+-            WHERE assignment.platform_account_id=account.id
+-              AND assignment.role_key='platform-operator' AND assignment.state='active'
+-          ))
+-          AND (
+-            $3::boolean OR EXISTS(SELECT 1 FROM food_locations location
+-              WHERE location.tenant_id=tenant.id AND location.public_access
+-                AND location.status='open')
+-            OR EXISTS(SELECT 1 FROM social_communities community
+-              WHERE community.tenant_id=tenant.id AND community.access_scope='public'
+-                AND community.discoverability='listed')
+-          )`,
+-      [actor.platformAccountId, tenantId, options.forCommunityCreation === true],
+-    );
+-    const row = account.rows[0];
+-    if (!row) throw invalidPublicRealm();
+-    const suffix = digest(`${actor.platformAccountId}\u0000${tenantId}`).slice(0, 32);
+-    const personId = `platform-user-${suffix}`;
+-    const personNumber = `P${suffix.slice(0, 20)}`;
+-    await this.db.transaction(async (tx) => {
+-      await tx.query(
+-        `INSERT INTO people
+-           (tenant_id,id,student_number,display_name,program,curriculum_version,study_year,campus,credential_status)
+-         VALUES ($1,$2,$3,$4,'一般使用者','platform',1,$5,'active')
+-         ON CONFLICT (tenant_id,id) DO UPDATE
+-           SET display_name=EXCLUDED.display_name
+-         WHERE people.credential_status='active'`,
+-        [tenantId, personId, personNumber, row.display_name, row.tenant_name],
+-      );
+-      await tx.query(
+-        `INSERT INTO platform_tenant_personas (platform_account_id,tenant_id,person_id)
+-         VALUES ($1,$2,$3)
+-         ON CONFLICT (platform_account_id,tenant_id) DO NOTHING`,
+-        [actor.platformAccountId, tenantId, personId],
++    const personId = await this.db.transaction(async (tx) => {
++      // Serialize first creation with other account operations, then use the
++      // persisted mapping; older personas need not follow today's ID format.
++      const account = await tx.query<{ display_name: string; tenant_name: string }>(
++        `SELECT account.display_name, tenant.display_name AS tenant_name
++           FROM platform_accounts account
++           CROSS JOIN tenants tenant
++          WHERE account.id=$1 AND account.state='active'
++            AND tenant.id=$2 AND tenant.state IN ('provisioned','open')
++            AND (NOT $3::boolean OR EXISTS (
++              SELECT 1 FROM platform_operator_assignments assignment
++              WHERE assignment.platform_account_id=account.id
++                AND assignment.role_key='platform-operator' AND assignment.state='active'
++            ))
++            AND (
++              $3::boolean OR EXISTS(SELECT 1 FROM food_locations location
++                WHERE location.tenant_id=tenant.id AND location.public_access
++                  AND location.status='open')
++              OR EXISTS(SELECT 1 FROM social_communities community
++                WHERE community.tenant_id=tenant.id AND community.access_scope='public'
++                  AND community.discoverability='listed')
++            ) FOR UPDATE OF account FOR SHARE OF tenant`,
++        [actor.platformAccountId, tenantId, options.forCommunityCreation === true],
+       );
++      const row = account.rows[0];
++      if (!row) throw invalidPublicRealm();
++      const existing = (await tx.query<{ person_id: string }>(
++        `SELECT person_id FROM platform_tenant_personas
++          WHERE platform_account_id=$1 AND tenant_id=$2 FOR UPDATE`,
++        [actor.platformAccountId, tenantId],
++      )).rows[0];
++      let createdPersonId: string | undefined;
++      if (!existing) {
++        const suffix = digest(`${actor.platformAccountId}\u0000${tenantId}`).slice(0, 32);
++        createdPersonId = `platform-user-${suffix}`;
++        const inserted = await tx.query<{ id: string }>(
++          `INSERT INTO people
++             (tenant_id,id,student_number,display_name,program,curriculum_version,study_year,campus,credential_status)
++           VALUES ($1,$2,$3,$4,'一般使用者','platform',1,$5,'active')
++           ON CONFLICT (tenant_id,id) DO NOTHING RETURNING id`,
++          [tenantId, createdPersonId, `P${suffix.slice(0, 20)}`, row.display_name, row.tenant_name],
++        );
++        // An unrelated pre-existing person must never be adopted or renamed.
++        if (!inserted.rows[0]) throw invalidPublicRealm();
++        await tx.query(
++          `INSERT INTO platform_tenant_personas (platform_account_id,tenant_id,person_id)
++           VALUES ($1,$2,$3) ON CONFLICT (platform_account_id,tenant_id) DO NOTHING`,
++          [actor.platformAccountId, tenantId, createdPersonId],
++        );
++      }
++      const stored = (await tx.query<{ person_id: string }>(
++        `SELECT persona.person_id FROM platform_tenant_personas persona
++         JOIN people person ON person.tenant_id=persona.tenant_id AND person.id=persona.person_id
++         WHERE persona.platform_account_id=$1 AND persona.tenant_id=$2
++           AND person.credential_status='active' FOR UPDATE OF persona,person`,
++        [actor.platformAccountId, tenantId],
++      )).rows[0];
++      if (!stored) throw invalidPublicRealm();
++      if (createdPersonId && createdPersonId !== stored.person_id) {
++        await tx.query(`DELETE FROM people WHERE tenant_id=$1 AND id=$2`, [tenantId, createdPersonId]);
++      }
++      await tx.query(`UPDATE people SET display_name=$3 WHERE tenant_id=$1 AND id=$2`,
++        [tenantId, stored.person_id, row.display_name]);
++      return stored.person_id;
+     });
+     return {
+       tenantId,
+diff --git a/apps/api/src/accounts/platform-persona-mapping.test.ts b/apps/api/src/accounts/platform-persona-mapping.test.ts
+new file mode 100644
+index 0000000..c8f2e35
+--- /dev/null
++++ b/apps/api/src/accounts/platform-persona-mapping.test.ts
+@@ -0,0 +1,96 @@
++import { createHash, randomUUID } from "node:crypto";
++import { afterEach, beforeEach, describe, expect, it } from "vitest";
++import { createDatabase, type CampusDatabase } from "../database";
++import { PlatformAccountService, type PlatformActor } from "./platform-account-service";
++
++describe("persisted public persona identity", () => {
++  let db: CampusDatabase;
++  let service: PlatformAccountService;
++  let actor: PlatformActor;
++  let other: PlatformActor;
++  const tenantId = "persona-school";
++  const secondTenantId = "other-persona-school";
++  const verifier = { verify: async () => { throw new Error("unused"); } };
++
++  async function account(): Promise<PlatformActor> {
++    const platformAccountId = `pa_${randomUUID()}`;
++    const credentialId = `pac_${randomUUID()}`;
++    await db.query(`INSERT INTO platform_accounts (id,display_name) VALUES ($1,'一般帳號')`, [platformAccountId]);
++    await db.query(`INSERT INTO platform_account_credentials
++      (id,platform_account_id,method,provider_issuer,provider_subject,verified_at,last_authenticated_at)
++      VALUES ($1,$2,'google','https://accounts.google.com',$3,now(),now())`, [credentialId, platformAccountId, randomUUID()]);
++    await db.query(`INSERT INTO platform_operator_assignments (platform_account_id,role_key,state)
++      VALUES ($1,'platform-operator','active')`, [platformAccountId]);
++    return { platformAccountId, credentialId, expiresAt: Date.now() + 3_600_000 };
++  }
++
++  async function mapping(owner: PlatformActor, school: string, person: string, status = "active") {
++    await db.query(`INSERT INTO people
++      (tenant_id,id,student_number,display_name,program,curriculum_version,study_year,campus,credential_status)
++      VALUES ($1,$2,$2,'既有一般使用者','一般使用者','platform',1,'公開社群',$3)`, [school, person, status]);
++    await db.query(`INSERT INTO platform_tenant_personas (platform_account_id,tenant_id,person_id)
++      VALUES ($1,$2,$3)`, [owner.platformAccountId, school, person]);
++  }
++
++  const resolve = (owner = actor, school = tenantId, instance = service) =>
++    instance.resolvePublicRealmActor(owner, school, { forCommunityCreation: true });
++
++  beforeEach(async () => {
++    db = await createDatabase({ seedDemo: false, attendanceCodeSecret: "persona-test-secret-over-thirty-two-characters" });
++    for (const school of [tenantId, secondTenantId]) {
++      await db.query(`INSERT INTO tenants (id,display_name,state,directory_source) VALUES ($1,'公開社群校','open','manual')`, [school]);
++    }
++    service = new PlatformAccountService(db, verifier);
++    actor = await account();
++    other = await account();
++  }, 60_000);
++
++  afterEach(async () => { await db?.close(); });
++
++  it("reuses older persona IDs without borrowing another account or tenant mapping or granting campus roles", async () => {
++    await mapping(actor, tenantId, "older-public-person");
++    await mapping(actor, secondTenantId, "other-school-person");
++    await mapping(other, tenantId, "other-account-person");
++    const resolved = await resolve();
++    expect(resolved).toEqual({ tenantId, personId: "older-public-person", roles: ["platform-user"],
++      sessionKind: "platform-account", credentialId: actor.credentialId });
++    expect((await resolve(actor, secondTenantId)).personId).toBe("other-school-person");
++    expect((await resolve(other)).personId).toBe("other-account-person");
++    expect((await db.query(`SELECT id FROM people WHERE tenant_id IN ($1,$2)`, [tenantId, secondTenantId])).rows).toHaveLength(3);
++    expect((await db.query(`SELECT id FROM identity_subjects WHERE tenant_id IN ($1,$2)`, [tenantId, secondTenantId])).rows).toEqual([]);
++    expect((await db.query(`SELECT person_id FROM platform_role_admin_assignments WHERE tenant_id IN ($1,$2)`, [tenantId, secondTenantId])).rows).toEqual([]);
++  });
++
++  it("returns one persisted mapping to concurrent first-time callers from separate services", async () => {
++    const results = await Promise.all([
++      resolve(), resolve(actor, tenantId, new PlatformAccountService(db, verifier)), resolve(),
++    ]);
++    expect(new Set(results.map(result => result.personId)).size).toBe(1);
++    const stored = (await db.query<{ person_id: string }>(`SELECT person_id FROM platform_tenant_personas
++      WHERE platform_account_id=$1 AND tenant_id=$2`, [actor.platformAccountId, tenantId])).rows;
++    expect(stored).toEqual([{ person_id: results[0]!.personId }]);
++    expect((await db.query(`SELECT id FROM people WHERE tenant_id=$1`, [tenantId])).rows).toHaveLength(1);
++    expect(results.every(result => result.roles.length === 1 && result.roles[0] === "platform-user")).toBe(true);
++  });
++
++  it("does not reactivate a suspended existing persona or create a replacement", async () => {
++    await mapping(actor, tenantId, "suspended-public-person", "suspended");
++    await expect(resolve()).rejects.toMatchObject({ statusCode: 404 });
++    expect((await db.query(`SELECT id,credential_status FROM people WHERE tenant_id=$1`, [tenantId])).rows)
++      .toEqual([{ id: "suspended-public-person", credential_status: "suspended" }]);
++    expect((await db.query(`SELECT person_id FROM platform_tenant_personas WHERE platform_account_id=$1 AND tenant_id=$2`,
++      [actor.platformAccountId, tenantId])).rows).toEqual([{ person_id: "suspended-public-person" }]);
++  });
++
++  it("does not adopt or rename an occupied generated ID belonging to another account", async () => {
++    const generatedId = `platform-user-${createHash("sha256").update(`${actor.platformAccountId}\u0000${tenantId}`).digest("hex").slice(0, 32)}`;
++    await mapping(other, tenantId, generatedId);
++    await expect(resolve()).rejects.toMatchObject({ statusCode: 404 });
++    expect((await db.query(`SELECT display_name FROM people WHERE tenant_id=$1 AND id=$2`, [tenantId, generatedId])).rows)
++      .toEqual([{ display_name: "既有一般使用者" }]);
++    expect((await db.query(`SELECT platform_account_id FROM platform_tenant_personas WHERE tenant_id=$1 AND person_id=$2`,
++      [tenantId, generatedId])).rows).toEqual([{ platform_account_id: other.platformAccountId }]);
++    expect((await db.query(`SELECT person_id FROM platform_tenant_personas WHERE platform_account_id=$1 AND tenant_id=$2`,
++      [actor.platformAccountId, tenantId])).rows).toEqual([]);
++  });
++});
+diff --git a/apps/api/src/event-governance/install-social-event-schemas.test.ts b/apps/api/src/event-governance/install-social-event-schemas.test.ts
+index 6a2a643..810a0f3 100644
+--- a/apps/api/src/event-governance/install-social-event-schemas.test.ts
++++ b/apps/api/src/event-governance/install-social-event-schemas.test.ts
+@@ -47,6 +47,12 @@ describe("social event schema installation for a real tenant", () => {
+     const reader = await account("公開交流使用者");
+     await db.query(`INSERT INTO platform_operator_assignments (platform_account_id,role_key,state)
+       VALUES ($1,'platform-operator','active')`, [operator.platformAccountId]);
++    // A migrated real account already has a stable persona with an older ID.
++    await db.query(`INSERT INTO people
++      (tenant_id,id,student_number,display_name,program,curriculum_version,study_year,campus,credential_status)
++      VALUES ($1,'legacy-public-operator','LEGACY-PUBLIC','校園營運','一般使用者','platform',1,'公開社群','active')`, [tenantId]);
++    await db.query(`INSERT INTO platform_tenant_personas (platform_account_id,tenant_id,person_id)
++      VALUES ($1,$2,'legacy-public-operator')`, [operator.platformAccountId, tenantId]);
+     const boardInput = { tenantId, name: "跨校問答", description: "各校公開交流", idempotencyKey: randomUUID() };
+
+     await expect(service.createBoard(operator, boardInput)).rejects.toMatchObject({
+@@ -122,6 +128,11 @@ describe("social event schema installation for a real tenant", () => {
+     const board = await service.createBoard(operator, boardInput);
+     expect(board).toMatchObject({ tenantId, name: boardInput.name, canPost: true });
+     expect(await service.createBoard(operator, boardInput)).toEqual(board);
++    const legacyAuthorPost = await service.createPost(operator, {
++      tenantId, communityId: board.id, text: "既有帳號在新看板發表", idempotencyKey: randomUUID(),
++    });
++    expect((await service.feed(reader, { tenantId })).items.map(item => item.id)).toContain(legacyAuthorPost.id);
++    expect((await accounts.resolvePublicRealmActor(operator, tenantId)).personId).toBe("legacy-public-operator");
+     const post = await service.createPost(reader, postInput);
+     expect(post).toMatchObject({ tenantId, text: postInput.text });
+     expect((await service.createPost(reader, postInput)).id).toBe(post.id);
+@@ -130,7 +141,7 @@ describe("social event schema installation for a real tenant", () => {
+     });
+     expect((await service.feed(operator, { tenantId })).items.map(item => item.id)).toContain(newBoardPost.id);
+     expect(await count("social_communities")).toBe(2);
+-    expect(await count("social_posts")).toBe(2);
++    expect(await count("social_posts")).toBe(3);
+     const events = (await db.query<{
+       event_type: string; event_schema_version: string; event_schema_sha256: string; producer_key: string;
+     }>(`SELECT event_type,event_schema_version,event_schema_sha256,producer_key
+diff --git a/runtime-grant-matrix.json b/runtime-grant-matrix.json
+index 8143bea..052fc3f 100644
+--- a/runtime-grant-matrix.json
++++ b/runtime-grant-matrix.json
+@@ -110,7 +110,7 @@
+     },
+     {
+       "path": "apps/api/src/accounts/platform-account-service.ts",
+-      "sha256": "7bd3795b90ae923bc3fc5c03030de1ff53605b409c8b1f53a6dca95fa8b1fa99"
++      "sha256": "1cc68f914d39db985ca885273bf2df14744e9e687b1923f0ff5a25d9d389617e"
+     },
+     {
+       "path": "apps/api/src/accounts/platform-idp.ts",
+@@ -34565,15 +34565,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 729,
+-      "column": 13,
+-      "code": "SQL_CALL_REACHABILITY_UNPROVEN",
+-      "detail": "anonymous-callable"
+-    },
+-    {
+-      "component": "api",
+-      "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 738,
++      "line": 763,
+       "column": 13,
+       "code": "SQL_CALL_REACHABILITY_UNPROVEN",
+       "detail": "anonymous-callable"
+@@ -45962,6 +45954,22 @@
+       "code": "SQL_CALL_REACHABILITY_UNPROVEN",
+       "detail": "anonymous-callable"
+     },
++    {
++      "component": "api",
++      "file": "apps/api/src/accounts/platform-account-service.ts",
++      "line": 746,
++      "column": 15,
++      "code": "SQL_CALL_REACHABILITY_UNPROVEN",
++      "detail": "anonymous-callable"
++    },
++    {
++      "component": "api",
++      "file": "apps/api/src/accounts/platform-account-service.ts",
++      "line": 761,
++      "column": 15,
++      "code": "SQL_CALL_REACHABILITY_UNPROVEN",
++      "detail": "anonymous-callable"
++    },
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-ops-service.ts",
+@@ -65362,6 +65370,22 @@
+       "code": "SQL_CALL_REACHABILITY_UNPROVEN",
+       "detail": "anonymous-callable"
+     },
++    {
++      "component": "api",
++      "file": "apps/api/src/accounts/platform-account-service.ts",
++      "line": 705,
++      "column": 29,
++      "code": "SQL_CALL_REACHABILITY_UNPROVEN",
++      "detail": "anonymous-callable"
++    },
++    {
++      "component": "api",
++      "file": "apps/api/src/accounts/platform-account-service.ts",
++      "line": 752,
++      "column": 29,
++      "code": "SQL_CALL_REACHABILITY_UNPROVEN",
++      "detail": "anonymous-callable"
++    },
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-ops-service.ts",
+@@ -69554,6 +69578,14 @@
+       "code": "SQL_CALL_REACHABILITY_UNPROVEN",
+       "detail": "anonymous-callable"
+     },
++    {
++      "component": "api",
++      "file": "apps/api/src/accounts/platform-account-service.ts",
++      "line": 728,
++      "column": 31,
++      "code": "SQL_CALL_REACHABILITY_UNPROVEN",
++      "detail": "anonymous-callable"
++    },
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-ops-service.ts",
+@@ -71626,6 +71658,14 @@
+       "code": "SQL_CALL_REACHABILITY_UNPROVEN",
+       "detail": "anonymous-callable"
+     },
++    {
++      "component": "api",
++      "file": "apps/api/src/accounts/platform-account-service.ts",
++      "line": 737,
++      "column": 32,
++      "code": "SQL_CALL_REACHABILITY_UNPROVEN",
++      "detail": "anonymous-callable"
++    },
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-ops-service.ts",
+@@ -80693,7 +80733,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 757,
++      "line": 779,
+       "column": 13,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_DELETE_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_account_sessions"
+@@ -80741,7 +80781,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 757,
++      "line": 779,
+       "column": 13,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_account_sessions"
+@@ -84997,7 +85037,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 774,
++      "line": 796,
+       "column": 26,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_accounts"
+@@ -85053,7 +85093,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 763,
++      "line": 785,
+       "column": 26,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_identity_providers"
+@@ -85469,15 +85509,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 702,
+-      "column": 27,
+-      "code": "SQL_LITERAL_UNRESOLVED",
+-      "detail": "FUNCTION_CALL_UNRESOLVED:and"
+-    },
+-    {
+-      "component": "api",
+-      "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 782,
++      "line": 804,
+       "column": 27,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:and"
+@@ -85506,14 +85538,6 @@
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:bool_or"
+     },
+-    {
+-      "component": "api",
+-      "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 702,
+-      "column": 27,
+-      "code": "SQL_LITERAL_UNRESOLVED",
+-      "detail": "FUNCTION_CALL_UNRESOLVED:exists"
+-    },
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/school-onboarding-service.ts",
+@@ -85626,14 +85650,6 @@
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:class_workspace_classroom_sessions"
+     },
+-    {
+-      "component": "api",
+-      "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 702,
+-      "column": 27,
+-      "code": "SQL_LITERAL_UNRESOLVED",
+-      "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:food_locations"
+-    },
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-ops-service.ts",
+@@ -85661,7 +85677,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 782,
++      "line": 804,
+       "column": 27,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:identity_staff_assignments"
+@@ -85717,7 +85733,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 782,
++      "line": 804,
+       "column": 27,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -85762,22 +85778,6 @@
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+     },
+-    {
+-      "component": "api",
+-      "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 702,
+-      "column": 27,
+-      "code": "SQL_LITERAL_UNRESOLVED",
+-      "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_accounts"
+-    },
+-    {
+-      "component": "api",
+-      "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 702,
+-      "column": 27,
+-      "code": "SQL_LITERAL_UNRESOLVED",
+-      "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_operator_assignments"
+-    },
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/school-onboarding-service.ts",
+@@ -85810,14 +85810,6 @@
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:school_onboarding_applications"
+     },
+-    {
+-      "component": "api",
+-      "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 702,
+-      "column": 27,
+-      "code": "SQL_LITERAL_UNRESOLVED",
+-      "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:social_communities"
+-    },
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/school-onboarding-service.ts",
+@@ -85842,14 +85834,6 @@
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenant_identity_providers"
+     },
+-    {
+-      "component": "api",
+-      "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 702,
+-      "column": 27,
+-      "code": "SQL_LITERAL_UNRESOLVED",
+-      "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+-    },
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-ops-service.ts",
+@@ -85885,7 +85869,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/accounts/platform-account-service.ts",
+-      "line": 782,
++      "line": 804,
+       "column": 27,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SESSION_AUTHORIZATION_OR_SEARCH_PATH_UNMODELED"
+@@ -89049,5 +89033,5 @@
+     "securityInvokerTrigger": "fixed-point expansion into invoker relation/function capabilities",
+     "publicExecute": "never used as a grant source; ACL proof remains independently blocked when unresolved"
+   },
+-  "canonicalSha256": "e0e29045ac5cf24f4d46d9f1bc1d087a6037a5bb5fcf2df8e319bbe47ef55f19"
++  "canonicalSha256": "974f644c53d1baf9de2b5c0f4000297ec4c8eb929bdfb29ffbdcfe7166f69aa7"
+ }
+--
+2.50.1 (Apple Git-155)
+

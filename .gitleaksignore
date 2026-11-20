@@ -1,0 +1,65 @@
+# Reviewed false positives from dependency checksums and a synthetic test request key.
+# Keep the default Gitleaks rules active for all other findings.
+759fab0b66fb02bb5632cc7ea5d86edcdfc1d88c:apps/web/src/lib/nuni/merchant.test.ts:generic-api-key:17
+759fab0b66fb02bb5632cc7ea5d86edcdfc1d88c:apps/mobile/ios/Podfile.lock:generic-api-key:2490
+759fab0b66fb02bb5632cc7ea5d86edcdfc1d88c:apps/mobile/ios/Podfile.lock:generic-api-key:2492
+759fab0b66fb02bb5632cc7ea5d86edcdfc1d88c:apps/mobile/ios/Podfile.lock:generic-api-key:2514
+759fab0b66fb02bb5632cc7ea5d86edcdfc1d88c:apps/mobile/ios/Podfile.lock:generic-api-key:2534
+# Reviewed public Firebase client configuration, verified against the existing
+# https://campus-one-tw.firebaseapp.com/__/firebase/init.json on 2026-10-11.
+# This exact historical finding is public app configuration, not a server credential.
+3f81018366aabb039fa61253ab9744007209e2e3:apps/mobile/eas.json:gcp-api-key:55
+# Historical emulator-only password fixture; requires demo- project and Firebase emulator hosts.
+# Reviewed exact commit/line only; keep all other Gitleaks findings active.
+042a30484fd7f8c926a99d5fb1db27d1da2403fb:scripts/test-env/seed.cjs:generic-api-key:20
+# Reviewed public source and migration SHA-256 checksums, not credentials.
+4a6e87764eeba0db5a9eaf35b7270fc65eb671ba:deploy/nuni-api/composed/rollback-source.json:generic-api-key:6
+4a6e87764eeba0db5a9eaf35b7270fc65eb671ba:deploy/nuni-api/composed/source.json:generic-api-key:11
+# Reviewed synthetic idempotency keys in the loopback-only materials acceptance runner.
+# These identify test requests and confer no authentication or access.
+2c4a285abdb24aa2346e9783d24bf1fb3c420356:scripts/verify-nuni-materials-api.mjs:generic-api-key:164
+2c4a285abdb24aa2346e9783d24bf1fb3c420356:scripts/verify-nuni-materials-api.mjs:generic-api-key:166
+2c4a285abdb24aa2346e9783d24bf1fb3c420356:scripts/verify-nuni-materials-api.mjs:generic-api-key:195
+0049a2f235d5a7086c6efad21ec08fb917e3db60:scripts/verify-nuni-materials-api.mjs:generic-api-key:164
+0049a2f235d5a7086c6efad21ec08fb917e3db60:scripts/verify-nuni-materials-api.mjs:generic-api-key:166
+0049a2f235d5a7086c6efad21ec08fb917e3db60:scripts/verify-nuni-materials-api.mjs:generic-api-key:195
+# mobile streak 本機儲存鍵名（LEGACY_STREAK_KEY 及已刪畫面的同類鍵名）
+f408a270c86c5bd410cd50d9ae6a626566e075e9:apps/mobile/src/features/engagement/repository.ts:generic-api-key:19
+20f7572b4e5da1ed97712dbad9749cb7f74ad8fa:apps/mobile/src/screens/AchievementsScreen.tsx:generic-api-key:76
+20f7572b4e5da1ed97712dbad9749cb7f74ad8fa:apps/mobile/src/screens/ProfileScreen.tsx:generic-api-key:22
+20f7572b4e5da1ed97712dbad9749cb7f74ad8fa:apps/mobile/src/screens/TodayScreen.tsx:generic-api-key:335
+cf32b80b6c3d1547d62fc043b37d76385c1f571c:apps/mobile/src/screens/AchievementsScreen.tsx:generic-api-key:75
+cf32b80b6c3d1547d62fc043b37d76385c1f571c:apps/mobile/src/screens/ProfileScreen.tsx:generic-api-key:21
+cf32b80b6c3d1547d62fc043b37d76385c1f571c:apps/mobile/src/screens/TodayScreen.tsx:generic-api-key:320
+# Podfile.lock 套件 checksum
+e70fa5b8f19a94be2d4e548c887cc6823cf4ef31:apps/mobile/ios/Podfile.lock:generic-api-key:2407
+# docs/API.md 截斷的範例 token
+2962cb398b69b78a639daa99e54981f33dee71fd:docs/API.md:generic-api-key:145
+980eea437bc5ee9ae4cee50c3d27122459ea7cbd:docs/API.md:generic-api-key:115
+# food-api.test.ts 測試假值
+a64aa736debbbbddd00cc6ff5485a432e3ff1806:apps/web/src/lib/nuni/food-api.test.ts:generic-api-key:42
+
+# Exact aliases for byte-identical files under the observed historical commit IDs.
+# Paired with the original reviews; validated by scripts/security/verify-gitleaks-history.mjs.
+1dfa558db862986b1a7e268854bc32ea1b42cf7c:scripts/verify-nuni-materials-api.mjs:generic-api-key:164
+1dfa558db862986b1a7e268854bc32ea1b42cf7c:scripts/verify-nuni-materials-api.mjs:generic-api-key:166
+1dfa558db862986b1a7e268854bc32ea1b42cf7c:scripts/verify-nuni-materials-api.mjs:generic-api-key:195
+4c20efb2ca72b4e4ad5aee64f6376862f9628aec:deploy/nuni-api/composed/source.json:generic-api-key:11
+4c20efb2ca72b4e4ad5aee64f6376862f9628aec:deploy/nuni-api/composed/rollback-source.json:generic-api-key:6
+e54f4ca2f99fb7c41548221f794347ce9fe294c1:scripts/test-env/seed.cjs:generic-api-key:20
+024b356723d1ec9d4ec87de28d36033ab9ee5fda:apps/mobile/eas.json:gcp-api-key:55
+29bdb8dd5eb3bde59bd88f607299fd05f5aadbd6:apps/web/src/lib/nuni/merchant.test.ts:generic-api-key:17
+29bdb8dd5eb3bde59bd88f607299fd05f5aadbd6:apps/mobile/ios/Podfile.lock:generic-api-key:2490
+29bdb8dd5eb3bde59bd88f607299fd05f5aadbd6:apps/mobile/ios/Podfile.lock:generic-api-key:2492
+29bdb8dd5eb3bde59bd88f607299fd05f5aadbd6:apps/mobile/ios/Podfile.lock:generic-api-key:2514
+29bdb8dd5eb3bde59bd88f607299fd05f5aadbd6:apps/mobile/ios/Podfile.lock:generic-api-key:2534
+01d04d9d357ad59f9638768bab6875085d40d6eb:apps/mobile/ios/Podfile.lock:generic-api-key:2407
+6e95d0972f2ec3fda29f6a540f119cf09e54feb9:apps/mobile/src/features/engagement/repository.ts:generic-api-key:19
+cedf63f6269ed4361eaed57ff54ce2ef8fbe313c:docs/API.md:generic-api-key:145
+c6b0c412503fb27e13ee31ec72b25291d6fa6d9d:apps/mobile/src/screens/AchievementsScreen.tsx:generic-api-key:76
+c6b0c412503fb27e13ee31ec72b25291d6fa6d9d:apps/mobile/src/screens/ProfileScreen.tsx:generic-api-key:22
+c6b0c412503fb27e13ee31ec72b25291d6fa6d9d:apps/mobile/src/screens/TodayScreen.tsx:generic-api-key:335
+593330cf36c5e7ab4d87e91eed6e563d230bff4d:apps/mobile/src/screens/AchievementsScreen.tsx:generic-api-key:75
+593330cf36c5e7ab4d87e91eed6e563d230bff4d:apps/mobile/src/screens/ProfileScreen.tsx:generic-api-key:21
+593330cf36c5e7ab4d87e91eed6e563d230bff4d:apps/mobile/src/screens/TodayScreen.tsx:generic-api-key:320
+d8628868502fe68b12e47bd26207042701ad29d0:docs/API.md:generic-api-key:115

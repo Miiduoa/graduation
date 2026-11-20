@@ -1,0 +1,151 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { parsePersonalImportAiResponse } from '@campus/shared/src/imports/aiRecognition';
+import {
+  hasPersonalImportDraft,
+  loadPersonalImportDraft,
+  savePersonalImportDraft,
+} from '../services/imports/personalImportDraft';
+
+const options = { kind: 'grades' as const, schoolId: 'pu', academicYear: '115', semester: '1' };
+const source = '資料庫，學分 3，成績 85';
+const result = () =>
+  parsePersonalImportAiResponse(
+    JSON.stringify({
+      complete: true,
+      rows: [{ title: '資料庫', credits: 3, grade: '85', evidence: source }],
+    }),
+    source,
+    options,
+  );
+beforeEach(async () => {
+  await AsyncStorage.clear();
+});
+
+test('recovers completed rows and retry ranges only for their owner and school', async () => {
+  const draft = {
+    text: `${source}\n第二門課`,
+    options,
+    ...result(),
+    retryBatches: [{ text: '第二門課', startLine: 2 }],
+  };
+  await savePersonalImportDraft({ owner: 'first', schoolId: 'pu' }, draft);
+  expect(await loadPersonalImportDraft({ owner: 'second', schoolId: 'pu' })).toBeNull();
+  expect(await loadPersonalImportDraft({ owner: 'first', schoolId: 'other' })).toBeNull();
+  expect(await loadPersonalImportDraft({ owner: 'first', schoolId: 'pu' })).toEqual(draft);
+});
+
+test('queued edits and clearing cannot be overwritten by an older checkpoint', async () => {
+  const scope = { owner: 'first', schoolId: 'pu' };
+  const draft = { text: source, options, ...result(), retryBatches: [] };
+  const first = savePersonalImportDraft(scope, draft);
+  const cleared = savePersonalImportDraft(scope, null);
+  await Promise.all([first, cleared]);
+  expect(await loadPersonalImportDraft(scope)).toBeNull();
+});
+
+test.each(['options', 'duplicate', 'source', 'retry'])(
+  'ignores a damaged %s draft instead of crashing the preview',
+  async (damage) => {
+    const scope = { owner: 'first', schoolId: 'pu' };
+    const draft = {
+      text: source,
+      options: { ...options },
+      ...result(),
+      retryBatches: [] as Array<{ text: string; startLine: number }>,
+    };
+    if (damage === 'options') draft.options.academicYear = {} as string;
+    if (damage === 'duplicate') draft.rows.push(draft.rows[0]);
+    if (damage === 'source') draft.rows[0].source.line = -1;
+    if (damage === 'retry') draft.retryBatches.push({ text: '不同來源', startLine: 1 });
+    await expect(savePersonalImportDraft(scope, draft)).rejects.toThrow('Invalid personal import draft');
+    // Older versions could persist invalid values; the reader must still reject them.
+    await AsyncStorage.setItem('campus.personal-import-draft.v1:first:pu', JSON.stringify(draft));
+    expect(await loadPersonalImportDraft(scope)).toBeNull();
+  },
+);
+
+test.each([{ selection: undefined }, { selection: [] }, { selection: ['kept'] }])(
+  'preserves optional selection %p in saved progress',
+  async ({ selection }) => {
+    const scope = { owner: 'first', schoolId: 'pu' };
+    const parsed = result();
+    parsed.rows[0].id = 'kept';
+    const draft = {
+      text: source,
+      options,
+      ...parsed,
+      selected: selection ? [...selection] : undefined,
+      retryBatches: [],
+    };
+    await savePersonalImportDraft(scope, draft);
+    expect((await loadPersonalImportDraft(scope))?.selected).toEqual(selection);
+  },
+);
+
+test.each([['missing-row'], [123], 'invalid'])(
+  'rejects malformed saved selection %p',
+  async (selected) => {
+    const scope = { owner: 'first', schoolId: 'pu' };
+    const draft = {
+      text: source,
+      options,
+      ...result(),
+      selected: selected as string[],
+      retryBatches: [],
+    };
+    await expect(savePersonalImportDraft(scope, draft)).rejects.toThrow('Invalid personal import draft');
+    // Older versions could persist invalid values; the reader must still reject them.
+    await AsyncStorage.setItem('campus.personal-import-draft.v1:first:pu', JSON.stringify(draft));
+    expect(await loadPersonalImportDraft(scope)).toBeNull();
+  },
+);
+
+
+test('查課忽略有效的空 AI 草稿，但保護有內容或損壞的已存草稿', async () => {
+  const scope = { owner: 'returning', schoolId: 'ncnu' };
+  const key = 'campus.personal-import-draft.v1:returning:ncnu';
+  await AsyncStorage.setItem(key, JSON.stringify({
+    text: '  ', options: { ...options, schoolId: 'ncnu', academicYear: '', semester: '' },
+    rows: [], selected: [], issues: [], retryBatches: [],
+  }));
+  expect(await loadPersonalImportDraft(scope)).not.toBeNull();
+  expect(await hasPersonalImportDraft(scope)).toBe(false);
+  await AsyncStorage.setItem(key, '{broken');
+  expect(await hasPersonalImportDraft(scope)).toBe(true);
+  expect(await AsyncStorage.getItem(key)).toBe('{broken');
+  await savePersonalImportDraft(scope, {
+    text: '未完成文字', options: { ...options, schoolId: 'ncnu' },
+    rows: [], issues: [], retryBatches: [],
+  });
+  expect(await hasPersonalImportDraft(scope)).toBe(true);
+});
+
+
+test('saving a recognized empty AI draft removes an older checkpoint', async () => {
+  const scope = { owner: 'first', schoolId: 'pu' };
+  await savePersonalImportDraft(scope, { text: source, options, ...result(), retryBatches: [] });
+  await savePersonalImportDraft(scope, {
+    text: ' \n', options, rows: [], selected: [], issues: [], retryBatches: [],
+  });
+  expect(await loadPersonalImportDraft(scope)).toBeNull();
+  expect(await hasPersonalImportDraft(scope)).toBe(false);
+});
+
+
+test.each([40_001, 100_000])('round trips %i characters allowed by manual input', async (length) => {
+  const scope = { owner: 'first', schoolId: 'pu' };
+  const draft = { text: '字'.repeat(length), options, ...result(), retryBatches: [] };
+  await savePersonalImportDraft(scope, draft);
+  expect(await loadPersonalImportDraft(scope)).toEqual(draft);
+});
+
+test.each(['text', 'serialized'])('rejects excessive %s size without replacing a recoverable checkpoint', async (limit) => {
+  const scope = { owner: 'first', schoolId: 'pu' };
+  const draft = { text: source, options, ...result(), retryBatches: [] };
+  await savePersonalImportDraft(scope, draft);
+  const excessive = limit === 'text'
+    ? { ...draft, text: '字'.repeat(100_001) }
+    : { ...draft, issues: [{ code: 'test', severity: 'warning' as const, message: '字'.repeat(1_000_000) }] };
+  await expect(savePersonalImportDraft(scope, excessive)).rejects.toThrow('Invalid personal import draft');
+  expect(await loadPersonalImportDraft(scope)).toEqual(draft);
+});

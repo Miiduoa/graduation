@@ -1,0 +1,627 @@
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { CampusDraftProvider, scopeStorageKey } from '@/components/CampusDraftProvider';
+import { personalImportsStorageKey } from '@/lib/personalImports';
+import AssistantPage from './LegacyAssistant';
+import { callCampusAssistant, executeCampusAgentWrite, getCampusAssistantSnapshot, type CampusAssistantEnvelope } from '@/lib/campusAssistantClient';
+
+const state = vi.hoisted(() => ({
+  uid: 'alice' as string | null,
+  query: '',
+  functionsConfigured: true,
+  platformId: '' as string,
+}));
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(state.query) }));
+vi.mock('@/components/AuthGuard', () => ({
+  useAuth: () => ({ user: state.uid ? { uid: state.uid } : null, loading: false, error: null }),
+}));
+vi.mock('@/lib/signInOptions', () => ({
+  useSignInOptions: () => ({ google: false, studentId: false, loading: false, retry: vi.fn() }),
+}));
+vi.mock('@/features/nuni/Session', () => ({
+  useOptionalNuniSession: () => state.platformId ? {
+    session: { platformAccountId: state.platformId, context: 'platform-session' },
+    loading: false, error: '', pendingLogout: false,
+  } : null,
+}));
+vi.mock('@/components/SiteShell', () => ({
+  SiteShell: ({
+    children,
+    title,
+    schoolName,
+  }: {
+    children: ReactNode;
+    title?: string;
+    schoolName?: string;
+  }) => (
+    <main>
+      {schoolName ? <p>{schoolName}</p> : null}
+      {title ? <h1>{title}</h1> : null}
+      {children}
+    </main>
+  ),
+}));
+vi.mock('@/lib/campusAssistantClient', async (original) => ({
+  ...(await original<typeof import('@/lib/campusAssistantClient')>()),
+  callCampusAssistant: vi.fn(),
+  executeCampusAgentWrite: vi.fn(),
+  getCampusAssistantSnapshot: vi.fn(),
+}));
+vi.mock('@/lib/functionsUrl', async (original) => ({
+  ...(await original<typeof import('@/lib/functionsUrl')>()),
+  areFunctionsConfigured: () => state.functionsConfigured,
+}));
+vi.mock('./AgentCards', () => ({
+  AgentCardList: ({ cards }: { cards: Array<{ kind: string }> }) => (
+    <div>{cards.map((card) => card.kind).join(',')}</div>
+  ),
+}));
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.unstubAllEnvs();
+  vi.stubEnv('CAMPUS_BACKEND', 'nuni');
+  vi.stubEnv('CAMPUS_ASSISTANT_ENABLED', 'false');
+  sessionStorage.clear();
+  state.uid = 'alice';
+  state.query = '';
+  state.functionsConfigured = true;
+  state.platformId = '';
+  localStorage.clear();
+  vi.mocked(getCampusAssistantSnapshot).mockImplementation(async (_userId, schoolId) => ({
+    schoolId,
+    checkedAt: '2026-10-26T12:00:00.000Z',
+    schedule: { status: 'unavailable', count: null },
+    assignments: { status: 'available', count: 0, items: [] },
+    announcements: { status: 'available', items: [] },
+  }));
+});
+afterEach(() => {
+  sessionStorage.clear();
+  vi.unstubAllGlobals();
+});
+function ask(content = '私人課表') {
+  fireEvent.change(screen.getByLabelText('你的問題'), { target: { value: content } });
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+}
+function withCampusDraft(node: ReactNode) {
+  return (
+    <CampusDraftProvider uid="alice" schoolId="pu" ready>
+      {node}
+    </CampusDraftProvider>
+  );
+}
+
+it('keeps live school grades available for dual sessions and reads explicit imports from their established owner', async () => {
+  state.platformId = 'platform-alice';
+  const imported = {
+    id: 'grade-1', kind: 'grades', title: '平台匯入專用科目', schoolId: 'pu',
+    academicYear: '115', semester: '1', credits: 3, grade: 'P', batchId: 'batch',
+    importedAt: '2026-11-07T10:00:00.000Z', source: { type: 'paste', line: 1, rawText: '不外送原文' },
+  };
+  localStorage.setItem(personalImportsStorageKey({ owner: 'platform:platform-alice', schoolId: 'pu' }),
+    JSON.stringify({ version: 1, records: [imported] }));
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '校方即時成績結果' } as CampusAssistantEnvelope);
+  render(<AssistantPage />);
+  ask('查看我的成績');
+  await screen.findByText('校方即時成績結果');
+  expect(callCampusAssistant).toHaveBeenCalledTimes(1);
+  ask('查看我的匯入成績');
+  await screen.findByText(/平台匯入專用科目/);
+  expect(callCampusAssistant).toHaveBeenCalledTimes(1);
+});
+
+it('uses the function name in the header instead of a school name before the school account is connected', () => {
+  state.uid = null;
+  render(<AssistantPage />);
+  expect(screen.getByRole('heading', { level: 1, name: '助理' })).toBeTruthy();
+  expect(screen.queryByText('靜宜大學')).toBeNull();
+});
+
+it('requires sign-in and does not send a query from a shared link automatically', () => {
+  state.uid = null;
+  state.query = 'q=問題';
+  const view = render(<AssistantPage />);
+  expect(screen.getByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
+  expect(screen.getByText('校園資訊可先從地圖、公車和公開公告查。')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
+  expect(screen.queryByRole('textbox')).toBeNull();
+  state.uid = 'alice';
+  view.rerender(<AssistantPage />);
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('問題');
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it('overwrites a preserved campus draft when the URL q differs', () => {
+  sessionStorage.setItem(
+    scopeStorageKey('alice', 'pu'),
+    JSON.stringify({ assistant: '舊草稿問題' }),
+  );
+  state.query = `q=${encodeURIComponent('深連結新問題')}`;
+  render(withCampusDraft(<AssistantPage />));
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('深連結新問題');
+});
+
+it('keeps a preserved campus draft when the URL has no q', () => {
+  sessionStorage.setItem(
+    scopeStorageKey('alice', 'pu'),
+    JSON.stringify({ assistant: '保留草稿' }),
+  );
+  state.query = 'campus=pu';
+  render(withCampusDraft(<AssistantPage />));
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('保留草稿');
+});
+
+it('preserves input on backend failure and retries without inserting a fake answer', async () => {
+  vi.mocked(callCampusAssistant)
+    .mockRejectedValueOnce({ code: 'functions/unavailable' })
+    .mockResolvedValueOnce({ content: '服務回覆' });
+  render(<AssistantPage />);
+  ask();
+  await screen.findByRole('alert');
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('私人課表');
+  expect(screen.getByRole('log').textContent).toBe('');
+  fireEvent.click(screen.getByRole('button', { name: '重試' }));
+  await screen.findByText('服務回覆');
+  expect(callCampusAssistant).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(callCampusAssistant).mock.calls[1][0].sessionId).toBe(
+    vi.mocked(callCampusAssistant).mock.calls[0][0].sessionId,
+  );
+  expect(vi.mocked(callCampusAssistant).mock.calls[1][0].messages).toEqual([
+    { role: 'user', content: '私人課表' },
+  ]);
+});
+
+it('prevents concurrent submissions and only displays the acknowledged response', async () => {
+  let finish!: (value: CampusAssistantEnvelope) => void;
+  vi.mocked(callCampusAssistant).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<AssistantPage />);
+  ask();
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  expect(callCampusAssistant).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('log').textContent).toBe('');
+  await act(async () => finish({ content: '真正回覆' }));
+  expect(screen.getByText('真正回覆')).toBeTruthy();
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
+});
+
+it.each(['account', 'course', 'logout'] as const)(
+  'clears private conversation and ignores late results after %s changes',
+  async (change) => {
+    let finish!: (value: CampusAssistantEnvelope) => void;
+    vi.mocked(callCampusAssistant)
+      .mockResolvedValueOnce({ content: 'Alice 舊課程紀錄' })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+    state.query = 'courseId=old-course';
+    const view = render(<AssistantPage />);
+    ask('先前問題');
+    await screen.findByText('Alice 舊課程紀錄');
+    ask('新問題');
+    const signal = vi.mocked(callCampusAssistant).mock.calls[1][1];
+    if (change === 'account') state.uid = 'bob';
+    if (change === 'course') state.query = 'courseId=new-course';
+    if (change === 'logout') state.uid = null;
+    view.rerender(<AssistantPage />);
+    expect(signal?.aborted).toBe(true);
+    expect(screen.queryByText('Alice 舊課程紀錄')).toBeNull();
+    await act(async () => finish({ content: 'Alice 晚到私人回覆' }));
+    expect(screen.queryByText('Alice 晚到私人回覆')).toBeNull();
+    if (change !== 'logout')
+      expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
+  },
+);
+
+it('clears an in-flight conversation without admitting its eventual result', async () => {
+  let finish!: (value: CampusAssistantEnvelope) => void;
+  vi.mocked(callCampusAssistant).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<AssistantPage />);
+  ask();
+  fireEvent.click(screen.getByRole('button', { name: '清除對話' }));
+  await act(async () => finish({ content: '已清除的回覆' }));
+  expect(screen.queryByText('已清除的回覆')).toBeNull();
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
+});
+
+it('retains read cards while keeping order writes and claimed receipts out of the dialogue', async () => {
+  vi.mocked(callCampusAssistant).mockResolvedValue({
+    content: '找到餐廳資訊',
+    cards: [
+      { kind: 'order_submitted', payload: { orderId: 'unverified' } },
+      { kind: 'order_draft_card', payload: {} },
+      {
+        kind: 'poi_card',
+        payload: { schoolId: 'pu', pois: [{ id: 'cafeteria', name: '餐廳', schoolId: 'pu' }] },
+      },
+    ],
+  });
+  render(<AssistantPage />);
+  ask();
+  await waitFor(() => expect(screen.getByText('poi_card')).toBeTruthy());
+  expect(screen.queryByText(/order_draft_card|order_submitted/)).toBeNull();
+  // 線上點餐還沒開：只回「目前還不能線上點餐」，不帶去我的訂單或餐廳頁
+  expect(screen.getByText('目前還不能線上點餐')).toBeTruthy();
+  expect(screen.queryByText('找到餐廳資訊')).toBeNull();
+  expect(screen.queryByRole('link', { name: '餐廳服務' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '我的訂單' })).toBeNull();
+  expect(document.querySelector('a[href="/orders"]')).toBeNull();
+});
+
+it('asked to order chicken rice, the web assistant replies only that online ordering is not open', async () => {
+  vi.mocked(callCampusAssistant).mockResolvedValue({
+    content: '已整理好訂餐草稿（1 項），按下確認後會送出。',
+    cards: [
+      {
+        kind: 'order_draft_card',
+        payload: {
+          cafeteriaId: 'cafe',
+          items: [{ menuItemId: 'rice', name: '雞腿飯', price: 100, quantity: 1 }],
+        },
+      },
+    ],
+  });
+  render(<AssistantPage />);
+  ask('幫我點一份雞腿飯');
+  await waitFor(() => expect(screen.getByText('目前還不能線上點餐')).toBeTruthy());
+  expect(screen.queryByText(/草稿|確認後會送出/)).toBeNull();
+  expect(screen.queryByRole('button', { name: /確認|下單/ })).toBeNull();
+  expect(document.querySelector('a[href="/orders"]')).toBeNull();
+});
+
+it('when web ordering is turned back on, the order note links to my orders again', async () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  vi.mocked(callCampusAssistant).mockResolvedValue({
+    content: '找到餐廳資訊',
+    cards: [{ kind: 'order_draft_card', payload: {} }],
+  });
+  render(<AssistantPage />);
+  ask();
+  await waitFor(() => expect(screen.getByText('找到餐廳資訊')).toBeTruthy());
+  expect(screen.getByRole('link', { name: '我的訂單' }).getAttribute('href')).toBe('/orders');
+});
+
+it.each(['餐點好了沒', '我的取餐號碼'])(
+  '線上點餐還沒開，問「%s」只回「目前還不能線上點餐」，不走後端、也不出現失敗句',
+  async (question) => {
+    vi.mocked(callCampusAssistant).mockRejectedValue({ code: 'functions/unavailable' });
+    render(<AssistantPage />);
+    expect(screen.queryByText(/訂單請以服務頁面的紀錄為準/)).toBeNull();
+    ask(question);
+    await waitFor(() => expect(screen.getByText('目前還不能線上點餐')).toBeTruthy());
+    expect(callCampusAssistant).not.toHaveBeenCalled();
+    expect(screen.queryByText('這次未能取得回覆。你的問題已保留，請稍後重試。')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  },
+);
+
+it('線上點餐打開之後，輸入提示會再寫訂單以服務頁面為準', () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  render(<AssistantPage />);
+  expect(screen.getByText('回覆可能有誤；申請、繳費與訂單請以服務頁面的紀錄為準。')).toBeTruthy();
+});
+
+it('routes assistant queries to the selected campus rather than the previous school ID', async () => {
+  state.query = 'campus=nthu&schoolId=pu';
+  vi.mocked(callCampusAssistant).mockResolvedValueOnce({ content: '清華的服務回覆' });
+  render(<AssistantPage />);
+  ask('圖書館');
+  await screen.findByText('清華的服務回覆');
+  expect(vi.mocked(callCampusAssistant).mock.calls[0][0].schoolId).toBe('nthu');
+});
+
+it('drops the previous campus conversation and cancels pending requests after a switch', async () => {
+  state.query = 'campus=pu';
+  let resolveOld!: (value: CampusAssistantEnvelope) => void;
+  vi.mocked(callCampusAssistant).mockImplementation(
+    () => new Promise((resolve) => { resolveOld = resolve; }),
+  );
+  const view = render(<AssistantPage />);
+  ask('舊校課表');
+  const signal = vi.mocked(callCampusAssistant).mock.calls[0][1];
+  state.query = 'campus=nthu&schoolId=pu';
+  view.rerender(<AssistantPage />);
+  expect(signal?.aborted).toBe(true);
+  expect(screen.getByRole('log').textContent).toBe('');
+  await act(async () => resolveOld({ content: '晚到的靜宜私人資訊' }));
+  expect(screen.queryByText('晚到的靜宜私人資訊')).toBeNull();
+  vi.mocked(callCampusAssistant).mockResolvedValueOnce({ content: '清華的服務回覆' });
+  ask('新校圖書館');
+  await screen.findByText('清華的服務回覆');
+  expect(vi.mocked(callCampusAssistant).mock.calls[1][0].schoolId).toBe('nthu');
+});
+
+it('keeps public lookup input available while ordinary questions stay blocked without cloud functions', () => {
+  state.functionsConfigured = false;
+  render(<AssistantPage />);
+  expect(screen.getByRole('heading', { name: '雲端助理尚未啟用' })).toBeTruthy();
+  expect(screen.getByText(/正式站尚未接上雲端函式服務/)).toBeTruthy();
+  expect((screen.getByLabelText('你的問題') as HTMLTextAreaElement).disabled).toBe(false);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByText('這次未能取得回覆。你的問題已保留，請稍後重試。')).toBeNull();
+  expect(screen.queryByRole('button', { name: '重試' })).toBeNull();
+  ask('我的下一堂課');
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+function publicCatalogResponse(schoolId: 'ncnu' | 'nthu', changes: Record<string, unknown> = {}) {
+  return new Response(JSON.stringify({
+    schoolId,
+    sourceUrl: schoolId === 'ncnu'
+      ? 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall'
+      : 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json',
+    fetchedAt: '2026-11-07T08:00:00.000Z',
+    operation: { id: `${schoolId}.courses.search`, version: 1, responseSchemaVersion: 1, access: 'anonymous-public' },
+    courses: [{
+      code: 'CS430000', section: '01', title: '公開資料庫課程', department: '資訊系',
+      teacher: '公開授課老師', credits: '3', time: '一34', room: '資電館101', semester: '1151',
+    }],
+    truncated: false,
+    ...changes,
+  }), { headers: { 'Content-Type': 'application/json' } });
+}
+
+it.each(['ncnu', 'nthu'] as const)('queries %s public courses through the real shared client with no cloud assistant', async (schoolId) => {
+  state.query = `campus=${schoolId}`;
+  state.functionsConfigured = false;
+  const fetcher = vi.fn().mockResolvedValue(publicCatalogResponse(schoolId));
+  vi.stubGlobal('fetch', fetcher);
+  render(<AssistantPage />);
+  ask('幫我查資料庫課程');
+  expect(await screen.findByText('公開資料庫課程')).toBeTruthy();
+  const url = new URL(fetcher.mock.calls[0][0], 'https://nuni.tw');
+  expect(url.pathname).toBe('/api/public-course-catalog');
+  expect(url.searchParams.get('schoolId')).toBe(schoolId);
+  expect(url.searchParams.get('q')).toBe('資料庫');
+  expect(fetcher.mock.calls[0][1]).toMatchObject({ credentials: 'omit', redirect: 'error' });
+  const href = new URL(screen.getByRole('link', { name: '查看課程與課表核對' }).getAttribute('href')!, 'https://nuni.tw');
+  expect(href.searchParams.get('schoolId')).toBe(schoolId);
+  expect(href.searchParams.get('q')).toBe('資料庫');
+  expect(screen.getByText(/115 學年度第 1 學期/)).toBeTruthy();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+  expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+it('can explicitly look up another public campus and does not change the current conversation school', async () => {
+  state.query = 'campus=pu';
+  const fetcher = vi.fn().mockResolvedValue(publicCatalogResponse('nthu'));
+  vi.stubGlobal('fetch', fetcher);
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '原校園私人回覆' });
+  render(<AssistantPage />);
+  ask('幫我查清大資料庫課程');
+  await screen.findByText('公開資料庫課程');
+  expect(new URL(fetcher.mock.calls[0][0], 'https://nuni.tw').searchParams.get('schoolId')).toBe('nthu');
+  ask('我的下一堂課');
+  await screen.findByText('原校園私人回覆');
+  expect(vi.mocked(callCampusAssistant).mock.calls[0][0]).toMatchObject({
+    schoolId: 'pu', messages: [{ role: 'user', content: '我的下一堂課' }],
+  });
+});
+
+it('shows the public-source retry path for a forged response without falling back to the model', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(publicCatalogResponse('nthu', { sourceUrl: 'https://example.test/catalog' })));
+  render(<AssistantPage />);
+  ask('幫我查清大資料庫課程');
+  await screen.findByText(/暫時無法取得可核對/);
+  expect(screen.queryByText('公開資料庫課程')).toBeNull();
+  expect(screen.getByRole('link', { name: '查看課程與課表核對' })).toBeTruthy();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it.each(['clear', 'account', 'school'] as const)('discards a public lookup after %s changes', async (change) => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn().mockReturnValue(new Promise<Response>((resolve) => { finish = resolve; }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<AssistantPage />);
+  ask('幫我查清大資料庫課程');
+  await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+  const signal = fetcher.mock.calls[0][1].signal as AbortSignal;
+  if (change === 'clear') fireEvent.click(screen.getByRole('button', { name: '清除對話' }));
+  else {
+    if (change === 'account') state.uid = 'bob';
+    else state.query = 'campus=ncnu';
+    view.rerender(<AssistantPage />);
+  }
+  expect(signal.aborted).toBe(true);
+  await act(async () => { finish(publicCatalogResponse('nthu')); });
+  expect(screen.queryByText('公開資料庫課程')).toBeNull();
+  expect(screen.queryByRole('link', { name: '查看課程與課表核對' })).toBeNull();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it('keeps a pending signed write proposal available after a read-only public lookup', async () => {
+  const runId = '01234567-89ab-4cde-8012-3456789abcde';
+  vi.mocked(callCampusAssistant).mockResolvedValue({
+    content: '先核對報修草稿',
+    run: { runId, status: 'completed' },
+    actions: [{
+      action: 'queue_action', label: '確認送出報修', requiresConfirmation: true,
+      params: { toolName: 'createDormRepairRequest', agentRunId: runId,
+        input: { dormitory: 'A棟', room: '301', category: '冷氣', description: '不冷' } },
+    }],
+  });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(publicCatalogResponse('nthu')));
+  render(<AssistantPage />);
+  ask('A棟301冷氣不冷');
+  await screen.findByRole('button', { name: '檢視草稿' });
+  ask('幫我查清大資料庫課程');
+  await screen.findByText('公開資料庫課程');
+  expect(screen.getByRole('button', { name: '檢視草稿' })).toBeTruthy();
+  expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+  expect(callCampusAssistant).toHaveBeenCalledOnce();
+});
+
+it('keeps the composer enabled when Cloud Functions are configured', () => {
+  state.functionsConfigured = true;
+  render(<AssistantPage />);
+  expect(screen.getByRole('heading', { name: '今天需要什麼幫忙？' })).toBeTruthy();
+  expect((screen.getByLabelText('你的問題') as HTMLTextAreaElement).disabled).toBe(false);
+  expect(screen.queryByText('雲端助理尚未啟用')).toBeNull();
+});
+
+it('provides service handoffs even when cloud functions are unavailable', async () => {
+  state.functionsConfigured = false;
+  state.query = 'schoolId=nthu';
+  render(<AssistantPage />);
+  ask('開啟宿舍服務');
+  expect((await screen.findByRole('link', { name: /開啟宿舍服務/ })).getAttribute('href'))
+    .toBe('/dormitory?schoolId=nthu');
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it('opens scoped career information without submitting a work-study application', async () => {
+  state.functionsConfigured = false;
+  state.query = 'schoolId=nthu';
+  render(<AssistantPage />);
+  ask('開啟職涯');
+  const career = await screen.findByRole('link', { name: /開啟職涯/ });
+  expect(career.getAttribute('href')).toBe('/career?schoolId=nthu');
+  expect(career.textContent).toContain('送出需在頁面確認');
+  expect(career.textContent).toContain('外部申請依原始公告另行辦理');
+  expect(screen.queryByText(/已(?:完成|申請|送出).*工讀|工讀申請成功/)).toBeNull();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+  expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+});
+
+it('does not send local service questions into later cloud conversation history', async () => {
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '接續一般查詢' });
+  render(<AssistantPage />);
+  ask('開啟私人訊息');
+  await screen.findByRole('link', { name: /開啟私人訊息/ });
+  ask('我這週的作業有哪些');
+  await screen.findByText('接續一般查詢');
+  expect(vi.mocked(callCampusAssistant).mock.calls[0][0].messages).toEqual([
+    { role: 'user', content: '我這週的作業有哪些' },
+  ]);
+});
+
+it('does not send campus-specific requests before a campus is selected', () => {
+  state.query = 'campus=all&schoolId=pu';
+  render(<AssistantPage />);
+  expect(screen.getByText('請先選擇一所學校，再使用校園助理。')).toBeTruthy();
+  expect(screen.queryByRole('form', { name: '傳送問題' })).toBeNull();
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it('shows real authorized assignments and does not infer a schedule from missing data', async () => {
+  vi.mocked(getCampusAssistantSnapshot).mockResolvedValueOnce({
+    schoolId: 'pu',
+    checkedAt: '2026-10-26T12:00:00.000Z',
+    schedule: { status: 'unavailable', count: null },
+    assignments: { status: 'available', count: 1, items: [
+      { title: '資料庫期末報告', groupName: '資料庫', dueAt: '2026-10-28T12:00:00.000Z' },
+    ] },
+    announcements: { status: 'unavailable', items: [] },
+  });
+  render(<AssistantPage />);
+  await screen.findByText('資料庫期末報告');
+  expect(screen.getByText(/助理目前無法取得正式課表/)).toBeTruthy();
+  expect(screen.getByText('公告來源暫時無法確認')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '整理優先順序' }));
+  expect((screen.getByLabelText('你的問題') as HTMLTextAreaElement).value).toContain('待繳作業');
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it('requires a second explicit confirmation before executing a validated action', async () => {
+  const runId = '01234567-89ab-4cde-8012-3456789abcde';
+  vi.mocked(callCampusAssistant).mockResolvedValue({
+    content: '請先確認報修內容',
+    run: { runId, status: 'completed' },
+    actions: [{
+      action: 'queue_action',
+      label: '確認存成報修備忘',
+      requiresConfirmation: true,
+      params: {
+        toolName: 'createDormRepairRequest',
+        agentRunId: runId,
+        input: { dormitory: 'A棟', room: '301', category: '冷氣', description: '不冷' },
+      },
+    }],
+  });
+  vi.mocked(executeCampusAgentWrite).mockResolvedValue({
+    success: true, toolName: 'createDormRepairRequest', repairId: 'repair-123',
+  });
+  render(<AssistantPage />);
+  ask('A棟301冷氣不冷');
+  await screen.findByText('請先確認報修內容');
+  expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '檢視草稿' }));
+  expect(screen.getByText('301')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認並執行' }));
+  await screen.findByText('報修備忘已存好');
+  expect(executeCampusAgentWrite).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(executeCampusAgentWrite).mock.calls[0][0]).toMatchObject({
+    userId: 'alice', schoolId: 'pu', agentRunId: runId,
+    toolName: 'createDormRepairRequest',
+  });
+  expect(screen.queryByText(/repair-123/)).toBeNull();
+  expect(screen.getByText('已幫你存成報修備忘，請依學校規定管道送出。此應用沒有送到學校。')).toBeTruthy();
+  expect(screen.queryByText('伺服器已確認執行成功')).toBeNull();
+  expect(screen.queryByText(/送出後即使離開此頁/)).toBeNull();
+  expect(screen.queryByText(/避免重複送出/)).toBeNull();
+});
+
+it('leave confirmation still uses the generic success copy, not the repair memo wording', async () => {
+  const runId = '01234567-89ab-4cde-8012-3456789abcde';
+  vi.mocked(callCampusAssistant).mockResolvedValue({
+    content: '請先確認請假內容',
+    run: { runId, status: 'completed' },
+    actions: [{
+      action: 'queue_action',
+      label: '確認請假',
+      requiresConfirmation: true,
+      params: {
+        toolName: 'submitLeaveRequest',
+        agentRunId: runId,
+        input: { courseId: 'course-1', date: '2026-10-29', type: '事假' },
+      },
+    }],
+  });
+  vi.mocked(executeCampusAgentWrite).mockResolvedValue({
+    success: true, toolName: 'submitLeaveRequest', requestId: 'leave-123',
+  });
+  render(<AssistantPage />);
+  ask('明天請假');
+  await screen.findByText('請先確認請假內容');
+  fireEvent.click(screen.getByRole('button', { name: '檢視草稿' }));
+  expect(screen.getByText(/送出後即使離開此頁，操作也可能繼續完成/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認並執行' }));
+  await screen.findByText('伺服器已確認執行成功');
+  expect(screen.queryByText('報修備忘已存好')).toBeNull();
+});
+
+it('never offers execution for an action not bound to its server run', async () => {
+  vi.mocked(callCampusAssistant).mockResolvedValue({
+    content: '草稿',
+    run: { runId: '01234567-89ab-4cde-8012-3456789abcde' },
+    actions: [{
+      action: 'queue_action',
+      label: '危險草稿',
+      requiresConfirmation: true,
+      params: {
+        toolName: 'createDormRepairRequest',
+        agentRunId: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+        input: { dormitory: 'A棟', room: '301', category: '冷氣', description: '不冷' },
+      },
+    }],
+  });
+  render(<AssistantPage />);
+  ask('報修');
+  await screen.findByText('草稿');
+  expect(screen.queryByRole('button', { name: '檢視草稿' })).toBeNull();
+  expect(executeCampusAgentWrite).not.toHaveBeenCalled();
+});

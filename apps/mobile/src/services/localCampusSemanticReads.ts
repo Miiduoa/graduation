@@ -1,0 +1,75 @@
+import type { OnDeviceSchoolContext } from './onDeviceSchoolContext';
+import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
+import { readSyncedAnnouncements, runOfflineCampusTool } from './offlineCampusTools';
+import {
+  localCampusReadPrompt, localCampusReadQuery, parseLocalCampusReadPlan,
+  type LocalReadMessage, type LocalCampusReadResult,
+} from './localCampusToolProtocol';
+
+/**
+ * One bounded planning inference, followed by at most three deterministic reads.
+ * The callback is the existing on-device engine. There is intentionally no
+ * HTTP client, write executor, notification module or dynamic route lookup here.
+ */
+export async function resolveLocalCampusSemanticReads(input: {
+  messages: readonly LocalReadMessage[];
+  context: OnDeviceSchoolContext;
+  snapshot?: CampusSenseSnapshot | null;
+  uid: string;
+  schoolId: string;
+  assertCurrent: () => void;
+  generate: (messages: NonNullable<ReturnType<typeof localCampusReadPrompt>>) => Promise<{
+    content: string; finishReason: string;
+  }>;
+}): Promise<{ content: string; results: LocalCampusReadResult[] } | null> {
+  input.assertCurrent();
+  if (!input.uid || !input.schoolId || input.context.schoolId !== input.schoolId) return null;
+  const scope = { uid: input.uid, schoolId: input.schoolId };
+  // A saved timetable is account-private. Preserve independently authorized
+  // campus sense data, but never consult a foreign or ownerless timetable.
+  const scopedContext: OnDeviceSchoolContext = input.context.ownerUid === input.uid
+    ? input.context
+    : { ...input.context, timetable: { source: 'not-available', updatedAt: null, courses: [] } };
+  const initialSense = validCampusSenseSnapshot(input.snapshot, scope);
+  if (scopedContext.timetable.source !== 'saved-device-copy' && !initialSense) return null;
+  const prompt = localCampusReadPrompt(input.messages);
+  if (!prompt) return null;
+  const selection = await input.generate(prompt);
+  input.assertCurrent();
+  // Truncated JSON can look valid while omitting the user's other requirements.
+  if (selection.finishReason !== 'stop') return null;
+  const plan = parseLocalCampusReadPlan(selection.content);
+  if (!plan?.calls.length) return null;
+
+  const results: LocalCampusReadResult[] = [];
+  for (const [index, call] of plan.calls.entries()) {
+    input.assertCurrent();
+    const now = Date.now();
+    // Do not extend snapshot life by starting a long native inference.
+    const sense = validCampusSenseSnapshot(input.snapshot, scope, now);
+    const context = { ...scopedContext, checkedAt: new Date(now).toISOString() };
+    const query = localCampusReadQuery(call);
+    // The selector chooses the source. Only the user's words can set a publication window.
+    const answer = call.tool === 'announcements' && plan.calls.length === 1
+      ? readSyncedAnnouncements(input.messages[input.messages.length - 1].content, now, sense)
+      : runOfflineCampusTool(query.question, context, sense, input.uid);
+    const available = call.tool === 'timetable'
+      ? context.timetable.source === 'saved-device-copy'
+      : call.tool === 'assignments' ? sense?.assignments.status === 'available'
+      : call.tool === 'announcements' ? sense?.announcements.status === 'available'
+      : context.timetable.source === 'saved-device-copy' || Boolean(sense);
+    results.push({
+      id: call.tool + ':' + index,
+      label: query.label,
+      content: answer?.content || '目前沒有足夠且可核對的本機資料，請先在對應服務儲存或同步資料。',
+      route: query.route,
+      source: query.source,
+      status: available && answer && answer.tool !== 'online-required' ? 'available' : 'unavailable',
+    });
+  }
+  input.assertCurrent();
+  return {
+    content: results.map((result) => result.label + '\n' + result.content).join('\n\n'),
+    results,
+  };
+}

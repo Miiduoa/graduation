@@ -1,0 +1,115 @@
+import type { SchoolIntegrationStatus } from './release';
+
+export type Announcement = {
+  id: string;
+  title: string;
+  body: string;
+  publishedAt: string; // ISO
+  source?: string;
+};
+
+export type ClubEvent = {
+  id: string;
+  title: string;
+  description: string;
+  startsAt: string;
+  endsAt: string;
+  location?: string;
+  capacity?: number;
+};
+
+export type Course = {
+  id: string;
+  name: string;
+  teacher?: string;
+  dayOfWeek: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  location?: string;
+};
+
+export type CampusPoi = {
+  id: string;
+  name: string;
+  category: 'building' | 'food' | 'office' | 'other';
+  lat: number;
+  lng: number;
+  description?: string;
+};
+
+export type CafeteriaMenuItem = {
+  id: string;
+  cafeteria: string;
+  name: string;
+  price?: number;
+  availableOn: string; // YYYY-MM-DD
+};
+
+export type School = {
+  id: string; // internal id
+  code: string; // user-facing join code
+  name: string;
+  shortName?: string;
+  themeColor?: string;
+  domains?: string[]; // email domains for auto-binding
+  aliases?: string[];
+  integrationStatus?: SchoolIntegrationStatus;
+};
+
+export * from './auth';
+export * from './schoolLogin';
+export * from './devUniversalAccounts';
+export * from './notifications';
+export * from './assistantPermissions';
+export * from './schools';
+export * from './campusGeo';
+export * from './release';
+export * from './creditAudit';
+export * from './puGradRequirements';
+export * from './tenant';
+export * from './puAuth';
+export * from './schoolIds';
+export * from './courseCatalogCapability';
+export * from './schoolAssistantIdentity';
+export * from './officialLibraries';
+export * from './schoolPublicServices';
+export * from './postLoginRoles';
+export * from './roles';
+export * from './lms/quizScoring';
+export * from './lms/gradebookCompute';
+export * from './lms/gradePredictor';
+export * from './lms/studyPlanner';
+export * from './lms/notificationPlanner';
+export * from './lms/mistakeRepertoire';
+export * from './lms/socraticCoach';
+export * from './lms/feedbackDrafter';
+export * from './lmsReviewQueue';
+export * from './companion/spriteEngine';
+export * from './companion/gardenEngine';
+export * from './companion/achievements';
+export * from './companion/signalAggregator';
+export * from './lms/rubricScoring';
+export * from './lms/riskRadar';
+export * from './lms/discussionEngine';
+export * from './lms/questionBank';
+export * from './lms/tronclassAdapter';
+export * from './lms/actionGraph';
+export * from './lms/attendanceEngine';
+export * from './timetable';
+export * from './merchantMode';
+export * from './cafeteriaCatalog';
+export * from './publicDiningCatalog';
+export * from './campusAnnouncements';
+export * from './loadFailureCopy';
+export * from './todaySense';
+export * from './todaySenseAgent';
+export * from './pickNextAction';
+export * from './wakeAwareRequest';
+export * from './foodPageCopy';
+export * from './signedInSocialReads';
+export * from './imports';
+export * from './providenceCampus';
+export * from './puLmsReadonly';
+export * from './academicSections';
+export * from './privateFileAccess';
+export * from './oralExamDemo';

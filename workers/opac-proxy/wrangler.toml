@@ -1,0 +1,11 @@
+# OPAC GraphQL proxy (free Workers tier). Deploy: cd workers/opac-proxy && pnpm install && npx wrangler deploy
+# Vars:
+#   FIREBASE_PROJECT_ID — must match EXPO_PUBLIC_FIREBASE_PROJECT_ID / Firebase Console project ID (JWT aud/iss verification).
+# App: set EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL=https://<worker>.workers.dev (no trailing slash).
+
+name = "campus-opac-proxy"
+main = "src/index.ts"
+compatibility_date = "2025-02-01"
+
+[vars]
+FIREBASE_PROJECT_ID = "REPLACE_WITH_FIREBASE_PROJECT_ID"

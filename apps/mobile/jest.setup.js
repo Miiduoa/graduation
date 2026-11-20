@@ -1,0 +1,212 @@
+import '@testing-library/jest-native/extend-expect';
+// Mock AsyncStorage
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);
+
+// Mock react-native-safe-area-context（很多 UI 元件呼叫 useSafeAreaInsets，
+// 若無 SafeAreaProvider 包裹會 throw；測試直接給 zero insets）
+jest.mock('react-native-safe-area-context', () => {
+  const React = require('react');
+  const insets = { top: 0, right: 0, bottom: 0, left: 0 };
+  const frame = { x: 0, y: 0, width: 0, height: 0 };
+  const SafeAreaInsetsContext = React.createContext(insets);
+  const SafeAreaFrameContext = React.createContext(frame);
+  return {
+    SafeAreaProvider: ({ children }) => React.createElement(React.Fragment, null, children),
+    SafeAreaConsumer: ({ children }) => (typeof children === 'function' ? children(insets) : null),
+    SafeAreaView: ({ children, ...props }) => React.createElement('View', props, children),
+    SafeAreaInsetsContext,
+    SafeAreaFrameContext,
+    useSafeAreaInsets: () => insets,
+    useSafeAreaFrame: () => frame,
+    initialWindowMetrics: { insets, frame },
+  };
+});
+
+// Mock WebView（PuWebView / components 匯出會靜態 require 原生模組）
+jest.mock('react-native-webview', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  const WebView = React.forwardRef((props, ref) =>
+    React.createElement(View, { ...props, ref, testID: props.testID ?? 'mock-webview' }),
+  );
+  return { WebView, default: WebView };
+});
+
+// Mock NetInfo
+jest.mock('@react-native-community/netinfo', () => ({
+  addEventListener: jest.fn(() => jest.fn()),
+  fetch: jest.fn(() =>
+    Promise.resolve({
+      isConnected: true,
+      isInternetReachable: true,
+      type: 'wifi',
+    }),
+  ),
+}));
+
+// Mock expo-notifications
+jest.mock('expo-notifications', () => ({
+  getPermissionsAsync: jest.fn(() => Promise.resolve({ status: 'granted' })),
+  requestPermissionsAsync: jest.fn(() => Promise.resolve({ status: 'granted' })),
+  getExpoPushTokenAsync: jest.fn(() => Promise.resolve({ data: 'ExponentPushToken[xxx]' })),
+  setNotificationHandler: jest.fn(),
+  addNotificationReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+  addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+}));
+
+// Mock expo-device
+jest.mock('expo-device', () => ({
+  isDevice: true,
+  brand: 'Apple',
+  modelName: 'iPhone 14',
+  osName: 'iOS',
+  osVersion: '17.0',
+}));
+
+// Mock expo-constants
+// Tests of LMS behaviour opt into the enabled path. Production default remains
+// false unless EXPO_PUBLIC_TRONCLASS_DATA_ENABLED is exactly 'true'.
+jest.mock('expo-constants', () => ({
+  expoConfig: {
+    name: 'Campus App',
+    slug: 'campus-app',
+    version: '1.0.0',
+    extra: { tronClassDataEnabled: true },
+  },
+}));
+
+// Mock expo-file-system
+jest.mock('expo-file-system', () => ({
+  documentDirectory: 'file:///mock/documents/',
+  cacheDirectory: 'file:///mock/cache/',
+  EncodingType: { Base64: 'base64' },
+  writeAsStringAsync: jest.fn(() => Promise.resolve()),
+  readAsStringAsync: jest.fn(() => Promise.resolve('{}')),
+  deleteAsync: jest.fn(() => Promise.resolve()),
+  getInfoAsync: jest.fn(() => Promise.resolve({ exists: false })),
+  makeDirectoryAsync: jest.fn(() => Promise.resolve()),
+  File: class {
+    constructor(uri) {
+      this.uri = uri;
+      this.exists = true;
+      this.size = 12;
+    }
+    async base64() {
+      return '';
+    }
+    async arrayBuffer() {
+      return new Uint8Array([1, 2, 3]).buffer;
+    }
+  },
+}));
+
+jest.mock('expo-image-picker', () => ({
+  MediaTypeOptions: { Images: 'Images' },
+  requestCameraPermissionsAsync: jest.fn(async () => ({ granted: false })),
+  requestMediaLibraryPermissionsAsync: jest.fn(async () => ({ granted: false })),
+  launchCameraAsync: jest.fn(async () => ({ canceled: true, assets: [] })),
+  launchImageLibraryAsync: jest.fn(async () => ({ canceled: true, assets: [] })),
+}));
+
+jest.mock('expo-document-picker', () => ({
+  getDocumentAsync: jest.fn(async () => ({ canceled: true, assets: [] })),
+}));
+
+// Mock Firebase
+jest.mock('firebase/app', () => ({
+  initializeApp: jest.fn(),
+  getApps: jest.fn(() => []),
+}));
+
+jest.mock('firebase/auth', () => ({
+  getAuth: jest.fn(),
+  initializeAuth: jest.fn(),
+  getReactNativePersistence: jest.fn(),
+  signInWithEmailAndPassword: jest.fn(),
+  signInWithCustomToken: jest.fn(),
+  createUserWithEmailAndPassword: jest.fn(),
+  signOut: jest.fn(),
+  onAuthStateChanged: jest.fn(),
+}));
+
+jest.mock('firebase/functions', () => ({
+  getFunctions: jest.fn(),
+  httpsCallable: jest.fn(() => jest.fn(async () => ({ data: { success: true, stamped: [] } }))),
+  connectFunctionsEmulator: jest.fn(),
+}));
+
+jest.mock('firebase/firestore', () => ({
+  getFirestore: jest.fn(),
+  collection: jest.fn(),
+  doc: jest.fn(),
+  getDoc: jest.fn(),
+  getDocs: jest.fn(),
+  getDocsFromServer: jest.fn(),
+  addDoc: jest.fn(),
+  updateDoc: jest.fn(),
+  deleteDoc: jest.fn(),
+  setDoc: jest.fn(),
+  serverTimestamp: jest.fn(() => ({ __type: 'serverTimestamp' })),
+  query: jest.fn(),
+  where: jest.fn(),
+  orderBy: jest.fn(),
+  limit: jest.fn(),
+  onSnapshot: jest.fn(),
+}));
+
+// Mock React Navigation
+jest.mock('@react-navigation/native', () => {
+  const actualNav = jest.requireActual('@react-navigation/native');
+  return {
+    ...actualNav,
+    useNavigation: () => ({
+      navigate: jest.fn(),
+      goBack: jest.fn(),
+      setOptions: jest.fn(),
+      setParams: jest.fn(),
+    }),
+    useRoute: () => ({
+      params: {},
+    }),
+    useFocusEffect: jest.fn(),
+  };
+});
+
+// Silence console warnings in tests
+const originalWarn = console.warn;
+console.warn = (...args) => {
+  if (
+    typeof args[0] === 'string' &&
+    (args[0].includes('Animated') ||
+      args[0].includes('componentWillReceiveProps') ||
+      args[0].includes('componentWillMount') ||
+      args[0].includes('not wrapped in act'))
+  ) {
+    return;
+  }
+  originalWarn.apply(console, args);
+};
+
+// Silence console errors for act warnings in tests
+const originalError = console.error;
+console.error = (...args) => {
+  if (typeof args[0] === 'string' && args[0].includes('not wrapped in act')) {
+    return;
+  }
+  originalError.apply(console, args);
+};
+
+// Global test timeout - increased for async operations
+jest.setTimeout(15000);
+
+// Configure global act environment for React 19
+global.IS_REACT_ACT_ENVIRONMENT = true;
+
+
+// inferIntent 記憶體學習映射會跨測試汙染意圖；延遲 require 以免搶先於測試檔 jest.mock。
+beforeEach(() => {
+  const { resetAdaptiveLearnedPatternsForTests } = require('./src/services/aiLocalAgent');
+  resetAdaptiveLearnedPatternsForTests();
+});

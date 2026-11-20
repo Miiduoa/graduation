@@ -1,0 +1,177 @@
+{
+  "comment": "依學生測試員對照台中Go／TDX 的三個錯誤，用 TDX v2 EstimatedTimeOfArrival／StopOfRoute 欄位錄成可重放資料。EstimateTime 單位為秒。台北時間 14:31＝UTC 06:31，14:42＝UTC 06:42。",
+  "nowIso": {
+    "directionBug": "2026-10-22T06:31:00.000Z",
+    "etaBug": "2026-10-22T06:42:00.000Z"
+  },
+  "estimatedTimeOfArrival": [
+    {
+      "scenario": "direction-reversed-300",
+      "StopUID": "TXG-PU-BRT",
+      "RouteUID": "TXG300",
+      "SubRouteUID": "TXG300",
+      "RouteName": { "Zh_tw": "300" },
+      "Direction": 1,
+      "StopStatus": 0,
+      "EstimateTime": 480,
+      "SrcUpdateTime": "2026-10-22T06:31:00.000Z",
+      "StopName": { "Zh_tw": "靜宜大學(專用道)" },
+      "DestinationStopNameZh": "靜宜大學(專用道)"
+    },
+    {
+      "scenario": "direction-reversed-300",
+      "StopUID": "TXG-PU-BRT",
+      "RouteUID": "TXG300",
+      "SubRouteUID": "TXG300",
+      "RouteName": { "Zh_tw": "300" },
+      "Direction": 0,
+      "StopStatus": 1,
+      "EstimateTime": null,
+      "NextBusTime": "2026-10-22T06:38:00.000Z",
+      "SrcUpdateTime": "2026-10-22T06:31:00.000Z",
+      "StopName": { "Zh_tw": "靜宜大學(專用道)" },
+      "DestinationStopNameZh": "臺中車站(A月台)"
+    },
+    {
+      "scenario": "eta-gap-162",
+      "StopUID": "TXG-PU-YING",
+      "RouteUID": "TXG162",
+      "SubRouteUID": "TXG162",
+      "RouteName": { "Zh_tw": "162" },
+      "Direction": 1,
+      "StopStatus": 0,
+      "EstimateTime": 660,
+      "SrcUpdateTime": "2026-10-22T06:42:00.000Z",
+      "StopName": { "Zh_tw": "靜宜大學(英才路)" },
+      "DestinationStopNameZh": "靜宜大學主顧聖母堂"
+    },
+    {
+      "scenario": "eta-gap-162",
+      "StopUID": "TXG-PU-GATE",
+      "RouteUID": "TXG162",
+      "SubRouteUID": "TXG162",
+      "RouteName": { "Zh_tw": "162" },
+      "Direction": 1,
+      "StopStatus": 0,
+      "EstimateTime": 1020,
+      "SrcUpdateTime": "2026-10-22T06:42:00.000Z",
+      "StopName": { "Zh_tw": "靜宜大學(校門)" },
+      "DestinationStopNameZh": "靜宜大學主顧聖母堂"
+    },
+    {
+      "scenario": "eta-gap-162",
+      "StopUID": "TXG-PU-YING",
+      "RouteUID": "TXG162",
+      "SubRouteUID": "TXG162",
+      "RouteName": { "Zh_tw": "162" },
+      "Direction": 0,
+      "StopStatus": 0,
+      "EstimateTime": 180,
+      "SrcUpdateTime": "2026-10-22T06:42:00.000Z",
+      "StopName": { "Zh_tw": "靜宜大學(英才路)" },
+      "DestinationStopNameZh": "嘉陽高中"
+    },
+    {
+      "scenario": "matched-368",
+      "StopUID": "TXG-PU-GATE",
+      "RouteUID": "TXG368",
+      "SubRouteUID": "TXG368",
+      "RouteName": { "Zh_tw": "368" },
+      "Direction": 0,
+      "StopStatus": 0,
+      "EstimateTime": 600,
+      "SrcUpdateTime": "2026-10-22T06:42:00.000Z",
+      "StopName": { "Zh_tw": "靜宜大學(校門)" },
+      "DestinationStopNameZh": "靜宜大學主顧聖母堂"
+    },
+    {
+      "scenario": "matched-301",
+      "StopUID": "TXG-PU-GATE",
+      "RouteUID": "TXG301",
+      "SubRouteUID": "TXG301",
+      "RouteName": { "Zh_tw": "301" },
+      "Direction": 1,
+      "StopStatus": 0,
+      "EstimateTime": 420,
+      "SrcUpdateTime": "2026-10-22T06:42:00.000Z",
+      "StopName": { "Zh_tw": "靜宜大學(校門)" },
+      "DestinationStopNameZh": "靜宜大學靜園餐廳"
+    },
+    {
+      "scenario": "matched-326-ended",
+      "StopUID": "TXG-PU-MAIN",
+      "RouteUID": "TXG326",
+      "SubRouteUID": "TXG326",
+      "RouteName": { "Zh_tw": "326" },
+      "Direction": 0,
+      "StopStatus": 3,
+      "EstimateTime": null,
+      "SrcUpdateTime": "2026-10-22T06:42:00.000Z",
+      "StopName": { "Zh_tw": "靜宜大學" },
+      "DestinationStopNameZh": "新民高中(健行路)"
+    },
+    {
+      "scenario": "wrap-307-branch",
+      "StopUID": "TXG-PU-BRT",
+      "RouteUID": "TXG3071",
+      "SubRouteUID": "TXG3071",
+      "RouteName": { "Zh_tw": "307副" },
+      "Direction": 1,
+      "StopStatus": 0,
+      "EstimateTime": 720,
+      "SrcUpdateTime": "2026-10-22T06:31:00.000Z",
+      "StopName": { "Zh_tw": "靜宜大學(專用道)" },
+      "DestinationStopNameZh": "八德東大勇路口"
+    }
+  ],
+  "stopOfRoute": [
+    {
+      "RouteUID": "TXG300",
+      "SubRouteUID": "TXG300",
+      "RouteName": { "Zh_tw": "300" },
+      "Direction": 0,
+      "Stops": [
+        { "StopUID": "TXG-PU-BRT", "StopName": { "Zh_tw": "靜宜大學(專用道)" } },
+        { "StopUID": "TXG-CHAOMA", "StopName": { "Zh_tw": "朝馬" } },
+        { "StopUID": "TXG-STATION", "StopName": { "Zh_tw": "臺中車站(A月台)" } }
+      ]
+    },
+    {
+      "RouteUID": "TXG300",
+      "SubRouteUID": "TXG300",
+      "RouteName": { "Zh_tw": "300" },
+      "Direction": 1,
+      "Stops": [
+        { "StopUID": "TXG-STATION", "StopName": { "Zh_tw": "臺中車站(A月台)" } },
+        { "StopUID": "TXG-CHAOMA", "StopName": { "Zh_tw": "朝馬" } },
+        { "StopUID": "TXG-PU-BRT", "StopName": { "Zh_tw": "靜宜大學(專用道)" } }
+      ]
+    },
+    {
+      "RouteUID": "TXG162",
+      "SubRouteUID": "TXG162",
+      "RouteName": { "Zh_tw": "162" },
+      "Direction": 0,
+      "Stops": [
+        { "StopUID": "TXG-PU-CHAPEL", "StopName": { "Zh_tw": "靜宜大學主顧聖母堂" } },
+        { "StopUID": "TXG-PU-GATE", "StopName": { "Zh_tw": "靜宜大學(校門)" } },
+        { "StopUID": "TXG-PU-YING", "StopName": { "Zh_tw": "靜宜大學(英才路)" } },
+        { "StopUID": "TXG-SHA", "StopName": { "Zh_tw": "沙鹿車站" } },
+        { "StopUID": "TXG-END", "StopName": { "Zh_tw": "嘉陽高中" } }
+      ]
+    },
+    {
+      "RouteUID": "TXG162",
+      "SubRouteUID": "TXG162",
+      "RouteName": { "Zh_tw": "162" },
+      "Direction": 1,
+      "Stops": [
+        { "StopUID": "TXG-END", "StopName": { "Zh_tw": "嘉陽高中" } },
+        { "StopUID": "TXG-SHA", "StopName": { "Zh_tw": "沙鹿車站" } },
+        { "StopUID": "TXG-PU-YING", "StopName": { "Zh_tw": "靜宜大學(英才路)" } },
+        { "StopUID": "TXG-PU-GATE", "StopName": { "Zh_tw": "靜宜大學(校門)" } },
+        { "StopUID": "TXG-PU-CHAPEL", "StopName": { "Zh_tw": "靜宜大學主顧聖母堂" } }
+      ]
+    }
+  ]
+}

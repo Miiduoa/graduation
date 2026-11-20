@@ -1,0 +1,1795 @@
+From 84890808a8c2526d95ee640d8ab06233f2ca81dc Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E9=A1=A7=E6=99=89=E7=91=8B?= <demohan513@gmail.com>
+Date: Fri, 9 Oct 2026 01:04:16 +0800
+Subject: [PATCH 1/2] =?UTF-8?q?=E6=96=B0=E5=A2=9E=E5=B9=B3=E5=8F=B0?=
+ =?UTF-8?q?=E7=AE=A1=E7=90=86=E5=93=A1=E7=99=BB=E5=85=A5=E8=88=87=E8=B7=A8?=
+ =?UTF-8?q?=E6=A0=A1=E5=85=AC=E9=96=8B=E7=A4=BE=E7=BE=A4=E7=AE=A1=E7=90=86?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../src/accounts/platform-account-service.ts  |  20 +-
+ .../platform-password-provisioning.ts         | 141 +++++++
+ .../accounts/platform-password-routes.test.ts | 127 +++++++
+ .../platform-password-service.pg.test.ts      |  47 +++
+ .../platform-password-service.test.ts         | 174 +++++++++
+ .../src/accounts/platform-password-service.ts | 145 ++++++++
+ .../accounts/platform-public-access.test.ts   |  18 +
+ .../accounts/platform-social-service.test.ts  | 191 ++++++++++
+ .../src/accounts/platform-social-service.ts   | 345 ++++++++++++++++++
+ apps/api/src/accounts/tenant-directory.ts     |   9 +
+ apps/api/src/app.ts                           | 103 +++++-
+ .../275_platform_password_administrators.sql  |  52 +++
+ .../migrations/276_platform_public_social.sql |  72 ++++
+ apps/api/src/platform-password-admin-cli.ts   |  61 ++++
+ apps/api/src/social/social-service.ts         |  12 +-
+ apps/api/tsup.config.ts                       |   1 +
+ .../contracts/src/user-facing-api-error.ts    |  14 +
+ 17 files changed, 1527 insertions(+), 5 deletions(-)
+ create mode 100644 apps/api/src/accounts/platform-password-provisioning.ts
+ create mode 100644 apps/api/src/accounts/platform-password-routes.test.ts
+ create mode 100644 apps/api/src/accounts/platform-password-service.pg.test.ts
+ create mode 100644 apps/api/src/accounts/platform-password-service.test.ts
+ create mode 100644 apps/api/src/accounts/platform-password-service.ts
+ create mode 100644 apps/api/src/accounts/platform-social-service.test.ts
+ create mode 100644 apps/api/src/accounts/platform-social-service.ts
+ create mode 100644 apps/api/src/migrations/275_platform_password_administrators.sql
+ create mode 100644 apps/api/src/migrations/276_platform_public_social.sql
+ create mode 100644 apps/api/src/platform-password-admin-cli.ts
+
+diff --git a/apps/api/src/accounts/platform-account-service.ts b/apps/api/src/accounts/platform-account-service.ts
+index e0b0b88..6a31d7a 100644
+--- a/apps/api/src/accounts/platform-account-service.ts
++++ b/apps/api/src/accounts/platform-account-service.ts
+@@ -276,6 +276,11 @@ export class PlatformAccountService {
+           AND credential.platform_account_id=session.platform_account_id
+         WHERE session.token_sha256=$1 AND session.expires_at > now()
+           AND account.state='active' AND credential.state='active'
++          AND (credential.method <> 'password' OR EXISTS (
++            SELECT 1 FROM platform_operator_assignments assignment
++             WHERE assignment.platform_account_id=account.id
++               AND assignment.role_key='platform-operator' AND assignment.state='active'
++          ))
+         LIMIT 1`,
+       [digest(handle)],
+     );
+@@ -687,7 +692,11 @@ export class PlatformAccountService {
+    * food/social routes.  This is not an identity_subject and carries no campus
+    * role, so it cannot become an enrolment, discount, grade or door grant.
+    */
+-  async resolvePublicRealmActor(actor: PlatformActor, tenantIdInput: string): Promise<AuthActor> {
++  async resolvePublicRealmActor(
++    actor: PlatformActor,
++    tenantIdInput: string,
++    options: { forCommunityCreation?: boolean } = {},
++  ): Promise<AuthActor> {
+     const tenantId = tenantIdInput.trim();
+     if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/u.test(tenantId)) throw invalidPublicRealm();
+     const account = await this.db.query<{ display_name: string; tenant_name: string }>(
+@@ -696,15 +705,20 @@ export class PlatformAccountService {
+          CROSS JOIN tenants tenant
+         WHERE account.id=$1 AND account.state='active'
+           AND tenant.id=$2 AND tenant.state IN ('provisioned','open')
++          AND (NOT $3::boolean OR EXISTS (
++            SELECT 1 FROM platform_operator_assignments assignment
++            WHERE assignment.platform_account_id=account.id
++              AND assignment.role_key='platform-operator' AND assignment.state='active'
++          ))
+           AND (
+-            EXISTS(SELECT 1 FROM food_locations location
++            $3::boolean OR EXISTS(SELECT 1 FROM food_locations location
+               WHERE location.tenant_id=tenant.id AND location.public_access
+                 AND location.status='open')
+             OR EXISTS(SELECT 1 FROM social_communities community
+               WHERE community.tenant_id=tenant.id AND community.access_scope='public'
+                 AND community.discoverability='listed')
+           )`,
+-      [actor.platformAccountId, tenantId],
++      [actor.platformAccountId, tenantId, options.forCommunityCreation === true],
+     );
+     const row = account.rows[0];
+     if (!row) throw invalidPublicRealm();
+diff --git a/apps/api/src/accounts/platform-password-provisioning.ts b/apps/api/src/accounts/platform-password-provisioning.ts
+new file mode 100644
+index 0000000..a454f4c
+--- /dev/null
++++ b/apps/api/src/accounts/platform-password-provisioning.ts
+@@ -0,0 +1,141 @@
++import { randomUUID } from "node:crypto";
++import type { CampusDatabase, SqlExecutor } from "../database";
++import { DomainError } from "../domain-error";
++import {
++  hashPlatformPassword,
++  lockPasswordLogin,
++  normalizePlatformPasswordEmail,
++  PLATFORM_PASSWORD_ISSUER,
++} from "./platform-password-service";
++
++export type PlatformPasswordProvisionInput = {
++  email: unknown;
++  password?: unknown;
++  displayName?: unknown;
++  reason: unknown;
++  performedBy: unknown;
++  expectedAccountId?: unknown;
++};
++
++type ProvisionAction = "create-account" | "add-credential" | "rotate-password";
++type OperatorGrant = "grant" | "restore" | "unchanged";
++export type PlatformPasswordProvisionResult = {
++  accountId: string | null;
++  status: "planned" | "applied";
++  action: ProvisionAction;
++  maskedEmail: string;
++  operatorGrant: OperatorGrant;
++};
++
++function refuse(code: string, message: string): never {
++  throw new DomainError(code, message, 409);
++}
++
++function boundedText(value: unknown, min: number, max: number): string | null {
++  if (typeof value !== "string") return null;
++  const text = value.trim();
++  return text.length >= min && text.length <= max && !/[\u0000-\u001f\u007f]/u.test(text) ? text : null;
++}
++
++function maskedEmail(email: string): string {
++  const at = email.indexOf("@");
++  return `${email.slice(0, 1)}***${email.slice(at)}`;
++}
++
++async function plan(tx: SqlExecutor, email: string, expectedAccountId?: unknown) {
++  const password = (await tx.query<{
++    credential_id: string; platform_account_id: string; state: string;
++  }>(`SELECT password.credential_id,password.platform_account_id,credential.state
++      FROM platform_password_credentials password
++      JOIN platform_account_credentials credential ON credential.id=password.credential_id
++      WHERE password.email=$1`, [email])).rows[0];
++  // Email is a lookup hint, never sufficient authority to merge credentials.
++  // Include unverified and inactive matches so neither creates a shadow account.
++  const matches = (await tx.query<{ id: string; state: string; verified: boolean }>(
++    `SELECT account.id,account.state,EXISTS (
++        SELECT 1 FROM platform_account_credentials credential
++        WHERE credential.platform_account_id=account.id AND credential.state='active'
++          AND credential.method IN ('google','apple') AND credential.email_verified
++          AND lower(btrim(credential.email_at_registration))=$1
++      ) AS verified
++      FROM platform_accounts account
++      WHERE lower(btrim(account.primary_email))=$1
++        OR EXISTS (SELECT 1 FROM platform_account_credentials credential
++          WHERE credential.platform_account_id=account.id
++            AND lower(btrim(credential.email_at_registration))=$1)
++        OR account.id=$2`, [email, password?.platform_account_id ?? null],
++  )).rows;
++  if (matches.length > 1) refuse("PLATFORM_PASSWORD_IDENTITY_AMBIGUOUS", "帳號的登入身分無法唯一確認，請先核對帳號。");
++  const existing = matches[0];
++  if (existing && existing.state !== "active") refuse("PLATFORM_PASSWORD_ACCOUNT_UNAVAILABLE", "這個帳號目前不能新增登入方式。");
++  if (existing && !password && !existing.verified) refuse("PLATFORM_PASSWORD_IDENTITY_UNVERIFIED", "既有帳號沒有可核對的已驗證信箱，未變更帳號。");
++  if (password?.state !== undefined && password.state !== "active") refuse("PLATFORM_PASSWORD_CREDENTIAL_UNAVAILABLE", "這個登入方式已撤銷，未變更帳號。");
++  if (expectedAccountId !== undefined && expectedAccountId !== existing?.id) refuse("PLATFORM_PASSWORD_TARGET_CHANGED", "帳號與檢查結果不同，請重新檢查。");
++  if (existing && !password) {
++    const otherPassword = (await tx.query(`SELECT 1 FROM platform_password_credentials WHERE platform_account_id=$1`, [existing.id])).rows;
++    if (otherPassword.length) refuse("PLATFORM_PASSWORD_IDENTITY_AMBIGUOUS", "帳號的登入身分無法唯一確認，請先核對帳號。");
++  }
++  const operator = existing ? (await tx.query<{ state: string }>(
++    `SELECT state FROM platform_operator_assignments WHERE platform_account_id=$1 AND role_key='platform-operator'`, [existing.id],
++  )).rows[0] : undefined;
++  return {
++    accountId: existing?.id ?? null,
++    credentialId: password?.credential_id ?? null,
++    action: (password ? "rotate-password" : existing ? "add-credential" : "create-account") as ProvisionAction,
++    operatorGrant: (operator?.state === "active" ? "unchanged" : operator ? "restore" : "grant") as OperatorGrant,
++  };
++}
++
++export async function provisionPlatformPasswordAdmin(
++  db: CampusDatabase,
++  input: PlatformPasswordProvisionInput,
++  options: { apply: boolean; rotatePassword?: boolean },
++): Promise<PlatformPasswordProvisionResult> {
++  const email = normalizePlatformPasswordEmail(input.email);
++  const reason = boundedText(input.reason, 5, 1000);
++  const performedBy = boundedText(input.performedBy, 3, 100);
++  const displayName = input.displayName === undefined ? "平台管理員" : boundedText(input.displayName, 1, 100);
++  if (!email || !reason || !performedBy || !displayName) {
++    throw new DomainError("PLATFORM_PASSWORD_PROVISION_INPUT_INVALID", "請提供有效信箱、顯示名稱、操作者與變更原因。", 400);
++  }
++  // Hash before entering the transaction. No password or hash enters audit/output.
++  const passwordHash = options.apply ? await hashPlatformPassword(input.password as string) : null;
++  return db.transaction(async (tx) => {
++    const key = options.apply ? await lockPasswordLogin(tx, email) : null;
++    let planned = await plan(tx, email, input.expectedAccountId);
++    if (!options.apply) return { accountId: planned.accountId, status: "planned", action: planned.action, maskedEmail: maskedEmail(email), operatorGrant: planned.operatorGrant };
++    if (planned.action === "rotate-password" && options.rotatePassword !== true) {
++      refuse("PLATFORM_PASSWORD_ROTATION_REQUIRED", "這個帳號已有密碼，請明確選擇更新密碼後再執行。");
++    }
++    if (planned.accountId) {
++      // Recheck identity after acquiring the same account lock used by closure.
++      await tx.query(`SELECT id FROM platform_accounts WHERE id=$1 FOR UPDATE`, [planned.accountId]);
++      planned = await plan(tx, email, planned.accountId);
++    }
++    const accountId = planned.accountId ?? `pa_${randomUUID()}`;
++    const credentialId = planned.credentialId ?? `pac_${randomUUID()}`;
++    if (!planned.accountId) {
++      await tx.query(`INSERT INTO platform_accounts (id,display_name,primary_email) VALUES ($1,$2,$3)`, [accountId, displayName, email]);
++    }
++    if (!planned.credentialId) {
++      await tx.query(`INSERT INTO platform_account_credentials
++          (id,platform_account_id,method,provider_issuer,provider_subject,email_at_registration,email_verified,verified_at,last_authenticated_at)
++        VALUES ($1,$2,'password',$3,$4,$4,false,clock_timestamp(),clock_timestamp())`,
++      [credentialId, accountId, PLATFORM_PASSWORD_ISSUER, email]);
++      await tx.query(`INSERT INTO platform_password_credentials (credential_id,platform_account_id,email,password_hash)
++        VALUES ($1,$2,$3,$4)`, [credentialId, accountId, email, passwordHash]);
++    } else {
++      await tx.query(`UPDATE platform_password_credentials SET password_hash=$2,updated_at=clock_timestamp() WHERE credential_id=$1`, [credentialId, passwordHash]);
++      await tx.query(`DELETE FROM platform_account_sessions WHERE credential_id=$1`, [credentialId]);
++    }
++    await tx.query(`INSERT INTO platform_operator_assignments (platform_account_id,role_key,state)
++      VALUES ($1,'platform-operator','active') ON CONFLICT (platform_account_id) DO UPDATE
++      SET state='active',revoked_at=NULL,updated_at=clock_timestamp()`, [accountId]);
++    await tx.query(`UPDATE platform_password_login_throttles SET failure_count=0,locked_until=NULL,
++      window_started_at=clock_timestamp(),updated_at=clock_timestamp() WHERE login_key=$1`, [key]);
++    await tx.query(`INSERT INTO platform_password_admin_audit
++      (id,platform_account_id,credential_id,action,operator_grant,performed_by,reason)
++      VALUES ($1,$2,$3,$4,$5,$6,$7)`, [`ppa_${randomUUID()}`, accountId, credentialId, planned.action, planned.operatorGrant, performedBy, reason]);
++    return { accountId, status: "applied", action: planned.action, maskedEmail: maskedEmail(email), operatorGrant: planned.operatorGrant };
++  });
++}
+diff --git a/apps/api/src/accounts/platform-password-routes.test.ts b/apps/api/src/accounts/platform-password-routes.test.ts
+new file mode 100644
+index 0000000..7da8ea7
+--- /dev/null
++++ b/apps/api/src/accounts/platform-password-routes.test.ts
+@@ -0,0 +1,127 @@
++import { afterAll, beforeAll, describe, expect, it } from "vitest";
++import { createApp, isPublicApiRoute } from "../app";
++import { createDatabase, type CampusDatabase } from "../database";
++import { provisionPlatformPasswordAdmin } from "./platform-password-provisioning";
++
++describe("administrator password HTTP boundary", () => {
++  let db: CampusDatabase;
++  let app: Awaited<ReturnType<typeof createApp>>;
++  const password = "HTTP test-only password";
++  let accountId: string;
++  beforeAll(async () => {
++    db = await createDatabase({ attendanceCodeSecret: "password-route-test-secret-over-thirty-two", seedDemo: false });
++    const provisioned = await provisionPlatformPasswordAdmin(db, {
++      email: "admin-http@example.test", password, reason: "Test administrator HTTP boundary", performedBy: "test-runner",
++    }, { apply: true });
++    accountId = provisioned.accountId!;
++    app = await createApp(db, {
++      auth: { mode: "campus-account" },
++      campusAccountSessionSecret: "password-http-test-session-secret-over-thirty-two",
++      attendanceCodeSecret: "password-route-test-secret-over-thirty-two", enableDemoAuth: false,
++    });
++  }, 30_000);
++  afterAll(async () => { await app?.close(); await db?.close(); });
++
++  it("only makes the exact password POST public and leaves campus authorization intact", async () => {
++    expect(isPublicApiRoute("POST", "/v1/auth/platform/password/sessions")).toBe(true);
++    for (const method of ["GET", "PUT", "DELETE", "PATCH"]) expect(isPublicApiRoute(method, "/v1/auth/platform/password/sessions")).toBe(false);
++    expect(isPublicApiRoute("POST", "/v1/auth/platform/password/sessions/extra")).toBe(false);
++    const response = await app.inject({ method: "POST", url: "/v1/auth/platform/password/sessions", payload: { email: "admin-http@example.test", password } });
++    expect(response.statusCode).toBe(201);
++    expect(response.headers["cache-control"]).toBe("no-store");
++    expect(response.body).not.toContain(password);
++    expect(response.json()).toMatchObject({ platformAccountId: accountId, isPlatformOperator: true });
++    const handle = response.json().sessionHandle as string;
++    const headers = { authorization: `Platform ${handle}` };
++    expect((await app.inject({ method: "GET", url: "/v1/auth/platform/sessions/current", headers })).statusCode).toBe(200);
++    expect((await app.inject({ method: "GET", url: "/v1/auth/platform/ops/audit", headers })).statusCode).toBe(200);
++    expect((await app.inject({ method: "GET", url: "/v1/bootstrap", headers })).statusCode).toBe(401);
++    expect((await app.inject({ method: "POST", url: "/v1/auth/platform/logout", headers })).statusCode).toBe(200);
++    expect((await app.inject({ method: "GET", url: "/v1/auth/platform/sessions/current", headers })).statusCode).toBe(401);
++  });
++
++  it("returns uniform failures without reflecting credentials and enforces the existing IP limit", async () => {
++    const responses = [];
++    for (const email of ["admin-http@example.test", "missing-http@example.test"]) responses.push(await app.inject({
++      method: "POST", url: "/v1/auth/platform/password/sessions", remoteAddress: "192.0.2.10",
++      payload: { email, password: "incorrect test-only password" },
++    }));
++    expect(responses.map((response) => response.statusCode)).toEqual([401, 401]);
++    expect(responses[0]!.json()).toEqual(responses[1]!.json());
++    for (const response of responses) {
++      expect(response.headers["cache-control"]).toBe("no-store");
++      expect(response.body).not.toContain("incorrect test-only password");
++    }
++    let last;
++    for (let attempt = 0; attempt < 11; attempt += 1) last = await app.inject({
++      method: "POST", url: "/v1/auth/platform/password/sessions", remoteAddress: "192.0.2.11", payload: { email: "invalid", password },
++    });
++    expect(last!.statusCode).toBe(429);
++  });
++
++  it("revokes existing password sessions immediately when the operator grant is revoked", async () => {
++    const logged = await app.inject({ method: "POST", url: "/v1/auth/platform/password/sessions", remoteAddress: "192.0.2.12", payload: { email: "admin-http@example.test", password } });
++    const headers = { authorization: `Platform ${logged.json().sessionHandle as string}` };
++    await db.query(`UPDATE platform_operator_assignments SET state='revoked',revoked_at=now() WHERE platform_account_id=$1`, [accountId]);
++    expect((await app.inject({ method: "GET", url: "/v1/auth/platform/sessions/current", headers })).statusCode).toBe(401);
++    expect((await app.inject({ method: "GET", url: "/v1/auth/platform/ops/audit", headers })).statusCode).toBe(401);
++    expect((await app.inject({ method: "POST", url: "/v1/auth/platform/password/sessions", remoteAddress: "192.0.2.12", payload: { email: "admin-http@example.test", password } })).statusCode).toBe(401);
++  });
++
++  it("requires platform sessions for public social projections and cannot override target ids", async () => {
++    await db.query(`UPDATE platform_operator_assignments SET state='active',revoked_at=NULL WHERE platform_account_id=$1`, [accountId]);
++    for (const path of ["boards", "feed", "blocks", "reports"]) {
++      const url = `/v1/auth/platform/social/${path}`;
++      expect(isPublicApiRoute("GET", url)).toBe(true);
++      expect((await app.inject({ method: "GET", url })).statusCode).toBe(401);
++    }
++    expect(isPublicApiRoute("GET", "/v1/auth/platform/social/private")).toBe(false);
++    const logged = await app.inject({ method: "POST", url: "/v1/auth/platform/password/sessions", remoteAddress: "192.0.2.14", payload: { email: "admin-http@example.test", password } });
++    const headers = { authorization: `Platform ${logged.json().sessionHandle as string}` };
++    for (const url of ["/v1/auth/platform/social/boards", "/v1/auth/platform/social/feed", "/v1/auth/platform/ops/social/reports"]) {
++      const response = await app.inject({ method: "GET", url, headers });
++      expect(response.statusCode).toBe(200);
++      expect(response.headers["cache-control"]).toBe("no-store");
++      expect(response.json().items).toEqual([]);
++    }
++    const overridden = await app.inject({ method: "POST", url: "/v1/auth/platform/social/blocks/path-target/revoke", headers,
++      payload: { blockId: "body-target", expectedVersion: 1, idempotencyKey: "http-unblock-test" } });
++    expect(overridden.statusCode).toBe(422);
++    const decision = await app.inject({ method: "POST", url: "/v1/auth/platform/ops/social/reports/path-target/decision", headers,
++      payload: { reportId: "body-target", decision: "hide", reason: "HTTP schema test", expectedVersion: 1, idempotencyKey: "http-decision-test" } });
++    expect(decision.statusCode).toBe(422);
++  });
++
++  it("publishes only school directory metadata while retaining readiness status", async () => {
++    expect(isPublicApiRoute("GET", "/v1/auth/schools/directory")).toBe(true);
++    expect(isPublicApiRoute("POST", "/v1/auth/schools/directory")).toBe(false);
++    expect(isPublicApiRoute("GET", "/v1/auth/schools/directory/private")).toBe(false);
++    await db.query(`INSERT INTO tenants (id,display_name,state,directory_source)
++      VALUES ('directory-open','目錄開放測試','open','manual'),('directory-closed','目錄停用測試','suspended','manual')`);
++    const response = await app.inject({ method: "GET", url: "/v1/auth/schools/directory", remoteAddress: "192.0.2.13" });
++    expect(response.statusCode).toBe(200);
++    const schools = response.json().schools as Array<{ tenantId: string; displayName: string; status: string }>;
++    expect(schools).toContainEqual({ tenantId: "directory-open", displayName: "目錄開放測試", status: "open" });
++    expect(schools.some((school) => school.tenantId === "directory-closed" || school.tenantId === "campus-demo")).toBe(false);
++    expect(schools.every((school) => Object.keys(school).sort().join(",") === "displayName,status,tenantId")).toBe(true);
++    expect(schools.some((school) => school.status === "not-open")).toBe(true);
++  });
++
++  it("creates a real first public board through the operator-only strict route", async () => {
++    const url = "/v1/auth/platform/ops/social/boards";
++    const payload = { tenantId: "first-board-http", name: "公開交流測試", description: "HTTP first board fixture", idempotencyKey: "http-first-board-test" };
++    expect((await app.inject({ method: "POST", url, payload, remoteAddress: "192.0.2.15" })).statusCode).toBe(401);
++    await db.query(`INSERT INTO tenants (id,display_name,state,directory_source)
++      VALUES ('first-board-http','首個看板測試','provisioned','manual')`);
++    const logged = await app.inject({ method: "POST", url: "/v1/auth/platform/password/sessions", remoteAddress: "192.0.2.16", payload: { email: "admin-http@example.test", password } });
++    const headers = { authorization: `Platform ${logged.json().sessionHandle as string}` };
++    const overridden = await app.inject({ method: "POST", url, headers, payload: { ...payload, accessScope: "campus" }, remoteAddress: "192.0.2.17" });
++    expect(overridden.statusCode).toBe(422);
++    const response = await app.inject({ method: "POST", url, headers, payload, remoteAddress: "192.0.2.18" });
++    expect(response.statusCode).toBe(201);
++    expect(response.headers["cache-control"]).toBe("no-store");
++    expect(response.json()).toMatchObject({ tenantId: "first-board-http", name: "公開交流測試", canPost: true });
++    const board = (await db.query<{ access_scope: string; discoverability: string }>(`SELECT access_scope,discoverability FROM social_communities WHERE tenant_id=$1 AND id=$2`, [payload.tenantId, response.json().id])).rows[0];
++    expect(board).toEqual({ access_scope: "public", discoverability: "listed" });
++  });
++});
+diff --git a/apps/api/src/accounts/platform-password-service.pg.test.ts b/apps/api/src/accounts/platform-password-service.pg.test.ts
+new file mode 100644
+index 0000000..c30ada3
+--- /dev/null
++++ b/apps/api/src/accounts/platform-password-service.pg.test.ts
+@@ -0,0 +1,47 @@
++import { randomUUID } from "node:crypto";
++import { afterAll, beforeAll, describe, expect, it } from "vitest";
++import { createDatabase, type CampusDatabase } from "../database";
++import { PlatformAccountService } from "./platform-account-service";
++import { PlatformPasswordService, passwordLoginKey } from "./platform-password-service";
++import { provisionPlatformPasswordAdmin } from "./platform-password-provisioning";
++
++const url = process.env.PLATFORM_PASSWORD_PG_TEST_URL;
++describe.skipIf(!url)("password throttling across real PostgreSQL pools", () => {
++  let first: CampusDatabase;
++  let second: CampusDatabase;
++  const password = "PostgreSQL test-only password";
++  const suffix = randomUUID();
++  const input = (email: string) => ({ email, password, performedBy: "postgres-test", reason: "Cross-pool administrator security test" });
++  function service(db: CampusDatabase) {
++    return new PlatformPasswordService(db, new PlatformAccountService(db, { verify: async () => { throw new Error("unused"); } }));
++  }
++  beforeAll(async () => {
++    const runtimeConfig = {
++      kind: "postgres" as const, url: url!, tlsMode: "disable" as const,
++      applicationName: "campus-password-security-test", pool: { max: 1, ssl: false, statement_timeout: 10_000 },
++    };
++    first = await createDatabase({ runtimeConfig, attendanceCodeSecret: "password-pg-test-not-production", seedDemo: false });
++    second = await createDatabase({ runtimeConfig, attendanceCodeSecret: "password-pg-test-not-production", seedDemo: false, schemaMode: "verify" });
++  }, 60_000);
++  afterAll(async () => { await first?.close(); await second?.close(); });
++
++  it("does not lose failures or allow a second pool to bypass account lockout", async () => {
++    const email = `parallel-${suffix}@example.test`;
++    await provisionPlatformPasswordAdmin(first, input(email), { apply: true });
++    const workers = [service(first), service(second)];
++    const attempts = await Promise.allSettled(Array.from({ length: 8 }, (_, index) => workers[index % 2]!.login({ email, password: "incorrect test-only password" })));
++    expect(attempts.every((result) => result.status === "rejected")).toBe(true);
++    expect((await second.query<{ failure_count: number }>(`SELECT failure_count FROM platform_password_login_throttles WHERE login_key=$1`, [passwordLoginKey(email)])).rows[0]?.failure_count).toBe(5);
++    await expect(service(second).login({ email, password })).rejects.toMatchObject({ code: "PLATFORM_PASSWORD_LOGIN_INVALID" });
++  }, 20_000);
++
++  it("lets only one concurrent provisioning transaction create an administrator", async () => {
++    const email = `provision-${suffix}@example.test`;
++    const attempts = await Promise.allSettled([first, second].map((db) => provisionPlatformPasswordAdmin(db, input(email), { apply: true })));
++    expect(attempts.filter((result) => result.status === "fulfilled")).toHaveLength(1);
++    expect(attempts.filter((result) => result.status === "rejected")).toHaveLength(1);
++    expect((await first.query<{ count: number }>(`SELECT count(*)::int AS count FROM platform_accounts WHERE primary_email=$1`, [email])).rows[0]?.count).toBe(1);
++    expect((await first.query<{ count: number }>(`SELECT count(*)::int AS count FROM platform_password_admin_audit audit
++      JOIN platform_accounts account ON account.id=audit.platform_account_id WHERE account.primary_email=$1`, [email])).rows[0]?.count).toBe(1);
++  }, 20_000);
++});
+diff --git a/apps/api/src/accounts/platform-password-service.test.ts b/apps/api/src/accounts/platform-password-service.test.ts
+new file mode 100644
+index 0000000..b5c6096
+--- /dev/null
++++ b/apps/api/src/accounts/platform-password-service.test.ts
+@@ -0,0 +1,174 @@
++import { createHash, randomUUID } from "node:crypto";
++import { afterAll, beforeAll, describe, expect, it } from "vitest";
++import { createDatabase, type CampusDatabase } from "../database";
++import { PlatformAccountService } from "./platform-account-service";
++import { provisionPlatformPasswordAdmin } from "./platform-password-provisioning";
++import { PlatformPasswordService, hashPlatformPassword, passwordLoginKey, validPlatformPassword } from "./platform-password-service";
++import { readProvisionInput } from "../platform-password-admin-cli";
++
++const password = "Test-only password 123!";
++const provisionInput = (email: string, extra: Record<string, unknown> = {}) => ({
++  email, password, reason: "Explicit test administrator provisioning", performedBy: "security-test", ...extra,
++});
++
++describe("formal platform administrator passwords", () => {
++  let db: CampusDatabase;
++  let accounts: PlatformAccountService;
++  let service: PlatformPasswordService;
++  beforeAll(async () => {
++    db = await createDatabase({ attendanceCodeSecret: "platform-password-test-no-real-secrets", seedDemo: false });
++    accounts = new PlatformAccountService(db, { verify: async () => { throw new Error("OAuth is not used by this test"); } });
++    service = new PlatformPasswordService(db, accounts);
++  }, 30_000);
++  afterAll(async () => { await db?.close(); });
++
++  async function externalAccount(email: string, verified = true) {
++    const accountId = `pa_${randomUUID()}`;
++    const credentialId = `pac_${randomUUID()}`;
++    await db.query(`INSERT INTO platform_accounts (id,display_name,primary_email) VALUES ($1,'External account',$2)`, [accountId, email]);
++    await db.query(`INSERT INTO platform_account_credentials
++      (id,platform_account_id,method,provider_issuer,provider_subject,email_at_registration,email_verified,verified_at,last_authenticated_at)
++      VALUES ($1,$2,'google','https://accounts.google.com',$3,$4,$5,now(),now())`, [credentialId, accountId, randomUUID(), email, verified]);
++    return { accountId, credentialId };
++  }
++
++  async function failure(email: string, supplied = password) {
++    return service.login({ email, password: supplied }).then(() => null, (error: { code: string; statusCode: number; message: string }) => ({ code: error.code, status: error.statusCode, message: error.message }));
++  }
++  const invalid = { code: "PLATFORM_PASSWORD_LOGIN_INVALID", status: 401, message: "帳號或密碼不正確，請稍後再試。" };
++
++  it("plans without writing an account, credential, throttle, grant or audit", async () => {
++    const result = await provisionPlatformPasswordAdmin(db, provisionInput("dry-run@example.test", { password: undefined }), { apply: false });
++    expect(result).toEqual({ accountId: null, status: "planned", action: "create-account", maskedEmail: "d***@example.test", operatorGrant: "grant" });
++    expect((await db.query(`SELECT 1 FROM platform_accounts WHERE primary_email='dry-run@example.test'`)).rows).toEqual([]);
++    expect((await db.query(`SELECT 1 FROM platform_password_login_throttles WHERE login_key=$1`, [passwordLoginKey("dry-run@example.test")])).rows).toEqual([]);
++  });
++
++  it("issues a real hashed platform session and an audited explicit operator grant", async () => {
++    const result = await provisionPlatformPasswordAdmin(db, provisionInput("formal-admin@example.test"), { apply: true });
++    const logged = await service.login({ email: " FORMAL-ADMIN@EXAMPLE.TEST ", password });
++    expect(logged).toMatchObject({ platformAccountId: result.accountId, isPlatformOperator: true, created: false, expiresInSeconds: 3600 });
++    expect(logged.sessionHandle).toMatch(/^ps_[A-Za-z0-9_-]{43}$/u);
++    const credential = (await db.query<{ method: string; email_verified: boolean; password_hash: string }>(
++      `SELECT credential.method,credential.email_verified,password.password_hash FROM platform_password_credentials password
++        JOIN platform_account_credentials credential ON credential.id=password.credential_id WHERE password.email=$1`, ["formal-admin@example.test"],
++    )).rows[0]!;
++    expect(credential.method).toBe("password");
++    expect(credential.email_verified).toBe(false);
++    expect(credential.password_hash).not.toContain(password);
++    expect(credential.password_hash).toMatch(/^scrypt\$32768\$8\$3\$/u);
++    const sessions = (await db.query<{ token_sha256: string }>(`SELECT token_sha256 FROM platform_account_sessions WHERE platform_account_id=$1`, [result.accountId])).rows;
++    expect(sessions).toEqual([{ token_sha256: createHash("sha256").update(logged.sessionHandle).digest("hex") }]);
++    const audit = (await db.query(`SELECT * FROM platform_password_admin_audit WHERE platform_account_id=$1`, [result.accountId])).rows;
++    expect(audit).toHaveLength(1);
++    expect(JSON.stringify(audit)).not.toContain(password);
++    expect(JSON.stringify(audit)).not.toContain(credential.password_hash);
++    expect((await db.query(`SELECT 1 FROM identity_subjects WHERE id=$1`, [result.accountId])).rows).toEqual([]);
++    await accounts.logout(`Platform ${logged.sessionHandle}`);
++    await expect(accounts.resolveSession(`Platform ${logged.sessionHandle}`)).rejects.toMatchObject({ code: "PLATFORM_SESSION_INVALID" });
++  });
++
++  it("uses independent salts and preserves password whitespace and byte limits", async () => {
++    expect(await hashPlatformPassword(password)).not.toBe(await hashPlatformPassword(password));
++    expect(validPlatformPassword("😀".repeat(8))).toBe(true);
++    expect(validPlatformPassword("字".repeat(86))).toBe(false);
++    expect(validPlatformPassword("1234567")).toBe(false);
++    await provisionPlatformPasswordAdmin(db, provisionInput("whitespace@example.test", { password: ` ${password} ` }), { apply: true });
++    expect(await failure("whitespace@example.test", password)).toEqual(invalid);
++    expect((await service.login({ email: "whitespace@example.test", password: ` ${password} ` })).isPlatformOperator).toBe(true);
++  });
++
++  it("links only a unique account with an active verified provider credential", async () => {
++    const existing = await externalAccount("verified-owner@example.test");
++    const before = (await db.query(`SELECT * FROM platform_account_credentials WHERE id=$1`, [existing.credentialId])).rows[0];
++    const result = await provisionPlatformPasswordAdmin(db, provisionInput("verified-owner@example.test", { expectedAccountId: existing.accountId }), { apply: true });
++    expect(result).toMatchObject({ action: "add-credential", accountId: existing.accountId });
++    expect((await db.query(`SELECT * FROM platform_account_credentials WHERE id=$1`, [existing.credentialId])).rows[0]).toEqual(before);
++    expect((await service.login({ email: "verified-owner@example.test", password })).platformAccountId).toBe(existing.accountId);
++  });
++
++  it("refuses unverified, ambiguous, unavailable and changed identities without granting a role", async () => {
++    const unverified = await externalAccount("unverified@example.test", false);
++    await externalAccount("ambiguous@example.test");
++    await externalAccount("ambiguous@example.test");
++    const suspended = await externalAccount("suspended@example.test");
++    await db.query(`UPDATE platform_accounts SET state='suspended',suspended_at=now() WHERE id=$1`, [suspended.accountId]);
++    for (const email of ["unverified@example.test", "ambiguous@example.test", "suspended@example.test"]) {
++      await expect(provisionPlatformPasswordAdmin(db, provisionInput(email), { apply: true })).rejects.toThrow();
++      expect((await db.query(`SELECT 1 FROM platform_password_credentials WHERE email=$1`, [email])).rows).toEqual([]);
++      expect((await db.query(`SELECT 1 FROM platform_password_login_throttles WHERE login_key=$1`, [passwordLoginKey(email)])).rows).toEqual([]);
++    }
++    await expect(provisionPlatformPasswordAdmin(db, provisionInput("verified-owner@example.test", { expectedAccountId: unverified.accountId }), { apply: false })).rejects.toMatchObject({ code: "PLATFORM_PASSWORD_TARGET_CHANGED" });
++  });
++
++  it("commits failed-attempt counts across service instances and locks case variants together", async () => {
++    await provisionPlatformPasswordAdmin(db, provisionInput("throttle@example.test"), { apply: true });
++    for (let attempt = 0; attempt < 5; attempt += 1) {
++      const instance = new PlatformPasswordService(db, accounts);
++      await expect(instance.login({ email: attempt % 2 ? " THROTTLE@example.test " : "throttle@example.test", password: "incorrect password" })).rejects.toMatchObject({ code: invalid.code, statusCode: 401 });
++    }
++    const locked = (await db.query<{ failure_count: number; locked_until: string }>(`SELECT failure_count,locked_until::text FROM platform_password_login_throttles WHERE login_key=$1`, [passwordLoginKey("throttle@example.test")])).rows[0]!;
++    expect(locked.failure_count).toBe(5);
++    expect(locked.locked_until).toBeTruthy();
++    expect(await failure("throttle@example.test")).toEqual(invalid);
++    expect((await db.query(`SELECT locked_until::text FROM platform_password_login_throttles WHERE login_key=$1`, [passwordLoginKey("throttle@example.test")])).rows[0]).toEqual({ locked_until: locked.locked_until });
++    await db.query(`UPDATE platform_password_login_throttles SET window_started_at=now()-interval '16 minutes',locked_until=now()-interval '1 second' WHERE login_key=$1`, [passwordLoginKey("throttle@example.test")]);
++    expect((await service.login({ email: "throttle@example.test", password })).isPlatformOperator).toBe(true);
++    expect((await db.query(`SELECT failure_count,locked_until FROM platform_password_login_throttles WHERE login_key=$1`, [passwordLoginKey("throttle@example.test")])).rows[0]).toEqual({ failure_count: 0, locked_until: null });
++  });
++
++  it("serializes concurrent attempts from separate service instances", async () => {
++    await provisionPlatformPasswordAdmin(db, provisionInput("concurrent@example.test"), { apply: true });
++    const results = await Promise.allSettled(Array.from({ length: 8 }, () => new PlatformPasswordService(db, accounts).login({ email: "concurrent@example.test", password: "incorrect password" })));
++    expect(results.every((result) => result.status === "rejected")).toBe(true);
++    expect((await db.query<{ failure_count: number }>(`SELECT failure_count FROM platform_password_login_throttles WHERE login_key=$1`, [passwordLoginKey("concurrent@example.test")])).rows[0]?.failure_count).toBe(5);
++    expect(await failure("concurrent@example.test")).toEqual(invalid);
++  });
++
++  it("uses the same public failure and persistent throttle for missing and revoked accounts", async () => {
++    expect(await failure("does-not-exist@example.test")).toEqual(invalid);
++    expect((await db.query<{ failure_count: number }>(`SELECT failure_count FROM platform_password_login_throttles WHERE login_key=$1`, [passwordLoginKey("does-not-exist@example.test")])).rows[0]?.failure_count).toBe(1);
++    const created = await provisionPlatformPasswordAdmin(db, provisionInput("revoked-operator@example.test"), { apply: true });
++    const logged = await service.login({ email: "revoked-operator@example.test", password });
++    await db.query(`UPDATE platform_operator_assignments SET state='revoked',revoked_at=now() WHERE platform_account_id=$1`, [created.accountId]);
++    expect(await failure("revoked-operator@example.test")).toEqual(invalid);
++    await expect(accounts.resolveSession(`Platform ${logged.sessionHandle}`)).rejects.toMatchObject({ code: "PLATFORM_SESSION_INVALID" });
++  });
++
++  it("requires explicit rotation, revokes only password sessions and records an immutable audit", async () => {
++    const existing = await externalAccount("rotate@example.test");
++    await provisionPlatformPasswordAdmin(db, provisionInput("rotate@example.test"), { apply: true });
++    const before = await service.login({ email: "rotate@example.test", password });
++    const externalHandle = `ps_${Buffer.alloc(32, 1).toString("base64url")}`;
++    await db.query(`INSERT INTO platform_account_sessions (token_sha256,platform_account_id,credential_id,expires_at)
++      VALUES ($1,$2,$3,now()+interval '1 hour')`, [passwordLoginKey(externalHandle), existing.accountId, existing.credentialId]);
++    await expect(provisionPlatformPasswordAdmin(db, provisionInput("rotate@example.test"), { apply: true })).rejects.toMatchObject({ code: "PLATFORM_PASSWORD_ROTATION_REQUIRED" });
++    const changed = await provisionPlatformPasswordAdmin(db, provisionInput("rotate@example.test", { password: "A new test-only password", expectedAccountId: existing.accountId }), { apply: true, rotatePassword: true });
++    expect(changed.action).toBe("rotate-password");
++    await expect(accounts.resolveSession(`Platform ${before.sessionHandle}`)).rejects.toMatchObject({ code: "PLATFORM_SESSION_INVALID" });
++    expect((await accounts.resolveSession(`Platform ${externalHandle}`)).credentialId).toBe(existing.credentialId);
++    expect(await failure("rotate@example.test")).toEqual(invalid);
++    expect((await service.login({ email: "rotate@example.test", password: "A new test-only password" })).isPlatformOperator).toBe(true);
++    await expect(db.query(`DELETE FROM platform_password_admin_audit WHERE platform_account_id=$1`, [existing.accountId])).rejects.toThrow("append-only");
++  });
++
++  it("rolls back account, credential, grant and throttle if the audit cannot commit", async () => {
++    await db.exec(`CREATE FUNCTION reject_password_audit_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test audit failure'; END; $$;
++      CREATE TRIGGER reject_password_audit_test BEFORE INSERT ON platform_password_admin_audit FOR EACH ROW EXECUTE FUNCTION reject_password_audit_test();`);
++    try {
++      await expect(provisionPlatformPasswordAdmin(db, provisionInput("rollback@example.test"), { apply: true })).rejects.toThrow("test audit failure");
++      expect((await db.query(`SELECT 1 FROM platform_accounts WHERE primary_email='rollback@example.test'`)).rows).toEqual([]);
++      expect((await db.query(`SELECT 1 FROM platform_password_login_throttles WHERE login_key=$1`, [passwordLoginKey("rollback@example.test")])).rows).toEqual([]);
++    } finally {
++      await db.exec(`DROP TRIGGER reject_password_audit_test ON platform_password_admin_audit; DROP FUNCTION reject_password_audit_test();`);
++    }
++  });
++
++  it("keeps stdin bounded and rejects unrecognized credential fields", async () => {
++    async function* input(value: string) { yield Buffer.from(value); }
++    expect(await readProvisionInput(input(JSON.stringify(provisionInput("stdin@example.test"))))).toMatchObject({ email: "stdin@example.test", password });
++    await expect(readProvisionInput(input("{"))).rejects.toThrow();
++    await expect(readProvisionInput(input("x".repeat(8193)))).rejects.toThrow("INPUT_TOO_LARGE");
++    await expect(readProvisionInput(input(JSON.stringify({ ...provisionInput("stdin@example.test"), passwordHash: "not allowed" })))).rejects.toThrow("INVALID_INPUT");
++  });
++});
+diff --git a/apps/api/src/accounts/platform-password-service.ts b/apps/api/src/accounts/platform-password-service.ts
+new file mode 100644
+index 0000000..c4793f2
+--- /dev/null
++++ b/apps/api/src/accounts/platform-password-service.ts
+@@ -0,0 +1,145 @@
++import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
++import type { CampusDatabase, SqlExecutor } from "../database";
++import { DomainError } from "../domain-error";
++import type { PlatformAccountService } from "./platform-account-service";
++
++const SCRYPT_N = 32768;
++const SCRYPT_R = 8;
++const SCRYPT_P = 3;
++const HASH_PREFIX = `scrypt$${SCRYPT_N}$${SCRYPT_R}$${SCRYPT_P}`;
++const DUMMY_HASH = `${HASH_PREFIX}$${Buffer.alloc(16).toString("base64url")}$${Buffer.alloc(32).toString("base64url")}`;
++const LOCKOUT_MS = 15 * 60 * 1000;
++const SESSION_SECONDS = 3600;
++export const PLATFORM_PASSWORD_ISSUER = "urn:nuni:platform-password";
++
++export function normalizePlatformPasswordEmail(value: unknown): string | null {
++  if (typeof value !== "string" || value.length > 300) return null;
++  const email = value.trim().toLowerCase();
++  if (email.length > 254 || !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/u.test(email)) return null;
++  return email;
++}
++
++export function validPlatformPassword(value: unknown): value is string {
++  return typeof value === "string" && Array.from(value).length >= 8 && Buffer.byteLength(value, "utf8") <= 256;
++}
++
++function derive(password: string, salt: Buffer): Promise<Buffer> {
++  return new Promise((resolve, reject) => {
++    scrypt(password, salt, 32, { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P, maxmem: 64 * 1024 * 1024 }, (error, hash) => {
++      if (error) reject(error);
++      else resolve(hash);
++    });
++  });
++}
++
++export async function hashPlatformPassword(password: string): Promise<string> {
++  if (!validPlatformPassword(password)) {
++    throw new DomainError("PLATFORM_PASSWORD_INPUT_INVALID", "密碼至少需要 8 個字元，且不能超過 256 位元組。", 400);
++  }
++  const salt = randomBytes(16);
++  return `${HASH_PREFIX}$${salt.toString("base64url")}$${(await derive(password, salt)).toString("base64url")}`;
++}
++
++async function verifyPassword(password: string, stored: string): Promise<boolean> {
++  const parts = stored.split("$");
++  const valid = parts.length === 6 && parts.slice(0, 4).join("$") === HASH_PREFIX
++    && /^[A-Za-z0-9_-]{22}$/u.test(parts[4] ?? "") && /^[A-Za-z0-9_-]{43}$/u.test(parts[5] ?? "");
++  const selected = valid ? parts : DUMMY_HASH.split("$");
++  const hash = await derive(password, Buffer.from(selected[4]!, "base64url"));
++  return timingSafeEqual(hash, Buffer.from(selected[5]!, "base64url")) && valid;
++}
++
++export function passwordLoginKey(email: string): string {
++  return createHash("sha256").update(email).digest("hex");
++}
++
++export async function lockPasswordLogin(tx: SqlExecutor, email: string): Promise<string> {
++  const key = passwordLoginKey(email);
++  await tx.query(`INSERT INTO platform_password_login_throttles (login_key) VALUES ($1)
++    ON CONFLICT (login_key) DO NOTHING`, [key]);
++  await tx.query(`SELECT login_key FROM platform_password_login_throttles WHERE login_key=$1 FOR UPDATE`, [key]);
++  return key;
++}
++
++function loginInvalid(): DomainError {
++  return new DomainError("PLATFORM_PASSWORD_LOGIN_INVALID", "帳號或密碼不正確，請稍後再試。", 401);
++}
++
++export class PlatformPasswordService {
++  constructor(private readonly db: CampusDatabase, private readonly accounts: PlatformAccountService) {}
++
++  async login(input: { email: unknown; password: unknown }) {
++    const email = normalizePlatformPasswordEmail(input.email);
++    const suppliedPassword = input.password;
++    const acceptablePassword = validPlatformPassword(suppliedPassword);
++    if (!email) throw loginInvalid();
++    const password = acceptablePassword ? suppliedPassword : "invalid-password-input";
++    const result = await this.db.transaction(async (tx) => {
++      const key = await lockPasswordLogin(tx, email);
++      // Read the database clock after acquiring the shared bucket lock.
++      const throttle = (await tx.query<{
++        failure_count: number; window_expired: boolean; blocked: boolean;
++      }>(`SELECT failure_count,
++          window_started_at <= clock_timestamp() - interval '15 minutes' AS window_expired,
++          COALESCE(locked_until > clock_timestamp(), false) AS blocked
++        FROM platform_password_login_throttles WHERE login_key=$1`, [key])).rows[0]!;
++      if (throttle.blocked) {
++        await verifyPassword(password, DUMMY_HASH);
++        return null;
++      }
++      const stored = (await tx.query<{
++        credential_id: string; platform_account_id: string; password_hash: string;
++      }>(`SELECT credential_id, platform_account_id, password_hash
++        FROM platform_password_credentials WHERE email=$1`, [email])).rows[0];
++      // Lock the account first, matching account close/suspension transactions.
++      const account = stored ? (await tx.query<{ state: string }>(
++        `SELECT state FROM platform_accounts WHERE id=$1 FOR UPDATE`, [stored.platform_account_id],
++      )).rows[0] : undefined;
++      const credential = stored ? (await tx.query<{ state: string; method: string }>(
++        `SELECT state,method FROM platform_account_credentials WHERE id=$1 AND platform_account_id=$2 FOR UPDATE`,
++        [stored.credential_id, stored.platform_account_id],
++      )).rows[0] : undefined;
++      const assignment = stored ? (await tx.query<{ state: string }>(
++        `SELECT state FROM platform_operator_assignments
++          WHERE platform_account_id=$1 AND role_key='platform-operator' FOR UPDATE`, [stored.platform_account_id],
++      )).rows[0] : undefined;
++      const matches = await verifyPassword(password, stored?.password_hash ?? DUMMY_HASH);
++      if (!acceptablePassword || !matches || account?.state !== "active"
++        || credential?.state !== "active" || credential.method !== "password" || assignment?.state !== "active") {
++        const failures = throttle.window_expired ? 1 : Math.min(5, throttle.failure_count + 1);
++        await tx.query(`UPDATE platform_password_login_throttles
++          SET failure_count=$2,
++              window_started_at=CASE WHEN $3 THEN clock_timestamp() ELSE window_started_at END,
++              locked_until=CASE WHEN $2 >= 5 THEN clock_timestamp() + ($4::integer * interval '1 millisecond') ELSE NULL END,
++              updated_at=clock_timestamp() WHERE login_key=$1`, [key, failures, throttle.window_expired, LOCKOUT_MS]);
++        // Returning commits the failure counter; throwing here would roll it back.
++        return null;
++      }
++      const sessionHandle = `ps_${randomBytes(32).toString("base64url")}`;
++      const expiresAt = (await tx.query<{ expires_at: Date | string }>(
++        `INSERT INTO platform_account_sessions (token_sha256,platform_account_id,credential_id,expires_at)
++          VALUES ($1,$2,$3,clock_timestamp() + ($4::integer * interval '1 second')) RETURNING expires_at`,
++        [passwordLoginKey(sessionHandle), stored!.platform_account_id, stored!.credential_id, SESSION_SECONDS],
++      )).rows[0]!.expires_at;
++      await tx.query(`UPDATE platform_account_credentials SET last_authenticated_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1`, [stored!.credential_id]);
++      await tx.query(`UPDATE platform_password_login_throttles SET failure_count=0,window_started_at=clock_timestamp(),locked_until=NULL,updated_at=clock_timestamp() WHERE login_key=$1`, [key]);
++      return { sessionHandle, platformAccountId: stored!.platform_account_id, credentialId: stored!.credential_id, expiresAt: new Date(expiresAt).getTime() };
++    });
++    if (!result) throw loginInvalid();
++    // Resolve again so a revocation committed after credential verification fails closed.
++    let projection: Awaited<ReturnType<PlatformAccountService["projectCurrentSession"]>>;
++    try {
++      const actor = await this.accounts.resolveSession(`Platform ${result.sessionHandle}`);
++      projection = await this.accounts.projectCurrentSession(actor);
++    } catch (error) {
++      await this.accounts.logout(`Platform ${result.sessionHandle}`);
++      if (error instanceof DomainError && error.statusCode === 401) throw loginInvalid();
++      throw error;
++    }
++    if (!projection.isPlatformOperator) {
++      await this.accounts.logout(`Platform ${result.sessionHandle}`);
++      throw loginInvalid();
++    }
++    return { ...projection, sessionHandle: result.sessionHandle, expiresInSeconds: SESSION_SECONDS, created: false as const };
++  }
++}
+diff --git a/apps/api/src/accounts/platform-public-access.test.ts b/apps/api/src/accounts/platform-public-access.test.ts
+index d5eac09..58b6a70 100644
+--- a/apps/api/src/accounts/platform-public-access.test.ts
++++ b/apps/api/src/accounts/platform-public-access.test.ts
+@@ -43,6 +43,24 @@ describe("general platform food and public social access", () => {
+ 
+   afterEach(async () => db.close());
+ 
++  it("only allows a live platform operator to prepare the first public board persona", async () => {
++    await expect(accounts.resolvePublicRealmActor(platform, "campus-demo", { forCommunityCreation: true }))
++      .rejects.toMatchObject({ code: "PLATFORM_PUBLIC_REALM_NOT_FOUND" });
++    await expect(accounts.resolvePublicRealmActor(platform, "nccu", { forCommunityCreation: true }))
++      .rejects.toMatchObject({ code: "PLATFORM_PUBLIC_REALM_NOT_FOUND" });
++    await db.query(`INSERT INTO platform_operator_assignments (platform_account_id,role_key,state)
++      VALUES ($1,'platform-operator','active')`, [platform.platformAccountId]);
++    await expect(accounts.resolvePublicRealmActor(platform, "nccu"))
++      .rejects.toMatchObject({ code: "PLATFORM_PUBLIC_REALM_NOT_FOUND" });
++    const actor = await accounts.resolvePublicRealmActor(platform, "nccu", { forCommunityCreation: true });
++    expect(actor).toMatchObject({ roles: ["platform-user"], sessionKind: "platform-account" });
++    expect((await db.query(`SELECT 1 FROM identity_subjects WHERE tenant_id=$1 AND id=$2`, [actor.tenantId, actor.personId])).rows).toHaveLength(0);
++    await db.query(`UPDATE platform_operator_assignments SET state='revoked',revoked_at=now()
++      WHERE platform_account_id=$1`, [platform.platformAccountId]);
++    await expect(accounts.resolvePublicRealmActor(platform, "nccu", { forCommunityCreation: true }))
++      .rejects.toMatchObject({ code: "PLATFORM_PUBLIC_REALM_NOT_FOUND" });
++  });
++
+   it("creates a non-campus persona and orders only from opted-in public food locations", async () => {
+     const realms = await accounts.listPublicRealms(platform);
+     expect(realms).toContainEqual(expect.objectContaining({ tenantId: "campus-demo", services: ["food"] }));
+diff --git a/apps/api/src/accounts/platform-social-service.test.ts b/apps/api/src/accounts/platform-social-service.test.ts
+new file mode 100644
+index 0000000..5d7c4c0
+--- /dev/null
++++ b/apps/api/src/accounts/platform-social-service.test.ts
+@@ -0,0 +1,191 @@
++import { randomUUID } from "node:crypto";
++import { afterEach, beforeEach, describe, expect, it } from "vitest";
++import { createDatabase, type CampusDatabase } from "../database";
++import { PlatformAccountService, type PlatformActor } from "./platform-account-service";
++import { PlatformSocialService } from "./platform-social-service";
++import { SocialService } from "../social/social-service";
++
++describe("platform public social", () => {
++  let db: CampusDatabase;
++  let accounts: PlatformAccountService;
++  let service: PlatformSocialService;
++  let author: PlatformActor;
++  let reader: PlatformActor;
++  let operator: PlatformActor;
++  const key = () => randomUUID();
++
++  async function account(name: string) {
++    const platformAccountId = `pa_${randomUUID()}`;
++    const credentialId = `pac_${randomUUID()}`;
++    await db.query(`INSERT INTO platform_accounts (id,display_name) VALUES ($1,$2)`, [platformAccountId, name]);
++    await db.query(`INSERT INTO platform_account_credentials
++      (id,platform_account_id,method,provider_issuer,provider_subject,verified_at,last_authenticated_at)
++      VALUES ($1,$2,'google','https://accounts.google.com',$3,now(),now())`, [credentialId, platformAccountId, key()]);
++    return { platformAccountId, credentialId, expiresAt: Date.now() + 3_600_000 };
++  }
++
++  beforeEach(async () => {
++    db = await createDatabase({ attendanceCodeSecret: "public-social-test-secret-over-thirty-two-characters" });
++    accounts = new PlatformAccountService(db, { verify: async () => { throw new Error("unused"); } });
++    service = new PlatformSocialService(db, accounts);
++    author = await account("作者");
++    reader = await account("讀者");
++    operator = await account("營運人員");
++    await db.query(`INSERT INTO platform_operator_assignments (platform_account_id,role_key,state)
++      VALUES ($1,'platform-operator','active')`, [operator.platformAccountId]);
++    for (const tenant of ["campus-demo", "nccu"]) {
++      await db.query(`INSERT INTO people
++        (tenant_id,id,student_number,display_name,program,curriculum_version,study_year,campus,credential_status)
++        VALUES ($1,'public-board-owner','PUBLICOWNER','看板管理','一般使用者','platform',1,'公開社群','active')`, [tenant]);
++      await db.query(`INSERT INTO social_profiles (tenant_id,id,person_id,handle,display_name)
++        VALUES ($1,'public-board-owner','public-board-owner','public-board-owner','看板管理')`, [tenant]);
++      await db.query(`INSERT INTO social_communities
++        (tenant_id,id,kind,name,discoverability,join_policy,posting_policy,owner_profile_id,access_scope)
++        VALUES ($1,'public-board','group','公開交流','listed','open','members','public-board-owner','public')`, [tenant]);
++    }
++  }, 60_000);
++
++  afterEach(async () => { await db?.close(); });
++
++  it("publishes real posts in an open board and keeps private/unlisted/suspended content out of every target lookup", async () => {
++    const post = await service.createPost(author, { tenantId: "campus-demo", communityId: "public-board", text: "跨校交流", idempotencyKey: key() });
++    expect((await service.feed(reader, {})).items.some(item => item.id === post.id)).toBe(true);
++    expect(post.author).toEqual({ displayName: "作者", isSelf: true });
++    await db.query(`UPDATE social_posts SET visibility='community-members' WHERE tenant_id=$1 AND id=$2`, [post.tenantId, post.id]);
++    await expect(service.getPost(reader, { tenantId: post.tenantId, postId: post.id })).rejects.toMatchObject({ statusCode: 404 });
++    await expect(service.report(reader, { tenantId: post.tenantId, postId: post.id, reason: "spam", idempotencyKey: key() })).rejects.toMatchObject({ statusCode: 404 });
++    await expect(service.blockAuthor(reader, { tenantId: post.tenantId, postId: post.id, idempotencyKey: key() })).rejects.toMatchObject({ statusCode: 404 });
++    await db.query(`UPDATE social_posts SET visibility='public-campus' WHERE tenant_id=$1 AND id=$2`, [post.tenantId, post.id]);
++    await db.query(`UPDATE social_communities SET discoverability='unlisted' WHERE tenant_id='campus-demo' AND id='public-board'`);
++    expect((await service.feed(reader, { tenantId: "campus-demo" })).items).toEqual([]);
++    await db.query(`UPDATE social_communities SET discoverability='listed',access_scope='campus' WHERE tenant_id='campus-demo' AND id='public-board'`);
++    await expect(service.getPost(reader, { tenantId: post.tenantId, postId: post.id })).rejects.toMatchObject({ statusCode: 404 });
++    await db.query(`UPDATE social_communities SET access_scope='public' WHERE tenant_id='campus-demo' AND id='public-board'`);
++    await db.query(`UPDATE tenants SET state='suspended' WHERE id='campus-demo'`);
++    await expect(service.getPost(reader, { tenantId: post.tenantId, postId: post.id })).rejects.toMatchObject({ statusCode: 404 });
++    await db.query(`UPDATE tenants SET state='open' WHERE id='campus-demo'`);
++  });
++
++  it("lets a live operator create the first real public board without campus roles and rejects ordinary accounts", async () => {
++    await db.query(`INSERT INTO tenants (id,display_name,state,directory_source) VALUES ('empty-public-realm','尚無看板大學','provisioned','manual')`);
++    const input = { tenantId: "empty-public-realm", name: "跨校問答", description: "公開分享與交流", idempotencyKey: key() };
++    await expect(service.createBoard(reader, input)).rejects.toMatchObject({ code: "PLATFORM_OPERATOR_REQUIRED" });
++    const board = await service.createBoard(operator, input);
++    expect(board).toMatchObject({ tenantId: input.tenantId, name: input.name, canPost: true, joinPolicy: "open", postingPolicy: "members" });
++    expect(await service.createBoard(operator, input)).toEqual(board);
++    expect((await service.boards(reader)).items.some(item => item.id === board.id)).toBe(true);
++    const posted = await service.createPost(reader, { tenantId: input.tenantId, communityId: board.id, text: "在第一個公開看板發文", idempotencyKey: key() });
++    expect((await service.feed(author, { tenantId: input.tenantId })).items[0]?.id).toBe(posted.id);
++    const persona = await accounts.resolvePublicRealmActor(operator, input.tenantId);
++    expect((await db.query(`SELECT id FROM identity_subjects WHERE tenant_id=$1 AND id=$2`, [persona.tenantId, persona.personId])).rows).toHaveLength(0);
++    await db.query(`UPDATE platform_operator_assignments SET state='revoked',revoked_at=now() WHERE platform_account_id=$1`, [operator.platformAccountId]);
++    await expect(service.createBoard(operator, input)).rejects.toMatchObject({ code: "PLATFORM_OPERATOR_REQUIRED" });
++  });
++
++  it("filters global blocks both ways across realms and permits only the owner's versioned unblock", async () => {
++    const post = await service.createPost(author, { tenantId: "nccu", communityId: "public-board", text: "另一個公開看板", idempotencyKey: key() });
++    const readerPost = await service.createPost(reader, { tenantId: "campus-demo", communityId: "public-board", text: "讀者公開文", idempotencyKey: key() });
++    const blockKey = key();
++    const block = await service.blockAuthor(reader, { tenantId: post.tenantId, postId: post.id, idempotencyKey: blockKey });
++    expect(await service.blockAuthor(reader, { tenantId: post.tenantId, postId: post.id, idempotencyKey: blockKey })).toEqual(block);
++    expect((await service.feed(reader, {})).items.every(item => item.author.isSelf)).toBe(true);
++    expect((await service.feed(author, {})).items.some(item => item.id === readerPost.id)).toBe(false);
++    const oldSocial = new SocialService(db);
++    const oldReader = await accounts.resolvePublicRealmActor(reader, "nccu");
++    const oldAuthor = await accounts.resolvePublicRealmActor(author, "campus-demo");
++    const oldReaderFeed = await oldSocial.feed(oldReader, { mode: "campus-latest", limit: 20, lookingForOnly: false });
++    const oldAuthorFeed = await oldSocial.feed(oldAuthor, { mode: "campus-latest", limit: 20, lookingForOnly: false });
++    expect(JSON.stringify(oldReaderFeed)).not.toContain(post.id);
++    expect(JSON.stringify(oldAuthorFeed)).not.toContain(readerPost.id);
++    expect((await service.listBlocks(author)).items).toEqual([]);
++    await expect(service.unblock(author, { blockId: block.id, expectedVersion: block.version, idempotencyKey: key() })).rejects.toMatchObject({ statusCode: 404 });
++    await expect(service.unblock(reader, { blockId: block.id, expectedVersion: 99, idempotencyKey: key() })).rejects.toMatchObject({ code: "PLATFORM_SOCIAL_VERSION_CONFLICT" });
++    await service.unblock(reader, { blockId: block.id, expectedVersion: block.version, idempotencyKey: key() });
++    expect((await service.feed(reader, {})).items.some(item => item.id === post.id)).toBe(true);
++  });
++
++  it("moderates with live operator authorization, conflict checks, CAS, idempotency and an atomic audit", async () => {
++    const post = await service.createPost(author, { tenantId: "nccu", communityId: "public-board", text: "需要處理的公開文", idempotencyKey: key() });
++    const report = await service.report(reader, { tenantId: post.tenantId, postId: post.id, reason: "privacy", detail: "公開了不適合公開的資料", idempotencyKey: key() });
++    await expect(service.listOperatorReports(reader, {})).rejects.toMatchObject({ code: "PLATFORM_OPERATOR_REQUIRED" });
++    await db.query(`INSERT INTO platform_operator_assignments (platform_account_id,role_key,state)
++      VALUES ($1,'platform-operator','active'),($2,'platform-operator','active')`, [author.platformAccountId, reader.platformAccountId]);
++    for (const conflict of [author, reader]) {
++      await expect(service.decideReport(conflict, { reportId: report.id, decision: "hide", reason: "需要隱藏處理", expectedVersion: report.version, idempotencyKey: key() })).rejects.toMatchObject({ code: "PLATFORM_SOCIAL_REVIEW_CONFLICT" });
++    }
++    await expect(service.decideReport(operator, { reportId: report.id, decision: "hide", reason: "需要隱藏處理", expectedVersion: 99, idempotencyKey: key() })).rejects.toMatchObject({ code: "PLATFORM_SOCIAL_VERSION_CONFLICT" });
++    const input = { reportId: report.id, decision: "hide" as const, reason: "公開個人資料，隱藏處理", expectedVersion: report.version, idempotencyKey: key() };
++    const result = await service.decideReport(operator, input);
++    expect(result.state).toBe("hidden");
++    expect(await service.decideReport(operator, input)).toEqual(result);
++    await expect(service.decideReport(operator, { ...input, decision: "dismiss" })).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
++    expect((await db.query<{state:string}>(`SELECT state FROM social_posts WHERE tenant_id=$1 AND id=$2`, [post.tenantId, post.id])).rows[0]?.state).toBe("removed");
++    expect((await service.feed(reader, {})).items.some(item => item.id === post.id)).toBe(false);
++    const oldSocial = new SocialService(db);
++    const oldActor = await accounts.resolvePublicRealmActor(reader, "nccu");
++    expect(JSON.stringify(await oldSocial.feed(oldActor, { mode: "campus-latest", limit: 20, lookingForOnly: false }))).not.toContain(post.id);
++    const authorPersona = await accounts.resolvePublicRealmActor(author, "nccu");
++    await expect(oldSocial.updatePost(authorPersona, post.id, { state: "published", reasonCode: "restore",
++      expectedVersion: post.version + 1, idempotencyKey: key() })).rejects.toMatchObject({ statusCode: 409 });
++    expect((await db.query(`SELECT id FROM platform_public_social_audit WHERE report_id=$1 AND action='hide'`, [report.id])).rows).toHaveLength(1);
++    await expect(db.query(`UPDATE platform_public_social_audit SET reason='rewrite' WHERE report_id=$1`, [report.id])).rejects.toThrow("append-only");
++    await expect(db.query(`DELETE FROM platform_public_social_audit WHERE report_id=$1`, [report.id])).rejects.toThrow("append-only");
++    await db.query(`UPDATE platform_operator_assignments SET state='revoked',revoked_at=now() WHERE platform_account_id=$1`, [operator.platformAccountId]);
++    await expect(service.decideReport(operator, input)).rejects.toMatchObject({ code: "PLATFORM_OPERATOR_REQUIRED" });
++    await expect(service.listOperatorReports(operator, {})).rejects.toMatchObject({ code: "PLATFORM_OPERATOR_REQUIRED" });
++  });
++
++  it("rechecks active account and credential and binds feed cursors to the viewer and filters", async () => {
++    for (const tenantId of ["campus-demo", "nccu"]) {
++      await service.createPost(author, { tenantId, communityId: "public-board", text: "游標測試", idempotencyKey: key() });
++    }
++    const page = await service.feed(reader, { limit: 1 });
++    expect(page.nextCursor).toBeTruthy();
++    await expect(service.feed(author, { cursor: page.nextCursor!, limit: 1 })).rejects.toMatchObject({ code: "PLATFORM_SOCIAL_CURSOR_INVALID" });
++    await expect(service.feed(reader, { cursor: page.nextCursor!, tenantId: "nccu" })).rejects.toMatchObject({ code: "PLATFORM_SOCIAL_CURSOR_INVALID" });
++    const next = await service.feed(reader, { cursor: page.nextCursor!, limit: 1 });
++    expect(next.items[0]?.id).not.toEqual(page.items[0]?.id);
++    await db.query(`UPDATE platform_accounts SET state='suspended',suspended_at=now() WHERE id=$1`, [reader.platformAccountId]);
++    await expect(service.boards(reader)).rejects.toMatchObject({ statusCode: 401 });
++    await db.query(`UPDATE platform_accounts SET state='active',suspended_at=null WHERE id=$1`, [reader.platformAccountId]);
++    await db.query(`UPDATE platform_account_credentials SET state='revoked',revoked_at=now() WHERE id=$1`, [reader.credentialId]);
++    await expect(service.feed(reader, {})).rejects.toMatchObject({ statusCode: 401 });
++  });
++
++  it("excludes unmapped campus authors, rejects private board publishing and rechecks visibility on create replay", async () => {
++    const unmappedId = key();
++    await db.query(`INSERT INTO social_posts (tenant_id,id,author_profile_id,community_id,text_content,visibility,state,published_at)
++      VALUES ('campus-demo',$1,'public-board-owner','public-board','校園作者的原有貼文','public-campus','published',now())`, [unmappedId]);
++    expect((await service.feed(reader, {})).items).toEqual([]);
++    await expect(service.getPost(reader, { tenantId: "campus-demo", postId: unmappedId })).rejects.toMatchObject({ statusCode: 404 });
++    const input = { tenantId: "campus-demo", communityId: "public-board", text: "真正公開的貼文", idempotencyKey: key() };
++    const post = await service.createPost(author, input);
++    expect(await service.createPost(author, input)).toEqual(post);
++    await expect(service.report(author, { tenantId: post.tenantId, postId: post.id, reason: "other", idempotencyKey: key() })).rejects.toMatchObject({ code: "PLATFORM_SOCIAL_SELF_TARGET" });
++    await db.query(`UPDATE social_communities SET access_scope='campus' WHERE tenant_id='campus-demo' AND id='public-board'`);
++    await expect(service.createPost(author, input)).rejects.toMatchObject({ statusCode: 404 });
++    await expect(service.createPost(reader, { ...input, idempotencyKey: key() })).rejects.toMatchObject({ statusCode: 404 });
++    const count = await db.query<{ count: number }>(`SELECT count(*)::int AS count FROM social_posts WHERE tenant_id='campus-demo' AND community_id='public-board'`);
++    expect(count.rows[0]?.count).toBe(2);
++  });
++
++  it("rolls post/report/idempotency back when the mandatory audit fails and permits a safe retry", async () => {
++    const post = await service.createPost(author, { tenantId: "nccu", communityId: "public-board", text: "交易回復驗證", idempotencyKey: key() });
++    const report = await service.report(reader, { tenantId: post.tenantId, postId: post.id, reason: "other", idempotencyKey: key() });
++    const input = { reportId: report.id, decision: "hide" as const, reason: "測試交易原子性", expectedVersion: report.version, idempotencyKey: key() };
++    await db.exec(`CREATE FUNCTION fail_public_social_audit_test() RETURNS trigger LANGUAGE plpgsql AS $$
++      BEGIN IF NEW.action='hide' THEN RAISE EXCEPTION 'audit test failure'; END IF; RETURN NEW; END; $$;
++      CREATE TRIGGER fail_public_social_audit_test BEFORE INSERT ON platform_public_social_audit
++        FOR EACH ROW EXECUTE FUNCTION fail_public_social_audit_test();`);
++    await expect(service.decideReport(operator, input)).rejects.toThrow("audit test failure");
++    expect((await service.getPost(reader, { tenantId: post.tenantId, postId: post.id })).version).toBe(post.version);
++    expect((await service.listReports(reader)).items[0]?.state).toBe("open");
++    expect((await db.query(`SELECT key FROM platform_public_social_idempotency WHERE key=$1`, [input.idempotencyKey])).rows).toHaveLength(0);
++    await db.exec(`DROP TRIGGER fail_public_social_audit_test ON platform_public_social_audit; DROP FUNCTION fail_public_social_audit_test();`);
++    await db.query(`UPDATE social_posts SET visibility='only-me' WHERE tenant_id=$1 AND id=$2`, [post.tenantId, post.id]);
++    await expect(service.decideReport(operator, input)).rejects.toMatchObject({ code: "PLATFORM_SOCIAL_POST_UNAVAILABLE" });
++    const dismissed = await service.decideReport(operator, { ...input, decision: "dismiss", idempotencyKey: key() });
++    expect(dismissed.state).toBe("dismissed");
++    expect((await db.query<{ state: string }>(`SELECT state FROM social_posts WHERE tenant_id=$1 AND id=$2`, [post.tenantId, post.id])).rows[0]?.state).toBe("published");
++  });
++});
+diff --git a/apps/api/src/accounts/platform-social-service.ts b/apps/api/src/accounts/platform-social-service.ts
+new file mode 100644
+index 0000000..46c9619
+--- /dev/null
++++ b/apps/api/src/accounts/platform-social-service.ts
+@@ -0,0 +1,345 @@
++import { randomUUID } from "node:crypto";
++import { z } from "zod";
++import type { CampusDatabase, SqlExecutor } from "../database";
++import { DomainError } from "../domain-error";
++import { SocialService, type SocialServiceOptions } from "../social/social-service";
++import { socialRequestHash } from "../social/social-utils";
++import type { PlatformAccountService, PlatformActor } from "./platform-account-service";
++
++const id = z.string().min(1).max(120);
++const tenantId = z.string().max(80).regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/u);
++const idempotencyKey = z.string().trim().min(8).max(100);
++const expectedVersion = z.number().int().positive();
++export const PlatformSocialTargetSchema = z.object({ tenantId, postId: id }).strict();
++export const PlatformSocialFeedQuerySchema = z.object({
++  tenantId: tenantId.optional(), communityId: id.optional(), cursor: z.string().max(1000).optional(),
++  limit: z.coerce.number().int().min(1).max(50).default(20),
++}).strict().refine(value => !value.communityId || Boolean(value.tenantId), { message: "看板篩選需要指定所屬公開區域。" });
++export const PlatformSocialCreatePostSchema = z.object({ tenantId, communityId: id, text: z.string().trim().min(1).max(10_000), idempotencyKey }).strict();
++export const PlatformSocialCreateBoardSchema = z.object({ tenantId, name: z.string().trim().min(2).max(80),
++  description: z.string().trim().max(400).default(""), idempotencyKey }).strict();
++export const PlatformSocialBlockSchema = PlatformSocialTargetSchema.extend({ idempotencyKey });
++export const PlatformSocialUnblockSchema = z.object({ blockId: id, expectedVersion, idempotencyKey }).strict();
++export const PlatformSocialReportSchema = PlatformSocialTargetSchema.extend({
++  reason: z.enum(["harassment", "spam", "privacy", "hate", "violence", "other"]),
++  detail: z.string().trim().max(2000).default(""), idempotencyKey,
++});
++export const PlatformSocialOperatorReportsQuerySchema = z.object({
++  state: z.enum(["open", "hidden", "dismissed"]).optional(), limit: z.coerce.number().int().min(1).max(100).default(50),
++}).strict();
++export const PlatformSocialDecisionSchema = z.object({
++  reportId: id, decision: z.enum(["hide", "dismiss"]), reason: z.string().trim().min(5).max(2000), expectedVersion, idempotencyKey,
++}).strict();
++
++interface PublicPostRow {
++  id: string; tenant_id: string; tenant_name: string; community_id: string; community_name: string;
++  text_content: string; display_name: string; author_account_id: string; published_at: string; version: number;
++}
++interface BlockRow { id: string; version: number; state: string; display_name: string; created_at: string | Date }
++interface ReportRow {
++  id: string; tenant_id: string; post_id: string; reporter_account_id: string; author_account_id: string;
++  reason: string; state: string; version: number; created_at: string | Date; detail: string;
++  public_snapshot: Record<string, unknown>; decision_reason: string | null;
++}
++
++// Every target operation uses this exact visibility gate. Membership-only,
++// unmapped campus authors and federation data never enter the global projection.
++const publicPosts = `FROM social_posts p
++  JOIN social_communities c ON c.tenant_id=p.tenant_id AND c.id=p.community_id
++  JOIN tenants t ON t.id=p.tenant_id
++  JOIN social_profiles profile ON profile.tenant_id=p.tenant_id AND profile.id=p.author_profile_id
++  JOIN platform_tenant_personas persona ON persona.tenant_id=profile.tenant_id AND persona.person_id=profile.person_id
++  JOIN platform_accounts author ON author.id=persona.platform_account_id
++  WHERE p.state='published' AND p.visibility='public-campus'
++    AND c.access_scope='public' AND c.discoverability='listed'
++    AND t.state IN ('provisioned','open') AND author.state='active'`;
++const postColumns = `p.id,p.tenant_id,t.display_name AS tenant_name,p.community_id,c.name AS community_name,
++  p.text_content,profile.display_name,persona.platform_account_id AS author_account_id,
++  to_char(p.published_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS published_at,p.version`;
++const notBlocked = `AND NOT EXISTS (SELECT 1 FROM platform_public_social_blocks b WHERE b.state='active'
++  AND ((b.owner_account_id=$1 AND b.target_account_id=persona.platform_account_id)
++    OR (b.target_account_id=$1 AND b.owner_account_id=persona.platform_account_id)))`;
++
++export class PlatformSocialService {
++  constructor(
++    private readonly db: CampusDatabase,
++    private readonly accounts: PlatformAccountService,
++    private readonly socialOptions: SocialServiceOptions = {},
++  ) {}
++
++  async createBoard(actor: PlatformActor, input: z.input<typeof PlatformSocialCreateBoardSchema>) {
++    const data = PlatformSocialCreateBoardSchema.parse(input);
++    await this.read(actor, tx => this.requireOperator(tx, actor));
++    const persona = await this.accounts.resolvePublicRealmActor(actor, data.tenantId, { forCommunityCreation: true });
++    const target = await this.write(actor, "board", data, async tx => {
++      const tenant = (await tx.query(`SELECT id FROM tenants WHERE id=$1 AND state IN ('provisioned','open') FOR SHARE`, [data.tenantId])).rows[0];
++      if (!tenant) throw notFound();
++      const social = new SocialService(transactionDatabase(this.db, tx), this.socialOptions);
++      const board = await social.createCommunity(persona, {
++        kind: "group", name: data.name, description: data.description, discoverability: "listed",
++        joinPolicy: "open", postingPolicy: "members", idempotencyKey: `public-board-${socialRequestHash(data).slice(0, 64)}`,
++      }, "public");
++      return { tenantId: data.tenantId, communityId: String(board.id) };
++    }, true);
++    const board = (await this.boards(actor)).items.find(row => row.tenantId === target.tenantId && row.id === target.communityId);
++    if (!board) throw notFound();
++    return board;
++  }
++
++  async boards(actor: PlatformActor) {
++    return this.read(actor, async tx => {
++      const rows = await tx.query<{
++        tenant_id: string; tenant_name: string; id: string; name: string; description: string | null;
++        join_policy: string; posting_policy: string; can_post: boolean;
++      }>(`SELECT c.tenant_id,t.display_name AS tenant_name,c.id,c.name,c.description,c.join_policy,c.posting_policy,
++          ((c.join_policy='open' AND c.posting_policy='members') OR EXISTS (
++            SELECT 1 FROM platform_tenant_personas persona JOIN social_profiles profile
++              ON profile.tenant_id=persona.tenant_id AND profile.person_id=persona.person_id
++            JOIN social_memberships m ON m.tenant_id=profile.tenant_id AND m.profile_id=profile.id
++            WHERE persona.platform_account_id=$1 AND m.tenant_id=c.tenant_id AND m.community_id=c.id
++              AND m.state='active' AND (c.posting_policy='members' OR m.role IN ('owner','moderator')))) AS can_post
++        FROM social_communities c JOIN tenants t ON t.id=c.tenant_id
++        WHERE c.access_scope='public' AND c.discoverability='listed' AND t.state IN ('provisioned','open')
++        ORDER BY t.display_name,c.name,c.tenant_id,c.id`, [actor.platformAccountId]);
++      return { items: rows.rows.map(row => ({ tenantId: row.tenant_id, tenantName: row.tenant_name, id: row.id,
++        name: row.name, description: row.description, joinPolicy: row.join_policy, postingPolicy: row.posting_policy, canPost: row.can_post })) };
++    });
++  }
++
++  async feed(actor: PlatformActor, input: z.input<typeof PlatformSocialFeedQuerySchema>) {
++    const query = PlatformSocialFeedQuerySchema.parse(input);
++    const scope = socialRequestHash({ viewer: actor.platformAccountId, tenantId: query.tenantId ?? null, communityId: query.communityId ?? null });
++    let cursor: { date: string; tenantId: string; postId: string } | null = null;
++    if (query.cursor) {
++      try {
++        const value = z.object({ date: z.string().datetime({ precision: 6 }), tenantId, postId: id, scope: z.literal(scope) }).strict()
++          .parse(JSON.parse(Buffer.from(query.cursor, "base64url").toString("utf8")));
++        cursor = value;
++      } catch { throw new DomainError("PLATFORM_SOCIAL_CURSOR_INVALID", "這個清單已變更，請重新載入。", 422); }
++    }
++    return this.read(actor, async tx => {
++      const rows = await tx.query<PublicPostRow>(`SELECT ${postColumns} ${publicPosts} ${notBlocked}
++        AND ($2::text IS NULL OR p.tenant_id=$2) AND ($3::text IS NULL OR p.community_id=$3)
++        AND ($4::timestamptz IS NULL OR (p.published_at,p.tenant_id,p.id)<($4::timestamptz,$5::text,$6::text))
++        ORDER BY p.published_at DESC,p.tenant_id DESC,p.id DESC LIMIT $7`,
++      [actor.platformAccountId, query.tenantId ?? null, query.communityId ?? null, cursor?.date ?? null, cursor?.tenantId ?? null, cursor?.postId ?? null, query.limit + 1]);
++      const selected = rows.rows.slice(0, query.limit);
++      const last = selected.at(-1);
++      return { items: selected.map(row => projectPost(row, actor)), nextCursor: rows.rows.length > query.limit && last
++        ? Buffer.from(JSON.stringify({ date: last.published_at, tenantId: last.tenant_id, postId: last.id, scope })).toString("base64url") : null };
++    });
++  }
++
++  async getPost(actor: PlatformActor, input: z.input<typeof PlatformSocialTargetSchema>) {
++    const target = PlatformSocialTargetSchema.parse(input);
++    return this.read(actor, async tx => projectPost(await this.publicTarget(tx, actor, target), actor));
++  }
++
++  async createPost(actor: PlatformActor, input: z.input<typeof PlatformSocialCreatePostSchema>) {
++    const data = PlatformSocialCreatePostSchema.parse(input);
++    await this.read(actor, async () => undefined);
++    const persona = await this.accounts.resolvePublicRealmActor(actor, data.tenantId);
++    return this.write(actor, "post", data, async tx => {
++      await tx.query(`SELECT id FROM people WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, [persona.tenantId, persona.personId]);
++      await this.requireBoard(tx, data.tenantId, data.communityId);
++      // Reuse all existing participation restrictions, membership rules, history,
++      // idempotency and governed outbox, in this transaction (no nested commit).
++      const social = new SocialService(transactionDatabase(this.db, tx), this.socialOptions);
++      const profile = await social.getSelfProfile(persona);
++      const membership = (await tx.query(`SELECT 1 FROM social_memberships WHERE tenant_id=$1
++        AND community_id=$2 AND profile_id=$3 AND state='active'`, [data.tenantId, data.communityId, profile.id])).rows[0];
++      if (!membership) {
++        const board = await this.requireBoard(tx, data.tenantId, data.communityId);
++        if (board.join_policy !== "open" || board.posting_policy !== "members") {
++          throw new DomainError("PLATFORM_SOCIAL_MEMBERSHIP_REQUIRED", "這個看板需要既有成員或管理員資格才能發表。", 403);
++        }
++        await social.changeMembership(persona, data.communityId, { action: "request-join", reasonCode: "user-request", idempotencyKey: `public-join-${socialRequestHash(data).slice(0, 64)}` });
++      }
++      const post = await social.createPost(persona, { communityId: data.communityId,
++        content: { text: data.text, tagIds: [], mediaRefs: [] }, visibility: "public-campus", state: "published",
++        idempotencyKey: `public-post-${socialRequestHash(data).slice(0, 64)}` });
++      return { tenantId: data.tenantId, postId: String(post.id) };
++    }).then(target => this.getPost(actor, target));
++  }
++
++  async blockAuthor(actor: PlatformActor, input: z.input<typeof PlatformSocialBlockSchema>) {
++    const data = PlatformSocialBlockSchema.parse(input);
++    return this.write(actor, "block", data, async tx => {
++      const target = await this.publicTarget(tx, actor, data, true);
++      if (target.author_account_id === actor.platformAccountId) throw new DomainError("PLATFORM_SOCIAL_SELF_TARGET", "不能封鎖自己的帳號。", 422);
++      const row = (await tx.query<BlockRow>(`INSERT INTO platform_public_social_blocks (id,owner_account_id,target_account_id)
++        VALUES ($1,$2,$3) ON CONFLICT (owner_account_id,target_account_id) DO UPDATE
++        SET state='active',version=platform_public_social_blocks.version+1,updated_at=now() RETURNING *`,
++      [randomUUID(), actor.platformAccountId, target.author_account_id])).rows[0]!;
++      await this.audit(tx, actor, "block", { blockId: row.id });
++      return { id: row.id, state: row.state, version: row.version };
++    });
++  }
++
++  async listBlocks(actor: PlatformActor) {
++    return this.read(actor, async tx => ({ items: (await tx.query<BlockRow>(`SELECT b.id,b.version,b.created_at,target.display_name
++      FROM platform_public_social_blocks b JOIN platform_accounts target ON target.id=b.target_account_id
++      WHERE b.owner_account_id=$1 AND b.state='active' ORDER BY b.created_at DESC,b.id DESC`, [actor.platformAccountId])).rows
++      .map(row => ({ id: row.id, version: row.version, displayName: row.display_name, createdAt: iso(row.created_at) })) }));
++  }
++
++  async unblock(actor: PlatformActor, input: z.input<typeof PlatformSocialUnblockSchema>) {
++    const data = PlatformSocialUnblockSchema.parse(input);
++    return this.write(actor, "unblock", data, async tx => {
++      const row = (await tx.query<BlockRow>(`SELECT * FROM platform_public_social_blocks
++        WHERE id=$1 AND owner_account_id=$2 FOR UPDATE`, [data.blockId, actor.platformAccountId])).rows[0];
++      if (!row) throw notFound();
++      if (row.version !== data.expectedVersion || row.state !== "active") throw versionConflict();
++      await tx.query(`UPDATE platform_public_social_blocks SET state='revoked',version=version+1,updated_at=now() WHERE id=$1`, [row.id]);
++      await this.audit(tx, actor, "unblock", { blockId: row.id });
++      return { id: row.id, state: "revoked", version: row.version + 1 };
++    });
++  }
++
++  async report(actor: PlatformActor, input: z.input<typeof PlatformSocialReportSchema>) {
++    const data = PlatformSocialReportSchema.parse(input);
++    return this.write(actor, "report", data, async tx => {
++      const target = await this.publicTarget(tx, actor, data, true);
++      if (target.author_account_id === actor.platformAccountId) throw new DomainError("PLATFORM_SOCIAL_SELF_TARGET", "不能檢舉自己的貼文。", 422);
++      const existing = (await tx.query(`SELECT id FROM platform_public_social_reports WHERE reporter_account_id=$1
++        AND tenant_id=$2 AND post_id=$3 AND state='open'`, [actor.platformAccountId, data.tenantId, data.postId])).rows[0];
++      if (existing) throw new DomainError("PLATFORM_SOCIAL_REPORT_PENDING", "這則貼文已有你的待處理檢舉。", 409);
++      const row = (await tx.query<ReportRow>(`INSERT INTO platform_public_social_reports
++        (id,reporter_account_id,author_account_id,tenant_id,post_id,reason,detail,public_snapshot)
++        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) RETURNING *`, [randomUUID(), actor.platformAccountId,
++        target.author_account_id, data.tenantId, data.postId, data.reason, data.detail, JSON.stringify(projectPost(target, actor))])).rows[0]!;
++      await this.audit(tx, actor, "report", { reportId: row.id });
++      return projectReport(row);
++    });
++  }
++
++  async listReports(actor: PlatformActor) {
++    return this.read(actor, async tx => ({ items: (await tx.query<ReportRow>(`SELECT * FROM platform_public_social_reports
++      WHERE reporter_account_id=$1 ORDER BY created_at DESC,id DESC LIMIT 100`, [actor.platformAccountId])).rows.map(projectReport) }));
++  }
++
++  async listOperatorReports(actor: PlatformActor, input: z.input<typeof PlatformSocialOperatorReportsQuerySchema>) {
++    const query = PlatformSocialOperatorReportsQuerySchema.parse(input);
++    return this.read(actor, async tx => {
++      await this.requireOperator(tx, actor);
++      return { items: (await tx.query<ReportRow>(`SELECT * FROM platform_public_social_reports
++        WHERE ($1::text IS NULL OR state=$1) ORDER BY created_at ASC,id ASC LIMIT $2`, [query.state ?? null, query.limit])).rows
++        .map(row => ({ ...projectReport(row), detail: row.detail, snapshot: row.public_snapshot, decisionReason: row.decision_reason,
++          canDecide: row.state === "open" && row.reporter_account_id !== actor.platformAccountId && row.author_account_id !== actor.platformAccountId })) };
++    });
++  }
++
++  async decideReport(actor: PlatformActor, input: z.input<typeof PlatformSocialDecisionSchema>) {
++    const data = PlatformSocialDecisionSchema.parse(input);
++    return this.write(actor, "decision", data, async tx => {
++      const report = (await tx.query<ReportRow>(`SELECT * FROM platform_public_social_reports WHERE id=$1 FOR UPDATE`, [data.reportId])).rows[0];
++      if (!report) throw notFound();
++      if (report.author_account_id === actor.platformAccountId || report.reporter_account_id === actor.platformAccountId) {
++        throw new DomainError("PLATFORM_SOCIAL_REVIEW_CONFLICT", "本人提出的檢舉或本人的貼文，請交由其他管理員處理。", 403);
++      }
++      if (report.version !== data.expectedVersion || report.state !== "open") throw versionConflict();
++      let postVersion: number | undefined;
++      if (data.decision === "hide") {
++        // Moderators do not inherit a viewer's block list. The public scope gate
++        // remains mandatory, including after the author changes visibility.
++        const post = (await tx.query<PublicPostRow>(`SELECT ${postColumns} ${publicPosts}
++          AND p.tenant_id=$1 AND p.id=$2 FOR UPDATE OF p FOR SHARE OF c,t`, [report.tenant_id, report.post_id])).rows[0];
++        if (!post) throw new DomainError("PLATFORM_SOCIAL_POST_UNAVAILABLE", "貼文已不是公開狀態，請確認後將這筆檢舉結案。", 409);
++        postVersion = post.version + 1;
++        await tx.query(`UPDATE social_posts SET state='removed',version=version+1,updated_at=now()
++          WHERE tenant_id=$1 AND id=$2 AND version=$3`, [post.tenant_id, post.id, post.version]);
++        // Platform moderation has no campus actor: its own immutable audit is
++        // authoritative, rather than inventing a people/identity-subject grant.
++        await this.audit(tx, actor, "hide", { reportId: report.id, postVersion, reason: data.reason });
++      } else await this.audit(tx, actor, "dismiss", { reportId: report.id, reason: data.reason });
++      const changed = (await tx.query<ReportRow>(`UPDATE platform_public_social_reports
++        SET state=$2,version=version+1,decision_reason=$3,decided_by_account_id=$4,decided_at=now()
++        WHERE id=$1 AND version=$5 RETURNING *`, [report.id, data.decision === "hide" ? "hidden" : "dismissed",
++        data.reason, actor.platformAccountId, data.expectedVersion])).rows[0];
++      if (!changed) throw versionConflict();
++      return projectReport(changed);
++    }, true);
++  }
++
++  private async publicTarget(tx: SqlExecutor, actor: PlatformActor, target: { tenantId: string; postId: string }, lock = false) {
++    const row = (await tx.query<PublicPostRow>(`SELECT ${postColumns} ${publicPosts} ${notBlocked}
++      AND p.tenant_id=$2 AND p.id=$3${lock ? " FOR SHARE OF p,c,t" : ""}`, [actor.platformAccountId, target.tenantId, target.postId])).rows[0];
++    if (!row) throw notFound();
++    return row;
++  }
++
++  private async requireBoard(tx: SqlExecutor, tenant: string, board: string) {
++    const row = (await tx.query<{ join_policy: string; posting_policy: string }>(`SELECT c.join_policy,c.posting_policy
++      FROM social_communities c JOIN tenants t ON t.id=c.tenant_id
++      WHERE c.tenant_id=$1 AND c.id=$2 AND c.access_scope='public' AND c.discoverability='listed'
++        AND t.state IN ('provisioned','open') FOR UPDATE OF c FOR SHARE OF t`, [tenant, board])).rows[0];
++    if (!row) throw notFound();
++    return row;
++  }
++
++  private async requireActor(tx: SqlExecutor, actor: PlatformActor, write: boolean) {
++    if (!Number.isFinite(actor.expiresAt) || actor.expiresAt <= Date.now()) throw inactive();
++    // Lock order matches account close/password revocation: account, credential.
++    const account = (await tx.query(`SELECT id FROM platform_accounts WHERE id=$1 AND state='active'
++      FOR ${write ? "UPDATE" : "SHARE"}`, [actor.platformAccountId])).rows[0];
++    if (!account) throw inactive();
++    const credential = (await tx.query(`SELECT id FROM platform_account_credentials
++      WHERE id=$1 AND platform_account_id=$2 AND state='active' FOR SHARE`, [actor.credentialId, actor.platformAccountId])).rows[0];
++    if (!credential) throw inactive();
++  }
++
++  private async requireOperator(tx: SqlExecutor, actor: PlatformActor) {
++    const row = (await tx.query(`SELECT platform_account_id FROM platform_operator_assignments
++      WHERE platform_account_id=$1 AND role_key='platform-operator' AND state='active' FOR SHARE`, [actor.platformAccountId])).rows[0];
++    if (!row) throw new DomainError("PLATFORM_OPERATOR_REQUIRED", "只有平台營運人員可以使用這項操作。", 403);
++  }
++
++  private read<T>(actor: PlatformActor, operation: (tx: SqlExecutor) => Promise<T>) {
++    return this.db.transaction(async tx => { await this.requireActor(tx, actor, false); return operation(tx); });
++  }
++
++  private write<T extends object>(actor: PlatformActor, operation: string, input: { idempotencyKey: string },
++    run: (tx: SqlExecutor) => Promise<T>, operator = false): Promise<T> {
++    return this.db.transaction(async tx => {
++      await this.requireActor(tx, actor, true);
++      if (operator) await this.requireOperator(tx, actor);
++      const hash = socialRequestHash(input);
++      const previous = (await tx.query<{ request_hash: string; response: T }>(`SELECT request_hash,response
++        FROM platform_public_social_idempotency WHERE actor_account_id=$1 AND operation=$2 AND key=$3`,
++      [actor.platformAccountId, operation, input.idempotencyKey])).rows[0];
++      if (previous) {
++        if (previous.request_hash !== hash) throw new DomainError("IDEMPOTENCY_CONFLICT", "這個操作識別碼已用於其他內容，請重新操作。", 409);
++        return previous.response;
++      }
++      const result = await run(tx);
++      await tx.query(`INSERT INTO platform_public_social_idempotency (actor_account_id,operation,key,request_hash,response)
++        VALUES ($1,$2,$3,$4,$5::jsonb)`, [actor.platformAccountId, operation, input.idempotencyKey, hash, JSON.stringify(result)]);
++      return result;
++    });
++  }
++
++  private async audit(tx: SqlExecutor, actor: PlatformActor, action: string, detail: { reportId?: string; blockId?: string; postVersion?: number; reason?: string }) {
++    await tx.query(`INSERT INTO platform_public_social_audit (id,actor_account_id,action,report_id,block_id,post_version,reason)
++      VALUES ($1,$2,$3,$4,$5,$6,$7)`, [randomUUID(), actor.platformAccountId, action, detail.reportId ?? null,
++      detail.blockId ?? null, detail.postVersion ?? null, detail.reason ?? null]);
++  }
++}
++
++function transactionDatabase(db: CampusDatabase, tx: SqlExecutor): CampusDatabase {
++  const transaction: CampusDatabase["transaction"] = async run => run(tx);
++  return { kind: db.kind, query: tx.query.bind(tx), exec: tx.exec.bind(tx), transaction,
++    withPinnedSession: async run => run({ kind: db.kind, query: tx.query.bind(tx), exec: tx.exec.bind(tx), transaction }),
++    checkReadiness: db.checkReadiness.bind(db), close: async () => { throw new Error("Cannot close an active social transaction"); } };
++}
++function projectPost(row: PublicPostRow, actor: PlatformActor) {
++  return { id: row.id, tenantId: row.tenant_id, tenantName: row.tenant_name, communityId: row.community_id,
++    communityName: row.community_name, text: row.text_content, author: { displayName: row.display_name, isSelf: row.author_account_id === actor.platformAccountId },
++    publishedAt: row.published_at, version: row.version };
++}
++function projectReport(row: ReportRow) {
++  return { id: row.id, tenantId: row.tenant_id, postId: row.post_id, state: row.state, version: row.version, reason: row.reason, createdAt: iso(row.created_at) };
++}
++function iso(value: string | Date) { return new Date(value).toISOString(); }
++function notFound() { return new DomainError("PLATFORM_SOCIAL_NOT_FOUND", "找不到這則公開內容。", 404); }
++function inactive() { return new DomainError("PLATFORM_SESSION_INVALID", "登入已失效，請重新登入。", 401); }
++function versionConflict() { return new DomainError("PLATFORM_SOCIAL_VERSION_CONFLICT", "資料已由其他操作更新，請重新載入再處理。", 409); }
+diff --git a/apps/api/src/accounts/tenant-directory.ts b/apps/api/src/accounts/tenant-directory.ts
+index 0b17e0b..763c8c5 100644
+--- a/apps/api/src/accounts/tenant-directory.ts
++++ b/apps/api/src/accounts/tenant-directory.ts
+@@ -130,6 +130,15 @@ export type DirectorySchoolMatch = {
+   status: "open" | "not-open";
+ };
+ 
++export async function listDirectorySchools(executor: SqlExecutor): Promise<DirectorySchoolMatch[]> {
++  const result = await executor.query<{ id: string; display_name: string; state: TenantState }>(
++    `SELECT id,display_name,state FROM tenants
++      WHERE id <> 'campus-demo' AND state <> 'suspended'
++      ORDER BY display_name,id LIMIT 500`,
++  );
++  return result.rows.map((row) => ({ tenantId: row.id, displayName: row.display_name, status: publicSchoolStatus(row.state) }));
++}
++
+ const HIDDEN_DIRECTORY_TENANTS = new Set(["campus-demo"]);
+ 
+ function publicSchoolStatus(state: TenantState): "open" | "not-open" {
+diff --git a/apps/api/src/app.ts b/apps/api/src/app.ts
+index d6803bb..cf91129 100644
+--- a/apps/api/src/app.ts
++++ b/apps/api/src/app.ts
+@@ -308,8 +308,21 @@ import {
+   type PlatformProviderKind,
+ } from "./accounts/platform-account-service";
+ import { PlatformIdTokenVerifier } from "./accounts/platform-idp";
++import { PlatformPasswordService } from "./accounts/platform-password-service";
++import {
++  PlatformSocialService,
++  PlatformSocialCreateBoardSchema,
++  PlatformSocialFeedQuerySchema,
++  PlatformSocialTargetSchema,
++  PlatformSocialCreatePostSchema,
++  PlatformSocialBlockSchema,
++  PlatformSocialUnblockSchema,
++  PlatformSocialReportSchema,
++  PlatformSocialOperatorReportsQuerySchema,
++  PlatformSocialDecisionSchema,
++} from "./accounts/platform-social-service";
+ import { summarizeTenantLoginReadiness } from "./accounts/tenant-login-readiness";
+-import { searchDirectorySchools } from "./accounts/tenant-directory";
++import { listDirectorySchools, searchDirectorySchools } from "./accounts/tenant-directory";
+ import { recordSchoolInterest } from "./accounts/school-interest";
+ import { recordMerchantInterest } from "./accounts/merchant-interest";
+ import { revokeCampusAccountSession } from "./accounts/campus-account-logout";
+@@ -571,7 +584,10 @@ export function isPublicApiRoute(method: string, pathname: string): boolean {
+       || pathname === "/v1/auth/platform/sessions/current"
+       || pathname === "/v1/auth/platform/memberships"
+       || pathname === "/v1/auth/platform/providers"
++      || ["boards", "feed", "blocks", "reports"].some((resource) => pathname === `/v1/auth/platform/social/${resource}`)
++      || /^\/v1\/auth\/platform\/social\/posts\/[^/]+\/[^/]+$/u.test(pathname)
+       || pathname === "/v1/auth/schools"
++      || pathname === "/v1/auth/schools/directory"
+       || pathname === "/v1/auth/platform/merchant-onboarding-programs"
+       || pathname === "/v1/auth/platform/merchant-applications"
+       || pathname.startsWith("/v1/auth/platform/merchant-workspaces")
+@@ -664,6 +680,9 @@ export function isPublicApiRoute(method: string, pathname: string): boolean {
+     || pathname === "/v1/auth/account/passkey/sessions"
+     || pathname === "/v1/auth/platform/login-transactions"
+     || pathname === "/v1/auth/platform/sessions"
++    || pathname === "/v1/auth/platform/password/sessions"
++    || ["posts", "blocks", "reports"].some((resource) => pathname === `/v1/auth/platform/social/${resource}`)
++    || /^\/v1\/auth\/platform\/social\/blocks\/[^/]+\/revoke$/u.test(pathname)
+     || pathname === "/v1/auth/platform/school-issued-session"
+     || pathname === "/v1/auth/platform/memberships"
+     || pathname === "/v1/auth/platform/merchant-applications"
+@@ -895,6 +914,7 @@ export async function createApp(db: CampusDatabase, options: AppOptions): Promis
+       ...(options.externalIdpJwksFetch ? { jwksFetch: options.externalIdpJwksFetch } : {}),
+     }),
+   );
++  const platformPasswords = new PlatformPasswordService(db, platformAccounts);
+   const staffRoles = new StaffRoleAdministrationService(db, {
+     ...(options.eventSchemaEnforcement ? { eventSchemaEnforcement: options.eventSchemaEnforcement } : {}),
+   });
+@@ -909,6 +929,13 @@ export async function createApp(db: CampusDatabase, options: AppOptions): Promis
+       scanner: attachmentRuntime.scanner.availability === "available",
+     },
+   });
++  const platformSocial = new PlatformSocialService(db, platformAccounts, {
++    eventSchemaEnforcement,
++    attachmentAvailability: {
++      objectStore: attachmentRuntime.objectStore.availability === "available",
++      scanner: attachmentRuntime.scanner.availability === "available",
++    },
++  });
+   const career = new CareerService(db, { eventSchemaEnforcement });
+   const degreeAudit = new DegreeAuditService(db, { eventSchemaEnforcement });
+   const iot = new IoTService(db, options.iotProvider ?? {}, { eventSchemaEnforcement });
+@@ -1490,6 +1517,10 @@ export async function createApp(db: CampusDatabase, options: AppOptions): Promis
+     return { schools: await searchDirectorySchools(db, query) };
+   });
+ 
++  app.get("/v1/auth/schools/directory", publicAuthRateLimit, async () => ({
++    schools: await listDirectorySchools(db),
++  }));
++
+   app.post("/v1/auth/school-interest", publicAuthRateLimit, async (request) => {
+     const body = (request.body ?? {}) as Record<string, unknown>;
+     const kind = body.kind === "notify-open" || body.kind === "unknown-school" ? body.kind : null;
+@@ -1754,6 +1785,13 @@ export async function createApp(db: CampusDatabase, options: AppOptions): Promis
+    */
+   app.get("/v1/auth/platform/providers", async () => platformAccounts.enabledProviderKinds());
+ 
++  app.post("/v1/auth/platform/password/sessions", publicAuthRateLimit, async (request, reply) => {
++    reply.header("Cache-Control", "no-store");
++    const body = (request.body ?? {}) as Record<string, unknown>;
++    const result = await platformPasswords.login({ email: body.email, password: body.password });
++    return reply.status(201).send(result);
++  });
++
+   app.post("/v1/auth/platform/login-transactions", publicAuthRateLimit, async (request) => {
+     const body = (request.body ?? {}) as Record<string, unknown>;
+     const kind = PLATFORM_PROVIDER_KINDS.find((candidate) => candidate === body.kind);
+@@ -2543,6 +2581,24 @@ export async function createApp(db: CampusDatabase, options: AppOptions): Promis
+     return platformOps.listAudit(actor);
+   });
+ 
++  app.post("/v1/auth/platform/ops/social/boards", publicAuthRateLimit, async (request, reply) => {
++    reply.header("Cache-Control", "no-store");
++    const actor = await platformAccounts.resolveSession(request.headers.authorization);
++    return reply.status(201).send(await platformSocial.createBoard(actor, PlatformSocialCreateBoardSchema.parse(request.body)));
++  });
++  app.get("/v1/auth/platform/ops/social/reports", async (request, reply) => {
++    reply.header("Cache-Control", "no-store");
++    const actor = await platformAccounts.resolveSession(request.headers.authorization);
++    return platformSocial.listOperatorReports(actor, PlatformSocialOperatorReportsQuerySchema.parse(request.query));
++  });
++  app.post("/v1/auth/platform/ops/social/reports/:reportId/decision", publicAuthRateLimit, async (request, reply) => {
++    reply.header("Cache-Control", "no-store");
++    const actor = await platformAccounts.resolveSession(request.headers.authorization);
++    const target = PlatformSocialDecisionSchema.pick({ reportId: true }).parse(request.params);
++    const body = PlatformSocialDecisionSchema.omit({ reportId: true }).parse(request.body);
++    return platformSocial.decideReport(actor, { ...body, ...target });
++  });
++
+   const schoolAdminPersonId = z.string().trim().min(1).max(80).regex(/^[a-zA-Z0-9._-]+$/u);
+ 
+   app.get("/v1/school/admin", async (request) => {
+@@ -2828,6 +2884,51 @@ export async function createApp(db: CampusDatabase, options: AppOptions): Promis
+     return { realms: await platformAccounts.listPublicRealms(platformActor) };
+   });
+ 
++  app.get("/v1/auth/platform/social/boards", async (request, reply) => {
++    reply.header("Cache-Control", "no-store");
++    return platformSocial.boards(await platformAccounts.resolveSession(request.headers.authorization));
++  });
++  app.get("/v1/auth/platform/social/feed", async (request, reply) => {
++    reply.header("Cache-Control", "no-store");
++    const actor = await platformAccounts.resolveSession(request.headers.authorization);
++    return platformSocial.feed(actor, PlatformSocialFeedQuerySchema.parse(request.query));
++  });
++  app.get("/v1/auth/platform/social/posts/:tenantId/:postId", async (request, reply) => {
++    reply.header("Cache-Control", "no-store");
++    const actor = await platformAccounts.resolveSession(request.headers.authorization);
++    return platformSocial.getPost(actor, PlatformSocialTargetSchema.parse(request.params));
++  });
++  app.post("/v1/auth/platform/social/posts", publicAuthRateLimit, async (request, reply) => {
++    reply.header("Cache-Control", "no-store");
++    const actor = await platformAccounts.resolveSession(request.headers.authorization);
++    return reply.status(201).send(await platformSocial.createPost(actor, PlatformSocialCreatePostSchema.parse(request.body)));
++  });
++  app.get("/v1/auth/platform/social/blocks", async (request, reply) => {
++    reply.header("Cache-Control", "no-store");
++    return platformSocial.listBlocks(await platformAccounts.resolveSession(request.headers.authorization));
++  });
++  app.post("/v1/auth/platform/social/blocks", publicAuthRateLimit, async (request, reply) => {
++    reply.header("Cache-Control", "no-store");
++    const actor = await platformAccounts.resolveSession(request.headers.authorization);
++    return platformSocial.blockAuthor(actor, PlatformSocialBlockSchema.parse(request.body));
++  });
++  app.post("/v1/auth/platform/social/blocks/:blockId/revoke", publicAuthRateLimit, async (request, reply) => {
++    reply.header("Cache-Control", "no-store");
++    const actor = await platformAccounts.resolveSession(request.headers.authorization);
++    const target = PlatformSocialUnblockSchema.pick({ blockId: true }).parse(request.params);
++    const body = PlatformSocialUnblockSchema.omit({ blockId: true }).parse(request.body);
++    return platformSocial.unblock(actor, { ...body, ...target });
++  });
++  app.get("/v1/auth/platform/social/reports", async (request, reply) => {
++    reply.header("Cache-Control", "no-store");
++    return platformSocial.listReports(await platformAccounts.resolveSession(request.headers.authorization));
++  });
++  app.post("/v1/auth/platform/social/reports", publicAuthRateLimit, async (request, reply) => {
++    reply.header("Cache-Control", "no-store");
++    const actor = await platformAccounts.resolveSession(request.headers.authorization);
++    return reply.status(201).send(await platformSocial.report(actor, PlatformSocialReportSchema.parse(request.body)));
++  });
++
+   const publicRealmActor = async (request: FastifyRequest) => {
+     const platformActor = await platformAccounts.resolveSession(request.headers.authorization);
+     const tenantId = (request.params as { tenantId?: unknown }).tenantId;
+diff --git a/apps/api/src/migrations/275_platform_password_administrators.sql b/apps/api/src/migrations/275_platform_password_administrators.sql
+new file mode 100644
+index 0000000..7edadfa
+--- /dev/null
++++ b/apps/api/src/migrations/275_platform_password_administrators.sql
+@@ -0,0 +1,52 @@
++ALTER TABLE platform_account_credentials
++  DROP CONSTRAINT platform_account_credentials_method_check;
++
++ALTER TABLE platform_account_credentials
++  ADD CONSTRAINT platform_account_credentials_method_check
++    CHECK (method IN ('google', 'apple', 'qa', 'password'));
++
++CREATE TABLE platform_password_credentials (
++  credential_id text PRIMARY KEY,
++  platform_account_id text NOT NULL UNIQUE REFERENCES platform_accounts(id),
++  email text NOT NULL UNIQUE CHECK (email = lower(btrim(email)) AND length(email) BETWEEN 3 AND 254),
++  password_hash text NOT NULL CHECK (length(password_hash) BETWEEN 80 AND 256),
++  created_at timestamptz NOT NULL DEFAULT now(),
++  updated_at timestamptz NOT NULL DEFAULT now(),
++  FOREIGN KEY (credential_id, platform_account_id)
++    REFERENCES platform_account_credentials(id, platform_account_id)
++);
++
++-- Unknown and existing accounts share the same lockout path. No email or
++-- submitted password is stored in the failed-attempt record.
++CREATE TABLE platform_password_login_throttles (
++  login_key text PRIMARY KEY CHECK (login_key ~ '^[a-f0-9]{64}$'),
++  failure_count integer NOT NULL DEFAULT 0 CHECK (failure_count BETWEEN 0 AND 5),
++  window_started_at timestamptz NOT NULL DEFAULT now(),
++  locked_until timestamptz,
++  updated_at timestamptz NOT NULL DEFAULT now()
++);
++
++CREATE INDEX platform_password_login_throttles_expiry_idx
++  ON platform_password_login_throttles(updated_at);
++
++CREATE TABLE platform_password_admin_audit (
++  id text PRIMARY KEY CHECK (id ~ '^ppa_[0-9a-f-]{36}$'),
++  platform_account_id text NOT NULL REFERENCES platform_accounts(id),
++  credential_id text NOT NULL REFERENCES platform_account_credentials(id),
++  action text NOT NULL CHECK (action IN ('create-account', 'add-credential', 'rotate-password')),
++  operator_grant text NOT NULL CHECK (operator_grant IN ('grant', 'restore', 'unchanged')),
++  performed_by text NOT NULL CHECK (length(btrim(performed_by)) BETWEEN 3 AND 100),
++  reason text NOT NULL CHECK (length(btrim(reason)) BETWEEN 5 AND 1000),
++  created_at timestamptz NOT NULL DEFAULT now()
++);
++
++CREATE FUNCTION platform_password_admin_audit_append_only()
++RETURNS trigger LANGUAGE plpgsql AS $$
++BEGIN
++  RAISE EXCEPTION 'administrator credential audit is append-only' USING ERRCODE = '42501';
++END;
++$$;
++
++CREATE TRIGGER platform_password_admin_audit_guard
++BEFORE UPDATE OR DELETE ON platform_password_admin_audit
++FOR EACH ROW EXECUTE FUNCTION platform_password_admin_audit_append_only();
+diff --git a/apps/api/src/migrations/276_platform_public_social.sql b/apps/api/src/migrations/276_platform_public_social.sql
+new file mode 100644
+index 0000000..01f1332
+--- /dev/null
++++ b/apps/api/src/migrations/276_platform_public_social.sql
+@@ -0,0 +1,72 @@
++CREATE TABLE platform_public_social_blocks (
++  id text PRIMARY KEY,
++  owner_account_id text NOT NULL REFERENCES platform_accounts(id),
++  target_account_id text NOT NULL REFERENCES platform_accounts(id),
++  state text NOT NULL DEFAULT 'active' CHECK (state IN ('active','revoked')),
++  version integer NOT NULL DEFAULT 1 CHECK (version > 0),
++  created_at timestamptz NOT NULL DEFAULT now(),
++  updated_at timestamptz NOT NULL DEFAULT now(),
++  UNIQUE (owner_account_id,target_account_id),
++  CHECK (owner_account_id <> target_account_id)
++);
++CREATE INDEX platform_public_social_blocks_target_idx
++  ON platform_public_social_blocks (target_account_id,owner_account_id) WHERE state='active';
++
++CREATE TABLE platform_public_social_reports (
++  id text PRIMARY KEY,
++  reporter_account_id text NOT NULL REFERENCES platform_accounts(id),
++  author_account_id text NOT NULL REFERENCES platform_accounts(id),
++  tenant_id text NOT NULL,
++  post_id text NOT NULL,
++  reason text NOT NULL CHECK (reason IN ('harassment','spam','privacy','hate','violence','other')),
++  detail text NOT NULL DEFAULT '' CHECK (length(detail) <= 2000),
++  public_snapshot jsonb NOT NULL,
++  state text NOT NULL DEFAULT 'open' CHECK (state IN ('open','hidden','dismissed')),
++  version integer NOT NULL DEFAULT 1 CHECK (version > 0),
++  decision_reason text,
++  decided_by_account_id text REFERENCES platform_accounts(id),
++  decided_at timestamptz,
++  created_at timestamptz NOT NULL DEFAULT now(),
++  FOREIGN KEY (tenant_id,post_id) REFERENCES social_posts(tenant_id,id),
++  CHECK (reporter_account_id <> author_account_id),
++  CHECK (decided_by_account_id IS NULL OR
++    (decided_by_account_id <> reporter_account_id AND decided_by_account_id <> author_account_id)),
++  CHECK ((state='open' AND decided_at IS NULL AND decided_by_account_id IS NULL AND decision_reason IS NULL)
++    OR (state<>'open' AND decided_at IS NOT NULL AND decided_by_account_id IS NOT NULL AND length(btrim(decision_reason)) BETWEEN 5 AND 2000))
++);
++CREATE UNIQUE INDEX platform_public_social_reports_open_idx
++  ON platform_public_social_reports (reporter_account_id,tenant_id,post_id) WHERE state='open';
++CREATE INDEX platform_public_social_reports_queue_idx
++  ON platform_public_social_reports (state,created_at,id);
++
++CREATE TABLE platform_public_social_idempotency (
++  actor_account_id text NOT NULL REFERENCES platform_accounts(id),
++  operation text NOT NULL,
++  key text NOT NULL CHECK (length(key) BETWEEN 8 AND 100),
++  request_hash text NOT NULL CHECK (request_hash ~ '^[a-f0-9]{64}$'),
++  response jsonb NOT NULL,
++  created_at timestamptz NOT NULL DEFAULT now(),
++  PRIMARY KEY (actor_account_id,operation,key)
++);
++
++CREATE TABLE platform_public_social_audit (
++  id text PRIMARY KEY,
++  actor_account_id text NOT NULL REFERENCES platform_accounts(id),
++  action text NOT NULL CHECK (action IN ('block','unblock','report','hide','dismiss')),
++  report_id text REFERENCES platform_public_social_reports(id),
++  block_id text REFERENCES platform_public_social_blocks(id),
++  post_version integer,
++  reason text,
++  created_at timestamptz NOT NULL DEFAULT now(),
++  CHECK ((action IN ('block','unblock') AND block_id IS NOT NULL AND report_id IS NULL)
++    OR (action IN ('report','hide','dismiss') AND report_id IS NOT NULL AND block_id IS NULL))
++);
++
++CREATE FUNCTION reject_platform_public_social_audit_change() RETURNS trigger LANGUAGE plpgsql AS $$
++BEGIN
++  RAISE EXCEPTION 'platform public social audit is append-only';
++END;
++$$;
++CREATE TRIGGER platform_public_social_audit_append_only
++  BEFORE UPDATE OR DELETE ON platform_public_social_audit
++  FOR EACH ROW EXECUTE FUNCTION reject_platform_public_social_audit_change();
+diff --git a/apps/api/src/platform-password-admin-cli.ts b/apps/api/src/platform-password-admin-cli.ts
+new file mode 100644
+index 0000000..5a17513
+--- /dev/null
++++ b/apps/api/src/platform-password-admin-cli.ts
+@@ -0,0 +1,61 @@
++import { resolve } from "node:path";
++import { fileURLToPath } from "node:url";
++import { createDatabase } from "./database";
++import { readDatabaseRuntimeConfig } from "./database-runtime-config";
++import { DomainError } from "./domain-error";
++import { provisionPlatformPasswordAdmin, type PlatformPasswordProvisionInput } from "./accounts/platform-password-provisioning";
++
++export async function readProvisionInput(stream: AsyncIterable<Uint8Array | string>): Promise<PlatformPasswordProvisionInput> {
++  const chunks: Buffer[] = [];
++  let length = 0;
++  for await (const chunk of stream) {
++    const buffer = Buffer.from(chunk);
++    length += buffer.length;
++    if (length > 8192) throw new Error("INPUT_TOO_LARGE");
++    chunks.push(buffer);
++  }
++  const buffer = Buffer.concat(chunks);
++  try {
++    const value: unknown = JSON.parse(buffer.toString("utf8"));
++    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("INVALID_INPUT");
++    const allowed = new Set(["email", "password", "displayName", "reason", "performedBy", "expectedAccountId"]);
++    if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error("INVALID_INPUT");
++    return value as PlatformPasswordProvisionInput;
++  } finally {
++    buffer.fill(0);
++    for (const chunk of chunks) chunk.fill(0);
++  }
++}
++
++export async function main(args = process.argv.slice(2)): Promise<void> {
++  if (args.some((arg) => arg !== "--apply" && arg !== "--rotate-password")
++    || (args.includes("--rotate-password") && !args.includes("--apply")) || process.stdin.isTTY) {
++    throw new Error("Use stdin JSON; flags: --apply [--rotate-password]. No credentials in arguments.");
++  }
++  const input = await readProvisionInput(process.stdin);
++  const isProduction = process.env.NODE_ENV === "production";
++  const runtimeConfig = readDatabaseRuntimeConfig(process.env, { isProduction, component: "migrate", allowEmbedded: !isProduction });
++  const db = await createDatabase({
++    runtimeConfig,
++    schemaMode: "verify",
++    seedDemo: false,
++    attendanceCodeSecret: "password-provision-does-not-use-attendance",
++  });
++  try {
++    const result = await provisionPlatformPasswordAdmin(db, input, { apply: args.includes("--apply"), rotatePassword: args.includes("--rotate-password") });
++    process.stdout.write(`${JSON.stringify(result)}\n`);
++  } finally {
++    delete input.password;
++    await db.close();
++  }
++}
++
++if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  try {
++    await main();
++  } catch (error) {
++    // Driver/JSON error messages can contain supplied values; never print them.
++    process.stderr.write(`${error instanceof DomainError ? error.code : "PLATFORM_PASSWORD_PROVISION_FAILED"}\n`);
++    process.exitCode = 1;
++  }
++}
+diff --git a/apps/api/src/social/social-service.ts b/apps/api/src/social/social-service.ts
+index 33b2bd2..8314235 100644
+--- a/apps/api/src/social/social-service.ts
++++ b/apps/api/src/social/social-service.ts
+@@ -1166,6 +1166,16 @@ export class SocialService {
+           AND ((b.control='block' AND ((b.owner_profile_id=$2 AND b.target_profile_id=p.author_profile_id)
+             OR (b.target_profile_id=$2 AND b.owner_profile_id=p.author_profile_id)))
+             OR (b.control='mute' AND b.owner_profile_id=$2 AND b.target_profile_id=p.author_profile_id)))
++        AND ($7::boolean = false OR NOT EXISTS (
++          SELECT 1 FROM platform_tenant_personas viewer_persona
++          JOIN social_profiles author_profile ON author_profile.tenant_id=p.tenant_id AND author_profile.id=p.author_profile_id
++          JOIN platform_tenant_personas author_persona ON author_persona.tenant_id=author_profile.tenant_id
++            AND author_persona.person_id=author_profile.person_id
++          JOIN platform_public_social_blocks global_block ON global_block.state='active'
++            AND ((global_block.owner_account_id=viewer_persona.platform_account_id AND global_block.target_account_id=author_persona.platform_account_id)
++              OR (global_block.target_account_id=viewer_persona.platform_account_id AND global_block.owner_account_id=author_persona.platform_account_id))
++          WHERE viewer_persona.tenant_id=$1 AND viewer_persona.person_id=$11
++        ))
+         AND (
+           p.author_profile_id=$2
+           OR p.visibility='public-campus'
+@@ -1200,7 +1210,7 @@ export class SocialService {
+       ORDER BY p.published_at DESC,p.id DESC LIMIT $8`,
+       [actor.tenantId, self.id, cursor?.timestamp ?? null, cursor?.id ?? null,
+         query.mode, query.communityId ?? null, this.isPlatformActor(actor), query.limit + 1,
+-        lookingForOnly || lookingForIntent !== null, lookingForIntent]);
++        lookingForOnly || lookingForIntent !== null, lookingForIntent, actor.personId]);
+     const visible: PostRow[] = [];
+     for (const row of rows.rows) {
+       if (await this.canViewPost(this.db, actor.tenantId, self.id, row)) visible.push(row);
+diff --git a/apps/api/tsup.config.ts b/apps/api/tsup.config.ts
+index d2406ef..b56f415 100644
+--- a/apps/api/tsup.config.ts
++++ b/apps/api/tsup.config.ts
+@@ -22,6 +22,7 @@ export default defineConfig({
+     "src/iot-command-expiry-worker.ts",
+     "src/pu-food-wave1-cli.ts",
+     "src/install-builtin-event-schemas-cli.ts",
++    "src/platform-password-admin-cli.ts",
+   ],
+   format: ["esm"],
+   platform: "node",
+diff --git a/packages/contracts/src/user-facing-api-error.ts b/packages/contracts/src/user-facing-api-error.ts
+index 4b235ce..49e921a 100644
+--- a/packages/contracts/src/user-facing-api-error.ts
++++ b/packages/contracts/src/user-facing-api-error.ts
+@@ -589,6 +589,20 @@ const codeMessages: Readonly<Record<string, string>> = {
+   SCHOOL_ONBOARDING_ALREADY_DECIDED: "這筆申請已經審核過了。",
+   SCHOOL_ONBOARDING_TENANT_SUSPENDED: "這所學校目前暫停中，不能用接入申請直接恢復。",
+   PLATFORM_OPERATOR_REQUIRED: "只有平台營運人員可以使用這項操作。",
++  PLATFORM_PASSWORD_LOGIN_INVALID: "帳號或密碼不正確，請稍後再試。",
++  PLATFORM_PASSWORD_ACCOUNT_UNAVAILABLE: "這個帳號目前不能新增登入方式。",
++  PLATFORM_PASSWORD_CREDENTIAL_UNAVAILABLE: "這個登入方式已撤銷，未變更帳號。",
++  PLATFORM_PASSWORD_IDENTITY_AMBIGUOUS: "帳號的登入身分無法唯一確認，請先核對帳號。",
++  PLATFORM_PASSWORD_IDENTITY_UNVERIFIED: "既有帳號沒有可核對的已驗證信箱，未變更帳號。",
++  PLATFORM_PASSWORD_ROTATION_REQUIRED: "這個帳號已有密碼，請明確選擇更新密碼後再執行。",
++  PLATFORM_PASSWORD_TARGET_CHANGED: "帳號與檢查結果不同，請重新檢查。",
++  PLATFORM_SOCIAL_CURSOR_INVALID: "這個清單已變更，請重新載入。",
++  PLATFORM_SOCIAL_MEMBERSHIP_REQUIRED: "這個看板需要既有成員或管理員資格才能發表。",
++  PLATFORM_SOCIAL_REVIEW_CONFLICT: "本人提出的檢舉或本人的貼文，請交由其他管理員處理。",
++  PLATFORM_SOCIAL_POST_UNAVAILABLE: "貼文已不是公開狀態，請確認後將這筆檢舉結案。",
++  PLATFORM_SOCIAL_REPORT_PENDING: "這則貼文已有你的待處理檢舉。",
++  PLATFORM_SOCIAL_VERSION_CONFLICT: "資料已由其他操作更新，請重新載入再處理。",
++  PLATFORM_SOCIAL_NOT_FOUND: "找不到這則公開內容。",
+   SCHOOL_ADMIN_REQUIRED: "這頁只給這所學校的管理員。",
+   SCHOOL_ADMIN_TENANT_LOCKED: "只能管理自己的學校。",
+   SCHOOL_FIRST_PERSON_MUST_BE_ADMIN: "第一位要先設成學校管理員。",

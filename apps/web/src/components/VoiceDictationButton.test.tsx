@@ -1,0 +1,440 @@
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { VoiceDictationButton } from './VoiceDictationButton';
+
+class FakeSpeechRecognition {
+  static last: FakeSpeechRecognition;
+  static failStart = false;
+  static active: FakeSpeechRecognition | null = null;
+  static delayAbort = false;
+  lang = '';
+  interimResults = false;
+  continuous = false;
+  onresult:
+    | ((event: { results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void)
+    | null = null;
+  onerror: ((event: { error: string }) => void) | null = null;
+  onend: (() => void) | null = null;
+  start = vi.fn(() => {
+    if (FakeSpeechRecognition.failStart) throw new Error('mock recognition unavailable');
+    if (FakeSpeechRecognition.active) throw new Error('previous recognition is still ending');
+    FakeSpeechRecognition.active = this;
+  });
+  end() {
+    if (FakeSpeechRecognition.active === this) FakeSpeechRecognition.active = null;
+    this.onend?.();
+  }
+  stop = vi.fn(() => this.end());
+  abort = vi.fn(() => {
+    if (!FakeSpeechRecognition.delayAbort) this.end();
+  });
+  constructor() {
+    FakeSpeechRecognition.last = this;
+  }
+}
+
+beforeEach(() => {
+  FakeSpeechRecognition.failStart = false;
+  FakeSpeechRecognition.active = null;
+  FakeSpeechRecognition.delayAbort = false;
+  Object.defineProperty(window, 'webkitSpeechRecognition', {
+    configurable: true,
+    value: FakeSpeechRecognition,
+  });
+});
+afterEach(() => {
+  vi.useRealTimers();
+  Reflect.deleteProperty(window, 'webkitSpeechRecognition');
+  Reflect.deleteProperty(document, 'permissionsPolicy');
+  Reflect.deleteProperty(document, 'featurePolicy');
+});
+
+it('fills a draft after a final Taiwanese Mandarin transcript without submitting it', () => {
+  const onTranscript = vi.fn();
+  render(<VoiceDictationButton onTranscript={onTranscript} />);
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  expect(FakeSpeechRecognition.last.lang).toBe('zh-TW');
+  expect(screen.getByRole('status').textContent).toContain('正在聆聽');
+  act(() =>
+    FakeSpeechRecognition.last.onresult?.({
+      results: [{ isFinal: true, 0: { transcript: '請幫我查公車' } }],
+    }),
+  );
+  expect(onTranscript).toHaveBeenCalledWith('請幫我查公車');
+  expect(FakeSpeechRecognition.last.stop).not.toHaveBeenCalled();
+  expect(FakeSpeechRecognition.last.abort).toHaveBeenCalledOnce();
+  expect(screen.getByRole('button', { name: '使用語音輸入' }).getAttribute('aria-pressed')).toBe(
+    'false',
+  );
+});
+
+it('explains microphone denial without changing the draft', () => {
+  const onTranscript = vi.fn();
+  render(<VoiceDictationButton onTranscript={onTranscript} />);
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  act(() => FakeSpeechRecognition.last.onerror?.({ error: 'not-allowed' }));
+  expect(screen.getByRole('alert').textContent).toContain('允許權限');
+  expect(onTranscript).not.toHaveBeenCalled();
+});
+
+it.each(['permissionsPolicy', 'featurePolicy'] as const)(
+  'keeps text work intact when %s blocks microphone access instead of starting capture',
+  (policyName) => {
+    const onTranscript = vi.fn();
+    const allowsFeature = vi.fn(() => false);
+    Object.defineProperty(document, policyName, { configurable: true, value: { allowsFeature } });
+    const previous = FakeSpeechRecognition.last;
+    render(<VoiceDictationButton onTranscript={onTranscript} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(allowsFeature).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+    expect(allowsFeature).toHaveBeenCalledWith('microphone');
+    expect(FakeSpeechRecognition.last).toBe(previous);
+    expect(FakeSpeechRecognition.active).toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('這個頁面未開放麥克風');
+    expect(screen.getByRole('alert').textContent).toContain('手機鍵盤的語音輸入');
+    expect(screen.getByRole('alert').textContent).not.toContain('允許權限');
+    expect(onTranscript).not.toHaveBeenCalled();
+
+    allowsFeature.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+    expect(FakeSpeechRecognition.last.start).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: '停止語音輸入' })).toBeTruthy();
+  },
+);
+
+it('still permits an explicit voice action when the browser cannot inspect its policy', () => {
+  Object.defineProperty(document, 'permissionsPolicy', {
+    configurable: true,
+    value: { allowsFeature: () => { throw new Error('unsupported policy inspection'); } },
+  });
+  render(<VoiceDictationButton onTranscript={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  expect(FakeSpeechRecognition.last.start).toHaveBeenCalledOnce();
+});
+
+it('disables speech if the browser does not support recognition', () => {
+  Reflect.deleteProperty(window, 'webkitSpeechRecognition');
+  render(<VoiceDictationButton onTranscript={vi.fn()} />);
+  expect(
+    (screen.getByRole('button', { name: '此瀏覽器不支援語音辨識' }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+});
+
+function finalResult(text: string) {
+  return { results: [{ isFinal: true, 0: { transcript: text } }] };
+}
+
+function startCapture(onTranscript = vi.fn()) {
+  const view = render(<VoiceDictationButton onTranscript={onTranscript} />);
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const recognition = FakeSpeechRecognition.last;
+  return { view, recognition, onTranscript, lateResult: recognition.onresult! };
+}
+
+it('stops without accepting a delayed final transcript or waiting for onend', () => {
+  const { recognition, lateResult, onTranscript } = startCapture();
+  fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+  act(() => lateResult(finalResult('停止後的舊文字')));
+  expect(onTranscript).not.toHaveBeenCalled();
+  expect(recognition.abort).toHaveBeenCalledOnce();
+  expect(recognition.stop).not.toHaveBeenCalled();
+  expect(recognition.onresult).toBeNull();
+  expect(recognition.onerror).toBeNull();
+  expect(recognition.onend).toBeNull();
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(screen.getByRole('button', { name: '使用語音輸入' })).toBeTruthy();
+});
+
+it('rejects final speech after stop even when the browser has not delivered onend', () => {
+  const { recognition, lateResult, onTranscript } = startCapture();
+  recognition.stop.mockImplementation(() => undefined);
+  fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+  act(() => lateResult(finalResult('停止後才送達的轉寫')));
+  expect(onTranscript).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: '使用語音輸入' })).toBeTruthy();
+});
+
+it('starts a fresh capture after natural end and ignores the previous final event', () => {
+  const { recognition, lateResult, onTranscript } = startCapture();
+  act(() => recognition.end());
+  expect(recognition.abort).not.toHaveBeenCalled();
+  expect(screen.queryByRole('status')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const next = FakeSpeechRecognition.last;
+  expect(next).not.toBe(recognition);
+  act(() => lateResult(finalResult('已結束的舊轉寫')));
+  expect(onTranscript).not.toHaveBeenCalled();
+  act(() => next.onresult?.(finalResult('重新開始的轉寫')));
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('重新開始的轉寫');
+});
+
+it('invalidates the capture immediately when disabled and allows a fresh capture later', () => {
+  const { view, recognition, lateResult, onTranscript } = startCapture();
+  view.rerender(<VoiceDictationButton onTranscript={onTranscript} disabled />);
+  act(() => lateResult(finalResult('停用後的舊文字')));
+  expect(onTranscript).not.toHaveBeenCalled();
+  expect(recognition.abort).toHaveBeenCalledOnce();
+  expect(recognition.onresult).toBeNull();
+  expect(screen.queryByRole('status')).toBeNull();
+  view.rerender(<VoiceDictationButton onTranscript={onTranscript} />);
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const next = FakeSpeechRecognition.last;
+  expect(next).not.toBe(recognition);
+  act(() => lateResult(finalResult('不能污染新的語音輸入')));
+  act(() => next.onresult?.(finalResult('新的草稿')));
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('新的草稿');
+});
+
+it('does not call a new callback with an old capture after unmount', () => {
+  const { view, recognition, lateResult, onTranscript } = startCapture();
+  view.unmount();
+  act(() => lateResult(finalResult('已離開的輸入')));
+  expect(onTranscript).not.toHaveBeenCalled();
+  expect(recognition.abort).toHaveBeenCalledOnce();
+  expect(recognition.onresult).toBeNull();
+  expect(recognition.onerror).toBeNull();
+  expect(recognition.onend).toBeNull();
+});
+
+it('delivers only the first nonempty final event and never overwrites an edited draft', () => {
+  const { view, recognition, lateResult, onTranscript } = startCapture();
+  act(() => lateResult(finalResult('  ')));
+  expect(onTranscript).not.toHaveBeenCalled();
+  expect(recognition.abort).not.toHaveBeenCalled();
+  act(() => lateResult(finalResult('第一份草稿')));
+  const newCallback = vi.fn();
+  view.rerender(<VoiceDictationButton onTranscript={newCallback} />);
+  act(() => lateResult(finalResult('第一份草稿')));
+  act(() => lateResult(finalResult('後來的不同文字')));
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('第一份草稿');
+  expect(newCallback).not.toHaveBeenCalled();
+  expect(recognition.abort).toHaveBeenCalledOnce();
+});
+
+it('keeps interim speech local and joins the final segments in the first final event', () => {
+  const { recognition, onTranscript } = startCapture();
+  expect(recognition.interimResults).toBe(true);
+  expect(recognition.continuous).toBe(false);
+  act(() =>
+    recognition.onresult?.({ results: [{ isFinal: false, 0: { transcript: '還沒說完' } }] }),
+  );
+  expect(screen.getByRole('status').textContent).toBe('還沒說完');
+  expect(onTranscript).not.toHaveBeenCalled();
+  act(() =>
+    recognition.onresult?.({
+      results: [
+        { isFinal: true, 0: { transcript: ' 找圖書館 ' } },
+        { isFinal: true, 0: { transcript: '再去吃飯' } },
+        { isFinal: false, 0: { transcript: '未確認片段' } },
+      ],
+    }),
+  );
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('找圖書館 再去吃飯');
+  expect(screen.queryByRole('status')).toBeNull();
+});
+
+it('does not let a previous session result or end event interrupt a new capture', () => {
+  const { recognition, lateResult, onTranscript } = startCapture();
+  const oldEnd = recognition.onend!;
+  fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const next = FakeSpeechRecognition.last;
+  act(() => {
+    lateResult(finalResult('舊轉寫'));
+    oldEnd();
+  });
+  expect(screen.getByRole('button', { name: '停止語音輸入' })).toBeTruthy();
+  expect(next.abort).not.toHaveBeenCalled();
+  act(() => next.onresult?.(finalResult('新轉寫')));
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('新轉寫');
+});
+
+it.each(['not-allowed', 'service-not-allowed', 'no-speech', 'audio-capture', 'network'])(
+  'ends a failed capture and allows retry after %s',
+  (error) => {
+    const { recognition, lateResult, onTranscript } = startCapture();
+    act(() => recognition.onerror?.({ error }));
+    expect(screen.getByRole('alert').textContent).toBeTruthy();
+    expect(screen.queryByRole('status')).toBeNull();
+    act(() => lateResult(finalResult('錯誤後的舊文字')));
+    expect(onTranscript).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+    expect(FakeSpeechRecognition.last).not.toBe(recognition);
+    expect(screen.queryByRole('alert')).toBeNull();
+  },
+);
+
+it('cleans up a start exception so retry works and stale events do nothing', () => {
+  FakeSpeechRecognition.delayAbort = true;
+  FakeSpeechRecognition.failStart = true;
+  const { recognition, onTranscript } = startCapture();
+  expect(screen.getByRole('alert').textContent).toContain('無法啟動');
+  expect(recognition.onresult).toBeNull();
+  expect(recognition.onerror).toBeNull();
+  expect(recognition.onend).toBeNull();
+  expect(screen.queryByRole('status')).toBeNull();
+  FakeSpeechRecognition.failStart = false;
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  act(() => FakeSpeechRecognition.last.onresult?.(finalResult('重新輸入')));
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('重新輸入');
+});
+
+it('handles an abort implementation that throws without leaving stale listeners', () => {
+  const { recognition, lateResult, onTranscript } = startCapture();
+  recognition.abort.mockImplementation(() => {
+    throw new Error('already stopped');
+  });
+  fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+  act(() => lateResult(finalResult('不應出現')));
+  expect(onTranscript).not.toHaveBeenCalled();
+  expect(recognition.onresult).toBeNull();
+  expect(screen.getByRole('button', { name: '使用語音輸入' })).toBeTruthy();
+});
+
+it('queues one restart click until the aborted browser capture actually ends', () => {
+  FakeSpeechRecognition.delayAbort = true;
+  const { recognition, lateResult, onTranscript } = startCapture();
+  const oldError = recognition.onerror!;
+  fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+  expect(screen.getByRole('button', { name: '使用語音輸入' }).getAttribute('aria-pressed')).toBe(
+    'false',
+  );
+  expect(screen.queryByRole('status')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const next = FakeSpeechRecognition.last;
+  expect(next.start).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: '停止語音輸入' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  act(() => {
+    lateResult(finalResult('舊的轉寫'));
+    oldError({ error: 'aborted' });
+    recognition.end();
+  });
+  expect(next.start).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('alert')).toBeNull();
+  act(() => next.onresult?.(finalResult('一次點擊重新輸入')));
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('一次點擊重新輸入');
+});
+
+it.each(['stop', 'disable', 'unmount'])(
+  'cancels a queued restart on %s before the previous capture ends',
+  (action) => {
+    FakeSpeechRecognition.delayAbort = true;
+    const { view, recognition, onTranscript } = startCapture();
+    fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+    const oldEnd = recognition.onend!;
+    fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+    const next = FakeSpeechRecognition.last;
+    const lateResult = next.onresult!;
+    if (action === 'stop') fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+    if (action === 'disable')
+      view.rerender(<VoiceDictationButton onTranscript={onTranscript} disabled />);
+    if (action === 'unmount') view.unmount();
+    act(() => {
+      recognition.end();
+      oldEnd();
+      lateResult(finalResult('取消後的文字'));
+    });
+    expect(next.start).not.toHaveBeenCalled();
+    expect(next.abort).not.toHaveBeenCalled();
+    expect(onTranscript).not.toHaveBeenCalled();
+    expect(screen.queryByRole('status')).toBeNull();
+    if (action !== 'unmount') {
+      view.rerender(<VoiceDictationButton onTranscript={onTranscript} />);
+      fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+      expect(FakeSpeechRecognition.last.start).toHaveBeenCalledOnce();
+      act(() => FakeSpeechRecognition.last.onresult?.(finalResult('取消後重試')));
+      expect(onTranscript).toHaveBeenCalledExactlyOnceWith('取消後重試');
+    }
+  },
+);
+
+it('restarts after the timeout without onend and ignores all late events from the old capture', () => {
+  vi.useFakeTimers();
+  FakeSpeechRecognition.delayAbort = true;
+  const { recognition, lateResult, onTranscript } = startCapture();
+  const oldError = recognition.onerror!;
+  const oldCaptureEnd = recognition.onend!;
+  fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+  const oldShutdownEnd = recognition.onend!;
+  // The browser releases the microphone but omits its completion event.
+  FakeSpeechRecognition.active = null;
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const next = FakeSpeechRecognition.last;
+  act(() => vi.advanceTimersByTime(1499));
+  expect(next.start).not.toHaveBeenCalled();
+  act(() => vi.advanceTimersByTime(1));
+  expect(next.start).toHaveBeenCalledOnce();
+  expect(recognition.onend).toBeNull();
+  expect(vi.getTimerCount()).toBe(0);
+  act(() => {
+    lateResult(finalResult('逾時後的舊轉寫'));
+    oldError({ error: 'network' });
+    oldCaptureEnd();
+    oldShutdownEnd();
+  });
+  expect(onTranscript).not.toHaveBeenCalled();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByRole('button', { name: '停止語音輸入' })).toBeTruthy();
+  expect(next.start).toHaveBeenCalledOnce();
+  act(() => next.onresult?.(finalResult('逾時後的新轉寫')));
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('逾時後的新轉寫');
+});
+
+it('clears the fallback when onend arrives before the timeout', () => {
+  vi.useFakeTimers();
+  FakeSpeechRecognition.delayAbort = true;
+  const { recognition } = startCapture();
+  fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const next = FakeSpeechRecognition.last;
+  act(() => {
+    vi.advanceTimersByTime(1000);
+    recognition.end();
+  });
+  expect(vi.getTimerCount()).toBe(0);
+  act(() => vi.advanceTimersByTime(2000));
+  expect(next.start).toHaveBeenCalledOnce();
+});
+
+it('shows the existing start error after a failed timeout restart and permits another click', () => {
+  vi.useFakeTimers();
+  FakeSpeechRecognition.delayAbort = true;
+  const { onTranscript } = startCapture();
+  fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const failed = FakeSpeechRecognition.last;
+  act(() => vi.advanceTimersByTime(1500));
+  expect(failed.start).toHaveBeenCalledOnce();
+  expect(screen.getByRole('alert').textContent).toContain('無法啟動語音辨識');
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(vi.getTimerCount()).toBe(0);
+  expect(failed.onresult).toBeNull();
+  FakeSpeechRecognition.active = null;
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  act(() => FakeSpeechRecognition.last.onresult?.(finalResult('再次點擊成功')));
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('再次點擊成功');
+});
+
+it.each(['stop', 'disable', 'unmount'])(
+  'clears the fallback timer on %s without starting the canceled capture',
+  (action) => {
+    vi.useFakeTimers();
+    FakeSpeechRecognition.delayAbort = true;
+    const { view, onTranscript } = startCapture();
+    fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+    fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+    const next = FakeSpeechRecognition.last;
+    expect(vi.getTimerCount()).toBe(1);
+    if (action === 'stop') fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+    if (action === 'disable')
+      view.rerender(<VoiceDictationButton onTranscript={onTranscript} disabled />);
+    if (action === 'unmount') view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => vi.advanceTimersByTime(3000));
+    expect(next.start).not.toHaveBeenCalled();
+    expect(onTranscript).not.toHaveBeenCalled();
+  },
+);

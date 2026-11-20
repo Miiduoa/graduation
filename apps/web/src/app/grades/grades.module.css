@@ -1,0 +1,459 @@
+.toolbar {
+  min-width: 0;
+}
+
+.toolbar h2 {
+  font-size: 1.1875rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.toolbar > label {
+  flex: 1 1 14rem;
+  min-width: 0;
+  max-width: 22rem;
+  font-size: 0.8125rem;
+}
+
+.toolbar > label input,
+.toolbar > label select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.filterResult {
+  flex-wrap: wrap;
+  font-size: 0.8125rem;
+}
+
+.gradeBook {
+  --grade-paper: #fbf8ef;
+  --grade-ink: #273a3f;
+  --grade-muted: #536360;
+  --grade-rule: #bbc0b5;
+  --grade-edge: #b5b8aa;
+  --grade-margin: #c7a7a1;
+  --grade-link: #754b39;
+  --grade-cover: #4c5f70;
+  --grade-cover-edge: #354555;
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  padding: 10px 10px 16px 22px;
+  border: 1px solid var(--grade-cover-edge);
+  border-radius: 2px 5px 5px 2px;
+  background:
+    repeating-linear-gradient(0deg, #ffffff08 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, #ffffff06 0 1px, transparent 1px 3px),
+    var(--grade-cover);
+  box-shadow: 0 5px 12px #172c3b1a, inset 5px 0 5px #00000018;
+}
+
+.gradeBook::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 10px;
+  border-left: 1px dashed #f4efe2a8;
+  pointer-events: none;
+}
+
+.gradeBook::after {
+  content: '';
+  position: absolute;
+  right: 10px;
+  bottom: 7px;
+  left: 22px;
+  height: 10px;
+  border: 1px solid var(--grade-edge);
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--grade-paper) 0 2px,
+    var(--grade-edge) 2px 3px
+  );
+  pointer-events: none;
+}
+
+.paper {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  padding: clamp(18px, 3vw, 32px);
+  border: 1px solid var(--grade-edge);
+  background: linear-gradient(100deg, #ffffff35, transparent 35%), var(--grade-paper);
+  color: var(--grade-ink);
+  box-shadow: 1px 2px 3px #172c3b20, inset 3px 0 5px #5363600d;
+  transform-origin: left top;
+  animation: none;
+  animation-delay: 0s;
+  transition: none;
+  transition-delay: 0s;
+}
+
+.paper::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: clamp(7px, 1vw, 13px);
+  width: 1px;
+  background: var(--grade-margin);
+  pointer-events: none;
+}
+
+.paperHeading {
+  padding-bottom: 18px;
+  border-bottom: 3px double var(--grade-rule);
+}
+
+.paperHeading p {
+  margin: 0 0 8px;
+  color: var(--grade-muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+}
+
+.paperHeading h3 {
+  margin: 0;
+  color: var(--grade-ink);
+  font-size: clamp(1.125rem, 2vw, 1.5rem);
+  font-weight: 650;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 18px 0;
+  border-bottom: 1px solid var(--grade-rule);
+}
+
+.metric {
+  min-width: 0;
+  padding: 0 18px 18px;
+  border-left: 1px solid var(--grade-rule);
+}
+
+.metric:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.metric:last-child {
+  padding-right: 0;
+}
+
+.metric p {
+  margin: 0;
+  color: var(--grade-muted);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.metric strong {
+  display: block;
+  margin: 8px 0;
+  font-size: 1.625rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.metric small {
+  display: block;
+  color: var(--grade-muted);
+  font-size: 0.75rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.officialSummary {
+  --text: var(--grade-ink);
+  --muted: var(--grade-muted);
+  --surface: var(--grade-paper);
+  --border: var(--grade-rule);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.officialSummary > section {
+  margin: 18px 0;
+  padding: 0 0 18px;
+  border: 0;
+  border-bottom: 1px solid var(--grade-rule);
+  border-radius: 0;
+  background: transparent;
+}
+
+.gradeBook .officialSummary h2 {
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.gradeBook .officialSummary p,
+.gradeBook .officialSummary h3 {
+  font-size: 0.8125rem;
+  line-height: 1.7;
+}
+
+.gradeBook .officialSummary dl {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+}
+
+.gradeBook .officialSummary dt {
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.gradeBook .officialSummary dd {
+  font-size: 1.125rem;
+  line-height: 1.6;
+}
+
+.gradeRows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.gradeRows > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(6.25rem, 24%);
+  gap: 18px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--grade-rule);
+}
+
+.course {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.course h3 {
+  margin: 0;
+  color: var(--grade-ink);
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.65;
+}
+
+.course p {
+  margin: 6px 0;
+  color: var(--grade-muted);
+  font-size: 0.8125rem;
+  line-height: 1.7;
+}
+
+.course a {
+  display: inline-block;
+  min-height: 32px;
+  padding: 6px 0;
+  color: var(--grade-link);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.course a:focus-visible {
+  outline: 3px solid var(--grade-link);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.score {
+  display: flex;
+  align-content: start;
+  align-items: baseline;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-width: 0;
+  padding-left: 18px;
+  border-left: 1px solid var(--grade-rule);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.scoreLabel {
+  flex-basis: 100%;
+  color: var(--grade-muted);
+  font-size: 0.75rem;
+  line-height: 1.7;
+}
+
+.score strong {
+  max-width: 100%;
+  font-size: 1.625rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+
+.scoreText strong {
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.score small {
+  color: var(--grade-muted);
+  font-size: 0.8125rem;
+}
+
+.empty {
+  margin: 0;
+  padding: 24px 0;
+  border-bottom: 1px solid var(--grade-rule);
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin: 20px 0 0;
+  color: var(--grade-muted);
+  font-size: 0.8125rem;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .toolbar > label {
+    max-width: 100%;
+  }
+
+  .gradeBook {
+    padding: 7px 7px 13px 17px;
+  }
+
+  .gradeBook::before {
+    left: 7px;
+  }
+
+  .gradeBook::after {
+    right: 7px;
+    bottom: 5px;
+    left: 17px;
+  }
+
+  .paper {
+    padding: 16px;
+  }
+
+  .overview {
+    grid-template-columns: 1fr;
+  }
+
+  .metric {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 4px 12px;
+    padding: 14px 0;
+    border: 0;
+    border-bottom: 1px dotted var(--grade-rule);
+  }
+
+  .metric:first-child {
+    padding-top: 0;
+  }
+
+  .metric:last-child {
+    border-bottom: 0;
+  }
+
+  .metric strong {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0;
+    text-align: right;
+  }
+
+  .metric small {
+    grid-column: 1 / -1;
+  }
+
+  .gradeRows > li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .score {
+    justify-content: flex-start;
+    gap: 4px 8px;
+    padding: 0;
+    border-left: 0;
+    text-align: left;
+  }
+
+  .scoreLabel {
+    flex-basis: auto;
+    margin-right: 4px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :global(:where(:root:not([data-theme='light']))) .gradeBook {
+    --grade-paper: #eee9db;
+    --grade-rule: #aeb4a5;
+    --grade-edge: #a6ad9f;
+    --grade-cover: #263744;
+    --grade-cover-edge: #15222c;
+  }
+}
+
+:global(:where(:root[data-theme='dark'])) .gradeBook {
+  --grade-paper: #eee9db;
+  --grade-rule: #aeb4a5;
+  --grade-edge: #a6ad9f;
+  --grade-cover: #263744;
+  --grade-cover-edge: #15222c;
+}
+
+@keyframes gradeSheetTurn {
+  from {
+    opacity: 0.75;
+    transform: perspective(1200px) rotateY(-2deg) translateX(2px);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(1200px) rotateY(0) translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :global(:root[data-reduced-motion='false']) .paper {
+    animation: gradeSheetTurn 180ms ease-out;
+  }
+}
+
+@media (forced-colors: active) {
+  .gradeBook {
+    --grade-paper: Canvas;
+    --grade-ink: CanvasText;
+    --grade-muted: CanvasText;
+    --grade-rule: CanvasText;
+    --grade-edge: CanvasText;
+    --grade-link: LinkText;
+    border-color: CanvasText;
+    background: Canvas;
+    box-shadow: none;
+  }
+
+  .gradeBook::before,
+  .gradeBook::after,
+  .paper::before {
+    display: none;
+  }
+
+  .paper {
+    background: Canvas;
+    box-shadow: none;
+  }
+
+  .course a:focus-visible {
+    outline-color: Highlight;
+  }
+}

@@ -1,0 +1,276 @@
+# demo_oral_v4.yaml
+# 口試 demo 自動化流程 — 配合 docs/DEMO_RECORDING_SCRIPT.md 旁白稿用
+#
+# 跑法：
+#   cd apps/mobile
+#   maestro test .maestro/flows/demo_oral_v4.yaml --env APP_ID=com.campus.app.dev
+#
+# 跑的時候同步開 QuickTime 錄影手機畫面，依旁白稿逐句念。
+# 整段時間 ~6-7 分鐘（包含 plan 執行等待）。
+
+appId: ${APP_ID}
+name: 口試 Demo v4 — 5 cockpit + 跨角色 + AI 信任卡
+tags:
+  - demo
+  - oral
+  - v4
+
+---
+# ──────────────────────────────────────────
+# 0. 起跑
+# ──────────────────────────────────────────
+- launchApp
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-Today'
+    timeout: 45000
+
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# ──────────────────────────────────────────
+# 1. 學生 cockpit（旁白：1:30 – 2:30）
+# ──────────────────────────────────────────
+- takeScreenshot: demo_01_student_today
+
+# 給觀眾看 hero 5 秒（讓旁白介紹）
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# 點 AgentBanner 進 AI Console
+- tapOn:
+    accessibilityLabel: 'AI Agent 摘要 學生 Today'
+
+- extendedWaitUntil:
+    visible: 'AI Agent 駕駛室'
+    timeout: 10000
+
+- takeScreenshot: demo_02_ai_console_student
+
+# 滾動讓觀眾看 Trust Card + Autonomy + 新增 AI 任務
+- swipe:
+    start: 50%, 70%
+    end: 50%, 30%
+
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- takeScreenshot: demo_03_ai_console_scrolled
+
+# ──────────────────────────────────────────
+# 2. 切到老師 → T1 主秀（旁白：2:30 – 4:30）
+# ──────────────────────────────────────────
+- tapOn: '←'  # 返回 cockpit
+
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    accessibilityLabel: '切換 demo 角色'
+
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn: '教師·張怡君'
+
+- extendedWaitUntil:
+    visible: 'AI 教學中樞'
+    timeout: 10000
+
+- takeScreenshot: demo_04_teacher_cockpit
+
+# 進 AI Console
+- tapOn:
+    accessibilityLabel: 'AI Agent 摘要 老師'
+
+- extendedWaitUntil:
+    visible: 'AI Agent 駕駛室'
+    timeout: 10000
+
+# 滾到底找 「新增 AI 代理任務」
+- swipe:
+    start: 50%, 80%
+    end: 50%, 20%
+
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- swipe:
+    start: 50%, 80%
+    end: 50%, 30%
+
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# 展開 + 點 T1
+- tapOn: '+ 新增 AI 代理任務'
+
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn: '批量草擬評語'
+
+- extendedWaitUntil:
+    visible: 'AI 已準備好 plan'
+    timeout: 10000
+
+- takeScreenshot: demo_05_plan_ready_alert
+
+- tapOn: 'OK'
+
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# 展開 plan card
+- tapOn: '5 份評語批量草擬'
+
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- takeScreenshot: demo_06_plan_5_steps
+
+# 按批准 → AI 跑 5 step
+- tapOn: '批准 AI 開始執行'
+
+# 等 AI 跑完（5 step × 平均 2 秒）
+- extendedWaitUntil:
+    visible: 'AI 已完成'
+    timeout: 30000
+
+- takeScreenshot: demo_07_plan_done
+
+- tapOn: 'OK'
+
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# ──────────────────────────────────────────
+# 3. TA → 主任 → 餐廳（旁白：5:30 – 6:30）
+# ──────────────────────────────────────────
+- tapOn: '←'
+
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    accessibilityLabel: '切換 demo 角色'
+
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn: 'TA·林助教'
+
+- extendedWaitUntil:
+    visible: 'AI 協助中樞'
+    timeout: 10000
+
+- takeScreenshot: demo_08_ta_dashboard
+
+- tapOn:
+    accessibilityLabel: '切換 demo 角色'
+
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn: '系主任·黃主任'
+
+- extendedWaitUntil:
+    visible: 'AI 系所中樞'
+    timeout: 10000
+
+- takeScreenshot: demo_09_admin_dashboard
+
+- tapOn:
+    accessibilityLabel: '切換 demo 角色'
+
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- swipe:
+    start: 50%, 60%
+    end: 50%, 30%
+
+- tapOn: '餐廳·阿櫻'
+
+- extendedWaitUntil:
+    visible: '靜宜中餐部'
+    timeout: 10000
+
+- takeScreenshot: demo_10_vendor_dashboard
+
+# ──────────────────────────────────────────
+# 4. 校園生活 BusV2 + 校園 hub（旁白：6:30 – 7:30）
+# ──────────────────────────────────────────
+- tapOn:
+    accessibilityLabel: '切換 demo 角色'
+
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn: '學生·顧晉瑋'
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-校園'
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-校園'
+
+- waitForAnimationToEnd:
+    timeout: 2500
+
+- takeScreenshot: demo_11_campus_hub
+
+# 點 BusV2
+- tapOn: '校園公車'
+
+- extendedWaitUntil:
+    visible: '下班公車'
+    timeout: 10000
+
+- takeScreenshot: demo_12_bus_v2
+
+# 返回 → 點校園地圖 V2
+- tapOn: '←'
+
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn: '校園地圖 V2'
+
+- waitForAnimationToEnd:
+    timeout: 4000
+
+- takeScreenshot: demo_13_map
+
+# ──────────────────────────────────────────
+# 5. AI 信任卡 收尾（旁白：7:30 – 8:30）
+# ──────────────────────────────────────────
+- tapOn:
+    id: 'tab-Today'
+
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    accessibilityLabel: 'AI Agent 摘要 學生 Today'
+
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    accessibilityLabel: '查看 AI 信任卡'
+
+- extendedWaitUntil:
+    visible: 'AI 信任卡'
+    timeout: 10000
+
+- takeScreenshot: demo_14_trust_card
+
+# 給觀眾看信任卡 5 秒，講結尾
+- waitForAnimationToEnd:
+    timeout: 5000
+
+- takeScreenshot: demo_15_trust_card_final

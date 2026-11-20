@@ -1,0 +1,554 @@
+{
+  "checkedAt": "2026-10-23T12:44:49.006Z",
+  "runtime": {
+    "node": "v22.23.4",
+    "abi": "127",
+    "openssl": "3.5.9",
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "environmentPresent": {
+    "NODE_TLS_REJECT_UNAUTHORIZED": false,
+    "NODE_OPTIONS": false,
+    "NODE_EXTRA_CA_CERTS": false,
+    "NODE_USE_SYSTEM_CA": false,
+    "SSL_CERT_FILE": false,
+    "SSL_CERT_DIR": false,
+    "CURL_CA_BUNDLE": false,
+    "REQUESTS_CA_BUNDLE": false,
+    "GRPC_DEFAULT_SSL_ROOTS_FILE_PATH": false,
+    "HTTPS_PROXY": false,
+    "HTTP_PROXY": false,
+    "ALL_PROXY": false,
+    "NO_PROXY": false
+  },
+  "discovery": [
+    {
+      "appRoot": 0,
+      "module": "node-fetch",
+      "version": "3.3.2",
+      "status": "loaded"
+    },
+    {
+      "appRoot": 0,
+      "module": "gaxios",
+      "version": "6.7.1",
+      "status": "loaded"
+    },
+    {
+      "appRoot": 0,
+      "module": "undici",
+      "status": "not-installed"
+    },
+    {
+      "appRoot": 0,
+      "module": "@grpc/grpc-js",
+      "version": "1.14.5",
+      "status": "loaded"
+    },
+    {
+      "appRoot": 1,
+      "module": "node-fetch",
+      "status": "same-installed-module"
+    },
+    {
+      "appRoot": 1,
+      "module": "gaxios",
+      "version": "7.1.4",
+      "status": "loaded"
+    },
+    {
+      "appRoot": 1,
+      "module": "undici",
+      "status": "not-installed"
+    },
+    {
+      "appRoot": 1,
+      "module": "@grpc/grpc-js",
+      "status": "same-installed-module"
+    },
+    {
+      "appRoot": 2,
+      "module": "node-fetch",
+      "version": "2.7.0",
+      "status": "loaded"
+    },
+    {
+      "appRoot": 2,
+      "module": "gaxios",
+      "status": "same-installed-module"
+    },
+    {
+      "appRoot": 2,
+      "module": "undici",
+      "status": "not-installed"
+    },
+    {
+      "appRoot": 2,
+      "module": "@grpc/grpc-js",
+      "status": "same-installed-module"
+    },
+    {
+      "appRoot": 3,
+      "module": "node-fetch",
+      "version": "2.7.0",
+      "status": "loaded"
+    },
+    {
+      "appRoot": 3,
+      "module": "gaxios",
+      "status": "same-installed-module"
+    },
+    {
+      "appRoot": 3,
+      "module": "undici",
+      "status": "not-installed"
+    },
+    {
+      "appRoot": 3,
+      "module": "@grpc/grpc-js",
+      "status": "same-installed-module"
+    },
+    {
+      "appRoot": 4,
+      "module": "node-fetch",
+      "version": "2.7.0",
+      "status": "loaded"
+    },
+    {
+      "appRoot": 4,
+      "module": "gaxios",
+      "status": "same-installed-module"
+    },
+    {
+      "appRoot": 4,
+      "module": "undici",
+      "status": "not-installed"
+    },
+    {
+      "appRoot": 4,
+      "module": "@grpc/grpc-js",
+      "status": "same-installed-module"
+    },
+    {
+      "appRoot": 5,
+      "module": "node-fetch",
+      "status": "same-installed-module"
+    },
+    {
+      "appRoot": 5,
+      "module": "gaxios",
+      "version": "7.1.4",
+      "status": "loaded"
+    },
+    {
+      "appRoot": 5,
+      "module": "undici",
+      "status": "not-installed"
+    },
+    {
+      "appRoot": 5,
+      "module": "@grpc/grpc-js",
+      "status": "same-installed-module"
+    }
+  ],
+  "results": [
+    {
+      "client": {
+        "name": "global-fetch"
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "global-fetch"
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "global-fetch"
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node:https"
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node:https"
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node:https"
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node:http2"
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node:http2"
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "category": "transport-or-client",
+      "outcome": "inconclusive",
+      "passed": false
+    },
+    {
+      "client": {
+        "name": "node:http2"
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "transport-or-client",
+      "outcome": "inconclusive",
+      "passed": false
+    },
+    {
+      "client": {
+        "name": "node-fetch",
+        "version": "3.3.2",
+        "appRoot": 0
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node-fetch",
+        "version": "3.3.2",
+        "appRoot": 0
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node-fetch",
+        "version": "3.3.2",
+        "appRoot": 0
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "gaxios",
+        "version": "6.7.1",
+        "appRoot": 0
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "gaxios",
+        "version": "6.7.1",
+        "appRoot": 0
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "gaxios",
+        "version": "6.7.1",
+        "appRoot": 0
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "@grpc/grpc-js",
+        "version": "1.14.5",
+        "appRoot": 0
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 403,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "@grpc/grpc-js",
+        "version": "1.14.5",
+        "appRoot": 0
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "category": "transport-or-client",
+      "outcome": "inconclusive",
+      "passed": false
+    },
+    {
+      "client": {
+        "name": "@grpc/grpc-js",
+        "version": "1.14.5",
+        "appRoot": 0
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "transport-or-client",
+      "outcome": "inconclusive",
+      "passed": false
+    },
+    {
+      "client": {
+        "name": "gaxios",
+        "version": "7.1.4",
+        "appRoot": 1
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "gaxios",
+        "version": "7.1.4",
+        "appRoot": 1
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "gaxios",
+        "version": "7.1.4",
+        "appRoot": 1
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node-fetch",
+        "version": "2.7.0",
+        "appRoot": 2
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node-fetch",
+        "version": "2.7.0",
+        "appRoot": 2
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node-fetch",
+        "version": "2.7.0",
+        "appRoot": 2
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node-fetch",
+        "version": "2.7.0",
+        "appRoot": 3
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node-fetch",
+        "version": "2.7.0",
+        "appRoot": 3
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node-fetch",
+        "version": "2.7.0",
+        "appRoot": 3
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node-fetch",
+        "version": "2.7.0",
+        "appRoot": 4
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node-fetch",
+        "version": "2.7.0",
+        "appRoot": 4
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "node-fetch",
+        "version": "2.7.0",
+        "appRoot": 4
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "gaxios",
+        "version": "7.1.4",
+        "appRoot": 5
+      },
+      "kind": "trusted-control",
+      "url": "https://nodejs.org/dist/index.json",
+      "httpStatus": 200,
+      "outcome": "response",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "gaxios",
+        "version": "7.1.4",
+        "appRoot": 5
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    },
+    {
+      "client": {
+        "name": "gaxios",
+        "version": "7.1.4",
+        "appRoot": 5
+      },
+      "kind": "untrusted",
+      "url": "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/",
+      "category": "certificate",
+      "code": "CERT_REVOKED",
+      "outcome": "rejected",
+      "passed": true
+    }
+  ],
+  "passed": false
+}

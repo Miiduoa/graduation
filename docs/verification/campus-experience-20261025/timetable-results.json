@@ -1,0 +1,13 @@
+{
+  "completed": [
+    "no private timetable is loaded before explicitly selecting a campus",
+    "PU legacy and NTHU scoped copies are isolated through PU → NTHU → all → PU",
+    "out-of-bounds movement rejected",
+    "keyboard move, cancel and draft protection",
+    "real drag with continuation offset, save and reload",
+    "390px layout, reachable editor actions and non-dragging movement",
+    "guest friend-availability notice leads to usable local free-time results",
+    "incomplete schedules do not produce planning suggestions"
+  ],
+  "pageErrors": []
+}

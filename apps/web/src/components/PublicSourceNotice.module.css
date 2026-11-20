@@ -1,0 +1,39 @@
+.notice {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+.notice dl {
+  margin: 0;
+}
+.notice dl > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+}
+.notice dt {
+  font-weight: 600;
+}
+.notice dd {
+  margin: 0;
+  min-width: 0;
+}
+.notice a,
+.notice button {
+  max-width: 100%;
+  min-height: 44px;
+  white-space: normal;
+  height: auto;
+  text-align: start;
+}
+.notice summary {
+  cursor: pointer;
+  min-height: 44px;
+}
+.notice :is(a, button, summary):focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+.url {
+  user-select: text;
+}

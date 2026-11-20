@@ -1,0 +1,62 @@
+.manager {
+  --floor-panel: var(--panel, var(--surface, #fff));
+  --floor-text: var(--text, #182525);
+  --floor-muted: var(--muted, #586967);
+  --floor-border: var(--border, #dce4df);
+  --floor-accent: var(--brand, #247965);
+  min-width: 0;
+  color: var(--floor-text);
+  border-block: 1px solid var(--floor-border);
+}
+.manager summary {
+  min-height: 44px;
+  padding: 11px 0;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.content { display: grid; gap: 12px; padding-bottom: 14px; min-width: 0; }
+.manager p, .manager h4 { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
+.manager h4 { font-size: 0.9375rem; }
+.hint, .source, .measurements { font-size: 0.8125rem; color: var(--floor-muted); }
+.notice { font-size: 0.875rem; }
+.controls { padding: 0; margin: 0; min-width: 0; border: 0; }
+.controls:disabled { opacity: 0.65; }
+.floors { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.floor { padding: 12px; border: 1px solid var(--floor-border); border-radius: 10px; min-width: 0; }
+.floor > div { display: grid; gap: 9px; min-width: 0; }
+.heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; min-width: 0; }
+.source a { color: var(--floor-accent); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.manager button, .manager input {
+  box-sizing: border-box;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--floor-border);
+  border-radius: 9px;
+  background: var(--floor-panel);
+  color: var(--floor-text);
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+.manager button { cursor: pointer; overflow-wrap: anywhere; }
+.manager button:hover { border-color: var(--floor-accent); }
+.manager button:disabled, .manager button[aria-disabled='true'] { cursor: default; opacity: 0.5; }
+.manager button:focus-visible, .manager input:focus-visible, .manager summary:focus-visible, .source a:focus-visible, .error:focus {
+  outline: 3px solid var(--floor-accent);
+  outline-offset: 3px;
+}
+.manager input { width: 100%; min-width: 0; }
+.editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; min-width: 0; padding-top: 3px; }
+.editor label { display: grid; gap: 5px; min-width: 0; font-size: 0.8125rem; overflow-wrap: anywhere; }
+.nameField, .editor > .actions, .editor > .error { grid-column: 1 / -1; }
+.manager .primary { border-color: var(--floor-accent); background: color-mix(in srgb, var(--floor-accent) 13%, var(--floor-panel)); font-weight: 600; }
+.error { padding: 10px; border: 1px solid #bf6856; border-radius: 8px; background: color-mix(in srgb, #df6750 12%, var(--floor-panel)); font-size: 0.875rem; }
+.removal { display: grid; gap: 10px; padding-top: 3px; min-width: 0; font-size: 0.875rem; }
+@media (max-width: 480px) {
+  .editor { grid-template-columns: minmax(0, 1fr); }
+  .heading { display: grid; }
+}

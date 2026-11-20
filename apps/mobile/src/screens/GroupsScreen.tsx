@@ -1,0 +1,657 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { ScrollView, Text, TextInput, View, Pressable } from 'react-native';
+import {
+  Screen,
+  Card,
+  Button,
+  Pill,
+  SectionTitle,
+  LoadingState,
+  ErrorState,
+} from '../ui/components';
+import { ClubDirectory } from './ClubDirectory';
+import { normalizeJoinCode, formatJoinCode, isValidJoinCode } from '../utils/joinCode';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme, getThemeVersion, subscribeToTheme } from '../ui/theme';
+import { useSchool } from '../state/school';
+import { useAuth } from '../state/auth';
+import { getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
+import { collection, getDocs, limit, query, where, documentId } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import { useAsyncList } from '../hooks/useAsyncList';
+import { safeNavigate } from '../utils/safeNavigate';
+
+type Group = {
+  id: string;
+  schoolId: string;
+  type: 'course' | 'club' | 'admin';
+  name: string;
+  joinCode: string;
+  isPublished?: boolean;
+  verification?: { status?: 'unverified' | 'verified_teacher' | 'verified_org' };
+  createdAt?: any;
+  createdBy?: string;
+};
+
+type UserGroup = {
+  groupId: string;
+  schoolId: string;
+  type: Group['type'];
+  name: string;
+  joinCode: string;
+  role: 'owner' | 'moderator' | 'member' | 'instructor';
+  status: 'active' | 'left';
+  joinedAt?: any;
+};
+
+// joinCode helpers moved to src/utils/joinCode
+
+// ─── Demo mode data ────────────────────────────────────────────────────────
+const DEMO_PUBLISHED_COURSES: Group[] = [
+  {
+    id: 'grp-db-sys',
+    schoolId: 'demo',
+    type: 'course',
+    name: '資料庫系統',
+    joinCode: 'DBSYS001',
+    isPublished: true,
+    verification: { status: 'verified_teacher' },
+  },
+  {
+    id: 'grp-prog2',
+    schoolId: 'demo',
+    type: 'course',
+    name: '程式設計二',
+    joinCode: 'PROG0002',
+    isPublished: true,
+    verification: { status: 'verified_teacher' },
+  },
+  {
+    id: 'grp-algo',
+    schoolId: 'demo',
+    type: 'course',
+    name: '演算法導論',
+    joinCode: 'ALGO0003',
+    isPublished: true,
+    verification: { status: 'unverified' },
+  },
+  {
+    id: 'grp-web',
+    schoolId: 'demo',
+    type: 'course',
+    name: 'Web 程式設計',
+    joinCode: 'WEBP0004',
+    isPublished: true,
+    verification: { status: 'verified_teacher' },
+  },
+];
+
+const DEMO_COURSE_META_MAP: Record<string, Group> = Object.fromEntries(
+  DEMO_PUBLISHED_COURSES.map((g) => [g.id, g]),
+);
+
+function getDemoGroupsForRole(role: string | undefined): UserGroup[] {
+  switch (role) {
+    case 'student':
+      return [
+        {
+          groupId: 'grp-db-sys',
+          schoolId: 'demo',
+          type: 'course',
+          name: '資料庫系統',
+          joinCode: 'DBSYS001',
+          role: 'member',
+          status: 'active',
+        },
+        {
+          groupId: 'grp-prog2',
+          schoolId: 'demo',
+          type: 'course',
+          name: '程式設計二',
+          joinCode: 'PROG0002',
+          role: 'member',
+          status: 'active',
+        },
+      ];
+    case 'teacher':
+      return [
+        {
+          groupId: 'grp-db-sys',
+          schoolId: 'demo',
+          type: 'course',
+          name: '資料庫系統',
+          joinCode: 'DBSYS001',
+          role: 'instructor',
+          status: 'active',
+        },
+        {
+          groupId: 'grp-web',
+          schoolId: 'demo',
+          type: 'course',
+          name: 'Web 程式設計',
+          joinCode: 'WEBP0004',
+          role: 'instructor',
+          status: 'active',
+        },
+      ];
+    case 'club_officer':
+      return [
+        {
+          groupId: 'grp-club-im',
+          schoolId: 'demo',
+          type: 'club',
+          name: '資管學會',
+          joinCode: 'IMCLUB1X',
+          role: 'owner',
+          status: 'active',
+        },
+      ];
+    case 'department_head':
+    case 'admin':
+      return [
+        {
+          groupId: 'grp-admin-dept',
+          schoolId: 'demo',
+          type: 'admin',
+          name: '資管系行政群組',
+          joinCode: 'ADMIN001',
+          role: 'owner',
+          status: 'active',
+        },
+      ];
+    default:
+      return [];
+  }
+}
+
+function getDemoCourseMetaForIds(ids: string[]): Group[] {
+  return ids.map((id) => DEMO_COURSE_META_MAP[id]).filter(Boolean) as Group[];
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function GroupsScreen(props: any) {
+  const { school, selectionReady } = useSchool();
+  const { user } = useAuth();
+  return (
+    <GroupsContent
+      key={JSON.stringify([user?.uid, school.id, selectionReady !== false])}
+      {...props}
+    />
+  );
+}
+
+function GroupsContent(props: any) {
+  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
+  const nav = props?.navigation;
+  const clubsOnly = props?.route?.name === 'Clubs';
+  const { school, selectionReady } = useSchool();
+  const clubScopeReady = selectionReady !== false && !!school.id;
+  const auth = useAuth();
+
+  const [joinCode, setJoinCode] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const [isJoining, setIsJoining] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+
+  const db = getDb();
+  const functions = getFunctionsInstance();
+
+  const [newCourseName, setNewCourseName] = useState('');
+
+  const {
+    items: myGroups,
+    loading,
+    error,
+    reload,
+    refresh,
+    refreshing,
+    lastRefreshError,
+  } = useAsyncList<UserGroup>(async () => {
+    if (clubsOnly && !clubScopeReady) return [];
+    if (!auth.user) return [];
+    if (isFirebaseMockMode()) return getDemoGroupsForRole(auth.profile?.role);
+    const ref = collection(db, 'users', auth.user.uid, 'groups');
+    // NOTE: Avoid composite index requirements for MVP by not combining orderBy with multiple where.
+    const qy = query(ref, where('schoolId', '==', school.id), where('status', '==', 'active'));
+    const snap = await getDocs(qy);
+    return snap.docs.map((d) => d.data() as any);
+  }, [db, auth.user?.uid, school.id, clubsOnly, clubScopeReady]);
+
+  useEffect(() => {
+    if (!clubsOnly || !clubScopeReady || typeof nav?.addListener !== 'function') return;
+    let leftDirectory = false;
+    const stopBlur = nav.addListener('blur', () => {
+      leftDirectory = true;
+    });
+    const stopFocus = nav.addListener('focus', () => {
+      if (!leftDirectory) return;
+      leftDirectory = false;
+      void refresh();
+    });
+    return () => {
+      stopBlur();
+      stopFocus();
+    };
+  }, [nav, clubsOnly, clubScopeReady, refresh]);
+
+  const myCourseGroups = useMemo(() => myGroups.filter((g) => g.type === 'course'), [myGroups]);
+  const myOtherGroups = useMemo(() => myGroups.filter((g) => g.type !== 'course'), [myGroups]);
+
+  const { items: myCourseMeta } = useAsyncList<Group>(async () => {
+    if (clubsOnly) return [];
+    const ids = myCourseGroups.map((g) => g.groupId).filter(Boolean);
+    if (isFirebaseMockMode()) return getDemoCourseMetaForIds(ids);
+    if (ids.length === 0) return [];
+
+    // Firestore "in" supports up to 10 items; chunk to avoid indexes.
+    const out: Group[] = [];
+    for (let i = 0; i < ids.length; i += 10) {
+      const chunk = ids.slice(i, i + 10);
+      const qy = query(collection(db, 'groups'), where(documentId(), 'in', chunk));
+      const snap = await getDocs(qy);
+      out.push(...(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as any));
+    }
+    return out;
+  }, [db, clubsOnly, myCourseGroups.map((g) => g.groupId).join(',')]);
+
+  const courseMetaById = useMemo(() => {
+    const m: Record<string, Group> = {};
+    for (const g of myCourseMeta) m[g.id] = g;
+    return m;
+  }, [myCourseMeta]);
+
+  const { items: publishedCourses, reload: reloadPublishedCourses } =
+    useAsyncList<Group>(async () => {
+      if (clubsOnly) return [];
+      if (isFirebaseMockMode()) return DEMO_PUBLISHED_COURSES;
+      // NOTE: Avoid composite indexes in MVP: query by isPublished only, then filter by school/type.
+      const qy = query(collection(db, 'groups'), where('isPublished', '==', true), limit(100));
+      const snap = await getDocs(qy);
+      return snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as any) }))
+        .filter((g: any) => g.schoolId === school.id && g.type === 'course') as any;
+    }, [db, school.id, clubsOnly]);
+
+  const onJoin = async () => {
+    setErr(null);
+    const code = normalizeJoinCode(joinCode);
+    if (code.length !== 8) {
+      setErr('加入碼需要 8 碼英數');
+      return;
+    }
+    if (!auth.user) {
+      setErr('請先到『我的』登入後再加入群組');
+      return;
+    }
+
+    setIsJoining(true);
+    try {
+      const joinGroupByCode = httpsCallable<
+        { joinCode: string; schoolId: string },
+        { success: boolean; groupId: string; groupName?: string }
+      >(functions, 'joinGroupByCode');
+      const result = await joinGroupByCode({ joinCode: code, schoolId: school.id });
+
+      try {
+        const { emitGroupJoined } = await import('../services/campusEventBus');
+        emitGroupJoined({
+          userId: auth.user.uid,
+          groupId: result.data.groupId,
+          groupName: result.data.groupName ?? '',
+        });
+      } catch {
+        /* optional bus */
+      }
+
+      setJoinCode('');
+      reload();
+      nav?.navigate?.('GroupDetail', { groupId: result.data.groupId });
+    } catch (e: any) {
+      setErr(e?.message ?? '加入失敗');
+    } finally {
+      setIsJoining(false);
+    }
+  };
+
+  const onLeave = async (groupId: string) => {
+    if (!auth.user) return;
+    try {
+      const leaveGroup = httpsCallable<{ groupId: string }, { success: boolean }>(
+        functions,
+        'leaveGroup',
+      );
+      await leaveGroup({ groupId });
+      reload();
+    } catch (e: any) {
+      setErr(e?.message ?? '退出失敗');
+    }
+  };
+
+  const onCreateCourse = async () => {
+    setErr(null);
+    if (!auth.user) {
+      setErr('請先登入');
+      return;
+    }
+    const name = newCourseName.trim();
+    if (!name) {
+      setErr('請輸入課程名稱');
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      const createGroup = httpsCallable<
+        {
+          name: string;
+          description?: string;
+          type: Group['type'];
+          schoolId: string;
+          isPrivate?: boolean;
+          isPublished?: boolean;
+          verification?: { status?: 'unverified' | 'verified_teacher' | 'verified_org' };
+        },
+        { success: boolean; groupId: string; joinCode?: string | null }
+      >(functions, 'createGroup');
+      const result = await createGroup({
+        schoolId: school.id,
+        name,
+        type: 'course',
+        description: '',
+        isPrivate: false,
+        isPublished: false,
+        verification: { status: 'unverified' },
+      });
+
+      setNewCourseName('');
+      reload();
+      reloadPublishedCourses();
+      nav?.navigate?.('GroupDetail', { groupId: result.data.groupId });
+    } catch (e: any) {
+      setErr(e?.message ?? '建立課程失敗');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  return (
+    <Screen>
+      {clubsOnly && !clubScopeReady ? (
+        <Card title="社團">
+          <Text style={{ color: theme.colors.text, lineHeight: 22 }}>
+            請先確認瀏覽校園，再查看該校社團。
+          </Text>
+        </Card>
+      ) : loading ? (
+        <LoadingState title={clubsOnly ? '社團' : '群組'} subtitle="載入中..." rows={3} />
+      ) : error ? (
+        <ErrorState
+          title={clubsOnly ? '社團' : '群組'}
+          subtitle={clubsOnly ? '讀取社團失敗' : '讀取群組失敗'}
+          hint={error}
+          actionText="重試"
+          onAction={reload}
+        />
+      ) : (
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+        >
+          {clubsOnly && refreshing ? (
+            <Text style={{ color: theme.colors.muted }}>正在更新我的社團…</Text>
+          ) : null}
+          {clubsOnly && lastRefreshError ? (
+            <Card title="社團名單尚未更新">
+              <Text accessibilityRole="alert" style={{ color: theme.colors.text, lineHeight: 22 }}>
+                暫時無法確認最新入社狀態，目前顯示上次讀取的名單。
+              </Text>
+              <Button
+                text="重新整理我的社團"
+                disabled={refreshing}
+                onPress={() => void refresh()}
+              />
+            </Card>
+          ) : null}
+          <ClubDirectory
+            uid={auth.user?.uid}
+            schoolId={school.id}
+            key={JSON.stringify([auth.user?.uid, school.id, clubsOnly])}
+            clubs={isFirebaseMockMode() ? [] : myGroups.filter((group) => group.type === 'club')}
+            initialSegment={clubsOnly ? 'discover' : 'mine'}
+            onOpen={(groupId) =>
+              clubsOnly
+                ? safeNavigate(nav, 'ClubDetail', { groupId })
+                : nav?.navigate?.('GroupDetail', { groupId })
+            }
+            onBrowseClub={
+              clubsOnly ? (groupId) => safeNavigate(nav, 'ClubDetail', { groupId }) : undefined
+            }
+          />
+          {!clubsOnly ? (
+            <>
+              <Card title="加入群組" subtitle="輸入加入碼（8 碼英數）。">
+                {err ? <Pill text={err} /> : null}
+
+                {auth.isAdmin ? (
+                  <View style={{ marginBottom: 10 }}>
+                    <Button
+                      text="管理員：課程認證"
+                      onPress={() => nav?.navigate?.('AdminCourseVerify')}
+                    />
+                  </View>
+                ) : null}
+
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text style={{ color: theme.colors.muted }}>加入碼</Text>
+                  <Text
+                    style={{
+                      color: joinCode.length === 8 ? theme.colors.success : theme.colors.muted,
+                      fontSize: 12,
+                    }}
+                  >
+                    {joinCode.length}/8
+                  </Text>
+                </View>
+                <TextInput
+                  accessibilityLabel="群組加入碼"
+                  value={formatJoinCode(joinCode)}
+                  onChangeText={(t) => setJoinCode(normalizeJoinCode(t))}
+                  autoCapitalize="characters"
+                  placeholder="XXXX-XXXX"
+                  placeholderTextColor={theme.colors.muted}
+                  maxLength={9}
+                  style={{
+                    marginTop: 10,
+                    paddingVertical: 12,
+                    paddingHorizontal: 14,
+                    borderRadius: theme.radius.md,
+                    borderWidth: 1,
+                    borderColor: isValidJoinCode(joinCode)
+                      ? theme.colors.success
+                      : theme.colors.border,
+                    backgroundColor: theme.colors.surface2,
+                    color: theme.colors.text,
+                    letterSpacing: 2,
+                    fontSize: 16,
+                    fontWeight: '600',
+                  }}
+                />
+                <View style={{ marginTop: 12, flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+                  <Button
+                    text={isJoining ? '加入中...' : '加入'}
+                    kind="primary"
+                    onPress={onJoin}
+                    disabled={isJoining || !isValidJoinCode(joinCode)}
+                  />
+                  <Button text="清除" onPress={() => setJoinCode('')} disabled={isJoining} />
+                </View>
+                <View style={{ marginTop: 10 }}>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                    {auth.user
+                      ? '向老師或群組管理員索取加入碼。'
+                      : '登入後，即可使用加入碼加入課程或群組。'}
+                  </Text>
+                </View>
+              </Card>
+
+              {auth.user ? (
+                <Card
+                  title="建立課程"
+                  subtitle="建立後會取得加入碼。發布前，課程不會出現在公開列表。"
+                >
+                  {err ? <Pill text={err} /> : null}
+                  <Text style={{ color: theme.colors.muted }}>課程名稱</Text>
+                  <TextInput
+                    accessibilityLabel="課程名稱"
+                    value={newCourseName}
+                    onChangeText={setNewCourseName}
+                    placeholder="例如 資料庫系統"
+                    placeholderTextColor={theme.colors.muted}
+                    style={{
+                      marginTop: 10,
+                      paddingVertical: 12,
+                      paddingHorizontal: 14,
+                      borderRadius: theme.radius.md,
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                      backgroundColor: theme.colors.surface2,
+                      color: theme.colors.text,
+                    }}
+                  />
+                  <View style={{ marginTop: 12, flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+                    <Button
+                      text={isCreating ? '建立中...' : '建立課程'}
+                      kind="primary"
+                      onPress={onCreateCourse}
+                      disabled={isCreating || !newCourseName.trim()}
+                    />
+                  </View>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
+                    提醒：發布/重設加入碼等教師管理功能，請進入課程後在「課程管理」調整。
+                  </Text>
+                </Card>
+              ) : null}
+
+              <Card title="我加入的課程" subtitle="課程會顯示老師認證/未驗證標示。">
+                <SectionTitle text={`數量：${myCourseGroups.length}`} />
+                <View style={{ marginTop: 10, gap: 10 }}>
+                  {myCourseGroups.map((g) => {
+                    const meta = courseMetaById[g.groupId];
+                    const v = meta?.verification?.status ?? 'unverified';
+                    return (
+                      <Pressable
+                        key={g.groupId}
+                        onPress={() => nav?.navigate?.('GroupDetail', { groupId: g.groupId })}
+                        style={{ borderRadius: theme.radius.lg }}
+                        accessible
+                        accessibilityRole="button"
+                        accessibilityLabel={`進入課程：${g.name}`}
+                      >
+                        <Card title={g.name} subtitle={`加入碼 ${g.joinCode}`}>
+                          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                            <Pill
+                              text={v === 'verified_teacher' ? '老師認證' : '未驗證'}
+                              kind={v === 'verified_teacher' ? 'accent' : 'default'}
+                            />
+                            <Pill text={meta?.isPublished ? '已發布' : '未發布'} />
+                          </View>
+                          <View style={{ marginTop: 12 }}>
+                            <Button text="退出課程" onPress={() => onLeave(g.groupId)} />
+                          </View>
+                        </Card>
+                      </Pressable>
+                    );
+                  })}
+                  {myCourseGroups.length === 0 ? (
+                    <Text style={{ color: theme.colors.muted }}>你目前尚未加入任何課程。</Text>
+                  ) : null}
+                </View>
+              </Card>
+
+              <Card title="其他群組" subtitle="社團 / 其他用途群組。">
+                <SectionTitle text={`數量：${myOtherGroups.length}`} />
+                <View style={{ marginTop: 10, gap: 10 }}>
+                  {myOtherGroups.map((g) => (
+                    <Pressable
+                      key={g.groupId}
+                      onPress={() => nav?.navigate?.('GroupDetail', { groupId: g.groupId })}
+                      style={{ borderRadius: theme.radius.lg }}
+                      accessible
+                      accessibilityRole="button"
+                      accessibilityLabel={`進入群組：${g.name}`}
+                    >
+                      <Card
+                        title={g.name}
+                        subtitle={`${g.type === 'club' ? '社團' : '行政群組'} · 加入碼 ${g.joinCode}`}
+                      >
+                        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                          <Pill text="公告" kind="accent" />
+                          <Pill text="問答" kind="accent" />
+                          <Pressable onPress={() => nav?.navigate?.('Dms')}>
+                            <Pill text="私訊" kind="accent" />
+                          </Pressable>
+                        </View>
+                        <View style={{ marginTop: 12 }}>
+                          <Button text="退出群組" onPress={() => onLeave(g.groupId)} />
+                        </View>
+                      </Card>
+                    </Pressable>
+                  ))}
+
+                  {myOtherGroups.length === 0 ? (
+                    <Text style={{ color: theme.colors.muted }}>你目前尚未加入其他群組。</Text>
+                  ) : null}
+                </View>
+              </Card>
+
+              <Card title="公開課程（可瀏覽）" subtitle="只顯示已發布課程；加入仍需 8 碼加入碼。">
+                <SectionTitle text={`數量：${publishedCourses.length}`} />
+                <View style={{ marginTop: 10, gap: 10 }}>
+                  {publishedCourses.map((g) => (
+                    <Card key={g.id} title={g.name} subtitle="公開課程">
+                      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                        <Pill
+                          text={
+                            (g.verification?.status ?? 'unverified') === 'verified_teacher'
+                              ? '老師認證'
+                              : '未驗證'
+                          }
+                          kind={
+                            (g.verification?.status ?? 'unverified') === 'verified_teacher'
+                              ? 'accent'
+                              : 'default'
+                          }
+                        />
+                        <Pill text="已發布" />
+                      </View>
+                      <Text
+                        style={{
+                          color: theme.colors.muted,
+                          fontSize: 12,
+                          lineHeight: 18,
+                          marginTop: 10,
+                        }}
+                      >
+                        加入方式：請向老師索取加入碼後，在上方輸入加入。
+                      </Text>
+                    </Card>
+                  ))}
+                  {publishedCourses.length === 0 ? (
+                    <Text style={{ color: theme.colors.muted }}>目前沒有公開課程。</Text>
+                  ) : null}
+                </View>
+              </Card>
+            </>
+          ) : null}
+        </ScrollView>
+      )}
+    </Screen>
+  );
+}

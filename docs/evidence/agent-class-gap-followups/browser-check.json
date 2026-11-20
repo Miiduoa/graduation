@@ -1,0 +1,680 @@
+[
+  {
+    "scenario": "390-light",
+    "pageErrors": [],
+    "externalRequests": [],
+    "requestFailures": [],
+    "geometry": [
+      {
+        "width": 390,
+        "documentWidth": 390,
+        "controls": [
+          {
+            "label": "空堂問題",
+            "width": 350,
+            "height": 76
+          },
+          {
+            "label": "查詢空堂",
+            "width": 82,
+            "height": 44
+          },
+          {
+            "label": "改查今天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "改查後天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "不限長度",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "查看全天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          }
+        ],
+        "clipped": [],
+        "smallControls": []
+      },
+      {
+        "width": 390,
+        "documentWidth": 390,
+        "controls": [
+          {
+            "label": "空堂問題",
+            "width": 350,
+            "height": 76
+          },
+          {
+            "label": "查詢空堂",
+            "width": 82,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "改查今天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "改查後天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "不限長度",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "查看全天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "只看下午",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          }
+        ],
+        "clipped": [],
+        "smallControls": []
+      },
+      {
+        "width": 390,
+        "documentWidth": 390,
+        "controls": [
+          {
+            "label": "空堂問題",
+            "width": 350,
+            "height": 76
+          },
+          {
+            "label": "查詢空堂",
+            "width": 82,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "改查今天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "改查明天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "不限長度",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "查看全天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "只看下午",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          }
+        ],
+        "clipped": [],
+        "smallControls": []
+      },
+      {
+        "width": 390,
+        "documentWidth": 390,
+        "controls": [
+          {
+            "label": "空堂問題",
+            "width": 350,
+            "height": 76
+          },
+          {
+            "label": "查詢空堂",
+            "width": 82,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "改查今天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "改查明天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "只看一小時以上",
+            "width": 117,
+            "height": 44
+          },
+          {
+            "label": "查看全天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "只看下午",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          }
+        ],
+        "clipped": [],
+        "smallControls": []
+      },
+      {
+        "width": 390,
+        "documentWidth": 390,
+        "controls": [
+          {
+            "label": "空堂問題",
+            "width": 350,
+            "height": 76
+          },
+          {
+            "label": "查詢空堂",
+            "width": 82,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "改查今天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "改查明天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "只看一小時以上",
+            "width": 117,
+            "height": 44
+          },
+          {
+            "label": "只看下午",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          }
+        ],
+        "clipped": [],
+        "smallControls": []
+      }
+    ],
+    "events": [
+      {
+        "kind": "ask",
+        "question": "明天下午有一個半小時的空堂嗎？",
+        "query": {
+          "day": "tomorrow",
+          "minMinutes": 90,
+          "part": "afternoon"
+        }
+      },
+      {
+        "kind": "ask",
+        "question": "改成下午三點半以後",
+        "query": {
+          "day": "tomorrow",
+          "minMinutes": 90,
+          "fromMinute": 930
+        }
+      },
+      {
+        "kind": "ask",
+        "question": "那後天呢？",
+        "query": {
+          "day": "day-after-tomorrow",
+          "minMinutes": 90,
+          "fromMinute": 930
+        }
+      },
+      {
+        "kind": "ask",
+        "question": "不限長度",
+        "query": {
+          "day": "day-after-tomorrow",
+          "minMinutes": 0,
+          "fromMinute": 930
+        }
+      },
+      {
+        "kind": "ask",
+        "question": "全天",
+        "query": {
+          "day": "day-after-tomorrow",
+          "minMinutes": 0
+        }
+      },
+      {
+        "kind": "open-route",
+        "route": "/timetable"
+      }
+    ],
+    "status": "passed"
+  },
+  {
+    "scenario": "320-dark",
+    "pageErrors": [],
+    "externalRequests": [],
+    "requestFailures": [],
+    "geometry": [
+      {
+        "width": 320,
+        "documentWidth": 320,
+        "controls": [
+          {
+            "label": "空堂問題",
+            "width": 280,
+            "height": 76
+          },
+          {
+            "label": "查詢空堂",
+            "width": 82,
+            "height": 44
+          },
+          {
+            "label": "改查今天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "改查後天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "不限長度",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "查看全天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          }
+        ],
+        "clipped": [],
+        "smallControls": []
+      },
+      {
+        "width": 320,
+        "documentWidth": 320,
+        "controls": [
+          {
+            "label": "空堂問題",
+            "width": 280,
+            "height": 76
+          },
+          {
+            "label": "查詢空堂",
+            "width": 82,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "改查今天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "改查後天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "不限長度",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "查看全天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "只看下午",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          }
+        ],
+        "clipped": [],
+        "smallControls": []
+      },
+      {
+        "width": 320,
+        "documentWidth": 320,
+        "controls": [
+          {
+            "label": "空堂問題",
+            "width": 280,
+            "height": 76
+          },
+          {
+            "label": "查詢空堂",
+            "width": 82,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "改查今天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "改查明天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "不限長度",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "查看全天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "只看下午",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          }
+        ],
+        "clipped": [],
+        "smallControls": []
+      },
+      {
+        "width": 320,
+        "documentWidth": 320,
+        "controls": [
+          {
+            "label": "空堂問題",
+            "width": 280,
+            "height": 76
+          },
+          {
+            "label": "查詢空堂",
+            "width": 82,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "改查今天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "改查明天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "只看一小時以上",
+            "width": 117,
+            "height": 44
+          },
+          {
+            "label": "查看全天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "只看下午",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          }
+        ],
+        "clipped": [],
+        "smallControls": []
+      },
+      {
+        "width": 320,
+        "documentWidth": 320,
+        "controls": [
+          {
+            "label": "空堂問題",
+            "width": 280,
+            "height": 76
+          },
+          {
+            "label": "查詢空堂",
+            "width": 82,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          },
+          {
+            "label": "改查今天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "改查明天",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "只看一小時以上",
+            "width": 117,
+            "height": 44
+          },
+          {
+            "label": "只看下午",
+            "width": 78,
+            "height": 44
+          },
+          {
+            "label": "開啟我的課表",
+            "width": 104,
+            "height": 44
+          }
+        ],
+        "clipped": [],
+        "smallControls": []
+      }
+    ],
+    "events": [
+      {
+        "kind": "ask",
+        "question": "明天下午有一個半小時的空堂嗎？",
+        "query": {
+          "day": "tomorrow",
+          "minMinutes": 90,
+          "part": "afternoon"
+        }
+      },
+      {
+        "kind": "ask",
+        "question": "改成下午三點半以後",
+        "query": {
+          "day": "tomorrow",
+          "minMinutes": 90,
+          "fromMinute": 930
+        }
+      },
+      {
+        "kind": "ask",
+        "question": "那後天呢？",
+        "query": {
+          "day": "day-after-tomorrow",
+          "minMinutes": 90,
+          "fromMinute": 930
+        }
+      },
+      {
+        "kind": "ask",
+        "question": "不限長度",
+        "query": {
+          "day": "day-after-tomorrow",
+          "minMinutes": 0,
+          "fromMinute": 930
+        }
+      },
+      {
+        "kind": "ask",
+        "question": "全天",
+        "query": {
+          "day": "day-after-tomorrow",
+          "minMinutes": 0
+        }
+      },
+      {
+        "kind": "open-route",
+        "route": "/timetable"
+      }
+    ],
+    "status": "passed"
+  }
+]

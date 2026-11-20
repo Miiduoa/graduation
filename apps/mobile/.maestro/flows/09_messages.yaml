@@ -1,0 +1,30 @@
+# 09_messages.yaml
+# campus://inbox/groups → 課程群組（Inbox 為訊息 Tab 初始畫面）
+
+appId: ${APP_ID}
+name: Messages & Groups Flow
+tags:
+  - smoke
+  - messages
+  - groups
+
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-Today'
+    timeout: 45000
+
+- waitForAnimationToEnd:
+    timeout: 2500
+
+- openLink: campus://inbox/groups
+
+- extendedWaitUntil:
+    visible: '加入碼'
+    timeout: 30000
+
+- takeScreenshot: groups_screen
+
+- back

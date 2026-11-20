@@ -1,0 +1,597 @@
+{
+  "sourceCommit": "040957b6b36f41c9f5558c1b8bbc61d3a9a5a7f7",
+  "sourceDirty": null,
+  "sourceHashes": [
+    {
+      "path": "apps/mobile/src/data/schoolIds.ts",
+      "sha256": "e7945de0e29c64369da15ee2f27891e8791956697b2b121ca31e435ad8930c89"
+    },
+    {
+      "path": "apps/mobile/src/features/nuniCourseworkFollowUp.ts",
+      "sha256": "c1d2384cd3111d99f2f31fea1b3bd2e428454d2f4b19f5a977f21fb2eac25c1d"
+    },
+    {
+      "path": "apps/mobile/src/features/nuniCourseworkSnapshot.ts",
+      "sha256": "b3079d5726cb287f5f05cf5e547385c4a3e2cb0e3d29369f6a22d225f795e73b"
+    },
+    {
+      "path": "apps/mobile/src/features/nuniCourseworkStudy.ts",
+      "sha256": "06fc24ddee0467baf2270da7a32d7bc0f21b75d8179dd4d31a14b7dfb9f98273"
+    },
+    {
+      "path": "apps/mobile/src/screens/CampusEvidencePlanCard.tsx",
+      "sha256": "00309e59301ef3a098b52c7ad169af789711865276794de60640900ccfb59cfb"
+    },
+    {
+      "path": "apps/mobile/src/screens/CampusPlanComparisonCard.tsx",
+      "sha256": "987ad16221c7f0ba92f8bada96918b8cbec9f27a38653e5d67fd6e775f6171d4"
+    },
+    {
+      "path": "apps/mobile/src/screens/CampusStudyAgendaCard.tsx",
+      "sha256": "656df3a983bfeefaad5fc31b2d6c9bc6f3a85b71f8ec8d721697a3da003e985e"
+    },
+    {
+      "path": "apps/mobile/src/screens/NuniCourseworkStudyAction.tsx",
+      "sha256": "7a15853a1cd8f38fea312c5d6ee647e86e14de003d2b1433d91c8ec70526d030"
+    },
+    {
+      "path": "apps/mobile/src/screens/NuniPlanAssignmentOpenButton.tsx",
+      "sha256": "1947696d1af65783a9140e5966896192ce65fe7127e97fff39d0a6217b150a91"
+    },
+    {
+      "path": "apps/mobile/src/screens/NuniStudyPlanActions.tsx",
+      "sha256": "c905f71348e259be4c52394c248606b6f57d6e5d2add6849f002c2d3852e247e"
+    },
+    {
+      "path": "apps/mobile/src/screens/SavedCampusPlansPanel.tsx",
+      "sha256": "88cde5b5771a56012a4620585e776fea74e05cfd0b75b36aba4fdd64f257e131"
+    },
+    {
+      "path": "apps/mobile/src/screens/nuni/StudyAssignmentAssistant.tsx",
+      "sha256": "1e05f8d54799e51f6a126eea17b2acaa59dc1debcd1873bc70357f65555c9582"
+    },
+    {
+      "path": "apps/mobile/src/services/abortableCampusRead.ts",
+      "sha256": "c22f6b2e9ecb776a6d8e35b4408ad2890967ccf22242d4e334bd4944e112fb8c"
+    },
+    {
+      "path": "apps/mobile/src/services/assignmentDeadlineWindow.ts",
+      "sha256": "abd1e79ae8e7b9779fac5985dfd8398d2de8cf5d7fd50bb82f1f43718d7f784c"
+    },
+    {
+      "path": "apps/mobile/src/services/assignmentQueryFilter.ts",
+      "sha256": "d6291181a45aa5282db5d9d6cb823e977b541c411e9b1649dfa7ea929d567b64"
+    },
+    {
+      "path": "apps/mobile/src/services/assignmentResultPage.ts",
+      "sha256": "8d8b7f451e47f7bc3ac57a71ea63d6b62c92149046ba038bcb7f30c26ff9150c"
+    },
+    {
+      "path": "apps/mobile/src/services/assistantCalendarExecution.ts",
+      "sha256": "d1a5defa9bb9af3267dd46b42449e2dfc62e899ed90b96c4deb7c0a8a8b0fe5b"
+    },
+    {
+      "path": "apps/mobile/src/services/assistantCalendarJournal.ts",
+      "sha256": "408ce0496f72a246cb231aec6ccbe427243031b39de0e21114e47129a051390d"
+    },
+    {
+      "path": "apps/mobile/src/services/assistantTimetableSource.ts",
+      "sha256": "a3b43739ef7cab747e487a42861da9dbf18a3661a4d6e0e1cd9e5ec66839060b"
+    },
+    {
+      "path": "apps/mobile/src/services/campusClockAvailability.ts",
+      "sha256": "6f643ec59917bdcae1f121388543fddd351d8c165bd26675046889068e97b6d0"
+    },
+    {
+      "path": "apps/mobile/src/services/campusPlanComparison.ts",
+      "sha256": "8a924bc2eceed9bcee8edd2716efb179c0c6f110a6c632319bef15c5991313a9"
+    },
+    {
+      "path": "apps/mobile/src/services/campusStudyAgenda.ts",
+      "sha256": "d24eb1a6e83e31ac1cf82cc2e19a4f205a5300876060ff82eecc7864e3cda5eb"
+    },
+    {
+      "path": "apps/mobile/src/services/courseworkStudyAvailability.ts",
+      "sha256": "b71b68f2cdb750838ac381e0655cfeb71067c6bdc8ca5212815d0b506943a791"
+    },
+    {
+      "path": "apps/mobile/src/services/nextSavedClasses.ts",
+      "sha256": "bf2e4f1e317a42a4f5f6590dca54d4dcb93b02319729019f5fd528b5dcaa9087"
+    },
+    {
+      "path": "apps/mobile/src/services/nuniAssignmentChanges.ts",
+      "sha256": "d1e126fd1b1e82e12871fd602065e1ea807203219eafd938920481d71595e26e"
+    },
+    {
+      "path": "apps/mobile/src/services/nuniClassCoursework.ts",
+      "sha256": "6a5cecc743b2bbff3665577fe0e9f3f5b184ae3e6622b127b907b6d06434c816"
+    },
+    {
+      "path": "apps/mobile/src/services/nuniQuizAssistant.ts",
+      "sha256": "ec914376ad9deae4cebceab980ab2017802cb8eec0f5b0749453c0de65ca9353"
+    },
+    {
+      "path": "apps/mobile/src/services/nuniReceiptQuery.ts",
+      "sha256": "1fb753a332c6ce8da9ea7afe835cfae84f39e940f9b1767e930da4324abba649"
+    },
+    {
+      "path": "apps/mobile/src/services/personalImports.ts",
+      "sha256": "5b4e709b72e95bf88be5137b31a3e55047a353fe547342e193d9801cd72ababf"
+    },
+    {
+      "path": "apps/mobile/src/services/personalTimetable.ts",
+      "sha256": "0773418b6a09fe8eb8d05d32a62c1e436bcb6a30295b0c1a7358fc3ee6a1b791"
+    },
+    {
+      "path": "apps/mobile/src/services/queryAssignmentDeadlines.ts",
+      "sha256": "284ab398c0651718a660e9fa3b705c10393daa981890628b4811ea4cf5d21e3d"
+    },
+    {
+      "path": "apps/mobile/src/services/savedCampusPlanValidation.ts",
+      "sha256": "19f71130650c67c6f16960530d89291cce5b738de0ffb749f4bdbecc62a9ea44"
+    },
+    {
+      "path": "apps/mobile/src/state/theme.tsx",
+      "sha256": "fce3a102495cdfa9a5940200ff045541254b463d09698e687ed9dd6576af0622"
+    },
+    {
+      "path": "apps/mobile/src/ui/aiFirst.tsx",
+      "sha256": "e99798dbfe57cc9a2a5c15d1497712c5a8b4725abb5cab52fa19a3bd355addda"
+    },
+    {
+      "path": "apps/mobile/src/ui/navigationTheme.ts",
+      "sha256": "c10f2a81c77c4bcbe57f9332b631d626da0f31e0c382f600bf7f8bcd93e6d6b9"
+    },
+    {
+      "path": "apps/mobile/src/ui/theme.ts",
+      "sha256": "e9a974f206af91a8ae8d9be9128a33373f07cb87e4bfd88e70597f6877675762"
+    },
+    {
+      "path": "apps/mobile/src/utils/routeRegistry.ts",
+      "sha256": "36247c10d75f2e658ad36318b4f5662a7537e9dee345852fa6672540d135c09a"
+    },
+    {
+      "path": "apps/mobile/src/utils/safeNavigate.ts",
+      "sha256": "6822ae281c5aa6c55b8e61af5ba7bb9b54ee49fa96c6e3a4534bdeba07fac0fa"
+    },
+    {
+      "path": "apps/mobile/src/widgets/timetableChanges.ts",
+      "sha256": "617771eec8994dc65c8499217b4191bb8e8aa4bf55ddb8f6a169851702b3b8c1"
+    },
+    {
+      "path": "packages/shared/src/academicSections.ts",
+      "sha256": "dad79b325dad74d18f8c86ddd6105ef113602a8ca7d2e4af647b4f7b305e04df"
+    },
+    {
+      "path": "packages/shared/src/assistantExecution.ts",
+      "sha256": "206b20216d8aad8c8c5049514ba2d84a58dd5e2bbeb19e583cee175b150e762a"
+    },
+    {
+      "path": "packages/shared/src/assistantPermissions.ts",
+      "sha256": "22f14e600555a6e5167007b080d0914f8cbf3b2121c1f20f9a8eeeb5f31e960c"
+    },
+    {
+      "path": "packages/shared/src/auth.ts",
+      "sha256": "920ce4dfc7f50715ec05135219c477b92ab35831383075985b1f603f92ae05a9"
+    },
+    {
+      "path": "packages/shared/src/cafeteriaCatalog.ts",
+      "sha256": "dc4227149729515884d417c443a4df71615ac93d95b7cc0d3deee2f90f26dcba"
+    },
+    {
+      "path": "packages/shared/src/campusAnnouncementCatalog.ts",
+      "sha256": "640ed66d7139a195453546d89ae05778416b2bed3c0f2db2ffa51bbff23c6bc2"
+    },
+    {
+      "path": "packages/shared/src/campusAnnouncementQuality.ts",
+      "sha256": "078e0d6a92235ce7d50e1f32ece8ca38360c8a9f69a1b830111c74d164e032c7"
+    },
+    {
+      "path": "packages/shared/src/campusAnnouncements.ts",
+      "sha256": "51ccbac17d8ef41c0eaff81e4c71abd4609a251ae2f429f3f2db0961ef930c45"
+    },
+    {
+      "path": "packages/shared/src/campusGeo.ts",
+      "sha256": "7cae58606a2c6adaf32e6b469e35e55b113046273c949af3effde3e987d114e3"
+    },
+    {
+      "path": "packages/shared/src/companion/achievements.ts",
+      "sha256": "9d216d04026c9221502579052a0632971bd9b6848908185b1ce7ed9ea9243557"
+    },
+    {
+      "path": "packages/shared/src/companion/gardenEngine.ts",
+      "sha256": "834fc0232030163107c96cbf2d0c27ad4d068fa11da97b0e2b6806a53eb2a380"
+    },
+    {
+      "path": "packages/shared/src/companion/signalAggregator.ts",
+      "sha256": "e0251e4733b9ad56e120310d0a92e347501f73f81b19b81854b894c638440e83"
+    },
+    {
+      "path": "packages/shared/src/companion/spriteEngine.ts",
+      "sha256": "ccb956289c825963bd5cbcd4c9cc76b1ed024405931c352775860dd49e7cf9f5"
+    },
+    {
+      "path": "packages/shared/src/courseAccess.ts",
+      "sha256": "122c8a27fd23e2830bd07fda31283af0986783d5441a9af1e91237cb868780e0"
+    },
+    {
+      "path": "packages/shared/src/courseAccessClient.ts",
+      "sha256": "0d9a787076eff8800c884276eed0f8fdd3b44167dce1a6d55480454ac2e0589c"
+    },
+    {
+      "path": "packages/shared/src/courseCatalogCapability.ts",
+      "sha256": "1174fc88fb043a9920140aed84fb5a169359fcbfe1660d3c895666da59457d93"
+    },
+    {
+      "path": "packages/shared/src/creditAudit.ts",
+      "sha256": "8023f4f0d7f3f4c4ec05ad90776a14a74c8c4211f1db17287aa9128659bb0893"
+    },
+    {
+      "path": "packages/shared/src/devUniversalAccounts.ts",
+      "sha256": "84e9d118c3fd88d669d8fcc5c316ecf5a4e405e35279114117c2b8e0104c47c5"
+    },
+    {
+      "path": "packages/shared/src/foodPageCopy.ts",
+      "sha256": "f89ffae9ac8337565d160be72d2cd91a33309b94616818175d033b56fbd34914"
+    },
+    {
+      "path": "packages/shared/src/imports/aiDelimitedText.ts",
+      "sha256": "3db248514d57ed6705ea3fb1408cc92f37c63c0f3dc39962ab209a1129dbce08"
+    },
+    {
+      "path": "packages/shared/src/imports/aiRecognition.ts",
+      "sha256": "3a1920fe88ab82cdaed943c3bc876ee9b2f3def5d437f74ffa6c1464368e9b59"
+    },
+    {
+      "path": "packages/shared/src/imports/aiTableAudit.ts",
+      "sha256": "240113ea72b88f6da9028af25211da319d53a1325da2a4905a8b8f3932d6b6d1"
+    },
+    {
+      "path": "packages/shared/src/imports/backup.ts",
+      "sha256": "187e1b3e4bae6a5e2a478634766fcf5699d721ea702de121319d25e2e98dffcc"
+    },
+    {
+      "path": "packages/shared/src/imports/copy.ts",
+      "sha256": "f6a4d299ddff0abea25d453c7f1385810afbb8f04c83641009eee8a0bbff6e9b"
+    },
+    {
+      "path": "packages/shared/src/imports/csv.ts",
+      "sha256": "9a809a067c6e81a5e8853d70c66ae89ba788785683e48711f514eb74253eae8b"
+    },
+    {
+      "path": "packages/shared/src/imports/documents.ts",
+      "sha256": "f2aeb8e331fe9c985e6850da75f0e778739f586f9d14ed2ee4c3a2e1c324bef9"
+    },
+    {
+      "path": "packages/shared/src/imports/eventCalendar.ts",
+      "sha256": "4a87b6458d3a9d15986af28e8843d7542a18f4918a2a458c85caff7c699ffbc5"
+    },
+    {
+      "path": "packages/shared/src/imports/eventDraft.ts",
+      "sha256": "806b96cdd32bc661683a4c827e272f1c996d977482045cf900bcd373dbfd555e"
+    },
+    {
+      "path": "packages/shared/src/imports/icalendar.ts",
+      "sha256": "1c81182a82b30769594e3554cb7a2146a19c5ad39c75be7836ed7ab4458289bc"
+    },
+    {
+      "path": "packages/shared/src/imports/icalendarSerialization.ts",
+      "sha256": "7c75ee8a4d62c3ba80262be2d03bda80f91ed8c173ef5fa9c13f3b0a0caee725"
+    },
+    {
+      "path": "packages/shared/src/imports/index.ts",
+      "sha256": "94772c5cda46e98b9d11e83fbb2a2a3b24617d082758612c7a53c8e998525bf5"
+    },
+    {
+      "path": "packages/shared/src/imports/monthCalendar.ts",
+      "sha256": "b08c30b6b1844d6ca7070d3e5c9b08b264943e1ab0a4757ac4fcacddb4d941c8"
+    },
+    {
+      "path": "packages/shared/src/imports/nameFields.ts",
+      "sha256": "8e1f201df1fbbd3ced25822b4875988b51c042c5cfa24e072ea92cd505b77b29"
+    },
+    {
+      "path": "packages/shared/src/imports/numericEvidence.ts",
+      "sha256": "9a94c344f6b1ce72d4bcdcbe8ccc7d2a63f600269df3f00a5e0bf1e1d93fd7f3"
+    },
+    {
+      "path": "packages/shared/src/imports/parser.ts",
+      "sha256": "ae62957b9ca8fa9b86037b3096d89accb871fc11ffcce58d8602799de38720b7"
+    },
+    {
+      "path": "packages/shared/src/imports/records.ts",
+      "sha256": "cfdf52eedddcac89a30e9576a450b320a611b10afcda9042fc6cefbb9b3a48a7"
+    },
+    {
+      "path": "packages/shared/src/imports/schoolPageTables.ts",
+      "sha256": "867d0651104c074fc30e708865183d7aeb1bf9c6158a9cab5fb74790b924f7b1"
+    },
+    {
+      "path": "packages/shared/src/imports/sync.ts",
+      "sha256": "4a5c57feafd8ca717f4a8abcef4cd99ddb74309d1f4b4d6ccb1630b15884cdfc"
+    },
+    {
+      "path": "packages/shared/src/imports/today.ts",
+      "sha256": "c3382ef7bd02a3fe5d326d27f90345385fcd37c2be7857502b0e8803508570fb"
+    },
+    {
+      "path": "packages/shared/src/imports/types.ts",
+      "sha256": "522d73763171a1bfe0a8e6717bd33244ea48ad7ab6df5217d874e887bf7a3edd"
+    },
+    {
+      "path": "packages/shared/src/imports/validation.ts",
+      "sha256": "6a317a5022574e0b4a29101bb1f77fa419e5dadc5d5195c9fa6b9ffce276fbac"
+    },
+    {
+      "path": "packages/shared/src/index.ts",
+      "sha256": "342787c2e6144581cbfc94f536c9b33a2563176a891b57fd1efe4fcb103006e2"
+    },
+    {
+      "path": "packages/shared/src/lms/actionGraph.ts",
+      "sha256": "b1c192ed9494d2fb213916efbf42c2eb6d8e6263accc5c01c70b9948f02a0ef4"
+    },
+    {
+      "path": "packages/shared/src/lms/attendanceEngine.ts",
+      "sha256": "cbbb6f6f7671b0e6b23d6fa4e70e9b1580932bc73f8a6ae5e462b1c0022514c6"
+    },
+    {
+      "path": "packages/shared/src/lms/discussionEngine.ts",
+      "sha256": "885aab8ef77b8fe244d7e7e60b6c32a79ab3bbd85a27717f8c0bfaeccc58a9e0"
+    },
+    {
+      "path": "packages/shared/src/lms/feedbackDrafter.ts",
+      "sha256": "27c82b0d0503b54eeaba4686b588a6848d5eb5fc51e3f05bb7f512b05abde550"
+    },
+    {
+      "path": "packages/shared/src/lms/gradePredictor.ts",
+      "sha256": "73869dc5da0ce628a90fc6890f253b546d8cc80ebcc17ba369f47480d4e32777"
+    },
+    {
+      "path": "packages/shared/src/lms/gradebookCompute.ts",
+      "sha256": "d990b5002ac3fe5831ac580f69103296279836392603e72b36c7c633c9ac2ccd"
+    },
+    {
+      "path": "packages/shared/src/lms/mistakeRepertoire.ts",
+      "sha256": "5a70f332d971953498502f274b2fa8367751a2dddd3784bbbdadf4ed018785cd"
+    },
+    {
+      "path": "packages/shared/src/lms/notificationPlanner.ts",
+      "sha256": "8c6f83694c6e0afbfeea8f98f3100b0b655c42ff435e4d795c5aaeafc7c18596"
+    },
+    {
+      "path": "packages/shared/src/lms/questionBank.ts",
+      "sha256": "dc55d322d9c608f520f76ddf976b1e861378540e044223867ec6284f1845e2a4"
+    },
+    {
+      "path": "packages/shared/src/lms/quizScoring.ts",
+      "sha256": "774dd74f983305cf13a07d11e5f5d96705aeb84a731dc8bc8fbe0c8d3fcbcc72"
+    },
+    {
+      "path": "packages/shared/src/lms/riskRadar.ts",
+      "sha256": "c55016ed631c3a9d9f055269719aeff547d5cf0ee1fa04507317fd59f7a687c7"
+    },
+    {
+      "path": "packages/shared/src/lms/rubricScoring.ts",
+      "sha256": "e2bbfc1ba4c4f634b6f92a95e3a9c12a06a9d72854bf53c9df3d622439c17093"
+    },
+    {
+      "path": "packages/shared/src/lms/socraticCoach.ts",
+      "sha256": "a66b5cffd21943256794bf61197161d10df0d69b23094ff8cbc016190283cabe"
+    },
+    {
+      "path": "packages/shared/src/lms/studyPlanner.ts",
+      "sha256": "1d3e0ea7ff6cc0e78fe072ad2beb490fc0f3a42a575b0ee4805bb78049094371"
+    },
+    {
+      "path": "packages/shared/src/lms/tronclassAdapter.ts",
+      "sha256": "ccd21e4afb03f044fcf2423d00d2d4be1b9f3185e5bf41e13145777687a9c6d0"
+    },
+    {
+      "path": "packages/shared/src/lmsReviewQueue.ts",
+      "sha256": "abd7ddb9b78cef2cfe9f9101d9e0ace05ec3d7372f62f97c8cb1e7194fbef0fd"
+    },
+    {
+      "path": "packages/shared/src/loadFailureCopy.ts",
+      "sha256": "e1af67573f206f7b383fcbe81a2073419de16ac84f17ca0ede84a07e46a47267"
+    },
+    {
+      "path": "packages/shared/src/merchantMode.ts",
+      "sha256": "445ea7541b94fa5f365fcceb46f28b90fc93b3ec23b1e57a243122babc796b56"
+    },
+    {
+      "path": "packages/shared/src/notifications.ts",
+      "sha256": "d496fe58a05835b7615d20d55d37d74bafb3b3823ff1607e4f8c455688b9f0d5"
+    },
+    {
+      "path": "packages/shared/src/nuni.ts",
+      "sha256": "2671a3799789521c8f7306a4fdd6be3a3bb5459b67a5b76f502bacdf0619d224"
+    },
+    {
+      "path": "packages/shared/src/nuniStudyAgenda.ts",
+      "sha256": "8db3b3ce521ebd1f20d5f4ca4cc2513d72828e13674e81d6e2cf8a0f3942880e"
+    },
+    {
+      "path": "packages/shared/src/officialLibraries.ts",
+      "sha256": "0832efbd3e21f94a61475c45cb060a32a26803c218d17671b032a79cf6ec3e00"
+    },
+    {
+      "path": "packages/shared/src/pickNextAction.ts",
+      "sha256": "ed968a08945e435d8f31e89703a3faa8b7662a17ed92ebee323107f13835eb58"
+    },
+    {
+      "path": "packages/shared/src/postLoginRoles.ts",
+      "sha256": "60a8d55ca5b505c3511e530cf4e7fd81bfb4904db51aedf8d72ab3d2e83052b6"
+    },
+    {
+      "path": "packages/shared/src/providenceCampus.ts",
+      "sha256": "fe4ad4c36b7498d33dc80da5e9ab43188f793d28a210c92389e08c839f5ca36b"
+    },
+    {
+      "path": "packages/shared/src/puAuth.ts",
+      "sha256": "7ec65c247887c76cbb890d2a3f6f9d0e1a6f29c00fff3dab117b6bf19888bbcd"
+    },
+    {
+      "path": "packages/shared/src/puGradRequirements.ts",
+      "sha256": "13458990476966d5c4ea222471146413927dc5861c7d67384e0ea50c238ec77e"
+    },
+    {
+      "path": "packages/shared/src/puLmsReadonly.ts",
+      "sha256": "651fe16dcb6291cd35ac6d7457ad589e198a47293f3f98a58a75391a7f7dd4de"
+    },
+    {
+      "path": "packages/shared/src/publicDiningCatalog.ts",
+      "sha256": "84639a8745c29aeed3dc60ca0d307e2adbb86bff8cd325b5c4b3024eba11ee35"
+    },
+    {
+      "path": "packages/shared/src/release.ts",
+      "sha256": "4aa32d2f35c325eceac12e289d18f6ca6b8d021a49ef2091a41a0811ba99b729"
+    },
+    {
+      "path": "packages/shared/src/roles.ts",
+      "sha256": "e21400a320be92b1fa7475e632d7415b1d2caf6c07bd9e8548eff7d91fd142c1"
+    },
+    {
+      "path": "packages/shared/src/schoolAssistantIdentity.ts",
+      "sha256": "46e8400cac9343b277dd0b49262fcf3f1848a686f5fde681559e2fe3238426af"
+    },
+    {
+      "path": "packages/shared/src/schoolIds.ts",
+      "sha256": "93a79f00640c4b14d69c33815ee79ecd96a3ecd2b190504945f65b41c320a8c7"
+    },
+    {
+      "path": "packages/shared/src/schoolLogin.ts",
+      "sha256": "2af761f32854aa9727d64bd32144893211d15fe133cb12a81e356a1695f98251"
+    },
+    {
+      "path": "packages/shared/src/schoolPublicServices.ts",
+      "sha256": "e9ed0aa496a9e48e0325c3a9b2a030891f7291d4dac0757760cccdef5d1d795f"
+    },
+    {
+      "path": "packages/shared/src/schools.ts",
+      "sha256": "8af6d5ed706c440971af015dee53b6772777e28f37711b0a93f8abf0f355dd20"
+    },
+    {
+      "path": "packages/shared/src/signedInSocialReads.ts",
+      "sha256": "913317691538a694aca290b4396096138cc0967a59805050b3ad401b602d39e5"
+    },
+    {
+      "path": "packages/shared/src/taipeiTime.ts",
+      "sha256": "ca42a0d67f7a0d4e8db7ee5632055df9b50e3ae2f0d8b3a61ff7abca6d2fee76"
+    },
+    {
+      "path": "packages/shared/src/tenant.ts",
+      "sha256": "2405da9da7126320de7232812a00d0374cc2a22b4c9eb139e7f3403d5a37bb4c"
+    },
+    {
+      "path": "packages/shared/src/timetable/appeals.ts",
+      "sha256": "31512e2b151bd910e2f0dd02086b1b91b3537a1f10a6b40dc3ec3ae997969347"
+    },
+    {
+      "path": "packages/shared/src/timetable/classExceptions.ts",
+      "sha256": "85dbaaeb42999fc84005b8ea8506fd92b37f2c9accaa1d7ed186a082f80ec1d0"
+    },
+    {
+      "path": "packages/shared/src/timetable/classroomCourseQuery.ts",
+      "sha256": "8d00a77a0c3d21e8494be4084fdb3e309af59abb31bca6caf6e88c80693c3ae8"
+    },
+    {
+      "path": "packages/shared/src/timetable/course.ts",
+      "sha256": "c127a63728add6e6c75687cc94d66f3b9ad36725c6053a5c0bf0f052e21fd64d"
+    },
+    {
+      "path": "packages/shared/src/timetable/friendResend.ts",
+      "sha256": "68e3b04d2554f099c5669ba2b3fcc18977daaf881012a4354f769363582b3498"
+    },
+    {
+      "path": "packages/shared/src/timetable/importDraft.ts",
+      "sha256": "55077c381714cc5aaa538e54160df04ca565ef3fc99c00788801097bcbc8e39f"
+    },
+    {
+      "path": "packages/shared/src/timetable/index.ts",
+      "sha256": "7748fdc219f9d3c4c56b3351e3c8765fc1c255ecb418544eb160ca8e01ea02af"
+    },
+    {
+      "path": "packages/shared/src/timetable/meetup.ts",
+      "sha256": "a048217e859eedfce0797b97eeeaaef82dd85e4814291e3d0273701dd38874ef"
+    },
+    {
+      "path": "packages/shared/src/timetable/periods.ts",
+      "sha256": "58b5dc858c0b7172687c2b2635720f06852dbd3a281f5345c14b6a67cb1dc833"
+    },
+    {
+      "path": "packages/shared/src/timetable/planner.ts",
+      "sha256": "26ffae3ad617fc732cb7aef22ee5eef7160bb003c7d55d5575b949e8142dd0f3"
+    },
+    {
+      "path": "packages/shared/src/timetable/schoolPeriods.ts",
+      "sha256": "f37202b6ccbc2eafa915a8e1b8debade6186a61d1878a49b91bdfd243ca017f3"
+    },
+    {
+      "path": "packages/shared/src/timetable/shareCodec.ts",
+      "sha256": "ee62921af159a5626c67d208b446a436d2002a2448fd8c7a21962b022ba463c0"
+    },
+    {
+      "path": "packages/shared/src/timetable/shareCopy.ts",
+      "sha256": "2c3233873661ea9a33516a39ce80fed82f5e77d9abc5f4a7b03d4ae7def908bb"
+    },
+    {
+      "path": "packages/shared/src/timetable/textImport.ts",
+      "sha256": "a84e1ecb2b48d01bd9d613e0093c9dc60573aaacfdf492a8c3df42e50a67c509"
+    },
+    {
+      "path": "packages/shared/src/todaySense.ts",
+      "sha256": "cc017369a9af9197c5529d000734ddb2489fc03ba422fdf5e5126fb0041aba55"
+    },
+    {
+      "path": "packages/shared/src/todaySenseAgent.ts",
+      "sha256": "6d63d3ac38b50c15b0e21b646fa7a1b991d8d749a479f2ca3022722c5795c325"
+    },
+    {
+      "path": "packages/shared/src/wakeAwareRequest.ts",
+      "sha256": "71529577fe4466fcf8ffd38f9c3c003eeabe7a752b6e0c456dfef7655478aeb8"
+    },
+    {
+      "path": "scripts/docs-preview/build.mjs",
+      "sha256": "cfa57d64a37a9b5ba4d1ddc43ae99a1b7ecb240f53b283d3ed7727bb77801d41"
+    },
+    {
+      "path": "scripts/docs-preview/fixture.tsx",
+      "sha256": "6197e1d836157fa2309865971c6041ff885800d738c2424ec47b92726259cc0c"
+    },
+    {
+      "path": "scripts/qa/saved-campus-plans/fixture.tsx",
+      "sha256": "1f8355dcb8b595b9d88c8a8f6a17d8183348d7cd9613989635c22504a84dd8ad"
+    }
+  ],
+  "builtAt": "2026-11-08T15:25:22.751Z",
+  "fixtureClock": "2026-11-08T02:00:00.000Z",
+  "dependencies": {
+    "esbuild": "0.28.2",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native-web": "0.21.2"
+  },
+  "sourceComponents": [
+    "CampusEvidencePlanCard",
+    "CampusStudyAgendaCard",
+    "SavedCampusPlansPanel",
+    "NuniStudyPlanActions",
+    "NuniPlanAssignmentOpenButton",
+    "NuniCourseworkStudyAction",
+    "AICard",
+    "AIButton"
+  ],
+  "sourceDirectories": ["apps/mobile/src", "packages/shared/src"],
+  "stubs": [
+    "Ionicons omitted, as in existing QA fixture",
+    "Safe area insets zero, as in existing QA fixture",
+    "Unused native reminder/assignment leaves throw",
+    "AsyncStorage isolated in-memory Map",
+    "Firebase initialization and APIs disabled",
+    "Synthetic platform account/source/current flags",
+    "Injected exact-target readers return unavailable; navigation only records events",
+    "Date.now fixed to fixtureClock"
+  ],
+  "untouched": "Presentation uses application components and current shared-package source without editing them. See sourceDirty and sourceHashes for the exact input state.",
+  "verification": "Build only. Browser inspection is separate. Does not certify login, platform data, native rendering, writes or integration."
+}

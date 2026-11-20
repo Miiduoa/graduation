@@ -1,0 +1,311 @@
+'use client';
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
+import {
+  NuniError,
+  nuniRecord,
+  parseNuniPrincipal,
+  type NuniPrincipal,
+} from '@campus/shared/src/nuni';
+import { WAKE_REQUEST_TIMEOUT_MS } from '@campus/shared/src/wakeAwareRequest';
+
+type Session = NuniPrincipal & { context: string; assignmentFileSubmit?: boolean };
+type SessionState = {
+  session: Session | null;
+  loading: boolean;
+  error: string;
+  pendingLogout: boolean;
+};
+type Auth = SessionState & { refresh: () => Promise<void>; logout: () => Promise<void> };
+const initialSessionState: SessionState = {
+  session: null,
+  loading: true,
+  error: '',
+  pendingLogout: false,
+};
+
+function createSessionStore(initialState: SessionState) {
+  let state = initialState;
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => state,
+    // Delayed Suspense under CampusProviders must hydrate against this loading snapshot.
+    getServerSnapshot: () => initialState,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    setState: (next: SessionState | ((previous: SessionState) => SessionState)) => {
+      state = typeof next === 'function' ? next(state) : next;
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
+
+type SessionStore = ReturnType<typeof createSessionStore>;
+const Context = createContext<{
+  store: SessionStore;
+  refresh: Auth['refresh'];
+  logout: Auth['logout'];
+} | null>(null);
+const LOGOUT_KEY = 'campus-one.nuni.logout-pending';
+const CHANGE_KEY = 'campus-one.nuni.session-change';
+// The BFF allows one upstream wake retry; leave five seconds for the browser/BFF round trip.
+const READ_REQUEST_TIMEOUT_MS = WAKE_REQUEST_TIMEOUT_MS * 2 + 5000;
+
+export async function browserUpload(
+  path: string,
+  context: string,
+  body: Blob,
+  contentType: string,
+): Promise<unknown> {
+  if (!/^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*$/.test(path)) throw new NuniError(400, 'INVALID_REQUEST');
+  const response = await fetch(`/api/nuni/${path}`, {
+    method: 'PUT',
+    cache: 'no-store',
+    credentials: 'same-origin',
+    redirect: 'error',
+    signal: AbortSignal.timeout(60000),
+    headers: {
+      'X-Campus-Session': context,
+      'Content-Type': contentType,
+    },
+    body,
+  });
+  if (!response.ok) {
+    let code = 'REQUEST_FAILED';
+    try {
+      const value = nuniRecord(await response.json());
+      if (typeof value.error === 'string') code = value.error;
+    } catch {}
+    throw new NuniError(response.status, code);
+  }
+  return response.json() as Promise<unknown>;
+}
+
+export async function browserRequest(
+  path: string,
+  context?: string,
+  input?: Record<string, unknown>,
+  method?: 'GET' | 'POST' | 'PUT',
+  query?: Record<string, string>,
+): Promise<unknown> {
+  const verb = method ?? (input !== undefined ? 'POST' : 'GET');
+  if (
+    !/^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*$/.test(path) ||
+    (query &&
+      (verb !== 'GET' ||
+        input !== undefined ||
+        Object.keys(query).length > 10 ||
+        Object.entries(query).some(
+          ([key, value]) =>
+            !/^[A-Za-z][A-Za-z0-9]{0,31}$/.test(key) ||
+            typeof value !== 'string' ||
+            value.length > 500,
+        )))
+  )
+    throw new NuniError(400, 'INVALID_REQUEST');
+  const search = new URLSearchParams(query).toString();
+  const sendJson = verb !== 'GET';
+  const response = await fetch(`/api/nuni/${path}${search ? `?${search}` : ''}`, {
+    method: verb,
+    cache: 'no-store',
+    credentials: 'same-origin',
+    redirect: 'error',
+    signal: AbortSignal.timeout(verb === 'GET' ? READ_REQUEST_TIMEOUT_MS : 12000),
+    headers: {
+      ...(context ? { 'X-Campus-Session': context } : {}),
+      ...(sendJson ? { 'Content-Type': 'application/json' } : {}),
+    },
+    ...(sendJson ? { body: JSON.stringify(input ?? {}) } : {}),
+  });
+  if (!response.ok) {
+    let code = 'REQUEST_FAILED';
+    try {
+      const value = nuniRecord(await response.json());
+      if (typeof value.error === 'string') code = value.error;
+    } catch {}
+    throw new NuniError(response.status, code);
+  }
+  return response.json() as Promise<unknown>;
+}
+
+function pendingContext(): string | null {
+  try {
+    return localStorage.getItem(LOGOUT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function announce(context: string | null): void {
+  try {
+    if (context) localStorage.setItem(LOGOUT_KEY, context);
+    else localStorage.removeItem(LOGOUT_KEY);
+    localStorage.setItem(CHANGE_KEY, crypto.randomUUID());
+  } catch {}
+}
+
+export function NuniSessionProvider({ children }: { children: ReactNode }) {
+  const [store] = useState(() => createSessionStore(initialSessionState));
+  const { setState } = store;
+  const generation = useRef(0);
+  const logoutActive = useRef(false);
+  const currentContext = useRef<string | null>(null);
+  const refresh = useCallback(async () => {
+    if (logoutActive.current) return;
+    const run = ++generation.current;
+    setState((previous) => ({
+      session: pendingContext() ? null : previous.session,
+      loading: true,
+      error: '',
+      pendingLogout: !!pendingContext(),
+    }));
+    try {
+      const result = nuniRecord(await browserRequest('session'));
+      if (run !== generation.current) return;
+      const context =
+        typeof result.context === 'string' && /^[A-Za-z0-9_-]{43}$/.test(result.context)
+          ? result.context
+          : null;
+      currentContext.current = context;
+      const storedContext = pendingContext();
+      if (storedContext && context && storedContext !== context) announce(null);
+      const pending =
+        result.pendingLogout === true || (!!storedContext && storedContext === context);
+      if (pending && result.authenticated === false && result.pendingLogout !== true) {
+        announce(null);
+        setState({ session: null, loading: false, error: '', pendingLogout: false });
+      } else if (pending) {
+        setState({
+          session: null,
+          loading: false,
+          error: '登出尚未完成，請重試以結束這次登入。',
+          pendingLogout: true,
+        });
+      } else if (result.authenticated === false) {
+        if (storedContext) announce(null);
+        setState({ session: null, loading: false, error: '', pendingLogout: false });
+      } else {
+        if (typeof result.context !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(result.context))
+          throw new NuniError(502, 'INVALID_RESPONSE');
+        setState({
+          session: {
+            ...parseNuniPrincipal(result),
+            context: result.context,
+            assignmentFileSubmit: result.assignmentFileSubmit === true,
+          },
+          loading: false,
+          error: '',
+          pendingLogout: false,
+        });
+      }
+    } catch {
+      if (run === generation.current)
+        setState({
+          session: null,
+          loading: false,
+          error: '無法確認登入狀態，請重新連線後再試。',
+          pendingLogout: !!pendingContext(),
+        });
+    }
+  }, [setState]);
+  const logout = useCallback(async () => {
+    if (logoutActive.current) return;
+    const expectedContext = currentContext.current || pendingContext();
+    if (!expectedContext) return;
+    logoutActive.current = true;
+    ++generation.current;
+    announce(expectedContext);
+    setState({ session: null, loading: true, error: '', pendingLogout: true });
+    try {
+      const result = nuniRecord(await browserRequest('session'));
+      if (result.authenticated === true || result.pendingLogout === true) {
+        if (typeof result.context !== 'string') throw new NuniError(502, 'INVALID_RESPONSE');
+        if (result.context !== expectedContext) throw new NuniError(409, 'SESSION_CHANGED');
+        await browserRequest('logout', expectedContext, {});
+      }
+      announce(null);
+      currentContext.current = null;
+      setState({ session: null, loading: false, error: '', pendingLogout: false });
+    } catch (failure) {
+      if (failure instanceof NuniError && failure.code === 'SESSION_CHANGED') {
+        announce(null);
+        currentContext.current = null;
+        setState({
+          session: null,
+          loading: false,
+          error: '帳號已變更，請重新確認登入狀態。',
+          pendingLogout: false,
+        });
+        return;
+      }
+      setState({
+        session: null,
+        loading: false,
+        error: '登出尚未完成，請重試以結束這次登入。',
+        pendingLogout: true,
+      });
+    } finally {
+      logoutActive.current = false;
+    }
+  }, [setState]);
+  useEffect(() => {
+    void refresh();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === CHANGE_KEY || event.key === LOGOUT_KEY) void refresh();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('pageshow', refresh);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      ++generation.current;
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('pageshow', refresh);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [refresh]);
+  const value = useMemo(() => ({ store, refresh, logout }), [store, refresh, logout]);
+  return <Context.Provider value={value}>{children}</Context.Provider>;
+}
+
+const absentStore = createSessionStore({
+  session: null,
+  loading: false,
+  error: '',
+  pendingLogout: false,
+});
+
+function useSessionState(store: SessionStore) {
+  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getServerSnapshot);
+}
+
+/** 沒有 NuniSessionProvider 時回傳 null（例如單獨測試頁面）。 */
+export function useOptionalNuniSession() {
+  const value = useContext(Context);
+  const state = useSessionState(value?.store ?? absentStore);
+  if (!value) return null;
+  return { ...state, refresh: value.refresh, logout: value.logout };
+}
+
+export function useNuniSession() {
+  const value = useContext(Context);
+  if (!value) throw new Error('NuniSessionProvider is required');
+  const state = useSessionState(value.store);
+  return { ...state, refresh: value.refresh, logout: value.logout };
+}

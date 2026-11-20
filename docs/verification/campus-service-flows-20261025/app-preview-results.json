@@ -1,0 +1,18 @@
+{
+  "checks": [
+    "announcements-390-light",
+    "announcement-search-and-result-navigation",
+    "announcement-empty-filter-reset",
+    "events-390-light",
+    "ongoing-event-filter",
+    "unknown-end-remains-started",
+    "event-multifield-search",
+    "announcements-320-oled",
+    "announcements-320-oled-200-percent-text",
+    "events-320-oled",
+    "events-320-oled-200-percent-text"
+  ],
+  "passed": 11,
+  "pageErrors": [],
+  "scope": "Real React Native Web screen components with local public-content fixtures; 200% text is browser simulation, not native device validation."
+}

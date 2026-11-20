@@ -1,0 +1,224 @@
+import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { School } from '@campus/shared/src';
+import { getPublicSchoolInfo } from '@campus/shared/src/publicSchoolInfo';
+import { findSchoolById, findSchoolsByCode, normalizeSchoolCode } from '@campus/shared/src/schools';
+import { clearCacheExceptSchool } from '../data/cachedSource';
+import { setHybridSourceSchoolContext } from '../data/hybridSource';
+import { applySchoolTheme, clearSchoolTheme, registerSchoolTheme } from '../ui/theme';
+
+export type SchoolSelection = {
+  code: string;
+  schoolId: string | null;
+  schoolName?: string | null;
+  shortName?: string | null;
+  themeColor?: string | null;
+  domains?: string[] | null;
+};
+
+export type SchoolContextValue = {
+  selectionReady: boolean;
+  selection: SchoolSelection;
+  setSelection: (next: Partial<SchoolSelection>) => void;
+  school: School;
+  schoolId: string | null;
+};
+
+const SchoolContext = createContext<SchoolContextValue | null>(null);
+
+const STORAGE_KEY = 'campus.schoolSelection.v1';
+
+// Presentation only. An empty ID cannot identify a data source.
+const noSchool: School = { id: '', code: '', name: '尚未選校' };
+
+function toSelection(school: School): SchoolSelection {
+  return {
+    code: normalizeSchoolCode(school.code),
+    schoolId: school.id,
+    schoolName: school.name,
+    shortName: school.shortName ?? null,
+    themeColor: school.themeColor ?? null,
+    domains: school.domains ?? null,
+  };
+}
+
+export function schoolFromSelection(selection: Partial<SchoolSelection>): School {
+  if ((selection.schoolId != null && typeof selection.schoolId !== 'string') ||
+      (selection.code != null && typeof selection.code !== 'string')) return noSchool;
+  const byId = findSchoolById(selection.schoolId);
+  if (byId) return byId;
+  const id = selection.schoolId?.trim();
+  if (id && /^(?:all|unknown)$/i.test(id)) return noSchool;
+  if (id && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(id)) {
+    // The public directory can introduce schools before the bundled legacy catalog is updated.
+    // Preserve their identity instead of silently rendering another institution's data.
+    const chosenCode = normalizeSchoolCode(selection.code);
+    const codeOwner = findSchoolsByCode(chosenCode);
+    const code =
+      /^[A-Z0-9_-]{1,120}$/.test(chosenCode) &&
+      !(codeOwner.length === 1 && codeOwner[0].id !== id)
+        ? chosenCode
+        : id.toUpperCase();
+    const official = getPublicSchoolInfo(id);
+    const name = official?.name ?? (typeof selection.schoolName === 'string' ? selection.schoolName.trim() : '');
+    const shortName = typeof selection.shortName === 'string' ? selection.shortName.trim() : '';
+    const color = typeof selection.themeColor === 'string' ? selection.themeColor : '';
+    return {
+      id,
+      code,
+      name: name.slice(0, 160) || `所選校園（${id}）`,
+      shortName: shortName.slice(0, 80) || undefined,
+      themeColor: /^#[0-9a-fA-F]{6}$/.test(color) ? color : undefined,
+      // Browsing metadata is not evidence of an authorized email domain.
+    };
+  }
+  const matches = findSchoolsByCode(selection.code);
+  return !id && matches.length === 1 ? matches[0] : noSchool;
+}
+
+function normalizeSelection(selection: Partial<SchoolSelection>): SchoolSelection {
+  const school = schoolFromSelection(selection);
+  return school.id ? toSelection(school) : { code: '', schoolId: null };
+}
+
+export function SchoolProvider(props: {
+  children: React.ReactNode;
+  initial?: Partial<SchoolSelection>;
+}) {
+  const [selection, setSelectionState] = useState<SchoolSelection>(() => normalizeSelection(props.initial ?? {}));
+  const [loaded, setLoaded] = useState(false);
+  // Any user-initiated selection takes priority over an earlier pending storage read.
+  const selectionRevision = useRef(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const startingRevision = selectionRevision.current;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as Partial<SchoolSelection>;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+        if (cancelled || selectionRevision.current !== startingRevision) return;
+        const restored = normalizeSelection(parsed);
+        setSelectionState((current) => selectionRevision.current === startingRevision ? restored : current);
+      } catch {
+        // ignore invalid persisted state
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const previousSchoolRef = useRef<string | null>(null);
+
+  const setSelection = (next: Partial<SchoolSelection>) => {
+    // Never let the initialization read overwrite a campus chosen while it was pending.
+    selectionRevision.current += 1;
+    setSelectionState((prev) => {
+      const identityChanged = next.code !== undefined || next.schoolId !== undefined;
+      const code = next.code != null ? normalizeSchoolCode(next.code) : next.schoolId === null ? '' : prev.code;
+      const schoolId = next.schoolId === undefined
+        ? next.code === undefined
+          ? prev.schoolId
+          : null
+        : next.schoolId;
+      const schoolName =
+        next.schoolName === undefined
+          ? identityChanged
+            ? null
+            : (prev.schoolName ?? null)
+          : next.schoolName;
+      const shortName =
+        next.shortName === undefined
+          ? identityChanged
+            ? null
+            : (prev.shortName ?? null)
+          : next.shortName;
+      const themeColor =
+        next.themeColor === undefined
+          ? identityChanged
+            ? null
+            : (prev.themeColor ?? null)
+          : next.themeColor;
+      const domains =
+        next.domains === undefined
+          ? identityChanged
+            ? null
+            : (prev.domains ?? null)
+          : next.domains;
+
+      return normalizeSelection({ code, schoolId, schoolName, shortName, themeColor, domains });
+    });
+  };
+
+  useEffect(() => {
+    if (!loaded) return;
+
+    const currentSchoolKey = selection.schoolId;
+    const previousSchoolKey = previousSchoolRef.current;
+
+    if (currentSchoolKey && previousSchoolKey && previousSchoolKey !== currentSchoolKey) {
+      clearCacheExceptSchool(currentSchoolKey).catch((error) => {
+        console.warn('Failed to clear cache on school switch:', error);
+      });
+    }
+
+    previousSchoolRef.current = currentSchoolKey;
+    if (currentSchoolKey) {
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(selection)).catch(() => void 0);
+    } else if (selectionRevision.current > 0) {
+      AsyncStorage.removeItem(STORAGE_KEY).catch(() => void 0);
+    }
+  }, [loaded, selection]);
+
+  const school = useMemo(() => schoolFromSelection(selection), [selection]);
+
+  useLayoutEffect(() => {
+    setHybridSourceSchoolContext(loaded ? selection.schoolId : null);
+    return () => { setHybridSourceSchoolContext(null); };
+  }, [loaded, selection.schoolId]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    if (!selection.schoolId) {
+      clearSchoolTheme();
+      return;
+    }
+    if (school.themeColor) {
+      registerSchoolTheme({
+        schoolId: school.id,
+        accent: school.themeColor,
+      });
+    }
+
+    applySchoolTheme(school.id, school.themeColor);
+  }, [loaded, school, selection.schoolId]);
+
+  const value: SchoolContextValue = useMemo(
+    () => ({
+      selectionReady: loaded,
+      selection,
+      setSelection,
+      school,
+      schoolId: selection.schoolId,
+    }),
+    [loaded, selection, school],
+  );
+
+  return <SchoolContext.Provider value={value}>{props.children}</SchoolContext.Provider>;
+}
+
+export function useSchool() {
+  const ctx = useOptionalSchool();
+  if (!ctx) throw new Error('useSchool must be used within SchoolProvider');
+  return ctx;
+}
+
+export function useOptionalSchool() {
+  return useContext(SchoolContext);
+}

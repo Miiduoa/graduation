@@ -1,0 +1,344 @@
+
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>
+        E校園服務網            </title>
+    <link rel="stylesheet" href="../_inc/bootstrap-4.0.0/css/bootstrap.min.css">
+    <link rel="stylesheet" href="../_inc/bootstrap-4.0.0/css/bootstrap_v3_color.css">
+    <link rel="stylesheet" href="../_inc/bootstrap-4.0.0/css/fontawesome-all-5.0.13.min.css">
+
+    <!--[if lt IE 9]>
+<script src="../_inc/html5shiv.min.js"></script>
+<script src="../_inc/respond.min.js"></script>
+<![endif]-->
+    <!--[if lt IE 10]>
+<script type="text/javascript">
+    if(confirm('您使用的IE瀏覽器版本過舊，\n為確保系統正常執行且取得更安全的瀏覽環境，\n建議使用chrome或fireFox瀏覽器，\n或立即更新您瀏覽器的版本，現在立即前往下載頁面?')){document.location.href='http://windows.microsoft.com/zh-TW/internet-explorer/downloads/ie';}
+</script>
+<![endif]-->
+    <script src="../_inc/bootstrap-4.0.0/js/jquery-3.3.1.min.js"></script>
+    <script src="../_inc/bootstrap-4.0.0/js/jquery-migrate-3.0.1.min.js"></script>
+    <script src="../_inc/bootstrap-4.0.0/js/popper-1.12.9.min.js"></script>
+    <script src="../_inc/bootstrap-4.0.0/js/bootstrap.min.js"></script>
+    <script src="../_inc/bootstrap-4.0.0/js/jquery-ui-1.12.1.min.js"></script>
+    <script src="../_inc/bootstrap-4.0.0/js/jquery.form-4.2.2.min.js"></script>
+    <script src="../_inc/bootstrap-4.0.0/js/jquery.validate-1.17.0.min.js" type="text/javascript"></script>
+    <script src="../_inc/bootstrap-4.0.0/js/jquery.metadata-2.0.0.js"></script>
+    <style type="text/css">
+
+        #bigPic {
+            background-image: url('images/header.png');
+            background-repeat: no-repeat;
+            background-position: top left;
+            height: 145px;
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+    <nav class="navbar navbar-expand-md navbar-dark bg-dark container-fluid fixed-top">
+        <div class="container">
+
+            <div class="col-sm-2">
+                <div class="navbar-brand">
+                    <img src="./_inc/bootstrap-4.0.0/img/pulogo_light.png" width="160" height="43" alt="" class="align-bottom mr-1">
+                    E校園服務網                                    </div>
+
+            </div>
+            <div class="col-sm-10">
+
+                <form class="form-row form-inline mt-2 d-flex justify-content-end align-items-center" target="_self" action="index_check.php" enctype="application/x-www-form-urlencoded" method="POST">
+                    <div class="input-group  input-group-sm m-1">
+                        <input type="hidden" name="en_flag" value="zh">
+                        <div class="input-group-prepend">
+                            <span class="input-group-text" id="userName"><i class="fas fa-user"></i></span>
+                        </div>
+                        <input type="text" class="form-control" placeholder="帳號" aria-label="userName" aria-describedby="userName" name="uid">
+                    </div>
+
+                    <div class="input-group input-group-sm m-1">
+
+
+
+
+                        <div class="input-group-prepend">
+                            <div class="input-group-text" id="userPwd">
+                                <span id="icon_click" class="fas fa-eye"></span>
+                            </div>
+                        </div>
+                        <input type="password" class="form-control"  id="pass" placeholder="密碼" aria-label="userPwd" aria-describedby="userPwd" name="upassword" autocomplete="off">
+                        <div class="input-group-append">
+                            <button class="btn btn-primary" type="submit">登入</button>
+                        </div>
+                    </div>
+                    <div class="input-group input-group-sm m-1">
+                        <a href="https://www.pu.edu.tw/" class="btn btn-primary btn-sm ">靜宜校首頁</a>
+                    </div>
+                </form>
+
+            </div>
+
+        </div>
+    </nav>
+
+         <!-- 系統維護公告 -->
+    <div class="container mt-auto pt-4">
+        <div id="bigPic"></div>
+
+        <!--公告區塊-->
+        
+        <!--登入表單-->
+        <div id="accordion" class="list-group">
+
+            <!--公開區-->
+            <div class="card">
+                <div class="btn btn-link card-header list-group-item list-group-item-action list-group-item-secondary " id="H-public" aria-controls="B-public" aria-expanded="true" data-target="#B-public" data-toggle="collapse">
+                    <h4 class="mb-0 float-left"><i class="fas fa-star"></i>公眾項目</h4>
+                    <a href="/index.php?lang=en" target="_self" class="btn btn-outline-info btn-sm ml-1 float-right">English</a>
+                    <a href="/index.php" target="_self" class="btn btn-outline-info btn-sm ml-1 float-right">中文</a>
+
+
+                </div>
+                <div id="B-public" class="show" aria-labelledby="H-public" data-parent="#accordion">
+                    <div class="card-body">
+
+                        <ul class="row list-unstyled " >                            <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_blank" href="
+                        https://outlook.office.com/mail/">
+                                    O365電子郵件(學生/教職員)</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_blank" href="
+                        https://webmail.pu.edu.tw">
+                                    靜宜電子郵件(Webmail)</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_blank" href="
+                        https://mypu.pu.edu.tw/Framework/Identity/password_update">
+                                    密碼修改</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_blank" href="
+                        https://webmail.pu.edu.tw/passwordForgotForm.do">
+                                    忘記密碼</a>
+                            </ul>
+                        </ul><ul class="row list-unstyled " >                            <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_blank" href="
+                        https://oits.pu.edu.tw/p/426-1002-3.php?Lang=zh-tw">
+                                    新生帳號查詢</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_blank" href="
+                        https://mypu.pu.edu.tw/Framework/Identity/activate">
+                                    靜宜帳號(啟用)</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_blank" href="
+                        https://mypu.pu.edu.tw/Framework/Identity/activate/employee">
+                                    教職員帳號啟用</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_self" href="
+                        index_ToNewPlt.php?sysID=acc">
+                                    學雜費繳費單查詢及列印</a>
+                            </ul>
+                        </ul><ul class="row list-unstyled " >                            <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_self" href="
+                        index_ToNewPlt.php?sysID=acc_payparent">
+                                    學雜費繳費證明列印</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_self" href="
+                        index_ToNewPlt.php?sysID=outside_choice2">
+                                    外校生校際選課系統</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_self" href="
+                        index_ToNewPlt.php?sysID=courseMap">
+                                    各系課程地圖</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_blank" href="
+                        https://tronclass.pu.edu.tw/">
+                                    玩課雲(WOW Class)</a>
+                            </ul>
+                        </ul><ul class="row list-unstyled " >                            <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_blank" href="
+                        https://km.pu.edu.tw/">
+                                    知識管理系統(KM)</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_self" href="
+                        choice/q_person.php">
+                                    修課人數查詢</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_self" href="
+                        guest_entry/login.php">
+                                    校外訪客登記</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_blank" href="
+                        https://eaps-1-114.pu.edu.tw/Letter/">
+                                    郵件招領查詢</a>
+                            </ul>
+                        </ul><ul class="row list-unstyled " >                            <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_blank" href="
+                        https://mypu.pu.edu.tw/Framework/Others/popularedu/index.php/Welcome/">
+                                    推廣教育課程線上報名系統</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_self" href="
+                        index_ToNewPlt.php?sysID=offQuery">
+                                    教師補(調)課資料查詢</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_blank" href="
+                        https://dorac.pu.edu.tw/p/412-1059-2487.php?Lang=zh-tw">
+                                    暑修專區</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_blank" href="
+                        https://library.pu.edu.tw/p/426-1054-22.php?Lang=zh-tw">
+                                    語言學習資源網</a>
+                            </ul>
+                        </ul><ul class="row list-unstyled " >                            <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_self" href="
+                        index_ToNewPlt.php?sysID=application_Pjobs">
+                                    徵才快訊</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_self" href="
+                        index_ToNewPlt.php?sysID=CourseCatalogSys">
+                                    課程綱要查詢系統</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_self" href="
+                        index_ToNewPlt.php?sysID=Course_Structure_Graph">
+                                    課程架構圖</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_self" href="
+                        abstract_new/query_main.php">
+                                    選課手冊暨課程綱要查詢(972以前)</a>
+                            </ul>
+                        </ul><ul class="row list-unstyled " >                            <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_self" href="
+                        index_ToNewPlt.php?sysID=grants_query">
+                                    獎助學金查詢系統</a>
+                            </ul>
+                                                    <ul class="col-md-3 py-1">
+                                <i class="fas fa-angle-right"></i>
+                                <a target="_self" href="
+                        2009programarea/index.php">
+                                    學程專區</a>
+                            </ul>
+                        </ul>
+                    </div>
+                </div>
+            </div><!--card-->
+
+
+        </div><!--accordion-->
+
+    </div><!--main container-->
+    <!--main container-->
+
+    <footer class="container">
+        <hr>
+        <div class="row text-muted ">
+            <div class="col-6 text-right">Copyright © 資訊處. All rights reserved. </div>
+            <div class="col-6 text-left">
+                <a href="https://alcat.pu.edu.tw/kmOpenLink.php?documentId=23135" target="_blank">[靜宜大學隱私權聲明]</a>
+                <a href="https://www.pu.edu.tw/">[靜宜校首頁]</a>
+            </div>
+        </div>
+        <div class="row">
+            <div class="text-right col-4">
+                靜宜校園新生活
+                <a href="https://play.google.com/store/apps/details?id=com.fet.puapp.dev&hl=zh_TW"><img src="qr_newSand.png" width="100" height="100" alt="" class="m-1" /></a>
+                <a href="https://apps.apple.com/tw/app/%E9%9D%9C%E5%AE%9C%E6%A0%A1%E5%9C%92%E6%96%B0%E7%94%9F%E6%B4%BB/id6738946283"><img src="qr_newSapl.png" width="105" height="105" alt="" class="m-1" /></a>
+            </div>
+            <div class="text-right col-4">
+                靜宜大學APP
+                <a href="https://play.google.com/store/apps/details?id=tw.edu.pu.act&hl=zh-TW"><img src="qr_android.png" width="100" height="100" alt="" class="m-1" /></a>
+                <a href="https://itunes.apple.com/us/app/jing-yi-tu-shu-guan/id740276935?l=zh&mt=8"><img src="qr_ios.png" width="100" height="100" alt="" class="m-1" /></a>
+            </div>
+            <div class="text-left col-4">
+                資訊處LINE好友
+                <a href="https://liff.line.me/1645278921-kWRPP32q/?accountId=tzp5350t"><img src="qr_help.png" width="100" height="100" class="m-1" alt="靜宜幫幫忙QRcode"></a>
+
+            </div>
+        </div>
+
+    </footer>
+
+
+</body>
+<script type="text/javascript">
+    $(document).ready(function()    {
+        $("#icon_click").click(function(){
+       		$(this).toggleClass("fas fa-eye fas fa-eye-slash");
+         	var type = $(this).hasClass("fas fa-eye-slash") ? "text" : "password";
+            $("#pass").attr("type", type);
+        });
+    });
+</script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-L9XER91S3R"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-L9XER91S3R');
+</script>
+
+</html>

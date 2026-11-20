@@ -1,0 +1,41 @@
+{
+  "comment": "經過本次獨立風險檢查的短期處置。告警保持可見，未宣稱套件已全部修復；critical 不可豁免。新增路徑、版本或 range 與到期均需重新檢查。",
+  "exceptions": [
+    {
+      "package": "picomatch",
+      "ghsa": "GHSA-fc5q-39xc-vjpf",
+      "scope": "workspace-prod",
+      "reason": "picomatch <=4.0.7 的 ReDoS（GHSA-fc5q-39xc-vjpf／CVE-2026-112366，CVSS 7.5 僅可用性）；截至 2026-11-18 官方 latest 仍為 4.0.7 且 first_patched_version 為空，無法升級修復。目前 workspace-prod 路徑僅出現在 Expo CLI、Jest（經 expo-router 測試工具）與 sucrase/tinyglobby，屬行動端建置與測試工具鏈，非正式 Web 或 Functions 請求執行期。",
+      "expiry": "2026-12-16",
+      "evidence": "2026-11-18 查核 GitHub Advisory GHSA-fc5q-39xc-vjpf（updated 2026-11-17T15:56:44Z）與 npm view picomatch：無已發布修補。main CI 44134820044 的 audit-report.json 路徑／版本集合為 2.3.2、3.0.2、4.0.4，對應 apps__mobile>expo>@expo/cli>picomatch、apps__mobile>expo>@expo/cli>expo-router>@testing-library/react-native>jest>@jest/core>jest-haste-map>anymatch>picomatch、apps__mobile>expo>@expo/config>sucrase>tinyglobby>picomatch。functions-prod 同次掃描 high=0。到期前若上游發布修補或路徑／版本集合變更，必須重查，不得延用本例外。",
+      "paths": [
+        "apps__mobile>expo>@expo/cli>picomatch",
+        "apps__mobile>expo>@expo/cli>expo-router>@testing-library/react-native>jest>@jest/core>jest-haste-map>anymatch>picomatch",
+        "apps__mobile>expo>@expo/config>sucrase>tinyglobby>picomatch"
+      ],
+      "versions": [
+        "2.3.2",
+        "3.0.2",
+        "4.0.4"
+      ]
+    },
+    {
+      "package": "picomatch",
+      "ghsa": "GHSA-fc5q-39xc-vjpf",
+      "scope": "workspace-all",
+      "reason": "同上 ReDoS，無已發布修補。workspace-all 額外路徑為 firebase-tools 與 Metro／Jest 測試工具鏈，非正式 Web 或 Functions 請求執行期。",
+      "expiry": "2026-12-16",
+      "evidence": "同次／後續 CI 的 toolchain-audit-report.json（#692 run 44134872463、#693 run 44152718491）路徑／版本集合為 2.3.2、3.0.2、4.0.4，對應 apps__mobile>expo>@expo/cli>picomatch、.>@firebase/rules-unit-testing>firebase>@firebase/auth>@react-native-async-storage/async-storage>react-native>@react-native/community-cli-plugin>metro>jest-worker>jest-util>picomatch、.>firebase-tools>superstatic>re2>node-gyp>tinyglobby>picomatch。到期前若上游發布修補或路徑／版本集合變更，必須重查。",
+      "paths": [
+        "apps__mobile>expo>@expo/cli>picomatch",
+        ".>@firebase/rules-unit-testing>firebase>@firebase/auth>@react-native-async-storage/async-storage>react-native>@react-native/community-cli-plugin>metro>jest-worker>jest-util>picomatch",
+        ".>firebase-tools>superstatic>re2>node-gyp>tinyglobby>picomatch"
+      ],
+      "versions": [
+        "2.3.2",
+        "3.0.2",
+        "4.0.4"
+      ]
+    }
+  ]
+}

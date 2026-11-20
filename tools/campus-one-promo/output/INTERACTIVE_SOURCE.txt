@@ -1,0 +1,7 @@
+Campus One | 2026-10-14, Asia/Taipei
+This short video uses NEW LIVE browser recordings on https://nuni.tw/ with actual Playwright clicks and typed input.
+Not a screenshot slideshow. This is a public unauthenticated demonstration. Some backend data is not connected.
+Tap highlights are visual indicators synchronized with real clicks, not simulated UI behavior.
+Recorded browser segments and timestamped click log are in the associated ZIP artifact.
+Source repo https://github.com/Miiduoa/graduation
+Duration: 37.50s

@@ -1,0 +1,82 @@
+# 06_cafeteria.yaml
+# campus://campus/cafeteria → 餐廳
+
+appId: ${APP_ID}
+name: Cafeteria Flow
+tags:
+  - smoke
+  - cafeteria
+
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-Today'
+    timeout: 45000
+
+- waitForAnimationToEnd:
+    timeout: 2500
+
+- openLink: campus://campus/cafeteria
+
+- extendedWaitUntil:
+    visible: '餐廳'
+    timeout: 20000
+
+- takeScreenshot: cafeteria_menu_list
+
+- tapOn:
+    text: '篩選'
+    optional: true
+
+- takeScreenshot: cafeteria_filter_options
+
+- tapOn:
+    text: '$50-100'
+    optional: true
+
+- takeScreenshot: cafeteria_price_filter
+
+- tapOn:
+    text: '重置'
+    optional: true
+
+- tapOn:
+    text: '全部餐廳'
+    optional: true
+
+- takeScreenshot: cafeteria_restaurant_select
+
+- tapOn:
+    index: 0
+    below:
+      text: '餐廳'
+    optional: true
+
+- extendedWaitUntil:
+    visible: '收藏'
+    timeout: 8000
+    optional: true
+
+- takeScreenshot: menu_item_detail
+
+- scrollUntilVisible:
+    element:
+      text: '評價'
+    direction: DOWN
+    optional: true
+
+- takeScreenshot: menu_item_reviews
+
+- tapOn:
+    text: '收藏'
+    optional: true
+
+- tapOn:
+    text: '線上點餐'
+    optional: true
+
+- takeScreenshot: online_ordering
+
+- back

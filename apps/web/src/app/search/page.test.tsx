@@ -1,0 +1,868 @@
+import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { interpretCampusRequest } from '@/lib/campusIntentClient';
+import { beforeEach, expect, it, vi } from 'vitest';
+import SearchPage from './page';
+import { visibleCampusServices } from '@/lib/campusServices';
+import { DIRECTORY_SEARCH_STORAGE_KEY } from '@/lib/campusDirectorySearch';
+
+// jsdom exposes descendants of closed <details> in role queries; check native disclosure state.
+function expandedLinks() {
+  return screen.getAllByRole('link').filter((link) => {
+    let parent = link.parentElement;
+    while (parent) {
+      if (parent instanceof HTMLDetailsElement && !parent.open) return false;
+      parent = parent.parentElement;
+    }
+    return true;
+  });
+}
+
+function expandDirectory() {
+  for (const detail of document.querySelectorAll<HTMLDetailsElement>('main details')) {
+    if (!detail.open) fireEvent.click(detail.querySelector('summary')!);
+  }
+}
+
+const selection = vi.hoisted(() => ({
+  current: null as null | {
+    selectedSchool: { id: string; code?: string } | null;
+    loading: boolean;
+    catalogStatus: string;
+  },
+}));
+vi.mock('@/components/SelectedSchoolProvider', () => ({
+  useOptionalSelectedSchool: () => selection.current,
+}));
+
+const userState = vi.hoisted(() => ({
+  uid: null as string | null,
+  loading: false,
+  error: null as Error | null,
+  platform: false,
+  accountId: 'platform-account',
+  context: 'platform-context',
+  platformLoading: false,
+  platformError: '',
+  pendingLogout: false,
+}));
+vi.mock('@/components/AuthGuard', () => ({
+  useAuth: () => ({
+    user: userState.uid ? { uid: userState.uid } : null,
+    loading: userState.loading,
+    error: userState.error,
+  }),
+}));
+vi.mock('@/features/nuni/Session', () => ({
+  useOptionalNuniSession: () =>
+    userState.platform
+      ? {
+          session: { platformAccountId: userState.accountId, context: userState.context },
+          loading: userState.platformLoading,
+          error: userState.platformError,
+          pendingLogout: userState.pendingLogout,
+        }
+      : null,
+}));
+vi.mock('@/lib/campusIntentClient', () => ({ interpretCampusRequest: vi.fn() }));
+vi.mock('@/components/VoiceDictationButton', () => ({
+  VoiceDictationButton: ({ onTranscript }: { onTranscript: (value: string) => void }) => (
+    <button type="button" onClick={() => onTranscript('明天沒有課，我想讀書再吃飯')}>
+      模擬語音輸入
+    </button>
+  ),
+}));
+const options = { studentId: false, loading: false, error: false, retry: vi.fn() };
+vi.mock('@/lib/signInOptions', () => ({ useSignInOptions: () => options }));
+
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
+beforeEach(() => {
+  window.history.replaceState({}, '', '/search');
+  sessionStorage.clear();
+  selection.current = null;
+  userState.uid = null;
+  userState.loading = false;
+  userState.error = null;
+  userState.platform = false;
+  userState.accountId = 'platform-account';
+  userState.context = 'platform-context';
+  userState.platformLoading = false;
+  userState.platformError = '';
+  userState.pendingLogout = false;
+  vi.mocked(interpretCampusRequest).mockReset();
+  options.studentId = false;
+  options.loading = false;
+  options.error = false;
+  options.retry.mockClear();
+});
+
+vi.mock('@/components/SiteShell', () => ({
+  SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
+}));
+
+it('keeps every service discoverable without inventing a school selection', () => {
+  render(<SearchPage />);
+  expandDirectory();
+  expect(screen.getAllByRole('link')).toHaveLength(visibleCampusServices().length);
+  expect(screen.getByRole('link', { name: /^學校資訊/ }).getAttribute('href')).toBe('/school-info');
+  expect(screen.getByRole('link', { name: /^校園活動/ }).getAttribute('href')).toBe('/events');
+  expect(screen.getByRole('link', { name: /^宿舍/ }).getAttribute('href')).toBe('/dormitory');
+  expect(screen.getByRole('link', { name: /^課程與群組/ }).getAttribute('href')).toBe('/groups');
+  expect(screen.getByRole('link', { name: /^成績回饋/ }).getAttribute('href')).toBe(
+    '/grades?tab=feedback',
+  );
+  expect(screen.getByRole('link', { name: /^校方課程/ }).getAttribute('href')).toBe(
+    '/school-courses',
+  );
+  expect(screen.getByRole('link', { name: /^餐廳/ }).getAttribute('href')).toBe('/cafeteria');
+  const serviceRoutes = screen.getAllByRole('link').map((link) => link.getAttribute('href'));
+  expect(serviceRoutes).toContain('/leave');
+  expect(serviceRoutes).toContain('/leave/review');
+  const profile = screen.getByRole('link', { name: /個人資料 查看帳號資料/ });
+  const destination = new URL(profile.getAttribute('href')!, 'https://campus.example');
+  expect(destination.pathname).toBe('/profile');
+  expect(destination.searchParams.get('schoolId')).toBeNull();
+  expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
+});
+
+it('combines category filters with keyword search and restores all services after clearing', () => {
+  render(<SearchPage />);
+  fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
+  expect(screen.queryByRole('link', { name: /^課表/ })).toBeNull();
+  expandDirectory();
+  expect(screen.getAllByRole('link')).toHaveLength(11);
+  expect(screen.queryByRole('link', { name: /^數位學生證/ })).toBeNull();
+  fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
+    target: { value: '借書' },
+  });
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toBe('找到 1 項服務');
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  expandDirectory();
+  expect(screen.getAllByRole('link')).toHaveLength(visibleCampusServices().length);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  fireEvent.click(screen.getByRole('button', { name: '帳號與協助' }));
+  expect(screen.getByRole('link', { name: /^數位學生證/ }).getAttribute('href')).toBe(
+    '/student-card',
+  );
+});
+
+it('offers a recovery action when a query has no matching service', () => {
+  render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '無此服务' } });
+  expect(screen.queryAllByRole('link')).toHaveLength(0);
+  expect(screen.getByRole('heading', { name: '沒有符合的服務' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '查看所有服務' }));
+  expandDirectory();
+  expect(screen.getAllByRole('link')).toHaveLength(visibleCampusServices().length);
+});
+
+it('matches search aliases without case or surrounding-space sensitivity', () => {
+  render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '  BUS  ' } });
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(within(screen.getByRole('link')).getByRole('heading', { name: '公車' })).toBeTruthy();
+});
+
+it('keeps the existing course directory alongside the added Nuni classroom', () => {
+  render(<SearchPage />);
+  expandDirectory();
+  const paths = screen.getAllByRole('link').map((link) => link.getAttribute('href')?.split('?')[0]);
+  expect(paths).toContain('/groups');
+  expect(paths).toContain('/cafeteria');
+  expect(paths).toContain('/food');
+  expect(paths).toContain('/classroom');
+  expect(paths).toContain('/grades');
+  expect(paths).toContain('/timetable');
+  expect(paths).toContain('/grades');
+  expect(paths).toContain('/import');
+  expect(paths).toContain('/calendar');
+});
+
+it('shows ordering-off copy for /food while keeping bus and announcements', () => {
+  render(<SearchPage />);
+  expect(screen.getByRole('link', { name: /點餐與取餐/ }).textContent).toContain(
+    '目前還不能線上點餐',
+  );
+  expect(screen.queryByText('選餐點、查訂單、出示取餐憑證')).toBeNull();
+  expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /^公告/ }).getAttribute('href')).toBe('/announcements');
+  expect(screen.queryByText('Nuni 不處理這筆的付款與退款')).toBeNull();
+});
+
+it('restores a shareable search and preserves only browsing context in service links', () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/search?q=%E5%80%9F%E6%9B%B8&category=campus&campus=school-b&schoolId=school-b&session=private',
+  );
+  render(<SearchPage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+  const target = new URL(
+    screen.getByRole('link', { name: /^圖書館/ }).getAttribute('href')!,
+    'https://campus.example',
+  );
+  expect(target.searchParams.get('campus')).toBe('school-b');
+  expect(target.searchParams.get('schoolId')).toBe('school-b');
+  expect(target.searchParams.has('session')).toBe(false);
+  expect(target.searchParams.has('q')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  expect(new URL(window.location.href).searchParams.get('campus')).toBe('school-b');
+  expect(new URL(window.location.href).searchParams.has('q')).toBe(false);
+});
+
+it('opens the feedback tab with the selected campus and without copying the search query', () => {
+  window.history.replaceState({}, '', '/search?q=回饋&campus=nthu&token=private');
+  render(<SearchPage />);
+  const destination = new URL(
+    screen.getByRole('link', { name: /^成績回饋/ }).getAttribute('href')!,
+    'https://campus.example',
+  );
+  expect(destination.pathname).toBe('/grades');
+  expect(destination.searchParams.get('tab')).toBe('feedback');
+  expect(destination.searchParams.get('campus')).toBe('nthu');
+  expect(destination.searchParams.has('q')).toBe(false);
+  expect(destination.searchParams.has('token')).toBe(false);
+});
+
+it('restores focus when clearing filters and leaves a composing search untouched', () => {
+  render(<SearchPage />);
+  const search = screen.getByRole('searchbox', { name: '想找什麼？' });
+  fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
+  fireEvent.change(search, { target: { value: '借書' } });
+  fireEvent.keyDown(search, { key: 'Escape', isComposing: true });
+  expect((search as HTMLInputElement).value).toBe('借書');
+  fireEvent.keyDown(search, { key: 'Escape' });
+  expect((search as HTMLInputElement).value).toBe('');
+  expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  expect(document.activeElement).toBe(search);
+  expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
+});
+
+it('uses the current school for feedback when the address still has an earlier campus', () => {
+  selection.current = {
+    selectedSchool: { id: 'nthu' },
+    loading: false,
+    catalogStatus: 'ready',
+  };
+  window.history.replaceState({}, '', '/search?campus=pu&schoolId=pu&school=PU&session=private');
+  render(<SearchPage />);
+  expandDirectory();
+  const target = new URL(
+    screen.getByRole('link', { name: /^成績回饋/ }).getAttribute('href')!,
+    'https://campus.example',
+  );
+  expect(target.pathname).toBe('/grades');
+  expect(target.searchParams.get('tab')).toBe('feedback');
+  expect(target.searchParams.get('campus')).toBe('nthu');
+  expect(target.searchParams.get('schoolId')).toBe('nthu');
+  expect(target.searchParams.get('school')).toBe('NTHU');
+  expect(target.searchParams.has('session')).toBe(false);
+});
+
+it.each(['職涯', '實習', '校內工讀'])(
+  'finds the public career workspace when searching for %s',
+  (query) => {
+    window.history.replaceState({}, '', `/search?campus=nthu&q=${encodeURIComponent(query)}`);
+    render(<SearchPage />);
+    const target = new URL(
+      screen.getByRole('link', { name: /^職涯/ }).getAttribute('href')!,
+      'https://campus.example',
+    );
+    expect(target.pathname).toBe('/career');
+    expect(target.searchParams.get('campus')).toBe('nthu');
+    expect(target.searchParams.has('q')).toBe(false);
+    expect(screen.getByRole('link', { name: /^職涯/ }).getAttribute('href')).toBe('/career?campus=nthu');
+    // A matching catalog result already provides the destination; do not
+    // repeat the same career entry as an additional quick action.
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+  },
+);
+
+it('finds tasks using separated words and full-width Latin characters', () => {
+  render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '繳交 作業' } });
+  expect(screen.getByRole('link', { name: /^課程與作業/ })).toBeTruthy();
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'ＢＵＳ' } });
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
+  expect(new URL(window.location.href).searchParams.get('q')).toBe('ＢＵＳ');
+});
+it('makes management and school qualifications discoverable without implying authorization', () => {
+  render(<SearchPage />);
+  expandDirectory();
+  expect(
+    screen.getByRole('link', { name: /管理員入口.*需平台管理權限/ }).getAttribute('href'),
+  ).toBe('/admin');
+  expect(screen.getByRole('link', { name: /學校資格.*Google 帳號/ }).getAttribute('href')).toBe(
+    '/classroom/account',
+  );
+});
+it('restores directory filters after returning from a service without the query in the address', () => {
+  const view = render(<SearchPage />);
+  fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+  view.unmount();
+  window.history.replaceState({}, '', '/library');
+  window.history.replaceState({}, '', '/search');
+  render(<SearchPage />);
+  expect((screen.getByRole('searchbox', { name: '想找什麼？' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+  expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
+});
+
+it('does not restore directory filters after they have been cleared', () => {
+  const view = render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  view.unmount();
+  window.history.replaceState({}, '', '/search');
+  render(<SearchPage />);
+  expect((screen.getByRole('searchbox', { name: '想找什麼？' }) as HTMLInputElement).value).toBe(
+    '',
+  );
+});
+
+it('restores filters after navigation and ignores unsupported categories', () => {
+  const view = render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '公車' } });
+  window.history.replaceState({}, '', '/search?q=%E5%80%9F%E6%9B%B8&category=missing');
+  view.rerender(<SearchPage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+  expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
+});
+
+it('shows a school login limitation before opening a service without hiding its entry', () => {
+  const view = render(<SearchPage />);
+  expandDirectory();
+  expect(screen.getByRole('link', { name: /^成績 查詢/ }).textContent).toContain('尚未開放登入');
+  options.studentId = true;
+  view.rerender(<SearchPage />);
+  expect(screen.getByRole('link', { name: /^成績 查詢/ }).textContent).not.toContain(
+    '尚未開放登入',
+  );
+});
+
+it('retains a search and public destinations when login availability fails, and offers retry', () => {
+  window.history.replaceState({}, '', '/search?schoolId=pu&q=公車');
+  options.error = true;
+  render(<SearchPage />);
+  expect(screen.queryByText(/尚未開放登入/)).toBeNull();
+  expect(screen.getByRole('link', { name: /^公車/ }).getAttribute('href')).toContain('schoolId=pu');
+  fireEvent.click(screen.getByRole('button', { name: '重新確認登入方式' }));
+  expect(options.retry).toHaveBeenCalledOnce();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('公車');
+});
+
+it('recognizes a complex signed-in campus request using AI instead of only keyword results', async () => {
+  userState.uid = 'alice';
+  vi.mocked(interpretCampusRequest).mockResolvedValue({
+    status: 'understood',
+    source: 'model',
+    summary: '想先確認課表，再找讀書和吃飯的地點。',
+    destinations: ['/timetable', '/library', '/cafeteria'],
+    clarifyingQuestion: null,
+  });
+  render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), {
+    target: { value: '明天沒有課的話我想去讀書再吃個飯' },
+  });
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+  expect(await screen.findByText('想先確認課表，再找讀書和吃飯的地點。')).toBeTruthy();
+  expect(screen.getByText('AI 建議先開啟')).toBeTruthy();
+  expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+});
+
+it('hides readonly homework by default and restores it when enabled', () => {
+  const view = render(<SearchPage />);
+  expect(screen.queryByRole('link', { name: /^校方作業與教材/ })).toBeNull();
+  view.rerender(
+    <SchoolLmsReadonlyProvider enabled={true}>
+      <SearchPage />
+    </SchoolLmsReadonlyProvider>,
+  );
+  expandDirectory();
+  expect(screen.getByRole('link', { name: /^校方作業與教材/ }).getAttribute('href')).toContain(
+    '/school-lms',
+  );
+});
+
+it('opens the selected campus semester grades and keeps feedback previews on their own tab', async () => {
+  userState.uid = 'alice';
+  window.history.replaceState({}, '', '/search?schoolId=nthu');
+  vi.mocked(interpretCampusRequest).mockResolvedValue({
+    status: 'understood',
+    source: 'model',
+    summary: '查看成績與回饋',
+    destinations: ['/grades', '/grades?tab=feedback'],
+    clarifyingQuestion: null,
+    previews: [
+      {
+        destination: '/grades',
+        status: 'available',
+        source: 'campus-platform',
+        message: '學期資料已匯入',
+        items: [],
+      },
+      {
+        destination: '/grades?tab=feedback',
+        status: 'empty',
+        source: 'campus-platform',
+        message: '尚無回饋紀錄',
+        items: [],
+      },
+    ],
+  });
+  render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '這學期表現怎樣' } });
+  fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+  const semester = await screen.findByRole('link', { name: /學期資料已匯入/ });
+  expect(semester.getAttribute('href')).toBe('/grades?tab=semester&schoolId=nthu');
+  expect(screen.getByRole('link', { name: /尚無回饋紀錄/ }).getAttribute('href')).toBe(
+    '/grades?tab=feedback&schoolId=nthu',
+  );
+});
+
+it('opens device bookmarks in the selected campus classroom and describes the account requirement', () => {
+  window.history.replaceState({}, '', '/search?campus=nthu&q=' + encodeURIComponent('書籤'));
+  render(<SearchPage />);
+  const bookmarks = screen.getByRole('link', { name: /教材收藏.*這台裝置.*Google 帳號/ });
+  expect(bookmarks.getAttribute('href')).toBe('/classroom/material-bookmarks?campus=nthu');
+});
+
+it.each([false, true])(
+  'shows App restaurant orders only when ordering is enabled (%s)',
+  (enabled) => {
+    vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', String(enabled));
+    try {
+      window.history.replaceState({}, '', '/search?campus=nthu&q=' + encodeURIComponent('訂單'));
+      render(<SearchPage />);
+      const orders = screen.queryByRole('link', { name: /App 餐廳訂單/ });
+      expect(orders?.getAttribute('href')).toBe(enabled ? '/orders?campus=nthu' : undefined);
+      expect(screen.getByRole('link', { name: /^點餐與取餐/ }).getAttribute('href')).toBe(
+        '/food?campus=nthu',
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  },
+);
+
+it.each([
+  ['打開我的訂單', '我的訂單', '/food'],
+  ['打開 App 餐廳訂單', 'App 餐廳訂單', '/orders'],
+])(
+  'resolves a named order service for a platform account before building search links: %s',
+  (query, label, path) => {
+    userState.platform = true;
+    vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+    try {
+      window.history.replaceState({}, '', '/search?campus=nthu&q=' + encodeURIComponent(query));
+      render(<SearchPage />);
+      expect(
+        screen.getByRole('link', { name: (name) => name.startsWith(label) }).getAttribute('href'),
+      ).toBe(`${path}?campus=nthu`);
+      expect(interpretCampusRequest).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  },
+);
+
+it('shows disabled ordering copy after resolving platform search shortcuts to food', () => {
+  userState.platform = true;
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
+  try {
+    window.history.replaceState(
+      {},
+      '',
+      '/search?campus=nthu&q=' + encodeURIComponent('打開我的訂單'),
+    );
+    render(<SearchPage />);
+    const orders = screen.getByRole('link', { name: /^我的訂單/ });
+    expect(orders.getAttribute('href')).toBe('/food?campus=nthu');
+    expect(orders.textContent).toContain('目前還不能線上點餐');
+    expect(screen.queryByRole('link', { name: /^App 餐廳訂單/ })).toBeNull();
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+it('sends a Google account search to the full assistant with its original request and campus', () => {
+  userState.platform = true;
+  window.history.replaceState({}, '', '/search?campus=pu&schoolId=pu&token=private');
+  render(<SearchPage />);
+  fireEvent.click(screen.getByRole('button', { name: '模擬語音輸入' }));
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: '用 AI 理解需求' })).toBeNull();
+  expect(screen.queryByText(/登入者會自動使用 AI/)).toBeNull();
+  const url = new URL(
+    screen.getByRole('link', { name: '交給校園助理' }).getAttribute('href')!,
+    'https://campus.example',
+  );
+  expect(url.pathname).toBe('/ai-assistant');
+  expect(url.searchParams.get('q')).toBe('明天沒有課，我想讀書再吃飯');
+  expect(url.searchParams.get('campus')).toBe('pu');
+  expect(url.searchParams.get('schoolId')).toBe('pu');
+  expect(url.searchParams.has('token')).toBe(false);
+  expect(screen.getByText(/帶入校園助理，檢查後再送出/)).toBeTruthy();
+});
+
+it('describes guest voice input as service search and does not run school analysis', () => {
+  render(<SearchPage />);
+  fireEvent.click(screen.getByRole('button', { name: '模擬語音輸入' }));
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+  expect(screen.queryByRole('link', { name: '交給校園助理' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '用 AI 理解需求' })).toBeNull();
+  expect(screen.getByText(/登入 Google 或學校帳號後，可使用校園助理/)).toBeTruthy();
+});
+
+it.each(['school-loading', 'school-error', 'platform-loading', 'platform-error', 'signing-out'])(
+  'retains keyword search without account AI claims when %s',
+  (status) => {
+    userState.uid = 'alice';
+    if (status === 'school-loading') userState.loading = true;
+    if (status === 'school-error') userState.error = new Error('expired');
+    if (status.startsWith('platform') || status === 'signing-out') {
+      userState.uid = null;
+      userState.platform = true;
+      userState.platformLoading = status === 'platform-loading';
+      userState.platformError = status === 'platform-error' ? 'expired' : '';
+      userState.pendingLogout = status === 'signing-out';
+    }
+    render(<SearchPage />);
+    fireEvent.click(screen.getByRole('button', { name: '模擬語音輸入' }));
+    expect(screen.queryByRole('button', { name: '用 AI 理解需求' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '交給校園助理' })).toBeNull();
+    expect(interpretCampusRequest).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '公車' } });
+    expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
+  },
+);
+
+it('preserves an explicitly shared search while the initial account is being confirmed', () => {
+  userState.platform = true;
+  userState.platformLoading = true;
+  window.history.replaceState({}, '', '/search?schoolId=pu&q=' + encodeURIComponent('借書'));
+  const view = render(<SearchPage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+  userState.platformLoading = false;
+  view.rerender(<SearchPage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+  expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+});
+
+it.each(['account', 'session', 'campus'])(
+  'clears the earlier query and rejects late interpretation after changing %s',
+  async (change) => {
+    userState.uid = 'alice';
+    userState.platform = true;
+    let resolve!: (result: Awaited<ReturnType<typeof interpretCampusRequest>>) => void;
+    vi.mocked(interpretCampusRequest).mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const view = render(<SearchPage />);
+    fireEvent.click(screen.getByRole('button', { name: '模擬語音輸入' }));
+    if (change === 'account') userState.accountId = 'second-account';
+    if (change === 'session') userState.context = 'second-session';
+    if (change === 'campus')
+      selection.current = {
+        selectedSchool: { id: 'nthu' },
+        loading: false,
+        catalogStatus: 'ready',
+      };
+    view.rerender(<SearchPage />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    expect(new URL(window.location.href).searchParams.has('q')).toBe(false);
+    await act(async () =>
+      resolve({
+        status: 'understood',
+        source: 'model',
+        summary: '之前帳號的搜尋結果',
+        destinations: ['/map'],
+        clarifyingQuestion: null,
+      }),
+    );
+    expect(screen.queryByText('之前帳號的搜尋結果')).toBeNull();
+    userState.accountId = 'platform-account';
+    userState.context = 'platform-context';
+    selection.current = null;
+    view.rerender(<SearchPage />);
+    expect(screen.queryByText('之前帳號的搜尋結果')).toBeNull();
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  },
+);
+
+it('does not restore a search saved by a different platform account after returning', () => {
+  userState.platform = true;
+  const view = render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+  view.unmount();
+  userState.accountId = 'second-account';
+  window.history.replaceState({}, '', '/search');
+  render(<SearchPage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+});
+
+it('keeps a same-account draft during refresh and does not revive a previously accepted result', async () => {
+  userState.uid = 'alice';
+  userState.platform = true;
+  vi.mocked(interpretCampusRequest).mockResolvedValue({
+    status: 'understood',
+    source: 'model',
+    summary: '刷新前的建議',
+    destinations: ['/map'],
+    clarifyingQuestion: null,
+  });
+  const view = render(<SearchPage />);
+  fireEvent.click(screen.getByRole('button', { name: '模擬語音輸入' }));
+  await screen.findByText('刷新前的建議');
+  userState.platformLoading = true;
+  view.rerender(<SearchPage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(
+    '明天沒有課，我想讀書再吃飯',
+  );
+  expect(screen.queryByText('刷新前的建議')).toBeNull();
+  userState.platformLoading = false;
+  view.rerender(<SearchPage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(
+    '明天沒有課，我想讀書再吃飯',
+  );
+  expect(screen.queryByText('刷新前的建議')).toBeNull();
+  expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+});
+
+it.each(['profile-default', 'schoolId-alias', 'all', 'personal'])(
+  'preserves a shared search through initial campus resolution: %s',
+  (source) => {
+    userState.uid = 'alice';
+    selection.current = { selectedSchool: null, loading: true, catalogStatus: 'ready' };
+    const campusQuery =
+      source === 'profile-default'
+        ? ''
+        : source === 'schoolId-alias'
+          ? '&schoolId=pu'
+          : `&campus=${source}`;
+    window.history.replaceState(
+      {},
+      '',
+      `/search?q=${encodeURIComponent('借書')}&category=campus${campusQuery}`,
+    );
+    const view = render(<SearchPage />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+    selection.current = {
+      selectedSchool: source === 'all' || source === 'personal' ? null : { id: 'pu', code: 'PU' },
+      loading: false,
+      catalogStatus: 'ready',
+    };
+    view.rerender(<SearchPage />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+    expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(new URL(window.location.href).searchParams.get('q')).toBe('借書');
+    expect(new URL(window.location.href).searchParams.get('category')).toBe('campus');
+    expect(interpretCampusRequest).not.toHaveBeenCalled();
+
+    selection.current.selectedSchool = { id: 'nthu', code: 'NTHU' };
+    view.rerender(<SearchPage />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    expect(new URL(window.location.href).searchParams.has('q')).toBe(false);
+    expect(new URL(window.location.href).searchParams.has('category')).toBe(false);
+  },
+);
+
+it('keeps pending-campus edits in the URL without saving an unconfirmed scope', () => {
+  userState.uid = 'alice';
+  selection.current = { selectedSchool: null, loading: true, catalogStatus: 'ready' };
+  const view = render(<SearchPage />);
+  fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
+  selection.current = {
+    selectedSchool: { id: 'pu', code: 'PU' },
+    loading: false,
+    catalogStatus: 'ready',
+  };
+  view.rerender(<SearchPage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+  expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  expect(new URL(window.location.href).searchParams.get('q')).toBe('借書');
+  fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toContain('pu');
+});
+
+it.each(['loading', 'error'])('keeps voice input local while the campus is %s', (status) => {
+  userState.uid = 'alice';
+  selection.current = {
+    selectedSchool: null,
+    loading: status === 'loading',
+    catalogStatus: status,
+  };
+  const view = render(<SearchPage />);
+  fireEvent.click(screen.getByRole('button', { name: '模擬語音輸入' }));
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: '用 AI 理解需求' })).toBeNull();
+  selection.current = { selectedSchool: { id: 'pu' }, loading: false, catalogStatus: 'ready' };
+  view.rerender(<SearchPage />);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(
+    '明天沒有課，我想讀書再吃飯',
+  );
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+});
+
+it.each(['account', 'session'])(
+  'clears pending-campus search filters across a real %s switch',
+  (change) => {
+    userState.platform = true;
+    selection.current = { selectedSchool: null, loading: true, catalogStatus: 'ready' };
+    const view = render(<SearchPage />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '私人讀書安排' } });
+    if (change === 'account') userState.accountId = 'second-account';
+    else userState.context = 'second-session';
+    view.rerender(<SearchPage />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    selection.current = { selectedSchool: { id: 'pu' }, loading: false, catalogStatus: 'ready' };
+    view.rerender(<SearchPage />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    expect(new URL(window.location.href).searchParams.has('q')).toBe(false);
+  },
+);
+
+it.each([
+  ['pu', 'loading'],
+  ['all', 'loading'],
+  ['all', 'error'],
+] as const)(
+  'keeps %s filters through campus %s but rejects an earlier analysis',
+  async (campus, status) => {
+    userState.uid = 'alice';
+    selection.current = {
+      selectedSchool: campus === 'pu' ? { id: 'pu', code: 'PU' } : null,
+      loading: false,
+      catalogStatus: 'ready',
+    };
+    window.history.replaceState(
+      {},
+      '',
+      campus === 'pu' ? '/search?schoolId=pu&campus=pu&school=PU' : '/search?campus=all',
+    );
+    let finish!: (result: Awaited<ReturnType<typeof interpretCampusRequest>>) => void;
+    vi.mocked(interpretCampusRequest).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const view = render(<SearchPage />);
+    fireEvent.click(screen.getByRole('button', { name: '模擬語音輸入' }));
+    selection.current.loading = status === 'loading';
+    selection.current.catalogStatus = status;
+    view.rerender(<SearchPage />);
+    expect(screen.queryByRole('button', { name: '用 AI 理解需求' })).toBeNull();
+    await act(async () =>
+      finish({
+        status: 'understood',
+        source: 'model',
+        summary: '重查校園前的結果',
+        destinations: ['/map'],
+        clarifyingQuestion: null,
+      }),
+    );
+    expect(screen.queryByText('重查校園前的結果')).toBeNull();
+    selection.current.loading = false;
+    selection.current.catalogStatus = 'ready';
+    view.rerender(<SearchPage />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(
+      '明天沒有課，我想讀書再吃飯',
+    );
+    expect(screen.queryByText('重查校園前的結果')).toBeNull();
+    expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([false, true])(
+  'does not overwrite pending-campus edits when History writes fail (initial account pending: %s)',
+  (initialAccountPending) => {
+    userState.uid = 'alice';
+    selection.current = { selectedSchool: { id: 'pu' }, loading: false, catalogStatus: 'ready' };
+    const first = render(<SearchPage />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+    first.unmount();
+    window.history.replaceState({}, '', '/search');
+    if (initialAccountPending) {
+      userState.uid = null;
+      userState.loading = true;
+    }
+    selection.current = { selectedSchool: null, loading: true, catalogStatus: 'ready' };
+    const view = render(<SearchPage />);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    const history = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    try {
+      fireEvent.change(screen.getByRole('searchbox'), { target: { value: '公車' } });
+      if (initialAccountPending) {
+        userState.uid = 'alice';
+        userState.loading = false;
+        view.rerender(<SearchPage />);
+        expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('公車');
+      }
+      selection.current = { selectedSchool: { id: 'pu' }, loading: false, catalogStatus: 'ready' };
+      view.rerender(<SearchPage />);
+      expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('公車');
+      expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
+    } finally {
+      history.mockRestore();
+    }
+  },
+);
+
+
+it('shows everyday services first while searchable secondary entries remain reachable', () => {
+  render(<SearchPage />);
+  expect(expandedLinks()).toHaveLength(16);
+  expect(screen.getByRole('link', { name: /^刪除帳號/ }).closest('details')!.open).toBe(false);
+  expect(screen.getByRole('link', { name: /^教材收藏/ }).closest('details')!.open).toBe(false);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '書籤' } });
+  expect(screen.getByRole('link', { name: /^教材收藏/ })).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toBe('找到 1 項服務');
+});
+
+it('returns to the expanded family after opening a secondary service', () => {
+  const view = render(<SearchPage />);
+  fireEvent.click(screen.getByText(/更多學習與課務服務/));
+  fireEvent.click(screen.getByLabelText('成績的相關服務'));
+  fireEvent.click(screen.getByRole('link', { name: /^成績回饋/ }));
+  view.unmount();
+  render(<SearchPage />);
+  const feedback = screen.getByRole('link', { name: /^成績回饋/ });
+  const family = feedback.closest('details')!;
+  expect(family.open).toBe(true);
+  expect(family.parentElement!.closest('details')!.open).toBe(true);
+  expect(feedback.getAttribute('href')).toBe('/grades?tab=feedback');
+});

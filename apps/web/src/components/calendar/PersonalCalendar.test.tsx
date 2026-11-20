@@ -1,0 +1,703 @@
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { beforeEach, expect, it, vi, type Mock } from 'vitest';
+import {
+  emptyPersonalEventDraft,
+  personalImportSavedNotice,
+  type PersonalImportRecord,
+} from '@campus/shared';
+import { PersonalCalendar } from './PersonalCalendar';
+import {
+  changePersonalImport,
+  personalImportsStorageKey,
+  readPersonalImports,
+  savePersonalImportBatch,
+} from '@/lib/personalImports';
+
+const context = vi.hoisted(() => {
+  type HomeTaskRow = {
+    id: string;
+    courseId: string;
+    courseName: string;
+    title: string;
+    dueAt: string | null;
+    href?: string;
+  };
+  type HomeDataRow = {
+    courses: { id: string; name: string; role: string; unreadCount: number }[];
+    tasks: HomeTaskRow[];
+    unreadCount: number;
+  };
+  type DeadlineRow = {
+    id: string;
+    title: string;
+    courseName: string;
+    courseId: string;
+    dueDate: string;
+    href: string;
+    source: 'nuni' | 'lms';
+    sourceLabel: string;
+  };
+  return {
+    owner: 'platform:one',
+    schoolId: 'pu',
+    search: '',
+    loading: false,
+    user: null as { uid: string } | null,
+    nuni: null as {
+      session: { context: string; platformAccountId: string };
+      loading: boolean;
+    } | null,
+    loadHomeData: vi.fn() as Mock<(uid: string) => Promise<HomeDataRow>>,
+    loadNuniCalendarDeadlines: vi.fn() as Mock<
+      (
+        transport: unknown,
+        platformAccountId: string,
+        fence?: { cancelled(): boolean },
+      ) => Promise<DeadlineRow[]>
+    >,
+  };
+});
+
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(context.search),
+}));
+
+vi.mock('next/link', () => ({
+  default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
+}));
+
+vi.mock('@/components/AuthGuard', () => ({
+  useAuth: () => ({ user: context.user, loading: false }),
+}));
+
+vi.mock('@/features/nuni/Session', () => ({
+  useOptionalNuniSession: () => context.nuni,
+  browserRequest: vi.fn(),
+}));
+
+vi.mock('@/lib/homeOverview', () => ({
+  loadHomeData: (uid: string) => context.loadHomeData(uid),
+}));
+
+vi.mock('@/lib/calendarCourseDeadlines', async (actual) => ({
+  ...(await actual<typeof import('@/lib/calendarCourseDeadlines')>()),
+  loadNuniCalendarDeadlines: (
+    transport: unknown,
+    platformAccountId: string,
+    fence?: { cancelled(): boolean },
+  ) => context.loadNuniCalendarDeadlines(transport, platformAccountId, fence),
+}));
+
+vi.mock('@/lib/usePersonalImports', async (actual) => ({
+  ...(await actual<typeof import('@/lib/usePersonalImports')>()),
+  usePersonalImportScope: () => ({
+    scope: { owner: context.owner, schoolId: context.schoolId },
+    scopeKey: personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId }),
+    loading: context.loading,
+    schoolName: '靜宜大學',
+  }),
+}));
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+  localStorage.clear();
+  context.owner = 'platform:one';
+  context.schoolId = 'pu';
+  context.search = '';
+  context.loading = false;
+  context.user = null;
+  context.nuni = null;
+  context.loadHomeData.mockReset().mockResolvedValue({ courses: [], tasks: [], unreadCount: 0 });
+  context.loadNuniCalendarDeadlines.mockReset().mockResolvedValue([]);
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: (_key: string, fn: () => unknown) => Promise.resolve().then(fn) },
+  });
+  URL.createObjectURL = vi.fn(() => 'blob:calendar');
+  URL.revokeObjectURL = vi.fn();
+  window.confirm = vi.fn(() => true);
+});
+
+async function createTimedEvent(title = '期中考') {
+  const view = renderCalendar();
+  await screen.findByRole('button', { name: '新增行程' });
+  fireEvent.click(screen.getByRole('button', { name: '新增行程' }));
+  fireEvent.change(screen.getByLabelText('標題'), { target: { value: title } });
+  fireEvent.change(screen.getByLabelText('日期'), { target: { value: '2026-10-20' } });
+  fireEvent.change(screen.getByLabelText('開始時間'), { target: { value: '09:00' } });
+  fireEvent.change(screen.getByLabelText('結束時間'), { target: { value: '10:30' } });
+  fireEvent.change(screen.getByLabelText('地點（選填）'), { target: { value: '主顧 301' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存行程' }));
+  await screen.findByText(personalImportSavedNotice(1));
+  return view;
+}
+
+it('creates, edits and deletes personal events through the storage contract', async () => {
+  const view = await createTimedEvent();
+  const scope = { owner: context.owner, schoolId: context.schoolId };
+  expect(readPersonalImports(scope)).toHaveLength(1);
+  expect(readPersonalImports(scope)[0]).toMatchObject({
+    title: '期中考',
+    date: '2026-10-20',
+    startTime: '09:00',
+    endTime: '10:30',
+    location: '主顧 301',
+    kind: 'events',
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: '編輯' }));
+  fireEvent.change(screen.getByLabelText('標題'), { target: { value: '期中考（改期）' } });
+  fireEvent.change(screen.getByLabelText('結束日期（跨日才填）'), {
+    target: { value: '2026-10-21' },
+  });
+  fireEvent.change(screen.getByLabelText('結束時間'), { target: { value: '01:00' } });
+  fireEvent.change(screen.getByLabelText('開始時間'), { target: { value: '22:00' } });
+  const beforeEdit = readPersonalImports(scope)[0];
+  fireEvent.click(screen.getByRole('button', { name: '儲存修改' }));
+  await screen.findByText('個人行程已更新。');
+  const edited = readPersonalImports(scope)[0];
+  expect(edited.id).toBe(beforeEdit.id);
+  expect(edited.source).toEqual(beforeEdit.source);
+  expect(edited).toMatchObject({
+    title: '期中考（改期）',
+    date: '2026-10-20',
+    endDate: '2026-10-21',
+    startTime: '22:00',
+    endTime: '01:00',
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: '編輯' }));
+  fireEvent.click(screen.getByRole('button', { name: '刪除這筆' }));
+  await screen.findByText('已刪除這筆個人行程。');
+  expect(readPersonalImports(scope)).toEqual([]);
+  view.unmount();
+});
+
+it('keeps the draft when validation or persistence fails and does not overwrite on load errors', async () => {
+  const view = renderCalendar();
+  await screen.findByRole('button', { name: '新增行程' });
+  fireEvent.click(screen.getByRole('button', { name: '新增行程' }));
+  fireEvent.change(screen.getByLabelText('標題'), { target: { value: '結束太早' } });
+  fireEvent.change(screen.getByLabelText('日期'), { target: { value: '2026-10-20' } });
+  fireEvent.change(screen.getByLabelText('開始時間'), { target: { value: '18:00' } });
+  fireEvent.change(screen.getByLabelText('結束時間'), { target: { value: '17:00' } });
+  expect(screen.getByText(/結束時間必須晚於開始時間/)).toBeTruthy();
+  expect((screen.getByRole('button', { name: '儲存行程' }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  expect((screen.getByLabelText('標題') as HTMLInputElement).value).toBe('結束太早');
+
+  fireEvent.change(screen.getByLabelText('結束時間'), { target: { value: '19:00' } });
+  const storageMethods = Object.hasOwn(localStorage, 'setItem')
+    ? localStorage
+    : Object.getPrototypeOf(localStorage);
+  vi.spyOn(storageMethods, 'setItem').mockImplementation(() => {
+    throw new Error('quota');
+  });
+  fireEvent.click(screen.getByRole('button', { name: '儲存行程' }));
+  await screen.findByText(/沒有存成/);
+  expect((screen.getByLabelText('標題') as HTMLInputElement).value).toBe('結束太早');
+  vi.mocked(storageMethods.setItem).mockRestore();
+  view.unmount();
+
+  const key = personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId });
+  localStorage.setItem(key, '{damaged');
+  const broken = renderCalendar();
+  await waitFor(() => expect(screen.getByText(/原始資料仍保留/)).toBeTruthy());
+  expect((screen.getByRole('button', { name: '新增行程' }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  expect(localStorage.getItem(key)).toBe('{damaged');
+  broken.unmount();
+});
+
+it('isolates accounts and schools, and preserves other records plus import provenance on edit', async () => {
+  const scope = { owner: context.owner, schoolId: context.schoolId };
+  const imported: PersonalImportRecord = {
+    id: 'import-keep',
+    kind: 'events',
+    title: '校慶',
+    schoolId: 'pu',
+    academicYear: '',
+    semester: '',
+    date: '2026-10-25',
+    allDay: true,
+    batchId: 'batch-import',
+    importedAt: '2026-10-01T00:00:00.000Z',
+    source: { type: 'file', name: '公告.ics', line: 4, rawText: 'SUMMARY:校慶' },
+  };
+  await savePersonalImportBatch(scope, [imported]);
+  const view = await createTimedEvent('自己的安排');
+  expect(readPersonalImports(scope)).toHaveLength(2);
+
+  const list = screen.getByText('自己的安排').closest('li');
+  expect(list).toBeTruthy();
+  fireEvent.click(within(list as HTMLElement).getByRole('button', { name: '編輯' }));
+  fireEvent.change(screen.getByLabelText('標題'), { target: { value: '自己的安排（改）' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存修改' }));
+  await screen.findByText('個人行程已更新。');
+  const rows = readPersonalImports(scope);
+  expect(rows).toHaveLength(2);
+  expect(rows.find((row) => row.source.name === '公告.ics')?.source).toEqual(imported.source);
+  view.unmount();
+
+  context.owner = 'platform:two';
+  const other = renderCalendar();
+  await screen.findByText(/還沒有行程/);
+  expect(readPersonalImports({ owner: 'platform:two', schoolId: 'pu' })).toEqual([]);
+  other.unmount();
+
+  context.owner = 'platform:one';
+  context.schoolId = 'ntu';
+  const otherSchool = renderCalendar();
+  await screen.findByText(/還沒有行程/);
+  otherSchool.unmount();
+});
+
+it('blocks stale saves after an account switch and supports retry after a failed load', async () => {
+  const view = await createTimedEvent('切換前');
+  const scope = { owner: 'platform:one', schoolId: 'pu' };
+  const original = readPersonalImports(scope)[0];
+  let active = true;
+  const pending = changePersonalImport(
+    scope,
+    original,
+    { ...original, title: '不該寫入' },
+    () => active,
+  );
+  active = false;
+  await expect(pending).rejects.toThrow('帳號或校園已切換');
+  expect(readPersonalImports(scope)[0].title).toBe('切換前');
+  view.unmount();
+
+  const key = personalImportsStorageKey(scope);
+  localStorage.setItem(key, '{damaged');
+  const broken = renderCalendar();
+  await screen.findByText(/原始資料仍保留/);
+  broken.unmount();
+
+  localStorage.setItem(
+    key,
+    JSON.stringify({ version: 1, records: [original], sync: { enabled: false, base: null } }),
+  );
+  const recovered = renderCalendar();
+  await screen.findByText('切換前');
+  expect((screen.getByRole('button', { name: '新增行程' }) as HTMLButtonElement).disabled).toBe(
+    false,
+  );
+  recovered.unmount();
+});
+
+it('exports the current personal events as ICS without claiming RSVP', async () => {
+  const view = await createTimedEvent('匯出我');
+  const anchor = {
+    click: vi.fn(),
+    href: '',
+    download: '',
+  } as unknown as HTMLAnchorElement;
+  const realCreate = document.createElement.bind(document);
+  vi.spyOn(document, 'createElement').mockImplementation(((
+    tag: string,
+    options?: ElementCreationOptions,
+  ) => {
+    if (tag === 'a') return anchor;
+    return realCreate(tag, options);
+  }) as typeof document.createElement);
+  fireEvent.click(screen.getByRole('button', { name: '月格' }));
+  fireEvent.click(screen.getByRole('button', { name: '2026-10-20' }));
+  fireEvent.click(screen.getByRole('button', { name: '匯出所選月份' }));
+  await waitFor(() => expect(anchor.click).toHaveBeenCalled());
+  expect(await screen.findByText(/已匯出 1 筆個人行程快照/)).toBeTruthy();
+  expect(screen.getByText(/不會代你報名或設定提醒/)).toBeTruthy();
+  view.unmount();
+});
+
+it('clears edit selection on cancel so list export includes every visible row', async () => {
+  const scope = { owner: context.owner, schoolId: context.schoolId };
+  await savePersonalImportBatch(scope, [
+    {
+      id: 'event-a',
+      kind: 'events',
+      title: '行程甲',
+      schoolId: 'pu',
+      academicYear: '',
+      semester: '',
+      date: '2026-10-20',
+      startTime: '09:00',
+      endTime: '10:00',
+      source: { type: 'paste', name: '手動新增', line: 1, rawText: '行程甲' },
+    },
+    {
+      id: 'event-b',
+      kind: 'events',
+      title: '行程乙',
+      schoolId: 'pu',
+      academicYear: '',
+      semester: '',
+      date: '2026-10-21',
+      startTime: '11:00',
+      endTime: '12:00',
+      source: { type: 'paste', name: '手動新增', line: 1, rawText: '行程乙' },
+    },
+  ]);
+  const view = renderCalendar();
+  await screen.findByText('行程甲');
+  fireEvent.click(
+    within(screen.getByText('行程甲').closest('li') as HTMLElement).getByRole('button', {
+      name: '編輯',
+    }),
+  );
+  expect(screen.getByRole('button', { name: '匯出這筆' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(screen.queryByRole('button', { name: '匯出這筆' })).toBeNull();
+
+  const downloads: string[] = [];
+  const realCreate = document.createElement.bind(document);
+  vi.spyOn(document, 'createElement').mockImplementation(((
+    tag: string,
+    options?: ElementCreationOptions,
+  ) => {
+    if (tag === 'a') {
+      return {
+        click: vi.fn(),
+        set href(_value: string) {},
+        get href() {
+          return '';
+        },
+        set download(value: string) {
+          downloads.push(value);
+        },
+        get download() {
+          return downloads.at(-1) || '';
+        },
+      } as unknown as HTMLAnchorElement;
+    }
+    return realCreate(tag, options);
+  }) as typeof document.createElement);
+  const createObjectURL = vi.fn((blob: Blob) => {
+    void blob.text().then((text) => {
+      (createObjectURL as unknown as { lastContent?: string }).lastContent = text;
+    });
+    return 'blob:calendar';
+  });
+  URL.createObjectURL = createObjectURL as unknown as typeof URL.createObjectURL;
+
+  fireEvent.click(screen.getByRole('button', { name: '月格' }));
+  fireEvent.click(screen.getByRole('button', { name: '2026-10-20' }));
+  fireEvent.click(screen.getByRole('button', { name: '匯出所選月份' }));
+  await waitFor(() => expect(downloads[0]).toBe('campus-one-personal-events.ics'));
+  await waitFor(async () => {
+    const blob = createObjectURL.mock.calls[0][0] as Blob;
+    const text = await blob.text();
+    expect(text.match(/BEGIN:VEVENT/g)).toHaveLength(2);
+    expect(text).toContain('SUMMARY:行程甲');
+    expect(text).toContain('SUMMARY:行程乙');
+  });
+  view.unmount();
+});
+
+it('preserves imported course metadata when only location is edited', async () => {
+  const scope = { owner: context.owner, schoolId: context.schoolId };
+  const imported = {
+    id: 'import-meta',
+    kind: 'events' as const,
+    title: '專題發表',
+    schoolId: 'pu',
+    academicYear: '',
+    semester: '',
+    courseCode: 'IM499',
+    teacher: '李老師',
+    className: '專題班',
+    date: '2026-10-22',
+    startTime: '14:00',
+    endTime: '16:00',
+    location: '舊教室',
+    source: { type: 'file' as const, name: '課表.ics', line: 2, rawText: 'SUMMARY:專題發表' },
+  };
+  const other = {
+    id: 'other-keep',
+    kind: 'events' as const,
+    title: '另一筆',
+    schoolId: 'pu',
+    academicYear: '',
+    semester: '',
+    date: '2026-10-23',
+    allDay: true,
+    source: { type: 'paste' as const, name: '手動新增', line: 1, rawText: '另一筆' },
+  };
+  await savePersonalImportBatch(scope, [imported, other]);
+  const view = renderCalendar();
+  await screen.findByText('專題發表');
+  fireEvent.click(
+    within(screen.getByText('專題發表').closest('li') as HTMLElement).getByRole('button', {
+      name: '編輯',
+    }),
+  );
+  fireEvent.change(screen.getByLabelText('地點（選填）'), { target: { value: '新教室' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存修改' }));
+  await screen.findByText('個人行程已更新。');
+  const rows = readPersonalImports(scope);
+  expect(rows).toHaveLength(2);
+  expect(rows.find((row) => row.id === 'import-meta')).toMatchObject({
+    id: 'import-meta',
+    courseCode: 'IM499',
+    teacher: '李老師',
+    className: '專題班',
+    location: '新教室',
+    source: imported.source,
+  });
+  expect(rows.find((row) => row.id === 'other-keep')?.title).toBe('另一筆');
+  view.unmount();
+});
+
+function renderCalendar() {
+  const view = render(<PersonalCalendar />);
+  fireEvent.change(view.getByLabelText('查看月份'), { target: { value: '2026-10' } });
+  fireEvent.click(view.getByRole('button', { name: '列表' }));
+  return view;
+}
+
+it('顯示 nuni 課程作業截止，標示來源並連到 classroom 作業', async () => {
+  const courseId = 'cw_11111111-1111-4111-8111-111111111111';
+  const assignmentId = 'cwa_22222222-2222-4222-8222-222222222222';
+  context.user = { uid: 'alice' };
+  context.nuni = {
+    session: { context: 'ctx', platformAccountId: 'pa_1' },
+    loading: false,
+  };
+  context.loadHomeData.mockResolvedValue({
+    courses: [],
+    tasks: [
+      {
+        id: 'dup',
+        courseId,
+        courseName: '資料庫',
+        title: '專題一',
+        dueAt: '2026-10-22T10:00:00.000Z',
+        href: `/course/${courseId}#assignment-${assignmentId}`,
+      },
+    ],
+    unreadCount: 0,
+  });
+  context.loadNuniCalendarDeadlines.mockResolvedValue([
+    {
+      id: `${courseId}:${assignmentId}`,
+      title: '專題一',
+      courseName: '資料庫',
+      courseId,
+      dueDate: '2026-10-22',
+      href: `/classroom/course/${courseId}?view=assignments#assignment-${assignmentId}`,
+      source: 'nuni',
+      sourceLabel: 'nuni 課程',
+    },
+  ]);
+  renderCalendar();
+  const due = await screen.findByTestId('calendar-due-list');
+  expect(within(due).getByText('專題一')).toBeTruthy();
+  expect(within(due).getByText(/nuni 課程/)).toBeTruthy();
+  expect(within(due).getByRole('link', { name: '查看作業' }).getAttribute('href')).toBe(
+    `/classroom/course/${courseId}?view=assignments#assignment-${assignmentId}`,
+  );
+  expect(context.loadNuniCalendarDeadlines).toHaveBeenCalled();
+});
+
+it('未登入時作業截止區保持說明，不因缺少課程而壞頁', async () => {
+  renderCalendar();
+  const due = await screen.findByTestId('calendar-due');
+  expect(due.textContent).toContain('登入後');
+  expect(screen.queryByTestId('calendar-due-list')).toBeNull();
+  expect(context.loadHomeData).not.toHaveBeenCalled();
+  expect(context.loadNuniCalendarDeadlines).not.toHaveBeenCalled();
+});
+
+it('LMS 失敗時仍顯示 nuni 作業截止', async () => {
+  const courseId = 'cw_11111111-1111-4111-8111-111111111111';
+  const assignmentId = 'cwa_22222222-2222-4222-8222-222222222222';
+  context.user = { uid: 'alice' };
+  context.nuni = {
+    session: { context: 'ctx', platformAccountId: 'pa_1' },
+    loading: false,
+  };
+  context.loadHomeData.mockRejectedValue(new Error('lms down'));
+  context.loadNuniCalendarDeadlines.mockResolvedValue([
+    {
+      id: `${courseId}:${assignmentId}`,
+      title: '專題一',
+      courseName: '資料庫',
+      courseId,
+      dueDate: '2026-10-22',
+      href: `/classroom/course/${courseId}?view=assignments#assignment-${assignmentId}`,
+      source: 'nuni',
+      sourceLabel: 'nuni 課程',
+    },
+  ]);
+  renderCalendar();
+  const due = await screen.findByTestId('calendar-due-list');
+  expect(within(due).getByText('專題一')).toBeTruthy();
+  expect(within(due).getByText(/nuni 課程/)).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('nuni 失敗時仍顯示 LMS 作業截止', async () => {
+  const courseId = 'cw_11111111-1111-4111-8111-111111111111';
+  context.user = { uid: 'alice' };
+  context.nuni = {
+    session: { context: 'ctx', platformAccountId: 'pa_1' },
+    loading: false,
+  };
+  context.loadHomeData.mockResolvedValue({
+    courses: [],
+    tasks: [
+      {
+        id: 'lms-only',
+        courseId,
+        courseName: '作業系統',
+        title: '期中報告',
+        dueAt: '2026-10-25T02:00:00.000Z',
+        href: `/course/${courseId}`,
+      },
+    ],
+    unreadCount: 0,
+  });
+  context.loadNuniCalendarDeadlines.mockRejectedValue(new Error('nuni down'));
+  renderCalendar();
+  const due = await screen.findByTestId('calendar-due-list');
+  expect(within(due).getByText('期中報告')).toBeTruthy();
+  expect(within(due).getByText(/校園 LMS／匯入/)).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('月格切月、選日期、編輯及回今天沿用同一份資料', async () => {
+  const view = await createTimedEvent('合成安排');
+  fireEvent.click(screen.getByRole('button', { name: '月格' }));
+  fireEvent.click(screen.getByRole('button', { name: '2026-10-20' }));
+  expect(screen.getByText('2026-10-20 的行程')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '編輯' }));
+  expect((screen.getByLabelText('標題') as HTMLInputElement).value).toBe('合成安排');
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  fireEvent.click(screen.getByRole('button', { name: '下一月' }));
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-11');
+  expect(screen.queryByText('2026-10-20 的行程')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '上一月' }));
+  expect(screen.getByRole('button', { name: '合成安排' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '回今天' }));
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe(
+    emptyPersonalEventDraft().date.slice(0, 7),
+  );
+  view.unmount();
+});
+
+function focusEvent(id = 'verified-event', patch: Partial<PersonalImportRecord> = {}): PersonalImportRecord {
+  return {
+    id, batchId: id, kind: 'events', schoolId: 'pu', academicYear: '', semester: '',
+    title: '已核對的複習安排', date: '2027-03-14', allDay: false, startTime: '15:00', endTime: '16:00',
+    importedAt: '2026-11-07T10:00:00.000Z', source: { type: 'paste', name: '助理確認', line: 1, rawText: '' },
+    ...patch,
+  };
+}
+
+function seedFocusedEvents(rows: PersonalImportRecord[], owner = context.owner, schoolId = context.schoolId) {
+  localStorage.setItem(personalImportsStorageKey({ owner, schoolId }), JSON.stringify({ version: 1, records: rows }));
+}
+
+it('does not describe an acknowledged server event as device-only when device sync is disabled', async () => {
+  const record = focusEvent();
+  localStorage.setItem(personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId }), JSON.stringify({
+    version: 1, records: [record],
+    sync: { enabled: false, base: null, acknowledged: [{ record, revision: 1 }] },
+  }));
+  render(<PersonalCalendar />);
+  await screen.findByText(/裝置同步尚未開啟/);
+  expect(screen.getByText(/先前已存入帳號的資料仍以帳號紀錄為準/)).toBeTruthy();
+  expect(screen.queryByText(/目前只存在這台裝置，換裝置或清除資料就會不見/)).toBeNull();
+});
+
+it('locates only a stored event by ID, selects its actual date and month, and focuses its list row without opening an edit form', async () => {
+  const target = focusEvent();
+  seedFocusedEvents([target, focusEvent('other-day', { title: '另一日', date: '2027-03-15' })]);
+  context.search = 'eventId=verified-event&date=1999-01-01&title=URL%E5%81%87%E8%B3%87%E6%96%99';
+  const before = localStorage.getItem(personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId }));
+  render(<PersonalCalendar />);
+  expect(await screen.findByText('已定位到「已核對的複習安排」。')).toBeTruthy();
+  await waitFor(() => expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2027-03'));
+  expect(screen.getByText('2027-03-14 的行程')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '列表' }).getAttribute('aria-pressed')).toBe('true');
+  const row = screen.getByRole('heading', { name: target.title }).closest('li');
+  expect(row?.getAttribute('aria-current')).toBe('true');
+  expect(document.activeElement).toBe(row);
+  expect(screen.queryByLabelText('標題')).toBeNull();
+  expect(screen.queryByText('URL假資料')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '另一日' })).toBeNull();
+  expect(localStorage.getItem(personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId }))).toBe(before);
+});
+
+it.each([
+  ['another owner', 'platform:two', 'pu'],
+  ['another school', 'platform:one', 'ntu'],
+])('does not locate an event belonging to %s even when URL fields request that scope', async (_label, owner, schoolId) => {
+  seedFocusedEvents([focusEvent(undefined, { schoolId })], owner, schoolId);
+  context.search = 'eventId=verified-event&owner=platform%3Atwo&date=2027-03-14&title=%E4%B8%8D%E5%8F%AF%E4%BF%A1';
+  render(<PersonalCalendar />);
+  expect(await screen.findByText(/目前帳號與校園的個人行事曆找不到這筆行程/)).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '已核對的複習安排' })).toBeNull();
+  expect(screen.queryByLabelText('標題')).toBeNull();
+});
+
+it('can locate an event that arrives after the initial read, without navigating back after the user changes months', async () => {
+  context.search = 'eventId=verified-event';
+  render(<PersonalCalendar />);
+  await screen.findByText(/找不到這筆行程/);
+  await act(async () => {
+    seedFocusedEvents([focusEvent()]);
+    window.dispatchEvent(new Event('campus-personal-imports-change'));
+  });
+  expect(await screen.findByText('2027-03-14 的行程')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '下一月' }));
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2027-04');
+  await act(async () => { window.dispatchEvent(new Event('campus-personal-imports-change')); });
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2027-04');
+});
+
+it('discards the previously located row on identity switch and only resolves the same ID in the new owner ledger', async () => {
+  seedFocusedEvents([focusEvent()]);
+  context.search = 'eventId=verified-event';
+  const view = render(<PersonalCalendar />);
+  await screen.findByText('已定位到「已核對的複習安排」。');
+  context.owner = 'platform:two';
+  view.rerender(<PersonalCalendar />);
+  await screen.findByText(/目前帳號與校園的個人行事曆找不到這筆行程/);
+  expect(screen.queryByRole('heading', { name: '已核對的複習安排' })).toBeNull();
+  expect(screen.queryByLabelText('標題')).toBeNull();
+});
+
+it('does not expose a non-event record through eventId or call a failed ledger read an absent event', async () => {
+  const grade = focusEvent(undefined, { kind: 'grades', title: '私人成績', academicYear: '115', semester: '1', grade: 'A', credits: 3 });
+  seedFocusedEvents([grade]);
+  context.search = 'eventId=verified-event';
+  const view = render(<PersonalCalendar />);
+  await screen.findByText(/找不到這筆行程/);
+  expect(screen.queryByText('私人成績')).toBeNull();
+  view.unmount();
+  localStorage.setItem(personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId }), '{damaged');
+  render(<PersonalCalendar />);
+  await screen.findByText(/原始資料仍保留/);
+  expect(screen.queryByText(/找不到這筆行程/)).toBeNull();
+});
+
+it('responds to a new eventId without changing either event or entering edit mode', async () => {
+  seedFocusedEvents([focusEvent(), focusEvent('next-event', { title: '下一個安排', date: '2027-05-02' })]);
+  context.search = 'eventId=verified-event';
+  const view = render(<PersonalCalendar />);
+  await screen.findByText('2027-03-14 的行程');
+  context.search = 'eventId=next-event';
+  view.rerender(<PersonalCalendar />);
+  await screen.findByText('2027-05-02 的行程');
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2027-05');
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '下一個安排' }).closest('li'));
+  expect(screen.queryByLabelText('標題')).toBeNull();
+  expect(readPersonalImports({ owner: context.owner, schoolId: context.schoolId })).toHaveLength(2);
+});

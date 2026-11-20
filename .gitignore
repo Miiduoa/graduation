@@ -1,0 +1,93 @@
+# Node
+node_modules/
+.pnpm-store/
+
+# Env（保留範本）
+.env*
+!.env.example
+!**/.env.example
+
+# 服務帳戶與金鑰（永遠不要進 repo；Fly secret 從 repo 外寫入）
+serviceAccount*.json
+*-service-account*.json
+*.pem
+*.key
+# Native Firebase / Google client configs may include secrets; none are committed.
+google-services.json
+GoogleService-Info.plist
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+firebase-debug.log*
+firestore-debug.log*
+
+# OS
+.DS_Store
+
+# LibreOffice（開啟 .xlsx 時產生的鎖檔，勿提交）
+.~lock.*
+
+# MS Office / WPS 暫存鎖檔（開啟 .pptx/.docx/.xlsx 時產生）
+~$*
+
+# 編輯器 / 臨時 backup（避免 .bak / _tmp_* 進 repo）
+*.bak
+*.bak2
+*.bak.*
+_tmp_*
+
+# Local tooling (do not commit)
+.playwright-cli/
+
+# Next
+apps/web/.next/
+apps/web/out/
+apps/web/public/ai/onnxruntime/
+next-env.d.ts
+
+# Expo
+.expo/
+apps/mobile/.expo/
+apps/mobile/dist/
+apps/mobile/web-build/
+expo-env.d.ts
+
+# Firebase
+backend/.firebase/
+# 注意：backend/functions/lib/ 不再 gitignored —
+# 它包含 agent runtime / tools 依賴的 source modules
+# (assistantFormat / assistantFetchers / notificationService / assistantQueue)
+
+# Generated shared CJS (Functions copy is built by firebase.json predeploy)
+packages/shared/dist-cjs/
+backend/functions/generated/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+# Pillow-only campus game asset script (scripts/generate-campus-game-flux.py)
+/.venv-game-assets/
+
+# AI Server
+backend/ai-server/.venv/
+backend/ai-server/data/
+
+# Misc
+.fuse_hidden*
+*.tsbuildinfo
+outputs/
+tmp/
+.test-env/
+artifacts/campus-visual/
+artifacts/timetable-browser/
+artifacts/saved-campus-plans/
+artifacts/docs-preview/
+artifacts/announcement-browser/
+artifacts/campus-services/
+artifacts/campus-spatial/
+artifacts/role-workflows/
+artifacts/interface-design/
+artifacts/assistant-plan-revision/

@@ -1,0 +1,39 @@
+.panel {
+  box-sizing: border-box;
+  display: grid;
+  gap: 10px;
+  width: min(100%, 560px);
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.panel h3, .panel h4, .panel p { margin: 0; }
+.panel h3 { font-size: 16px; font-weight: 700; }
+.panel h4, .eventTitle { font-size: 14px; font-weight: 650; }
+.note, .summary, .notice { font-size: 13px; }
+.note { color: var(--muted); }
+.notice { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--panel); }
+.group { display: grid; gap: 8px; min-width: 0; }
+.changes { display: grid; gap: 12px; list-style: none; padding: 0; margin: 0; min-width: 0; }
+.changes > li { display: grid; gap: 6px; min-width: 0; padding-top: 8px; border-top: 1px solid var(--border); }
+.fields { margin: 0; display: grid; gap: 8px; min-width: 0; font-size: 13px; }
+.field { display: grid; grid-template-columns: minmax(64px, 80px) minmax(0, 1fr); gap: 8px; }
+.field dt { font-weight: 650; }
+.field dd { display: grid; gap: 4px; margin: 0; min-width: 0; font-variant-numeric: tabular-nums; }
+.field dd > div { min-width: 0; }
+.valueLabel { color: var(--muted); }
+.events { display: grid; gap: 8px; margin: 0; padding-left: 1.5em; min-width: 0; font-size: 13px; }
+.events li { min-width: 0; padding-left: 2px; }
+.events strong, .events span { display: block; }
+.events span { color: var(--muted); font-variant-numeric: tabular-nums; }
+.separate { display: grid; gap: 12px; min-width: 0; }
+.separate > div { display: grid; gap: 4px; min-width: 0; }
+@media (max-width: 600px) {
+  .panel { padding: 12px; }
+  .field { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}

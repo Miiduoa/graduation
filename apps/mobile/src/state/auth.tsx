@@ -1,0 +1,1045 @@
+/* eslint-disable */
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+} from 'firebase/firestore';
+import {
+  getAuthInstance,
+  getDb,
+  hasUsableFirebaseConfig,
+  subscribeToTokenRefresh,
+} from '../firebase';
+import { findSchoolById, resolveSchoolByEmail } from '@campus/shared/src/schools';
+import { isProvidenceSchoolId } from '@campus/shared/src/schoolIds';
+import { getPostLoginContext } from '../data/postLoginDataRouter';
+import { clearAllCache } from '../data/cachedSource';
+import { clearAllOfflineData, getOfflineQueue } from '../services/offline';
+import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
+import { getCachedPushToken, removePushTokenFromFirestore } from '../services/notifications';
+import { clearMockAuthSession, loadMockAuthSession } from '../services/mockAuth';
+import { clearUserScopedStorage } from '../services/scopedStorage';
+import { puCacheClearAll } from '../data/puDataCache';
+import { clearPUCache } from '../services/puDataCache';
+import { getInMemoryPostLoginContext, setInMemoryPostLoginContext } from '../services/postLoginContextHolder';
+import { bindVerifiedSchoolAiScope, revokeVerifiedSchoolAiScope } from '../services/verifiedSchoolAiScope';
+import { ensureCampusStoryBinding } from '../services/campusStoryBinding';
+import { captureSchoolSessionAssertion, clearPUSession } from '../services/studentIdAuth';
+import { clearOwnedPuCampusSessions } from '../services/clearOwnedPuCampusSessions';
+import {
+  clearTCSession,
+  purgeLegacyTCSensitiveStorage,
+} from '../services/tronClassClient';
+
+import type { UserRole as DataUserRole } from '../data/types';
+import type { MerchantAssignment } from '../data/types';
+import { DEMO_EXAM_BENTO_MERCHANT_ID } from '../data/demoMerchants';
+import { getRoleGroup, type RoleGroup } from '../services/permissions';
+import { useOptionalSchool } from './school';
+
+export type UserRole = DataUserRole;
+
+export type UserProfile = {
+  uid: string;
+  email?: string | null;
+  schoolId?: string | null;
+  primarySchoolId?: string | null;
+  role: UserRole;
+  /** 登入後多身分（Firestore users.postLoginRoles，與 custom claims.roles 對齊） */
+  postLoginRoles?: string[] | null;
+  schoolMembershipRole?: string | null;
+  schoolMembershipSchoolId?: string | null;
+  displayName?: string | null;
+  department?: string | null;
+  studentId?: string | null;
+  bio?: string | null;
+  phone?: string | null;
+  avatarUrl?: string | null;
+  isPublicProfile?: boolean | null;
+  roleGroup?: RoleGroup;
+  serviceRoles?: string[];
+  merchantAssignments?: MerchantAssignment[];
+  merchantAssignmentsError?: string | null;
+};
+
+type AuthContextValue = {
+  user: User | null;
+  profile: UserProfile | null;
+  loading: boolean;
+  profileLoading: boolean;
+  error: string | null;
+  tokenError: Error | null;
+  tokenExpired: boolean;
+  hasPendingOfflineData: boolean;
+  isAdmin: boolean;
+  isEditor: boolean;
+  refreshProfile: () => Promise<void>;
+  signOut: (expectedUid?: string) => Promise<void>;
+  signOutWithWarning: () => Promise<boolean>;
+  clearTokenError: () => void;
+};
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+function toIsoStringOrNull(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) {
+    return value;
+  }
+  // Prefer toMillis() to avoid Hermes cross-realm Date issue
+  if (value && typeof (value as { toMillis?: unknown }).toMillis === 'function') {
+    const ms = (value as { toMillis: () => number }).toMillis();
+    if (typeof ms === 'number' && Number.isFinite(ms)) {
+      return new Date(ms).toISOString();
+    }
+  }
+  if (value && typeof (value as { toDate?: () => Date }).toDate === 'function') {
+    try {
+      const d = (value as { toDate: () => Date }).toDate();
+      try {
+        return new Date(d.getTime()).toISOString();
+      } catch {
+        // Cross-realm Date — fallback to string parsing
+        const parsed = Date.parse(String(d));
+        return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+      }
+    } catch {
+      return null;
+    }
+  }
+  if (value && typeof (value as { seconds?: number }).seconds === 'number') {
+    return new Date((value as { seconds: number }).seconds * 1000).toISOString();
+  }
+  if (value && typeof (value as { _seconds?: number })._seconds === 'number') {
+    return new Date((value as { _seconds: number })._seconds * 1000).toISOString();
+  }
+  return null;
+}
+
+async function loadMerchantAssignments(uid: string): Promise<MerchantAssignment[]> {
+  // demo 帳號不去 Firestore 查 cafeterias/operators/{uid}（會 permission-denied）
+  if (typeof uid === 'string' && uid.startsWith('demo_')) {
+    return [];
+  }
+  const db = getDb();
+  // School and cafeteria directories are public. Operator rules allow an exact
+  // self read, and existing assignments identify the user only by document ID.
+  const schools = await getDocs(collection(db, 'schools'));
+  const rowsBySchool = await Promise.all(
+    schools.docs.map(async (school) => {
+      const cafeterias = await getDocs(collection(db, 'schools', school.id, 'cafeterias'));
+      return Promise.all(cafeterias.docs.map(async (cafeteria): Promise<MerchantAssignment | null> => {
+        const operator = await getDoc(
+          doc(db, 'schools', school.id, 'cafeterias', cafeteria.id, 'operators', uid),
+        );
+        if (!operator.exists()) return null;
+        const operatorData = operator.data() as Record<string, unknown>;
+        const cafeteriaData = cafeteria.data() as Record<string, unknown>;
+        const pilotStatusRaw = String(cafeteriaData.pilotStatus ?? 'inactive');
+
+        return {
+          schoolId: school.id,
+          schoolName: findSchoolById(school.id)?.name ?? school.id,
+          cafeteriaId: cafeteria.id,
+          cafeteriaName:
+            typeof cafeteriaData.name === 'string' && cafeteriaData.name.trim()
+              ? cafeteriaData.name
+              : cafeteria.id,
+          merchantId:
+            typeof cafeteriaData.merchantId === 'string' && cafeteriaData.merchantId.trim()
+              ? cafeteriaData.merchantId
+              : cafeteria.id,
+          brandKey:
+            typeof cafeteriaData.brandKey === 'string' && cafeteriaData.brandKey.trim()
+              ? cafeteriaData.brandKey
+              : null,
+          operatorRole:
+            operatorData.role === 'owner' || operatorData.role === 'manager'
+              ? operatorData.role
+              : 'staff',
+          status: operatorData.status === 'inactive' ? 'inactive' : 'active',
+          orderingEnabled: cafeteriaData.orderingEnabled === true,
+          pilotStatus:
+            pilotStatusRaw === 'pilot' || pilotStatusRaw === 'live' ? pilotStatusRaw : 'inactive',
+          displayName: typeof operatorData.displayName === 'string' ? operatorData.displayName : null,
+          email: typeof operatorData.email === 'string' ? operatorData.email : null,
+          lastActiveAt: toIsoStringOrNull(operatorData.lastActiveAt),
+        } satisfies MerchantAssignment;
+      }));
+    }),
+  );
+
+  return rowsBySchool
+    .flat()
+    .filter((row): row is MerchantAssignment => row !== null)
+    .sort((a, b) => {
+      const aActive = a.status === 'active' ? 1 : 0;
+      const bActive = b.status === 'active' ? 1 : 0;
+      return bActive - aActive || a.cafeteriaName.localeCompare(b.cafeteriaName, 'zh-TW');
+    });
+}
+
+async function loadProfile(u: User | null): Promise<UserProfile | null> {
+  if (!u) return null;
+
+  // demo 帳號（mockAuth）uid 以 'demo_' 開頭，這些 uid 不在 Firestore；
+  // 走 mock 路徑（toMockUserProfile）已經有完整 profile，這裡直接短路，
+  // 避免 [firebase] Failed to fetch users/demo_* 的 dev toast 干擾 demo 現場。
+  if (typeof u.uid === 'string' && u.uid.startsWith('demo_')) {
+    return null;
+  }
+
+  try {
+    const db = getDb();
+    const ref = doc(db, 'users', u.uid);
+    const snap = await getDoc(ref);
+    const data = snap.exists() ? (snap.data() as Record<string, unknown>) : {};
+    let merchantAssignments: MerchantAssignment[] = [];
+    let merchantAssignmentsError: string | null = null;
+    try {
+      merchantAssignments = await loadMerchantAssignments(u.uid);
+    } catch {
+      merchantAssignmentsError = '目前無法確認門市指派，請重新載入。';
+    }
+    const assignmentSchoolId =
+      merchantAssignments.find((assignment) => assignment.status === 'active')?.schoolId ??
+      merchantAssignments[0]?.schoolId ??
+      null;
+    const schoolId =
+      (data.primarySchoolId as string | undefined) ??
+      (data.schoolId as string | undefined) ??
+      assignmentSchoolId ??
+      resolveSchoolByEmail(u.email)?.id ??
+      null;
+    let schoolMembershipRole: string | null = null;
+    let schoolMembershipSchoolId: string | null = null;
+    let serviceRoles: string[] = [];
+
+    if (schoolId) {
+      const membershipSnap = await getDoc(doc(db, 'schools', schoolId, 'members', u.uid)).catch(
+        () => null,
+      );
+      const membershipData = membershipSnap?.exists()
+        ? (membershipSnap.data() as Record<string, unknown>)
+        : null;
+      const hasActiveMembership =
+        membershipData?.status === 'active' &&
+        (membershipData.schoolId == null || membershipData.schoolId === schoolId);
+      schoolMembershipRole =
+        hasActiveMembership && typeof membershipData?.role === 'string'
+          ? membershipData.role
+          : null;
+      schoolMembershipSchoolId = hasActiveMembership ? schoolId : null;
+
+      // Try to load service roles
+      try {
+        const serviceRolesSnap = await getDoc(
+          doc(db, 'schools', schoolId, 'serviceRoles', u.uid),
+        ).catch(() => null);
+        if (hasActiveMembership && serviceRolesSnap?.exists()) {
+          const serviceRoleData = serviceRolesSnap.data() as Record<string, unknown>;
+          if (
+            serviceRoleData.status === 'active' &&
+            (serviceRoleData.schoolId == null || serviceRoleData.schoolId === schoolId)
+          ) {
+            serviceRoles = ['orders', 'repairs', 'packages', 'printing', 'health'].filter(
+              (domain) => serviceRoleData[domain] === true,
+            );
+          }
+        }
+      } catch {
+        // Service roles optional - ignore errors
+        serviceRoles = [];
+      }
+    }
+
+    void ensureCampusStoryBinding(); // Firebase Auth profile only; nuni Google has no uid.
+    const userRole = (data.role as UserRole) ?? 'student';
+    const roleGroup = getRoleGroup(userRole);
+    const postLoginRolesRaw = data.postLoginRoles as unknown;
+    const postLoginRoles = Array.isArray(postLoginRolesRaw)
+      ? (postLoginRolesRaw as string[]).filter((x) => typeof x === 'string')
+      : null;
+
+    return {
+      uid: u.uid,
+      email: (data.email as string | undefined) ?? u.email,
+      schoolId,
+      primarySchoolId: schoolId,
+      role: userRole,
+      postLoginRoles: postLoginRoles?.length ? postLoginRoles : null,
+      schoolMembershipRole,
+      schoolMembershipSchoolId,
+      displayName:
+        (typeof data.displayName === 'string' && data.displayName.trim()
+          ? data.displayName
+          : null) ??
+        u.displayName ??
+        null,
+      department: (data.department as string) ?? null,
+      studentId: (data.studentId as string) ?? null,
+      bio: (data.bio as string) ?? null,
+      phone: (data.phone as string) ?? null,
+      avatarUrl:
+        (typeof data.avatarUrl === 'string' && data.avatarUrl.trim() ? data.avatarUrl : null) ??
+        u.photoURL ??
+        null,
+      isPublicProfile: (data.isPublicProfile as boolean) ?? null,
+      roleGroup,
+      serviceRoles,
+      merchantAssignments,
+      merchantAssignmentsError,
+    };
+  } catch (error) {
+    console.error('[auth] Failed to load profile:', error);
+    throw error;
+  }
+}
+
+function toMockUserProfile(session: {
+  uid: string;
+  email: string;
+  schoolId: string;
+  displayName: string;
+  role: UserRole;
+  department?: string | null;
+  studentId?: string | null;
+}): UserProfile {
+  // 依角色補上必要的 serviceRoles / merchantAssignments，
+  // 讓各角色在 demo 模式下能通過畫面的權限檢查。
+  const serviceRoles: string[] = [];
+  let merchantAssignments: MerchantAssignment[] = [];
+
+  const r = session.role;
+  if (r === 'vendor') {
+    serviceRoles.push('merchant');
+    // 對齊 DEMO_MERCHANTS，且把口試 Demo 店家排第一，方便現場展示接單。
+    // 這樣 MerchantHubScreen / VendorDashboardScreen / 學生 OrderingScreen
+    // 三邊使用同一組 merchant id，避免「我送單和接單到底能不能運作」這條鏈斷掉。
+    merchantAssignments = [
+      {
+        schoolId: session.schoolId,
+        schoolName: '靜宜大學',
+        cafeteriaId: DEMO_EXAM_BENTO_MERCHANT_ID,
+        cafeteriaName: '口試 Demo 便當店',
+        merchantId: DEMO_EXAM_BENTO_MERCHANT_ID,
+        brandKey: 'demo_exam_bento',
+        operatorRole: 'manager',
+        status: 'active',
+        orderingEnabled: true,
+        pilotStatus: 'live',
+        displayName: session.displayName,
+        email: session.email,
+        lastActiveAt: new Date().toISOString(),
+      },
+      {
+        schoolId: session.schoolId,
+        schoolName: '靜宜大學',
+        cafeteriaId: 'merchant_cafe_a',
+        cafeteriaName: '靜宜中餐部',
+        merchantId: 'merchant_cafe_a',
+        brandKey: 'zhongcan',
+        operatorRole: 'manager',
+        status: 'active',
+        orderingEnabled: true,
+        pilotStatus: 'live',
+        displayName: session.displayName,
+        email: session.email,
+        lastActiveAt: new Date().toISOString(),
+      },
+      {
+        schoolId: session.schoolId,
+        schoolName: '靜宜大學',
+        cafeteriaId: 'merchant_coffee_b',
+        cafeteriaName: '校園咖啡屋',
+        merchantId: 'merchant_coffee_b',
+        brandKey: 'coffee',
+        operatorRole: 'staff',
+        status: 'active',
+        orderingEnabled: true,
+        pilotStatus: 'live',
+        displayName: session.displayName,
+        email: session.email,
+        lastActiveAt: new Date().toISOString(),
+      },
+      {
+        schoolId: session.schoolId,
+        schoolName: '靜宜大學',
+        cafeteriaId: 'merchant_noodle_f',
+        cafeteriaName: '阿婆麵食館',
+        merchantId: 'merchant_noodle_f',
+        brandKey: 'noodle',
+        operatorRole: 'manager',
+        status: 'active',
+        orderingEnabled: true,
+        pilotStatus: 'live',
+        displayName: session.displayName,
+        email: session.email,
+        lastActiveAt: new Date().toISOString(),
+      },
+    ];
+  } else if (r === 'department_head') {
+    serviceRoles.push('department');
+  } else if (r === 'admin') {
+    serviceRoles.push('department', 'admin');
+  }
+
+  return {
+    uid: session.uid,
+    email: session.email,
+    schoolId: session.schoolId,
+    primarySchoolId: session.schoolId,
+    role: session.role,
+    postLoginRoles: null,
+    schoolMembershipRole: session.role === 'admin' ? 'admin' : null,
+    schoolMembershipSchoolId: session.role === 'admin' ? session.schoolId : null,
+    displayName: session.displayName,
+    department: session.department ?? null,
+    studentId: session.studentId ?? null,
+    bio: null,
+    phone: null,
+    avatarUrl: null,
+    isPublicProfile: null,
+    roleGroup: getRoleGroup(session.role),
+    serviceRoles,
+    merchantAssignments,
+  };
+}
+
+function toMockFirebaseUser(session: { uid: string; email: string; displayName: string }): User {
+  return {
+    uid: session.uid,
+    email: session.email,
+    displayName: session.displayName,
+    emailVerified: true,
+    isAnonymous: false,
+    photoURL: null,
+    phoneNumber: null,
+    providerId: 'password',
+    tenantId: null,
+    delete: async () => undefined,
+    getIdToken: async () => 'mock-token',
+    getIdTokenResult: async () => ({
+      token: 'mock-token',
+      claims: {},
+      authTime: new Date().toISOString(),
+      issuedAtTime: new Date().toISOString(),
+      expirationTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      signInProvider: 'password',
+      signInSecondFactor: null,
+    }),
+    reload: async () => undefined,
+    toJSON: () => ({ uid: session.uid, email: session.email, displayName: session.displayName }),
+    metadata: {
+      creationTime: new Date().toISOString(),
+      lastSignInTime: new Date().toISOString(),
+    },
+    providerData: [],
+    refreshToken: 'mock-refresh-token',
+  } as User;
+}
+
+export function AuthProvider(props: { children: React.ReactNode }) {
+  const schoolContext = useOptionalSchool();
+  const selectedSchoolId = schoolContext?.selection.schoolId ?? null;
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [tokenError, setTokenError] = useState<Error | null>(null);
+  const [tokenExpired, setTokenExpired] = useState(false);
+  const [hasPendingOfflineData, setHasPendingOfflineData] = useState(false);
+
+  const requestIdRef = useRef(0);
+  const isSigningOutRef = useRef(false);
+  const currentUserRef = useRef(user);
+  currentUserRef.current = user;
+
+  const isAdmin = useMemo(() => {
+    return (
+      !profileLoading &&
+      Boolean(user?.uid) &&
+      profile?.uid === user?.uid &&
+      Boolean(selectedSchoolId) &&
+      profile?.schoolMembershipSchoolId === selectedSchoolId &&
+      profile?.schoolMembershipRole === 'admin'
+    );
+  }, [
+    profileLoading,
+    user?.uid,
+    profile?.uid,
+    profile?.schoolMembershipRole,
+    profile?.schoolMembershipSchoolId,
+    selectedSchoolId,
+  ]);
+
+  const isEditor = useMemo(() => {
+    return (
+      isAdmin ||
+      (!profileLoading &&
+        Boolean(user?.uid) &&
+        profile?.uid === user?.uid &&
+        Boolean(selectedSchoolId) &&
+        profile?.schoolMembershipSchoolId === selectedSchoolId &&
+        profile?.schoolMembershipRole === 'editor')
+    );
+  }, [
+    isAdmin,
+    profileLoading,
+    user?.uid,
+    profile?.uid,
+    profile?.schoolMembershipRole,
+    profile?.schoolMembershipSchoolId,
+    selectedSchoolId,
+  ]);
+
+  // A Firebase profile alone does not identify the owner of raw device-wide campus caches.
+  // Only the verified school-login pipeline may produce a restorable context.
+  const profileSchoolId = profile?.primarySchoolId ?? profile?.schoolId;
+  const readySchoolId = schoolContext?.selectionReady ? selectedSchoolId : null;
+  useLayoutEffect(() => {
+    const uid = user?.uid;
+    const held = getInMemoryPostLoginContext();
+    const validProfile = uid && profile?.uid === uid && !loading && !profileLoading && !tokenExpired;
+    if (held && (!validProfile || held.uid !== uid || !isProvidenceSchoolId(readySchoolId) ||
+        !isProvidenceSchoolId(profileSchoolId) || !isProvidenceSchoolId(held.schoolId))) {
+      setInMemoryPostLoginContext(null);
+    }
+    if (!validProfile || !isProvidenceSchoolId(readySchoolId) || !isProvidenceSchoolId(profileSchoolId) ||
+        readySchoolId !== profileSchoolId ||
+        !hasUsableFirebaseConfig() || getAuthInstance().currentUser !== user || isSigningOutRef.current) return;
+    let active = true;
+    let restored: Awaited<ReturnType<typeof getPostLoginContext>> = null;
+    const auth = getAuthInstance();
+    // PU session 目前僅存在記憶體，冷啟動不會還原；期限未知也拒絕綁定。
+    // 下一次成功學校登入仍由 studentIdAuth 的已驗證登入流程綁定。
+    const assertSchoolSession = captureSchoolSessionAssertion({ uid, schoolId: profileSchoolId });
+    const assertRestoredSession = () => {
+      assertSchoolSession();
+      if (!active || auth.currentUser !== user || isSigningOutRef.current) {
+        throw new Error('登入狀態已變更，請重新登入。');
+      }
+    };
+    void getPostLoginContext(profileSchoolId, uid).then((ctx) => {
+      if (active && auth.currentUser === user && !isSigningOutRef.current &&
+          ctx?.origin === 'verified-school-login' && ctx.uid === uid && ctx.schoolId === profileSchoolId &&
+          isProvidenceSchoolId(ctx.schoolId) &&
+          !getInMemoryPostLoginContext()) {
+        assertRestoredSession();
+        restored = ctx;
+        setInMemoryPostLoginContext(ctx);
+        bindVerifiedSchoolAiScope(ctx, assertRestoredSession);
+      }
+    }).catch((failure) => {
+      if (active) console.warn('[auth] Could not restore the school context:', failure);
+    });
+    return () => {
+      active = false;
+      if (restored && getInMemoryPostLoginContext() === restored) setInMemoryPostLoginContext(null);
+    };
+  }, [user, profile?.uid, readySchoolId, profileSchoolId, loading, profileLoading, tokenExpired]);
+
+  const refreshProfile = useCallback(async () => {
+    // ── 先檢查 mock auth session（hybrid login 使用 mock auth 即使有 Firebase config）──
+    const mockSession = await loadMockAuthSession();
+    if (mockSession) {
+      setUser(toMockFirebaseUser(mockSession));
+      setProfile(toMockUserProfile(mockSession));
+      setError(null);
+      setLoading(false);
+      setProfileLoading(false);
+      // 確保 demo 模式下 demoStore + roleEventBus inbox 都有資料；
+      //   無論使用者是從 LoginLanding 還是 DemoRolePill 進來都會跑。
+      if (mockSession.uid?.startsWith('demo_')) {
+        try {
+          const seeder = await import('../services/demoInboxSeeder');
+          await seeder.seedDemoInboxIfNeeded(mockSession.uid).catch(() => undefined);
+        } catch {
+          /* swallow */
+        }
+      }
+      return;
+    }
+
+    // ── 沒有 mock session → 嘗試 Firebase Auth ──
+    if (!hasUsableFirebaseConfig()) {
+      setUser(null);
+      setProfile(null);
+      setLoading(false);
+      setProfileLoading(false);
+      return;
+    }
+
+    const currentUser = getAuthInstance().currentUser;
+    if (!currentUser) {
+      setUser(null);
+      setProfile(null);
+      setLoading(false);
+      setProfileLoading(false);
+      return;
+    }
+
+    const currentRequestId = ++requestIdRef.current;
+    setProfileLoading(true);
+
+    try {
+      // 等待一小段時間確保 Firebase Auth 狀態已完全同步
+      // 這解決了 SSO 登入後立即呼叫 refreshProfile 時可能拿到舊資料的問題
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const p = await loadProfile(currentUser);
+      if (requestIdRef.current === currentRequestId) {
+        setProfile(p);
+        setError(null);
+      }
+    } catch (e) {
+      if (requestIdRef.current === currentRequestId) {
+        console.error('[auth] refreshProfile failed:', e);
+        setError(loadFailureCopy(e));
+        setProfile((current) =>
+          current?.uid === currentUser.uid
+            ? {
+                ...current,
+                schoolMembershipRole: null,
+                schoolMembershipSchoolId: null,
+                serviceRoles: [],
+                merchantAssignments: [],
+                merchantAssignmentsError: '目前無法確認門市指派，請重新載入。',
+              }
+            : null,
+        );
+      }
+    } finally {
+      if (requestIdRef.current === currentRequestId) {
+        setProfileLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    purgeLegacyTCSensitiveStorage().catch((e) => {
+      console.warn('[auth] Sensitive legacy storage cleanup failed:', e);
+    });
+
+    if (!hasUsableFirebaseConfig()) {
+      let isCancelled = false;
+
+      (async () => {
+        try {
+          const session = await loadMockAuthSession();
+          if (isCancelled) return;
+
+          setUser(session ? toMockFirebaseUser(session) : null);
+          setProfile(session ? toMockUserProfile(session) : null);
+          setTokenError(null);
+          setTokenExpired(false);
+          setError(null);
+        } finally {
+          if (!isCancelled) {
+            setLoading(false);
+            setProfileLoading(false);
+          }
+        }
+      })();
+
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    const auth = getAuthInstance();
+    let isCancelled = false;
+
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      if (isCancelled) return;
+
+      const currentRequestId = ++requestIdRef.current;
+
+      // mock/demo session 是 mobile demo 的主登入來源。即使 Firebase 還殘留
+      // currentUser，也要先採用 mockAuth，避免 demo 角色被判成未登入或舊帳號。
+      try {
+        const mockSession = await loadMockAuthSession();
+        if (!isCancelled && requestIdRef.current === currentRequestId && mockSession) {
+          setUser(toMockFirebaseUser(mockSession));
+          setProfile(toMockUserProfile(mockSession));
+          setError(null);
+          setTokenError(null);
+          setTokenExpired(false);
+          setLoading(false);
+          setProfileLoading(false);
+          if (mockSession.uid?.startsWith('demo_')) {
+            try {
+              const seeder = await import('../services/demoInboxSeeder');
+              await seeder.seedDemoInboxIfNeeded(mockSession.uid).catch(() => undefined);
+            } catch {
+              /* swallow */
+            }
+          }
+          return;
+        }
+      } catch {
+        // Ignore and continue with Firebase Auth below.
+      }
+
+      // Firebase Auth 沒有登入使用者 → 檢查 mock auth session（hybrid login 用的）
+      if (!u) {
+        try {
+          const mockSession = await loadMockAuthSession();
+          if (!isCancelled && requestIdRef.current === currentRequestId) {
+            if (mockSession) {
+              setUser(toMockFirebaseUser(mockSession));
+              setProfile(toMockUserProfile(mockSession));
+              setError(null);
+            } else {
+              setUser(null);
+              setProfile(null);
+            }
+            setTokenError(null);
+            setTokenExpired(false);
+          }
+        } catch (e) {
+          if (!isCancelled && requestIdRef.current === currentRequestId) {
+            setUser(null);
+            setProfile(null);
+          }
+        } finally {
+          if (!isCancelled && requestIdRef.current === currentRequestId) {
+            setLoading(false);
+            setProfileLoading(false);
+          }
+        }
+        return;
+      }
+
+      setUser(u);
+      setLoading(true);
+      setProfileLoading(true);
+      setError(null);
+
+      try {
+        const p = await loadProfile(u);
+        if (!isCancelled && requestIdRef.current === currentRequestId) {
+          setProfile(p);
+        }
+      } catch (e) {
+        if (!isCancelled && requestIdRef.current === currentRequestId) {
+          console.error('[auth] onAuthStateChanged profile load failed:', e);
+          setError(loadFailureCopy(e));
+          setProfile(null);
+        }
+      } finally {
+        if (!isCancelled && requestIdRef.current === currentRequestId) {
+          setLoading(false);
+          setProfileLoading(false);
+        }
+      }
+    });
+
+    const unsubToken = subscribeToTokenRefresh((tokenUser, err) => {
+      if (isCancelled) return;
+
+      if (err) {
+        setTokenError(err);
+        if (err.message === 'TOKEN_REFRESH_EXHAUSTED') {
+          setTokenExpired(true);
+          setError('登入狀態已過期，請重新登入');
+        }
+      } else {
+        setTokenError(null);
+        setTokenExpired(false);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+      unsub();
+      unsubToken();
+    };
+  }, []);
+
+  useEffect(() => {
+    const checkPendingData = async () => {
+      try {
+        const queue = await getOfflineQueue();
+        setHasPendingOfflineData(queue.length > 0);
+      } catch {
+        setHasPendingOfflineData(false);
+      }
+    };
+
+    checkPendingData();
+    const interval = setInterval(checkPendingData, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleSignOut = useCallback(
+    async (
+      expectedUid?: string,
+    ): Promise<{
+      success: boolean;
+      hadCleanupErrors: boolean;
+    }> => {
+      const currentUserId = hasUsableFirebaseConfig()
+        ? getAuthInstance().currentUser?.uid ?? null
+        : currentUserRef.current?.uid ?? null;
+      const expectedAccountUid = expectedUid ?? currentUserId;
+      const assertExpectedAccount = (allowSignedOut = false) => {
+        const currentUid = hasUsableFirebaseConfig()
+          ? getAuthInstance().currentUser?.uid ?? null
+          : currentUserRef.current?.uid ?? null;
+        if (currentUid !== expectedAccountUid && !(allowSignedOut && currentUid === null)) {
+          throw new Error('The account changed before sign out completed');
+        }
+      };
+      assertExpectedAccount();
+      if (isSigningOutRef.current) {
+        if (expectedUid) throw new Error('Sign out is already in progress');
+        console.log('[auth] Sign out already in progress');
+        return { success: false, hadCleanupErrors: false };
+      }
+
+      isSigningOutRef.current = true;
+      revokeVerifiedSchoolAiScope();
+
+      // 先清理本地資料，再登出
+      // 這解決了登出後清理過程中發生錯誤時，使用者已登出但本地還有上一個使用者資料殘留的問題
+      const cleanupErrors: Error[] = [];
+      const cleanupTasks: Promise<unknown>[] = [
+        (async () => {
+          const plans = require('../services/savedCampusPlans') as typeof import('../services/savedCampusPlans');
+          return plans.beginSavedCampusPlansSignOutCleanup();
+        })().catch((e) => {
+          console.warn('[auth] Saved plan cleanup failed:', e);
+          throw e;
+        }),
+        // Cancel only Campus Agent's own device notifications before Firebase
+        // changes identity; this synchronously fences in-flight local writes.
+        (async () => {
+          const reminders = require('../services/campusAssignmentReminders') as
+            typeof import('../services/campusAssignmentReminders');
+          return reminders.beginCampusAssignmentReminderSignOutCleanup();
+        })().catch((e) => {
+          console.warn('[auth] Campus Agent local reminder cleanup failed:', e);
+          throw e;
+        }),
+        clearAllCache(() => assertExpectedAccount()).catch((e) => {
+          console.warn('[auth] clearAllCache failed:', e);
+          throw e;
+        }),
+        clearAllOfflineData(() => assertExpectedAccount()).catch((e) => {
+          console.warn('[auth] clearAllOfflineData failed:', e);
+          throw e;
+        }),
+        clearUserScopedStorage(
+          { uid: currentUserId, schoolId: profile?.schoolId ?? null },
+          () => assertExpectedAccount(),
+        ).catch((e) => {
+          console.warn('[auth] Scoped storage cleanup failed:', e);
+          throw e;
+        }),
+        clearMockAuthSession().catch((e) => {
+          console.warn('[auth] clearMockAuthSession failed:', e);
+          throw e;
+        }),
+        clearTCSession().catch((e) => {
+          console.warn('[auth] clearTCSession failed:', e);
+          throw e;
+        }),
+      ];
+
+      if (currentUserId && hasUsableFirebaseConfig()) {
+        cleanupTasks.push(
+          getCachedPushToken()
+            .then((token) => {
+              if (!token) return;
+              return removePushTokenFromFirestore(currentUserId, token);
+            })
+            .catch((e) => {
+              console.warn('[auth] Failed to remove push token during sign out:', e);
+              throw e;
+            }),
+        );
+        cleanupTasks.push(
+          clearOwnedPuCampusSessions().catch((e) => {
+            console.warn('[auth] Failed to clear campus sessions during sign out:', e);
+            throw e;
+          }),
+        );
+      }
+
+      // 使用 Promise.allSettled 來確保所有清理操作都嘗試執行
+      const cleanupResults = await Promise.allSettled(cleanupTasks);
+
+      cleanupResults.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          cleanupErrors.push(
+            result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
+          );
+        }
+      });
+
+      const hadCleanupErrors = cleanupErrors.length > 0;
+      if (hadCleanupErrors) {
+        console.warn('[auth] Some cleanup operations failed:', cleanupErrors);
+      }
+
+      try {
+        assertExpectedAccount();
+        if (hasUsableFirebaseConfig()) {
+          const auth = getAuthInstance();
+          await signOut(auth);
+        }
+        assertExpectedAccount(true);
+        // 即使 Firebase 已 signOut，若使用者原本是 mockAuth 登入，
+        // onAuthStateChanged 不會 fire（沒有 Firebase user 變化），
+        // 所以這裡必須**主動清空 React state**，否則 App.tsx 不會跳回 LoginLanding。
+        await clearMockAuthSession();
+        assertExpectedAccount(true);
+        setUser(null);
+        setProfile(null);
+
+        // 清除靜宜大學快取和 session
+        clearPUSession();
+        setInMemoryPostLoginContext(null);
+        await clearPUCache().catch(() => {});
+        assertExpectedAccount(true);
+        await puCacheClearAll().catch(() => {});
+        assertExpectedAccount(true);
+
+        setTokenError(null);
+        setTokenExpired(false);
+        setError(null);
+
+        return { success: true, hadCleanupErrors };
+      } catch (e) {
+        console.error('[auth] Sign out failed:', e);
+        throw e;
+      } finally {
+        isSigningOutRef.current = false;
+        try {
+          const plans = require('../services/savedCampusPlans') as typeof import('../services/savedCampusPlans');
+          plans.endSavedCampusPlansSignOutCleanup();
+        } catch (e) {
+          console.warn('[auth] Saved plan sign-out fence cleanup failed:', e);
+        }
+        // A failed sign-out must not permanently disable reminders for a
+        // still-signed-in account. An epoch bump invalidates prior tasks.
+        try {
+          const reminders = require('../services/campusAssignmentReminders') as
+            typeof import('../services/campusAssignmentReminders');
+          reminders.endCampusAssignmentReminderSignOutCleanup();
+        } catch (e) {
+          console.warn('[auth] Reminder sign-out fence cleanup failed:', e);
+        }
+      }
+    },
+    [profile?.schoolId],
+  );
+
+  const handleSignOutWithWarning = useCallback(async (): Promise<boolean> => {
+    const pendingQueue = await getOfflineQueue();
+
+    const performSignOut = async (): Promise<boolean> => {
+      try {
+        const result = await handleSignOut();
+        if (result.hadCleanupErrors) {
+          const { Alert } = require('react-native');
+          Alert.alert('登出成功', '部分本機通知或快取未能完整清理。請檢查這台手機的通知設定，以免收到舊帳號提醒。', [
+            { text: '好', style: 'default' },
+          ]);
+        }
+        return result.success;
+      } catch (e) {
+        const { Alert } = require('react-native');
+        Alert.alert('登出失敗', '登出時發生錯誤，請稍後再試。', [{ text: '好', style: 'default' }]);
+        return false;
+      }
+    };
+
+    if (pendingQueue.length > 0) {
+      return new Promise((resolve) => {
+        const { Alert } = require('react-native');
+        Alert.alert(
+          '尚有未同步的資料',
+          `您有 ${pendingQueue.length} 筆資料尚未同步到伺服器。登出後這些資料將會遺失。\n\n確定要登出嗎？`,
+          [
+            { text: '取消', style: 'cancel', onPress: () => resolve(false) },
+            {
+              text: '仍然登出',
+              style: 'destructive',
+              onPress: async () => {
+                const success = await performSignOut();
+                resolve(success);
+              },
+            },
+          ],
+        );
+      });
+    }
+
+    return performSignOut();
+  }, [handleSignOut]);
+
+  const clearTokenError = useCallback(() => {
+    setTokenError(null);
+    setTokenExpired(false);
+    setError(null);
+  }, []);
+
+  const value: AuthContextValue = useMemo(
+    () => ({
+      user,
+      profile,
+      loading,
+      profileLoading,
+      error,
+      tokenError,
+      tokenExpired,
+      hasPendingOfflineData,
+      isAdmin,
+      isEditor,
+      refreshProfile,
+      signOut: async (expectedUid?: string) => {
+        await handleSignOut(expectedUid);
+      },
+      signOutWithWarning: handleSignOutWithWarning,
+      clearTokenError,
+    }),
+    [
+      user,
+      profile,
+      loading,
+      profileLoading,
+      error,
+      tokenError,
+      tokenExpired,
+      hasPendingOfflineData,
+      isAdmin,
+      isEditor,
+      refreshProfile,
+      handleSignOut,
+      handleSignOutWithWarning,
+      clearTokenError,
+    ],
+  );
+
+  return <AuthContext.Provider value={value}>{props.children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
+}

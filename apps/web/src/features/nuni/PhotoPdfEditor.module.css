@@ -1,0 +1,93 @@
+.editor {
+  width: 100%;
+  padding: 20px;
+  border: 1px solid #b8c9bd;
+  border-radius: 14px;
+  background: #f8faf7;
+  color: #26382e;
+}
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.editor p {
+  line-height: 1.7;
+  margin: 12px 0;
+}
+.editor button,
+.pick {
+  padding: 8px 12px;
+  border: 1px solid #98ad9f;
+  border-radius: 7px;
+  background: white;
+  color: inherit;
+}
+.editor button:disabled {
+  opacity: 0.45;
+}
+.pick {
+  display: inline-block;
+}
+.pick input {
+  display: block;
+  max-width: 100%;
+  margin-top: 8px;
+}
+.pages {
+  list-style: none;
+  padding: 0;
+  margin: 18px 0;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+.pages li {
+  min-width: 0;
+}
+.paper {
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e8ece7;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.paper img {
+  max-width: 68%;
+  max-height: 68%;
+  object-fit: contain;
+  box-shadow: 0 3px 9px #26382e22;
+}
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.proof {
+  margin-top: 18px;
+  display: grid;
+  gap: 12px;
+}
+.proof iframe {
+  width: 100%;
+  height: 520px;
+  border: 1px solid #98ad9f;
+  background: white;
+}
+@media (prefers-color-scheme: dark) {
+  .editor {
+    background: #202e26;
+    color: #eef5ef;
+  }
+  .editor button,
+  .pick {
+    background: #314238;
+  }
+  .paper {
+    background: #16221b;
+  }
+}

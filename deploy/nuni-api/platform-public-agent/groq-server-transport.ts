@@ -1,0 +1,145 @@
+import { PublicAgentError } from './contract';
+
+const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+const canonicalTransports = new WeakSet<object>();
+export function isCanonicalGroqTransport(value: unknown): boolean {
+  return typeof value === 'function' && canonicalTransports.has(value);
+}
+// A proof belongs to one service-created execution attempt. It contains no
+// input or credential, cannot survive another attempt and can be consumed once.
+export type FreeAssuranceAttempt = object;
+type AttemptState = {
+  signal: AbortSignal;
+  operationId: string;
+  phase: 'ready' | 'denied' | 'sent' | 'consumed';
+  requestSignal?: AbortSignal;
+  proof?: Error;
+};
+const attempts = new WeakMap<FreeAssuranceAttempt, AttemptState>();
+export function createFreeAssuranceAttempt(
+  signal: AbortSignal,
+  operationId: string,
+): FreeAssuranceAttempt {
+  if (!/^pago_[a-f0-9-]{36}$/u.test(operationId))
+    throw new PublicAgentError('PUBLIC_AGENT_NOT_CONFIGURED', 503);
+  const attempt = Object.freeze({});
+  attempts.set(attempt, { signal, operationId, phase: 'ready' });
+  return attempt;
+}
+export function isFreeAssuranceDenied(value: unknown, attempt: FreeAssuranceAttempt): boolean {
+  const state = attempts.get(attempt);
+  return (
+    !!state &&
+    state.phase === 'denied' &&
+    state.proof === value &&
+    !state.signal.aborted &&
+    state.requestSignal?.aborted === false
+  );
+}
+export function consumeFreeAssuranceDenied(
+  value: unknown,
+  attempt: FreeAssuranceAttempt,
+  operationId: string,
+): boolean {
+  if (attempts.get(attempt)?.operationId !== operationId) return false;
+  if (!isFreeAssuranceDenied(value, attempt)) return false;
+  attempts.get(attempt)!.phase = 'consumed';
+  return true;
+}
+function assuranceDenied(attempt: FreeAssuranceAttempt, requestSignal: AbortSignal): Error | null {
+  const state = attempts.get(attempt);
+  if (!state || state.phase !== 'ready' || state.signal.aborted || requestSignal.aborted)
+    return null;
+  const proof = new Error('free assurance unavailable');
+  state.phase = 'denied';
+  state.requestSignal = requestSignal;
+  state.proof = proof;
+  return proof;
+}
+function beginFetch(attempt: FreeAssuranceAttempt, requestSignal: AbortSignal): boolean {
+  const state = attempts.get(attempt);
+  if (!state || state.phase !== 'ready' || state.signal.aborted || requestSignal.aborted)
+    return false;
+  state.phase = 'sent';
+  state.requestSignal = requestSignal;
+  return true;
+}
+type FreeOnlyGuard = (signal: AbortSignal) => Promise<boolean>;
+type Options = { credential: string; fetch: typeof fetch; freeOnlyGuard: FreeOnlyGuard };
+const unavailable = (): never => {
+  throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
+};
+
+/**
+ * Candidate only. The host must supply an authoritative no-charge guarantee; a
+ * plan-status lookup or an operator-provided boolean cannot make billing atomic.
+ * No runtime configuration in this repository enables this transport.
+ */
+export function createGroqServerTransport(options: Options) {
+  if (
+    typeof options?.credential !== 'string' ||
+    !/^[\x21-\x7e]{1,1024}$/u.test(options.credential) ||
+    typeof options.fetch !== 'function' ||
+    typeof options.freeOnlyGuard !== 'function'
+  )
+    return unavailable();
+  const credential = options.credential;
+  const transport = async (
+    input: string,
+    init: RequestInit,
+    beforeSend: () => Promise<void>,
+    attempt: FreeAssuranceAttempt,
+  ) => {
+    const headers = new Headers(init?.headers);
+    if (
+      input !== ENDPOINT ||
+      init?.method !== 'POST' ||
+      init.redirect !== 'error' ||
+      init.cache !== 'no-store' ||
+      typeof init.body !== 'string' ||
+      !init.signal ||
+      typeof beforeSend !== 'function' ||
+      headers.get('content-type') !== 'application/json' ||
+      headers.get('accept') !== 'application/json' ||
+      [...headers.keys()].some((name) => name !== 'accept' && name !== 'content-type')
+    )
+      return unavailable();
+    const signal = init.signal;
+    if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);
+    let allowed: unknown;
+    try {
+      allowed = await options.freeOnlyGuard(signal);
+    } catch {
+      return unavailable();
+    }
+    if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);
+    if (allowed === false)
+      throw (
+        assuranceDenied(attempt, signal) ??
+        new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503)
+      );
+    if (allowed !== true) return unavailable();
+    // Recheck the session after the potentially slow guard and immediately before sending.
+    await beforeSend();
+    if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);
+    if (!beginFetch(attempt, signal)) return unavailable();
+    try {
+      return await options.fetch(ENDPOINT, {
+        method: 'POST',
+        redirect: 'error',
+        cache: 'no-store',
+        signal,
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json',
+          authorization: `Bearer ${credential}`,
+        },
+        body: init.body,
+      });
+    } catch {
+      return unavailable();
+    }
+  };
+  canonicalTransports.add(transport);
+  return transport;
+}

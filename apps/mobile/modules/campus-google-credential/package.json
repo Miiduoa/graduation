@@ -1,0 +1,7 @@
+{
+  "name": "campus-google-credential",
+  "version": "0.1.0",
+  "description": "nuni native Google sign-in bridge for iOS and Android.",
+  "main": "index.ts",
+  "private": true
+}

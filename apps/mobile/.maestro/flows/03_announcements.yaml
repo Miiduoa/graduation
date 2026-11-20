@@ -1,0 +1,60 @@
+# 03_announcements.yaml
+# Today 儀表捲動至「學校公告」捷徑（需 Metro 載入目前 SmartDashboard；載入逾時 25s 會強制結束佔位畫面）
+
+appId: ${APP_ID}
+name: Announcements Flow
+tags:
+  - smoke
+  - announcements
+
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-Today'
+    timeout: 45000
+
+- waitForAnimationToEnd:
+    timeout: 2500
+
+- scrollUntilVisible:
+    element:
+      text: '學校公告'
+    direction: DOWN
+    timeout: 120000
+
+- tapOn:
+    text: '學校公告'
+
+- extendedWaitUntil:
+    visible:
+      id: 'e2e-announcements-screen'
+    timeout: 20000
+
+- takeScreenshot: announcements_list
+
+- tapOn:
+    text: '搜尋公告（標題/內文/來源）'
+
+- inputText: '選課'
+
+- extendedWaitUntil:
+    visible: '選課'
+    timeout: 8000
+    optional: true
+
+- takeScreenshot: announcements_search_result
+
+- tapOn:
+    index: 1
+    optional: true
+
+- extendedWaitUntil:
+    visible: '收藏'
+    timeout: 8000
+    optional: true
+
+- takeScreenshot: announcement_detail_optional
+
+- back

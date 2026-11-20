@@ -1,0 +1,131 @@
+'use client';
+
+import { use } from 'react';
+
+import dynamic from 'next/dynamic';
+import Link from 'next/link';
+import { SiteShell } from '@/components/SiteShell';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
+import { PageLoadingCard } from '@/components/PageLoadingCard';
+import { usePublicNavigationPort } from './usePublicNavigationPort';
+
+// 使用 dynamic import 並關閉 SSR（Leaflet 需要 browser API）
+const MapClient = dynamic(() => import('./MapClient'), {
+  ssr: false,
+  loading: () => <PageLoadingCard message="地圖載入中..." />,
+});
+
+export default function MapPage(props: {
+  searchParams?: Promise<{
+    school?: string;
+    schoolId?: string;
+    campus?: string;
+    route?: string | string[];
+    focus?: string | string[];
+    query?: string | string[];
+  }>;
+}) {
+  const searchParams = props.searchParams ? use(props.searchParams) : undefined;
+  const { schoolId, schoolName, schoolSearch: q, status } = useCampusBrowseContext(searchParams);
+  const {
+    port,
+    needsSignIn,
+    capabilityStatus,
+    retryCapability,
+    availabilityStatus,
+    retryAvailability,
+  } = usePublicNavigationPort(schoolId, schoolName);
+  const route = Array.isArray(searchParams?.route) ? searchParams.route[0] : searchParams?.route;
+  const focus = Array.isArray(searchParams?.focus) ? searchParams.focus[0] : searchParams?.focus;
+  const query = Array.isArray(searchParams?.query) ? searchParams.query[0] : searchParams?.query;
+
+  return (
+    <SiteShell
+      title="校園地圖"
+      subtitle="查看校園地點與校方地圖，確認位置再出發。"
+      schoolName={schoolName}
+      compactHeading
+    >
+      {status === 'ready' && schoolId ? (
+        <MapClient
+          key={schoolId}
+          school={schoolId}
+          schoolName={schoolName}
+          route={route}
+          focus={focus}
+          query={query}
+          publicTask={port}
+        />
+      ) : (
+        <section className="card" role="status">
+          <h2>
+            {status === 'loading'
+              ? '正在讀取校園目錄…'
+              : status === 'error'
+                ? '無法確認所選學校'
+                : '先選擇一所學校'}
+          </h2>
+          <p>選擇校園後才讀取該校的建築與設施，不會沿用上一所學校的地點。</p>
+        </section>
+      )}
+
+      {needsSignIn && schoolId && (
+        <p className="card">
+          登入 nuni 帳號後可查看此校園是否提供公開校園導航。{' '}
+          <Link href={`/login?returnUrl=${encodeURIComponent(`/map?campus=${schoolId}`)}`}>
+            登入或註冊
+          </Link>
+        </p>
+      )}
+      {schoolId && capabilityStatus === 'unavailable' && (
+        <p className="card">此校園的雲端導航尚未開放。</p>
+      )}
+      {schoolId && capabilityStatus === 'error' && (
+        <section className="card" role="status">
+          <p>暫時無法確認此校園的導航服務。</p>
+          <button type="button" className="btn secondary" onClick={retryCapability}>
+            重新查詢
+          </button>
+        </section>
+      )}
+      {schoolId && availabilityStatus === 'error' && (
+        <section className="card" role="status">
+          <p>暫時無法確認校園導航服務。</p>
+          <button type="button" className="btn secondary" onClick={retryAvailability}>
+            重新查詢
+          </button>
+        </section>
+      )}
+      <div
+        style={{
+          margin: '16px 0',
+          padding: '14px 18px',
+          borderRadius: 'var(--radius)',
+          background: 'var(--accent-soft)',
+          border: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 14,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 3 }}>
+            找校園地點
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text)' }}>
+            找不到建築或設施？用地圖搜尋，或打開校園目錄。
+          </div>
+        </div>
+        <Link
+          href={`/search${q ? `${q}&` : '?'}q=${encodeURIComponent('地點')}`}
+          className="btn"
+          style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+        >
+          詢問地點 →
+        </Link>
+      </div>
+    </SiteShell>
+  );
+}

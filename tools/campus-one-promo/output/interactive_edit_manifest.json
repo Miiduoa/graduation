@@ -1,0 +1,59 @@
+{
+  "source_date": "2026-10-14",
+  "source": "https://nuni.tw/",
+  "duration_seconds": 37.5,
+  "video_file": "Campus_One_2026-10-14_Real_Click_Demo.mp4",
+  "chapters": [
+    {
+      "id": "01-bus",
+      "raw_video": "/home/runner/work/graduation/graduation/tools/campus-one-promo/interactive/01-bus.webm",
+      "raw_seconds": 11.04,
+      "edit_seconds": 9.93,
+      "clicks": 3,
+      "verified_actions": [
+        "從首頁打開公車",
+        "切換站名搜尋",
+        "輸入靜宜大學"
+      ],
+      "final_url": "https://nuni.tw/bus"
+    },
+    {
+      "id": "02-timetable",
+      "raw_video": "/home/runner/work/graduation/graduation/tools/campus-one-promo/interactive/02-timetable.webm",
+      "raw_seconds": 11.04,
+      "edit_seconds": 9.93,
+      "clicks": 4,
+      "verified_actions": [
+        "打開課務課表",
+        "切換一週模式",
+        "切換單日模式",
+        "打開新增課程"
+      ],
+      "final_url": "https://nuni.tw/timetable"
+    },
+    {
+      "id": "03-search",
+      "raw_video": "/home/runner/work/graduation/graduation/tools/campus-one-promo/interactive/03-search.webm",
+      "raw_seconds": 7.16,
+      "edit_seconds": 6.07,
+      "clicks": 2,
+      "verified_actions": [
+        "搜尋公車服務",
+        "點選搜尋結果公車"
+      ],
+      "final_url": "https://nuni.tw/bus"
+    },
+    {
+      "id": "04-campus",
+      "raw_video": "/home/runner/work/graduation/graduation/tools/campus-one-promo/interactive/04-campus.webm",
+      "raw_seconds": 7.16,
+      "edit_seconds": 6.07,
+      "clicks": 2,
+      "verified_actions": [
+        "從首頁打開校園地圖",
+        "點擊找校園地點"
+      ],
+      "final_url": "https://nuni.tw/map"
+    }
+  ]
+}

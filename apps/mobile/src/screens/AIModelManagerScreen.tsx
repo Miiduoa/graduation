@@ -1,0 +1,985 @@
+/* eslint-disable */
+/**
+ * AI Model Manager Screen — 本地 AI 模型下載管理
+ * 讓使用者選擇、下載、管理本地 LLM 模型。
+ */
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+  Animated,
+  Platform,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import NetInfo from '@react-native-community/netinfo';
+import * as Device from 'expo-device';
+import * as FileSystem from 'expo-file-system/legacy';
+import {
+  localLLM,
+  MODEL_REGISTRY,
+  type ModelDownloadProgress,
+  type LLMState,
+  type LLMRuntimeAvailability,
+} from '../services/localLLMInference';
+import { localAssistant } from '../services/localAssistant';
+import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+
+// ═══════════════════════════════════════════════
+// Model Metadata — 使用者友善的模型資訊
+// ═══════════════════════════════════════════════
+
+interface ModelInfo {
+  id: string;
+  name: string;
+  description: string;
+  sizeLabel: string;
+  sizeBytes: number;
+  quality: '輕量' | '標準' | '完整';
+  qualityStars: number; // 1-5
+  speedStars: number; // 1-5
+  recommended: boolean;
+  features: string[];
+  badge?: string;
+}
+
+const recommendedOnDeviceModelId =
+  Platform.OS === 'ios' &&
+  typeof Device.totalMemory === 'number' &&
+  Device.totalMemory >= 6 * 1024 * 1024 * 1024
+    ? 'qwen2.5-3b'
+    : 'qwen2.5-0.5b';
+
+const MODEL_INFO: ModelInfo[] = [
+  // ── 輕量級 ──
+  {
+    id: 'qwen2.5-0.5b',
+    name: 'Qwen2.5 隨身 AI',
+    description: '輕量中文模型，適合日常問答、文字整理。下載後可完全離線運算；複雜推理建議改用進階模型。',
+    sizeLabel: '約 398 MB',
+    sizeBytes: MODEL_REGISTRY['qwen2.5-0.5b'].modelSize,
+    quality: '輕量',
+    qualityStars: 2,
+    speedStars: 5,
+    recommended: true,
+    features: ['免付費 API', '離線問答', '中文對話', '手機本地處理'],
+    badge: '首次安裝推薦',
+  },
+  {
+    id: 'smollm2-1.7b',
+    name: 'SmolLM2 輕量版',
+    description: '舊版輕量模型，適合英文簡單對話；中文建議優先選 Qwen2.5',
+    sizeLabel: '1.1 GB',
+    sizeBytes: 1_100_000_000,
+    quality: '輕量',
+    qualityStars: 2,
+    speedStars: 5,
+    recommended: false,
+    features: ['基本問答', '校園資訊', '快速回覆'],
+    badge: '最省空間',
+  },
+  // ── 標準級 ──
+  {
+    id: 'qwen2.5-3b',
+    name: 'Qwen2.5 標準版',
+    description: '中英文表現優秀，空間與品質最佳平衡',
+    sizeLabel: '2.1 GB',
+    sizeBytes: 2_100_000_000,
+    quality: '標準',
+    qualityStars: 3,
+    speedStars: 4,
+    recommended: false,
+    features: ['中英文雙語', '工具使用', '多輪對話'],
+  },
+  {
+    id: 'phi-3.5-mini',
+    name: 'Phi-3.5 標準版',
+    description: '推理能力突出，適合邏輯分析',
+    sizeLabel: '2.4 GB',
+    sizeBytes: 2_400_000_000,
+    quality: '標準',
+    qualityStars: 3,
+    speedStars: 3,
+    recommended: false,
+    features: ['推理分析', '數學計算', '邏輯思考'],
+  },
+  // ── 進階級 (7B) ──
+  {
+    id: 'qwen2.5-7b',
+    name: 'Qwen2.5 進階版',
+    description: '7B 參數，中英文理解與生成能力大幅提升，Agent 代理執行更準確',
+    sizeLabel: '4.7 GB',
+    sizeBytes: 4_680_000_000,
+    quality: '完整',
+    qualityStars: 5,
+    speedStars: 2,
+    recommended: false,
+    features: ['中文推理', '進階對話', '長文整理', '工具理解'],
+    badge: '高記憶體裝置',
+  },
+  {
+    id: 'mistral-7b-v0.3',
+    name: 'Mistral 7B 進階版',
+    description: '7B 參數，歐洲頂尖開源模型，英文推理與分析能力極強',
+    sizeLabel: '4.4 GB',
+    sizeBytes: 4_370_000_000,
+    quality: '完整',
+    qualityStars: 5,
+    speedStars: 2,
+    recommended: false,
+    features: ['頂級推理', '程式分析', '邏輯思考', '英文最強'],
+    badge: '進階',
+  },
+];
+
+// ═══════════════════════════════════════════════
+// Component
+// ═══════════════════════════════════════════════
+
+export default function AIModelManagerScreen({ navigation }: any) {
+  const styles = useThemeStyleSheet(createStyles);
+  const [llmState, setLlmState] = useState<LLMState>(localLLM.getState());
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, ModelDownloadProgress>>(
+    {},
+  );
+  const [downloadedModels, setDownloadedModels] = useState<string[]>([]);
+  const [activeModel, setActiveModel] = useState<string | null>(null);
+  const [isWifi, setIsWifi] = useState(true);
+  const [diskSpace, setDiskSpace] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [runtimeAvailability, setRuntimeAvailability] = useState<LLMRuntimeAvailability>(() =>
+    localLLM.getRuntimeAvailability(),
+  );
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // ── Init ──
+  useEffect(() => {
+    const unsub = localLLM.subscribe(setLlmState);
+    setRuntimeAvailability(localLLM.getRuntimeAvailability());
+    loadState();
+    checkNetwork();
+    checkDiskSpace();
+
+    // Pulse animation for recommended badge
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.05, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      ]),
+    ).start();
+
+    return unsub;
+  }, []);
+
+  const loadState = useCallback(async () => {
+    setLoading(true);
+    try {
+      const downloaded = await localLLM.getDownloadedModels();
+      setDownloadedModels(downloaded);
+
+      const status = await localAssistant.getStatus();
+      // A preference alone is not proof that the native context loaded.
+      setActiveModel(status.llmState.status === 'ready' ? status.llmState.modelId ?? null : null);
+    } catch (e) {
+      console.warn('[AIModelManager] loadState error:', e);
+    }
+    setLoading(false);
+  }, []);
+
+  const checkNetwork = useCallback(async () => {
+    const state = await NetInfo.fetch();
+    setIsWifi(state.type === 'wifi');
+  }, []);
+
+  const checkDiskSpace = useCallback(async () => {
+    try {
+      const free = await FileSystem.getFreeDiskStorageAsync();
+      setDiskSpace(free);
+    } catch {
+      setDiskSpace(null);
+    }
+  }, []);
+
+  // ── Actions ──
+
+  const handleDownload = useCallback(
+    async (modelId: string) => {
+      const info = MODEL_INFO.find((m) => m.id === modelId);
+      if (!info) return;
+      if (['generating', 'loading', 'downloading'].includes(localLLM.getState().status)) {
+        Alert.alert('AI 正在使用中', '目前還有模型下載或推論工作，請先完成或取消後再操作。');
+        return;
+      }
+
+      const runtime = localLLM.getRuntimeAvailability();
+      setRuntimeAvailability(runtime);
+      if (!runtime.available) {
+        Alert.alert(
+          '需要開發版 App',
+          runtime.reason ??
+            '本地 AI 模型需要原生推理模組。請改用已安裝 llama.rn 的開發版 App，不要使用 Expo Go。',
+        );
+        return;
+      }
+
+      // Wi-Fi check
+      const netState = await NetInfo.fetch();
+      if (netState.type !== 'wifi') {
+        Alert.alert(
+          '建議使用 Wi-Fi',
+          `${info.name} 大約 ${info.sizeLabel}，使用行動數據下載可能會產生大量費用。確定要繼續嗎？`,
+          [
+            { text: '取消', style: 'cancel' },
+            { text: '繼續下載', onPress: () => startDownload(modelId) },
+          ],
+        );
+        return;
+      }
+
+      // Disk space check
+      if (diskSpace !== null && diskSpace < info.sizeBytes * 1.2) {
+        Alert.alert(
+          '儲存空間不足',
+          `下載 ${info.name} 需要約 ${info.sizeLabel} 的空間，但你的裝置只剩 ${formatBytes(diskSpace)}。請先清理一些空間。`,
+          [{ text: '了解' }],
+        );
+        return;
+      }
+
+      startDownload(modelId);
+    },
+    [diskSpace],
+  );
+
+  const activateModel = useCallback(
+    async (
+      modelId: string,
+      messages: {
+        successTitle: string;
+        successBody: string;
+        failureTitle: string;
+        failureFallback: string;
+      },
+    ): Promise<boolean> => {
+      const runtime = localLLM.getRuntimeAvailability();
+      setRuntimeAvailability(runtime);
+      if (!runtime.available) {
+        setActiveModel(null);
+        Alert.alert(messages.failureTitle, runtime.reason ?? '本地 AI 推理引擎尚未就緒。');
+        return false;
+      }
+
+      // Only persist a new preference after the native context is ready.
+      const ok = await localLLM.loadModel(modelId);
+      if (ok) {
+        await localAssistant.setConfig({ modelId }).catch(() => {});
+        setActiveModel(modelId);
+        Alert.alert(messages.successTitle, messages.successBody);
+        return true;
+      }
+
+      setActiveModel(null);
+      const state = localLLM.getState();
+      const errMsg = state.error?.includes('原生模組')
+        ? 'AI 推理引擎尚未就緒，請確認 App 已完整安裝後重試。如果問題持續，請嘗試重新安裝 App。'
+        : (state.error ?? messages.failureFallback);
+      Alert.alert(messages.failureTitle, errMsg);
+      return false;
+    },
+    [],
+  );
+
+  const startDownload = useCallback(async (modelId: string) => {
+    try {
+      const ok = await localLLM.downloadModel(modelId, (progress) => {
+        setDownloadProgress((prev) => ({ ...prev, [modelId]: progress }));
+      });
+
+      if (ok) {
+        setDownloadedModels((prev) => Array.from(new Set([...prev, modelId])));
+        setDownloadProgress((prev) => {
+          const next = { ...prev };
+          delete next[modelId];
+          return next;
+        });
+        await activateModel(modelId, {
+          successTitle: '下載並啟用成功',
+          successBody: 'AI 模型已載入，可以開始對話了！',
+          failureTitle: '下載成功但啟用失敗',
+          failureFallback: '模型已下載，但載入到本機 AI 推理引擎時失敗。請稍後重試啟用。',
+        });
+      } else {
+        const state = localLLM.getState();
+        if (state.status !== 'uninitialized' || state.error) {
+          Alert.alert('下載未完成', state.error ?? '下載未完成。請確認是否有其他模型操作正在進行。');
+        }
+        setDownloadProgress((prev) => {
+          const next = { ...prev };
+          delete next[modelId];
+          return next;
+        });
+      }
+    } catch (e: any) {
+      Alert.alert('下載錯誤', e?.message ?? '未知錯誤，請稍後重試。');
+      setDownloadProgress((prev) => {
+        const next = { ...prev };
+        delete next[modelId];
+        return next;
+      });
+    }
+  }, [activateModel]);
+
+  const handleActivate = useCallback(async (modelId: string) => {
+    try {
+      await activateModel(modelId, {
+        successTitle: '啟用成功',
+        successBody: 'AI 模型已載入，可以開始對話了！',
+        failureTitle: '啟用失敗',
+        failureFallback: '模型載入失敗，請重試。',
+      });
+    } catch (e: any) {
+      setActiveModel(null);
+      Alert.alert('啟用失敗', '模型載入時發生錯誤，請稍後重試。');
+    }
+  }, [activateModel]);
+
+  const handleDelete = useCallback(
+    (modelId: string) => {
+      const info = MODEL_INFO.find((m) => m.id === modelId);
+      Alert.alert(
+        '刪除模型',
+        `確定要刪除 ${info?.name ?? modelId}？這將釋放 ${info?.sizeLabel ?? '未知'} 的空間。`,
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '刪除',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await localLLM.deleteModel(modelId);
+                setDownloadedModels((prev) => prev.filter((id) => id !== modelId));
+                if (activeModel === modelId) setActiveModel(null);
+                void checkDiskSpace();
+              } catch (error: any) {
+                Alert.alert('無法刪除模型', error?.message || '模型正在使用中，請稍後再試。');
+              }
+            },
+          },
+        ],
+      );
+    },
+    [activeModel],
+  );
+
+  // ── Render ──
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ActivityIndicator size="large" color={theme.colors.accent} style={{ marginTop: 40 }} />
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.headerIcon}>
+            <Ionicons name="hardware-chip-outline" size={28} color={theme.colors.onAccent} />
+          </View>
+          <Text style={styles.headerTitle}>本地 AI 模型</Text>
+          <Text style={styles.headerSub}>
+            下載模型後，AI 助理可以完全在你的手機上運行，不需要網路也能使用
+          </Text>
+        </View>
+
+        {/* Status Bar */}
+        <View style={styles.statusBar}>
+          <View style={styles.statusItem}>
+            <Ionicons
+              name={isWifi ? 'wifi' : 'cellular'}
+              size={16}
+              color={isWifi ? theme.colors.success : theme.colors.warning}
+            />
+            <Text style={styles.statusText}>{isWifi ? 'Wi-Fi 已連線' : '行動數據'}</Text>
+          </View>
+          {diskSpace !== null && (
+            <View style={styles.statusItem}>
+              <Ionicons name="folder-outline" size={16} color={theme.colors.textSecondary} />
+              <Text style={styles.statusText}>可用空間：{formatBytes(diskSpace)}</Text>
+            </View>
+          )}
+          {activeModel && (
+            <View style={styles.statusItem}>
+              <Ionicons name="checkmark-circle" size={16} color={theme.colors.success} />
+              <Text style={[styles.statusText, { color: theme.colors.success }]}>
+                已啟用：{MODEL_INFO.find((m) => m.id === activeModel)?.name ?? activeModel}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {!runtimeAvailability.available && (
+          <View style={styles.runtimeNotice}>
+            <Ionicons name="construct-outline" size={18} color={theme.colors.warning} />
+            <Text style={styles.runtimeNoticeText}>
+              {runtimeAvailability.reason ?? '本地 AI 推理引擎尚未就緒。'}
+            </Text>
+          </View>
+        )}
+
+        {/* Model Cards */}
+        {MODEL_INFO.map((model) => {
+          const recommended = model.id === recommendedOnDeviceModelId;
+          const isDownloaded = downloadedModels.includes(model.id);
+          const isActive = activeModel === model.id;
+          const progress = downloadProgress[model.id];
+          const isDownloading =
+            (llmState.status === 'downloading' && llmState.modelId === model.id) ||
+            !!downloadProgress[model.id];
+          const engineBusy = ['downloading', 'loading', 'generating'].includes(llmState.status);
+          const canActivate = runtimeAvailability.available && !engineBusy;
+          const canDownload = runtimeAvailability.available && !engineBusy;
+
+          return (
+            <Animated.View
+              key={model.id}
+              style={[
+                styles.modelCard,
+                isActive && styles.modelCardActive,
+                recommended && { transform: [{ scale: pulseAnim }] },
+              ]}
+            >
+              {/* Badge */}
+              {(recommended || model.badge) && (
+                <View
+                  style={[
+                    styles.badge,
+                    recommended ? styles.badgeRecommended : styles.badgeNormal,
+                  ]}
+                >
+                  <Text style={[styles.badgeText, !recommended && { color: theme.colors.textSecondary }]}>{recommended ? '此裝置建議' : model.badge}</Text>
+                </View>
+              )}
+
+              {/* Model Header */}
+              <View style={styles.modelHeader}>
+                <Text style={styles.modelName}>{model.name}</Text>
+                <Text style={styles.modelSize}>{model.sizeLabel}</Text>
+              </View>
+
+              <Text style={styles.modelDesc}>{model.description}</Text>
+
+              {/* Quality / Speed Bars */}
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statLabel}>品質</Text>
+                  <View style={styles.starRow}>
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Ionicons
+                        key={`q${i}`}
+                        name={i < model.qualityStars ? 'star' : 'star-outline'}
+                        size={14}
+                        color={i < model.qualityStars ? '#FFD700' : '#D1D5DB'}
+                      />
+                    ))}
+                  </View>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statLabel}>速度</Text>
+                  <View style={styles.starRow}>
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Ionicons
+                        key={`s${i}`}
+                        name={i < model.speedStars ? 'flash' : 'flash-outline'}
+                        size={14}
+                        color={i < model.speedStars ? theme.colors.warning : '#D1D5DB'}
+                      />
+                    ))}
+                  </View>
+                </View>
+              </View>
+
+              {/* Features */}
+              <View style={styles.featuresRow}>
+                {model.features.map((f) => (
+                  <View key={f} style={styles.featureChip}>
+                    <Text style={styles.featureText}>{f}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* Error State */}
+              {llmState.status === 'error' && llmState.modelId === model.id && (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    marginBottom: 10,
+                    padding: 10,
+                    backgroundColor: theme.colors.dangerSoft,
+                    borderRadius: 8,
+                  }}
+                >
+                  <Ionicons name="alert-circle" size={16} color={theme.colors.danger} />
+                  <Text style={{ color: theme.colors.danger, fontSize: 12, flex: 1 }} numberOfLines={3}>
+                    {llmState.error ?? '發生錯誤，請稍後重試'}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() =>
+                      isDownloaded ? handleActivate(model.id) : handleDownload(model.id)
+                    }
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                      backgroundColor: theme.colors.accent,
+                      borderRadius: 6,
+                    }}
+                  >
+                    <Text style={{ color: theme.colors.onAccent, fontSize: 11, fontWeight: '600' }}>重試</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Download Progress */}
+              {isDownloading && progress && (
+                <View style={styles.progressContainer}>
+                  <View style={styles.progressBarBg}>
+                    <View style={[styles.progressBarFill, { width: `${progress.percent}%` }]} />
+                  </View>
+                  <Text style={styles.progressText}>
+                    {formatBytes(progress.bytesDownloaded)} / {formatBytes(progress.totalBytes)} (
+                    {progress.percent}%)
+                  </Text>
+                </View>
+              )}
+
+              {/* Action Buttons */}
+              <View style={styles.actionRow}>
+                {!isDownloaded && !isDownloading && (
+                  <TouchableOpacity
+                    style={[
+                      styles.actionBtn,
+                      styles.downloadBtn,
+                      !canDownload && styles.actionBtnDisabled,
+                    ]}
+                    onPress={() => handleDownload(model.id)}
+                    disabled={!canDownload}
+                  >
+                    <Ionicons
+                      name={canDownload ? 'cloud-download-outline' : 'construct-outline'}
+                      size={18}
+                      color={canDownload ? theme.colors.onAccent : theme.colors.textSecondary}
+                    />
+                    <Text
+                      style={[styles.actionBtnText, !canDownload && styles.actionBtnTextDisabled]}
+                    >
+                      {canDownload ? '下載模型' : engineBusy ? '請稍後再試' : '需開發版 App'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {isDownloaded && !isActive && (
+                  <>
+                    <TouchableOpacity
+                      style={[
+                        styles.actionBtn,
+                        styles.activateBtn,
+                        !canActivate && styles.actionBtnDisabled,
+                      ]}
+                      onPress={() => handleActivate(model.id)}
+                      disabled={!canActivate}
+                    >
+                      <Ionicons
+                        name="power-outline"
+                        size={18}
+                        color={canActivate ? theme.colors.onAccent : theme.colors.textSecondary}
+                      />
+                      <Text
+                        style={[styles.actionBtnText, !canActivate && styles.actionBtnTextDisabled]}
+                      >
+                        {canActivate ? '啟用' : engineBusy ? '請稍後再試' : '需重建 App'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.actionBtn, styles.deleteBtn, engineBusy && styles.actionBtnDisabled]}
+                      onPress={() => handleDelete(model.id)}
+                      disabled={engineBusy}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={theme.colors.danger} />
+                    </TouchableOpacity>
+                  </>
+                )}
+
+                {isActive && (
+                  <View style={styles.activeIndicator}>
+                    <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} />
+                    <Text style={styles.activeText}>使用中</Text>
+                  </View>
+                )}
+
+                {isDownloading && (
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.cancelBtn]}
+                    onPress={() => { void localLLM.cancelDownload(model.id); }}
+                  >
+                    <Ionicons name="close-circle-outline" size={18} color={theme.colors.danger} />
+                    <Text style={[styles.actionBtnText, { color: theme.colors.danger }]}>取消</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </Animated.View>
+          );
+        })}
+
+        {/* Info Section */}
+        <View style={styles.infoSection}>
+          <Text style={styles.infoTitle}>關於本地 AI</Text>
+          <View style={styles.infoItem}>
+            <Ionicons name="lock-closed-outline" size={18} color={theme.colors.textSecondary} />
+            <Text style={styles.infoText}>所有對話完全在你的手機上處理，不會上傳到任何伺服器</Text>
+          </View>
+          <View style={styles.infoItem}>
+            <Ionicons name="cloud-offline-outline" size={18} color={theme.colors.textSecondary} />
+            <Text style={styles.infoText}>下載模型後可離線使用 AI 助理（網路搜尋功能除外）</Text>
+          </View>
+          <View style={styles.infoItem}>
+            <Ionicons name="battery-half-outline" size={18} color={theme.colors.textSecondary} />
+            <Text style={styles.infoText}>使用本地 AI 時手機可能會稍微發熱，這是正常現象。7B 進階模型需要 6GB 以上 RAM 的裝置</Text>
+          </View>
+          <View style={styles.infoItem}>
+            <Ionicons name="trash-bin-outline" size={18} color={theme.colors.textSecondary} />
+            <Text style={styles.infoText}>隨時可以刪除模型釋放空間，不影響其他功能</Text>
+          </View>
+        </View>
+
+        {/* Without Model Notice */}
+        <View style={styles.fallbackNotice}>
+          <Ionicons name="information-circle-outline" size={20} color={theme.colors.accent} />
+          <Text style={styles.fallbackText}>
+            即使不下載模型，AI
+            助理仍可使用基本問答功能（校園資訊、課表查詢等），只是無法進行深度推理和自然對話。
+          </Text>
+        </View>
+
+        <View style={{ height: 40 }} />
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+// ═══════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+// ═══════════════════════════════════════════════
+// Styles
+// ═══════════════════════════════════════════════
+
+const createStyles = () => StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+  scroll: {
+    padding: 16,
+  },
+
+  // Header
+  header: {
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingVertical: 12,
+  },
+  headerIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: theme.colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: theme.colors.text,
+    marginBottom: 8,
+  },
+  headerSub: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: 20,
+  },
+
+  // Status
+  statusBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 20,
+    paddingHorizontal: 4,
+  },
+  statusItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statusText: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+  },
+  runtimeNotice: {
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: theme.colors.warningSoft,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    alignItems: 'flex-start',
+  },
+  runtimeNoticeText: {
+    fontSize: 12,
+    color: theme.colors.text,
+    flex: 1,
+    lineHeight: 18,
+  },
+
+  // Model Card
+  modelCard: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  modelCardActive: {
+    borderColor: theme.colors.success,
+    borderWidth: 2,
+  },
+  badge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  badgeRecommended: {
+    backgroundColor: theme.colors.accent,
+  },
+  badgeNormal: {
+    backgroundColor: theme.colors.surface2,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: theme.colors.onAccent,
+  },
+  modelHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+    paddingRight: 70,
+  },
+  modelName: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: theme.colors.text,
+  },
+  modelSize: {
+    fontSize: 13,
+    color: theme.colors.textSecondary,
+    fontWeight: '500',
+  },
+  modelDesc: {
+    fontSize: 13,
+    color: theme.colors.textSecondary,
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+
+  // Stats
+  statsRow: {
+    flexDirection: 'row',
+    gap: 24,
+    marginBottom: 12,
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    fontWeight: '500',
+  },
+  starRow: {
+    flexDirection: 'row',
+    gap: 2,
+  },
+
+  // Features
+  featuresRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 14,
+  },
+  featureChip: {
+    backgroundColor: theme.colors.accentSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  featureText: {
+    fontSize: 11,
+    color: theme.colors.accent,
+    fontWeight: '500',
+  },
+
+  // Progress
+  progressContainer: {
+    marginBottom: 12,
+  },
+  progressBarBg: {
+    height: 6,
+    backgroundColor: theme.colors.border,
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: theme.colors.accent,
+    borderRadius: 3,
+  },
+  progressText: {
+    fontSize: 11,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+  },
+
+  // Actions
+  actionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  downloadBtn: {
+    backgroundColor: theme.colors.accent,
+    flex: 1,
+    justifyContent: 'center',
+  },
+  activateBtn: {
+    backgroundColor: theme.colors.accent,
+    flex: 1,
+    justifyContent: 'center',
+  },
+  deleteBtn: {
+    backgroundColor: theme.colors.dangerSoft,
+    paddingHorizontal: 12,
+  },
+  cancelBtn: {
+    backgroundColor: theme.colors.dangerSoft,
+    flex: 1,
+    justifyContent: 'center',
+  },
+  actionBtnDisabled: {
+    backgroundColor: theme.colors.border,
+  },
+  actionBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.onAccent,
+  },
+  actionBtnTextDisabled: {
+    color: theme.colors.textSecondary,
+  },
+  activeIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+  },
+  activeText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.success,
+  },
+
+  // Info
+  infoSection: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  infoTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: theme.colors.text,
+    marginBottom: 12,
+  },
+  infoItem: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 10,
+    alignItems: 'flex-start',
+  },
+  infoText: {
+    fontSize: 13,
+    color: theme.colors.textSecondary,
+    flex: 1,
+    lineHeight: 18,
+  },
+
+  // Fallback Notice
+  fallbackNotice: {
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: theme.colors.accentSoft,
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'flex-start',
+  },
+  fallbackText: {
+    fontSize: 12,
+    color: theme.colors.text,
+    flex: 1,
+    lineHeight: 18,
+  },
+});

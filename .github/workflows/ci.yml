@@ -1,0 +1,696 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A newer main run must not interrupt a partially applied production deployment.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  NODE_VERSION: '22.23.5'
+  PNPM_VERSION: '10'
+
+jobs:
+  security-gates:
+    name: Security Gates
+    runs-on: ubuntu-latest
+    services:
+      public-cafeteria-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: cafeteria_test
+          POSTGRES_PASSWORD: cafeteria_test_only
+          POSTGRES_DB: cafeteria_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cafeteria_test -d cafeteria_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        id: install
+        run: pnpm install --frozen-lockfile
+
+      - name: Production dependency audit
+        # 只收集一次 JSON；audit exit 僅接受 0（乾淨）或 1（有效弱點報告）。
+        # 政策閘門阻擋 critical 與未審查 high；moderate／low 仍寫入報告追蹤。
+        # 通過此步驟不代表已無 high；殘餘接受見 docs/security/dependency-risk-acceptance.json。
+        # if: always（且 install 成功）讓三個 scope 都能留下 artifact，不略過最終 job 失敗。
+        if: always() && steps.install.outcome == 'success'
+        run: |
+          set +e
+          pnpm audit --prod --json > audit-report.json
+          audit_exit=$?
+          set -e
+          node scripts/dependency-security-gate.cjs \
+            --report audit-report.json \
+            --format pnpm-legacy \
+            --scope workspace-prod \
+            --audit-exit-code "$audit_exit"
+
+      - name: Build toolchain dependency audit
+        if: always() && steps.install.outcome == 'success'
+        run: |
+          set +e
+          pnpm audit --json > toolchain-audit-report.json
+          audit_exit=$?
+          set -e
+          node scripts/dependency-security-gate.cjs \
+            --report toolchain-audit-report.json \
+            --format pnpm-legacy \
+            --scope workspace-all \
+            --audit-exit-code "$audit_exit"
+
+      - name: Verify isolated Functions deployment package
+        run: node scripts/verify-functions-package.cjs
+
+      - name: Test deployment readiness gates
+        env:
+          EAS_JSON_PACKAGE_ROOT: ${{ runner.temp }}/eas-config-schema/node_modules/@expo/eas-json
+        run: |
+          npm install --prefix "$RUNNER_TEMP/eas-config-schema" --ignore-scripts --no-audit --no-fund @expo/eas-json@24.9.0
+          node --test scripts/dependency-security-gate.test.cjs scripts/dependency-security-compatibility.test.mjs packages/shared/tests/postLoginRoles.test.cjs scripts/firebase-ci-workflow.test.cjs scripts/wait-for-firestore-indexes.test.cjs scripts/firebase-release-preflight.test.cjs scripts/verify-eas-build.test.mjs scripts/prepare-eas-submit.test.mjs scripts/prepare-eas-build.test.mjs scripts/verify-nuni-integration.test.mjs
+          node --test scripts/nuni-course-source.test.mjs scripts/nuni-course-api-boundary.test.mjs scripts/nuni-materials-api-boundary.test.mjs scripts/nuni-merchant-api-boundary.test.mjs scripts/nuni-merchant-source.test.mjs scripts/nuni-merchant-native-transport.test.mjs scripts/seed-cafeterias.test.cjs scripts/demo/seed-oral-exam.test.mjs
+          python3 deploy/nuni-api/food-ordering/build_test.py
+          python3 scripts/platform-lost-found/prepare_test.py
+          python3 deploy/nuni-api/assistant-permissions/prepare_test.py
+          python3 deploy/nuni-api/assistant-permissions/prepare.py --verify-only
+          node --test deploy/nuni-web-legacy/source.test.mjs deploy/nuni-web-legacy/build.test.mjs deploy/nuni-api/security/source.test.mjs
+
+      - name: Test public cafeteria HTTP and PostgreSQL contracts
+        env:
+          PUBLIC_CAFETERIA_TEST_DATABASE_URL: postgresql://cafeteria_test:cafeteria_test_only@127.0.0.1:5432/cafeteria_test
+          PUBLIC_CAFETERIA_TEST_DEPS: ${{ runner.temp }}/public-cafeteria-test/node_modules
+          PUBLIC_CAFETERIA_TEST_TYPE_ROOTS: ${{ runner.temp }}/public-cafeteria-test/node_modules/@types
+          PUBLIC_CAFETERIA_TEST_TSC: ${{ runner.temp }}/public-cafeteria-test/node_modules/.bin/tsc
+        run: |
+          npm install --prefix "$RUNNER_TEMP/public-cafeteria-test" --ignore-scripts --no-audit --no-fund fastify@5.10.0 pg@8.22.0 typescript@5.9.3 @types/node@22.20.5
+          node scripts/test-public-cafeterias.mjs
+          python3 -m unittest discover -s scripts/public-cafeterias -p '*_test.py'
+
+      - name: Test personal imports and course access against PostgreSQL
+        env:
+          IMPORT_SYNC_TEST_DATABASE_URL: postgresql://cafeteria_test:cafeteria_test_only@127.0.0.1:5432/cafeteria_test
+          IMPORT_SYNC_TEST_DEPS: ${{ runner.temp }}/public-cafeteria-test/node_modules
+          IMPORT_SYNC_TEST_TYPE_ROOTS: ${{ runner.temp }}/public-cafeteria-test/node_modules/@types
+          IMPORT_SYNC_TEST_TSC: ${{ runner.temp }}/public-cafeteria-test/node_modules/.bin/tsc
+          COURSE_TEST_DATABASE_URL: postgresql://cafeteria_test:cafeteria_test_only@127.0.0.1:5432/cafeteria_test
+          COURSE_TEST_DEPS: ${{ runner.temp }}/public-cafeteria-test/node_modules
+          COURSE_TEST_TYPE_ROOTS: ${{ runner.temp }}/public-cafeteria-test/node_modules/@types
+          COURSE_TEST_TSC: ${{ runner.temp }}/public-cafeteria-test/node_modules/.bin/tsc
+        run: |
+          node scripts/test-personal-import-sync.mjs
+          node scripts/test-course-access.mjs
+          python3 -m unittest discover -s scripts/course-access -p '*_test.py'
+          python3 -m unittest discover -s scripts/personal-import-sync -p '*_test.py'
+
+      - name: Audit Functions deployment dependencies
+        if: always() && steps.install.outcome == 'success'
+        working-directory: backend/functions
+        run: |
+          set +e
+          npm audit --omit=dev --json > ../../functions-deploy-audit.json
+          audit_exit=$?
+          set -e
+          node ../../scripts/dependency-security-gate.cjs \
+            --report ../../functions-deploy-audit.json \
+            --format npm \
+            --scope functions-prod \
+            --audit-exit-code "$audit_exit"
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload audit artifact
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: audit-report
+          path: |
+            audit-report.json
+            toolchain-audit-report.json
+            functions-deploy-audit.json
+          retention-days: 7
+
+  lint-and-typecheck:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: nuni UI design checks
+        run: |
+          node --test scripts/ui-design-gate.test.mjs
+          node scripts/ui-design-gate.mjs --base HEAD^1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Web and App document reader assets match their source
+        run: pnpm documents:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Test platform public Agent admission contracts
+        run: node scripts/test-platform-public-agent.mjs
+
+  test-mobile:
+    name: Mobile Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run mobile tests and produce a real report
+        # The mobile test script already supplies --runInBand.
+        # Coverage is intentionally not claimed: the CI Jest coverage path
+        # still needs a separate dependency-resolution fix.
+        env:
+          TZ: Asia/Taipei
+        run: pnpm --filter mobile test --ci --json --outputFile=jest-results.json
+
+      - name: Verify report and publish test counts
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = 'apps/mobile/jest-results.json';
+          if (!fs.existsSync(path)) throw new Error('Jest result file was not generated');
+          const report = JSON.parse(fs.readFileSync(path, 'utf8'));
+          if (!Number.isInteger(report.numTotalTests) || report.numTotalTests === 0) {
+            throw new Error('Jest result file has no tests');
+          }
+          if (report.numFailedTests > 0 || report.success === false) {
+            throw new Error('Jest JSON report contains failures');
+          }
+          const summary = [
+            '## Mobile Jest test report',
+            '',
+            '| Result | Count |',
+            '|---|---:|',
+            '| Passed | ' + report.numPassedTests + ' |',
+            '| Failed | ' + report.numFailedTests + ' |',
+            '| Skipped | ' + report.numPendingTests + ' |',
+            '| Total | ' + report.numTotalTests + ' |',
+            '',
+            'Report artifact: mobile-jest-results. Coverage is not collected by this job.',
+            ''
+          ].join('\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+          console.log('Validated Jest report:', path);
+          NODE
+
+      - name: Upload Jest test results
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mobile-jest-results
+          path: apps/mobile/jest-results.json
+          if-no-files-found: error
+          retention-days: 14
+
+  test-web:
+    name: Web Tests
+    runs-on: ubuntu-latest
+    # Test-only PostgreSQL. No production credentials or databases are used.
+    services:
+      attachment-postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: box
+          POSTGRES_PASSWORD: attachment_test_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U box -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared modules used by the Web school data source
+        run: node scripts/build-functions-shared.cjs
+
+      - name: Test web server lifecycle
+        run: node --test deploy/web/start.test.cjs deploy/web/release-check.test.mjs deploy/web/transit-release-gate.test.mjs deploy/web/release-safety.test.mjs deploy/web/career-release-gate.test.mjs
+
+      - name: Validate paired course-study comparison evidence
+        run: node --test scripts/qa/course-study/compare.test.mjs
+
+      - name: Test shared ordering contracts
+        run: pnpm --filter @campus/shared test:food
+
+      - name: Test shared school catalogs and personal imports
+        run: node --test --test-concurrency=1 packages/shared/tests/schools.test.cjs packages/shared/tests/ncnuCourseSchedule.test.cjs packages/shared/tests/nthuCourseSchedule.test.cjs packages/shared/tests/personalImportCloud.test.cjs
+
+      - name: Test assistant services, academic data and verified execution contracts
+        run: node --test packages/shared/tests/assistantServices.test.cjs packages/shared/tests/assistantTaskPlan.test.cjs packages/shared/tests/assistantRoleWorkflows.test.cjs packages/shared/tests/assistantRoleProfiles.test.cjs packages/shared/tests/assistantRoleTasks.test.cjs packages/shared/tests/importedAcademicSummary.test.cjs packages/shared/tests/assistantExecution.test.cjs packages/shared/tests/personalImportAcknowledgement.test.cjs
+
+      - name: Test PDF and Excel readers with real document fixtures
+        run: pnpm test:documents
+
+      - name: Run PostgreSQL attachment and assistant permission regressions
+        # Include real multi-connection CAS and account-closure races for AI settings.
+        env:
+          NUNI_TEST_POSTGRES_PORT: '5432'
+          PGPASSWORD: attachment_test_only
+        run: pnpm --filter web exec vitest run src/lib/nuni/assignmentFileStore.postgres.test.ts src/lib/nuni/assignmentFileService.test.ts src/lib/nuni/platformAssistantPermissionStore.database.test.ts --reporter=verbose
+
+      - name: Run web tests
+        # vitest 4 不接受 --ci flag（vitest run 已預設 CI-friendly）；
+        # --coverage 需要 @vitest/coverage-v8（已在 devDeps）。
+        env:
+          NUNI_TEST_POSTGRES_PORT: '5432'
+          PGPASSWORD: attachment_test_only
+        run: pnpm --filter web exec vitest run --coverage
+
+  test-nuni-assistant:
+    name: Assistant Integration Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            scripts/nuni-assistant/pnpm-lock.yaml
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install isolated assistant dependencies
+        run: pnpm --dir scripts/nuni-assistant install --ignore-workspace --frozen-lockfile
+      - name: Test assistant routes and web BFF integration
+        run: pnpm --dir scripts/nuni-assistant test
+
+  test-functions:
+    name: Functions Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run functions tests
+        run: pnpm --filter functions test --runInBand
+
+  test-rules:
+    name: Firestore Rules Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run security and transaction tests
+        run: pnpm test:rules
+
+      - name: Preserve failed emulator diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: emulator-failure-logs
+          path: |
+            firestore-debug.log
+            storage-debug.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  build-mobile:
+    name: Build Mobile
+    runs-on: ubuntu-latest
+    needs: [security-gates, lint-and-typecheck, test-mobile, test-functions, test-rules]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Expo Doctor
+        working-directory: apps/mobile
+        run: npx expo-doctor@1.21.5
+
+      - name: Bundle mobile JavaScript
+        working-directory: apps/mobile
+        env:
+          APP_ENV: development
+          EXPO_PUBLIC_APP_ENV: development
+        run: |
+          pnpm exec expo export --platform ios --output-dir /tmp/campus-ios-export
+          pnpm exec expo export --platform android --output-dir /tmp/campus-android-export
+
+      - name: Validate Expo app config
+        working-directory: apps/mobile
+        run: npx expo config --type public --json > /tmp/expo-config.json
+
+      - name: Validate EAS build profiles
+        working-directory: apps/mobile
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const config = JSON.parse(fs.readFileSync('eas.json', 'utf8'));
+
+          for (const name of ['development', 'preview', 'production']) {
+            if (!config.build?.[name]) {
+              throw new Error(`Missing EAS build profile: ${name}`);
+            }
+          }
+
+          if (config.build?.base?.node !== '22.23.5') {
+            throw new Error('EAS base Node must be 22.23.5');
+          }
+          if (config.build?.base?.pnpm !== '10.28.2') {
+            throw new Error('EAS base pnpm must be 10.28.2');
+          }
+          if (config.build?.preview?.android?.buildType !== 'apk') {
+            throw new Error('Preview Android profile must produce an APK');
+          }
+          if (config.build?.production?.android?.buildType !== 'app-bundle') {
+            throw new Error('Production Android profile must produce an app bundle');
+          }
+
+          console.log('EAS build profiles are structurally valid.');
+          NODE
+
+  build-web:
+    name: Build Web
+    runs-on: ubuntu-latest
+    needs: [security-gates, lint-and-typecheck]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web app
+        run: pnpm --filter web build
+        env:
+          NEXT_PUBLIC_FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY || 'mock-api-key' }}
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN || 'mock.firebaseapp.com' }}
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID || 'mock-project' }}
+
+      - name: Scan browser bundle for Admin SDK material
+        run: |
+          set -euo pipefail
+          if command -v rg >/dev/null 2>&1; then
+            if rg -n 'firebase-admin|private_key|FIREBASE_SERVICE_ACCOUNT_JSON' apps/web/.next/static; then
+              echo '::error::apps/web/.next/static contains firebase-admin or service-account material'
+              exit 1
+            fi
+          elif grep -R -n -E 'firebase-admin|private_key|FIREBASE_SERVICE_ACCOUNT_JSON' apps/web/.next/static; then
+            echo '::error::apps/web/.next/static contains firebase-admin or service-account material'
+            exit 1
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-build
+          include-hidden-files: true
+          path: |
+            apps/web/.next/
+            !apps/web/.next/cache/**
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Verify standalone Web runtime
+        run: |
+          set -euo pipefail
+          docker build -f deploy/web/Dockerfile -t campus-one-web:ci \
+            --build-arg NEXT_PUBLIC_FIREBASE_API_KEY=mock-api-key \
+            --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=mock.firebaseapp.com \
+            --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID=mock-project \
+            --build-arg NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=mock-project.firebasestorage.app \
+            --build-arg NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=123456789 \
+            --build-arg NEXT_PUBLIC_FIREBASE_APP_ID=1:123456789:web:test .
+          docker run -d --name campus-one-web-ci -p 127.0.0.1:8080:8080 campus-one-web:ci
+          trap 'docker logs campus-one-web-ci; docker rm -f campus-one-web-ci' EXIT
+          curl --fail --retry 10 --retry-all-errors --retry-delay 2 --connect-timeout 2 --max-time 5 http://127.0.0.1:8080/health/live
+          curl --fail --silent http://127.0.0.1:8080/search > /tmp/campus-service-directory.html
+          test -s /tmp/campus-service-directory.html
+          test "$(docker exec campus-one-web-ci id -u)" != "0"
+          test -z "$(docker exec campus-one-web-ci find /app -name '.env' -o -name '.env.*' -o -name '*serviceAccount*.json' -o -name '*.pem' -o -name '*.key')"
+
+  deploy-functions:
+    name: Deploy Firebase backend
+    runs-on: ubuntu-latest
+    needs:
+      [
+        security-gates,
+        lint-and-typecheck,
+        test-mobile,
+        test-web,
+        test-nuni-assistant,
+        test-functions,
+        test-rules,
+        build-mobile,
+        build-web,
+      ]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    environment: production
+    steps:
+      - name: Require main for production Firebase deploy
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::正式環境 Firebase 佈署只能從 main 觸發。目前 ref 是 ${{ github.ref }}。"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Deploy to Firebase
+        id: firebase_deploy
+        timeout-minutes: 30
+        env:
+          FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ -z "$FIREBASE_PROJECT_ID" ]; then
+            echo "::error::Set FIREBASE_PROJECT_ID in the production environment variables."
+            exit 1
+          fi
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "::error::Set FIREBASE_TOKEN in the production environment secrets."
+            exit 1
+          fi
+          if [[ ! "$FIREBASE_PROJECT_ID" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]] || [ "$FIREBASE_PROJECT_ID" = "default" ]; then
+            echo "::error::FIREBASE_PROJECT_ID must be an explicit Firebase project ID, not a local alias."
+            exit 1
+          fi
+          if [ "$FIREBASE_PROJECT_ID" != "campus-one-tw" ]; then
+            echo "::error::The approved production target is campus-one-tw. Update the release configuration before changing projects."
+            exit 1
+          fi
+          node scripts/firebase-release-preflight.cjs --mode rules-only --project "$FIREBASE_PROJECT_ID" --storage-bucket campus-one-tw.firebasestorage.app --auth-domain nuni.tw --database-location nam5 --output firebase-preflight.json
+          # campus-one-tw 是 Spark，不能佈署 Cloud Functions。
+          # HTTP callable / 排程 / Firestore onSnapshot 跑在 Fly（docs/deploy/functions-on-fly.md）。
+          # 這裡只佈署規則、索引與 Storage。
+          pnpm -w firebase deploy --only firestore:rules,storage,firestore:indexes --project "$FIREBASE_PROJECT_ID" --non-interactive
+          node scripts/wait-for-firestore-indexes.cjs --project "$FIREBASE_PROJECT_ID" --timeout-seconds 1200
+
+      - name: Record Firebase deployment outcome
+        if: always()
+        env:
+          FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          DEPLOYMENT_OUTCOME: ${{ steps.firebase_deploy.outcome }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const receipt = {
+            schemaVersion: 1,
+            recordedAt: new Date().toISOString(),
+            sourceCommit: process.env.GITHUB_SHA,
+            runUrl: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+            project: process.env.FIREBASE_PROJECT_ID || null,
+            deploymentStepOutcome: process.env.DEPLOYMENT_OUTCOME || 'not-run',
+            preflightReceiptAvailable: fs.existsSync('firebase-preflight.json'),
+            scope: 'Firebase rules/indexes/storage only; Cloud Functions run on Fly, not Spark.',
+          };
+          fs.writeFileSync('firebase-deployment-outcome.json', `${JSON.stringify(receipt, null, 2)}\n`);
+          NODE
+
+      - name: Preserve Firebase release evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: firebase-release-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            firebase-preflight.json
+            firebase-deployment-outcome.json
+          if-no-files-found: error
+          retention-days: 14
+
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs:
+      [
+        security-gates,
+        lint-and-typecheck,
+        test-mobile,
+        test-web,
+        test-nuni-assistant,
+        test-functions,
+        test-rules,
+        build-mobile,
+        build-web,
+      ]
+    if: always()
+    steps:
+      - name: Check job results
+        run: |
+          echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Gates | ${{ needs.security-gates.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint & Type Check | ${{ needs.lint-and-typecheck.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Mobile Tests | ${{ needs.test-mobile.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Web Tests | ${{ needs.test-web.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Assistant Integration Tests | ${{ needs.test-nuni-assistant.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Functions Tests | ${{ needs.test-functions.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Rules Tests | ${{ needs.test-rules.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Mobile | ${{ needs.build-mobile.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Web | ${{ needs.build-web.result }} |" >> $GITHUB_STEP_SUMMARY
+      - name: Require every validation job to pass
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        run: |
+          echo "::error::At least one required validation job failed, was cancelled, or was skipped."
+          exit 1

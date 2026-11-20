@@ -1,0 +1,31 @@
+{
+  "checks": [
+    "home reflows at 1440px",
+    "life directory reflows at 1440px",
+    "home reflows at 768px",
+    "life directory reflows at 768px",
+    "home reflows at 390px",
+    "life directory reflows at 390px",
+    "home reflows at 320px",
+    "life directory reflows at 320px",
+    "mobile bottom navigation leaves footer actions reachable",
+    "service search, empty recovery and category filtering work on mobile",
+    "service menu opens within viewport and Escape restores focus",
+    "menu search supports keyboard navigation, campus-scoped links and empty recovery",
+    "settings deep links, history and keyboard sections preserve campus and fragment",
+    "campus selection closes the picker and preserves navigation scope",
+    "home and life use OLED black with matching browser chrome",
+    "explicit dark preference stays black in light system mode, transit and offline pages",
+    "course task titles and long deadlines reflow at 200% text size in both themes",
+    "320px large-text preference has no overflow",
+    "unsigned account entry keeps existing actions without demo copy",
+    "account footer links remain readable in light and OLED themes",
+    "find-school action stays on the account page",
+    "class-workspace join stays off the new login page",
+    "old find-school URL still lands on the new entry",
+    "live old screens stay reachable; replaced shells 404 or redirect",
+    "account return navigation preserves campus, tabs and settings position",
+    "signed-in account visits follow allowed return paths"
+  ],
+  "pageErrors": []
+}

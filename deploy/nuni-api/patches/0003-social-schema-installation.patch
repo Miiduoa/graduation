@@ -1,0 +1,1277 @@
+From e72b1c4c6529dc3d4062d71906e4381e25b09e3f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E9=A1=A7=E6=99=89=E7=91=8B?= <demohan513@gmail.com>
+Date: Fri, 9 Oct 2026 01:46:25 +0800
+Subject: [PATCH] =?UTF-8?q?=E6=96=B0=E5=A2=9E=E7=A4=BE=E7=BE=A4=E4=BA=8B?=
+ =?UTF-8?q?=E4=BB=B6=E5=A5=91=E7=B4=84=E5=AE=9A=E5=90=91=E5=AE=89=E8=A3=9D?=
+ =?UTF-8?q?=E8=88=87=E5=BC=B7=E5=88=B6=E6=B2=BB=E7=90=86=E5=9B=9E=E6=AD=B8?=
+ =?UTF-8?q?=E9=A9=97=E8=AD=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../install-builtin-event-schemas.test.ts     |   3 +-
+ .../install-builtin-event-schemas.ts          |  10 +-
+ .../install-social-event-schemas.test.ts      | 149 ++++++++++++
+ .../src/install-builtin-event-schemas-cli.ts  |   2 +-
+ runtime-grant-matrix.json                     | 228 +++++++++---------
+ 5 files changed, 272 insertions(+), 120 deletions(-)
+ create mode 100644 apps/api/src/event-governance/install-social-event-schemas.test.ts
+
+diff --git a/apps/api/src/event-governance/install-builtin-event-schemas.test.ts b/apps/api/src/event-governance/install-builtin-event-schemas.test.ts
+index 3159c34..89e9063 100644
+--- a/apps/api/src/event-governance/install-builtin-event-schemas.test.ts
++++ b/apps/api/src/event-governance/install-builtin-event-schemas.test.ts
+@@ -138,12 +138,13 @@ describe("install automatically-registered builtin event schemas", () => {
+ });
+
+ describe("event schema seed CLI env parsing", () => {
+-  it("reads one or more tenant ids and food/automatic sets", () => {
++  it("reads one or more tenant ids and food/social/automatic sets", () => {
+     expect(parseEventSchemaSeedTenantIds({})).toEqual(["pu"]);
+     expect(parseEventSchemaSeedTenantIds({ CAMPUS_EVENT_SCHEMA_TENANT_IDS: "pu, campus-demo" }))
+       .toEqual(["pu", "campus-demo"]);
+     expect(parseEventSchemaSeedTenantIds({ PU_FOOD_TENANT_ID: "nthu" })).toEqual(["nthu"]);
+     expect(parseEventSchemaSeedSet({})).toBe("food");
++    expect(parseEventSchemaSeedSet({ CAMPUS_EVENT_SCHEMA_SET: "social" })).toBe("social");
+     expect(parseEventSchemaSeedSet({ CAMPUS_EVENT_SCHEMA_SET: "automatic" })).toBe("automatic");
+     expect(() => parseEventSchemaSeedSet({ CAMPUS_EVENT_SCHEMA_SET: "all" }))
+       .toThrow(/CAMPUS_EVENT_SCHEMA_SET/);
+diff --git a/apps/api/src/event-governance/install-builtin-event-schemas.ts b/apps/api/src/event-governance/install-builtin-event-schemas.ts
+index 5618583..7f3bb30 100644
+--- a/apps/api/src/event-governance/install-builtin-event-schemas.ts
++++ b/apps/api/src/event-governance/install-builtin-event-schemas.ts
+@@ -3,6 +3,7 @@ import type { CampusDatabase } from "../database";
+ import {
+   BUILTIN_EVENT_SCHEMAS,
+   BUILTIN_FOOD_EVENT_SCHEMAS,
++  BUILTIN_SOCIAL_EVENT_SCHEMAS,
+   isAutomaticallyRegisteredBuiltinEventSchema,
+   type BuiltinEventSchema,
+ } from "./builtin-event-schemas";
+@@ -13,7 +14,7 @@ import { EventSchemaService } from "./event-schema-service";
+ export const BUILTIN_EVENT_SCHEMA_AUTHOR_PERSON_ID = "nuni-event-schema-author";
+ export const BUILTIN_EVENT_SCHEMA_REVIEWER_PERSON_ID = "nuni-event-schema-reviewer";
+
+-export type BuiltinEventSchemaInstallSet = "food" | "automatic";
++export type BuiltinEventSchemaInstallSet = "food" | "social" | "automatic";
+
+ export interface InstallBuiltinEventSchemasOptions {
+   tenantId: string;
+@@ -36,7 +37,8 @@ export interface InstallBuiltinEventSchemasResult {
+ export function schemasForBuiltinEventSchemaInstallSet(
+   set: BuiltinEventSchemaInstallSet,
+ ): readonly BuiltinEventSchema[] {
+-  const source = set === "automatic" ? BUILTIN_EVENT_SCHEMAS : BUILTIN_FOOD_EVENT_SCHEMAS;
++  const source = set === "automatic" ? BUILTIN_EVENT_SCHEMAS
++    : set === "social" ? BUILTIN_SOCIAL_EVENT_SCHEMAS : BUILTIN_FOOD_EVENT_SCHEMAS;
+   return source.filter(isAutomaticallyRegisteredBuiltinEventSchema);
+ }
+
+@@ -58,8 +60,8 @@ export function parseEventSchemaSeedTenantIds(
+
+ export function parseEventSchemaSeedSet(environment: NodeJS.ProcessEnv): BuiltinEventSchemaInstallSet {
+   const raw = environment.CAMPUS_EVENT_SCHEMA_SET?.trim().toLowerCase() || "food";
+-  if (raw !== "food" && raw !== "automatic") {
+-    throw new Error("CAMPUS_EVENT_SCHEMA_SET 只能是 food 或 automatic");
++  if (raw !== "food" && raw !== "social" && raw !== "automatic") {
++    throw new Error("CAMPUS_EVENT_SCHEMA_SET 只能是 food、social 或 automatic");
+   }
+   return raw;
+ }
+diff --git a/apps/api/src/event-governance/install-social-event-schemas.test.ts b/apps/api/src/event-governance/install-social-event-schemas.test.ts
+new file mode 100644
+index 0000000..6a2a643
+--- /dev/null
++++ b/apps/api/src/event-governance/install-social-event-schemas.test.ts
+@@ -0,0 +1,149 @@
++import { randomUUID } from "node:crypto";
++import { afterEach, beforeEach, describe, expect, it } from "vitest";
++import { PlatformAccountService, type PlatformActor } from "../accounts/platform-account-service";
++import { PlatformSocialService } from "../accounts/platform-social-service";
++import { createDatabase, type CampusDatabase } from "../database";
++import { SocialService } from "../social/social-service";
++import { BUILTIN_SOCIAL_EVENT_SCHEMAS, isAutomaticallyRegisteredBuiltinEventSchema } from "./builtin-event-schemas";
++import { eventSchemaSha256 } from "./event-schema-runtime";
++import {
++  BUILTIN_EVENT_SCHEMA_AUTHOR_PERSON_ID,
++  BUILTIN_EVENT_SCHEMA_REVIEWER_PERSON_ID,
++  installAutomaticallyRegisteredBuiltinEventSchemas,
++  schemasForBuiltinEventSchemaInstallSet,
++} from "./install-builtin-event-schemas";
++
++describe("social event schema installation for a real tenant", () => {
++  let db: CampusDatabase;
++  const tenantId = "social-release-school";
++
++  beforeEach(async () => {
++    db = await createDatabase({ seedDemo: false, attendanceCodeSecret: "social-release-secret-over-thirty-two-characters" });
++    await db.query(`INSERT INTO tenants (id,display_name,state,directory_source)
++      VALUES ($1,'社群契約驗證校','open','manual')`, [tenantId]);
++  }, 60_000);
++
++  afterEach(async () => { await db?.close(); });
++
++  async function account(displayName: string): Promise<PlatformActor> {
++    const platformAccountId = `pa_${randomUUID()}`;
++    const credentialId = `pac_${randomUUID()}`;
++    await db.query(`INSERT INTO platform_accounts (id,display_name) VALUES ($1,$2)`, [platformAccountId, displayName]);
++    await db.query(`INSERT INTO platform_account_credentials
++      (id,platform_account_id,method,provider_issuer,provider_subject,verified_at,last_authenticated_at)
++      VALUES ($1,$2,'google','https://accounts.google.com',$3,now(),now())`,
++    [credentialId, platformAccountId, randomUUID()]);
++    return { platformAccountId, credentialId, expiresAt: Date.now() + 3_600_000 };
++  }
++
++  async function count(table: "social_communities" | "social_posts" | "outbox_events" | "platform_event_schemas") {
++    return (await db.query<{ count: number }>(`SELECT count(*)::int AS count FROM ${table} WHERE tenant_id=$1`, [tenantId])).rows[0]!.count;
++  }
++
++  it("keeps board and post writes fail-closed until social-only contracts are installed with governed audit", async () => {
++    const accounts = new PlatformAccountService(db, { verify: async () => { throw new Error("unused"); } });
++    const service = new PlatformSocialService(db, accounts, { eventSchemaEnforcement: "enforce" });
++    const operator = await account("校園營運");
++    const reader = await account("公開交流使用者");
++    await db.query(`INSERT INTO platform_operator_assignments (platform_account_id,role_key,state)
++      VALUES ($1,'platform-operator','active')`, [operator.platformAccountId]);
++    const boardInput = { tenantId, name: "跨校問答", description: "各校公開交流", idempotencyKey: randomUUID() };
++
++    await expect(service.createBoard(operator, boardInput)).rejects.toMatchObject({
++      code: "EVENT_PUBLISH_SCHEMA_UNAVAILABLE", statusCode: 503,
++      message: expect.stringContaining("social.membership.changed@1.0.0"),
++    });
++    expect(await count("social_communities")).toBe(0);
++    expect(await count("outbox_events")).toBe(0);
++    expect(await count("platform_event_schemas")).toBe(0);
++
++    // An existing board/member fixture isolates the post event prerequisite;
++    // no service ever runs with enforcement disabled to create this fixture.
++    const social = new SocialService(db, { eventSchemaEnforcement: "enforce" });
++    const owner = await accounts.resolvePublicRealmActor(operator, tenantId, { forCommunityCreation: true });
++    const ownerProfile = await social.getSelfProfile(owner);
++    const existingBoardId = randomUUID();
++    await db.query(`INSERT INTO social_communities
++      (tenant_id,id,kind,name,discoverability,join_policy,posting_policy,owner_profile_id,access_scope)
++      VALUES ($1,$2,'group','既有公開看板','listed','open','members',$3,'public')`,
++    [tenantId, existingBoardId, ownerProfile.id]);
++    const readerPersona = await accounts.resolvePublicRealmActor(reader, tenantId);
++    const readerProfile = await social.getSelfProfile(readerPersona);
++    await db.query(`INSERT INTO social_memberships (tenant_id,id,community_id,profile_id,role,state)
++      VALUES ($1,$2,$3,$4,'member','active')`, [tenantId, randomUUID(), existingBoardId, readerProfile.id]);
++    const postInput = { tenantId, communityId: existingBoardId, text: "公開交流內容", idempotencyKey: randomUUID() };
++    await expect(service.createPost(reader, postInput)).rejects.toMatchObject({
++      code: "EVENT_PUBLISH_SCHEMA_UNAVAILABLE", statusCode: 503,
++      message: expect.stringContaining("social.post.created@1.0.0"),
++    });
++    expect(await count("social_posts")).toBe(0);
++    expect(await count("outbox_events")).toBe(0);
++
++    const schemas = schemasForBuiltinEventSchemaInstallSet("social");
++    expect(schemas).toEqual(BUILTIN_SOCIAL_EVENT_SCHEMAS.filter(isAutomaticallyRegisteredBuiltinEventSchema));
++    expect(schemas).toHaveLength(30);
++    expect(schemas.every(schema => schema.owningModule === "social")).toBe(true);
++    expect(await installAutomaticallyRegisteredBuiltinEventSchemas(db, { tenantId, schemas })).toEqual({
++      tenantId, considered: 30, registered: 30, activated: 30, alreadyActive: 0,
++    });
++
++    const rows = (await db.query<{
++      event_type: string; schema_version: string; schema_sha256: string; state: string;
++      version: number; created_by: string; reviewed_by: string;
++    }>(`SELECT event_type,schema_version,schema_sha256,state,version,created_by,reviewed_by
++      FROM platform_event_schemas WHERE tenant_id=$1`, [tenantId])).rows;
++    expect(rows).toHaveLength(30);
++    for (const schema of schemas) {
++      expect(rows.find(row => row.event_type === schema.eventType && row.schema_version === schema.schemaVersion)).toEqual({
++        event_type: schema.eventType, schema_version: schema.schemaVersion,
++        schema_sha256: eventSchemaSha256(schema.eventType, schema.schemaVersion, schema.payloadSchema),
++        state: "active", version: 2,
++        created_by: BUILTIN_EVENT_SCHEMA_AUTHOR_PERSON_ID, reviewed_by: BUILTIN_EVENT_SCHEMA_REVIEWER_PERSON_ID,
++      });
++    }
++    const audit = async () => (await db.query<{
++      event_type: string; schema_version: string; action: string; actor_id: string; reason_code: string;
++    }>(`SELECT event_type,schema_version,action,actor_id,reason_code FROM platform_event_schema_audit
++      WHERE tenant_id=$1 ORDER BY event_type,schema_version,action`, [tenantId])).rows;
++    const firstAudit = await audit();
++    expect(firstAudit).toHaveLength(60);
++    for (const schema of schemas) {
++      expect(firstAudit).toContainEqual({ event_type: schema.eventType, schema_version: schema.schemaVersion,
++        action: "registered", actor_id: BUILTIN_EVENT_SCHEMA_AUTHOR_PERSON_ID, reason_code: "BUILTIN_SCHEMA_REGISTERED" });
++      expect(firstAudit).toContainEqual({ event_type: schema.eventType, schema_version: schema.schemaVersion,
++        action: "activated", actor_id: BUILTIN_EVENT_SCHEMA_REVIEWER_PERSON_ID, reason_code: "BUILTIN_SCHEMA_ACTIVATED" });
++    }
++    expect(await installAutomaticallyRegisteredBuiltinEventSchemas(db, { tenantId, schemas })).toEqual({
++      tenantId, considered: 30, registered: 0, activated: 0, alreadyActive: 30,
++    });
++    expect(await audit()).toEqual(firstAudit);
++
++    // The original failed requests can now be retried with their original keys.
++    const board = await service.createBoard(operator, boardInput);
++    expect(board).toMatchObject({ tenantId, name: boardInput.name, canPost: true });
++    expect(await service.createBoard(operator, boardInput)).toEqual(board);
++    const post = await service.createPost(reader, postInput);
++    expect(post).toMatchObject({ tenantId, text: postInput.text });
++    expect((await service.createPost(reader, postInput)).id).toBe(post.id);
++    const newBoardPost = await service.createPost(reader, {
++      tenantId, communityId: board.id, text: "新看板也能發表", idempotencyKey: randomUUID(),
++    });
++    expect((await service.feed(operator, { tenantId })).items.map(item => item.id)).toContain(newBoardPost.id);
++    expect(await count("social_communities")).toBe(2);
++    expect(await count("social_posts")).toBe(2);
++    const events = (await db.query<{
++      event_type: string; event_schema_version: string; event_schema_sha256: string; producer_key: string;
++    }>(`SELECT event_type,event_schema_version,event_schema_sha256,producer_key
++      FROM outbox_events WHERE tenant_id=$1`, [tenantId])).rows;
++    expect(events.map(event => event.event_type)).toEqual(expect.arrayContaining([
++      "social.membership.changed", "social.community.created", "social.post.created",
++    ]));
++    for (const event of events) {
++      expect(event.producer_key).toBe("social-api");
++      expect(rows.find(row => row.event_type === event.event_type && row.schema_version === event.event_schema_version)?.schema_sha256)
++        .toBe(event.event_schema_sha256);
++      expect(event.event_schema_sha256).toMatch(/^[a-f0-9]{64}$/u);
++    }
++    expect((await db.query(`SELECT id FROM people WHERE id IN ('teacher-demo','student-demo','platform-event-author-demo')`)).rows).toEqual([]);
++  }, 60_000);
++});
+diff --git a/apps/api/src/install-builtin-event-schemas-cli.ts b/apps/api/src/install-builtin-event-schemas-cli.ts
+index 2b5ee6d..3cf4a39 100644
+--- a/apps/api/src/install-builtin-event-schemas-cli.ts
++++ b/apps/api/src/install-builtin-event-schemas-cli.ts
+@@ -64,7 +64,7 @@ async function main(): Promise<void> {
+   const result = await runInstallBuiltinEventSchemas(process.env, { isProduction, workspaceRoot });
+   for (const tenant of result.tenants) {
+     process.stdout.write(
+-      `已登錄 ${tenant.tenantId} 的${result.schemaSet === "food" ? "餐飲" : "自動內建"}事件契約（${result.databaseKind}）：`
++      `已登錄 ${tenant.tenantId} 的${result.schemaSet === "food" ? "餐飲" : result.schemaSet === "social" ? "社群" : "自動內建"}事件契約（${result.databaseKind}）：`
+       + `處理 ${tenant.considered} 筆，新註冊 ${tenant.registered}、新啟用 ${tenant.activated}、原本已啟用 ${tenant.alreadyActive}。\n`,
+     );
+   }
+diff --git a/runtime-grant-matrix.json b/runtime-grant-matrix.json
+index 348d392..8143bea 100644
+--- a/runtime-grant-matrix.json
++++ b/runtime-grant-matrix.json
+@@ -410,7 +410,7 @@
+     },
+     {
+       "path": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "sha256": "4f54ecf01a45cdb4ffdbe130a228e4e7396e3e5e2632ec91f081b108e424f63b"
++      "sha256": "947a057d8ae8ceeb95b057ff5ea49c1642f13394b45b4f100246247e79d68e5a"
+     },
+     {
+       "path": "apps/api/src/event-governance/known-event-schema-hashes.ts",
+@@ -78573,7 +78573,7 @@
+     {
+       "component": "ai-agent-retention",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -78589,7 +78589,7 @@
+     {
+       "component": "ai-agent-retention",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -78605,7 +78605,7 @@
+     {
+       "component": "ai-agent-retention",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -78629,7 +78629,7 @@
+     {
+       "component": "ai-agent-retention",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -78645,7 +78645,7 @@
+     {
+       "component": "ai-agent-retention",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -78677,7 +78677,7 @@
+     {
+       "component": "ai-agent-run-coordinator",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -78693,7 +78693,7 @@
+     {
+       "component": "ai-agent-run-coordinator",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -78709,7 +78709,7 @@
+     {
+       "component": "ai-agent-run-coordinator",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -78733,7 +78733,7 @@
+     {
+       "component": "ai-agent-run-coordinator",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -78749,7 +78749,7 @@
+     {
+       "component": "ai-agent-run-coordinator",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -78909,7 +78909,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -78957,7 +78957,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -78973,7 +78973,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -79109,7 +79109,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -79125,7 +79125,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -79325,7 +79325,7 @@
+     {
+       "component": "calendar-reminder-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -79341,7 +79341,7 @@
+     {
+       "component": "calendar-reminder-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -79357,7 +79357,7 @@
+     {
+       "component": "calendar-reminder-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -79381,7 +79381,7 @@
+     {
+       "component": "calendar-reminder-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -79397,7 +79397,7 @@
+     {
+       "component": "calendar-reminder-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -79429,7 +79429,7 @@
+     {
+       "component": "dormitory-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -79445,7 +79445,7 @@
+     {
+       "component": "dormitory-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -79461,7 +79461,7 @@
+     {
+       "component": "dormitory-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -79485,7 +79485,7 @@
+     {
+       "component": "dormitory-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -79501,7 +79501,7 @@
+     {
+       "component": "dormitory-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -79533,7 +79533,7 @@
+     {
+       "component": "evidence-purge",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -79549,7 +79549,7 @@
+     {
+       "component": "evidence-purge",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -79565,7 +79565,7 @@
+     {
+       "component": "evidence-purge",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -79589,7 +79589,7 @@
+     {
+       "component": "evidence-purge",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -79605,7 +79605,7 @@
+     {
+       "component": "evidence-purge",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -79637,7 +79637,7 @@
+     {
+       "component": "food-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -79653,7 +79653,7 @@
+     {
+       "component": "food-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -79669,7 +79669,7 @@
+     {
+       "component": "food-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -79693,7 +79693,7 @@
+     {
+       "component": "food-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -79709,7 +79709,7 @@
+     {
+       "component": "food-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -79741,7 +79741,7 @@
+     {
+       "component": "iot-command-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -79757,7 +79757,7 @@
+     {
+       "component": "iot-command-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -79773,7 +79773,7 @@
+     {
+       "component": "iot-command-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -79797,7 +79797,7 @@
+     {
+       "component": "iot-command-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -79813,7 +79813,7 @@
+     {
+       "component": "iot-command-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -79845,7 +79845,7 @@
+     {
+       "component": "iot-grant-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -79861,7 +79861,7 @@
+     {
+       "component": "iot-grant-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -79877,7 +79877,7 @@
+     {
+       "component": "iot-grant-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -79901,7 +79901,7 @@
+     {
+       "component": "iot-grant-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -79917,7 +79917,7 @@
+     {
+       "component": "iot-grant-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -79949,7 +79949,7 @@
+     {
+       "component": "leave-fulfillment",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -79965,7 +79965,7 @@
+     {
+       "component": "leave-fulfillment",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -79981,7 +79981,7 @@
+     {
+       "component": "leave-fulfillment",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -80005,7 +80005,7 @@
+     {
+       "component": "leave-fulfillment",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -80021,7 +80021,7 @@
+     {
+       "component": "leave-fulfillment",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -80061,7 +80061,7 @@
+     {
+       "component": "leave-workflow-timeout",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -80077,7 +80077,7 @@
+     {
+       "component": "leave-workflow-timeout",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -80093,7 +80093,7 @@
+     {
+       "component": "leave-workflow-timeout",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -80117,7 +80117,7 @@
+     {
+       "component": "leave-workflow-timeout",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -80133,7 +80133,7 @@
+     {
+       "component": "leave-workflow-timeout",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -80165,7 +80165,7 @@
+     {
+       "component": "migration",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -80181,7 +80181,7 @@
+     {
+       "component": "migration",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -80197,7 +80197,7 @@
+     {
+       "component": "migration",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -80221,7 +80221,7 @@
+     {
+       "component": "migration",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -80237,7 +80237,7 @@
+     {
+       "component": "migration",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -80269,7 +80269,7 @@
+     {
+       "component": "notification-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -80285,7 +80285,7 @@
+     {
+       "component": "notification-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -80301,7 +80301,7 @@
+     {
+       "component": "notification-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -80325,7 +80325,7 @@
+     {
+       "component": "notification-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -80341,7 +80341,7 @@
+     {
+       "component": "notification-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -80373,7 +80373,7 @@
+     {
+       "component": "outbox-publisher",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -80389,7 +80389,7 @@
+     {
+       "component": "outbox-publisher",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -80405,7 +80405,7 @@
+     {
+       "component": "outbox-publisher",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -80429,7 +80429,7 @@
+     {
+       "component": "outbox-publisher",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -80445,7 +80445,7 @@
+     {
+       "component": "outbox-publisher",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -80477,7 +80477,7 @@
+     {
+       "component": "registration-reservation-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -80493,7 +80493,7 @@
+     {
+       "component": "registration-reservation-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -80509,7 +80509,7 @@
+     {
+       "component": "registration-reservation-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -80533,7 +80533,7 @@
+     {
+       "component": "registration-reservation-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -80549,7 +80549,7 @@
+     {
+       "component": "registration-reservation-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -80581,7 +80581,7 @@
+     {
+       "component": "registration-waitlist-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:conflict"
+@@ -80597,7 +80597,7 @@
+     {
+       "component": "registration-waitlist-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:people"
+@@ -80613,7 +80613,7 @@
+     {
+       "component": "registration-waitlist-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "FUNCTION_CALL_UNRESOLVED:platform_event_schema_staff_assignments"
+@@ -80637,7 +80637,7 @@
+     {
+       "component": "registration-waitlist-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 188,
++      "line": 190,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:people"
+@@ -80653,7 +80653,7 @@
+     {
+       "component": "registration-waitlist-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 201,
++      "line": 203,
+       "column": 11,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_INSERT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schema_staff_assignments"
+@@ -82573,7 +82573,7 @@
+     {
+       "component": "ai-agent-retention",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -82581,7 +82581,7 @@
+     {
+       "component": "ai-agent-run-coordinator",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83717,7 +83717,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83733,7 +83733,7 @@
+     {
+       "component": "calendar-reminder-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83741,7 +83741,7 @@
+     {
+       "component": "dormitory-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83749,7 +83749,7 @@
+     {
+       "component": "evidence-purge",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83757,7 +83757,7 @@
+     {
+       "component": "food-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83765,7 +83765,7 @@
+     {
+       "component": "iot-command-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83773,7 +83773,7 @@
+     {
+       "component": "iot-grant-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83861,7 +83861,7 @@
+     {
+       "component": "leave-fulfillment",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83885,7 +83885,7 @@
+     {
+       "component": "leave-workflow-timeout",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83893,7 +83893,7 @@
+     {
+       "component": "migration",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83901,7 +83901,7 @@
+     {
+       "component": "notification-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83909,7 +83909,7 @@
+     {
+       "component": "outbox-publisher",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83917,7 +83917,7 @@
+     {
+       "component": "registration-reservation-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -83925,7 +83925,7 @@
+     {
+       "component": "registration-waitlist-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 88,
++      "line": 90,
+       "column": 25,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:tenants"
+@@ -86349,7 +86349,7 @@
+     {
+       "component": "ai-agent-retention",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86365,7 +86365,7 @@
+     {
+       "component": "ai-agent-run-coordinator",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86453,7 +86453,7 @@
+     {
+       "component": "api",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86517,7 +86517,7 @@
+     {
+       "component": "calendar-reminder-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86533,7 +86533,7 @@
+     {
+       "component": "dormitory-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86549,7 +86549,7 @@
+     {
+       "component": "evidence-purge",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86565,7 +86565,7 @@
+     {
+       "component": "food-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86581,7 +86581,7 @@
+     {
+       "component": "iot-command-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86597,7 +86597,7 @@
+     {
+       "component": "iot-grant-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86613,7 +86613,7 @@
+     {
+       "component": "leave-fulfillment",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86629,7 +86629,7 @@
+     {
+       "component": "leave-workflow-timeout",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86645,7 +86645,7 @@
+     {
+       "component": "migration",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86661,7 +86661,7 @@
+     {
+       "component": "notification-delivery",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86685,7 +86685,7 @@
+     {
+       "component": "outbox-publisher",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86701,7 +86701,7 @@
+     {
+       "component": "registration-reservation-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -86717,7 +86717,7 @@
+     {
+       "component": "registration-waitlist-expiry",
+       "file": "apps/api/src/event-governance/install-builtin-event-schemas.ts",
+-      "line": 109,
++      "line": 111,
+       "column": 29,
+       "code": "SQL_LITERAL_UNRESOLVED",
+       "detail": "SQL_SELECT_UNQUALIFIED_TARGET_SEARCH_PATH_UNPROVEN:platform_event_schemas"
+@@ -89049,5 +89049,5 @@
+     "securityInvokerTrigger": "fixed-point expansion into invoker relation/function capabilities",
+     "publicExecute": "never used as a grant source; ACL proof remains independently blocked when unresolved"
+   },
+-  "canonicalSha256": "c219b6e3e91d99ebf9f6da0ed3ff331b688356b70cdde727bc472b96a1b59c30"
++  "canonicalSha256": "e0e29045ac5cf24f4d46d9f1bc1d087a6037a5bb5fcf2df8e319bbe47ef55f19"
+ }

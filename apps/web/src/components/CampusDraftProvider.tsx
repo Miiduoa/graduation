@@ -1,0 +1,344 @@
+'use client';
+
+import { sha256 } from 'js-sha256';
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
+
+export type CampusDraftSlot = 'assistant';
+
+const STORAGE_PREFIX = 'campus.draft.v2:';
+const LEGACY_STORAGE_PREFIX = 'campus.draft.v1:';
+const IDENTITY_MARKER_KEY = 'campus.draft.identity.v2';
+const MAX_DRAFT_LENGTH = 4000;
+
+type DraftMap = Partial<Record<CampusDraftSlot, string>>;
+
+type DraftState = {
+  uid: string | null;
+  schoolId: string | null;
+  ready: boolean;
+  resolved: boolean;
+  identityReady: boolean;
+  identityResolved: boolean;
+  drafts: DraftMap;
+};
+
+type DraftController = {
+  hasActivity: () => boolean;
+  discard: () => void;
+};
+
+let activeController: DraftController | null = null;
+
+/** SelectedSchoolProvider 換校前讀取：目前範圍是否有未送出草稿。 */
+export function hasCampusDraftActivity(): boolean {
+  return activeController?.hasActivity() ?? false;
+}
+
+/** 確認捨棄並切換學校時呼叫，清掉目前範圍草稿。 */
+export function discardActiveCampusDrafts(): void {
+  activeController?.discard();
+}
+
+export function campusDraftIdentity(
+  uid?: string | null,
+  platformAccountId?: string | null,
+): string | null {
+  return uid || platformAccountId ? JSON.stringify([uid ?? '', platformAccountId ?? '']) : null;
+}
+
+export function scopeStorageKey(uid: string | null, schoolId: string | null): string {
+  return `${STORAGE_PREFIX}${uid ?? 'guest'}:${schoolId ?? 'all'}`;
+}
+
+function readStoredDrafts(key: string): DraftMap {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    const drafts: DraftMap = {};
+    for (const [slot, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'string' && value.trim()) {
+        drafts[slot as CampusDraftSlot] = value.slice(0, MAX_DRAFT_LENGTH);
+      }
+    }
+    return drafts;
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredDrafts(key: string, drafts: DraftMap): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const payload: DraftMap = {};
+    for (const [slot, value] of Object.entries(drafts) as [CampusDraftSlot, string | undefined][]) {
+      if (typeof value === 'string' && value.trim()) payload[slot] = value.slice(0, MAX_DRAFT_LENGTH);
+    }
+    if (Object.keys(payload).length === 0) sessionStorage.removeItem(key);
+    else sessionStorage.setItem(key, JSON.stringify(payload));
+  } catch {
+    // sessionStorage 不可用時仍保留記憶體草稿。
+  }
+}
+
+export function purgeAccountDrafts(uid: string | null): void {
+  if (typeof window === 'undefined') return;
+  purgeStoredDrafts(`${STORAGE_PREFIX}${uid ?? 'guest'}:`);
+}
+
+function purgeStoredDrafts(prefix: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const keys: string[] = [];
+    for (let index = 0; index < sessionStorage.length; index += 1) {
+      const key = sessionStorage.key(index);
+      if (key?.startsWith(prefix)) keys.push(key);
+    }
+    for (const key of keys) sessionStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
+/** 必須在任何草稿讀取之前執行；標記只保存摘要，不保存原始身分。 */
+function confirmStoredIdentity(uid: string | null): boolean {
+  if (typeof window === 'undefined') return false;
+  purgeStoredDrafts(LEGACY_STORAGE_PREFIX);
+  try {
+    const marker = sha256(JSON.stringify(uid));
+    const previous = sessionStorage.getItem(IDENTITY_MARKER_KEY);
+    const changed = previous !== null && previous !== marker;
+    if (changed) purgeStoredDrafts(STORAGE_PREFIX);
+    sessionStorage.setItem(IDENTITY_MARKER_KEY, marker);
+    return changed;
+  } catch {
+    // sessionStorage 不可用時仍可使用記憶體草稿。
+    return false;
+  }
+}
+
+function hasText(drafts: DraftMap): boolean {
+  return Object.values(drafts).some((value) => typeof value === 'string' && value.trim().length > 0);
+}
+
+class DraftStore {
+  listeners = new Set<() => void>();
+  state: DraftState;
+  constructor(uid: string | null, schoolId: string | null, ready: boolean, identityReady: boolean) {
+    if (identityReady) confirmStoredIdentity(uid);
+    this.state = {
+      uid,
+      schoolId,
+      ready,
+      resolved: ready,
+      identityReady,
+      identityResolved: identityReady,
+      drafts: ready && identityReady ? readStoredDrafts(scopeStorageKey(uid, schoolId)) : {},
+    };
+  }
+  snapshot = () => this.state;
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+  publish(next: DraftState) {
+    this.state = next;
+    for (const listener of this.listeners) listener();
+  }
+  reconcile(uid: string | null, schoolId: string | null, ready: boolean, identityReady: boolean) {
+    // 同一次 render 先清除舊身分並更新 snapshot，避免子元件讀到前帳號草稿。
+    const old = this.state;
+    // loading 期間 selectedSchoolId 常暫成 null：保留上一所已確定的校，避免清空記憶體草稿。
+    const effectiveSchoolId =
+      !ready && schoolId === null && old.schoolId !== null ? old.schoolId : schoolId;
+    const storedIdentityChanged =
+      identityReady && (!old.identityReady || old.uid !== uid)
+        ? confirmStoredIdentity(uid)
+        : false;
+    const identityChanged = storedIdentityChanged || (old.identityResolved && old.uid !== uid);
+    if (identityChanged) {
+      purgeAccountDrafts(old.uid);
+      purgeAccountDrafts(null);
+      purgeAccountDrafts(uid);
+    }
+    const schoolChanged =
+      old.schoolId !== effectiveSchoolId && (old.resolved || old.schoolId !== null);
+    if (identityChanged || schoolChanged) {
+      this.state = {
+        uid,
+        schoolId: effectiveSchoolId,
+        ready,
+        resolved: ready || old.resolved,
+        identityReady,
+        identityResolved: identityReady || old.identityResolved,
+        // 換帳立即清空；只有身分已確認才可讀取目前學校草稿。
+        drafts:
+          !identityChanged && ready && identityReady
+            ? readStoredDrafts(scopeStorageKey(uid, effectiveSchoolId))
+            : {},
+      };
+      return;
+    }
+    if (
+      old.identityReady !== identityReady ||
+      old.ready !== ready ||
+      old.uid !== uid ||
+      old.schoolId !== effectiveSchoolId
+    ) {
+      const drafts =
+        identityReady && ready && (!old.ready || !old.identityReady) && !hasText(old.drafts)
+          ? readStoredDrafts(scopeStorageKey(uid, effectiveSchoolId))
+          : old.drafts;
+      this.state = {
+        uid,
+        schoolId: effectiveSchoolId,
+        ready,
+        resolved: ready || old.resolved,
+        identityReady,
+        identityResolved: identityReady || old.identityResolved,
+        drafts,
+      };
+    }
+  }
+  setDraft(slot: CampusDraftSlot, text: string) {
+    if (!this.state.ready || !this.state.identityReady) return;
+    const nextText = text.slice(0, MAX_DRAFT_LENGTH);
+    if ((this.state.drafts[slot] ?? '') === nextText) return;
+    const drafts = { ...this.state.drafts, [slot]: nextText };
+    writeStoredDrafts(scopeStorageKey(this.state.uid, this.state.schoolId), drafts);
+    this.publish({ ...this.state, drafts });
+  }
+  clearDraft(slot: CampusDraftSlot) {
+    this.setDraft(slot, '');
+  }
+  discardAll() {
+    writeStoredDrafts(scopeStorageKey(this.state.uid, this.state.schoolId), {});
+    this.publish({ ...this.state, drafts: {} });
+  }
+}
+
+type CampusDraftContextValue = {
+  store: DraftStore;
+  state: DraftState;
+};
+
+const CampusDraftContext = createContext<CampusDraftContextValue | null>(null);
+
+export function CampusDraftProvider({
+  uid,
+  schoolId,
+  ready = true,
+  identityReady = true,
+  children,
+}: {
+  uid: string | null;
+  schoolId: string | null;
+  ready?: boolean;
+  identityReady?: boolean;
+  children: ReactNode;
+}) {
+  const [store] = useState(() => new DraftStore(uid, schoolId, ready, identityReady));
+  store.reconcile(uid, schoolId, ready, identityReady);
+  const state = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
+  const controller = useMemo<DraftController>(
+    () => ({
+      hasActivity: () => store.state.identityReady && hasText(store.state.drafts),
+      discard: () => store.discardAll(),
+    }),
+    [store],
+  );
+
+  useLayoutEffect(() => {
+    activeController = controller;
+    return () => {
+      if (activeController === controller) activeController = null;
+    };
+  }, [controller]);
+
+  const value = useMemo(() => ({ store, state }), [store, state]);
+  return <CampusDraftContext.Provider value={value}>{children}</CampusDraftContext.Provider>;
+}
+
+export function useCampusDraft(slot: CampusDraftSlot) {
+  const context = useContext(CampusDraftContext);
+  if (!context) {
+    throw new Error('useCampusDraft must be used within CampusDraftProvider');
+  }
+  const text = (context.state.identityReady ? context.state.drafts[slot] : '') ?? '';
+  const setText = useCallback(
+    (next: string | ((previous: string) => string)) => {
+      if (!context.store.state.identityReady) return;
+      const previous = context.store.state.drafts[slot] ?? '';
+      const value = typeof next === 'function' ? next(previous) : next;
+      context.store.setDraft(slot, value);
+    },
+    [context.store, slot],
+  );
+  const clear = useCallback(() => {
+    context.store.clearDraft(slot);
+  }, [context.store, slot]);
+  return {
+    text,
+    setText,
+    clear,
+    ready: context.state.ready && context.state.identityReady,
+    uid: context.state.uid,
+    schoolId: context.state.schoolId,
+  };
+}
+
+/** 測試或尚未掛 Provider 的頁面可安全呼叫；無 Provider 時退回元件內本地狀態。 */
+export function useOptionalCampusDraft(slot: CampusDraftSlot) {
+  const context = useContext(CampusDraftContext);
+  const [localText, setLocalText] = useState('');
+  const setText = useCallback(
+    (next: string | ((previous: string) => string)) => {
+      if (context) {
+        if (!context.store.state.identityReady) return;
+        const previous = context.store.state.drafts[slot] ?? '';
+        context.store.setDraft(slot, typeof next === 'function' ? next(previous) : next);
+        return;
+      }
+      setLocalText((previous) => (typeof next === 'function' ? next(previous) : next));
+    },
+    [context, slot],
+  );
+  const clear = useCallback(() => {
+    if (context) context.store.clearDraft(slot);
+    else setLocalText('');
+  }, [context, slot]);
+  if (!context) {
+    return {
+      text: localText,
+      setText,
+      clear,
+      ready: false,
+      uid: null as string | null,
+      schoolId: null as string | null,
+      available: false as const,
+    };
+  }
+  return {
+    text: (context.state.identityReady ? context.state.drafts[slot] : '') ?? '',
+    setText,
+    clear,
+    ready: context.state.ready && context.state.identityReady,
+    uid: context.state.uid,
+    schoolId: context.state.schoolId,
+    available: true as const,
+  };
+}

@@ -1,0 +1,120 @@
+import React, { useState } from 'react';
+import { useAuth } from '../../state/auth';
+import { theme } from '../../ui/theme';
+import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
+import { View, Text, TextInput, Pressable, ScrollView, Alert, StyleSheet } from 'react-native';
+import { getSupabaseClient } from '../../services/supabaseClient';
+import { postForumReply } from '../../services/lmsV2WriteTools';
+import {
+  CourseV2Header,
+  useCourseV2Params,
+  useLoadable,
+  CourseV2Loading,
+  CourseV2Error,
+} from './_courseV2Shell';
+
+export default function CourseForumTopicV2Screen() {
+  const styles = useThemeStyleSheet(createStyles);
+  const { user } = useAuth();
+  const { courseId, topicId, courseName } = useCourseV2Params();
+  const [reply, setReply] = useState('');
+  const [posting, setPosting] = useState(false);
+
+  const loadable = useLoadable(async () => {
+    const sb = getSupabaseClient();
+    if (!sb) return { topic: null, posts: [] };
+    const { data: topic } = await sb
+      .from('forum_topics')
+      .select('id, title')
+      .eq('id', topicId)
+      .maybeSingle();
+    const { data: posts } = await sb
+      .from('forum_posts')
+      .select('id, body, body_html, author_id, parent_post_id, created_at, deleted_at')
+      .eq('topic_id', topicId)
+      .order('created_at', { ascending: true })
+      .limit(200);
+    return { topic, posts: (posts ?? []).filter((p: any) => !p.deleted_at) };
+  }, JSON.stringify([courseId, topicId, user?.uid]));
+
+  const handlePost = async () => {
+    if (!reply.trim() || !topicId) return;
+    setPosting(true);
+    const r = await postForumReply({ courseId: courseId!, topicId, body: reply });
+    setPosting(false);
+    if (r.success) {
+      setReply('');
+      loadable.refresh();
+    } else {
+      Alert.alert('發文失敗', r.summary);
+    }
+  };
+
+  if (loadable.loading) return <CourseV2Loading />;
+  if (loadable.error) return <CourseV2Error error={loadable.error} onRetry={loadable.refresh} />;
+  const { topic, posts } = loadable.data!;
+
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+      <CourseV2Header title={topic?.title ?? '討論串'} subtitle={courseName} />
+      <ScrollView contentContainerStyle={{ padding: 12, gap: 10 }}>
+        {posts.map((p: any) => (
+          <View key={p.id} style={styles.post}>
+            <Text style={styles.author}>{String(p.author_id).slice(0, 8)}</Text>
+            <Text style={styles.body}>{p.body}</Text>
+            <Text style={styles.time}>{new Date(p.created_at).toLocaleString()}</Text>
+          </View>
+        ))}
+        {posts.length === 0 ? <Text style={{ color: theme.colors.muted }}>尚無回覆</Text> : null}
+      </ScrollView>
+      <View style={styles.composer}>
+        <TextInput
+          style={styles.input}
+          value={reply}
+          onChangeText={setReply}
+          placeholder="輸入回覆..."
+          multiline
+        />
+        <Pressable
+          style={[styles.send, !reply.trim() && { opacity: 0.5 }]}
+          disabled={!reply.trim() || posting}
+          onPress={handlePost}
+        >
+          <Text style={styles.sendLabel}>送出</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const createStyles = () => StyleSheet.create({
+  post: {
+    backgroundColor: theme.colors.surface,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+  },
+  author: { fontSize: 12, fontWeight: '600', color: theme.colors.textSecondary },
+  body: { color: theme.colors.text, fontSize: 14, lineHeight: 20, marginTop: 4 },
+  time: { fontSize: 11, color: theme.colors.muted, marginTop: 6 },
+  composer: {
+    flexDirection: 'row',
+    padding: 12,
+    gap: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  input: {
+    color: theme.colors.text,
+    flex: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+    borderRadius: 8,
+    padding: 8,
+    maxHeight: 100,
+  },
+  send: { minHeight: 44, paddingHorizontal: 16, justifyContent: 'center', backgroundColor: theme.colors.accent, borderRadius: 8 },
+  sendLabel: { color: theme.colors.onAccent, fontWeight: '600' },
+});

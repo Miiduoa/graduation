@@ -1,0 +1,6 @@
+.notice { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 20px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--panel); }
+.dot { flex: 0 0 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--muted); }
+.notice[data-state='live'] .dot { background: var(--success, var(--brand)); }
+.notice[data-state='offline'] .dot, .notice[data-state='error'] .dot { background: var(--warning, var(--muted)); }
+.notice strong { font-size: 13px; line-height: 1.6; }
+.notice p { margin: 4px 0 0; font-size: 12px; line-height: 1.7; color: var(--muted); overflow-wrap: anywhere; }

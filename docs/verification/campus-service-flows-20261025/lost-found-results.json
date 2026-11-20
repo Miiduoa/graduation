@@ -1,0 +1,20 @@
+{
+  "checks": [
+    "real Firebase emulator session and unchanged rules load the signed-in list with 50 initial rows",
+    "browser Back restores the expanded lost-and-found list from a detail page",
+    "browser Back retains text, type, status and current-user filters after a genuine owner-scoped read",
+    "detail return link and reload retain the same filters and Firebase session",
+    "empty filters clear back to the complete local school collection and restore keyboard focus",
+    "signed-in lost-and-found search fits 320px and 390px in light mode",
+    "signed-in lost-and-found search fits 320px and 390px in dark mode",
+    "switching the explicit campus clears the previous school results while keeping the emulator account"
+  ],
+  "pageErrors": [],
+  "networkErrors": [],
+  "cancelledRequestCount": 84,
+  "blockedExternalRequests": [],
+  "emulatorProject": "demo-campus-services",
+  "usedEmulatorAccount": true,
+  "firestoreRequestCount": 29,
+  "fixtureNote": "Anonymous Firebase emulator account and synthetic Firestore content; no real school login or external services."
+}

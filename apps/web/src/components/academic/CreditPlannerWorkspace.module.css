@@ -1,0 +1,699 @@
+.workspace {
+  margin: 22px 0 44px;
+  min-width: 0;
+  color: var(--text);
+}
+
+.heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.kicker {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+}
+
+.heading h2 {
+  margin: 6px 0 8px;
+  font-size: clamp(24px, 3.6vw, 34px);
+  letter-spacing: -0.035em;
+  line-height: 1.3;
+  font-weight: 730;
+}
+
+.heading p,
+.cardTitle p,
+.sourceNote,
+.footnote,
+.muted {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.actions,
+.formActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.primary,
+.secondary,
+.textButton,
+.courseControls button,
+.undo button {
+  font: inherit;
+  cursor: pointer;
+  min-height: 44px;
+  border-radius: 12px;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.primary {
+  padding: 0 18px;
+  background: var(--brand);
+  border: 1px solid var(--brand);
+  color: var(--on-brand);
+  font-weight: 650;
+}
+
+.secondary {
+  padding: 0 15px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  font-weight: 600;
+}
+
+.textButton,
+.courseControls button,
+.undo button {
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 0 10px;
+}
+
+.primary:hover {
+  filter: brightness(1.07);
+}
+
+.secondary:hover,
+.textButton:hover,
+.courseControls button:hover,
+.undo button:hover {
+  background: var(--bg-soft);
+  border-color: var(--border-strong);
+}
+
+.workspace button:focus-visible,
+.workspace input:focus-visible,
+.workspace select:focus-visible {
+  outline: 3px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.sourceNote {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 22px;
+}
+
+.localBadge {
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.settings {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+}
+
+.field {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 630;
+}
+
+.field input,
+.field select,
+.termSelect select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 450;
+  font-size: 15px;
+  box-sizing: border-box;
+}
+
+.field input::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.field input[aria-invalid='true'] {
+  border-color: var(--warning);
+}
+
+.field small {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 450;
+  line-height: 1.6;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0 0;
+}
+
+.metric,
+.metricAccent {
+  padding: 18px 20px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.metricAccent {
+  background: var(--accent-soft);
+}
+
+.metric > span,
+.metricAccent > span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.metric strong,
+.metricAccent strong {
+  display: block;
+  font-size: clamp(25px, 3vw, 34px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  margin: 9px 0 6px;
+  overflow-wrap: anywhere;
+}
+
+.metric strong small,
+.metricAccent strong small {
+  font-size: 13px;
+  font-weight: 450;
+  color: var(--muted);
+}
+
+.metric p,
+.metricAccent p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.forecast {
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  padding: 16px 20px;
+  margin: 12px 0 32px;
+  background: var(--bg-soft);
+}
+
+.forecastCopy {
+  display: grid;
+  gap: 6px;
+}
+
+.forecastCopy strong {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.6;
+}
+
+.forecastCopy span {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.progress,
+.termTrack,
+.categoryTrack {
+  display: block;
+  overflow: hidden;
+  height: 8px;
+  border-radius: 100px;
+  background: var(--border);
+}
+
+.progress {
+  margin-top: 13px;
+}
+
+.progress > span,
+.termTrack > span,
+.categoryTrack > span {
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  border-radius: inherit;
+  background: var(--brand);
+}
+
+.sectionHeading {
+  margin: 0 0 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.sectionHeading h3,
+.cardTitle h3 {
+  margin: 6px 0 0;
+  font-size: 19px;
+  letter-spacing: -0.015em;
+  font-weight: 680;
+}
+
+.termSelect {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.termSelect select {
+  min-width: 104px;
+  width: auto;
+}
+
+.terms {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.termCard {
+  padding: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 15px;
+  min-width: 0;
+}
+
+.termTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.termTop > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.termTop strong {
+  font-size: 20px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.termTop small {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.termTrack {
+  margin: 14px 0 10px;
+  height: 6px;
+}
+
+.termCard p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.footnote {
+  margin: 8px 0 30px;
+}
+
+.courseLayout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.84fr) minmax(0, 1.16fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.addCard,
+.courseList {
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 18px;
+  padding: 20px;
+}
+
+.addCard {
+  display: grid;
+  gap: 15px;
+}
+
+.cardTitle {
+  margin-bottom: 4px;
+}
+
+.cardTitle p {
+  margin-top: 8px;
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.count {
+  font-size: 14px;
+  background: var(--bg-soft);
+  color: var(--muted);
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 8px;
+  vertical-align: middle;
+}
+
+.empty {
+  text-align: center;
+  display: grid;
+  place-content: center;
+  min-height: 190px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 14px;
+  margin: 18px 0 0;
+  padding: 20px;
+}
+
+.empty strong {
+  font-size: 15px;
+}
+
+.empty p {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.courses {
+  padding: 0;
+  margin: 16px 0 0;
+  list-style: none;
+  display: grid;
+  gap: 7px;
+}
+
+.courseRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 12px 12px 14px;
+  min-width: 0;
+}
+
+.courseDetails {
+  min-width: 0;
+}
+
+.courseDetails strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.courseDetails p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.courseControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+}
+
+.courseControls span {
+  width: 100%;
+  text-align: right;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.courseControls small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.courseControls button {
+  min-height: 44px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.undo {
+  padding: 8px 12px;
+  margin: 12px 0;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.undo button {
+  margin-left: 8px;
+  color: var(--brand);
+  text-decoration: underline;
+  font-weight: 650;
+}
+
+.categories {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 0;
+}
+
+.categories > div {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 12px;
+  min-width: 0;
+}
+
+.categories span {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.categories strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 650;
+  margin: 7px 0 12px;
+}
+
+.categoryTrack {
+  height: 5px;
+}
+
+.error {
+  padding: 10px 12px;
+  margin: 8px 0 0;
+  border: 1px solid var(--warning);
+  background: var(--warning-soft);
+  border-radius: 10px;
+  color: var(--warning);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.disclaimer {
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--muted);
+  border-left: 3px solid var(--border-strong);
+  padding: 8px 14px;
+  margin: 20px 0 8px;
+  background: var(--bg-soft);
+}
+
+.disclaimer strong {
+  color: var(--text);
+}
+
+.saveNotice {
+  color: var(--warning);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 8px 0;
+}
+
+@media (max-width: 1020px) {
+  .settings {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .terms,
+  .categories {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .courseLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 680px) {
+  .heading {
+    align-items: start;
+  }
+
+  .actions {
+    width: 100%;
+  }
+
+  .settings,
+  .metrics {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+
+  .metrics {
+    padding: 0;
+  }
+
+  .metric,
+  .metricAccent {
+    padding: 15px 18px;
+  }
+
+  .settings,
+  .addCard,
+  .courseList {
+    border-radius: 15px;
+  }
+
+  .termCard {
+    padding: 13px;
+  }
+
+  .termTop {
+    display: grid;
+    gap: 6px;
+  }
+
+  .courseRow {
+    flex-wrap: wrap;
+  }
+
+  .courseControls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .courseControls span {
+    width: auto;
+    margin-right: auto;
+    text-align: left;
+  }
+}
+
+@media (max-width: 380px) {
+  .terms,
+  .categories,
+  .formRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace button {
+    transition: none;
+  }
+}
+
+@media print {
+  .actions,
+  .addCard,
+  .courseControls button,
+  .undo,
+  .termSelect {
+    display: none;
+  }
+
+  .courseLayout,
+  .metrics,
+  .settings,
+  .terms {
+    display: block;
+  }
+
+  .termCard,
+  .metric,
+  .metricAccent,
+  .courseList {
+    margin-bottom: 10px;
+    break-inside: avoid;
+  }
+}
+
+.backupInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

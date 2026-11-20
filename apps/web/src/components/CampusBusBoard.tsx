@@ -1,0 +1,280 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import {
+  CAMPUS_NEXT, CAMPUS_NEXT_ROUTES, CAMPUS_SEGMENTS, campusApproachModel,
+  campusDirectionEnded, campusEtaView, campusLaneDisplay, campusLiveUnavailable, campusRowKey,
+  campusSegmentRows, campusSegmentWaitLine, campusUpdatedLabel, hasCampusNext,
+  pickCampusApproachRow, queryTransit,
+  type CampusSegmentKey, type TransitResult,
+} from '@/lib/transit';
+import { CampusApproachTrack } from './CampusApproachTrack';
+import { CampusArrivalRow } from './CampusArrivalRow';
+import { CampusIcon } from './CampusIcon';
+import { SchoolSelector } from './SchoolSelector';
+import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
+import css from './transit.module.css';
+
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <path
+        d="M20 12a8 8 0 1 1-2.2-5.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path d="M20 4.5v5h-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SkeletonList() {
+  return (
+    <ul className={css.boardList} aria-hidden="true" data-testid="campus-skeleton">
+      {[0, 1, 2].map((index) => (
+        <li key={index} className={css.skeletonRow}>
+          <span className={css.skeletonBadge} />
+          <span className={css.skeletonCopy}>
+            <span className={css.skeletonLine} />
+            <span className={css.skeletonLineShort} />
+          </span>
+          <span className={css.skeletonEta} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; schoolName: string }) {
+  const selection = useOptionalSelectedSchool();
+  const spec = hasCampusNext(schoolId) ? CAMPUS_NEXT[schoolId] : null;
+  const [segment, setSegment] = useState<CampusSegmentKey>('往沙鹿');
+  const [result, setResult] = useState<TransitResult | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [revision, setRevision] = useState(0);
+  const [clock, setClock] = useState(() => Date.now());
+  const [offline, setOffline] = useState(false);
+  const [needsFreshData, setNeedsFreshData] = useState(false);
+  const [laneOpen, setLaneOpen] = useState(false);
+  const [focusedKey, setFocusedKey] = useState<string | null>(null);
+  const inFlight = useRef(false);
+  useEffect(() => {
+    if (!spec) return;
+    let active = true;
+    let controller: AbortController | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function refresh() {
+      if (!active || inFlight.current || document.visibilityState === 'hidden' || !navigator.onLine) {
+        if (active && !navigator.onLine) { setOffline(true); setNeedsFreshData(true); setBusy(false); }
+        return;
+      }
+      const current = new AbortController();
+      controller = current;
+      inFlight.current = true;
+      const timeout = setTimeout(() => current.abort(), 20_000);
+      setBusy(true);
+      let delay = 30_000;
+      try {
+        const next = await queryTransit({ action: 'campus-next', schoolId }, current.signal);
+        if (!active || current.signal.aborted) return;
+        if (next.status === 'ready') {
+          setResult(next);
+          setNeedsFreshData(false);
+        } else {
+          setResult((previous) => previous?.status === 'ready' ? previous : next);
+          setNeedsFreshData(true);
+          delay = 60_000;
+        }
+        setClock(Date.now());
+      } catch {
+        if (active && controller === current) {
+          setResult((previous) => previous?.status === 'ready' ? previous : { status: 'unavailable', reason: 'network' });
+          setNeedsFreshData(true);
+          delay = 60_000;
+        }
+      } finally {
+        clearTimeout(timeout);
+        if (controller === current) {
+          controller = null;
+          if (active) {
+            inFlight.current = false;
+            if (current.signal.aborted) {
+              setNeedsFreshData(true);
+              delay = 60_000;
+            }
+            setBusy(false);
+            if (document.visibilityState === 'visible' && navigator.onLine) timer = setTimeout(() => void refresh(), delay);
+          }
+        }
+      }
+    }
+    const resume = () => {
+      clearTimeout(timer);
+      setOffline(!navigator.onLine);
+      setClock(Date.now());
+      if (!navigator.onLine) {
+        setNeedsFreshData(true);
+        controller?.abort();
+        controller = null;
+        inFlight.current = false;
+        setBusy(false);
+        return;
+      }
+      if (document.visibilityState === 'visible') {
+        setNeedsFreshData(true);
+        if (controller) {
+          controller.abort();
+          controller = null;
+          inFlight.current = false;
+        }
+        void refresh();
+      }
+    };
+    const clockTimer = setInterval(() => setClock(Date.now()), 15_000);
+    void refresh();
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('online', resume);
+    window.addEventListener('offline', resume);
+    return () => {
+      active = false;
+      controller?.abort();
+      inFlight.current = false;
+      clearTimeout(timer);
+      clearInterval(clockTimer);
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('online', resume);
+      window.removeEventListener('offline', resume);
+    };
+  }, [schoolId, spec, revision]);
+  if (!spec) return null;
+  const current = CAMPUS_SEGMENTS.find((item) => item.key === segment) ?? CAMPUS_SEGMENTS[0];
+  const arrivals = result?.status === 'ready' && result.kind === 'arrivals' ? result.arrivals : [];
+  const rows = campusSegmentRows(arrivals, current.group, clock, CAMPUS_NEXT_ROUTES);
+  const lane = current.group === '專用道' ? campusLaneDisplay(rows, clock) : { shown: rows, extra: [] };
+  const waitLine = campusSegmentWaitLine(current, rows);
+  const routeStops = result?.status === 'ready' && result.kind === 'arrivals' ? result.routeStops ?? [] : [];
+  const approachRow = pickCampusApproachRow([...lane.shown, ...lane.extra], focusedKey, clock);
+  const approach = campusApproachModel(approachRow, clock, routeStops);
+  const allEnded = campusDirectionEnded(rows, clock);
+  const liveUnavailable = campusLiveUnavailable(rows, clock, result?.status === 'ready' && result.stale === true);
+  const unverified = offline || needsFreshData;
+  const fetchedAt = result?.status === 'ready' ? result.fetchedAt : '';
+  const stamp = fetchedAt ? campusUpdatedLabel(fetchedAt, clock, liveUnavailable) : busy ? '' : '';
+  const missing = result?.status === 'unavailable';
+  const showSkeleton = !result;
+  function retry() {
+    if (busy || inFlight.current) return;
+    setBusy(true);
+    setRevision((value) => value + 1);
+  }
+  return (
+    <section className={`${css.board} ${css.physicalBoard}`} aria-labelledby="campus-bus-title" aria-busy={busy} data-testid="campus-next">
+      <header className={css.boardHead}>
+        <span className={css.boardEmblem} aria-hidden="true"><CampusIcon name="bus" size={32} /></span>
+        <div className={css.boardHeadCopy}>
+          {selection ? <SchoolSelector compact variant="name" /> : <p className={css.boardSchool}>{schoolName}</p>}
+          <h1 id="campus-bus-title" className={css.boardTitle}>公車</h1>
+          <p className={css.boardLabel} aria-hidden="true">BUS STOP</p>
+        </div>
+        <button
+          type="button"
+          className={css.refreshIcon}
+          aria-label="重新整理"
+          disabled={busy || offline}
+          onClick={retry}
+        >
+          <RefreshIcon />
+        </button>
+      </header>
+      {offline ? <p className={css.boardStamp} role="status">目前離線，恢復網路後會重新查詢。</p> : null}
+      {!offline && needsFreshData ? <p className={css.boardStamp} role="status">{busy ? '正在重新確認班次，暫不顯示到站預估。' : '目前無法確認最新班次，請稍後重試。'}</p> : null}
+      {!unverified && stamp ? <p className={css.boardStamp}>{stamp}</p> : null}
+      {allEnded && !unverified ? <p className={css.boardEndedHint}>這個方向今天的班次都結束了</p> : null}
+      <div className={css.segmentWrap} data-campus-segments="true" data-sticky-cover="true">
+        <div className={css.segmentBar} role="tablist" aria-label="站牌方向">
+          {CAMPUS_SEGMENTS.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              role="tab"
+              aria-selected={segment === item.key}
+              className={css.segment}
+              onClick={() => {
+                setSegment(item.key);
+                setLaneOpen(false);
+                setFocusedKey(null);
+              }}
+            >
+              {item.key}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className={css.waitLine}>{waitLine}</p>
+      {approach && !unverified && !liveUnavailable && !missing && !showSkeleton ? (
+        <CampusApproachTrack
+          key={approachRow ? campusRowKey(approachRow) : undefined}
+          model={approach}
+          animateUpdates={!offline && !liveUnavailable}
+        />
+      ) : null}
+      {missing ? (
+        <div className={css.boardError} role="status">
+          <p>暫時讀不到資料，請稍後再試</p>
+          <button type="button" className={css.retry} disabled={busy} onClick={retry}>再試一次</button>
+        </div>
+      ) : offline && !result ? (
+        <div className={css.boardError} role="status">
+          <p>離線時無法取得班次，連線後會自動重新查詢。</p>
+        </div>
+      ) : showSkeleton ? (
+        <SkeletonList />
+      ) : (
+        <ul key={segment} className={`${css.boardList} ${css.boardListEnter}`}>
+          {lane.shown.length ? lane.shown.map((row) => (
+            <li key={`${row.route}:${row.heading}`}>
+              <CampusArrivalRow
+                row={row}
+                now={clock}
+                unverified={unverified || (liveUnavailable && ['live', 'soon'].includes(campusEtaView(row.arrival, clock).kind))}
+                animateUpdates={!unverified && !liveUnavailable}
+                active={approachRow ? campusRowKey(row) === campusRowKey(approachRow) : false}
+                onSelect={() => setFocusedKey(campusRowKey(row))}
+              />
+            </li>
+          )) : (
+            <li>
+              <p className={css.emptyGroup} role="status">暫無班次資訊</p>
+            </li>
+          )}
+          {laneOpen ? lane.extra.map((row) => (
+            <li key={`${row.route}:${row.heading}`}>
+              <CampusArrivalRow
+                row={row}
+                now={clock}
+                unverified={unverified || (liveUnavailable && ['live', 'soon'].includes(campusEtaView(row.arrival, clock).kind))}
+                animateUpdates={!unverified && !liveUnavailable}
+                active={approachRow ? campusRowKey(row) === campusRowKey(approachRow) : false}
+                onSelect={() => setFocusedKey(campusRowKey(row))}
+              />
+            </li>
+          )) : null}
+          {lane.extra.length ? (
+            <li className={css.laneMore}>
+              <button
+                type="button"
+                className={css.laneMoreToggle}
+                aria-expanded={laneOpen}
+                onClick={() => setLaneOpen((open) => !open)}
+              >
+                {laneOpen ? '收合' : `還有 ${lane.extra.length} 班`}
+              </button>
+            </li>
+          ) : null}
+        </ul>
+      )}
+    </section>
+  );
+}

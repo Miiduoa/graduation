@@ -1,0 +1,418 @@
+import 'dotenv/config';
+import { googleIosInfoPlist } from './scripts/configure-nuni-google.cjs';
+
+type AppEnvironment = 'development' | 'preview' | 'production';
+
+type FeatureAvailability = {
+  enabled: boolean;
+  sso: boolean;
+  courses: boolean;
+  grades: boolean;
+  payments: boolean;
+  widgets: boolean;
+  deeplinks: boolean;
+};
+
+function normalizeAppEnv(value?: string): AppEnvironment {
+  if (value === 'production' || value === 'preview') {
+    return value;
+  }
+
+  return 'development';
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value == null || value.trim() === '') {
+    return fallback;
+  }
+
+  return value === 'true';
+}
+
+function parseCsv(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function requireReleaseValue(
+  name: string,
+  value: string | undefined,
+  isReleaseLike: boolean,
+): string | undefined {
+  const normalized = value?.trim();
+  if (isReleaseLike && !normalized) {
+    throw new Error(`[app.config] Missing required release env: ${name}`);
+  }
+  return normalized;
+}
+
+function errorReportingUrl(value: string | undefined): string {
+  const endpoint = value?.trim();
+  if (!endpoint) {
+    throw new Error(
+      '[app.config] Remote error reporting requires EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT',
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw new Error('[app.config] EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT must be an HTTPS URL');
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.hash) {
+    throw new Error(
+      '[app.config] EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT must be an HTTPS URL without credentials or a fragment',
+    );
+  }
+  return endpoint;
+}
+
+function requirePositiveInteger(
+  name: string,
+  value: string | number | undefined,
+  isReleaseLike: boolean,
+  fallback: number,
+): number {
+  const parsed = typeof value === 'number' ? value : Number(value ?? fallback);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    if (isReleaseLike) {
+      throw new Error(`[app.config] ${name} must be a positive integer`);
+    }
+
+    return fallback;
+  }
+
+  return parsed;
+}
+
+export default ({ config }: any) => {
+  const appEnv = normalizeAppEnv(process.env.APP_ENV);
+  const isProduction = appEnv === 'production';
+  const isReleaseLike = appEnv === 'preview' || appEnv === 'production';
+  const releasedSchoolIds = parseCsv(process.env.EXPO_PUBLIC_RELEASED_SCHOOL_IDS);
+
+  const featureAvailability: FeatureAvailability = {
+    enabled: true,
+    sso: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_SSO, !isReleaseLike),
+    courses: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_COURSES, !isReleaseLike),
+    grades: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_GRADES, !isReleaseLike),
+    payments: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_PAYMENTS, !isReleaseLike),
+    widgets: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_WIDGETS, false),
+    deeplinks: parseBoolean(process.env.EXPO_PUBLIC_FEATURE_DEEPLINKS, !isReleaseLike),
+  };
+  const enableUniversalDevAccounts =
+    !isProduction && parseBoolean(process.env.EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS, true);
+  const allowLocalMockAuth =
+    appEnv === 'development' && process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK_AUTH === 'true';
+
+  const firebase = {
+    apiKey: requireReleaseValue(
+      'EXPO_PUBLIC_FIREBASE_API_KEY',
+      process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+      isReleaseLike,
+    ),
+    authDomain: requireReleaseValue(
+      'EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN',
+      process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+      isReleaseLike,
+    ),
+    projectId: requireReleaseValue(
+      'EXPO_PUBLIC_FIREBASE_PROJECT_ID',
+      process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+      isReleaseLike,
+    ),
+    storageBucket: requireReleaseValue(
+      'EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET',
+      process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+      isReleaseLike,
+    ),
+    messagingSenderId: requireReleaseValue(
+      'EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID',
+      process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+      isReleaseLike,
+    ),
+    appId: requireReleaseValue(
+      'EXPO_PUBLIC_FIREBASE_APP_ID',
+      process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+      isReleaseLike,
+    ),
+  };
+
+  const easProjectId = requireReleaseValue(
+    'EXPO_PUBLIC_EAS_PROJECT_ID',
+    process.env.EXPO_PUBLIC_EAS_PROJECT_ID,
+    isReleaseLike,
+  );
+  const legalBaseUrl = requireReleaseValue(
+    'EXPO_PUBLIC_LEGAL_BASE_URL',
+    process.env.EXPO_PUBLIC_LEGAL_BASE_URL,
+    isReleaseLike,
+  );
+  // Reporting already keeps diagnostics locally when no endpoint is configured.
+  // Never invent a remote destination just to make a platform build pass.
+  const remoteErrorReporting = parseBoolean(process.env.EXPO_PUBLIC_ERROR_REPORTING_ENABLED, false);
+  const errorReportingEndpoint = remoteErrorReporting
+    ? errorReportingUrl(process.env.EXPO_PUBLIC_ERROR_REPORTING_ENDPOINT)
+    : undefined;
+  // The current campus map uses Leaflet/OpenStreetMap, not the native Google SDK.
+  const mapsApiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() || undefined;
+
+  const hasSchoolFeatures = Object.entries(featureAvailability).some(
+    ([feature, enabled]) => feature !== 'enabled' && enabled,
+  );
+  if (isReleaseLike && hasSchoolFeatures && releasedSchoolIds.length === 0) {
+    throw new Error(
+      '[app.config] Enabled school features require verified schools in EXPO_PUBLIC_RELEASED_SCHOOL_IDS',
+    );
+  }
+
+  const bundleIdentifier =
+    process.env.IOS_BUNDLE_IDENTIFIER?.trim() ||
+    config.ios?.bundleIdentifier ||
+    (isProduction ? 'com.campus.app' : 'com.campus.app.dev');
+  const androidPackage =
+    process.env.ANDROID_PACKAGE_NAME?.trim() ||
+    config.android?.package ||
+    (isProduction ? 'com.campus.app' : 'com.campus.app.dev');
+  const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim();
+  if (
+    googleIosClientId ===
+      '1096741064465-b8ue803rbqdpcq75t1g03o5t49vi0s4q.apps.googleusercontent.com' &&
+    bundleIdentifier !== 'com.nuni.app'
+  ) {
+    throw new Error(
+      '[app.config] The registered production Google iOS client requires com.nuni.app.',
+    );
+  }
+  const buildNumber =
+    requireReleaseValue(
+      'IOS_BUILD_NUMBER',
+      process.env.IOS_BUILD_NUMBER ?? String(config.ios?.buildNumber ?? '1'),
+      isReleaseLike,
+    ) ?? '1';
+  const versionCode = requirePositiveInteger(
+    'ANDROID_VERSION_CODE',
+    process.env.ANDROID_VERSION_CODE ?? config.android?.versionCode,
+    isReleaseLike,
+    1,
+  );
+  const deepLinkHost = featureAvailability.deeplinks
+    ? (requireReleaseValue(
+        'EXPO_PUBLIC_DEEP_LINK_HOST',
+        process.env.EXPO_PUBLIC_DEEP_LINK_HOST,
+        isReleaseLike,
+      ) ?? null)
+    : null;
+
+  const plugins = [
+    'expo-localization',
+    'expo-web-browser',
+    [
+      'expo-camera',
+      {
+        cameraPermission: '需要相機權限以掃描 QR 碼',
+      },
+    ],
+    [
+      'expo-location',
+      {
+        locationAlwaysAndWhenInUsePermission: '需要位置權限以提供校園導航',
+      },
+    ],
+    [
+      'expo-image-picker',
+      {
+        photosPermission: '需要相簿權限以選擇照片',
+      },
+    ],
+    [
+      'expo-notifications',
+      {
+        color: '#314D40',
+        sounds: ['./assets/sounds/notification.wav'],
+      },
+    ],
+    [
+      'expo-document-picker',
+      {
+        iCloudContainerEnvironment: isProduction ? 'Production' : 'Development',
+      },
+    ],
+    [
+      'expo-local-authentication',
+      {
+        faceIDPermission: '使用 Face ID 進行安全驗證',
+      },
+    ],
+    './src/widgets/expo-widget-plugin.js',
+  ];
+  const configuredAiProvider = process.env.EXPO_PUBLIC_AI_PROVIDER ?? 'gemini';
+  const releaseAiProviderOverride = process.env.EXPO_PUBLIC_RELEASE_AI_PROVIDER?.trim();
+  if (isReleaseLike && releaseAiProviderOverride && releaseAiProviderOverride !== 'cloud') {
+    throw new Error('[app.config] Release AI provider must be cloud');
+  }
+  if (isReleaseLike && process.env.EXPO_PUBLIC_GEMINI_API_KEY?.trim()) {
+    throw new Error('[app.config] Remove EXPO_PUBLIC_GEMINI_API_KEY from release builds');
+  }
+  const releaseAiProvider = isReleaseLike ? 'cloud' : configuredAiProvider;
+  const aiOfflineFirstBuild = parseBoolean(process.env.EXPO_PUBLIC_AI_OFFLINE_FIRST, false);
+
+  const androidIntentFilters = [
+    {
+      action: 'VIEW',
+      data: [{ scheme: 'campus' }],
+      category: ['BROWSABLE', 'DEFAULT'],
+    },
+    ...(deepLinkHost
+      ? [
+          {
+            action: 'VIEW',
+            autoVerify: isProduction,
+            data: [{ scheme: 'https', host: deepLinkHost, pathPrefix: '/' }],
+            category: ['BROWSABLE', 'DEFAULT'],
+          },
+        ]
+      : []),
+  ];
+
+  return {
+    ...config,
+    name: config.name ?? 'nuni',
+    slug: config.slug ?? 'campus-app',
+    version: config.version ?? '1.0.0',
+    orientation: 'portrait',
+    scheme: 'campus',
+    userInterfaceStyle: 'automatic',
+    icon: config.icon ?? './assets/icon.png',
+    splash: {
+      image: config.splash?.image ?? './assets/splash-icon.png',
+      resizeMode: 'contain',
+      backgroundColor: '#000000',
+    },
+    assetBundlePatterns: ['**/*'],
+    ios: {
+      ...(config.ios ?? {}),
+      supportsTablet: true,
+      bundleIdentifier,
+      buildNumber,
+      infoPlist: {
+        ...googleIosInfoPlist(config.ios?.infoPlist ?? {}, googleIosClientId),
+        NSCameraUsageDescription: '需要相機權限以掃描 QR 碼和拍照',
+        NSPhotoLibraryUsageDescription: '需要相簿權限以選擇照片',
+        NSLocationWhenInUseUsageDescription: '需要位置權限以提供校園導航',
+        NSLocationAlwaysAndWhenInUseUsageDescription: '需要位置權限以提供校園導航',
+        NSFaceIDUsageDescription: '使用 Face ID 進行安全驗證',
+        NFCReaderUsageDescription: '讀取對方出示的學生證，核對學校與學號。',
+        'com.apple.developer.nfc.readersession.iso7816.select-identifiers': ['F04E554E490101'],
+        UIBackgroundModes: ['fetch', 'remote-notification'],
+      },
+      associatedDomains: deepLinkHost ? [`applinks:${deepLinkHost}`] : undefined,
+      config: { ...(config.ios?.config ?? {}), ...(mapsApiKey ? { googleMapsApiKey: mapsApiKey } : {}) },
+      entitlements: {
+        'com.apple.developer.applesignin': ['Default'],
+        'aps-environment': isProduction ? 'production' : 'development',
+        'com.apple.security.application-groups': [`group.${bundleIdentifier}`],
+        'com.apple.developer.nfc.readersession.formats': ['TAG'],
+      },
+    },
+    android: {
+      ...(config.android ?? {}),
+      adaptiveIcon: {
+        foregroundImage:
+          config.android?.adaptiveIcon?.foregroundImage ?? './assets/adaptive-icon.png',
+        backgroundColor: '#000000',
+      },
+      package: androidPackage,
+      versionCode,
+      permissions: [
+        'CAMERA',
+        'ACCESS_FINE_LOCATION',
+        'ACCESS_COARSE_LOCATION',
+        'RECEIVE_BOOT_COMPLETED',
+        'VIBRATE',
+        'USE_FINGERPRINT',
+        'USE_BIOMETRIC',
+        'NFC',
+      ],
+      config: mapsApiKey ? { googleMaps: { apiKey: mapsApiKey } } : undefined,
+      intentFilters: androidIntentFilters,
+    },
+    plugins,
+    extra: {
+      ...(config.extra ?? {}),
+      appEnv,
+      isReleaseLike,
+      legalBaseUrl,
+      errorReportingEndpoint,
+      firebase,
+      cloudFunctionRegion: process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? 'asia-east1',
+      functionsBaseUrl: process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ?? '',
+      cloudFunctionBaseUrl:
+        process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ??
+        process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ??
+        '',
+      // Release builds must always use the backend proxy. Local Ollama/offline AI is only
+      // for development, training, and evaluation; it cannot be an App Store dependency.
+      aiProvider: releaseAiProvider,
+      aiRuntimeMode: isReleaseLike ? 'production-backend' : 'development-configured',
+      aiServerBaseUrl: process.env.EXPO_PUBLIC_AI_SERVER_URL ?? '',
+      /** Cloudflare Worker OPAC proxy base URL (no trailing slash); empty → device direct fetch only */
+      libraryOpacProxyUrl: process.env.EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL ?? '',
+      geminiApiKey: isReleaseLike ? '' : (process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? ''),
+      /** 裝置 AI 的輕量預設；進階使用者可在模型管理頁下載其他 GGUF。 */
+      localLlmDefaultModelId: process.env.EXPO_PUBLIC_LOCAL_LLM_MODEL ?? 'qwen2.5-0.5b',
+      /** true：預設關閉網搜／預抓學習（完全離線優先）；仍可用對應 EXPO_PUBLIC_AI_* =true 強制開啟 */
+      aiOfflineFirst: aiOfflineFirstBuild,
+      aiWebSearchEnabled: aiOfflineFirstBuild
+        ? parseBoolean(process.env.EXPO_PUBLIC_AI_ENABLE_WEB_SEARCH, false)
+        : parseBoolean(process.env.EXPO_PUBLIC_AI_ENABLE_WEB_SEARCH, true),
+      aiWebLearningEnabled: aiOfflineFirstBuild
+        ? parseBoolean(process.env.EXPO_PUBLIC_AI_WEB_LEARNING_ENABLED, false)
+        : parseBoolean(process.env.EXPO_PUBLIC_AI_WEB_LEARNING_ENABLED, true),
+      devPreferCloudAssistant: parseBoolean(
+        process.env.EXPO_PUBLIC_DEV_PREFER_CLOUD_ASSISTANT,
+        false,
+      ),
+      enableMockSSO: !isReleaseLike && process.env.EXPO_PUBLIC_ENABLE_MOCK_SSO === 'true',
+      enableUniversalDevAccounts,
+      allowLocalMockAuth,
+      /** 僅在 `EXPO_PUBLIC_TRONCLASS_DATA_ENABLED=true` 時對 TronClass 發網路請求；未設定或非 true 則關閉，學校連線預設關閉。 */
+      tronClassDataEnabled: parseBoolean(process.env.EXPO_PUBLIC_TRONCLASS_DATA_ENABLED, false),
+      assignmentFileSubmit: parseBoolean(
+        process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED,
+        false,
+      ),
+      googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
+      googleIosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? '',
+      googleAndroidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? '',
+      eas: {
+        projectId: easProjectId,
+        build: { experimental: { ios: { appExtensions: [{
+          targetName: 'CampusWidgetExtension', bundleIdentifier: `${bundleIdentifier}.widget`,
+          entitlements: { 'com.apple.security.application-groups': [`group.${bundleIdentifier}`] },
+        }] } } },
+      },
+      release: {
+        releasedSchoolIds,
+        deepLinkHost,
+        features: featureAvailability,
+      },
+      widgetConfig: {
+        appGroupId: `group.${bundleIdentifier}`,
+        refreshInterval: 15,
+      },
+    },
+    updates: easProjectId
+      ? {
+          fallbackToCacheTimeout: 0,
+          url: `https://u.expo.dev/${easProjectId}`,
+        }
+      : undefined,
+    // 原生學生證 NFC 需隨新安裝檔發佈，預覽與正式版使用獨立執行版本。
+    runtimeVersion: isProduction
+      ? 'campus-one-native-photo-pdf-widget-live-nfc-3'
+      : 'campus-preview-native-photo-pdf-widget-live-nfc-3',
+  };
+};

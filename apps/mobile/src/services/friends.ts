@@ -1,0 +1,177 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
+import type { Firestore } from 'firebase/firestore';
+import { canResendFriendRequest } from '@campus/shared';
+import { getDb } from '../firebase';
+
+export type FriendshipStatus = 'pending' | 'accepted' | 'declined' | 'blocked';
+
+export type Friendship = {
+  id: string;
+  schoolId: string;
+  fromUid: string;
+  toUid: string;
+  status: FriendshipStatus;
+  createdAt?: any;
+  acceptedAt?: any;
+  declinedAt?: any;
+  fromName?: string;
+  toName?: string;
+};
+
+export function friendshipDeclinedAtMs(f: Friendship | null | undefined): number {
+  const value = f?.declinedAt;
+  return typeof value?.toMillis === 'function' ? value.toMillis() : 0;
+}
+
+function col(db: Firestore) {
+  return collection(db, 'friendships');
+}
+
+export function directionalRequestId(schoolId: string, fromUid: string, toUid: string) {
+  return `req_${schoolId}_${fromUid}_${toUid}`;
+}
+
+/** 相對於自己的對象 UID（單一向度好友文件）。 */
+export function opponentUidFromFriendship(f: Friendship, myUid: string): string {
+  return f.fromUid === myUid ? f.toUid : f.fromUid;
+}
+
+/** 撤回邀請／略過對方／解除好友／清除封鎖列，皆刪除該 friendships 文件。 */
+export async function removeFriendship(friendshipId: string) {
+  await deleteDoc(doc(getDb(), 'friendships', friendshipId));
+}
+
+export async function sendFriendRequest(schoolId: string, fromUid: string, toUid: string) {
+  if (fromUid === toUid) throw new Error('無法對自己發送好友邀請');
+  const db = getDb();
+  const id = directionalRequestId(schoolId, fromUid, toUid);
+  const existing = await getDoc(doc(db, 'friendships', id)).catch(() => null);
+  if (existing?.exists()) {
+    const current = { id, ...(existing.data() as Omit<Friendship, 'id'>) };
+    if (current.status === 'declined') {
+      // 對方婉拒後要等七天，滿七天先拿掉舊邀請再送
+      const declinedAtMs = friendshipDeclinedAtMs(current);
+      if (declinedAtMs && !canResendFriendRequest(declinedAtMs)) throw new Error('declined-wait');
+      await deleteDoc(doc(db, 'friendships', id));
+    } else {
+      return;
+    }
+  }
+  await setDoc(doc(db, 'friendships', id), {
+    schoolId,
+    fromUid,
+    toUid,
+    status: 'pending' as FriendshipStatus,
+    createdAt: serverTimestamp(),
+  });
+}
+
+export async function acceptFriendRequest(friendshipId: string) {
+  const db = getDb();
+  await updateDoc(doc(db, 'friendships', friendshipId), {
+    status: 'accepted',
+    acceptedAt: serverTimestamp(),
+  });
+}
+
+/** 婉拒邀請：記下時間，送出邀請的人七天內不能再送。 */
+export async function declineFriendRequest(friendshipId: string) {
+  await updateDoc(doc(getDb(), 'friendships', friendshipId), {
+    status: 'declined',
+    declinedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * 封鎖：另外記一筆 friendBlocks，不改原本邀請的狀態（婉拒的七天才不會被跳過）。
+ * 原本那筆能刪就刪（待確認或好友），刪不掉的（例如對方婉拒、還沒滿七天）就留著。
+ */
+export async function blockUser(schoolId: string, myUid: string, otherUid: string, friendshipId?: string) {
+  const db = getDb();
+  await setDoc(doc(db, 'friendBlocks', `${myUid}_${otherUid}`), {
+    schoolId,
+    blockerUid: myUid,
+    blockedUid: otherUid,
+    createdAt: serverTimestamp(),
+  });
+  if (friendshipId) await deleteDoc(doc(db, 'friendships', friendshipId)).catch(() => undefined);
+}
+
+export async function unblockUser(myUid: string, otherUid: string) {
+  await deleteDoc(doc(getDb(), 'friendBlocks', `${myUid}_${otherUid}`));
+}
+
+export async function listAcceptedFriends(schoolId: string, myUid: string): Promise<Friendship[]> {
+  const db = getDb();
+  const [a, b] = await Promise.all([
+    getDocs(
+      query(col(db), where('schoolId', '==', schoolId), where('status', '==', 'accepted'), where('fromUid', '==', myUid)),
+    ),
+    getDocs(
+      query(col(db), where('schoolId', '==', schoolId), where('status', '==', 'accepted'), where('toUid', '==', myUid)),
+    ),
+  ]);
+  const map = new Map<string, Friendship>();
+  [...a.docs, ...b.docs].forEach((d) => {
+    map.set(d.id, { id: d.id, ...(d.data() as Omit<Friendship, 'id'>) });
+  });
+  return [...map.values()];
+}
+
+export async function listIncomingFriendRequests(schoolId: string, myUid: string): Promise<Friendship[]> {
+  const db = getDb();
+  let snap;
+  try {
+    snap = await getDocs(
+      query(
+        col(db),
+        where('schoolId', '==', schoolId),
+        where('toUid', '==', myUid),
+        where('status', '==', 'pending'),
+        orderBy('createdAt', 'desc'),
+        limit(50),
+      ),
+    );
+  } catch {
+    snap = await getDocs(
+      query(col(db), where('schoolId', '==', schoolId), where('toUid', '==', myUid), where('status', '==', 'pending'), limit(50)),
+    );
+  }
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Friendship, 'id'>) }));
+}
+
+export async function listOutgoingFriendRequests(schoolId: string, myUid: string): Promise<Friendship[]> {
+  const db = getDb();
+  const snap = await getDocs(
+    query(col(db), where('schoolId', '==', schoolId), where('fromUid', '==', myUid), where('status', '==', 'pending'), limit(50)),
+  );
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Friendship, 'id'>) }));
+}
+
+export async function getFriendshipBetween(
+  schoolId: string,
+  a: string,
+  b: string,
+): Promise<Friendship | null> {
+  const db = getDb();
+  const ids = [directionalRequestId(schoolId, a, b), directionalRequestId(schoolId, b, a)];
+  for (const id of ids) {
+    const s = await getDoc(doc(db, 'friendships', id)).catch(() => null);
+    if (s?.exists()) return { id: s.id, ...(s.data() as Omit<Friendship, 'id'>) };
+  }
+  return null;
+}
