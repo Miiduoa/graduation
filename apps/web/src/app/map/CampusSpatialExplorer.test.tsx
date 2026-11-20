@@ -1093,6 +1093,76 @@ it('starts first WebGL render after Safari initial invalid VisualViewport recove
   }
 });
 
+it('starts deferred first WebGL on Safari pageshow when VisualViewport becomes valid with no resize event', async () => {
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: 0, offsetLeft: 0, offsetTop: 0,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 40, left: 0, top: 40, right: 320, bottom: 220,
+    width: 320, height: 180, toJSON: () => ({}),
+  } as DOMRect);
+  try {
+    // The first observer was positive, but invalid iOS geometry blocked startup.
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    fireEvent(window, new Event('pagehide'));
+    viewport.height = window.innerHeight;
+    // Safari may restore a valid viewport only on pageshow. No resize/scroll
+    // or second intersection callback is dispatched in this regression.
+    fireEvent(window, new Event('pageshow'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.create).toHaveBeenCalledTimes(1);
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+it('resumes an existing Safari 3D scene on pageshow after invalid VisualViewport without a resize event', async () => {
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 40, left: 0, top: 40, right: 320, bottom: 220,
+    width: 320, height: 180, toJSON: () => ({}),
+  } as DOMRect);
+  try {
+    fireEvent(window, new Event('pagehide'));
+    viewport.height = 0;
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+    fireEvent(window, new Event('pagehide'));
+    viewport.height = window.innerHeight;
+    // An accessible recovery no longer depends on the WebView sending a
+    // VisualViewport event or another IntersectionObserver notification.
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    scene.setActive.mockClear();
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.setActive).not.toHaveBeenCalled();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('cancels pending first WebGL startup if a newer observer record says the map is offscreen', async () => {
   const viewport = Object.assign(new EventTarget(), {
     width: window.innerWidth, height: Number.NaN, offsetLeft: 0, offsetTop: 0,

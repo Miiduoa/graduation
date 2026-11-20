@@ -489,9 +489,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     const onPageShow = () => {
       pageSuspended = false;
       invalidateRestoredOffscreenVisibility();
-      updateVisibility();
-      startWhenVisible();
-      syncPendingStartup();
+      // A restored Safari page can recover a valid VisualViewport without
+      // dispatching resize, scroll or a fresh IntersectionObserver callback.
+      // Recheck the current rect on pageshow: the same two gates apply to
+      // both a previously paused scene and a pending first render.
+      onViewportResize();
     };
     // iOS VisualViewport can expand/scroll back into view without firing a
     // second IntersectionObserver callback. Only undo a pause that *this*
