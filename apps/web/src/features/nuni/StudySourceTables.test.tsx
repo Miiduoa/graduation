@@ -2395,3 +2395,52 @@ it('keeps comparisons for visible CJK, emoji, math and Braille row labels', () =
     }
   }
 });
+
+
+it('does not derive numeric or percentage charts from visually reordered Unicode labels', () => {
+  // These controls can reverse a displayed label even when its raw source
+  // contains meaningful letters. The verbatim table must remain available.
+  const controls = ['\u061c', '\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e', '\u2066', '\u2067', '\u2068', '\u2069'];
+  for (const [heading, values] of [
+    ['金額', ['100', '200']],
+    ['出席率', ['25%', '75%']],
+  ] as const) {
+    for (const control of controls) {
+      for (const inHeader of [false, true]) {
+        const column = inHeader ? heading + control : heading;
+        const firstLabel = inHeader ? '班級A' : '班級' + control + 'A';
+        const text = [
+          '| 項目 | ' + column + ' |',
+          '| --- | --- |',
+          '| ' + firstLabel + ' | ' + values[0] + ' |',
+          '| 班級B | ' + values[1] + ' |',
+        ].join('\n');
+        const view = render(<StudySourceTables text={text} />);
+        const table = within(view.container).getByRole('table');
+        expect(within(table).getByText(firstLabel)).toBeTruthy();
+        expect(within(table).getByText(values[0])).toBeTruthy();
+        expect(within(table).getByText(values[1])).toBeTruthy();
+        expect(comparisonSummaries(view.container)).toEqual([]);
+        view.unmount();
+      }
+    }
+  }
+});
+
+it('still allows charts for readable RTL names, ordinary Chinese and complete emoji without direction controls', () => {
+  for (const [heading, values] of [
+    ['金額', ['100', '200']],
+    ['出席率', ['25%', '75%']],
+  ] as const) {
+    const text = [
+      '| 項目 | ' + heading + ' |',
+      '| --- | --- |',
+      '| العربية | ' + values[0] + ' |',
+      '| 👩‍💻 עברית | ' + values[1] + ' |',
+    ].join('\n');
+    const view = render(<StudySourceTables text={text} />);
+    expect(comparisonSummaries(view.container)).toHaveLength(1);
+    expect(within(view.container).getByRole('table')).toBeTruthy();
+    view.unmount();
+  }
+});

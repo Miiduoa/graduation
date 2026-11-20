@@ -48,6 +48,14 @@ const NETWORK_IDENTIFIER_COUNT_COLUMN =
 
 // Carry the exact Markdown source line through both derived views, so students
 // can cross-check every bar against the original authorized lesson table.
+// Unicode direction controls can visually reorder an otherwise readable label.
+// Keep the authorized table byte-for-byte, but never derive a chart whose
+// labels a student or screen reader cannot reliably compare to that source.
+const STUDY_CHART_BIDI_CONTROL = /\p{Bidi_Control}/u;
+function hasUnambiguousChartLabel(label: string): boolean {
+  return hasVisibleStudyContent(label) && !STUDY_CHART_BIDI_CONTROL.test(label);
+}
+
 type SourceValueRow = { label: string; original: string; amount: number; sourceLine: number };
 
 // A mobile WebView can leave clipboard.writeText() unresolved indefinitely.
@@ -219,7 +227,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   // them as bars would imply a magnitude that the source does not support.
   const column = table.headers[1].trim();
   // An unlabeled number in a percentage column is ambiguous: do not scale it to the largest row.
-  if (isPercentageColumn(column) || isNonRatioColumn(column)) return null;
+  if (!hasUnambiguousChartLabel(column) || isPercentageColumn(column) || isNonRatioColumn(column)) return null;
   // Repeated "學分" is an explicit source unit, not a value to infer.
   // Accept it only in a credit column and when ALL rows use the same format.
   const plainNumber = /^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/u;
@@ -234,7 +242,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   // Invisible row labels cannot identify a derived bar to students or screen readers.
   // Keep the exact original table, but skip optional graphs without readable keys.
   for (const [rowIndex, [label, original]] of table.rows.entries()) {
-    if (!hasVisibleStudyContent(label ?? '') || !original) return null;
+    if (!hasUnambiguousChartLabel(label ?? '') || !original) return null;
     const creditMatch = creditsColumn ? creditNumber.exec(original) : null;
     const format = plainNumber.test(original) ? 'plain'
       : groupedNumber.test(original) ? 'grouped' : creditMatch ? 'credits' : null;
@@ -262,12 +270,12 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
 function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
   const column = table.headers[1];
-  if (!isBoundedPercentageColumn(column) || isNonRatioColumn(column)) return null;
+  if (!hasUnambiguousChartLabel(column) || !isBoundedPercentageColumn(column) || isNonRatioColumn(column)) return null;
   const rows: SourceValueRow[] = [];
   // Invisible row labels cannot identify a derived bar to students or screen readers.
   // Keep the exact original table, but skip optional graphs without readable keys.
   for (const [rowIndex, [label, original]] of table.rows.entries()) {
-    if (!hasVisibleStudyContent(label ?? '') || !original ||
+    if (!hasUnambiguousChartLabel(label ?? '') || !original ||
         !/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[%％]$/u.test(original)) return null;
     const amount = Number(original.slice(0, -1));
     if (!Number.isFinite(amount) || amount > 100) return null;
