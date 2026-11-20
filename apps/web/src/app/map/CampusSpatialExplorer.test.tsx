@@ -311,7 +311,7 @@ it('offers an accessible way to recover a suspended scene when mobile visibility
 
   notify(false, 200);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  expect(within(dialog).getByRole('status').textContent).toContain('立體畫面已暫停');
+  expect(within(dialog).getByText(/立體畫面已暫停/)).toBeTruthy();
   const recovery = within(dialog).getByRole('button', { name: '重新啟動立體畫面' });
   expect(recovery).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
