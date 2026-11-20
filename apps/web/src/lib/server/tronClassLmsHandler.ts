@@ -424,7 +424,7 @@ async function loadCourseContents(
   return { announcements, materials, errors };
 }
 
-function readCachedExtras(value: unknown, nowMs: number): {
+function readCachedExtras(value: unknown, nowMs: number, allowedCourseIds: Set<number>): {
   extras: Record<string, CachedCourseContents>;
   pruned: boolean;
 } {
@@ -443,10 +443,13 @@ function readCachedExtras(value: unknown, nowMs: number): {
     const retryMs = Array.isArray(row.errors) && row.errors.length > 0
       ? PARTIAL_COURSE_RETRY_MS : LMS_SNAPSHOT_TTL_MS;
     const effectiveExpiresAtMs = Math.min(expiresAtMs, fetchedAtMs + retryMs);
-    if (!courseId || !Number.isFinite(fetchedAtMs) || !Number.isFinite(effectiveExpiresAtMs) ||
+    if (!courseId || !allowedCourseIds.has(courseId) ||
+      !Number.isFinite(fetchedAtMs) || !Number.isFinite(effectiveExpiresAtMs) ||
       effectiveExpiresAtMs <= nowMs ||
       !Array.isArray(row.announcements) || !Array.isArray(row.materials) || !validCourseErrors(row.errors) ||
-      row.errors.some(error => error.courseId !== courseId)) {
+      // A legacy cache may contain an auth-rejected per-feed response. Treat
+      // it as stale rather than letting its partial contents mask expired login.
+      row.errors.some(error => error.courseId !== courseId || error.status === 401)) {
       pruned = true;
       continue;
     }
@@ -661,7 +664,13 @@ export function createTronClassLmsHandler({
         cacheData.projectionVersion === LMS_CACHE_PROJECTION_VERSION &&
         cacheData.sessionVersion === sessionVersion &&
         cacheStillFresh(cacheData.expiresAt, now()) && publicSnapshot(cacheData.snapshot, uid, now())) {
-        const pruned = readCachedExtras(cacheData.extras, now());
+        // Cached extras must belong to a course in this verified snapshot;
+        // the cache key alone is not evidence that the owner is enrolled.
+        const allowedCourseIds = new Set((cacheData.snapshot as LmsReadonlySnapshot).courses.flatMap((course) => {
+          const id = positiveId(record(course).id);
+          return id ? [id] : [];
+        }));
+        const pruned = readCachedExtras(cacheData.extras, now(), allowedCourseIds);
         extras = refresh ? {} : pruned.extras;
         cachedHomework = refresh ? null : homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid, now())!);
         shouldPruneExtras = !refresh && pruned.pruned;

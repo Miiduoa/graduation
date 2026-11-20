@@ -1666,6 +1666,54 @@ it.each(['cold fetch', 'extras cleanup'])('rejects %s if the portal relinks afte
   }
 });
 
+it('prunes same-session cached materials and notices outside the verified course list', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const extras = store.docs.get(CACHE)!.extras as Record<string, {
+    announcements: { title: string; courseId: number }[];
+    materials: { title: string; courseId: number }[];
+    errors: LmsReadonlySnapshot['courseErrors'];
+  }>;
+  const foreign = structuredClone(extras['10001']);
+  foreign.announcements[0].title = '另一門課公告';
+  foreign.announcements[0].courseId = 99999;
+  foreign.materials[0].title = '另一門課教材';
+  foreign.materials[0].courseId = 99999;
+  extras['99999'] = foreign;
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request();
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.cache.hit).toBe(true);
+  expect(body.result.contentsLoadedFor).toEqual([10001]);
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.announcements).toHaveLength(1);
+  expect(JSON.stringify(body)).not.toMatch(/另一門課公告|另一門課教材/);
+  expect(store.docs.get(CACHE)!.extras).not.toHaveProperty('99999');
+  for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+});
+
+it('refetches same-session cached courseware with a legacy 401 error rather than serving it', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const extras = store.docs.get(CACHE)!.extras as Record<string, {
+    errors: LmsReadonlySnapshot['courseErrors'];
+  }>;
+  extras['10001'].errors = [{
+    courseId: 10001, courseName: LMS_FIXTURE_COURSE.name, area: 'materials', status: 401,
+  }];
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.courseErrors).toEqual([]);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+  expect((store.docs.get(CACHE)!.extras as typeof extras)['10001'].errors).toEqual([]);
+});
+
 it('makes no LMS calls when the read-only feature flag is disabled', async () => {
   const { request, source, store } = setup();
   const doc = vi.spyOn(store.db, 'doc');
