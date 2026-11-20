@@ -163,12 +163,32 @@ function stripTrailingCategoryQualifiers(value: string): string {
  * qualifiers with punctuation instead of brackets (e.g. "公車站 / 校內").
  * Only a complete root category before a separator may exclude a POI.
  */
+
+function firstExternalCategoryAnnotationRoot(category: string): string {
+  let depth = 0;
+  for (let index = 0; index < category.length; index += 1) {
+    const char = category[index];
+    if (char === '(' || char === '[') depth += 1;
+    else if ((char === ')' || char === ']') && depth > 0) depth -= 1;
+    else if (depth === 0) {
+      if ('/:：／|｜·'.includes(char)) return category.slice(0, index).trim();
+      if ('–—'.includes(char)) return category.slice(0, index).trim();
+      if (char === '-' && /\s/.test(category[index - 1] ?? '') && /\s/.test(category[index + 1] ?? '')) {
+        return category.slice(0, index).trim();
+      }
+    }
+  }
+  return category;
+}
+
 function isExplicitNonClassroomCategory(value: unknown): boolean {
   const category = comparisonText(value);
   if (NON_CLASSROOM_POI_CATEGORIES.has(stripTrailingCategoryQualifiers(category))) return true;
-  // Split only on standalone annotation separators. A bare ASCII hyphen
-  // within a code/name is not a delimiter; never infer identity from keywords.
-  const root = category.split(/(?:\s+-\s+|\s*[–—]\s*|[/:：／|｜·])/u, 1)[0]?.trim() ?? '';
+  // Split only on standalone annotation separators outside balanced
+  // parentheses or brackets. "Bus Stop (Campus / Inbound) / Temporary"
+  // must still reduce to bus stop; a slash inside the qualifier must not.
+  // A bare ASCII hyphen within a code/name is not a delimiter.
+  const root = firstExternalCategoryAnnotationRoot(category);
   return root !== category && NON_CLASSROOM_POI_CATEGORIES.has(stripTrailingCategoryQualifiers(root));
 }
 

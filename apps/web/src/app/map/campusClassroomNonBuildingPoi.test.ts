@@ -476,6 +476,22 @@ describe('malformed imported transit stop markers cannot become classroom destin
 });
 
 describe('nested and long POI qualifiers never override classroom destinations', () => {
+  it('still rejects a stop category whose slash sits inside parentheses before a trailing annotation', () => {
+    // Synthetic import label, not a published timetable destination.
+    const annotatedStop = {
+      ...hall,
+      id: 'synthetic-qualified-slash-stop',
+      category: 'Bus Stop (Campus / Inbound) / Temporary',
+      building: '主顧樓',
+    };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [annotatedStop, hall],
+    }).matches).toEqual([hall]);
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [annotatedStop],
+    }).status).toBe('unmatched');
+  });
+
   it('rejects synthetically nested or long stop and dining labels', () => {
     const nonBuildingCategories = [
       'Bus Stop (Campus (Inbound))',
