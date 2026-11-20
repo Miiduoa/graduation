@@ -85,3 +85,52 @@ test('rapid save taps produce one write, and a rejected save can be retried', as
   expect(saveCreatorCard).toHaveBeenCalledTimes(2);
   expect(await view.findByText('社群簡介已儲存。')).toBeTruthy();
 });
+
+
+test('switching school and account mid-save starts a fresh profile and ignores late success', async () => {
+  let resolvePrior: (card: Awaited<ReturnType<typeof saveCreatorCard>>) => void = () => undefined;
+  jest.mocked(saveCreatorCard).mockImplementationOnce(() => (
+    new Promise<Awaited<ReturnType<typeof saveCreatorCard>>>((resolve) => { resolvePrior = resolve; })
+  ));
+  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+  fireEvent.press(await view.findByLabelText('建立社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), 'Alice 的攝影社');
+  act(() => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+
+  view.rerender(<CreatorCardPanel schoolId="other-school" ownerUid="bob" own />);
+  fireEvent.press(await view.findByLabelText('建立社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), 'Bob 的新校園簡介');
+
+  await act(async () => {
+    resolvePrior({ headline: '舊帳號', bio: 'Alice 的攝影社', linkUrl: '' });
+  });
+  expect(view.getByLabelText('個人簡介').props.value).toBe('Bob 的新校園簡介');
+  expect(view.queryByText('社群簡介已儲存。')).toBeNull();
+
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  expect(saveCreatorCard).toHaveBeenCalledTimes(2);
+  expect(saveCreatorCard).toHaveBeenLastCalledWith('other-school', 'bob', {
+    headline: '', bio: 'Bob 的新校園簡介', linkUrl: '',
+  });
+  expect(await view.findByText('社群簡介已儲存。')).toBeTruthy();
+});
+
+test('switching from own card to a peer during a rejected save never shows the old editor', async () => {
+  let rejectPrior: (reason: Error) => void = () => undefined;
+  jest.mocked(saveCreatorCard).mockImplementationOnce(() => (
+    new Promise<Awaited<ReturnType<typeof saveCreatorCard>>>((_, reject) => {
+      rejectPrior = reject;
+    })
+  ));
+  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+  fireEvent.press(await view.findByLabelText('建立社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), 'Alice 的內容');
+  act(() => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  view.rerender(<CreatorCardPanel schoolId="pu" ownerUid="charlie" own={false} />);
+  expect(view.queryByLabelText('個人簡介')).toBeNull();
+  await act(async () => { rejectPrior(new Error('offline')); });
+  expect(view.queryByLabelText('個人簡介')).toBeNull();
+  expect(view.queryByText(/輸入內容已保留/)).toBeNull();
+  expect(view.queryByLabelText('建立社群簡介')).toBeNull();
+});
