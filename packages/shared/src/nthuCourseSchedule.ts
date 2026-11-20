@@ -117,8 +117,23 @@ export function nthuTimetableImportCsv(course: PublicCatalogCourse): string | nu
   // Do not silently discard a malformed or out-of-range official credit value:
   // students rely on imported credits for their personal academic planning.
   const credits = course.credits;
-  if (credits !== '' && (!/^\d+(?:\.\d+)?$/.test(credits) ||
-      !Number.isFinite(Number(credits)) || Number(credits) > 40)) return null;
+  // Cached/externally supplied course cards can bypass the typed catalog
+  // validator. Do not coerce non-string credit values into plausible numbers.
+  if (typeof credits !== 'string' || credits.length > 32) return null;
+  if (credits !== '') {
+    const decimalPattern = /^\d+(?:\.\d+)?$/;
+    if (!decimalPattern.test(credits)) return null;
+    // Compare the exact decimal before Number() rounds values just over 40
+    // down to 40. Match NCNU's reviewed import boundary.
+    const [whole, fraction = ''] = credits.split('.');
+    const integer = whole.replace(/^0+/, '');
+    if (integer.length > 2 || (integer.length === 2 && integer > '40') ||
+        (integer === '40' && /[1-9]/.test(fraction))) return null;
+    // The CSV serializer writes Number as a string, while personal import
+    // only accepts decimal notation (not exponential notation).
+    if (!Number.isFinite(Number(credits)) ||
+        !decimalPattern.test(String(Number(credits)))) return null;
+  }
   // Multiple official room/time pairs may describe one course. A repeated
   // weekday/period would duplicate or overlap the student's imported timetable;
   // require manual verification rather than silently importing both rooms.
