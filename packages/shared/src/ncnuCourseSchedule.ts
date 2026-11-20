@@ -67,10 +67,22 @@ export function ncnuTimetableImportCsv(course: PublicCatalogCourse): string | nu
   // Do not silently omit unknown or out-of-range official credits from the
   // student's personal timetable. An empty source value remains explicitly
   // unknown; other malformed values require manual verification, as at NTHU.
-  const credits = course.credits;
-  if (typeof credits !== 'string' || (credits !== '' &&
-      (credits.length > 32 || !/^\d+(?:\.\d+)?$/.test(credits) ||
-       !Number.isFinite(Number(credits)) || Number(credits) > 40))) return null;
+  const creditText = course.credits;
+  const decimalPattern = /^\d+(?:\.\d+)?$/;
+  if (typeof creditText !== 'string') return null;
+  let credits: number | undefined;
+  if (creditText !== '') {
+    if (creditText.length > 32 || !decimalPattern.test(creditText)) return null;
+    // Check the exact decimal before Number() can round it down to 40.
+    const [whole, fraction = ''] = creditText.split('.');
+    const integer = whole.replace(/^0+/, '');
+    if (integer.length > 2 || (integer.length === 2 && integer > '40') ||
+        (integer === '40' && /[1-9]/.test(fraction))) return null;
+
+    credits = Number(creditText);
+    // The CSV serializer uses String(), and the importer expects decimal notation.
+    if (!decimalPattern.test(String(credits))) return null;
+  }
   // One course cannot safely import the same weekday/period twice, even when
   // the provider splits it into separate day groups. Keep the raw public listing
   // for manual verification instead of writing overlapping personal sessions.
@@ -97,7 +109,7 @@ export function ncnuTimetableImportCsv(course: PublicCatalogCourse): string | nu
     periodLabel: meeting.periodLabel,
     startTime: meeting.startTime,
     endTime: meeting.endTime,
-    credits: credits === '' ? undefined : Number(credits),
+    credits,
     source: { type: 'paste', line: index + 1, rawText: course.time },
   })), ['schoolId', 'academicYear', 'semester', 'courseCode', 'className', 'title', 'teacher', 'location', 'credits', 'dayOfWeek', 'periodLabel', 'startTime', 'endTime']);
 }

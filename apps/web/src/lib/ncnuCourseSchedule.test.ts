@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { ncnuCourseMeetings, ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
-import { readImportDelimitedRecords } from '@campus/shared/src/imports/aiDelimitedText';
+import { parsePersonalImport } from '@campus/shared/src/imports/parser';
 import type { PublicCatalogCourse } from '@campus/shared/src/publicCourseCatalog';
 
 const officialCourse: PublicCatalogCourse = {
@@ -17,28 +17,35 @@ const officialCourse: PublicCatalogCourse = {
 };
 
 describe('NCNU public course to personal timetable credit handoff', () => {
-  it.each(['0', '2.5', '3.25', '40'])(
-    'keeps an official %s-credit value rather than silently dropping it',
-    (credits) => {
+  it.each<[string, number | undefined]>([
+    ['0', 0],
+    ['2.5', 2.5],
+    ['3.25', 3.25],
+    ['40', 40],
+    ['040.000', 40],
+    ['0.000001', 0.000001],
+    ['', undefined],
+  ])(
+    'round-trips official credit text "%s" as %s',
+    (credits, expected) => {
       const csv = ncnuTimetableImportCsv({ ...officialCourse, credits });
       expect(csv).not.toBeNull();
-      const records = readImportDelimitedRecords(csv!, ',');
-      expect(records).not.toBeNull();
-      const index = records![0].cells.indexOf('credits');
-      expect(index).toBeGreaterThanOrEqual(0);
-      expect(records!.slice(1).map(({ cells }) => cells[index])).toEqual(
-        [String(Number(credits))],
-      );
+      const parsed = parsePersonalImport(csv!, {
+        kind: 'timetable', schoolId: 'ncnu', academicYear: '115', semester: '1',
+      });
+      expect(parsed.issues.filter(issue =>
+        issue.severity === 'error' || issue.code === 'unrecognized-field',
+      )).toEqual([]);
+      expect(parsed.rows.map(row => row.credits)).toEqual([expected]);
     },
   );
 
-  it('keeps a genuinely blank official credit as unknown for review', () => {
-    const csv = ncnuTimetableImportCsv({ ...officialCourse, credits: '' });
-    expect(csv).not.toBeNull();
-    const records = readImportDelimitedRecords(csv!, ',');
-    const index = records![0].cells.indexOf('credits');
-    expect(records!.slice(1).map(({ cells }) => cells[index])).toEqual(['']);
-  });
+  it.each(['40.0000000000000001', '040.0000000000000001', '0.0000001'])(
+    'refuses official credit %s before generating an import CSV',
+    (credits) => {
+      expect(ncnuTimetableImportCsv({ ...officialCourse, credits })).toBeNull();
+    },
+  );
 
   it.each(['待確認', '3學分', '-1', '40.01', 'NaN', 'Infinity', '3.5.0', ' 3'])(
     'refuses unverified NCNU credit %s instead of importing a false blank',
