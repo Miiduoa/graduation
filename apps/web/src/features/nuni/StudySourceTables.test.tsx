@@ -1839,6 +1839,53 @@ it('falls back to the first source cell when a mobile WebView cannot focus a tab
   expect(document.activeElement?.textContent).toContain('原文第 3 行 · 回表格核對');
 });
 
+it('focuses the original table region when a WebView silently ignores row and cell focus', () => {
+  const material = [
+    '| 課程 | 學分 |', '| --- | --- |',
+    '| 資料庫 | 3 |', '| 網路 | 2 |',
+  ].join('\n');
+  const view = render(<StudySourceTables text={material} />);
+  const sourceRow = view.container.querySelector('tbody tr');
+  const sourceCell = sourceRow?.querySelector('th');
+  const region = sourceRow?.closest<HTMLElement>('[role="region"]');
+  if (!sourceRow || !sourceCell || !region) throw new Error('Missing original table');
+  Object.defineProperty(sourceRow, 'focus', { configurable: true, value: () => {} });
+  Object.defineProperty(sourceCell, 'focus', { configurable: true, value: () => {} });
+  fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
+  const jump = screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' });
+  fireEvent.click(jump);
+  expect(document.activeElement).toBe(region);
+  expect(region.getAttribute('aria-label')).toContain('原文表格 1');
+  expect(sourceRow.textContent).toBe('資料庫3');
+  fireEvent.click(screen.getByRole('button', { name: '返回原文第 3 行的圖表' }));
+  expect(document.activeElement).toBe(jump);
+});
+
+it('keeps the source and return action when row, cell and region focus all fail', () => {
+  const material = [
+    '| 課程 | 完成率 |', '| --- | --- |',
+    '| 資料庫 | 75% |', '| 網路 | 50% |',
+  ].join('\n');
+  const view = render(<StudySourceTables text={material} />);
+  const sourceRow = view.container.querySelector('tbody tr');
+  const sourceCell = sourceRow?.querySelector('th');
+  const region = sourceRow?.closest<HTMLElement>('[role="region"]');
+  if (!sourceRow || !sourceCell || !region) throw new Error('Missing original table');
+  for (const element of [sourceRow, sourceCell, region]) {
+    Object.defineProperty(element, 'focus', {
+      configurable: true,
+      value: () => { throw new Error('WebView refused focus'); },
+    });
+  }
+  fireEvent.click(screen.getByText('展開第 2 欄「完成率」的原文百分比（100% 滿格）'));
+  const jump = screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' });
+  expect(() => fireEvent.click(jump)).not.toThrow();
+  expect(sourceRow.textContent).toBe('資料庫75%');
+  expect(screen.getByRole('button', { name: '返回原文第 3 行的圖表' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '返回原文第 3 行的圖表' }));
+  expect(document.activeElement).toBe(jump);
+});
+
 it('reopens a collapsed comparison to return from its exact authorized source row', () => {
   const material = [
     '| 課程 | 學分 |', '| --- | --- |',

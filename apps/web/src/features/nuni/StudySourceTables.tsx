@@ -518,7 +518,14 @@ export function StudySourceTables({ text }: { text: string }) {
     try { row.focus(); } catch { /* Try a focusable source cell below. */ }
     if (document.activeElement !== row && !row.contains(document.activeElement)) {
       try { row.querySelector<HTMLElement>('th, td')?.focus(); }
-      catch { /* The table remains readable and the return control remains reachable. */ }
+      catch { /* Try the keyboard-focusable original table region below. */ }
+    }
+    if (document.activeElement !== row && !row.contains(document.activeElement)) {
+      // Some WebViews silently ignore focus() on both <tr> and its cells.
+      // Keep students near the original row instead of leaving focus in the
+      // comparison below the table. The source region already has tabindex=0.
+      try { row.closest<HTMLElement>('[role="region"]')?.focus(); }
+      catch { /* The source and return control must remain available. */ }
     }
     try { row.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }
     catch { /* A failed scroll must not prevent keyboard focus. */ }
