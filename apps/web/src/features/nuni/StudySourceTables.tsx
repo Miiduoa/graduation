@@ -146,6 +146,14 @@ const ENGLISH_NON_RATIO_ORDINAL_LEVEL_COLUMN =
 const ORDINAL_COUNT_COLUMN =
   /(?:人數|數量|總數|次數|筆數|件數|個數|級數|\b(?:count|total|number\s+of|quantity|entries)\b)/iu;
 
+// Exam and class ranks are ordinal positions, not ratio-scale quantities:
+// rank 4 is not four times rank 1. Counts *of* ranks are still quantities.
+const NON_RATIO_RANK_POSITION_COLUMN = /(?:排名|名次|名列)/u;
+const ENGLISH_NON_RATIO_RANK_POSITION_COLUMN =
+  /\b(?:rank(?:ing)?s?|(?:position|place)\s+in\s+(?:class|school|cohort|exam))\b/iu;
+const RANK_COUNT_COLUMN =
+  /(?:人數|數量|總數|次數|筆數|件數|個數|數目|\b(?:count|total|number\s+of|quantity|entries)\b)/iu;
+
 function isPercentageColumn(header: string): boolean {
   return SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header) ||
     SOURCE_RATE_OR_RATIO_COLUMN.test(header) ||
@@ -186,7 +194,10 @@ function isNonRatioColumn(header: string): boolean {
        !SCORE_COUNT_COLUMN.test(column)) ||
        ((NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column) ||
          ENGLISH_NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column)) &&
-        !ORDINAL_COUNT_COLUMN.test(column))) return true;
+        !ORDINAL_COUNT_COLUMN.test(column)) ||
+      ((NON_RATIO_RANK_POSITION_COLUMN.test(column) ||
+         ENGLISH_NON_RATIO_RANK_POSITION_COLUMN.test(column)) &&
+        !RANK_COUNT_COLUMN.test(column))) return true;
   if (/(?:^|[^0-9０-９])(?:[0０]\s*(?:[/／]|\bor\b)\s*[1１]|[1１]\s*(?:[/／]|\bor\b)\s*[0０])(?:$|[^0-9０-９])/iu.test(column)) return true;
   const unqualifiedColumn = column.replace(/(?:\s*[（(][^）)]*[）)])+$/u, '').trim();
   if (/(?:^|\s)(?:id|uuid|code|no\.?|#)$/iu.test(unqualifiedColumn)) return true;

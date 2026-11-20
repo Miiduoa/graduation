@@ -716,6 +716,32 @@ it('does not draw misleading bars for formulas, dates, percentages, units or amb
   expect(container.querySelector('meter')).toBeNull();
 });
 
+it.each([
+  '期中考排名', '期末考排名', '班級名次', '全校排名', '系所排名',
+  'Class Rank', 'Exam Ranking', 'Overall Rank', 'Rank Position',
+  'Position in Class', 'Place in School', 'Cohort Ranking',
+])('keeps academic rank positions as original text rather than ratio bars (%s)', (header) => {
+  const material = ['| 學生 | ' + header + ' |', '| --- | --- |',
+    '| 甲 | 1 |', '| 乙 | 4 |'].join('\n');
+  const { container } = render(<StudySourceTables text={material} />);
+  expect(within(screen.getByRole('table')).getAllByRole('cell')
+    .map((cell) => cell.textContent)).toEqual(['1', '4']);
+  expect(comparisonSummaries(container)).toEqual([]);
+  expect(container.querySelector('meter')).toBeNull();
+});
+
+it.each([
+  '排名人數', '名次數量', '班級排名筆數', '每個名次的人數',
+  'Rank Count', 'Ranking Total', 'Number of Rankings', 'Rank Quantity',
+])('continues to compare explicit counts of ranks as quantities (%s)', (header) => {
+  const material = ['| 班級 | ' + header + ' |', '| --- | --- |',
+    '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
+  const { container } = render(<StudySourceTables text={material} />);
+  expect(Array.from(container.querySelectorAll('meter')).map((bar) =>
+    [bar.getAttribute('value'), bar.getAttribute('max')]))
+    .toEqual([['2', '4'], ['4', '4']]);
+});
+
 it('does not turn ordinal priority, severity or difficulty levels into misleading bars', () => {
   for (const header of [
     '優先級', '優先順序', '嚴重程度', '風險等級', '難度', '難度等級',

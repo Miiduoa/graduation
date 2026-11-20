@@ -1,3 +1,9 @@
+## 2026-11-21：班級與考試排名不再誤呈現為倍數圖
+
+- 發現「期末考排名／班級名次／Class Rank／Exam Ranking」等帶限定詞的欄名，先前未被單字型排名欄位規則攔截，可能把第 4 名誤畫成第 1 名的四倍。這些數字代表**序位**，不是從零起算的量值；現在保留教材原表、逐字行號、選取／複製／TXT，對此類欄位不產生衍生長條圖。
+- 明確的「排名人數／名次數量／Rank Count／Number of Rankings」仍是可比較的實際計數，不因名稱含「排名」而被全部擋掉。新增 12 組序位欄名及 8 組計數欄名的 React DOM 正反回歸。新 head 的 CI 與 CodeQL 須獨立重新驗證；沒有新增套件、外傳教材或修改備份格式。
+- 前版精確 head `d1b758becade3b14141875ed7dc71b813672d1d5` 的 [CI #44802527389](https://github.com/Miiduoa/graduation/actions/runs/44802527389) 失敗：Web Tests 的 8 項失敗集中於 `Assistant.roleReadBoundary.test.tsx`，實際 log 指向本人課表／個人行程／學生成績來源未出現，非白板修改路徑；前版其他 Build、Lint、Mobile、Security 與 CodeQL individually 成功，不能當作整體 CI 成功。保持 Agent 任務隔離，不以遮蔽測試解決。正式 App 5504170 審查、Maestro、iOS／Android、WebGPU 繁中與 Ahaboard 同條件比較仍未通過，不合併、不部署。
+
 ## 2026-11-21：圖表每筆數值可由讀屏器直接追溯到原文行
 
 - 白板衍生數值比較／固定 100% 百分比圖的 meter 原先只在**重複項目名稱**時把教材行號放入讀屏名稱；名稱不重複時，使用者若靠讀屏器跳轉各 meter，未必能獲得其相鄰「原文第 N 行」按鈕的來源位置。這次讓每筆 meter 的 `aria-describedby` 精確指向**同筆資料**已有的原文核對按鈕，保留 `aria-label`、原始數值與 `aria-valuetext`；以 React `useId` 避免同頁多張表格出現 ID 衝突。學生仍可按原按鈕返回可選取、可複製的原教材。
