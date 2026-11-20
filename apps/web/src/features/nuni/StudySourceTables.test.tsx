@@ -2194,3 +2194,51 @@ it.each([
     .toEqual(['必修' + values[0], '必修' + values[1]]);
   view.unmount();
 });
+
+it('compares English network transfer speeds without treating their rate unit as a percentage', () => {
+  for (const header of [
+    'Data Rate', 'Bit Rate', 'Transfer Rate', 'Transmission Rate',
+    'Download Rate', 'Upload Rate', 'Network Rate', 'Link Rate',
+    'Baud Rate', 'Sample Rate', 'Data Rate (Mbps)', 'Download Rate (MB/s)',
+  ]) {
+    const original = ['| 連線 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2.50 |', '| 乙 | 4.00 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={original} />);
+    expect(comparisonSummaries(container)).toEqual([
+      '展開第 2 欄「' + header + '」的原文數值比較',
+    ]);
+    expect(Array.from(container.querySelectorAll('meter')).map(bar => [
+      bar.getAttribute('value'), bar.getAttribute('max'), bar.getAttribute('aria-valuetext'),
+    ])).toEqual([
+      ['2.5', '4', '2.50；本欄最大值 4.00'],
+      ['4', '4', '4.00；本欄最大值 4.00'],
+    ]);
+    expect(within(screen.getByRole('table')).getAllByRole('cell').map(cell => cell.textContent))
+      .toEqual(['2.50', '4.00']);
+    unmount();
+  }
+});
+
+it('does not treat English business rates or explicit percent-unit speed rates as plain amounts', () => {
+  for (const header of [
+    'Rate', 'Exchange Rate', 'Interest Rate', 'Error Rate', 'Success Rate',
+    'Conversion Rate', 'Growth Rate', 'Data Rate (%)',
+    'Download Rate (%)', 'Data Rate Percent', 'Data Rate / Error Rate',
+  ]) {
+    const original = ['| 連線 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={original} />);
+    expect(comparisonSummaries(container)).toEqual([]);
+    expect(container.querySelector('meter')).toBeNull();
+    expect(within(screen.getByRole('table')).getAllByRole('cell').map(cell => cell.textContent))
+      .toEqual(['2', '4']);
+    unmount();
+  }
+  // Only literal percentages, never bare figures, can produce a fixed 100% chart.
+  const literalPercent = ['| 連線 | Download Rate (%) |', '| --- | --- |',
+    '| 甲 | 20% |', '| 乙 | 40% |'].join('\n');
+  const { container } = render(<StudySourceTables text={literalPercent} />);
+  expect(Array.from(container.querySelectorAll('meter')).map(bar =>
+    [bar.getAttribute('value'), bar.getAttribute('max')]))
+    .toEqual([['20', '100'], ['40', '100']]);
+});

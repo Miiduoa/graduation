@@ -57,6 +57,12 @@ const SOURCE_PERCENT_COLUMN = /(?:百分比|百分率|佔比|占比|完成率|�
 const ENGLISH_PERCENT_COLUMN =
   /\b(?:percent(?:age)?|progress(?:\s+rate)?|completion\s+rate|accuracy(?:\s+rate)?|attendance\s+rate|participation\s+rate|retention\s+rate|conversion\s+rate|error\s+rate|dropout\s+rate|pass(?:ing)?\s+rate|success\s+rate)\b/iu;
 
+// English transfer/bit/data rates are measurable speeds rather than
+// dimensionless percentages. Accept only complete, explicit speed labels;
+// generic rates (error, interest, conversion, success) remain ambiguous.
+// A trailing percent unit still takes precedence over this exemption.
+const ENGLISH_MEASURED_SPEED_RATE_COLUMN =
+  /^(?:data|bit|transfer|transmission|download|upload|network|link|baud|sample|sampling)\s+rate(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 // An English rate header must not quietly use max-of-column scaling, and
 // raw numbers without an explicit percent sign remain ambiguous.
 // A generic rate/ratio header is not a quantity even if it contains bare
@@ -127,7 +133,8 @@ const ORDINAL_COUNT_COLUMN =
 
 function isPercentageColumn(header: string): boolean {
   return SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header) ||
-    SOURCE_RATE_OR_RATIO_COLUMN.test(header) || ENGLISH_RATE_OR_RATIO_COLUMN.test(header);
+    SOURCE_RATE_OR_RATIO_COLUMN.test(header) ||
+    (ENGLISH_RATE_OR_RATIO_COLUMN.test(header) && !ENGLISH_MEASURED_SPEED_RATE_COLUMN.test(header));
 }
 
 // Only columns with an established 0–100 interpretation receive a 100% meter.
