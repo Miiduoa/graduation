@@ -1005,6 +1005,7 @@ it.each([
   ['Build (CI) (%)', '10%', '20%'],
   ['Access (0 or 1)', '0', '1'],
   ['Access (0 or 1) (%)', '0%', '1%'],
+  ['Build Number (Progress) (%)', '25%', '75%'],
 ])(
   'keeps identifiers and binary codes in the source table (%s)', (header, first, second) => {
     const material = ['| 項目 | ' + header + ' |', '| --- | --- |',

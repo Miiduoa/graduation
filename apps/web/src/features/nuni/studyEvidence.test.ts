@@ -208,10 +208,12 @@ describe('exact source-to-lesson evidence', () => {
       expect(locateStudyEvidence('A\u200d💻', '💻')).toEqual({
         before: 'A\u200d', quote: '💻', after: '', occurrences: 1,
       });
+      expect(locateStudyEvidence('\u{16D63}\u{16D67}', '\u{16D63}\u{16D67}')?.quote).toBe('\u{16D63}\u{16D67}');
       for (const [source, partial] of [
         ['e\u0301e', '\u0301e'], ['e\u0301', 'e'], ['👩‍💻', '💻'], ['👍🏽', '👍'],
         ['👩🏽‍💻', '💻'], ['A\u200d💻', 'A'],
         ['🇹🇼', '🇼'], ['한', 'ᅡᆫ'], ['क्ष', 'ष'], ['甲\r\n乙', '甲\r'],
+        ['\u{16D63}\u{16D67}', '\u{16D63}'],
       ]) {
         expect(locateStudyEvidence(source, partial)).toBeNull();
       }

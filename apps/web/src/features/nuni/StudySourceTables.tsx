@@ -146,7 +146,7 @@ function isNonRatioColumn(header: string): boolean {
   // "教室數" / "Room Count" header remains a valid measured quantity.
   if (/^(?:教室|實驗室|房號|寢室|寢室號|宿舍房號|房間號碼|校舍|大樓|座位|座位號|位置|地點)(?:\s*[（(][^）)]{1,40}[）)])?$/u.test(column) ||
       /^(?:classroom|room|dorm(?:itory)?\s+room|lab(?:oratory)?|building|location|seat)(?:\s+(?:no\.?|number|id|code|#))?(?:\s*\([^)]{1,40}\))?$/iu.test(column)) return true;
-  return /^build$/iu.test(unqualifiedColumn) || (!describesBoundedRate && NON_RATIO_RELEASE_COLUMN.test(column) &&
+  return /^build(?:\s+number)?$/iu.test(unqualifiedColumn) || (!describesBoundedRate && NON_RATIO_RELEASE_COLUMN.test(column) &&
     !RELEASE_COUNT_COLUMN.test(column) && !ENGLISH_RELEASE_COUNT_COLUMN.test(column));
 }
 

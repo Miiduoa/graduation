@@ -22,6 +22,8 @@ const graphemePrepend = /[\u0600-\u0605\u06dd\u070f\u0890-\u0891\u08e2\u0d4e\u{1
 const hangulLeading = /^[\u1100-\u115f\ua960-\ua97c]$/u;
 const hangulVowel = /^[\u1160-\u11a7\ud7b0-\ud7c6]$/u;
 const hangulTrailing = /^[\u11a8-\u11ff\ud7cb-\ud7fb]$/u;
+// Unicode 16 treats these Kirat Rai vowel signs as a single grapheme cluster.
+const kiratRaiVowel = /^[\u{16d63}\u{16d67}-\u{16d6a}]$/u;
 
 function joinsHangul(previous: string, current: string): boolean {
   const syllable = previous.charCodeAt(0) - 0xac00;
@@ -56,6 +58,7 @@ function fallbackBoundaries(source: string): Uint8Array {
         (continuesGrapheme || graphemePrepend.test(previous) ||
           joinsHangul(previous, current) || (regional && regionalRun % 2 === 1) ||
           (followsEmojiZwj && isPictographic) ||
+          (kiratRaiVowel.test(previous) && kiratRaiVowel.test(current)) ||
           (followsIndicLinker && /\p{Lo}/u.test(current) && !/\p{Script=Han}/u.test(current))));
     if (!joinsPrevious) boundaries[index] = 1;
     followsEmojiZwj = current === '\u200d' && followsPictographic;
