@@ -452,9 +452,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       const position = hostViewportVisibility();
       return position === 'offscreen' || position === 'invalid-visual-viewport';
     };
+    // Keep a way back when pageshow/visibilitychange (not a resize event)
+    // invalidates an already-running scene. Safari may not issue another
+    // IntersectionObserver entry after its visual viewport becomes valid.
+    let suspendedByViewport = false;
     const invalidateRestoredOffscreenVisibility = () => {
       if (visible && !manualStart && typeof IntersectionObserver !== 'undefined' &&
           hostMustStaySuspended()) {
+        if (started) suspendedByViewport = true;
         visible = false;
       }
     };
@@ -481,7 +486,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // viewport listener initiated, on positive and measurable overlap, after
     // a real observer previously permitted startup. Never bypass the initial
     // offscreen-import gate or restart an unconfirmed/legacy WebView scene.
-    let suspendedByViewport = false;
     const onViewportResize = () => {
       if (!active) return;
       if (!manualStart && typeof IntersectionObserver !== 'undefined') {

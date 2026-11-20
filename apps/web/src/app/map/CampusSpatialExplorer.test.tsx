@@ -925,6 +925,16 @@ it('does not reactivate Safari WebGL from a queued observer entry while visual v
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
     expect(scene.create).toHaveBeenCalledTimes(1);
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    // The invalid geometry was first noticed by pageshow, not resize or
+    // IntersectionObserver. Once Safari reports valid bounds, the EXISTING
+    // scene must recover without another observer entry or manual retry.
+    const callsWhileInvalid = scene.setActive.mock.calls.length;
+    viewport.offsetTop = 0;
+    act(() => viewport.dispatchEvent(new Event('scroll')));
+    expect(scene.setActive.mock.calls.length).toBeGreaterThan(callsWhileInvalid);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
     fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
     scene.setActive.mockClear();
     viewport.dispatchEvent(new Event('resize'));
