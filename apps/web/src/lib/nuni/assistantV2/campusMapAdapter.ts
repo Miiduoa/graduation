@@ -11,9 +11,9 @@ import {
 import { guardedPublicCampusRead, type PublicCampusReadGuard } from '../../publicCampusReadGuard';
 import { V2Error } from './contracts';
 import {
-  campusMapHref, campusMapMatch, campusMapResolution, campusMapSourcePath, parseCampusMapArguments,
-  parseCampusMapResult, validCampusMapSchool, type CampusMapArguments, type CampusMapItem,
-  type CampusMapRead, type CampusMapSource,
+  boundedTransitStopMarker, campusMapHref, campusMapMatch, campusMapResolution, campusMapSourcePath,
+  parseCampusMapArguments, parseCampusMapResult, validCampusMapSchool, type CampusMapArguments,
+  type CampusMapItem, type CampusMapRead, type CampusMapSource,
 } from './campusMap';
 
 /** One bounded query plus an optional legacy query. Every query is accounted
@@ -37,10 +37,13 @@ function safePlace(place: CampusMapPlaceLike): CampusMapPlaceLike | null {
   if (!name) return null;
   const building = place.building ? plain(place.building, 120) : '';
   const floor = place.floor ? plain(place.floor, 80) : '';
+  // Preserve a bounded stop marker without widening CampusMapPlaceLike or
+  // copying raw Firestore values into the assistant result.
   return { id: place.id, name, category: plain(place.category, 80) || '其他',
     description: plain(place.description, 320), lat: place.lat, lng: place.lng,
     facilities: [...new Set((place.facilities ?? []).map(value => plain(value, 80)).filter(Boolean))].slice(0, 12),
-    ...(building ? { building } : {}), ...(floor ? { floor } : {}) };
+    ...(building ? { building } : {}), ...(floor ? { floor } : {}),
+    ...boundedTransitStopMarker(place) } as CampusMapPlaceLike;
 }
 
 export async function readCampusMap(input: {
