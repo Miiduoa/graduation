@@ -633,10 +633,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Safari's visual viewport can resize/scroll without a layout resize or
     // a timely IntersectionObserver callback. Listen to both dimensions;
     // older WebViews without this optional API keep the window fallback.
-    try {
-      visualViewport?.addEventListener('resize', onViewportResize);
-      visualViewport?.addEventListener('scroll', onViewportResize);
-    } catch { /* partially implemented WebView API */ }
+    // An embedded WebView may support only one VisualViewport event. Register
+    // independently: a throwing resize listener must not suppress scroll,
+    // which is the only signal sent after certain keyboard/pinch changes.
+    for (const event of ['resize', 'scroll'] as const) {
+      try { visualViewport?.addEventListener(event, onViewportResize); }
+      catch { /* partially implemented WebView API */ }
+    }
     startWhenVisible();
     return () => {
       active = false;
@@ -648,10 +651,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('resize', onViewportResize);
-      try {
-        visualViewport?.removeEventListener('resize', onViewportResize);
-        visualViewport?.removeEventListener('scroll', onViewportResize);
-      } catch { /* partially implemented WebView API */ }
+      // Always attempt both removals even if the first WebView API throws.
+      // Otherwise a retained scroll handler can touch a disposed GPU scene.
+      for (const event of ['resize', 'scroll'] as const) {
+        try { visualViewport?.removeEventListener(event, onViewportResize); }
+        catch { /* partially implemented WebView API */ }
+      }
       pendingCreate = null;
       scene?.dispose();
       runtime.current = null;

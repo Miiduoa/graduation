@@ -819,6 +819,63 @@ it('pauses offscreen WebGL on iOS visual viewport resize and scroll without wind
   }
 });
 
+it('keeps VisualViewport scroll recovery and cleans up after broken resize event APIs', async () => {
+  // Some embedded iOS WebViews throw only for resize subscriptions. The
+  // independent scroll subscription is then the sole keyboard/pinch signal.
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    offsetLeft: 0,
+    offsetTop: 0,
+  });
+  const add = vi.spyOn(viewport, 'addEventListener').mockImplementation((type, callback, options) => {
+    if (type === 'resize') throw new Error('resize subscription unavailable');
+    return EventTarget.prototype.addEventListener.call(viewport, type, callback, options);
+  });
+  const remove = vi.spyOn(viewport, 'removeEventListener').mockImplementation((type, callback, options) => {
+    if (type === 'resize') throw new Error('resize cleanup unavailable');
+    return EventTarget.prototype.removeEventListener.call(viewport, type, callback, options);
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const top = window.innerHeight - 40;
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: top, left: 0, top, right: 320, bottom: top + 180,
+    width: 320, height: 180, toJSON: () => ({}),
+  } as DOMRect);
+  try {
+    expect(add).toHaveBeenCalledWith('resize', expect.any(Function));
+    expect(add).toHaveBeenCalledWith('scroll', expect.any(Function));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    // The layout viewport and observer remain unchanged; only the visual
+    // viewport scroll event can stop unnecessary offscreen GPU work.
+    viewport.height = top - 10;
+    act(() => viewport.dispatchEvent(new Event('scroll')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+    viewport.height = window.innerHeight;
+    act(() => viewport.dispatchEvent(new Event('scroll')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    expect(remove).toHaveBeenCalledWith('resize', expect.any(Function));
+    expect(remove).toHaveBeenCalledWith('scroll', expect.any(Function));
+    scene.setActive.mockClear();
+    viewport.height = 1;
+    viewport.dispatchEvent(new Event('scroll'));
+    expect(scene.setActive).not.toHaveBeenCalled();
+  } finally {
+    bounds.mockRestore();
+    add.mockRestore();
+    remove.mockRestore();
+  }
+});
+
 it('keeps a viewport-paused 3D scene suspended while iOS VisualViewport reports invalid bounds', async () => {
   // Safari keyboard and pinch transitions can briefly expose 0/NaN dimensions.
   // The larger layout viewport must not count as proof that an obscured canvas
