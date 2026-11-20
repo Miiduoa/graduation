@@ -268,6 +268,31 @@ test('board subscription blocks repeat taps, keeps a pending choice during refre
   expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
 });
 
+test('a server refresh started before a write cannot erase the later confirmed subscription', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  let finishRefresh!: (ids: string[]) => void;
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(
+    () => new Promise<string[]>((resolve) => { finishRefresh = resolve; }),
+  );
+  let finishWrite!: () => void;
+  jest.mocked(subscribeToBoard).mockImplementationOnce(
+    () => new Promise<void>((resolve) => { finishWrite = resolve; }),
+  );
+
+  let refreshPromise!: Promise<void>;
+  act(() => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+  await act(async () => { finishWrite(); });
+  expect(view.getByLabelText('取消訂閱讀書會').props.accessibilityState.disabled).toBe(false);
+
+  await act(async () => { finishRefresh([]); await refreshPromise; });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+  expect(subscribeToBoard).toHaveBeenCalledTimes(1);
+});
+
 test('failed board subscription rolls back and allows an explicit retry', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   let fail!: (error: Error) => void;

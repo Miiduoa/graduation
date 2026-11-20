@@ -81,6 +81,8 @@ function BoardsContent() {
   const loadVersion = useRef(0);
   // A pending subscription belongs to this mounted student + school scope.
   const pendingSubscriptionIds = useRef(new Set<string>());
+  // Ignore a list snapshot if a write began or finished after that read started.
+  const subscriptionRevision = useRef(0);
   const [pendingSubscriptions, setPendingSubscriptions] = useState<ReadonlySet<string>>(new Set());
   const mounted = useRef(true);
   useEffect(() => {
@@ -90,6 +92,7 @@ function BoardsContent() {
 
   const load = useCallback(async () => {
     const version = ++loadVersion.current;
+    const subscriptionRevisionAtRead = subscriptionRevision.current;
     setLoadError('');
     try {
       if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
@@ -106,6 +109,7 @@ function BoardsContent() {
       // A refresh finishing during a pending write must not erase the student's
       // optimistic choice. Reconcile the server snapshot after the write settles.
       setSubscribed((previous) => {
+        if (subscriptionRevision.current !== subscriptionRevisionAtRead) return previous;
         const next = new Set(subs);
         for (const id of pendingSubscriptionIds.current) {
           if (previous.has(id)) next.add(id);
@@ -178,6 +182,7 @@ function BoardsContent() {
       // Ref-level exclusion prevents opposite writes for the same board.
       if (pendingSubscriptionIds.current.has(b.id)) return;
       pendingSubscriptionIds.current.add(b.id);
+      subscriptionRevision.current += 1;
       setPendingSubscriptions(new Set(pendingSubscriptionIds.current));
       const wasSub = subscribed.has(b.id);
       setSubscribed((previous) => {
@@ -203,6 +208,7 @@ function BoardsContent() {
         }
       } finally {
         pendingSubscriptionIds.current.delete(b.id);
+        subscriptionRevision.current += 1;
         if (mounted.current) setPendingSubscriptions(new Set(pendingSubscriptionIds.current));
       }
     },
