@@ -439,7 +439,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
             if (lastObservationTime !== -Infinity) return;
             latest = hostEntries[hostEntries.length - 1];
           }
-          visible = latest.isIntersecting;
+          // IntersectionObserver may report isIntersecting=true when the
+          // canvas only touches the viewport boundary. A zero-area map has
+          // no visible pixels and must not allocate or resume mobile WebGL.
+          // Older WebViews that omit usable rectangle dimensions still use
+          // the boolean intersection flag and retain the manual-start path.
+          const rect = latest.intersectionRect;
+          const hasMeasuredArea = rect &&
+            Number.isFinite(rect.width) && Number.isFinite(rect.height);
+          visible = latest.isIntersecting &&
+            (!hasMeasuredArea || (rect.width > 0 && rect.height > 0));
           updateVisibility();
           startWhenVisible();
           syncPendingStartup();
