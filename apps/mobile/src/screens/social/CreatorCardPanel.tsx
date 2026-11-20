@@ -31,9 +31,20 @@ function CardButton({ label, onPress, disabled = false, primary = false, busy = 
   );
 }
 
-export function CreatorCardPanel({
+type CreatorCardPanelProps = { schoolId: string; ownerUid: string; own: boolean };
+
+export function CreatorCardPanel(props: CreatorCardPanelProps) {
+  // A new instance per profile/authorization scope prevents old draft, feedback
+  // and pending save responses from appearing under another account or school.
+  return <ScopedCreatorCardPanel
+    key={JSON.stringify([props.schoolId, props.ownerUid, props.own])}
+    {...props}
+  />;
+}
+
+function ScopedCreatorCardPanel({
   schoolId, ownerUid, own,
-}: { schoolId: string; ownerUid: string; own: boolean }) {
+}: CreatorCardPanelProps) {
   const styles = useThemeStyleSheet(createStyles);
   const [state, setState] = useState<CardState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
@@ -41,7 +52,13 @@ export function CreatorCardPanel({
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const [saving, setSaving] = useState(false);
   const savingFlight = useRef(false);
+  const mounted = useRef(false);
   const [feedback, setFeedback] = useState('');
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -70,16 +87,20 @@ export function CreatorCardPanel({
     setFeedback('');
     try {
       const confirmed = await saveCreatorCard(schoolId, ownerUid, draft);
+      if (!mounted.current) return;
       setState({ status: 'ready', value: confirmed });
       setEditing(false);
       setFeedback('社群簡介已儲存。');
     } catch (error) {
+      if (!mounted.current) return;
       setFeedback(error instanceof Error && /最多|HTTPS|有效/.test(error.message)
         ? error.message
         : '儲存尚未完成，輸入內容已保留，請確認連線及校籍後重試。');
     } finally {
-      savingFlight.current = false;
-      setSaving(false);
+      if (mounted.current) {
+        savingFlight.current = false;
+        setSaving(false);
+      }
     }
   };
 
