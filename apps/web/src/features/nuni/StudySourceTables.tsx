@@ -455,9 +455,23 @@ function StudySourceSelection({ table, index, sourceLines }: {
 }) {
   const [rowIndex, setRowIndex] = useState(-1);
   const [includeHeader, setIncludeHeader] = useState(false);
-  // Use the authorized source, not textarea.value: textareas normalize CRLF
-  // to LF, and a stale WebView DOM value is not evidence from the lesson.
-  const selectedSource = tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex, includeHeader);
+  const [includeSourceCitation, setIncludeSourceCitation] = useState(false);
+  // Keep original excerpt bytes separate from optional, visibly marked metadata.
+  // Neither the Markdown source nor its cell order is ever rewritten.
+  const originalRowLine = table.startLine + rowIndex + 2;
+  const originalExcerpt = tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex, includeHeader);
+  const citation = rowIndex < 0
+    ? `教材原文第 ${table.startLine} 至 ${table.startLine + table.rows.length + 1} 行`
+    : !includeHeader
+      ? `教材原文第 ${originalRowLine} 行`
+      : rowIndex === 0
+        ? `教材原文第 ${table.startLine} 至 ${originalRowLine} 行`
+        : `教材原文第 ${table.startLine}、${table.startLine + 1}、${originalRowLine} 行（非連續）`;
+  const citationNewline = sourceLines[table.startLine - 1]?.separator || '\n';
+  // The selectable fallback, clipboard and TXT must use identical payloads.
+  const selectedSource = includeSourceCitation
+    ? `[${citation}]${citationNewline}${originalExcerpt}`
+    : originalExcerpt;
   const [copyFeedback, setCopyFeedback] = useState('');
   const originalText = useRef<HTMLTextAreaElement>(null);
   const copyRequest = useRef(0);
@@ -475,6 +489,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
     invalidateCopy();
     setRowIndex(-1);
     setIncludeHeader(false);
+    setIncludeSourceCitation(false);
     setCopyFeedback('');
   }, [sourceLines, invalidateCopy]);
   useEffect(() => () => { invalidateCopy(); }, [invalidateCopy]);
@@ -582,7 +597,6 @@ function StudySourceSelection({ table, index, sourceLines }: {
 
   // Tell screen readers exactly which original lines an excerpt covers.
   // A single row with its header skips intervening lesson rows.
-  const originalRowLine = table.startLine + rowIndex + 2;
   const selectionAnnouncement = rowIndex < 0
     ? `目前選取整張表格：原文第 ${table.startLine} 至 ${table.startLine + table.rows.length + 1} 行，包含欄名、分隔列與全部資料列。`
     : includeHeader
@@ -594,7 +608,8 @@ function StudySourceSelection({ table, index, sourceLines }: {
       <summary>選取第 {index + 1} 張表格的原文（可複製）</summary>
       <p className={styles.note}>
         可選整張表格或單一資料列的原始 Markdown 行，不重新編造欄位內容。
-        單列預設不包含欄名；若需保留欄位意義，可勾選附上原始欄名及分隔列。若瀏覽器阻擋剪貼簿權限，仍可長按或鍵盤選取原文。
+        單列預設不包含欄名；可勾選附上原始欄名及分隔列，或在摘錄開頭另加教材行號註記。
+        行號註記不屬於教材原文，未勾選時逐字不變；若瀏覽器阻擋剪貼簿權限，仍可長按或鍵盤選取下方文字。
       </p>
       <label>
         原文範圍
@@ -626,6 +641,14 @@ function StudySourceSelection({ table, index, sourceLines }: {
           連同原文欄名與分隔列
         </label>
       )}
+      <label>
+        <input type="checkbox" checked={includeSourceCitation} onChange={(event) => {
+          invalidateCopy();
+          setCopyFeedback('');
+          setIncludeSourceCitation(event.target.checked);
+        }} />
+        摘錄開頭加上教材原文行號（註記非原文）
+      </label>
       <p className={styles.note} aria-live="polite" aria-atomic="true">
         {selectionAnnouncement}
       </p>

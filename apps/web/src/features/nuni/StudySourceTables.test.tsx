@@ -2666,3 +2666,61 @@ it('makes each numeric and percentage meter announce its precise original source
     view.unmount();
   }
 });
+
+
+it('adds optional non-contiguous source-line evidence to copied study excerpts without unrelated rows', async () => {
+  const lesson = [
+    '本週課程',
+    '| 課程 | 學分 |',
+    '| :--- | ---: |',
+    '| SQL \\| NoSQL | 3 |',
+    '| 統計 | 2 |',
+    '| 網路 | 1 |',
+  ].join('\r\n');
+  const copy = vi.fn(() => Promise.resolve());
+  await withSourceClipboard({ value: { writeText: copy } }, async () => {
+    const view = render(<StudySourceTables text={lesson} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    fireEvent.change(screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }),
+      { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '摘錄開頭加上教材原文行號（註記非原文）' }));
+    const expected = [
+      '[教材原文第 2、3、6 行（非連續）]',
+      '| 課程 | 學分 |',
+      '| :--- | ---: |',
+      '| 網路 | 1 |',
+    ].join('\r\n');
+    const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+    expect(field.value).toBe(expected.replace(/\r\n/gu, '\n'));
+    expect(field.value).not.toContain('| 統計 | 2 |');
+    fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格第 3 列原文' }));
+    expect(copy).toHaveBeenCalledWith(expected);
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('瀏覽器已接受複製指令'));
+    view.unmount();
+  });
+});
+
+it('switches citation between full table, adjacent first row and exact single row, resetting on source replacement', () => {
+  const lesson = ['| 科目 | 學分 |', '| --- | --- |', '| A | 3 |', '| B | 2 |'].join('\n');
+  const view = render(<StudySourceTables text={lesson} />);
+  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+  const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+  const citation = screen.getByRole('checkbox', { name: '摘錄開頭加上教材原文行號（註記非原文）' });
+  const range = screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' });
+  expect(field.value).toBe(lesson);
+  fireEvent.click(citation);
+  expect(field.value).toBe('[教材原文第 1 至 4 行]\n' + lesson);
+  fireEvent.change(range, { target: { value: '0' } });
+  expect(field.value).toBe('[教材原文第 3 行]\n| A | 3 |');
+  fireEvent.click(screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }));
+  expect(field.value).toBe('[教材原文第 1 至 3 行]\n| 科目 | 學分 |\n| --- | --- |\n| A | 3 |');
+  fireEvent.change(range, { target: { value: '1' } });
+  expect(field.value).toBe('[教材原文第 4 行]\n| B | 2 |');
+  fireEvent.click(citation);
+  expect(field.value).toBe('| B | 2 |');
+  view.rerender(<StudySourceTables text={lesson.replace('| A | 3 |', '| C | 4 |')} />);
+  expect((screen.getByRole('checkbox', { name: '摘錄開頭加上教材原文行號（註記非原文）' }) as HTMLInputElement).checked).toBe(false);
+  expect(field.value).toContain('| C | 4 |');
+  view.unmount();
+});
