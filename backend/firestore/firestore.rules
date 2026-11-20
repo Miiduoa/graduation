@@ -1564,12 +1564,16 @@ service cloud.firestore {
       }
 
       match /gradebook/{entryId} {
-        allow read: if canManageGroup(groupId)
-          || (isSignedIn() && (
-            entryId == request.auth.uid
-            || resource.data.userId == request.auth.uid
-          ));
-        allow create, update, delete: if canManageGroup(groupId);
+        // A row ID or embedded userId is not current class/campus authorization.
+        // Teachers must also have a live canonical school binding after transfer.
+        allow read: if isActiveCurrentGroupMember(groupId)
+          && (
+            canManageGroup(groupId)
+            || entryId == request.auth.uid
+            || resource.data.get('userId', null) == request.auth.uid
+          );
+        allow create, update, delete: if isActiveCurrentGroupMember(groupId)
+          && canManageGroup(groupId);
       }
 
       match /milestones/{milestoneId} {

@@ -2685,6 +2685,79 @@ describe('firestore security rules', () => {
     );
   });
 
+  test('gradebook owner and teacher grants require current course and canonical campus membership', async () => {
+    const group = 'groups/gradebook-revoke-1';
+    const row = `${group}/gradebook/bob`;
+    const extra = `${group}/gradebook/created-by-teacher`;
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      for (const uid of ['bob', 'alice', 'teacher', 'outsider']) {
+        const school = uid === 'outsider' ? 'other' : 'pu';
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: school });
+        await db.doc(`schools/${school}/members/${uid}`).set({
+          status: 'active', role: uid === 'teacher' ? 'teacher' : 'student',
+        });
+      }
+      for (const [uid, role] of [['bob', 'member'], ['alice', 'member'], ['teacher', 'instructor']]) {
+        await db.doc(`${group}/members/${uid}`).set({ status: 'active', role });
+      }
+      await db.doc(row).set({ userId: 'bob', finalScore: 92 });
+    });
+
+    const bobDb = testEnv.authenticatedContext('bob').firestore();
+    const aliceDb = testEnv.authenticatedContext('alice').firestore();
+    const teacherDb = testEnv.authenticatedContext('teacher').firestore();
+    const outsiderDb = testEnv.authenticatedContext('outsider').firestore();
+    const bobRow = bobDb.doc(row);
+    const teacherRow = teacherDb.doc(row);
+    const denyBob = () => assertFails(bobRow.get({ source: 'server' }));
+    const denyTeacher = async () => {
+      await assertFails(teacherRow.get({ source: 'server' }));
+      await assertFails(teacherRow.update({ finalScore: 30 }));
+      await assertFails(teacherDb.doc(extra).set({ userId: 'outsider', finalScore: 50 }));
+    };
+    await assertSucceeds(bobRow.get({ source: 'server' }));
+    await assertFails(aliceDb.doc(row).get({ source: 'server' }));
+    await assertFails(outsiderDb.doc(row).get({ source: 'server' }));
+    await assertSucceeds(teacherRow.get({ source: 'server' }));
+    await assertSucceeds(teacherRow.update({ finalScore: 91 }));
+    await assertSucceeds(teacherDb.doc(extra).set({ userId: 'outsider', finalScore: 50 }));
+    await assertSucceeds(teacherDb.doc(extra).delete());
+
+    // Reuse unchanged authenticated contexts to exercise live revocation and replay.
+    await seedFirestore(db => db.doc(`${group}/members/bob`).update({ status: 'removed' }));
+    await denyBob();
+    await seedFirestore(async db => {
+      await db.doc(`${group}/members/bob`).update({ status: 'active' });
+      await db.doc('schools/pu/members/bob').update({ status: 'removed' });
+    });
+    await denyBob();
+    await seedFirestore(async db => {
+      await db.doc('schools/pu/members/bob').update({ status: 'active' });
+      await db.doc('users/bob').update({ primarySchoolId: 'other' });
+    });
+    await denyBob();
+    await seedFirestore(db => db.doc('users/bob').delete());
+    await denyBob();
+    await seedFirestore(db => db.doc('users/bob').set({ status: 'active', primarySchoolId: 'pu' }));
+    await assertSucceeds(bobRow.get({ source: 'server' }));
+
+    await seedFirestore(db => db.doc(`${group}/members/teacher`).update({ status: 'removed' }));
+    await denyTeacher();
+    await seedFirestore(async db => {
+      await db.doc(`${group}/members/teacher`).update({ status: 'active' });
+      await db.doc('users/teacher').update({ schoolId: 'other' });
+    });
+    await denyTeacher();
+    await seedFirestore(db => db.doc('users/teacher').set({ status: 'active', schoolId: 'pu' }));
+    await assertSucceeds(teacherRow.get({ source: 'server' }));
+    await assertSucceeds(teacherRow.update({ finalScore: 93 }));
+    await seedFirestore(db => db.doc('schools/pu/members/teacher').update({ status: 'removed' }));
+    await denyTeacher();
+    await seedFirestore(db => db.doc('schools/pu/members/teacher').update({ status: 'active' }));
+    await assertSucceeds(teacherRow.get({ source: 'server' }));
+  });
+
   test("deny students from reading classmates' gradebook rows", async () => {
     await seedFirestore(async (db) => {
       await db.collection('groups').doc('group-1').set({
