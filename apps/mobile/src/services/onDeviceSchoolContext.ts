@@ -326,6 +326,10 @@ export function formatOnDeviceSchoolPrompt(
   senseSnapshot: CampusSenseSnapshot | null | undefined,
   expectedOwnerUid: string,
 ): string {
+  // Capture a single device-clock instant for privacy freshness, Taipei time,
+  // and assignment priorities. A wall-clock adjustment during formatting must
+  // not make the same authorized row both at and past its deadline.
+  const deviceNowMs = Date.now();
   // Reject caller-supplied scope/timetable getters before they are consulted.
   // Legitimate cached JSON and the live collector always use own data fields.
   const context = snapshot && hasOwnEvidenceFields(snapshot, ['checkedAt', 'schoolId', 'schoolName', 'timetable'], ['ownerUid'])
@@ -343,7 +347,7 @@ export function formatOnDeviceSchoolPrompt(
   // A canonical timestamp may still be a replay from an older session or
   // far in the future after a device clock change. Recheck immediately before
   // composing the local model prompt; the collector can be run again offline.
-  const clockAgeMs = Date.now() - checkedAt.getTime();
+  const clockAgeMs = deviceNowMs - checkedAt.getTime();
   const verifiedClock = Number.isFinite(clockAgeMs) &&
     checkedAt.toISOString() === context?.checkedAt &&
     clockAgeMs >= -30_000 && clockAgeMs <= 5 * 60_000;
@@ -355,7 +359,7 @@ export function formatOnDeviceSchoolPrompt(
     weekday: 'long',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date()) : '無法核對（請重新整理裝置資料）';
+  }).format(new Date(deviceNowMs)) : '無法核對（請重新整理裝置資料）';
   // The rule-based timetable tool uses every saved course. Keep only a short
   // excerpt in the LLM prompt so a small local model cannot overflow context.
   // The prompt is a separate privacy boundary: a caller cannot pass a cached
@@ -412,13 +416,13 @@ const sampleCourses = owned && timetable
   // Scope checks must not invoke a restored root getter before row validation.
   const candidateSense = owned && hasOwnEvidenceFields(senseSnapshot,
     ['userId', 'schoolId', 'checkedAt', 'schedule', 'assignments', 'announcements'])
-    ? validCampusSenseSnapshot(senseSnapshot, { uid: expectedOwnerUid, schoolId })
+    ? validCampusSenseSnapshot(senseSnapshot, { uid: expectedOwnerUid, schoolId }, deviceNowMs)
     : null;
   const verifiedSense = safeCampusSenseForPrompt(candidateSense) ? candidateSense : null;
   // Derive both the small excerpt and its next deadline from one verified,
   // already-authorized snapshot and one device-clock reading. A small local
   // model should not have to guess priority from an overdue backlog.
-  const assignmentNowMs = Date.now();
+  const assignmentNowMs = deviceNowMs;
   const assignmentExcerpt = verifiedSense
     ? dueOrderedAssignmentExcerpt(verifiedSense.assignments.items, 5, assignmentNowMs) : [];
   const nearestNotExpired = assignmentExcerpt.find((item) =>
