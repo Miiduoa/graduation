@@ -136,18 +136,17 @@ export function parseCampusMapResult(raw: unknown, schoolId: string, requested: 
           typeof item.lat !== 'number' || typeof item.lng !== 'number' || !Number.isFinite(item.lat) || !Number.isFinite(item.lng) ||
           Math.abs(item.lat) > 90 || Math.abs(item.lng) > 180 || (item.lat === 0 && item.lng === 0) ||
           !Array.isArray(item.facilities) || item.facilities.length > 12) throw new Error('Invalid map place');
-      const parsed: CampusMapItem = { id, schoolId, name: clean(item.name, 160), category: clean(item.category, 80),
+      const parsed = { id, schoolId, name: clean(item.name, 160), category: clean(item.category, 80),
         description: clean(item.description, 320, true), lat: item.lat, lng: item.lng,
         facilities: item.facilities.map(facility => clean(facility, 80)), source: item.source as CampusMapSource,
         sourcePath: item.sourcePath as string, href: item.href as string,
         match: item.match as CampusMapMatch, verification: item.verification as CampusMapItem['verification'],
         ...(item.building !== undefined ? { building: clean(item.building, 120) } : {}),
-        ...(item.floor !== undefined ? { floor: clean(item.floor, 80) } : {}) };
-      const matchPlace = Object.prototype.propertyIsEnumerable.call(item, 'transitStopIds')
-        ? { ...parsed, transitStopIds: item.transitStopIds } as CampusMapPlaceLike
-        : parsed;
+        ...(item.floor !== undefined ? { floor: clean(item.floor, 80) } : {}),
+        ...(Object.prototype.propertyIsEnumerable.call(item, 'transitStopIds')
+          ? { transitStopIds: item.transitStopIds } : {}) } as CampusMapItem;
       if (new Set(parsed.facilities).size !== parsed.facilities.length ||
-          parsed.match !== campusMapMatch(schoolId, args.query, matchPlace)) throw new Error('Invalid map match');
+          parsed.match !== campusMapMatch(schoolId, args.query, parsed)) throw new Error('Invalid map match');
       const sourceUrl = providencePlaceSourceUrl(schoolId, parsed);
       const verification = sourceUrl ? isProvidencePendingVerification(schoolId, parsed) ? 'single-source' : 'cross-checked' : 'published';
       if (parsed.verification !== verification || item.sourceUrl !== (sourceUrl ?? undefined) ||

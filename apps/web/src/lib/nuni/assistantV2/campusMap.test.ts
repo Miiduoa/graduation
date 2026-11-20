@@ -96,24 +96,34 @@ describe('map query and source contract', () => {
       id: 'synthetic-unrecognized-stop',
       name: hall.name,
       category: 'academic',
-      description: '',
+      description: 'PH303 附近候車',
       lat: hall.lat,
       lng: hall.lng,
       building: '主顧樓',
       transitStopIds: ['unknown-stop-1'],
     };
     const { transitStopIds: _ignored, ...withoutMarkers } = spoof;
-    expect(campusMapMatch('pu', 'PH303', spoof)).not.toBe('building');
+    expect(campusMapMatch('pu', 'PH303', spoof)).toBe('search');
     expect(campusMapMatch('pu', 'PH303', withoutMarkers)).toBe('building');
     const value = result('PH303');
-    value.items = [{
+    const item = {
       id: spoof.id, schoolId: 'pu', name: spoof.name, category: spoof.category, description: spoof.description,
       lat: spoof.lat, lng: spoof.lng, building: spoof.building, facilities: [],
-      source: 'school-pois', sourcePath: 'schools/pu/pois',
-      href: campusMapHref('pu', 'PH303', spoof.id), match: 'building', verification: 'published',
+      source: 'school-pois' as const, sourcePath: 'schools/pu/pois',
+      href: campusMapHref('pu', 'PH303', spoof.id), match: 'search' as const, verification: 'published' as const,
       transitStopIds: spoof.transitStopIds,
-    } as CampusMapRead['items'][number] & { transitStopIds: string[] }];
-    expect(() => parseCampusMapResult(value, 'pu', { query: 'PH303', limit: 5 })).toThrow('INVALID_CAMPUS_MAP_RESULT');
+    };
+    value.items = [item];
+    value.resolution = 'candidates';
+    const parsed = parseCampusMapResult(value, 'pu', { query: 'PH303', limit: 5 });
+    expect(parsed.items[0].match).toBe('search');
+    expect(parsed.items[0]).toHaveProperty('transitStopIds', spoof.transitStopIds);
+    expect(parseCampusMapResult(parsed, 'pu', { query: 'PH303', limit: 5 }).items[0].match).toBe('search');
+    expect(() => parseCampusMapResult({
+      ...value,
+      items: [{ ...item, match: 'building' }],
+      resolution: 'matched',
+    }, 'pu', { query: 'PH303', limit: 5 })).toThrow('INVALID_CAMPUS_MAP_RESULT');
   });
 
   it('keeps partial coverage ahead of candidates and the fact that no route was executed', () => {
