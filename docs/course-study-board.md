@@ -1,3 +1,9 @@
+## 2026-11-20：部分手機 WebView 的 Intl.Segmenter 異常不再中斷原文佐證
+
+- 修正 AI 讀書白板的原文精確引句定位：部分 iOS／Android 內嵌瀏覽器可能存在不完整的 Intl.Segmenter，建構、segment、containing、迭代時拋錯或靜默回傳殘缺分段，舊版會中斷原文核對或信任錯誤分段。現在只在異常時懶載入既有 UTF-16／Unicode 字素邊界備援，並逐段驗證 iterator 的連續性、原字元內容和完整覆蓋。正常 Segmenter 仍維持原效能路徑。
+- 新增七種模擬失效模式的 Vitest 回歸，驗證正常可見教材引句與完整 Emoji 可以定位，半個合成字／旗幟不可被誤標為完整教材原文；不修改教材、AI 解釋、閱讀 v1/v2、練習 checkpoint v1，也沒有新增依賴或外部傳輸。
+- 模擬 Node／WebView 異常不是 iOS Safari、Android Chrome、VoiceOver／TalkBack 或 Ahaboard 真機驗收；正式 CI／CodeQL、App 5504170 APPROVED、Maestro、WebGPU 繁體中文與競品同教材同題同機比較仍須依最新 SHA 查核。PR 保持 Draft，不合併、不部署。
+
 ## 2026-11-20：英文傳輸速率可核對比較，其他 Rate 仍禁止誤導圖
 
 - 在原文兩欄 Markdown 教材中，英文 Data Rate、Bit Rate、Transfer Rate、Download Rate 等是具有量值意義的傳輸速率，但舊版只因包含 Rate 就全部隱藏數值比較；這次只為明確且完整的英文速率欄名開放非負原始數值長條，支援可選擇的原文逐列回查、保留逐字數值／單位欄名。含括號的原始單位（如 Mbps、MB/s）可保留。

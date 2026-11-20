@@ -74,20 +74,60 @@ function fallbackBoundaries(source: string): Uint8Array {
 }
 
 function studyGraphemeBoundary(source: string): (index: number) => boolean {
-  if (typeof Intl.Segmenter === 'function') {
-    const segments = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(source);
-    if (typeof segments.containing === 'function') {
-      return (index) => index === 0 || index === source.length || segments.containing(index)?.index === index;
+  // A few embedded mobile WebViews expose Intl.Segmenter but throw during
+  // construction, lookup or iteration, or return incomplete segments. Keep
+  // source evidence usable without trusting a broken segmentation result.
+  let fallback: Uint8Array | undefined;
+  const fallbackBoundary = (index: number): boolean => {
+    fallback ??= fallbackBoundaries(source);
+    return fallback[index] === 1;
+  };
+  try {
+    if (typeof Intl.Segmenter === 'function') {
+      const segments = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(source);
+      if (typeof segments.containing === 'function') {
+        return (index) => {
+          if (index === 0 || index === source.length) return true;
+          try {
+            const found = segments.containing(index);
+            // An undefined, out-of-range or fabricated segment is not proof
+            // that a quotation begins at a complete visible character.
+            if (!found || !Number.isSafeInteger(found.index) ||
+                found.index < 0 || found.index > index ||
+                typeof found.segment !== 'string' || found.segment.length === 0 ||
+                index >= found.index + found.segment.length ||
+                source.slice(found.index, found.index + found.segment.length) !== found.segment) {
+              return fallbackBoundary(index);
+            }
+            return found.index === index;
+          } catch {
+            return fallbackBoundary(index);
+          }
+        };
+      }
+      if (typeof segments[Symbol.iterator] === 'function') {
+        const boundaries = new Uint8Array(source.length + 1);
+        let next = 0;
+        for (const segment of segments) {
+          // Iterator-only implementations must cover the original UTF-16
+          // text in order, with no missing, duplicated or substituted bytes.
+          if (!Number.isSafeInteger(segment.index) || segment.index !== next ||
+              typeof segment.segment !== 'string' || segment.segment.length === 0 ||
+              source.slice(next, next + segment.segment.length) !== segment.segment) {
+            return fallbackBoundary;
+          }
+          boundaries[next] = 1;
+          next += segment.segment.length;
+        }
+        if (next !== source.length) return fallbackBoundary;
+        boundaries[source.length] = 1;
+        return (index) => boundaries[index] === 1;
+      }
     }
-    if (typeof segments[Symbol.iterator] === 'function') {
-      const boundaries = new Uint8Array(source.length + 1);
-      for (const { index } of segments) boundaries[index] = 1;
-      boundaries[source.length] = 1;
-      return (index) => boundaries[index] === 1;
-    }
+  } catch {
+    // A partially implemented Segmenter must not break source verification.
   }
-  const boundaries = fallbackBoundaries(source);
-  return (index) => boundaries[index] === 1;
+  return fallbackBoundary;
 }
 
 export function locateStudyEvidence(source: string, quote: string, occurrence = 0): StudyEvidenceLocation | null {

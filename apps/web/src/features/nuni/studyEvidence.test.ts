@@ -223,6 +223,55 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
+  it.each([
+    'constructor', 'segment', 'containing', 'invalid-containing',
+    'iterator', 'invalid-iterator', 'truncated-iterator',
+  ] as const)('uses source-safe grapheme boundaries if mobile Segmenter has a %s failure', (failure) => {
+    // Simulate partial WebView Intl implementations. A successful indexOf is
+    // never enough to claim that a partial emoji or combining glyph is evidence.
+    const fakeIntl = Object.create(Intl);
+    fakeIntl.Segmenter = class {
+      constructor() {
+        if (failure === 'constructor') throw new Error('Segmenter unavailable');
+      }
+      segment(source: string) {
+        if (failure === 'segment') throw new Error('segment failed');
+        if (failure === 'containing') {
+          return { containing: () => { throw new Error('containing failed'); } };
+        }
+        if (failure === 'invalid-containing') {
+          return { containing: (index: number) => ({ index, segment: 'not original text' }) };
+        }
+        return {
+          [Symbol.iterator]: function* () {
+            if (failure === 'iterator') throw new Error('iterator failed');
+            if (failure === 'invalid-iterator') {
+              yield { index: 0, segment: source.slice(0, 1) };
+              yield { index: 2, segment: source.slice(1) };
+              return;
+            }
+            // The iterator may silently stop without returning the rest.
+            yield { index: 0, segment: source.slice(0, 1) };
+          },
+        };
+      }
+    };
+    vi.stubGlobal('Intl', fakeIntl);
+    try {
+      expect(locateStudyEvidence('e\u0301e', 'e')).toEqual({
+        before: 'e\u0301', quote: 'e', after: '', occurrences: 1,
+      });
+      expect(locateStudyEvidence('e\u0301', 'e')).toBeNull();
+      expect(locateStudyEvidence('👩‍💻👩', '👩')).toEqual({
+        before: '👩‍💻', quote: '👩', after: '', occurrences: 1,
+      });
+      expect(locateStudyEvidence('🇹🇼', '🇹')).toBeNull();
+      expect(locateStudyEvidence('前教材後', '教材')?.quote).toBe('教材');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('locates a late repeated quote without losing non-overlapping counts', () => {
     const original = '甲'.repeat(20_000);
     const last = locateStudyEvidence(original, '甲', 19_999);
