@@ -592,6 +592,97 @@ test('restored partial assignment metadata matches legacy or eight-page reader b
   }
 });
 
+test('offline assignment excerpt prioritizes verified deadlines beyond the first five without losing original route IDs', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const source = (assignmentId: string) => ({
+    kind: 'group-assignment' as const, groupId: 'course-db', assignmentId,
+  });
+  // A paginated authorized read need not arrive in deadline order. The sixth
+  // and seventh entries are the earliest deadlines, not "no assignments".
+  const items: CampusSenseSnapshot['assignments']['items'] = [
+    { title: '無期限作業', groupName: '資料庫', dueAt: null, source: source('undated') },
+    ...Array.from({ length: 4 }, (_, index) => ({
+      title: `較晚截止作業${index + 1}`, groupName: '資料庫',
+      dueAt: `2026-12-0${index + 1}T10:00:00.000+08:00`,
+      source: source(`later${index + 1}`),
+    })),
+    { title: '較早截止作業', groupName: '資料庫', dueAt: '2026-11-20T10:00:00.000+08:00', source: source('soon') },
+    { title: '最早截止作業', groupName: '資料庫', dueAt: '2026-11-19T10:00:00.000+08:00', source: source('earliest') },
+  ];
+  const authorized: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: items.length, items,
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const prompt = formatOnDeviceSchoolPrompt(local, authorized, 'alice');
+  expect(prompt).toContain('來源總數：7；本次已取得：7；完整性：來源已完整讀取');
+  expect(prompt.indexOf('最早截止作業')).toBeLessThan(prompt.indexOf('較早截止作業'));
+  expect(prompt).toContain('最早截止作業');
+  expect(prompt).toContain('較早截止作業');
+  expect(prompt).toContain('"assignmentId":"earliest"');
+  expect(prompt).toContain('"assignmentId":"soon"');
+  expect(prompt).not.toContain('無期限作業');
+  expect(prompt).not.toContain('較晚截止作業4');
+  expect(items[0].title).toBe('無期限作業'); // No mutation of original authorized data.
+  expect(items[6].title).toBe('最早截止作業');
+
+  const partial = formatOnDeviceSchoolPrompt(local, {
+    ...authorized, assignments: {
+      ...authorized.assignments, count: 8,
+      coverage: { complete: false, reason: 'legacy-partial', pages: 1 },
+    },
+  }, 'alice');
+  expect(partial).toContain('完整性：僅讀取部分資料');
+  expect(partial).toContain('不能認定這五項是全部作業中最早截止的五項');
+  expect(partial).toContain('"assignmentId":"earliest"');
+  expect(formatOnDeviceSchoolPrompt(local, authorized, 'bob')).not.toContain('最早截止作業');
+});
+
+test('deadline hints use device time only and never infer submission or closed status', async () => {
+  jest.useFakeTimers().setSystemTime(new Date('2026-11-19T12:00:00.000Z'));
+  try {
+    jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+    const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+    const items: CampusSenseSnapshot['assignments']['items'] = [
+      { title: '沒有設定期限', groupName: '資料庫', dueAt: null },
+      { title: '下一個截止', groupName: '資料庫', dueAt: '2026-11-19T20:30:00+08:00',
+        source: { kind: 'group-assignment', groupId: 'db', assignmentId: 'upcoming' } },
+      { title: '剛過截止', groupName: '資料庫', dueAt: '2026-11-19T19:30:00+08:00',
+        source: { kind: 'group-assignment', groupId: 'db', assignmentId: 'expired' } },
+      { title: '正好截止', groupName: '資料庫', dueAt: '2026-11-19T20:00:00+08:00',
+        source: { kind: 'group-assignment', groupId: 'db', assignmentId: 'exact-deadline' } },
+    ];
+    const authorized: CampusSenseSnapshot = {
+      userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+      schedule: { status: 'available', count: 1 },
+      assignments: { status: 'available', count: items.length, items,
+        coverage: { complete: true, reason: 'complete', pages: 1 } },
+      announcements: { status: 'available', items: [] },
+    };
+    const prompt = formatOnDeviceSchoolPrompt(local, authorized, 'alice');
+    expect(prompt.indexOf('剛過截止')).toBeLessThan(prompt.indexOf('正好截止'));
+    expect(prompt.indexOf('正好截止')).toBeLessThan(prompt.indexOf('下一個截止'));
+    expect(prompt.indexOf('下一個截止')).toBeLessThan(prompt.indexOf('沒有設定期限'));
+    expect(prompt).toContain('"assignmentId":"expired"');
+    expect(prompt).toContain('"assignmentId":"exact-deadline"');
+    expect(prompt).toContain('"assignmentId":"upcoming"');
+    expect(prompt).toMatch(/"assignmentId":"exact-deadline"[^\n]*?"deadlineHint":"依裝置時間推估正好到截止點；是否仍可繳交請到原作業頁核對"/);
+    expect(prompt).toContain('依裝置時間推估已過截止點；是否仍可繳交請到原作業頁核對');
+    expect(prompt).toContain('依裝置時間推估尚未到截止點');
+    expect(prompt).toContain('來源未提供截止時間');
+    expect(prompt).toContain('不證明校方系統仍接受繳交、已繳交或尚未繳交');
+    expect(items[0].title).toBe('沒有設定期限');
+    expect(formatOnDeviceSchoolPrompt(local, authorized, 'bob')).not.toContain('剛過截止');
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test('complete pending-only evidence never implies all assignments or submitted history', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
   const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
