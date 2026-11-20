@@ -932,6 +932,83 @@ it('recovers a transient Safari scroll subscription failure without replacing Vi
   }
 });
 
+it('starts deferred Safari 3D on foreground visibilitychange without pageshow or viewport events', async () => {
+  // A normal browser tab switch (unlike bfcache) may only deliver
+  // visibilitychange. The initial observer was positive, but height=0
+  // prevented its first WebGL allocation until the tab comes back.
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: 0, offsetLeft: 0, offsetTop: 0,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 40, left: 0, top: 40, right: 320, bottom: 220,
+    width: 320, height: 180, toJSON: () => ({}),
+  } as DOMRect);
+  try {
+    expect(scene.create).not.toHaveBeenCalled();
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    fireEvent(document, new Event('visibilitychange'));
+    viewport.height = window.innerHeight;
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    // No pageshow, resize, scroll or new observer notification.
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    fireEvent(document, new Event('visibilitychange'));
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    scene.setActive.mockClear();
+    fireEvent(document, new Event('visibilitychange'));
+    expect(scene.setActive).not.toHaveBeenCalled();
+  } finally {
+    bounds.mockRestore();
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  }
+});
+
+it('resumes existing Safari 3D on foreground visibilitychange without pageshow or viewport events', async () => {
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 40, left: 0, top: 40, right: 320, bottom: 220,
+    width: 320, height: 180, toJSON: () => ({}),
+  } as DOMRect);
+  try {
+    viewport.height = 0;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    fireEvent(document, new Event('visibilitychange'));
+    viewport.height = window.innerHeight;
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    // A tab return does not necessarily trigger bfcache pageshow.
+    fireEvent(document, new Event('visibilitychange'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    scene.setActive.mockClear();
+    fireEvent(document, new Event('visibilitychange'));
+    expect(scene.setActive).not.toHaveBeenCalled();
+  } finally {
+    bounds.mockRestore();
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  }
+});
+
 it('keeps a viewport-paused 3D scene suspended while iOS VisualViewport reports invalid bounds', async () => {
   // Safari keyboard and pinch transitions can briefly expose 0/NaN dimensions.
   // The larger layout viewport must not count as proof that an obscured canvas

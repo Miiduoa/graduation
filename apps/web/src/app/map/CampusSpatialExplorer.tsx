@@ -480,7 +480,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       }
     };
     const onVisibilityChange = () => {
-      if (!document.hidden) invalidateRestoredOffscreenVisibility();
+      if (!document.hidden) {
+        // Ordinary iOS tab switches resume with visibilitychange, without
+        // pageshow or any VisualViewport resize/scroll event. Revalidate the
+        // current viewport and retry missing listeners on that foreground
+        // transition, so a previously paused (or deferred first) scene
+        // recovers only when its original observer permit is still valid.
+        invalidateRestoredOffscreenVisibility();
+        onViewportResize();
+        return;
+      }
       updateVisibility();
       startWhenVisible();
       syncPendingStartup();
