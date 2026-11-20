@@ -508,19 +508,28 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // listeners to the current instance, without leaving callbacks on an old
     // viewport or interpreting a throwing getter as an absent API.
     let subscribedVisualViewport: VisualViewport | null = null;
+    // A temporary WebView addEventListener failure is not permanent. Retry
+    // missing subscriptions on pageshow/window resize even when Safari keeps
+    // the same VisualViewport object after a keyboard or bfcache transition.
+    const registeredViewportEvents = new Set<'resize' | 'scroll'>();
     const refreshVisualViewportListeners = () => {
       let current: VisualViewport | null;
       try { current = window.visualViewport; }
       catch { return; }
-      if (current === subscribedVisualViewport) return;
-      for (const event of ['resize', 'scroll'] as const) {
-        try { subscribedVisualViewport?.removeEventListener(event, onViewportResize); }
-        catch { /* partially implemented WebView API */ }
+      if (current !== subscribedVisualViewport) {
+        for (const event of ['resize', 'scroll'] as const) {
+          try { subscribedVisualViewport?.removeEventListener(event, onViewportResize); }
+          catch { /* partially implemented WebView API */ }
+        }
+        registeredViewportEvents.clear();
+        subscribedVisualViewport = current;
       }
-      subscribedVisualViewport = current;
       for (const event of ['resize', 'scroll'] as const) {
-        try { subscribedVisualViewport?.addEventListener(event, onViewportResize); }
-        catch { /* partially implemented WebView API */ }
+        if (registeredViewportEvents.has(event)) continue;
+        try {
+          subscribedVisualViewport?.addEventListener(event, onViewportResize);
+          if (subscribedVisualViewport) registeredViewportEvents.add(event);
+        } catch { /* retry when the same instance becomes usable again */ }
       }
     };
     const onViewportResize = () => {
