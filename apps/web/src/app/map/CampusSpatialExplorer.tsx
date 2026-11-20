@@ -463,6 +463,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // invalidates an already-running scene. Safari may not issue another
     // IntersectionObserver entry after its visual viewport becomes valid.
     let suspendedByViewport = false;
+    // Safari can deliver a *positive* initial observer entry while its visual
+    // viewport getters are transiently invalid. Remember that observation,
+    // but do not allocate WebGL until a later viewport event proves the host
+    // is actually on screen. A negative observer entry cancels this permit.
+    let pendingInitialViewportConfirmation = false;
     const invalidateRestoredOffscreenVisibility = () => {
       if (visible && !manualStart && typeof IntersectionObserver !== 'undefined' &&
           hostMustStaySuspended()) {
@@ -500,12 +505,18 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         if (position === 'offscreen' || position === 'invalid-visual-viewport') {
           if (visible && started) suspendedByViewport = true;
           visible = false;
+        } else if (position === 'onscreen' && pendingInitialViewportConfirmation && !started) {
+          // The observer already confirmed positive intersection. This is
+          // not an eager start: current valid geometry is the second gate.
+          visible = true;
+          pendingInitialViewportConfirmation = false;
         } else if (position === 'onscreen' && suspendedByViewport && started) {
           visible = true;
           suspendedByViewport = false;
         }
       }
       updateVisibility();
+      startWhenVisible();
       syncPendingStartup();
     };
 
@@ -579,11 +590,20 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // automatic recovery only for an already-started scene once the
           // visual viewport becomes measurable again.
           const position = hostViewportVisibility();
+          const confirmedIntersecting = latest.isIntersecting &&
+            (!hasMeasuredArea || (rect.width > 0 && rect.height > 0));
+          // An initial positive callback can arrive during Safari's 0/NaN
+          // VisualViewport transition. Do not strand the initial render if
+          // no second observer callback follows; require valid on-screen
+          // geometry on the later viewport event before starting.
+          if (!started) {
+            pendingInitialViewportConfirmation =
+              position === 'invalid-visual-viewport' && confirmedIntersecting;
+          }
           if (position === 'invalid-visual-viewport' && visible && started) {
             suspendedByViewport = true;
           }
-          visible = latest.isIntersecting &&
-            (!hasMeasuredArea || (rect.width > 0 && rect.height > 0)) &&
+          visible = confirmedIntersecting &&
             position !== 'offscreen' && position !== 'invalid-visual-viewport';
           if (visible) suspendedByViewport = false;
           updateVisibility();

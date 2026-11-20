@@ -997,6 +997,84 @@ it('keeps Safari WebGL paused when a VisualViewport getter throws, then recovers
   }
 });
 
+it('starts first WebGL render after Safari initial invalid VisualViewport recovers without another observer callback', async () => {
+  // The initial positive observer callback can race a keyboard transition
+  // which temporarily exposes height=0. We must not start then, but a valid
+  // measurable on-screen viewport later is sufficient to finish the two gates.
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: 0, offsetLeft: 0, offsetTop: 0,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 40, left: 0, top: 40, right: 320, bottom: 220,
+    width: 320, height: 180, toJSON: () => ({}),
+  } as DOMRect);
+  try {
+    // The default observer mock has already delivered a positive intersection.
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    viewport.height = window.innerHeight;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    // A viewport event does not create a second Three.js scene.
+    act(() => viewport.dispatchEvent(new Event('scroll')));
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    scene.setActive.mockClear();
+    viewport.dispatchEvent(new Event('resize'));
+    expect(scene.setActive).not.toHaveBeenCalled();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+it('cancels pending first WebGL startup if a newer observer record says the map is offscreen', async () => {
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: Number.NaN, offsetLeft: 0, offsetTop: 0,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 40, left: 0, top: 40, right: 320, bottom: 220,
+    width: 320, height: 180, toJSON: () => ({}),
+  } as DOMRect);
+  try {
+    expect(scene.create).not.toHaveBeenCalled();
+    // A later negative observer entry invalidates the pending initial permit,
+    // even if the host's layout rectangle appears on screen.
+    act(() => intersection?.([{
+      target: graphics, time: 20, isIntersecting: false,
+      intersectionRect: { width: 0, height: 0 },
+    }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
+    viewport.height = window.innerHeight;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    // A fresh positive observer record remains required after that denial.
+    act(() => intersection?.([{
+      target: graphics, time: 21, isIntersecting: true,
+      intersectionRect: { width: 320, height: 180 },
+    }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('pauses a ready mobile WebGL scene when viewport resize moves the host offscreen', async () => {
   // Rotating the device or showing the soft keyboard can change viewport
   // height before IntersectionObserver delivers its next callback.
