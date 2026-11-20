@@ -29,6 +29,10 @@ type Props = {
   onSelect: (location: MapLocation) => void;
 };
 
+// 0: enter/leave viewport; 1e-9: zero-area edge touch <-> any visible
+// pixel (still representable as float32 in browser engines); 0.01: legacy
+// coarse visibility step.
+const VIEWPORT_THRESHOLDS = [0, 1e-9, 0.01];
 // Reuse a single empty array to avoid recreating a WebGL context whenever
 // the footprint status or the visible map selection changes.
 const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
@@ -478,9 +482,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           updateVisibility();
           startWhenVisible();
           syncPendingStartup();
-        }, { threshold: [0, 0.01] });
-        // The extra 1% threshold ensures a new callback when an edge-touch
-        // (isIntersecting=true, zero-area) becomes actually visible.
+        }, { threshold: VIEWPORT_THRESHOLDS });
+        // An edge-touch (isIntersecting=true, zero area) and a sliver of
+        // visible area (for example 0.5%) are both intersecting. A tiny
+        // positive threshold guarantees a callback across that boundary in
+        // both directions, so WebGL starts once any pixel shows and pauses
+        // again when only the edge touches.
         intersection.observe(host);
       } catch {
         // observe() may have registered partially before throwing.
@@ -967,12 +974,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // Captive portals and misconfigured gateways can reply HTTP 200 with
         // non-JSON documents and a stalled body. Our endpoint only returns
         // JSON; reject any explicitly incompatible media type before reading
-        // the stream, while accepting application/*+json with parameters.
+        // the stream, while accepting application/*+json with parameters
+        // (RFC 6838 restricted-name characters, including `_`).
         // Missing Content-Type remains compatible with legacy WebView bridges.
         const contentType = response.headers?.get('content-type')?.trim().toLowerCase() ?? '';
         const mediaType = contentType.split(';', 1)[0]?.trim() ?? '';
         const invalidMediaType = mediaType !== '' && mediaType !== 'application/json' &&
-          !/^application\/[a-z0-9][a-z0-9.+-]*\+json$/.test(mediaType);
+          !/^application\/[a-z0-9][a-z0-9!#$&^_.+-]*\+json$/.test(mediaType);
         // RFC Content-Length is a decimal byte count, not a fraction, hex
         // number or comma-separated value. Do not trust a 200 JSON body whose
         // advertised size is invalid or implausibly large for this API.

@@ -129,7 +129,7 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
   expect(observedHost).toBe(graphics);
   // Edge-touch and positive-area transitions can both have isIntersecting=true.
   // A second threshold is needed to receive the later visible-area callback.
-  expect(options?.threshold).toEqual([0, 0.01]);
+  expect(options?.threshold).toEqual([0, 1e-9, 0.01]);
   expect(scene.create).not.toHaveBeenCalled();
 
   const notify = (time: number, width: number, height: number) => {
@@ -154,6 +154,33 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('requests a callback between an edge touch and any visible sliver of the canvas', async () => {
+  // IntersectionObserver only notifies when isIntersecting or the threshold
+  // index changes. Edge touch (ratio 0) and a 0.5% sliver are both
+  // intersecting, so the thresholds must place them at different indexes in
+  // both directions. Mirrors the spec's threshold-index rule (W3C IO §3.2.8).
+  let options: IntersectionObserverInit | undefined;
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(_callback: IntersectionObserverCallback, init?: IntersectionObserverInit) { options = init; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const thresholds = options?.threshold as number[];
+  const index = (ratio: number) => {
+    const found = thresholds.findIndex((value) => value > ratio);
+    return found === -1 ? thresholds.length : found;
+  };
+  // One CSS pixel row of a 2000×2000 canvas is still a visible sliver.
+  for (const sliver of [0.005, 1 / (2000 * 2000), 0.009]) {
+    expect(index(sliver)).not.toBe(index(0));
+  }
+  // float32 storage in browser engines must not round the tiny step to 0.
+  expect(Math.fround(thresholds[1])).toBeGreaterThan(0);
 });
 
 it('uses the latest viewport state when a fast mobile scroll batches observer entries', async () => {
@@ -1458,7 +1485,10 @@ it.each([
 
 // JSON-family media types must still load valid source-checked geometry;
 // a 200 response with an explicit incompatible media type must not.
-it.each(['application/json; charset=UTF-8', 'application/vnd.nuni+json; charset=UTF-8'] as const)(
+it.each([
+  'application/json; charset=UTF-8', 'application/vnd.nuni+json; charset=UTF-8',
+  'application/vnd.example_campus+json', 'application/geo+json',
+] as const)(
   'accepts a complete %s building snapshot without a fallback',
   async (contentType) => {
     const { library, buildings, body } = sourcedLibraryFootprintFixture();
