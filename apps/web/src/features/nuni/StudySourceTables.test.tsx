@@ -1839,6 +1839,53 @@ it('falls back to the first source cell when a mobile WebView cannot focus a tab
   expect(document.activeElement?.textContent).toContain('原文第 3 行 · 回表格核對');
 });
 
+it('reopens a collapsed comparison to return from its exact authorized source row', () => {
+  const material = [
+    '| 課程 | 學分 |', '| --- | --- |',
+    '| 資料庫 | 3 |', '| 網路 | 2 |',
+  ].join('\n');
+  const view = render(<StudySourceTables text={material} />);
+  const summary = screen.getByText('展開第 2 欄「學分」的原文數值比較');
+  const disclosure = summary.closest('details');
+  expect(disclosure).not.toBeNull();
+  if (!disclosure) throw new Error('Expected a comparison disclosure');
+  disclosure.open = true;
+  const jump = screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' });
+  fireEvent.click(jump);
+  const sourceRow = view.container.querySelector('tbody tr');
+  expect(document.activeElement).toBe(sourceRow);
+  // The user may close this disclosure while studying the original row.
+  disclosure.open = false;
+  fireEvent.click(screen.getByRole('button', { name: '返回原文第 3 行的圖表' }));
+  expect(disclosure.open).toBe(true);
+  expect(document.activeElement).toBe(jump);
+  expect(screen.queryByRole('button', { name: '返回原文第 3 行的圖表' })).toBeNull();
+  expect(sourceRow?.textContent).toBe('資料庫3');
+});
+
+it('falls back to a comparison summary when a WebView rejects chart button focus', () => {
+  const material = [
+    '| 課程 | 完成率 |', '| --- | --- |',
+    '| 資料庫 | 75% |', '| 網路 | 50% |',
+  ].join('\n');
+  const view = render(<StudySourceTables text={material} />);
+  const summary = screen.getByText('展開第 2 欄「完成率」的原文百分比（100% 滿格）');
+  const disclosure = summary.closest('details');
+  expect(disclosure).not.toBeNull();
+  if (!disclosure) throw new Error('Expected a percentage disclosure');
+  disclosure.open = true;
+  summary.setAttribute('tabindex', '0');
+  const jump = screen.getByRole('button', { name: '原文第 4 行 · 回表格核對' });
+  fireEvent.click(jump);
+  expect(document.activeElement).toBe(view.container.querySelectorAll('tbody tr')[1]);
+  Object.defineProperty(jump, 'focus', { configurable: true, value: () => { throw new Error('WebView focus refused'); } });
+  disclosure.open = false;
+  fireEvent.click(screen.getByRole('button', { name: '返回原文第 4 行的圖表' }));
+  expect(disclosure.open).toBe(true);
+  expect(document.activeElement).toBe(summary);
+  expect(view.container.querySelectorAll('tbody tr')[1]?.textContent).toBe('網路50%');
+});
+
 it('never shows a stale return-to-chart control after the authorized source changes', () => {
   const oldMaterial = [
     '| 舊課程 | 學分 |', '| --- | --- |',

@@ -527,8 +527,18 @@ export function StudySourceTables({ text }: { text: string }) {
     const origin = returnTarget?.origin;
     setReturnTarget(null);
     if (!origin?.isConnected) return;
-    try { origin.focus(); } catch { /* The comparison remains visible. */ }
-    try { origin.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }
+    // The student may close the comparison disclosure while checking the
+    // source row. Reopen it before returning focus: a hidden chart button
+    // cannot reliably receive focus in Safari, WebView or keyboard navigation.
+    const disclosure = origin.closest('details');
+    if (disclosure && !disclosure.open) disclosure.open = true;
+    try { origin.focus(); } catch { /* Fall back to the disclosure heading. */ }
+    const summary = disclosure?.querySelector<HTMLElement>('summary');
+    if (document.activeElement !== origin) {
+      try { summary?.focus(); } catch { /* Keep the original source available. */ }
+    }
+    const destination = document.activeElement === origin ? origin : summary ?? origin;
+    try { destination.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }
     catch { /* A failed scroll must not prevent keyboard focus. */ }
   };
   if (!tables.length) return null;
