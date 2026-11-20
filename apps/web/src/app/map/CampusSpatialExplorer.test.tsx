@@ -874,6 +874,67 @@ it('keeps a viewport-paused 3D scene suspended while iOS VisualViewport reports 
   }
 });
 
+it('does not reactivate Safari WebGL from a queued observer entry while visual viewport bounds are invalid', async () => {
+  // A WebView may deliver an apparently current positive intersection while
+  // the visual viewport is briefly 0/NaN during soft-keyboard or zoom changes.
+  // A stale callback must not bypass the fail-closed viewport resize gate.
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    offsetLeft: 0,
+    offsetTop: 0,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 80, left: 0, top: 80, right: 320, bottom: 260,
+    width: 320, height: 180, toJSON: () => ({}),
+  } as DOMRect);
+  const notify = (time: number) => {
+    act(() => intersection?.([{
+      target: graphics, time, isIntersecting: true,
+      intersectionRect: { width: 320, height: 180 },
+    }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
+  };
+  try {
+    for (const invalidHeight of [0, Number.NaN]) {
+      viewport.height = invalidHeight;
+      act(() => viewport.dispatchEvent(new Event('resize')));
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      const pausedAt = scene.setActive.mock.calls.length;
+      notify(1000 + pausedAt);
+      expect(scene.setActive.mock.calls.slice(pausedAt)
+        .every(([enabled]) => enabled === false)).toBe(true);
+      expect(scene.create).toHaveBeenCalledTimes(1);
+      expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+    }
+
+    // Recover without another observer callback once the viewport is valid.
+    viewport.height = window.innerHeight;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+
+    // A bfcache restore cannot bypass the same guard either.
+    fireEvent(window, new Event('pagehide'));
+    viewport.offsetTop = Number.NaN;
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    scene.setActive.mockClear();
+    viewport.dispatchEvent(new Event('resize'));
+    notify(2000);
+    expect(scene.setActive).not.toHaveBeenCalled();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('pauses a ready mobile WebGL scene when viewport resize moves the host offscreen', async () => {
   // Rotating the device or showing the soft keyboard can change viewport
   // height before IntersectionObserver delivers its next callback.

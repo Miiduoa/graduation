@@ -415,7 +415,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Geometry is only affirmative when both the host and the effective
     // viewport have valid, positive bounds. Unknown WebView measurements must
     // never be interpreted as proof that the map is back on screen.
-    const hostViewportVisibility = (): 'onscreen' | 'offscreen' | 'unknown' => {
+    const hostViewportVisibility = (): 'onscreen' | 'offscreen' | 'unknown' | 'invalid-visual-viewport' => {
       try {
         const rect = host.getBoundingClientRect();
         const width = window.innerWidth;
@@ -429,7 +429,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // report zero, NaN or incomplete bounds. Falling back to the *larger*
         // layout viewport here could falsely resume an obscured GPU canvas.
         // Use layout bounds only when VisualViewport is genuinely unavailable.
-        if (visualViewport && !hasVisualBounds) return 'unknown';
+        if (visualViewport && !hasVisualBounds) return 'invalid-visual-viewport';
         const left = hasVisualBounds ? visualViewport.offsetLeft : 0;
         const top = hasVisualBounds ? visualViewport.offsetTop : 0;
         const right = left + (hasVisualBounds ? visualViewport.width : width);
@@ -444,10 +444,17 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         return 'unknown';
       }
     };
-    const hostDefinitelyOffscreen = () => hostViewportVisibility() === 'offscreen';
+    // Both a confirmed offscreen rect and an invalid iOS VisualViewport must
+    // block stale observer/page-restoration records from waking the GPU.
+    // An unmeasurable legacy host rect remains 'unknown' so older WebViews
+    // can still use a real observer signal or the manual-start control.
+    const hostMustStaySuspended = () => {
+      const position = hostViewportVisibility();
+      return position === 'offscreen' || position === 'invalid-visual-viewport';
+    };
     const invalidateRestoredOffscreenVisibility = () => {
       if (visible && !manualStart && typeof IntersectionObserver !== 'undefined' &&
-          hostDefinitelyOffscreen()) {
+          hostMustStaySuspended()) {
         visible = false;
       }
     };
@@ -479,7 +486,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       if (!active) return;
       if (!manualStart && typeof IntersectionObserver !== 'undefined') {
         const position = hostViewportVisibility();
-        if (position === 'offscreen') {
+        if (position === 'offscreen' || position === 'invalid-visual-viewport') {
           if (visible && started) suspendedByViewport = true;
           visible = false;
         } else if (position === 'onscreen' && suspendedByViewport && started) {
@@ -555,9 +562,18 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // A callback queued before bfcache scroll restoration can carry a
           // *newer* timestamp and a positive historical intersectionRect.
           // Do not wake the GPU if the host is demonstrably offscreen now.
+          // A queued positive intersection can arrive while Safari reports
+          // a zero/NaN visual viewport. The old fallback treated this as
+          // 'unknown' and could reactivate a hidden WebGL scene. Preserve
+          // automatic recovery only for an already-started scene once the
+          // visual viewport becomes measurable again.
+          const position = hostViewportVisibility();
+          if (position === 'invalid-visual-viewport' && visible && started) {
+            suspendedByViewport = true;
+          }
           visible = latest.isIntersecting &&
             (!hasMeasuredArea || (rect.width > 0 && rect.height > 0)) &&
-            !hostDefinitelyOffscreen();
+            position !== 'offscreen' && position !== 'invalid-visual-viewport';
           if (visible) suspendedByViewport = false;
           updateVisibility();
           startWhenVisible();
