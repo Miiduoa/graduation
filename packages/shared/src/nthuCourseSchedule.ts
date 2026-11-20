@@ -131,9 +131,21 @@ export function nthuTimetableImportCsv(course: PublicCatalogCourse): string | nu
     const integer = whole.replace(/^0+/, '');
     if (integer.length > 2 || (integer.length === 2 && integer > '40') ||
         (integer === '40' && /[1-9]/.test(fraction))) return null;
-    // CSV 匯出會把數字寫成十進位（不使用指數記法），例如 0.0000001 仍可再匯入。
     if (!Number.isFinite(Number(credits))) return null;
   }
+  // 個人匯入解析器只接受十進位學分。String(Number('0.0000001')) 會變成 1e-7，
+  // 只在這種情況改寫為來源的精確十進位（去除多餘的前導與尾端零），
+  // 不改動共用 CSV 序列化器，也不改變一般學分的輸出。
+  const creditCell = (): number | undefined => {
+    if (credits === '') return undefined;
+    const value = Number(credits);
+    if (!/[eE]/.test(String(value))) return value;
+    const [whole, fraction = ''] = credits.split('.');
+    const integer = whole.replace(/^0+(?=\d)/, '');
+    const decimals = fraction.replace(/0+$/, '');
+    // 字串以數字開頭，CSV 公式前綴防護不受影響；解析器會再轉回同一個數值。
+    return (decimals ? `${integer}.${decimals}` : integer) as unknown as number;
+  };
   // Multiple official room/time pairs may describe one course. A repeated
   // weekday/period would duplicate or overlap the student's imported timetable;
   // require manual verification rather than silently importing both rooms.
@@ -160,7 +172,7 @@ export function nthuTimetableImportCsv(course: PublicCatalogCourse): string | nu
     periodLabel: meeting.periodLabel,
     startTime: meeting.startTime,
     endTime: meeting.endTime,
-    credits: credits === '' ? undefined : Number(credits),
+    credits: creditCell(),
     source: { type: 'paste', line: index + 1, rawText: course.time },
   })), ['schoolId', 'academicYear', 'semester', 'courseCode', 'className', 'title', 'teacher', 'location', 'credits', 'dayOfWeek', 'periodLabel', 'startTime', 'endTime']);
 }
