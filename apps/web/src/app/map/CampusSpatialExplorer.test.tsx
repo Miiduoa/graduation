@@ -112,8 +112,12 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
   // target even when its intersection rectangle has zero visible area.
   // This synthetic case checks GPU activation boundaries, not phone FPS.
   let observedHost: Element | null = null;
+  let options: IntersectionObserverInit | undefined;
   vi.stubGlobal('IntersectionObserver', class {
-    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    constructor(callback: IntersectionObserverCallback, init?: IntersectionObserverInit) {
+      intersection = callback;
+      options = init;
+    }
     observe(target: Element) { observedHost = target; }
     disconnect = disconnect;
   });
@@ -123,6 +127,9 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
   const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
   const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
   expect(observedHost).toBe(graphics);
+  // Edge-touch and positive-area transitions can both have isIntersecting=true.
+  // A second threshold is needed to receive the later visible-area callback.
+  expect(options?.threshold).toEqual([0, 0.01]);
   expect(scene.create).not.toHaveBeenCalled();
 
   const notify = (time: number, width: number, height: number) => {
