@@ -593,6 +593,9 @@ test('restored partial assignment metadata matches legacy or eight-page reader b
 });
 
 test('offline assignment excerpt prioritizes verified deadlines beyond the first five without losing original route IDs', async () => {
+  // 固定裝置時間，避免日後前五項都過期時觸發「保留最近將到期」規則而讓此測試隨日期失敗。
+  jest.useFakeTimers().setSystemTime(new Date('2026-11-18T00:00:00.000Z'));
+  try {
   jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
   const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
   const source = (assignmentId: string) => ({
@@ -641,6 +644,9 @@ test('offline assignment excerpt prioritizes verified deadlines beyond the first
   expect(partial).toContain('不能認定這五項是全部作業中最早截止的五項');
   expect(partial).toContain('"assignmentId":"earliest"');
   expect(formatOnDeviceSchoolPrompt(local, authorized, 'bob')).not.toContain('最早截止作業');
+  } finally {
+    jest.useRealTimers();
+  }
 });
 
 test('deadline hints use device time only and never infer submission or closed status', async () => {
@@ -710,7 +716,7 @@ test('offline prompt preserves the next upcoming deadline when old overdue work 
       announcements: { status: 'available', items: [] },
     };
     const prompt = formatOnDeviceSchoolPrompt(local, authorized, 'alice');
-    expect(prompt).toContain('過期項目擠滿前五項時保留最近將到期 1 項');
+    expect(prompt).toContain('過期項目擠滿前五項且本次資料中仍有未到截止點的作業時，保留最近將到期 1 項');
     expect(prompt).toContain('一小時後截止');
     expect(prompt).toContain('"assignmentId":"upcoming-now"');
     expect(prompt).toContain('依裝置時間推估尚未到截止點');
@@ -720,6 +726,18 @@ test('offline prompt preserves the next upcoming deadline when old overdue work 
     expect(prompt).toContain('這不代表其餘過期作業已完成');
     expect(items[4].title).toBe('舊逾期作業5'); // Source order and IDs stay unchanged.
     expect(formatOnDeviceSchoolPrompt(local, authorized, 'bob')).not.toContain('一小時後截止');
+
+    // 全部都已過期時沒有可保留的候選，維持原本最早五項，不憑空替換。
+    const allOverdue = items.slice(0, 5).concat({
+      title: '第六筆逾期作業', groupName: '資料庫', dueAt: '2026-11-10T10:00:00+08:00',
+      source: source('old-6'),
+    });
+    const overduePrompt = formatOnDeviceSchoolPrompt(local, { ...authorized, assignments: {
+      ...authorized.assignments, count: allOverdue.length, items: allOverdue,
+    } }, 'alice');
+    for (let index = 1; index <= 5; index += 1) expect(overduePrompt).toContain(`舊逾期作業${index}`);
+    expect(overduePrompt).not.toContain('第六筆逾期作業');
+    expect(overduePrompt).toContain('若沒有這類作業則照原排序列出');
   } finally {
     jest.useRealTimers();
   }
