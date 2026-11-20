@@ -100,6 +100,27 @@ describe('public course filters', () => {
       expect(parsePublicCourseFilters(value)).toBeNull();
     }
   });
+  it.each([
+    ['3.0000000000000001', 3, 'exclude'],
+    ['40.0000000000000001', 40, 'exclude'],
+    ['0.0000000000000001', 0, 'exclude'],
+    ['3.2500000000000001', 3.25, 'exclude'],
+    ['003.25000', 3.25, 'match'],
+    ['０３．５０', 3.5, 'match'],
+    ['3.' + '0'.repeat(1_000) + '1', 3, 'exclude'],
+    ['3.' + '0'.repeat(1_000), 3, 'match'],
+    ['待確認', 3, 'unresolved'],
+    ['', 3, 'unresolved'],
+  ] as const)('matches official credits without floating point rounding: %s', (credits, expected, result) => {
+    for (const schoolId of ['nthu', 'ncnu'] as const) {
+      expect(evaluatePublicCourseFilters({ ...course, credits }, schoolId, { credits: expected })).toBe(result);
+    }
+  });
+  it('does not trust a malformed cached credit type as a filtered result', () => {
+    expect(evaluatePublicCourseFilters({
+      ...course, credits: 3 as unknown as string,
+    }, 'nthu', { credits: 3 })).toBe('unresolved');
+  });
   it('matches an actual day while keeping all meetings and unverified-term weekday evidence', () => {
     expect(publicCourseWeekdays(course, 'nthu')).toEqual([3, 5]);
     expect(publicCourseWeekdays({ ...course, semester: '1152' }, 'nthu')).toEqual([3, 5]);
@@ -154,6 +175,7 @@ describe('filtered response and handoff contract', () => {
     { unresolvedCount: 1.5 },
     { unresolvedCount: 20_001 },
     { courses: [{ ...course, credits: '2' }] },
+    { courses: [{ ...course, credits: '3.0000000000000001' }] },
     { courses: [{ ...course, meetings: [] }] },
   ])('does not accept dropped or fabricated conditions: %j', (patch) => {
     expect(isPublicCourseCatalog({ ...result(), ...patch }, 'nthu', filters)).toBe(false);
