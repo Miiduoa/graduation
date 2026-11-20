@@ -621,6 +621,51 @@ it('offers an opt-in comparison with only exact, positive source table values', 
   expect(container.querySelector('meter')).toBeNull();
 });
 
+it('compares strict thousands-grouped lesson quantities while preserving exact source numerals', () => {
+  const markdown = [
+    '| 項目 | 交易筆數 |',
+    '| --- | --- |',
+    '| 甲 | 1,200 |',
+    '| 乙 | 2,450.50 |',
+  ].join('\n');
+  const { container } = render(<StudySourceTables text={markdown} />);
+  expect(within(screen.getByRole('table')).getAllByRole('cell')
+    .map((cell) => cell.textContent)).toEqual(['1,200', '2,450.50']);
+  expect(Array.from(container.querySelectorAll('meter')).map((bar) => ({
+    value: bar.getAttribute('value'),
+    max: bar.getAttribute('max'),
+    label: bar.getAttribute('aria-label'),
+    text: bar.getAttribute('aria-valuetext'),
+  }))).toEqual([
+    { value: '1200', max: '2450.5', label: '甲：1,200',
+      text: '1,200；本欄最大值 2,450.50' },
+    { value: '2450.5', max: '2450.5', label: '乙：2,450.50',
+      text: '2,450.50；本欄最大值 2,450.50' },
+  ]);
+});
+
+it('never interprets mixed, invalid thousands separators or source identifiers as quantities', () => {
+  for (const [first, second, header] of [
+    ['1,000', '200', '交易筆數'], // Keep mixed grouping ambiguous.
+    ['1,20', '2,400', '交易筆數'],
+    ['12,34,567', '1,234', '交易筆數'],
+    ['01,200', '02,400', '交易筆數'],
+    ['0,000', '1,000', '交易筆數'],
+    ['1,200%', '2,400%', '交易筆數'],
+    ['1,200', '2,400.123', '交易筆數'],
+    ['1,200', '2,400', '版本'], // Formatting does not make IDs measurable.
+  ] as const) {
+    const text = ['| 名稱 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | ' + first + ' |', '| 乙 | ' + second + ' |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={text} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual([first, second]);
+    expect(comparisonSummaries(container)).toEqual([]);
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+});
+
 it('does not draw misleading bars for formulas, dates, percentages, units or ambiguous rows', () => {
   for (const secondColumn of [
     ['2+3', '4'], ['12%', '25%'], ['2026-11-14', '2026-11-15'],

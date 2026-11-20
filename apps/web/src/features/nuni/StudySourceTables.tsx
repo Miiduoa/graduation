@@ -207,9 +207,10 @@ function isNonRatioColumn(header: string): boolean {
 }
 
 /**
- * Optional, source-grounded comparison of plain non-negative values only.
- * A number with units, a percentage, a date or an expression is not a scalar
- * measure we can safely turn into a bar. No AI inference or source rewriting.
+ * Optional, source-grounded comparison of non-negative source numbers only.
+ * Strict comma-grouped thousands are accepted only when every row shares that
+ * format. Units, percentages, dates, expressions and mixed formats are omitted.
+ * No AI inference or source rewriting.
  */
 function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
@@ -221,17 +222,22 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   // Repeated "學分" is an explicit source unit, not a value to infer.
   // Accept it only in a credit column and when ALL rows use the same format.
   const plainNumber = /^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/u;
+  // Course finance tables often use commas for thousands. Require every
+  // source row to use strict three-digit grouping before comparing any bar;
+  // mixing 1,000 with 200, or malformed 1,20, remains unverified source text.
+  const groupedNumber = /^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d{1,2})?$/u;
   const creditNumber = /^((?:0|[1-9]\d{0,5})(?:\.\d{1,2})?) ?學分$/u;
   const creditsColumn = /(?:學分|credits?)/iu.test(column);
-  let rowFormat: 'plain' | 'credits' | null = null;
+  let rowFormat: 'plain' | 'grouped' | 'credits' | null = null;
   const rows: SourceValueRow[] = [];
   for (const [rowIndex, [label, original]] of table.rows.entries()) {
     if (!label?.trim() || !original) return null;
     const creditMatch = creditsColumn ? creditNumber.exec(original) : null;
-    const format = plainNumber.test(original) ? 'plain' : creditMatch ? 'credits' : null;
+    const format = plainNumber.test(original) ? 'plain'
+      : groupedNumber.test(original) ? 'grouped' : creditMatch ? 'credits' : null;
     if (!format || (rowFormat !== null && format !== rowFormat)) return null;
     rowFormat = format;
-    const amount = Number(creditMatch?.[1] ?? original);
+    const amount = Number((creditMatch?.[1] ?? original).replace(/,/gu, ''));
     if (!Number.isFinite(amount)) return null;
     rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
   }
@@ -315,8 +321,8 @@ function StudySourceValueComparison({ table, onJumpToSource }: {
     <details className={styles.sourceValueComparison}>
       <summary>展開第 2 欄「{table.headers[1]}」的原文數值比較</summary>
       <p className={styles.note}>
-        只比較明確的非負純數字，或學分欄每列都寫出「學分」的非負數；以本欄最大值為滿格。
-        不換算單位、不混用純數字與附單位數值，也不比較日期或編號；請核對上方原文。
+        只比較格式一致的非負純數字（包含每列皆以逗號正確分隔千位），或學分欄每列都寫出「學分」的非負數；以本欄最大值為滿格。
+        不換算單位、不混用不同數字格式或附單位數值，也不比較日期或編號；請核對上方原文。
       </p>
       <ul className={styles.sourceValueList} aria-label={table.headers[1] + ' 原文數值比較'}>
         {rows.map((row) => (
