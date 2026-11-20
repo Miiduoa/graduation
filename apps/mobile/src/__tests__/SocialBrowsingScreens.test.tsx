@@ -320,6 +320,53 @@ test('a refresh overlapping one board write still applies server state for other
   expect(view.getByLabelText('取消訂閱讀書會').props.accessibilityState.disabled).toBe(false);
 });
 
+test('a failed write during an overlapping refresh falls back to the fresher server state', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  let finishRefresh!: (ids: string[]) => void;
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(
+    () => new Promise<string[]>((resolve) => { finishRefresh = resolve; }),
+  );
+  let fail!: (error: Error) => void;
+  jest.mocked(subscribeToBoard).mockImplementationOnce(
+    () => new Promise<void>((_resolve, reject) => { fail = reject; }),
+  );
+
+  let refreshPromise!: Promise<void>;
+  act(() => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+  // Another device already subscribed; the snapshot lands while the local write is pending.
+  await act(async () => { finishRefresh(['board']); await refreshPromise; });
+  await act(async () => { fail(new Error('offline')); });
+  expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
+  expect(view.getByLabelText('取消訂閱讀書會').props.accessibilityState.disabled).toBe(false);
+});
+
+test('a refresh that lands after a failed write applies the server state', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  let finishRefresh!: (ids: string[]) => void;
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(
+    () => new Promise<string[]>((resolve) => { finishRefresh = resolve; }),
+  );
+  let fail!: (error: Error) => void;
+  jest.mocked(subscribeToBoard).mockImplementationOnce(
+    () => new Promise<void>((_resolve, reject) => { fail = reject; }),
+  );
+
+  let refreshPromise!: Promise<void>;
+  act(() => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+  await act(async () => { fail(new Error('offline')); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+  await act(async () => { finishRefresh(['board']); await refreshPromise; });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
 test('two native presses before a rerender start only one board write', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   let finish!: () => void;

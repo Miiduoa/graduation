@@ -85,6 +85,9 @@ function BoardsContent() {
   // their local state; every other board still takes the server snapshot.
   const subscriptionRevision = useRef(0);
   const boardWriteRevision = useRef(new Map<string, number>());
+  // Server value seen by a refresh while a board write was pending. A failed
+  // write falls back to this fresher value instead of the pre-tap state.
+  const serverStateDuringWrite = useRef(new Map<string, boolean>());
   const [pendingSubscriptions, setPendingSubscriptions] = useState<ReadonlySet<string>>(new Set());
   const mounted = useRef(true);
   useEffect(() => {
@@ -108,6 +111,10 @@ function BoardsContent() {
       ]);
       if (loadVersion.current !== version) return;
       setBoards(rows);
+      const serverIds = new Set(subs);
+      for (const id of pendingSubscriptionIds.current) {
+        serverStateDuringWrite.current.set(id, serverIds.has(id));
+      }
       // A refresh finishing during a pending write must not erase the student's
       // optimistic choice. Reconcile the server snapshot after the write settles.
       setSubscribed((previous) => {
@@ -188,7 +195,10 @@ function BoardsContent() {
       if (pendingSubscriptionIds.current.has(b.id)) return;
       pendingSubscriptionIds.current.add(b.id);
       subscriptionRevision.current += 1;
+      const priorRevision = boardWriteRevision.current.get(b.id);
       boardWriteRevision.current.set(b.id, subscriptionRevision.current);
+      serverStateDuringWrite.current.delete(b.id);
+      let writeSucceeded = false;
       setPendingSubscriptions(new Set(pendingSubscriptionIds.current));
       const wasSub = subscribed.has(b.id);
       setSubscribed((previous) => {
@@ -200,13 +210,20 @@ function BoardsContent() {
       try {
         if (wasSub) await unsubscribeFromBoard(uid, sid, b.id);
         else await subscribeToBoard(uid, sid, b.id);
+        writeSucceeded = true;
       } catch (error: any) {
+        // A failed write changed nothing on the server, so it must not make
+        // this board's local state outrank refreshes that started earlier.
+        if (priorRevision === undefined) boardWriteRevision.current.delete(b.id);
+        else boardWriteRevision.current.set(b.id, priorRevision);
+        const serverSaysSubscribed = serverStateDuringWrite.current.get(b.id);
+        const restoreSubscribed = serverSaysSubscribed ?? wasSub;
         // A delayed failure from the previous user/school must not alert or
         // revert the currently mounted student's board subscriptions.
         if (mounted.current) {
           setSubscribed((previous) => {
             const next = new Set(previous);
-            if (wasSub) next.add(b.id);
+            if (restoreSubscribed) next.add(b.id);
             else next.delete(b.id);
             return next;
           });
@@ -214,8 +231,9 @@ function BoardsContent() {
         }
       } finally {
         pendingSubscriptionIds.current.delete(b.id);
+        serverStateDuringWrite.current.delete(b.id);
         subscriptionRevision.current += 1;
-        boardWriteRevision.current.set(b.id, subscriptionRevision.current);
+        if (writeSucceeded) boardWriteRevision.current.set(b.id, subscriptionRevision.current);
         if (mounted.current) setPendingSubscriptions(new Set(pendingSubscriptionIds.current));
       }
     },
