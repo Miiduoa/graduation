@@ -237,8 +237,15 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
       : groupedNumber.test(original) ? 'grouped' : creditMatch ? 'credits' : null;
     if (!format || (rowFormat !== null && format !== rowFormat)) return null;
     rowFormat = format;
-    const amount = Number((creditMatch?.[1] ?? original).replace(/,/gu, ''));
-    if (!Number.isFinite(amount)) return null;
+    // Parsing a long decimal directly as Number can silently round away a
+    // source cent (e.g. 1,000,000,000,000,000.01). Only graph quantities
+    // whose integer minor units are exactly representable; keep every other
+    // source row verbatim in the original table without a derived bar.
+    const [whole, fraction = ''] = (creditMatch?.[1] ?? original).replace(/,/gu, '').split('.');
+    const scale = 10 ** fraction.length;
+    const minorUnits = Number(whole) * scale + Number(fraction || '0');
+    if (!Number.isSafeInteger(minorUnits)) return null;
+    const amount = minorUnits / scale;
     rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
   }
   return rows.some((row) => row.amount > 0) ? rows : null;

@@ -644,6 +644,37 @@ it('compares strict thousands-grouped lesson quantities while preserving exact s
   ]);
 });
 
+it('compares large but safely representable grouped cents without altering the source numerals', () => {
+  const markdown = [
+    '| 項目 | 金額 |', '| --- | --- |',
+    '| 甲 | 1,234,567,890,123.45 |', '| 乙 | 1,234,567,890,123.46 |',
+  ].join('\\n');
+  const { container } = render(<StudySourceTables text={markdown} />);
+  expect(within(screen.getByRole('table')).getAllByRole('cell')
+    .map((cell) => cell.textContent)).toEqual(['1,234,567,890,123.45', '1,234,567,890,123.46']);
+  expect(Array.from(container.querySelectorAll('meter')).map((meter) => meter.getAttribute('value')))
+    .toEqual(['1234567890123.45', '1234567890123.46']);
+});
+
+it('never graphs grouped integers or fractional cents that JavaScript cannot represent exactly', () => {
+  for (const [first, second] of [
+    ['9,007,199,254,740,992', '9,007,199,254,740,993'],
+    ['1,000,000,000,000,000.01', '1,000,000,000,000,000.02'],
+    ['100,000,000,000,000.01', '100,000,000,000,000.02'],
+  ] as const) {
+    const markdown = [
+      '| 項目 | 金額 |', '| --- | --- |',
+      '| 甲 | ' + first + ' |', '| 乙 | ' + second + ' |',
+    ].join('\\n');
+    const { container, unmount } = render(<StudySourceTables text={markdown} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual([first, second]);
+    expect(comparisonSummaries(container)).toEqual([]);
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+});
+
 it('never interprets mixed, invalid thousands separators or source identifiers as quantities', () => {
   for (const [first, second, header] of [
     ['1,000', '200', '交易筆數'], // Keep mixed grouping ambiguous.
