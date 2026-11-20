@@ -2924,6 +2924,55 @@ describe('firestore security rules', () => {
   });
 
 
+  test('student peer review updates cannot forge staff metadata or replay submission time', async () => {
+    const group = 'groups/review-fields-1';
+    const receipt = `${group}/assignments/task-1/peerReviews/alice`;
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      for (const [uid, role] of [['alice', 'member'], ['bob', 'member'], ['teacher', 'instructor']]) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: 'pu' });
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+        await db.doc(`${group}/members/${uid}`).set({ status: 'active', role });
+      }
+      await db.doc(receipt).set({
+        reviewerId: 'alice', submissionOwnerId: 'bob', comment: '',
+        scores: {}, submittedAt: null, teacherNotes: 'Only staff may change this',
+        gradePublished: false,
+      });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore().doc(receipt);
+    const teacher = testEnv.authenticatedContext('teacher').firestore().doc(receipt);
+    const bob = testEnv.authenticatedContext('bob').firestore().doc(receipt);
+
+    // Normal feedback and live timestamp updates must continue to work.
+    await assertSucceeds(alice.update({
+      comment: 'Clear reasoning', scores: { rubric1: 4 }, updatedAt: serverTimestamp(),
+    }));
+    await assertFails(bob.update({ comment: 'Impersonated reviewer' }));
+    await assertFails(alice.update({ teacherNotes: 'Student overwrite' }));
+    await assertFails(alice.update({ gradePublished: true }));
+    await assertFails(alice.update({ gradeScore: 100 }));
+    await assertFails(alice.update({ comment: 'x'.repeat(4001) }));
+    await assertFails(alice.update({ scores: 'forged scores' }));
+    await assertFails(alice.update({ scores: Object.fromEntries(
+      Array.from({ length: 33 }, (_, i) => [`rubric${i}`, 5]),
+    ) }));
+    await assertFails(alice.update({ updatedAt: new Date('2020-01-01T00:00:00Z') }));
+    await assertFails(alice.update({ submittedAt: new Date('2020-01-01T00:00:00Z') }));
+    await assertSucceeds(alice.update({ submittedAt: serverTimestamp() }));
+    // The submittedAt receipt cannot be removed, backdated or replayed.
+    await assertFails(alice.update({ submittedAt: null }));
+    await assertFails(alice.update({ submittedAt: serverTimestamp() }));
+    await assertSucceeds(teacher.update({ teacherNotes: 'Reviewed by staff' }));
+
+    // A still-valid Firebase auth context must not survive live course revocation.
+    await seedFirestore((db) => db.doc(`${group}/members/alice`).update({ status: 'removed' }));
+    await assertFails(alice.update({ comment: 'Replay after course removal' }));
+    await seedFirestore((db) => db.doc(`${group}/members/alice`).update({ status: 'active' }));
+    await assertSucceeds(alice.update({ comment: 'Reauthorized feedback' }));
+  });
+
   test('stale peer-review documents cannot authorize root submissions, review receipts or writes after campus revocation', async () => {
     const base = 'groups/review-revoke-1';
     const reviewPath = `${base}/assignments/assignment-1/peerReviews/alice`;

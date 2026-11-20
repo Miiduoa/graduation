@@ -1549,6 +1549,23 @@ service cloud.firestore {
         }
 
         match /peerReviews/{reviewerId} {
+          // A reviewer may only edit feedback, not teacher-owned metadata.
+          // Updates to review timestamps must be server-time and submission
+          // must be a one-way transition from an unsubmitted receipt.
+          function validReviewerFeedbackUpdate() {
+            let changed = request.resource.data.diff(resource.data).affectedKeys();
+            return changed.hasOnly(['comment', 'scores', 'submittedAt', 'updatedAt'])
+              && request.resource.data.get('comment', '') is string
+              && request.resource.data.get('comment', '').size() <= 4000
+              && request.resource.data.get('scores', {}) is map
+              && request.resource.data.get('scores', {}).size() <= 32
+              && (!changed.hasAny(['submittedAt'])
+                || (resource.data.get('submittedAt', null) == null
+                  && request.resource.data.get('submittedAt', null) == request.time))
+              && (!changed.hasAny(['updatedAt'])
+                || request.resource.data.get('updatedAt', null) == request.time);
+          }
+
           allow read: if canReadPeerReviewDoc(groupId, assignmentId, reviewerId, resource.data);
           allow create: if canManageGroup(groupId)
             && request.resource.data.reviewerId == reviewerId;
@@ -1558,6 +1575,7 @@ service cloud.firestore {
               && reviewerId == request.auth.uid
               && request.resource.data.reviewerId == resource.data.reviewerId
               && request.resource.data.submissionOwnerId == resource.data.submissionOwnerId
+              && validReviewerFeedbackUpdate()
             );
           allow delete: if canManageGroup(groupId);
         }
