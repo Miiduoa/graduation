@@ -170,3 +170,39 @@ test('portfolio URL cannot open: no duplicate external handoff and a visible ret
     openURL.mockRestore();
   }
 });
+
+test('a late failure from the old portfolio URL does not mark a newly saved link as broken', async () => {
+  let rejectOld: (reason: Error) => void = () => undefined;
+  const openURL = jest.spyOn(Linking, 'openURL')
+    .mockImplementationOnce(() => new Promise<void>((_, reject) => {
+      rejectOld = reject;
+    }))
+    .mockResolvedValue(undefined);
+  jest.mocked(readCreatorCard).mockResolvedValue({
+    headline: '校園攝影', bio: '作品集', linkUrl: 'https://old.example.org/',
+  });
+  jest.mocked(saveCreatorCard).mockResolvedValue({
+    headline: '校園攝影', bio: '作品集', linkUrl: 'https://new.example.org/',
+  });
+  try {
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+    fireEvent.press(await view.findByLabelText('查看作品連結'));
+    expect(openURL).toHaveBeenCalledWith('https://old.example.org/');
+
+    fireEvent.press(view.getByLabelText('編輯社群簡介'));
+    fireEvent.changeText(view.getByLabelText('作品連結'), 'https://new.example.org/');
+    await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+    expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+
+    await act(async () => { rejectOld(new Error('old browser handoff failed')); });
+    expect(view.queryByText('無法開啟作品連結，請稍後再試。')).toBeNull();
+    expect(view.getByLabelText('查看作品連結').props.accessibilityState)
+      .toMatchObject({ disabled: false, busy: false });
+
+    await act(async () => { fireEvent.press(view.getByLabelText('查看作品連結')); });
+    expect(openURL).toHaveBeenCalledTimes(2);
+    expect(openURL).toHaveBeenNthCalledWith(2, 'https://new.example.org/');
+  } finally {
+    openURL.mockRestore();
+  }
+});
