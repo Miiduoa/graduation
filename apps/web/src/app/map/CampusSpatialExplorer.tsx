@@ -92,10 +92,16 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       }
       return JSON.parse(raw) as unknown;
     }
-    // Nonstandard JSON-only fetch bridges (also used by older test mocks)
-    // have no raw-body interface. Still prevent oversized parsed values from
-    // being accepted as verified geometry, although their initial allocation
-    // cannot be bounded here.
+    // A JSON-only WebView bridge exposes no raw bytes. If an identity
+    // Content-Length is present, we cannot verify that the complete HTTP
+    // representation reached JSON.parse(); reserializing the object is not
+    // an equivalent integrity check (whitespace and escaped text can differ).
+    // Fail closed for mapped building outlines, leaving POIs and directions.
+    if (identityLength !== null) {
+      throw new Error('Unverifiable building outline response length');
+    }
+    // Without a declared length, retain the legacy JSON-only fallback with
+    // its post-parse decoded-size check. This cannot cap initial allocation.
     const payload: unknown = await response.json();
     if (signal?.aborted) throw new Error('Building outline read aborted');
     const normalized = JSON.stringify(payload);
