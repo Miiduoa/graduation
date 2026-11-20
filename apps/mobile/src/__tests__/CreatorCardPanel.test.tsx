@@ -58,3 +58,30 @@ test('read error is retryable and never shown as unpublished', async () => {
   expect(await view.findByLabelText('建立社群簡介')).toBeTruthy();
   expect(readCreatorCard).toHaveBeenCalledTimes(2);
 });
+
+
+test('rapid save taps produce one write, and a rejected save can be retried', async () => {
+  let rejectFirst: (reason: Error) => void = () => undefined;
+  jest.mocked(saveCreatorCard).mockImplementationOnce(() => (
+    new Promise((_, reject) => {
+      rejectFirst = (reason) => reject(reason);
+    })
+  ));
+  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+  fireEvent.press(await view.findByLabelText('建立社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), '校園社團活動與攝影作品');
+  act(() => {
+    const saveButton = view.getByLabelText('儲存簡介');
+    fireEvent.press(saveButton);
+    fireEvent.press(saveButton);
+  });
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('正在確認儲存…').props.accessibilityState)
+    .toMatchObject({ disabled: true, busy: true });
+  await act(async () => { rejectFirst(new Error('offline')); });
+  expect(view.getByLabelText('個人簡介').props.value).toBe('校園社團活動與攝影作品');
+  expect(view.getByText(/輸入內容已保留/)).toBeTruthy();
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  expect(saveCreatorCard).toHaveBeenCalledTimes(2);
+  expect(await view.findByText('社群簡介已儲存。')).toBeTruthy();
+});
