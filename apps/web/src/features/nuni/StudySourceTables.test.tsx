@@ -1717,8 +1717,7 @@ it('copies an exact selected lesson row together with optional original headers,
     expect(field.value).toBe(selected.join('\n'));
     fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格第 1 列原文' }));
     expect(copy).toHaveBeenCalledWith(selected.join('\r\n'));
-    expect(copy.mock.calls[0][0]).not.toContain('999');
-    expect(copy.mock.calls[0][0]).not.toContain('| 網路 | 2 |');
+    expect(copy).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain('瀏覽器已接受複製指令'));
     fireEvent.change(range, { target: { value: '1' } });
     expect((screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }) as HTMLInputElement).checked).toBe(false);
