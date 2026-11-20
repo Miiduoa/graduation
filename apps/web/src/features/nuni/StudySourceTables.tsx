@@ -381,13 +381,20 @@ function splitOriginalSourceLines(source: string): OriginalSourceLine[] {
 }
 
 /** Select only the source's original table lines; never reserialize hidden cells. */
-function tableSourceSelection(lines: OriginalSourceLine[], table: StudySourceTable, rowIndex: number | null = null): string {
+function tableSourceSelection(lines: OriginalSourceLine[], table: StudySourceTable, rowIndex: number | null = null, includeHeader = false): string {
   const start = table.startLine - 1;
   if (rowIndex !== null) {
-    // A single data row is copied as its exact source line, without
-    // synthesizing headers, omitting a hidden cell or joining non-adjacent rows.
+    // The default remains the exact data row. Students can explicitly include
+    // its literal header and Markdown separator for a meaningful study excerpt.
+    // Take only authorized source lines, never reserialize cells or include
+    // intervening answers from another row.
     if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= table.rows.length) return '';
-    return lines[start + 2 + rowIndex]?.text ?? '';
+    const chosen = lines[start + 2 + rowIndex];
+    if (!includeHeader) return chosen?.text ?? '';
+    const header = lines[start];
+    const divider = lines[start + 1];
+    if (!header || !divider || !chosen) return '';
+    return header.text + header.separator + divider.text + divider.separator + chosen.text;
   }
   const end = start + table.rows.length + 2;
   const selected = lines.slice(start, end);
@@ -423,9 +430,10 @@ function StudySourceSelection({ table, index, sourceLines }: {
   sourceLines: OriginalSourceLine[];
 }) {
   const [rowIndex, setRowIndex] = useState(-1);
+  const [includeHeader, setIncludeHeader] = useState(false);
   // Use the authorized source, not textarea.value: textareas normalize CRLF
   // to LF, and a stale WebView DOM value is not evidence from the lesson.
-  const selectedSource = tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex);
+  const selectedSource = tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex, includeHeader);
   const [copyFeedback, setCopyFeedback] = useState('');
   const originalText = useRef<HTMLTextAreaElement>(null);
   const copyRequest = useRef(0);
@@ -442,6 +450,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
   useEffect(() => {
     invalidateCopy();
     setRowIndex(-1);
+    setIncludeHeader(false);
     setCopyFeedback('');
   }, [sourceLines, invalidateCopy]);
   useEffect(() => () => { invalidateCopy(); }, [invalidateCopy]);
@@ -548,7 +557,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
       <summary>選取第 {index + 1} 張表格的原文（可複製）</summary>
       <p className={styles.note}>
         可選整張表格或單一資料列的原始 Markdown 行，不重新編造欄位內容。
-        單列不包含欄名，請對照上方表格；可以直接複製，若瀏覽器阻擋剪貼簿權限，仍可長按或鍵盤選取原文。
+        單列預設不包含欄名；若需保留欄位意義，可勾選附上原始欄名及分隔列。若瀏覽器阻擋剪貼簿權限，仍可長按或鍵盤選取原文。
       </p>
       <label>
         原文範圍
@@ -560,6 +569,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
               invalidateCopy();
               setCopyFeedback('');
               setRowIndex(next);
+              setIncludeHeader(false);
             }
           }}>
           <option value={-1}>整張表格（含欄名）</option>
@@ -569,6 +579,16 @@ function StudySourceSelection({ table, index, sourceLines }: {
             </option>)}
         </select>
       </label>
+      {rowIndex >= 0 && (
+        <label>
+          <input type="checkbox" checked={includeHeader} onChange={(event) => {
+            invalidateCopy();
+            setCopyFeedback('');
+            setIncludeHeader(event.target.checked);
+          }} />
+          連同原文欄名與分隔列
+        </label>
+      )}
       <button type="button" onClick={() => {
         const selected = selectSelectedOriginal();
         setCopyFeedback(selected
@@ -595,7 +615,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
         aria-label={`原文表格 ${index + 1} 的可選取文字`}
         readOnly
         spellCheck={false}
-        rows={rowIndex < 0 ? Math.min(8, table.rows.length + 2) : 2}
+        rows={rowIndex < 0 ? Math.min(8, table.rows.length + 2) : includeHeader ? 4 : 2}
         value={selectedSource}
       />
     </details>

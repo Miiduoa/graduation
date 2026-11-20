@@ -1689,6 +1689,43 @@ async function withSourceClipboard(descriptor: PropertyDescriptor, run: () => Pr
   }
 }
 
+
+it('copies an exact selected lesson row together with optional original headers, never hidden teacher rows', async () => {
+  const original = [
+    '<div hidden>',
+    '| 教師未公布 | 數字 |',
+    '| --- | --- |',
+    '| 答案 | 999 |',
+    '</div>',
+    '| 課程 | 學分 |',
+    '| :--- | ---: |',
+    '| SQL \\| NoSQL | 3 |',
+    '| 網路 | 2 |',
+  ].join('\r\n');
+  const copy = vi.fn(() => Promise.resolve());
+  await withSourceClipboard({ value: { writeText: copy } }, async () => {
+    render(<StudySourceTables text={original} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    const range = screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' });
+    fireEvent.change(range, { target: { value: '0' } });
+    const option = screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }) as HTMLInputElement;
+    expect(option.checked).toBe(false);
+    const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+    expect(field.value).toBe('| SQL \\| NoSQL | 3 |');
+    fireEvent.click(option);
+    const selected = ['| 課程 | 學分 |', '| :--- | ---: |', '| SQL \\| NoSQL | 3 |'];
+    expect(field.value).toBe(selected.join('\n'));
+    fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格第 1 列原文' }));
+    expect(copy).toHaveBeenCalledWith(selected.join('\r\n'));
+    expect(copy.mock.calls[0][0]).not.toContain('999');
+    expect(copy.mock.calls[0][0]).not.toContain('| 網路 | 2 |');
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('瀏覽器已接受複製指令'));
+    fireEvent.change(range, { target: { value: '1' } });
+    expect((screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }) as HTMLInputElement).checked).toBe(false);
+    expect(field.value).toBe('| 網路 | 2 |');
+  });
+});
+
 it('copies only the exact chosen source row and confirms only after a clipboard promise resolves', async () => {
   const copy = vi.fn(() => Promise.resolve());
   await withSourceClipboard({ value: { writeText: copy } }, async () => {
