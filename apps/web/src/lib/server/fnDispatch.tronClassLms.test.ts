@@ -486,6 +486,56 @@ it.each([
   expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
 });
 
+it.each(['returned', 'thrown', 'recovered'] as const)(
+  'refetches a fresh legacy 401 courseware extra when the school has %s',
+  async (outcome) => {
+    const { request, source, store } = setup();
+    expect((await request({ courseId: 10001 })).status).toBe(200);
+    const extras = store.docs.get(CACHE)!.extras as Record<string, {
+      fetchedAt: string; expiresAt: string; errors: LmsReadonlySnapshot['courseErrors'];
+    }>;
+    Object.assign(extras['10001'], {
+      fetchedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      errors: [{ courseId: 10001, courseName: LMS_FIXTURE_COURSE.name, area: 'materials', status: 401 }],
+    });
+    const cacheBefore = structuredClone(store.docs.get(CACHE));
+    for (const method of Object.values(source)) vi.mocked(method).mockClear();
+    vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => {
+      if (query !== 'type=courseware_activity') return { ok: true, value: [LMS_FIXTURE_MATERIAL] };
+      if (outcome === 'returned') return { ok: false, status: 401 };
+      if (outcome === 'thrown') throw Object.assign(new Error('HTTP 401'), { status: 401 });
+      return { ok: true, value: [] };
+    });
+
+    const response = await request({ courseId: 10001 });
+    const body = await response.json();
+    expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchCourses).not.toHaveBeenCalled();
+    expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
+    if (outcome !== 'recovered') {
+      expect(body.error.status).toBe('FAILED_PRECONDITION');
+      expect(body.result).toBeUndefined();
+      expect(store.docs.get(CACHE)).toEqual(cacheBefore);
+      expect(store.docs.has(RETRY)).toBe(false);
+      return;
+    }
+    expect(response.status).toBe(200);
+    expect(body.result.cache.hit).toBe(false);
+    expect(body.result.materials).toHaveLength(1);
+    expect(body.result.courseErrors).toEqual([]);
+    expect((store.docs.get(CACHE)!.extras as typeof extras)['10001'].errors).toEqual([]);
+
+    vi.mocked(source.fetchActivities).mockClear();
+    const next = await (await request({ courseId: 10001 })).json();
+    expect(next.result.cache.hit).toBe(true);
+    expect(next.result.materials).toEqual(body.result.materials);
+    expect(next.result.courseErrors).toEqual([]);
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+  },
+);
+
 it.each(['homework', 'activities', 'announcements'] as const)(
   'requires reconnect instead of caching partial course data after a 401 from %s',
   async (feed) => {
@@ -1502,6 +1552,41 @@ it('drops cached contents for courses absent from the linked session course list
   expect(store.docs.get(CACHE)!.extras).toHaveProperty('10001');
   expect(store.docs.get(CACHE)!.extras).not.toHaveProperty('10002');
   for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+});
+
+it('serves legacy cached homework and valid course extras alongside malformed course rows', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const snapshot = store.docs.get(CACHE)!.snapshot as Record<string, unknown>;
+  const courses = snapshot.courses as unknown[];
+  snapshot.courses = [null, 'broken', 42, { name: '沒有課程編號' }, { id: -1 }, ...courses];
+  const extras = store.docs.get(CACHE)!.extras as Record<string, unknown>;
+  extras['10002'] = structuredClone(extras['10001']);
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  for (const data of [{}, { courseId: 10001 }]) {
+    const response = await request(data);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.error).toBeUndefined();
+    expect(body.result.cache.hit).toBe(true);
+    expect(body.result.homework).toHaveLength(2);
+    expect(body.result.contentsLoadedFor).toEqual([10001]);
+    expect(body.result.materials).toHaveLength(1);
+    for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+  }
+  expect(store.docs.get(CACHE)!.extras).not.toHaveProperty('10002');
+
+  // Exercise the course lookup after its extra expires as well as the cache-hit path.
+  Object.assign((store.docs.get(CACHE)!.extras as Record<string, object>)['10001'], {
+    expiresAt: new Date(0).toISOString(),
+  });
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.materials).toHaveLength(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
 });
 
 it('does not prune course contents refreshed after the initial cache read', async () => {
