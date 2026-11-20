@@ -79,6 +79,14 @@ function BoardsContent() {
   const [composeOpen, setComposeOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const loadVersion = useRef(0);
+  // A pending subscription belongs to this mounted student + school scope.
+  const pendingSubscriptionIds = useRef(new Set<string>());
+  const [pendingSubscriptions, setPendingSubscriptions] = useState<ReadonlySet<string>>(new Set());
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const load = useCallback(async () => {
     const version = ++loadVersion.current;
@@ -95,7 +103,16 @@ function BoardsContent() {
       ]);
       if (loadVersion.current !== version) return;
       setBoards(rows);
-      setSubscribed(new Set(subs));
+      // A refresh finishing during a pending write must not erase the student's
+      // optimistic choice. Reconcile the server snapshot after the write settles.
+      setSubscribed((previous) => {
+        const next = new Set(subs);
+        for (const id of pendingSubscriptionIds.current) {
+          if (previous.has(id)) next.add(id);
+          else next.delete(id);
+        }
+        return next;
+      });
     } catch (cause) {
       if (loadVersion.current !== version) return;
       const code = (cause as { code?: string })?.code ?? '';
@@ -157,10 +174,14 @@ function BoardsContent() {
         if (!uid) Alert.alert('請登入', '登入後即可訂閱看板');
         return;
       }
+      // React state may not have rerendered between two native presses.
+      // Ref-level exclusion prevents opposite writes for the same board.
+      if (pendingSubscriptionIds.current.has(b.id)) return;
+      pendingSubscriptionIds.current.add(b.id);
+      setPendingSubscriptions(new Set(pendingSubscriptionIds.current));
       const wasSub = subscribed.has(b.id);
-      // 樂觀更新
-      setSubscribed((prev) => {
-        const next = new Set(prev);
+      setSubscribed((previous) => {
+        const next = new Set(previous);
         if (wasSub) next.delete(b.id);
         else next.add(b.id);
         return next;
@@ -168,15 +189,21 @@ function BoardsContent() {
       try {
         if (wasSub) await unsubscribeFromBoard(uid, sid, b.id);
         else await subscribeToBoard(uid, sid, b.id);
-      } catch (e: any) {
-        Alert.alert('訂閱失敗', e?.message ?? String(e));
-        // 還原
-        setSubscribed((prev) => {
-          const next = new Set(prev);
-          if (wasSub) next.add(b.id);
-          else next.delete(b.id);
-          return next;
-        });
+      } catch (error: any) {
+        // A delayed failure from the previous user/school must not alert or
+        // revert the currently mounted student's board subscriptions.
+        if (mounted.current) {
+          setSubscribed((previous) => {
+            const next = new Set(previous);
+            if (wasSub) next.add(b.id);
+            else next.delete(b.id);
+            return next;
+          });
+          Alert.alert('訂閱失敗', error?.message ?? String(error));
+        }
+      } finally {
+        pendingSubscriptionIds.current.delete(b.id);
+        if (mounted.current) setPendingSubscriptions(new Set(pendingSubscriptionIds.current));
       }
     },
     [auth.user?.uid, school?.id, subscribed],
@@ -261,6 +288,7 @@ function BoardsContent() {
             }
             const b = item.board;
             const isSub = subscribed.has(b.id);
+            const isPending = pendingSubscriptions.has(b.id);
             return (
               <Pressable
                 style={styles.row}
@@ -301,11 +329,16 @@ function BoardsContent() {
                 </View>
                 <Pressable
                   hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${isSub ? '取消訂閱' : '訂閱'}${b.name}`}
+                  accessibilityHint={isPending ? '正在同步訂閱狀態' : '向伺服器更新本校看板訂閱'}
+                  accessibilityState={{ disabled: isPending, busy: isPending }}
+                  disabled={isPending}
                   onPress={(e) => {
                     e.stopPropagation?.();
                     void onToggleSubscribe(b);
                   }}
-                  style={[styles.subBtn, isSub && styles.subBtnOn]}
+                  style={[styles.subBtn, isSub && styles.subBtnOn, isPending && { opacity: 0.65 }]}
                 >
                   <Ionicons
                     name={isSub ? 'notifications' : 'notifications-outline'}
@@ -553,6 +586,7 @@ const createStyles = () => StyleSheet.create({
 
   subBtn: {
     flexDirection: 'row',
+    minHeight: 44,
     alignItems: 'center',
     gap: 5,
     paddingHorizontal: 10,

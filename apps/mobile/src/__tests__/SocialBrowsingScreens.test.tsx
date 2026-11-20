@@ -9,7 +9,7 @@ import { BoardsScreen } from '../screens/social/BoardsScreen';
 import { CommunityScreen } from '../screens/CommunityScreen';
 import { fetchRecentCampusPosts, toggleCampusPostLike } from '../services/feed';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
-import { listBoards, listSubscribedBoardIds } from '../services/boards';
+import { listBoards, listSubscribedBoardIds, subscribeToBoard, unsubscribeFromBoard } from '../services/boards';
 import { listActiveStoriesForSchool, markStoryViewed } from '../services/stories';
 import { listFollowingIds, followUser } from '../services/follows';
 import {
@@ -241,6 +241,73 @@ test.each(screens)(
     if (Component === BoardsScreen) expect(view.getByText('已訂閱')).toBeTruthy();
   },
 );
+
+test('board subscription blocks repeat taps, keeps a pending choice during refresh, and permits undo', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  let finish!: () => void;
+  jest.mocked(subscribeToBoard).mockImplementationOnce(
+    () => new Promise<void>((resolve) => { finish = resolve; }),
+  );
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+  const pending = view.getByLabelText('取消訂閱讀書會');
+  expect(pending.props.accessibilityState).toMatchObject({ busy: true, disabled: true });
+  fireEvent.press(pending);
+  expect(subscribeToBoard).toHaveBeenCalledTimes(1);
+  expect(subscribeToBoard).toHaveBeenCalledWith('alice', 'pu', 'board');
+
+  await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  expect(view.getByLabelText('取消訂閱讀書會').props.accessibilityState.disabled).toBe(true);
+  await act(async () => { finish(); });
+  expect(view.getByLabelText('取消訂閱讀書會').props.accessibilityState.disabled).toBe(false);
+  await act(async () => { fireEvent.press(view.getByLabelText('取消訂閱讀書會')); });
+  expect(unsubscribeFromBoard).toHaveBeenCalledTimes(1);
+  expect(unsubscribeFromBoard).toHaveBeenCalledWith('alice', 'pu', 'board');
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+});
+
+test('failed board subscription rolls back and allows an explicit retry', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  let fail!: (error: Error) => void;
+  jest.mocked(subscribeToBoard).mockImplementationOnce(
+    () => new Promise<void>((_resolve, reject) => { fail = reject; }),
+  );
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+  expect(view.getByLabelText('取消訂閱讀書會').props.accessibilityState.disabled).toBe(true);
+  await act(async () => { fail(new Error('offline')); });
+  expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
+  expect(view.getByLabelText('訂閱讀書會').props.accessibilityState.disabled).toBe(false);
+  await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+  expect(subscribeToBoard).toHaveBeenCalledTimes(2);
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
+test('a subscription failure from the prior school never alerts or reverts the new scope', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  let fail!: (error: Error) => void;
+  jest.mocked(subscribeToBoard).mockImplementationOnce(
+    () => new Promise<void>((_resolve, reject) => { fail = reject; }),
+  );
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+  expect(subscribeToBoard).toHaveBeenCalledWith('alice', 'pu', 'board');
+
+  mockSchoolId = 'other';
+  view.rerender(<BoardsScreen />);
+  await view.findByText('讀書會');
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+  await act(async () => { fail(new Error('stale offline')); });
+  expect(alertSpy).not.toHaveBeenCalled();
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+  await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+  expect(subscribeToBoard).toHaveBeenLastCalledWith('alice', 'other', 'board');
+});
 
 test('a story read failure is reported without wiping the existing feed', async () => {
   jest.mocked(fetchRecentCampusPosts).mockResolvedValue([post]);
