@@ -107,6 +107,48 @@ it('does not allocate offscreen WebGL or start its deadline until the canvas ent
   }
 });
 
+it('does not start or resume WebGL when the canvas only touches the viewport edge', async () => {
+  // IntersectionObserver may report isIntersecting=true on an edge-adjacent
+  // target even when its intersection rectangle has zero visible area.
+  // This synthetic case checks GPU activation boundaries, not phone FPS.
+  let observedHost: Element | null = null;
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe(target: Element) { observedHost = target; }
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  expect(observedHost).toBe(graphics);
+  expect(scene.create).not.toHaveBeenCalled();
+
+  const notify = (time: number, width: number, height: number) => {
+    const entries = [{
+      isIntersecting: true, target: graphics, time,
+      intersectionRect: { width, height },
+    }] as unknown as IntersectionObserverEntry[];
+    act(() => intersection?.(entries, {} as IntersectionObserver));
+  };
+  notify(100, 0, 160);
+  expect(scene.create).not.toHaveBeenCalled();
+  expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+  notify(110, 280, 160);
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+  notify(120, 280, 0);
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  notify(130, 280, 160);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('uses the latest viewport state when a fast mobile scroll batches observer entries', async () => {
   // A queued offscreen state followed by onscreen in one callback must start
   // WebGL once. The inverse order must suspend it, not keep rendering offscreen.
