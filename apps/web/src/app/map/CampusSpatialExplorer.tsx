@@ -277,6 +277,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const appearance = useSyncExternalStore(subscribeAppearance, readAppearance, () => 'reduced:light');
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<'loading' | 'deferred' | 'ready' | 'error'>('loading');
+  // Some mobile WebViews never report a fresh onscreen entry after suspending a
+  // running scene. Keep a visible recovery control instead of a frozen canvas.
+  const [renderSuspended, setRenderSuspended] = useState(false);
   const [deferredCause, setDeferredCause] = useState<'background' | 'offscreen'>('background');
   const [attempt, setAttempt] = useState(0);
   // An embedded WebView may construct an observer but never deliver entries.
@@ -319,7 +322,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     if (isDeferred()) defer();
     else setStatus('loading');
 
-    const updateVisibility = () => scene?.setActive(visible && !isBackgrounded());
+    const updateVisibility = () => {
+      if (!scene) return;
+      const shouldRender = visible && !isBackgrounded();
+      scene.setActive(shouldRender);
+      setRenderSuspended(!shouldRender);
+    };
     const fail = () => {
       if (!active) return;
       active = false;
@@ -528,6 +536,17 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
               重試立體畫面
             </button>
           </>}
+        </div>
+      )}
+      {status === 'ready' && renderSuspended && (
+        <div className={styles.sceneMessage} role="status">
+          <p>立體畫面已暫停。回到空間圖會自動恢復；若沒有恢復，可手動重新啟動。</p>
+          <button className="btn" type="button" onClick={() => {
+            // The recovery button disappears while the scene restarts; keep
+            // keyboard focus within the tour instead of losing it to body.
+            host?.focus();
+            setManualStart(true);
+          }}>重新啟動立體畫面</button>
         </div>
       )}
       <span className={styles.sceneCaption}>地點位置示意</span>
