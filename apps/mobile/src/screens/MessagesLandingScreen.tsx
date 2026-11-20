@@ -1,108 +1,106 @@
-import React, { useSyncExternalStore } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import React from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MESSAGING_NAV_SECTIONS } from '@campus/shared/src/academicSections';
 import { DmsScreen } from './DmsScreen';
-import { getThemeVersion, subscribeToTheme, theme } from '../ui/theme';
+import { theme } from '../ui/theme';
+import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { safeNavigate } from '../utils/safeNavigate';
-import { rootNavigateNested } from '../app/rootNavigation';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
 
 const NOTIFY_SECTION = MESSAGING_NAV_SECTIONS[0];
-const DM_SECTION = MESSAGING_NAV_SECTIONS[1];
 
 export function MessagesLandingScreen({ navigation }: ServiceScreenProps) {
-  useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
+  const s = useThemeStyleSheet(createStyles);
   const insets = useSafeAreaInsets();
+  const actions = [
+    {
+      label: '校園社群',
+      accessibilityLabel: '前往校園社群',
+      icon: 'people-outline' as const,
+      onPress: () => safeNavigate(navigation, 'CampusSocialScreen'),
+    },
+    {
+      label: '好友與邀請',
+      accessibilityLabel: '搜尋同學或管理好友邀請',
+      icon: 'person-add-outline' as const,
+      onPress: () => safeNavigate(navigation, 'FriendsManage'),
+    },
+    {
+      label: '我的群組',
+      accessibilityLabel: '前往我的群組',
+      icon: 'chatbubbles-outline' as const,
+      onPress: () => safeNavigate(navigation, 'Groups'),
+    },
+    {
+      label: NOTIFY_SECTION.label,
+      accessibilityLabel: `前往${NOTIFY_SECTION.label}`,
+      icon: 'notifications-outline' as const,
+      onPress: () => safeNavigate(navigation, NOTIFY_SECTION.mobileScreen),
+    },
+  ];
+
   return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      <View
-        style={{
-          paddingTop: Math.max(insets.top, 8) + 10,
-          paddingHorizontal: 18,
-          paddingBottom: 18,
-          borderBottomWidth: 1,
-          borderBottomColor: theme.colors.border,
-        }}
-      >
-        <Text style={{ fontSize: 28, fontWeight: '800', letterSpacing: -0.6, color: theme.colors.text }}>
-          {DM_SECTION.label}
+    <View style={s.page}>
+      <View style={[s.header, { paddingTop: Math.max(insets.top, 8) + 10 }]}>
+        <Text accessibilityRole="header" style={s.title}>
+          交流
         </Text>
-        <Text style={{ color: theme.colors.textSecondary, marginTop: 6, lineHeight: 20, fontSize: 13 }}>
-          本校對話即時更新。這裡是私訊；服務通知請走「{NOTIFY_SECTION.label}」。
-        </Text>
-        <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`前往${NOTIFY_SECTION.label}`}
-            onPress={() =>
-              rootNavigateNested(NOTIFY_SECTION.mobileTab, NOTIFY_SECTION.mobileScreen)
-            }
-            style={({ pressed }) => ({
-              flex: 1,
-              minHeight: 58,
-              borderRadius: 14,
-              paddingHorizontal: 14,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 10,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              backgroundColor: theme.colors.surface,
-              opacity: pressed ? 0.75 : 1,
-            })}
-          >
-            <Ionicons name="notifications-outline" size={22} color={theme.colors.accent} />
-            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
-              {NOTIFY_SECTION.label}
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="前往我的群組"
-            onPress={() => safeNavigate(navigation, 'Groups')}
-            style={({ pressed }) => ({
-              flex: 1,
-              minHeight: 58,
-              borderRadius: 14,
-              paddingHorizontal: 14,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 10,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              backgroundColor: theme.colors.surface,
-              opacity: pressed ? 0.75 : 1,
-            })}
-          >
-            <Ionicons name="people-outline" size={22} color={theme.colors.accent} />
-            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>我的群組</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="搜尋同學或管理好友邀請"
-            onPress={() => safeNavigate(navigation, 'FriendsManage')}
-            style={({ pressed }) => ({
-              flex: 1,
-              minHeight: 58,
-              borderRadius: 14,
-              paddingHorizontal: 14,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 10,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              backgroundColor: theme.colors.surface,
-              opacity: pressed ? 0.75 : 1,
-            })}
-          >
-            <Ionicons name="person-add-outline" size={22} color={theme.colors.accent} />
-            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>好友與邀請</Text>
-          </Pressable>
+        <Text style={s.subtitle}>聊近況、找同學，接續你的對話。</Text>
+        <View style={s.actions}>
+          {actions.map((action) => (
+            <Pressable
+              key={action.label}
+              accessibilityRole="button"
+              accessibilityLabel={action.accessibilityLabel}
+              onPress={action.onPress}
+              style={({ pressed }) => [s.action, pressed && s.pressed]}
+            >
+              <Ionicons name={action.icon} size={20} color={theme.colors.accent} />
+              <Text style={s.actionLabel}>{action.label}</Text>
+              <Ionicons name="chevron-forward" size={14} color={theme.colors.muted} />
+            </Pressable>
+          ))}
         </View>
+        <Text accessibilityRole="header" style={s.inboxHeading}>
+          私訊
+        </Text>
       </View>
       <DmsScreen navigation={navigation} />
     </View>
   );
 }
+
+const createStyles = () =>
+  StyleSheet.create({
+    page: { flex: 1, backgroundColor: theme.colors.bg },
+    header: { paddingHorizontal: 18, paddingBottom: 8 },
+    title: { fontSize: 28, fontWeight: '700', letterSpacing: -0.6, color: theme.colors.text },
+    subtitle: { color: theme.colors.textSecondary, marginTop: 6, lineHeight: 20, fontSize: 13 },
+    actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 },
+    action: {
+      flexBasis: '45%',
+      flexGrow: 1,
+      minWidth: 130,
+      minHeight: 52,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+    },
+    actionLabel: {
+      flex: 1,
+      color: theme.colors.text,
+      fontWeight: '600',
+      fontSize: 14,
+      lineHeight: 20,
+    },
+    inboxHeading: { color: theme.colors.text, fontWeight: '600', fontSize: 17, marginTop: 18 },
+    pressed: { backgroundColor: theme.colors.surfaceInteractive },
+  });

@@ -57,6 +57,10 @@ it('shows the unsigned entry without the old preview card or long copy', async (
   render(<AccountPage />);
   expect(await screen.findByRole('button', { name: '登入校園帳號' })).toBeTruthy();
   expect(screen.getByRole('heading', { name: '登入' })).toBeTruthy();
+  const roles = screen.getByLabelText('其他身分與工作入口') as HTMLDetailsElement;
+  expect(roles.open).toBe(false);
+  expect(screen.getByRole('link', { name: '第一次申請店家進駐' }).closest('details')).toBe(roles);
+  fireEvent.click(roles.querySelector('summary')!);
   expect(screen.getByRole('link', { name: '第一次申請店家進駐' }).getAttribute('href')).toBe('/merchant/apply');
   expect(screen.getByRole('link', { name: '查看申請或進入門市' }).getAttribute('href')).toBe('/merchant/workspace');
   expect(screen.getByRole('link', { name: '平台管理員登入' }).getAttribute('href')).toBe('/admin/login');

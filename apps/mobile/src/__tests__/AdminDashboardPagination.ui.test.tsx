@@ -129,10 +129,13 @@ test('announcement management opens the public feed and the exact school announc
   await waitFor(() => expect(view.getAllByText('查看公開頁').length).toBeGreaterThan(0));
   fireEvent.press(view.getByText('查看公開公告列表'));
   expect(navigate).toHaveBeenLastCalledWith('Today', {
-    screen: '公告總覽', params: undefined,
+    initial: false,
+    screen: '公告總覽',
+    params: undefined,
   });
   fireEvent.press(view.getAllByText('查看公開頁')[0]);
   expect(navigate).toHaveBeenLastCalledWith('Today', {
+    initial: false,
     screen: '公告詳情',
     params: { id: 'ann-0', schoolId: 'pu', sourceKind: 'school-announcement' },
   });
@@ -147,5 +150,9 @@ test('empty announcement management still links to the public feed', async () =>
   fireEvent.press(view.getByRole('tab', { name: '公告' }));
   await waitFor(() => expect(view.getByText('尚無公告')).toBeTruthy());
   fireEvent.press(view.getByText('查看公開公告列表'));
-  expect(navigate).toHaveBeenCalledWith('Today', { screen: '公告總覽', params: undefined });
+  expect(navigate).toHaveBeenCalledWith('Today', {
+    initial: false,
+    screen: '公告總覽',
+    params: undefined,
+  });
 });

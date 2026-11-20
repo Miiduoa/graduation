@@ -1202,6 +1202,20 @@ it('shows clear source choices and never starts a model download without choosin
   );
 });
 
+it('keeps the local fallback download notice visible when cloud image consent is enabled', async () => {
+  window.history.replaceState(null, '', '/import?kind=timetable');
+  context.session = {
+    platformAccountId: 'pa_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    context: 'verified-account-context', isPlatformOperator: false,
+  };
+  vi.mocked(browserRequest).mockResolvedValue({ workspaces: [] });
+  render(<PersonalImportCenter />);
+  fireEvent.click(screen.getByLabelText('同意上傳原始課表截圖給雲端視覺模型'));
+  expect(screen.getByText(/你已選擇雲端看圖/)).toBeTruthy();
+  expect(screen.getByText(/本機備援模型首次下載約 1.9 GB/)).toBeTruthy();
+  expect(runPersonalImportAi).not.toHaveBeenCalled();
+});
+
 it('explains unsupported AI while preserving ordinary import paths', async () => {
   vi.mocked(getPersonalImportAiAvailability).mockReturnValue({
     available: false,
@@ -1884,7 +1898,7 @@ it('拆分未勾選課程後，所有單節仍排除於正式匯入', async () =
   await prepare('課程名稱,星期,開始節次,結束節次\n排除課程,一,1,2\n保留課程,二,3,3');
   fireEvent.click(screen.getByRole('checkbox', { name: /第 1 筆/ }));
   fireEvent.click(screen.getAllByRole('button', { name: '拆成單節課程' })[0]);
-  const boxes = screen.getAllByRole('checkbox') as HTMLInputElement[];
+  const boxes = screen.getAllByRole('checkbox', { name: /第 \d+ 筆/ }) as HTMLInputElement[];
   expect(boxes.filter((box) => !box.checked)).toHaveLength(2);
   expect(screen.queryByRole('button', { name: '修正星期一第2節 排除課程' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));

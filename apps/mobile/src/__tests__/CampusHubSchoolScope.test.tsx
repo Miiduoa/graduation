@@ -32,11 +32,11 @@ beforeEach(() => {
 test('行事曆入口先說明校園事件，並保留個人行程與課表的去向', () => {
   const navigation = { navigate: jest.fn() };
   const view = render(<CampusHubScreen navigation={navigation} />);
+  fireEvent.changeText(view.getByPlaceholderText('搜尋地點或服務'), '行事曆');
   const entry = view.getByRole('button', {
     name: '校園行事曆，校園活動與作業截止；個人行程、課表另開',
   });
   expect(view.queryByText('課程與自己的安排')).toBeNull();
-  expect(view.getByText('校園活動')).toBeTruthy();
   fireEvent.press(entry);
   expect(safeNavigate).toHaveBeenCalledWith(navigation, 'SmartCalendarScreen', undefined, {
     fallbackMessage: '「校園行事曆」目前無法開啟。',
@@ -49,7 +49,7 @@ test.each(['個人行程', '課表', '行事曆'])('搜尋 %s 仍找得到分流
   expect(view.getByText('校園行事曆')).toBeTruthy();
 });
 
-test.each(['住宿', '宿舍', '職涯', '實習', '入住', '就業'])(
+test.each(['住宿', '宿舍', '入住'])(
   'campus home reaches current school information when looking for %s',
   (keyword) => {
     const navigation = { navigate: jest.fn() };
@@ -62,11 +62,27 @@ test.each(['住宿', '宿舍', '職涯', '實習', '入住', '就業'])(
   },
 );
 
+test.each(['職涯', '實習', '工讀', '就業', '工作', '徵才', '履歷', '求職'])(
+  '搜尋 %s 直接開啟職涯服務，不再只到學校資訊',
+  (keyword) => {
+    const navigation = { navigate: jest.fn() };
+    const view = render(<CampusHubScreen navigation={navigation} />);
+    fireEvent.changeText(view.getByLabelText('搜尋校園服務'), keyword);
+    expect(view.queryByText('學校資訊')).toBeNull();
+    fireEvent.press(view.getByRole('button', { name: '職涯，找實習、工讀與校方職涯資訊' }));
+    expect(safeNavigate).toHaveBeenCalledWith(navigation, 'Career', undefined, {
+      fallbackMessage: '「職涯」目前無法開啟。',
+    });
+  },
+);
+
 test('Taichung-specific transport entry is only available in its original PU context', () => {
   const view = render(<CampusHubScreen />);
+  fireEvent.press(view.getByRole('button', { name: /^展開出行與設施/ }));
   expect(view.getByText('台中交通')).toBeTruthy();
   mockSchool = { id: 'nthu', name: '國立清華大學' };
   view.rerender(<CampusHubScreen />);
+  fireEvent.press(view.getByRole('button', { name: /^展開出行與設施/ }));
   expect(view.queryByText('台中交通')).toBeNull();
   expect(view.getByText('國立清華大學')).toBeTruthy();
   expect(view.getByText('圖書館')).toBeTruthy();
@@ -74,9 +90,11 @@ test('Taichung-specific transport entry is only available in its original PU con
 
 test('closed modules stay out of the directory while official information has clear entries', () => {
   const view = render(<CampusHubScreen />);
+  fireEvent.press(view.getByRole('button', { name: /^展開餐飲與住宿/ }));
+  fireEvent.press(view.getByRole('button', { name: /^展開校園資源/ }));
   expect(view.getByText('宿舍')).toBeTruthy();
-  expect(view.queryByText('職涯')).toBeNull();
-  expect(view.queryByText('社團')).toBeNull();
+  expect(view.getByText('職涯')).toBeTruthy();
+  expect(view.getByText('社團')).toBeTruthy();
   expect(view.queryByText('校園錢包')).toBeNull();
   expect(view.queryByText('報修')).toBeNull();
   expect(view.queryByText('住宿資訊')).toBeNull();
@@ -90,6 +108,7 @@ test('frequent services open their actual routes without duplicate map entries',
   expect(view.getAllByText('校園地圖')).toHaveLength(1);
   fireEvent.press(view.getByTestId('e2e-campus-open-map'));
   expect(safeNavigate).toHaveBeenCalledWith(navigation, 'MapV2', undefined, expect.any(Object));
+  fireEvent.press(view.getByRole('button', { name: /^展開校園資源/ }));
   fireEvent.press(view.getByText('學校資訊'));
   expect(safeNavigate).toHaveBeenLastCalledWith(
     navigation,
@@ -99,11 +118,31 @@ test('frequent services open their actual routes without duplicate map entries',
   );
 });
 
+test.each(['社團', '入社', '幹部', '社課'])(
+  '搜尋 %s 直接進社團目錄，沒有重複的活動替代捷徑',
+  (keyword) => {
+    const navigation = { navigate: jest.fn() };
+    const view = render(<CampusHubScreen navigation={navigation} />);
+    fireEvent.changeText(view.getByLabelText('搜尋校園服務'), keyword);
+    fireEvent.press(view.getByRole('button', { name: '社團，找社團、查看已加入社團與活動' }));
+    expect(safeNavigate).toHaveBeenCalledWith(navigation, 'Clubs', undefined, {
+      fallbackMessage: '「社團」目前無法開啟。',
+    });
+    expect(view.queryByRole('button', { name: '依需求前往社團' })).toBeNull();
+  },
+);
+
 test('lost-found uses the Google platform entry while its screen retains the explicit legacy source', () => {
   const navigation = { navigate: jest.fn() };
   const view = render(<CampusHubScreen navigation={navigation} />);
+  fireEvent.press(view.getByRole('button', { name: /^展開校園資源/ }));
   fireEvent.press(view.getByText('失物招領'));
-  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'PlatformLostFound', undefined, expect.any(Object));
+  expect(safeNavigate).toHaveBeenCalledWith(
+    navigation,
+    'PlatformLostFound',
+    undefined,
+    expect.any(Object),
+  );
 });
 
 test('the compact school control opens the picker directly from campus services', async () => {
@@ -138,6 +177,7 @@ test('changing school resets the search and regional service matches', () => {
 test('the wallet is offered only when payments are available', () => {
   mockPaymentsEnabled = true;
   const view = render(<CampusHubScreen />);
+  fireEvent.press(view.getByRole('button', { name: /^展開餐飲與住宿/ }));
   expect(view.getByText('校園錢包')).toBeTruthy();
 });
 
@@ -186,7 +226,7 @@ test.each([
 ])('搜尋「%s」可直接開啟目錄上的服務', (query, title, route) => {
   const navigation = { navigate: jest.fn() };
   const view = render(<CampusHubScreen navigation={navigation} />);
-  expect(view.getByText(title)).toBeTruthy();
+  expect(view.queryByText(title)).toBeNull();
   fireEvent.changeText(view.getByLabelText('搜尋校園服務'), query);
   fireEvent.press(view.getByText(title));
   expect(safeNavigate).toHaveBeenCalledWith(navigation, route, undefined, expect.any(Object));
@@ -197,7 +237,100 @@ test('站內點餐的訂單和 App 校園餐廳的訂單有各自的入口', () 
   const view = render(<CampusHubScreen navigation={navigation} />);
   fireEvent.changeText(view.getByLabelText('搜尋校園服務'), '訂單紀錄');
   fireEvent.press(view.getByText('站內點餐'));
-  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'NuniWorkspace', { tab: 'food' }, expect.any(Object));
+  expect(safeNavigate).toHaveBeenCalledWith(
+    navigation,
+    'NuniWorkspace',
+    { tab: 'food' },
+    expect.any(Object),
+  );
   fireEvent.press(view.getByText('我的訂單'));
-  expect(safeNavigate).toHaveBeenLastCalledWith(navigation, 'StudentOrders', undefined, expect.any(Object));
+  expect(safeNavigate).toHaveBeenLastCalledWith(
+    navigation,
+    'StudentOrders',
+    undefined,
+    expect.any(Object),
+  );
+});
+
+test('生活先顯示常用任務，交流與課務仍能經搜尋直達', () => {
+  const navigation = { navigate: jest.fn() };
+  const view = render(<CampusHubScreen navigation={navigation} />);
+  expect(view.queryByText('校園社群')).toBeNull();
+  expect(view.queryByText('找人')).toBeNull();
+  expect(view.queryByText('校園行事曆')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('搜尋校園服務'), '社群');
+  expect(view.getByText('交流與課務')).toBeTruthy();
+  fireEvent.press(view.getByText('校園社群'));
+  expect(safeNavigate).toHaveBeenCalledWith(
+    navigation,
+    'CampusSocialScreen',
+    undefined,
+    expect.any(Object),
+  );
+});
+
+test('更多生活服務可展開或搜尋，清空搜尋不改變原本的展開狀態', () => {
+  const view = render(<CampusHubScreen />);
+  expect(view.queryByText('列印')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('搜尋校園服務'), '列印');
+  expect(view.getByText('列印')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '清除搜尋' }));
+  expect(view.queryByText('列印')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: /^展開校園資源/ }));
+  expect(view.getByText('列印')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('搜尋校園服務'), '公車');
+  fireEvent.press(view.getByRole('button', { name: '清除搜尋' }));
+  expect(view.getByText('列印')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: /^收合校園資源/ }));
+  expect(view.queryByText('列印')).toBeNull();
+});
+
+test('搜尋與展開都不能啟用未開放的支付服務', () => {
+  const view = render(<CampusHubScreen />);
+  fireEvent.press(view.getByRole('button', { name: /^展開餐飲與住宿/ }));
+  expect(view.queryByText('校園錢包')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('搜尋校園服務'), '支付');
+  expect(view.queryByText('校園錢包')).toBeNull();
+});
+
+
+test('只先顯示常用服務，分類按需展開；搜尋仍會找到收合項目且不改變原展開狀態', () => {
+  const view = render(<CampusHubScreen />);
+  for (const title of ['校園地圖', '餐廳', '校園公車', '圖書館']) expect(view.getByText(title)).toBeTruthy();
+  expect(view.queryByText('校園活動')).toBeNull();
+  expect(view.queryByText('宿舍')).toBeNull();
+  const toggle = view.getByRole('button', { name: /^展開校園資源/ });
+  expect(toggle.props.accessibilityState.expanded).toBe(false);
+  fireEvent.press(toggle);
+  expect(view.getByText('校園活動')).toBeTruthy();
+  expect(view.getByRole('button', { name: /^收合校園資源/ }).props.accessibilityState.expanded).toBe(true);
+  fireEvent.changeText(view.getByLabelText('搜尋校園服務'), '報修');
+  expect(view.getByText('宿舍')).toBeTruthy();
+  expect(view.queryByRole('button', { name: /^展開餐飲與住宿/ })).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '清除搜尋' }));
+  expect(view.queryByText('宿舍')).toBeNull();
+  expect(view.getByText('校園活動')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: /^收合校園資源/ }));
+  expect(view.queryByText('校園活動')).toBeNull();
+});
+
+test('換校會清除原分類展開，避免沿用另一校的服務狀態', () => {
+  const view = render(<CampusHubScreen />);
+  fireEvent.press(view.getByRole('button', { name: /^展開餐飲與住宿/ }));
+  expect(view.getByText('宿舍')).toBeTruthy();
+  mockSchool = { id: 'nthu', name: '國立清華大學' };
+  view.rerender(<CampusHubScreen />);
+  expect(view.queryByText('宿舍')).toBeNull();
+  expect(view.getByRole('button', { name: /^展開餐飲與住宿/ }).props.accessibilityState.expanded).toBe(false);
+});
+
+test('失物搜尋與自然語句捷徑使用同一平台入口，不重複顯示舊校務目的地', () => {
+  const navigation = { navigate: jest.fn() };
+  const view = render(<CampusHubScreen navigation={navigation} />);
+  fireEvent.changeText(view.getByLabelText('搜尋校園服務'), '失物招領');
+  expect(view.getAllByText('失物招領')).toHaveLength(1);
+  expect(view.queryByLabelText('依需求前往失物招領')).toBeNull();
+  fireEvent.changeText(view.getByLabelText('搜尋校園服務'), '我找不到我的東西');
+  fireEvent.press(view.getByLabelText('依需求前往失物招領'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'PlatformLostFound', undefined, expect.any(Object));
 });
