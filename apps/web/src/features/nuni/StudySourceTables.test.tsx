@@ -640,6 +640,39 @@ it('does not draw misleading bars for formulas, dates, percentages, units or amb
   expect(container.querySelector('meter')).toBeNull();
 });
 
+it('does not turn ordinal priority, severity or difficulty levels into misleading bars', () => {
+  for (const header of [
+    '優先級', '優先順序', '嚴重程度', '風險等級', '難度', '難度等級',
+    '危險等級', '等級', 'Priority', 'Priority Level', 'Severity',
+    'Risk Level', 'Difficulty', 'Level', 'Tier', 'Level (1-5)', 'Tier No.',
+  ]) {
+    const material = ['| 課程 | ' + header + ' |', '| --- | --- |',
+      '| 資料庫 | 1 |', '| 網路 | 4 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual(['1', '4']);
+    expect(comparisonSummaries(container)).toEqual([]);
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+});
+
+it('still compares explicit counts of ordinal categories', () => {
+  for (const header of [
+    '優先級數', '風險等級數量', '各難度人數', '風險等級總數',
+    'Level Count', 'Number of Levels', 'Priority Count',
+    'Severity Count', 'Tier Count',
+  ]) {
+    const material = ['| 對象 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter'))
+      .map((meter) => [meter.getAttribute('value'), meter.getAttribute('max')]))
+      .toEqual([['2', '4'], ['4', '4']]);
+    unmount();
+  }
+});
+
 it('does not compare numeric ordinals, class levels or pages as quantities', () => {
   for (const header of [
     '學年', '學年（民國）', '學期', '年級', '班級', '頁碼（PDF）', '頁次',

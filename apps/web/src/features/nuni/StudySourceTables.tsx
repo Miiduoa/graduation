@@ -91,6 +91,15 @@ const ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN =
 const SCORE_COUNT_COLUMN =
   /(?:人數|筆數|次數|數量|總數|件數|\b(?:count|number\s+of|quantity|entries)\b)/iu;
 
+// Ranked priority, severity and difficulty levels are ORDINAL, not quantities.
+// Do not imply that level 4 is twice level 2; counts OF levels remain measurable.
+const NON_RATIO_ORDINAL_LEVEL_COLUMN =
+  /(?:優先(?:順序|序位|級別|等級|級)|優先度|嚴重(?:程度|度|等級)|風險(?:等級|級別|程度)|難度(?:等級|級別)?|危險(?:等級|程度)|等級|級別)/u;
+const ENGLISH_NON_RATIO_ORDINAL_LEVEL_COLUMN =
+  /\b(?:priority|severity|difficulty|tier|level|risk\s+(?:level|grade|category))\b/iu;
+const ORDINAL_COUNT_COLUMN =
+  /(?:人數|數量|總數|次數|筆數|件數|個數|級數|\b(?:count|total|number\s+of|quantity|entries)\b)/iu;
+
 function isPercentageColumn(header: string): boolean {
   return SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header) ||
     SOURCE_RATE_OR_RATIO_COLUMN.test(header) || ENGLISH_RATE_OR_RATIO_COLUMN.test(header);
@@ -121,7 +130,10 @@ function isNonRatioColumn(header: string): boolean {
        !ENGLISH_STATUS_COUNT_COLUMN.test(column)) ||
       ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
         ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN.test(column)) &&
-       !SCORE_COUNT_COLUMN.test(column))) return true;
+       !SCORE_COUNT_COLUMN.test(column)) ||
+       ((NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column) ||
+         ENGLISH_NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column)) &&
+        !ORDINAL_COUNT_COLUMN.test(column))) return true;
   if (/(?:^|[^0-9０-９])(?:[0０]\s*(?:[/／]|\bor\b)\s*[1１]|[1１]\s*(?:[/／]|\bor\b)\s*[0０])(?:$|[^0-9０-９])/iu.test(column)) return true;
   const unqualifiedColumn = column.replace(/(?:\s*[（(][^）)]*[）)])+$/u, '').trim();
   if (/(?:^|\s)(?:id|uuid|code|no\.?|#)$/iu.test(unqualifiedColumn)) return true;

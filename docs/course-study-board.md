@@ -1,3 +1,9 @@
+## 2026-11-20：優先級、風險等級與難度不得誤畫成倍數比較
+
+- 資管、資安教材中的「優先級 1／4」「嚴重程度 1／4」「風險等級 1／4」及英文 Priority、Severity、Risk Level、Difficulty、Level、Tier 是**順序／分類刻度**，不能將第 4 級畫成第 1 級的四倍。這類表格仍保留逐字來源、讀屏與原文選取／複製／TXT，但不產生誤導的零起點比例圖。
+- 明確的類別**計數**，例如「優先級數」「風險等級數量」「各難度人數」、Level Count、Priority Count、Severity Count、Number of Levels，仍允許可選原文數值比較。新增 17 種負例、9 種正例 DOM 回歸及獨立正則煙測；不更動教材、來源行、閱讀 v1/v2、練習 checkpoint v1、依賴與私人資料傳輸。
+- 純規則煙測非正式 Vitest／CI，須以新提交 SHA 核對 Web/Mobile Tests、Build、Lint/TypeCheck、Security、CodeQL 及 App 5504170 APPROVED；Maestro、iOS/Android 真機、WebGPU 中文與 Ahaboard 同教材同題同機比較仍未驗收。PR 保持 Draft，不合併、不部署。
+
 ## 2026-11-20：相同分類名稱的教材資料列可逐筆比較與回原文
 
 - 教材表格可能重複使用「必修」「同一班級」等分類名稱，並以**不同來源列**記載學分或 0–100% 百分比。過去只因第一欄名稱相同就隱藏整張可選比較圖，學生無法看到這些分開的記錄。
