@@ -88,6 +88,9 @@ function BoardsContent() {
   // Server value seen by a refresh while a board write was pending. A failed
   // write falls back to this fresher value instead of the pre-tap state.
   const serverStateDuringWrite = useRef(new Map<string, boolean>());
+  // Revision of the board's last confirmed write when the pending write began.
+  // Snapshots read before that confirmation are older than the local state.
+  const pendingBaseRevision = useRef(new Map<string, number>());
   const [pendingSubscriptions, setPendingSubscriptions] = useState<ReadonlySet<string>>(new Set());
   const mounted = useRef(true);
   useEffect(() => {
@@ -113,6 +116,8 @@ function BoardsContent() {
       setBoards(rows);
       const serverIds = new Set(subs);
       for (const id of pendingSubscriptionIds.current) {
+        const base = pendingBaseRevision.current.get(id);
+        if (base !== undefined && base > subscriptionRevisionAtRead) continue;
         serverStateDuringWrite.current.set(id, serverIds.has(id));
       }
       // A refresh finishing during a pending write must not erase the student's
@@ -198,6 +203,8 @@ function BoardsContent() {
       const priorRevision = boardWriteRevision.current.get(b.id);
       boardWriteRevision.current.set(b.id, subscriptionRevision.current);
       serverStateDuringWrite.current.delete(b.id);
+      if (priorRevision === undefined) pendingBaseRevision.current.delete(b.id);
+      else pendingBaseRevision.current.set(b.id, priorRevision);
       let writeSucceeded = false;
       setPendingSubscriptions(new Set(pendingSubscriptionIds.current));
       const wasSub = subscribed.has(b.id);
@@ -232,6 +239,7 @@ function BoardsContent() {
       } finally {
         pendingSubscriptionIds.current.delete(b.id);
         serverStateDuringWrite.current.delete(b.id);
+        pendingBaseRevision.current.delete(b.id);
         subscriptionRevision.current += 1;
         if (writeSucceeded) boardWriteRevision.current.set(b.id, subscriptionRevision.current);
         if (mounted.current) setPendingSubscriptions(new Set(pendingSubscriptionIds.current));
