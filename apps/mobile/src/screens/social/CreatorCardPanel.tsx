@@ -135,7 +135,7 @@ function ScopedCreatorCardPanel({
   const submit = async () => {
     // A synchronous ref guards multiple taps in the same render before React
     // commits the disabled state. A failed write releases it for a real retry.
-    if (!own || savingFlight.current || state.status !== 'ready') return;
+    if (!own || needsConfirmation || savingFlight.current || state.status !== 'ready') return;
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');

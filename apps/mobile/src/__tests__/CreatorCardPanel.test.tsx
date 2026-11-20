@@ -61,7 +61,7 @@ test('read error is retryable and never shown as unpublished', async () => {
 });
 
 
-test('rapid save taps produce one write, and a rejected save can be retried', async () => {
+test('rapid taps never duplicate an ambiguous save before a fresh server check', async () => {
   let rejectFirst: (reason: Error) => void = () => undefined;
   jest.mocked(saveCreatorCard).mockImplementationOnce(() => (
     new Promise<Awaited<ReturnType<typeof saveCreatorCard>>>((_, reject) => {
@@ -82,8 +82,32 @@ test('rapid save taps produce one write, and a rejected save can be retried', as
   await act(async () => { rejectFirst(new Error('offline')); });
   expect(view.getByLabelText('個人簡介').props.value).toBe('校園社團活動與攝影作品');
   expect(view.getByText(/草稿已保留/)).toBeTruthy();
+  expect(view.getByLabelText('儲存簡介').props.accessibilityState)
+    .toMatchObject({ disabled: true, busy: false });
+
+  // Even if a stale callback is invoked directly, an unconfirmed prior write
+  // must not be resent. Pressable disabled alone is not the service boundary.
+  await act(async () => {
+    view.getByLabelText('儲存簡介').props.onPress();
+  });
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('核對儲存結果')).toBeTruthy();
+
+  // Mock server-only read reports no existing card: only then may the student
+  // choose a second write. This is a simulated service response, not emulator proof.
+  await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+  expect(readCreatorCard).toHaveBeenCalledTimes(2);
+  expect(readCreatorCard).toHaveBeenLastCalledWith('pu', 'alice');
+  expect(view.getByText(/伺服器資料與草稿不同/)).toBeTruthy();
+  expect(view.getByLabelText('儲存簡介').props.accessibilityState)
+    .toMatchObject({ disabled: false, busy: false });
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenCalledTimes(2);
+  expect(saveCreatorCard).toHaveBeenLastCalledWith('pu', 'alice', {
+    headline: '', bio: '校園社團活動與攝影作品', linkUrl: '',
+  });
   expect(await view.findByText('社群簡介已儲存。')).toBeTruthy();
 });
 
