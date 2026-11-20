@@ -1587,8 +1587,11 @@ service cloud.firestore {
         allow read: if isActiveCurrentGroupMember(groupId)
           && (
             canManageGroup(groupId)
-            || entryId == request.auth.uid
             || resource.data.get('userId', null) == request.auth.uid
+            // Prefer the explicit canonical row owner over a possibly stale
+            // document ID. Only truly field-less legacy rows use the ID.
+            || (!resource.data.keys().hasAny(['userId'])
+              && entryId == request.auth.uid)
           );
         allow create, update, delete: if isActiveCurrentGroupMember(groupId)
           && canManageGroup(groupId);

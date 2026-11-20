@@ -2685,6 +2685,52 @@ describe('firestore security rules', () => {
     );
   });
 
+  test('gradebook document ID never overrides a contradictory explicit userId', async () => {
+    const group = 'groups/gradebook-owner-conflict-1';
+    const aliceId = `${group}/gradebook/alice`;
+    const bobId = `${group}/gradebook/bob`;
+    const opaque = `${group}/gradebook/opaque-row-1`;
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      for (const [uid, role] of [['alice', 'member'], ['bob', 'member'], ['teacher', 'instructor']]) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: 'pu' });
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+        await db.doc(`${group}/members/${uid}`).set({ status: 'active', role });
+      }
+      // Contradictory IDs can occur in legacy imports and correction flows.
+      await db.doc(aliceId).set({ userId: 'bob', finalScore: 74 });
+      await db.doc(bobId).set({ userId: 'alice', finalScore: 89 });
+      await db.doc(opaque).set({ userId: 'alice', finalScore: 91 });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    // A mis-keyed row must not become readable to the wrong student.
+    await assertFails(alice.doc(aliceId).get({ source: 'server' }));
+    await assertFails(bob.doc(bobId).get({ source: 'server' }));
+    await assertSucceeds(bob.doc(aliceId).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(bobId).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(opaque).get({ source: 'server' }));
+    await assertFails(bob.doc(opaque).get({ source: 'server' }));
+    await assertSucceeds(teacher.doc(aliceId).get({ source: 'server' }));
+
+    // Present-but-null is not a legacy missing field; fail closed.
+    await seedFirestore(db => db.doc(aliceId).set({ userId: null, finalScore: 74 }));
+    await assertFails(alice.doc(aliceId).get({ source: 'server' }));
+    await assertFails(bob.doc(aliceId).get({ source: 'server' }));
+    // Old rows without an explicit owner keep the documented ID fallback.
+    await seedFirestore(db => db.doc(aliceId).set({ finalScore: 74 }));
+    await assertSucceeds(alice.doc(aliceId).get({ source: 'server' }));
+    await assertFails(bob.doc(aliceId).get({ source: 'server' }));
+    await seedFirestore(db => db.doc(`${group}/members/alice`).update({ status: 'removed' }));
+    await assertFails(alice.doc(aliceId).get({ source: 'server' }));
+    await assertFails(alice.doc(opaque).get({ source: 'server' }));
+    await seedFirestore(db => db.doc(`${group}/members/alice`).update({ status: 'active' }));
+    await assertSucceeds(alice.doc(aliceId).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(opaque).get({ source: 'server' }));
+  });
+
   test('gradebook owner and teacher grants require current course and canonical campus membership', async () => {
     const group = 'groups/gradebook-revoke-1';
     const row = `${group}/gradebook/bob`;
