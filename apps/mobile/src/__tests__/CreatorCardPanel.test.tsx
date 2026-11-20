@@ -1,4 +1,5 @@
 import React from 'react';
+import { Linking } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { CreatorCardPanel } from '../screens/social/CreatorCardPanel';
 import { readCreatorCard, saveCreatorCard } from '../services/creatorCard';
@@ -133,4 +134,39 @@ test('switching from own card to a peer during a rejected save never shows the o
   expect(view.queryByLabelText('個人簡介')).toBeNull();
   expect(view.queryByText(/輸入內容已保留/)).toBeNull();
   expect(view.queryByLabelText('建立社群簡介')).toBeNull();
+});
+
+
+test('portfolio URL cannot open: no duplicate external handoff and a visible retry', async () => {
+  let rejectFirst: (reason: Error) => void = () => undefined;
+  const openURL = jest.spyOn(Linking, 'openURL')
+    .mockImplementationOnce(() => new Promise<void>((_, reject) => {
+      rejectFirst = reject;
+    }))
+    .mockResolvedValue(undefined);
+  jest.mocked(readCreatorCard).mockResolvedValue({
+    headline: '攝影社', bio: '我的作品', linkUrl: 'https://example.org/',
+  });
+  try {
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+    const link = await view.findByLabelText('查看作品連結');
+    act(() => {
+      fireEvent.press(link);
+      fireEvent.press(link);
+    });
+    expect(openURL).toHaveBeenCalledTimes(1);
+    expect(openURL).toHaveBeenCalledWith('https://example.org/');
+    expect(view.getByLabelText('查看作品連結').props.accessibilityState)
+      .toMatchObject({ disabled: true, busy: true });
+    await act(async () => { rejectFirst(new Error('no browser available')); });
+    const alert = view.getByText('無法開啟作品連結，請稍後再試。');
+    expect(alert.props.accessibilityRole).toBe('alert');
+    expect(view.getByLabelText('查看作品連結').props.accessibilityState)
+      .toMatchObject({ disabled: false, busy: false });
+    await act(async () => { fireEvent.press(view.getByLabelText('查看作品連結')); });
+    expect(openURL).toHaveBeenCalledTimes(2);
+    expect(view.queryByText('無法開啟作品連結，請稍後再試。')).toBeNull();
+  } finally {
+    openURL.mockRestore();
+  }
 });
