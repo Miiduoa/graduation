@@ -403,22 +403,29 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // even if scroll restoration has moved the canvas outside the viewport.
     // Never wake an existing GPU context from that stale observation. Wait for
     // a fresh intersecting event or an explicit manual restart instead.
-    const invalidateRestoredOffscreenVisibility = () => {
-      if (!visible || manualStart || typeof IntersectionObserver === 'undefined') return;
+    // Delayed observer entries can still report a previously visible canvas
+    // after Safari restores its scroll position. The current DOM rectangle
+    // is authoritative only when it has measurable positive dimensions; on
+    // legacy WebViews without usable layout measurements, keep the observer
+    // signal and the accessible manual-recovery path.
+    const hostDefinitelyOffscreen = () => {
       try {
         const rect = host.getBoundingClientRect();
         const width = window.innerWidth;
         const height = window.innerHeight;
-        if (Number.isFinite(rect.width) && rect.width > 0 &&
-            Number.isFinite(rect.height) && rect.height > 0 &&
-            Number.isFinite(width) && width > 0 &&
-            Number.isFinite(height) && height > 0 &&
-            (rect.bottom <= 0 || rect.top >= height || rect.right <= 0 || rect.left >= width)) {
-          visible = false;
-        }
+        return Number.isFinite(rect.width) && rect.width > 0 &&
+          Number.isFinite(rect.height) && rect.height > 0 &&
+          Number.isFinite(width) && width > 0 &&
+          Number.isFinite(height) && height > 0 &&
+          (rect.bottom <= 0 || rect.top >= height || rect.right <= 0 || rect.left >= width);
       } catch {
-        // Older WebViews can fail to measure during restore. Retain the
-        // observer/explicit-recovery fallback without interrupting navigation.
+        return false;
+      }
+    };
+    const invalidateRestoredOffscreenVisibility = () => {
+      if (visible && !manualStart && typeof IntersectionObserver !== 'undefined' &&
+          hostDefinitelyOffscreen()) {
+        visible = false;
       }
     };
     const onVisibilityChange = () => {
@@ -501,8 +508,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           const rect = latest.intersectionRect;
           const hasMeasuredArea = rect &&
             Number.isFinite(rect.width) && Number.isFinite(rect.height);
+          // A callback queued before bfcache scroll restoration can carry a
+          // *newer* timestamp and a positive historical intersectionRect.
+          // Do not wake the GPU if the host is demonstrably offscreen now.
           visible = latest.isIntersecting &&
-            (!hasMeasuredArea || (rect.width > 0 && rect.height > 0));
+            (!hasMeasuredArea || (rect.width > 0 && rect.height > 0)) &&
+            !hostDefinitelyOffscreen();
           updateVisibility();
           startWhenVisible();
           syncPendingStartup();
