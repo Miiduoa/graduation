@@ -977,7 +977,8 @@ it('keeps network ports, radio channels and protocol layers as identifiers, not 
   for (const header of [
     'TCP 埠號', 'UDP 埠號', '來源埠', '目的埠', '連接埠', '服務埠',
     '埠號', '通訊埠', '無線頻道', 'Wi-Fi 頻道', '頻道編號', '通道號碼',
-    '網路層級', '協定號碼', 'Port', 'TCP Port', 'UDP Port', 'Source Port',
+    '網路層級', '協定號碼', '連接埠編號', 'Wi-Fi 通道號',
+    'TCP 埠號（常用）', 'Port', 'TCP Port', 'UDP Port', 'Source Port',
     'Destination Port', 'Port Number', 'Port No.', 'Channel',
     'Wi-Fi Channel', 'Channel #', 'OSI Layer', 'Layer', 'Protocol Number',
     'TCP Port (%)',
@@ -999,6 +1000,8 @@ it('continues to compare measured counts and throughput instead of hiding real n
     'Port Count', 'Number of Ports', 'Open Port Count', 'Channel Count',
     'Number of Channels', 'Layer Count', 'Number of Layers',
     'Port Throughput', 'Layer Thickness', 'Channel Width',
+    '連接埠吞吐量', '通訊埠流量', '頻道頻寬', '通道寬度',
+    '無線頻道速率', 'Wi-Fi 頻道容量', '網路埠負載',
   ]) {
     const material = ['| 範圍 | ' + header + ' |', '| --- | --- |',
       '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');

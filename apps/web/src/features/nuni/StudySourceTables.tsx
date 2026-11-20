@@ -27,8 +27,11 @@ const ENGLISH_STATUS_COUNT_COLUMN = /\b(?:count|total|number\s+of|quantity)\b/iu
 // position in a namespace, not an amount: TCP port 443 is not 5.5 times
 // port 80. Keep source rows, copying and exporting unchanged. Explicit counts
 // of ports/channels/layers remain measurable quantities.
+// Match whole identifier headers. A numeric channel or port label is not a
+// ratio-scale measurement, but "頻道頻寬" and "連接埠吞吐量" describe real
+// measured quantities and must not be rejected just for containing the noun.
 const NON_RATIO_NETWORK_IDENTIFIER_COLUMN =
-  /(?:埠號|連接埠|通訊埠|通信埠|網路埠|服務埠|來源埠|目的埠|頻道(?:編號|號碼|號)?|通道(?:編號|號碼|號)?|網路層級|協定號碼)/u;
+  /^(?:(?:tcp|udp|wi-?fi|osi|無線|網路)\s*)?(?:埠號|連接埠|通訊埠|通信埠|網路埠|服務埠|來源埠|目的埠|頻道|通道|網路層級|協定號碼)(?:\s*(?:編號|號碼|號|id|no\.?|#))?(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 const ENGLISH_NON_RATIO_NETWORK_IDENTIFIER_COLUMN =
   /^(?:(?:(?:tcp|udp|src|dst|source|destination|service|network)\s+)?ports?(?:\s+(?:number|no\.?|id|#))?|(?:(?:wi-?fi|wireless|radio|network)\s+)?channels?(?:\s+(?:number|no\.?|id|#))?|(?:(?:osi|network|protocol)\s+)?layers?(?:\s+(?:number|no\.?|id|#))?|protocol\s+(?:number|no\.?|id))(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 // A VLAN tag / ASN and a database key are identifiers, not measured
