@@ -452,7 +452,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           updateVisibility();
           startWhenVisible();
           syncPendingStartup();
-        });
+        }, { threshold: [0, 0.01] });
+        // The extra 1% threshold ensures a new callback when an edge-touch
+        // (isIntersecting=true, zero-area) becomes actually visible.
         intersection.observe(host);
       } catch {
         // observe() may have registered partially before throwing.
