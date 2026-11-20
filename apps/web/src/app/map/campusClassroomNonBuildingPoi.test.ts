@@ -522,7 +522,26 @@ describe('nested and long POI qualifiers never override classroom destinations',
     }).matches).toEqual([annotatedHall]);
   });
 
+  it('still rejects a stop category after an 80-character display clip leaves a trailing hyphen', () => {
+    const fullCategory = 'Bus Stop (North Campus inbound service at the main Engineering Hall entrance) - Temporary';
+    const clippedCategory = Array.from(fullCategory).slice(0, 80).join('').trim();
+    expect(clippedCategory.endsWith('-')).toBe(true);
+    for (const category of [fullCategory, clippedCategory]) {
+      const annotatedStop = {
+        ...hall,
+        id: 'synthetic-clipped-stop-category',
+        name: 'Temporary Stop',
+        category,
+        building: '主顧樓',
+      };
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query: 'PH303', locations: [annotatedStop],
+      }).status).toBe('unmatched');
+    }
+  });
+
   it('still rejects a stop category whose slash sits inside parentheses before a trailing annotation', () => {
+
     // Synthetic import label, not a published timetable destination.
     const annotatedStop = {
       ...hall,

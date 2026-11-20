@@ -139,7 +139,7 @@ function closerToPublishedStopThanSourcedHall(
  * 32-character suffix matcher missed those otherwise explicit stop categories.
  * Unwind only complete, balanced trailing groups: never classify an unrelated
  * building merely because its label contains the word "bus" or "交通".
- * comparisonText already bounds the input to 120 Unicode code points.
+ * categoryComparisonText bounds the input to MAX_CAMPUS_CATEGORY_LENGTH.
  */
 function stripTrailingCategoryQualifiers(value: string): string {
   let unqualified = value;
@@ -210,7 +210,13 @@ function firstExternalCategoryAnnotationRoot(category: string): string {
     else if (depth === 0) {
       if ('/:：／|｜·'.includes(char)) return category.slice(0, index).trim();
       if ('–—'.includes(char)) return category.slice(0, index).trim();
-      if (char === '-' && /\s/.test(category[index - 1] ?? '') && /\s/.test(category[index + 1] ?? '')) {
+      // A hyphen is a separator when spaced on both sides, or when a
+      // shortened display label leaves a trailing " -" with no right-hand text.
+      if (
+        char === '-' &&
+        /\s/.test(category[index - 1] ?? '') &&
+        (index === category.length - 1 || /\s/.test(category[index + 1] ?? ''))
+      ) {
         return category.slice(0, index).trim();
       }
     }

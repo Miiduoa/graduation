@@ -147,6 +147,23 @@ describe('map query and source contract', () => {
     expect(parsedBlank.items[0]).not.toHaveProperty('transitStopIds');
   });
 
+  it('does not treat a bus-stop category as a classroom building after display clipping', () => {
+    const hall = PROVIDENCE_CAMPUS_PLACES.find(place => place.id === 'pu-zhugu')!;
+    const fullCategory = 'Bus Stop (North Campus inbound service at the main Engineering Hall entrance) - Temporary';
+    const clippedCategory = Array.from(fullCategory).slice(0, 80).join('').trim();
+    const stop = {
+      id: 'synthetic-clipped-stop-category',
+      name: 'Temporary Stop',
+      category: clippedCategory,
+      description: '',
+      lat: hall.lat,
+      lng: hall.lng,
+      building: '主顧樓',
+    };
+    expect(campusMapMatch('pu', 'PH303', stop)).not.toBe('building');
+    expect(campusMapMatch('pu', 'PH303', { ...stop, category: fullCategory })).not.toBe('building');
+  });
+
   it('keeps partial coverage ahead of candidates and the fact that no route was executed', () => {
     const value = result(); value.partial = true; value.resolution = 'partial';
     const text = formatCampusMapRead(read(value));
