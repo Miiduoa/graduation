@@ -447,8 +447,18 @@ service cloud.firestore {
         && acceptsStudentSubmission(groupId, assignmentId);
     }
 
+    // A historical peer-review assignment is not current class/campus access.
+    // This also protects legacy top-level submissions, which lack a nested
+    // parent member check. Both server-bound school IDs must be consistent.
+    function isActiveCurrentGroupMember(groupId) {
+      return isActiveGroupMember(groupId)
+        && isConsistentRootPostSchoolMember(
+          get(/databases/$(database)/documents/groups/$(groupId)).data.get('schoolId', '')
+        );
+    }
+
     function isAssignedReviewer(groupId, assignmentId, submissionId, data) {
-      return isSignedIn()
+      return isActiveCurrentGroupMember(groupId)
         && exists(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/peerReviews/$(request.auth.uid))
         && get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/peerReviews/$(request.auth.uid)).data.submissionOwnerId
           == submissionOwnerId(data, submissionId);
@@ -595,8 +605,9 @@ service cloud.firestore {
 
     function canReadPeerReviewDoc(groupId, assignmentId, reviewerId, data) {
       return canManageGroup(groupId)
-        || (isSignedIn() && reviewerId == request.auth.uid)
-        || (isSignedIn() && data.submissionOwnerId == request.auth.uid && data.submittedAt != null);
+        || (isActiveCurrentGroupMember(groupId)
+          && (reviewerId == request.auth.uid
+            || (data.submissionOwnerId == request.auth.uid && data.submittedAt != null)));
     }
 
     // AI server-side metadata logs are written by Admin SDK only.
@@ -1543,7 +1554,7 @@ service cloud.firestore {
             && request.resource.data.reviewerId == reviewerId;
           allow update: if canManageGroup(groupId)
             || (
-              isSignedIn()
+              isActiveCurrentGroupMember(groupId)
               && reviewerId == request.auth.uid
               && request.resource.data.reviewerId == resource.data.reviewerId
               && request.resource.data.submissionOwnerId == resource.data.submissionOwnerId

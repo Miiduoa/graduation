@@ -2767,6 +2767,7 @@ describe('firestore security rules', () => {
         name: 'Secure Systems',
       });
       for (const uid of ['alice', 'bob', 'charlie']) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: 'tw-demo-uni' });
         await db.doc(`schools/tw-demo-uni/members/${uid}`).set({
           role: 'student',
           status: 'active',
@@ -2847,6 +2848,77 @@ describe('firestore security rules', () => {
     await assertFails(
       outsiderDb.doc('groups/group-1/assignments/assignment-1/submissions/bob').get(),
     );
+  });
+
+
+  test('stale peer-review documents cannot authorize root submissions, review receipts or writes after campus revocation', async () => {
+    const base = 'groups/review-revoke-1';
+    const reviewPath = `${base}/assignments/assignment-1/peerReviews/alice`;
+    const nested = `${base}/assignments/assignment-1/submissions/bob`;
+    const legacy = 'submissions/review-revoke-legacy';
+    await seedFirestore(async (db) => {
+      await db.doc(base).set({ schoolId: 'pu', type: 'course' });
+      await db.doc(`${base}/assignments/assignment-1`).set({ type: 'assignment' });
+      for (const uid of ['alice', 'bob', 'outsider']) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: 'pu' });
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+      }
+      for (const uid of ['alice', 'bob']) {
+        await db.doc(`${base}/members/${uid}`).set({ status: 'active', role: 'member' });
+      }
+      await db.doc(reviewPath).set({
+        reviewerId: 'alice', submissionOwnerId: 'bob', comment: '', scores: {}, submittedAt: null,
+      });
+      await db.doc(`${base}/assignments/assignment-1/peerReviews/outsider`).set({
+        reviewerId: 'outsider', submissionOwnerId: 'bob', comment: '', scores: {}, submittedAt: null,
+      });
+      await db.doc(nested).set({ userId: 'bob', content: 'Private nested answer' });
+      await db.doc(legacy).set({
+        userId: 'bob', groupId: 'review-revoke-1', assignmentId: 'assignment-1',
+        content: 'Private legacy answer',
+      });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const outsider = testEnv.authenticatedContext('outsider').firestore();
+    const aliceLegacy = alice.doc(legacy);
+    const aliceNested = alice.doc(nested);
+    const aliceReview = alice.doc(reviewPath);
+    const denyAlice = async () => {
+      await assertFails(aliceLegacy.get({ source: 'server' }));
+      await assertFails(aliceNested.get({ source: 'server' }));
+      await assertFails(aliceReview.get({ source: 'server' }));
+      await assertFails(aliceReview.update({ comment: 'Stale review replay' }));
+    };
+    // A leaked assignment ID does not enroll an outsider in a course.
+    await assertFails(outsider.doc(legacy).get({ source: 'server' }));
+    await assertFails(outsider.doc(`${base}/assignments/assignment-1/peerReviews/outsider`).get());
+    await assertFails(outsider.doc(`${base}/assignments/assignment-1/peerReviews/outsider`).update({ comment: 'forged' }));
+    await assertSucceeds(aliceLegacy.get({ source: 'server' }));
+    await assertSucceeds(aliceNested.get({ source: 'server' }));
+    await assertSucceeds(aliceReview.get({ source: 'server' }));
+    await assertSucceeds(aliceReview.update({ comment: 'A valid review' }));
+
+    // Keep the same authenticated Firebase context while revoking course, school and profile.
+    await seedFirestore((db) => db.doc(`${base}/members/alice`).update({ status: 'removed' }));
+    await denyAlice();
+    await seedFirestore(async (db) => {
+      await db.doc(`${base}/members/alice`).update({ status: 'active' });
+      await db.doc('schools/pu/members/alice').update({ status: 'removed' });
+    });
+    await denyAlice();
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').update({ status: 'active' });
+      await db.doc('users/alice').update({ primarySchoolId: 'other' });
+    });
+    await denyAlice();
+    await seedFirestore((db) => db.doc('users/alice').delete());
+    await denyAlice();
+    // Server restores a single valid school binding; historical one-field profiles remain usable.
+    await seedFirestore((db) => db.doc('users/alice').set({ status: 'active', primarySchoolId: 'pu' }));
+    await assertSucceeds(aliceLegacy.get({ source: 'server' }));
+    await assertSucceeds(aliceNested.get({ source: 'server' }));
+    await assertSucceeds(aliceReview.get({ source: 'server' }));
+    await assertSucceeds(aliceReview.update({ comment: 'Reauthorized review' }));
   });
 
   test('signed-in users can read pulse aggregates; guests and writers cannot', async () => {
@@ -4403,6 +4475,7 @@ describe('course assignment submissions', () => {
     await seedFirestore(async (db) => {
       await db.doc('groups/course-1').set({ name: 'Course', schoolId: 'school-1', type: 'course' });
       for (const uid of ['alice', 'bob', 'teacher']) {
+        await db.doc(`users/${uid}`).set({ status: 'active', schoolId: 'school-1' });
         await db.doc(`schools/school-1/members/${uid}`).set({
           role: uid === 'teacher' ? 'faculty' : 'student', status: 'active',
         });
