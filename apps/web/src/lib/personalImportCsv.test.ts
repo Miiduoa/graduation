@@ -36,3 +36,18 @@ it('escapes quote, line break and cells that spreadsheet apps might evaluate', (
   expect(csv).toContain('"\'-1"');
   expect(serializePersonalImportsCsv([])).toMatch(/^\uFEFFkind,title,/);
 });
+
+it('writes very small or large numbers in decimal notation so the parser can read them back', () => {
+  const csv = serializePersonalImportsCsv([
+    { ...base, credits: 0.0000001 },
+    { ...base, id: 'two', credits: 1.5e-7 },
+    { ...base, id: 'three', credits: 1e21 },
+    { ...base, id: 'four', credits: 2.5 },
+  ]);
+  expect(csv).toContain('"0.0000001"');
+  expect(csv).toContain('"0.00000015"');
+  expect(csv).toContain('"1000000000000000000000"');
+  expect(csv).toContain('"2.5"');
+  expect(csv).not.toMatch(/\d[eE][+-]?\d/);
+  expect(Number('0.00000015')).toBe(1.5e-7);
+});

@@ -120,7 +120,7 @@ export function nthuTimetableImportCsv(course: PublicCatalogCourse): string | nu
   // Cached/externally supplied course cards can bypass the typed catalog
   // validator. Do not coerce non-string credit values into plausible numbers.
   // 不設長度上限：main 接受的等值長格式（例如前導零或尾端補零）仍須可匯入，
-  // 下方的十進位檢查是線性時間，且最終只寫入 Number 後的十進位字串。
+  // 下方的十進位檢查是線性時間，CSV 只寫入 Number 後的十進位表示。
   if (typeof credits !== 'string') return null;
   if (credits !== '') {
     const decimalPattern = /^\d+(?:\.\d+)?$/;
@@ -131,10 +131,8 @@ export function nthuTimetableImportCsv(course: PublicCatalogCourse): string | nu
     const integer = whole.replace(/^0+/, '');
     if (integer.length > 2 || (integer.length === 2 && integer > '40') ||
         (integer === '40' && /[1-9]/.test(fraction))) return null;
-    // The CSV serializer writes Number as a string, while personal import
-    // only accepts decimal notation (not exponential notation).
-    if (!Number.isFinite(Number(credits)) ||
-        !decimalPattern.test(String(Number(credits)))) return null;
+    // CSV 匯出會把數字寫成十進位（不使用指數記法），例如 0.0000001 仍可再匯入。
+    if (!Number.isFinite(Number(credits))) return null;
   }
   // Multiple official room/time pairs may describe one course. A repeated
   // weekday/period would duplicate or overlap the student's imported timetable;

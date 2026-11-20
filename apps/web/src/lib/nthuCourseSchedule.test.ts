@@ -30,6 +30,9 @@ describe('NTHU public course credits passed to a personal timetable', () => {
     ['40', 40],
     ['040.000', 40],
     ['0.000001', 0.000001],
+    // 與 main 相容：極小學分不可因指數記法而無法匯入或被拒絕。
+    ['0.0000001', 0.0000001],
+    ['0.00000015', 0.00000015],
     // 與 main 相容：可無損轉換的長格式等值表示仍要完整匯入。
     ['3.' + '0'.repeat(31), 3],
     ['0'.repeat(32) + '3', 3],
@@ -45,12 +48,13 @@ describe('NTHU public course credits passed to a personal timetable', () => {
       issue.severity === 'error' || issue.code === 'unrecognized-field',
     )).toEqual([]);
     expect(parsed.rows.map(row => row.credits)).toEqual([expected, expected]);
+    expect(csv).not.toMatch(/\d[eE][+-]?\d/);
     expect(parsed.rows.map(row => row.location)).toEqual(['BMES醫環618', 'BMES醫環501']);
   });
 
   it.each([
     '待確認', '3學分', '-1', '40.01', '40.0000000000000001',
-    '040.0000000000000001', '0.0000001', 'NaN', 'Infinity',
+    '040.0000000000000001', 'NaN', 'Infinity',
     '3.5.0', ' 3', '3 ', '1' + '0'.repeat(40),
   ])('rejects invalid or lossy source credit %s before generating CSV', credits => {
     expect(nthuTimetableImportCsv({ ...publicCourse, credits })).toBeNull();
