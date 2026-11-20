@@ -694,6 +694,48 @@ test('deadline hints use device time only and never infer submission or closed s
   }
 });
 
+test('a device clock jump mid-format cannot change which authorized assignment is at its cutoff', () => {
+  const cutoff = Date.parse('2026-11-20T00:00:00.000Z');
+  jest.useFakeTimers().setSystemTime(cutoff);
+  try {
+    const checkedAt = new Date(cutoff).toISOString();
+    const local: OnDeviceSchoolContext = {
+      checkedAt, ownerUid: 'alice', schoolId: 'pu', schoolName: '靜宜大學',
+      timetable: { source: 'saved-device-copy', updatedAt: checkedAt, courses: [] },
+    };
+    const snapshot: CampusSenseSnapshot = {
+      userId: 'alice', schoolId: 'pu', checkedAt,
+      schedule: { status: 'available', count: 0 },
+      assignments: {
+        status: 'available', count: 1,
+        items: [{
+          title: '原頁必須核對的作業', groupName: '資料庫',
+          dueAt: '2026-11-20T08:00:00+08:00',
+          source: { kind: 'group-assignment', groupId: 'db', assignmentId: 'at-cutoff' },
+        }],
+        coverage: { complete: true, reason: 'complete', pages: 1 },
+      },
+      announcements: { status: 'available', items: [] },
+    };
+    // The old code re-read Date.now after validating the account and produced
+    // an expired hint for the exact same cutoff. Reproduce that one-minute jump.
+    const clock = jest.spyOn(Date, 'now').mockImplementationOnce(() => cutoff)
+      .mockImplementation(() => cutoff + 60_000);
+    const prompt = formatOnDeviceSchoolPrompt(local, snapshot, 'alice');
+    expect(clock).toHaveBeenCalledTimes(1);
+    expect(prompt).toContain('原頁必須核對的作業');
+    expect(prompt).toContain('"assignmentId":"at-cutoff"');
+    expect(prompt).toContain('"deadlineHint":"依裝置時間推估正好到截止點；是否仍可繳交請到原作業頁核對"');
+    expect(prompt).not.toContain('依裝置時間推估已過截止點');
+    expect(prompt).toContain('不代表仍可繳交');
+    // No unrelated account gains the same source by changing the displayed question.
+    expect(formatOnDeviceSchoolPrompt(local, snapshot, 'bob')).not.toContain('原頁必須核對的作業');
+  } finally {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  }
+});
+
 test('offline prompt preserves the next upcoming deadline when old overdue work fills the first five slots', async () => {
   jest.useFakeTimers().setSystemTime(new Date('2026-11-20T00:00:00.000Z'));
   try {
