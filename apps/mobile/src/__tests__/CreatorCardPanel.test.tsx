@@ -63,7 +63,7 @@ test('read error is retryable and never shown as unpublished', async () => {
 test('rapid save taps produce one write, and a rejected save can be retried', async () => {
   let rejectFirst: (reason: Error) => void = () => undefined;
   jest.mocked(saveCreatorCard).mockImplementationOnce(() => (
-    new Promise((_, reject) => {
+    new Promise<Awaited<ReturnType<typeof saveCreatorCard>>>((_, reject) => {
       rejectFirst = (reason) => reject(reason);
     })
   ));

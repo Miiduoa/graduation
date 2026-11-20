@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   CREATOR_CARD_LIMITS, EMPTY_CREATOR_CARD, type CreatorCard,
@@ -12,14 +12,15 @@ type CardState =
   | { status: 'error' }
   | { status: 'ready'; value: CreatorCard | null };
 
-function CardButton({ label, onPress, disabled = false, primary = false }: {
-  label: string; onPress: () => void; disabled?: boolean; primary?: boolean;
+function CardButton({ label, onPress, disabled = false, primary = false, busy = false }: {
+  label: string; onPress: () => void; disabled?: boolean; primary?: boolean; busy?: boolean;
 }) {
   const styles = useThemeStyleSheet(createStyles);
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled, busy }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [styles.button, primary && styles.primary,
@@ -39,6 +40,7 @@ export function CreatorCardPanel({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const [saving, setSaving] = useState(false);
+  const savingFlight = useRef(false);
   const [feedback, setFeedback] = useState('');
 
   useEffect(() => {
@@ -60,7 +62,10 @@ export function CreatorCardPanel({
   };
 
   const submit = async () => {
-    if (!own || saving || state.status !== 'ready') return;
+    // A synchronous ref guards multiple taps in the same render before React
+    // commits the disabled state. A failed write releases it for a real retry.
+    if (!own || savingFlight.current || state.status !== 'ready') return;
+    savingFlight.current = true;
     setSaving(true);
     setFeedback('');
     try {
@@ -73,6 +78,7 @@ export function CreatorCardPanel({
         ? error.message
         : '儲存尚未完成，輸入內容已保留，請確認連線及校籍後重試。');
     } finally {
+      savingFlight.current = false;
       setSaving(false);
     }
   };
@@ -134,7 +140,7 @@ export function CreatorCardPanel({
           {!!feedback && <Text accessibilityRole="alert" style={styles.error}>{feedback}</Text>}
           <View style={styles.actions}>
             <CardButton label={saving ? '正在確認儲存…' : '儲存簡介'}
-              primary disabled={saving} onPress={() => void submit()} />
+              primary disabled={saving} busy={saving} onPress={() => void submit()} />
             <CardButton label="取消編輯" disabled={saving}
               onPress={() => { setEditing(false); setFeedback(''); }} />
           </View>
