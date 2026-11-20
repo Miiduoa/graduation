@@ -37,7 +37,7 @@ test('a failed write retains editable content and gives a retryable error', asyn
   fireEvent.changeText(view.getByLabelText('個人簡介'), '沒送出的草稿');
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(view.getByLabelText('個人簡介').props.value).toBe('沒送出的草稿');
-  expect(view.getByText(/輸入內容已保留/)).toBeTruthy();
+  expect(view.getByText(/草稿已保留/)).toBeTruthy();
   expect(view.queryByText('社群簡介已儲存。')).toBeNull();
 });
 
@@ -81,7 +81,7 @@ test('rapid save taps produce one write, and a rejected save can be retried', as
     .toMatchObject({ disabled: true, busy: true });
   await act(async () => { rejectFirst(new Error('offline')); });
   expect(view.getByLabelText('個人簡介').props.value).toBe('校園社團活動與攝影作品');
-  expect(view.getByText(/輸入內容已保留/)).toBeTruthy();
+  expect(view.getByText(/草稿已保留/)).toBeTruthy();
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenCalledTimes(2);
   expect(await view.findByText('社群簡介已儲存。')).toBeTruthy();
@@ -132,7 +132,7 @@ test('switching from own card to a peer during a rejected save never shows the o
   expect(view.queryByLabelText('個人簡介')).toBeNull();
   await act(async () => { rejectPrior(new Error('offline')); });
   expect(view.queryByLabelText('個人簡介')).toBeNull();
-  expect(view.queryByText(/輸入內容已保留/)).toBeNull();
+  expect(view.queryByText(/草稿已保留/)).toBeNull();
   expect(view.queryByLabelText('建立社群簡介')).toBeNull();
 });
 
@@ -205,4 +205,67 @@ test('a late failure from the old portfolio URL does not mark a newly saved link
   } finally {
     openURL.mockRestore();
   }
+});
+
+test('an ambiguous save is confirmed by a fresh read without sending a duplicate write', async () => {
+  const card = { headline: '校園攝影', bio: '已送出的作品介紹', linkUrl: '' };
+  jest.mocked(readCreatorCard).mockResolvedValueOnce(null).mockResolvedValueOnce(card);
+  jest.mocked(saveCreatorCard).mockRejectedValueOnce(new Error('unavailable after write'));
+  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+  fireEvent.press(await view.findByLabelText('建立社群簡介'));
+  fireEvent.changeText(view.getByLabelText('一句話介紹'), card.headline);
+  fireEvent.changeText(view.getByLabelText('個人簡介'), card.bio);
+
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('儲存簡介').props.accessibilityState).toMatchObject({ disabled: true });
+  expect(view.getByLabelText('核對儲存結果')).toBeTruthy();
+  expect(readCreatorCard).toHaveBeenCalledTimes(1);
+
+  await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+  expect(readCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice');
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  expect(view.queryByLabelText('個人簡介')).toBeNull();
+  expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+});
+
+test('a server mismatch keeps the edit and requires an explicit new save', async () => {
+  jest.mocked(readCreatorCard).mockResolvedValueOnce(null).mockResolvedValueOnce({
+    headline: '舊資料', bio: '', linkUrl: '',
+  });
+  jest.mocked(saveCreatorCard).mockRejectedValueOnce(new Error('unavailable'));
+  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+  fireEvent.press(await view.findByLabelText('建立社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), '新的待儲存草稿');
+
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('個人簡介').props.value).toBe('新的待儲存草稿');
+  expect(view.getByText(/伺服器資料與草稿不同/)).toBeTruthy();
+  expect(view.queryByLabelText('核對儲存結果')).toBeNull();
+  expect(view.getByLabelText('儲存簡介').props.accessibilityState).toMatchObject({ disabled: false });
+
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  expect(saveCreatorCard).toHaveBeenCalledTimes(2);
+});
+
+test('an offline confirmation can be retried without resending the save', async () => {
+  const card = { headline: '', bio: '校園志工服務', linkUrl: '' };
+  jest.mocked(readCreatorCard).mockResolvedValueOnce(null)
+    .mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(card);
+  jest.mocked(saveCreatorCard).mockRejectedValueOnce(new Error('unavailable'));
+  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+  fireEvent.press(await view.findByLabelText('建立社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), card.bio);
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+
+  await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+  expect(view.getByText(/仍無法核對伺服器資料/)).toBeTruthy();
+  expect(view.getByLabelText('個人簡介').props.value).toBe(card.bio);
+  expect(view.getByLabelText('核對儲存結果')).toBeTruthy();
+  await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+  expect(readCreatorCard).toHaveBeenCalledTimes(3);
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
 });

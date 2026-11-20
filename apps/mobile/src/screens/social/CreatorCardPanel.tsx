@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
-  CREATOR_CARD_LIMITS, EMPTY_CREATOR_CARD, type CreatorCard,
+  CREATOR_CARD_LIMITS, EMPTY_CREATOR_CARD, validateCreatorCard, type CreatorCard,
 } from '@campus/shared/src/creatorCard';
 import { readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 import { theme } from '../../ui/theme';
@@ -51,6 +51,9 @@ function ScopedCreatorCardPanel({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const [saving, setSaving] = useState(false);
+  // A write can succeed while its server confirmation read fails. Avoid
+  // automatically sending a second write until the student checks the server.
+  const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const savingFlight = useRef(false);
   const [openingLink, setOpeningLink] = useState(false);
   const openingLinkFlight = useRef(false);
@@ -81,8 +84,52 @@ function ScopedCreatorCardPanel({
   const beginEdit = () => {
     if (!own || state.status !== 'ready') return;
     setDraft(state.value ?? EMPTY_CREATOR_CARD);
+    setNeedsConfirmation(false);
     setFeedback('');
     setEditing(true);
+  };
+
+  const changeDraft = (field: keyof CreatorCard, value: string) => {
+    setDraft((previous) => ({ ...previous, [field]: value }));
+    setNeedsConfirmation(false);
+    setFeedback('');
+  };
+
+  const confirmPreviousSave = async () => {
+    if (!own || !needsConfirmation || savingFlight.current || state.status !== 'ready') return;
+    savingFlight.current = true;
+    setSaving(true);
+    setFeedback('');
+    try {
+      // readCreatorCard is server-only: cached or stale local values cannot
+      // claim that an ambiguous prior write was persisted.
+      const latest = await readCreatorCard(schoolId, ownerUid);
+      if (!mounted.current) return;
+      const expected = validateCreatorCard(draft);
+      if (latest &&
+        latest.headline === expected.headline &&
+        latest.bio === expected.bio &&
+        latest.linkUrl === expected.linkUrl) {
+        currentPortfolioLink.current = latest.linkUrl;
+        setLinkError('');
+        setState({ status: 'ready', value: latest });
+        setEditing(false);
+        setNeedsConfirmation(false);
+        setFeedback('社群簡介已儲存。');
+      } else {
+        setNeedsConfirmation(false);
+        setFeedback('伺服器資料與草稿不同，草稿已保留。確認後可重新儲存。');
+      }
+    } catch {
+      if (mounted.current) {
+        setFeedback('仍無法核對伺服器資料，草稿已保留，請稍後重試核對。');
+      }
+    } finally {
+      if (mounted.current) {
+        savingFlight.current = false;
+        setSaving(false);
+      }
+    }
   };
 
   const submit = async () => {
@@ -92,19 +139,22 @@ function ScopedCreatorCardPanel({
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
+    setNeedsConfirmation(false);
     try {
       const confirmed = await saveCreatorCard(schoolId, ownerUid, draft);
       if (!mounted.current) return;
       currentPortfolioLink.current = confirmed.linkUrl;
       setLinkError('');
+      setNeedsConfirmation(false);
       setState({ status: 'ready', value: confirmed });
       setEditing(false);
       setFeedback('社群簡介已儲存。');
     } catch (error) {
       if (!mounted.current) return;
-      setFeedback(error instanceof Error && /最多|HTTPS|有效/.test(error.message)
-        ? error.message
-        : '儲存尚未完成，輸入內容已保留，請確認連線及校籍後重試。');
+      const validationError = error instanceof Error && /最多|HTTPS|有效/.test(error.message);
+      setNeedsConfirmation(!validationError);
+      setFeedback(validationError ? error.message
+        : '無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
     } finally {
       if (mounted.current) {
         savingFlight.current = false;
@@ -153,7 +203,7 @@ function ScopedCreatorCardPanel({
           <TextInput
             accessibilityLabel="一句話介紹"
             value={draft.headline}
-            onChangeText={(headline) => setDraft((value) => ({ ...value, headline }))}
+            onChangeText={(headline) => changeDraft('headline', headline)}
             maxLength={CREATOR_CARD_LIMITS.headline}
             placeholder="例如：記錄校園日常的攝影愛好者"
             placeholderTextColor={theme.colors.textSecondary}
@@ -164,7 +214,7 @@ function ScopedCreatorCardPanel({
           <TextInput
             accessibilityLabel="個人簡介"
             value={draft.bio}
-            onChangeText={(bio) => setDraft((value) => ({ ...value, bio }))}
+            onChangeText={(bio) => changeDraft('bio', bio)}
             multiline
             maxLength={CREATOR_CARD_LIMITS.bio}
             placeholder="分享興趣、社團、作品或你想和同學交流的事。"
@@ -177,7 +227,7 @@ function ScopedCreatorCardPanel({
           <TextInput
             accessibilityLabel="作品連結"
             value={draft.linkUrl}
-            onChangeText={(linkUrl) => setDraft((value) => ({ ...value, linkUrl }))}
+            onChangeText={(linkUrl) => changeDraft('linkUrl', linkUrl)}
             maxLength={CREATOR_CARD_LIMITS.linkUrl}
             autoCapitalize="none"
             autoCorrect={false}
@@ -190,10 +240,15 @@ function ScopedCreatorCardPanel({
           <Text style={styles.note}>這些內容只會顯示給所屬校園成員，不會帶入學號、電話或校務資料。</Text>
           {!!feedback && <Text accessibilityRole="alert" style={styles.error}>{feedback}</Text>}
           <View style={styles.actions}>
-            <CardButton label={saving ? '正在確認儲存…' : '儲存簡介'}
-              primary disabled={saving} busy={saving} onPress={() => void submit()} />
+            <CardButton label={saving && !needsConfirmation ? '正在確認儲存…' : '儲存簡介'}
+              primary disabled={saving || needsConfirmation} busy={saving}
+              onPress={() => void submit()} />
+            {needsConfirmation && (
+              <CardButton label={saving ? '正在核對伺服器…' : '核對儲存結果'}
+                disabled={saving} busy={saving} onPress={() => void confirmPreviousSave()} />
+            )}
             <CardButton label="取消編輯" disabled={saving}
-              onPress={() => { setEditing(false); setFeedback(''); }} />
+              onPress={() => { setEditing(false); setNeedsConfirmation(false); setFeedback(''); }} />
           </View>
         </View>
       ) : (
