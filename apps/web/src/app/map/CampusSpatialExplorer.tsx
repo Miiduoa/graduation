@@ -408,16 +408,29 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // is authoritative only when it has measurable positive dimensions; on
     // legacy WebViews without usable layout measurements, keep the observer
     // signal and the accessible manual-recovery path.
+    // On iOS the soft keyboard and pinch-zoom often change only the visual
+    // viewport, leaving window.innerHeight unchanged. Its offset is relative
+    // to the layout viewport used by getBoundingClientRect().
+    const visualViewport = window.visualViewport;
     const hostDefinitelyOffscreen = () => {
       try {
         const rect = host.getBoundingClientRect();
         const width = window.innerWidth;
         const height = window.innerHeight;
+        const hasVisualBounds = visualViewport &&
+          Number.isFinite(visualViewport.width) && visualViewport.width > 0 &&
+          Number.isFinite(visualViewport.height) && visualViewport.height > 0 &&
+          Number.isFinite(visualViewport.offsetLeft) &&
+          Number.isFinite(visualViewport.offsetTop);
+        const left = hasVisualBounds ? visualViewport.offsetLeft : 0;
+        const top = hasVisualBounds ? visualViewport.offsetTop : 0;
+        const right = left + (hasVisualBounds ? visualViewport.width : width);
+        const bottom = top + (hasVisualBounds ? visualViewport.height : height);
         return Number.isFinite(rect.width) && rect.width > 0 &&
           Number.isFinite(rect.height) && rect.height > 0 &&
           Number.isFinite(width) && width > 0 &&
           Number.isFinite(height) && height > 0 &&
-          (rect.bottom <= 0 || rect.top >= height || rect.right <= 0 || rect.left >= width);
+          (rect.bottom <= top || rect.top >= bottom || rect.right <= left || rect.left >= right);
       } catch {
         return false;
       }
@@ -548,6 +561,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('resize', onViewportResize);
+    // Safari's visual viewport can resize/scroll without a layout resize or
+    // a timely IntersectionObserver callback. Listen to both dimensions;
+    // older WebViews without this optional API keep the window fallback.
+    try {
+      visualViewport?.addEventListener('resize', onViewportResize);
+      visualViewport?.addEventListener('scroll', onViewportResize);
+    } catch { /* partially implemented WebView API */ }
     startWhenVisible();
     return () => {
       active = false;
@@ -559,6 +579,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('resize', onViewportResize);
+      try {
+        visualViewport?.removeEventListener('resize', onViewportResize);
+        visualViewport?.removeEventListener('scroll', onViewportResize);
+      } catch { /* partially implemented WebView API */ }
       pendingCreate = null;
       scene?.dispose();
       runtime.current = null;
