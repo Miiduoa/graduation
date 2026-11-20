@@ -1797,6 +1797,43 @@ it('does not claim success when a WebView clipboard getter throws or returns no 
   });
 });
 
+it.each([
+  { acknowledgement: false, label: 'false' },
+  { acknowledgement: 0, label: '0' },
+  { acknowledgement: null, label: 'null' },
+  { acknowledgement: 'false', label: 'string false' },
+  { acknowledgement: { success: false }, label: 'object failure' },
+])('does not claim clipboard success for a WebView bridge returning $label', async ({ acknowledgement }) => {
+  const copy = vi.fn(() => Promise.resolve(acknowledgement));
+  await withSourceClipboard({ value: { writeText: copy } }, async () => {
+    const view = render(<StudySourceTables text={source} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    fireEvent.change(screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }),
+      { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格第 2 列原文' }));
+    expect(copy).toHaveBeenCalledWith('| 計算機概論 | 2 | 205 |');
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('未確認複製'));
+    expect(screen.getByRole('status').textContent).not.toContain('已接受複製指令');
+    const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+    expect(field.value).toBe('| 計算機概論 | 2 | 205 |');
+    expect(field.selectionStart).toBe(0);
+    expect(field.selectionEnd).toBe(field.value.length);
+    view.unmount();
+  });
+});
+
+it('accepts an explicit true acknowledgement without losing the manual source', async () => {
+  await withSourceClipboard({ value: { writeText: () => Promise.resolve(true) } }, async () => {
+    const view = render(<StudySourceTables text={source} />);
+    fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+    fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格原文' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('已接受複製指令'));
+    expect((screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement).value)
+      .toContain('| 資料庫 | 3 | 301 |');
+    view.unmount();
+  });
+});
+
 it('ignores late clipboard success after the selected source row changes', async () => {
   let acknowledge: (() => void) | undefined;
   const pending = new Promise<void>((resolve) => { acknowledge = resolve; });

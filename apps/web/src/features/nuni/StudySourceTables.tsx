@@ -520,7 +520,11 @@ function StudySourceSelection({ table, index, sourceLines }: {
       void Promise.resolve(result as PromiseLike<unknown>).then(
         (acknowledged) => {
           if (copyRequest.current !== request) return;
-          if (acknowledged === false) manualCopy(request);
+          // Native Clipboard.writeText() resolves with void (undefined).
+          // Some in-app WebView bridges resolve false, null, 0, a string or
+          // an object instead of rejecting a denied/unsupported copy.
+          // Those nonstandard acknowledgements do not prove success.
+          if (acknowledged !== undefined && acknowledged !== true) manualCopy(request);
           else {
             invalidateCopy();
             setCopyFeedback('瀏覽器已接受複製指令；若無法貼上，仍可長按下方原文。');

@@ -1,3 +1,9 @@
+## 2026-11-21：手機 WebView 剪貼簿異常回覆保守處理
+
+- 修正教材表格「複製原文」的非標準 WebView 回覆判定：標準 `Clipboard.writeText()` Promise<void>（resolve undefined）和明確 true 維持既有接受提示；如果手機 App bridge 的 Promise 卻 resolve false、null、0、"false" 或不明物件，就**不宣告複製成功**，改以既有唯讀原文欄位、選取範圍與長按／鍵盤複製提示作為備援。這只表示瀏覽器回覆已收到，不保證系統剪貼簿的實際內容。
+- 加入 5 類拒絕回覆與 1 類成功回覆的模擬 React DOM 回歸，核對原始單列文字、全選範圍與狀態；無新套件、外部傳輸或 checkpoint 變更。模擬測試不能代替 iPhone Safari／Android Chrome 的實機複製、貼上及讀屏驗收。
+- 本次基準 head `53f96bebc618fd996934ff84374f06d2a9f928b8` 的 [CI #44820413044](https://github.com/Miiduoa/graduation/actions/runs/44820413044) **整體失敗**：Web Tests 有 8 個 `Assistant.roleReadBoundary.test.tsx` 非白板路徑失敗；Web/Mobile Build、Lint/TypeCheck、Security、Functions、Firestore、Assistant 與 [CodeQL #44820413042](https://github.com/Miiduoa/graduation/actions/runs/44820413042) 個別成功。未修改其他 Agent 任務，也不能將舊綠燈沿用到新 SHA。GitHub App 5504170 正式 APPROVED、Maestro、實機與 Ahaboard 同教材同題同裝置比較缺證據；PR 必須維持 Draft、不合併、不部署。
+
 ## 2026-11-21：財務／教學季度序號不再誤當倍數圖
 
 - 由有權使用的教材表格顯示「第 1 季／第 4 季」或「Fiscal Quarter 1／4」時，季度是年內位置，不能推論第 4 季是第 1 季的四倍。現在對明確的季度、季別、季次、Quarter／Qtr 等序號欄位只保留可核對的原文表格，不衍生長條圖；真正的「季度數量／Quarter Count／Quarterly Revenue」等量值繼續可比較。
