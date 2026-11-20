@@ -4125,3 +4125,102 @@ it('discloses missing audited way outlines without treating a partial OSM reply 
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
+
+
+it('does not crash or eagerly start WebGL when a WebView VisualViewport getter throws, then recovers', async () => {
+  // Some embedded browsers expose a VisualViewport property that throws
+  // during restoration. This is not equivalent to an API being unsupported.
+  const original = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
+  });
+  let throwOnRead = true;
+  Object.defineProperty(window, 'visualViewport', {
+    configurable: true,
+    get() {
+      if (throwOnRead) throw new Error('visual viewport temporarily unavailable');
+      return viewport;
+    },
+  });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 40, left: 0, top: 40, right: 320, bottom: 220,
+      width: 320, height: 180, toJSON: () => ({}),
+    } as DOMRect);
+    try {
+      expect(scene.create).not.toHaveBeenCalled();
+      expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+      expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+      // No second observer result: window.resize is enough to recover an
+      // already confirmed intersection once the getter and geometry work.
+      throwOnRead = false;
+      fireEvent(window, new Event('resize'));
+      await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
+      // The recovered viewport now receives its own resize listener.
+      viewport.height = 10;
+      act(() => viewport.dispatchEvent(new Event('resize')));
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      viewport.height = window.innerHeight;
+      act(() => viewport.dispatchEvent(new Event('scroll')));
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
+      expect(scene.create).toHaveBeenCalledTimes(1);
+      fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+      scene.setActive.mockClear();
+      act(() => viewport.dispatchEvent(new Event('resize')));
+      expect(scene.setActive).not.toHaveBeenCalled();
+    } finally {
+      bounds.mockRestore();
+    }
+  } finally {
+    if (original) Object.defineProperty(window, 'visualViewport', original);
+    else Reflect.deleteProperty(window, 'visualViewport');
+  }
+});
+
+it('rebinds viewport events after Safari page restoration replaces the VisualViewport instance', async () => {
+  const first = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
+  });
+  const restored = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
+  });
+  vi.stubGlobal('visualViewport', first);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 40, left: 0, top: 40, right: 320, bottom: 220,
+    width: 320, height: 180, toJSON: () => ({}),
+  } as DOMRect);
+  try {
+    vi.stubGlobal('visualViewport', restored);
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    const callsAfterRebind = scene.setActive.mock.calls.length;
+    first.height = 10;
+    act(() => first.dispatchEvent(new Event('resize')));
+    expect(scene.setActive.mock.calls.length).toBe(callsAfterRebind);
+    // Only the new, actually visible viewport may control the live scene.
+    restored.height = 10;
+    act(() => restored.dispatchEvent(new Event('scroll')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    restored.height = window.innerHeight;
+    act(() => restored.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    scene.setActive.mockClear();
+    act(() => restored.dispatchEvent(new Event('scroll')));
+    expect(scene.setActive).not.toHaveBeenCalled();
+  } finally {
+    bounds.mockRestore();
+  }
+});

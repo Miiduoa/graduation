@@ -411,7 +411,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // On iOS the soft keyboard and pinch-zoom often change only the visual
     // viewport, leaving window.innerHeight unchanged. Its offset is relative
     // to the layout viewport used by getBoundingClientRect().
-    const visualViewport = window.visualViewport;
+    // Read the current viewport on each check: WebViews can temporarily throw
+    // when accessing it, or replace its instance after page restoration.
     // Geometry is only affirmative when both the host and the effective
     // viewport have valid, positive bounds. Unknown WebView measurements must
     // never be interpreted as proof that the map is back on screen.
@@ -421,6 +422,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       // each getter once; an exception is *not* permission to fall back to
       // the larger layout viewport and wake a hidden WebGL context.
       let visualBounds: { left: number; top: number; width: number; height: number } | null = null;
+      let visualViewport: VisualViewport | null;
+      try { visualViewport = window.visualViewport; }
+      catch { return 'invalid-visual-viewport'; }
       if (visualViewport) {
         try {
           const { width, height, offsetLeft, offsetTop } = visualViewport;
@@ -500,8 +504,28 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // viewport listener initiated, on positive and measurable overlap, after
     // a real observer previously permitted startup. Never bypass the initial
     // offscreen-import gate or restart an unconfirmed/legacy WebView scene.
+    // Page restore can replace the VisualViewport object. Transfer the two
+    // listeners to the current instance, without leaving callbacks on an old
+    // viewport or interpreting a throwing getter as an absent API.
+    let subscribedVisualViewport: VisualViewport | null = null;
+    const refreshVisualViewportListeners = () => {
+      let current: VisualViewport | null;
+      try { current = window.visualViewport; }
+      catch { return; }
+      if (current === subscribedVisualViewport) return;
+      for (const event of ['resize', 'scroll'] as const) {
+        try { subscribedVisualViewport?.removeEventListener(event, onViewportResize); }
+        catch { /* partially implemented WebView API */ }
+      }
+      subscribedVisualViewport = current;
+      for (const event of ['resize', 'scroll'] as const) {
+        try { subscribedVisualViewport?.addEventListener(event, onViewportResize); }
+        catch { /* partially implemented WebView API */ }
+      }
+    };
     const onViewportResize = () => {
       if (!active) return;
+      refreshVisualViewportListeners();
       if (!manualStart && typeof IntersectionObserver !== 'undefined') {
         const position = hostViewportVisibility();
         if (position === 'offscreen' || position === 'invalid-visual-viewport') {
@@ -644,10 +668,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // An embedded WebView may support only one VisualViewport event. Register
     // independently: a throwing resize listener must not suppress scroll,
     // which is the only signal sent after certain keyboard/pinch changes.
-    for (const event of ['resize', 'scroll'] as const) {
-      try { visualViewport?.addEventListener(event, onViewportResize); }
-      catch { /* partially implemented WebView API */ }
-    }
+    refreshVisualViewportListeners();
     startWhenVisible();
     return () => {
       active = false;
@@ -662,7 +683,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       // Always attempt both removals even if the first WebView API throws.
       // Otherwise a retained scroll handler can touch a disposed GPU scene.
       for (const event of ['resize', 'scroll'] as const) {
-        try { visualViewport?.removeEventListener(event, onViewportResize); }
+        try { subscribedVisualViewport?.removeEventListener(event, onViewportResize); }
         catch { /* partially implemented WebView API */ }
       }
       pendingCreate = null;
