@@ -84,6 +84,24 @@ export function campusMapSourcePath(schoolId: string, source: CampusMapSource): 
     : source === 'legacy-pois' ? 'pois' : 'bundled/providence-campus';
 }
 
+
+const BOUNDED_TRANSIT_STOP_MARKER = ['1'];
+const MAX_TRANSIT_STOP_MARKER_INSPECTION = 32;
+
+/** Classroom matching only needs a yes/no stop marker. Never copy a raw
+ * Firestore value into a validated assistant result or the tool summary. */
+export function boundedTransitStopMarker(place: object): { transitStopIds: string[] } | Record<string, never> {
+  if (!Object.prototype.propertyIsEnumerable.call(place, 'transitStopIds')) return {};
+  const ids: unknown = (place as { transitStopIds?: unknown }).transitStopIds;
+  const hasMarker = typeof ids === 'string'
+    ? ids.trim().length > 0
+    : Array.isArray(ids)
+      ? ids.length > MAX_TRANSIT_STOP_MARKER_INSPECTION
+        || ids.some((id: unknown) => (typeof id === 'string' ? id.trim().length > 0 : id != null))
+      : ids != null;
+  return hasMarker ? { transitStopIds: [...BOUNDED_TRANSIT_STOP_MARKER] } : {};
+}
+
 function comparable(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('zh-TW').replace(/\s+/g, ' ').trim();
 }
@@ -143,8 +161,7 @@ export function parseCampusMapResult(raw: unknown, schoolId: string, requested: 
         match: item.match as CampusMapMatch, verification: item.verification as CampusMapItem['verification'],
         ...(item.building !== undefined ? { building: clean(item.building, 120) } : {}),
         ...(item.floor !== undefined ? { floor: clean(item.floor, 80) } : {}),
-        ...(Object.prototype.propertyIsEnumerable.call(item, 'transitStopIds')
-          ? { transitStopIds: item.transitStopIds } : {}) } as CampusMapItem;
+        ...boundedTransitStopMarker(item) } as CampusMapItem;
       if (new Set(parsed.facilities).size !== parsed.facilities.length ||
           parsed.match !== campusMapMatch(schoolId, args.query, parsed)) throw new Error('Invalid map match');
       const sourceUrl = providencePlaceSourceUrl(schoolId, parsed);

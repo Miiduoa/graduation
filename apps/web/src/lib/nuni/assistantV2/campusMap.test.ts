@@ -117,8 +117,14 @@ describe('map query and source contract', () => {
     value.resolution = 'candidates';
     const parsed = parseCampusMapResult(value, 'pu', { query: 'PH303', limit: 5 });
     expect(parsed.items[0].match).toBe('search');
-    expect(parsed.items[0]).toHaveProperty('transitStopIds', spoof.transitStopIds);
+    expect(parsed.items[0]).toHaveProperty('transitStopIds', ['1']);
     expect(parseCampusMapResult(parsed, 'pu', { query: 'PH303', limit: 5 }).items[0].match).toBe('search');
+    const oversized = { ...item, transitStopIds: { nested: 'x'.repeat(10_000), more: Array.from({ length: 5000 }, (_, i) => i) } };
+    const bounded = parseCampusMapResult({ ...value, items: [oversized] }, 'pu', { query: 'PH303', limit: 5 });
+    expect(bounded.items[0].match).toBe('search');
+    expect(bounded.items[0]).toHaveProperty('transitStopIds', ['1']);
+    expect(JSON.stringify(bounded.items[0]).length).toBeLessThan(JSON.stringify(oversized).length);
+    expect(parseCampusMapResult(bounded, 'pu', { query: 'PH303', limit: 5 }).items[0].match).toBe('search');
     expect(() => parseCampusMapResult({
       ...value,
       items: [{ ...item, match: 'building' }],
