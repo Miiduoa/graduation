@@ -400,7 +400,26 @@ describe('published Providence service identity is not a classroom building', ()
 
 
 describe('published POI classroom routing never trusts an unrelated Firestore building alias', () => {
+  it('still matches a published hall or library when the POI uses its official English catalog name', () => {
+    const renyuan = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-renyuan');
+    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library');
+    expect(renyuan).toBeTruthy();
+    expect(library).toBeTruthy();
+    const namedRenyuan = { ...renyuan!, name: 'Anthony Kuo Hall' };
+    const namedLibrary = { ...library!, name: 'Gaesia Library' };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'Anthony Kuo Hall 303', locations: [namedRenyuan],
+    }).matches).toEqual([namedRenyuan]);
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'Gaesia Library 303', locations: [namedLibrary],
+    }).matches).toEqual([namedLibrary]);
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: '任垣樓 303', locations: [renyuan!],
+    }).matches).toEqual([renyuan!]);
+  });
+
   it('does not redirect a sourced clinic or chapel to PH303 after synthetic building/category corruption', () => {
+
     const hallFromCatalog = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu');
     expect(hallFromCatalog).toBeDefined();
     for (const id of ['pu-health', 'pu-chapel']) {

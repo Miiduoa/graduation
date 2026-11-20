@@ -292,10 +292,44 @@ const VERIFIED_CLASSROOM_BUILDING_CODES = [
  * Allow its own sourced name and explicitly verified bilingual code aliases;
  * other schools and unsourced records retain the existing matching behavior.
  */
+
+/** Official English names from the campus POI catalog, keyed by the same
+ * published Providence IDs. A name aliases only that sourced ID; it does not
+ * confer identity on an unsourced or relabelled POI.
+ */
+const PUBLISHED_PROVIDENCE_ENGLISH_NAMES = new Map<string, string>([
+  ['pu-zhugu', 'Providence Hall'],
+  ['pu-renyuan', 'Anthony Kuo Hall'],
+  ['pu-boduo', 'St. Peter Hall'],
+  ['pu-wenxing', 'Wen Xing Hall'],
+  ['pu-gelun', 'Theodore Guerin Hall'],
+  ['pu-fangji', 'St. Francis Hall'],
+  ['pu-siyuan', 'Si Yuan Hall'],
+  ['pu-jingan', 'Jing An Hall'],
+  ['pu-library', 'Gaesia Library'],
+  ['pu-chapel', 'Chapel'],
+  ['pu-jingyuan', 'Jingyuan Cafeteria'],
+  ['pu-yiyuan', 'Yiyuan Cafeteria'],
+  ['pu-gym', 'John Paul II Sports Hall'],
+  ['pu-health', 'Health Center'],
+  ['pu-parking-moto', 'Motorcycle Parking'],
+]);
+
+function officialSourcedNames(published: CampusMapPlaceLike): string[] {
+  const names = [published.name];
+  const catalogEnglish = PUBLISHED_PROVIDENCE_ENGLISH_NAMES.get(published.id);
+  if (catalogEnglish) names.push(catalogEnglish);
+  if (Object.prototype.propertyIsEnumerable.call(published, 'nameEn')) {
+    const nameEn: unknown = (published as { nameEn?: unknown }).nameEn;
+    if (typeof nameEn === 'string' && nameEn.trim()) names.push(nameEn);
+  }
+  return names;
+}
+
 function isSourcedBuildingLabel(school: string, published: CampusMapPlaceLike, suppliedLabel: unknown): boolean {
   const label = comparisonText(suppliedLabel);
   if (!label) return false;
-  if (label === comparisonText(published.name)) return true;
+  if (officialSourcedNames(published).some((name) => comparisonText(name) === label)) return true;
   return VERIFIED_CLASSROOM_BUILDING_CODES.some(
     (entry) =>
       entry.schoolId === school &&
