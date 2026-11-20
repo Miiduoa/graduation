@@ -79,18 +79,25 @@ function BoardsContent() {
   const [composeOpen, setComposeOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const loadVersion = useRef(0);
-  // A pending subscription belongs to this mounted student + school scope.
-  const pendingSubscriptionIds = useRef(new Set<string>());
+  // Writes still in flight per board (several may be queued while offline).
+  const pendingSubscriptionCounts = useRef(new Map<string, number>());
   // Per-board write revision: only boards written after a read started keep
   // their local state; every other board still takes the server snapshot.
   const subscriptionRevision = useRef(0);
   const boardWriteRevision = useRef(new Map<string, number>());
-  // Server value seen by a refresh while a board write was pending. A failed
-  // write falls back to this fresher value instead of the pre-tap state.
-  const serverStateDuringWrite = useRef(new Map<string, boolean>());
-  // Revision of the board's last confirmed write when the pending write began.
-  // Snapshots read before that confirmation are older than the local state.
-  const pendingBaseRevision = useRef(new Map<string, number>());
+  // Latest tap per board; only its outcome may roll back or alert.
+  const latestIntent = useRef(new Map<string, number>());
+  const intentCounter = useRef(0);
+  // Mirrors `subscribed` synchronously so two presses before a rerender toggle
+  // from the newest optimistic state instead of a stale closure.
+  const subscribedRef = useRef<Set<string>>(new Set());
+  const applySubscribed = useCallback((update: (previous: Set<string>) => Set<string>) => {
+    setSubscribed((previous) => {
+      const next = update(previous);
+      subscribedRef.current = next;
+      return next;
+    });
+  }, []);
   const [pendingSubscriptions, setPendingSubscriptions] = useState<ReadonlySet<string>>(new Set());
   const mounted = useRef(true);
   useEffect(() => {
@@ -105,7 +112,7 @@ function BoardsContent() {
     try {
       if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
         setBoards([]);
-        setSubscribed(new Set());
+        applySubscribed(() => new Set());
         return;
       }
       const [rows, subs] = await Promise.all([
@@ -114,17 +121,9 @@ function BoardsContent() {
       ]);
       if (loadVersion.current !== version) return;
       setBoards(rows);
-      const serverIds = new Set(subs);
-      for (const id of pendingSubscriptionIds.current) {
-        const base = pendingBaseRevision.current.get(id);
-        if (base !== undefined && base > subscriptionRevisionAtRead) continue;
-        serverStateDuringWrite.current.set(id, serverIds.has(id));
-      }
-      // A refresh finishing during a pending write must not erase the student's
-      // optimistic choice. Reconcile the server snapshot after the write settles.
-      setSubscribed((previous) => {
+      applySubscribed((previous) => {
         const next = new Set(subs);
-        const keepLocal = new Set(pendingSubscriptionIds.current);
+        const keepLocal = new Set(pendingSubscriptionCounts.current.keys());
         for (const [id, revision] of boardWriteRevision.current) {
           if (revision > subscriptionRevisionAtRead) keepLocal.add(id);
         }
@@ -139,7 +138,7 @@ function BoardsContent() {
       const code = (cause as { code?: string })?.code ?? '';
       if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
         setBoards([]);
-        setSubscribed(new Set());
+        applySubscribed(() => new Set());
       }
       setLoadError('暫時無法更新看板。請確認網路與登入狀態，再試一次。');
     } finally {
@@ -148,7 +147,7 @@ function BoardsContent() {
         setRefreshing(false);
       }
     }
-  }, [school?.id, auth.user?.uid]);
+  }, [school?.id, auth.user?.uid, applySubscribed]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -195,57 +194,67 @@ function BoardsContent() {
         if (!uid) Alert.alert('請登入', '登入後即可訂閱看板');
         return;
       }
-      // React state may not have rerendered between two native presses.
-      // Ref-level exclusion prevents opposite writes for the same board.
-      if (pendingSubscriptionIds.current.has(b.id)) return;
-      pendingSubscriptionIds.current.add(b.id);
+      const wasSub = subscribedRef.current.has(b.id);
+      const target = !wasSub;
+      const intent = ++intentCounter.current;
+      latestIntent.current.set(b.id, intent);
+      pendingSubscriptionCounts.current.set(b.id, (pendingSubscriptionCounts.current.get(b.id) ?? 0) + 1);
       subscriptionRevision.current += 1;
       const priorRevision = boardWriteRevision.current.get(b.id);
       boardWriteRevision.current.set(b.id, subscriptionRevision.current);
-      serverStateDuringWrite.current.delete(b.id);
-      if (priorRevision === undefined) pendingBaseRevision.current.delete(b.id);
-      else pendingBaseRevision.current.set(b.id, priorRevision);
-      let writeSucceeded = false;
-      setPendingSubscriptions(new Set(pendingSubscriptionIds.current));
-      const wasSub = subscribed.has(b.id);
-      setSubscribed((previous) => {
+      setPendingSubscriptions(new Set(pendingSubscriptionCounts.current.keys()));
+      const optimistic = new Set(subscribedRef.current);
+      if (target) optimistic.add(b.id);
+      else optimistic.delete(b.id);
+      subscribedRef.current = optimistic;
+      applySubscribed((previous) => {
         const next = new Set(previous);
-        if (wasSub) next.delete(b.id);
-        else next.add(b.id);
+        if (target) next.add(b.id);
+        else next.delete(b.id);
         return next;
       });
+      let failed = false;
       try {
+        // Writes are not blocked while pending: offline Firestore queues them in
+        // order, so the student can still undo a mistaken tap before reconnecting.
         if (wasSub) await unsubscribeFromBoard(uid, sid, b.id);
         else await subscribeToBoard(uid, sid, b.id);
-        writeSucceeded = true;
       } catch (error: any) {
+        failed = true;
+        const isLatest = latestIntent.current.get(b.id) === intent;
         // A failed write changed nothing on the server, so it must not make
         // this board's local state outrank refreshes that started earlier.
-        if (priorRevision === undefined) boardWriteRevision.current.delete(b.id);
-        else boardWriteRevision.current.set(b.id, priorRevision);
-        const serverSaysSubscribed = serverStateDuringWrite.current.get(b.id);
-        const restoreSubscribed = serverSaysSubscribed ?? wasSub;
+        if (isLatest) {
+          if (priorRevision === undefined) boardWriteRevision.current.delete(b.id);
+          else boardWriteRevision.current.set(b.id, priorRevision);
+        }
         // A delayed failure from the previous user/school must not alert or
-        // revert the currently mounted student's board subscriptions.
-        if (mounted.current) {
-          setSubscribed((previous) => {
+        // revert the currently mounted student's board subscriptions. An older
+        // failure is superseded by the student's newer tap on the same board.
+        if (mounted.current && isLatest) {
+          applySubscribed((previous) => {
             const next = new Set(previous);
-            if (restoreSubscribed) next.add(b.id);
+            if (wasSub) next.add(b.id);
             else next.delete(b.id);
             return next;
           });
           Alert.alert('訂閱失敗', error?.message ?? String(error));
         }
       } finally {
-        pendingSubscriptionIds.current.delete(b.id);
-        serverStateDuringWrite.current.delete(b.id);
-        pendingBaseRevision.current.delete(b.id);
+        const remaining = (pendingSubscriptionCounts.current.get(b.id) ?? 1) - 1;
+        if (remaining > 0) pendingSubscriptionCounts.current.set(b.id, remaining);
+        else pendingSubscriptionCounts.current.delete(b.id);
         subscriptionRevision.current += 1;
-        if (writeSucceeded) boardWriteRevision.current.set(b.id, subscriptionRevision.current);
-        if (mounted.current) setPendingSubscriptions(new Set(pendingSubscriptionIds.current));
+        const isLatest = latestIntent.current.get(b.id) === intent;
+        if (!failed && isLatest) boardWriteRevision.current.set(b.id, subscriptionRevision.current);
+        if (mounted.current) setPendingSubscriptions(new Set(pendingSubscriptionCounts.current.keys()));
       }
+      // The rollback above is only the pre-tap guess; a snapshot taken during
+      // the write may have included the unconfirmed local change. Re-read the
+      // server once this board has no writes left in flight.
+      if (failed && mounted.current && !pendingSubscriptionCounts.current.has(b.id)) void load();
     },
-    [auth.user?.uid, school?.id, subscribed],
+    [auth.user?.uid, school?.id, applySubscribed, load],
   );
 
   if (!auth.user?.uid) {
@@ -370,9 +379,8 @@ function BoardsContent() {
                   hitSlop={8}
                   accessibilityRole="button"
                   accessibilityLabel={`${isSub ? '取消訂閱' : '訂閱'}${b.name}`}
-                  accessibilityHint={isPending ? '正在同步訂閱狀態' : '向伺服器更新本校看板訂閱'}
-                  accessibilityState={{ disabled: isPending, busy: isPending }}
-                  disabled={isPending}
+                  accessibilityHint={isPending ? '正在同步訂閱狀態，可再點一次撤銷' : '向伺服器更新本校看板訂閱'}
+                  accessibilityState={{ busy: isPending }}
                   onPress={(e) => {
                     e?.stopPropagation?.();
                     void onToggleSubscribe(b);
