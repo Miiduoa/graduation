@@ -272,6 +272,56 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
+
+  it.each(['containing', 'iterator'] as const)(
+    'does not trust code-point-only Segmenter %s as complete visible graphemes', (mode) => {
+      // The fake WebView reports real contiguous source bytes but incorrectly
+      // splits combining accents, ZWJ emoji, flag pairs and Hangul syllables.
+      // This used to pass the Segmenter shape/content checks.
+      const fakeIntl = Object.create(Intl);
+      fakeIntl.Segmenter = class {
+        segment(source: string) {
+          if (mode === 'containing') {
+            return {
+              containing(position: number) {
+                let index = 0;
+                for (const segment of source) {
+                  if (position >= index && position < index + segment.length) {
+                    return { index, segment };
+                  }
+                  index += segment.length;
+                }
+                return undefined;
+              },
+            };
+          }
+          return {
+            *[Symbol.iterator]() {
+              let index = 0;
+              for (const segment of source) {
+                yield { index, segment };
+                index += segment.length;
+              }
+            },
+          };
+        }
+      };
+      vi.stubGlobal('Intl', fakeIntl);
+      try {
+        expect(locateStudyEvidence('e\u0301e', 'e')).toEqual({
+          before: 'e\u0301', quote: 'e', after: '', occurrences: 1,
+        });
+        expect(locateStudyEvidence('👩‍💻👩', '👩')?.before).toBe('👩‍💻');
+        expect(locateStudyEvidence('🇹🇼🇹', '🇹')?.before).toBe('🇹🇼');
+        expect(locateStudyEvidence('1️⃣1', '1')?.before).toBe('1️⃣');
+        expect(locateStudyEvidence('한', 'ᄒ')).toBeNull();
+        expect(locateStudyEvidence('前教材後', '教材')?.quote).toBe('教材');
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
   it('locates a late repeated quote without losing non-overlapping counts', () => {
     const original = '甲'.repeat(20_000);
     const last = locateStudyEvidence(original, '甲', 19_999);

@@ -73,6 +73,37 @@ function fallbackBoundaries(source: string): Uint8Array {
   return boundaries;
 }
 
+
+/**
+ * A broken WebView Segmenter may return contiguous, byte-correct code-point
+ * segments that split a *visible* grapheme. Check ambiguous boundaries with
+ * our conservative Unicode fallback even if native containing()/iteration
+ * claims they are valid. Ordinary Han/Latin boundaries retain the fast path.
+ */
+function potentiallySplitGrapheme(source: string, index: number): boolean {
+  if (index <= 0 || index >= source.length) return false;
+  const previousUnit = source.charCodeAt(index - 1);
+  const currentUnit = source.charCodeAt(index);
+  if (previousUnit >= 0xd800 && previousUnit <= 0xdbff &&
+      currentUnit >= 0xdc00 && currentUnit <= 0xdfff) return true;
+
+  const previousStart = previousUnit >= 0xdc00 && previousUnit <= 0xdfff &&
+      index >= 2 && source.charCodeAt(index - 2) >= 0xd800 &&
+      source.charCodeAt(index - 2) <= 0xdbff ? index - 2 : index - 1;
+  const currentEnd = currentUnit >= 0xd800 && currentUnit <= 0xdbff &&
+      index + 1 < source.length && source.charCodeAt(index + 1) >= 0xdc00 &&
+      source.charCodeAt(index + 1) <= 0xdfff ? index + 2 : index + 1;
+  const previous = source.slice(previousStart, index);
+  const current = source.slice(index, currentEnd);
+  return (previous === '\r' && current === '\n') ||
+    graphemeContinuation.test(previous) || graphemeContinuation.test(current) ||
+    graphemePrepend.test(previous) || joinsHangul(previous, current) ||
+    (regionalIndicator.test(previous) && regionalIndicator.test(current)) ||
+    (previous === '\u200d' && pictographic.test(current)) ||
+    (indicLinker.test(previous) && /\p{Lo}/u.test(current)) ||
+    (kiratRaiVowel.test(previous) && kiratRaiVowel.test(current));
+}
+
 function studyGraphemeBoundary(source: string): (index: number) => boolean {
   // A few embedded mobile WebViews expose Intl.Segmenter but throw during
   // construction, lookup or iteration, or return incomplete segments. Keep
@@ -99,7 +130,8 @@ function studyGraphemeBoundary(source: string): (index: number) => boolean {
                 source.slice(found.index, found.index + found.segment.length) !== found.segment) {
               return fallbackBoundary(index);
             }
-            return found.index === index;
+            return found.index === index &&
+              (!potentiallySplitGrapheme(source, index) || fallbackBoundary(index));
           } catch {
             return fallbackBoundary(index);
           }
@@ -121,7 +153,8 @@ function studyGraphemeBoundary(source: string): (index: number) => boolean {
         }
         if (next !== source.length) return fallbackBoundary;
         boundaries[source.length] = 1;
-        return (index) => boundaries[index] === 1;
+        return (index) => boundaries[index] === 1 &&
+          (!potentiallySplitGrapheme(source, index) || fallbackBoundary(index));
       }
     }
   } catch {
