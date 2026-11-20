@@ -282,6 +282,59 @@ it('ignores foreign and older viewport callbacks without disabling walking navig
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+it('offers an accessible way to recover a suspended scene when mobile visibility stops updating', async () => {
+  // Synthetic observer: after a real scene has started, a mobile WebView can
+  // stop delivering visibility records. The canvas must not stay black with
+  // no keyboard-accessible recovery, and normal recovery must reuse the scene.
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(private callback: IntersectionObserverCallback) { intersection = callback; }
+    observe(target: Element) {
+      const entries = [{
+        target, isIntersecting: true, time: 100,
+        intersectionRect: { width: 280, height: 160 },
+      }] as unknown as IntersectionObserverEntry[];
+      this.callback(entries, this as unknown as IntersectionObserver);
+    }
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const notify = (isIntersecting: boolean, time: number) => {
+    const entries = [{
+      target: host, isIntersecting, time,
+      intersectionRect: { width: isIntersecting ? 280 : 0, height: isIntersecting ? 160 : 0 },
+    }] as unknown as IntersectionObserverEntry[];
+    act(() => intersection?.(entries, {} as IntersectionObserver));
+  };
+
+  notify(false, 200);
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  expect(within(dialog).getByRole('status').textContent).toContain('立體畫面已暫停');
+  const recovery = within(dialog).getByRole('button', { name: '重新啟動立體畫面' });
+  expect(recovery).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+  notify(true, 300);
+  expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(scene.create).toHaveBeenCalledTimes(1);
+
+  // No later callback arrives after the second pause. The explicit recovery
+  // restarts one context, while preserving map keyboard focus and walking link.
+  notify(false, 400);
+  const retry = within(dialog).getByRole('button', { name: '重新啟動立體畫面' });
+  retry.focus();
+  fireEvent.click(retry);
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+  expect(scene.dispose).toHaveBeenCalledTimes(1);
+  expect(document.activeElement).toBe(host);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('does not let untimed WebView records override newer timestamped visibility', async () => {
   // A partially implemented mobile IntersectionObserver can mix entries
   // without time into a batch, and deliver old untimed callbacks later.
