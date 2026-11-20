@@ -964,13 +964,15 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // or partial representation into a trusted 3D building snapshot.
         const contentRange = response.headers?.get('content-range') ?? null;
         const contentLength = response.headers?.get('content-length') ?? null;
-        // An HTML login page or captive-portal error can arrive as HTTP 200
-        // with a never-ending body. The public endpoint returns JSON, never
-        // an HTML document; reject these known-wrong representations at the
-        // headers stage without consuming bandwidth or waiting 15 seconds.
-        // Missing Content-Type (legacy WebViews/test bridges) remains allowed.
+        // Captive portals and misconfigured gateways can reply HTTP 200 with
+        // non-JSON documents and a stalled body. Our endpoint only returns
+        // JSON; reject any explicitly incompatible media type before reading
+        // the stream, while accepting application/*+json with parameters.
+        // Missing Content-Type remains compatible with legacy WebView bridges.
         const contentType = response.headers?.get('content-type')?.trim().toLowerCase() ?? '';
-        const htmlResponse = /^(?:text\/html|application\/xhtml\+xml)(?:\s*;|$)/.test(contentType);
+        const mediaType = contentType.split(';', 1)[0]?.trim() ?? '';
+        const invalidMediaType = mediaType !== '' && mediaType !== 'application/json' &&
+          !/^application\/[a-z0-9][a-z0-9.+-]*\+json$/.test(mediaType);
         // RFC Content-Length is a decimal byte count, not a fraction, hex
         // number or comma-separated value. Do not trust a 200 JSON body whose
         // advertised size is invalid or implausibly large for this API.
@@ -984,7 +986,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
             Number(contentLength) === 0 ||
             Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
-            contentRange !== null || invalidContentLength || htmlResponse) {
+            contentRange !== null || invalidContentLength || invalidMediaType) {
           // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
           // can still stream a large body; release it without awaiting an
           // uncooperative proxy, rather than waste mobile bandwidth/memory.
@@ -1012,7 +1014,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
             status < 300 && status !== 200;
           const rateLimitedOrIncomplete = invalidSuccessStatus || status === 304 || status === 408 ||
             status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
-            contentRange !== null || invalidContentLength || htmlResponse;
+            contentRange !== null || invalidContentLength || invalidMediaType;
           // A proxy can return an incomplete 206/Content-Range document or
           // a 408 without Retry-After. These responses cannot be trusted as
           // complete OSM geometry and should not trigger a manual retry loop.
@@ -1022,7 +1024,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           const fallbackBackoff = invalidSuccessStatus || status === 304 ||
             status === 408 || status === 429 || status === 502 ||
             status === 503 || status === 504 || contentRange !== null || invalidContentLength ||
-            htmlResponse;
+            invalidMediaType;
           const seconds = rateLimitedOrIncomplete
             ? (footprintCooldownSeconds(response) ?? (fallbackBackoff ? 60 : null))
             : null;
