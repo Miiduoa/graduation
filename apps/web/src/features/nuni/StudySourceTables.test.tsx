@@ -1001,7 +1001,7 @@ it('continues to compare measured counts and throughput instead of hiding real n
     'Number of Channels', 'Layer Count', 'Number of Layers',
     'Port Throughput', 'Layer Thickness', 'Channel Width',
     '連接埠吞吐量', '通訊埠流量', '頻道頻寬', '通道寬度',
-    '無線頻道速率', 'Wi-Fi 頻道容量', '網路埠負載',
+    '無線頻道速率', '傳輸速率', '下載速率', 'Wi-Fi 頻道容量', '網路埠負載',
   ]) {
     const material = ['| 範圍 | ' + header + ' |', '| --- | --- |',
       '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
@@ -1009,6 +1009,18 @@ it('continues to compare measured counts and throughput instead of hiding real n
     expect(Array.from(container.querySelectorAll('meter'))
       .map((bar) => [bar.getAttribute('value'), bar.getAttribute('max')]))
       .toEqual([['2', '4'], ['4', '4']]);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual(['2', '4']);
+    unmount();
+  }
+});
+
+it('keeps non-speed rates and proportions from becoming unitless quantity bars', () => {
+  for (const header of ['錯誤率', '合格率', '利率', '比率', '占比']) {
+    const material = ['| 課題 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(comparisonSummaries(container)).toEqual([]);
     expect(within(screen.getByRole('table')).getAllByRole('cell')
       .map((cell) => cell.textContent)).toEqual(['2', '4']);
     unmount();

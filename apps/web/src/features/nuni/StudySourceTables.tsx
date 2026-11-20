@@ -61,7 +61,10 @@ const ENGLISH_PERCENT_COLUMN =
 // raw numbers without an explicit percent sign remain ambiguous.
 // A generic rate/ratio header is not a quantity even if it contains bare
 // numbers. Never scale 75 to a 100%-looking bar just because it is the maximum.
-const SOURCE_RATE_OR_RATIO_COLUMN = /(?:率|比例|比率|佔比|占比)/u;
+// A speed (速率) is a measured quantity, unlike an unqualified rate or
+// proportion. Do not interpret plain speed figures as 0–100% percentages.
+// Avoid lookbehind here so older mobile Safari/WebViews can parse this file.
+const SOURCE_RATE_OR_RATIO_COLUMN = /(?:比例|比率|佔比|占比|(?:^|[^速])率)/u;
 const ENGLISH_RATE_OR_RATIO_COLUMN = /\b(?:rate|ratio|share)\b/iu;
 // Changes, investment returns and interest can exceed 100% or be negative.
 // A fixed 100% meter would claim a ceiling that the lesson never established.

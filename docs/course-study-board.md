@@ -1976,3 +1976,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 
 - 「全選表格原文」現在核對原始唯讀文字區是否真的取得焦點，以及選取範圍是否從第 0 個字元涵蓋全文。部分 iOS／Android 內嵌 WebView 即使 `focus()`、`select()`、`setSelectionRange()` 沒有拋錯，也可能靜默忽略操作；遇到這類情況，介面明確提示改以長按原文或鍵盤選取，不宣稱複製成功。即使瀏覽器回報範圍正確，也只說明「回報已全選」，不保證系統複製選單或下載完成。
 - React DOM 模擬回歸覆蓋正常全選、雙 API 拋錯與三個 API 全部靜默忽略；保留原始教材、CRLF、逐列範圍與既有複製／TXT 備援，不新增套件、傳輸私人教材或更動 checkpoint。這不是 Safari／Chrome／VoiceOver／TalkBack 實機驗收；PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-20：修復 Web Tests 實際失敗的「速率」欄位誤判
+
+- 精確 head \`9871bc83a9cc240d1d6ed75b418ba430b0e147ea\` 的 CI #44695682447 真實 Web Tests job #136151748861 失敗（19,572 通過、1 失敗）：\`StudySourceTables.test.tsx\` 的網路量測正例要求「無線頻道速率」可選比較，卻被通用中文字「率」匹配器錯認為百分率，導致原文數值比較區被隱藏；同 SHA 的 Build Web/Mobile、Lint/TypeCheck、Mobile Tests、Security Gates、CodeQL 已通過，但 CI Summary 失敗。
+- 修改只針對百分比／一般比率欄的判斷：將「速率」視為可量測的非負數值（仍需全部資料列為同欄、同格式的純數字），保留真正的「錯誤率」「通過率」「利率」「比率」對缺少 % 的數值不推測為 0–100% 圖。新增「傳輸速率」「下載速率」正例與 5 組一般比率反例，原始授權教材、行號與讀屏表格內容保持不變。
+- 使用不需正規式 lookbehind 的寫法，避免較舊 Safari/WebView 解析失敗。不新增套件、不改 v1/v2 閱讀備份或逐題 checkpoint、不外傳私人教材；待新 head 重新跑全套 CI、CodeQL。指定 App 5504170 APPROVED、Maestro／手機真機與 Ahaboard 同教材同題同機測試未齊前保持 Draft，不合併、不部署。
