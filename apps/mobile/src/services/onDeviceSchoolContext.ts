@@ -190,9 +190,18 @@ function dueOrderedAssignmentExcerpt(
     if (b.dueMs === null) return -1;
     return a.dueMs - b.dueMs || a.index - b.index;
   });
+  // An old backlog can fill all five earliest-deadline slots and hide the next
+  // actionable due date. Keep one nearest upcoming item when none of the five
+  // is upcoming, without reading more records or mutating authorized evidence.
+  const excerpt = copied.slice(0, limit);
+  const nearestUpcoming = copied.find(({ dueMs }) => dueMs !== null && dueMs >= deviceNowMs);
+  if (limit > 0 && excerpt.length === limit && nearestUpcoming &&
+      !excerpt.some(({ dueMs }) => dueMs !== null && dueMs >= deviceNowMs)) {
+    excerpt[limit - 1] = nearestUpcoming;
+  }
   // Only a device-clock estimate, not proof of submission, official availability,
   // or whether an expired assignment's original page still allows a response.
-  return copied.slice(0, limit).map(({ index, dueMs, ...evidence }) => ({
+  return excerpt.map(({ index, dueMs, ...evidence }) => ({
     ...evidence,
     deadlineHint: dueMs === null
       ? '來源未提供截止時間'
@@ -417,12 +426,12 @@ const sampleCourses = owned && timetable
           '；完整性：' + (verifiedSense.assignments.coverage?.complete === true
             ? '來源已完整讀取' : verifiedSense.assignments.coverage
               ? '僅讀取部分資料' : '未能核對是否完整') +
-          '；依已取得項目的截止時間排序，最多列出期限最早的 5 項：' +
+          '；依本次已取得的期限排序，最多列出 5 項（過期項目擠滿前五項且本次資料中仍有未到截止點的作業時，保留最近將到期 1 項）：' +
             JSON.stringify(dueOrderedAssignmentExcerpt(verifiedSense.assignments.items, 5, Date.now())),
         '校園公告：' + verifiedSense.announcements.status +
           '；部分項目：' + JSON.stringify(ownArrayPrefix(verifiedSense.announcements.items, 4).map(({ title, publishedAt }) => ({ title, publishedAt }))),
         '上述來源總數與完整性，只涵蓋已授權課程中目前開放且未見已繳交時間的作業，不包括已提交、草稿、關閉或無權存取的作業；不能當成全部作業或歷史繳交清單。',
-        '期限排序僅比較本次已取得且有截止時間的作業，無期限項目排在後面；期限提示只是依裝置時間與舊同步資料估算，不證明校方系統仍接受繳交、已繳交或尚未繳交；若來源僅部分讀取，不能認定這五項是全部作業中最早截止的五項。即使來源完整，上面仍最多列出 5 項；未列出不代表沒有其他作業，沒有繳交回條也不能斷言未交。若要核對全部作業與繳交狀態，請到原課程作業頁核對；不可把同步資料說成最新結果，不得執行任何寫入。',
+        '期限排序僅比較本次已取得且有截止時間的作業，無期限項目排在後面；若過期作業占滿前五項且本次已取得的資料中仍有尚未到截止點的作業，會保留最近將到期的一筆；若沒有這類作業則照原排序列出，這不代表其餘過期作業已完成；期限提示只是依裝置時間與舊同步資料估算，不證明校方系統仍接受繳交、已繳交或尚未繳交；若來源僅部分讀取，不能認定這五項是全部作業中最早截止的五項。即使來源完整，上面仍最多列出 5 項；未列出不代表沒有其他作業，沒有繳交回條也不能斷言未交。若要核對全部作業與繳交狀態，請到原課程作業頁核對；不可把同步資料說成最新結果，不得執行任何寫入。',
       ].join('\n')
     : '此回合沒有主動同步且有效的校園資料，不可自行猜測個人作業、公告與申請狀態。';
   return [
