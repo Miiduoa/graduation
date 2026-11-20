@@ -48,6 +48,12 @@ export function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> 
   });
 }
 
+
+function transitStopIdsFrom(place: object): { transitStopIds?: unknown } {
+  const descriptor = Object.getOwnPropertyDescriptor(place, 'transitStopIds');
+  return descriptor?.enumerable ? { transitStopIds: descriptor.value } : {};
+}
+
 export function toCampusMapPlaces(locations: readonly CampusMapPlaceLike[]): CampusMapPlace[] {
   return locations.map((place) => ({
     id: place.id,
@@ -59,9 +65,7 @@ export function toCampusMapPlaces(locations: readonly CampusMapPlaceLike[]): Cam
     building: place.building,
     floor: place.floor,
     facilities: place.facilities ? [...place.facilities] : [],
-    ...(Object.prototype.propertyIsEnumerable.call(place, 'transitStopIds')
-      ? { transitStopIds: place.transitStopIds }
-      : {}),
+    ...transitStopIdsFrom(place),
   }));
 }
 

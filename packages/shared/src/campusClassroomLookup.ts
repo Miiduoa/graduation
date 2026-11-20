@@ -72,12 +72,13 @@ function isRoomSuffix(value: string): boolean {
 const NON_CLASSROOM_POI_CATEGORIES = new Set([
   '公車站', '公車站牌', '公車', '停車', '停車場', '交通', '道路',
   '校車站', '接駁站', '巴士站', '校門', '出入口',
-  'bus', 'bus stop', 'bus_stop', 'bus station', 'bus_station',
-  'shuttle stop', 'shuttle_stop', 'transit', 'parking', 'car park', 'car_park',
+  'bus', 'bus stop', 'bus_stop', 'bus-stop', 'bus station', 'bus_station', 'bus-station',
+  'shuttle stop', 'shuttle_stop', 'shuttle-stop', 'transit', 'parking', 'car park', 'car_park',
   'road', 'gate', 'entrance',
   // Restaurant/retail POIs may point to a teaching building through a
   // Firestore `building` field, but their own coordinates are not its entrance.
-  '餐飲', '餐廳', '咖啡廳', '商店', '販賣部',
+  // parseCampusMapRecord maps the legacy `convenience` category to 生活.
+  '餐飲', '餐廳', '咖啡廳', '商店', '販賣部', '生活',
   'restaurant', 'cafe', 'cafeteria', 'food court', 'food_court',
   'shop', 'store', 'convenience store', 'convenience_store', 'atm',
 ]);
@@ -112,6 +113,23 @@ function hasTransitStopIdentity(location: CampusMapPlaceLike, school: string): b
       : ids != null;
   return hasMarker || (school === 'pu' && PUBLISHED_PROVIDENCE_BUS_STOP_IDS.has(location.id));
 }
+
+/** A reused published hall ID must not inherit a nearby stop's coordinates.
+ * Compare squared degree distance only for already-sourced Providence halls.
+ */
+function closerToPublishedStopThanSourcedHall(
+  school: string,
+  location: CampusMapPlaceLike,
+  published: CampusMapPlaceLike | undefined,
+): boolean {
+  if (school !== 'pu' || !published) return false;
+  const hallDistance = (location.lat - published.lat) ** 2 + (location.lng - published.lng) ** 2;
+  return PROVIDENCE_BUS_STOPS.some((stop) => {
+    const stopDistance = (location.lat - stop.lat) ** 2 + (location.lng - stop.lng) ** 2;
+    return stopDistance < hallDistance;
+  });
+}
+
 
 /** Firestore may nest or chain campus/terminal annotations, such as
  * "Bus Stop (Campus (Inbound))" or "餐飲 [North [B1]]". The old single-level
@@ -227,11 +245,12 @@ function sourcedBuildingLabel(school: string, published: CampusMapPlaceLike | un
   return isSourcedBuildingLabel(school, published, building) ? building : undefined;
 }
 
-// A verified code may be followed by either a room (PH303) or an explicitly
-// written floor + room (PH3F303). This identifies the same existing building;
-// the digits do not verify an indoor floor, room position or walking route.
-// A bare 3F is a floor marker, not evidence of a classroom number.
-const VERIFIED_CODE_ROOM_SUFFIX = /^[\s:：-]*\d{1,5}(?!f(?:\s*(?:教室|室))?$)[a-z]?(?:\s*(?:教室|室))?$/u;
+// A verified code may be followed by either a room (PH303 / PH303F) or an
+// explicitly written floor + room (PH3F303). This identifies the same existing
+// building; the digits do not verify an indoor floor, room position or route.
+// A bare 3F or 12F is a floor marker, not evidence of a classroom number.
+const VERIFIED_CODE_FLOOR_ONLY_SUFFIX = /^[\s:：-]*b?\d{1,2}\s*f(?:\s*(?:教室|室))?$/u;
+const VERIFIED_CODE_ROOM_SUFFIX = /^[\s:：-]*\d{1,5}[a-z]?(?:\s*(?:教室|室))?$/u;
 const VERIFIED_CODE_FLOOR_ROOM_SUFFIX =
   /^[\s:：-]*(?:b?\d{1,2}\s*f|(?:地下|地上)?(?:\d{1,2}|[一二三四五六七八九十]{1,3})樓)(?:[\s,，:：·/\-]+)?\d{1,5}[a-z]?(?:\s*(?:教室|室))?$/u;
 
@@ -241,6 +260,7 @@ function nameMatchesVerifiedCode(school: string, query: string, suppliedName: un
   return VERIFIED_CLASSROOM_BUILDING_CODES.some((entry) => {
     if (entry.schoolId !== school || !query.startsWith(entry.code)) return false;
     const suffix = query.slice(entry.code.length);
+    if (VERIFIED_CODE_FLOOR_ONLY_SUFFIX.test(suffix)) return false;
     return (VERIFIED_CODE_ROOM_SUFFIX.test(suffix) || VERIFIED_CODE_FLOOR_ROOM_SUFFIX.test(suffix)) &&
       entry.buildingNames.some((building) => comparisonText(building) === name);
   });
@@ -313,7 +333,8 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     ) return false;
     // A nearby transit stop can be named after a hall or carry its building
     // field in Firestore. Never promote that stop into a classroom destination.
-    if (hasTransitStopIdentity(location, school) || isExplicitNonClassroomCategory(location.category)) return false;
+    if (hasTransitStopIdentity(location, school) || isExplicitNonClassroomCategory(location.category) ||
+        closerToPublishedStopThanSourcedHall(school, location, published)) return false;
     // A sourced clinic, chapel or sports POI must not navigate to another
     // building through an unsourced Firestore `building` override.
     const building = sourcedBuildingLabel(school, published, location.building);

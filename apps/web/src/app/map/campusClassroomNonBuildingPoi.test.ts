@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveCampusClassroom,
 } from '@campus/shared/src/campusClassroomLookup';
+import { parseCampusMapRecord } from '@campus/shared/src/campusMapRecords';
 import {
   PROVIDENCE_BUS_STOPS,
   PROVIDENCE_CAMPUS_PLACES,
@@ -637,6 +638,7 @@ describe('verified PH code with explicit floor and room text', () => {
     for (const query of [
       'PH3F303', 'ＰＨ３Ｆ３０３', 'PH 3F 303',
       'PH3樓303', 'PHB1F12', 'PH B1F-12',
+      'PH303F', 'PH303F室',
     ]) {
       const result = resolveCampusClassroom({
         schoolId: 'pu', query, locations: [sourcedHall!],
@@ -662,6 +664,45 @@ describe('verified PH code with explicit floor and room text', () => {
     expect(resolveCampusClassroom({
       schoolId: 'another-school', query: 'PH3F303', locations: [sourcedHall!],
     }).status).toBe('unmatched');
+  });
+});
+
+
+describe('parsed load-path categories and nearby stop coordinates stay non-classroom', () => {
+  const sourcedHall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  const publishedStop = PROVIDENCE_BUS_STOPS.find((stop) => stop.id === 'pu-bus-zhugu')!;
+
+  it('does not treat a sourced hall ID at a published stop point as PH303', () => {
+    expect(sourcedHall).toBeDefined();
+    expect(publishedStop).toBeDefined();
+    // Synthetic coordinate swap: the catalog hall ID with the published
+    // stop's coordinates, not a surveyed classroom or moved building.
+    const spoofed = { ...sourcedHall, lat: publishedStop.lat, lng: publishedStop.lng };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [spoofed],
+    }).status).toBe('unmatched');
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [sourcedHall],
+    }).matches).toEqual([sourcedHall]);
+  });
+
+  it('excludes parsed convenience and hyphenated bus-stop categories from PH303', () => {
+    const store = parseCampusMapRecord('synthetic-convenience', {
+      ...hall,
+      category: 'convenience',
+      building: '主顧樓',
+    }, 'pu')!;
+    expect(store.category).toBe('生活');
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [store, hall],
+    }).matches).toEqual([hall]);
+
+    const hyphenStop = {
+      ...hall, id: 'synthetic-hyphen-stop', category: 'bus-stop', building: '主顧樓',
+    };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'PH303', locations: [hyphenStop, hall],
+    }).matches).toEqual([hall]);
   });
 });
 
