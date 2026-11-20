@@ -1399,6 +1399,34 @@ it('rejects unverifiable identity Content-Length on a JSON-only WebView response
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+// A proxy can reply HTTP 200 with an explicit zero-byte representation,
+// then leave its stream open indefinitely. Reject that impossible snapshot at
+// the headers, for identity *and* compressed responses, instead of waiting for
+// the 15-second mobile timeout. This is a synthetic network regression.
+it.each(['identity', 'gzip'] as const)(
+  'rejects HTTP 200 with empty %s framing before reading a stalled body',
+  async (coding) => {
+    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+    const cancel = vi.fn();
+    const neverFinishingBody = new ReadableStream<Uint8Array>({ cancel });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(neverFinishingBody, {
+      status: 200,
+      headers: { 'Content-Length': '000', 'Content-Encoding': coding },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]}
+      selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    expect(retry.hasAttribute('disabled')).toBe(true);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  },
+);
+
 it('keeps the legacy JSON-only bridge usable when no body length was declared', async () => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
   const json = vi.fn().mockResolvedValue(JSON.parse(body));
