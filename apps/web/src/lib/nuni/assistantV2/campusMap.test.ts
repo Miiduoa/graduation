@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { getOfficialCampusMapUrl } from '@campus/shared/src/campusMapLookup';
 import { PROVIDENCE_CAMPUS_PLACES } from '@campus/shared/src/providenceCampus';
 import {
-  campusMapHref, campusMapMatch, formatCampusMapRead, parseCampusMapArguments, parseCampusMapResult,
-  type CampusMapRead,
+  boundedTransitStopMarker, campusMapHref, campusMapMatch, formatCampusMapRead, parseCampusMapArguments,
+  parseCampusMapResult, type CampusMapRead,
 } from './campusMap';
 
 function result(query = '任垣樓501'): CampusMapRead {
@@ -130,6 +130,21 @@ describe('map query and source contract', () => {
       items: [{ ...item, match: 'building' }],
       resolution: 'matched',
     }, 'pu', { query: 'PH303', limit: 5 })).toThrow('INVALID_CAMPUS_MAP_RESULT');
+    const blankIds = Array(33).fill(' ');
+    const blankHall = { ...withoutMarkers, transitStopIds: blankIds };
+    expect(boundedTransitStopMarker(blankHall)).toEqual({});
+    expect(campusMapMatch('pu', 'PH303', { ...blankHall, ...boundedTransitStopMarker(blankHall) })).toBe('building');
+    const blankValue = result('PH303');
+    blankValue.items = [{
+      id: spoof.id, schoolId: 'pu', name: spoof.name, category: 'academic', description: '',
+      lat: spoof.lat, lng: spoof.lng, building: spoof.building, facilities: [],
+      source: 'school-pois', sourcePath: 'schools/pu/pois',
+      href: campusMapHref('pu', 'PH303', spoof.id), match: 'building', verification: 'published',
+      transitStopIds: blankIds,
+    } as CampusMapRead['items'][number] & { transitStopIds: string[] }];
+    const parsedBlank = parseCampusMapResult(blankValue, 'pu', { query: 'PH303', limit: 5 });
+    expect(parsedBlank.items[0].match).toBe('building');
+    expect(parsedBlank.items[0]).not.toHaveProperty('transitStopIds');
   });
 
   it('keeps partial coverage ahead of candidates and the fact that no route was executed', () => {

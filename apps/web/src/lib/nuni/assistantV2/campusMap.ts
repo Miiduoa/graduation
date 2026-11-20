@@ -86,18 +86,18 @@ export function campusMapSourcePath(schoolId: string, source: CampusMapSource): 
 
 
 const BOUNDED_TRANSIT_STOP_MARKER = ['1'];
-const MAX_TRANSIT_STOP_MARKER_INSPECTION = 32;
 
 /** Classroom matching only needs a yes/no stop marker. Never copy a raw
- * Firestore value into a validated assistant result or the tool summary. */
+ * Firestore value into a validated assistant result or the tool summary.
+ * Emptiness rules must match the shared resolver: a long array of blank
+ * strings is not a stop marker. */
 export function boundedTransitStopMarker(place: object): { transitStopIds: string[] } | Record<string, never> {
   if (!Object.prototype.propertyIsEnumerable.call(place, 'transitStopIds')) return {};
   const ids: unknown = (place as { transitStopIds?: unknown }).transitStopIds;
   const hasMarker = typeof ids === 'string'
     ? ids.trim().length > 0
     : Array.isArray(ids)
-      ? ids.length > MAX_TRANSIT_STOP_MARKER_INSPECTION
-        || ids.some((id: unknown) => (typeof id === 'string' ? id.trim().length > 0 : id != null))
+      ? ids.some((id: unknown) => (typeof id === 'string' ? id.trim().length > 0 : id != null))
       : ids != null;
   return hasMarker ? { transitStopIds: [...BOUNDED_TRANSIT_STOP_MARKER] } : {};
 }
