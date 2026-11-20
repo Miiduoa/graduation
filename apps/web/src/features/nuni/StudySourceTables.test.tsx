@@ -937,6 +937,45 @@ it('keeps room and seat identifiers as locations, not ratio-style bars', () => {
   }
 });
 
+it('keeps network ports, radio channels and protocol layers as identifiers, not ratio bars', () => {
+  for (const header of [
+    'TCP 埠號', 'UDP 埠號', '來源埠', '目的埠', '連接埠', '服務埠',
+    '埠號', '通訊埠', '無線頻道', 'Wi-Fi 頻道', '頻道編號', '通道號碼',
+    '網路層級', '協定號碼', 'Port', 'TCP Port', 'UDP Port', 'Source Port',
+    'Destination Port', 'Port Number', 'Port No.', 'Channel',
+    'Wi-Fi Channel', 'Channel #', 'OSI Layer', 'Layer', 'Protocol Number',
+    'TCP Port (%)',
+  ]) {
+    const material = ['| 服務 | ' + header + ' |', '| --- | --- |',
+      '| HTTPS | 443 |', '| HTTP | 80 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual(['443', '80']);
+    expect(comparisonSummaries(container)).toEqual([]);
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+});
+
+it('continues to compare measured counts and throughput instead of hiding real network quantities', () => {
+  for (const header of [
+    '連接埠數', '開放埠數量', '埠號數量', '通道總數', '頻道數', '網路層數',
+    'Port Count', 'Number of Ports', 'Open Port Count', 'Channel Count',
+    'Number of Channels', 'Layer Count', 'Number of Layers',
+    'Port Throughput', 'Layer Thickness', 'Channel Width',
+  ]) {
+    const material = ['| 範圍 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter'))
+      .map((bar) => [bar.getAttribute('value'), bar.getAttribute('max')]))
+      .toEqual([['2', '4'], ['4', '4']]);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual(['2', '4']);
+    unmount();
+  }
+});
+
 it('reads the exact source numeric spelling, rather than inferring a percentage', () => {
   const material = ['| 課程 | 學分 |', '| --- | --- |',
     '| 資料庫 | 3.00 |', '| 網路 | 2.50 |'].join('\n');

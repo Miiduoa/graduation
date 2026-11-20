@@ -1,3 +1,9 @@
+## 2026-11-20：網路埠號與通訊層級不再顯示錯誤倍數圖
+
+- 修正資管／資安教材將 TCP/UDP 連接埠 443／80、Wi-Fi 通道或 OSI Layer 7／4 畫成零起點倍數長條的問題：這些數字是識別／層級，不代表流量、速度或規模。僅關閉此類標籤的衍生比較圖；教材原始表格、來源行號、可選取文字、逐列複製／TXT 匯出仍保持不變。
+- 對明確的「連接埠數／通道數／網路層數」及 Port Count、Number of Channels、Layer Count 等真實數量保留可選數值圖，並避免將 Port Throughput、Layer Thickness、Channel Width 等量測欄一併禁止。
+- 新增 28 組識別碼反例與 16 組計數／量測正例的模擬 DOM 回歸。無新套件、教材傳輸、學習進度格式或其他任務修改。DOM 回歸不等於真實 iOS／Android、Maestro、WebGPU 中文教學或 Ahaboard 同教材同題同機驗收；所有 CI/CodeQL 與 App 5504170 審查須以精確新 head 為準，PR 保持 Draft，不合併、不部署。
+
 ## 2026-11-20：優先級、風險等級與難度不得誤畫成倍數比較
 
 - 資管、資安教材中的「優先級 1／4」「嚴重程度 1／4」「風險等級 1／4」及英文 Priority、Severity、Risk Level、Difficulty、Level、Tier 是**順序／分類刻度**，不能將第 4 級畫成第 1 級的四倍。這類表格仍保留逐字來源、讀屏與原文選取／複製／TXT，但不產生誤導的零起點比例圖。

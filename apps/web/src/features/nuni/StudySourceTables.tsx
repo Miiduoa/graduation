@@ -23,6 +23,17 @@ const ENGLISH_NON_RATIO_STATUS_COLUMN =
 const STATUS_COUNT_COLUMN = /(?:人數|數量|總數|次數|筆數|件數|個數|數目)/u;
 const ENGLISH_STATUS_COUNT_COLUMN = /\b(?:count|total|number\s+of|quantity)\b/iu;
 
+// Network port numbers, radio channels and OSI protocol layers identify a
+// position in a namespace, not an amount: TCP port 443 is not 5.5 times
+// port 80. Keep source rows, copying and exporting unchanged. Explicit counts
+// of ports/channels/layers remain measurable quantities.
+const NON_RATIO_NETWORK_IDENTIFIER_COLUMN =
+  /(?:埠號|連接埠|通訊埠|通信埠|網路埠|服務埠|來源埠|目的埠|頻道(?:編號|號碼|號)?|通道(?:編號|號碼|號)?|網路層級|協定號碼)/u;
+const ENGLISH_NON_RATIO_NETWORK_IDENTIFIER_COLUMN =
+  /^(?:(?:(?:tcp|udp|src|dst|source|destination|service|network)\s+)?ports?(?:\s+(?:number|no\.?|id|#))?|(?:(?:wi-?fi|wireless|radio|network)\s+)?channels?(?:\s+(?:number|no\.?|id|#))?|(?:(?:osi|network|protocol)\s+)?layers?(?:\s+(?:number|no\.?|id|#))?|protocol\s+(?:number|no\.?|id))(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+const NETWORK_IDENTIFIER_COUNT_COLUMN =
+  /(?:埠(?:號)?(?:數量|總數|個數|數)|通道(?:數量|總數|個數|數)|頻道(?:數量|總數|個數|數)|層(?:數量|總數|個數|數)|\b(?:count|total|number\s+of|quantity)\b)/iu;
+
 // Carry the exact Markdown source line through both derived views, so students
 // can cross-check every bar against the original authorized lesson table.
 type SourceValueRow = { label: string; original: string; amount: number; sourceLine: number };
@@ -118,7 +129,10 @@ function isNonRatioColumn(header: string): boolean {
   // A percent unit alone does not turn a status or release label into a rate.
   const describesBoundedRate = isBoundedPercentageColumn(header) &&
     (isBoundedPercentageColumn(column) || /率|\brate\b/iu.test(column));
-  if (AMBIGUOUS_TIME_COLUMN.test(column) ||
+  if (((NON_RATIO_NETWORK_IDENTIFIER_COLUMN.test(column) ||
+         ENGLISH_NON_RATIO_NETWORK_IDENTIFIER_COLUMN.test(column)) &&
+        !NETWORK_IDENTIFIER_COUNT_COLUMN.test(column)) ||
+      AMBIGUOUS_TIME_COLUMN.test(column) ||
       NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
       DECIBEL_UNIT_COLUMN.test(column) ||
       NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
