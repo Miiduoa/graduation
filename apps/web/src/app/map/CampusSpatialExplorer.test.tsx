@@ -512,8 +512,7 @@ it.each(['constructor', 'observe'] as const)(
     // Even a failed constructor can leave a queued callback in a WebView.
     // Neither failure path may let it deactivate the eager fallback scene.
     const activeCalls = scene.setActive.mock.calls.length;
-    act(() => intersection?.([{ isIntersecting: false, target: graphics, time: 10 }] as IntersectionObserverEntry[],
-      {} as IntersectionObserver));
+    act(() => intersection?.(([{ isIntersecting: false, target: graphics, time: 10 }] as unknown as IntersectionObserverEntry[]), {} as IntersectionObserver));
     expect(scene.setActive.mock.calls.length).toBe(activeCalls);
     expect(scene.setActive).not.toHaveBeenCalledWith(false);
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
