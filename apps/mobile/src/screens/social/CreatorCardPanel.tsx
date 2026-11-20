@@ -52,6 +52,9 @@ function ScopedCreatorCardPanel({
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const [saving, setSaving] = useState(false);
   const savingFlight = useRef(false);
+  const [openingLink, setOpeningLink] = useState(false);
+  const openingLinkFlight = useRef(false);
+  const [linkError, setLinkError] = useState('');
   const mounted = useRef(false);
   const [feedback, setFeedback] = useState('');
 
@@ -100,6 +103,25 @@ function ScopedCreatorCardPanel({
       if (mounted.current) {
         savingFlight.current = false;
         setSaving(false);
+      }
+    }
+  };
+
+  const openPortfolioLink = async (url: string) => {
+    // Linking is an OS handoff: even a valid HTTPS URL may be rejected. Prevent
+    // a second tap from launching another handoff while the first is pending.
+    if (openingLinkFlight.current) return;
+    openingLinkFlight.current = true;
+    setOpeningLink(true);
+    setLinkError('');
+    try {
+      await Linking.openURL(url);
+    } catch {
+      if (mounted.current) setLinkError('無法開啟作品連結，請稍後再試。');
+    } finally {
+      if (mounted.current) {
+        openingLinkFlight.current = false;
+        setOpeningLink(false);
       }
     }
   };
@@ -174,12 +196,15 @@ function ScopedCreatorCardPanel({
             <Pressable
               accessibilityRole="link"
               accessibilityLabel="查看作品連結"
-              onPress={() => void Linking.openURL(state.value!.linkUrl)}
+              accessibilityState={{ disabled: openingLink, busy: openingLink }}
+              disabled={openingLink}
+              onPress={() => void openPortfolioLink(state.value!.linkUrl)}
               style={styles.external}
             >
               <Text style={styles.externalText}>查看作品連結</Text>
             </Pressable>
           )}
+          {!!linkError && <Text accessibilityRole="alert" style={styles.error}>{linkError}</Text>}
           {own && (
             <View style={styles.actions}>
               {!state.value?.headline && !state.value?.bio && !state.value?.linkUrl &&
