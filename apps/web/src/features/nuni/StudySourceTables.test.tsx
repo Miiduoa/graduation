@@ -2516,3 +2516,49 @@ it('announces exact original lines for full-table, chosen row, and row plus head
   );
   expect(field.value).toBe(['| 科目 | 次數 |', '| --- | --- |', '| 新課 | 8 |'].join('\n'));
 });
+
+it('makes each numeric and percentage meter announce its precise original source-line action', () => {
+  // A screen reader jumping directly between meter controls otherwise misses
+  // the provenance button, particularly for unique row labels.
+  for (const [heading, first, second] of [
+    ['學習時數', '3', '5'],
+    ['出席率', '30%', '50%'],
+  ] as const) {
+    const lesson = [
+      '教材前言',
+      '| 項目 | ' + heading + ' |',
+      '| --- | --- |',
+      '| 資料庫 | ' + first + ' |',
+      '| 網路 | ' + second + ' |',
+    ].join('\n');
+    const view = render(<StudySourceTables text={lesson} />);
+    const meters = Array.from(view.container.querySelectorAll('meter'));
+    expect(meters).toHaveLength(2);
+    const descriptionIds = meters.map((meter) => meter.getAttribute('aria-describedby'));
+    expect(descriptionIds[0]).toBeTruthy();
+    expect(new Set(descriptionIds).size).toBe(2);
+    for (const [index, meter] of meters.entries()) {
+      const sourceButton = Array.from(view.container.querySelectorAll('button'))
+        .find((button) => button.id === meter.getAttribute('aria-describedby'));
+      expect(sourceButton?.textContent?.trim()).toBe('原文第 ' + (index + 4) + ' 行 · 回表格核對');
+      expect(meter.getAttribute('aria-label')).toContain(index === 0 ? first : second);
+    }
+
+    // Rerendering a different authorized lesson must not leave accessible
+    // descriptions pointing to the previous lesson's line numbers.
+    view.rerender(<StudySourceTables text={[
+      '新的教材前言', '第二行', '第三行',
+      '| 項目 | ' + heading + ' |', '| --- | --- |',
+      '| 資料庫 | ' + first + ' |', '| 網路 | ' + second + ' |',
+    ].join('\n')} />);
+    const revisedMeters = Array.from(view.container.querySelectorAll('meter'));
+    expect(revisedMeters).toHaveLength(2);
+    for (const [index, meter] of revisedMeters.entries()) {
+      const sourceButton = Array.from(view.container.querySelectorAll('button'))
+        .find((button) => button.id === meter.getAttribute('aria-describedby'));
+      expect(sourceButton?.textContent?.trim()).toBe('原文第 ' + (index + 6) + ' 行 · 回表格核對');
+      expect(meter.getAttribute('aria-describedby')).toBeTruthy();
+    }
+    view.unmount();
+  }
+});

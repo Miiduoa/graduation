@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { extractStudySourceTables, type StudySourceTable } from './studySourceTables';
 import { hasVisibleStudyContent } from './courseStudySession';
 import styles from './CourseStudyPanel.module.css';
@@ -299,6 +299,7 @@ function StudySourcePercentComparison({ table, onJumpToSource }: {
   onJumpToSource: (rowIndex: number, origin: HTMLButtonElement) => void;
 }) {
   const rows = sourcePercentRows(table);
+  const sourceDescriptionPrefix = useId();
   if (!rows) return null;
   return (
     <details className={styles.sourceValueComparison}>
@@ -315,10 +316,12 @@ function StudySourcePercentComparison({ table, onJumpToSource }: {
               <span>{row.original}</span>
             </div>
             <button type="button" className={styles.sourceLineJump}
+              id={`${sourceDescriptionPrefix}-row-${row.sourceLine}`}
               onClick={(event) => onJumpToSource(row.sourceLine - table.startLine - 2, event.currentTarget)}>
               原文第 {row.sourceLine} 行 · 回表格核對
             </button>
             <meter min={0} max={100} value={row.amount}
+              aria-describedby={`${sourceDescriptionPrefix}-row-${row.sourceLine}`}
               aria-label={chartRowAccessibleLabel(row, rows)}
               aria-valuetext={row.original + '；滿格 100%'} />
           </li>
@@ -334,6 +337,7 @@ function StudySourceValueComparison({ table, onJumpToSource }: {
   onJumpToSource: (rowIndex: number, origin: HTMLButtonElement) => void;
 }) {
   const rows = sourceValueRows(table);
+  const sourceDescriptionPrefix = useId();
   if (!rows) return null;
   const maxRow = rows.reduce((best, row) => row.amount > best.amount ? row : best);
   const max = maxRow.amount;
@@ -352,10 +356,12 @@ function StudySourceValueComparison({ table, onJumpToSource }: {
               <span>{row.original}</span>
             </div>
             <button type="button" className={styles.sourceLineJump}
+              id={`${sourceDescriptionPrefix}-row-${row.sourceLine}`}
               onClick={(event) => onJumpToSource(row.sourceLine - table.startLine - 2, event.currentTarget)}>
               原文第 {row.sourceLine} 行 · 回表格核對
             </button>
             <meter min={0} max={max} value={row.amount}
+              aria-describedby={`${sourceDescriptionPrefix}-row-${row.sourceLine}`}
               aria-label={chartRowAccessibleLabel(row, rows)}
               aria-valuetext={row.original + '；本欄最大值 ' + maxRow.original} />
           </li>
