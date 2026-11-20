@@ -106,20 +106,25 @@ function isBoundedPercentageColumn(header: string): boolean {
 
 function isNonRatioColumn(header: string): boolean {
   const column = header.trim().replace(/\s*(?:[（(]\s*[%％]\s*[）)]|[%％])$/u, '').trim();
+  // A percent unit alone does not turn a status or release label into a rate.
+  const describesBoundedRate = isBoundedPercentageColumn(header) &&
+    (isBoundedPercentageColumn(column) || /率|\brate\b/iu.test(column));
   if (AMBIGUOUS_TIME_COLUMN.test(column) ||
       NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
       DECIBEL_UNIT_COLUMN.test(column) ||
       NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
       ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
-      ((NON_RATIO_STATUS_COLUMN.test(column) ||
+      (!describesBoundedRate &&
+       (NON_RATIO_STATUS_COLUMN.test(column) ||
         ENGLISH_NON_RATIO_STATUS_COLUMN.test(column)) &&
        !STATUS_COUNT_COLUMN.test(column) &&
        !ENGLISH_STATUS_COUNT_COLUMN.test(column)) ||
       ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
         ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN.test(column)) &&
        !SCORE_COUNT_COLUMN.test(column))) return true;
-  if (/(?:^|[^0-9０-９])(?:[0０]\s*[/／]\s*[1１]|[1１]\s*[/／]\s*[0０])(?:$|[^0-9０-９])/u.test(column)) return true;
-  if (/(?:^|\s)(?:id|uuid|code|no\.?|#)$/iu.test(column)) return true;
+  if (/(?:^|[^0-9０-９])(?:[0０]\s*(?:[/／]|\bor\b)\s*[1１]|[1１]\s*(?:[/／]|\bor\b)\s*[0０])(?:$|[^0-9０-９])/iu.test(column)) return true;
+  const unqualifiedColumn = column.replace(/(?:\s*[（(][^）)]*[）)])+$/u, '').trim();
+  if (/(?:^|\s)(?:id|uuid|code|no\.?|#)$/iu.test(unqualifiedColumn)) return true;
   // A question number identifies an exercise; its magnitude is not a measured result.
   // Keep the exact table, but never turn "第 2 題" vs "第 4 題" into a 2× bar.
   if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|題號|題次|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
@@ -141,7 +146,7 @@ function isNonRatioColumn(header: string): boolean {
   // "教室數" / "Room Count" header remains a valid measured quantity.
   if (/^(?:教室|實驗室|房號|寢室|寢室號|宿舍房號|房間號碼|校舍|大樓|座位|座位號|位置|地點)(?:\s*[（(][^）)]{1,40}[）)])?$/u.test(column) ||
       /^(?:classroom|room|dorm(?:itory)?\s+room|lab(?:oratory)?|building|location|seat)(?:\s+(?:no\.?|number|id|code|#))?(?:\s*\([^)]{1,40}\))?$/iu.test(column)) return true;
-  return /^build$/iu.test(column) || (NON_RATIO_RELEASE_COLUMN.test(column) &&
+  return /^build$/iu.test(unqualifiedColumn) || (!describesBoundedRate && NON_RATIO_RELEASE_COLUMN.test(column) &&
     !RELEASE_COUNT_COLUMN.test(column) && !ENGLISH_RELEASE_COUNT_COLUMN.test(column));
 }
 

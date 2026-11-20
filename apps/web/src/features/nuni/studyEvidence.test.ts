@@ -197,13 +197,20 @@ describe('exact source-to-lesson evidence', () => {
     };
     vi.stubGlobal('Intl', mockIntl);
     try {
-      for (const quote of ['教材原文', 'e\u0301', '👩‍💻', '👍🏽', '🇹🇼', '#️⃣', '한', 'क्ष']) {
+      for (const quote of ['教材原文', 'e\u0301', '👩‍💻', '👩🏽‍💻', '👍🏽', '🇹🇼', '#️⃣', '한', 'क्ष']) {
         expect(locateStudyEvidence('前 ' + quote + ' 後', quote)).toEqual({
           before: '前 ', quote, after: ' 後', occurrences: 1,
         });
       }
+      expect(locateStudyEvidence('甲\n\u0301', '甲\n')).toEqual({
+        before: '', quote: '甲\n', after: '\u0301', occurrences: 1,
+      });
+      expect(locateStudyEvidence('A\u200d💻', '💻')).toEqual({
+        before: 'A\u200d', quote: '💻', after: '', occurrences: 1,
+      });
       for (const [source, partial] of [
         ['e\u0301e', '\u0301e'], ['e\u0301', 'e'], ['👩‍💻', '💻'], ['👍🏽', '👍'],
+        ['👩🏽‍💻', '💻'], ['A\u200d💻', 'A'],
         ['🇹🇼', '🇼'], ['한', 'ᅡᆫ'], ['क्ष', 'ष'], ['甲\r\n乙', '甲\r'],
       ]) {
         expect(locateStudyEvidence(source, partial)).toBeNull();

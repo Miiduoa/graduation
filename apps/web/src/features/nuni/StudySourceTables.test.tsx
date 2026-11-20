@@ -996,13 +996,22 @@ it('scales explicit English percent and rate columns to 100%, not to the highest
   }
 });
 
-it.each(['Status Code (%)', 'Access (0/1) %', 'Build (%)', 'Room # (%)'])(
-  'keeps percentage-shaped identifiers and binary codes in the source table (%s)', (header) => {
+it.each([
+  ['Status Code (%)', '0%', '1%'],
+  ['Access (0/1) %', '0%', '1%'],
+  ['Build (%)', '0%', '1%'],
+  ['Room # (%)', '0%', '1%'],
+  ['Build (CI)', '100', '300'],
+  ['Build (CI) (%)', '10%', '20%'],
+  ['Access (0 or 1)', '0', '1'],
+  ['Access (0 or 1) (%)', '0%', '1%'],
+])(
+  'keeps identifiers and binary codes in the source table (%s)', (header, first, second) => {
     const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
-      '| 甲 | 0% |', '| 乙 | 1% |'].join('\n');
+      '| 甲 | ' + first + ' |', '| 乙 | ' + second + ' |'].join('\n');
     const { container } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell')
-      .map((cell) => cell.textContent)).toEqual(['0%', '1%']);
+      .map((cell) => cell.textContent)).toEqual([first, second]);
     expect(comparisonSummaries(container)).toEqual([]);
   },
 );
@@ -1027,7 +1036,7 @@ it('guards progress and additional rate headers with source-grounded 100% scalin
   const columns = [
     '學習進度', '完成度', '達成率', '合格率', '參與率', '缺席率',
     'Progress', 'Progress Rate', 'Participation Rate', 'Retention Rate',
-    'Conversion Rate', 'Error Rate', 'Dropout Rate',
+    'Conversion Rate', 'Error Rate', 'Dropout Rate', '啟用率 (%)', 'Release Completion Rate',
   ];
   for (const column of columns) {
     const material = [

@@ -12,6 +12,9 @@ export type StudyEvidenceLocation = {
 };
 
 const graphemeContinuation = /[\p{M}\p{Grapheme_Extend}\p{Emoji_Modifier}\u0e33\u0eb3\u200d]/u;
+const graphemeControl = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+const pictographic = /\p{Extended_Pictographic}/u;
+const emojiExtend = /[\p{Grapheme_Extend}\p{Emoji_Modifier}]/u;
 const regionalIndicator = /\p{Regional_Indicator}/u;
 // Prepend and Indic_Conjunct_Break=Linker from the Unicode character database.
 const indicLinker = /[\u094d\u09cd\u0acd\u0b4d\u0c4d\u0d4d\u1039\u17d2\u1a60\u1b44\u1bab\ua9c0\uaaf6\u{10a3f}\u{11133}\u{113d0}\u{1193e}\u{11a47}\u{11a99}\u{11f42}]/u;
@@ -34,6 +37,9 @@ function joinsHangul(previous: string, current: string): boolean {
 function fallbackBoundaries(source: string): Uint8Array {
   const boundaries = new Uint8Array(source.length + 1);
   let previous = '';
+  let previousIsControl = false;
+  let followsPictographic = false;
+  let followsEmojiZwj = false;
   let regionalRun = 0;
   let index = 0;
   // On older WebViews, err on the side of keeping ambiguous sequences together.
@@ -42,15 +48,22 @@ function fallbackBoundaries(source: string): Uint8Array {
   for (const current of source) {
     const regional = regionalIndicator.test(current);
     const continuesGrapheme = graphemeContinuation.test(current);
+    const isControl = graphemeControl.test(current) &&
+      !continuesGrapheme && !graphemePrepend.test(current);
+    const isPictographic = pictographic.test(current);
     const joinsPrevious = (previous === '\r' && current === '\n') ||
-      continuesGrapheme || graphemePrepend.test(previous) ||
-      joinsHangul(previous, current) || (regional && regionalRun % 2 === 1) ||
-      (previous === '\u200d' && /\p{Extended_Pictographic}/u.test(current)) ||
-      (followsIndicLinker && /\p{Lo}/u.test(current) && !/\p{Script=Han}/u.test(current));
+      (!previousIsControl && !isControl &&
+        (continuesGrapheme || graphemePrepend.test(previous) ||
+          joinsHangul(previous, current) || (regional && regionalRun % 2 === 1) ||
+          (followsEmojiZwj && isPictographic) ||
+          (followsIndicLinker && /\p{Lo}/u.test(current) && !/\p{Script=Han}/u.test(current))));
     if (!joinsPrevious) boundaries[index] = 1;
+    followsEmojiZwj = current === '\u200d' && followsPictographic;
+    followsPictographic = isPictographic || (followsPictographic && emojiExtend.test(current));
     followsIndicLinker = indicLinker.test(current) || (followsIndicLinker && continuesGrapheme);
     regionalRun = regional ? regionalRun + 1 : 0;
     previous = current;
+    previousIsControl = isControl;
     index += current.length;
   }
   boundaries[0] = boundaries[source.length] = 1;
