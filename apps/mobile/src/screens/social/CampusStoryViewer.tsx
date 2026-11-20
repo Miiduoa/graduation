@@ -574,7 +574,7 @@ function StoryClip({
           onPause();
         }}
         onReadyForDisplay={({ status }) => {
-          if (current.current && status?.isLoaded && status.durationMillis)
+          if (current.current === session && status?.isLoaded && status.durationMillis)
             setDurationSeconds(Math.ceil(status.durationMillis / 1000));
         }}
         onPlaybackStatusUpdate={(status) => {
