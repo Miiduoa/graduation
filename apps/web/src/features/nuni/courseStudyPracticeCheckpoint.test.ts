@@ -125,13 +125,12 @@ describe('versioned independent review checkpoint', () => {
     expect(() => parseStudyPracticeCheckpoint('x'.repeat(8 * 1024 * 1024 + 1), scope)).toThrow(/8 MiB/);
   });
 
-  it('rejects card injection, duplicate/out-of-order IDs and invalid response disclosure', () => {
+  it('rejects card injection, duplicate/out-of-order IDs and invalid self-ratings', () => {
     const raw = serializeStudyPracticeCheckpoint(checkpoint());
     for (const altered of [
       (item: any) => { item.practice.cardIds.reverse(); },
       (item: any) => { item.practice.cardIds = [item.practice.cardIds[0], item.practice.cardIds[0]]; },
       (item: any) => { item.practice.cardIds[0] = '0:0:exam:1'; },
-      (item: any) => { item.practice.responses[item.practice.cardIds[1]].attempt = ''; item.practice.responses[item.practice.cardIds[1]].answerVisible = true; },
       (item: any) => { item.practice.responses[item.practice.cardIds[0]].attempt = ''; },
       (item: any) => { item.practice.index = 99; },
       (item: any) => { item.practice.extra = 'injected'; },
@@ -161,36 +160,64 @@ describe('versioned independent review checkpoint', () => {
     }), scope)).not.toThrow();
   });
 
-  it('restores visible drafts but rejects invisible-only forged answer disclosure and self-ratings', () => {
+  it('restores a legacy reading reveal embedded in a v1 practice checkpoint', () => {
     const raw = serializeStudyPracticeCheckpoint(checkpoint());
-    // These all pass String.trim() despite containing no substantive answer.
-    for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f']) {
-      expect(invisible.trim().length).toBeGreaterThan(0);
-      // An already self-rated response cannot be restored with invisible text.
-      expect(() => parseStudyPracticeCheckpoint(tamper(raw, (item) => {
-        item.practice.responses[item.practice.cardIds[0]].attempt = invisible;
-      }), scope)).toThrow(/試答、揭答與自評狀態不一致/);
-      // Even if the learner had hidden the reference answer after rating.
-      expect(() => parseStudyPracticeCheckpoint(tamper(raw, (item) => {
-        const response = item.practice.responses[item.practice.cardIds[0]];
-        response.attempt = invisible;
-        response.answerVisible = false;
-      }), scope)).toThrow(/試答、揭答與自評狀態不一致/);
-      // A blank, unrated answer must not restore an unlocked reference answer.
-      expect(() => parseStudyPracticeCheckpoint(tamper(raw, (item) => {
-        const response = item.practice.responses[item.practice.cardIds[1]];
-        response.attempt = invisible;
-        response.answerVisible = true;
-      }), scope)).toThrow(/試答、揭答與自評狀態不一致/);
-      // Untouched raw drafts are not silently erased or mistaken for a rating.
+    const restored = parseStudyPracticeCheckpoint(tamper(raw, (item) => {
+      const lesson = item.progress.passages['0:0'].modes.understand.lessons[0];
+      lesson.attempt = '\u200b';
+      lesson.answerVisible = true;
+    }), scope);
+    expect(restored.progress.passages['0:0'].modes.understand.lessons[0]).toMatchObject({
+      attempt: '\u200b', answerVisible: false,
+    });
+    expect(restored.progress.passages['0:0'].note).toBe('原本的閱讀筆記');
+    expect(restored.round).toEqual(parseStudyPracticeCheckpoint(raw, scope).round);
+    expect(parseStudyPracticeCheckpoint(serializeStudyPracticeCheckpoint(restored), scope)).toEqual(restored);
+  });
+
+  it('preserves invisible drafts verbatim and relocks their reference answers', () => {
+    const raw = serializeStudyPracticeCheckpoint(checkpoint());
+    for (const invisible of ['', '\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f', '\ufff9', '\ufffa', '\ufffb']) {
       const resumed = parseStudyPracticeCheckpoint(tamper(raw, (item) => {
         const response = item.practice.responses[item.practice.cardIds[1]];
         response.attempt = invisible;
-        response.answerVisible = false;
+        response.answerVisible = true;
       }), scope);
       expect(resumed.round.responses[resumed.round.cards[1].id]).toMatchObject({
         attempt: invisible, answerVisible: false, outcome: null,
       });
+      expect(resumed.round.responses[resumed.round.cards[0].id].outcome).toBe('again');
+    }
+  });
+
+  it('preserves self-ratings that passed the old trim() attempt gate', () => {
+    const raw = serializeStudyPracticeCheckpoint(checkpoint());
+    // These drafts were non-empty after trim() and were accepted by v1 checkpoints.
+    for (const attempt of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f', '\ufff9', '\ufffa', '\ufffb']) {
+      for (const answerVisible of [true, false]) {
+        const restored = parseStudyPracticeCheckpoint(tamper(raw, (item) => {
+          const response = item.practice.responses[item.practice.cardIds[0]];
+          response.attempt = attempt;
+          response.answerVisible = answerVisible;
+        }), scope);
+        expect(restored.round.responses[restored.round.cards[0].id]).toMatchObject({
+          attempt, answerVisible: false, outcome: 'again',
+        });
+      }
+    }
+  });
+
+  it('continues to validate self-ratings against the attempt', () => {
+    const raw = serializeStudyPracticeCheckpoint(checkpoint());
+    // Whitespace-only attempts also failed the old trim() gate.
+    for (const invisible of ['', '   ', '\n\t']) {
+      for (const answerVisible of [true, false]) {
+        expect(() => parseStudyPracticeCheckpoint(tamper(raw, (item) => {
+          const response = item.practice.responses[item.practice.cardIds[0]];
+          response.attempt = invisible;
+          response.answerVisible = answerVisible;
+        }), scope)).toThrow(/試答、揭答與自評狀態不一致/);
+      }
     }
     // Real student maths, Chinese, a complete emoji and attached accents remain valid.
     for (const visible of ['主鍵', 'x²+y²', '👩‍💻', 'e\u0301', '⠃']) {

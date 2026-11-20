@@ -1874,7 +1874,7 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 ### 2026-11-19：原文引句不可切開 Unicode 顯示字素
 
 - `String.indexOf` 即使逐位元完全相同，仍可能把 `e + 組合重音` 的單獨 `e`、`👩‍💻` 的 `👩`、國旗中的半個區域符號，或按鍵表情中的數字當成完整教材原文引句。這些局部字串不是學生可逐字核對的完整顯示字素，不能標示「已定位」。
-- `studyEvidence.ts` 保留原文與引句的位元、非重疊匹配及指定重複次數，但用 `Intl.Segmenter` 的 Unicode grapheme 邊界剔除局部命中；只計入完整命中且讓 `occurrence` 對應真正可核對的引用。若瀏覽器沒有此 API，採拒絕假證據的保守結果。僅記錄候選索引，避免保存整篇教材所有字素邊界。
+- `studyEvidence.ts` 保留原文與引句的位元、非重疊匹配及指定重複次數，但用 `Intl.Segmenter` 的 Unicode grapheme 邊界剔除局部命中；只計入完整命中且讓 `occurrence` 對應真正可核對的引用。若 WebView 缺少 `containing()`，改用可迭代的分段結果；缺少 `Intl.Segmenter` 時，使用保守的字素邊界檢查，仍可定位一般中文引句，並避免拆開組合重音、Emoji 或國旗。
 - Vitest 新增組合重音、ZWJ emoji、國旗、按鍵符號的正反回歸，以及同一引句先在字素內部、後在獨立字素出現的重複計數；沿用既有閱讀／練習 checkpoint 與權限，不增加套件、雲端模型或私人教材外傳。
 - 本輪獨立 Node 22 針對核心定位邏輯的 13 組驗證通過；此結果不等同正式 Vitest、瀏覽器、Maestro、iOS／Android 真機、WebGPU 或 Ahaboard 同機對照。推送後以新 head 重新查 CI／CodeQL；指定 GitHub App 5504170 的 APPROVED 與真機仍未取得前保持 Draft、不合併、不部署。
 

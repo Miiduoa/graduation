@@ -13,7 +13,14 @@ export const STUDY_SESSION_LIMITS = {
  * Keep real letters, mathematics, full emoji and attached accents intact.
  */
 export function hasVisibleStudyAttempt(attempt: string): boolean {
-  return attempt.replace(/[\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800]/gu, '').length > 0;
+  return hasVisibleStudyContent(attempt);
+}
+
+export function hasVisibleStudyContent(text: string, { ignorePunctuation = false } = {}): boolean {
+  // A punctuation base with a keycap mark is itself a visible emoji.
+  if (ignorePunctuation && /[0-9#*]\ufe0f?\u20e3/u.test(text)) return true;
+  const content = ignorePunctuation ? text.replace(/\p{P}/gu, '') : text;
+  return /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800\ufff9-\ufffb]/u.test(content);
 }
 
 export type StudyLesson = StudyTutorTurn & {

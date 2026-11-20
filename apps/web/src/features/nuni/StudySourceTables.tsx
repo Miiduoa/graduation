@@ -104,6 +104,47 @@ function isBoundedPercentageColumn(header: string): boolean {
     !ENGLISH_UNBOUNDED_RATE_COLUMN.test(header);
 }
 
+function isNonRatioColumn(header: string): boolean {
+  const column = header.trim().replace(/\s*(?:[（(]\s*[%％]\s*[）)]|[%％])$/u, '').trim();
+  if (AMBIGUOUS_TIME_COLUMN.test(column) ||
+      NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
+      DECIBEL_UNIT_COLUMN.test(column) ||
+      NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
+      ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
+      ((NON_RATIO_STATUS_COLUMN.test(column) ||
+        ENGLISH_NON_RATIO_STATUS_COLUMN.test(column)) &&
+       !STATUS_COUNT_COLUMN.test(column) &&
+       !ENGLISH_STATUS_COUNT_COLUMN.test(column)) ||
+      ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
+        ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN.test(column)) &&
+       !SCORE_COUNT_COLUMN.test(column))) return true;
+  if (/(?:^|[^0-9０-９])(?:[0０]\s*[/／]\s*[1１]|[1１]\s*[/／]\s*[0０])(?:$|[^0-9０-９])/u.test(column)) return true;
+  if (/(?:^|\s)(?:id|uuid|code|no\.?|#)$/iu.test(column)) return true;
+  // A question number identifies an exercise; its magnitude is not a measured result.
+  // Keep the exact table, but never turn "第 2 題" vs "第 4 題" into a 2× bar.
+  if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|題號|題次|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
+      /\b(?:question|problem|exercise|item)\s+(?:id|number|no\.?)(?:\b|$)/iu.test(column) ||
+      /^(?:年度|year|number)$/iu.test(column) ||
+      // A number identifying a term, page, floor or class is an ordinal or
+      // category, not a comparable measure. Parenthetical source qualifiers
+      // (e.g. 學年（民國）) must not turn it into a bar.
+      /^(?:學年|學期|年級|班級|頁碼|頁次|週次|樓層|排名|名次|月份|民國年|西元年)(?:\s*[（(][^）)]*[）)])?$/u.test(column) ||
+      /^(?:semester|term|month|rank|ranking|floor|grade|page)$/iu.test(column) ||
+      /\b(?:academic\s+(?:year|term|semester)|student\s+(?:id|number)|course\s+(?:id|code|number)|postal\s+code|zip\s+code|phone\s+number|account\s+(?:id|number)|page\s+(?:no\.?|number)|sequence\s+number|floor\s+number)\b/iu.test(column)) return true;
+  // A textbook's week, chapter or lesson ordinal is a position, not a
+  // measurement. "Chapter 4" must not appear twice as large as "Chapter 2".
+  // Count headers (e.g. Number of Chapters / 章節數量) remain eligible.
+  if (/^(?:章節|章次|章號|單元|單元號|單元編號|課次|講次|節次|第幾週)(?:\s*[（(][^）)]{1,40}[）)])?$/u.test(column) ||
+      /^(?:week|chapter|unit|lesson|module|section|lecture|session)(?:\s+(?:number|no\.?|id|#))?(?:\s*\([^)]{1,40}\))?$/iu.test(column)) return true;
+  // Numeric room and seat labels identify where a student belongs, not
+  // quantities: classroom 301 is not 1.5 times classroom 205. A real
+  // "教室數" / "Room Count" header remains a valid measured quantity.
+  if (/^(?:教室|實驗室|房號|寢室|寢室號|宿舍房號|房間號碼|校舍|大樓|座位|座位號|位置|地點)(?:\s*[（(][^）)]{1,40}[）)])?$/u.test(column) ||
+      /^(?:classroom|room|dorm(?:itory)?\s+room|lab(?:oratory)?|building|location|seat)(?:\s+(?:no\.?|number|id|code|#))?(?:\s*\([^)]{1,40}\))?$/iu.test(column)) return true;
+  return /^build$/iu.test(column) || (NON_RATIO_RELEASE_COLUMN.test(column) &&
+    !RELEASE_COUNT_COLUMN.test(column) && !ENGLISH_RELEASE_COUNT_COLUMN.test(column));
+}
+
 /**
  * Optional, source-grounded comparison of plain non-negative values only.
  * A number with units, a percentage, a date or an expression is not a scalar
@@ -115,43 +156,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   // them as bars would imply a magnitude that the source does not support.
   const column = table.headers[1].trim();
   // An unlabeled number in a percentage column is ambiguous: do not scale it to the largest row.
-  if (isPercentageColumn(column) ||
-      AMBIGUOUS_TIME_COLUMN.test(column) ||
-      NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
-      DECIBEL_UNIT_COLUMN.test(column) ||
-      NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
-      ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
-      ((NON_RATIO_STATUS_COLUMN.test(column) ||
-        ENGLISH_NON_RATIO_STATUS_COLUMN.test(column)) &&
-       !STATUS_COUNT_COLUMN.test(column) &&
-       !ENGLISH_STATUS_COUNT_COLUMN.test(column)) ||
-      ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
-        ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN.test(column)) &&
-       !SCORE_COUNT_COLUMN.test(column))) return null;
-  // A question number identifies an exercise; its magnitude is not a measured result.
-  // Keep the exact table, but never turn "第 2 題" vs "第 4 題" into a 2× bar.
-  if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|題號|題次|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
-      /\b(?:question|problem|exercise|item)\s+(?:id|number|no\.?)(?:\b|$)/iu.test(column) ||
-      /^(?:年度|year|date|id|uuid|no\.?|number)$/iu.test(column) ||
-      // A number identifying a term, page, floor or class is an ordinal or
-      // category, not a comparable measure. Parenthetical source qualifiers
-      // (e.g. 學年（民國）) must not turn it into a bar.
-      /^(?:學年|學期|年級|班級|頁碼|頁次|週次|樓層|排名|名次|月份|民國年|西元年)(?:\s*[（(][^）)]*[）)])?$/u.test(column) ||
-      /^(?:semester|term|month|rank|ranking|floor|grade|page)$/iu.test(column) ||
-      /\b(?:academic\s+(?:year|term|semester)|student\s+(?:id|number)|course\s+(?:id|code|number)|postal\s+code|zip\s+code|phone\s+number|account\s+(?:id|number)|page\s+(?:no\.?|number)|sequence\s+number|floor\s+number)\b/iu.test(column)) return null;
-  // A textbook's week, chapter or lesson ordinal is a position, not a
-  // measurement. "Chapter 4" must not appear twice as large as "Chapter 2".
-  // Count headers (e.g. Number of Chapters / 章節數量) remain eligible.
-  if (/^(?:章節|章次|章號|單元|單元號|單元編號|課次|講次|節次|第幾週)(?:\s*[（(][^）)]{1,40}[）)])?$/u.test(column) ||
-      /^(?:week|chapter|unit|lesson|module|section|lecture|session)(?:\s+(?:number|no\.?|id|#))?(?:\s*\([^)]{1,40}\))?$/iu.test(column)) return null;
-  // Numeric room and seat labels identify where a student belongs, not
-  // quantities: classroom 301 is not 1.5 times classroom 205. A real
-  // "教室數" / "Room Count" header remains a valid measured quantity.
-  if (/^(?:教室|實驗室|房號|寢室|寢室號|宿舍房號|房間號碼|校舍|大樓|座位|座位號|位置|地點)(?:\s*[（(][^）)]{1,40}[）)])?$/u.test(column) ||
-      /^(?:classroom|room|dorm(?:itory)?\s+room|lab(?:oratory)?|building|location|seat)(?:\s+(?:no\.?|number|id|code))?(?:\s*\([^)]{1,40}\))?$/iu.test(column)) return null;
-  if (NON_RATIO_RELEASE_COLUMN.test(column) &&
-      !RELEASE_COUNT_COLUMN.test(column) &&
-      !ENGLISH_RELEASE_COUNT_COLUMN.test(column)) return null;
+  if (isPercentageColumn(column) || isNonRatioColumn(column)) return null;
   // Repeated "學分" is an explicit source unit, not a value to infer.
   // Accept it only in a credit column and when ALL rows use the same format.
   const plainNumber = /^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/u;
@@ -179,7 +184,8 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
  */
 function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
-  if (!isBoundedPercentageColumn(table.headers[1])) return null;
+  const column = table.headers[1];
+  if (!isBoundedPercentageColumn(column) || isNonRatioColumn(column)) return null;
   const rows: SourceValueRow[] = [];
   for (const [rowIndex, [label, original]] of table.rows.entries()) {
     if (!label?.trim() || !original ||
@@ -546,14 +552,12 @@ export function StudySourceTables({ text }: { text: string }) {
     if (document.activeElement !== origin) {
       try { summary?.focus(); } catch { /* The return control must remain available. */ }
     }
-    const focused = document.activeElement === origin || (summary !== null && summary !== undefined && document.activeElement === summary);
-    const destination = document.activeElement === origin ? origin : summary ?? origin;
+    const destination = document.activeElement === origin ? origin : summary;
+    // Keep the retry in view if the WebView refuses both focus attempts.
+    if (!destination || document.activeElement !== destination) return;
     try { destination.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }
     catch { /* A failed scroll must not prevent keyboard focus. */ }
-    // Some in-app WebViews refuse focus on both the chart button and summary.
-    // Do not unmount the return button and strand keyboard users at the source.
-    // They can retry, use Tab, or scroll through the still-open comparison.
-    if (focused) setReturnTarget(null);
+    setReturnTarget(null);
   };
   if (!tables.length) return null;
 

@@ -292,25 +292,30 @@ describe('source and passage integrity', () => {
 });
 
 describe('lesson and draft validation', () => {
-  it('rejects invisible-only restored reference disclosure in both v1/v2, while preserving real student answers', () => {
+  it('round-trips a legacy zero-width reveal and preserves the rest of the reading backup', () => {
+    // The base writer used attempt.trim(), so this was a valid v2 backup.
+    const legacy = envelope();
+    mode(legacy).lessons[0].attempt = '\u200b';
+    mode(legacy).lessons[0].answerVisible = true;
+    expect(mode(legacy).lessons[0].attempt.trim()).toBeTruthy();
+    const restored = parseCourseStudyProgress(JSON.stringify(legacy), scope);
+    const expected = data();
+    expected.passages['0:0'].modes.understand.lessons[0].attempt = '\u200b';
+    expect(restored).toEqual(expected);
+    expect(parseCourseStudyProgress(serializeCourseStudyProgress(restored), scope)).toEqual(expected);
+  });
+
+  it('relocks invisible-only legacy attempts in v1/v2 and preserves visible answers', () => {
     for (const version of [1, 2]) {
-      for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f']) {
+      for (const invisible of ['', '\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f', '\ufff9', '\ufffa', '\ufffb']) {
         const saved = envelope();
         saved.version = version;
         mode(saved).lessons[0].attempt = invisible;
         mode(saved).lessons[0].answerVisible = true;
-        expect(() => parseCourseStudyProgress(JSON.stringify(saved), scope)).toThrow(/試答與參考回答狀態不一致/);
-
-        const inMemory = data();
-        inMemory.passages['0:0'].modes.understand.lessons[0].attempt = invisible;
-        inMemory.passages['0:0'].modes.understand.lessons[0].answerVisible = true;
-        expect(() => serializeCourseStudyProgress(inMemory)).toThrow(/試答與參考回答狀態不一致/);
-
-        // An unreviewed draft is preserved verbatim, not silently discarded.
-        saved.passages['0:0'].modes.understand.lessons[0].answerVisible = false;
         const restored = parseCourseStudyProgress(JSON.stringify(saved), scope);
-        expect(restored.passages['0:0'].modes.understand.lessons[0].attempt).toBe(invisible);
-        expect(restored.passages['0:0'].modes.understand.lessons[0].answerVisible).toBe(false);
+        expect(restored.passages['0:0'].modes.understand.lessons[0]).toMatchObject({
+          attempt: invisible, answerVisible: false,
+        });
       }
       for (const visible of ['主鍵', 'x²+y²', '👩‍💻', 'e\u0301', '⠃']) {
         const saved = envelope();
@@ -330,7 +335,6 @@ describe('lesson and draft validation', () => {
     (value: Envelope) => { mode(value).question = '字'.repeat(501); },
     (value: Envelope) => { mode(value).lessons[0].question = '字'.repeat(501); },
     (value: Envelope) => { mode(value).lessons[0].attempt = '字'.repeat(2001); },
-    (value: Envelope) => { mode(value).lessons[0].answerVisible = true; },
     (value: Envelope) => { Reflect.set(value.passages['0:0'], 'needsReview', 'yes'); },
     (value: Envelope) => { Reflect.deleteProperty(value.passages['0:0'].modes, 'practice'); },
     (value: Envelope) => { Reflect.set(value.passages['0:0'].modes, 'other', emptyStudyPassage().modes.understand); },

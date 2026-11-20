@@ -121,7 +121,7 @@ it('keeps invisible-only self-check drafts from unlocking a reference answer in 
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
   await screen.findByRole('region', { name: '本段 AI 講解' });
-  for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f']) {
+  for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f', '\ufff9', '\ufffa', '\ufffb']) {
     fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: invisible } });
     const compare = screen.getByRole('button', { name: '對照參考回答' }) as HTMLButtonElement;
     expect(compare.disabled).toBe(true);

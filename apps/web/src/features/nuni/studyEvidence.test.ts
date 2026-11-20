@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { locateStudyEvidence } from './studyEvidence';
 
 describe('exact source-to-lesson evidence', () => {
@@ -50,8 +50,8 @@ describe('exact source-to-lesson evidence', () => {
     });
   });
   it('does not mark invisible-only AI citations as visible source evidence', () => {
-    const original = '甲\u200b乙 / \u2800 / \u0301 / \u202e';
-    for (const invisibleQuote of ['\u200b', '\u2800', '\u0301', '\u202e', ' \u2800 ']) {
+    const original = '甲\u200b乙 / \u2800 / \u0301 / \u202e / \ufff9 / \ufffa / \ufffb';
+    for (const invisibleQuote of ['\u200b', '\u2800', '\u0301', '\u202e', ' \u2800 ', '\ufff9', '\ufffa', '\ufffb']) {
       // Exact byte overlap alone is insufficient for a readable citation.
       expect(original.includes(invisibleQuote)).toBe(true);
       expect(locateStudyEvidence(original, invisibleQuote)).toBeNull();
@@ -173,6 +173,44 @@ describe('exact source-to-lesson evidence', () => {
       expect(locateStudyEvidence(glyph, glyph)).toEqual({
         before: '', quote: glyph, after: '', occurrences: 1,
       });
+    }
+  });
+
+  it('accepts complete keycap emoji while excluding punctuation-only citations', () => {
+    const source = '#️⃣ *️⃣ 1️⃣ # *';
+    for (const quote of ['#️⃣', '*️⃣', '1️⃣']) {
+      expect(locateStudyEvidence(source, quote)?.quote).toBe(quote);
+    }
+    for (const quote of ['#', '*', '# *']) {
+      expect(locateStudyEvidence(source, quote)).toBeNull();
+    }
+  });
+
+  it.each(['Segmenter', 'containing'] as const)('locates whole graphemes without %s', (missing) => {
+    const NativeSegmenter = Intl.Segmenter;
+    const mockIntl = Object.create(Intl);
+    mockIntl.Segmenter = missing === 'Segmenter' ? undefined : class {
+      segment(source: string) {
+        const segments = new NativeSegmenter().segment(source);
+        return { [Symbol.iterator]: segments[Symbol.iterator].bind(segments) };
+      }
+    };
+    vi.stubGlobal('Intl', mockIntl);
+    try {
+      for (const quote of ['教材原文', 'e\u0301', '👩‍💻', '👍🏽', '🇹🇼', '#️⃣', '한', 'क्ष']) {
+        expect(locateStudyEvidence('前 ' + quote + ' 後', quote)).toEqual({
+          before: '前 ', quote, after: ' 後', occurrences: 1,
+        });
+      }
+      for (const [source, partial] of [
+        ['e\u0301e', '\u0301e'], ['e\u0301', 'e'], ['👩‍💻', '💻'], ['👍🏽', '👍'],
+        ['🇹🇼', '🇼'], ['한', 'ᅡᆫ'], ['क्ष', 'ष'], ['甲\r\n乙', '甲\r'],
+      ]) {
+        expect(locateStudyEvidence(source, partial)).toBeNull();
+      }
+      expect(locateStudyEvidence('🇺🇹🇹🇹', '🇹🇹')?.before).toBe('🇺🇹');
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 

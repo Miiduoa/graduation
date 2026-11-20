@@ -663,7 +663,7 @@ it('keeps software versions, editions and build identifiers as text, not mislead
   for (const header of [
     '版本', '軟體版本', '版本號', '版次', '修訂版', '修訂號', '發行版', '發行號', '編譯號',
     'Version', 'Software Version', 'Version (major)', 'Revision', 'Revision No.',
-    'Edition', 'Release', 'Build Number', 'Build ID',
+    'Edition', 'Release', 'Build', 'Build Number', 'Build ID',
   ]) {
     const material = [
       '| 軟體 | ' + header + ' |', '| --- | --- |',
@@ -701,7 +701,7 @@ it('keeps binary state, access and completion codes as categories, not proportio
     '完成與否', '通過與否', '布林值', '真假值', '開關狀態',
     'Status', 'Status (0/1)', 'Enrollment Status', 'Enabled',
     'Is Active', 'Is Completed', 'Pass Flag', 'Boolean', 'Flag',
-    'Activation State', 'Has Access', 'State',
+    'Activation State', 'Has Access', 'State', 'Access (0/1)', 'Access（１／０）',
   ]) {
     const material = [
       '| 項目 | ' + header + ' |', '| --- | --- |',
@@ -879,7 +879,7 @@ it('still compares explicit numbers of weeks, chapters and learning units', () =
 
 it('keeps room and seat identifiers as locations, not ratio-style bars', () => {
   for (const header of ['教室', '實驗室', '房號', '宿舍房號', '寢室', '座位',
-    '位置', '地點', 'Room', 'Room Number', 'Classroom', 'Lab No.',
+    '位置', '地點', 'Room', 'Room Number', 'Room #', 'Classroom', 'Lab No.',
     'Building', 'Location', 'Seat Number']) {
     const material = ['| 課程 | ' + header + ' |', '| --- | --- |',
       '| 資料庫 | 301 |', '| 網路 | 205 |'].join('\n');
@@ -995,6 +995,17 @@ it('scales explicit English percent and rate columns to 100%, not to the highest
     unmount();
   }
 });
+
+it.each(['Status Code (%)', 'Access (0/1) %', 'Build (%)', 'Room # (%)'])(
+  'keeps percentage-shaped identifiers and binary codes in the source table (%s)', (header) => {
+    const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 0% |', '| 乙 | 1% |'].join('\n');
+    const { container } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual(['0%', '1%']);
+    expect(comparisonSummaries(container)).toEqual([]);
+  },
+);
 
 it('does not compare unlabeled English rates as quantities or block real numeric amounts', () => {
   for (const header of ['Percent', 'Percentage', 'Completion Rate', 'Accuracy', 'Passing Rate']) {
@@ -1950,9 +1961,15 @@ it('retains the return control when a WebView refuses both chart and summary foc
   const back = screen.getByRole('button', { name: '返回原文第 3 行的圖表' });
   Object.defineProperty(jump, 'focus', { configurable: true, value: () => { throw new Error('chart focus blocked'); } });
   Object.defineProperty(summary, 'focus', { configurable: true, value: () => { throw new Error('summary focus blocked'); } });
+  const scrollChart = vi.fn();
+  const scrollSummary = vi.fn();
+  Object.defineProperty(jump, 'scrollIntoView', { value: scrollChart });
+  Object.defineProperty(summary, 'scrollIntoView', { value: scrollSummary });
   disclosure.open = false;
   fireEvent.click(back);
   expect(disclosure.open).toBe(true);
+  expect(scrollChart).not.toHaveBeenCalled();
+  expect(scrollSummary).not.toHaveBeenCalled();
   expect(document.activeElement).toBe(sourceRow);
   // The student must not lose the only working return action after the focus
   // attempt fails. Native keyboard navigation can still reach this button.
@@ -1962,6 +1979,7 @@ it('retains the return control when a WebView refuses both chart and summary foc
   Reflect.deleteProperty(summary, 'focus');
   fireEvent.click(back);
   expect(document.activeElement).toBe(jump);
+  expect(scrollChart).toHaveBeenCalledOnce();
   expect(screen.queryByRole('button', { name: '返回原文第 3 行的圖表' })).toBeNull();
 });
 
