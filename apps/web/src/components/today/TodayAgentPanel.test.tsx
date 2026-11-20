@@ -90,6 +90,178 @@ function verified(): V2ActionState {
   };
 }
 
+it('keeps the homepage picker closed until requested and plans only the selected source task', () => {
+  const input = props({ compact: true });
+  render(<TodayAgentPanel {...input} />);
+  const picker = screen.getByText('選一件待辦，找 30 分鐘空檔').closest('details')!;
+  const list = within(picker).getByRole('list', { name: '先處理近期截止的事' });
+  const chooseTask = within(list).getByRole('button', { name: '替「作業 one」找 30 分鐘準備時間' });
+  expect(picker.open).toBe(false);
+  expect(picker.contains(list)).toBe(true);
+  expect(list.contains(chooseTask)).toBe(true);
+  expect(input.onPlan).not.toHaveBeenCalled();
+  expect(screen.queryByRole('list', { name: '代辦步驟' })).toBeNull();
+  fireEvent.click(picker.querySelector('summary')!);
+  expect(picker.open).toBe(true);
+  expect(input.onPlan).not.toHaveBeenCalled();
+  fireEvent.click(chooseTask);
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(input.tasks[0]);
+  expect(input.onConfirm).not.toHaveBeenCalled();
+});
+
+it('keeps explicit elapsed recovery in the compact recent list without restoring a duplicate task picker', () => {
+  const original = followup({ status: 'elapsed', checkedAt: '2026-11-13T00:05:00.000Z',
+    event: { ...followup().event, startTime: '07:00', endTime: '07:30' } });
+  const input = props({ compact: true, followups: [original] });
+  render(<TodayAgentPanel {...input} />);
+  expect(screen.queryByText('選一件待辦，找 30 分鐘空檔')).toBeNull();
+  const recent = screen.getByText('最近安排（1）').closest('details')!;
+  expect(recent.open).toBe(true);
+  const recover = within(recent).getByRole('button', { name: '替「作業 one」重新找 30 分鐘準備時間' });
+  expect(input.onPlan).not.toHaveBeenCalled();
+  fireEvent.click(recover);
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(input.tasks[0], original.mutationId);
+  expect(input.onConfirm).not.toHaveBeenCalled();
+});
+
+it('keeps compact unknown-result reconciliation visible while elapsed recovery stays disabled', () => {
+  const original = followup({ status: 'elapsed', checkedAt: '2026-11-13T00:05:00.000Z',
+    event: { ...followup().event, startTime: '07:00', endTime: '07:30' } });
+  const input = props({ compact: true, followups: [original], reply,
+    states: { [card.mutationId]: { status: 'unknown', message: '原操作仍待核對' } } });
+  render(<TodayAgentPanel {...input} />);
+  const recover = screen.getByRole('button', { name: '替「作業 one」重新找 30 分鐘準備時間' });
+  expect((recover as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(recover);
+  expect(input.onPlan).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新核對結果' }));
+  expect(input.onReconcile).toHaveBeenCalledExactlyOnceWith(card);
+  expect(input.onConfirm).not.toHaveBeenCalled();
+});
+
+it('selects the nearest unplanned coursework after already-arranged tasks and counts only remaining candidates', () => {
+  const allTasks = Array.from({ length: 7 }, (_, index) => task(
+    String(index + 1), `2026-11-13T${String(9 + index).padStart(2, '0')}:00:00+08:00`,
+  ));
+  const input = props({ compact: true, tasks: allTasks,
+    followups: allTasks.slice(0, 3).map((item) => followup({
+      mutationId: `already-planned-${item.id}`,
+      task: { workspaceId: item.courseId, taskId: item.id, kind: 'assignment' },
+      source: { ...followup().source!, title: item.title, dueAt: item.dueAt! },
+    })),
+  });
+  render(<TodayAgentPanel {...input} />);
+  const picker = screen.getByText('選一件待辦，找 30 分鐘空檔').closest('details')!;
+  fireEvent.click(picker.querySelector('summary')!);
+  const list = within(picker).getByRole('list', { name: '先處理近期截止的事' });
+  expect(within(list).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent))
+    .toEqual(['作業 4', '作業 5', '作業 6']);
+  expect(within(picker).getByText('近期 3 件')).toBeTruthy();
+  expect(within(picker).getByText(/其他 1 件可在課程中查看/)).toBeTruthy();
+  expect(within(picker).queryByText(/其他 4 件/)).toBeNull();
+  expect(screen.getByText('最近安排（3）')).toBeTruthy();
+  expect(input.onPlan).not.toHaveBeenCalled();
+  fireEvent.click(within(list).getByRole('button', { name: '替「作業 4」找 30 分鐘準備時間' }));
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(allTasks[3]);
+  expect(input.onConfirm).not.toHaveBeenCalled();
+});
+
+it('keeps an expanded homepage picker and its keyboard focus while a same-scope read disables planning', () => {
+  const input = props({ compact: true });
+  const view = render(<TodayAgentPanel {...input} />);
+  const picker = screen.getByText('選一件待辦，找 30 分鐘空檔').closest('details')!;
+  const summary = picker.querySelector('summary')!;
+  fireEvent.click(summary);
+  summary.focus();
+  const chooseTask = within(picker).getByRole('button', {
+    name: '替「作業 one」找 30 分鐘準備時間',
+  }) as HTMLButtonElement;
+  expect(picker.open).toBe(true);
+  expect(document.activeElement).toBe(summary);
+
+  view.rerender(<TodayAgentPanel {...input} loading />);
+  expect(screen.getByText('選一件待辦，找 30 分鐘空檔').closest('details')).toBe(picker);
+  expect(picker.open).toBe(true);
+  expect(document.activeElement).toBe(summary);
+  expect(within(picker).getByRole('button', { name: '替「作業 one」找 30 分鐘準備時間' })).toBe(chooseTask);
+  expect(chooseTask.disabled).toBe(true);
+  expect(screen.getByRole('status').textContent).toContain('正在讀取');
+  fireEvent.click(chooseTask);
+  expect(input.onPlan).not.toHaveBeenCalled();
+
+  view.rerender(<TodayAgentPanel {...input} />);
+  expect(screen.getByText('選一件待辦，找 30 分鐘空檔').closest('details')).toBe(picker);
+  expect(picker.open).toBe(true);
+  expect(document.activeElement).toBe(summary);
+  expect(chooseTask.disabled).toBe(false);
+  expect(input.onPlan).not.toHaveBeenCalled();
+  expect(input.onConfirm).not.toHaveBeenCalled();
+});
+
+it('keeps the original confirmation outside the collapsible homepage task picker', () => {
+  const input = props({ compact: true, reply });
+  render(<TodayAgentPanel {...input} />);
+  const picker = screen.getByText('選一件待辦，找 30 分鐘空檔').closest('details')!;
+  const confirmation = screen.getByRole('button', { name: '確認' });
+  expect(picker.open).toBe(false);
+  expect(picker.contains(confirmation)).toBe(false);
+  fireEvent.click(picker.querySelector('summary')!);
+  fireEvent.click(picker.querySelector('summary')!);
+  expect(screen.getByRole('button', { name: '確認' })).toBe(confirmation);
+  fireEvent.click(confirmation);
+  expect(input.onConfirm).toHaveBeenCalledExactlyOnceWith([card]);
+});
+
+it('keeps an uncertain result actionable without reopening the homepage picker or retrying a write', () => {
+  const input = props({ compact: true, reply, states: {
+    [card.mutationId]: { status: 'unknown', message: '執行結果尚未核對' },
+  } });
+  render(<TodayAgentPanel {...input} />);
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新核對結果' }));
+  expect(input.onReconcile).toHaveBeenCalledExactlyOnceWith(card);
+  expect(input.onConfirm).not.toHaveBeenCalled();
+});
+
+it('opens attention-needed follow-ups independently of the compact task picker', () => {
+  const input = props({ compact: true, tasks: [task('one'), task('two')],
+    followups: [followup({ status: 'event_missing', calendar: 'missing' })] });
+  render(<TodayAgentPanel {...input} />);
+  const picker = screen.getByText('選一件待辦，找 30 分鐘空檔').closest('details')!;
+  const recent = screen.getByText('最近安排（1）').closest('details')!;
+  expect(picker.open).toBe(false);
+  expect(recent.open).toBe(true);
+  expect(screen.getByRole('group', { name: '「作業 one」的安排追蹤' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '查看「作業 one」的行程' }).getAttribute('href'))
+    .toBe('/calendar?schoolId=pu&eventId=planned-event-1');
+  fireEvent.click(picker.querySelector('summary')!);
+  expect(screen.getAllByRole('group', { name: '「作業 one」的安排追蹤' })).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: '替「作業 one」找 30 分鐘準備時間' })).toBeNull();
+  expect(input.onPlan).not.toHaveBeenCalled();
+});
+
+it('keeps already-arranged coursework in one follow-up list without an unusable picker', () => {
+  render(<TodayAgentPanel {...props({ compact: true, followups: [followup()] })} />);
+  expect(screen.queryByText('選一件待辦，找 30 分鐘空檔')).toBeNull();
+  const recent = screen.getByText('最近安排（1）').closest('details')!;
+  fireEvent.click(recent.querySelector('summary')!);
+  expect(screen.getAllByRole('group', { name: '「作業 one」的安排追蹤' })).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: /找 30 分鐘準備時間/ })).toBeNull();
+});
+
+it('omits only a fully empty homepage panel while preserving loading, failures and a no-slot reply', () => {
+  const input = props({ compact: true, tasks: [] });
+  const view = render(<TodayAgentPanel {...input} />);
+  expect(screen.queryByRole('region', { name: '替待辦安排時間' })).toBeNull();
+  view.rerender(<TodayAgentPanel {...input} loading />);
+  expect(screen.getByRole('status').textContent).toContain('正在讀取');
+  view.rerender(<TodayAgentPanel {...input} error="課程暫時讀不到" />);
+  expect(screen.getByRole('alert').textContent).toBe('課程暫時讀不到');
+  view.rerender(<TodayAgentPanel {...input} reply={{ answer: '今天沒有符合條件的 30 分鐘空檔。', cards: [], steps: [] }} />);
+  expect(screen.getByLabelText('這次代辦結果').textContent).toContain('今天沒有符合條件');
+});
+
 it('surfaces the three nearest valid deadlines without starting a request on mount', () => {
   const first = task('first', '2026-11-13T09:00:00+08:00');
   const second = task('second', '2026-11-13T10:00:00+08:00');
@@ -343,6 +515,71 @@ it('does not turn elapsed preparation time into a submitted assignment', () => {
   })]} />);
   expect(screen.getByText('作業已繳交')).toBeTruthy();
   expect(screen.queryByText('作業仍待繳交。')).toBeNull();
+});
+
+const elapsedFollowup = (change: Partial<AssistantCourseworkFollowup> = {}) => followup({
+  status: 'elapsed',
+  event: { ...followup().event, date: '2026-11-12' },
+  ...change,
+});
+it('offers an explicit new preview for an elapsed arrangement and preserves its original history', () => {
+  const original = elapsedFollowup();
+  const input = props({ followups: [original] });
+  render(<TodayAgentPanel {...input} />);
+
+  expect(screen.getByText('準備時間已結束')).toBeTruthy();
+  expect(input.onPlan).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '替「作業 one」重新找 30 分鐘準備時間' }));
+
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(input.tasks[0], original.mutationId);
+  expect(input.onConfirm).not.toHaveBeenCalled();
+  expect(input.onCancel).not.toHaveBeenCalled();
+  expect(screen.getByRole('link', { name: '查看「作業 one」的行程' }).getAttribute('href'))
+    .toContain(original.mutationId);
+});
+it.each([
+  { status: 'scheduled' },
+  { status: 'in_progress' },
+  { status: 'unavailable', source: null, calendar: 'unavailable' },
+  { status: 'event_changed', calendar: 'changed' },
+  { status: 'event_missing', calendar: 'missing' },
+  { status: 'submitted', source: { ...followup().source!, submitted: true } },
+  { status: 'closed', source: { ...followup().source!, state: 'closed' } },
+  { source: { ...followup().source!, dueAt: '2026-11-13T07:59:00+08:00' } },
+  { event: followup().event },
+] as Partial<AssistantCourseworkFollowup>[])(
+  'does not offer recovery for a source or arrangement that is not a verified elapsed task: %j',
+  change => {
+    render(<TodayAgentPanel {...props({ followups: [elapsedFollowup(change)] })} />);
+    expect(screen.queryByRole('button', { name: /重新找 30 分鐘/ })).toBeNull();
+  },
+);
+it.each(['scheduled', 'unavailable'] as const)('another %s arrangement for the same task blocks recovery of its old parent', status => {
+  const active = followup({ mutationId: 'other-arrangement', status,
+    ...(status === 'unavailable' ? { source: null, calendar: 'unavailable' as const } : {}) });
+  render(<TodayAgentPanel {...props({ followups: [elapsedFollowup(), active] })} />);
+  expect(screen.queryByRole('button', { name: /重新找 30 分鐘/ })).toBeNull();
+});
+it('continues only the latest elapsed arrangement while retaining older parents', () => {
+  const old = elapsedFollowup({ mutationId: 'older-parent', event: { ...followup().event, date: '2026-11-11' } });
+  const latest = elapsedFollowup();
+  const input = props({ followups: [old, latest] });
+  render(<TodayAgentPanel {...input} />);
+  const buttons = screen.getAllByRole('button', { name: /重新找 30 分鐘/ });
+  expect(buttons).toHaveLength(1);
+  fireEvent.click(buttons[0]);
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(input.tasks[0], latest.mutationId);
+  expect(screen.getAllByText('準備時間已結束')).toHaveLength(2);
+});
+it('keeps recovery available in recent arrangements outside the first three pending tasks', () => {
+  const fourth = task('four', '2026-11-15T12:00:00+08:00');
+  const row = elapsedFollowup({ task: { workspaceId: fourth.courseId, taskId: fourth.id, kind: 'assignment' },
+    source: { ...followup().source!, title: fourth.title, dueAt: fourth.dueAt! } });
+  const input = props({ tasks: [task('one'), task('two'), task('three'), fourth], followups: [row] });
+  render(<TodayAgentPanel {...input} />);
+  fireEvent.click(screen.getByText(/最近安排（1）/));
+  fireEvent.click(screen.getByRole('button', { name: '替「作業 four」重新找 30 分鐘準備時間' }));
+  expect(input.onPlan).toHaveBeenCalledExactlyOnceWith(fourth, row.mutationId);
 });
 
 it('shows changed or missing calendar evidence without inventing a replacement operation', () => {

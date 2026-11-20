@@ -87,7 +87,7 @@ async function preparePickup(
       const issuedAt = currentTime();
       validateEventProposal(ledger, event, [], issuedAt, true);
       const card = signCard(input.binding, 'propose_personal_event', event, ledger.revision,
-        input.secret, issuedAt, undefined, undefined, undefined,
+        input.secret, issuedAt, undefined, undefined, undefined, undefined, undefined,
         foodPickupGuardForSource(source, durationMinutes));
       steps.push({ name: 'propose_personal_event', status: 'ok', summary: '取餐行程已備妥，等待你的確認' });
       return {

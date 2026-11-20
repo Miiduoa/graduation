@@ -165,9 +165,7 @@ async def basic_comparison(page):
     assert await snapshot(page) == ledger, 'Reading the comparison caused an API call or write'
 
 
-async def geometry_against_composer(target, dock_element):
-    # Read target and the entire composer dock in one layout snapshot.
-    return await target.evaluate('''(node, dock) => {
+GEOMETRY_AGAINST_COMPOSER = '''(node, dock) => {
       const box = element => {const r=element.getBoundingClientRect();
         return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height};};
       const style=getComputedStyle(node), visual=window.visualViewport, scrolling=document.scrollingElement;
@@ -178,10 +176,70 @@ async def geometry_against_composer(target, dock_element):
           scrollMarginBlockStart:style.scrollMarginBlockStart,scrollMarginBlockEnd:style.scrollMarginBlockEnd},
         visualViewport:visual?{width:visual.width,height:visual.height,offsetLeft:visual.offsetLeft,
           offsetTop:visual.offsetTop,pageLeft:visual.pageLeft,pageTop:visual.pageTop,scale:visual.scale}:null};
+    }'''
+
+
+async def geometry_against_composer(target, dock_element):
+    # Read target and the entire composer dock in one layout snapshot.
+    return await target.evaluate(GEOMETRY_AGAINST_COMPOSER, dock_element)
+
+
+async def observe_next_forward_tab(button, dock_element):
+    # Previous native focus may still be scrolling between Playwright commands.
+    # Observe the real keydown before product handlers, without changing focus or scrolling.
+    await button.evaluate('''(node, dock) => {
+      const geometry = ''' + GEOMETRY_AGAINST_COMPOSER + ''';
+      node.__qaFocusProbe?.stop();
+      const original=node.scrollIntoView;
+      const probe={requests:[],keydown:null,timeline:[],maxFrames:30,maxDurationMs:750};
+      const active=()=>({tag:document.activeElement?.tagName ?? null,id:document.activeElement?.id ?? null});
+      const sample=phase=>({phase,time:performance.now(),active:active(),geometry:geometry(node,dock)});
+      const scrollSample=()=>{const value=geometry(node,dock);
+        return {button:value.target,scroll:value.scroll,documentScrollingElement:value.documentScrollingElement,
+          time:performance.now(),active:active()};};
+      let frame=0,timer=0,frames=0,stopped=false,started=0;
+      const onKeydown=event=>{
+        if(event.key!=='Tab' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey)return;
+        document.removeEventListener('keydown',onKeydown,true);
+        started=performance.now();
+        probe.keydown={key:event.key,shiftKey:event.shiftKey,isTrusted:event.isTrusted,
+          defaultPreventedAtCapture:event.defaultPrevented,defaultPreventedAfterDispatch:null,
+          target:{tag:event.target?.tagName ?? null,id:event.target?.id ?? null},
+          before:geometry(node,dock)};
+        probe.timeline.push(sample('keydown capture'));
+        const tick=()=>{
+          if(stopped)return;
+          frames+=1;
+          // The event has finished dispatching by the first animation frame.
+          probe.keydown.defaultPreventedAfterDispatch=event.defaultPrevented;
+          probe.timeline.push(sample('animation frame'));
+          if(frames>=probe.maxFrames || performance.now()-started>=probe.maxDurationMs)probe.stop();
+          else frame=requestAnimationFrame(tick);
+        };
+        frame=requestAnimationFrame(tick);
+        timer=setTimeout(probe.stop,probe.maxDurationMs);
+      };
+      const observedScroll=function(options){
+        const request={options:options ?? null,before:scrollSample()};
+        probe.requests.push(request);
+        try{return original.call(this,options);}
+        finally{request.after=scrollSample();}
+      };
+      probe.stop=()=>{
+        if(stopped)return;
+        stopped=true;clearTimeout(timer);cancelAnimationFrame(frame);
+        document.removeEventListener('keydown',onKeydown,true);
+        if(node.scrollIntoView===observedScroll)node.scrollIntoView=original;
+      };
+      node.__qaFocusProbe=probe;
+      node.scrollIntoView=observedScroll;
+      // The listener is consumed by the next forward Tab or removed with this
+      // page context. The recording deadline begins at keydown, not installation.
+      document.addEventListener('keydown',onKeydown,true);
     }''', dock_element)
 
 
-async def focused_action_readability(page, button, name, before_tab=None):
+async def focused_action_readability(page, button, name, before_tab_observation=None, require_no_scroll=False):
     # Observe native Tab scrolling only. Do not repair visibility with scrollIntoView/focus.
     await expect(button).to_be_focused()
     await page.evaluate('''() => new Promise(resolve => {
@@ -192,9 +250,21 @@ async def focused_action_readability(page, button, name, before_tab=None):
     evidence = await geometry_against_composer(button, await dock.element_handle())
     evidence['focused'] = await button.evaluate('node => document.activeElement === node')
     evidence['action'] = await button.inner_text()
-    probe = await button.evaluate("node => ({installed:!!node.__qaScrollRequests,requests:node.__qaScrollRequests || []})")
+    probe = await button.evaluate('''node => {
+      const probe=node.__qaFocusProbe;
+      probe?.stop();
+      return {installed:!!probe,requests:probe?.requests ?? [],keydown:probe?.keydown ?? null,
+        timeline:probe?.timeline ?? [],maxFrames:probe?.maxFrames,maxDurationMs:probe?.maxDurationMs};
+    }''')
     evidence['scrollRequests'] = probe['requests']
     evidence['scrollProbe'] = 'Single-element observer delegates the original native scrollIntoView' if probe['installed'] else None
+    if before_tab_observation is not None:
+        evidence['beforeTabObservation'] = before_tab_observation
+        evidence['beforeTabSampleTiming'] = 'Document capture listener during the real Tab keydown, before product handlers and native focus'
+        evidence['tabEvent'] = probe['keydown']
+        evidence['focusTimeline'] = probe['timeline']
+        evidence['focusTimelineLimits'] = {key: probe.get(key) for key in ['maxFrames', 'maxDurationMs']}
+    before_tab = probe['keydown']['before'] if probe['keydown'] is not None else None
     if before_tab is not None:
         evidence['beforeTab'] = before_tab
         previous, previous_dock, previous_viewport = before_tab['target'], before_tab['dock'], before_tab['viewport']
@@ -205,6 +275,12 @@ async def focused_action_readability(page, button, name, before_tab=None):
     evidence['viewportScreenshot'] = f'{name}-viewport.png'
     (OUT / f'{name}.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
     await page.screenshot(path=str(OUT / evidence['viewportScreenshot']), full_page=False)
+    if before_tab_observation is not None:
+        assert probe['installed'] and probe['keydown'] is not None, f'Missing real Tab keydown capture: {evidence}'
+        assert (probe['keydown']['isTrusted'] and probe['keydown']['key'] == 'Tab'
+                and not probe['keydown']['shiftKey'] and probe['keydown']['defaultPreventedAfterDispatch'] is not None), evidence
+    if require_no_scroll:
+        assert evidence.get('noScrollExpected') is True, f'Visible forward Tab did not exercise the no-scroll precondition: {evidence}'
     target, dock_box, viewport = evidence['target'], evidence['dock'], evidence['viewport']
     assert (evidence['focused'] and target['width'] > 0 and target['height'] > 0
             and target['top'] >= 0 and target['bottom'] <= min(dock_box['top'], viewport['height'])
@@ -661,6 +737,94 @@ async def unknown_case(page):
     return {'mode': 'controlled cancellation response loss + failed readback; explicit reconcile then resume'}
 
 
+async def role_context_case(page, unknown=False):
+    await start_plan(page)
+    if unknown:
+        await open_revision(page)
+        await page.evaluate('window.__agentQA.configure({unknownCancellation:true})')
+        await page.get_by_role('button', name='重新預覽', exact=True).click()
+        await expect(card_list(page).nth(0).get_by_role('button', name='重新核對結果', exact=True)).to_be_enabled()
+        await idle(page)
+        await expect(page.get_by_role('button', name='重新預覽', exact=True)).to_be_disabled()
+    question = page.get_by_role('textbox', name='問題', exact=True)
+    draft = ' 尚未送出的原問題\n第二行補充內容 '
+    await question.fill(draft)
+    choice = page.get_by_role('combobox', name='目前處理的工作', exact=True)
+    await expect(choice).to_have_value('student')
+    # Retain real DOM handles: matching replacement cards or a remounted
+    # conversation must not satisfy the preservation assertions.
+    retained = [(question, await question.element_handle()),
+                (choice, await choice.element_handle()),
+                (page.get_by_role('log'), await page.get_by_role('log').element_handle())]
+    for index in range(2):
+        card = card_list(page).nth(index)
+        retained.append((card, await card.element_handle()))
+    if unknown:
+        revision = page.get_by_role('textbox', name='修改條件', exact=True)
+        recovery = card_list(page).nth(0).get_by_role('button', name='重新核對結果', exact=True)
+        retained.extend([(revision, await revision.element_handle()), (recovery, await recovery.element_handle())])
+    else:
+        confirmation = card_list(page).nth(0).get_by_role('button', name='確認', exact=True)
+        retained.append((confirmation, await confirmation.element_handle()))
+    ledger = await snapshot(page)
+    expected_actions = ['ask', 'cancel', 'reconcile'] if unknown else ['ask']
+    assert actions(ledger) == expected_actions, ledger
+    card_text = await card_list(page).all_text_contents()
+    name = 'role-unknown-390' if unknown else 'role-pending-390'
+    evidence = []
+
+    async def assert_retained():
+        await expect(card_list(page)).to_have_count(2)
+        assert await card_list(page).all_text_contents() == card_text, 'Changing work context altered an existing card'
+        for locator, original in retained:
+            assert await locator.evaluate('(node, original) => node === original && original.isConnected', original), (
+                'Changing work context remounted the conversation, composer or existing action')
+        if unknown:
+            await expect(revision).to_have_value(CHANGE)
+            await expect(recovery).to_be_enabled()
+            await expect(page.get_by_role('button', name='重新預覽', exact=True)).to_be_disabled()
+        else:
+            await expect(confirmation).to_be_enabled()
+            await expect(card_list(page).nth(1).get_by_role('button', name='確認', exact=True)).to_be_disabled()
+        assert await snapshot(page) == ledger, 'Changing context or filling an example caused an API call or write'
+        await no_writes(page)
+
+    for context, example in [('teacher', '查我的授課概況，查近期活動'),
+                             ('merchant', '查我的門市營運概況，查近期活動')]:
+        await choice.select_option(context)
+        await expect(choice).to_have_value(context)
+        await expect(question).to_have_value(draft)
+        await expect(page.get_by_role('button', name='幫我排今晚寫作業', exact=True)).to_have_count(0)
+        await assert_retained()
+        await page.get_by_role('button', name=example, exact=True).click()
+        await expect(question).to_have_value(example)
+        await expect(question).to_be_focused()
+        await assert_retained()
+        await page.get_by_role('button', name='切換保留草稿', exact=True).click()
+        await expect(question).to_have_value(draft)
+        await assert_retained()
+        # Reuse the strict existing viewport/composer bounds. Focusing the
+        # native select is the user action; no geometry or scroll repair follows.
+        await choice.focus()
+        readability = await focused_action_readability(page, choice, name + '-' + context)
+        evidence.append({'context': context, 'readability': readability, 'overflow': await no_overflow(page)})
+    await capture(page, name + '-preserved')
+    await assert_retained()
+    if unknown:
+        await page.evaluate('window.__agentQA.configure({unknownCancellation:false})')
+        await recovery.click()
+        await expect(card_list(page).nth(0)).to_contain_text('已撤銷未執行提議')
+        state = await snapshot(page)
+        assert actions(state) == expected_actions + ['reconcile'], state
+        assert state['requests'][-1]['body']['token'] == ledger['requests'][-1]['body']['token'], state
+        await expect(question).to_have_value(draft)
+        await expect(revision).to_have_value(CHANGE)
+        await no_writes(page)
+    return {'mode': 'native work-context selection and example filling preserve drafts and existing actions',
+            'existingAction': 'unknown cancellation with explicit recovery' if unknown else 'unconfirmed plan',
+            'noRequestsDuringContextChanges': True, 'sameConversationAndCardNodes': True, 'readability': evidence}
+
+
 async def late_school_case(page):
     await start_plan(page)
     await open_revision(page)
@@ -800,9 +964,11 @@ async def protected_good_case(page, name):
     await no_overflow(page)
     await page.screenshot(path=str(OUT / f'protected-{name}-selection-viewport.png'), full_page=False)
     focused_action = None
+    visible_forward_tab = None
     if len(before) == 2:
         button = page.get_by_role('button', name='重新預覽', exact=True)
         dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
+        dock_element = await dock.element_handle()
         # The previous native Tab may still be scrolling the textarea into view.
         # Observe both elements settling before measuring this Tab's baseline;
         # never move focus, scroll the page, or change motion/CSS for the check.
@@ -816,23 +982,18 @@ async def protected_good_case(page, name):
             json.dumps(before_tab, ensure_ascii=False, indent=2), encoding='utf-8')
         assert all(value['settled'] for value in settling.values()), (
             f'Native focus layout did not settle before Tab: {settling}')
-        # Observe only this button instance; every product call delegates unchanged to native.
-        await button.evaluate('''node => {
-          const original=node.scrollIntoView, requests=[];
-          const sample=target=>{const r=target.getBoundingClientRect(), scrolling=document.scrollingElement;
-            return {button:{top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height},
-              scroll:{x:scrollX,y:scrollY},documentScrollingElement:scrolling?{
-                scrollHeight:scrolling.scrollHeight,clientHeight:scrolling.clientHeight,scrollTop:scrolling.scrollTop}:null};};
-          node.__qaScrollRequests=requests;
-          node.scrollIntoView=function(options){
-            const request={options:options ?? null,before:sample(this)};
-            requests.push(request);
-            try {return original.call(this,options);}
-            finally {request.after=sample(this);}
-          };
-        }''')
+        await observe_next_forward_tab(button, dock_element)
         await page.keyboard.press('Tab')
         focused_action = await focused_action_readability(page, button, f'protected-{name}-preview-focus', before_tab)
+        # A native keyboard roundtrip now exercises an already visible target;
+        # the strict no-scroll branch must run even if the first Tab needed reveal.
+        await page.keyboard.press('Shift+Tab')
+        await expect(page.get_by_role('textbox', name='修改條件', exact=True)).to_be_focused()
+        before_visible_tab = await geometry_against_composer(button, dock_element)
+        await observe_next_forward_tab(button, dock_element)
+        await page.keyboard.press('Tab')
+        visible_forward_tab = await focused_action_readability(
+            page, button, f'protected-{name}-visible-forward-tab-focus', before_visible_tab, require_no_scroll=True)
         await page.keyboard.press('Enter')
     else:
         await page.get_by_role('button', name='重新預覽', exact=True).click()
@@ -844,7 +1005,341 @@ async def protected_good_case(page, name):
     await capture(page, f'protected-{name}-confirmed')
     return {'mode': 'native protection selection and manual confirmations against fixed fake API',
             'protectedIndices': indices, 'fixtureOriginal': before, 'fixtureRevised': after,
-            'readability': readability, 'focusedPreview': focused_action}
+            'readability': readability, 'focusedPreview': focused_action, 'visibleForwardTab': visible_forward_tab}
+
+
+async def begin_controlled_native_smooth_scroll(button, dock_element):
+    # Only setup uses standard scroll APIs. Once motion starts, this observer
+    # reads geometry and the real keydown; it never repairs focus or scrolling.
+    return await button.evaluate('''(node, dock) => new Promise(resolveReady => {
+      const geometry = ''' + GEOMETRY_AGAINST_COMPOSER + ''';
+      const initial=geometry(node,dock), scrolling=document.scrollingElement;
+      const maximumY=Math.max(0,(scrolling?.scrollHeight ?? 0)-innerHeight);
+      const requestedStart={x:initial.scroll.x,y:Math.max(0,Math.min(maximumY,Math.round(
+        initial.scroll.y+initial.target.bottom-(Math.min(initial.dock.top,innerHeight)-24))))};
+      const originalScrollTo=window.scrollTo, windowScrollToRequests=[];
+      // Delegate unchanged arguments and receiver. Read only offsets/time here;
+      // additional geometry reads could disturb the event-to-compositor timing.
+      const scrollSample=()=>({time:performance.now(),x:window.scrollX,y:window.scrollY});
+      const observedScrollTo=function(...args){
+        const value=args[0];
+        const options=value && typeof value==='object'
+          ? {left:value.left,top:value.top,behavior:value.behavior} : args;
+        const request={options,before:scrollSample()};
+        windowScrollToRequests.push(request);
+        try{return originalScrollTo.apply(this,args);}
+        finally{request.after=scrollSample();}
+      };
+      window.scrollTo=observedScrollTo;
+      window.scrollTo({left:requestedStart.x,top:requestedStart.y,behavior:'instant'});
+      const start=geometry(node,dock);
+      const destination={x:start.scroll.x,y:Math.min(maximumY,Math.floor(start.scroll.y+start.target.top-24))};
+      const evidence={mode:'controlled native smooth scroll, followed by a trusted forward Tab',
+        requestedStart,start,destination,timeoutMs:1000,maxFrames:120,minimumProgress:2,minimumRemaining:8,
+        ready:false,readySample:null,keydown:null,timeline:[],finished:false,finishReason:null,
+        windowScrollToRequests,windowScrollToObserver:'Delegates original scrollTo with unchanged arguments and receiver; records only offsets/time'};
+      const active=()=>({tag:document.activeElement?.tagName ?? null,id:document.activeElement?.id ?? null});
+      const sample=phase=>({phase,time:performance.now(),active:active(),focused:document.activeElement===node,
+        geometry:geometry(node,dock)});
+      const readable=value=>value.target.width>0 && value.target.height>0 && value.target.top>=12 &&
+        value.target.bottom+12<=Math.min(value.dock.top,value.viewport.height) &&
+        value.target.left>=0 && value.target.right<=value.viewport.width;
+      let frame=0,timer=0,frames=0,readyResolved=false,resolveDone,keydownEvent=null;
+      const done=new Promise(resolve=>{resolveDone=resolve;});
+      const stop=reason=>{
+        if(evidence.finished)return;
+        evidence.finished=true;evidence.finishReason=reason;
+        clearTimeout(timer);cancelAnimationFrame(frame);
+        document.removeEventListener('keydown',onKeydown,true);
+        if(window.scrollTo===observedScrollTo)window.scrollTo=originalScrollTo;
+        if(!readyResolved){readyResolved=true;resolveReady({ready:false,reason,start,destination});}
+        resolveDone();
+      };
+      const onKeydown=event=>{
+        if(event.key!=='Tab' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey)return;
+        document.removeEventListener('keydown',onKeydown,true);
+        keydownEvent=event;
+        const captured=sample('keydown capture'), current=captured.geometry;
+        evidence.keydown={key:event.key,shiftKey:event.shiftKey,isTrusted:event.isTrusted,
+          defaultPreventedAtCapture:event.defaultPrevented,defaultPreventedAfterDispatch:null,
+          target:{tag:event.target?.tagName ?? null,id:event.target?.id ?? null},
+          ...captured,readable:readable(current),
+          progressSinceStart:current.scroll.y-start.scroll.y,
+          remainingToDestination:destination.y-current.scroll.y};
+        evidence.timeline.push(captured);
+      };
+      const tick=()=>{
+        if(evidence.finished)return;
+        frames+=1;
+        if(keydownEvent)evidence.keydown.defaultPreventedAfterDispatch=keydownEvent.defaultPrevented;
+        const value=sample(evidence.keydown?'post-Tab animation frame':'native smooth animation frame');
+        evidence.timeline.push(value);
+        if(!readyResolved){
+          const progress=value.geometry.scroll.y-start.scroll.y;
+          const remaining=destination.y-value.geometry.scroll.y;
+          if(progress>=evidence.minimumProgress && remaining>=evidence.minimumRemaining && readable(value.geometry)){
+            evidence.ready=true;evidence.readySample=value;readyResolved=true;
+            resolveReady({ready:true,start,destination,atFirstMovement:value});
+          }else if(remaining<=1){stop('native destination reached before a pending-scroll sample');return;}
+        }
+        if(frames>=evidence.maxFrames){stop('frame limit');return;}
+        frame=requestAnimationFrame(tick);
+      };
+      node.__qaNativeSmoothScroll={evidence,done,stop};
+      if(!readable(start) || destination.y-start.scroll.y<120){
+        stop('insufficient visible native scroll range');return;
+      }
+      document.addEventListener('keydown',onKeydown,true);
+      evidence.timeline.push(sample('before controlled native smooth scroll'));
+      evidence.nativeScrollRequest={left:destination.x,top:destination.y,behavior:'smooth'};
+      window.scrollTo(evidence.nativeScrollRequest);
+      timer=setTimeout(()=>stop('sampling deadline'),evidence.timeoutMs);
+      frame=requestAnimationFrame(tick);
+    })''', dock_element)
+
+
+async def controlled_native_smooth_tab_case(page):
+    name = 'controlled-native-smooth-scroll-320'
+    await start_plan(page)
+    await open_revision(page, keyboard=True)
+    await select_protection(page, ORIGINAL, [0], keyboard=True)
+    field = page.get_by_role('textbox', name='修改條件', exact=True)
+    await expect(field).to_be_focused()
+    button = page.get_by_role('button', name='重新預覽', exact=True)
+    await expect(button).to_be_enabled()
+    # Let pending focus handlers finish before the explicit controlled setup.
+    await page.evaluate('''() => new Promise(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    })''')
+    ledger = await snapshot(page)
+    dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
+    dock_element = await dock.element_handle()
+    await observe_next_forward_tab(button, dock_element)
+    evidence = {'mode': 'controlled browser-native smooth scroll; no fixture API faults or post-Tab geometry repair'}
+    try:
+        ready = await begin_controlled_native_smooth_scroll(button, dock_element)
+        evidence['setup'] = ready
+        assert ready['ready'], f'Pending native smooth-scroll precondition was not reached: {ready}'
+        # No intervening locator action or screenshot may finish the animation.
+        await page.keyboard.press('Tab')
+        evidence['nativeSmoothScroll'] = await button.evaluate('''async node => {
+          const probe=node.__qaNativeSmoothScroll;
+          await probe.done;
+          return probe.evidence;
+        }''')
+        focus = await focused_action_readability(
+            page, button, name + '-tab-focus', ready['atFirstMovement']['geometry'], require_no_scroll=True)
+        evidence['focusedPreview'] = focus
+        native = evidence['nativeSmoothScroll']
+        keydown = native['keydown']
+        assert keydown is not None, f'Missing controlled real Tab capture: {native}'
+        assert (keydown['isTrusted'] and keydown['key'] == 'Tab' and not keydown['shiftKey']
+                and keydown['target']['tag'] == 'TEXTAREA' and keydown['readable']
+                and keydown['defaultPreventedAtCapture'] is False
+                and keydown['defaultPreventedAfterDispatch'] is True), native
+        assert (keydown['progressSinceStart'] >= native['minimumProgress']
+                and keydown['remainingToDestination'] >= native['minimumRemaining']), (
+                    f'Real Tab missed the pending native smooth-scroll interval: {native}')
+        assert keydown['geometry']['scroll'] == focus['beforeTab']['scroll'], (native, focus)
+        post_tab = [value for value in native['timeline'] if value['phase'] == 'post-Tab animation frame']
+        assert len(post_tab) >= 4 and post_tab[-1]['time'] - keydown['time'] >= 500, (
+            f'Insufficient read-only observation after real Tab: {native}')
+        original_scroll = keydown['geometry']['scroll']
+        assert all(abs(value['geometry']['scroll'][axis] - original_scroll[axis]) <= 1
+                   for value in post_tab for axis in ['x', 'y']), (
+                       f'Pending native smooth scroll continued after visible Tab: {native}')
+        assert all(value['focused'] and value['geometry']['target']['top'] >= 0
+                   and value['geometry']['target']['bottom'] <= min(
+                       value['geometry']['dock']['top'], value['geometry']['viewport']['height'])
+                   for value in post_tab), f'Focused preview became obscured after real Tab: {native}'
+        assert focus['scrollRequests'] == [], f'Visible Tab required a corrective scrollIntoView: {focus}'
+        assert await snapshot(page) == ledger, 'Controlled focus case caused an API request or write'
+        await no_writes(page)
+        await no_overflow(page)
+        return evidence
+    finally:
+        native = await button.evaluate('''node => {
+          const probe=node.__qaNativeSmoothScroll;
+          probe?.stop('case ended');
+          return probe?.evidence ?? null;
+        }''')
+        if native is not None:
+            evidence['nativeSmoothScroll'] = native
+        (OUT / f'{name}-evidence.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+async def observe_revision_scroll_policy(page):
+    # Record actual product scroll requests without adding a scroll/focus call.
+    await page.evaluate('''() => {
+      const original=Element.prototype.scrollIntoView;
+      const inRevision=()=>Boolean(document.activeElement?.closest('[data-assistant-plan-revision="true"]'));
+      const offsets=()=>({time:performance.now(),x:scrollX,y:scrollY,inRevision:inRevision()});
+      const probe={requests:[],checkpoints:[]};
+      const observed=function(...args){
+        const value=args[0];
+        const options=value && typeof value==='object'
+          ? {behavior:value.behavior,block:value.block,inline:value.inline} : value ?? null;
+        const request={options,target:{tag:this.tagName,id:this.id,
+          inAssistantLog:Boolean(this.closest('[role="log"]')),
+          isThreadEnd:this.parentElement?.getAttribute('role')==='log' && this===this.parentElement.lastElementChild},before:offsets()};
+        probe.requests.push(request);
+        try{return original.apply(this,args);}
+        finally{request.after=offsets();}
+      };
+      probe.checkpoint=name=>{
+        const value={name,...offsets(),rootScrollBehavior:getComputedStyle(document.documentElement).scrollBehavior,
+          reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,
+          active:{tag:document.activeElement?.tagName ?? null,id:document.activeElement?.id ?? null}};
+        probe.checkpoints.push(value);return value;
+      };
+      probe.stop=()=>{if(Element.prototype.scrollIntoView===observed)Element.prototype.scrollIntoView=original;};
+      Element.prototype.scrollIntoView=observed;
+      window.__qaRevisionScrollPolicy=probe;
+    }''')
+
+
+async def observe_revision_focus_stability(button, dock_element):
+    # A bounded read-only observation after the real keydown. The existing
+    # keydown probe independently records the first frames of the transition.
+    return await button.evaluate('''(node,dock) => new Promise(resolve => {
+      const geometry = ''' + GEOMETRY_AGAINST_COMPOSER + ''';
+      const timeoutMs=750,maxFrames=240,started=performance.now();
+      const evidence={timeoutMs,maxFrames,started,keydown:node.__qaFocusProbe?.keydown ?? null,timeline:[]};
+      let frame=0,frames=0,finished=false;
+      const sample=phase=>({phase,time:performance.now(),focused:document.activeElement===node,
+        rootScrollBehavior:getComputedStyle(document.documentElement).scrollBehavior,geometry:geometry(node,dock)});
+      const finish=reason=>{
+        if(finished)return;
+        finished=true;clearTimeout(timer);cancelAnimationFrame(frame);
+        evidence.finishReason=reason;evidence.timeline.push(sample('observation end'));resolve(evidence);
+      };
+      const tick=()=>{
+        if(finished)return;
+        frames+=1;evidence.timeline.push(sample('animation frame'));
+        if(frames>=maxFrames){finish('frame limit');return;}
+        frame=requestAnimationFrame(tick);
+      };
+      const timer=setTimeout(()=>finish('sampling deadline'),timeoutMs);
+      evidence.timeline.push(sample('after real keyboard command'));
+      frame=requestAnimationFrame(tick);
+    })''', dock_element)
+
+
+async def revision_native_focus_policy_case(page):
+    name = 'revision-native-focus-policy-320'
+    evidence = {'mode': 'real product auto-follow, editor and native keyboard focus; no test scroll or focus repair',
+                'checkpoints': []}
+    await observe_revision_scroll_policy(page)
+
+    async def checkpoint(label, expected, in_revision):
+        value = await page.evaluate('name => window.__qaRevisionScrollPolicy.checkpoint(name)', label)
+        evidence['checkpoints'].append(value)
+        assert value['rootScrollBehavior'] == expected and value['inRevision'] is in_revision, value
+        assert value['reducedMotion'] is False, value
+        return value
+
+    try:
+        await checkpoint('before plan: global smooth policy', 'smooth', False)
+        await start_plan(page)
+        ledger = await snapshot(page)
+        automatic = await page.evaluate('window.__qaRevisionScrollPolicy.requests.filter(request=>request.target.isThreadEnd)')
+        evidence['automaticFollowRequests'] = automatic
+        assert automatic and all(isinstance(request['options'], dict)
+                                 and request['options'].get('behavior') == 'instant'
+                                 for request in automatic), (
+                                     f'Actual product auto-follow did not use instant scrolling: {automatic}')
+        await checkpoint('before opening revision', 'smooth', False)
+        await page.get_by_role('button', name='修改時間或條件', exact=True).first.click()
+        field = page.get_by_role('textbox', name='修改條件', exact=True)
+        await expect(field).to_be_focused()
+        await checkpoint('revision opened with native click', 'auto', True)
+        await field.fill(CHANGE)
+        await page.keyboard.press('Shift+Tab')
+        await expect(protection_checkbox(page, 1)).to_be_focused()
+        await checkpoint('native backward Tab to second checkbox', 'auto', True)
+        await page.keyboard.press('Shift+Tab')
+        await expect(protection_checkbox(page, 0)).to_be_focused()
+        await checkpoint('native backward Tab to first checkbox', 'auto', True)
+        await page.keyboard.press('Space')
+        await expect(protection_checkbox(page, 0)).to_be_checked()
+        await expect(protection_checkbox(page, 1)).not_to_be_checked()
+        await page.keyboard.press('Tab')
+        await expect(protection_checkbox(page, 1)).to_be_focused()
+        await checkpoint('native forward Tab to second checkbox', 'auto', True)
+        await page.keyboard.press('Tab')
+        await expect(field).to_be_focused()
+        await expect(field).to_have_value(CHANGE)
+        await checkpoint('native forward Tab to textarea', 'auto', True)
+        button = page.get_by_role('button', name='重新預覽', exact=True)
+        dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
+        dock_element = await dock.element_handle()
+        before_first_tab = await geometry_against_composer(button, dock_element)
+        await observe_next_forward_tab(button, dock_element)
+        await page.keyboard.press('Tab')
+        evidence['firstPreviewFocus'] = await focused_action_readability(
+            page, button, name + '-first-preview', before_first_tab)
+        # The real first Tab can reveal the button. The native roundtrip then
+        # requires the visible/no-scroll branch, without any setup scroll call.
+        await page.keyboard.press('Shift+Tab')
+        await expect(field).to_be_focused()
+        await checkpoint('native roundtrip before visible preview', 'auto', True)
+        before_visible_tab = await geometry_against_composer(button, dock_element)
+        await observe_next_forward_tab(button, dock_element)
+        await page.keyboard.press('Tab')
+        stability = await observe_revision_focus_stability(button, dock_element)
+        evidence['stability'] = stability
+        focus = await focused_action_readability(
+            page, button, name + '-visible-preview', before_visible_tab, require_no_scroll=True)
+        evidence['visiblePreviewFocus'] = focus
+        keydown = focus['tabEvent']
+        assert keydown['defaultPreventedAtCapture'] is False and keydown['defaultPreventedAfterDispatch'] is True, focus
+        expected_scroll = focus['beforeTab']['scroll']
+        frames = [value for value in stability['timeline'] if value['phase'] == 'animation frame']
+        assert len(frames) >= 4 and frames[-1]['time'] - stability['started'] >= 500, stability
+        assert all(value['focused'] and value['rootScrollBehavior'] == 'auto'
+                   and value['geometry']['target']['top'] >= 0
+                   and value['geometry']['target']['bottom'] <= min(
+                       value['geometry']['dock']['top'], value['geometry']['viewport']['height'])
+                   for value in stability['timeline']), stability
+        observed_geometry = [value['geometry'] for value in stability['timeline']]
+        observed_geometry.extend(value['geometry'] for value in focus['focusTimeline'])
+        assert all(abs(value['scroll'][axis] - expected_scroll[axis]) <= 1
+                   for value in observed_geometry for axis in ['x', 'y']), (
+                       f'Visible native Tab changed position during continuous observation: {evidence}')
+        assert focus['scrollRequests'] == [], f'Visible preview needed a corrective scrollIntoView: {focus}'
+        requests = await page.evaluate('window.__qaRevisionScrollPolicy.requests')
+        tab_time = next(value['time'] for value in focus['focusTimeline'] if value['phase'] == 'keydown capture')
+        assert not any(request['before']['time'] >= tab_time for request in requests), (
+            f'Visible native Tab triggered a product scrollIntoView: {requests}')
+        assert not any(request['options'] and isinstance(request['options'], dict)
+                       and request['options'].get('behavior') == 'smooth' and request['before']['inRevision']
+                       for request in requests), requests
+        await checkpoint('visible preview after continuous observation', 'auto', True)
+        # Walk out with actual keyboard input; never move focus with evaluate.
+        for index in range(16):
+            await page.keyboard.press('Tab')
+            value = await page.evaluate('name => window.__qaRevisionScrollPolicy.checkpoint(name)', f'exit Tab {index + 1}')
+            evidence['checkpoints'].append(value)
+            if not value['inRevision']:
+                assert value['rootScrollBehavior'] == 'smooth', value
+                break
+            assert value['rootScrollBehavior'] == 'auto', value
+        else:
+            raise AssertionError('Native Tab did not leave the revision panel within 16 controls')
+        await expect(page.get_by_role('form', name='修改安排再預覽', exact=True)).to_have_count(1)
+        await expect(field).to_have_value(CHANGE)
+        await expect(protection_checkbox(page, 0)).to_be_checked()
+        assert await snapshot(page) == ledger, 'Editor keyboard flow caused an API request or write'
+        await no_writes(page)
+        await no_overflow(page)
+        await page.screenshot(path=str(OUT / f'{name}-restored-global-policy.png'), full_page=False)
+        return evidence
+    finally:
+        evidence['scrollPolicyProbe'] = await page.evaluate('''() => {
+          const probe=window.__qaRevisionScrollPolicy;probe?.stop();
+          return probe?{requests:probe.requests,checkpoints:probe.checkpoints}:null;
+        }''')
+        (OUT / f'{name}-evidence.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 async def protected_all_case(page):
@@ -1356,15 +1851,20 @@ def build_evidence():
     meta = json.loads((OUT / 'bundle-meta.json').read_text())
     paths = [name for name in meta['inputs'] if not name.startswith(('fixture:', '<', '(disabled):')) and 'node_modules/' not in name]
     hashes = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in paths}
-    for required in ['Assistant.tsx', 'AssistantCards.tsx', 'AssistantPlanRevision.tsx', 'AssistantPlanComparison.tsx', 'planComparison.ts', 'assistantExecutionJournal.ts', 'assistantCalendarExecution.ts', 'assistantPlanProtection.ts', 'assistantPlanRevisionDraft.ts', 'usePlanRevisionDraft.ts', 'AssistantPlanDraftRecovery.tsx']:
+    for required in ['Assistant.tsx', 'AssistantThread.tsx', 'AssistantRoleTasks.tsx', 'assistantRoleWorkflows.ts', 'AssistantCards.tsx', 'AssistantPlanRevision.tsx', 'AssistantPlanComparison.tsx', 'planComparison.ts', 'assistantExecutionJournal.ts', 'assistantCalendarExecution.ts', 'assistantPlanProtection.ts', 'assistantPlanRevisionDraft.ts', 'usePlanRevisionDraft.ts', 'AssistantPlanDraftRecovery.tsx']:
         assert any(name.endswith('/' + required) for name in hashes), f'Real implementation missing: {required}'
     return {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'sourceSha256': hashes}
 
 
-async def main(selected_cases=None):
+async def main(diagnose_native_smooth_scroll=False, selected_cases=None):
     report = {'scope': 'Production React UI in Chromium; fixed fake API/account/campus; no model or real backend',
               'modelLimitation': 'Fixture returns predefined revised cards; this does not test model interpretation or generation quality',
-              'build': build_evidence(), 'selectedCases': selected_cases, 'cases': []}
+              'runKind': 'engine-diagnostic' if diagnose_native_smooth_scroll else 'product-acceptance',
+              'selectedCases': selected_cases, 'build': build_evidence(), 'cases': []}
+    report_path = OUT / ('native-smooth-scroll-diagnostic-results.json' if diagnose_native_smooth_scroll else 'results.json')
+    if diagnose_native_smooth_scroll:
+        report['diagnosticScope'] = ('Manually injected native smooth animation; preserves the strict no-scroll assertions. '
+                                     'This is a browser-engine diagnostic, not one of the product acceptance cases.')
     handler = functools.partial(QuietHandler, directory=str(OUT))
     server = ThreadingHTTPServer(('127.0.0.1', 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -1377,6 +1877,8 @@ async def main(selected_cases=None):
             try:
                 cases = [('native-1440', 1440, lambda p: native_case(p, 1440)),
                          ('native-320', 320, lambda p: native_case(p, 320)),
+                         ('role-pending-390', 390, role_context_case),
+                         ('role-unknown-390', 390, lambda p: role_context_case(p, unknown=True)),
                          ('controlled-ask-error', 1440, lambda p: ask_error_case(p, 'error')),
                          ('controlled-empty-preview', 1440, lambda p: ask_error_case(p, 'empty')),
                          ('controlled-unknown-cancel', 1440, unknown_case),
@@ -1390,6 +1892,7 @@ async def main(selected_cases=None):
                 cases.extend([
                     ('protected-single-1440', 1440, lambda p: protected_good_case(p, 'single-1440')),
                     ('protected-single-320', 320, lambda p: protected_good_case(p, 'single-320')),
+                    ('revision-native-focus-policy-320', 320, revision_native_focus_policy_case),
                     ('protected-multiple-reordered', 1440, lambda p: protected_good_case(p, 'multiple-reordered')),
                     ('protected-all-320', 320, protected_all_case),
                     ('protected-partial-exact-duplicates', 1440, protected_partial_duplicate_case),
@@ -1419,13 +1922,16 @@ async def main(selected_cases=None):
                     ('pickup-390', 390, lambda p: pickup_case(p, 390)),
                     ('pickup-reload-390', 390, pickup_reload_case),
                 ])
+                if diagnose_native_smooth_scroll:
+                    cases = [('controlled-native-smooth-scroll-320', 320, controlled_native_smooth_tab_case)]
                 if selected_cases:
                     unknown = set(selected_cases) - {name for name, _width, _run in cases}
                     if unknown:
                         raise ValueError('Unknown --case: ' + ', '.join(sorted(unknown)))
                     cases = [case for case in cases if case[0] in selected_cases]
                 for name, width, run in cases:
-                    motion = 'no-preference' if name == 'protected-single-320' else 'reduce'
+                    motion = 'no-preference' if name in ['protected-single-320', 'revision-native-focus-policy-320',
+                                                       'controlled-native-smooth-scroll-320'] else 'reduce'
                     context = await browser.new_context(viewport={'width': width, 'height': 900 if width > 320 else 720},
                                                         reduced_motion=motion, locale='zh-TW', timezone_id='Asia/Taipei', service_workers='block')
                     page = await context.new_page()
@@ -1463,7 +1969,7 @@ async def main(selected_cases=None):
                             result['ledgerUnavailable'] = str(evidence_error)
                         report['cases'].append(result)
                         (OUT / f'{name}-ledger.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
-                        (OUT / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+                        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
                         await context.close()
             finally:
                 await browser.close()
@@ -1471,14 +1977,17 @@ async def main(selected_cases=None):
         report['failure'] = traceback.format_exc()
         raise
     finally:
-        (OUT / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
         server.shutdown()
         server.server_close()
-    print(json.dumps({'passed': len(report['cases']), 'artifacts': str(OUT)}, ensure_ascii=False))
+    print(json.dumps({'passed': len(report['cases']), 'runKind': report['runKind'], 'artifacts': str(OUT)}, ensure_ascii=False))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--diagnose-native-smooth-scroll', action='store_true',
+                        help='Run only the strict external native-animation engine diagnostic, outside product acceptance')
     parser.add_argument('--case', action='append', dest='cases',
                         help='Run only this exact case name; repeat for multiple cases. Defaults to all cases.')
-    asyncio.run(main(parser.parse_args().cases))
+    arguments = parser.parse_args()
+    asyncio.run(main(diagnose_native_smooth_scroll=arguments.diagnose_native_smooth_scroll, selected_cases=arguments.cases))

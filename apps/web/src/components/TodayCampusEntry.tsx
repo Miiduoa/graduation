@@ -3,23 +3,29 @@
 import {
   lazy,
   Suspense,
+  useCallback,
+  useEffect,
   useId,
   useImperativeHandle,
-  useLayoutEffect,
   useRef,
   useState,
   type Ref,
 } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { areFunctionsConfigured } from '@/lib/functionsUrl';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
+import { useCampusNavigationSearch } from '@/lib/campusNavigation';
+import { currentReturnPath } from '@/lib/navigation';
+import { useLocationHash } from '@/lib/useLocationHash';
 import { useAssistantEnabled } from './AssistantEnabledProvider';
 import { useAuth } from './AuthGuard';
 import { LoginLink } from './LoginLink';
 import { CampusIcon } from './CampusIcon';
 import { QuickCampusEntry } from './QuickCampusEntry';
 import styles from './TodayCampusEntry.module.css';
+import type { AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
 
 const NuniConversation = lazy(async () => ({
   default: (await import('@/features/nuni/Assistant')).Conversation,
@@ -28,19 +34,32 @@ const SchoolConversation = lazy(async () => ({
   default: (await import('@/app/ai-assistant/LegacyAssistant')).AssistantConversation,
 }));
 
-type Account = { kind: 'nuni'; context: string; accountId: string } | { kind: 'school'; uid: string; localOwner: string };
+type Account =
+  | { kind: 'nuni'; context: string; accountId: string }
+  | { kind: 'school'; uid: string; localOwner: string };
 
-function TodayConversation({ account, schoolId, cloudEnabled }: { account: Account; schoolId: string; cloudEnabled: boolean }) {
+function TodayConversation({
+  account,
+  schoolId,
+  cloudEnabled,
+  preferredWorkContext,
+}: {
+  account: Account;
+  schoolId: string;
+  cloudEnabled: boolean;
+  preferredWorkContext?: AssistantWorkContext;
+}) {
   const [text, setText] = useState('');
   const [nuniFreeform, setNuniFreeform] = useState(false);
-  const canAsk = account.kind === 'school' ? areFunctionsConfigured() : !cloudEnabled || nuniFreeform;
+  const canAsk =
+    account.kind === 'school' ? areFunctionsConfigured() : !cloudEnabled || nuniFreeform;
   const [searchOpen, setSearchOpen] = useState(false);
   const conversation = useRef<HTMLDivElement>(null);
   const searchId = useId();
   const draft = { text, setText };
 
   return (
-    <section className={styles.conversation} aria-label="今天的校園助理">
+    <section className={styles.conversation} aria-label="校園助理對話入口">
       <div className={styles.tools}>
         {canAsk && <p className={styles.hint}>語音聽寫可能由瀏覽器的語音服務處理。</p>}
         <button
@@ -74,6 +93,7 @@ function TodayConversation({ account, schoolId, cloudEnabled }: { account: Accou
         <Suspense fallback={<p role="status">正在開啟校園助理…</p>}>
           {account.kind === 'nuni' ? (
             <NuniConversation
+              preferredWorkContext={preferredWorkContext}
               context={account.context}
               accountId={account.accountId}
               schoolId={schoolId}
@@ -98,24 +118,68 @@ function TodayConversation({ account, schoolId, cloudEnabled }: { account: Accou
   );
 }
 
-export function TodayCampusEntry() {
-  useLayoutEffect(() => {
-    // A client-side visit keeps the previous document's microphone policy.
-    // Load Today's headers before the first draft, only for a blocked soft navigation.
-    type Policy = { allowsFeature(feature: string): boolean };
-    const doc = document as Document & { permissionsPolicy?: Policy; featurePolicy?: Policy };
-    const policy = doc.permissionsPolicy ?? doc.featurePolicy;
-    if (
-      window.top !== window ||
-      !('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) ||
-      policy?.allowsFeature('microphone') !== false
-    )
-      return;
-    const navigation = performance.getEntriesByType?.('navigation')[0];
-    if (navigation && new URL(navigation.name).pathname !== window.location.pathname) {
-      window.location.reload();
+export function TodayCampusEntry({
+  active = true,
+  focusRequest = 0,
+  returnAnchor = 'today-voice-entry',
+  preferredWorkContext,
+}: {
+  preferredWorkContext?: AssistantWorkContext;
+  active?: boolean;
+  focusRequest?: number;
+  returnAnchor?: 'today-voice-entry' | 'campus-assistant-entry';
+} = {}) {
+  const entry = useRef<HTMLDivElement>(null);
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const campusSearch = useCampusNavigationSearch(params);
+  const returnSearch = new URLSearchParams(params?.toString());
+  for (const key of ['school', 'schoolId', 'campus']) returnSearch.delete(key);
+  new URLSearchParams(campusSearch).forEach((value, key) => returnSearch.set(key, value));
+  const returnPath = currentReturnPath(pathname, returnSearch.toString(), `#${returnAnchor}`);
+  useEffect(() => {
+    const root = entry.current;
+    if (!active || !focusRequest || !root) return;
+    const initialFocus = document.activeElement;
+    function focusInput() {
+      // A delayed capability response must not take focus after the user has
+      // already moved to another control or returned to the underlying page.
+      if (
+        document.activeElement !== initialFocus &&
+        document.activeElement !== document.body &&
+        initialFocus?.isConnected
+      ) {
+        observer.disconnect();
+        return;
+      }
+      const field = root?.querySelector<HTMLElement>(
+        'form[aria-label="傳送問題"] textarea:not(:disabled), input[type="search"]:not(:disabled)',
+      );
+      if (!field) return;
+      field.focus({ preventScroll: true });
+      field.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      observer.disconnect();
     }
-  }, []);
+    const observer = new MutationObserver(focusInput);
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['disabled'],
+    });
+    focusInput();
+    return () => observer.disconnect();
+  }, [active, focusRequest]);
+  return (
+    <div ref={entry}>
+      <CampusEntryContent returnPath={returnPath} preferredWorkContext={preferredWorkContext} />
+    </div>
+  );
+}
+
+function CampusEntryContent({ returnPath, preferredWorkContext }: {
+  returnPath: string; preferredWorkContext?: AssistantWorkContext;
+}) {
   const hydrated = useClientHydrated();
   const auth = useAuth();
   const nuni = useNuniSession();
@@ -125,22 +189,31 @@ export function TodayCampusEntry() {
   const uid = auth.user?.uid;
   const functionsConfigured = areFunctionsConfigured();
   const platformAvailable = !!session && !nuni.error;
-  if (!hydrated || nuni.loading || (auth.loading && !(platformAvailable && (enabled || !functionsConfigured))))
+  if (
+    !hydrated ||
+    nuni.loading ||
+    (auth.loading && !(platformAvailable && (enabled || !functionsConfigured)))
+  )
     return <p role="status">正在確認登入狀態…</p>;
   if (nuni.pendingLogout) return <p role="status">正在確認登出狀態…</p>;
+  if (campus.status === 'loading') return <p role="status">正在確認瀏覽校園…</p>;
   const preferSchoolEngine = !enabled && functionsConfigured && !!uid && !auth.error;
   const account: Account | null =
     session && !nuni.error && !preferSchoolEngine
       ? { kind: 'nuni', context: session.context, accountId: session.platformAccountId }
       : uid && !auth.error
-        ? { kind: 'school', uid, localOwner: session ? 'platform:' + session.platformAccountId : 'school:' + uid }
+        ? {
+            kind: 'school',
+            uid,
+            localOwner: session ? 'platform:' + session.platformAccountId : 'school:' + uid,
+          }
         : null;
   if (!account || campus.status !== 'ready' || !campus.schoolId) {
     return (
       <>
         {!uid && !session ? (
           <p className={styles.hint}>
-            <LoginLink returnPath="/">登入後，在今天頁詢問校園助理</LoginLink>
+            <LoginLink returnPath={returnPath}>登入後，接著詢問校園助理</LoginLink>
           </p>
         ) : account && campus.status === 'unselected' ? (
           <p className={styles.hint}>請先從頁首選擇學校，就能在這裡詢問校園助理。</p>
@@ -155,6 +228,7 @@ export function TodayCampusEntry() {
   }
   return (
     <TodayConversation
+      preferredWorkContext={preferredWorkContext}
       key={JSON.stringify([
         uid,
         session?.context,
@@ -171,41 +245,71 @@ export function TodayCampusEntry() {
   );
 }
 
-export type TodayVoiceHandle = { openVoice(): void };
+export type TodayAssistantHandle = { openAssistant(): void };
+
+function stopAssistantVoice(panel: HTMLElement | null) {
+  panel
+    ?.querySelectorAll<HTMLButtonElement>(
+      '[data-voice-input][aria-pressed="true"], [data-voice-playback][aria-pressed="true"]',
+    )
+    .forEach((button) => button.click());
+}
+
+function clearAssistantAnchor(anchor: string) {
+  if (window.location.hash !== `#${anchor}`) return;
+  try {
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${window.location.search}`,
+    );
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  } catch {
+    // Closing the assistant remains possible when History access is unavailable.
+  }
+}
 
 export function TodayAssistantDisclosure({
   ref,
   onOpenChange,
+  preferredWorkContext,
 }: {
-  ref: Ref<TodayVoiceHandle>;
+  preferredWorkContext?: AssistantWorkContext;
+  ref: Ref<TodayAssistantHandle>;
   onOpenChange: (open: boolean) => void;
 }) {
   const disclosure = useRef<HTMLDetailsElement>(null);
+  const openingTrigger = useRef<HTMLElement | null>(null);
+  const hash = useLocationHash();
+  const [opened, setOpened] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
+  const [focusRequest, setFocusRequest] = useState(0);
+
+  const openAssistant = useCallback(() => {
+    const panel = disclosure.current;
+    if (!panel) return;
+    openingTrigger.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    panel.open = true;
+    setOpened(true);
+    setHasOpened(true);
+    setFocusRequest((request) => request + 1);
+    onOpenChange(true);
+  }, [onOpenChange]);
+
+  useEffect(() => {
+    if (hash !== '#today-voice-entry') return;
+    openAssistant();
+    // A login-return fragment opens once; conversation updates must not refocus it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hash]);
 
   useImperativeHandle(
     ref,
     () => ({
-      openVoice() {
-        const panel = disclosure.current;
-        if (!panel) return;
-        panel.open = true;
-        onOpenChange(true);
-        const composer = panel.querySelector('form[aria-label="傳送問題"]') ?? panel;
-        const microphone = composer.querySelector<HTMLButtonElement>(
-          '[data-voice-input]:not(:disabled)',
-        );
-        if (microphone) {
-          microphone.focus();
-          if (microphone.getAttribute('aria-pressed') === 'false') microphone.click();
-          return;
-        }
-        const field = composer.querySelector<HTMLElement>(
-          'textarea:not(:disabled), input[type="search"]',
-        );
-        (field ?? panel.querySelector('summary'))?.focus();
-      },
+      openAssistant,
     }),
-    [onOpenChange],
+    [openAssistant],
   );
 
   return (
@@ -213,15 +317,29 @@ export function TodayAssistantDisclosure({
       ref={disclosure}
       id="today-voice-entry"
       className={styles.disclosure}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape' || event.nativeEvent.isComposing || !event.currentTarget.open)
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.open = false;
+        setOpened(false);
+        onOpenChange(false);
+        stopAssistantVoice(event.currentTarget);
+        clearAssistantAnchor('today-voice-entry');
+        const trigger = openingTrigger.current;
+        (trigger?.isConnected ? trigger : event.currentTarget.querySelector('summary'))?.focus();
+      }}
       onToggle={({ currentTarget: panel, target }) => {
         if (target !== panel) return;
+        setOpened(panel.open);
         onOpenChange(panel.open);
-        if (panel.open) return;
-        panel
-          .querySelectorAll<HTMLButtonElement>(
-            '[data-voice-input][aria-pressed="true"], [data-voice-playback][aria-pressed="true"]',
-          )
-          .forEach((button) => button.click());
+        if (panel.open) {
+          setHasOpened(true);
+          return;
+        }
+        stopAssistantVoice(panel);
+        clearAssistantAnchor('today-voice-entry');
       }}
     >
       <summary className={styles.trigger}>
@@ -230,7 +348,7 @@ export function TodayAssistantDisclosure({
         <span className={styles.triggerHint}>打字或語音詢問</span>
       </summary>
       <div className={styles.body}>
-        <TodayCampusEntry />
+        {hasOpened && <TodayCampusEntry active={opened} focusRequest={focusRequest} preferredWorkContext={preferredWorkContext} />}
       </div>
     </details>
   );

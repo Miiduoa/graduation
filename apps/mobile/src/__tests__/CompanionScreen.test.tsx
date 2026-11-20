@@ -60,9 +60,14 @@ it('shows useful local information and routes cross-tab actions through the regi
   await waitFor(() => expect(view.getByText('資料庫系統')).toBeTruthy());
   expect(view.getByText('活力 68 / 100')).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '依建議前往相關服務' }));
-  expect(navigation.navigate).toHaveBeenCalledWith('校園', { screen: 'Cafeteria', params: undefined });
+  expect(navigation.navigate).toHaveBeenCalledWith('校園', {
+    initial: false,
+    screen: 'Cafeteria',
+    params: undefined,
+  });
   fireEvent.press(view.getByRole('button', { name: '開啟課程 資料庫系統' }));
   expect(navigation.navigate).toHaveBeenCalledWith('學習', {
+    initial: false,
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });

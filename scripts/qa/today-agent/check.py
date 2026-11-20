@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import threading
+from datetime import datetime
 from pathlib import Path
 
 from playwright.async_api import async_playwright, expect
@@ -17,6 +18,16 @@ MUTATION = 'qa-home-calendar-001'
 ORIGINAL_CONTEXT = 'a' * 43
 CALENDAR_HREF = '/calendar?schoolId=fixture-campus-a&eventId=' + MUTATION
 TASK_HREF = '/classroom/course/course-a#assignment-task-urgent'
+RECOVERY_MUTATION = 'qa-home-calendar-recovery-001'
+RECOVERY_TOKEN = 'qa-signed-home-calendar-recovery-001'
+RECOVERY_BUTTON = '替「資料結構作業」重新找 30 分鐘準備時間'
+ORIGINAL_EVENT = {
+    'title': '準備作業：資料結構作業', 'date': '2026-11-13',
+    'allDay': False, 'startTime': '14:00', 'endTime': '14:30',
+}
+RECOVERY_EVENT = {**ORIGINAL_EVENT, 'startTime': '15:30', 'endTime': '16:00'}
+RECOVERY_PROOF = {'issuedContext': ORIGINAL_CONTEXT, 'conversationId': 'qa-home-conversation',
+                  'token': 'qa-signed-home-calendar-001', 'args': ORIGINAL_EVENT}
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
@@ -250,6 +261,188 @@ async def track_account_scope(page, result, label, baseline):
     await page.screenshot(path=str(OUTPUT / f'{label}-returned-account.png'), full_page=True)
 
 
+def assert_recovery_contract(value, baseline, committed=False):
+    """Keep the original proof/event immutable and independently verify the child."""
+    assert value['requests'][:len(baseline['requests'])] == baseline['requests'], value
+    assert not value['violations'] and not value['otherSchoolProofs'], value
+    assert value['records'][0] == value['writes'][0] == baseline['records'][0], value
+    original_proofs = [proof for proof in value['primaryProofs'] if proof['card']['mutationId'] == MUTATION]
+    assert original_proofs == baseline['proofs'], value
+    expected_ids = [MUTATION, RECOVERY_MUTATION] if committed else [MUTATION]
+    assert [row['id'] for row in value['records']] == expected_ids, value
+    assert value['writes'] == value['records'], value
+    for row in value['requests'][len(baseline['requests']):]:
+        body = row['body']
+        assert row['accountId'] == 'qa-agent', row
+        assert body['schoolId'] == 'fixture-campus-a', row
+        assert 'question' not in body and 'history' not in body, row
+        if row['action'] == 'plan':
+            assert body['task'] == TASK and body['recovery'] == RECOVERY_PROOF, row
+            assert set(body) <= {'schoolId', 'conversationId', 'routeToken', 'task', 'recovery'}, row
+            if 'routeToken' in body:
+                assert (body['conversationId'], body['routeToken']) in [
+                    ('qa-home-conversation', 'qa-route-token'),
+                    ('qa-home-recovery-conversation', 'qa-recovery-route-token')], row
+        else:
+            child = body['token'] == RECOVERY_TOKEN
+            assert body['token'] == (RECOVERY_TOKEN if child else RECOVERY_PROOF['token']), row
+            assert body['args'] == (RECOVERY_EVENT if child else ORIGINAL_EVENT), row
+            assert body['conversationId'] == (value['recoveryConversationId'] if child else 'qa-home-conversation'), row
+            if row['action'] == 'followup':
+                assert body['issuedContext'] == ORIGINAL_CONTEXT, row
+                assert set(body) == {'schoolId', 'conversationId', 'issuedContext', 'token', 'args'}, row
+                if 'followup' in row:
+                    assert row['followup']['mutationId'] == (RECOVERY_MUTATION if child else MUTATION), row
+                    assert row['followup']['task'] == TASK, row
+                    assert row['followup']['event'] == body['args'], row
+            else:
+                assert child and row['action'] in ['confirm', 'reconcile'], row
+                assert set(body) == {'schoolId', 'conversationId', 'token', 'args'}, row
+    if value['activeAccount'] == 'qa-agent':
+        assert {row['id']: row for row in value['imports']} == {row['id']: row for row in value['records']}, value
+        assert not value['journal'], value
+    if committed:
+        assert len(value['primaryProofs']) == 2 and value['readbacks'] == 2, value
+        child_proof = next(proof for proof in value['primaryProofs'] if proof['card']['mutationId'] == RECOVERY_MUTATION)
+        assert child_proof['issuedContext'] == ORIGINAL_CONTEXT, child_proof
+        assert child_proof['conversationId'] == value['recoveryConversationId'], child_proof
+        assert child_proof['card']['args'] == RECOVERY_EVENT and child_proof['card']['token'] == RECOVERY_TOKEN, child_proof
+        assert len([row for row in value['requests'] if row['action'] == 'confirm' and row['body']['token'] == RECOVERY_TOKEN]) == 1, value
+        assert value['journalAtConfirm'][0]['card']['mutationId'] == RECOVERY_MUTATION, value
+        assert value['journalRemovals'][-1]['proofs'] == value['primaryProofs'], value
+    else:
+        assert value['primaryProofs'] == baseline['proofs'], value
+        assert value['readbacks'] == baseline['readbacks'], value
+        assert not any(row['action'] in ['confirm', 'reconcile', 'cancel'] for row in value['requests'][len(baseline['requests']):]), value
+
+
+async def recovery_scenario(page, result, label, baseline, flow, mode):
+    # Advance both actual browser Date and the parent's clock prop. The old
+    # arrangement has genuinely elapsed while the coursework deadline is future.
+    await page.clock.set_fixed_time(datetime.fromisoformat('2026-11-13T15:00:00+08:00'))
+    await page.evaluate("window.__todayAgentQA.setClock('2026-11-13T15:00:00+08:00')")
+    await page.evaluate("window.__todayAgentQA.setTasks('urgent')")
+    await page.evaluate("window.__todayAgentQA.setFollowupStatus('elapsed')")
+    await page.get_by_role('button', name='更新安排狀態', exact=True).click()
+    await wait_for_followups(page, 2)
+    await expect(tracked(page)).to_contain_text('作業仍待繳交')
+    recover = page.get_by_role('button', name=RECOVERY_BUTTON, exact=True)
+    await expect(recover).to_be_enabled()
+    elapsed = await snapshot(page)
+    assert_read_only(baseline, elapsed, mode)
+    result['elapsed'] = elapsed
+
+    # Hold a real controller request while two browser clicks hit the button.
+    # The synthetic API never writes from plan, even when returning a child card.
+    await page.evaluate('window.__todayAgentQA.holdRecoveryPlan()')
+    await recover.dblclick()
+    await page.wait_for_function('window.__todayAgentQA.snapshot().pendingRecoveryPlan')
+    pending = await snapshot(page)
+    plans = [row for row in pending['requests'] if row['action'] == 'plan' and 'recovery' in row['body']]
+    assert len(plans) == 1, pending  # The already-established route is reused.
+    assert_recovery_contract(pending, baseline)
+    await expect(page.get_by_role('button', name='確認', exact=True)).to_have_count(0)
+    result['pendingRecovery'] = pending
+
+    if flow == 'recovery-account-scope':
+        await page.evaluate('window.__todayAgentQA.switchAccount()')
+        await expect(tracked(page)).to_have_count(0)
+        await page.evaluate('window.__todayAgentQA.releaseRecoveryPlan()')
+        await page.wait_for_function('!window.__todayAgentQA.snapshot().pendingRecoveryPlan')
+        await expect(page.get_by_role('button', name='確認', exact=True)).to_have_count(0)
+        await expect(page.get_by_role('article', name='行程確認卡')).to_have_count(0)
+        await expect(page.get_by_text('資料結構作業', exact=True)).to_have_count(0)
+        other = await snapshot(page)
+        assert other['activeAccount'] == 'qa-agent-other', other
+        assert not other['proofs'] and not other['imports'] and not other['journal'], other
+        assert other['requests'] == pending['requests'], other
+        assert_recovery_contract(other, baseline)
+        result['lateRecoveryOtherAccount'] = other
+        await page.evaluate('window.__todayAgentQA.returnAccount()')
+        await wait_for_followups(page, 3)
+        await expect(tracked(page)).to_have_count(1)
+        await expect(recover).to_be_enabled()
+        await expect(page.get_by_role('button', name='確認', exact=True)).to_have_count(0)
+        returned = await snapshot(page)
+        assert returned['requests'][-1]['session'] == 'd' * 43, returned
+        assert returned['requests'][-1]['body']['issuedContext'] == ORIGINAL_CONTEXT, returned
+        assert_recovery_contract(returned, baseline)
+        result['returnedAfterLateRecovery'] = returned
+    else:
+        await page.evaluate('window.__todayAgentQA.releaseRecoveryPlan()')
+        confirm = page.get_by_role('button', name='確認', exact=True)
+        await expect(confirm).to_be_enabled()
+        await expect(page.get_by_role('article', name='行程確認卡')).to_contain_text('15:30–16:00')
+        await expect(tracked(page)).to_contain_text('準備時間已結束')
+        preview = await snapshot(page)
+        assert_recovery_contract(preview, baseline)
+        result['recoveryPreview'] = preview
+        result['geometry'].append(await geometry(page))
+        await page.screenshot(path=str(OUTPUT / f'{label}-recovery-preview.png'), full_page=True)
+
+        if flow == 'recovery-cancel':
+            await page.get_by_role('button', name='取消', exact=True).click()
+            await expect(confirm).to_have_count(0)
+            await expect(recover).to_be_enabled()
+            cancelled = await snapshot(page)
+            assert cancelled['requests'] == preview['requests'], cancelled
+            assert_recovery_contract(cancelled, baseline)
+            result['cancelledRecovery'] = cancelled
+            # Cancelling only withdraws an unsent preview. The same old proof
+            # remains available for another explicit, read-only attempt.
+            await recover.click()
+            await expect(confirm).to_be_enabled()
+            retried = await snapshot(page)
+            assert len([row for row in retried['requests'] if row['action'] == 'plan' and 'recovery' in row['body']]) == 2, retried
+            assert_recovery_contract(retried, baseline)
+            await page.get_by_role('button', name='取消', exact=True).click()
+            await expect(confirm).to_have_count(0)
+            await page.reload(wait_until='networkidle')
+            await wait_for_followups(page, 3)
+            await expect(recover).to_be_enabled()
+            await assert_tracking_links(page)
+            reloaded = await snapshot(page)
+            assert_recovery_contract(reloaded, baseline)
+            result['cancelledRecoveryReload'] = reloaded
+        else:
+            await page.evaluate('window.__todayAgentQA.holdRecoveryConfirm()')
+            await confirm.dblclick()
+            await page.wait_for_function('window.__todayAgentQA.snapshot().pendingRecoveryConfirm')
+            committing = await snapshot(page)
+            child_confirms = [row for row in committing['requests'] if row['action'] == 'confirm' and row['body']['token'] == RECOVERY_TOKEN]
+            assert len(child_confirms) == 1, committing
+            assert len(committing['records']) == len(committing['writes']) == 2, committing
+            assert committing['records'][0] == baseline['records'][0], committing
+            assert len(committing['journal']) == 1 and committing['journal'][0]['card']['mutationId'] == RECOVERY_MUTATION, committing
+            result['confirmInFlight'] = committing
+            await page.evaluate('window.__todayAgentQA.releaseRecoveryConfirm()')
+            await wait_for_followups(page, 3)
+            await expect(tracked(page)).to_have_count(2)
+            await expect(confirm).to_have_count(0)
+            verified = await snapshot(page)
+            assert_recovery_contract(verified, baseline, committed=True)
+            child_requests = [row for row in verified['requests'] if row['body'].get('token') == RECOVERY_TOKEN]
+            assert [row['action'] for row in child_requests] == ['confirm'] + (['reconcile'] if mode == 'lost-response' else []) + ['followup'], child_requests
+            if mode == 'lost-response':
+                assert child_requests[0]['body'] == child_requests[1]['body'], child_requests
+                assert child_requests[0]['outcome'] == 'committed-response-lost', child_requests
+            result['recoveryVerified'] = verified
+            await page.reload(wait_until='networkidle')
+            await wait_for_followups(page, 5)
+            await expect(tracked(page)).to_have_count(2)
+            await expect(page.get_by_role('button', name=RECOVERY_BUTTON, exact=True)).to_have_count(0)
+            await expect(page.get_by_role('button', name='確認', exact=True)).to_have_count(0)
+            reloaded = await snapshot(page)
+            assert_recovery_contract(reloaded, baseline, committed=True)
+            assert actions(reloaded, include_reads=False) == actions(verified, include_reads=False), reloaded
+            assert reloaded['primaryProofs'] == verified['primaryProofs'], reloaded
+            event_hrefs = await tracked(page).get_by_role('link', name=re.compile('的行程$')).evaluate_all('(nodes) => nodes.map(node => node.getAttribute("href"))')
+            assert sorted(event_hrefs) == sorted([CALENDAR_HREF, '/calendar?schoolId=fixture-campus-a&eventId=' + RECOVERY_MUTATION]), event_hrefs
+            result['recoveryReloaded'] = reloaded
+    result['geometry'].append(await geometry(page))
+    await page.screenshot(path=str(OUTPUT / f'{label}-recovery-final.png'), full_page=True)
+
+
 async def scenario(browser, port, width, mode, theme, flow='baseline'):
     label = f'{width}-{mode if flow == "baseline" else flow}-{theme}'
     origin = f'http://127.0.0.1:{port}/'
@@ -271,6 +464,7 @@ async def scenario(browser, port, width, mode, theme, flow='baseline'):
     result = {'scenario': label, 'fixture': True, 'pageErrors': errors,
               'externalRequests': external, 'requestFailures': failures, 'geometry': []}
     try:
+        await page.clock.set_fixed_time(datetime.fromisoformat('2026-11-13T13:00:00+08:00'))
         await page.goto(f'{origin}?mode={mode}&theme={theme}', wait_until='networkidle')
         confirm = page.get_by_role('button', name='確認', exact=True)
         await expect(confirm).to_be_enabled()
@@ -319,6 +513,8 @@ async def scenario(browser, port, width, mode, theme, flow='baseline'):
             await track_lifecycle(page, result, label, after)
         elif flow == 'tracking-account-scope':
             await track_account_scope(page, result, label, after)
+        elif flow.startswith('recovery-'):
+            await recovery_scenario(page, result, label, after, flow, mode)
         for measured in result['geometry']:
             assert measured['documentWidth'] <= width, measured
             assert not measured['smallButtons'], measured['smallButtons']
@@ -351,6 +547,14 @@ async def main():
                 results.append(await scenario(browser, server.server_address[1], width, mode, theme))
             results.append(await scenario(browser, server.server_address[1], 390, 'normal', 'light', 'tracking-lifecycle'))
             results.append(await scenario(browser, server.server_address[1], 390, 'normal', 'dark', 'tracking-account-scope'))
+            for width, mode, theme, flow in [
+                (390, 'normal', 'light', 'recovery-confirm'),
+                (1280, 'normal', 'dark', 'recovery-confirm'),
+                (390, 'lost-response', 'dark', 'recovery-lost-response'),
+                (390, 'normal', 'dark', 'recovery-cancel'),
+                (390, 'normal', 'light', 'recovery-account-scope'),
+            ]:
+                results.append(await scenario(browser, server.server_address[1], width, mode, theme, flow))
             await browser.close()
     except Exception as error:
         results.append({'scenario': 'browser-runtime', 'status': 'blocked', 'fixture': True, 'error': str(error)})

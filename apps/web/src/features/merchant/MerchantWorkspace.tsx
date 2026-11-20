@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
+import { AccountDemoDiningPanel } from '@/features/food/AccountDemoDiningPanel';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
@@ -17,6 +18,10 @@ import {
   type MerchantOverviewView,
   type NuniMerchantApplicationInput,
 } from '@campus/shared/src/nuniMerchant';
+import {
+  merchantApplicationNextStep,
+  merchantOverviewNextStep,
+} from '@campus/shared/src/merchantJourney';
 import styles from './MerchantWorkspace.module.css';
 import { MerchantOperations, type MerchantOperationDrafts } from './MerchantOperations';
 import { clearAllFoodPendingForAccount } from '@/features/food/foodPersistence';
@@ -51,8 +56,8 @@ function expired(error: unknown) {
 const merchantEntry = {
   overview: {
     path: '/merchant',
-    title: '店家合作',
-    subtitle: '申請校園門市、查看審核進度或管理自己的門市。',
+    title: '店家工作台',
+    subtitle: '查看待處理事項、管理已授權門市，或追蹤進駐申請。',
   },
   apply: {
     path: '/merchant/apply',
@@ -93,20 +98,31 @@ export function MerchantWorkspace({ view = 'overview' }: { view?: MerchantOvervi
     setOperationScope({ accountId: confirmedAccount, locations: new Map(), food: new Map() });
     return null;
   }
+  const nativeWorkspace = auth.session ? (
+    <AccountWorkspace
+      key={`${auth.session.platformAccountId}:${auth.session.context}`}
+      view={view}
+      context={auth.session.context}
+      operationDrafts={operationScope.locations}
+      foodDrafts={operationScope.food}
+      suspended={auth.loading}
+      onSwitchAccount={auth.logout}
+      onExpired={auth.refresh}
+    />
+  ) : null;
   return (
     <SiteShell title={entry.title} subtitle={entry.subtitle}>
       {cleanupError ? <p role="alert">{cleanupError}</p> : null}
       {auth.session && !auth.pendingLogout && !auth.error ? (
-        <AccountWorkspace
-          key={`${auth.session.platformAccountId}:${auth.session.context}`}
-          view={view}
-          context={auth.session.context}
-          operationDrafts={operationScope.locations}
-          foodDrafts={operationScope.food}
-          suspended={auth.loading}
-          onSwitchAccount={auth.logout}
-          onExpired={auth.refresh}
-        />
+        view === 'apply' ? (
+          nativeWorkspace
+        ) : (
+          <AccountDemoDiningPanel
+            view="merchant"
+            entryOnly={view === 'overview'}
+            fallback={nativeWorkspace}
+          />
+        )
       ) : (
         <NuniSignIn returnUrl={entry.path} />
       )}
@@ -341,9 +357,19 @@ function AccountWorkspace({
       </section>
     );
   }
+  const hasMerchantRecords =
+    !!overview && (overview.workspaces.length > 0 || overview.applications.length > 0);
+  const hasApplicationDraft =
+    Object.entries(draft).some(
+      ([field, value]) => field !== 'businessKind' && typeof value === 'string' && value.trim(),
+    ) ||
+    draft.businessKind !== 'company' ||
+    draft.serviceModes.length !== 1 ||
+    draft.serviceModes[0] !== 'pickup';
+  const nextStep = overview ? merchantOverviewNextStep(overview) : null;
   return (
     <div className={styles.stack}>
-      {view !== 'workspace' && (
+      {(view === 'apply' || (view === 'overview' && overview && !hasMerchantRecords)) && (
         <section className={styles.intro}>
           <h2>店家如何進駐</h2>
           <p>請準備店名、營業地點及聯絡方式。已經申請過的店家可以直接查看審核進度。</p>
@@ -363,11 +389,28 @@ function AccountWorkspace({
       </div>
       {loading && <p role="status">正在載入店家資料…</p>}
       {loadError && <p role="alert">{loadError}</p>}
+      {notice && <p role="status">{notice}</p>}
       {overview && (
         <div className={styles.stack} hidden={loading || !!loadError}>
+          {view !== 'apply' && nextStep && (view === 'workspace' || hasMerchantRecords) && (
+            <section className={styles.nextTask} aria-labelledby="merchant-next-step-title">
+              <p className={styles.eyebrow}>下一步</p>
+              <h3 id="merchant-next-step-title">{nextStep.title}</h3>
+              <p>{nextStep.description}</p>
+              {nextStep.section === 'apply' ? (
+                <Link href="/merchant/apply">開始進駐申請</Link>
+              ) : (
+                <a href={`#merchant-${nextStep.section}-title`}>
+                  {nextStep.section === 'locations' ? '選擇門市' : '查看申請進度'}
+                </a>
+              )}
+            </section>
+          )}
           {view !== 'apply' && (
             <section className={styles.panel} aria-labelledby="merchant-locations-title">
-              <h3 id="merchant-locations-title">已授權門市</h3>
+              <h3 id="merchant-locations-title" tabIndex={-1}>
+                已授權門市
+              </h3>
               {overview.workspaces.length === 0 ? (
                 <>
                   <p>
@@ -417,7 +460,9 @@ function AccountWorkspace({
           )}
           {view !== 'apply' && (
             <section className={styles.panel} aria-labelledby="merchant-applications-title">
-              <h3 id="merchant-applications-title">申請進度</h3>
+              <h3 id="merchant-applications-title" tabIndex={-1}>
+                申請進度
+              </h3>
               {overview.applications.length === 0 ? (
                 <p>你還沒有送出進駐申請。</p>
               ) : (
@@ -434,8 +479,8 @@ function AccountWorkspace({
                         })}
                       </p>
                       {item.reviewerNote && <p>審核說明：{item.reviewerNote}</p>}
-                      {item.state === 'needs-information' && (
-                        <p>請依審核說明向受理單位提供資料，不必重複建立申請。</p>
+                      {item.state !== 'approved' && (
+                        <p>{merchantApplicationNextStep(item.state)}</p>
                       )}
                       {item.state === 'approved' && (
                         <div className={styles.stack}>
@@ -471,8 +516,15 @@ function AccountWorkspace({
               )}
             </section>
           )}
-          {view === 'workspace' ? (
-            <Link href="/merchant/apply">申請新門市</Link>
+          {view === 'workspace' ||
+          (view === 'overview' &&
+            hasMerchantRecords &&
+            !pending &&
+            !submitError &&
+            !hasApplicationDraft) ? (
+            <div className={styles.entryActions}>
+              <Link href="/merchant/apply">申請新門市</Link>
+            </div>
           ) : (
             <section className={styles.panel} aria-labelledby="merchant-apply-title">
               <h3 id="merchant-apply-title">申請進駐</h3>
@@ -648,7 +700,6 @@ function AccountWorkspace({
                   </Button>
                 </form>
               )}
-              {notice && <p role="status">{notice}</p>}
             </section>
           )}
         </div>

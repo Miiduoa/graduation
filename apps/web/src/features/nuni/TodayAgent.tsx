@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { parseAssistantCalendarEvent, parseAssistantCalendarExecutionResult } from '@campus/shared/src/assistantExecution';
 import { parseAssistantCourseworkFollowup, type AssistantCourseworkFollowup } from '@campus/shared/src/assistantCourseworkFollowup';
 import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
-import { TodayAgentPanel, todayAgentTaskKey } from '@/components/today/TodayAgentPanel';
+import { TodayAgentPanel, todayAgentTaskKey, recoverableTodayArrangement } from '@/components/today/TodayAgentPanel';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import type { HomeTask } from '@/lib/homeOverview';
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
@@ -21,6 +21,7 @@ import type { V2ActionState, V2ActionStates, V2Card, V2Reply } from './assistant
 
 type Scope = { context: string; accountId: string; schoolId: string };
 type Props = {
+  compact?: boolean;
   context: string;
   accountId: string;
   tasks: HomeTask[];
@@ -35,6 +36,7 @@ type State = {
   reply: V2Reply | null;
   states: V2ActionStates;
   selectedTaskId?: string;
+  recoveryMutationId?: string;
   pending: Pending;
   error: string;
   previewExpiresAt: number | null;
@@ -226,7 +228,10 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
     update(run, { followups: [...results.values()], trackingReady: ready,
       trackingError: ready ? '' : '部分已安排事項暫時無法核對，原紀錄仍保留。請重新核對後再安排，避免重複新增。' });
     const selectedTask = props.tasks.find(task => todayAgentTaskKey(task) === stateRef.current.selectedTaskId);
-    if (selectedTask && trackedTask(selectedTask))
+    const recovery = selectedTask && stateRef.current.recoveryMutationId
+      ? recoverableTodayArrangement(selectedTask, stateRef.current.followups, Date.now()) : null;
+    if (selectedTask && trackedTask(selectedTask) &&
+        (!recovery || recovery.mutationId !== stateRef.current.recoveryMutationId))
       discardUnsentPreview(run, '這件課務已有安排，已撤下尚未送出的預覽。請查看原安排的最新狀態。');
   }
   function remember(run: Lifetime, card: V2Card) {
@@ -248,7 +253,7 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
         ? stateRef.current.states[card.mutationId] ?? { status: 'unknown', message: '上次操作尚待核對。' }
         : { status: 'unknown', message: '已找回上次操作，請核對原行程結果。' },
     ])) as V2ActionStates;
-    update(run, { ready: true, selectedTaskId: undefined, previewExpiresAt: null, states, reply: {
+    update(run, { ready: true, selectedTaskId: undefined, recoveryMutationId: undefined, previewExpiresAt: null, states, reply: {
       answer: '上次送出的安排還有結果待核對，先確認原行程再繼續。', cards, steps: [], dataRead: true,
     } });
   }
@@ -260,7 +265,7 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
     if (action && action.status !== 'blocked') return false;
     const entries = readAssistantExecutionJournal(journalScope);
     if (entries.some((entry) => entry.card.mutationId === cards[0].mutationId)) return false;
-    update(run, { previewExpiresAt: null, states: {}, reply: {
+    update(run, { recoveryMutationId: undefined, previewExpiresAt: null, states: {}, reply: {
       answer: message, cards: [], steps: [], dataRead: true,
     } });
     return true;
@@ -365,7 +370,7 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function plan(task: HomeTask) {
+  async function plan(task: HomeTask, recoveryMutationId?: string) {
     if (props.loading || !props.tasks.some((current) => todayAgentTaskKey(current) === todayAgentTaskKey(task))) return;
     const due = task.dueAt ? parseTaipeiInstant(task.dueAt) : null;
     const now = props.now?.getTime();
@@ -376,13 +381,24 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
     autoPrepared.current = true;
     try {
       if (!checkJournal(run, true)) return;
-      if (!trackingCurrent(run) || trackedTask(task)) return;
+      if (!trackingCurrent(run)) return;
+      let recovery: { issuedContext: string; conversationId: string; token: string; args: unknown } | undefined;
+      if (recoveryMutationId) {
+        const candidate = recoverableTodayArrangement(task, stateRef.current.followups, Date.now());
+        if (!candidate || candidate.mutationId !== recoveryMutationId) return;
+        const entry = readTodayAgentFollowups(localScope).find(item => item.card.mutationId === recoveryMutationId);
+        if (!entry) return;
+        parseAssistantCourseworkFollowup(candidate, { schoolId: scope.schoolId,
+          mutationId: entry.card.mutationId, event: entry.card.args });
+        recovery = { issuedContext: entry.issuedContext, conversationId: entry.conversationId,
+          token: entry.card.token, args: entry.card.args };
+      } else if (trackedTask(task)) return;
       assertTodayAgentFollowupCapacity(localScope);
-      update(run, { selectedTaskId: todayAgentTaskKey(task), reply: null, states: {}, previewExpiresAt: null });
+      update(run, { selectedTaskId: todayAgentTaskKey(task), recoveryMutationId, reply: null, states: {}, previewExpiresAt: null });
       const target = { workspaceId: task.courseId, taskId: task.id, kind: task.kind ?? 'assignment' };
       let binding = route.current;
       let raw = await send(run, 'plan', { conversationId: binding?.conversationId ?? crypto.randomUUID(),
-        ...(binding ? { routeToken: binding.token } : {}), task: target });
+        ...(binding ? { routeToken: binding.token } : {}), task: target, ...(recovery ? { recovery } : {}) });
       if (!active(run)) return;
       if (raw && typeof raw === 'object' && (raw as { bootstrap?: unknown }).bootstrap === true) {
         const value = raw as Record<string, unknown>;
@@ -391,7 +407,8 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
           throw new Error('安排連線無法核對，請重新尋找時段。');
         binding = { conversationId: value.conversationId, token: value.routeToken };
         route.current = binding;
-        raw = await send(run, 'plan', { conversationId: binding.conversationId, routeToken: binding.token, task: target });
+        raw = await send(run, 'plan', { conversationId: binding.conversationId, routeToken: binding.token,
+          task: target, ...(recovery ? { recovery } : {}) });
       }
       if (!active(run)) return;
       // A non-bootstrap result still belongs to the exact conversation sent in the first request.
@@ -553,12 +570,12 @@ function ScopedTodayAgent({ scope, ...props }: Omit<Props, 'context' | 'accountI
     // The component lifetime is fixed to one account and campus. Reads use stateRef and never dispatch a write.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return <TodayAgentPanel tasks={state.ready ? props.tasks : []} now={props.now}
+  return <TodayAgentPanel compact={props.compact} tasks={state.ready ? props.tasks : []} now={props.now}
     loading={props.loading || (!state.ready && !state.error)} error={state.error || state.trackingError || props.error}
     selectedTaskId={state.selectedTaskId} reply={state.reply} states={state.states} pending={state.pending}
     followups={state.followups} tracking={state.pending === 'followup'} planningBlocked={!state.trackingReady}
     onRefreshFollowups={() => void refreshFollowups()}
-    onPlan={(task) => void plan(task)} onConfirm={(cards) => void confirm(cards)}
+    onPlan={(task, recoveryMutationId) => void plan(task, recoveryMutationId)} onConfirm={(cards) => void confirm(cards)}
     onCancel={(index) => void cancel(index)} onReconcile={(card) => void reconcile(card)} onRetry={retry} />;
 }
 

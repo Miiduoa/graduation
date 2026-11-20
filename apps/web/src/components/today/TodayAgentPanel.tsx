@@ -12,6 +12,8 @@ import type { HomeTask } from '@/lib/homeOverview';
 import styles from './TodayAgentPanel.module.css';
 
 export type TodayAgentPanelProps = {
+  /** Today already displays the task list; keep its planning picker secondary. */
+  compact?: boolean;
   tasks: HomeTask[];
   now: Date | null;
   loading?: boolean;
@@ -24,7 +26,7 @@ export type TodayAgentPanelProps = {
   tracking?: boolean;
   planningBlocked?: boolean;
   onRefreshFollowups?: () => void;
-  onPlan: (task: HomeTask) => void;
+  onPlan: (task: HomeTask, recoveryMutationId?: string) => void;
   onConfirm: (cards: V2Card[]) => void;
   onCancel: (index: number) => void;
   onReconcile: (card: V2Card) => void;
@@ -34,6 +36,27 @@ export type TodayAgentPanelProps = {
 /** Presentation identity only; callers pass the original IDs to the action API. */
 export function todayAgentTaskKey(task: HomeTask): string {
   return `${task.courseId}:${task.kind ?? 'assignment'}:${task.id}`;
+}
+
+/** Display eligibility only. The server re-authenticates the saved proof and current sources. */
+export function recoverableTodayArrangement(
+  task: HomeTask, followups: readonly AssistantCourseworkFollowup[], now: number,
+): AssistantCourseworkFollowup | null {
+  if (!Number.isFinite(now)) return null;
+  const tracked = followups.filter(row => row.task &&
+    `${row.task.workspaceId}:${row.task.kind}:${row.task.taskId}` === todayAgentTaskKey(task));
+  const end = (row: AssistantCourseworkFollowup) => parseTaipeiInstant(
+    `${row.event.endDate || row.event.date}T${row.event.allDay ? '23:59' : row.event.endTime}:00+08:00`,
+  );
+  if (!tracked.length || tracked.some(row => {
+    const due = row.source?.dueAt ? parseTaipeiInstant(row.source.dueAt) : null;
+    const ended = end(row);
+    return row.source?.state !== 'open' || row.source.submitted !== false || due === null || due <= now ||
+      row.status !== 'elapsed' || row.calendar !== 'matching' || ended === null || ended > now;
+  })) return null;
+  // Keep historical parents, but continue from the latest eligible arrangement.
+  return [...tracked].sort((left, right) => (end(right) ?? 0) - (end(left) ?? 0) ||
+    right.mutationId.localeCompare(left.mutationId))[0];
 }
 
 const pendingLabels = {
@@ -78,9 +101,11 @@ function followupCopy(row: AssistantCourseworkFollowup): { label: string; note?:
   }
 }
 
-function TrackedArrangement({ row, showTitle = false }: {
+function TrackedArrangement({ row, showTitle = false, onRecover, disabled }: {
   row: AssistantCourseworkFollowup;
   showTitle?: boolean;
+  onRecover?: () => void;
+  disabled?: boolean;
 }) {
   const title = row.source?.title ?? row.event.title;
   const copy = followupCopy(row);
@@ -113,6 +138,10 @@ function TrackedArrangement({ row, showTitle = false }: {
       {copy.note && <p className={styles.followupNote}>{copy.note}</p>}
       {calendarNote && <p className={styles.followupNote}>{calendarNote}</p>}
       <div className={styles.followupActions}>
+        {onRecover && <button type="button" className={styles.textButton} disabled={disabled}
+          aria-label={`替「${title}」重新找 30 分鐘準備時間`} onClick={onRecover}>
+          重新找 30 分鐘
+        </button>}
         <Link href={calendarHref} aria-label={`查看「${title}」的行程`}>
           {row.calendar === 'matching' ? '查看安排' : '查看行事曆'}
         </Link>
@@ -155,7 +184,6 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
     seen.add(key);
     return true;
   });
-  const tasks = unique.slice(0, 3);
   const tracking = !!props.tracking || props.pending === 'followup';
   const followups = props.followups ?? [];
   const taskFollowups = new Map<string, AssistantCourseworkFollowup[]>();
@@ -163,7 +191,11 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
     const key = followupTaskKey(row);
     if (key) taskFollowups.set(key, [...(taskFollowups.get(key) ?? []), row]);
   }
-  const visibleKeys = new Set(waiting ? [] : tasks.map(todayAgentTaskKey));
+  const candidates = props.compact
+    ? unique.filter((task) => !taskFollowups.has(todayAgentTaskKey(task)))
+    : unique;
+  const tasks = candidates.slice(0, 3);
+  const visibleKeys = new Set(waiting || props.compact ? [] : tasks.map(todayAgentTaskKey));
   const otherFollowups = followups.filter((row) => {
     const key = followupTaskKey(row);
     return key === null || !visibleKeys.has(key);
@@ -180,6 +212,15 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
     ['unknown', 'checking', 'executing', 'conflict', 'absent'].includes(state.status) ||
     (state.status === 'verified' && (state.local !== 'ready' || !!state.verificationWarning)));
   const blocked = waiting || tracking || !!props.planningBlocked || !!props.pending || activePlan || unresolved;
+  const recoveryTasks = new Map(unique.flatMap(task => {
+    const row = clockReady ? recoverableTodayArrangement(task, followups, clock) : null;
+    return row ? [[row.mutationId, task] as const] : [];
+  }));
+  const arrangement = (row: AssistantCourseworkFollowup, showTitle = false) => {
+    const task = recoveryTasks.get(row.mutationId);
+    return <TrackedArrangement key={row.mutationId} row={row} showTitle={showTitle} disabled={blocked}
+      onRecover={task ? () => props.onPlan(task, row.mutationId) : undefined} />;
+  };
   const completed = cards.length > 0 && calendarOnly && cards.every((card) =>
     props.states[card.mutationId]?.status === 'verified');
   const step = completed ? 3 : cards.length ? 2 : 1;
@@ -193,8 +234,50 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
   const compacted = cards.length - detailedCards.length;
   const showReply = props.reply && (!calendarOnly || !cards.length || detailedCards.length > 0);
 
+  if (props.compact && !waiting && !props.error && !tasks.length && !props.reply &&
+      !followups.length && !props.pending && !tracking && !unresolved) return null;
+
+  const taskList = <div>
+    <p id={tasksId} className={styles.listHeading}>先處理近期截止的事</p>
+    <ul className={styles.tasks} aria-labelledby={tasksId}>
+      {tasks.map((task) => {
+        const key = todayAgentTaskKey(task);
+        const selected = props.selectedTaskId === key;
+        const due = formatTaipeiDateTime(task.dueAt!, { seconds: false });
+        const tracked = taskFollowups.get(key) ?? [];
+        return (
+          <li key={key} className={styles.task} data-selected={selected || undefined}>
+            <div className={styles.taskContent}>
+              <h3>{task.title}</h3>
+              <p>{task.courseName}</p>
+              <p className={styles.deadline}>{due} 截止</p>
+              {tracked.map((row) => arrangement(row))}
+            </div>
+            {!tracked.length && <button type="button" className={styles.planButton} disabled={blocked}
+              aria-label={`替「${task.title}」找 30 分鐘準備時間`}
+              onClick={() => props.onPlan(task)}>
+              {props.pending === 'plan' && selected ? '正在安排…' : '找 30 分鐘'}
+            </button>}
+          </li>
+        );
+      })}
+    </ul>
+    {candidates.length > 3 && <p className={styles.message}>
+      先列出最接近截止的 3 件，其他 {candidates.length - 3} 件可在課程中查看。
+    </p>}
+  </div>;
+  const taskPicker = !props.compact ? taskList : tasks.length ? (
+    <details className={styles.taskPicker}>
+      <summary className={styles.pickerSummary}>
+        選一件待辦，找 30 分鐘空檔
+        <span className={styles.pickerCount}>近期 {tasks.length} 件</span>
+      </summary>
+      {taskList}
+    </details>
+  ) : null;
+
   return (
-    <section className={styles.panel} aria-labelledby={titleId}>
+    <section className={styles.panel} data-compact={props.compact || undefined} aria-labelledby={titleId}>
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>nuni 代辦</p>
@@ -205,7 +288,7 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
       <p className={styles.description}>
         依作業期限、已同步課表與個人行程找出準備時間，確認後替你加入行事曆。
       </p>
-      <ol className={styles.progress} aria-label="代辦步驟">
+      {(!props.compact || cards.length > 0 || props.pending === 'plan') && <ol className={styles.progress} aria-label="代辦步驟">
         {['讀取待辦', '安排空檔', '加入行事曆'].map((label, index) => {
           const done = index === 0 ? sourceReady : index === 1 ? cards.length > 0 : completed;
           const current = !completed && (waiting ? index === 0 : props.pending === 'plan' ? index === 1 : index === step);
@@ -217,7 +300,7 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
             </li>
           );
         })}
-      </ol>
+      </ol>}
 
       {props.error && <div className={styles.error}>
         <p role="alert">{props.error}</p>
@@ -227,38 +310,9 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
         </button>}
       </div>}
 
-      {waiting ? <p className={styles.message} role="status">正在讀取可安排的課程待辦…</p>
-        : tasks.length ? (
-          <div>
-            <p id={tasksId} className={styles.listHeading}>先處理近期截止的事</p>
-            <ul className={styles.tasks} aria-labelledby={tasksId}>
-              {tasks.map((task) => {
-                const key = todayAgentTaskKey(task);
-                const selected = props.selectedTaskId === key;
-                const due = formatTaipeiDateTime(task.dueAt!, { seconds: false });
-                const tracked = taskFollowups.get(key) ?? [];
-                return (
-                  <li key={key} className={styles.task} data-selected={selected || undefined}>
-                    <div className={styles.taskContent}>
-                      <h3>{task.title}</h3>
-                      <p>{task.courseName}</p>
-                      <p className={styles.deadline}>{due} 截止</p>
-                      {tracked.map((row) => <TrackedArrangement key={row.mutationId} row={row} />)}
-                    </div>
-                    {!tracked.length && <button type="button" className={styles.planButton} disabled={blocked}
-                      aria-label={`替「${task.title}」找 30 分鐘準備時間`}
-                      onClick={() => props.onPlan(task)}>
-                      {props.pending === 'plan' && selected ? '正在安排…' : '找 30 分鐘'}
-                    </button>}
-                  </li>
-                );
-              })}
-            </ul>
-            {unique.length > 3 && <p className={styles.message}>
-              先列出最接近截止的 3 件，其他 {unique.length - 3} 件可在課程中查看。
-            </p>}
-          </div>
-        ) : !props.error ? (
+      {waiting && <p className={styles.message} role="status">正在讀取可安排的課程待辦…</p>}
+      {tasks.length && (props.compact || !waiting) ? taskPicker
+        : !waiting && !props.error && (!props.compact || !followups.length) ? (
           <div className={styles.empty}>
             <p>{props.tasks.length
               ? '目前讀到的待辦沒有可提前安排的期限，請先查看作業收件狀態。'
@@ -272,14 +326,15 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
           先完成或取消下方安排，再選下一件。結果尚未確認時，請先核對原操作。
         </p>}
 
-      {otherFollowups.length > 0 && <details className={styles.recent}>
+      {otherFollowups.length > 0 && <details className={styles.recent}
+        open={props.compact && attentionCount > 0 ? true : undefined}>
         <summary className={styles.recentSummary}>
           <span>最近安排（{otherFollowups.length}）</span>
           {attentionCount > 0 && <span className={styles.needsAttention}>需要確認 {attentionCount} 件</span>}
         </summary>
         <ul className={styles.recentList} aria-label="最近安排的追蹤狀態">
           {otherFollowups.map((row) => <li key={row.mutationId}>
-            <TrackedArrangement row={row} showTitle />
+            {arrangement(row, true)}
           </li>)}
         </ul>
       </details>}

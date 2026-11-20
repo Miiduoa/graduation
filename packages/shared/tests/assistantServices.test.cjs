@@ -95,6 +95,49 @@ describe('assistant service destinations', () => {
     }
   });
 
+  test('opens the public career directory with its exact Web and registered native destinations', () => {
+    const service = getAssistantService('career');
+    assert.equal(service.access, 'public');
+    assert.equal(service.href, '/career');
+    assert.equal(service.mobileRoute, 'Career');
+    assert.equal(ROUTE_TO_TAB[service.mobileRoute], '校園');
+    for (const question of ['開啟職涯', '打開校內工讀頁', '開啟實習資訊', 'open career page']) {
+      const intent = resolveAssistantServiceIntent(question);
+      assert.equal(intent?.kind, 'open', question);
+      assert.equal(intent.service.id, 'career', question);
+      for (const audience of ['school', 'platform']) {
+        assert.equal(assistantServiceHref(intent.service, 'pu', audience), '/career?schoolId=pu');
+      }
+    }
+  });
+
+  test('career navigation does not submit or claim to complete a work-study application', () => {
+    assert.match(getAssistantService('career').summary, /查看.*申請.*另行辦理/);
+    assert.doesNotMatch(getAssistantService('career').summary, /已(?:完成|申請|送出)|申請成功/);
+    for (const question of [
+      '申請工讀', '幫我申請工讀', '替我申請實習', '送出工讀申請',
+      '打開職涯並申請工讀', 'open career and apply for work study',
+    ]) {
+      assert.equal(resolveAssistantServiceIntent(question), null, question);
+    }
+  });
+
+  test('keeps career public and school-scoped while requiring sign-in for authorized applications', () => {
+    const service = getAssistantService('career');
+    assert.equal(service.href, '/career');
+    assert.equal(service.category, 'campus');
+    assert.equal(service.access, 'public');
+    assert.equal(service.mobileRoute, 'Career');
+    assert.match(service.summary, /公開職涯資訊/);
+    assert.match(service.summary, /登入後.*校方開放與授權.*工讀申請.*實習學分進度/);
+    assert.match(service.summary, /送出需在頁面確認/);
+    assert.equal(assistantServiceHref('career'), '/career');
+    for (const audience of [undefined, 'school', 'platform']) {
+      assert.equal(assistantServiceHref('career', 'tw-pu', audience), '/career?schoolId=tw-pu');
+      assert.equal(assistantServiceHref('career', 'ntu', audience), '/career?schoolId=ntu');
+    }
+  });
+
   test('missing features do not get invented native screens or completed-action promises', () => {
     for (const id of [
       'leave', 'clubs', 'school-courses', 'merchant', 'admin', 'attendance',
@@ -197,6 +240,24 @@ describe('assistant service command routing', () => {
       const result = resolveAssistantServiceIntent(`打開${service.label}`);
       assert.equal(result?.kind, 'open', service.label);
       assert.equal(result.service.id, service.id, service.label);
+    }
+  });
+
+  test('opens career resources without replacing credit planning, application or progress requests', () => {
+    for (const question of [
+      '打開職涯頁', '請幫我開啟校內工讀', '開啟實習學分', 'open career services', 'open internship',
+    ]) {
+      const result = resolveAssistantServiceIntent(question);
+      assert.equal(result?.kind, 'open', question);
+      assert.equal(result.service.id, 'career', question);
+    }
+    assert.equal(resolveAssistantServiceIntent('開啟學分規劃')?.service.id, 'credits');
+    for (const question of [
+      '幫我申請校內工讀', '幫我送出工讀申請', '我的實習學分夠了嗎', '查詢我的實習進度',
+      '幫我確認實習結案', '打開職涯並送出工讀申請', '開啟實習學分並確認結案',
+      'open career and submit an application',
+    ]) {
+      assert.equal(resolveAssistantServiceIntent(question), null, question);
     }
   });
 
