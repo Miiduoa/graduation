@@ -356,6 +356,48 @@ test('a failed write re-reads the server so another device\'s subscription is sh
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
+test('a failed write never discards an in-flight pull-to-refresh, even if its re-read fails', async () => {
+  const otherBoard = { id: 'board-b', name: '攝影社', type: 'topic' };
+  jest.mocked(listBoards).mockResolvedValue([board, otherBoard]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('攝影社');
+
+  const rows = deferred<typeof board[]>();
+  jest.mocked(listBoards).mockImplementationOnce(() => rows.promise as any);
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board-b']);
+  const write = deferred();
+  jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
+
+  let refreshPromise!: Promise<void>;
+  act(() => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+  jest.mocked(listSubscribedBoardIds).mockRejectedValueOnce(Object.assign(new Error('x'), { code: 'unavailable' }));
+  await act(async () => { write.reject(new Error('offline')); });
+  await act(async () => { rows.resolve([board, otherBoard]); await refreshPromise; });
+  expect(view.getByLabelText('取消訂閱攝影社')).toBeTruthy();
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+  expect(view.queryByText('暫時無法更新看板。請確認網路與登入狀態，再試一次。')).toBeNull();
+});
+
+test('a batch whose last settled write succeeded still re-reads after an earlier failure', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const first = deferred();
+  const second = deferred();
+  jest.mocked(subscribeToBoard).mockImplementationOnce(() => first.promise);
+  jest.mocked(unsubscribeFromBoard).mockImplementationOnce(() => second.promise);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+  fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
+  const readsBefore = jest.mocked(listSubscribedBoardIds).mock.calls.length;
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  // Latest (unsubscribe) fails first; the older subscribe then succeeds and clears the batch.
+  await act(async () => { second.reject(new Error('offline')); });
+  await act(async () => { first.resolve(); });
+  expect(jest.mocked(listSubscribedBoardIds).mock.calls.length).toBe(readsBefore + 1);
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
 test('a refresh older than a confirmed write cannot hide it after the next write fails', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const view = render(<BoardsScreen />);

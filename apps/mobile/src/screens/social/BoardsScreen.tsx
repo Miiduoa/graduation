@@ -88,6 +88,8 @@ function BoardsContent() {
   // Latest tap per board; only its outcome may roll back or alert.
   const latestIntent = useRef(new Map<string, number>());
   const intentCounter = useRef(0);
+  // Boards whose current batch of in-flight writes included a failure.
+  const failedSinceIdle = useRef(new Set<string>());
   // Mirrors `subscribed` synchronously so two presses before a rerender toggle
   // from the newest optimistic state instead of a stale closure.
   const subscribedRef = useRef<Set<string>>(new Set());
@@ -148,6 +150,29 @@ function BoardsContent() {
       }
     }
   }, [school?.id, auth.user?.uid, applySubscribed]);
+
+  // Re-read one board's subscription after a failed write without touching the
+  // list refresh pipeline (loadVersion, error banner, spinner), so an in-flight
+  // pull-to-refresh is never discarded. Best effort: errors keep the rollback.
+  const reconcileBoardSubscription = useCallback(async (boardId: string, uid: string, sid: string) => {
+    const revisionAtRead = subscriptionRevision.current;
+    try {
+      const subs = await listSubscribedBoardIds(uid, sid, { throwOnError: true });
+      if (!mounted.current) return;
+      if (pendingSubscriptionCounts.current.has(boardId)) return;
+      if ((boardWriteRevision.current.get(boardId) ?? -1) > revisionAtRead) return;
+      const serverSubscribed = subs.includes(boardId);
+      applySubscribed((previous) => {
+        if (previous.has(boardId) === serverSubscribed) return previous;
+        const next = new Set(previous);
+        if (serverSubscribed) next.add(boardId);
+        else next.delete(boardId);
+        return next;
+      });
+    } catch {
+      // Keep the pre-tap rollback; the next refresh will reconcile.
+    }
+  }, [applySubscribed]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -221,6 +246,7 @@ function BoardsContent() {
         else await subscribeToBoard(uid, sid, b.id);
       } catch (error: any) {
         failed = true;
+        failedSinceIdle.current.add(b.id);
         const isLatest = latestIntent.current.get(b.id) === intent;
         // A failed write changed nothing on the server, so it must not make
         // this board's local state outrank refreshes that started earlier.
@@ -251,10 +277,13 @@ function BoardsContent() {
       }
       // The rollback above is only the pre-tap guess; a snapshot taken during
       // the write may have included the unconfirmed local change. Re-read the
-      // server once this board has no writes left in flight.
-      if (failed && mounted.current && !pendingSubscriptionCounts.current.has(b.id)) void load();
+      // server once this board has no writes left in flight, even if the last
+      // write to settle succeeded but an earlier one in the batch failed.
+      if (!pendingSubscriptionCounts.current.has(b.id) && failedSinceIdle.current.delete(b.id) && mounted.current) {
+        void reconcileBoardSubscription(b.id, uid, sid);
+      }
     },
-    [auth.user?.uid, school?.id, applySubscribed, load],
+    [auth.user?.uid, school?.id, applySubscribed, reconcileBoardSubscription],
   );
 
   if (!auth.user?.uid) {
