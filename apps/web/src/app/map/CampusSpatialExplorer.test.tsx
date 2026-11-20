@@ -945,6 +945,58 @@ it('does not reactivate Safari WebGL from a queued observer entry while visual v
   }
 });
 
+it('keeps Safari WebGL paused when a VisualViewport getter throws, then recovers', async () => {
+  // A partially implemented iOS WebView can expose the API but throw while
+  // reading a property during keyboard/bfcache restoration. A queued positive
+  // observer entry must not wake the GPU or bypass the fail-closed pause.
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    offsetLeft: 0,
+    offsetTop: 0,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 80, left: 0, top: 80, right: 320, bottom: 260,
+    width: 320, height: 180, toJSON: () => ({}),
+  } as DOMRect);
+  try {
+    Object.defineProperty(viewport, 'height', {
+      configurable: true,
+      get() { throw new Error('transient visual viewport read failure'); },
+    });
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    const pausedAt = scene.setActive.mock.calls.length;
+    act(() => intersection?.([{
+      target: graphics, time: 4100, isIntersecting: true,
+      intersectionRect: { width: 320, height: 180 },
+    }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
+    expect(scene.setActive.mock.calls.slice(pausedAt)
+      .every(([enabled]) => enabled === false)).toBe(true);
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+    // Safari recovers the getter but emits no second IntersectionObserver.
+    Object.defineProperty(viewport, 'height', {
+      configurable: true, writable: true, value: window.innerHeight,
+    });
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    scene.setActive.mockClear();
+    viewport.dispatchEvent(new Event('resize'));
+    expect(scene.setActive).not.toHaveBeenCalled();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('pauses a ready mobile WebGL scene when viewport resize moves the host offscreen', async () => {
   // Rotating the device or showing the soft keyboard can change viewport
   // height before IntersectionObserver delivers its next callback.

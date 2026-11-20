@@ -416,24 +416,29 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // viewport have valid, positive bounds. Unknown WebView measurements must
     // never be interpreted as proof that the map is back on screen.
     const hostViewportVisibility = (): 'onscreen' | 'offscreen' | 'unknown' | 'invalid-visual-viewport' => {
+      // Some embedded Safari/WebViews expose VisualViewport but throw when a
+      // dimension is read during keyboard, zoom or bfcache transitions. Read
+      // each getter once; an exception is *not* permission to fall back to
+      // the larger layout viewport and wake a hidden WebGL context.
+      let visualBounds: { left: number; top: number; width: number; height: number } | null = null;
+      if (visualViewport) {
+        try {
+          const { width, height, offsetLeft, offsetTop } = visualViewport;
+          if (![width, height, offsetLeft, offsetTop].every(Number.isFinite) ||
+            width <= 0 || height <= 0) return 'invalid-visual-viewport';
+          visualBounds = { left: offsetLeft, top: offsetTop, width, height };
+        } catch {
+          return 'invalid-visual-viewport';
+        }
+      }
       try {
         const rect = host.getBoundingClientRect();
         const width = window.innerWidth;
         const height = window.innerHeight;
-        const hasVisualBounds = visualViewport &&
-          Number.isFinite(visualViewport.width) && visualViewport.width > 0 &&
-          Number.isFinite(visualViewport.height) && visualViewport.height > 0 &&
-          Number.isFinite(visualViewport.offsetLeft) &&
-          Number.isFinite(visualViewport.offsetTop);
-        // During iOS keyboard/pinch transitions VisualViewport can temporarily
-        // report zero, NaN or incomplete bounds. Falling back to the *larger*
-        // layout viewport here could falsely resume an obscured GPU canvas.
-        // Use layout bounds only when VisualViewport is genuinely unavailable.
-        if (visualViewport && !hasVisualBounds) return 'invalid-visual-viewport';
-        const left = hasVisualBounds ? visualViewport.offsetLeft : 0;
-        const top = hasVisualBounds ? visualViewport.offsetTop : 0;
-        const right = left + (hasVisualBounds ? visualViewport.width : width);
-        const bottom = top + (hasVisualBounds ? visualViewport.height : height);
+        const left = visualBounds?.left ?? 0;
+        const top = visualBounds?.top ?? 0;
+        const right = left + (visualBounds?.width ?? width);
+        const bottom = top + (visualBounds?.height ?? height);
         if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height,
           width, height, left, top, right, bottom].every(Number.isFinite) ||
           rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0 ||
@@ -441,6 +446,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         return rect.bottom <= top || rect.top >= bottom ||
           rect.right <= left || rect.left >= right ? 'offscreen' : 'onscreen';
       } catch {
+        // A broken host/layout measurement is not evidence of an offscreen
+        // canvas; keep the observer and keyboard recovery available.
         return 'unknown';
       }
     };
