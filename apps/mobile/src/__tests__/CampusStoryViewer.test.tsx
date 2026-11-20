@@ -127,6 +127,36 @@ describe('story playback clock', () => {
     view.unmount();
   });
 
+  test('ignores stale metadata from an older playback session after pause and resume', () => {
+    const view = render(
+      <Shelf
+        rows={[{
+          ...common,
+          id: 'video-metadata-restarted',
+          kind: 'video',
+          mediaUrl: 'https://example.com/activity.mp4',
+          expiresAt: Date.now() + 100_000,
+        }]}
+      />,
+    );
+    fireEvent.press(view.getByText('開啟bob'));
+    fireEvent.press(view.getByLabelText('播放影片'));
+    const staleReady = view.getByLabelText('限時動態影片').props.onReadyForDisplay;
+
+    // An older decoder can report the wrong duration after the student resumes.
+    fireEvent.press(view.getByLabelText('暫停播放'));
+    fireEvent.press(view.getByLabelText('播放影片'));
+    act(() => staleReady({ status: { isLoaded: true, durationMillis: 18000 } }));
+    expect(view.getByText('載入影片…')).toBeTruthy();
+
+    // The current session may still populate the actual video duration.
+    const freshReady = view.getByLabelText('限時動態影片').props.onReadyForDisplay;
+    act(() => freshReady({ status: { isLoaded: true, durationMillis: 12500 } }));
+    expect(view.getByText('0 / 13 秒')).toBeTruthy();
+    expect(view.getByLabelText('限時動態影片').props.shouldPlay).toBe(true);
+    view.unmount();
+  });
+
   test('ignores a stale video error after pause and resume on the same story', () => {
     const view = render(
       <Shelf
