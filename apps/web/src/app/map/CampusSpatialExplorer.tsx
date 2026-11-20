@@ -425,6 +425,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           Number.isFinite(visualViewport.height) && visualViewport.height > 0 &&
           Number.isFinite(visualViewport.offsetLeft) &&
           Number.isFinite(visualViewport.offsetTop);
+        // During iOS keyboard/pinch transitions VisualViewport can temporarily
+        // report zero, NaN or incomplete bounds. Falling back to the *larger*
+        // layout viewport here could falsely resume an obscured GPU canvas.
+        // Use layout bounds only when VisualViewport is genuinely unavailable.
+        if (visualViewport && !hasVisualBounds) return 'unknown';
         const left = hasVisualBounds ? visualViewport.offsetLeft : 0;
         const top = hasVisualBounds ? visualViewport.offsetTop : 0;
         const right = left + (hasVisualBounds ? visualViewport.width : width);

@@ -819,6 +819,61 @@ it('pauses offscreen WebGL on iOS visual viewport resize and scroll without wind
   }
 });
 
+it('keeps a viewport-paused 3D scene suspended while iOS VisualViewport reports invalid bounds', async () => {
+  // Safari keyboard and pinch transitions can briefly expose 0/NaN dimensions.
+  // The larger layout viewport must not count as proof that an obscured canvas
+  // has re-entered the actually visible region.
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    offsetLeft: 0,
+    offsetTop: 0,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const top = window.innerHeight - 40;
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: top, left: 0, top, right: 320, bottom: top + 180,
+    width: 320, height: 180, toJSON: () => ({}),
+  } as DOMRect);
+  try {
+    viewport.height = top - 10;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    const callsBeforeInvalid = scene.setActive.mock.calls.length;
+    for (const invalidHeight of [0, Number.NaN, -1]) {
+      viewport.height = invalidHeight;
+      act(() => viewport.dispatchEvent(new Event('resize')));
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    }
+    viewport.height = window.innerHeight;
+    viewport.offsetTop = Number.NaN;
+    act(() => viewport.dispatchEvent(new Event('scroll')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.setActive.mock.calls.slice(callsBeforeInvalid)
+      .every(([enabled]) => enabled === false)).toBe(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+    // Only valid positive visual-viewport geometry can recover this pause.
+    viewport.offsetTop = 0;
+    act(() => viewport.dispatchEvent(new Event('scroll')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    scene.setActive.mockClear();
+    viewport.dispatchEvent(new Event('resize'));
+    viewport.dispatchEvent(new Event('scroll'));
+    expect(scene.setActive).not.toHaveBeenCalled();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('pauses a ready mobile WebGL scene when viewport resize moves the host offscreen', async () => {
   // Rotating the device or showing the soft keyboard can change viewport
   // height before IntersectionObserver delivers its next callback.
