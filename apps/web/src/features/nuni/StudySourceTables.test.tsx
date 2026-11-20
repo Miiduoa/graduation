@@ -648,7 +648,7 @@ it('compares large but safely representable grouped cents without altering the s
   const markdown = [
     '| 項目 | 金額 |', '| --- | --- |',
     '| 甲 | 1,234,567,890,123.45 |', '| 乙 | 1,234,567,890,123.46 |',
-  ].join('\\n');
+  ].join('\n');
   const { container } = render(<StudySourceTables text={markdown} />);
   expect(within(screen.getByRole('table')).getAllByRole('cell')
     .map((cell) => cell.textContent)).toEqual(['1,234,567,890,123.45', '1,234,567,890,123.46']);
@@ -665,7 +665,7 @@ it('never graphs grouped integers or fractional cents that JavaScript cannot rep
     const markdown = [
       '| 項目 | 金額 |', '| --- | --- |',
       '| 甲 | ' + first + ' |', '| 乙 | ' + second + ' |',
-    ].join('\\n');
+    ].join('\n');
     const { container, unmount } = render(<StudySourceTables text={markdown} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell')
       .map((cell) => cell.textContent)).toEqual([first, second]);
