@@ -714,6 +714,45 @@ it('suspends a ready WebGL scene on pagehide even without a hidden document', as
   expect(scene.setActive).not.toHaveBeenCalled();
 });
 
+it('keeps WebGL suspended if scroll restoration moves the canvas offscreen before pageshow', async () => {
+  // Synthetic Safari bfcache regression: the previous IntersectionObserver
+  // entry said visible, but page restore scrolls the host outside the viewport.
+  // No GPU restart until a new intersecting event confirms its position.
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const offscreenTop = window.innerHeight + 120;
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: offscreenTop, left: 0, top: offscreenTop,
+    right: 320, bottom: offscreenTop + 180, width: 320, height: 180,
+    toJSON: () => ({}),
+  } as DOMRect);
+  try {
+    fireEvent(window, new Event('pagehide'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+    bounds.mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0,
+      right: 320, bottom: 180, width: 320, height: 180,
+      toJSON: () => ({}),
+    } as DOMRect);
+    act(() => intersection?.([{
+      isIntersecting: true, target: graphics,
+      intersectionRect: { width: 320, height: 180 },
+    }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('does not start hidden-tab WebGL after the spatial dialog is closed', async () => {
   Object.defineProperty(document, 'hidden', { configurable: true, value: true });
   try {

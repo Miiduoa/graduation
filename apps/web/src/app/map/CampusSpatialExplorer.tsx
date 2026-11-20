@@ -399,7 +399,30 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // the next visibilitychange/pageshow. Never allocate while hidden.
       }).catch(fail);
     };
+    // Safari bfcache / WebView restore may retain a visible observer state
+    // even if scroll restoration has moved the canvas outside the viewport.
+    // Never wake an existing GPU context from that stale observation. Wait for
+    // a fresh intersecting event or an explicit manual restart instead.
+    const invalidateRestoredOffscreenVisibility = () => {
+      if (!visible || manualStart || typeof IntersectionObserver === 'undefined') return;
+      try {
+        const rect = host.getBoundingClientRect();
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        if (Number.isFinite(rect.width) && rect.width > 0 &&
+            Number.isFinite(rect.height) && rect.height > 0 &&
+            Number.isFinite(width) && width > 0 &&
+            Number.isFinite(height) && height > 0 &&
+            (rect.bottom <= 0 || rect.top >= height || rect.right <= 0 || rect.left >= width)) {
+          visible = false;
+        }
+      } catch {
+        // Older WebViews can fail to measure during restore. Retain the
+        // observer/explicit-recovery fallback without interrupting navigation.
+      }
+    };
     const onVisibilityChange = () => {
+      if (!document.hidden) invalidateRestoredOffscreenVisibility();
       updateVisibility();
       startWhenVisible();
       syncPendingStartup();
@@ -411,6 +434,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
     const onPageShow = () => {
       pageSuspended = false;
+      invalidateRestoredOffscreenVisibility();
       updateVisibility();
       startWhenVisible();
       syncPendingStartup();
