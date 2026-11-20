@@ -1427,6 +1427,32 @@ it.each(['identity', 'gzip'] as const)(
   },
 );
 
+// Captive portals and upstream auth/error pages can respond 200 with HTML,
+// then stream forever. The campus API's JSON-only contract must reject the
+// misleading media type at headers time, cancel the stream, and keep walking
+// directions usable instead of hanging an embedded mobile WebView.
+it.each(['text/html; charset=UTF-8', 'application/xhtml+xml'] as const)(
+  'rejects HTTP 200 %s map documents before reading a stalled body',
+  async (contentType) => {
+    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+    const cancel = vi.fn();
+    const stalledBody = new ReadableStream<Uint8Array>({ cancel });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(stalledBody, {
+      status: 200, headers: { 'Content-Type': contentType, 'Retry-After': '120' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]}
+      selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  },
+);
+
 it('keeps the legacy JSON-only bridge usable when no body length was declared', async () => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
   const json = vi.fn().mockResolvedValue(JSON.parse(body));
