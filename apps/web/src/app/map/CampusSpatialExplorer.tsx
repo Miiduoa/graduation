@@ -335,7 +335,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // it resolves. Pause the startup deadline and defer WebGL allocation until
     // the tab is visible again. Resuming must not duplicate the context.
     const syncPendingStartup = () => {
-      if (!active || !started || scene) return;
+      if (!active || scene) return;
+      // Even before startup, page events must refresh the deferred reason so
+      // a stalled observer leaves the manual entry available in the foreground.
+      if (!started) {
+        if (isDeferred()) defer();
+        return;
+      }
       if (isDeferred()) {
         if (timeout !== null) window.clearTimeout(timeout);
         timeout = null;
@@ -396,6 +402,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // construction or observe(). Do not strand the tour in offscreen mode:
     // the safe fallback is the existing eager startup path.
     let intersection: IntersectionObserver | null = null;
+    let observerLive = true;
     // Keep timestamps across observer callbacks, not only within one batch:
     // an old, queued notification must not restart offscreen mobile WebGL.
     let lastObservationTime = -Infinity;
@@ -405,7 +412,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // A WebView can deliver an already-queued callback after disconnect
           // (including after the modal closes). Do not reactivate a disposed
           // WebGL scene or issue state updates from the previous dialog.
-          if (!active) return;
+          if (!active || !observerLive) return;
           // Only entries for this canvas host may change its visibility.
           // Legacy callback shims may omit target; a *different* explicit
           // target is never proof that our map entered the viewport.
@@ -464,6 +471,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       } catch {
         // observe() may have registered partially before throwing.
         try { intersection?.disconnect(); } catch { /* broken WebView observer */ }
+        // disconnect() cannot cancel queued notifications from a failed
+        // constructor/observe(). They must not deactivate the eager fallback.
+        observerLive = false;
         intersection = null;
         visible = true;
       }

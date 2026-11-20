@@ -382,6 +382,52 @@ it('lets a student manually start 3D if a WebView never reports canvas visibilit
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+it('restores manual 3D startup after a background open with no WebView visibility reports', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    observe() {}
+    disconnect = disconnect;
+  });
+  Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    const walkingLink = within(dialog).getByRole('link', { name: '開啟步行導航' });
+    const walkingHref = walkingLink.getAttribute('href');
+    expect(walkingHref).toBeTruthy();
+    expect(new URL(walkingHref!).searchParams.get('travelmode')).toBe('walking');
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    expect(within(dialog).getByText(/目前位於背景分頁/)).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: '手動開啟立體畫面' })).toBeNull();
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(timerSpy.mock.calls.some(([, delay]) => delay === 12_000)).toBe(false);
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    fireEvent(document, new Event('visibilitychange'));
+    fireEvent(window, new Event('pageshow'));
+    await act(async () => { await Promise.resolve(); });
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(timerSpy.mock.calls.some(([, delay]) => delay === 12_000)).toBe(false);
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    expect(within(dialog).queryByText(/目前位於背景分頁/)).toBeNull();
+    expect(within(dialog).getByText(/滑動至空間圖後才載入.*可手動開啟/)).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')).toBe(walkingHref);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '手動開啟立體畫面' }));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')).toBe(walkingHref);
+  } finally {
+    timerSpy.mockRestore();
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  }
+});
+
 it('still defers manual 3D startup if the tab backgrounds before the WebView import settles', async () => {
   vi.stubGlobal('IntersectionObserver', class {
     observe() {}
@@ -447,7 +493,8 @@ it.each(['constructor', 'observe'] as const)(
   async (failurePoint) => {
     const brokenDisconnect = vi.fn();
     vi.stubGlobal('IntersectionObserver', class {
-      constructor(_callback: IntersectionObserverCallback) {
+      constructor(callback: IntersectionObserverCallback) {
+        intersection = callback;
         if (failurePoint === 'constructor') throw new Error('unsupported observer');
       }
       observe() {
@@ -462,6 +509,20 @@ it.each(['constructor', 'observe'] as const)(
     expect(scene.create).toHaveBeenCalledTimes(1);
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     expect(brokenDisconnect).toHaveBeenCalledTimes(failurePoint === 'observe' ? 1 : 0);
+    // Even a failed constructor can leave a queued callback in a WebView.
+    // Neither failure path may let it deactivate the eager fallback scene.
+    const activeCalls = scene.setActive.mock.calls.length;
+    act(() => intersection?.([{ isIntersecting: false, target: graphics, time: 10 }] as IntersectionObserverEntry[],
+      {} as IntersectionObserver));
+    expect(scene.setActive.mock.calls.length).toBe(activeCalls);
+    expect(scene.setActive).not.toHaveBeenCalledWith(false);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    fireEvent(window, new Event('pageshow'));
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
   },
 );
 
