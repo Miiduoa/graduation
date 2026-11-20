@@ -4023,6 +4023,71 @@ describe('storage security rules', () => {
   });
 
 
+  test('conflicting school bindings revoke story GET, LIST, receipts and owner mutations', async () => {
+    const now = Date.now();
+    const storyPath = 'campusStories/transfer-conflict';
+    const receiptPath = storyPath + '/schools/pu/authors/alice/views/bob';
+    const payload = {
+      schoolId: 'pu', authorUid: 'alice', kind: 'text',
+      text: 'Synthetic school-scoped story', expiresAt: now + 3_600_000,
+      viewCount: 0,
+    };
+    await seedFirestore(async (db) => {
+      await db.doc(storyPath).set(payload);
+      for (const uid of ['alice', 'bob']) {
+        await db.doc(`users/${uid}`).set(campusBoundProfile('pu'));
+        await db.doc(`schools/pu/members/${uid}`).set(campusBoundMembership('pu'));
+        // A new campus membership and an old one can coexist temporarily.
+        await db.doc(`schools/other/members/${uid}`).set(campusBoundMembership('other'));
+      }
+    });
+    // Deliberately retain the same issued auth contexts after server updates.
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const story = bob.doc(storyPath);
+    const receipt = bob.doc(receiptPath);
+    const list = bob.collection('campusStories').where('schoolId', '==', 'pu')
+      .where('expiresAt', '>', now + 120_000).limit(20);
+
+    await assertSucceeds(story.get());
+    await assertSucceeds(list.get());
+    await assertSucceeds(receipt.set({ viewerUid: 'bob', viewedAt: serverTimestamp() }));
+    await assertSucceeds(receipt.get());
+
+    await seedFirestore(async (db) => {
+      // Bob has old schoolId and new primarySchoolId; Alice has the reverse.
+      await db.doc('users/bob').update({ primarySchoolId: 'other' });
+      await db.doc('users/alice').update({ schoolId: 'other' });
+    });
+    await assertFails(story.get());
+    await assertFails(list.get());
+    await assertFails(receipt.get());
+    await assertFails(bob.doc('campusStories/replayed-transfer').set({
+      ...payload, authorUid: 'bob',
+    }));
+    await assertFails(alice.doc(storyPath).get());
+    await assertFails(alice.doc(storyPath).delete());
+    await assertFails(alice.doc('campusStories/forged-transfer').set(payload));
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').update({ primarySchoolId: 'pu' });
+      await db.doc('users/alice').update({ schoolId: 'pu' });
+    });
+    await assertSucceeds(story.get());
+    await assertSucceeds(list.get());
+    await assertSucceeds(receipt.get());
+
+    // Preserve the existing single-field canonical story reader behavior.
+    await seedFirestore((db) => db.doc('users/bob').set({ status: 'active', schoolId: 'pu' }));
+    await assertSucceeds(story.get());
+    await assertSucceeds(receipt.get());
+    await seedFirestore((db) => db.doc('users/bob').set({ status: 'active', primarySchoolId: 'pu' }));
+    await assertSucceeds(story.get());
+    // Receipt reads still require explicit schoolId as they did before.
+    await assertFails(receipt.get());
+    await assertSucceeds(alice.doc(storyPath).delete());
+  });
+
   test('stale story tokens lose reads, writes and deletion after account or school revocation', async () => {
     const now = Date.now();
     const payload = {

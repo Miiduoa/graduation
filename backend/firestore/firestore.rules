@@ -23,12 +23,11 @@ service cloud.firestore {
     // school membership must not authorize a deleted account, and a
     // client-rebuilt student profile cannot stamp schoolId / primarySchoolId.
     function isCanonicalStoryMember(schoolId) {
-      return isSchoolMember(schoolId)
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId
-          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('primarySchoolId', '') == schoolId
-        );
+      // A partially transferred profile must not retain its old campus
+      // audience through one stale field plus an active old membership.
+      // Reuse the current-campus consistency predicate already enforced for
+      // private legacy posts, without adding a distinct document lookup.
+      return isConsistentRootPostSchoolMember(schoolId);
     }
 
     function hasAnyServiceRole(schoolId, uid) {
@@ -2331,7 +2330,10 @@ service cloud.firestore {
       }
       function canAccessReceipts() {
         let parent = story();
+        // Keep the previous explicit schoolId requirement for legacy
+        // receipts, and also reject conflicting primarySchoolId transfers.
         return isCurrentSchoolMember(parent.schoolId)
+          && isCanonicalStoryMember(parent.schoolId)
           && parent.expiresAt is int && parent.expiresAt > request.time.toMillis();
       }
       function validOwnReceipt(viewerUid) {

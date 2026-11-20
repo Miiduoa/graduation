@@ -979,3 +979,13 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - 最小修補：存在 `userId` 欄位時只認證明確 `userId == auth.uid`，唯獨歷史行**完全沒有** `userId` 欄位才按文件 ID 回退；顯式 null／錯誤 owner 不回退。有效課程、學校與 canonical 校籍驗權及教師管理權不變。
 - 新增合成 Firebase Rules regression，包含錯配兩方向、合法不透明行 ID、教師 GET、顯式 null、無 userId 的舊行、異帳號、撤權及同 token 恢復。先前對同分支的 1039/1039 與 workflow `#44739299402` 只對舊 SHA 有效，**不能**當成本次新 head 成功證據。
 - 本輪不執行受拒絕的 `pnpm/npm audit`，不建立會觸發該外送流程的 PR，不碰正式資料、憑證、已發 URL、遷移、部署或 E 校園；仍須對精確新 head 查 Firebase Emulator／HTTP、完整 CI／CodeQL／Supabase permissions／Python security／Mobile Agent Regression／適用 Maestro、指定 App 5504170 審查及正式發布回復。GCS/Supabase URL 撤銷、真 Storage CAS、PG CI、minimatch 雙鎖檔、歷史互評老師備註隱私及 Rules 讀取額度仍待處理。
+
+
+### 2026-11-21｜限時動態轉校衝突：殘留會員資格不得繼續讀取及取得閱覽收據（隔離候選）
+
+- **基準：** main `cea4084fff5347b5d3203d9cadb499db439040b7`；接續安全分支 `feature/security-peer-review-revocation-20261120` 的精確父提交 `6a5829613bc0c49465e8a0974a71d1561d9eafc2`。本節記錄新候選原始碼與測試；實際 head 與 Actions 以本輪 GitHub 產生的提交為準。
+- **新增來源缺口：** `isCanonicalStoryMember` 先前使用 `schoolId == target || primarySchoolId == target`。如果兩個受伺服器綁定的欄位轉校期間衝突，且舊校 `schools/{schoolId}/members/{uid}` 尚為 active，持舊登入狀態者仍可 GET/LIST 舊校限時動態、發布／刪除內容。閱覽收據 `canAccessReceipts` 只確認 `schoolId`，同樣未阻擋另一欄位已更新的轉校狀態。此為 Rules 授權條件確認，不代表正式環境發生利用。
+- **最小修補：** 故事文件使用先前已驗證的 `isConsistentRootPostSchoolMember` 做 canonical 雙校籍一致性（增加 0 個不同文件查詢）；收據保留歷史明確 `schoolId` 必要條件，再加同一一致性檢查，**不**擴大只有 `primarySchoolId` 的帳號讀取收據權限。保留單欄位合法故事 GET、恢復後正常閱讀及作者刪除。
+- **合成回歸：** 新增相同 Firebase auth context 的雙向校籍衝突、正常 GET/LIST、收據 CREATE/GET、舊校 GET/LIST 拒絕、跨校發布與刪除拒絕、恢復及單欄位歷史 profile 相容案例。須在真正 Firebase Emulator 和相關現有工作流程對精確 head 重跑，不能沿用上輪 `6a582961...` 的成功。
+- **限制與發布閘門：** 真 GCS 已發 URL、Storage 附件 token 撤銷、Supabase URL、隔離 Storage 競態仍未結案；正式歷史雙校籍資料盤點、完整 CI／CodeQL／Supabase permissions／Python security／Mobile Agent Regression／適用 Maestro、nuni-merge-gate App 5504170 的精確 head「審查通過」、回復與部署尚未完成。未執行被拒絕的 npm/pnpm audit，也不透過其他方式外送相同依賴清單；不使用正式資料、金鑰、token、migration、E 校園。正式合併／發布由既有主線窗口處理。
+
