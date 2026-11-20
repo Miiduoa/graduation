@@ -2480,3 +2480,39 @@ it('still allows charts for readable RTL names, ordinary Chinese and complete em
     view.unmount();
   }
 });
+
+
+it('announces exact original lines for full-table, chosen row, and row plus headers', () => {
+  const lesson = [
+    '前言', '| 科目 | 學分 |', '| --- | --- |',
+    '| 資料庫 | 3 |', '| 網路 | 2 |', '後記',
+  ].join('\r\n');
+  const view = render(<StudySourceTables text={lesson} />);
+  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+  const message = view.container.querySelector('[aria-live="polite"][aria-atomic="true"]');
+  expect(message?.textContent?.trim()).toBe(
+    '目前選取整張表格：原文第 2 至 5 行，包含欄名、分隔列與全部資料列。',
+  );
+  fireEvent.change(screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }),
+    { target: { value: '1' } });
+  expect(message?.textContent?.trim()).toBe(
+    '目前只選取第 2 列：原文第 5 行資料列，未包含欄名與分隔列。',
+  );
+  const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+  expect(field.value).toBe('| 網路 | 2 |');
+  fireEvent.click(screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }));
+  expect(message?.textContent?.trim()).toBe(
+    '目前選取第 2 列：原文第 2、3 行欄名與分隔列，以及第 5 行資料列；不包含其他資料列。',
+  );
+  expect(field.value).toBe(['| 科目 | 學分 |', '| --- | --- |', '| 網路 | 2 |'].join('\n'));
+  expect(field.value).not.toContain('| 資料庫 | 3 |');
+
+  // A new authorized source must reset the announcement and selected excerpt.
+  view.rerender(<StudySourceTables text={
+    ['新教材', '| 科目 | 次數 |', '| --- | --- |', '| 新課 | 8 |'].join('\n')
+  } />);
+  expect(message?.textContent?.trim()).toBe(
+    '目前選取整張表格：原文第 2 至 4 行，包含欄名、分隔列與全部資料列。',
+  );
+  expect(field.value).toBe(['| 科目 | 次數 |', '| --- | --- |', '| 新課 | 8 |'].join('\n'));
+});

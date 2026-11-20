@@ -552,6 +552,15 @@ function StudySourceSelection({ table, index, sourceLines }: {
     }
   };
 
+  // Tell screen readers exactly which original lines an excerpt covers.
+  // A single row with its header skips intervening lesson rows.
+  const originalRowLine = table.startLine + rowIndex + 2;
+  const selectionAnnouncement = rowIndex < 0
+    ? `目前選取整張表格：原文第 ${table.startLine} 至 ${table.startLine + table.rows.length + 1} 行，包含欄名、分隔列與全部資料列。`
+    : includeHeader
+      ? `目前選取第 ${rowIndex + 1} 列：原文第 ${table.startLine}、${table.startLine + 1} 行欄名與分隔列，以及第 ${originalRowLine} 行資料列；不包含其他資料列。`
+      : `目前只選取第 ${rowIndex + 1} 列：原文第 ${originalRowLine} 行資料列，未包含欄名與分隔列。`;
+
   return (
     <details className={styles.sourceTableSelection}>
       <summary>選取第 {index + 1} 張表格的原文（可複製）</summary>
@@ -589,6 +598,9 @@ function StudySourceSelection({ table, index, sourceLines }: {
           連同原文欄名與分隔列
         </label>
       )}
+      <p className={styles.note} aria-live="polite" aria-atomic="true">
+        {selectionAnnouncement}
+      </p>
       <button type="button" onClick={() => {
         const selected = selectSelectedOriginal();
         setCopyFeedback(selected
