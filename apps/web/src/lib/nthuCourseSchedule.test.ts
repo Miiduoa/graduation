@@ -30,6 +30,10 @@ describe('NTHU public course credits passed to a personal timetable', () => {
     ['40', 40],
     ['040.000', 40],
     ['0.000001', 0.000001],
+    // 與 main 相容：可無損轉換的長格式等值表示仍要完整匯入。
+    ['3.' + '0'.repeat(31), 3],
+    ['0'.repeat(32) + '3', 3],
+    ['0'.repeat(10_000), 0],
     ['', undefined],
   ])('preserves valid official credit %s as %s across both meetings', (credits, expected) => {
     const csv = nthuTimetableImportCsv({ ...publicCourse, credits });
@@ -47,7 +51,7 @@ describe('NTHU public course credits passed to a personal timetable', () => {
   it.each([
     '待確認', '3學分', '-1', '40.01', '40.0000000000000001',
     '040.0000000000000001', '0.0000001', 'NaN', 'Infinity',
-    '3.5.0', ' 3', '3 ', '0'.repeat(10_000),
+    '3.5.0', ' 3', '3 ', '1' + '0'.repeat(40),
   ])('rejects invalid or lossy source credit %s before generating CSV', credits => {
     expect(nthuTimetableImportCsv({ ...publicCourse, credits })).toBeNull();
   });

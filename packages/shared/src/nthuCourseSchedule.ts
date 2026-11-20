@@ -119,7 +119,9 @@ export function nthuTimetableImportCsv(course: PublicCatalogCourse): string | nu
   const credits = course.credits;
   // Cached/externally supplied course cards can bypass the typed catalog
   // validator. Do not coerce non-string credit values into plausible numbers.
-  if (typeof credits !== 'string' || credits.length > 32) return null;
+  // 不設長度上限：main 接受的等值長格式（例如前導零或尾端補零）仍須可匯入，
+  // 下方的十進位檢查是線性時間，且最終只寫入 Number 後的十進位字串。
+  if (typeof credits !== 'string') return null;
   if (credits !== '') {
     const decimalPattern = /^\d+(?:\.\d+)?$/;
     if (!decimalPattern.test(credits)) return null;
