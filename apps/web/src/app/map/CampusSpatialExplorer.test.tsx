@@ -1431,8 +1431,11 @@ it.each(['identity', 'gzip'] as const)(
 // then stream forever. The campus API's JSON-only contract must reject the
 // misleading media type at headers time, cancel the stream, and keep walking
 // directions usable instead of hanging an embedded mobile WebView.
-it.each(['text/html; charset=UTF-8', 'application/xhtml+xml'] as const)(
-  'rejects HTTP 200 %s map documents before reading a stalled body',
+it.each([
+  'text/html; charset=UTF-8', 'application/xhtml+xml', 'text/plain; charset=UTF-8',
+  'application/xml', 'image/svg+xml', 'application/octet-stream',
+] as const)(
+  'rejects HTTP 200 incompatible %s map documents before reading a stalled body',
   async (contentType) => {
     const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
     const cancel = vi.fn();
@@ -1449,6 +1452,30 @@ it.each(['text/html; charset=UTF-8', 'application/xhtml+xml'] as const)(
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
     expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  },
+);
+
+// JSON-family media types must still load valid source-checked geometry;
+// a 200 response with an explicit incompatible media type must not.
+it.each(['application/json; charset=UTF-8', 'application/vnd.nuni+json; charset=UTF-8'] as const)(
+  'accepts a complete %s building snapshot without a fallback',
+  async (contentType) => {
+    const { library, buildings, body } = sourcedLibraryFootprintFixture();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Content-Length': String(new TextEncoder().encode(body).byteLength),
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]}
+      selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   },
 );
