@@ -2242,3 +2242,42 @@ it('does not treat English business rates or explicit percent-unit speed rates a
     [bar.getAttribute('value'), bar.getAttribute('max')]))
     .toEqual([['20', '100'], ['40', '100']]);
 });
+
+it('does not draw ratio bars from numeric weekdays in class schedules', () => {
+  for (const header of [
+    '星期', '星期幾', '禮拜幾', '上課星期', '開課週別', '週幾', '周序號',
+    '考試星期', 'Weekday', 'Weekday Number', 'Week Day',
+    'Day of Week', 'Day of the Week', 'Day-of-Week (ISO 8601)', 'Class Day of Week',
+  ]) {
+    const material = [
+      '| 課程 | ' + header + ' |', '| --- | --- |',
+      '| 資料庫 | 1 |', '| 網路概論 | 5 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(comparisonSummaries(container)).toEqual([]);
+    expect(container.querySelector('meter')).toBeNull();
+    expect(within(screen.getByRole('table')).getAllByRole('cell').map(cell => cell.textContent))
+      .toEqual(['1', '5']);
+    unmount();
+  }
+});
+
+it('retains real weekday counts and study-hour quantities as source comparisons', () => {
+  for (const header of [
+    '每週上課天數', '星期數量', '上課天數', 'Number of Weekdays',
+    'Weekday Count', 'Study Hours', 'Lab Hours', '出席天數', 'Day Count',
+  ]) {
+    const material = [
+      '| 課程 | ' + header + ' |', '| --- | --- |',
+      '| 資料庫 | 2 |', '| 網路概論 | 4 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(comparisonSummaries(container)).toEqual([
+      '展開第 2 欄「' + header + '」的原文數值比較',
+    ]);
+    expect(Array.from(container.querySelectorAll('meter')).map(item => [
+      item.getAttribute('value'), item.getAttribute('max'),
+    ])).toEqual([['2', '4'], ['4', '4']]);
+    unmount();
+  }
+});

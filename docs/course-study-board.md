@@ -1989,3 +1989,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 精確 head \`9871bc83a9cc240d1d6ed75b418ba430b0e147ea\` 的 CI #44695682447 真實 Web Tests job #136151748861 失敗（19,572 通過、1 失敗）：\`StudySourceTables.test.tsx\` 的網路量測正例要求「無線頻道速率」可選比較，卻被通用中文字「率」匹配器錯認為百分率，導致原文數值比較區被隱藏；同 SHA 的 Build Web/Mobile、Lint/TypeCheck、Mobile Tests、Security Gates、CodeQL 已通過，但 CI Summary 失敗。
 - 修改只針對百分比／一般比率欄的判斷：將「速率」視為可量測的非負數值（仍需全部資料列為同欄、同格式的純數字），保留真正的「錯誤率」「通過率」「利率」「比率」對缺少 % 的數值不推測為 0–100% 圖。新增「傳輸速率」「下載速率」正例與 5 組一般比率反例，原始授權教材、行號與讀屏表格內容保持不變。
 - 使用不需正規式 lookbehind 的寫法，避免較舊 Safari/WebView 解析失敗。不新增套件、不改 v1/v2 閱讀備份或逐題 checkpoint、不外傳私人教材；待新 head 重新跑全套 CI、CodeQL。指定 App 5504170 APPROVED、Maestro／手機真機與 Ahaboard 同教材同題同機測試未齊前保持 Draft，不合併、不部署。
+
+
+### 2026-11-20：課表星期序號不再被誤畫為倍數長條
+
+- 修正兩欄教材表中的「星期幾／上課星期／週別／Weekday／Day of Week」若使用 1、5 等星期序號，系統過去可能將星期五畫成星期一的五倍。星期是日曆位置而非具有比例零點的數量；現在保留逐字原表、行號、選取／複製／TXT，不產生誤導性數值圖。
+- 具有量值的「每週上課天數／星期數量／Number of Weekdays／Study Hours」仍顯示原文比較，不因此被誤擋。新增 15 組星期序號及 9 組真實數量的 React DOM 正反測試，另以獨立 JS 規則煙測核對（不是正式 Vitest 或實機驗收）。
+- 僅變更 `StudySourceTables.tsx`、對應測試與本文件，保留原始教材、閱讀 v1/v2 與練習 v1 checkpoint、私人資料界線，不加入套件或 API。必須以此新 SHA 重新查核 CI／CodeQL，指定 App 5504170、Maestro、iOS／Android、WebGPU 教學及 Ahaboard 同機對照仍待驗收；PR 保持 Draft，不合併、不部署。

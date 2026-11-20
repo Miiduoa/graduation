@@ -92,6 +92,12 @@ const NON_RATIO_SCIENCE_COLUMN =
 const ENGLISH_NON_RATIO_SCIENCE_COLUMN =
   /\b(?:temperature|temp\.?|celsius|fahrenheit|pH|decibels?|richter)\b/iu;
 const DECIBEL_UNIT_COLUMN = /\bdB(?:A|C|FS|m|W)?\b/u;
+// A weekday number is a calendar position, not an elapsed duration or
+// quantity: Friday (5) is not five times Monday (1). Counts of teaching days
+// and actual study hours must remain eligible for measured comparisons.
+const NON_RATIO_WEEKDAY_COLUMN =
+  /^(?:(?:上課|開課|考試|測驗|授課)?(?:星期|禮拜|週|周)(?:幾|別|序號|編號|次序)?|(?:class|course|exam)\s+(?:weekday|day[\s-]*of[\s-]*(?:the[\s-]*)?week)|(?:weekday|week[\s-]*day|day[\s-]*of[\s-]*(?:the[\s-]*)?week)(?:\s+(?:number|no\.?|index|code|id))?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+
 // Clock readings and geographic coordinates have conventional origins.
 // Even positive bare figures (8 vs 12 o'clock, 24 vs 25 degrees east)
 // are not ratios; retain the original table without a zero-based chart.
@@ -156,6 +162,7 @@ function isNonRatioColumn(header: string): boolean {
       NON_RATIO_NETWORK_NAMESPACE_COLUMN.test(column) ||
       NON_RATIO_DATABASE_KEY_COLUMN.test(column) ||
       AMBIGUOUS_TIME_COLUMN.test(column) ||
+      NON_RATIO_WEEKDAY_COLUMN.test(column) ||
       NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
       DECIBEL_UNIT_COLUMN.test(column) ||
       NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
