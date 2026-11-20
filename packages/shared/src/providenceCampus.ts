@@ -36,6 +36,7 @@ export type CampusMapPlaceLike = {
   building?: string;
   floor?: string;
   facilities?: string[];
+  transitStopIds?: unknown;
 };
 
 export const PROVIDENCE_CAMPUS_SOURCE = {

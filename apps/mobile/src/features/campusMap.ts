@@ -15,6 +15,7 @@ export type CampusMapPlace = {
   building?: string;
   floor?: string;
   facilities: string[];
+  transitStopIds?: unknown;
 };
 
 /** 地點來源最多等這麼久；連線卡住時不能讓畫面永遠停在「正在載入」。 */
@@ -58,6 +59,9 @@ export function toCampusMapPlaces(locations: readonly CampusMapPlaceLike[]): Cam
     building: place.building,
     floor: place.floor,
     facilities: place.facilities ? [...place.facilities] : [],
+    ...(Object.prototype.propertyIsEnumerable.call(place, 'transitStopIds')
+      ? { transitStopIds: place.transitStopIds }
+      : {}),
   }));
 }
 
