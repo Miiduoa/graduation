@@ -525,8 +525,10 @@ export function StudySourceTables({ text }: { text: string }) {
   };
   const returnToChart = () => {
     const origin = returnTarget?.origin;
-    setReturnTarget(null);
-    if (!origin?.isConnected) return;
+    if (!origin?.isConnected) {
+      setReturnTarget(null);
+      return;
+    }
     // The student may close the comparison disclosure while checking the
     // source row. Reopen it before returning focus: a hidden chart button
     // cannot reliably receive focus in Safari, WebView or keyboard navigation.
@@ -535,11 +537,16 @@ export function StudySourceTables({ text }: { text: string }) {
     try { origin.focus(); } catch { /* Fall back to the disclosure heading. */ }
     const summary = disclosure?.querySelector<HTMLElement>('summary');
     if (document.activeElement !== origin) {
-      try { summary?.focus(); } catch { /* Keep the original source available. */ }
+      try { summary?.focus(); } catch { /* The return control must remain available. */ }
     }
+    const focused = document.activeElement === origin || (summary !== null && summary !== undefined && document.activeElement === summary);
     const destination = document.activeElement === origin ? origin : summary ?? origin;
     try { destination.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }
     catch { /* A failed scroll must not prevent keyboard focus. */ }
+    // Some in-app WebViews refuse focus on both the chart button and summary.
+    // Do not unmount the return button and strand keyboard users at the source.
+    // They can retry, use Tab, or scroll through the still-open comparison.
+    if (focused) setReturnTarget(null);
   };
   if (!tables.length) return null;
 

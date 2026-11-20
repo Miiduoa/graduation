@@ -1886,6 +1886,38 @@ it('falls back to a comparison summary when a WebView rejects chart button focus
   expect(view.container.querySelectorAll('tbody tr')[1]?.textContent).toBe('網路50%');
 });
 
+it('retains the return control when a WebView refuses both chart and summary focus', () => {
+  const material = [
+    '| 課程 | 學分 |', '| --- | --- |',
+    '| 資料庫 | 3 |', '| 網路 | 2 |',
+  ].join('\n');
+  const view = render(<StudySourceTables text={material} />);
+  const summary = screen.getByText('展開第 2 欄「學分」的原文數值比較');
+  const disclosure = summary.closest('details');
+  if (!disclosure) throw new Error('Expected comparison disclosure');
+  disclosure.open = true;
+  const jump = screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' });
+  fireEvent.click(jump);
+  const sourceRow = view.container.querySelector('tbody tr');
+  expect(document.activeElement).toBe(sourceRow);
+  const back = screen.getByRole('button', { name: '返回原文第 3 行的圖表' });
+  Object.defineProperty(jump, 'focus', { configurable: true, value: () => { throw new Error('chart focus blocked'); } });
+  Object.defineProperty(summary, 'focus', { configurable: true, value: () => { throw new Error('summary focus blocked'); } });
+  disclosure.open = false;
+  fireEvent.click(back);
+  expect(disclosure.open).toBe(true);
+  expect(document.activeElement).toBe(sourceRow);
+  // The student must not lose the only working return action after the focus
+  // attempt fails. Native keyboard navigation can still reach this button.
+  expect(screen.getByRole('button', { name: '返回原文第 3 行的圖表' })).toBe(back);
+  expect(view.container.querySelector('tbody tr')?.textContent).toBe('資料庫3');
+  Reflect.deleteProperty(jump, 'focus');
+  Reflect.deleteProperty(summary, 'focus');
+  fireEvent.click(back);
+  expect(document.activeElement).toBe(jump);
+  expect(screen.queryByRole('button', { name: '返回原文第 3 行的圖表' })).toBeNull();
+});
+
 it('never shows a stale return-to-chart control after the authorized source changes', () => {
   const oldMaterial = [
     '| 舊課程 | 學分 |', '| --- | --- |',
