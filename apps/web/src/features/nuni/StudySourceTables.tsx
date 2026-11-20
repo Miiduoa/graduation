@@ -318,12 +318,20 @@ function tableSourceSelection(lines: OriginalSourceLine[], table: StudySourceTab
 // A few iOS Safari and in-app WebViews throw when select() is called on a
 // readonly textarea. Keep the original table text in place and try a precise
 // selection range too, so a failed browser selection never breaks copying.
-function selectOriginalTableText(field: HTMLTextAreaElement | null) {
-  if (!field) return;
+function selectOriginalTableText(field: HTMLTextAreaElement | null): boolean {
+  if (!field) return false;
   try { field.focus(); } catch { /* The student can still long-press the source. */ }
   try { field.select(); } catch { /* Try the explicit selection range below. */ }
   try { field.setSelectionRange(0, field.value.length); }
   catch { /* The unchanged source remains available for native selection. */ }
+  // Some in-app WebViews silently ignore both APIs. A successful method call
+  // is not evidence that text was selected. Even reported selection bounds
+  // cannot guarantee a native menu, so the message must remain cautious.
+  try {
+    return document.activeElement === field &&
+      field.selectionStart === 0 && field.selectionEnd === field.value.length &&
+      field.value.length > 0;
+  } catch { return false; }
 }
 
 /** Keep per-table selection local and reset it when the authorized source changes. */
@@ -362,13 +370,13 @@ function StudySourceSelection({ table, index, sourceLines }: {
       setCopyFeedback('瀏覽器未確認複製；原文仍保留在下方，請長按選取或使用鍵盤複製。');
     }
   };
-  const selectSelectedOriginal = () => {
+  const selectSelectedOriginal = (): boolean => {
     const field = originalText.current;
-    if (!field) return;
+    if (!field) return false;
     // Readonly DOM values can still drift after an embedded WebView glitch.
     // Repair the long-press fallback before selection and clipboard access.
     if (field.value !== selectedSource.replace(/\r\n?/gu, '\n')) field.value = selectedSource;
-    selectOriginalTableText(field);
+    return selectOriginalTableText(field);
   };
   const copySelectedOriginal = () => {
     const field = originalText.current;
@@ -479,7 +487,12 @@ function StudySourceSelection({ table, index, sourceLines }: {
             </option>)}
         </select>
       </label>
-      <button type="button" onClick={selectSelectedOriginal}>
+      <button type="button" onClick={() => {
+        const selected = selectSelectedOriginal();
+        setCopyFeedback(selected
+          ? '瀏覽器回報已全選下方原文；可用鍵盤複製，或長按原文使用系統複製選單。'
+          : '瀏覽器未確認全選；下方原文仍保留，請長按重新選取或使用鍵盤複製。');
+      }}>
         {rowIndex < 0
           ? `全選第 ${index + 1} 張表格原文`
           : `全選第 ${index + 1} 張表格第 ${rowIndex + 1} 列原文`}

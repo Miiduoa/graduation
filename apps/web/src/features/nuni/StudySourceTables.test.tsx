@@ -1345,6 +1345,7 @@ it('selects verbatim source table lines with a focusable one-tap control', () =>
   expect(document.activeElement).toBe(field);
   expect(field?.selectionStart).toBe(0);
   expect(field?.selectionEnd).toBe(field?.value.length);
+  expect(screen.getByRole('status').textContent).toContain('瀏覽器回報已全選');
   expect(field?.value).toContain('SQL \\| NoSQL');
   expect(field?.value).not.toContain('序言');
   expect(field?.value).not.toContain('結尾');
@@ -1405,8 +1406,30 @@ it('leaves the original text available if both selection APIs fail', () => {
   expect(field.readOnly).toBe(true);
   expect(field.value).toContain('| 計算機概論 | 2 | 205 |');
   expect(document.activeElement).toBe(field);
+  expect(screen.getByRole('status').textContent).toContain('瀏覽器未確認全選');
 });
 
+it('reports silently ignored WebView selection instead of promising a copy', () => {
+  const view = render(<StudySourceTables text={source} />);
+  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+  const field = view.container.querySelector('textarea');
+  expect(field).not.toBeNull();
+  if (!field) return;
+  field.setSelectionRange(1, 2);
+  field.blur();
+  for (const method of ['focus', 'select', 'setSelectionRange'] as const) {
+    Object.defineProperty(field, method, {
+      configurable: true,
+      value: () => { /* A WebView can ignore selection without throwing. */ },
+    });
+  }
+  fireEvent.click(screen.getByRole('button', { name: '全選第 1 張表格原文' }));
+  expect(field.selectionStart).toBe(1);
+  expect(field.selectionEnd).toBe(2);
+  expect(screen.getByRole('status').textContent).toContain('瀏覽器未確認全選');
+  expect(field.readOnly).toBe(true);
+  expect(field.value).toContain('| 計算機概論 | 2 | 205 |');
+});
 
 it('selects an exact individual source row without reconstructing cells or copying other rows', () => {
   const view = render(<StudySourceTables text={source} />);
