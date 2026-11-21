@@ -94,6 +94,10 @@ function BoardsContent() {
   const intentCounter = useRef(0);
   // Boards whose current batch of in-flight writes included a failure.
   const failedSinceIdle = useRef(new Set<string>());
+  // Last server-confirmed subscription set. Optimistic taps never write this;
+  // a failed latest write rolls back here instead of to the previous tap.
+  const confirmedSubscribedRef = useRef<Set<string>>(new Set());
+  const lastConfirmedIntent = useRef(new Map<string, number>());
   // Mirrors `subscribed` synchronously so two presses before a rerender toggle
   // from the newest optimistic state instead of a stale closure.
   const subscribedRef = useRef<Set<string>>(new Set());
@@ -118,6 +122,7 @@ function BoardsContent() {
     try {
       if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
         setBoards([]);
+        confirmedSubscribedRef.current = new Set();
         applySubscribed(() => new Set());
         return;
       }
@@ -127,13 +132,19 @@ function BoardsContent() {
       ]);
       if (loadVersion.current !== version) return;
       setBoards(rows);
+      const keepLocal = new Set(pendingSubscriptionCounts.current.keys());
+      for (const [id, revision] of boardWriteRevision.current) {
+        if (revision > subscriptionRevisionAtRead) keepLocal.add(id);
+      }
+      const nextConfirmed = new Set(subs);
+      for (const id of keepLocal) {
+        if (confirmedSubscribedRef.current.has(id)) nextConfirmed.add(id);
+        else nextConfirmed.delete(id);
+      }
+      confirmedSubscribedRef.current = nextConfirmed;
       appliedReadRevision.current += 1;
       applySubscribed((previous) => {
         const next = new Set(subs);
-        const keepLocal = new Set(pendingSubscriptionCounts.current.keys());
-        for (const [id, revision] of boardWriteRevision.current) {
-          if (revision > subscriptionRevisionAtRead) keepLocal.add(id);
-        }
         for (const id of keepLocal) {
           if (previous.has(id)) next.add(id);
           else next.delete(id);
@@ -145,6 +156,7 @@ function BoardsContent() {
       const code = (cause as { code?: string })?.code ?? '';
       if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
         setBoards([]);
+        confirmedSubscribedRef.current = new Set();
         appliedReadRevision.current += 1;
         applySubscribed(() => new Set());
       }
@@ -175,6 +187,10 @@ function BoardsContent() {
       if ((boardWriteRevision.current.get(boardId) ?? -1) > revisionAtRead) return;
       if (appliedReadRevision.current !== appliedReadAtStart) return;
       if (latestIntent.current.get(boardId) !== intentAtStart) return;
+      const nextConfirmed = new Set(confirmedSubscribedRef.current);
+      if (serverSubscribed) nextConfirmed.add(boardId);
+      else nextConfirmed.delete(boardId);
+      confirmedSubscribedRef.current = nextConfirmed;
       applySubscribed((previous) => {
         if (previous.has(boardId) === serverSubscribed) return previous;
         const next = new Set(previous);
@@ -238,7 +254,6 @@ function BoardsContent() {
       latestIntent.current.set(b.id, intent);
       pendingSubscriptionCounts.current.set(b.id, (pendingSubscriptionCounts.current.get(b.id) ?? 0) + 1);
       subscriptionRevision.current += 1;
-      const priorRevision = boardWriteRevision.current.get(b.id);
       boardWriteRevision.current.set(b.id, subscriptionRevision.current);
       setPendingSubscriptions(new Set(pendingSubscriptionCounts.current.keys()));
       const optimistic = new Set(subscribedRef.current);
@@ -261,19 +276,16 @@ function BoardsContent() {
         failed = true;
         failedSinceIdle.current.add(b.id);
         const isLatest = latestIntent.current.get(b.id) === intent;
-        // A failed write changed nothing on the server, so it must not make
-        // this board's local state outrank refreshes that started earlier.
-        if (isLatest) {
-          if (priorRevision === undefined) boardWriteRevision.current.delete(b.id);
-          else boardWriteRevision.current.set(b.id, priorRevision);
-        }
+        // Do not restore boardWriteRevision on failure: a list read that
+        // started during this write may still be carrying an unconfirmed
+        // cache snapshot, and must not overwrite the rollback later.
         // A delayed failure from the previous user/school must not alert or
         // revert the currently mounted student's board subscriptions. An older
         // failure is superseded by the student's newer tap on the same board.
         if (mounted.current && isLatest) {
           applySubscribed((previous) => {
             const next = new Set(previous);
-            if (wasSub) next.add(b.id);
+            if (confirmedSubscribedRef.current.has(b.id)) next.add(b.id);
             else next.delete(b.id);
             return next;
           });
@@ -286,6 +298,13 @@ function BoardsContent() {
         subscriptionRevision.current += 1;
         const isLatest = latestIntent.current.get(b.id) === intent;
         if (!failed && isLatest) boardWriteRevision.current.set(b.id, subscriptionRevision.current);
+        if (!failed && (lastConfirmedIntent.current.get(b.id) ?? 0) < intent) {
+          lastConfirmedIntent.current.set(b.id, intent);
+          const nextConfirmed = new Set(confirmedSubscribedRef.current);
+          if (target) nextConfirmed.add(b.id);
+          else nextConfirmed.delete(b.id);
+          confirmedSubscribedRef.current = nextConfirmed;
+        }
         if (mounted.current) setPendingSubscriptions(new Set(pendingSubscriptionCounts.current.keys()));
       }
       // The rollback above is only the pre-tap guess; a snapshot taken during

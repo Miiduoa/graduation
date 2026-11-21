@@ -526,6 +526,51 @@ test('a late failed-write re-read never restores a board after access is revoked
   expect(view.queryByLabelText('取消訂閱讀書會')).toBeNull();
 });
 
+test('two failed presses before a rerender roll back to the last confirmed state', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const first = deferred();
+  const second = deferred();
+  jest.mocked(subscribeToBoard).mockImplementationOnce(() => first.promise);
+  jest.mocked(unsubscribeFromBoard).mockImplementationOnce(() => second.promise);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+  const button = view.getByLabelText('訂閱讀書會');
+  await act(async () => { fireEvent.press(button); fireEvent.press(button); });
+  jest.mocked(isSubscribedToBoard).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => { first.reject(new Error('offline')); });
+  await act(async () => { second.reject(new Error('offline')); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+  await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+  expect(subscribeToBoard).toHaveBeenCalledTimes(2);
+  expect(unsubscribeFromBoard).toHaveBeenCalledTimes(1);
+});
+
+test('a late list snapshot taken during a failed write never restores the unconfirmed change', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  const rows = deferred<typeof board[]>();
+  const subs = deferred<string[]>();
+  jest.mocked(listBoards).mockImplementationOnce(() => rows.promise as any);
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
+  const write = deferred();
+  jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
+
+  let refreshPromise!: Promise<void>;
+  act(() => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+
+  await act(async () => { subs.resolve(['board']); });
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(false);
+  await act(async () => { write.reject(new Error('offline')); });
+  expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  await act(async () => { rows.resolve([board]); await refreshPromise; });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+});
+
 test('two native presses before a rerender toggle from the newest choice', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const view = render(<BoardsScreen />);
