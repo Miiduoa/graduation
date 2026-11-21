@@ -2789,7 +2789,8 @@ describe('firestore security rules', () => {
     await assertFails(carolDb.doc(nested).get({ source: 'server' }));
     await assertFails(carolDb.doc(legacy).get({ source: 'server' }));
     await assertFails(carolDb.doc(revision).get({ source: 'server' }));
-    await assertSucceeds(aliceDb.doc(review).get({ source: 'server' }));
+    // This historical peer review embeds teacherNotes: student GET must fail closed.
+    await assertFails(aliceDb.doc(review).get({ source: 'server' }));
 
     // Old membership remains active, but the profile has a conflicting school.
     // The same authenticated client must lose every staff-only route immediately.
@@ -2819,6 +2820,52 @@ describe('firestore security rules', () => {
     await seedFirestore((db) => db.doc('users/teacher').set(campusBoundProfile('pu')));
     await allowStaffReads();
     await assertSucceeds(teacherDb.doc(extraReview).delete());
+  });
+
+  test('private teacher peer-review notes never leak through student document GET', async () => {
+    const group = 'groups/staff-only-peer-review-1';
+    const receipt = group + '/assignments/work-1/peerReviews/alice';
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      for (const [uid, role] of [
+        ['teacher', 'instructor'], ['alice', 'member'],
+        ['bob', 'member'], ['carol', 'member'],
+      ]) {
+        await db.doc('users/' + uid).set(campusBoundProfile('pu'));
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+        await db.doc(group + '/members/' + uid).set({ status: 'active', role });
+      }
+      await db.doc(receipt).set({
+        reviewerId: 'alice', submissionOwnerId: 'bob',
+        submittedAt: new Date('2026-11-01T00:00:00Z'),
+        comment: 'Constructive feedback', teacherNotes: 'Confidential staff assessment',
+      });
+    });
+    const teacher = testEnv.authenticatedContext('teacher').firestore().doc(receipt);
+    const reviewer = testEnv.authenticatedContext('alice').firestore().doc(receipt);
+    const owner = testEnv.authenticatedContext('bob').firestore().doc(receipt);
+    const unrelated = testEnv.authenticatedContext('carol').firestore().doc(receipt);
+
+    await assertSucceeds(teacher.get({ source: 'server' }));
+    await assertFails(reviewer.get({ source: 'server' }));
+    await assertFails(owner.get({ source: 'server' }));
+    await assertFails(unrelated.get({ source: 'server' }));
+    await assertFails(reviewer.get({ source: 'server' }));
+
+    // A synthetic, authorized removal of staff-only fields restores feedback.
+    await seedFirestore(db => db.doc(receipt).update({ teacherNotes: deleteField() }));
+    await assertSucceeds(reviewer.get({ source: 'server' }));
+    await assertSucceeds(owner.get({ source: 'server' }));
+    await assertFails(unrelated.get({ source: 'server' }));
+
+    await seedFirestore(db => db.doc(receipt).update({ teacherNotes: 'New staff note' }));
+    await assertFails(reviewer.get({ source: 'server' }));
+    await assertFails(owner.get({ source: 'server' }));
+    await assertSucceeds(teacher.get({ source: 'server' }));
+    await seedFirestore(db => db.doc('users/teacher').update({ primarySchoolId: 'other' }));
+    await assertFails(teacher.get({ source: 'server' }));
+    await seedFirestore(db => db.doc('users/teacher').update({ primarySchoolId: 'pu' }));
+    await assertSucceeds(teacher.get({ source: 'server' }));
   });
 
   test('gradebook owner and teacher grants require current course and canonical campus membership', async () => {

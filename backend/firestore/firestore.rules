@@ -608,9 +608,12 @@ service cloud.firestore {
         && change.revision == previous.get('gradeRevisionCount', 0) + 1;
     }
 
+    // A peer review with staff-only notes must not be returned whole to a
+    // learner; historical mixed documents fail closed until notes are separated.
     function canReadPeerReviewDoc(groupId, assignmentId, reviewerId, data) {
       return canManageCurrentGroup(groupId)
-        || (isActiveCurrentGroupMember(groupId)
+        || (!data.keys().hasAny(['teacherNotes'])
+          && isActiveCurrentGroupMember(groupId)
           && (reviewerId == request.auth.uid
             || (data.submissionOwnerId == request.auth.uid && data.submittedAt != null)));
     }

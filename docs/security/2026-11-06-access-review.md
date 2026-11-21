@@ -1011,3 +1011,10 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **獨立未結案的資料界線**：同儕互評收據若把 `teacherNotes` 與學生可讀的回饋置於同一個 Firestore 文件，Rules 無法只隱藏個別欄位；需核對 Web/Mobile 與教師資料存放方式，必要時採獨立教師私密文件與相容移轉。此處不宣稱教師備註具欄位級保密。
 
 - **第二次隔離回饋與範圍收斂**：優化 helper 之精確 SHA `d6ada6323a898d2bd7f1953b2a3edbd2d350af8b`，Firestore Actions #44867873317 仍因 Rules 1000 expressions 上限導致 4/550 失敗（546 通過），涉及非教師評閱路徑、合法首次評分與原子更正。為先恢復原有功能，保留上一版已驗證的敏感讀取／互評權限檢查，但恢復未改前的教師 grade update 與 gradeRevision create 原始謂詞；**教師校籍衝突期間寫入成績及修訂仍是未修復風險**，不得把本補丁宣稱涵蓋寫入撤權。後續需重構 grade 規則分支以留出 expression budget，或將校籍核驗透過不可偽造的資料模型整合後重跑 atomic correction。新 SHA 回歸仍需核對，正式發布不可用未驗證提交。
+
+### 2026-11-21｜同儕互評教師備註整筆 GET 的敏感欄位隔離（新分支候選）
+
+- 來源缺口：`groups/{groupId}/assignments/{assignmentId}/peerReviews/{reviewerId}` 對學生評閱者與被評閱者 GET 會返回**完整**文件，包括同份收據混放的 `teacherNotes`。既有合成案例實際包含 `teacherNotes: 'Restricted teacher note'`，先前卻將學生 GET 視為成功。這是可由 Rules 與資料模式推斷的敏感資訊暴露路徑，**不是**正式環境有外洩的證據。Firebase 官方明確指出 Rules 無法做欄位級讀取遮蔽（https://firebase.google.com/docs/firestore/security/rules-fields）。
+- 最小 fail-closed 防線：對含 `teacherNotes` 的既有混合文件，學生評閱者／被評閱者的整筆 GET 改為拒絕，仍僅允許具即時校籍及課程教師權限者讀；不含該欄位的普通評閱內容正常可讀，未修改寫入許可。此規則也會讓含空字串 `teacherNotes` 的舊收據暫時無法由學生 GET，須完成歷史資料盤點與合法分離遷移後恢復相容；不能直接將資料清掉。
+- 合成 Emulator 回歸：教師正常讀取，評閱者與被評閱學生拒讀混合欄位，無關同學拒讀，重放拒絕，合成移除教師備註後正常讀取恢復、重新加入備註即撤權，教師轉校雙欄位衝突拒絕與恢復。既有測試中含 `teacherNotes` 的學生 GET 預期改為拒絕。
+- **隔離驗證與發布**：本次仍需依新 SHA GitHub Firestore 工作流程核對結果；完整 CI、CodeQL、Supabase permissions、Python、Mobile Agent、適用 Maestro 及指定 App 5504170 精確 head 核可不得繼承。後續需將真正 staff-only 欄位拆到僅教師可讀的獨立文件、做受控且可回復的歷史資料遷移及 Web/Mobile 讀取相容測試。其他 `gradeScore` 等欄位是否屬於教師私密資料，須按資料契約獨立調查。教師部分轉校的評分寫入撤權、GCS/Supabase 已發網址撤權及 Storage CAS 仍未結案。未處理正式資料、金鑰、附件 token、migration、部署或 E 校園，也不執行未授權 npm/pnpm audit。
