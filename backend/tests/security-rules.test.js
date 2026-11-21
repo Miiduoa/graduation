@@ -2937,6 +2937,77 @@ describe('firestore security rules', () => {
     await assertSucceeds(teacher.get({ source: 'server' }));
   });
 
+  test('mis-keyed peer-review assignments cannot read another student submission', async () => {
+    const groupId = 'review-assignment-owner-1';
+    const group = 'groups/' + groupId;
+    const assignmentId = 'task-1';
+    const review = group + '/assignments/' + assignmentId + '/peerReviews/alice';
+    const nested = group + '/assignments/' + assignmentId + '/submissions/bob';
+    const legacy = 'submissions/review-assignment-owner-legacy';
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      await db.doc(group + '/assignments/' + assignmentId).set({ type: 'assignment' });
+      for (const [uid, role] of [
+        ['alice', 'member'], ['bob', 'member'], ['teacher', 'instructor'],
+      ]) {
+        await db.doc('users/' + uid).set({ status: 'active', schoolId: 'pu', primarySchoolId: 'pu' });
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active', role: 'student' });
+        await db.doc(group + '/members/' + uid).set({ status: 'active', role });
+      }
+      await db.doc(nested).set({ userId: 'bob', content: 'Private graded work' });
+      await db.doc(legacy).set({
+        groupId, assignmentId, userId: 'bob', content: 'Private legacy graded work',
+      });
+      // Imported assignment is indexed under Alice's path but belongs to
+      // teacher; Alice must not inherit the private submission capability.
+      await db.doc(review).set({ reviewerId: 'teacher', submissionOwnerId: 'bob' });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const denyAlice = async () => {
+      await assertFails(alice.doc(nested).get({ source: 'server' }));
+      await assertFails(alice.doc(legacy).get({ source: 'server' }));
+    };
+    const allowAlice = async () => {
+      await assertSucceeds(alice.doc(nested).get({ source: 'server' }));
+      await assertSucceeds(alice.doc(legacy).get({ source: 'server' }));
+    };
+
+    await denyAlice();
+    await assertSucceeds(bob.doc(nested).get({ source: 'server' }));
+    await assertSucceeds(bob.doc(legacy).get({ source: 'server' }));
+    await assertSucceeds(teacher.doc(nested).get({ source: 'server' }));
+    await assertSucceeds(teacher.doc(legacy).get({ source: 'server' }));
+
+    await seedFirestore(db => db.doc(review).update({ reviewerId: 'alice' }));
+    await allowAlice();
+    // Explicit null is not equivalent to a missing owner field.
+    await seedFirestore(db => db.doc(review).update({ reviewerId: null }));
+    await denyAlice();
+    // Truly old receipts lacking reviewerId retain the legacy read contract.
+    await seedFirestore(db => db.doc(review).set({ submissionOwnerId: 'bob' }));
+    await allowAlice();
+
+    // Revocation applies to the same authenticated client, including replays.
+    await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'other' }));
+    await denyAlice();
+    await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'pu' }));
+    await allowAlice();
+    await seedFirestore(db => db.doc(group + '/members/alice').update({ status: 'removed' }));
+    await denyAlice();
+    await seedFirestore(db => db.doc(group + '/members/alice').update({ status: 'active' }));
+    await allowAlice();
+    await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'revoked' }));
+    await denyAlice();
+    await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'active' }));
+    await allowAlice();
+    // A later conflicting import must immediately revoke the derived access.
+    await seedFirestore(db => db.doc(review).update({ reviewerId: 'teacher' }));
+    await denyAlice();
+  });
+
   test('gradebook owner and teacher grants require current course and canonical campus membership', async () => {
     const group = 'groups/gradebook-revoke-1';
     const row = `${group}/gradebook/bob`;

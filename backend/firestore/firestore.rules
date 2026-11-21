@@ -463,10 +463,14 @@ service cloud.firestore {
     }
 
     function isAssignedReviewer(groupId, assignmentId, submissionId, data) {
+      let receiptPath = /databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/peerReviews/$(request.auth.uid);
       return isActiveCurrentGroupMember(groupId)
-        && exists(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/peerReviews/$(request.auth.uid))
-        && get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/peerReviews/$(request.auth.uid)).data.submissionOwnerId
-          == submissionOwnerId(data, submissionId);
+        && exists(receiptPath)
+        // A review assignment stored at Alice's path but explicitly owned by
+        // another reviewer must never reveal that student's private submission.
+        // Only genuinely missing reviewerId fields keep legacy read support.
+        && get(receiptPath).data.get('reviewerId', request.auth.uid) == request.auth.uid
+        && get(receiptPath).data.submissionOwnerId == submissionOwnerId(data, submissionId);
     }
 
     function canReadSubmissionDoc(groupId, assignmentId, submissionId, data) {

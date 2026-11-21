@@ -1026,3 +1026,13 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **最小修補：** 學生 GET 若收據有 `reviewerId` 欄位，須同時與路徑及登入者一致；僅完全缺欄的歷史文件保留路徑 GET 相容，明確 null／衝突均拒絕。學生 UPDATE 則必須有明確且與登入者一致的原始 `reviewerId`，不能自行修復他人的收據；教師原有的合法修正及已提交的被評閱者讀取仍保留。`teacherNotes` 的整筆 GET 拒讀保持原安全規則。
 - **可重跑回歸：** `backend/tests/security-rules.test.js` 新增合成 Firestore Emulator 情境，測試跨帳號讀／寫雙拒絕、被評閱者及教師正常讀取、教師修正後合法回饋、同一 token 的跨校欄位衝突／退課撤權／重放、重新授權、再次錯綁撤權及缺欄 legacy GET。推送前未在本環境執行 Firebase Emulator，須核對**精確新 SHA** 的 feature-only Firestore workflow 實際結果；其他測試與正式資料不以靜態推演代替。
 - **發布與已知限制：** 有明確錯綁的歷史收據會拒絕路徑學生讀寫，應離線盤點及教師修正，而不可放寬授權。提交前已確認 main `27ad30c0a098908b2161950303fcf9209764a083`，來源 security 三檔未被 main 新增提交改動；使用原 feature 分支、原 head `1e6090abb2eae7c652eaff7be680215a8b202ed6` 的 `expected_sha` 非強制前進，避免影響其他排程。新 SHA 尚需完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro 及指定 App 5504170 的精確「審查通過」；舊 #517/#577 核可無效。既有 npm/pnpm audit 外送拒絕仍維持，不新增可觸發外送流程的 PR，不合併或部署；無正式資料／金鑰／附件 token／migration／E 校園。另有 GCS／Supabase 已發網址撤權、真 Storage CAS、教師跨校 grading 寫入及歷史 staff-only 欄位遷移待驗證。
+
+
+### 2026-11-22｜錯綁互評指派不可衍生作業收據讀取權（隔離候選）
+
+- **精確起點：** 已核對 main `d31a3faa5a36dd12ce559be49aac75a92fca1bfc` 與既有安全 feature head `e8a7d95062a946fbb99a24a7ce678ebc7de8cba2`，當時 ahead 15／behind 13；#517、#577 均已合併，不能沿用原 PR 核可。舊 head 的 Firestore workflow #44905419074 已成功，新的精確 SHA 必須另驗。
+- **新的授權缺口：** `isAssignedReviewer` 只依 `peerReviews/{request.auth.uid}` 路徑存在及 `submissionOwnerId` 判定是否可 GET 同學私人作業，未核對該收據內明確的 `reviewerId`。因此一份匯入錯綁為路徑 Alice、明確 `reviewerId = teacher`、`submissionOwnerId = Bob` 的指派，即使先前的 `peerReviews` GET/UPDATE 修補已保護評閱文件，仍可由 Alice 經巢狀或根目錄的 `submissions` 讀取 Bob 私人提交內容。這是程式碼推得的可利用授權路徑，不代表已發生正式資料錯綁或外洩。
+- **最小修補：** 共用 `isAssignedReviewer` 新增實際收據 `reviewerId` 與登入者一致判斷；明確 null 或衝突拒絕，只有欄位**真正缺失**的歷史收據維持讀取相容。維持本人、現職教師、合法指定評閱者原授權，不改動寫入與正式資料。
+- **合成回歸：** `backend/tests/security-rules.test.js` 增加同一登入 context 的巢狀／根目錄私人作業雙路徑、錯綁拒讀、本人／教師允許、修復後允許、null 拒絕、歷史無欄位相容、跨校校籍衝突、課程與學校撤權／恢復，以及後續再次錯綁立即撤權。
+- **驗證與發布界線：** 此份原始碼／測試候選尚待精確新 SHA Firestore emulator GitHub workflow 成果；完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro 與 nuni-merge-gate App 5504170 對精確 head 的「審查通過」均不得從先前版本繼承。不得自行合併或部署。歷史錯綁資料、教師成績寫入撤權、含教師備註舊資料分離、真 GCS／Supabase 已發網址、Storage CAS、minimatch 雙鎖檔及回復驗證仍未結案。
+- **安全操作：** 僅合成測試；不接觸正式資料、金鑰、附件 token、migration、E 校園，不執行或繞道遭拒絕的 npm／pnpm audit。
