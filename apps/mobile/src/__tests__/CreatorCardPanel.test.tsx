@@ -1,5 +1,5 @@
 import React from 'react';
-import { Linking, Pressable } from 'react-native';
+import { Linking } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { CreatorCardPanel } from '../screens/social/CreatorCardPanel';
 import { readCreatorCard, saveCreatorCard } from '../services/creatorCard';
@@ -10,7 +10,11 @@ jest.mock('../services/creatorCard', () => ({
 }));
 
 beforeEach(() => {
+  // resetAllMocks on these two services prevents an unconsumed one-shot
+  // implementation in a failed test from leaking into the next student's flow.
   jest.clearAllMocks();
+  jest.mocked(readCreatorCard).mockReset();
+  jest.mocked(saveCreatorCard).mockReset();
   jest.mocked(readCreatorCard).mockResolvedValue(null);
   jest.mocked(saveCreatorCard).mockResolvedValue({
     headline: '校園攝影', bio: '分享校園生活', linkUrl: '',
@@ -71,10 +75,14 @@ test('rapid taps never duplicate an ambiguous save before a fresh server check',
   const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
   fireEvent.press(await view.findByLabelText('建立社群簡介'));
   fireEvent.changeText(view.getByLabelText('個人簡介'), '校園社團活動與攝影作品');
-  // Retain the actual composite Pressable callback before its disabled state
-  // is committed. The host View returned by getByLabelText has no onPress.
-  const staleOnPress = view.UNSAFE_getAllByType(Pressable)
-    .find((node) => node.props.accessibilityLabel === '儲存簡介')?.props.onPress as (() => void) | undefined;
+  // Retain CardButton's actual onPress closure before the disabled state
+  // commits. React Native renders Pressable as a host View in this Jest
+  // renderer; querying by Pressable type throws "No instances found".
+  // The CardButton composite retains the original submit callback so the
+  // test still exercises an outdated handler, not just a disabled host View.
+  const staleOnPress = view.UNSAFE_root.findAll((node) =>
+    node.props.label === '儲存簡介' && typeof node.props.onPress === 'function'
+  )[0]?.props.onPress as (() => void) | undefined;
   expect(staleOnPress).toEqual(expect.any(Function));
   act(() => {
     const saveButton = view.getByLabelText('儲存簡介');
