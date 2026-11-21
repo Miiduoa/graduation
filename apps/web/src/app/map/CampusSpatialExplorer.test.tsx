@@ -92,10 +92,15 @@ it('refuses contradictory host DOMRect bounds until WebView layout recovers with
     ...validRect, right: validRect.left,
   });
   try {
+    // The legacy viewport shim omits DOMRect coordinates, but the observer
+    // entry itself must satisfy the complete browser type contract.
     act(() => intersection?.([{
       isIntersecting: true, target: graphics, time: 1,
-      intersectionRect: { width: 280, height: 160 },
-    }] as IntersectionObserverEntry[], {} as IntersectionObserver));
+      intersectionRect: { width: 280, height: 160 } as DOMRect,
+      boundingClientRect: validRect,
+      rootBounds: validRect,
+      intersectionRatio: 1,
+    } satisfies IntersectionObserverEntry], {} as IntersectionObserver));
     expect(scene.create).not.toHaveBeenCalled();
     expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
 
