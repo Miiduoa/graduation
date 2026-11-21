@@ -2822,6 +2822,71 @@ describe('firestore security rules', () => {
     await assertSucceeds(teacherDb.doc(extraReview).delete());
   });
 
+  test('course assignment metadata writes revoke immediately on canonical school transfer', async () => {
+    const group = 'groups/assignment-campus-transfer-1';
+    const base = group + '/assignments/';
+    const draft = base + 'draft';
+    const published = base + 'published';
+    const fresh = base + 'new-assignment';
+
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      await db.doc('users/teacher').set(campusBoundProfile('pu'));
+      await db.doc('users/bob').set(campusBoundProfile('pu'));
+      for (const uid of ['teacher', 'bob']) {
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+        await db.doc(group + '/members/' + uid).set({
+          status: 'active', role: uid === 'teacher' ? 'instructor' : 'member',
+        });
+      }
+      await db.doc(draft).set({ type: 'resource', title: 'Instructor draft' });
+      await db.doc(published).set({
+        type: 'assignment', title: 'Published task', description: 'Work',
+        createdBy: 'teacher', published: true, status: 'published',
+        allowLateSubmission: false, dueAt: null, points: 100,
+      });
+    });
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const revised = (title) => ({
+      title, lastEditedBy: 'teacher', updatedAt: serverTimestamp(),
+    });
+    const cannotWrite = async () => {
+      await assertFails(teacher.doc(fresh).set({ type: 'assignment', title: 'Unexpected' }));
+      await assertFails(teacher.doc(draft).update({ title: 'Unauthorized edit' }));
+      await assertFails(teacher.doc(draft).delete());
+      await assertFails(teacher.doc(published).update(revised('Unauthorized published edit')));
+    };
+
+    await assertSucceeds(teacher.doc(fresh).set({ type: 'assignment', title: 'Legitimate task' }));
+    await assertSucceeds(teacher.doc(draft).update({ title: 'Legitimate edit' }));
+    await assertSucceeds(teacher.doc(published).update(revised('Legitimate published edit')));
+    await assertFails(bob.doc(fresh).set({ type: 'assignment', title: 'Student escalation' }));
+
+    // The old school and course membership remain active. The same signed-in
+    // teacher must lose every write when either server-owned school ID diverges.
+    await seedFirestore(db => db.doc('users/teacher').update({ primarySchoolId: 'other' }));
+    await cannotWrite();
+    await cannotWrite();
+    await seedFirestore(db => db.doc('users/teacher').update({ primarySchoolId: 'pu', schoolId: 'other' }));
+    await cannotWrite();
+    await seedFirestore(db => db.doc('users/teacher').update({ schoolId: 'pu' }));
+
+    await seedFirestore(db => db.doc(group + '/members/teacher').update({ status: 'removed' }));
+    await cannotWrite();
+    await seedFirestore(db => db.doc(group + '/members/teacher').update({ status: 'active' }));
+    await seedFirestore(db => db.doc('schools/pu/members/teacher').update({ status: 'removed' }));
+    await cannotWrite();
+    await seedFirestore(db => db.doc('schools/pu/members/teacher').update({ status: 'active' }));
+    await seedFirestore(db => db.doc('users/teacher').update({ status: 'suspended' }));
+    await cannotWrite();
+    await seedFirestore(db => db.doc('users/teacher').set(campusBoundProfile('pu')));
+
+    await assertSucceeds(teacher.doc(fresh).set({ type: 'assignment', title: 'Restored task' }));
+    await assertSucceeds(teacher.doc(published).update(revised('Restored published edit')));
+    await assertSucceeds(teacher.doc(draft).delete());
+  });
+
   test('private teacher peer-review notes never leak through student document GET', async () => {
     const group = 'groups/staff-only-peer-review-1';
     const receipt = group + '/assignments/work-1/peerReviews/alice';

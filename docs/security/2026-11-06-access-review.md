@@ -1036,3 +1036,10 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **合成回歸：** `backend/tests/security-rules.test.js` 增加同一登入 context 的巢狀／根目錄私人作業雙路徑、錯綁拒讀、本人／教師允許、修復後允許、null 拒絕、歷史無欄位相容、跨校校籍衝突、課程與學校撤權／恢復，以及後續再次錯綁立即撤權。
 - **驗證與發布界線：** 此份原始碼／測試候選尚待精確新 SHA Firestore emulator GitHub workflow 成果；完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro 與 nuni-merge-gate App 5504170 對精確 head 的「審查通過」均不得從先前版本繼承。不得自行合併或部署。歷史錯綁資料、教師成績寫入撤權、含教師備註舊資料分離、真 GCS／Supabase 已發網址、Storage CAS、minimatch 雙鎖檔及回復驗證仍未結案。
 - **安全操作：** 僅合成測試；不接觸正式資料、金鑰、附件 token、migration、E 校園，不執行或繞道遭拒絕的 npm／pnpm audit。
+
+### 2026-11-22｜舊校課程管理員仍可操作作業設定的寫入邊界（獨立修補候選）
+
+- **來源與危害**：`groups/{groupId}/assignments/{assignmentId}` 的建立、更新、刪除沿用 `canManageGroup`，只檢查舊校／舊課程 membership；在 canonical `schoolId` 或 `primarySchoolId` 已轉校，但舊 membership 未同步撤銷的期間，登入中的舊教師仍可新增課程作業、修改既有發佈內容，或刪除非正式 assignment 項目。與已修的私人收據讀取權限不一致。此為來源規則缺口，非正式站實際利用證據。
+- **最小修補**：僅將這個 `assignments` 路徑的 `allow create`／`allow update`／`allow delete` 改用既有 `canManageCurrentGroup(groupId)`；不改學生成績原子更正、儲存或其他群組權限。既有 helper 要求仍有效的群組／校籍 member 與帳號雙校籍一致，已知單欄歷史帳號仍支援。
+- **可重現測試**：新增 `course assignment metadata writes revoke immediately on canonical school transfer` 真 Firebase Emulator 案例，合法教師建立、更新及刪除／更新已發佈作業、學生越權、同登入 token 的雙向轉校衝突、課程／校籍撤銷、停權、連續重放和恢復。另以獨立 test-only 分支保留原規則重現。新提交後須核對精確 SHA 的 Actions 成功結果，不以靜態比對宣稱通過。
+- **合併及發布限制**：本變更不代表其他 `canManageGroup` 路徑或成績修改原子交易已加固。尤其 `submissions` 成績寫入與 `gradeRevisions` 的跨校一致性仍受 Firestore Rules expression budget 限制，須另行分解；GCS／Supabase 已發網址撤銷、真 Storage 競態、歷史資料移轉及正式發布驗收也尚未完成。沿用原 feature branch 與 `expected_sha`，不自行合併、部署或代簽 App 5504170；未使用正式資料／金鑰／E 校園，不重跑被拒的 npm/pnpm audit。

@@ -1492,10 +1492,10 @@ service cloud.firestore {
 
       match /assignments/{assignmentId} {
         allow read: if isActiveGroupMember(groupId);
-        allow create: if canManageGroup(groupId);
+        allow create: if canManageCurrentGroup(groupId);
         // Published text assignments can only be edited by their author.
         // Another course manager must not alter points, identity, or publication state.
-        allow update: if canManageGroup(groupId)
+        allow update: if canManageCurrentGroup(groupId)
           && (
             (
               resource.data.get('type', '') != 'assignment'
@@ -1525,7 +1525,7 @@ service cloud.firestore {
               && request.resource.data.get('updatedAt', null) == request.time
             )
           );
-        allow delete: if canManageGroup(groupId)
+        allow delete: if canManageCurrentGroup(groupId)
           && resource.data.get('type', '') != 'assignment';
 
         match /submissions/{submissionId} {
