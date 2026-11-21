@@ -145,6 +145,63 @@ it('disambiguates same-name campus markers before opening walking or flat-map na
   expect(onSelect).toHaveBeenCalledWith(duplicatePlaces[2]);
 });
 
+it('reveals and copies the original POI marker coordinate without claiming an entrance or stale selection', async () => {
+  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  let finishFirstCopy: (() => void) | undefined;
+  const writeText = vi.fn()
+    .mockImplementationOnce(() => new Promise<void>((resolve) => { finishFirstCopy = resolve; }))
+    .mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const picker = within(dialog).getByRole('combobox', { name: '想去哪裡' });
+    const copyButton = within(dialog).getByRole('button', { name: '複製地圖標記座標' });
+
+    expect(within(dialog).getByText('地圖標記座標：24.226, 120.58（非建築入口）')).toBeTruthy();
+    expect(copyButton.getAttribute('aria-describedby')).toBeTruthy();
+    expect(writeText).not.toHaveBeenCalled();
+    fireEvent.click(copyButton);
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('24.226,120.58');
+
+    // Clipboard permission may remain unresolved while the student switches POIs.
+    // The old operation must never announce success for a newly selected marker.
+    fireEvent.change(picker, { target: { value: 'dorm' } });
+    expect(within(dialog).getByText('地圖標記座標：24.228, 120.582（非建築入口）')).toBeTruthy();
+    await act(async () => { finishFirstCopy?.(); });
+    expect(within(dialog).queryByText('已複製目前地點標記座標。')).toBeNull();
+
+    fireEvent.click(copyButton);
+    expect(writeText).toHaveBeenLastCalledWith('24.228,120.582');
+    await waitFor(() => expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy());
+    const google = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+    const apple = new URL(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' }).getAttribute('href')!);
+    expect(google.searchParams.get('destination')).toBe('24.228,120.582');
+    expect(apple.searchParams.get('daddr')).toBe('24.228,120.582');
+  } finally {
+    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
+
+it('keeps verified marker coordinates readable when a WebView has no Clipboard API', async () => {
+  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(within(dialog).getByText('地圖標記座標：24.226, 120.58（非建築入口）')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '複製地圖標記座標' }));
+    await waitFor(() => expect(within(dialog).getByText('無法自動複製，請手動選取上方的地圖標記座標。')).toBeTruthy());
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
+
 it('rejects non-finite host DOMRect coordinates before first WebGL allocation and during scene restore', async () => {
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) { intersection = callback; }

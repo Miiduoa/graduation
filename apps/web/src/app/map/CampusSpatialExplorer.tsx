@@ -930,6 +930,29 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     point.id === chosen?.id && spatialDestinationIdentity(point.location) === chosen.identity);
   const showOverview = overview || !selectedPoint;
   const place = selectedPoint?.location;
+  // Show the original marker coordinate even for uniquely named buildings:
+  // students can compare it against a real map before following directions.
+  // Copying is optional because older Safari/WebViews may deny clipboard access.
+  const [coordinateCopyState, setCoordinateCopyState] = useState<'idle' | 'copied' | 'unavailable'>('idle');
+  const markerIdentity = place ? spatialDestinationIdentity(place) : null;
+  const currentMarkerIdentity = useRef(markerIdentity);
+  currentMarkerIdentity.current = markerIdentity;
+  useEffect(() => {
+    setCoordinateCopyState('idle');
+  }, [markerIdentity]);
+  const copyMarkerCoordinates = async () => {
+    if (!place) return;
+    const identity = spatialDestinationIdentity(place);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+      await navigator.clipboard.writeText(`${place.lat},${place.lng}`);
+      // A pending clipboard permission prompt can outlive a POI refresh or
+      // selection change. Do not announce success for a different destination.
+      if (currentMarkerIdentity.current === identity) setCoordinateCopyState('copied');
+    } catch {
+      if (currentMarkerIdentity.current === identity) setCoordinateCopyState('unavailable');
+    }
+  };
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);
   const previousPoint = model.points[index - 1];
   const nextPoint = model.points[index + 1];
@@ -1556,6 +1579,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 <p className={styles.category}>{place.category}</p>
                 <h3 aria-live="polite" aria-atomic="true">{place.name}</h3>
                 {place.description && <p>{place.description}</p>}
+                <p className={styles.note}>地圖標記座標：{place.lat}, {place.lng}（非建築入口）</p>
                 {/* A changing live status distinguishes same-name scene markers even when the heading stays identical. */}
                 {repeatedNames.has(place.name) && (
                   <p className={styles.note} role="status" aria-live="polite" aria-atomic="true">
@@ -1619,6 +1643,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 </button>
                 <a className="btn" href={walkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟步行導航</a>
                 <a className="btn" href={appleWalkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟 Apple 地圖步行導航</a>
+                <button className="btn" type="button" onClick={() => { void copyMarkerCoordinates(); }}
+                  aria-describedby={directionsNoteId}>複製地圖標記座標</button>
+                {coordinateCopyState !== 'idle' && <span className={styles.note} role="status" aria-live="polite">
+                  {coordinateCopyState === 'copied'
+                    ? '已複製目前地點標記座標。'
+                    : '無法自動複製，請手動選取上方的地圖標記座標。'}
+                </span>
                 <p id={directionsNoteId} className={styles.note}>導航僅以目前地點標記為目的地，並非已核實的校舍入口、可通行道路或無障礙動線；請依現場指標確認。</p>
                 <button className="btn" type="button" onClick={() => setBuildingPlanOpen(true)}>平面圖建模預覽</button>
                 {source && <a className={styles.source} href={source} target="_blank" rel="noopener noreferrer">查看地點資料來源 ↗</a>}
