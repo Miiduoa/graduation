@@ -111,6 +111,10 @@ it('disambiguates same-name campus markers before opening walking or flat-map na
   expect(new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!)
     .searchParams.get('destination')).toBe('24.229,120.582');
   expect(scene.create).toHaveBeenCalledTimes(1);
+  // Before taking a step, assistive technology announces which duplicate POI
+  // that button will select. Unambiguous adjacent places keep short labels.
+  expect(within(dialog).getByRole('button', { name: '上一個地點：教學大樓（行政）' })).toBeTruthy();
+  expect(within(dialog).getByRole('button', { name: '下一個地點' })).toBeTruthy();
   // The range control is a second way to choose destinations. Its spoken
   // value must disambiguate duplicate POIs just like the select menu.
   const progress = within(dialog).getByRole('slider', { name: /導覽進度/ }) as HTMLInputElement;
@@ -119,13 +123,17 @@ it('disambiguates same-name campus markers before opening walking or flat-map na
   );
   fireEvent.change(progress, { target: { value: '0' } });
   expect(picker.value).toBe('same-a');
+  expect(within(dialog).getByRole('button', { name: '下一個地點：教學大樓（行政）' })).toBeTruthy();
   expect(progress.getAttribute('aria-valuetext')).toBe(
     '第 1 個地點，共 4 個：教學大樓（教學 · 地圖座標 24.225, 120.58 · 清單第 1 項）',
   );
   fireEvent.change(progress, { target: { value: '3' } });
   expect(picker.value).toBe('unique');
   expect(progress.getAttribute('aria-valuetext')).toBe('第 4 個地點，共 4 個：圖書館');
-  fireEvent.change(progress, { target: { value: '2' } });
+  const previous = within(dialog).getByRole('button', {
+    name: '上一個地點：教學大樓（教學 · 地圖座標 24.229, 120.582 · 清單第 3 項）',
+  });
+  fireEvent.click(previous);
   expect(picker.value).toBe('same-c');
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('button', { name: '在平面地圖查看' }));
