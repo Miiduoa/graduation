@@ -3,6 +3,7 @@ import functools
 import http.server
 import json
 import os
+import shutil
 import threading
 from pathlib import Path
 from urllib.parse import urlencode
@@ -66,6 +67,107 @@ async def check_notification_activity(page, report):
     report['checks'].append('Notification retains its reading time across a real browser tab focus change and expires after returning')
 
 
+async def press_native_tab(key):
+    # CDP Input.dispatchKeyEvent focuses the web widget before *every* event,
+    # including keyUp, undoing a Tab handoff to the browser's own controls.
+    # https://chromium.googlesource.com/chromium/src/+/refs/heads/main/content/browser/devtools/protocol/input_handler.cc
+    # Use XTEST in the headed Xvfb session. No --window, windowactivate,
+    # windowfocus or DOM focus rescue: events go to the current native focus.
+    assert key in ('Tab', 'Shift+Tab'), f'Unsupported native boundary key: {key}'
+    assert os.environ.get('INTERFACE_BROWSER_HEADED') == '1' and os.environ.get('DISPLAY'), (
+        'Native dialog boundary verification requires the headed Xvfb workflow')
+    executable = shutil.which('xdotool')
+    assert executable, 'Native dialog boundary verification requires xdotool; CDP is not a fallback'
+    command = [executable, 'key', '--clearmodifiers', '--delay', '20',
+               'shift+Tab' if key == 'Shift+Tab' else 'Tab']
+    process = await asyncio.create_subprocess_exec(
+        *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    succeeded = False
+    try:
+        _stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=3)
+        assert process.returncode == 0, f'Native keyboard command failed: {stderr.decode()}'
+        succeeded = True
+    finally:
+        if not succeeded:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+            # A terminated key sequence must not leave Shift held for the next
+            # scenario. These are releases only; the original failure propagates.
+            release = await asyncio.create_subprocess_exec(
+                executable, 'keyup', 'Tab', 'Shift_L', 'Shift_R',
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            try:
+                await asyncio.wait_for(release.wait(), timeout=1)
+            except asyncio.TimeoutError:
+                release.kill()
+                await release.wait()
+
+
+async def diagnose_keyboard_transport(browser):
+    # This isolated native-dialog probe explains the input transport. It does
+    # not replace the product's focus checks or contribute a passing scenario.
+    report = {'browserVersion': browser.version, 'diagnosticOnly': True, 'attempts': []}
+    context = None
+    session = None
+    try:
+        context = await browser.new_context(viewport={'width': 390, 'height': 844})
+        page = await context.new_page()
+        page.set_default_timeout(5000)
+        session = await context.new_cdp_session(page)
+        await session.send('Emulation.setFocusEmulationEnabled', {'enabled': False})
+        await page.set_content('''<!doctype html><title>Native keyboard transport probe</title>
+          <button>Outside before</button>
+          <dialog style="height:400px;overflow:auto">
+            <button id="first">First</button><div style="height:700px"></div>
+            <button id="last">Last</button>
+          </dialog><button>Outside after</button>
+          <script>document.querySelector('dialog').showModal();</script>''')
+        await page.bring_to_front()
+
+        async def state():
+            return await page.evaluate('''() => ({
+              focused: document.hasFocus(), active: document.activeElement.id || document.activeElement.tagName,
+              activeMatchesFocus: document.activeElement.matches(':focus'),
+              nativeModal: document.querySelector('dialog').matches(':modal'),
+            })''')
+
+        for attempt in range(1, 4):
+            await page.locator('#last').click()
+            item = {'attempt': attempt, 'transport': 'cdp', 'before': await state()}
+            report['attempts'].append(item)
+            try:
+                await page.keyboard.down('Tab')
+                await page.wait_for_timeout(50)
+                item['afterKeyDown'] = await state()
+            finally:
+                await page.keyboard.up('Tab')
+            await page.wait_for_timeout(50)
+            item['afterKeyUp'] = await state()
+
+        await page.locator('#last').click()
+        item = {'transport': 'x11-xtest', 'before': await state()}
+        report['attempts'].append(item)
+        await press_native_tab('Tab')
+        await page.wait_for_timeout(50)
+        item['afterPress'] = await state()
+    except Exception as error:
+        report['error'] = repr(error)
+    finally:
+        if session:
+            try:
+                await session.detach()
+            except Exception as error:
+                report.setdefault('cleanupErrors', []).append(repr(error))
+        if context:
+            try:
+                await context.close()
+            except Exception as error:
+                report.setdefault('cleanupErrors', []).append(repr(error))
+        (OUTPUT / 'native-keyboard-probe.json').write_text(
+            json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
 async def assert_modal_tab_boundary(page, key, expected, report):
     # Native dialog traversal may visit browser chrome at a document boundary.
     # https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation
@@ -110,25 +212,34 @@ async def assert_modal_tab_boundary(page, key, expected, report):
     seen = set()
     try:
         for step in (1, 2, 3):
-            await page.keyboard.press(key)
+            before = await probe.evaluate('probe => probe.read()')
+            await press_native_tab(key)
             started = asyncio.get_running_loop().time()
             state = await probe.evaluate('probe => probe.read()')
             immediate = dict(state)
             samples = 1
-            # activeElement falls back to BODY after the last control blurs.
-            # document.hasFocus may not yet reflect the browser UI handoff.
-            # Wait only for that empty-focus transient, without another key or
-            # any focus call; the exact same strict states below must still pass.
-            while (state['nativeModal'] and state['documentFocused']
-                   and state['activeTag'] == 'BODY' and not state['activeMatchesFocus']
-                   and not state['outsideFocusEvents']
-                   and asyncio.get_running_loop().time() - started < .5):
+            comparison = ('documentFocused', 'activeTag', 'activeName',
+                          'activeMatchesFocus', 'expectedActive', 'dialogActive')
+
+            def still_settling():
+                unchanged = all(state[field] == before[field] for field in comparison)
+                empty_focus = (state['documentFocused'] and state['activeTag'] == 'BODY'
+                               and not state['activeMatchesFocus'])
+                return (state['nativeModal'] and not state['outsideFocusEvents']
+                        and (unchanged or empty_focus))
+
+            # XTEST completion means the X events were sent, not that Chromium
+            # has processed them. Wait for a real change from the preceding
+            # control, then apply the same strict states below. A focused BODY
+            # is never accepted, nor is a background focusin during this wait.
+            while still_settling() and asyncio.get_running_loop().time() - started < .5:
                 await asyncio.sleep(.02)
                 state = await probe.evaluate('probe => probe.read()')
                 samples += 1
             elapsed = round((asyncio.get_running_loop().time() - started) * 1000, 1)
             report.setdefault('dialogFocusTransitions', []).append({
-                'key': key, 'step': step, 'immediate': immediate,
+                'key': key, 'step': step, 'keyboard': 'x11-xtest',
+                'before': before, 'immediate': immediate,
                 'settled': dict(state), 'elapsedMs': elapsed, 'samples': samples,
             })
             state.update({'key': key, 'step': step})
@@ -746,6 +857,7 @@ async def main():
                 executable_path=os.environ.get('CHROME_PATH'),
                 headless=os.environ.get('INTERFACE_BROWSER_HEADED') != '1')
             try:
+                await diagnose_keyboard_transport(browser)
                 for config in SCENARIOS:
                     await scenario(browser, f'http://127.0.0.1:{server.server_port}', config, reports)
             finally:
