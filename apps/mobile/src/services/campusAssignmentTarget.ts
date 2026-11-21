@@ -32,9 +32,12 @@ export function resolveCampusAssignmentTarget(input: {
   const snapshot = validCampusSenseSnapshot(input.snapshot, input.scope, now);
   if (!snapshot || snapshot.assignments.status !== 'available' ||
       typeof input.assignment.title !== 'string' || !input.assignment.title.trim()) return null;
-  const title = campusAssignmentDisplayTitle(input.assignment.title);
+  // Truncated labels are for display only. Using their first 130 characters
+  // as a navigation key can open a different task with the same long prefix.
+  // If the planner has only a shortened title, fail closed to the course list.
+  const title = input.assignment.title.replace(/\s+/g, ' ').trim();
   const matches = snapshot.assignments.items.filter((row) =>
-    campusAssignmentDisplayTitle(row.title) === title &&
+    row.title.replace(/\s+/g, ' ').trim() === title &&
     row.groupName === (input.assignment.groupName ?? '') &&
     row.dueAt === (input.assignment.dueAt ?? null));
   // Same-title tasks must never pick whichever happens to appear first.
