@@ -1513,8 +1513,12 @@ describe('public Providence building geometry route', () => {
       const start = Date.parse('2026-11-15T01:30:00Z');
       const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
       try {
+        const upstreamHeaders = new Headers();
+        for (const [name, value] of Object.entries(headers)) {
+          if (typeof value === 'string') upstreamHeaders.set(name, value);
+        }
         const upstream = vi.fn()
-          .mockResolvedValueOnce(new Response('overloaded', { status: 503, headers }))
+          .mockResolvedValueOnce(new Response('overloaded', { status: 503, headers: upstreamHeaders }))
           .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
         vi.stubGlobal('fetch', upstream);
         const { GET } = await import('./route');
