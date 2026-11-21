@@ -936,8 +936,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [coordinateCopyState, setCoordinateCopyState] = useState<'idle' | 'copied' | 'unavailable'>('idle');
   const markerIdentity = place ? spatialDestinationIdentity(place) : null;
   const currentMarkerIdentity = useRef(markerIdentity);
-  currentMarkerIdentity.current = markerIdentity;
   useEffect(() => {
+    // Revoke clipboard feedback on the committed selection; never mutate a
+    // ref during render (React may discard an interrupted render).
+    currentMarkerIdentity.current = markerIdentity;
     setCoordinateCopyState('idle');
   }, [markerIdentity]);
   const copyMarkerCoordinates = async () => {
