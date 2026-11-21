@@ -1,3 +1,5 @@
+import { hasVisibleStudyContent } from './courseStudySession';
+
 /**
  * A visible local filename stem shared by note TXT, reading JSON and practice
  * JSON exports. Do not leak invisible format controls into mobile file lists.
@@ -115,5 +117,10 @@ export function courseStudyBackupFilenameStem(sourceTitle: string): string {
     .trim()
     .replace(/\.(pdf|txt|md|markdown)$/i, '')
     .replace(/^[. ]+|[. ]+$/gu, '');
-  return truncateFilenameStem(safe).trim() || '讀書白板';
+  const stem = truncateFilenameStem(safe).trim();
+  // Joiners are meaningful inside Persian/Indic words and emoji sequences,
+  // but a title made ONLY of default-ignorable characters would leave a
+  // seemingly blank filename in iOS Files and Android Downloads.
+  // Retain visible source spelling; change only the local export filename.
+  return hasVisibleStudyContent(stem) ? stem : '讀書白板';
 }
