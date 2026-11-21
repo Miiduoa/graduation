@@ -81,12 +81,20 @@ function compareCourseCredits(course: PublicCatalogCourse, expected: number): Pu
   if (typeof course.credits !== 'string') return 'unresolved';
   const text = course.credits.normalize('NFKC').trim();
   if (!/^\d+(?:\.\d+)?$/.test(text)) return 'unresolved';
+  // Overflowing published values used to be unresolved because Number()
+  // yielded Infinity. Keep that, instead of treating them as a known mismatch.
+  if (!Number.isFinite(Number(text))) return 'unresolved';
   // Queries are already validated as 0–40 with <=2 decimals, so String(expected)
   // is a plain decimal. Strip only mathematically insignificant source zeros;
   // never let floating-point rounding manufacture an exact match.
+  // Walk backward so a long zero run followed by a nonzero digit stays linear.
   const [whole, fraction = ''] = text.split('.');
   const integer = whole.replace(/^0+/, '') || '0';
-  const decimal = fraction.replace(/0+$/, '');
+  let decimalEnd = fraction.length;
+  while (decimalEnd > 0 && fraction.charCodeAt(decimalEnd - 1) === 48) {
+    decimalEnd -= 1;
+  }
+  const decimal = fraction.slice(0, decimalEnd);
   const actual = decimal ? `${integer}.${decimal}` : integer;
   return actual === String(expected) ? 'match' : 'exclude';
 }

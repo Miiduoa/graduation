@@ -116,6 +116,22 @@ describe('public course filters', () => {
       expect(evaluatePublicCourseFilters({ ...course, credits }, schoolId, { credits: expected })).toBe(result);
     }
   });
+  it('keeps overflowing official credit strings unresolved instead of excluding them', () => {
+    const credits = '9'.repeat(309);
+    for (const schoolId of ['nthu', 'ncnu'] as const) {
+      expect(evaluatePublicCourseFilters({ ...course, credits }, schoolId, { credits: 40 })).toBe('unresolved');
+    }
+  });
+  it('compares long exact credit decimals in linear time', () => {
+    const almostThree = '3.' + '0'.repeat(100_000) + '1';
+    const exactThree = '3.' + '0'.repeat(100_000);
+    const started = Date.now();
+    for (const schoolId of ['nthu', 'ncnu'] as const) {
+      expect(evaluatePublicCourseFilters({ ...course, credits: almostThree }, schoolId, { credits: 3 })).toBe('exclude');
+      expect(evaluatePublicCourseFilters({ ...course, credits: exactThree }, schoolId, { credits: 3 })).toBe('match');
+    }
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
   it('does not trust a malformed cached credit type as a filtered result', () => {
     expect(evaluatePublicCourseFilters({
       ...course, credits: 3 as unknown as string,
