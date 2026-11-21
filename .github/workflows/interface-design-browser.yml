@@ -9,6 +9,9 @@ on:
       - 'apps/web/src/components/SchoolSelector*'
       - 'apps/web/src/components/QuickCampusEntry*'
       - 'apps/web/src/components/VoiceDictationButton*'
+      - 'apps/web/src/components/PageRecovery*'
+      - 'apps/web/src/app/error.tsx'
+      - 'apps/web/src/app/not-found.tsx'
       - 'apps/web/src/app/search/**'
       - 'apps/web/src/lib/useCampusFinderAccount*'
       - 'apps/web/src/components/academic/**'
@@ -67,7 +70,9 @@ jobs:
       - name: Bundle real interface with explicit synthetic data boundaries
         run: node scripts/qa/interface-design/build.mjs
       - name: Verify interface, forms and accessibility scenarios
-        run: python scripts/qa/interface-design/check.py
+        # Keep the existing interface suite headless. A separate headed browser
+        # measures real notification focus changes on this display.
+        run: xvfb-run -a -s "-screen 0 1920x1440x24" python scripts/qa/interface-design/check.py
       - name: Upload rendered evidence and source hashes
         if: always()
         uses: actions/upload-artifact@v7

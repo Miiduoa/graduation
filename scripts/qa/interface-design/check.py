@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 
 from playwright.async_api import async_playwright, expect
 from quick_search import check_quick_search
+from feedback import check_action_feedback
 
 OUTPUT = Path(__file__).resolve().parents[3] / 'artifacts' / 'interface-design'
 SCENARIOS = [
@@ -27,23 +28,72 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+async def check_notification_activity(page, report):
+    trigger = page.get_by_role('button', name='顯示完成通知', exact=True)
+    notification = page.get_by_role('status').filter(has_text='已儲存安排')
+    activity = []
+    report['notificationActivity'] = activity
+
+    async def record(stage):
+        activity.append({'stage': stage, **await page.evaluate('''() => ({
+          visibility: document.visibilityState, focused: document.hasFocus(),
+          activeControl: document.activeElement?.textContent?.trim(),
+        })''')})
+
+    other_page = None
+    try:
+        await page.bring_to_front()
+        await page.wait_for_function("document.visibilityState === 'visible' && document.hasFocus()")
+        await trigger.click()
+        await page.mouse.move(1, 1)
+        await expect(notification).to_be_visible()
+        await record('before-switch')
+        other_page = await page.context.new_page()
+        await other_page.bring_to_front()
+        await record('after-switch')
+        await page.wait_for_function("document.visibilityState !== 'visible' || !document.hasFocus()")
+        await page.wait_for_timeout(1800)
+        await expect(notification).to_be_visible()
+        await record('reading-time-preserved')
+        await page.bring_to_front()
+        await record('returned')
+        await page.wait_for_function("document.visibilityState === 'visible' && document.hasFocus()")
+        await expect(notification).to_have_count(0, timeout=5000)
+    finally:
+        if other_page:
+            await other_page.close()
+        await page.bring_to_front()
+    report['checks'].append('Notification retains its reading time across a real browser tab focus change and expires after returning')
+
+
 async def assert_modal_tab_boundary(page, key, expected, report):
     # Native dialog traversal may visit browser chrome at a document boundary.
     # https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation
     # A native scrollable region can also be a focusable area whose DOM anchor
     # is its element: https://html.spec.whatwg.org/multipage/interaction.html#focusable-area
-    # Each exact intermediate state is allowed only once. Background page
-    # controls, unrelated dialog controls and repeated boundaries always fail.
-    seen = set()
-    for step in (1, 2, 3):
-        await page.keyboard.press(key)
-        state = await expected.evaluate('''expected => {
+    # Retain the original headless suite's exact boundary oracle and also watch
+    # actual focus events. Background controls never become acceptable stops.
+    probe = await expected.evaluate_handle('''expected => {
+      const dialog = expected.closest('dialog');
+      const outsideFocusEvents = [];
+      const recordFocus = event => {
+        if (event.target instanceof Element && !dialog.contains(event.target)) {
+          outsideFocusEvents.push({
+            tag: event.target.tagName,
+            name: event.target.getAttribute('aria-label') || event.target.textContent?.trim().slice(0, 80),
+          });
+        }
+      };
+      document.addEventListener('focusin', recordFocus, true);
+      return {
+        release: () => document.removeEventListener('focusin', recordFocus, true),
+        read: () => {
           const active = document.activeElement;
-          const dialog = expected.closest('dialog');
           return {
             documentFocused: document.hasFocus(),
             activeTag: active?.tagName ?? null,
             activeName: active?.getAttribute('aria-label') || active?.textContent?.trim().slice(0, 80),
+            activeMatchesFocus: Boolean(active?.matches(':focus')),
             insideDialog: Boolean(dialog?.contains(active)),
             expectedActive: active === expected,
             nativeModal: Boolean(dialog?.matches(':modal')),
@@ -52,25 +102,37 @@ async def assert_modal_tab_boundary(page, key, expected, report):
             dialogOverflowY: dialog ? getComputedStyle(dialog).overflowY : null,
             dialogScrollHeight: dialog?.scrollHeight,
             dialogClientHeight: dialog?.clientHeight,
+            outsideFocusEvents: [...outsideFocusEvents],
           };
-        }''')
-        state.update({'key': key, 'step': step})
-        report.setdefault('dialogFocusBoundaries', []).append(state)
-        assert state['nativeModal'], f'Modal state lost at keyboard boundary: {state}'
-        if state['documentFocused'] and state['expectedActive'] and state['insideDialog']:
-            return
-        kind = None
-        if not state['documentFocused'] and state['activeTag'] == 'BODY':
-            kind = 'browser-ui'
-        elif (state['documentFocused'] and state['dialogActive'] and state['insideDialog']
-              and state['dialogTabIndex'] is None
-              and state['dialogOverflowY'] in ('auto', 'scroll')
-              and state['dialogClientHeight'] > 0
-              and state['dialogScrollHeight'] > state['dialogClientHeight'] + 1):
-            kind = 'dialog-scroller'
-        assert step < 3 and kind is not None and kind not in seen, (
-            f'Focus escaped, repeated a boundary, or missed the expected control: {state}')
-        seen.add(kind)
+        },
+      };
+    }''')
+    seen = set()
+    try:
+        for step in (1, 2, 3):
+            await page.keyboard.press(key)
+            state = await probe.evaluate('probe => probe.read()')
+            state.update({'key': key, 'step': step, 'keyboard': 'cdp-headless'})
+            report.setdefault('dialogFocusBoundaries', []).append(state)
+            assert state['nativeModal'], f'Modal state lost at keyboard boundary: {state}'
+            assert not state['outsideFocusEvents'], f'Background content received focus: {state}'
+            if state['documentFocused'] and state['expectedActive'] and state['insideDialog']:
+                return
+            kind = None
+            if not state['documentFocused'] and state['activeTag'] == 'BODY':
+                kind = 'browser-ui'
+            elif (state['documentFocused'] and state['dialogActive'] and state['insideDialog']
+                  and state['dialogTabIndex'] is None
+                  and state['dialogOverflowY'] in ('auto', 'scroll')
+                  and state['dialogClientHeight'] > 0
+                  and state['dialogScrollHeight'] > state['dialogClientHeight'] + 1):
+                kind = 'dialog-scroller'
+            assert step < 3 and kind is not None and kind not in seen, (
+                f'Focus escaped, repeated a boundary, or missed the expected control: {state}')
+            seen.add(kind)
+    finally:
+        await probe.evaluate('probe => probe.release()')
+        await probe.dispose()
 
 
 async def check_dialogs_and_fields(page, config, report, capture, suffix=''):
@@ -374,7 +436,8 @@ async def font_evidence(context, page):
         await session.detach()
 
 
-async def scenario(browser, origin, config, reports):
+async def scenario(browser, origin, config, report):
+    report['interfaceStatus'] = 'running'
     context = await browser.new_context(
         viewport={'width': config['width'], 'height': config['height']},
         device_scale_factor=1, reduced_motion=config.get('system_motion', 'no-preference'),
@@ -383,8 +446,6 @@ async def scenario(browser, origin, config, reports):
     page.set_default_timeout(8000)
     errors, external = [], []
     page.on('pageerror', lambda error: errors.append(str(error)))
-    report = {**config, 'status': 'running', 'checks': [], 'screenshots': []}
-    reports.append(report)
 
     async def local_only(route):
         if route.request.url.startswith(origin + '/') and route.request.method == 'GET':
@@ -399,7 +460,32 @@ async def scenario(browser, origin, config, reports):
         filename = config['name'] + '-' + name + '.png'
         # Pixel evidence records the settled interface, not a random reveal
         # frame. Motion behavior is asserted separately before capture.
-        await page.screenshot(path=str(OUTPUT / filename), full_page=full_page, animations='disabled')
+        async def paint_ready():
+            await page.evaluate('''async () => {
+              await document.fonts.ready;
+              await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            }''')
+
+        await paint_ready()
+        try:
+            await page.screenshot(path=str(OUTPUT / filename), full_page=full_page, animations='disabled')
+        except Exception as error:
+            # Chromium can reject the first surface capture while a headed
+            # window is settling. Retry only that protocol error, once, with
+            # the exact same capture extent; never substitute a smaller image.
+            if 'Page.captureScreenshot' not in str(error) or 'Unable to capture screenshot' not in str(error):
+                raise
+            report.setdefault('captureRetries', []).append({
+                'name': name, 'fullPage': full_page, 'error': repr(error),
+                'layout': await page.evaluate('''() => ({
+                  width: innerWidth, height: innerHeight, scrollX, scrollY,
+                  contentWidth: document.documentElement.scrollWidth,
+                  contentHeight: document.documentElement.scrollHeight,
+                  focused: document.hasFocus(), visibility: document.visibilityState,
+                })'''),
+            })
+            await paint_ready()
+            await page.screenshot(path=str(OUTPUT / filename), full_page=full_page, animations='disabled')
         report['screenshots'].append(filename)
 
     async def layout(name):
@@ -423,6 +509,11 @@ async def scenario(browser, origin, config, reports):
         params = {key: value for key, value in config.items() if key in ('theme', 'role', 'text', 'motion', 'font')}
         await page.goto(origin + '/?' + urlencode(params))
         await expect(page.get_by_role('heading', name='今天', exact=True)).to_be_visible()
+        report['browserScreen'] = await page.evaluate('''() => ({
+          width: screen.width, height: screen.height,
+          availableWidth: screen.availWidth, availableHeight: screen.availHeight,
+          outerWidth, outerHeight, innerWidth, innerHeight,
+        })''')
         try:
             report['fontEvidence'] = await font_evidence(context, page)
         except Exception as error:
@@ -552,9 +643,21 @@ async def scenario(browser, origin, config, reports):
               return toast.bottom <= nav.top && toast.left >= 0 && toast.right <= innerWidth;
             }'''), 'Toast overlapped mobile navigation or viewport'
         await capture('toast', full_page=False)
+        text_sizes = await notification.evaluate('''node => {
+          const root = getComputedStyle(document.documentElement);
+          return { title: getComputedStyle(node.firstElementChild).fontSize,
+            message: getComputedStyle(node.lastElementChild).fontSize,
+            bodyToken: root.getPropertyValue('--font-body-size').trim(),
+            detailToken: root.getPropertyValue('--font-body-sm-size').trim(),
+            rootSize: parseFloat(root.fontSize) };
+        }''')
+        assert abs(float(text_sizes['title'].removesuffix('px')) - float(text_sizes['bodyToken'].removesuffix('rem')) * text_sizes['rootSize']) < .1, text_sizes
+        assert abs(float(text_sizes['message'].removesuffix('px')) - float(text_sizes['detailToken'].removesuffix('rem')) * text_sizes['rootSize']) < .1, text_sizes
         await trigger.focus()
         await expect(notification).to_have_count(0, timeout=5000)
         report['checks'].append('Pressed feedback respects motion preferences; completion toast fits, announces status, pauses during focus and resumes afterward')
+
+        report['checks'].append('Notification title and detail follow the active site text preference')
 
         # Collect the independent new form/short-window checks even if one
         # fails. A failure stays a failure; reset the synthetic page afterward
@@ -574,6 +677,7 @@ async def scenario(browser, origin, config, reports):
                 await expect(page.get_by_role('heading', name='今天', exact=True)).to_be_visible()
 
         await check_section('forms', lambda: check_dialogs_and_fields(page, config, report, capture))
+        await check_section('action-feedback', lambda: check_action_feedback(page, config, report, capture))
         await check_section('quick-search', lambda: check_quick_search(page, config, report, capture))
         if config['name'] in ('desktop-light', 'compact-dark-site-motion'):
             await check_section('short-services', lambda: check_short_service_menu(page, report, capture))
@@ -591,9 +695,9 @@ async def scenario(browser, origin, config, reports):
         assert not external, external
         assert not section_failures, section_failures
         report['checks'].append('No application HTTP calls, real logouts, external requests or browser errors')
-        report['status'] = 'passed'
+        report['interfaceStatus'] = 'passed'
     except Exception as failure:
-        report.update({'status': 'failed', 'error': repr(failure)})
+        report.update({'interfaceStatus': 'failed', 'error': repr(failure)})
         try:
             await capture('failure', full_page=False)
             (OUTPUT / (config['name'] + '-failure.html')).write_text(await page.content(), encoding='utf-8')
@@ -604,23 +708,126 @@ async def scenario(browser, origin, config, reports):
         await context.close()
 
 
+async def native_notification_scenario(browser, origin, config, report):
+    result = report['nativeNotification']
+    result['status'] = 'running'
+    result['browserVersion'] = browser.version
+    context = page = focus_session = None
+    errors, external = [], []
+
+    async def local_only(route):
+        if route.request.url.startswith(origin + '/') and route.request.method == 'GET':
+            await route.continue_()
+        else:
+            external.append({'url': route.request.url, 'method': route.request.method})
+            await route.abort()
+
+    try:
+        context = await browser.new_context(
+            viewport={'width': config['width'], 'height': config['height']},
+            device_scale_factor=1, reduced_motion=config.get('system_motion', 'no-preference'),
+            locale='zh-TW', timezone_id='Asia/Taipei')
+        page = await context.new_page()
+        page.set_default_timeout(8000)
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        await page.route('**/*', local_only)
+        # Real tab activity needs native document focus. This override is
+        # confined to its own headed browser and never changes the established
+        # headless interface suite's keyboard or modal behavior.
+        focus_session = await context.new_cdp_session(page)
+        await focus_session.send('Emulation.setFocusEmulationEnabled', {'enabled': False})
+        params = {key: value for key, value in config.items() if key in ('theme', 'role', 'text', 'motion', 'font')}
+        await page.goto(origin + '/?' + urlencode(params))
+        await expect(page.get_by_role('heading', name='今天', exact=True)).to_be_visible()
+        await check_notification_activity(page, result)
+        ledger = await page.evaluate('window.__interfaceQA.snapshot()')
+        result['ledger'] = ledger
+        assert not ledger['requests'], ledger
+        assert ledger['logouts'] == 0, ledger
+        assert not errors, errors
+        assert not external, external
+        result['checks'].append('Native notification activity makes no application HTTP calls, real logouts or external requests, and produces no browser errors')
+        result['status'] = 'passed'
+    except Exception as failure:
+        result.update({'status': 'failed', 'error': repr(failure)})
+        if page:
+            try:
+                filename = config['name'] + '-native-notification-failure.png'
+                await page.screenshot(path=str(OUTPUT / filename), full_page=False, animations='disabled')
+                report['screenshots'].append(filename)
+                (OUTPUT / (config['name'] + '-native-notification-failure.html')).write_text(await page.content(), encoding='utf-8')
+            except Exception as capture_error:
+                result['captureError'] = repr(capture_error)
+    finally:
+        result.update({'pageErrors': errors, 'externalRequests': external})
+        for resource, cleanup in ((focus_session, 'detach'), (context, 'close')):
+            if resource:
+                try:
+                    await getattr(resource, cleanup)()
+                except Exception as failure:
+                    result['status'] = 'failed'
+                    result.setdefault('error', repr(failure))
+                    result.setdefault('cleanupErrors', []).append(repr(failure))
+        report['checks'].extend(result['checks'])
+        report['notificationActivity'] = result.get('notificationActivity', [])
+
+
 async def main():
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(QuietHandler, directory=str(OUTPUT)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    reports = []
+    origin = f'http://127.0.0.1:{server.server_port}'
+    # Preallocate every required result. A missing, interrupted or failed phase
+    # can never inherit a successful status from the other browser.
+    reports = [{
+        **config, 'status': 'pending', 'interfaceStatus': 'pending',
+        'interfaceBrowser': 'headless', 'checks': [], 'screenshots': [],
+        'nativeNotification': {
+            'status': 'pending', 'browser': 'headed', 'focusEmulation': False, 'checks': [],
+        },
+    } for config in SCENARIOS]
+
+    def fail_phase(report, headless, failure):
+        if headless:
+            report['interfaceStatus'] = 'failed'
+            report.setdefault('error', repr(failure))
+        else:
+            report['nativeNotification']['status'] = 'failed'
+            report['nativeNotification'].setdefault('error', repr(failure))
+
     try:
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(executable_path=os.environ.get('CHROME_PATH'))
-            try:
-                for config in SCENARIOS:
-                    await scenario(browser, f'http://127.0.0.1:{server.server_port}', config, reports)
-            finally:
-                await browser.close()
-        assert len(reports) == len(SCENARIOS) and all(row['status'] == 'passed' for row in reports), 'Interface browser checks failed; see checks.json and failure screenshots'
-        print(json.dumps({'scenarios': len(reports), 'checks': sum(len(row['checks']) for row in reports)}))
+            # The full existing interface suite keeps its original environment.
+            # Only the additional cross-tab reading check needs headed Chromium.
+            for headless, operation in ((True, scenario), (False, native_notification_scenario)):
+                browser = None
+                try:
+                    browser = await playwright.chromium.launch(
+                        executable_path=os.environ.get('CHROME_PATH'), headless=headless)
+                    for config, report in zip(SCENARIOS, reports):
+                        try:
+                            await operation(browser, origin, config, report)
+                        except Exception as failure:
+                            fail_phase(report, headless, failure)
+                except Exception as failure:
+                    for report in reports:
+                        fail_phase(report, headless, failure)
+                finally:
+                    if browser:
+                        try:
+                            await browser.close()
+                        except Exception as failure:
+                            for report in reports:
+                                fail_phase(report, headless, failure)
     finally:
+        for report in reports:
+            passed = report['interfaceStatus'] == 'passed' and report['nativeNotification']['status'] == 'passed'
+            report['status'] = 'passed' if passed else 'failed'
+            if not passed:
+                report.setdefault('error', 'Both the complete headless interface suite and headed native notification activity must pass; see their phase statuses and errors')
         server.shutdown()
         (OUTPUT / 'checks.json').write_text(json.dumps(reports, ensure_ascii=False, indent=2), encoding='utf-8')
+    assert len(reports) == len(SCENARIOS) and all(row['status'] == 'passed' for row in reports), 'Interface browser checks failed; see checks.json and failure screenshots'
+    print(json.dumps({'scenarios': len(reports), 'checks': sum(len(row['checks']) for row in reports)}))
 
 
 if __name__ == '__main__':

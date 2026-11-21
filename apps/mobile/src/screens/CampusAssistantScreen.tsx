@@ -86,6 +86,7 @@ const SERVICE_AFTER_WRITE: Record<CampusAgentWriteTool, string> = {
   renewBook: 'Library',
   returnBook: 'Library',
   reserveWashingMachine: 'Dormitory',
+  cancelWashingReservation: 'Dormitory',
 };
 
 const VERIFIED_SERVICE_ROUTES: Record<string, { route: string; label: string }> = {

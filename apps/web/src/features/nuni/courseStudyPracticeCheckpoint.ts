@@ -10,6 +10,7 @@ import {
 } from './courseStudyProgress';
 import {
   buildStudyPracticeDeck,
+  hasVisibleStudyAttempt,
   startStudyPracticeRound,
   type StudyPracticeResponse,
   type StudyPracticeRound,
@@ -82,14 +83,16 @@ function readRound(value: unknown, progress: CourseStudyProgressData): StudyPrac
       typeof response.answerVisible !== 'boolean' || typeof response.hintVisible !== 'boolean' ||
       ![null, 'again', 'understood', 'skipped'].includes(response.outcome as string | null)) invalid();
     const outcome = response.outcome as StudyPracticeResponse['outcome'];
-    if ((response.answerVisible && !response.attempt.trim()) ||
-      // A learner may hide a once-read reference answer after self-assessing.
-      // Preserve the rating in the v1 checkpoint without disclosing the answer.
-      ((outcome === 'again' || outcome === 'understood') && !response.attempt.trim()) ||
-      (outcome === 'skipped' && response.answerVisible)) invalid('練習的試答、揭答與自評狀態不一致，無法還原。');
+    const hasAnswer = hasVisibleStudyAttempt(response.attempt);
+    const answerVisible = response.answerVisible && hasAnswer;
+    // Older checkpoints used trim() as the attempt gate. Invisible-only drafts
+    // that passed that check must not block the rest of the file.
+    const passedLegacyAttemptGate = response.attempt.trim().length > 0;
+    if (((outcome === 'again' || outcome === 'understood') && !hasAnswer && !passedLegacyAttemptGate) ||
+      (outcome === 'skipped' && answerVisible)) invalid('練習的試答、揭答與自評狀態不一致，無法還原。');
     responses[card.id] = {
-      attempt: response.attempt as string,
-      answerVisible: response.answerVisible as boolean,
+      attempt: response.attempt,
+      answerVisible,
       hintVisible: response.hintVisible as boolean,
       outcome,
     };

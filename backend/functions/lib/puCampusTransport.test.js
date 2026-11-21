@@ -30,6 +30,8 @@ const GOLDEN_FIELDS = {
 const GOLDEN_SIGN = '8a8512b7c00a0ae25cd545ef61b5c8d905cc5a973167ae3e60f94e63298ed8b0';
 
 afterEach(() => {
+  jest.restoreAllMocks();
+  jest.useRealTimers();
   setCampusHttpFetch(null);
   delete process.env.PU_EDGE_RELAY_URL;
   delete process.env.PU_EDGE_RELAY_SECRET;
@@ -158,6 +160,99 @@ test('without injection or env, sendWithCampusFetch leaves https.request in char
   await expect(sendWithCampusFetch({ url: 'https://alcat.pu.edu.tw/' })).resolves.toBeNull();
 });
 
+test('does not start a relay fetch or direct fallback when the caller signal is already aborted', async () => {
+  const controller = new AbortController();
+  controller.abort(new Error('private-reason'));
+  const fetch = jest.fn();
+  await expect(sendWithCampusFetch({ url: 'https://tronclass.pu.edu.tw/api/profile', fetch, signal: controller.signal }))
+    .rejects.toMatchObject({ name: 'AbortError', code: 'ABORT_ERR', message: 'Campus request cancelled' });
+  expect(fetch).not.toHaveBeenCalled();
+  await expect(sendWithCampusFetch({ url: 'https://tronclass.pu.edu.tw/api/profile', signal: controller.signal }))
+    .rejects.toMatchObject({ code: 'ABORT_ERR' });
+});
+
+test('aborts the actual injected fetch and removes the parent signal listener', async () => {
+  const controller = new AbortController();
+  const remove = jest.spyOn(controller.signal, 'removeEventListener');
+  let upstream;
+  const fetch = jest.fn((_url, init) => new Promise((_resolve, reject) => {
+    upstream = init.signal;
+    init.signal.addEventListener('abort', () => reject(Object.assign(new Error('private-reason'), { name: 'AbortError' })), { once: true });
+  }));
+  const pending = expect(sendWithCampusFetch({ url: 'https://tronclass.pu.edu.tw/api/profile', fetch,
+    signal: controller.signal, timeoutMs: 8_000 })).rejects.toMatchObject({ code: 'ABORT_ERR', message: 'Campus request cancelled' });
+  controller.abort();
+  await pending;
+  expect(upstream.aborted).toBe(true);
+  expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+});
+
+test('retains the transport timeout when a caller also supplies a signal', async () => {
+  jest.useFakeTimers();
+  const controller = new AbortController();
+  let upstream;
+  const fetch = (_url, init) => new Promise((_resolve, reject) => {
+    upstream = init.signal;
+    init.signal.addEventListener('abort', () => reject(Object.assign(new Error('private-reason'), { name: 'AbortError' })), { once: true });
+  });
+  const pending = expect(sendWithCampusFetch({ url: 'https://tronclass.pu.edu.tw/api/profile', fetch,
+    signal: controller.signal, timeoutMs: 100 })).rejects.toMatchObject({ code: 'ETIMEDOUT', message: 'Campus request timed out' });
+  await jest.advanceTimersByTimeAsync(100);
+  await pending;
+  expect(upstream.aborted).toBe(true);
+  expect(controller.signal.aborted).toBe(false);
+});
+
+test('cancels a stalled bounded response body when the caller aborts after response headers', async () => {
+  const controller = new AbortController();
+  const cancel = jest.fn();
+  const body = new ReadableStream({ pull() {}, cancel });
+  const fetch = jest.fn(async () => new Response(body));
+  const pending = expect(sendWithCampusFetch({ url: 'https://tronclass.pu.edu.tw/api/profile', fetch,
+    signal: controller.signal, timeoutMs: 8_000, maxResponseBytes: 100 })).rejects.toMatchObject({ code: 'ABORT_ERR' });
+  await Promise.resolve(); await Promise.resolve();
+  controller.abort();
+  await pending;
+  expect(cancel).toHaveBeenCalledTimes(1);
+});
+
+test('stops an oversized stream without buffering the rest of the school response', async () => {
+  const cancel = jest.fn();
+  let chunks = 0;
+  const body = new ReadableStream({
+    pull(controller) { chunks++; controller.enqueue(new Uint8Array(60)); },
+    cancel,
+  }, { highWaterMark: 0 });
+  await expect(sendWithCampusFetch({ url: 'https://tronclass.pu.edu.tw/api/profile',
+    fetch: async () => new Response(body), timeoutMs: 8_000, maxResponseBytes: 100 }))
+    .rejects.toThrow('Campus response is too large');
+  expect(chunks).toBe(2);
+  expect(cancel).toHaveBeenCalledTimes(1);
+});
+
+test('applies its deadline while a bounded response body stalls after headers', async () => {
+  jest.useFakeTimers();
+  const cancel = jest.fn();
+  const body = new ReadableStream({ pull() {}, cancel });
+  const pending = expect(sendWithCampusFetch({ url: 'https://tronclass.pu.edu.tw/api/profile',
+    fetch: async () => new Response(body), timeoutMs: 100, maxResponseBytes: 100 }))
+    .rejects.toMatchObject({ code: 'ETIMEDOUT', message: 'Campus request timed out' });
+  await jest.advanceTimersByTimeAsync(100);
+  await pending;
+  expect(cancel).toHaveBeenCalledTimes(1);
+});
+
+test('discards a response from an injected fetch that resolves after cancellation', async () => {
+  const controller = new AbortController();
+  let finish;
+  const fetch = jest.fn(() => new Promise(resolve => { finish = resolve; }));
+  const pending = expect(sendWithCampusFetch({ url: 'https://tronclass.pu.edu.tw/api/profile', fetch,
+    signal: controller.signal })).rejects.toMatchObject({ code: 'ABORT_ERR' });
+  controller.abort();
+  finish(new Response('private-late-body'));
+  await pending;
+});
+
 test('alt relay stays off unless url, secret and exact hosts are all set', () => {
   expect(readPuEdgeRelayAltConfig({})).toBeNull();
   process.env.PU_EDGE_RELAY_ALT_URL = 'https://alt.example';
@@ -230,7 +325,7 @@ test('env-based alt relay signs listed hosts to the alt URL and keeps others on 
   expect(JSON.parse(logs[0])).toMatchObject({ host: 'alcat.pu.edu.tw', via: 'alt' });
   expect(JSON.parse(logs[1])).not.toHaveProperty('via');
   const alcatHeaders = await (async () => {
-    const fetchImpl = jest.fn(async (_url, init) => {
+    const fetchImpl = jest.fn(async (_url, _init) => {
       return new Response('ok');
     });
     const signed = createCjsRelayFetch(

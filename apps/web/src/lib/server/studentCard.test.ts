@@ -58,8 +58,21 @@ function issuanceDatabase(initial?: Record<string, unknown>) {
       work(transaction),
     ),
   } as unknown as Firestore;
-  return { db, transaction, readRecord: () => record };
+  return { db, transaction, user, readRecord: () => record };
 }
+
+it.each(['deleted', 'disabled', 'suspended', 'inactive'])(
+  'refuses issuance for an unavailable account (%s)',
+  async (status) => {
+    const store = issuanceDatabase();
+    store.user.status = status;
+    await expect(issueStudentCard(store.db, account, 'pu')).rejects.toThrow(
+      'SCHOOL_SIGN_IN_REQUIRED',
+    );
+    expect(store.transaction.set).not.toHaveBeenCalled();
+    expect(store.readRecord()).toBeUndefined();
+  },
+);
 
 describe('student card identity', () => {
   it('takes the number from the authenticated school login', () => {

@@ -60,6 +60,7 @@ jest.mock('../features/campusAssistant', () => ({
   })),
 }));
 jest.mock('../features/campusAssistantActions', () => ({
+  ...jest.requireActual('../features/campusAssistantActions'),
   confirmCampusAgentWrite: jest.fn(),
 }));
 jest.mock('../services/campusSenseSnapshot', () => ({
@@ -507,6 +508,39 @@ test('a lost write receipt is never displayed as success or offered for automati
   expect(view.queryByText('伺服器已確認執行成功')).toBeNull();
   expect(view.queryByText('確認並執行')).toBeNull();
   expect(confirmCampusAgentWrite).toHaveBeenCalledTimes(1);
+});
+
+test('the campus chat confirms the chosen washing cancellation and opens its actual service', async () => {
+  const proposal = {
+    label: '確認取消洗衣預約', toolName: 'cancelWashingReservation' as const,
+    input: { reservationId: 'washing-2', machineId: 'A2', dormitory: 'A棟', startTime: '18:30',
+      reservedUntil: null, expectedReservationVersion: 'a'.repeat(64) },
+    agentRunId: '01234567-89ab-4cde-8012-3456789abcde',
+  };
+  request.mockResolvedValueOnce({ content: '請確認這筆洗衣預約。', source: 'campus',
+    hasActions: true, proposals: [proposal] });
+  jest.mocked(confirmCampusAgentWrite).mockResolvedValueOnce({
+    success: true, toolName: 'cancelWashingReservation', reservationId: 'washing-2',
+    machineId: 'A2', dormitory: 'A棟', startTime: '18:30', reservedUntil: null,
+    status: 'cancelled', schoolId: 'pu', userId: 'A',
+  });
+  const navigate = jest.fn();
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  selectCampusMode(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '取消洗衣預約 washing-2');
+  await act(async () => { fireEvent.press(view.getByText('送出問題')); });
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  fireEvent.press(view.getByText('檢視任務草稿'));
+  expect(view.getByText('washing-2')).toBeTruthy();
+  expect(view.getByText('未提供到期時間')).toBeTruthy();
+  await act(async () => { fireEvent.press(view.getByText('確認並執行')); });
+  expect(confirmCampusAgentWrite).toHaveBeenCalledTimes(1);
+  expect(confirmCampusAgentWrite).toHaveBeenCalledWith(expect.objectContaining({
+    userId: 'A', schoolId: 'pu', proposal,
+  }));
+  expect(view.getByText('洗衣預約已取消')).toBeTruthy();
+  fireEvent.press(view.getByText('開啟服務頁核對紀錄'));
+  expect(navigate).toHaveBeenCalledWith('校園', { screen: 'Dormitory', params: undefined });
 });
 
 test('a user explicitly syncs authorized context before it reaches local inference', async () => {

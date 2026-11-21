@@ -29,6 +29,13 @@ const HIDDEN_HTML_CONTAINERS = new Set([
   // Scan explicit hidden attributes/styles on these elements as well, while
   // leaving ordinary visible HTML wrappers eligible for source tables.
   'span', 'p', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
+  // The HTML hidden attribute is global, including older <center> handouts,
+  // definition lists and inline semantic wrappers. If these are omitted,
+  // teacher-only Markdown-looking rows can escape into the derived study view.
+  // Only explicit source attributes/styles are checked, not computed CSS.
+  'center', 'address', 'hgroup', 'dl', 'dt', 'dd',
+  'a', 'em', 'strong', 'b', 'i', 'u', 'small', 'mark', 'time',
+  'output', 'ins', 'del', 'sup', 'sub',
 ]);
 // HTML disclosure / dialog bodies are not standalone Markdown tables. Keep
 // nested disclosures balanced so a closed inner example cannot expose its parent.
@@ -48,6 +55,22 @@ const TABLE_SUPPRESSED_HTML_TAGS = new Set([
   'template', 'noscript', 'svg', 'math', 'table',
   'xmp', 'iframe', 'noembed', 'noframes', 'title', 'plaintext',
 ]);
+
+// HTML custom elements use hyphenated tag names. A teacher-only
+// <lesson-answer hidden> must be treated like <div hidden>, including nested
+// same-name wrappers. Do not guess visibility of unrelated unknown tags.
+function isCustomHtmlContainer(tag: string): boolean {
+  return /^[a-z][a-z0-9_-]*-[a-z0-9_-]+$/u.test(tag);
+}
+function isTrackedHtmlTag(tag: string): boolean {
+  return TABLE_SUPPRESSED_HTML_TAGS.has(tag) || isCustomHtmlContainer(tag);
+}
+function isNestableHtmlTag(tag: string): boolean {
+  return NESTABLE_HTML_BLOCKS.has(tag) || isCustomHtmlContainer(tag);
+}
+function canCarryHiddenHtmlAttribute(tag: string): boolean {
+  return HIDDEN_HTML_CONTAINERS.has(tag) || isCustomHtmlContainer(tag);
+}
 
 /** Split CSS declarations without treating semicolons in strings, URLs or comments as separators. */
 function splitInlineCssDeclarations(style: string): string[] {
@@ -131,7 +154,12 @@ function decodeCssEscapes(value: string): string {
 // "display:none;display:not-a-mode" must remain hidden in the derived table.
 // This intentionally covers plain literal values only; function-based and
 // multi-token CSS still require a real browser's computed style.
-const CSS_WIDE_VALUES = new Set(['initial', 'inherit', 'unset', 'revert', 'revert-layer']);
+// 'initial' is a known literal for the four tracked properties. In contrast,
+// inherit/unset/revert/revert-layer can depend on an ancestor, user-agent rules
+// or cascade layers that this source-text scanner cannot inspect. A later
+// contextual declaration must never be treated as proof that a previously
+// hidden teacher-only table is now visible.
+const CSS_CONTEXTUAL_WIDE_VALUES = new Set(['inherit', 'unset', 'revert', 'revert-layer']);
 const CSS_DISPLAY_KEYWORDS = new Set([
   'none', 'contents', 'block', 'inline', 'run-in', 'flow-root',
   'inline-block', 'inline-flex', 'inline-grid', 'inline-table',
@@ -142,28 +170,40 @@ const CSS_DISPLAY_KEYWORDS = new Set([
   'ruby', 'ruby-base', 'ruby-text', 'ruby-base-container', 'ruby-text-container',
 ]);
 function isRecognizedInlineCssValue(name: string, value: string): boolean {
-  if (CSS_WIDE_VALUES.has(value)) return true;
+  if (value === 'initial') return true;
   if (name === 'opacity') {
     // CSS <alpha-value>: an ordinary number/percentage, or a functional
     // expression whose computed value cannot be established by this scanner.
     return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?%?$/iu.test(value) ||
       /^(?:calc|min|max|clamp|var|env)\(/iu.test(value);
   }
-  // Reject clearly invalid single identifiers, without trying to parse the
-  // multi-keyword display grammar, custom properties or future CSS functions.
-  if (!/^[a-z-]+$/u.test(value)) return true;
+  // Unknown multi-token values must not silently override a preceding
+  // display:none or visibility:hidden: an invalid CSS declaration is ignored
+  // by the browser. Recognize common valid two-keyword display values only;
+  // keep other ambiguous combinations out of the optional source table.
+  if (name === 'display' &&
+      /^(?:block|inline|run-in)\s+(?:flow|flow-root|flex|grid|table|ruby)$/u.test(value)) return true;
+  if (!/^[a-z-]+$/u.test(value)) return false;
   if (name === 'display') return CSS_DISPLAY_KEYWORDS.has(value);
   if (name === 'visibility') return ['visible', 'hidden', 'collapse'].includes(value);
   if (name === 'content-visibility') return ['visible', 'hidden', 'auto'].includes(value);
   return true;
 }
 
+// Inline CSS functions can depend on unavailable custom properties, viewport
+// settings or browser computation. We cannot prove their rendered visibility
+// from Markdown source text, so withhold optional derived tables rather than
+// accidentally show a teacher-only table that the renderer may hide.
+// Future or unrecognized functions can be valid in some browsers. Never
+// assume a rendered display state from their source-text spelling.
+const UNRESOLVED_VISIBILITY_FUNCTION = /\b[a-z][a-z-]*\s*\(/iu;
 function hasExplicitHiddenInlineStyle(style: string): boolean {
   // Only recognize literal inline visibility declarations. CSS properties
   // cascade independently; a visible value for one property cannot override
   // a hidden value for another. Same-property !important and order still apply.
   // This is not a computed-style parser (external styles and var() are unknown).
   const effective = new Map<string, { value: string; important: boolean }>();
+  let unresolvedVisibility = false;
   // CSS permits whitespace (including comments) between ! and important.
   // The comment splitter above normalizes /* ... */ to whitespace.
   const importantSuffix = /\s*!\s*important\s*$/iu;
@@ -174,6 +214,10 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
     const name = property[1].toLowerCase();
     const important = importantSuffix.test(property[2]);
     const value = property[2].replace(importantSuffix, '').trim().toLowerCase();
+    if (UNRESOLVED_VISIBILITY_FUNCTION.test(value) || CSS_CONTEXTUAL_WIDE_VALUES.has(value)) {
+      unresolvedVisibility = true;
+      continue;
+    }
     if (!value || !isRecognizedInlineCssValue(name, value)) continue;
     const previous = effective.get(name);
     if (!previous || important || !previous.important)
@@ -186,7 +230,7 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
   // are otherwise visible. Do not infer variables, calc(), animations or
   // external CSS; only literal zero numbers/percentages with cascade applied.
   const opacity = effective.get('opacity')?.value;
-  return effective.get('display')?.value === 'none' ||
+  return unresolvedVisibility || effective.get('display')?.value === 'none' ||
     ['hidden', 'collapse'].includes(effective.get('visibility')?.value ?? '') ||
     effective.get('content-visibility')?.value === 'hidden' ||
     (opacity !== undefined && /^[+-]?(?:0+(?:\.0+)?|\.0+)(?:e[+-]?\d+)?%?$/u.test(opacity));
@@ -361,7 +405,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
     (token, tag: string, offset: number) => {
       // Do not fold a Markdown-escaped example into an active HTML tag.
       if (isEscapedMarkdownTag(source, offset)) return token;
-      if (!TABLE_SUPPRESSED_HTML_TAGS.has(tag.toLowerCase()) || !/[\r\n]/u.test(token)) return token;
+      if (!isTrackedHtmlTag(tag.toLowerCase()) || !/[\r\n]/u.test(token)) return token;
       const newlines = token.match(/\r\n|\r|\n/gu) ?? [];
       return token.replace(/\r\n|\r|\n/gu, ' ') + '\n'.repeat(newlines.length);
     },
@@ -405,7 +449,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
       // Raw <pre>/<code> blocks are HTML, not Markdown inline-code contexts.
       if (!inHtmlComment &&
           (htmlCodeBlocks.length === 0 ||
-            NESTABLE_HTML_BLOCKS.has(htmlCodeBlocks[htmlCodeBlocks.length - 1])) &&
+            isNestableHtmlTag(htmlCodeBlocks[htmlCodeBlocks.length - 1])) &&
           isInsideInlineCode(line, match.index ?? 0)) continue;
       if (inHtmlComment) {
         if (token === '-->' || token === '--!>') inHtmlComment = false;
@@ -427,7 +471,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         continue;
       }
       const tag = match[1]?.toLowerCase();
-      if (!tag || !TABLE_SUPPRESSED_HTML_TAGS.has(tag)) continue;
+      if (!tag || !isTrackedHtmlTag(tag)) continue;
       // Preformatted examples contain literal tag-looking text. In contrast,
       // nested containers of the same type inside a hidden wrapper must be
       // balanced, or the inner closing tag could expose unpublished rows.
@@ -442,10 +486,10 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         // </plaintext> must not expose a teacher-only table below it.
         if (closing && current === tag && current !== 'plaintext') htmlCodeBlocks.pop();
         else if (!closing && !selfClosing && !RAW_HTML_TEXT_BLOCKS.has(current) &&
-            ((current === tag && NESTABLE_HTML_BLOCKS.has(tag)) || RAW_HTML_TEXT_BLOCKS.has(tag)))
+            ((current === tag && isNestableHtmlTag(tag)) || RAW_HTML_TEXT_BLOCKS.has(tag)))
           htmlCodeBlocks.push(tag);
       } else if (!closing && !selfClosing &&
-          (!HIDDEN_HTML_CONTAINERS.has(tag) || hasHiddenHtmlAttribute(token))) {
+          (!canCarryHiddenHtmlAttribute(tag) || hasHiddenHtmlAttribute(token))) {
         htmlCodeBlocks.push(tag);
       }
       hiddenLine = true;

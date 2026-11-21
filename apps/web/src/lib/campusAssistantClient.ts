@@ -10,6 +10,7 @@ import { httpsCallable } from 'firebase/functions';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { getAuth, getDb, getFunctionsInstance, isFirebaseConfigured } from './firebase';
 import { areFunctionsConfigured } from './functionsUrl';
+import { isWashingCancellationInput, isWashingCancellationReceipt } from './assistantPresentation';
 
 export type AgentCardKind =
   | 'directions_card'
@@ -72,6 +73,12 @@ export interface AgentWriteResult {
   requestId?: string;
   repairId?: string;
   reservationId?: string;
+  machineId?: string;
+  dormitory?: string;
+  startTime?: string;
+  reservedUntil?: string | null;
+  schoolId?: string;
+  userId?: string;
   orderId?: string;
   status?: string;
 }
@@ -190,6 +197,9 @@ export async function executeCampusAgentWrite(
     }
   };
   checkSession();
+  if (input.toolName === 'cancelWashingReservation' && !isWashingCancellationInput(input.payload)) {
+    throw new CampusAssistantError('invalid-response');
+  }
   const callable = httpsCallable<
     { toolName: string; input: Record<string, unknown>; agentRunId: string; context: Record<string, string> },
     AgentWriteResult
@@ -206,7 +216,9 @@ export async function executeCampusAgentWrite(
       },
     });
     checkSession();
-    if (!data || typeof data.success !== 'boolean' || data.toolName !== input.toolName) {
+    if (!data || typeof data.success !== 'boolean' || data.toolName !== input.toolName ||
+        (input.toolName === 'cancelWashingReservation' && data.success &&
+          !isWashingCancellationReceipt(data, input.payload, input))) {
       throw new CampusAssistantError('invalid-response');
     }
     return data;

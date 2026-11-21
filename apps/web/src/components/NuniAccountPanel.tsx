@@ -98,10 +98,7 @@ function ConfirmedAccountPanel({
   useEffect(() => {
     const operation = recoveryOperation.current;
     if (!operation) return;
-    if (recovery === 'error') {
-      recoveryOperation.current = null;
-      settleRecovery(operation, 'reject', operation.failure);
-    } else if (!loading && recovery === 'idle' && readerVersion === operation.targetVersion) {
+    if (!loading && recovery === 'idle' && readerVersion === operation.targetVersion) {
       recoveryOperation.current = null;
       // Complete after the previous reader's cleanup, so it cannot start another read.
       settleRecovery(operation, 'resolve');
@@ -117,11 +114,6 @@ function ConfirmedAccountPanel({
     setReaderVersion((value) => value + 1);
   }, [loading, recovery]);
   function recoverMemberships() {
-    if (recovery === 'error') {
-      const previous = recoveryOperation.current;
-      recoveryOperation.current = null;
-      if (previous) settleRecovery(previous, 'reject', previous.failure);
-    }
     if (recoveryOperation.current) return recoveryOperation.current.promise;
     if (loading || !mounted.current) {
       const unavailable = Promise.reject(new Error('Account verification is not ready'));
