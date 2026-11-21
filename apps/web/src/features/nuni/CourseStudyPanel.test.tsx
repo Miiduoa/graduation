@@ -1,10 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { runInNewContext } from 'node:vm';
 import { beforeEach, expect, it, vi } from 'vitest';
-import type { TutorExplanation } from '@/lib/studyTutor';
+import { studySourceFromText, type TutorExplanation } from '@/lib/studyTutor';
 import { CourseStudyPanel, readStudyFileBytes } from './CourseStudyPanel';
-import { COURSE_STUDY_PROGRESS_LIMITS, parseCourseStudyProgress } from './courseStudyProgress';
+import { COURSE_STUDY_PROGRESS_LIMITS, parseCourseStudyProgress, serializeCourseStudyProgress } from './courseStudyProgress';
 import { parseStudyPracticeCheckpoint } from './courseStudyPracticeCheckpoint';
+import { emptyStudyPassage } from './courseStudySession';
 
 const mocks = vi.hoisted(() => ({ run: vi.fn(), read: vi.fn(), available: true }));
 vi.mock('@/lib/studyTutorRuntime', () => ({
@@ -22,6 +23,53 @@ const explanation: TutorExplanation = {
 };
 beforeEach(() => { mocks.read.mockReset(); mocks.run.mockReset(); mocks.available = true; mocks.run.mockResolvedValue(explanation); });
 
+
+
+it('keeps invisible-only note drafts out of TXT actions while still protecting them from accidental close', () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  const download = screen.getByRole('button', { name: '下載本次筆記' });
+  const copy = screen.getByRole('button', { name: '複製本次筆記' });
+  const invisible = '\u200d\u0301\u2800';
+
+  expect(download.hasAttribute('disabled')).toBe(true);
+  fireEvent.change(note, { target: { value: invisible } });
+  expect(download.hasAttribute('disabled')).toBe(true);
+  expect(copy.hasAttribute('disabled')).toBe(true);
+
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  expect(screen.getByRole('heading', { name: '要關閉讀書白板嗎？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '繼續讀書' }));
+  expect(note.value).toBe(invisible);
+
+  fireEvent.change(note, { target: { value: '主鍵整理：不能重複' } });
+  expect(download.hasAttribute('disabled')).toBe(false);
+  expect(copy.hasAttribute('disabled')).toBe(false);
+  fireEvent.change(note, { target: { value: invisible } });
+  expect(download.hasAttribute('disabled')).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
+  expect(download.hasAttribute('disabled')).toBe(false);
+  expect(copy.hasAttribute('disabled')).toBe(false);
+  expect(note.value).toBe(invisible);
+});
+
+it('counts only readable notes in a progress preview without deleting saved invisible drafts', () => {
+  const source = studySourceFromText({ id: material.id, title: material.title, text: material.body });
+  const invisible = '\u200d\u0301\u2800';
+  const progress = serializeCourseStudyProgress({
+    scope, source, position: { sectionIndex: 0, passageIndex: 0, mode: 'understand' },
+    passages: { '0:0': { ...emptyStudyPassage(), note: invisible } },
+  });
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText('貼上已備份的進度 JSON'), { target: { value: progress } });
+  fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
+  const preview = screen.getByRole('region', { name: '閱讀進度預覽' });
+  expect(within(preview).getByText('個人筆記').parentElement?.querySelector('dd')?.textContent).toBe('0 段');
+
+  fireEvent.click(within(preview).getByRole('button', { name: '還原這份進度' }));
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value).toBe(invisible);
+  expect(screen.getByRole('button', { name: '下載本次筆記' }).hasAttribute('disabled')).toBe(true);
+});
 
 it('isolates study notes when two different account/course scopes share an ambiguous colon-joined key', () => {
   // These scopes have the same old key, "student:course:one".
