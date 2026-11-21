@@ -95,6 +95,22 @@ it('disambiguates same-name campus markers before opening walking or flat-map na
   fireEvent.change(picker, { target: { value: 'same-c' } });
   expect(within(dialog).getByText(/同名地點：目前選擇/).textContent)
     .toContain('24.229, 120.582');
+  // The range control is a second way to choose destinations. Its spoken
+  // value must disambiguate duplicate POIs just like the select menu.
+  const progress = within(dialog).getByRole('slider', { name: /導覽進度/ }) as HTMLInputElement;
+  expect(progress.getAttribute('aria-valuetext')).toBe(
+    '第 3 個地點，共 4 個：教學大樓（教學 · 地圖座標 24.229, 120.582 · 清單第 3 項）',
+  );
+  fireEvent.change(progress, { target: { value: '0' } });
+  expect(picker.value).toBe('same-a');
+  expect(progress.getAttribute('aria-valuetext')).toBe(
+    '第 1 個地點，共 4 個：教學大樓（教學 · 地圖座標 24.225, 120.58 · 清單第 1 項）',
+  );
+  fireEvent.change(progress, { target: { value: '3' } });
+  expect(picker.value).toBe('unique');
+  expect(progress.getAttribute('aria-valuetext')).toBe('第 4 個地點，共 4 個：圖書館');
+  fireEvent.change(progress, { target: { value: '2' } });
+  expect(picker.value).toBe('same-c');
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('button', { name: '在平面地圖查看' }));
   expect(onSelect).toHaveBeenCalledWith(duplicatePlaces[2]);

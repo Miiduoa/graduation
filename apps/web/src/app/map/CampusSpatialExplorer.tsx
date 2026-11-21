@@ -1516,7 +1516,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                   max={Math.max(0, model.points.length - 1)}
                   value={Math.max(0, index)}
                   disabled={model.points.length < 2}
-                  aria-valuetext={`第 ${index + 1} 個地點，共 ${model.points.length} 個：${place.name}`}
+                  aria-valuetext={`第 ${index + 1} 個地點，共 ${model.points.length} 個：${optionLabels.get(place.id) ?? place.name}`}
                   onChange={(event) => {
                     const point = model.points[Number(event.target.value)];
                     if (point) selectPlace(point.id);
