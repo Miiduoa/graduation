@@ -30,6 +30,7 @@ import { isFirebaseMockMode } from '../../firebase';
 import {
   listBoards,
   listSubscribedBoardIds,
+  isSubscribedToBoard,
   subscribeToBoard,
   unsubscribeFromBoard,
   groupBoardsByType,
@@ -79,14 +80,50 @@ function BoardsContent() {
   const [composeOpen, setComposeOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const loadVersion = useRef(0);
+  // Incremented when a list refresh actually applies a subscription snapshot,
+  // so a late single-board re-read cannot clobber a newer pull-to-refresh.
+  const appliedReadRevision = useRef(0);
+  // Writes still in flight per board (several may be queued while offline).
+  const pendingSubscriptionCounts = useRef(new Map<string, number>());
+  // Per-board write revision: only boards written after a read started keep
+  // their local state; every other board still takes the server snapshot.
+  const subscriptionRevision = useRef(0);
+  const boardWriteRevision = useRef(new Map<string, number>());
+  // Latest tap per board; only its outcome may roll back or alert.
+  const latestIntent = useRef(new Map<string, number>());
+  const intentCounter = useRef(0);
+  // Boards whose current batch of in-flight writes included a failure.
+  const failedSinceIdle = useRef(new Set<string>());
+  // Last server-confirmed subscription set. Optimistic taps never write this;
+  // a failed latest write rolls back here instead of to the previous tap.
+  const confirmedSubscribedRef = useRef<Set<string>>(new Set());
+  const lastConfirmedIntent = useRef(new Map<string, number>());
+  // Mirrors `subscribed` synchronously so two presses before a rerender toggle
+  // from the newest optimistic state instead of a stale closure.
+  const subscribedRef = useRef<Set<string>>(new Set());
+  const applySubscribed = useCallback((update: (previous: Set<string>) => Set<string>) => {
+    setSubscribed((previous) => {
+      const next = update(previous);
+      subscribedRef.current = next;
+      return next;
+    });
+  }, []);
+  const [pendingSubscriptions, setPendingSubscriptions] = useState<ReadonlySet<string>>(new Set());
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const load = useCallback(async () => {
     const version = ++loadVersion.current;
+    const subscriptionRevisionAtRead = subscriptionRevision.current;
     setLoadError('');
     try {
       if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
         setBoards([]);
-        setSubscribed(new Set());
+        confirmedSubscribedRef.current = new Set();
+        applySubscribed(() => new Set());
         return;
       }
       const [rows, subs] = await Promise.all([
@@ -95,13 +132,33 @@ function BoardsContent() {
       ]);
       if (loadVersion.current !== version) return;
       setBoards(rows);
-      setSubscribed(new Set(subs));
+      const keepLocal = new Set(pendingSubscriptionCounts.current.keys());
+      for (const [id, revision] of boardWriteRevision.current) {
+        if (revision > subscriptionRevisionAtRead) keepLocal.add(id);
+      }
+      const nextConfirmed = new Set(subs);
+      for (const id of keepLocal) {
+        if (confirmedSubscribedRef.current.has(id)) nextConfirmed.add(id);
+        else nextConfirmed.delete(id);
+      }
+      confirmedSubscribedRef.current = nextConfirmed;
+      appliedReadRevision.current += 1;
+      applySubscribed((previous) => {
+        const next = new Set(subs);
+        for (const id of keepLocal) {
+          if (previous.has(id)) next.add(id);
+          else next.delete(id);
+        }
+        return next;
+      });
     } catch (cause) {
       if (loadVersion.current !== version) return;
       const code = (cause as { code?: string })?.code ?? '';
       if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
         setBoards([]);
-        setSubscribed(new Set());
+        confirmedSubscribedRef.current = new Set();
+        appliedReadRevision.current += 1;
+        applySubscribed(() => new Set());
       }
       setLoadError('暫時無法更新看板。請確認網路與登入狀態，再試一次。');
     } finally {
@@ -110,7 +167,41 @@ function BoardsContent() {
         setRefreshing(false);
       }
     }
-  }, [school?.id, auth.user?.uid]);
+  }, [school?.id, auth.user?.uid, applySubscribed]);
+
+  // Re-read one board's subscription after a failed write without touching the
+  // list refresh pipeline (loadVersion, error banner, spinner), so an in-flight
+  // pull-to-refresh is never discarded. Best effort: errors keep the rollback.
+  const reconcileBoardSubscription = useCallback(async (boardId: string, uid: string, sid: string) => {
+    const revisionAtRead = subscriptionRevision.current;
+    const appliedReadAtStart = appliedReadRevision.current;
+    // latestIntent only moves forward and is never restored after a failed
+    // write, so an older re-read cannot clobber a newer one for this board.
+    const intentAtStart = latestIntent.current.get(boardId);
+    try {
+      // Read this board only. listSubscribedBoardIds is capped at 100 and
+      // must not treat a missing id as "unsubscribed".
+      const serverSubscribed = await isSubscribedToBoard(uid, sid, boardId);
+      if (!mounted.current) return;
+      if (pendingSubscriptionCounts.current.has(boardId)) return;
+      if ((boardWriteRevision.current.get(boardId) ?? -1) > revisionAtRead) return;
+      if (appliedReadRevision.current !== appliedReadAtStart) return;
+      if (latestIntent.current.get(boardId) !== intentAtStart) return;
+      const nextConfirmed = new Set(confirmedSubscribedRef.current);
+      if (serverSubscribed) nextConfirmed.add(boardId);
+      else nextConfirmed.delete(boardId);
+      confirmedSubscribedRef.current = nextConfirmed;
+      applySubscribed((previous) => {
+        if (previous.has(boardId) === serverSubscribed) return previous;
+        const next = new Set(previous);
+        if (serverSubscribed) next.add(boardId);
+        else next.delete(boardId);
+        return next;
+      });
+    } catch {
+      // Keep the pre-tap rollback; the next refresh will reconcile.
+    }
+  }, [applySubscribed]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -157,29 +248,74 @@ function BoardsContent() {
         if (!uid) Alert.alert('請登入', '登入後即可訂閱看板');
         return;
       }
-      const wasSub = subscribed.has(b.id);
-      // 樂觀更新
-      setSubscribed((prev) => {
-        const next = new Set(prev);
-        if (wasSub) next.delete(b.id);
-        else next.add(b.id);
+      const wasSub = subscribedRef.current.has(b.id);
+      const target = !wasSub;
+      const intent = ++intentCounter.current;
+      latestIntent.current.set(b.id, intent);
+      pendingSubscriptionCounts.current.set(b.id, (pendingSubscriptionCounts.current.get(b.id) ?? 0) + 1);
+      subscriptionRevision.current += 1;
+      boardWriteRevision.current.set(b.id, subscriptionRevision.current);
+      setPendingSubscriptions(new Set(pendingSubscriptionCounts.current.keys()));
+      const optimistic = new Set(subscribedRef.current);
+      if (target) optimistic.add(b.id);
+      else optimistic.delete(b.id);
+      subscribedRef.current = optimistic;
+      applySubscribed((previous) => {
+        const next = new Set(previous);
+        if (target) next.add(b.id);
+        else next.delete(b.id);
         return next;
       });
+      let failed = false;
       try {
+        // Writes are not blocked while pending: offline Firestore queues them in
+        // order, so the student can still undo a mistaken tap before reconnecting.
         if (wasSub) await unsubscribeFromBoard(uid, sid, b.id);
         else await subscribeToBoard(uid, sid, b.id);
-      } catch (e: any) {
-        Alert.alert('訂閱失敗', e?.message ?? String(e));
-        // 還原
-        setSubscribed((prev) => {
-          const next = new Set(prev);
-          if (wasSub) next.add(b.id);
-          else next.delete(b.id);
-          return next;
-        });
+      } catch (error: any) {
+        failed = true;
+        failedSinceIdle.current.add(b.id);
+        const isLatest = latestIntent.current.get(b.id) === intent;
+        // Do not restore boardWriteRevision on failure: a list read that
+        // started during this write may still be carrying an unconfirmed
+        // cache snapshot, and must not overwrite the rollback later.
+        // A delayed failure from the previous user/school must not alert or
+        // revert the currently mounted student's board subscriptions. An older
+        // failure is superseded by the student's newer tap on the same board.
+        if (mounted.current && isLatest) {
+          applySubscribed((previous) => {
+            const next = new Set(previous);
+            if (confirmedSubscribedRef.current.has(b.id)) next.add(b.id);
+            else next.delete(b.id);
+            return next;
+          });
+          Alert.alert('訂閱失敗', error?.message ?? String(error));
+        }
+      } finally {
+        const remaining = (pendingSubscriptionCounts.current.get(b.id) ?? 1) - 1;
+        if (remaining > 0) pendingSubscriptionCounts.current.set(b.id, remaining);
+        else pendingSubscriptionCounts.current.delete(b.id);
+        subscriptionRevision.current += 1;
+        const isLatest = latestIntent.current.get(b.id) === intent;
+        if (!failed && isLatest) boardWriteRevision.current.set(b.id, subscriptionRevision.current);
+        if (!failed && (lastConfirmedIntent.current.get(b.id) ?? 0) < intent) {
+          lastConfirmedIntent.current.set(b.id, intent);
+          const nextConfirmed = new Set(confirmedSubscribedRef.current);
+          if (target) nextConfirmed.add(b.id);
+          else nextConfirmed.delete(b.id);
+          confirmedSubscribedRef.current = nextConfirmed;
+        }
+        if (mounted.current) setPendingSubscriptions(new Set(pendingSubscriptionCounts.current.keys()));
+      }
+      // The rollback above is only the pre-tap guess; a snapshot taken during
+      // the write may have included the unconfirmed local change. Re-read the
+      // server once this board has no writes left in flight, even if the last
+      // write to settle succeeded but an earlier one in the batch failed.
+      if (!pendingSubscriptionCounts.current.has(b.id) && failedSinceIdle.current.delete(b.id) && mounted.current) {
+        void reconcileBoardSubscription(b.id, uid, sid);
       }
     },
-    [auth.user?.uid, school?.id, subscribed],
+    [auth.user?.uid, school?.id, applySubscribed, reconcileBoardSubscription],
   );
 
   if (!auth.user?.uid) {
@@ -261,6 +397,7 @@ function BoardsContent() {
             }
             const b = item.board;
             const isSub = subscribed.has(b.id);
+            const isPending = pendingSubscriptions.has(b.id);
             return (
               <Pressable
                 style={styles.row}
@@ -301,11 +438,15 @@ function BoardsContent() {
                 </View>
                 <Pressable
                   hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${isSub ? '取消訂閱' : '訂閱'}${b.name}`}
+                  accessibilityHint={isPending ? '正在同步訂閱狀態，可再點一次撤銷' : '向伺服器更新本校看板訂閱'}
+                  accessibilityState={{ busy: isPending }}
                   onPress={(e) => {
-                    e.stopPropagation?.();
+                    e?.stopPropagation?.();
                     void onToggleSubscribe(b);
                   }}
-                  style={[styles.subBtn, isSub && styles.subBtnOn]}
+                  style={[styles.subBtn, isSub && styles.subBtnOn, isPending && { opacity: 0.65 }]}
                 >
                   <Ionicons
                     name={isSub ? 'notifications' : 'notifications-outline'}
@@ -553,6 +694,7 @@ const createStyles = () => StyleSheet.create({
 
   subBtn: {
     flexDirection: 'row',
+    minHeight: 44,
     alignItems: 'center',
     gap: 5,
     paddingHorizontal: 10,
