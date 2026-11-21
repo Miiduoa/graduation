@@ -24,7 +24,7 @@ import courseStyles from './schoolCourses.module.css';
 type CourseSearch = { query: string; filters?: PublicCourseFilters };
 type SearchResult = CourseSearch & (
   | { status: 'loading' | 'error' }
-  | { status: 'ready'; courses: PublicCatalogCourse[]; truncated: boolean; fetchedAt?: string; unresolvedCount?: number }
+  | { status: 'ready'; courses: PublicCatalogCourse[]; truncated: boolean; sourceUrl: string; fetchedAt?: string; unresolvedCount?: number }
 );
 
 const QUERY_LENGTH_NOTICE = '搜尋文字最多 80 個字，請縮短後再查詢。';
@@ -278,7 +278,16 @@ function PublicCourseSearchForm({
       }
       const year = first.semester.slice(0, -1);
       const semester = first.semester.slice(-1);
-      const source = { type: 'paste' as const, name: `${schoolName}本學期開設課程` };
+      // Preserve the actual term and validated official feed in the review draft.
+      // fetchedAt means our server retrieved the data, NOT that the school updated it.
+      const fetchedAt = result?.status === 'ready' && result.fetchedAt
+        ? formatPublicCatalogFetchedAt(result.fetchedAt) : null;
+      const sourceUrl = result?.status === 'ready' ? result.sourceUrl : '未提供';
+      const source = {
+        type: 'paste' as const,
+        name: `${schoolName}｜${year}學年度第${semester}學期公開開課資料｜來源：${sourceUrl}｜` +
+          `資料擷取：${fetchedAt ? `${fetchedAt}（台灣時間；非校方更新時間）` : '時間未提供'}`,
+      };
       const { rows, issues } = parsePersonalImport(csv, { kind: 'timetable', schoolId, academicYear: year, semester, source });
       if (!rows.length || issues.some(issue => issue.severity === 'error')) return '課表資料需要手動核對，請先複製再貼到匯入頁。';
       writePersonalImportDraft(scope, { kind: 'timetable', year, semester, text: csv, source, rows, parseIssues: issues, excluded: [], backup: null });
@@ -360,7 +369,7 @@ function PublicCourseSearchForm({
       if (pending.current?.controller === controller && !controller.signal.aborted) {
         setResult({
           status: 'ready', ...search, courses: data.courses, truncated: data.truncated,
-          fetchedAt: data.fetchedAt, unresolvedCount: data.unresolvedCount,
+          sourceUrl: data.sourceUrl, fetchedAt: data.fetchedAt, unresolvedCount: data.unresolvedCount,
         });
       }
     } catch {

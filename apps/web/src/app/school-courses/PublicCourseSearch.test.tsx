@@ -770,6 +770,34 @@ it('prepares both meetings for the current owner and opens the review section wi
   expect(readPersonalImports(importContext.scope)).toEqual([]);
 });
 
+it.each([
+  { schoolId: 'ncnu' as const, schoolName: '國立暨南國際大學',
+    url: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall' },
+  { schoolId: 'nthu' as const, schoolName: '國立清華大學',
+    url: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json' },
+])('preserves the verified $schoolId catalog source, actual term and fetch time in the draft', async ({ schoolId, schoolName, url }) => {
+  importContext.scope.schoolId = schoolId;
+  await chooseCourse(schoolId);
+  const draft = readPersonalImportDraft(importContext.scope);
+  expect(draft?.source.name).toBe(
+    `${schoolName}｜115學年度第1學期公開開課資料｜來源：${url}｜資料擷取：2026-11-06 16:00（台灣時間；非校方更新時間）`,
+  );
+  expect(draft?.rows.length).toBe(2);
+  expect(draft?.rows.every(row => row.source.name === draft.source.name)).toBe(true);
+  expect(readPersonalImports(importContext.scope)).toEqual([]);
+});
+
+it('marks a missing public catalog retrieval time as unknown, never as a school update', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt: undefined })));
+  render(<PublicCourseSearch {...props} />);
+  submit('005076');
+  fireEvent.click(await screen.findByRole('button', { name: '帶入課表核對' }));
+  const draft = readPersonalImportDraft(importContext.scope);
+  expect(draft?.source.name).toContain('115學年度第1學期公開開課資料');
+  expect(draft?.source.name).toContain('資料擷取：時間未提供');
+  expect(draft?.source.name).not.toContain('本學期');
+});
+
 it.each((['ncnu', 'nthu'] as const).flatMap((schoolId) =>
   ['full', 'partial', 'corrupt', 'wrong-school', 'unconfirmed', 'storage-error'].map((reason) => ({ schoolId, reason })),
 ))('preserves existing $schoolId work and offers manual copy when $reason', async ({ schoolId, reason }) => {
@@ -925,6 +953,8 @@ it('selects two public courses and creates one scoped review draft with every me
   const draft = readPersonalImportDraft(importContext.scope);
   expect(draft?.year).toBe('115');
   expect(draft?.semester).toBe('1');
+  expect(draft?.source.name).toContain('來源：https://ccweb6.ncnu.edu.tw/');
+  expect(draft?.source.name).toContain('資料擷取：2026-11-06 16:00');
   expect(draft?.rows.map(row => row.dayOfWeek)).toEqual([5, 3, 4]);
   expect(draft?.rows.map(row => row.courseCode)).toEqual(['005076', '130021', '130021']);
   expect(readPersonalImports(importContext.scope)).toEqual([]);
