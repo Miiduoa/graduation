@@ -31,10 +31,6 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
 async def check_notification_activity(page, report):
     trigger = page.get_by_role('button', name='顯示完成通知', exact=True)
     notification = page.get_by_role('status').filter(has_text='已儲存安排')
-    await page.bring_to_front()
-    await trigger.click()
-    await page.mouse.move(1, 1)
-    await expect(notification).to_be_visible()
     activity = []
     report['notificationActivity'] = activity
 
@@ -44,9 +40,20 @@ async def check_notification_activity(page, report):
           activeControl: document.activeElement?.textContent?.trim(),
         })''')})
 
-    await record('before-switch')
-    other_page = await page.context.new_page()
+    # Playwright 1.57.0 crPage.ts forces every page visible/focused, including
+    # in headed mode. Disable that emulation for the measured page so native
+    # tab activation, not a mocked DOM value/event, drives the product timer.
+    session = await page.context.new_cdp_session(page)
+    other_page = None
     try:
+        await session.send('Emulation.setFocusEmulationEnabled', {'enabled': False})
+        await page.bring_to_front()
+        await page.wait_for_function("document.visibilityState === 'visible' && document.hasFocus()")
+        await trigger.click()
+        await page.mouse.move(1, 1)
+        await expect(notification).to_be_visible()
+        await record('before-switch')
+        other_page = await page.context.new_page()
         await other_page.bring_to_front()
         await record('after-switch')
         await page.wait_for_function("document.visibilityState !== 'visible' || !document.hasFocus()")
@@ -58,8 +65,11 @@ async def check_notification_activity(page, report):
         await page.wait_for_function("document.visibilityState === 'visible' && document.hasFocus()")
         await expect(notification).to_have_count(0, timeout=5000)
     finally:
-        await other_page.close()
+        if other_page:
+            await other_page.close()
         await page.bring_to_front()
+        await session.send('Emulation.setFocusEmulationEnabled', {'enabled': True})
+        await session.detach()
     report['checks'].append('Notification retains its reading time across a real browser tab focus change and expires after returning')
 
 
