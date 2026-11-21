@@ -378,3 +378,54 @@ test('an offline confirmation can be retried without resending the save', async 
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
   expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
 });
+
+test('a stalled server confirmation times out, permits a read-only retry, and ignores the old reply', async () => {
+  jest.useFakeTimers();
+  try {
+    const card = { headline: '', bio: '這次儲存的校園介紹', linkUrl: '' };
+    let resolveStalled!: (value: typeof card) => void;
+    const stalled = new Promise<typeof card>((resolve) => { resolveStalled = resolve; });
+    jest.mocked(readCreatorCard)
+      .mockResolvedValueOnce(null)
+      .mockReturnValueOnce(stalled)
+      .mockResolvedValueOnce(card);
+    jest.mocked(saveCreatorCard).mockRejectedValueOnce(new Error('confirmation lost after write'));
+
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.press(view.getByLabelText('建立社群簡介'));
+    fireEvent.changeText(view.getByLabelText('個人簡介'), card.bio);
+    await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+    expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+
+    fireEvent.press(view.getByLabelText('核對儲存結果'));
+    expect(view.getByLabelText('正在核對伺服器…')).toBeTruthy();
+
+    await act(async () => {
+      jest.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(view.getByText(/核對等待逾時/)).toBeTruthy();
+    expect(view.getByLabelText('核對儲存結果').props.accessibilityState)
+      .toMatchObject({ disabled: false, busy: false });
+    expect(view.getByLabelText('個人簡介').props.value).toBe(card.bio);
+    expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+
+    await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+    expect(readCreatorCard).toHaveBeenCalledTimes(3);
+    expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+    expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+
+    // The first stalled read may still resolve; it must not overwrite the
+    // successful retry or turn the confirmed card into a different result.
+    await act(async () => {
+      resolveStalled({ ...card, bio: '過時的舊讀取結果' });
+      await Promise.resolve();
+    });
+    expect(view.getByText('這次儲存的校園介紹')).toBeTruthy();
+    expect(view.queryByText('過時的舊讀取結果')).toBeNull();
+    expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  } finally {
+    jest.useRealTimers();
+  }
+});
