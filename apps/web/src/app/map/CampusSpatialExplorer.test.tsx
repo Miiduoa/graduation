@@ -2312,10 +2312,18 @@ it('requires a fresh choice when the source reuses an inherited POI ID at a diff
 
   const replacement = { ...places[0], lat: places[0].lat + 0.002, name: '新圖書館' };
   view.rerender(<CampusSpatialExplorer {...props} locations={[replacement, places[1]]} selected={places[0]} />);
+  // The stale destination must disappear synchronously from the accessible
+  // controls. A changed model intentionally disposes the previous WebGL
+  // scene and asynchronously imports/creates the replacement scene, so its
+  // setView() call is not guaranteed during the same React render tick.
   expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
   expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
-  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null }));
+  expect(scene.dispose).toHaveBeenCalledTimes(1);
   expect(onSelect).not.toHaveBeenCalled();
+  await waitFor(() => {
+    expect(scene.create).toHaveBeenCalledTimes(2);
+    expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null }));
+  });
 
   fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: replacement.id } });
   const directions = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
