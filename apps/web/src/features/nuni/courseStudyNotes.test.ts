@@ -304,6 +304,44 @@ describe('course study note downloads', () => {
     expect(output).not.toContain('原文公式：\nz=7');
   });
 
+  it('labels unreadable AI self-check prompts and answers without implying a completed review', () => {
+    for (const invisible of ['', '\u200b', ' \u2060\u0301 ', '\u2800']) {
+      const memory = withLesson();
+      const lesson = memory.modes.understand.lessons[0];
+      lesson.response.question = invisible;
+      lesson.response.answer = invisible;
+      lesson.attempt = '我的思考';
+      lesson.answerVisible = true;
+      const original = JSON.stringify(memory);
+      const output = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
+      expect(output).toContain('自我檢查題：AI 未提供可讀題目，請對照原文自行練習');
+      expect(output).toContain('參考回答：AI 未提供可讀回答，請對照原文');
+      expect(output).not.toContain('自我檢查題：\n');
+      expect(output).not.toContain('參考回答（已展開）：');
+      expect(output).toContain('我的試答：\n我的思考');
+      expect(output).toContain('引用原文：\n主鍵用來唯一識別資料。');
+      expect(JSON.stringify(memory)).toBe(original);
+
+      lesson.answerVisible = false;
+      expect(buildCourseStudyNotes('資料庫', source, { '0:0': memory }))
+        .not.toContain('參考回答：AI 未提供可讀回答');
+      lesson.answerVisible = true;
+      lesson.attempt = ' \u200b ';
+      expect(buildCourseStudyNotes('資料庫', source, { '0:0': memory }))
+        .not.toContain('參考回答：AI 未提供可讀回答');
+    }
+    const memory = withLesson();
+    const lesson = memory.modes.understand.lessons[0];
+    lesson.response.question = '主鍵的用途是什麼？';
+    lesson.response.answer = '唯一識別。';
+    lesson.attempt = '我的思考';
+    lesson.answerVisible = true;
+    const output = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
+    expect(output).toContain('自我檢查題：\n主鍵的用途是什麼？');
+    expect(output).toContain('參考回答（已展開）：\n唯一識別。');
+    expect(output).not.toContain('AI 未提供可讀');
+  });
+
   it('preserves Unicode, multiline notes and source text verbatim as plain text', () => {
     const note = '  我的例子：學號 😀\r\n第二行：α＋β\n<img src=x onerror=alert(1)>  ';
     const memory = { ...emptyStudyPassage(), note };

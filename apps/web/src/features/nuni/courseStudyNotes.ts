@@ -96,11 +96,20 @@ export function buildCourseStudyNotes(
                 lines.push(txtFormulaLabel(passage.text, step.formula), step.formula);
             });
           }
-          lines.push('', '自我檢查題：', lesson.response.question);
+          // A stored model response can have a blank or invisible self-check.
+          // Keep the entry, but never pretend an unreadable prompt or answer exists.
+          if (hasVisibleStudyContent(lesson.response.question))
+            lines.push('', '自我檢查題：', lesson.response.question);
+          else
+            lines.push('', '自我檢查題：AI 未提供可讀題目，請對照原文自行練習');
           if (hasVisibleStudyAttempt(lesson.attempt)) lines.push('', '我的試答：', lesson.attempt);
           // Downloading must not bypass the same self-check condition as the panel.
-          if (lesson.answerVisible && hasVisibleStudyAttempt(lesson.attempt))
-            lines.push('', '參考回答（已展開）：', lesson.response.answer);
+          if (lesson.answerVisible && hasVisibleStudyAttempt(lesson.attempt)) {
+            if (hasVisibleStudyContent(lesson.response.answer))
+              lines.push('', '參考回答（已展開）：', lesson.response.answer);
+            else
+              lines.push('', '參考回答：AI 未提供可讀回答，請對照原文');
+          }
         }
       }
     });
