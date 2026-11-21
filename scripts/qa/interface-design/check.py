@@ -40,13 +40,8 @@ async def check_notification_activity(page, report):
           activeControl: document.activeElement?.textContent?.trim(),
         })''')})
 
-    # Playwright 1.57.0 crPage.ts forces every page visible/focused, including
-    # in headed mode. Disable that emulation for the measured page so native
-    # tab activation, not a mocked DOM value/event, drives the product timer.
-    session = await page.context.new_cdp_session(page)
     other_page = None
     try:
-        await session.send('Emulation.setFocusEmulationEnabled', {'enabled': False})
         await page.bring_to_front()
         await page.wait_for_function("document.visibilityState === 'visible' && document.hasFocus()")
         await trigger.click()
@@ -68,8 +63,6 @@ async def check_notification_activity(page, report):
         if other_page:
             await other_page.close()
         await page.bring_to_front()
-        await session.send('Emulation.setFocusEmulationEnabled', {'enabled': True})
-        await session.detach()
     report['checks'].append('Notification retains its reading time across a real browser tab focus change and expires after returning')
 
 
@@ -426,6 +419,11 @@ async def scenario(browser, origin, config, reports):
         device_scale_factor=1, reduced_motion=config.get('system_motion', 'no-preference'),
         locale='zh-TW', timezone_id='Asia/Taipei')
     page = await context.new_page()
+    # Playwright 1.57.0 crPage.ts forces every page visible/focused, including
+    # in headed mode. Keep native focus for the whole scenario: both background
+    # notification timing and Tab reaching browser chrome need the real state.
+    focus_session = await context.new_cdp_session(page)
+    await focus_session.send('Emulation.setFocusEmulationEnabled', {'enabled': False})
     page.set_default_timeout(8000)
     errors, external = [], []
     page.on('pageerror', lambda error: errors.append(str(error)))
@@ -470,6 +468,11 @@ async def scenario(browser, origin, config, reports):
         await page.goto(origin + '/?' + urlencode(params))
         await page.bring_to_front()
         await expect(page.get_by_role('heading', name='今天', exact=True)).to_be_visible()
+        report['browserScreen'] = await page.evaluate('''() => ({
+          width: screen.width, height: screen.height,
+          availableWidth: screen.availWidth, availableHeight: screen.availHeight,
+          outerWidth, outerHeight, innerWidth, innerHeight,
+        })''')
         try:
             report['fontEvidence'] = await font_evidence(context, page)
         except Exception as error:
@@ -662,6 +665,7 @@ async def scenario(browser, origin, config, reports):
             report['captureError'] = repr(capture_error)
     finally:
         report.update({'pageErrors': errors, 'externalRequests': external})
+        await focus_session.detach()
         await context.close()
 
 

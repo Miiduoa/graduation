@@ -219,6 +219,9 @@
   }
 
   .activity::after {
+    /* This decorative stroke uses a foreground system color as its fill.
+       Keep that fill from being remapped to the button's background color. */
+    forced-color-adjust: none;
     background: ButtonText;
   }
 

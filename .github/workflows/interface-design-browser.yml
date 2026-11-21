@@ -72,7 +72,8 @@ jobs:
         run: node scripts/qa/interface-design/build.mjs
       - name: Verify interface, forms and accessibility scenarios
         # Native tab visibility/focus is not represented by separate headless pages.
-        run: xvfb-run -a python scripts/qa/interface-design/check.py
+        # The display must also contain the 1440px desktop window and its chrome.
+        run: xvfb-run -a -s "-screen 0 1920x1440x24" python scripts/qa/interface-design/check.py
       - name: Upload rendered evidence and source hashes
         if: always()
         uses: actions/upload-artifact@v7
