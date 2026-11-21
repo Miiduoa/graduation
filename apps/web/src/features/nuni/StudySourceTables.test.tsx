@@ -1167,6 +1167,7 @@ it.each([
   { name: 'regular space', values: ['75 %', '25 %'], amounts: ['75', '25'] },
   { name: 'no-break space and fullwidth digits', values: ['７５\u00a0％', '２５\u00a0％'], amounts: ['75', '25'] },
   { name: 'narrow no-break space and fullwidth decimals', values: ['７５．５０\u202f％', '２４．５０\u202f％'], amounts: ['75.5', '24.5'] },
+  { name: 'mixed spaced and unspaced fullwidth percentage rows', values: ['７５ ％', '５０％'], amounts: ['75', '50'] },
 ])('compares percent signs separated by a single source space ($name), without rewriting evidence', ({ values, amounts }) => {
   const material = ['| 課程 | 完成率 |', '| --- | --- |',
     '| 資料庫 | ' + values[0] + ' |', '| 網路 | ' + values[1] + ' |'].join('\n');
@@ -2772,7 +2773,7 @@ it.each([
   ['７5％', '５０％'], // Mixed digits within one value
   ['７５％', '25%'], // Mixed digit formats in one table
   ['７５％', '５０．１２３％'], // Unsupported precision
-  ['７５ ％', '５０％'], // Unsupported inserted whitespace
+  ['７５  ％', '５０％'], // Two inserted spaces remain ambiguous; one is intentionally supported
 ])('retains invalid or ambiguous fullwidth percentage source without derived meters (%s, %s)', (first, second) => {
   const material = ['| 科目 | 完成率 |', '| --- | --- |',
     '| 資料庫 | ' + first + ' |', '| 網路 | ' + second + ' |'].join('\n');
