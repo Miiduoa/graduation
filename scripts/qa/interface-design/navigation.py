@@ -57,7 +57,11 @@ async def check_today_reading_width(page, config, report):
       };
       const rows=(testId, schedule) => [...screen.querySelectorAll(`[data-testid="${testId}"] li > a:first-child`)].map(link => {
         const body=link.children[schedule ? 1 : 0];
-        const title=schedule ? body.firstElementChild.firstElementChild : body.querySelector('[class*="rowTitle"]');
+        // CSS Modules are minified in this real production bundle. Locate the
+        // synthetic work titles by their rendered text, not generated classes.
+        const title=schedule ? body.firstElementChild.firstElementChild : [...body.children].find(node =>
+          ['小組專題進度紀錄','資料處理練習'].includes(node.textContent.trim()));
+        if (!title) throw new Error('Expected Today fixture title is missing from its content row');
         const action=link.nextElementSibling;
         return {text:title.textContent,body:box(body),fontSize:parseFloat(getComputedStyle(title).fontSize),
           time:schedule ? box(link.firstElementChild) : null,
