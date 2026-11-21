@@ -931,6 +931,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const showOverview = overview || !selectedPoint;
   const place = selectedPoint?.location;
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);
+  const previousPoint = model.points[index - 1];
+  const nextPoint = model.points[index + 1];
   const selectId = useId();
   const progressId = useId();
   const directionsNoteId = useId();
@@ -1540,8 +1542,14 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                   }}
                 />
                 <div className={styles.steps}>
-                  <button className="btn" type="button" disabled={index <= 0} onClick={() => selectPlace(model.points[index - 1].id)}>上一個地點</button>
-                  <button className="btn" type="button" disabled={index >= model.points.length - 1} onClick={() => selectPlace(model.points[index + 1].id)}>下一個地點</button>
+                  <button className="btn" type="button" disabled={index <= 0}
+                    aria-label={previousPoint && repeatedNames.has(previousPoint.name)
+                      ? `上一個地點：${optionLabels.get(previousPoint.id) ?? previousPoint.name}` : undefined}
+                    onClick={() => { if (previousPoint) selectPlace(previousPoint.id); }}>上一個地點</button>
+                  <button className="btn" type="button" disabled={index >= model.points.length - 1}
+                    aria-label={nextPoint && repeatedNames.has(nextPoint.name)
+                      ? `下一個地點：${optionLabels.get(nextPoint.id) ?? nextPoint.name}` : undefined}
+                    onClick={() => { if (nextPoint) selectPlace(nextPoint.id); }}>下一個地點</button>
                 </div>
               </div>
               <section className={styles.place} aria-label="導覽地點資訊">
