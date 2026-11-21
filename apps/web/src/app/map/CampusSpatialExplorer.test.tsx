@@ -2310,6 +2310,9 @@ it('requires a fresh choice when the selected location disappears instead of usi
   view.rerender(<CampusSpatialExplorer {...props} locations={[replacement]} selected={null} />);
   expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
   expect(within(dialog).queryByRole('heading', { name: '本校宿舍' })).toBeNull();
+  const missingGuidance = within(dialog).getByText(/先前選擇的地點已變更或不在目前地圖範圍/);
+  expect(missingGuidance.getAttribute('role')).toBe('status');
+  expect(missingGuidance.getAttribute('aria-live')).toBe('polite');
   expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
   expect(within(dialog).getByRole('button', { name: '看全部地點' }).getAttribute('aria-pressed')).toBe('true');
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
@@ -2331,6 +2334,9 @@ it('requires a fresh choice when the source reuses an inherited POI ID at a diff
   // setView() call is not guaranteed during the same React render tick.
   expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
   expect(within(dialog).queryByRole('link', { name: '開啟 Apple 地圖步行導航' })).toBeNull();
+  const changedGuidance = within(dialog).getByText(/先前選擇的地點已變更或不在目前地圖範圍/);
+  expect(changedGuidance.getAttribute('role')).toBe('status');
+  expect(changedGuidance.getAttribute('aria-atomic')).toBe('true');
   expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
   expect(scene.dispose).toHaveBeenCalledTimes(1);
   expect(onSelect).not.toHaveBeenCalled();
@@ -2340,6 +2346,7 @@ it('requires a fresh choice when the source reuses an inherited POI ID at a diff
   });
 
   fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: replacement.id } });
+  expect(within(dialog).queryByText(/先前選擇的地點已變更或不在目前地圖範圍/)).toBeNull();
   const directions = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
   expect(directions.searchParams.get('destination')).toBe(`${replacement.lat},${replacement.lng}`);
   const updatedApple = new URL(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' }).getAttribute('href')!);
@@ -2359,6 +2366,7 @@ it('revokes a deliberate 3D choice if its ID is reused at a changed coordinate, 
 
   const movedDorm = { ...places[1], lng: places[1].lng + 0.003 };
   view.rerender(<CampusSpatialExplorer {...props} locations={[places[0], movedDorm]} />);
+  expect(within(dialog).queryByText(/先前選擇的地點已變更或不在目前地圖範圍/)).toBeTruthy();
   expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
   expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
   expect(onSelect).not.toHaveBeenCalled();

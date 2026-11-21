@@ -1623,7 +1623,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 <button className="btn" type="button" onClick={() => setBuildingPlanOpen(true)}>平面圖建模預覽</button>
                 {source && <a className={styles.source} href={source} target="_blank" rel="noopener noreferrer">查看地點資料來源 ↗</a>}
               </div>
-              </> : <p className={styles.note} role="status">請選擇地點，確認位置後再開啟導航。</p>}
+              </> : <p className={styles.note} role="status" aria-live="polite" aria-atomic="true">
+                {chosen && !selectedPoint
+                  ? '先前選擇的地點已變更或不在目前地圖範圍，已停用導航。請重新選擇地點，核對標記位置後再開啟導航。'
+                  : '請選擇地點，確認位置後再開啟導航。'}
+              </p>}
             </div>
         </div>
       )}
