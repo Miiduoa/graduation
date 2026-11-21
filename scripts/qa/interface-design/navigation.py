@@ -49,6 +49,37 @@ async def check_navigation_geometry(page, config, report):
     report['checks'].append('Navigation labels and icons fit their targets; current marker stays clear; content clearance follows actual mobile bar height; academic text follows preferences')
 
 
+async def check_today_reading_width(page, config, report):
+    geometry = await page.get_by_test_id('student-today').evaluate('''screen => {
+      const box = node => {
+        const r=node.getBoundingClientRect();
+        return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width};
+      };
+      const rows=(testId, schedule) => [...screen.querySelectorAll(`[data-testid="${testId}"] li > a:first-child`)].map(link => {
+        const body=link.children[schedule ? 1 : 0];
+        const title=schedule ? body.firstElementChild.firstElementChild : body.querySelector('[class*="rowTitle"]');
+        const action=link.nextElementSibling;
+        return {text:title.textContent,body:box(body),fontSize:parseFloat(getComputedStyle(title).fontSize),
+          time:schedule ? box(link.firstElementChild) : null,
+          action:action ? box(action) : null};
+      });
+      return {classes:rows('today-classes',true),work:rows('today-work',false)};
+    }''')
+    if config['role'] == 'guest':
+        assert not geometry['classes'] and not geometry['work'], geometry
+        return
+    assert geometry['classes'], 'The real Today course rows were not rendered'
+    for item in [*geometry['classes'], *geometry['work']]:
+        assert item['body']['width'] >= 5 * item['fontSize'], ('Reading text was squeezed by adjacent time or action', item)
+        if config['name'] == 'compact-large-200':
+            if item['time']:
+                assert item['time']['bottom'] <= item['body']['top'] + 1, item
+            if item['action']:
+                assert item['action']['top'] >= item['body']['bottom'] - 1, item
+    report['todayReadingGeometry'] = geometry
+    report['checks'].append('Today course and task text keeps a readable width; very large text places time above and service actions below the content')
+
+
 async def check_service_navigation(page, config, report, capture):
     await page.get_by_role('button', name='返回今天', exact=True).click()
     trigger = page.locator('summary[aria-label="所有服務"]')

@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 from playwright.async_api import async_playwright, expect
 from quick_search import check_quick_search
 from feedback import check_action_feedback
-from navigation import check_navigation_geometry, check_service_navigation
+from navigation import check_navigation_geometry, check_service_navigation, check_today_reading_width
 
 OUTPUT = Path(__file__).resolve().parents[3] / 'artifacts' / 'interface-design'
 SCENARIOS = [
@@ -212,6 +212,9 @@ async def check_dialogs_and_fields(page, config, report, capture, suffix=''):
         target = dialog.locator(selector)
         await expect(target).to_be_focused()
         if selector == '#fixture-note':
+            # Read after the product's single-frame keyboard reveal has settled.
+            # The test never scrolls before checking the two-line reading area.
+            await page.evaluate('() => new Promise(resolve => requestAnimationFrame(resolve))')
             visibility = await target.evaluate('''node => {
               const field = node.getBoundingClientRect();
               const dialog = node.closest('dialog');
@@ -530,6 +533,7 @@ async def scenario(browser, origin, config, report):
             report['fontEvidence'] = {'error': repr(error)}
         await layout('today')
         await check_navigation_geometry(page, config, report)
+        await check_today_reading_width(page, config, report)
         await capture('today')
         if config['role'] == 'guest':
             await expect(page.get_by_role('link', name='匯入我的課表', exact=True)).to_be_visible()
