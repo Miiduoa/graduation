@@ -630,23 +630,25 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // no visible pixels and must not allocate or resume mobile WebGL.
           // Older WebViews that omit the entire intersectionRect still use
           // the boolean flag and retain the manual-start path.
-          const rect = latest.intersectionRect;
-          // An absent intersectionRect is possible in legacy observer shims.
-          // But a present rectangle with invalid dimensions cannot prove that
-          // the host has visible pixels: fail closed to avoid waking WebGL.
-          // In particular NaN/Infinity must not be treated as "unmeasured".
-          // A callback queued before bfcache scroll restoration can carry a
-          // *newer* timestamp and a positive historical intersectionRect.
-          // Do not wake the GPU if the host is demonstrably offscreen now.
-          // A queued positive intersection can arrive while Safari reports
-          // a zero/NaN visual viewport. The old fallback treated this as
-          // 'unknown' and could reactivate a hidden WebGL scene. Preserve
-          // automatic recovery only for an already-started scene once the
-          // visual viewport becomes measurable again.
+          // Some embedded WebViews deliver an intersection rectangle with
+          // positive dimensions but invalid origin/edge coordinates, or throw
+          // when a DOMRect getter is read after tab restoration. Neither is
+          // evidence of visible pixels. Ignore omitted coordinate fields in
+          // legacy shims, but fail closed for any provided non-finite value.
+          // A callback queued before bfcache scroll restoration can also
+          // carry a newer timestamp for an old on-screen position.
           const position = hostViewportVisibility();
-          const confirmedIntersecting = latest.isIntersecting &&
-            (!rect || (Number.isFinite(rect.width) && Number.isFinite(rect.height) &&
-              rect.width > 0 && rect.height > 0));
+          let confirmedIntersecting = false;
+          try {
+            const rect = latest.intersectionRect;
+            confirmedIntersecting = Boolean(latest.isIntersecting) && (!rect ||
+              (Number.isFinite(rect.width) && Number.isFinite(rect.height) &&
+                rect.width > 0 && rect.height > 0 &&
+                [rect.x, rect.y, rect.left, rect.top, rect.right, rect.bottom]
+                  .every((value) => value === undefined || Number.isFinite(value))));
+          } catch {
+            // A partially implemented DOMRect getter cannot wake mobile GPU.
+          }
           // An initial positive callback can arrive during Safari's 0/NaN
           // VisualViewport transition. Do not strand the initial render if
           // no second observer callback follows; require valid on-screen

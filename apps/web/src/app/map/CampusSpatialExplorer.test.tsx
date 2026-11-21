@@ -132,10 +132,20 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
   expect(options?.threshold).toEqual([0, 1e-9, 0.01]);
   expect(scene.create).not.toHaveBeenCalled();
 
-  const notify = (time: number, width: number, height: number) => {
+  const notify = (time: number, width: number, height: number, coordinates: Record<string, number> = {}) => {
     const entries = [{
       isIntersecting: true, target: graphics, time,
-      intersectionRect: { width, height },
+      intersectionRect: { width, height, ...coordinates },
+    }] as unknown as IntersectionObserverEntry[];
+    act(() => intersection?.(entries, {} as IntersectionObserver));
+  };
+  const notifyThrowingRect = (time: number) => {
+    const entries = [{
+      isIntersecting: true, target: graphics, time,
+      intersectionRect: {
+        width: 280, height: 160,
+        get left() { throw new Error('WebView DOMRect coordinate unavailable'); },
+      },
     }] as unknown as IntersectionObserverEntry[];
     act(() => intersection?.(entries, {} as IntersectionObserver));
   };
@@ -146,6 +156,18 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
     notify(101 + index, width, 160);
     expect(scene.create).not.toHaveBeenCalled();
   }
+  // Dimensions alone are insufficient: broken WebViews may return a
+  // positive area with invalid coordinates, or throw on DOMRect access.
+  for (const [index, coordinate] of [
+    { x: Number.NaN }, { y: Number.POSITIVE_INFINITY },
+    { left: Number.NaN }, { top: Number.POSITIVE_INFINITY },
+    { right: Number.NEGATIVE_INFINITY }, { bottom: Number.NaN },
+  ].entries()) {
+    notify(104 + index, 280, 160, coordinate);
+    expect(scene.create).not.toHaveBeenCalled();
+  }
+  notifyThrowingRect(109.5);
+  expect(scene.create).not.toHaveBeenCalled();
   expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
@@ -160,6 +182,16 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
     notify(121 + index, width, 160);
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
   }
+  for (const [index, coordinate] of [
+    { x: Number.NaN }, { y: Number.POSITIVE_INFINITY },
+    { left: Number.NaN }, { top: Number.POSITIVE_INFINITY },
+    { right: Number.NEGATIVE_INFINITY }, { bottom: Number.NaN },
+  ].entries()) {
+    notify(124 + index, 280, 160, coordinate);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  }
+  notifyThrowingRect(129.5);
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
   notify(130, 280, 160);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
