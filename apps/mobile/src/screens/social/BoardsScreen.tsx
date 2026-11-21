@@ -30,6 +30,7 @@ import { isFirebaseMockMode } from '../../firebase';
 import {
   listBoards,
   listSubscribedBoardIds,
+  isSubscribedToBoard,
   subscribeToBoard,
   unsubscribeFromBoard,
   groupBoardsByType,
@@ -79,6 +80,9 @@ function BoardsContent() {
   const [composeOpen, setComposeOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const loadVersion = useRef(0);
+  // Incremented when a list refresh actually applies a subscription snapshot,
+  // so a late single-board re-read cannot clobber a newer pull-to-refresh.
+  const appliedReadRevision = useRef(0);
   // Writes still in flight per board (several may be queued while offline).
   const pendingSubscriptionCounts = useRef(new Map<string, number>());
   // Per-board write revision: only boards written after a read started keep
@@ -123,6 +127,7 @@ function BoardsContent() {
       ]);
       if (loadVersion.current !== version) return;
       setBoards(rows);
+      appliedReadRevision.current += 1;
       applySubscribed((previous) => {
         const next = new Set(subs);
         const keepLocal = new Set(pendingSubscriptionCounts.current.keys());
@@ -140,6 +145,7 @@ function BoardsContent() {
       const code = (cause as { code?: string })?.code ?? '';
       if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
         setBoards([]);
+        appliedReadRevision.current += 1;
         applySubscribed(() => new Set());
       }
       setLoadError('暫時無法更新看板。請確認網路與登入狀態，再試一次。');
@@ -156,12 +162,15 @@ function BoardsContent() {
   // pull-to-refresh is never discarded. Best effort: errors keep the rollback.
   const reconcileBoardSubscription = useCallback(async (boardId: string, uid: string, sid: string) => {
     const revisionAtRead = subscriptionRevision.current;
+    const appliedReadAtStart = appliedReadRevision.current;
     try {
-      const subs = await listSubscribedBoardIds(uid, sid, { throwOnError: true });
+      // Read this board only. listSubscribedBoardIds is capped at 100 and
+      // must not treat a missing id as "unsubscribed".
+      const serverSubscribed = await isSubscribedToBoard(uid, sid, boardId);
       if (!mounted.current) return;
       if (pendingSubscriptionCounts.current.has(boardId)) return;
       if ((boardWriteRevision.current.get(boardId) ?? -1) > revisionAtRead) return;
-      const serverSubscribed = subs.includes(boardId);
+      if (appliedReadRevision.current !== appliedReadAtStart) return;
       applySubscribed((previous) => {
         if (previous.has(boardId) === serverSubscribed) return previous;
         const next = new Set(previous);

@@ -9,7 +9,7 @@ import { BoardsScreen } from '../screens/social/BoardsScreen';
 import { CommunityScreen } from '../screens/CommunityScreen';
 import { fetchRecentCampusPosts, toggleCampusPostLike } from '../services/feed';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
-import { listBoards, listSubscribedBoardIds, subscribeToBoard, unsubscribeFromBoard } from '../services/boards';
+import { listBoards, listSubscribedBoardIds, isSubscribedToBoard, subscribeToBoard, unsubscribeFromBoard } from '../services/boards';
 import { listActiveStoriesForSchool, markStoryViewed } from '../services/stories';
 import { listFollowingIds, followUser } from '../services/follows';
 import {
@@ -67,6 +67,7 @@ jest.mock('../services/feed', () => ({
 jest.mock('../services/boards', () => ({
   listBoards: jest.fn(),
   listSubscribedBoardIds: jest.fn(async () => []),
+  isSubscribedToBoard: jest.fn(async () => false),
   subscribeToBoard: jest.fn(),
   unsubscribeFromBoard: jest.fn(),
   groupBoardsByType: (rows: unknown[]) => ({ topic: rows }),
@@ -138,6 +139,7 @@ beforeEach(async () => {
   jest.mocked(fetchRecentCampusPosts).mockResolvedValue([]);
   jest.mocked(listBoards).mockResolvedValue([]);
   jest.mocked(listSubscribedBoardIds).mockResolvedValue([]);
+  jest.mocked(isSubscribedToBoard).mockResolvedValue(false);
   jest.mocked(listActiveStoriesForSchool).mockResolvedValue([]);
   jest.mocked(listFollowingIds).mockResolvedValue([]);
   jest.mocked(followUser).mockResolvedValue(undefined);
@@ -335,10 +337,10 @@ test('a failed write never trusts a snapshot that may contain its own unconfirme
   fireEvent.press(view.getByLabelText('訂閱讀書會'));
   // Firestore latency compensation: the cache snapshot echoes the pending local write.
   await act(async () => { refresh.resolve(['board']); await refreshPromise; });
-  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([]);
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(false);
   await act(async () => { write.reject(new Error('permission-denied')); });
   expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'permission-denied');
-  expect(listSubscribedBoardIds).toHaveBeenLastCalledWith('alice', 'pu', { throwOnError: true });
+  expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board');
   expect(view.getByLabelText('訂閱讀書會').props.accessibilityState.busy).toBe(false);
 });
 
@@ -350,9 +352,10 @@ test('a failed write re-reads the server so another device\'s subscription is sh
   const write = deferred();
   jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
   fireEvent.press(view.getByLabelText('訂閱讀書會'));
-  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
   await act(async () => { write.reject(new Error('offline')); });
   expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
+  expect(isSubscribedToBoard).toHaveBeenCalledWith('alice', 'pu', 'board');
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
@@ -371,7 +374,7 @@ test('a failed write never discards an in-flight pull-to-refresh, even if its re
   let refreshPromise!: Promise<void>;
   act(() => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
   fireEvent.press(view.getByLabelText('訂閱讀書會'));
-  jest.mocked(listSubscribedBoardIds).mockRejectedValueOnce(Object.assign(new Error('x'), { code: 'unavailable' }));
+  jest.mocked(isSubscribedToBoard).mockRejectedValueOnce(Object.assign(new Error('x'), { code: 'unavailable' }));
   await act(async () => { write.reject(new Error('offline')); });
   await act(async () => { rows.resolve([board, otherBoard]); await refreshPromise; });
   expect(view.getByLabelText('取消訂閱攝影社')).toBeTruthy();
@@ -389,12 +392,13 @@ test('a batch whose last settled write succeeded still re-reads after an earlier
   await view.findByText('讀書會');
   fireEvent.press(view.getByLabelText('訂閱讀書會'));
   fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
-  const readsBefore = jest.mocked(listSubscribedBoardIds).mock.calls.length;
-  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  const readsBefore = jest.mocked(isSubscribedToBoard).mock.calls.length;
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
   // Latest (unsubscribe) fails first; the older subscribe then succeeds and clears the batch.
   await act(async () => { second.reject(new Error('offline')); });
   await act(async () => { first.resolve(); });
-  expect(jest.mocked(listSubscribedBoardIds).mock.calls.length).toBe(readsBefore + 1);
+  expect(jest.mocked(isSubscribedToBoard).mock.calls.length).toBe(readsBefore + 1);
+  expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board');
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
@@ -415,9 +419,56 @@ test('a refresh older than a confirmed write cannot hide it after the next write
   fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
   // This snapshot was read before the confirmed subscription above.
   await act(async () => { refresh.resolve([]); await refreshPromise; });
-  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
   await act(async () => { unsubscribe.reject(new Error('offline')); });
   expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
+  expect(isSubscribedToBoard).toHaveBeenCalledWith('alice', 'pu', 'board');
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
+test('a late failed-write re-read never overwrites a newer pull-to-refresh', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  const write = deferred();
+  jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+
+  const reRead = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => reRead.promise);
+  await act(async () => { write.reject(new Error('offline')); });
+  expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  // Another device subscribed; the list refresh applies first.
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  await act(async () => { reRead.resolve(false); });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
+test('a failed unsubscribe re-read keeps the subscription even when the list omits it', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  const write = deferred();
+  jest.mocked(unsubscribeFromBoard).mockImplementationOnce(() => write.promise);
+  fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
+
+  // The list endpoint is capped at 100 and may omit this board.
+  const listCallsBefore = jest.mocked(listSubscribedBoardIds).mock.calls.length;
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([]);
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
+  await act(async () => { write.reject(new Error('offline')); });
+  expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
+  expect(isSubscribedToBoard).toHaveBeenCalledWith('alice', 'pu', 'board');
+  expect(jest.mocked(listSubscribedBoardIds).mock.calls.length).toBe(listCallsBefore);
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
