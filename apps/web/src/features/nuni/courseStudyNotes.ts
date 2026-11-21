@@ -1,4 +1,5 @@
 import { courseStudyBackupFilenameStem } from './courseStudyBackupFilename';
+import { locateStudyEvidence } from './studyEvidence';
 import { splitStudySection, type StudyMode, type StudySource } from '@/lib/studyTutor';
 import { hasVisibleStudyAttempt, hasVisibleStudyContent, type StudyPassageMemory } from './courseStudySession';
 
@@ -7,6 +8,16 @@ const modes: { value: StudyMode; label: string }[] = [
   { value: 'exam', label: '考前複習' },
   { value: 'practice', label: '練習思路' },
 ];
+
+/**
+ * Never label an AI-generated quotation as source text unless the same
+ * grapheme-safe evidence locator used by the reader finds it in this passage.
+ * This proves literal presence, not correctness or relevance of the explanation.
+ */
+function txtCitationLabel(passageText: string, quote: string, step = false): string {
+  if (locateStudyEvidence(passageText, quote)) return step ? '本步引用原文：' : '引用原文：';
+  return step ? '本步 AI 引句（無法在本段逐字定位）：' : 'AI 引句（無法在本段逐字定位）：';
+}
 
 /** Plain text only. Source/session ownership is maintained by CourseStudyPanel. */
 export function buildCourseStudyNotes(
@@ -50,14 +61,14 @@ export function buildCourseStudyNotes(
           lines.push(
             `講解標題：${lesson.response.title}`,
             'AI 講解：', lesson.response.explanation,
-            '', '引用原文：', lesson.response.sourceQuote,
+            '', txtCitationLabel(passage.text, lesson.response.sourceQuote), lesson.response.sourceQuote,
           );
           if (lesson.response.steps?.length) {
             lines.push('', '分步講解：');
             lesson.response.steps.forEach((step, index) => {
               lines.push('', `第 ${index + 1} 步：${step.title}`,
                 '本步講解：', step.explanation,
-                '本步引用原文：', step.sourceQuote);
+                txtCitationLabel(passage.text, step.sourceQuote, true), step.sourceQuote);
               if (step.formula) lines.push('原文公式：', step.formula);
             });
           }

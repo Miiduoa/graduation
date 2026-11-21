@@ -199,6 +199,43 @@ describe('course study note downloads', () => {
     expect(JSON.stringify(memory)).toBe(before);
   });
 
+
+  it('labels unlocatable AI quotes without claiming they came from the current source passage', () => {
+    const memory = withLesson();
+    const lesson = memory.modes.understand.lessons[0];
+    lesson.response = {
+      ...lesson.response,
+      sourceQuote: '教材沒有提到的外鍵定義',
+      steps: [
+        { title: '回到原文', explanation: '先看教材。', sourceQuote: '主鍵用來唯一識別資料。' },
+        { title: '額外推測', explanation: '此句沒有來源支持。', sourceQuote: '外鍵一定不能為空值' },
+        { title: '標點不是證據', explanation: '標點重複不能當佐證。', sourceQuote: '。' },
+      ],
+    };
+    const original = JSON.stringify(memory);
+    const text = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
+
+    expect(text).toContain('AI 引句（無法在本段逐字定位）：\n教材沒有提到的外鍵定義');
+    expect(text).toContain('本步引用原文：\n主鍵用來唯一識別資料。');
+    expect(text).toContain('本步 AI 引句（無法在本段逐字定位）：\n外鍵一定不能為空值');
+    expect(text).toContain('本步 AI 引句（無法在本段逐字定位）：\n。');
+    expect(text).not.toContain('引用原文：\n教材沒有提到的外鍵定義');
+    expect(text).not.toContain('本步引用原文：\n外鍵一定不能為空值');
+    expect(text).toContain('AI 講解：\n主鍵像是每位學生的學號。');
+    expect(JSON.stringify(memory)).toBe(original);
+  });
+
+  it('does not accept a substring of a joined emoji as a source citation in exported notes', () => {
+    const emojiSource = studySourceFromText({
+      id: 'grapheme-evidence', title: '符號練習', text: '團隊使用 👩‍💻 合作。'
+    });
+    const memory = withLesson();
+    memory.modes.understand.lessons[0].response.sourceQuote = '👩';
+    const text = buildCourseStudyNotes('符號', emojiSource, { '0:0': memory });
+    expect(text).toContain('AI 引句（無法在本段逐字定位）：\n👩');
+    expect(text).toContain('原文：\n團隊使用 👩‍💻 合作。');
+  });
+
   it('preserves Unicode, multiline notes and source text verbatim as plain text', () => {
     const note = '  我的例子：學號 😀\r\n第二行：α＋β\n<img src=x onerror=alert(1)>  ';
     const memory = { ...emptyStudyPassage(), note };
