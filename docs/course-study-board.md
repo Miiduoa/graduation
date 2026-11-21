@@ -2145,3 +2145,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 教材表格「行號、資料行號、原始碼行號、列號、步驟編號」以及 Line Number、Row No.、Step Index 等是文件／操作的**位置識別碼**，不是有比例零點的量值。原本 2、4 可能被畫成二倍長條；現在只保留原文表格、精確來源行號、逐字 TXT／複製與讀屏，不衍生誤導圖。
 - 「程式碼行數、資料列數、步驟數量、Line Count、Row Count、Number of Steps」是真正的計數，仍可選用來源數值比較。新增 14 個位置欄名與 10 個計數欄名的 React DOM 正反回歸；不更動 PDF/TXT/Markdown 解析、閱讀 v1/v2 與逐題 v1 checkpoint，不新增套件或外傳私人教材。
 - 本次是明確規則修補與測試案例，須以本 SHA 的 CI/CodeQL 實際完成結果為準，不能視為 iOS/Android、VoiceOver/TalkBack、WebGPU 或 Ahaboard 同教材同題同機驗收。指定 App 5504170 APPROVED、Maestro 與客觀競品對照未齊前維持 Draft，不合併、不部署。
+
+
+### 2026-11-21：修復 Web Tests 的 HTML 原文字面範例驗證，保留教師答案界線
+
+- head `d06fb51751d32932e929e5c6d2959c7e7a59a579` 的 [CI #44899079249](https://github.com/Miiduoa/graduation/actions/runs/44899079249) 中，Web Tests job #136830993249 **失敗**：19,773 通過、1 失敗、115 跳過。失敗的 `StudySourceTables.test.tsx` 案例將 HTML 教學中的 `<pre>` 寫成未跳脫的原始標籤，又預期後續表格一定公開。實際 HTML 會把未跳脫的 `<pre>` 當成巢狀元素，僅遇到一次 `</pre>` 不能保證外層已關閉，因此保守掃描器沒有揭露下方表格是正確的資料界線。
+- 本輪修正教材範例測試，使用 `&lt;code&gt;`／`&lt;pre&gt;` 表示真正的字面教學範例，並新增相反案例：未跳脫的巢狀 `<pre>` 即使寫在同一行文字中，也必須防止外層尚未關閉時的教師答案被額外衍生；外層關閉後的公開表格則能正常被選取。此修補不放寬正式解析器的安全保守規則。
+- 僅修改測試與文件，不動教材原文、進度 v1/v2、練習 checkpoint、依賴、外部 API 或其他任務。測試案例修正不等於正式 CI 已通過；新 SHA 仍需 Web/Build/Lint/Security/CodeQL、App 5504170 APPROVED、Maestro／iOS／Android 真機及 Ahaboard 同條件對照。維持 Draft，不合併、不部署。
