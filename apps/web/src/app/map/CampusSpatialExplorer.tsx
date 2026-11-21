@@ -647,7 +647,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
               (Number.isFinite(rect.width) && Number.isFinite(rect.height) &&
                 rect.width > 0 && rect.height > 0 &&
                 [rect.x, rect.y, rect.left, rect.top, rect.right, rect.bottom]
-                  .every((value) => value === undefined || Number.isFinite(value))));
+                  .every((value) => value === undefined || Number.isFinite(value)) &&
+                // Some WebViews report positive width/height alongside an
+                // impossible or zero-area edge pair. An explicitly supplied
+                // right/bottom edge must be beyond its matching start edge;
+                // fully omitted legacy-shim coordinates remain supported.
+                (rect.left === undefined || rect.right === undefined || rect.right > rect.left) &&
+                (rect.top === undefined || rect.bottom === undefined || rect.bottom > rect.top)));
           } catch {
             // A partially implemented DOMRect getter cannot wake mobile GPU.
           }
@@ -770,7 +776,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
               </>
           ) : <>
             <p>這次無法顯示立體畫面。你仍可選擇地點，查看資訊與導航。</p>
-            <button className="btn" type="button" onClick={() => setAttempt((value) => value + 1)}>
+            <button className="btn" type="button" onClick={() => {
+              // Retry replaces this button with a loading/status layer.
+              // Keep keyboard and screen-reader focus inside the map instead
+              // of losing focus when the button is removed from the dialog.
+              host?.focus();
+              setAttempt((value) => value + 1);
+            }}>
               重試立體畫面
             </button>
           </>}

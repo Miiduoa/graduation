@@ -166,6 +166,11 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
     notify(104 + index, 280, 160, coordinate);
     expect(scene.create).not.toHaveBeenCalled();
   }
+  // An inconsistent WebView DOMRect can claim positive dimensions but
+  // explicitly report an empty or inverted edge interval. Never allocate GPU.
+  notify(109.1, 280, 160, { left: 20, right: 20 });
+  notify(109.2, 280, 160, { top: 30, bottom: 10 });
+  expect(scene.create).not.toHaveBeenCalled();
   notifyThrowingRect(109.5);
   expect(scene.create).not.toHaveBeenCalled();
   expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
@@ -190,6 +195,9 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
     notify(124 + index, 280, 160, coordinate);
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
   }
+  notify(129.1, 280, 160, { left: 20, right: 20 });
+  notify(129.2, 280, 160, { top: 30, bottom: 10 });
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
   notifyThrowingRect(129.5);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
   notify(130, 280, 160);
@@ -1788,8 +1796,13 @@ it('keeps real place information and navigation available after WebGL failure an
   fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'dorm' } });
   expect(within(dialog).getByRole('heading', { name: '本校宿舍' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-  fireEvent.click(within(dialog).getByRole('button', { name: '重試立體畫面' }));
+  const retry = within(dialog).getByRole('button', { name: '重試立體畫面' });
+  retry.focus();
+  expect(document.activeElement).toBe(retry);
+  fireEvent.click(retry);
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+  // The retry button disappears. Focus must not fall back to the page body.
+  expect(document.activeElement).toBe(within(dialog).getByRole('group', { name: '校園地點空間圖' }));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'dorm' }));
 });
 
