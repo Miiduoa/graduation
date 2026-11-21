@@ -526,6 +526,8 @@ function PublicCourseSearchForm({
               <p role="status" aria-label="選取課程">已選 {selectedCourses.length} 門課（最多 {MAX_PUBLIC_COURSE_BULK_SELECTION} 門），可一次帶入同學期課表核對。</p>
               <button type="button" className="btn primary" disabled={selectedCourses.length < 2}
                 onClick={reviewSelectedCourses}>將選取的課程一起帶入核對</button>
+              <button type="button" className="btn" disabled={selectedCourses.length === 0}
+                onClick={() => { setSelectedCards([]); setBulkNotice(null); }}>清除已選課程</button>
               {bulkNotice && <p role="alert">{bulkNotice}</p>}
             </div>
           )}

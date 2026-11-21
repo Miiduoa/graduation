@@ -946,6 +946,32 @@ it('does not partially import mixed-semester or duplicate public listings', asyn
   expect(push).not.toHaveBeenCalled();
 });
 
+it('recovers a rejected mixed-term batch with one clear action and no partial draft', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([
+    course, { ...course, code: '130021', section: 'b', semester: '1152', title: '另一學期' },
+  ])));
+  render(<PublicCourseSearch {...props} />);
+  submit('實習');
+  await screen.findByRole('heading', { name: '另一學期' });
+  const checks = screen.getAllByRole('checkbox', { name: /選入批次核對/ }) as HTMLInputElement[];
+  const clear = screen.getByRole('button', { name: '清除已選課程' }) as HTMLButtonElement;
+  expect(clear.disabled).toBe(true);
+  checks.forEach(check => fireEvent.click(check));
+  fireEvent.click(screen.getByRole('button', { name: '將選取的課程一起帶入核對' }));
+  expect(screen.getByRole('alert').textContent).toContain('不同學期');
+  expect(clear.disabled).toBe(false);
+
+  fireEvent.click(clear);
+  expect(checks.every(check => !check.checked)).toBe(true);
+  expect(screen.getByRole('status', { name: '選取課程' }).textContent).toContain('已選 0 門課');
+  expect(clear.disabled).toBe(true);
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+  expect(push).not.toHaveBeenCalled();
+  fireEvent.click(checks[0]);
+  expect(clear.disabled).toBe(false);
+});
+
 it('protects an existing draft, and clears batch selections when a search changes', async () => {
   const second = { ...course, code: '130021', section: 'b', title: '資料結構', time: '3cd4i' };
   const fetcher = vi.fn().mockImplementation(async () => response([course, second]));
