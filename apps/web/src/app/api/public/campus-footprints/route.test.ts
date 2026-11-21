@@ -1494,8 +1494,8 @@ describe('public Providence building geometry route', () => {
       headers: { 'Retry-After': '2099-01-01' },
     },
     {
-      label: 'obsolete RFC 850 HTTP-date format',
-      headers: { 'Retry-After': 'Sunday, 15-Nov-26 23:00:00 GMT' },
+      label: 'nonstandard long-weekday date without RFC 850 hyphens',
+      headers: { 'Retry-After': 'Sunday, 15 Nov 2026 23:00:00 GMT' },
     },
     {
       label: 'non-HTTP origin Date that would inflate a legitimate retry to a day',
@@ -1536,6 +1536,36 @@ describe('public Providence building geometry route', () => {
         clock.mockRestore();
       }
     });
+
+  it.each([
+    ['RFC 850', 'Sunday, 15-Nov-26 23:00:00 GMT'],
+    ['asctime', 'Sun Nov 15 23:00:00 2026'],
+  ])('honours a valid legacy %s HTTP-date Retry-After (RFC 9110)', async (_format, retryAfter) => {
+    // Both obsolete HTTP-date wire formats remain valid for recipients.
+    // A hard IMF-only check would prematurely hammer a busy OSM instance.
+    const start = Date.parse('2026-11-15T01:30:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response('busy', {
+          status: 503, headers: { 'Retry-After': retryAfter },
+        }))
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Retry-After')).toBe('77400');
+      clock.mockReturnValue(start + 10 * 60_000);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(start + 77401 * 1000);
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
 
   it.each([
     { label: 'HTTP 503', mode: 'error' },
