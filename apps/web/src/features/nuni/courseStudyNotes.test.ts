@@ -150,21 +150,21 @@ describe('course study note downloads', () => {
   });
 
   it('omits invisible-only saved lesson questions while preserving visible questions and the original session', () => {
-    for (const question of ['\\u200b', ' \\u2060\\u200d\\u0301 ', '\\u2800', '\\u202e']) {
+    for (const question of ['\u200b', ' \u2060\u200d\u0301 ', '\u2800', '\u202e']) {
       const memory = withLesson();
       memory.modes.understand.lessons[0].question = question;
       const before = JSON.stringify(memory);
       const exportText = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
       expect(exportText).not.toContain('我的問題：');
       expect(exportText).toContain('講解標題：唯一識別');
-      expect(exportText).toContain('引用原文：\\n主鍵用來唯一識別資料。');
+      expect(exportText).toContain('引用原文：\n主鍵用來唯一識別資料。');
       expect(JSON.stringify(memory)).toBe(before);
     }
-    for (const question of ['學號如何唯一？', 'e\\u0301', '👩‍💻']) {
+    for (const question of ['學號如何唯一？', 'e\u0301', '👩‍💻']) {
       const memory = withLesson();
       memory.modes.understand.lessons[0].question = question;
       const exportText = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
-      expect(exportText).toContain(`我的問題：\\n${question}\\n`);
+      expect(exportText).toContain(`我的問題：\n${question}\n`);
     }
   });
 
