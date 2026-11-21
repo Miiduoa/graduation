@@ -19,6 +19,17 @@ function txtCitationLabel(passageText: string, quote: string, step = false): str
   return step ? '本步 AI 引句（無法在本段逐字定位）：' : 'AI 引句（無法在本段逐字定位）：';
 }
 
+/**
+ * A generated formula is only a literal source formula when all of its
+ * graphemes occur in the current passage. Matching does not certify that the
+ * AI explanation or mathematical transformation is correct.
+ */
+function txtFormulaLabel(passageText: string, formula: string): string {
+  return locateStudyEvidence(passageText, formula)
+    ? '原文公式：'
+    : 'AI 公式（無法在本段逐字定位）：';
+}
+
 /** Plain text only. Source/session ownership is maintained by CourseStudyPanel. */
 export function buildCourseStudyNotes(
   courseTitle: string,
@@ -69,7 +80,8 @@ export function buildCourseStudyNotes(
               lines.push('', `第 ${index + 1} 步：${step.title}`,
                 '本步講解：', step.explanation,
                 txtCitationLabel(passage.text, step.sourceQuote, true), step.sourceQuote);
-              if (step.formula) lines.push('原文公式：', step.formula);
+              if (step.formula && hasVisibleStudyContent(step.formula))
+                lines.push(txtFormulaLabel(passage.text, step.formula), step.formula);
             });
           }
           lines.push('', '自我檢查題：', lesson.response.question);
