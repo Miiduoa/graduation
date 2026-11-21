@@ -280,12 +280,18 @@ export function buildCourseStudyPracticeNotes(
       `第 ${index + 1} 題／共 ${round.cards.length} 題`,
       `原文位置：${card.label}`,
       `讀法：${modeLabels[card.mode]}・第 ${card.lessonId} 次講解`,
-      '自我檢查題：', card.question,
+      '自我檢查題：', hasVisibleStudyContent(card.question)
+        ? card.question : 'AI 未提供可讀題目，請對照本段原文自行練習',
       '', '本輪試答：', hasVisibleStudyAttempt(response.attempt) ? response.attempt : '（尚未作答）',
       `本人自評：${response.outcome ? outcomeLabels[response.outcome] : '尚未自評'}`,
       `原文提示：${response.hintVisible ? '已展開' : '未展開'}`,
     );
-    if (canRevealAnswer) lines.push('', '參考回答（本輪已展開）：', card.answer);
+    if (canRevealAnswer) {
+      if (hasVisibleStudyContent(card.answer))
+        lines.push('', '參考回答（本輪已展開）：', card.answer);
+      else
+        lines.push('', '參考回答：AI 未提供可讀回答，請對照本段原文');
+    }
     if (response.hintVisible || canRevealAnswer) {
       // Practice cards snapshot a generated quote. Only the exact current
       // passage can justify an "original source quote" label in exported TXT.
