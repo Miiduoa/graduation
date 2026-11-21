@@ -296,11 +296,19 @@ function PublicCourseSearchForm({
         void response.body?.cancel().catch(() => undefined);
         return;
       }
-      // Native already bounds this contract. Web must reject oversized public
-      // replies too, before parsing or offering course rows for personal import.
-      if (!response.ok || Number(response.headers?.get('content-length')) > MAX_PUBLIC_COURSE_RESPONSE_BYTES) {
-        // A rejected header/status must also stop the incoming body. Otherwise
-        // an oversized upstream response can keep downloading after we error.
+      // Align Web with native and assistant: reject malformed length metadata
+      // or a non-JSON response before reading any course payload.
+      const lengthHeader = response.headers?.get('content-length') ?? null;
+      const contentType = response.headers?.get('content-type') ?? null;
+      const declaredBytes = lengthHeader === null ? 0 : Number(lengthHeader);
+      if (!response.ok ||
+          (lengthHeader !== null &&
+            (!/^\d+$/.test(lengthHeader.trim()) ||
+              !Number.isSafeInteger(declaredBytes) ||
+              declaredBytes > MAX_PUBLIC_COURSE_RESPONSE_BYTES)) ||
+          (contentType !== null &&
+            !/^application\/json(?:\s*;|\s*$)/i.test(contentType.trim()))) {
+        // A rejected source must not keep downloading in the background.
         void response.body?.cancel().catch(() => undefined);
         throw new Error('Invalid public catalog response');
       }

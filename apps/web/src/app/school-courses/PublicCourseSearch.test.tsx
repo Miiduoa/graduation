@@ -537,6 +537,44 @@ it('refuses an announced oversized catalog before reading its body or preparing 
 });
 
 it.each([
+  { header: 'content-length', value: '-1' },
+  { header: 'content-length', value: '1e2' },
+  { header: 'content-length', value: 'not-a-number' },
+  { header: 'content-type', value: 'text/html' },
+  { header: 'content-type', value: 'application/jsonp' },
+])('rejects invalid public course $header: $value before reading the stream', async ({ header, value }) => {
+  const cancelled = vi.fn();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new TextEncoder().encode('{}')); },
+    cancel: cancelled,
+  });
+  const fetcher = vi.fn().mockResolvedValue(new Response(stream, {
+    status: 200, headers: { [header]: value },
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('暫時無法');
+  expect(cancelled).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('heading', { name: course.title })).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+it('accepts a correctly declared JSON catalog with charset and byte length', async () => {
+  const body = await response([course]).text();
+  const fetcher = vi.fn().mockResolvedValue(new Response(body, {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'content-length': String(new TextEncoder().encode(body).length),
+    },
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '帶入課表核對' })).toBeTruthy();
+});
+
+it.each([
   { reason: 'announced oversize', status: 200, contentLength: '524289' },
   { reason: 'HTTP error', status: 503, contentLength: '8' },
 ])('cancels the unread stream on $reason before it can enter a timetable', async ({ status, contentLength }) => {

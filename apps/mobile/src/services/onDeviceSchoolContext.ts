@@ -326,6 +326,10 @@ export function formatOnDeviceSchoolPrompt(
   senseSnapshot: CampusSenseSnapshot | null | undefined,
   expectedOwnerUid: string,
 ): string {
+  // Capture a single device-clock instant for privacy freshness, Taipei time,
+  // and assignment priorities. A wall-clock adjustment during formatting must
+  // not make the same authorized row both at and past its deadline.
+  const deviceNowMs = Date.now();
   // Reject caller-supplied scope/timetable getters before they are consulted.
   // Legitimate cached JSON and the live collector always use own data fields.
   const context = snapshot && hasOwnEvidenceFields(snapshot, ['checkedAt', 'schoolId', 'schoolName', 'timetable'], ['ownerUid'])
@@ -343,7 +347,7 @@ export function formatOnDeviceSchoolPrompt(
   // A canonical timestamp may still be a replay from an older session or
   // far in the future after a device clock change. Recheck immediately before
   // composing the local model prompt; the collector can be run again offline.
-  const clockAgeMs = Date.now() - checkedAt.getTime();
+  const clockAgeMs = deviceNowMs - checkedAt.getTime();
   const verifiedClock = Number.isFinite(clockAgeMs) &&
     checkedAt.toISOString() === context?.checkedAt &&
     clockAgeMs >= -30_000 && clockAgeMs <= 5 * 60_000;
@@ -355,7 +359,7 @@ export function formatOnDeviceSchoolPrompt(
     weekday: 'long',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date()) : '無法核對（請重新整理裝置資料）';
+  }).format(new Date(deviceNowMs)) : '無法核對（請重新整理裝置資料）';
   // The rule-based timetable tool uses every saved course. Keep only a short
   // excerpt in the LLM prompt so a small local model cannot overflow context.
   // The prompt is a separate privacy boundary: a caller cannot pass a cached
@@ -412,9 +416,17 @@ const sampleCourses = owned && timetable
   // Scope checks must not invoke a restored root getter before row validation.
   const candidateSense = owned && hasOwnEvidenceFields(senseSnapshot,
     ['userId', 'schoolId', 'checkedAt', 'schedule', 'assignments', 'announcements'])
-    ? validCampusSenseSnapshot(senseSnapshot, { uid: expectedOwnerUid, schoolId })
+    ? validCampusSenseSnapshot(senseSnapshot, { uid: expectedOwnerUid, schoolId }, deviceNowMs)
     : null;
   const verifiedSense = safeCampusSenseForPrompt(candidateSense) ? candidateSense : null;
+  // Derive both the small excerpt and its next deadline from one verified,
+  // already-authorized snapshot and one device-clock reading. A small local
+  // model should not have to guess priority from an overdue backlog.
+  const assignmentNowMs = deviceNowMs;
+  const assignmentExcerpt = verifiedSense
+    ? dueOrderedAssignmentExcerpt(verifiedSense.assignments.items, 5, assignmentNowMs) : [];
+  const nearestNotExpired = assignmentExcerpt.find((item) =>
+    item.dueAt !== null && Date.parse(item.dueAt) >= assignmentNowMs) ?? null;
   // Source text is untrusted content. It is evidence for the answer, not a new instruction.
   const sense = verifiedSense
     ? [
@@ -427,7 +439,9 @@ const sampleCourses = owned && timetable
             ? '來源已完整讀取' : verifiedSense.assignments.coverage
               ? '僅讀取部分資料' : '未能核對是否完整') +
           '；依本次已取得的期限排序，最多列出 5 項（過期項目擠滿前五項且本次資料中仍有未到截止點的作業時，保留最近將到期 1 項）：' +
-            JSON.stringify(dueOrderedAssignmentExcerpt(verifiedSense.assignments.items, 5, Date.now())),
+            JSON.stringify(assignmentExcerpt),
+        '本次已取得資料中最近尚未過截止點的作業（僅優先核對原作業頁，不代表仍可繳交；無來源 ID 不可推定導頁）：' +
+          (nearestNotExpired ? JSON.stringify(nearestNotExpired) : '未能從本次資料確認') + '。',
         '校園公告：' + verifiedSense.announcements.status +
           '；部分項目：' + JSON.stringify(ownArrayPrefix(verifiedSense.announcements.items, 4).map(({ title, publishedAt }) => ({ title, publishedAt }))),
         '上述來源總數與完整性，只涵蓋已授權課程中目前開放且未見已繳交時間的作業，不包括已提交、草稿、關閉或無權存取的作業；不能當成全部作業或歷史繳交清單。',
