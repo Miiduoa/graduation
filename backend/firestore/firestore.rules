@@ -456,22 +456,10 @@ service cloud.firestore {
         );
     }
 
-    // canManageGroup already checks the live course and school memberships.
-    // Check only the canonical server-bound profile here: running the full
-    // membership predicate twice exhausts the 1000-expression Rules budget
-    // during an otherwise valid atomic grade correction.
+    // Sensitive reads and peer-review edits require current campus binding.
+    // Grade write paths have a separate atomic audit verification budget.
     function canManageCurrentGroup(groupId) {
-      let profilePath = /databases/$(database)/documents/users/$(request.auth.uid);
-      let found = exists(profilePath);
-      let profile = found ? get(profilePath).data : {};
-      let schoolId = get(/databases/$(database)/documents/groups/$(groupId)).data.get('schoolId', '');
-      let school = profile.get('schoolId', null);
-      let primary = profile.get('primarySchoolId', null);
-      return canManageGroup(groupId)
-        && found
-        && (school == schoolId || primary == schoolId)
-        && (school == null || school == '' || school == schoolId)
-        && (primary == null || primary == '' || primary == schoolId);
+      return canManageGroup(groupId) && isActiveCurrentGroupMember(groupId);
     }
 
     function isAssignedReviewer(groupId, assignmentId, submissionId, data) {
@@ -1546,7 +1534,7 @@ service cloud.firestore {
               'userId', 'groupId', 'assignmentId', 'content', 'attachments', 'answers', 'status', 'submittedAt', 'updatedAt'
             ]);
           allow update: if (
-            canManageCurrentGroup(groupId)
+            canManageGroup(groupId)
             && (
               validFirstPublishedGrade(groupId, assignmentId, submissionId)
               || validFirstLegacyGrade(groupId, assignmentId, submissionId)
@@ -1565,7 +1553,7 @@ service cloud.firestore {
 
           match /gradeRevisions/{revisionId} {
             allow read: if canManageCurrentGroup(groupId);
-            allow create: if canManageCurrentGroup(groupId)
+            allow create: if canManageGroup(groupId)
               && validGradeRevisionLog(groupId, assignmentId, submissionId, revisionId);
             allow update, delete: if false;
           }

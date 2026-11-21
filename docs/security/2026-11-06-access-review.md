@@ -1003,9 +1003,11 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 
 - **已讀基準**：main `67ed7458339e4db981ed016926affa465d995d2f`；既有安全分支精確父提交 `a32859ba3203f301388d70d071f0fcc816e31d5f`（10 ahead／11 behind）。原安全 PR #517/#577 均已合併，但核可不可移植。main 的 CI #44861099479（含現有 Security Gates、Firestore、Mobile／Web）及 CodeQL #44861099489 成功；本安全分支上一提交 Firestore #44845858468 成功。新提交的結果須另行核實。
 - **授權缺口**：`canManageGroup` 以殘留群組教師資格和舊校會員資格認定管理者，未重新核對 server-bound `users/{uid}.schoolId/primarySchoolId`。當使用者部分轉校且舊資格未撤除，仍可讀取 nested／legacy 私人作業提交、同儕互評（含教師備註）、gradeRevisions，並可能操作教師端評分與互評。這是從 Rules 可重現的邊界缺口，未發現正式環境利用證據。
-- **最小修補**：新增 `canManageCurrentGroup`，沿用已存在的 `isActiveCurrentGroupMember`，只套用於上述敏感教師授權分支（含教師 grade update、peer review 建立／修改／刪除和 revisions 建立），保留其他一般群組管理語義，不更改任何正式資料或歷史文件。學生本人與合法指派評閱者原權限保留。修正一份舊教師測試 fixture，使其具備真實 server-bound 校籍。
+- **最小修補**：新增 `canManageCurrentGroup`，沿用已存在的 `isActiveCurrentGroupMember`，用於私人提交／同儕互評／修訂紀錄**讀取**及同儕互評建立／修改／刪除；教師**成績更新與原子修訂紀錄建立尚未納入此閘門**，保留其他一般群組管理語義，不更改任何正式資料或歷史文件。學生本人與合法指派評閱者原權限保留。修正一份舊教師測試 fixture，使其具備真實 server-bound 校籍。
 - **可重跑回歸**：`backend/tests/security-rules.test.js` 新增真 Firebase Emulator 案例，涵蓋合法教師 GET/CREATE/DELETE、同校無關帳號拒絕、合法學生評閱讀取、同一登入 context 的雙向校籍衝突、課程／學校會員撤權、帳號刪除、拒絕重放與恢復。未宣稱真實寫入競態已測；GCS/Supabase 已發 URL／真 Storage CAS 仍另列。
 - **驗收與禁止事項**：新 head 的 Firestore workflow、完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、指定 nuni-merge-gate App 5504170 對精確 head「審查通過」、發布及回復均需獨立核對；不將原 SHA 的結果視為新 SHA。沿用 feature-only branch，不主動建立會外送 npm/pnpm audit payload 的 PR。未接觸正式資料、金鑰、附件 token、migration、部署或 E 校園。無 staging GCS bucket 憑證，已發簽名 URL 撤銷仍是獨立發布阻礙。
 
 - **精確測試回饋與修正**：首次 head `3a8016e3cc3766df694c59c44853e2011a5ec0eb` 的 Firestore Actions #44867580859 實測為 548/550；既有合法首次評分與原子成績更正各 1 失敗，錯誤為 Firestore Rules 的 1000 expressions 上限（重複執行 isActiveGroupMember 造成）。後續候選移除重複 membership 展開，保留一次 live canManageGroup 加 profile 雙校籍一致檢查；不得沿用先前測試成功，必須以新精確 SHA 再跑。
 - **獨立未結案的資料界線**：同儕互評收據若把 `teacherNotes` 與學生可讀的回饋置於同一個 Firestore 文件，Rules 無法只隱藏個別欄位；需核對 Web/Mobile 與教師資料存放方式，必要時採獨立教師私密文件與相容移轉。此處不宣稱教師備註具欄位級保密。
+
+- **第二次隔離回饋與範圍收斂**：優化 helper 之精確 SHA `d6ada6323a898d2bd7f1953b2a3edbd2d350af8b`，Firestore Actions #44867873317 仍因 Rules 1000 expressions 上限導致 4/550 失敗（546 通過），涉及非教師評閱路徑、合法首次評分與原子更正。為先恢復原有功能，保留上一版已驗證的敏感讀取／互評權限檢查，但恢復未改前的教師 grade update 與 gradeRevision create 原始謂詞；**教師校籍衝突期間寫入成績及修訂仍是未修復風險**，不得把本補丁宣稱涵蓋寫入撤權。後續需重構 grade 規則分支以留出 expression budget，或將校籍核驗透過不可偽造的資料模型整合後重跑 atomic correction。新 SHA 回歸仍需核對，正式發布不可用未驗證提交。
