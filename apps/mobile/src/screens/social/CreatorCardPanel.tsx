@@ -7,6 +7,8 @@ import { readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 
+const CREATOR_CARD_CONFIRM_TIMEOUT_MS = 15_000;
+
 type CardState =
   | { status: 'loading' }
   | { status: 'error' }
@@ -114,14 +116,30 @@ function ScopedCreatorCardPanel({
     setSaving(true);
     setFeedback('');
     let latest: CreatorCard | null;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     try {
-      latest = await readCreatorCard(schoolId, ownerUid);
+      // Bound only the UI wait, not the SDK network request. Promise.race
+      // discards late replies after a timeout; a new explicit tap performs
+      // another server read without ever resending the uncertain write.
+      latest = await Promise.race([
+        readCreatorCard(schoolId, ownerUid),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => {
+            timedOut = true;
+            reject(new Error('Creator card confirmation timed out'));
+          }, CREATOR_CARD_CONFIRM_TIMEOUT_MS);
+        }),
+      ]);
     } catch {
       if (mounted.current) {
-        setFeedback('仍無法核對伺服器資料，草稿已保留，請稍後重試核對。');
+        setFeedback(timedOut
+          ? '核對等待逾時，草稿已保留，請重新核對；不會自動再次儲存。'
+          : '仍無法核對伺服器資料，草稿已保留，請稍後重試核對。');
       }
       return;
     } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
       if (mounted.current) {
         savingFlight.current = false;
         setSaving(false);
