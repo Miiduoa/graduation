@@ -71,6 +71,35 @@ async function open() {
   return screen.getByRole('dialog', { name: '校園空間導覽' });
 }
 
+it('disambiguates same-name campus markers before opening walking or flat-map navigation', async () => {
+  const duplicatePlaces: MapLocation[] = [
+    { id: 'same-a', name: '教學大樓', category: '教學', description: '', lat: 24.225, lng: 120.58 },
+    { id: 'same-b', name: '教學大樓', category: '行政', description: '', lat: 24.227, lng: 120.581 },
+    { id: 'same-c', name: '教學大樓', category: '教學', description: '', lat: 24.229, lng: 120.582 },
+    { id: 'unique', name: '圖書館', category: '學習', description: '', lat: 24.226, lng: 120.583 },
+  ];
+  const onSelect = vi.fn();
+  render(<CampusSpatialExplorer school="other-school" locations={duplicatePlaces}
+    selected={null} onSelect={onSelect} />);
+  const dialog = await open();
+  const picker = within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement;
+  const options = Array.from(picker.options).filter((option) => option.value);
+  expect(options.map((option) => option.text)).toEqual([
+    '教學大樓（教學 · 地圖座標 24.225, 120.58 · 清單第 1 項）',
+    '教學大樓（行政）',
+    '教學大樓（教學 · 地圖座標 24.229, 120.582 · 清單第 3 項）',
+    '圖書館',
+  ]);
+  expect(new Set(options.map((option) => option.text)).size).toBe(options.length);
+
+  fireEvent.change(picker, { target: { value: 'same-c' } });
+  expect(within(dialog).getByText(/同名地點：目前選擇/).textContent)
+    .toContain('24.229, 120.582');
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole('button', { name: '在平面地圖查看' }));
+  expect(onSelect).toHaveBeenCalledWith(duplicatePlaces[2]);
+});
+
 it('rejects non-finite host DOMRect coordinates before first WebGL allocation and during scene restore', async () => {
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) { intersection = callback; }

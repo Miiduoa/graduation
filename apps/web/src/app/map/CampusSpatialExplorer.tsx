@@ -847,6 +847,29 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
 
 function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props & { onClose: () => void }) {
   const model = useMemo(() => buildCampusSpatialModel(locations), [locations]);
+  // Two map records can have the same public-facing name (including two
+  // buildings of the same category). A screen reader or keyboard user must
+  // be able to distinguish the exact pinned destination before navigating.
+  // Only use existing marker/category data; coordinates are not entrances.
+  const { optionLabels, repeatedNames } = useMemo(() => {
+    const nameCounts = new Map<string, number>();
+    const categoryCounts = new Map<string, number>();
+    for (const point of model.points) {
+      nameCounts.set(point.name, (nameCounts.get(point.name) ?? 0) + 1);
+      const group = JSON.stringify([point.name, point.category]);
+      categoryCounts.set(group, (categoryCounts.get(group) ?? 0) + 1);
+    }
+    const repeatedNames = new Set([...nameCounts].filter(([, count]) => count > 1).map(([name]) => name));
+    const optionLabels = new Map(model.points.map((point, index) => {
+      if (!repeatedNames.has(point.name)) return [point.id, point.name] as const;
+      const sameCategory = (categoryCounts.get(JSON.stringify([point.name, point.category])) ?? 0) > 1;
+      const detail = sameCategory
+        ? ` · 地圖座標 ${point.location.lat}, ${point.location.lng} · 清單第 ${index + 1} 項`
+        : '';
+      return [point.id, `${point.name}（${point.category || '未分類'}${detail}）`] as const;
+    }));
+    return { optionLabels, repeatedNames };
+  }, [model.points]);
   // A matching ID alone is not an audited source: Firestore can reuse a POI
   // ID at different coordinates, under a new name or with a new category.
   // Skip the whole-campus download unless a *visible* marker still matches
@@ -1480,7 +1503,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 <label htmlFor={selectId}>想去哪裡</label>
                 <select id={selectId} value={place?.id ?? ''} onChange={(event) => selectPlace(event.target.value)}>
                   {!place && <option value="" disabled>請選擇地點</option>}
-                  {model.points.map((point) => <option key={point.id} value={point.id}>{point.name}</option>)}
+                  {model.points.map((point) => <option key={point.id} value={point.id}>{optionLabels.get(point.id) ?? point.name}</option>)}
                 </select>
               </div>
               {place ? <>
@@ -1508,6 +1531,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 <p className={styles.category}>{place.category}</p>
                 <h3 aria-live="polite" aria-atomic="true">{place.name}</h3>
                 {place.description && <p>{place.description}</p>}
+                {repeatedNames.has(place.name) && (
+                  <p className={styles.note}>
+                    同名地點：目前選擇「{place.category || '未分類'}」，地圖標記座標 {place.lat}, {place.lng}。
+                    這是地點標記，不代表已核實的建築入口；請核對位置再開啟導航。
+                  </p>
+                )}
                 {(place.building || place.floor) && <p>{[place.building, place.floor && `樓層：${place.floor}`].filter(Boolean).join(' · ')}</p>}
                 {Boolean(place.facilities?.length) && <p>設施：{place.facilities!.join('、')}</p>}
                 {school === 'pu' && footprintStatus === 'ready' && (
