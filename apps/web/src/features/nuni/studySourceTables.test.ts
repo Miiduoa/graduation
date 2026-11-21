@@ -1314,6 +1314,8 @@ describe('dynamic inline CSS never promotes ambiguous lesson content into a sour
     '<span style="opacity:0;opacity:calc(1)">',
     '<div style="display:block;display:var(--answer-display)">',
     '<section style="visibility:env(safe-area-inset-top)">',
+    '<div style="display:future-display(block)">',
+    '<p style="opacity:future-alpha(1)">',
   ])('omits an unresolved %s while retaining the later public table', (opening) => {
     const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
     const source = [
@@ -1346,6 +1348,12 @@ describe('invalid CSS declarations cannot override hidden teacher-only source ta
     '<aside style="opacity:0;opacity:transparent">',
     '<aside style="opacity:0!important;opacity:broken!important">',
     '<p style="opacity:0e0;opacity:not-a-number">',
+    '<div style="display:none;display:banana block">',
+    '<div style="display:none!important;display:banana block!important">',
+    '<section style="visibility:hidden;visibility:visible hidden">',
+    '<aside style="content-visibility:hidden;content-visibility:auto unknown">',
+    '<p style="opacity:0;opacity:0 1">',
+    '<div style="display:none;display:future-display(block)">',
     '<div style="opacity&colon;0&period;0">',
     '<section style="opacity&colon;0&percnt;">',
     '<p style="opacity&colon;&plus;0">',
@@ -1370,6 +1378,8 @@ describe('invalid CSS declarations cannot override hidden teacher-only source ta
     '<aside style="opacity:0;opacity:0.5">',
     '<aside style="opacity:0!important;opacity:1e0!important">',
     '<div style="opacity:0;opacity:initial">',
+    '<div style="display:none;display:inline flex">',
+    '<div style="display:none!important;display:block grid!important">',
   ])('keeps legitimate visible CSS overrides eligible for source tables: %s', (opening) => {
     const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
     expect(extractStudySourceTables([opening, ...visibleTable, `</${tag}>`].join('\n')))

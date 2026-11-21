@@ -149,9 +149,13 @@ function isRecognizedInlineCssValue(name: string, value: string): boolean {
     return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?%?$/iu.test(value) ||
       /^(?:calc|min|max|clamp|var|env)\(/iu.test(value);
   }
-  // Reject clearly invalid single identifiers, without trying to parse the
-  // multi-keyword display grammar, custom properties or future CSS functions.
-  if (!/^[a-z-]+$/u.test(value)) return true;
+  // Unknown multi-token values must not silently override a preceding
+  // display:none or visibility:hidden: an invalid CSS declaration is ignored
+  // by the browser. Recognize common valid two-keyword display values only;
+  // keep other ambiguous combinations out of the optional source table.
+  if (name === 'display' &&
+      /^(?:block|inline|run-in)\s+(?:flow|flow-root|flex|grid|table|ruby)$/u.test(value)) return true;
+  if (!/^[a-z-]+$/u.test(value)) return false;
   if (name === 'display') return CSS_DISPLAY_KEYWORDS.has(value);
   if (name === 'visibility') return ['visible', 'hidden', 'collapse'].includes(value);
   if (name === 'content-visibility') return ['visible', 'hidden', 'auto'].includes(value);
@@ -162,7 +166,9 @@ function isRecognizedInlineCssValue(name: string, value: string): boolean {
 // settings or browser computation. We cannot prove their rendered visibility
 // from Markdown source text, so withhold optional derived tables rather than
 // accidentally show a teacher-only table that the renderer may hide.
-const UNRESOLVED_VISIBILITY_FUNCTION = /\b(?:var|env|calc|min|max|clamp)\s*\(/iu;
+// Future or unrecognized functions can be valid in some browsers. Never
+// assume a rendered display state from their source-text spelling.
+const UNRESOLVED_VISIBILITY_FUNCTION = /\b[a-z][a-z-]*\s*\(/iu;
 function hasExplicitHiddenInlineStyle(style: string): boolean {
   // Only recognize literal inline visibility declarations. CSS properties
   // cascade independently; a visible value for one property cannot override

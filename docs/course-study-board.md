@@ -2086,3 +2086,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 繁中教材可能寫作 `７５％`、`７５．５０％`。在欄名明確表示界限 0–100% 百分率、整欄同為全形數字格式且原值合規時，白板可選擇顯示固定 100% 上限的百分比圖。只將全形數字與全形小數點換成 meter 的數值；原文格、來源行號、讀屏內容、剪貼簿、TXT 一律保留教材原來字元。
 - 混用半/全形數字、前導零、超過兩位小數、超過 100%、空白或小數點格式不明時，只保留完整原文表格，不衍生可能誤解的圖表。新增 3 組正常與 7 組不合規的 React DOM 回歸，驗證刻度、來源原文、讀屏數值及文字選取。無新增依賴、付費 API、資料外傳及 checkpoint 格式變更。
 - 此為程式與 DOM 測試案例，正式 CI／CodeQL、App 5504170 APPROVED、Maestro／iOS／Android 真機、WebGPU 繁中與 Ahaboard 同教材同題同機對照須依本輪精確新 SHA 另行驗證；PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-21：修補多詞 CSS 覆寫造成的隱藏教材誤列風險
+
+- 來源 Markdown 若寫 `display:none;display:banana block`、`visibility:hidden;visibility:visible hidden` 等不合法的多詞 CSS，原掃描器會將後者當成可用覆寫，可能把教師尚未公開的表格當成公開內容衍生顯示。現在不能確認有效的多詞宣告不再覆蓋前方明確隱藏值；常見有效 `inline flex`、`block grid` 仍維持可見性判斷。
+- 不只 `var()`／`calc()`，未知或未來 CSS 函數（如 `future-display()`）也不再被當成已確定可見，而是保守不建立衍生表格；原始教材文字保持不動。新增正反來源解析測試，涵蓋 invalid multi-token、unknown function、合法 multi-keyword override 與隱藏內容之後的公開表格。
+- 只調整本機教材衍生視圖、測試及文件，不新增套件、不外傳教材、不變更閱讀／練習備份。不宣稱完整 CSS computed style 或瀏覽器／實機驗收；須以新 SHA 完整 CI、CodeQL、指定 App 5504170、Maestro 和 Ahaboard 同條件對照為準。PR 保持 Draft，不合併、不部署。
