@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { PersonalImportRecord } from '@campus/shared';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
@@ -26,8 +26,13 @@ export function usePersonalImportScope() {
   const scope: PersonalImportScope = { owner, schoolId: school?.selectedSchoolId || 'personal' };
   return {
     scope,
-    canPrepareSchoolDraft: !loading && !auth.error && !nuni?.error && !nuni?.pendingLogout &&
-      school?.catalogStatus === 'ready' && school.selectedSchool?.id === scope.schoolId,
+    canPrepareSchoolDraft:
+      !loading &&
+      !auth.error &&
+      !nuni?.error &&
+      !nuni?.pendingLogout &&
+      school?.catalogStatus === 'ready' &&
+      school.selectedSchool?.id === scope.schoolId,
     scopeKey: personalImportsStorageKey(scope),
     loading,
     schoolName: school?.selectedSchool?.name || '未指定校園',
@@ -38,10 +43,13 @@ export function usePersonalImports(scope: PersonalImportScope, enabled = true) {
   const key = personalImportsStorageKey(scope);
   const [state, setState] = useState<{
     key: string;
+    attempt: number;
     records: PersonalImportRecord[];
     error: string;
     syncEnabled: boolean;
   } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((value) => value + 1), []);
   const owner = scope.owner;
   const schoolId = scope.schoolId;
   useEffect(() => {
@@ -50,10 +58,11 @@ export function usePersonalImports(scope: PersonalImportScope, enabled = true) {
       try {
         const records = readPersonalImports({ owner, schoolId });
         const syncEnabled = readPersonalImportSyncState({ owner, schoolId }).enabled;
-        setState({ key, records, error: '', syncEnabled });
+        setState({ key, attempt, records, error: '', syncEnabled });
       } catch (error) {
         setState({
           key,
+          attempt,
           records: [],
           error: error instanceof Error ? error.message : '無法讀取匯入紀錄。',
           syncEnabled: false,
@@ -67,8 +76,8 @@ export function usePersonalImports(scope: PersonalImportScope, enabled = true) {
       window.removeEventListener('storage', refresh);
       window.removeEventListener(PERSONAL_IMPORT_CHANGE, refresh);
     };
-  }, [key, enabled, owner, schoolId]);
-  const visible = enabled && state?.key === key ? state : null;
+  }, [key, enabled, owner, schoolId, attempt]);
+  const visible = enabled && state?.key === key && state.attempt === attempt ? state : null;
   return {
     records: visible?.records ?? [],
     error: visible?.error ?? '',
@@ -76,5 +85,6 @@ export function usePersonalImports(scope: PersonalImportScope, enabled = true) {
     syncEnabled: visible?.syncEnabled ?? false,
     /** True only after a successful read for this scope; load failures must not look empty. */
     ready: !!visible && !visible.error,
+    retry,
   };
 }

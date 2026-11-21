@@ -20,10 +20,13 @@ import {
   type NuniSubmission,
   type NuniSubmissionFile,
 } from '@campus/shared/src/nuni';
+import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
 import { PhotoPdfEditor } from './PhotoPdfEditor';
 import { useClasses } from './CourseUI';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
+import fileStyles from './AssignmentFileFields.module.css';
 
 export type LocalAssignmentFile = {
   key: string;
@@ -43,30 +46,69 @@ export type AssignmentFileOperation = {
 
 export type AssignmentUploadProgress = { completed: number; total: number };
 
-function kindOf(file: File): 'image' | 'file' {
-  return file.type.startsWith('image/') ? 'image' : 'file';
-}
+type AssignmentFileSelection = {
+  files: LocalAssignmentFile[];
+  added: number;
+  rejected: { name: string; reason: string }[];
+};
 
-export function collectLocalFiles(current: LocalAssignmentFile[], incoming: FileList | File[]): LocalAssignmentFile[] {
+export function collectLocalFileSelection(
+  current: LocalAssignmentFile[],
+  incoming: FileList | File[],
+): AssignmentFileSelection {
   const next = [...current];
+  const rejected: AssignmentFileSelection['rejected'] = [];
   for (const file of Array.from(incoming)) {
+    let classified: ReturnType<typeof classifyAssignmentFile>;
     try {
-      classifyAssignmentFile(file.name, file.type);
-    } catch {
+      classified = classifyAssignmentFile(file.name, file.type);
+    } catch (cause) {
+      rejected.push({
+        name: file.name,
+        reason:
+          cause instanceof NuniError && cause.code === 'ASSIGNMENT_FILE_NAME_INVALID'
+            ? '檔名無法使用，請重新命名後再選。'
+            : '格式不支援，或副檔名與檔案格式不一致。',
+      });
       continue;
     }
-    const kind = kindOf(file);
+    const { kind, contentType } = classified;
     const used = next.filter((item) => item.kind === kind).length;
-    if (kind === 'image' && used >= MAX_ASSIGNMENT_IMAGES) continue;
-    if (kind === 'file' && used >= MAX_ASSIGNMENT_DOCUMENTS) continue;
+    const limit = kind === 'image' ? MAX_ASSIGNMENT_IMAGES : MAX_ASSIGNMENT_DOCUMENTS;
+    if (used >= limit) {
+      rejected.push({
+        name: file.name,
+        reason:
+          kind === 'image'
+            ? `照片最多 ${limit} 張，請先刪除不需要的照片。`
+            : `文件最多 ${limit} 個，請先刪除不需要的文件。`,
+      });
+      continue;
+    }
+    // Some file pickers omit MIME types. Fill only a missing type from the
+    // classifier, and keep photos in their own quota. The server still validates
+    // the type and uploaded bytes independently.
+    const selected = file.type
+      ? file
+      : new File([file], file.name, {
+          type: contentType,
+          lastModified: file.lastModified,
+        });
     next.push({
       key: `${file.name}:${file.size}:${file.lastModified}:${next.length}:${Math.random().toString(36).slice(2, 8)}`,
-      file,
+      file: selected,
       kind,
-      previewUrl: kind === 'image' ? URL.createObjectURL(file) : undefined,
+      previewUrl: kind === 'image' ? URL.createObjectURL(selected) : undefined,
     });
   }
-  return next;
+  return { files: next, added: next.length - current.length, rejected };
+}
+
+export function collectLocalFiles(
+  current: LocalAssignmentFile[],
+  incoming: FileList | File[],
+): LocalAssignmentFile[] {
+  return collectLocalFileSelection(current, incoming).files;
 }
 
 export function revokeUnusedAssignmentPreviews(
@@ -101,7 +143,11 @@ export function useAssignmentFilePreviews(files: LocalAssignmentFile[]) {
 }
 
 export async function compressAssignmentImageFile(file: File): Promise<File> {
-  if (!file.type.startsWith('image/') || /heic|heif/i.test(file.type) || typeof document === 'undefined')
+  if (
+    !file.type.startsWith('image/') ||
+    /heic|heif/i.test(file.type) ||
+    typeof document === 'undefined'
+  )
     return file;
   const bitmapFn = globalThis.createImageBitmap;
   if (typeof bitmapFn !== 'function') return file;
@@ -109,7 +155,9 @@ export async function compressAssignmentImageFile(file: File): Promise<File> {
     const bitmap = await bitmapFn(file);
     const size = assignmentImageTargetSize(bitmap.width, bitmap.height);
     const skip =
-      size.width === bitmap.width && size.height === bitmap.height && file.size <= 1.5 * 1024 * 1024;
+      size.width === bitmap.width &&
+      size.height === bitmap.height &&
+      file.size <= 1.5 * 1024 * 1024;
     if (skip) {
       bitmap.close?.();
       return file;
@@ -124,7 +172,9 @@ export async function compressAssignmentImageFile(file: File): Promise<File> {
     }
     context.drawImage(bitmap, 0, 0, size.width, size.height);
     bitmap.close?.();
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', 0.82),
+    );
     if (!blob || blob.size >= file.size) return file;
     return new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
       type: 'image/jpeg',
@@ -225,13 +275,21 @@ export function AssignmentFilePreview({
         ))}
       </ul>
       {opened?.previewUrl ? (
-        <div className={styles.lightbox} role="dialog" aria-modal="true" aria-label={opened.file.name}>
-          <button type="button" onClick={() => setOpenedKey(null)}>
-            關閉
-          </button>
+        <Modal
+          isOpen
+          onClose={() => setOpenedKey(null)}
+          title={opened.file.name}
+          description={formatAssignmentFileSize(opened.file.size)}
+          size="xl"
+          footer={
+            <Button type="button" variant="outline" onClick={() => setOpenedKey(null)}>
+              關閉預覽
+            </Button>
+          }
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={opened.previewUrl} alt={opened.file.name} />
-        </div>
+          <img className={fileStyles.previewImage} src={opened.previewUrl} alt={opened.file.name} />
+        </Modal>
       ) : null}
     </>
   );
@@ -257,7 +315,8 @@ export function SubmittedFileList({ files }: { files: NuniSubmissionFile[] }) {
             <span>
               <strong>{file.originalName}</strong>
               <small>
-                {formatAssignmentFileSize(file.byteSize)} · {file.kind === 'image' ? '照片' : '檔案'}
+                {formatAssignmentFileSize(file.byteSize)} ·{' '}
+                {file.kind === 'image' ? '照片' : '檔案'}
               </small>
               <span className={styles.fileEdit}>
                 <a href={view}>查看</a>
@@ -283,7 +342,9 @@ export function SubmissionReceipt({
     <section className={shared.receipt} aria-label="我的繳交紀錄">
       <strong>{assignmentReceiptStatusLabel(late)}</strong>
       <p>
-        <time dateTime={submission.submittedAt}>{formatTaipeiDateTime(submission.submittedAt)}</time>
+        <time dateTime={submission.submittedAt}>
+          {formatTaipeiDateTime(submission.submittedAt)}
+        </time>
       </p>
       {submission.files?.length ? <SubmittedFileList files={submission.files} /> : null}
     </section>
@@ -300,12 +361,15 @@ export function AssignmentFilePicker({
   disabled?: boolean;
 }) {
   const [pdfOpen, setPdfOpen] = useState(false);
+  const [selection, setSelection] = useState<Omit<AssignmentFileSelection, 'files'> | null>(null);
   const camera = useRef<HTMLInputElement>(null);
   const album = useRef<HTMLInputElement>(null);
   const docs = useRef<HTMLInputElement>(null);
-  function add(list: FileList | null) {
+  function add(list: FileList | File[] | null) {
     if (!list?.length) return;
-    onChange(collectLocalFiles(files, list));
+    const result = collectLocalFileSelection(files, list);
+    setSelection({ added: result.added, rejected: result.rejected });
+    if (result.added) onChange(result.files);
   }
   return (
     <div className={styles.fileActions}>
@@ -345,19 +409,37 @@ export function AssignmentFilePicker({
           event.target.value = '';
         }}
       />
-      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled || pdfOpen} onClick={() => camera.current?.click()}>
+      <button
+        type="button"
+        className={`${shared.button} ${shared.secondary}`}
+        disabled={disabled || pdfOpen}
+        onClick={() => camera.current?.click()}
+      >
         拍照
       </button>
-      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled || pdfOpen} onClick={() => album.current?.click()}>
+      <button
+        type="button"
+        className={`${shared.button} ${shared.secondary}`}
+        disabled={disabled || pdfOpen}
+        onClick={() => album.current?.click()}
+      >
         相簿
       </button>
-      <button type="button" className={`${shared.button} ${shared.secondary}`} disabled={disabled || pdfOpen} onClick={() => docs.current?.click()}>
+      <button
+        type="button"
+        className={`${shared.button} ${shared.secondary}`}
+        disabled={disabled || pdfOpen}
+        onClick={() => docs.current?.click()}
+      >
         檔案
       </button>
       <button
         type="button"
         className={`${shared.button} ${shared.secondary}`}
-        disabled={disabled || files.filter((file) => file.kind === 'file').length >= MAX_ASSIGNMENT_DOCUMENTS}
+        disabled={
+          disabled ||
+          files.filter((file) => file.kind === 'file').length >= MAX_ASSIGNMENT_DOCUMENTS
+        }
         onClick={() => setPdfOpen(true)}
       >
         照片轉 PDF
@@ -366,12 +448,37 @@ export function AssignmentFilePicker({
         <PhotoPdfEditor
           onCancel={() => setPdfOpen(false)}
           onConfirm={(file) => {
-            onChange(collectLocalFiles(files, [file]));
+            add([file]);
             setPdfOpen(false);
           }}
         />
       ) : null}
-      <p className={styles.note}>網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。</p>
+      <p className={fileStyles.limits}>
+        照片 {files.filter((file) => file.kind === 'image').length}/{MAX_ASSIGNMENT_IMAGES} 張 ·
+        文件 {files.filter((file) => file.kind === 'file').length}/{MAX_ASSIGNMENT_DOCUMENTS} 個
+      </p>
+      {selection ? (
+        <div className={fileStyles.selection} role="status" aria-live="polite" aria-atomic="true">
+          <p>
+            {selection.added ? `已加入 ${selection.added} 個檔案。` : '這次沒有加入檔案。'}
+            {selection.rejected.length
+              ? ` ${selection.rejected.length} 個未加入，請確認下方原因。`
+              : null}
+          </p>
+          {selection.rejected.length ? (
+            <ul aria-label="未加入的檔案">
+              {selection.rejected.map((item, index) => (
+                <li key={`${index}:${item.name}`}>
+                  <strong>{item.name}</strong>：{item.reason}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+      <p className={styles.note}>
+        網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。
+      </p>
       <AssignmentFilePreview files={files} onChange={onChange} disabled={disabled} />
     </div>
   );

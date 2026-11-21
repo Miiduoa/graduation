@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   assignmentFileHref,
+  collectLocalFileSelection,
   collectLocalFiles,
   compressAssignmentImageFile,
   revokeUnusedAssignmentPreviews,
@@ -19,11 +20,46 @@ afterEach(() => {
 describe('collectLocalFiles', () => {
   it('keeps at most eight images and two documents, and drops disallowed types', () => {
     const images = Array.from({ length: 9 }, (_, index) => file(`shot-${index}.jpg`, 'image/jpeg'));
-    const docs = [file('a.pdf', 'application/pdf'), file('b.pdf', 'application/pdf'), file('c.pdf', 'application/pdf')];
-    const next = collectLocalFiles([], [...images, ...docs, file('bad.exe', 'application/octet-stream')]);
+    const docs = [
+      file('a.pdf', 'application/pdf'),
+      file('b.pdf', 'application/pdf'),
+      file('c.pdf', 'application/pdf'),
+    ];
+    const next = collectLocalFiles(
+      [],
+      [...images, ...docs, file('bad.exe', 'application/octet-stream')],
+    );
     expect(next.filter((item) => item.kind === 'image')).toHaveLength(8);
     expect(next.filter((item) => item.kind === 'file')).toHaveLength(2);
     expect(next.some((item) => item.file.name.endsWith('.exe'))).toBe(false);
+  });
+
+  it('uses the validated file extension when a picker omits MIME and keeps the original bytes', async () => {
+    const original = new File(['photo bytes'], '空類型照片.png', { lastModified: 123 });
+    const existing = collectLocalFiles(
+      [],
+      [file('a.pdf', 'application/pdf'), file('b.pdf', 'application/pdf')],
+    );
+    const selection = collectLocalFileSelection(existing, [original]);
+    expect(selection.added).toBe(1);
+    expect(selection.rejected).toEqual([]);
+    const added = selection.files[2]!;
+    expect(added.kind).toBe('image');
+    expect(added.previewUrl).toBeTruthy();
+    expect(added.file.type).toBe('image/png');
+    expect(added.file.name).toBe(original.name);
+    expect(added.file.lastModified).toBe(original.lastModified);
+    expect(await added.file.arrayBuffer()).toEqual(await original.arrayBuffer());
+    expect(selection.files.slice(0, 2)).toEqual(existing);
+  });
+
+  it('does not override an explicitly mismatched MIME to accept a file', () => {
+    const selection = collectLocalFileSelection([], [file('wrong.png', 'application/pdf')]);
+    expect(selection.files).toEqual([]);
+    expect(selection.added).toBe(0);
+    expect(selection.rejected).toEqual([
+      { name: 'wrong.png', reason: '格式不支援，或副檔名與檔案格式不一致。' },
+    ]);
   });
 });
 
@@ -84,21 +120,27 @@ describe('uploadAndSubmitFiles', () => {
         _workspaceId: string,
         _assignmentId: string,
         _input: {
-          files: { originalName: string; contentType: string; byteSize: number; idempotencyKey?: string }[];
+          files: {
+            originalName: string;
+            contentType: string;
+            byteSize: number;
+            idempotencyKey?: string;
+          }[];
           idempotencyKey: string;
         },
       ) => [
-      {
-        id: 'cwf_11111111-1111-4111-8111-111111111111',
-        uploadPath: 'class-workspaces/cw/assignments/cwa/files/cwf_1/content',
-        contentType: 'image/jpeg',
-      },
-      {
-        id: 'cwf_22222222-2222-4222-8222-222222222222',
-        uploadPath: 'class-workspaces/cw/assignments/cwa/files/cwf_2/content',
-        contentType: 'image/jpeg',
-      },
-    ]);
+        {
+          id: 'cwf_11111111-1111-4111-8111-111111111111',
+          uploadPath: 'class-workspaces/cw/assignments/cwa/files/cwf_1/content',
+          contentType: 'image/jpeg',
+        },
+        {
+          id: 'cwf_22222222-2222-4222-8222-222222222222',
+          uploadPath: 'class-workspaces/cw/assignments/cwa/files/cwf_2/content',
+          contentType: 'image/jpeg',
+        },
+      ],
+    );
     const uploadAssignmentFile = vi.fn(async () => ({}));
     const submitFiles = vi.fn(async () => ({
       id: 'cwa_11111111-1111-4111-8111-111111111111',
@@ -156,15 +198,49 @@ it('resumes only unfinished uploads with the original intents and prepared files
   ]);
   let failed = false;
   const uploadAssignmentFile = vi.fn(async (path: string) => {
-    if (path === 'second' && !failed) { failed = true; throw new TypeError('upload interrupted'); }
+    if (path === 'second' && !failed) {
+      failed = true;
+      throw new TypeError('upload interrupted');
+    }
   });
   const submitFiles = vi.fn(async () => ({}));
   const classes = { createAssignmentFileIntents, uploadAssignmentFile, submitFiles } as never;
-  const files = collectLocalFiles([], [file('a.pdf', 'application/pdf'), file('b.pdf', 'application/pdf')]);
-  await expect(uploadAndSubmitFiles(classes, 'workspace', 'assignment', 'original', files, 'key', undefined, operation)).rejects.toThrow('upload interrupted');
+  const files = collectLocalFiles(
+    [],
+    [file('a.pdf', 'application/pdf'), file('b.pdf', 'application/pdf')],
+  );
+  await expect(
+    uploadAndSubmitFiles(
+      classes,
+      'workspace',
+      'assignment',
+      'original',
+      files,
+      'key',
+      undefined,
+      operation,
+    ),
+  ).rejects.toThrow('upload interrupted');
   expect(submitFiles).not.toHaveBeenCalled();
-  await uploadAndSubmitFiles(classes, 'workspace', 'assignment', 'changed', [], 'key', undefined, operation);
+  await uploadAndSubmitFiles(
+    classes,
+    'workspace',
+    'assignment',
+    'changed',
+    [],
+    'key',
+    undefined,
+    operation,
+  );
   expect(createAssignmentFileIntents).toHaveBeenCalledTimes(1);
-  expect(uploadAssignmentFile.mock.calls.map(([path]) => path)).toEqual(['first', 'second', 'second']);
-  expect(submitFiles).toHaveBeenCalledWith('workspace', 'assignment', { body: 'original', fileIds: ['first', 'second'], idempotencyKey: 'key' });
+  expect(uploadAssignmentFile.mock.calls.map(([path]) => path)).toEqual([
+    'first',
+    'second',
+    'second',
+  ]);
+  expect(submitFiles).toHaveBeenCalledWith('workspace', 'assignment', {
+    body: 'original',
+    fileIds: ['first', 'second'],
+    idempotencyKey: 'key',
+  });
 });
