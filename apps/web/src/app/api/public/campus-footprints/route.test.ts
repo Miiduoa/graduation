@@ -1489,6 +1489,55 @@ describe('public Providence building geometry route', () => {
     vi.restoreAllMocks();
   });
   it.each([
+    {
+      label: 'ISO calendar date instead of an HTTP-date',
+      headers: { 'Retry-After': '2099-01-01' },
+    },
+    {
+      label: 'obsolete RFC 850 HTTP-date format',
+      headers: { 'Retry-After': 'Sunday, 15-Nov-26 23:00:00 GMT' },
+    },
+    {
+      label: 'non-HTTP origin Date that would inflate a legitimate retry to a day',
+      headers: {
+        Date: '2000-01-01',
+        'Retry-After': new Date(Date.parse('2026-11-15T01:00:00Z')).toUTCString(),
+      },
+    },
+  ])('does not trust $label when deciding the public Overpass retry window',
+    async ({ headers }) => {
+      // Synthetic proxy headers, not observations from the live Overpass API.
+      // The local clock is already 90 minutes ahead of the nominal origin.
+      // Bad date formats should use the ordinary 10-minute safety backoff,
+      // rather than locking all campus users out for up to 24 hours.
+      const start = Date.parse('2026-11-15T01:30:00Z');
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        const upstream = vi.fn()
+          .mockResolvedValueOnce(new Response('overloaded', { status: 503, headers }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+
+        const rejected = await GET();
+        expect(rejected.status).toBe(503);
+        expect(rejected.headers.get('Retry-After')).toBe('600');
+        expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+
+        clock.mockReturnValue(start + 9 * 60_000);
+        expect((await GET()).headers.get('Retry-After')).toBe('60');
+        expect(upstream).toHaveBeenCalledTimes(1);
+        clock.mockReturnValue(start + 10 * 60_000 + 1_000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+  it.each([
     { label: 'HTTP 503', mode: 'error' },
     { label: 'HTTP 200 Content-Range', mode: 'range' },
     { label: 'HTTP 200 Overpass remark', mode: 'remark' },
