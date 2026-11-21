@@ -688,6 +688,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         visible = position === 'onscreen' || position === 'unknown';
       }
     }
+    // Legacy WebViews with no IntersectionObserver should share the same
+    // measured fallback as a broken observer, not eagerly start offscreen GPU.
+    // The capture scroll listener below can wake the canvas once it appears.
+    if (!manualStart && typeof IntersectionObserver === 'undefined') {
+      observerFallback = true;
+      const position = hostViewportVisibility();
+      visible = position === 'onscreen' || position === 'unknown';
+    }
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);

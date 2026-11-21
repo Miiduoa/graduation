@@ -568,8 +568,8 @@ it('fully tears down WebGL and page listeners if WebView observer disconnect thr
   }
 });
 
-it.each(['constructor', 'observe'] as const)(
-  'defers offscreen WebGL when the WebView observer fails at %s and resumes on container scroll',
+it.each(['missing', 'constructor', 'observe'] as const)(
+  'defers offscreen WebGL when the WebView observer is %s and resumes on container scroll',
   async (failurePoint) => {
     let onscreen = false;
     const originalRect = Element.prototype.getBoundingClientRect;
@@ -582,16 +582,20 @@ it.each(['constructor', 'observe'] as const)(
           width: 300, height: 180, toJSON: () => ({}),
         } as DOMRect;
       });
-    vi.stubGlobal('IntersectionObserver', class {
-      constructor(callback: IntersectionObserverCallback) {
-        intersection = callback;
-        if (failurePoint === 'constructor') throw new Error('unavailable observer');
-      }
-      observe() {
-        if (failurePoint === 'observe') throw new Error('cannot observe host');
-      }
-      disconnect = disconnect;
-    });
+    if (failurePoint === 'missing') {
+      vi.stubGlobal('IntersectionObserver', undefined);
+    } else {
+      vi.stubGlobal('IntersectionObserver', class {
+        constructor(callback: IntersectionObserverCallback) {
+          intersection = callback;
+          if (failurePoint === 'constructor') throw new Error('unavailable observer');
+        }
+        observe() {
+          if (failurePoint === 'observe') throw new Error('cannot observe host');
+        }
+        disconnect = disconnect;
+      });
+    }
     const timerSpy = vi.spyOn(window, 'setTimeout');
     try {
       const { unmount } = render(<CampusSpatialExplorer school="other-school"
@@ -630,6 +634,59 @@ it.each(['constructor', 'observe'] as const)(
     }
   },
 );
+
+it('blocks legacy no-observer WebGL during an invalid VisualViewport and resumes from viewport events', async () => {
+  // Some legacy WebViews omit IntersectionObserver while exposing a transient
+  // zero-height VisualViewport during soft-keyboard and return transitions.
+  vi.stubGlobal('IntersectionObserver', undefined);
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: 0, offsetLeft: 0, offsetTop: 0,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  const originalRect = Element.prototype.getBoundingClientRect;
+  const rectSpy = vi.spyOn(Element.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: Element) {
+      if (this.getAttribute('aria-label') !== '校園地點空間圖') return originalRect.call(this);
+      return {
+        x: 0, y: 24, left: 0, top: 24, right: 300, bottom: 204,
+        width: 300, height: 180, toJSON: () => ({}),
+      } as DOMRect;
+    });
+  const timerSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    const { unmount } = render(<CampusSpatialExplorer school="other-school"
+      locations={places} selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    expect(host.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(timerSpy.mock.calls.some(([, delay]) => delay === 12_000)).toBe(false);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+    viewport.height = window.innerHeight;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    viewport.height = 0;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    viewport.height = window.innerHeight;
+    act(() => viewport.dispatchEvent(new Event('scroll')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+
+    unmount();
+    const calls = scene.setActive.mock.calls.length;
+    viewport.dispatchEvent(new Event('resize'));
+    viewport.dispatchEvent(new Event('scroll'));
+    expect(scene.setActive).toHaveBeenCalledTimes(calls);
+    expect(scene.dispose).toHaveBeenCalledTimes(1);
+  } finally {
+    timerSpy.mockRestore();
+    rectSpy.mockRestore();
+  }
+});
 
 it.each(['constructor', 'observe'] as const)(
   'falls back to working 3D and walking navigation when a WebView observer fails at %s',
