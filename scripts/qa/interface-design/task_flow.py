@@ -309,6 +309,16 @@ async def scenario(browser, origin, config, reports):
 
     async def capture(name, full_page=True):
         filename = f"task-flow-{config['name']}-{name}.png"
+        # Preserve the real opening animation; record its settled frame rather
+        # than a translucent intermediate frame. Infinite child spinners are
+        # intentionally outside this capture-only wait.
+        await page.evaluate('''async () => {
+          const animations = [...document.querySelectorAll('dialog:modal')]
+            .flatMap(dialog => dialog.getAnimations())
+            .filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime));
+          await Promise.allSettled(animations.map(animation => animation.finished));
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }''')
         await page.screenshot(path=str(OUTPUT / filename), full_page=full_page)
         report['screenshots'].append(filename)
 
