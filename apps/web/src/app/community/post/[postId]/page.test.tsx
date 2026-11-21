@@ -97,6 +97,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   if (originalShow) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShow);
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
@@ -268,6 +269,55 @@ it('retains the edit draft after a lost response and rejects an empty title', as
   fireEvent.click(screen.getByRole('button', { name: '儲存' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(mocks.updatePost).toHaveBeenCalledTimes(2);
+});
+
+it('reopens the same slow edit without resubmitting and applies a hidden success without moving focus', async () => {
+  ownPost();
+  let resolve!: () => void;
+  mocks.updatePost.mockImplementation(
+    () =>
+      new Promise<void>((done) => {
+        resolve = done;
+      }),
+  );
+  render(<PostDetailPage />);
+  const opener = await screen.findByRole('button', { name: '✏️ 編輯' });
+  vi.useFakeTimers();
+  opener.focus();
+  fireEvent.click(opener);
+  fireEvent.change(screen.getByLabelText('標題'), { target: { value: '等待確認的修改' } });
+  fireEvent.change(screen.getByLabelText('內文'), { target: { value: '仍保留的內文' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存' }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15_000);
+  });
+  expect(screen.getByText(/這次送出仍可能完成，請勿重複送出/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '先關閉' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(opener);
+  fireEvent.click(opener);
+  expect((screen.getByLabelText('標題') as HTMLInputElement).value).toBe('等待確認的修改');
+  expect((screen.getByLabelText('內文') as HTMLTextAreaElement).value).toBe('仍保留的內文');
+  expect(screen.getByLabelText('標題').matches(':disabled')).toBe(true);
+  fireEvent.submit(screen.getByRole('dialog').querySelector('form')!);
+  expect(mocks.updatePost).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole('button', { name: '先關閉' }));
+  const focused = screen.getByPlaceholderText('輸入留言⋯');
+  focused.focus();
+  await act(async () => {
+    resolve();
+  });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByText('等待確認的修改')).toBeTruthy();
+  expect(screen.getByText('仍保留的內文')).toBeTruthy();
+  expect(document.activeElement).toBe(focused);
+  expect(mocks.updatePost).toHaveBeenCalledOnce();
+  fireEvent.click(opener);
+  expect(screen.getByLabelText('標題').matches(':disabled')).toBe(false);
+  fireEvent.change(screen.getByLabelText('標題'), { target: { value: '取消後不保留' } });
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  fireEvent.click(opener);
+  expect((screen.getByLabelText('標題') as HTMLInputElement).value).toBe('等待確認的修改');
 });
 
 it('does not let a previous account edit completion close a new editing session', async () => {

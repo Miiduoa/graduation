@@ -19,7 +19,11 @@ import { SiteShell } from '@/components/SiteShell';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input, Textarea } from '@/components/ui/Input';
-import { useCommunityFormSession } from '../../_components/useCommunityFormSession';
+import {
+  COMMUNITY_FORM_PENDING_COPY,
+  useCommunityFormSession,
+  type CommunityFormCloseReason,
+} from '../../_components/useCommunityFormSession';
 import formStyles from '../../_components/CommunityForm.module.css';
 import modalStyles from '@/components/ui/Modal.module.css';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
@@ -86,7 +90,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const [replyParentId, setReplyParentId] = useState<string | null>(null);
   const [sendingReply, setSendingReply] = useState(false);
   const [likeBusy, setLikeBusy] = useState(false);
-  const [editScope, setEditScope] = useState<string | null>(null);
+  const [editSession, setEditSession] = useState<{ scope: string; open: boolean } | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [bookmarkState, setBookmarkState] = useState<{ scope: string; saved: boolean } | null>(
     null,
@@ -413,7 +417,11 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
           <div style={{ display: 'flex', gap: 6 }}>
             {isMine ? (
               <>
-                <button type="button" onClick={() => setEditScope(bookmarkScope)} style={btnGhost}>
+                <button
+                  type="button"
+                  onClick={() => setEditSession({ scope: bookmarkScope, open: true })}
+                  style={btnGhost}
+                >
                   ✏️ 編輯
                 </button>
                 <button
@@ -665,18 +673,21 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         </div>
       </div>
 
-      {editScope === bookmarkScope && isMine && post.id === postId && (
+      {editSession?.scope === bookmarkScope && isMine && post.id === postId && (
         <EditPostModal
           key={bookmarkScope}
+          open={editSession.open}
           initial={{
             title: post.title,
             content: post.content,
             tagsRaw: (post.tags ?? []).join(', '),
           }}
-          onClose={() => setEditScope(null)}
+          onClose={(reason) =>
+            setEditSession(reason === 'pending' ? { scope: bookmarkScope, open: false } : null)
+          }
           onSubmit={(patch) => updateCampusPost(schoolId, postId, patch)}
           onSaved={(patch) => {
-            setEditScope(null);
+            setEditSession(null);
             setPost((current) => (current?.id === postId ? { ...current, ...patch } : current));
           }}
         />
@@ -694,8 +705,9 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
 type EditPostPatch = { title: string; content: string; tags: string[] };
 
 function EditPostModal(props: {
+  open: boolean;
   initial: { title: string; content: string; tagsRaw: string };
-  onClose: () => void;
+  onClose: (reason: CommunityFormCloseReason) => void;
   onSubmit: (patch: EditPostPatch) => Promise<void>;
   onSaved: (patch: EditPostPatch) => void;
 }) {
@@ -732,23 +744,23 @@ function EditPostModal(props: {
 
   return (
     <Modal
-      isOpen
+      isOpen={props.open}
       onClose={session.requestClose}
       title="編輯貼文"
       size="lg"
       initialFocusRef={titleRef}
       showCloseButton={!session.busy}
-      closeOnEsc={!session.busy}
-      closeOnOverlayClick={!session.busy}
+      closeOnEsc={session.canClose}
+      closeOnOverlayClick={session.canClose}
       footer={
         <>
           <Button
             type="button"
             variant="ghost"
             onClick={session.requestClose}
-            disabled={session.busy}
+            disabled={!session.canClose}
           >
-            取消
+            {session.busy && session.slow ? '先關閉' : '取消'}
           </Button>
           <Button type="submit" form={formId} variant="primary" loading={session.busy}>
             {session.busy ? '儲存中…' : '儲存'}
@@ -788,7 +800,7 @@ function EditPostModal(props: {
         </fieldset>
         {session.busy && (
           <p role="status" className={modalStyles.notice}>
-            正在儲存，請稍候。
+            {session.slow ? COMMUNITY_FORM_PENDING_COPY : '正在儲存，請稍候。'}
           </p>
         )}
         {session.error && (

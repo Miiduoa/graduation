@@ -15,7 +15,12 @@ import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input, Select, Textarea } from '@/components/ui/Input';
-import { useCommunityFormSession } from './useCommunityFormSession';
+import {
+  COMMUNITY_FORM_PENDING_COPY,
+  useCommunityFormSession,
+  type CommunityFormCloseReason,
+  type CommunityFormDisplay,
+} from './useCommunityFormSession';
 import formStyles from './CommunityForm.module.css';
 import modalStyles from '@/components/ui/Modal.module.css';
 import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
@@ -75,6 +80,7 @@ export function StudyBuddyTab(props: { schoolId: string }) {
   const { schoolId } = props;
   const { user } = useAuth();
   const [subTab, setSubTab] = useState<SubTab>('review');
+  const [visitedGroups, setVisitedGroups] = useState(false);
 
   return (
     <div>
@@ -95,7 +101,10 @@ export function StudyBuddyTab(props: { schoolId: string }) {
               role="tab"
               aria-selected={on}
               type="button"
-              onClick={() => setSubTab(k)}
+              onClick={() => {
+                if (k === 'group') setVisitedGroups(true);
+                setSubTab(k);
+              }}
               style={{
                 padding: '10px 16px',
                 background: 'transparent',
@@ -113,19 +122,24 @@ export function StudyBuddyTab(props: { schoolId: string }) {
         })}
       </div>
 
-      {subTab === 'review' ? (
+      <div hidden={subTab !== 'review'}>
         <CourseReviewSection
           key={`${schoolId}:${user?.uid ?? ''}`}
           schoolId={schoolId}
           myUid={user?.uid ?? null}
+          active={subTab === 'review'}
         />
-      ) : (
-        <StudyGroupSection
-          key={`${schoolId}:${user?.uid ?? ''}`}
-          schoolId={schoolId}
-          myUid={user?.uid ?? null}
-          myName={user?.displayName ?? null}
-        />
+      </div>
+      {visitedGroups && (
+        <div hidden={subTab !== 'group'}>
+          <StudyGroupSection
+            key={`${schoolId}:${user?.uid ?? ''}`}
+            schoolId={schoolId}
+            myUid={user?.uid ?? null}
+            myName={user?.displayName ?? null}
+            active={subTab === 'group'}
+          />
+        </div>
       )}
 
       <p style={{ marginTop: 24, color: 'var(--muted)', fontSize: 13 }}>
@@ -137,12 +151,16 @@ export function StudyBuddyTab(props: { schoolId: string }) {
 
 // ─── Course Reviews ─────────────────────────────────────
 
-function CourseReviewSection(props: { schoolId: string; myUid: string | null }) {
+export function CourseReviewSection(props: {
+  schoolId: string;
+  myUid: string | null;
+  active?: boolean;
+}) {
   const { schoolId, myUid } = props;
   const [reviews, setReviews] = useState<CourseReviewDoc[]>([]);
   const [filter, setFilter] = useState('');
   const filterRef = useRef<HTMLInputElement>(null);
-  const [showModal, setShowModal] = useState(false);
+  const [formDisplay, setFormDisplay] = useState<CommunityFormDisplay>('closed');
 
   const load = useCallback(async () => {
     if (!schoolId) {
@@ -164,8 +182,6 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
     return reviews.filter((r) => `${r.courseName} ${r.courseCode}`.toLowerCase().includes(q));
   }, [reviews, filter]);
   const agg = useMemo(() => aggregateReviews(filtered), [filtered]);
-
-  if (error) return <CommunityLoadError message={error} retry={refresh} />;
 
   return (
     <div>
@@ -191,20 +207,26 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
         <button
           type="button"
           className="btn primary"
-          onClick={() => setShowModal(true)}
+          onClick={() => setFormDisplay('open')}
           style={{ fontSize: 13, padding: '8px 16px' }}
         >
           ＋ 寫評價
         </button>
       </div>
+      {formDisplay === 'pending-hidden' && (
+        <p role="status" className={formStyles.hint}>
+          評價表單與這次送出仍保留在本頁，可再按「寫評價」查看結果。
+        </p>
+      )}
 
-      {agg.totalCount > 0 && <ReviewSummary agg={agg} />}
+      {error && <CommunityLoadError message={error} retry={refresh} />}
+      {!error && agg.totalCount > 0 && <ReviewSummary agg={agg} />}
 
       {loading ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
           載入中…
         </div>
-      ) : filtered.length === 0 ? (
+      ) : error ? null : filtered.length === 0 ? (
         <div className={formStyles.empty}>
           <h3>{filter.trim() ? '找不到符合的課程評價' : '尚無評價'}</h3>
           <p role="status">
@@ -224,7 +246,7 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
               清除搜尋
             </Button>
           ) : (
-            <Button type="button" variant="primary" onClick={() => setShowModal(true)}>
+            <Button type="button" variant="primary" onClick={() => setFormDisplay('open')}>
               寫第一則評價
             </Button>
           )}
@@ -253,13 +275,14 @@ function CourseReviewSection(props: { schoolId: string; myUid: string | null }) 
         </div>
       )}
 
-      {showModal && (
+      {formDisplay !== 'closed' && (
         <ReviewModal
+          open={props.active !== false && formDisplay === 'open'}
           schoolId={schoolId}
           myUid={myUid}
-          onClose={() => setShowModal(false)}
+          onClose={(reason) => setFormDisplay(reason === 'pending' ? 'pending-hidden' : 'closed')}
           onSubmitted={async () => {
-            setShowModal(false);
+            setFormDisplay('closed');
             await refresh();
           }}
         />
@@ -452,9 +475,10 @@ function ReviewCard({
 }
 
 export function ReviewModal(props: {
+  open?: boolean;
   schoolId: string;
   myUid: string | null;
-  onClose: () => void;
+  onClose: (reason: CommunityFormCloseReason) => void;
   onSubmitted: () => void;
 }) {
   const [courseName, setCourseName] = useState('');
@@ -513,24 +537,24 @@ export function ReviewModal(props: {
 
   return (
     <Modal
-      isOpen
+      isOpen={props.open ?? true}
       onClose={session.requestClose}
       title="寫課程評價"
       size="lg"
       description="分享修課經驗。課程名稱與整體評分為必填，其餘可略過。"
       initialFocusRef={courseRef}
       showCloseButton={!session.busy}
-      closeOnEsc={!session.busy}
-      closeOnOverlayClick={!session.busy}
+      closeOnEsc={session.canClose}
+      closeOnOverlayClick={session.canClose}
       footer={
         <>
           <Button
             type="button"
             variant="ghost"
             onClick={session.requestClose}
-            disabled={session.busy}
+            disabled={!session.canClose}
           >
-            取消
+            {session.busy && session.slow ? '先關閉' : '取消'}
           </Button>
           <Button type="submit" form={formId} variant="primary" loading={session.busy}>
             {session.busy ? '送出中…' : '送出評價'}
@@ -598,7 +622,7 @@ export function ReviewModal(props: {
         </fieldset>
         {session.busy && (
           <p role="status" className={modalStyles.notice}>
-            正在送出評價，請稍候。
+            {session.slow ? COMMUNITY_FORM_PENDING_COPY : '正在送出評價，請稍候。'}
           </p>
         )}
         {session.error && (
@@ -672,14 +696,15 @@ function StarRow({
 
 // ─── Study Groups ───────────────────────────────────────
 
-function StudyGroupSection(props: {
+export function StudyGroupSection(props: {
   schoolId: string;
   myUid: string | null;
   myName: string | null;
+  active?: boolean;
 }) {
   const { schoolId, myUid, myName } = props;
   const [groups, setGroups] = useState<WebStudyGroup[]>([]);
-  const [showModal, setShowModal] = useState(false);
+  const [formDisplay, setFormDisplay] = useState<CommunityFormDisplay>('closed');
 
   const load = useCallback(async () => {
     if (!schoolId) {
@@ -734,8 +759,6 @@ function StudyGroupSection(props: {
     }
   };
 
-  if (error) return <CommunityLoadError message={error} retry={refresh} />;
-
   return (
     <div>
       <div
@@ -753,18 +776,24 @@ function StudyGroupSection(props: {
         <button
           type="button"
           className="btn primary"
-          onClick={() => setShowModal(true)}
+          onClick={() => setFormDisplay('open')}
           style={{ fontSize: 13, padding: '8px 16px' }}
         >
           ＋ 建立讀書會
         </button>
       </div>
+      {formDisplay === 'pending-hidden' && (
+        <p role="status" className={formStyles.hint}>
+          讀書會表單與這次送出仍保留在本頁，可再按「建立讀書會」查看結果。
+        </p>
+      )}
 
+      {error && <CommunityLoadError message={error} retry={refresh} />}
       {loading ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
           載入中…
         </div>
-      ) : groups.length === 0 ? (
+      ) : error ? null : groups.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
           <div style={{ fontSize: 32, marginBottom: 8 }}>👥</div>
           <div style={{ fontWeight: 700, color: 'var(--text)' }}>暫無讀書會</div>
@@ -851,14 +880,15 @@ function StudyGroupSection(props: {
         </div>
       )}
 
-      {showModal && (
+      {formDisplay !== 'closed' && (
         <CreateGroupModal
+          open={props.active !== false && formDisplay === 'open'}
           schoolId={schoolId}
           myUid={myUid}
           myName={myName}
-          onClose={() => setShowModal(false)}
+          onClose={(reason) => setFormDisplay(reason === 'pending' ? 'pending-hidden' : 'closed')}
           onCreated={async () => {
-            setShowModal(false);
+            setFormDisplay('closed');
             await refresh();
           }}
         />
@@ -868,10 +898,11 @@ function StudyGroupSection(props: {
 }
 
 export function CreateGroupModal(props: {
+  open?: boolean;
   schoolId: string;
   myUid: string | null;
   myName: string | null;
-  onClose: () => void;
+  onClose: (reason: CommunityFormCloseReason) => void;
   onCreated: () => void;
 }) {
   const [name, setName] = useState('');
@@ -936,24 +967,24 @@ export function CreateGroupModal(props: {
 
   return (
     <Modal
-      isOpen
+      isOpen={props.open ?? true}
       onClose={session.requestClose}
       title="建立讀書會"
       size="lg"
       description="先決定課程與時間，最多 6 位同學一起參加。"
       initialFocusRef={nameRef}
       showCloseButton={!session.busy}
-      closeOnEsc={!session.busy}
-      closeOnOverlayClick={!session.busy}
+      closeOnEsc={session.canClose}
+      closeOnOverlayClick={session.canClose}
       footer={
         <>
           <Button
             type="button"
             variant="ghost"
             onClick={session.requestClose}
-            disabled={session.busy}
+            disabled={!session.canClose}
           >
-            取消
+            {session.busy && session.slow ? '先關閉' : '取消'}
           </Button>
           <Button type="submit" form={formId} variant="primary" loading={session.busy}>
             {session.busy ? '建立中…' : '建立讀書會'}
@@ -1033,7 +1064,7 @@ export function CreateGroupModal(props: {
         </fieldset>
         {session.busy && (
           <p role="status" className={modalStyles.notice}>
-            正在建立讀書會，請稍候。
+            {session.slow ? COMMUNITY_FORM_PENDING_COPY : '正在建立讀書會，請稍候。'}
           </p>
         )}
         {session.error && (

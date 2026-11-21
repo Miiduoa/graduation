@@ -286,6 +286,88 @@ async def group_form(page, config, report, capture):
     report['checks'].append('Actual study-group form associates time labels, focuses invalid end time, keeps all draft values after failure, locks pending operations, sends the preserved payload once on retry and restores focus after closing')
 
 
+async def slow_pending_parent_forms(page, report, capture):
+    for kind, region_name, opener_name, dialog_name, submit_name in (
+        ('review', '課程評價父層驗收', '＋ 寫評價', '寫課程評價', '送出評價'),
+        ('group', '讀書會父層驗收', '＋ 建立讀書會', '建立讀書會', '建立讀書會'),
+    ):
+        region = page.get_by_role('region', name=region_name, exact=True)
+        opener = region.get_by_role('button', name=opener_name, exact=True)
+        before = await page.evaluate(
+            '(kind) => window.__taskFlowQA.snapshot().writes.filter(row => row.kind === kind)', kind)
+        await opener.click()
+        dialog = page.get_by_role('dialog', name=dialog_name, exact=True)
+        course = dialog.get_by_role('textbox', name='課程名稱', exact=False)
+        course_name = '慢速連線評價課程' if kind == 'review' else '慢速連線讀書課程'
+        await course.fill(course_name)
+        fields = [(course, course_name)]
+        if kind == 'review':
+            await dialog.get_by_role('textbox', name='課程代碼（選填）', exact=True).fill('SLOW-REVIEW-001')
+            radio = dialog.get_by_role('radiogroup', name='整體評分（必填）', exact=True).get_by_role('radio', name='1 顆星', exact=True)
+            await radio.focus()
+            await page.keyboard.press('Space')
+            await page.keyboard.press('ArrowRight')
+            comment = dialog.get_by_role('textbox', name='評論（選填）', exact=True)
+            await comment.fill('慢速連線期間保留這次送出，不重複建立。')
+            fields.append((comment, '慢速連線期間保留這次送出，不重複建立。'))
+            completed_text = course_name
+        else:
+            name = dialog.get_by_role('textbox', name='讀書會名稱', exact=False)
+            await name.fill('慢速連線讀書會')
+            fields.append((name, '慢速連線讀書會'))
+            completed_text = '慢速連線讀書會'
+        await dialog.get_by_role('button', name=submit_name, exact=True).click()
+        await page.wait_for_function(
+            '({kind, count}) => window.__taskFlowQA.snapshot().writes.filter(row => row.kind === kind).length === count',
+            arg={'kind': kind, 'count': len(before) + 1})
+        for field, _value in fields:
+            await expect(field).to_be_disabled()
+        await expect(dialog.get_by_role('button', name='取消', exact=True)).to_be_disabled()
+        await expect(dialog.get_by_role('button', name='先關閉', exact=True)).to_have_count(0)
+        # Advance the actual product timer without a 15-second wall-clock sleep.
+        await page.clock.fast_forward(15_001)
+        close = dialog.get_by_role('button', name='先關閉', exact=True)
+        await expect(close).to_be_enabled()
+        await expect(dialog.get_by_role('status')).to_contain_text('這次送出仍可能完成')
+        await expect(dialog.locator('button[type="submit"]')).to_be_disabled()
+        pending = await page.evaluate(
+            '(kind) => window.__taskFlowQA.snapshot().writes.filter(row => row.kind === kind)', kind)
+        assert len(pending) == len(before) + 1 and pending[-1]['status'] == 'pending', pending
+        await close.scroll_into_view_if_needed()
+        await assert_layout(page, report, kind + '-slow-pending', dialog)
+        await capture(kind + '-slow-pending', full_page=False)
+        await close.click()
+        await expect(dialog).to_have_count(0)
+        await expect(opener).to_be_focused()
+        await expect(region.get_by_role('status').filter(has_text='這次送出仍保留在本頁')).to_be_visible()
+        await opener.click()
+        await expect(dialog).to_be_visible()
+        await expect(close).to_be_enabled()
+        for field, value in fields:
+            await expect(field).to_have_value(value)
+            await expect(field).to_be_disabled()
+        if kind == 'review':
+            await expect(dialog.get_by_role('radiogroup', name='整體評分（必填）', exact=True).get_by_role('radio', name='2 顆星', exact=True)).to_be_checked()
+        await expect(dialog.locator('button[type="submit"]')).to_be_disabled()
+        # Native form submission must also respect the original in-flight write.
+        await dialog.locator('form').evaluate('(form) => form.requestSubmit()')
+        reopened = await page.evaluate(
+            '(kind) => window.__taskFlowQA.snapshot().writes.filter(row => row.kind === kind)', kind)
+        assert reopened == pending, (pending, reopened)
+        await assert_layout(page, report, kind + '-pending-restored', dialog)
+        await capture(kind + '-pending-restored', full_page=False)
+        await page.evaluate('(kind) => window.__taskFlowQA.settle(kind, true)', kind)
+        await expect(dialog).to_have_count(0)
+        await expect(opener).to_be_focused()
+        await expect(region.get_by_text(completed_text, exact=True)).to_be_visible()
+        completed = await page.evaluate(
+            '(kind) => window.__taskFlowQA.snapshot().writes.filter(row => row.kind === kind)', kind)
+        assert len(completed) == len(pending), completed
+        assert completed[-1]['id'] == pending[-1]['id'] and completed[-1]['status'] == 'succeeded', completed
+        assert completed[-1]['data'] == pending[-1]['data'], completed
+        report['checks'].append(f'Actual {kind} parent preserves its form and original promise after 15-second pending dismissal; reopening restores the locked draft without a second write, and the original success refreshes the real parent list and restores focus')
+
+
 async def scenario(browser, origin, config, reports):
     report = {'name': config['name'], 'config': config, 'status': 'running', 'checks': [], 'screenshots': []}
     reports.append(report)
@@ -294,6 +376,7 @@ async def scenario(browser, origin, config, reports):
         color_scheme=config['theme'], reduced_motion='reduce' if config.get('motion') else 'no-preference',
     )
     page = await context.new_page()
+    await page.clock.install()
     errors, external = [], []
     page.on('pageerror', lambda error: errors.append(str(error)))
 
@@ -331,6 +414,7 @@ async def scenario(browser, origin, config, reports):
         await attachments(page, config, report, capture)
         await review_form(page, config, report, capture)
         await group_form(page, config, report, capture)
+        await slow_pending_parent_forms(page, report, capture)
         await assert_layout(page, report, 'completed')
         report['ledger'] = await page.evaluate('window.__interfaceQA.snapshot()')
         report['taskFlow'] = await page.evaluate('window.__taskFlowQA.snapshot()')

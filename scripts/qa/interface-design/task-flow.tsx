@@ -12,6 +12,8 @@ import {
 import {
   ReviewModal,
   CreateGroupModal,
+  CourseReviewSection,
+  StudyGroupSection,
 } from '../../../apps/web/src/app/community/_components/StudyBuddyTab';
 import { taskFlowWrites } from './task-flow-boundaries';
 import home from '../../../apps/web/src/app/home.module.css';
@@ -122,6 +124,14 @@ function TaskFlowFixture() {
           <Button onClick={() => setDialog('group')}>建立讀書會</Button>
         </div>
         {completed && <p role="status">{completed}</p>}
+      </section>
+      <section className={home.section} aria-label="課程評價父層驗收">
+        <h2>課程評價</h2>
+        <CourseReviewSection schoolId="pu" myUid="synthetic-teacher" />
+      </section>
+      <section className={home.section} aria-label="讀書會父層驗收">
+        <h2>讀書會</h2>
+        <StudyGroupSection schoolId="pu" myUid="synthetic-teacher" myName="合成老師" />
       </section>
       <section className="fixture-controls" aria-label="任務流程驗收控制">
         <p>以上均為真實產品元件；帳號、課程與資料寫入使用獨立合成資料。</p>
