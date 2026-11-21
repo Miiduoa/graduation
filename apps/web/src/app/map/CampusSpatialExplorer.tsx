@@ -315,10 +315,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   useEffect(() => {
     if (!host) return;
     let active = true;
-    // Do not allocate a mobile WebGL context until the viewport observer has
-    // actually confirmed that this map is on screen. Without the API, retain
-    // the original eager-start fallback for older WebViews.
-    let visible = manualStart || typeof IntersectionObserver === 'undefined';
+    // No observer result (or legacy geometry fallback) has confirmed the
+    // canvas yet. Starting with visible=true in an API-less WebView displayed
+    // the loading spinner even after fallback geometry proved the map offscreen.
+    // Wait for that measured decision; manual start remains user-authorized.
+    let visible = manualStart;
     let pageSuspended = false;
     let scene: CampusSpatialScene | null = null;
     // Safari can fire pagehide before visibilitychange when entering bfcache.
