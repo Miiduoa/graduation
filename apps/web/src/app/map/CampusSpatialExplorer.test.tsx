@@ -132,7 +132,7 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
   expect(options?.threshold).toEqual([0, 1e-9, 0.01]);
   expect(scene.create).not.toHaveBeenCalled();
 
-  const notify = (time: number, width: number, height: number, coordinates: Record<string, number> = {}) => {
+  const notify = (time: number, width: number, height: number, coordinates: Record<string, number | undefined> = {}) => {
     const entries = [{
       isIntersecting: true, target: graphics, time,
       intersectionRect: { width, height, ...coordinates },
