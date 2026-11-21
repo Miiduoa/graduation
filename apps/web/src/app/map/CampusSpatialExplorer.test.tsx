@@ -71,6 +71,86 @@ async function open() {
   return screen.getByRole('dialog', { name: '校園空間導覽' });
 }
 
+it('refuses contradictory host DOMRect bounds until WebView layout recovers without rebuilding WebGL', async () => {
+  // A mobile WebView can expose positive dimensions with collapsed edges
+  // while keyboard, zoom or bfcache layout is being restored.
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const validRect = {
+    x: 12, y: 16, left: 12, top: 16, right: 312, bottom: 176,
+    width: 300, height: 160, toJSON: () => ({}),
+  } as DOMRect;
+  const rect = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
+    ...validRect, right: validRect.left,
+  });
+  try {
+    act(() => intersection?.([{
+      isIntersecting: true, target: graphics, time: 1,
+      intersectionRect: { width: 280, height: 160 },
+    }] as IntersectionObserverEntry[], {} as IntersectionObserver));
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+
+    // An earlier positive observer record is not enough; valid current
+    // host geometry is required before the first GPU allocation.
+    rect.mockReturnValue(validRect);
+    fireEvent(window, new Event('resize'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    rect.mockReturnValue({ ...validRect, bottom: validRect.top });
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    rect.mockReturnValue(validRect);
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    rect.mockRestore();
+  }
+});
+
+it('keeps legacy no-observer WebGL deferred when host edges contradict dimensions', async () => {
+  vi.stubGlobal('IntersectionObserver', undefined);
+  const validRect = {
+    x: 12, y: 16, left: 12, top: 16, right: 312, bottom: 176,
+    width: 300, height: 160, toJSON: () => ({}),
+  } as DOMRect;
+  let currentRect: DOMRect = { ...validRect, right: validRect.left };
+  const originalRect = HTMLElement.prototype.getBoundingClientRect;
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return this.getAttribute('aria-label') === '校園地點空間圖'
+      ? currentRect : originalRect.call(this);
+  });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    expect(scene.create).not.toHaveBeenCalled();
+
+    currentRect = validRect;
+    fireEvent(window, new Event('scroll'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    rect.mockRestore();
+  }
+});
+
 it('does not allocate offscreen WebGL or start its deadline until the canvas enters view', async () => {
   // Override the normal on-screen observer fixture: a scrollable narrow
   // viewport can open the modal with the graphics below the fold.

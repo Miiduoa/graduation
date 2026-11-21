@@ -13,6 +13,44 @@ const realTable = (startLine: number) => [{
   rows: [['資料庫', '3']],
 }];
 
+describe('HTML form controls are not independently readable source tables', () => {
+  it.each([
+    ['select', '<select><option value="lesson">', '</option></select>'],
+    ['datalist', '<datalist id="answers"><option value="private">', '</option></datalist>'],
+    ['optgroup', '<optgroup label="teacher">', '</optgroup>'],
+    ['option', '<option value="not-markdown">', '</option>'],
+    ['button', '<button type="button">', '</button>'],
+  ])('does not derive a public table inside a %s control', (_name, opening, closing) => {
+    const source = [
+      opening,
+      '| 未公布答案 | 分數 |',
+      '| --- | --- |',
+      '| 不可複製的選項內容 | 100 |',
+      closing,
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('retains original line numbers after a multi-line select opener', () => {
+    const source = [
+      '<select',
+      '  data-course="private">',
+      '| 非獨立表格 | 分數 |',
+      '| --- | --- |',
+      '| 尚未發布 | 99 |',
+      '</select>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(7));
+  });
+
+  it('does not suppress an ordinary table after an escaped form-control example', () => {
+    const source = ['範例：\\<select> 不會開啟真實表單。', ...visibleTable].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+});
+
 describe('valid Markdown fence boundaries for course source tables', () => {
   it('keeps a public table after an invalid backtick-fence info string', () => {
     // A backtick in a backtick fence info string makes that opener invalid.
