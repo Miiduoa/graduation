@@ -513,7 +513,7 @@ function PublicCourseSearchForm({
       )}
       {result?.status === 'ready' && (
         <>
-          <p role="status">
+          <p role="status" aria-label="查詢結果">
             {result.courses.length ? `顯示${term}${result.courses.length} 筆開課資料。` : `這次查詢沒有找到${term}課程。`}
             {result.truncated ? '符合條件的課程超過顯示上限，可改用課號或老師姓名縮小範圍。' : null}
           </p>
@@ -523,7 +523,7 @@ function PublicCourseSearchForm({
           {result.fetchedAt && <p>校方資料擷取：{formatPublicCatalogFetchedAt(result.fetchedAt)}（台灣時間；非校方更新時間）</p>}
           {result.courses.length > 0 && (
             <div className={courseStyles.searchActions}>
-              <p role="status">已選 {selectedCourses.length} 門課（最多 {MAX_PUBLIC_COURSE_BULK_SELECTION} 門），可一次帶入同學期課表核對。</p>
+              <p role="status" aria-label="選取課程">已選 {selectedCourses.length} 門課（最多 {MAX_PUBLIC_COURSE_BULK_SELECTION} 門），可一次帶入同學期課表核對。</p>
               <button type="button" className="btn primary" disabled={selectedCourses.length < 2}
                 onClick={reviewSelectedCourses}>將選取的課程一起帶入核對</button>
               {bulkNotice && <p role="alert">{bulkNotice}</p>}

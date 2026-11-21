@@ -681,7 +681,8 @@ it('handles malformed or wrong-campus replies as failure, retries, and explains 
   expect(screen.queryByText(course.title)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新查詢' }));
   expect(await screen.findByText('專業實習（一）')).toBeTruthy();
-  expect(screen.getByRole('status').textContent).toContain('超過顯示上限');
+  expect(screen.getByRole('status', { name: '查詢結果' }).textContent).toContain('超過顯示上限');
+  expect(screen.getByRole('status', { name: '選取課程' }).textContent).toContain('已選 0 門課');
   view.unmount();
   expect(fetcher.mock.calls[1][1].signal.aborted).toBe(true);
 });
