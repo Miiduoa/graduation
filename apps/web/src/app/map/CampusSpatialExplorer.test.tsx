@@ -94,8 +94,9 @@ it('refuses contradictory host DOMRect bounds until WebView layout recovers with
   try {
     act(() => intersection?.([{
       isIntersecting: true, target: graphics, time: 1,
-      intersectionRect: { width: 280, height: 160 },
-    }] as IntersectionObserverEntry[], {} as IntersectionObserver));
+      intersectionRect: { ...validRect, width: 280, right: 292 },
+      boundingClientRect: validRect, intersectionRatio: 280 / 300, rootBounds: null,
+    }], {} as IntersectionObserver));
     expect(scene.create).not.toHaveBeenCalled();
     expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
 
