@@ -681,7 +681,8 @@ it('handles malformed or wrong-campus replies as failure, retries, and explains 
   expect(screen.queryByText(course.title)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新查詢' }));
   expect(await screen.findByText('專業實習（一）')).toBeTruthy();
-  expect(screen.getByRole('status').textContent).toContain('超過顯示上限');
+  expect(screen.getByRole('status', { name: '查詢結果' }).textContent).toContain('超過顯示上限');
+  expect(screen.getByRole('status', { name: '選取課程' }).textContent).toContain('已選 0 門課');
   view.unmount();
   expect(fetcher.mock.calls[1][1].signal.aborted).toBe(true);
 });
@@ -902,4 +903,78 @@ it.each(['ncnu', 'nthu'] as const)('keeps a public %s course readable but blocks
   expect(within(card).queryByRole('button', { name: '帶入課表核對' })).toBeNull();
   expect(within(card).queryByRole('button', { name: '複製課表匯入資料' })).toBeNull();
   expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+
+it('selects two public courses and creates one scoped review draft with every meeting', async () => {
+  const second = { ...course, code: '130021', section: 'b', title: '資料結構', time: '3cd4i' };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course, second])));
+  render(<PublicCourseSearch {...props} />);
+  submit('課');
+  await screen.findByRole('heading', { name: '資料結構' });
+
+  const checks = screen.getAllByRole('checkbox', { name: /選入批次核對/ });
+  expect(checks).toHaveLength(2);
+  const batch = screen.getByRole('button', { name: '將選取的課程一起帶入核對' });
+  expect((batch as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(checks[0]);
+  fireEvent.click(checks[1]);
+  expect((batch as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(batch);
+
+  const draft = readPersonalImportDraft(importContext.scope);
+  expect(draft?.year).toBe('115');
+  expect(draft?.semester).toBe('1');
+  expect(draft?.rows.map(row => row.dayOfWeek)).toEqual([5, 3, 4]);
+  expect(draft?.rows.map(row => row.courseCode)).toEqual(['005076', '130021', '130021']);
+  expect(readPersonalImports(importContext.scope)).toEqual([]);
+  expect(push).toHaveBeenCalledTimes(1);
+});
+
+it('does not partially import mixed-semester or duplicate public listings', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([
+    course,
+    { ...course, code: '130021', section: 'b', semester: '1152', title: '另一學期' },
+  ])));
+  render(<PublicCourseSearch {...props} />);
+  submit('實習');
+  await screen.findByRole('heading', { name: '另一學期' });
+  screen.getAllByRole('checkbox', { name: /選入批次核對/ }).forEach(check => fireEvent.click(check));
+  fireEvent.click(screen.getByRole('button', { name: '將選取的課程一起帶入核對' }));
+  expect(screen.getByRole('alert').textContent).toContain('不同學期');
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+  expect(push).not.toHaveBeenCalled();
+});
+
+it('protects an existing draft, and clears batch selections when a search changes', async () => {
+  const second = { ...course, code: '130021', section: 'b', title: '資料結構', time: '3cd4i' };
+  const fetcher = vi.fn().mockImplementation(async () => response([course, second]));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} />);
+  submit('課');
+  await screen.findByRole('heading', { name: '資料結構' });
+  screen.getAllByRole('checkbox', { name: /選入批次核對/ }).forEach(check => fireEvent.click(check));
+  const batch = screen.getByRole('button', { name: '將選取的課程一起帶入核對' });
+  expect((batch as HTMLButtonElement).disabled).toBe(false);
+
+  const csv = ncnuTimetableImportCsv(course)!;
+  const parsed = parsePersonalImport(csv, {
+    kind: 'timetable', schoolId: 'ncnu', academicYear: '115', semester: '1',
+    source: { type: 'paste', name: '現有草稿' },
+  });
+  writePersonalImportDraft(importContext.scope, {
+    kind: 'timetable', year: '115', semester: '1', text: csv,
+    source: { type: 'paste', name: '現有草稿' },
+    rows: parsed.rows, parseIssues: parsed.issues, excluded: [], backup: null,
+  });
+  fireEvent.click(batch);
+  expect(screen.getByRole('alert').textContent).toContain('已有待核對的草稿');
+  expect(readPersonalImportDraft(importContext.scope)?.rows).toHaveLength(1);
+  expect(push).not.toHaveBeenCalled();
+
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '更新查詢' } });
+  expect(screen.queryByRole('button', { name: '將選取的課程一起帶入核對' })).toBeNull();
+  fireEvent.submit(screen.getByRole('search', { name: '搜尋校方開課資料' }));
+  await screen.findByRole('heading', { name: '資料結構' });
+  expect((screen.getByRole('button', { name: '將選取的課程一起帶入核對' }) as HTMLButtonElement).disabled).toBe(true);
 });

@@ -1,6 +1,6 @@
 import { courseStudyBackupFilenameStem } from './courseStudyBackupFilename';
 import { splitStudySection, type StudyMode, type StudySource } from '@/lib/studyTutor';
-import type { StudyPassageMemory } from './courseStudySession';
+import { hasVisibleStudyAttempt, type StudyPassageMemory } from './courseStudySession';
 
 const modes: { value: StudyMode; label: string }[] = [
   { value: 'understand', label: '理解概念' },
@@ -56,9 +56,9 @@ export function buildCourseStudyNotes(
             });
           }
           lines.push('', '自我檢查題：', lesson.response.question);
-          if (lesson.attempt.trim()) lines.push('', '我的試答：', lesson.attempt);
+          if (hasVisibleStudyAttempt(lesson.attempt)) lines.push('', '我的試答：', lesson.attempt);
           // Downloading must not bypass the same self-check condition as the panel.
-          if (lesson.answerVisible && lesson.attempt.trim())
+          if (lesson.answerVisible && hasVisibleStudyAttempt(lesson.attempt))
             lines.push('', '參考回答（已展開）：', lesson.response.answer);
         }
       }

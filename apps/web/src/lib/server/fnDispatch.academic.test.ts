@@ -180,9 +180,12 @@ it('rejects a token belonging to a different school', async () => {
 
 it.each([
   { status: 'deleted' },
+  { status: 'disabled' },
+  { status: 'suspended' },
+  { status: 'inactive' },
   { accountDeletionInProgress: true },
   { schoolId: 'other' },
-])('rejects a removed, deleting or mismatched account: %j', async (fields) => {
+])('rejects a removed, disabled, deleting or mismatched account: %j', async (fields) => {
   const { request, store, grades } = setup();
   store.docs.set(`users/${UID}`, { schoolId: 'pu', ...fields });
   expect((await request()).status).toBe(403);

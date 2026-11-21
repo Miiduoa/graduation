@@ -69,7 +69,7 @@ export function PreAuthStack() {
     <Stack.Navigator
       initialRouteName="LoginLanding"
       screenLayout={({ children, route, navigation }) =>
-        route.name === 'LoginLanding' || route.name === 'NuniWorkspace' || route.name === 'OralExamDemo' ? <>{children}</> : (
+        route.name === 'LoginLanding' || route.name === 'NuniWorkspace' || route.name === 'TronClassWorkspace' || route.name === 'OralExamDemo' ? <>{children}</> : (
           <PublicSchoolRoute onHome={() => navigation.navigate('LoginLanding')}>{children}</PublicSchoolRoute>
         )
       }
@@ -123,6 +123,7 @@ export function PreAuthStack() {
       />
       <Stack.Screen name="PlatformLostFound" component={PlatformLostFoundScreen} options={{ title: '失物招領' }} />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
+      <Stack.Screen name="TronClassWorkspace" getComponent={() => require('./TronClassWorkspaceScreen').TronClassWorkspaceScreen} options={{ title: 'TronClass 課務' }} />
       <Stack.Screen
         name="OralExamDemo"
         getComponent={() => require('./OralExamDemoScreen').default}

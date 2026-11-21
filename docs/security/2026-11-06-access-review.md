@@ -910,3 +910,113 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 新增四組 Emulator 回歸案例，涵蓋轉學生、只有主要校籍的舊帳號、只有舊校籍欄位的帳號及 null 主要校籍；同時驗證停權、刪除中、撤權及殘留舊校 membership 不可取得權限。完整 security-rules 測試 199/199、Web 討論服務與私有附件三組測試 147/147、離線盤點工具 10/10 通過；`git diff --check` 通過。
 
 歷史討論列表的 P1 尚未修復：缺少公開欄位的文件無法由現有四條等值查詢找回，而直接放寬列表規則會讓明確草稿外洩。保留此安全限制，完整修補需要可信伺服器分頁讀取及兩端串接；現行 PR 已修改檔案中沒有可用的分頁端點，須先取得擴充檔案範圍的授權。單筆讀取或離線盤點均不能取代此修補，PR 的相容性驗收仍未通過。
+
+## 2026-11-19：PR #577 已合併後，main 舊根集合仍有公開狀態／校籍授權缺口（未發布候選）
+
+- 2026-11-19 08:27 UTC 獨立核對 main 精確 `52403426be2140a4273d14eee34b7279404f1554`；#577 於 05:34 UTC 已合併，merge commit `2a9bad18dd88a6873b08063df8b308e5df2cf9e0`。既有未引用候選 `5db511be2b26da5769fe55854299f877bf5c8d58` 未成為 main，此處重新以當時 main 建立最小變更，避免覆蓋其他開發。
+- 根集合 `groupPosts/{id}` 的 `canReadGroupPost` 原先只核對群組會員資格，沒有對已知 ID 檢查公開四欄及目前 canonical 校籍。全域 `comments/{id}`、`postLikes/{id}` 共用此 helper，還有 `allow read` 可列舉根貼文／留言。知道 ID 的有效成員可能看到未公開內容；轉校殘留 membership 可能重放存取。此為原始碼授權邏輯問題，**沒有**正式站存在受影響資料或遭利用之證據。
+- 最小修補：根貼文單筆 GET 須有目前學校的群組與學校資格；非作者、非合法管理員必須四欄明確公開；草稿僅作者／教師可預覽；根貼文及全域留言列表一律拒絕；投票 GET／CREATE／DELETE 都要公開父文，不因草稿預覽豁免。採用既有 `isCurrentSchoolMember`，但需另驗證主要校籍與舊帳號缺欄相容。
+- 兩筆既有合法投票 fixture 改為四欄完整公開。新增 Firebase Emulator 回歸程式涵蓋正常、匿名、跨帳號／校、已知 ID 草稿與缺欄、列表拒絕、留言、投票、轉校殘留會員、撤權、停權、撤回和重放。測試檔 JS 僅以 V8 做語法解析；本環境無專案依賴及 emulator，**尚未實跑**。
+- 暫不 update_ref 或觸發現有含未授權 npm/pnpm audit 外送的 CI；無正式資料、金鑰、下載 token、migration、GCS staging、E 校園、部署及合併。正式整合須以最新精確 head 重做 Emulator/HTTP、Web/Mobile/Functions、CodeQL、Supabase permissions、Python security、Mobile Agent、適用 Maestro、指定 App 5504170 APPROVED 與回復驗證。Firestore GET/exists 10 次限額及舊用戶資料相容需隔離驗收。
+
+
+### 2026-11-19：全域舊貼文的雙校籍欄位衝突防重放（隔離候選）
+- 從 main `66fe65075423a364883b465a2cd55a0a21b22765` 重新建立包含原候選 `8527ab251d60d77625f06ab7920dd2c193c694d9` P0 明確公開四欄、root comments 讀取與投票驗權、關閉全域 LIST 的最小修補，避免覆蓋當前主線手機限動修改。
+- 額外發現：前候選只檢查 `schoolId`，部分轉學情境可能已把伺服器欄位 `primarySchoolId` 改為新校，而原 `schoolId` 與舊群組／學校 membership 還沒更新。此狀態會讓舊校 GET／留言／投票仍被授權；反向不一致也不能猜測哪個正確。
+- 新的 `isConsistentRootPostSchoolMember` 要求兩個非空校籍欄位與目標校別一致；只有單一伺服器管理欄位的合法歷史帳號仍允許。這項檢查只作用於舊根貼文，不擴散到其他功能。
+- 擴充同一支 Firebase Emulator 回歸，涵蓋 stale `schoolId`、stale `primarySchoolId`、已發 ID 的留言及票據重放、回復一致的正常存取與只有主要校籍的歷史帳號。所有資料均為合成資料。
+- 已完成來源對照與有界 JS 布林授權矩陣，但此候選 **沒有 Firebase Emulator、完整 Jest、CI、CodeQL、Supabase、Python、Mobile Agent、Maestro、GCS staging、發布回復驗證**。還要核實 Rules 單請求文件存取上限與合法多校帳號相容，不能宣稱正式漏洞已修復。
+- npm/pnpm audit 的依賴清單外送拒絕持續有效；本輪未執行／繞道重送、未推送分支觸發 CI、未合併或部署、未操作正式資料／金鑰／token／migration／E 校園。主線窗口必須在精確 head 檢查及 nuni-merge-gate App 5504170 核可後才處理合併。
+
+
+### 2026-11-20｜隔離 Git 整合候選：legacy root 貼文／留言／投票需明確公開與目前校籍
+
+- **精確基準：** main `40cbb474d2d435a784f5356b08a0984059903d82`；本次沿用未引用的 `92c84f7c972ec74595bb00f0cb70db5f6eb58d8a` 原始三檔候選，在主線不變的安全檔案上重新建立單一 parent 的 Git 整合候選。#517、#577 均已 merged，舊 App 5504170 審查成功僅限 #577 原 head，**不可繼承至本候選**。
+- **問題與處理：** 已合併 main 的 root `groupPosts/{id}` 只依群組會員核准讀取，可能讓殘留的舊校會員於已知 ID 讀取缺發布欄位／草稿；root `comments`、`postLikes` 間接承襲。候選改為已驗證目前校籍及群組會員、雙校籍欄位衝突時 fail-closed；非作者／非管理員只接受明確四欄發布狀態。作者與合法管理員仍可精確預覽，但未公開文不可按讚。全域列表拒絕，已在 security-rules.test.js 補合成 Emulator 回歸程式。此變更可能影響舊版列表／未分類歷史文，尚須相容性盤點與人工判讀。
+- **本輪離線確認：** 新增測試檔完整內容經 V8 `new Function()` 語法解析成功；從來源核對 8/8 個關鍵權限子條件；以 **1,152** 組合成布林角色、目前雙校籍、群組／學校狀態及公開／草稿／缺欄／封存情境的獨立矩陣推演（允許 GET 39 組、公開互動 12 組，非作者讀取缺欄 0 組、雙校籍衝突授權 0 組）。此為模型而不是 Firestore Rules 編譯器／Emulator 執行、真實流量或正式資料證明。
+- **仍需阻擋：** 尚無精確候選 Firebase Emulator、HTTP／Web／Functions、CI／CodeQL／Supabase permissions／Python security／Mobile Agent Regression／適用 Maestro，亦無指定 App 5504170 對新 head 的「審查通過」。因先前明確未授權向 npm registry 外送依賴清單，本輪僅建立並使用 `expected_sha` 非強制前進獨立開發分支 `fix/security-legacy-root-post-visibility-20261120`，未建立 PR、未觸發現有 `security-gates` 的 `pnpm/npm audit`，也不改工具轉送同一 payload。正式 PR 及完整 CI 需先解決外送授權問題；主線合併仍待精確 head 測試與指定 App 審查。正式 GCS/Supabase 已發網址撤權、真實 Storage CAS、舊資料／索引相容性、發布及復原仍未驗收。未操作正式資料／金鑰／token／migration／E 校園或部署。
+
+
+### 2026-11-20｜獨立 Firebase Rules 回歸：教師撤權／作者轉校／帳號文件消失
+
+- 從 `fix/security-legacy-root-post-visibility-20261120` 的精確 `8f94c3670b97d98c6c5ed451626133e87a1a59ad` 另開隔離驗證分支 `feature/security-root-post-emulator-20261120`，保留原修補分支與原主線，不重寫其他進行中的工作。新增真 Firebase Rules Emulator 可執行的相同登入情境：教師被撤銷後不得預覽根草稿與留言、權限恢復後允許；作者校籍欄位衝突時不得借作者權限讀草稿、恢復後允許；Canonical 使用者文件消失但學校／群組會員殘留時不得讀公開貼文或票據，重建有效 profile 後允許。
+- 相關測試併入 `backend/tests/security-rules.test.js` 既有 legacy root 情境，正式執行指令為 `pnpm test:rules`；測試資料為合成，未接 E 校園、正式 GCS、Supabase 或 Firebase 正式資源。此紀錄於觸發驗證前建立，**不得視為 Emulator 已通過**。需查精確提交工作紀錄、CI／CodeQL／Supabase／Python／Mobile Agent／適用 Maestro 與指定 App 5504170；未具該精確 head 核可不得合併、發布。
+- 已確認既有 `.github/workflows/firestore-rules.yml` 針對 `feature/**` push 有獨立 Firestore／Storage Emulator 測試，**不執行 `pnpm/npm audit`**；不建立 PR 來觸發包含外送 audit 的 CI，也不以新工具或代理重送 audit payload。相關其他 CI 沒有新 head 的綠燈不得沿用。
+
+### 2026-11-20｜legacy root postLikes 收據跨帳號 GET（隔離修補候選）
+
+- **缺口：** 根 `postLikes/{id}` 的 `allow get` 只驗父貼文公開及目前學校／群組會員，未綁定收據的 `userId`。同群組使用者若知道他人收據 ID，即可讀取別人的投票識別及興趣；原測試甚至將此情境視為允許。此為原始碼與合成情境中的授權缺口，不是正式資料已曝露的證據。
+- **最小修補：** 精確 GET 增加 `resource.data.get('userId', null) == request.auth.uid`，維持本人的正常查詢、公開父文／校籍／群組／撤銷條件、既有 create/delete 與歷史任意收據 ID 的相容性，不改公開的貼文彙總計數。新 Emulator 案例檢查同群組跨帳號（雙向）與作者讀取其他投票者、正常本人與既有撤權重放。
+- **驗證界線：** JavaScript 回歸來源已完成 V8 語法解析；Firebase Emulator、Web/Mobile/Functions 與各 workflow 需對新 SHA 分別驗證。舊客戶端若有依賴 GET 其他投票者的單筆收據，將受到預期限制，需先確認相容性。Firestore Rules 的成功 GET 會傳回完整文件，無法只遮蔽 userId（[官方說明](https://firebase.google.com/docs/firestore/security/rules-fields)）。
+- **發布／權限：** 未授權 npm/pnpm audit 外送限制持續有效；獨立分支不觸發該 audit，不能因此當作 Security Gates 通過。指定 nuni-merge-gate App 5504170 的精確 head 審查及全套測試前不合併。無正式資料、金鑰、token、migration、E 校園或部署；GCS/Supabase 已簽 URL、真 Storage 競態、PG CI、minimatch 雙鎖檔及回復仍待驗收。
+
+### 2026-11-20｜Peer-review assignment revival / private submission revocation (independent candidate)
+
+- Source base `ad94b4f6a4018ff73077def6d1f0ec8716c400f9`. A residual `peerReviews/{reviewerId}` previously authorized legacy global `submissions/{id}` GET and reviewer-specific peer review GET/UPDATE without the current group member or school profile check; nested submissions had a separate group check but stale school-binding collisions still remained. A previously issued Firebase ID token remains usable until expiration, making live membership checks essential. This is an **authorization source flaw**, not evidence of production exploitation.
+- Scoped candidate adds `isActiveCurrentGroupMember` (active class and school membership, canonical account, non-conflicting server-bound school IDs) to review-assignment reading and student review updates. Teacher management authorization and owners' ability to read their own legacy receipts are not silently changed. Existing tests that legitimately use reviewer access now seed the required canonical school profile.
+- New deterministic Firebase Rules regression covers normal course review, outsider's residual assignment, same-token course removal, school removal, transfer conflict, deleted account, and lawful restoration, for both nested and root submissions and peer-review receipts/writes. The existing feature-only Firestore workflow has no npm/pnpm audit command; no rejected dependency list is sent using audit. No production credentials, E-campus or migration used.
+- **Verification pending for this candidate:** exact SHA emulator/CI, document lookup budget and release compatibility. Full PR head CodeQL, Supabase permissions, Python security, Mobile Agent, Maestro, nuni-merge-gate App 5504170 and real deployment are not inherited from older commits. Historical profiles without either campus binding will be denied peer-review access by design pending inventory/compatibility; teacher read/gradebook boundaries still need their own scope review.
+
+### 2026-11-20｜Gradebook owner/teacher stale-campus replay (isolated follow-up)
+
+- **High-impact rule gap:** `groups/{groupId}/gradebook/{entryId}` previously allowed direct row GET for `entryId == auth.uid` or `resource.data.userId == auth.uid` with only `isSignedIn()`; neither live course nor active campus membership was checked. A formerly enrolled learner who retains a valid Firebase login could still GET a known gradebook row after being removed from the course or transferred. The teacher manager branch used `canManageGroup()` without canonical profile school consistency, enabling a lingering instructor membership to read or alter grades during a partial transfer. No production exposure has been established.
+- **Minimum Rules patch:** Require `isActiveCurrentGroupMember(groupId)` on all gradebook reads and management writes. This reuses the already emulator-verified canonical profile, active school and course membership, dual-school consistency logic; do not change gradebook fields, records, migration or legitimate teacher workflow.
+- **New regression:** Synthetic Firebase Emulator suite verifies owner and teacher normal access, classmate and cross-campus denial, teacher create/update/delete, same-token course/school revocation, conflicting transfer bindings, deleted user, repeated denied reads/writes and reauthorization with a legacy single school field. Reuses `backend/tests/security-rules.test.js` and the `feature/**` Firestore-only workflow, which has no npm/pnpm audit. Real outcome must be attached to the exact new SHA; older success does not count.
+- **Release limits:** Schoolless historical profiles lose direct gradebook access until canonical campus binding is verified; validate Web/Mobile gradebook consumers, Firestore 10-document authorization read-call budget and same-school query forms before release. The parent peer-review fixes, signed GCS/Supabase URLs, real isolated Storage CAS, Postgres CI, minimatch double lockfiles, exact-head full CI/CodeQL/Supabase/Python/Mobile/Maestro, designated App 5504170 approval and production rollback remain separate. No E-campus, production credentials, data, token cleanup, migration, npm/pnpm audit or deployment performed.
+
+
+### 2026-11-20｜Peer-review metadata tampering / timestamp replay (isolated candidate)
+
+- **New source-level defect:** The student branch of `groups/{groupId}/assignments/{assignmentId}/peerReviews/{reviewerId}` UPDATE protected only `reviewerId` and `submissionOwnerId`. An active assigned reviewer could inject/change staff-owned fields (`teacherNotes`, `gradePublished`, `gradeScore`) or set an arbitrary `submittedAt`, despite having no teacher role. This is a reproducible authorization-predicate flaw, not evidence of production exploitation.
+- **Smallest fix:** Retain active canonical campus/course and immutable reviewer/owner checks. Limit student-changed fields to `comment`, `scores`, `submittedAt`, `updatedAt`; validate feedback type/length and max score-map entries. Changing timestamps must use `request.time` and `submittedAt` must move once from null to server-time. The teacher management branch is unchanged.
+- **Regression:** New synthetic Firebase Rules test verifies legitimate feedback, cross-user denial, teacher-field injection, oversize/malformed feedback, backdated/replayed submission, teacher edit and live course revocation/restoration with the same Firebase client context.
+- **Verification boundary:** Changes will be pushed through `expected_sha`, `force=false` to the pre-existing feature-only Firestore workflow (no npm/pnpm audit command). Its actual Emulator/DM/Web results must be checked against the resulting precise SHA; full PR CI, CodeQL, Supabase permissions, Python security, Mobile Agent Regression, applicable Maestro, designated nuni-merge-gate App 5504170 approval and deployment/rollback are **not** inherited from older SHAs. Old clients that rewrite `submittedAt` after submission or send non-string comments require compatibility review. No production/E-campus data, tokens, migrations, keys or deployments touched.
+
+### 2026-11-21｜Gradebook 明確 owner 優先於 legacy 文件 ID（隔離修補候選）
+
+- 起始安全分支精確 `1c158b6eb27744991f07799c2e67f4382bfb17ef`，對照 main `cea4084fff5347b5d3203d9cadb499db439040b7`（寫入前快照）；沿用既有 `feature/security-peer-review-revocation-20261120`，不改主線及平行排程。
+- 新缺口：`groups/{groupId}/gradebook/{entryId}` 原學生 GET 在有效校籍與課程資格之外，使用 `entryId == auth.uid || resource.data.userId == auth.uid`。當匯入或更正產生「文件 ID 為 Alice、明確 userId 為 Bob」的錯配成績行時，Alice 也能讀到 Bob 的成績。這是可重現的授權條件漏洞，不代表已發現正式資料錯配或實際外洩。
+- 最小修補：存在 `userId` 欄位時只認證明確 `userId == auth.uid`，唯獨歷史行**完全沒有** `userId` 欄位才按文件 ID 回退；顯式 null／錯誤 owner 不回退。有效課程、學校與 canonical 校籍驗權及教師管理權不變。
+- 新增合成 Firebase Rules regression，包含錯配兩方向、合法不透明行 ID、教師 GET、顯式 null、無 userId 的舊行、異帳號、撤權及同 token 恢復。先前對同分支的 1039/1039 與 workflow `#44739299402` 只對舊 SHA 有效，**不能**當成本次新 head 成功證據。
+- 本輪不執行受拒絕的 `pnpm/npm audit`，不建立會觸發該外送流程的 PR，不碰正式資料、憑證、已發 URL、遷移、部署或 E 校園；仍須對精確新 head 查 Firebase Emulator／HTTP、完整 CI／CodeQL／Supabase permissions／Python security／Mobile Agent Regression／適用 Maestro、指定 App 5504170 審查及正式發布回復。GCS/Supabase URL 撤銷、真 Storage CAS、PG CI、minimatch 雙鎖檔、歷史互評老師備註隱私及 Rules 讀取額度仍待處理。
+
+
+### 2026-11-21｜限時動態轉校衝突：殘留會員資格不得繼續讀取及取得閱覽收據（隔離候選）
+
+- **基準：** main `cea4084fff5347b5d3203d9cadb499db439040b7`；接續安全分支 `feature/security-peer-review-revocation-20261120` 的精確父提交 `6a5829613bc0c49465e8a0974a71d1561d9eafc2`。本節記錄新候選原始碼與測試；實際 head 與 Actions 以本輪 GitHub 產生的提交為準。
+- **新增來源缺口：** `isCanonicalStoryMember` 先前使用 `schoolId == target || primarySchoolId == target`。如果兩個受伺服器綁定的欄位轉校期間衝突，且舊校 `schools/{schoolId}/members/{uid}` 尚為 active，持舊登入狀態者仍可 GET/LIST 舊校限時動態、發布／刪除內容。閱覽收據 `canAccessReceipts` 只確認 `schoolId`，同樣未阻擋另一欄位已更新的轉校狀態。此為 Rules 授權條件確認，不代表正式環境發生利用。
+- **最小修補：** 故事文件使用先前已驗證的 `isConsistentRootPostSchoolMember` 做 canonical 雙校籍一致性（增加 0 個不同文件查詢）；收據保留歷史明確 `schoolId` 必要條件，再加同一一致性檢查，**不**擴大只有 `primarySchoolId` 的帳號讀取收據權限。保留單欄位合法故事 GET、恢復後正常閱讀及作者刪除。
+- **合成回歸：** 新增相同 Firebase auth context 的雙向校籍衝突、正常 GET/LIST、收據 CREATE/GET、舊校 GET/LIST 拒絕、跨校發布與刪除拒絕、恢復及單欄位歷史 profile 相容案例。須在真正 Firebase Emulator 和相關現有工作流程對精確 head 重跑，不能沿用上輪 `6a582961...` 的成功。
+- **限制與發布閘門：** 真 GCS 已發 URL、Storage 附件 token 撤銷、Supabase URL、隔離 Storage 競態仍未結案；正式歷史雙校籍資料盤點、完整 CI／CodeQL／Supabase permissions／Python security／Mobile Agent Regression／適用 Maestro、nuni-merge-gate App 5504170 的精確 head「審查通過」、回復與部署尚未完成。未執行被拒絕的 npm/pnpm audit，也不透過其他方式外送相同依賴清單；不使用正式資料、金鑰、token、migration、E 校園。正式合併／發布由既有主線窗口處理。
+
+
+### 2026-11-21｜群組作業收據：文件 ID 不得覆蓋明確學生 owner（獨立候選）
+
+- 本輪精確已讀基準：安全分支 `e031a8774e2fb91a309149ef6ad959292bb0bd6d`、main `cea4084fff5347b5d3203d9cadb499db439040b7`，兩者已分歧 9 ahead／9 behind；#517、#577 已合併，其原核可只屬原 head。原 `e031a8774e2fb91a309149ef6ad959292bb0bd6d` 的 Firestore-only workflow #44813405090 已完成成功，本候選尚不得沿用。
+- 發現 `groups/{groupId}/assignments/{assignmentId}/submissions/{submissionId}` 單筆讀取，原規則以 `submissionId == request.auth.uid || canReadSubmissionDoc(...)` 授權。若歷史／匯入資料的文件 ID 是 Alice，但明確 `userId` 是 Bob，同課程的 Alice 可讀到 Bob 的私人作答與已發布評語。這是由精確現有 Rules 可證的授權條件缺口；**不是**已觀察到正式資料錯配或實際外洩。
+- 最小修改保留「本人查詢尚未建立的收據」的既有空文件 GET（`resource == null`），但有實際文件時一律呼叫 `canReadSubmissionDoc`，以明確 owner 為準。合法真 owner、教師及指派評閱者仍按原授權，無 `userId/uid/studentId` 的舊收據才依既有 owner helper 回退至文件 ID；明確 null 不回退。
+- 新增合成 Firebase Emulator 回歸：雙向錯配、正確 owner、opaque 路徑、舊收據、null owner、非會員、教師、同一登入狀態的退課／校籍撤權與恢復。沒有操作正式資料或既有收據。
+- **驗證分層：** 提交前做來源錨點與 JS 語法檢查；新 head Emulator／HTTP／DM／TypeCheck／Web Build 必須以本輪 GitHub workflow 實際結果回填；完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、指定 App 5504170 對新 head 的 APPROVED、歷史資料盤點、發布回復及真 GCS／Supabase 已發 URL 撤銷仍未完成。這次沒有改 migration、部署、金鑰或 E 校園；未執行或繞道未授權 npm/pnpm audit。
+
+
+### 2026-11-21｜教師舊校資格重放：私人作業收據、同儕互評及成績修訂（隔離候選）
+
+- **已讀基準**：main `67ed7458339e4db981ed016926affa465d995d2f`；既有安全分支精確父提交 `a32859ba3203f301388d70d071f0fcc816e31d5f`（10 ahead／11 behind）。原安全 PR #517/#577 均已合併，但核可不可移植。main 的 CI #44861099479（含現有 Security Gates、Firestore、Mobile／Web）及 CodeQL #44861099489 成功；本安全分支上一提交 Firestore #44845858468 成功。新提交的結果須另行核實。
+- **授權缺口**：`canManageGroup` 以殘留群組教師資格和舊校會員資格認定管理者，未重新核對 server-bound `users/{uid}.schoolId/primarySchoolId`。當使用者部分轉校且舊資格未撤除，仍可讀取 nested／legacy 私人作業提交、同儕互評（含教師備註）、gradeRevisions，並可能操作教師端評分與互評。這是從 Rules 可重現的邊界缺口，未發現正式環境利用證據。
+- **最小修補**：新增 `canManageCurrentGroup`，沿用已存在的 `isActiveCurrentGroupMember`，用於私人提交／同儕互評／修訂紀錄**讀取**及同儕互評建立／修改／刪除；教師**成績更新與原子修訂紀錄建立尚未納入此閘門**，保留其他一般群組管理語義，不更改任何正式資料或歷史文件。學生本人與合法指派評閱者原權限保留。修正一份舊教師測試 fixture，使其具備真實 server-bound 校籍。
+- **可重跑回歸**：`backend/tests/security-rules.test.js` 新增真 Firebase Emulator 案例，涵蓋合法教師 GET/CREATE/DELETE、同校無關帳號拒絕、合法學生評閱讀取、同一登入 context 的雙向校籍衝突、課程／學校會員撤權、帳號刪除、拒絕重放與恢復。未宣稱真實寫入競態已測；GCS/Supabase 已發 URL／真 Storage CAS 仍另列。
+- **驗收與禁止事項**：新 head 的 Firestore workflow、完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、指定 nuni-merge-gate App 5504170 對精確 head「審查通過」、發布及回復均需獨立核對；不將原 SHA 的結果視為新 SHA。沿用 feature-only branch，不主動建立會外送 npm/pnpm audit payload 的 PR。未接觸正式資料、金鑰、附件 token、migration、部署或 E 校園。無 staging GCS bucket 憑證，已發簽名 URL 撤銷仍是獨立發布阻礙。
+
+- **精確測試回饋與修正**：首次 head `3a8016e3cc3766df694c59c44853e2011a5ec0eb` 的 Firestore Actions #44867580859 實測為 548/550；既有合法首次評分與原子成績更正各 1 失敗，錯誤為 Firestore Rules 的 1000 expressions 上限（重複執行 isActiveGroupMember 造成）。後續候選移除重複 membership 展開，保留一次 live canManageGroup 加 profile 雙校籍一致檢查；不得沿用先前測試成功，必須以新精確 SHA 再跑。
+- **獨立未結案的資料界線**：同儕互評收據若把 `teacherNotes` 與學生可讀的回饋置於同一個 Firestore 文件，Rules 無法只隱藏個別欄位；需核對 Web/Mobile 與教師資料存放方式，必要時採獨立教師私密文件與相容移轉。此處不宣稱教師備註具欄位級保密。
+
+- **第二次隔離回饋與範圍收斂**：優化 helper 之精確 SHA `d6ada6323a898d2bd7f1953b2a3edbd2d350af8b`，Firestore Actions #44867873317 仍因 Rules 1000 expressions 上限導致 4/550 失敗（546 通過），涉及非教師評閱路徑、合法首次評分與原子更正。為先恢復原有功能，保留上一版已驗證的敏感讀取／互評權限檢查，但恢復未改前的教師 grade update 與 gradeRevision create 原始謂詞；**教師校籍衝突期間寫入成績及修訂仍是未修復風險**，不得把本補丁宣稱涵蓋寫入撤權。後續需重構 grade 規則分支以留出 expression budget，或將校籍核驗透過不可偽造的資料模型整合後重跑 atomic correction。新 SHA 回歸仍需核對，正式發布不可用未驗證提交。
+
+
+### 2026-11-21｜全分支整合：保留安全提交歷史並補完教師成績寫入撤權
+
+- 以 `main 67ed7458339e4db981ed016926affa465d995d2f` 整合安全分支 `92cabab8b3e871093cf2b64a58404c1375ae0960`；後者已包含 `8f94c3670b97d98c6c5ed451626133e87a1a59ad`、`a5d2ac48b7092e254728976f901fcb6f6d9d5cd9`、`ad94b4f6a4018ff73077def6d1f0ec8716c400f9`，使用真正 merge 保留四個分支的來源歷史。規則、測試及本文三檔無文字衝突。
+- 前述教師成績更新／原子修訂建立仍使用舊管理謂詞的缺口於本整合修補：`isActiveCurrentGroupMember` 單次核對現存群組、有效群組會員及既有 canonical 帳號／雙校籍／學校會員條件；`canManageCurrentGroup` 在此結果上檢查原有四種管理角色，避免同一帳號／會員校驗被重複展開。首次正式評分、歷史首次評分及原子修訂建立均使用此謂詞，原成績欄位限制、回答不可變及 audit 原子一致性檢查保留。
+- 新增三項真正 Firebase Emulator 回歸，使用同一登入 client 依次重放雙向校籍衝突、停用帳號、刪帳中、帳號文件刪除、學校撤權及課程撤權，核對首次兩種評分及原子更正均拒絕，恢復合法資格後可成功。合成初始分數與不可變學生回答也有斷言。
+- 本機 Node `22.23.5`、Firebase CLI `15.34.1`，Firestore／Storage Emulator 執行 `node --test --test-name-pattern="course assignment submissions|firestore security rules|campus story" backend/tests/security-rules.test.js`：**131/131 通過，0 失敗、0 略過**。包含正常教師首次發佈、歷史首次評分、原子成績更正、互評及所有本分支新增授權回歸；合法更正未因 1000 expressions 限制被拒絕。
+- 額外核對完整檔案時，本機既有 Storage story draft upload 正向案例出現 `storage/unauthorized`，同一環境改用精確 `main 67ed7458` 的原規則與原測試亦同樣失敗（會員查詢出現 null）；不是把此項算入通過，也未為讓測試通過而放寬 Storage。其完整整合 CI／跨產品 Emulator 仍須在總整合 head 獨立核實。本節不表示合併至遠端 main 或部署，指定 App 的精確 head 審查依既有規則執行。

@@ -59,6 +59,7 @@ const inputs = [
     'scripts/qa/interface-design/build.mjs',
     'scripts/qa/interface-design/check.py',
     'scripts/qa/interface-design/quick_search.py',
+    'scripts/qa/interface-design/feedback.py',
     'scripts/qa/browser/install-playwright.sh',
     'package.json',
     'apps/web/package.json',

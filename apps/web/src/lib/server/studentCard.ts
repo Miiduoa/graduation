@@ -63,7 +63,7 @@ async function activeMember(db: Firestore, tx: Transaction, uid: string, school:
     toPublicSchoolId(user.get('schoolId')) === school &&
     toPublicSchoolId(user.get('primarySchoolId') ?? user.get('schoolId')) === school &&
     user.get('accountDeletionInProgress') !== true &&
-    user.get('status') !== 'deleted' &&
+    !['deleted', 'disabled', 'suspended', 'inactive'].includes(user.get('status')) &&
     member.get('status') === 'active'
   );
 }

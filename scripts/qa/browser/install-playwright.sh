@@ -30,6 +30,11 @@ retry_install() {
       echo "${label} failed after 3 attempts." >&2
       return 1
     fi
+    echo "${label} attempt ${attempt}/3 failed or timed out; retrying after $((attempt * 15)) seconds." >&2
+    # timeout's KILL can terminate the monitor before its children finish
+    # releasing package-manager locks. Back off before starting recovery,
+    # so dpkg does not race cleanup of the failed installation process group.
+    sleep "$((attempt * 15))"
     if (( ${#elevation[@]} )); then
       # Killing apt during unpack/configure releases its lock but can leave
       # dpkg unfinished. Complete pending configuration before apt retries;
@@ -39,8 +44,6 @@ retry_install() {
         return 1
       fi
     fi
-    echo "${label} attempt ${attempt}/3 failed or timed out; retrying after $((attempt * 15)) seconds." >&2
-    sleep "$((attempt * 15))"
   done
 }
 

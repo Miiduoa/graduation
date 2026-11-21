@@ -9,6 +9,7 @@ import { Modal, ConfirmModal } from '../../../apps/web/src/components/ui/Modal';
 import { Input, Textarea, Select } from '../../../apps/web/src/components/ui/Input';
 import { CampusIcon } from '../../../apps/web/src/components/CampusIcon';
 import { QuickCampusEntry } from '../../../apps/web/src/components/QuickCampusEntry';
+import { PageRecovery } from '../../../apps/web/src/components/PageRecovery';
 import {
   applyWebAppearancePreferences,
   defaultWebPreferences,
@@ -66,6 +67,23 @@ function Controls() {
         </Button>
         <Button type="button" variant="outline" onClick={() => navigate('/interface-quick')}>
           檢查快速搜尋
+        </Button>
+        <Button type="button" variant="outline" onClick={() => navigate('/interface-feedback')}>
+          檢查操作回饋
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => navigate('/library/fixture-missing?schoolId=pu&campus=pu&q=fixture-only')}
+        >
+          檢查失效連結
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => navigate('/community/fixture-error?schoolId=pu&campus=pu&q=fixture-only')}
+        >
+          檢查頁面重試
         </Button>
         <Button type="button" loading>
           儲存中
@@ -151,6 +169,67 @@ function Controls() {
   );
 }
 
+function ActionFeedback() {
+  const [loading, setLoading] = useState(false);
+  return (
+    <section aria-label="操作回饋驗收" style={{ display: 'grid', gap: 24, minWidth: 0 }}>
+      <div className={home.heading}>
+        <h1>操作回饋</h1>
+      </div>
+      <p className="fixture-copy">下方按鈕只切換處理中狀態，文字、圖示與操作順序保持一致。</p>
+      <div>
+        <Button type="button" variant="outline" onClick={() => setLoading((current) => !current)}>
+          {loading ? '結束處理' : '開始處理'}
+        </Button>
+      </div>
+      <div className="fixture-buttons">
+        <Button id="feedback-plain" type="button" variant="primary" loading={loading}>
+          儲存提醒
+        </Button>
+        <Button id="feedback-neighbor" type="button" variant="ghost">
+          取消
+        </Button>
+      </div>
+      <div className="fixture-buttons">
+        <Button
+          id="feedback-left"
+          type="button"
+          loading={loading}
+          icon={<CampusIcon name="calendar" size={18} />}
+        >
+          加入行程
+        </Button>
+        <Button
+          id="feedback-right"
+          type="button"
+          variant="outline"
+          loading={loading}
+          icon={<CampusIcon name="arrow" size={18} />}
+          iconPosition="right"
+        >
+          繼續
+        </Button>
+        <Button
+          id="feedback-icon"
+          type="button"
+          variant="ghost"
+          loading={loading}
+          aria-label="重新整理資料"
+          icon={<CampusIcon name="search" size={18} />}
+        />
+      </div>
+      <Button id="feedback-full" type="button" fullWidth loading={loading}>
+        同步課程與作業
+      </Button>
+      <div>
+        <Button id="feedback-unavailable" type="button" disabled>
+          尚未開放
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 function Fixture() {
   const pathname = usePathname();
   return (
@@ -226,6 +305,12 @@ function Fixture() {
                 </div>
                 <QuickCampusEntry onAsk={null} />
               </>
+            ) : pathname === '/interface-feedback' ? (
+              <ActionFeedback />
+            ) : pathname === '/library/fixture-missing' ? (
+              <PageRecovery kind="missing" />
+            ) : pathname === '/community/fixture-error' ? (
+              <PageRecovery kind="error" onRetry={() => navigate('/')} />
             ) : (
               <>
                 <div className={home.heading}>

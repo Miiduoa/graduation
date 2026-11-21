@@ -6,6 +6,23 @@ export const STUDY_SESSION_LIMITS = {
   attemptCharacters: 2_000,
 } as const;
 
+/**
+ * A response made only of whitespace, direction markers, joiners, variation
+ * selectors, isolated combining marks or Braille blank is not an actual answer.
+ * Reuse this gate for live review, reading/checkpoint restore and TXT export.
+ * Keep real letters, mathematics, full emoji and attached accents intact.
+ */
+export function hasVisibleStudyAttempt(attempt: string): boolean {
+  return hasVisibleStudyContent(attempt);
+}
+
+export function hasVisibleStudyContent(text: string, { ignorePunctuation = false } = {}): boolean {
+  // A punctuation base with a keycap mark is itself a visible emoji.
+  if (ignorePunctuation && /[0-9#*]\ufe0f?\u20e3/u.test(text)) return true;
+  const content = ignorePunctuation ? text.replace(/\p{P}/gu, '') : text;
+  return /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800\ufff9-\ufffb]/u.test(content);
+}
+
 export type StudyLesson = StudyTutorTurn & {
   id: number;
   previousLessonId: number | null;

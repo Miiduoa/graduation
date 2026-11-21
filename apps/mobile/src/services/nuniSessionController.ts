@@ -14,6 +14,14 @@ import {
   parseNuniLoginTransaction,
   type NuniTransport,
 } from './nuniClient';
+import {
+  requestNativeTronClassDownload,
+  requestNativeTronClassSubmissionDownload,
+  validNativeTronClassSubmissionDownload,
+  type NativeTronClassDownloadInput,
+  type NativeTronClassSubmissionDownloadInput,
+  type NativeTronClassDownloadedFile,
+} from './tronClassNativeDownload';
 
 export type NativeNuniSession = NuniPrincipal & { context: string; expiresAt: number };
 export type NativeNuniState = {
@@ -590,11 +598,74 @@ export class NuniSessionController {
       throw error;
     }
   };
+  /** An exact binary capability, not an arbitrary authenticated URL fetch. */
+  tronClassDownload = async (
+    input: NativeTronClassDownloadInput,
+    expectedContext: string,
+  ): Promise<NativeTronClassDownloadedFile> => {
+    const session = this.state.session;
+    if (!session || !this.record || !this.isSessionCurrent(session.platformAccountId, expectedContext))
+      throw new NuniError(409, 'SESSION_CHANGED');
+    const run = this.generation;
+    const controller = new AbortController();
+    this.controllers.add(controller);
+    try {
+      return await requestNativeTronClassDownload(
+        `Platform ${this.record.sessionHandle}`,
+        input,
+        () => this.current(run) && this.isSessionCurrent(session.platformAccountId, expectedContext),
+        controller.signal,
+      );
+    } catch (error) {
+      if (!this.current(run)) throw new NuniError(409, 'SESSION_CHANGED');
+      if (error instanceof NuniError && error.status === 401) await this.refresh();
+      throw error;
+    } finally { this.controllers.delete(controller); }
+  };
+  tronClassSubmissionDownload = async (
+    input: NativeTronClassSubmissionDownloadInput,
+    expectedContext: string,
+    signal?: AbortSignal,
+  ): Promise<NativeTronClassDownloadedFile> => {
+    if (!validNativeTronClassSubmissionDownload(input))
+      throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+    const session = this.state.session;
+    if (signal?.aborted || !session || !this.record ||
+      !this.isSessionCurrent(session.platformAccountId, expectedContext))
+      throw new NuniError(409, 'SESSION_CHANGED');
+    const run = this.generation;
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    this.controllers.add(controller);
+    try {
+      const result = await requestNativeTronClassSubmissionDownload(
+        `Platform ${this.record.sessionHandle}`,
+        input,
+        () => !controller.signal.aborted && this.current(run) &&
+          this.isSessionCurrent(session.platformAccountId, expectedContext),
+        controller.signal,
+      );
+      if (controller.signal.aborted || !this.current(run) ||
+        !this.isSessionCurrent(session.platformAccountId, expectedContext))
+        throw new NuniError(409, 'SESSION_CHANGED');
+      return result;
+    } catch (error) {
+      if (!this.current(run) || signal?.aborted)
+        throw new NuniError(409, 'SESSION_CHANGED');
+      if (error instanceof NuniError && error.status === 401) await this.refresh();
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', abort);
+      this.controllers.delete(controller);
+    }
+  };
   upload = async (
     path: string,
     expectedContext: string,
     body: Uint8Array,
     contentType: string,
+    query?: Record<string, string>,
   ): Promise<unknown> => {
     const session = this.state.session;
     if (
@@ -621,6 +692,7 @@ export class NuniSessionController {
           body,
           contentType,
           controller.signal,
+          query,
         );
         if (!this.current(run) || this.state.session?.context !== expectedContext)
           throw new NuniError(409, 'SESSION_CHANGED');

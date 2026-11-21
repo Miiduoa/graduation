@@ -29,18 +29,23 @@ type Props = {
   onSelect: (location: MapLocation) => void;
 };
 
+// 0: enter/leave viewport; 1e-9: zero-area edge touch <-> any visible
+// pixel (still representable as float32 in browser engines); 0.01: legacy
+// coarse visibility step.
+const VIEWPORT_THRESHOLDS = [0, 1e-9, 0.01];
 // Reuse a single empty array to avoid recreating a WebGL context whenever
 // the footprint status or the visible map selection changes.
 const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
 // The 3D overlay is scoped to the *filtered* map. When the view contains
 // only transit stops (official transit feed), OSM nodes or other non-outline
 // POIs, downloading every campus building wastes bandwidth on mobile.
-// Include relation IDs for future reviewed relation support, without
-// claiming that each way/relation has passed the building geometry parser.
+// Only audited OSM ways can become 3D volumes today. A relation-only POI
+// still has its own map marker/source link, but must not trigger an unusable
+// whole-campus Overpass download until relation geometries are implemented.
 const POTENTIAL_OUTLINE_POI_IDS = new Set(
   PROVIDENCE_CAMPUS_PLACES
     .filter((place) => place.verification === 'cross-checked' &&
-      /^https:\/\/www\.openstreetmap\.org\/(?:way|relation)\/[1-9]\d*$/.test(place.sourceUrl))
+      /^https:\/\/www\.openstreetmap\.org\/way\/[1-9]\d*$/.test(place.sourceUrl))
     .map((place) => place.id),
 );
 const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
@@ -63,8 +68,53 @@ const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 // cannot exhaust mobile memory even without a reliable Content-Length.
 // Fallback is only for non-streaming WebViews / synthetic fetch stubs.
 async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
+  // Content-Length describes transport bytes for gzip/br, but the browser
+  // delivers decoded bytes. Enforce exact framing ONLY for identity responses;
+  // a truncated but syntactically valid JSON document is not a complete map.
+  const encoding = response.headers?.get('content-encoding')?.trim().toLowerCase() ?? null;
+  const declared = response.headers?.get('content-length') ?? null;
+  const identityLength = (encoding === null || encoding === 'identity') &&
+    declared !== null && /^\d+$/.test(declared) ? Number(declared) : null;
   if (!response.body || typeof response.body.getReader !== 'function') {
-    return response.json() as Promise<unknown>;
+    // Old embedded WebViews can expose a Response without a usable stream.
+    // We cannot stop their text() buffering mid-flight, but reject decoded
+    // content before JSON.parse() allocates a potentially huge object tree.
+    // Check UTF-16 length first (a lower bound on encoded UTF-8 bytes) to
+    // avoid creating an extra giant byte array for clearly oversized bodies.
+    if (typeof response.text === 'function') {
+      const raw = await response.text();
+      if (signal?.aborted) throw new Error('Building outline read aborted');
+      if (raw.length > MAX_DECLARED_FOOTPRINT_BYTES) {
+        throw new Error('Building outline response exceeded byte limit');
+      }
+      const decodedBytes = new TextEncoder().encode(raw).byteLength;
+      if (decodedBytes > MAX_DECLARED_FOOTPRINT_BYTES) {
+        throw new Error('Building outline response exceeded byte limit');
+      }
+      if (identityLength !== null && decodedBytes !== identityLength) {
+        throw new Error('Incomplete building outline response');
+      }
+      return JSON.parse(raw) as unknown;
+    }
+    // A JSON-only WebView bridge exposes no raw bytes. If an identity
+    // Content-Length is present, we cannot verify that the complete HTTP
+    // representation reached JSON.parse(); reserializing the object is not
+    // an equivalent integrity check (whitespace and escaped text can differ).
+    // Fail closed for mapped building outlines, leaving POIs and directions.
+    if (identityLength !== null) {
+      throw new Error('Unverifiable building outline response length');
+    }
+    // Without a declared length, retain the legacy JSON-only fallback with
+    // its post-parse decoded-size check. This cannot cap initial allocation.
+    const payload: unknown = await response.json();
+    if (signal?.aborted) throw new Error('Building outline read aborted');
+    const normalized = JSON.stringify(payload);
+    if (typeof normalized !== 'string' ||
+        normalized.length > MAX_DECLARED_FOOTPRINT_BYTES ||
+        new TextEncoder().encode(normalized).byteLength > MAX_DECLARED_FOOTPRINT_BYTES) {
+      throw new Error('Building outline response exceeded byte limit');
+    }
+    return payload;
   }
   const reader = response.body.getReader();
   // A mobile pagehide/unmount/timeout may arrive after the fetch headers but
@@ -102,6 +152,10 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
         throw new Error('Building outline response exceeded byte/chunk limit');
       }
       const end = total + value.byteLength;
+      if (identityLength !== null && end > identityLength) {
+        cancelReader();
+        throw new Error('Building outline response length mismatch');
+      }
       if (end > bytes.byteLength) {
         const larger = new Uint8Array(Math.min(MAX_DECLARED_FOOTPRINT_BYTES,
           Math.max(bytes.byteLength * 2, end)));
@@ -116,6 +170,9 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
     reader.releaseLock();
   }
   if (signal?.aborted) throw new Error('Building outline read aborted');
+  if (identityLength !== null && total !== identityLength) {
+    throw new Error('Incomplete building outline response');
+  }
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, total))) as unknown;
 }
 const OSM_COOLDOWN_STORAGE_KEY = 'nuni:pu:osm-footprint-cooldown-until';
@@ -230,7 +287,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const appearance = useSyncExternalStore(subscribeAppearance, readAppearance, () => 'reduced:light');
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<'loading' | 'deferred' | 'ready' | 'error'>('loading');
+  // Some mobile WebViews never report a fresh onscreen entry after suspending a
+  // running scene. Keep a visible recovery control instead of a frozen canvas.
+  const [renderSuspended, setRenderSuspended] = useState(false);
+  const [deferredCause, setDeferredCause] = useState<'background' | 'offscreen'>('background');
   const [attempt, setAttempt] = useState(0);
+  // An embedded WebView may construct an observer but never deliver entries.
+  // Only an explicit user choice bypasses offscreen detection.
+  const [manualStart, setManualStart] = useState(false);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
   const view = useMemo(() => ({
@@ -251,15 +315,30 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   useEffect(() => {
     if (!host) return;
     let active = true;
-    let visible = true;
+    // No observer result (or legacy geometry fallback) has confirmed the
+    // canvas yet. Starting with visible=true in an API-less WebView displayed
+    // the loading spinner even after fallback geometry proved the map offscreen.
+    // Wait for that measured decision; manual start remains user-authorized.
+    let visible = manualStart;
     let pageSuspended = false;
     let scene: CampusSpatialScene | null = null;
     // Safari can fire pagehide before visibilitychange when entering bfcache.
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended || document.hidden;
-    setStatus(isBackgrounded() ? 'deferred' : 'loading');
+    const isDeferred = () => isBackgrounded() || !visible;
+    const defer = () => {
+      setDeferredCause(isBackgrounded() ? 'background' : 'offscreen');
+      setStatus('deferred');
+    };
+    if (isDeferred()) defer();
+    else setStatus('loading');
 
-    const updateVisibility = () => scene?.setActive(visible && !isBackgrounded());
+    const updateVisibility = () => {
+      if (!scene) return;
+      const shouldRender = visible && !isBackgrounded();
+      scene.setActive(shouldRender);
+      setRenderSuspended(!shouldRender);
+    };
     const fail = () => {
       if (!active) return;
       active = false;
@@ -275,11 +354,17 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // it resolves. Pause the startup deadline and defer WebGL allocation until
     // the tab is visible again. Resuming must not duplicate the context.
     const syncPendingStartup = () => {
-      if (!active || !started || scene) return;
-      if (isBackgrounded()) {
+      if (!active || scene) return;
+      // Even before startup, page events must refresh the deferred reason so
+      // a stalled observer leaves the manual entry available in the foreground.
+      if (!started) {
+        if (isDeferred()) defer();
+        return;
+      }
+      if (isDeferred()) {
         if (timeout !== null) window.clearTimeout(timeout);
         timeout = null;
-        setStatus('deferred');
+        defer();
         return;
       }
       if (timeout === null) timeout = window.setTimeout(fail, 12000);
@@ -287,13 +372,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       pendingCreate?.();
     };
     const startWhenVisible = () => {
-      if (!active || started || isBackgrounded()) return;
+      if (!active || started || isDeferred()) return;
       started = true;
       syncPendingStartup();
       void import('./campusSpatialScene').then(({ createCampusSpatialScene }) => {
         if (!active) return;
         const finishStart = () => {
-          if (!active || isBackgrounded() || scene) return;
+          if (!active || isDeferred() || scene) return;
           pendingCreate = null;
           scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail, footprints });
           if (!active) {
@@ -315,7 +400,104 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // the next visibilitychange/pageshow. Never allocate while hidden.
       }).catch(fail);
     };
+    // Safari bfcache / WebView restore may retain a visible observer state
+    // even if scroll restoration has moved the canvas outside the viewport.
+    // Never wake an existing GPU context from that stale observation. Wait for
+    // a fresh intersecting event or an explicit manual restart instead.
+    // Delayed observer entries can still report a previously visible canvas
+    // after Safari restores its scroll position. The current DOM rectangle
+    // is authoritative only when it has measurable positive dimensions; on
+    // legacy WebViews without usable layout measurements, keep the observer
+    // signal and the accessible manual-recovery path.
+    // On iOS the soft keyboard and pinch-zoom often change only the visual
+    // viewport, leaving window.innerHeight unchanged. Its offset is relative
+    // to the layout viewport used by getBoundingClientRect().
+    // Read the current viewport on each check: WebViews can temporarily throw
+    // when accessing it, or replace its instance after page restoration.
+    // Geometry is only affirmative when both the host and the effective
+    // viewport have valid, positive bounds. Unknown WebView measurements must
+    // never be interpreted as proof that the map is back on screen.
+    const hostViewportVisibility = (): 'onscreen' | 'offscreen' | 'unknown' | 'invalid-visual-viewport' | 'invalid-host-rect' => {
+      // Some embedded Safari/WebViews expose VisualViewport but throw when a
+      // dimension is read during keyboard, zoom or bfcache transitions. Read
+      // each getter once; an exception is *not* permission to fall back to
+      // the larger layout viewport and wake a hidden WebGL context.
+      let visualBounds: { left: number; top: number; width: number; height: number } | null = null;
+      let visualViewport: VisualViewport | null;
+      try { visualViewport = window.visualViewport; }
+      catch { return 'invalid-visual-viewport'; }
+      if (visualViewport) {
+        try {
+          const { width, height, offsetLeft, offsetTop } = visualViewport;
+          if (![width, height, offsetLeft, offsetTop].every(Number.isFinite) ||
+            width <= 0 || height <= 0) return 'invalid-visual-viewport';
+          visualBounds = { left: offsetLeft, top: offsetTop, width, height };
+        } catch {
+          return 'invalid-visual-viewport';
+        }
+      }
+      try {
+        const rect = host.getBoundingClientRect();
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        const left = visualBounds?.left ?? 0;
+        const top = visualBounds?.top ?? 0;
+        const right = left + (visualBounds?.width ?? width);
+        const bottom = top + (visualBounds?.height ?? height);
+        if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height,
+          width, height, left, top, right, bottom].every(Number.isFinite) ||
+          rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0 ||
+          right <= left || bottom <= top) return 'unknown';
+        // A WebView can expose positive width/height while its DOMRect edges
+        // are reversed or collapsed. These bounds never prove the host visible.
+        if (rect.right <= rect.left || rect.bottom <= rect.top) return 'invalid-host-rect';
+        return rect.bottom <= top || rect.top >= bottom ||
+          rect.right <= left || rect.left >= right ? 'offscreen' : 'onscreen';
+      } catch {
+        // A broken host/layout measurement is not evidence of an offscreen
+        // canvas; keep the observer and keyboard recovery available.
+        return 'unknown';
+      }
+    };
+    // Both a confirmed offscreen rect and an invalid iOS VisualViewport must
+    // block stale observer/page-restoration records from waking the GPU.
+    // An unmeasurable legacy host rect remains 'unknown' so older WebViews
+    // can still use a real observer signal or the manual-start control.
+    const hostMustStaySuspended = () => {
+      const position = hostViewportVisibility();
+      return position === 'offscreen' || position === 'invalid-visual-viewport' || position === 'invalid-host-rect';
+    };
+    // Keep a way back when pageshow/visibilitychange (not a resize event)
+    // invalidates an already-running scene. Safari may not issue another
+    // IntersectionObserver entry after its visual viewport becomes valid.
+    let suspendedByViewport = false;
+    // When a broken WebView cannot observe the host, use measurable DOM bounds
+    // instead of eagerly allocating offscreen WebGL. Unknown legacy layouts
+    // retain the prior fallback, and a visible scroll can wake a deferred map.
+    let observerFallback = false;
+    // Safari can deliver a *positive* initial observer entry while its visual
+    // viewport getters are transiently invalid. Remember that observation,
+    // but do not allocate WebGL until a later viewport event proves the host
+    // is actually on screen. A negative observer entry cancels this permit.
+    let pendingInitialViewportConfirmation = false;
+    const invalidateRestoredOffscreenVisibility = () => {
+      if (visible && !manualStart && typeof IntersectionObserver !== 'undefined' &&
+          hostMustStaySuspended()) {
+        if (started) suspendedByViewport = true;
+        visible = false;
+      }
+    };
     const onVisibilityChange = () => {
+      if (!document.hidden) {
+        // Ordinary iOS tab switches resume with visibilitychange, without
+        // pageshow or any VisualViewport resize/scroll event. Revalidate the
+        // current viewport and retry missing listeners on that foreground
+        // transition, so a previously paused (or deferred first) scene
+        // recovers only when its original observer permit is still valid.
+        invalidateRestoredOffscreenVisibility();
+        onViewportResize();
+        return;
+      }
       updateVisibility();
       startWhenVisible();
       syncPendingStartup();
@@ -327,33 +509,248 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
     const onPageShow = () => {
       pageSuspended = false;
+      invalidateRestoredOffscreenVisibility();
+      // A restored Safari page can recover a valid VisualViewport without
+      // dispatching resize, scroll or a fresh IntersectionObserver callback.
+      // Recheck the current rect on pageshow: the same two gates apply to
+      // both a previously paused scene and a pending first render.
+      onViewportResize();
+    };
+    // iOS VisualViewport can expand/scroll back into view without firing a
+    // second IntersectionObserver callback. Only undo a pause that *this*
+    // viewport listener initiated, on positive and measurable overlap, after
+    // a real observer previously permitted startup. Never bypass the initial
+    // offscreen-import gate or restart an unconfirmed/legacy WebView scene.
+    // Page restore can replace the VisualViewport object. Transfer the two
+    // listeners to the current instance, without leaving callbacks on an old
+    // viewport or interpreting a throwing getter as an absent API.
+    let subscribedVisualViewport: VisualViewport | null = null;
+    // A temporary WebView addEventListener failure is not permanent. Retry
+    // missing subscriptions on pageshow/window resize even when Safari keeps
+    // the same VisualViewport object after a keyboard or bfcache transition.
+    const registeredViewportEvents = new Set<'resize' | 'scroll'>();
+    const refreshVisualViewportListeners = () => {
+      let current: VisualViewport | null;
+      try { current = window.visualViewport; }
+      catch { return; }
+      if (current !== subscribedVisualViewport) {
+        for (const event of ['resize', 'scroll'] as const) {
+          try { subscribedVisualViewport?.removeEventListener(event, onViewportResize); }
+          catch { /* partially implemented WebView API */ }
+        }
+        registeredViewportEvents.clear();
+        subscribedVisualViewport = current;
+      }
+      for (const event of ['resize', 'scroll'] as const) {
+        if (registeredViewportEvents.has(event)) continue;
+        try {
+          subscribedVisualViewport?.addEventListener(event, onViewportResize);
+          if (subscribedVisualViewport) registeredViewportEvents.add(event);
+        } catch { /* retry when the same instance becomes usable again */ }
+      }
+    };
+    const onViewportResize = () => {
+      if (!active) return;
+      refreshVisualViewportListeners();
+      if (observerFallback) {
+        const position = hostViewportVisibility();
+        if (position !== 'unknown') visible = position === 'onscreen';
+      } else if (!manualStart && typeof IntersectionObserver !== 'undefined') {
+        const position = hostViewportVisibility();
+        if (position === 'offscreen' || position === 'invalid-visual-viewport' || position === 'invalid-host-rect') {
+          if (visible && started) suspendedByViewport = true;
+          visible = false;
+        } else if (position === 'onscreen' && pendingInitialViewportConfirmation && !started) {
+          // The observer already confirmed positive intersection. This is
+          // not an eager start: current valid geometry is the second gate.
+          visible = true;
+          pendingInitialViewportConfirmation = false;
+        } else if (position === 'onscreen' && suspendedByViewport && started) {
+          visible = true;
+          suspendedByViewport = false;
+        }
+      }
       updateVisibility();
       startWhenVisible();
       syncPendingStartup();
     };
 
-    const intersection = typeof IntersectionObserver === 'undefined' ? null :
-      new IntersectionObserver(([entry]) => {
-        visible = entry?.isIntersecting ?? false;
-        updateVisibility();
-      });
-    intersection?.observe(host);
+    // A few embedded WebViews expose IntersectionObserver but fail during
+    // construction or observe(). Do not strand the tour in offscreen mode:
+    // the safe fallback is the existing eager startup path.
+    let intersection: IntersectionObserver | null = null;
+    let observerLive = true;
+    // Keep timestamps across observer callbacks, not only within one batch:
+    // an old, queued notification must not restart offscreen mobile WebGL.
+    let lastObservationTime = -Infinity;
+    if (!manualStart && typeof IntersectionObserver !== 'undefined') {
+      try {
+        intersection = new IntersectionObserver((entries) => {
+          // A WebView can deliver an already-queued callback after disconnect
+          // (including after the modal closes). Do not reactivate a disposed
+          // WebGL scene or issue state updates from the previous dialog.
+          if (!active || !observerLive) return;
+          // Only entries for this canvas host may change its visibility.
+          // Legacy callback shims may omit target; a *different* explicit
+          // target is never proof that our map entered the viewport.
+          const hostEntries = entries.filter((entry) => !entry.target || entry.target === host);
+          // A fast scroll can batch several transitions. Real observer
+          // entries expose time; use the most recent timestamp rather than
+          // trusting array order. Keep last-entry fallback for legacy WebViews
+          // or test shims without timestamps; an empty batch changes nothing.
+          if (!hostEntries.length) return;
+          // Some embedded WebViews include a time only on *some* entries.
+          // An untimed final item must not hide a newer timed transition,
+          // and an untimed callback cannot safely supersede a timestamped
+          // offscreen event delivered earlier. Purely untimed legacy shims
+          // still follow array order until a trustworthy time is observed.
+          const timed = hostEntries.filter((entry) => Number.isFinite(entry.time));
+          let latest: IntersectionObserverEntry;
+          if (timed.length) {
+            latest = timed[0];
+            // Equal timestamps can occur when a browser rounds time values.
+            // Entries within one callback are queued in transition order,
+            // so the last tied entry describes the latest state in that batch.
+            // Equal-time records from a DIFFERENT callback remain ambiguous
+            // and are rejected by the strict cross-batch check below.
+            for (const entry of timed) {
+              if (entry.time >= latest.time) latest = entry;
+            }
+            // A delayed older callback may arrive after a newer one, even
+            // if it is the sole entry in its own callback.
+            // Quantized timestamps can tie across separate callbacks.
+            // Never wake GPU on an ambiguous equal-time positive event,
+            // but accept an equal-time negative event to fail closed: keeping
+            // an offscreen WebGL scene active wastes mobile power. A newer
+            // positive event (or explicit manual recovery) can resume it.
+            if (latest.time < lastObservationTime ||
+                (latest.time === lastObservationTime && latest.isIntersecting)) return;
+            lastObservationTime = latest.time;
+          } else {
+            if (lastObservationTime !== -Infinity) return;
+            latest = hostEntries[hostEntries.length - 1];
+          }
+          // IntersectionObserver may report isIntersecting=true when the
+          // canvas only touches the viewport boundary. A zero-area map has
+          // no visible pixels and must not allocate or resume mobile WebGL.
+          // Older WebViews that omit the entire intersectionRect still use
+          // the boolean flag and retain the manual-start path.
+          // Some embedded WebViews deliver an intersection rectangle with
+          // positive dimensions but invalid origin/edge coordinates, or throw
+          // when a DOMRect getter is read after tab restoration. Neither is
+          // evidence of visible pixels. Ignore omitted coordinate fields in
+          // legacy shims, but fail closed for any provided non-finite value.
+          // A callback queued before bfcache scroll restoration can also
+          // carry a newer timestamp for an old on-screen position.
+          const position = hostViewportVisibility();
+          let confirmedIntersecting = false;
+          try {
+            const rect = latest.intersectionRect;
+            confirmedIntersecting = Boolean(latest.isIntersecting) && (!rect ||
+              (Number.isFinite(rect.width) && Number.isFinite(rect.height) &&
+                rect.width > 0 && rect.height > 0 &&
+                [rect.x, rect.y, rect.left, rect.top, rect.right, rect.bottom]
+                  .every((value) => value === undefined || Number.isFinite(value)) &&
+                // Some WebViews report positive width/height alongside an
+                // impossible or zero-area edge pair. An explicitly supplied
+                // right/bottom edge must be beyond its matching start edge;
+                // fully omitted legacy-shim coordinates remain supported.
+                (rect.left === undefined || rect.right === undefined || rect.right > rect.left) &&
+                (rect.top === undefined || rect.bottom === undefined || rect.bottom > rect.top)));
+          } catch {
+            // A partially implemented DOMRect getter cannot wake mobile GPU.
+          }
+          // An initial positive callback can arrive during Safari's 0/NaN
+          // VisualViewport transition. Do not strand the initial render if
+          // no second observer callback follows; require valid on-screen
+          // geometry on the later viewport event before starting.
+          if (!started) {
+            pendingInitialViewportConfirmation =
+              (position === 'invalid-visual-viewport' || position === 'invalid-host-rect') && confirmedIntersecting;
+          }
+          if (!confirmedIntersecting) {
+            // A newer negative observer record revokes the viewport-only
+            // recovery permit. Otherwise a subsequent valid resize can
+            // resurrect a scene the observer has explicitly marked hidden.
+            // Wait for the next genuine positive intersection instead.
+            suspendedByViewport = false;
+          } else if ((position === 'invalid-visual-viewport' || position === 'invalid-host-rect') && visible && started) {
+            suspendedByViewport = true;
+          }
+          visible = confirmedIntersecting &&
+            position !== 'offscreen' && position !== 'invalid-visual-viewport' && position !== 'invalid-host-rect';
+          if (visible) suspendedByViewport = false;
+          updateVisibility();
+          startWhenVisible();
+          syncPendingStartup();
+        }, { threshold: VIEWPORT_THRESHOLDS });
+        // An edge-touch (isIntersecting=true, zero area) and a sliver of
+        // visible area (for example 0.5%) are both intersecting. A tiny
+        // positive threshold guarantees a callback across that boundary in
+        // both directions, so WebGL starts once any pixel shows and pauses
+        // again when only the edge touches.
+        intersection.observe(host);
+      } catch {
+        // observe() may have registered partially before throwing.
+        try { intersection?.disconnect(); } catch { /* broken WebView observer */ }
+        // disconnect() cannot cancel queued notifications from a failed
+        // constructor/observe(). They must not deactivate the eager fallback.
+        observerLive = false;
+        intersection = null;
+        observerFallback = true;
+        const position = hostViewportVisibility();
+        // A broken observer does not authorize starting a measurable offscreen
+        // host (or one hidden by an invalid iOS VisualViewport). Older WebViews
+        // whose host geometry is unknown still retain their eager fallback.
+        visible = position === 'onscreen' || position === 'unknown';
+      }
+    }
+    // Legacy WebViews with no IntersectionObserver should share the same
+    // measured fallback as a broken observer, not eagerly start offscreen GPU.
+    // The capture scroll listener below can wake the canvas once it appears.
+    if (!manualStart && typeof IntersectionObserver === 'undefined') {
+      observerFallback = true;
+      const position = hostViewportVisibility();
+      visible = position === 'onscreen' || position === 'unknown';
+    }
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('resize', onViewportResize);
+    // With no functioning observer, capture nested container scrolling too:
+    // a mobile map below the fold may enter view without resizing the window.
+    // Scope the extra listener to the exceptional fallback path only.
+    if (observerFallback) window.addEventListener('scroll', onViewportResize, { capture: true, passive: true });
+    // Safari's visual viewport can resize/scroll without a layout resize or
+    // a timely IntersectionObserver callback. Listen to both dimensions;
+    // older WebViews without this optional API keep the window fallback.
+    // An embedded WebView may support only one VisualViewport event. Register
+    // independently: a throwing resize listener must not suppress scroll,
+    // which is the only signal sent after certain keyboard/pinch changes.
+    refreshVisualViewportListeners();
     startWhenVisible();
     return () => {
       active = false;
       if (timeout !== null) window.clearTimeout(timeout);
-      intersection?.disconnect();
+      // A broken embedded WebView may throw even on disconnect(). Complete
+      // scene and listener cleanup regardless; never leak a WebGL context.
+      try { intersection?.disconnect(); } catch { /* broken WebView observer teardown */ }
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('resize', onViewportResize);
+      if (observerFallback) window.removeEventListener('scroll', onViewportResize, true);
+      // Always attempt both removals even if the first WebView API throws.
+      // Otherwise a retained scroll handler can touch a disposed GPU scene.
+      for (const event of ['resize', 'scroll'] as const) {
+        try { subscribedVisualViewport?.removeEventListener(event, onViewportResize); }
+        catch { /* partially implemented WebView API */ }
+      }
       pendingCreate = null;
       scene?.dispose();
       runtime.current = null;
     };
-  }, [host, model, onSelect, onCameraChange, attempt, footprints]);
+  }, [host, model, onSelect, onCameraChange, attempt, footprints, manualStart]);
 
   return (
     <>
@@ -368,12 +765,41 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       />
       {status !== 'ready' && (
         <div className={styles.sceneMessage} role="status">
-          {status === 'loading' ? <p>正在開啟空間導覽…</p> : status === 'deferred' ? <p>目前位於背景分頁，返回導覽後才會啟動立體畫面；仍可查看地點與步行導航。</p> : <>
+          {status === 'loading' ? <p>正在開啟空間導覽…</p> : status === 'deferred' ? (
+            deferredCause === 'background'
+              ? <p>目前位於背景分頁，返回導覽後才會啟動立體畫面；仍可查看地點與步行導航。</p>
+              : <>
+                <p>尚未確認立體畫面在可見範圍；滑動至空間圖後才載入，以節省手機效能與電力。若沒有自動載入，可手動開啟。地點資訊與步行導航仍可使用。</p>
+                <button className="btn" type="button" onClick={() => {
+                  // The launch button disappears as loading begins. Preserve
+                  // keyboard/screen-reader focus on the map instead of body.
+                  host?.focus();
+                  setManualStart(true);
+                }}>手動開啟立體畫面</button>
+              </>
+          ) : <>
             <p>這次無法顯示立體畫面。你仍可選擇地點，查看資訊與導航。</p>
-            <button className="btn" type="button" onClick={() => setAttempt((value) => value + 1)}>
+            <button className="btn" type="button" onClick={() => {
+              // Retry replaces this button with a loading/status layer.
+              // Keep keyboard and screen-reader focus inside the map instead
+              // of losing focus when the button is removed from the dialog.
+              host?.focus();
+              setAttempt((value) => value + 1);
+            }}>
               重試立體畫面
             </button>
           </>}
+        </div>
+      )}
+      {status === 'ready' && renderSuspended && (
+        <div className={styles.sceneMessage} role="status">
+          <p>立體畫面已暫停。回到空間圖會自動恢復；若沒有恢復，可手動重新啟動。</p>
+          <button className="btn" type="button" onClick={() => {
+            // The recovery button disappears while the scene restarts; keep
+            // keyboard focus within the tour instead of losing it to body.
+            host?.focus();
+            setManualStart(true);
+          }}>重新啟動立體畫面</button>
         </div>
       )}
       <span className={styles.sceneCaption}>地點位置示意</span>
@@ -413,9 +839,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   // ID at different coordinates, under a new name or with a new category.
   // Skip the whole-campus download unless a *visible* marker still matches
   // the bundled OSM provenance identity used by visibleFootprints below.
-  const hasOutlineCandidate = school === 'pu' &&
-    model.points.some((point) => POTENTIAL_OUTLINE_POI_IDS.has(point.id) &&
-      providencePlaceSourceUrl(school, point.location) !== null);
+  const auditedWayCandidateCount = school === 'pu'
+    ? model.points.filter((point) => POTENTIAL_OUTLINE_POI_IDS.has(point.id) &&
+      providencePlaceSourceUrl(school, point.location) !== null).length
+    : 0;
+  const hasOutlineCandidate = auditedWayCandidateCount > 0;
   // Only a deliberate in-dialog choice overrides the current map selection. If the
   // source withdraws an automatic match, do not silently navigate to its first replacement.
   const [selection, setSelection] = useState<string | null>(null);
@@ -783,15 +1211,30 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // or partial representation into a trusted 3D building snapshot.
         const contentRange = response.headers?.get('content-range') ?? null;
         const contentLength = response.headers?.get('content-length') ?? null;
+        // Captive portals and misconfigured gateways can reply HTTP 200 with
+        // non-JSON documents and a stalled body. Our endpoint only returns
+        // JSON; reject any explicitly incompatible media type before reading
+        // the stream, while accepting application/*+json with parameters
+        // (RFC 6838 restricted-name characters, including `_`).
+        // Missing Content-Type remains compatible with legacy WebView bridges.
+        const contentType = response.headers?.get('content-type')?.trim().toLowerCase() ?? '';
+        const mediaType = contentType.split(';', 1)[0]?.trim() ?? '';
+        const invalidMediaType = mediaType !== '' && mediaType !== 'application/json' &&
+          !/^application\/[a-z0-9][a-z0-9!#$&^_.+-]*\+json$/.test(mediaType);
         // RFC Content-Length is a decimal byte count, not a fraction, hex
         // number or comma-separated value. Do not trust a 200 JSON body whose
         // advertised size is invalid or implausibly large for this API.
         const invalidContentLength = contentLength !== null &&
           (!/^\d+$/.test(contentLength) ||
             !Number.isSafeInteger(Number(contentLength)) ||
+            // HTTP 200 with a declared empty representation cannot contain
+            // verified OSM geometry, regardless of identity/gzip encoding.
+            // Reject at headers so a stalled WebView body cannot hold the map
+            // for the full 15-second network deadline.
+            Number(contentLength) === 0 ||
             Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
-            contentRange !== null || invalidContentLength) {
+            contentRange !== null || invalidContentLength || invalidMediaType) {
           // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
           // can still stream a large body; release it without awaiting an
           // uncooperative proxy, rather than waste mobile bandwidth/memory.
@@ -819,7 +1262,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
             status < 300 && status !== 200;
           const rateLimitedOrIncomplete = invalidSuccessStatus || status === 304 || status === 408 ||
             status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
-            contentRange !== null || invalidContentLength;
+            contentRange !== null || invalidContentLength || invalidMediaType;
           // A proxy can return an incomplete 206/Content-Range document or
           // a 408 without Retry-After. These responses cannot be trusted as
           // complete OSM geometry and should not trigger a manual retry loop.
@@ -828,7 +1271,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           // ordinary 500 keeps its existing manual-retry behavior.
           const fallbackBackoff = invalidSuccessStatus || status === 304 ||
             status === 408 || status === 429 || status === 502 ||
-            status === 503 || status === 504 || contentRange !== null || invalidContentLength;
+            status === 503 || status === 504 || contentRange !== null || invalidContentLength ||
+            invalidMediaType;
           const seconds = rateLimitedOrIncomplete
             ? (footprintCooldownSeconds(response) ?? (fallbackBackoff ? 60 : null))
             : null;
@@ -985,6 +1429,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {hasOutlineCandidate && footprintStatus === 'ready' && (
                   <>
                     <strong role="status">{visibleFootprints.length} 棟公開建築輪廓</strong>
+                    {auditedWayCandidateCount > visibleFootprints.length && <span>
+                      目前範圍另有 {auditedWayCandidateCount - visibleFootprints.length} 筆清單中的 OSM 建築 way 未取得可顯示的有效外框；不代表建築不存在，也不代表已驗證入口。
+                    </span>}
                     <span>依 OpenStreetMap 圖徵立體化。高度使用 OSM 標註或 12 公尺示意值，未經校方測量；不是室內導覽或無障礙路線。</span>
                     {footprintDate && <small>資料讀取：{footprintDate}{footprintStale ? '（暫用舊快照）' : ''}</small>}
                     {footprintBaseDate && <small>OSM 資料庫同步：{footprintBaseDate}（非現地查證）</small>}

@@ -31,6 +31,13 @@ function confirmedAgentWrite(toolName, result, input = {}, scope = {}) {
     case 'reserveWashingMachine':
       return hasId(result.reservationId) && hasId(result.machineId) &&
         result.machineId === input.machineId && hasTime(result.reservedUntil);
+    case 'cancelWashingReservation':
+      return result.success === true && result.status === 'cancelled' &&
+        hasId(result.reservationId) && result.reservationId === input.reservationId &&
+        hasId(result.machineId) && result.machineId === input.machineId &&
+        result.schoolId === scope.schoolId && result.userId === scope.uid &&
+        ['dormitory', 'startTime', 'reservedUntil'].every((key) =>
+          Object.prototype.hasOwnProperty.call(result, key) && result[key] === input[key]);
     case 'createOrder':
       return result.success === true && hasId(result.orderId) &&
         result.userId === scope.uid && result.schoolId === scope.schoolId &&

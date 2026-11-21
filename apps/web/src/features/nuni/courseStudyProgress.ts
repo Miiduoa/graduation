@@ -8,7 +8,7 @@ import {
   type StudySource,
   type TutorExplanation,
 } from '@/lib/studyTutor';
-import { STUDY_SESSION_LIMITS, type StudyLesson, type StudyModeMemory, type StudyPassageMemory } from './courseStudySession';
+import { STUDY_SESSION_LIMITS, hasVisibleStudyAttempt, type StudyLesson, type StudyModeMemory, type StudyPassageMemory } from './courseStudySession';
 
 const FORMAT = 'campus-one-study-progress';
 const VERSION = 2;
@@ -109,8 +109,8 @@ function readMode(value: unknown, passage: StudyPassage, version: ProgressVersio
     previousId = id;
     const parentId = lesson.previousLessonId === null ? null : integer(lesson.previousLessonId, 1, id - 1);
     const attempt = text(lesson.attempt, STUDY_SESSION_LIMITS.attemptCharacters);
-    const answerVisible = boolean(lesson.answerVisible);
-    if (answerVisible && !attempt.trim()) invalid('進度檔的試答與參考回答狀態不一致，無法還原。');
+    // Older backups could reveal the answer for an invisible draft. Preserve the draft.
+    const answerVisible = boolean(lesson.answerVisible) && hasVisibleStudyAttempt(attempt);
     let response: TutorExplanation;
     try {
       // A matching quote confirms a relationship to this copy, not its authenticity or teaching quality.

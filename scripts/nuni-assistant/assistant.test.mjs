@@ -164,7 +164,8 @@ test('complete provider request contains only allowlisted public data; no networ
   } finally {
     globalThis.fetch = previous;
   }
-  assert.equal(Object.keys(m.effectivePermissions()).length, 12);
+  assert.equal(Object.keys(m.effectivePermissions()).length, 13);
+  assert.equal(m.effectivePermissions().cancelWashingReservation, false);
   assert.ok(Object.values(m.effectivePermissions()).every((v) => v === false));
   for (const mode of ['schema', 'tool', '429', 'timeout']) {
     const s = new m.AssistantService(m.fakeProvider(mode));

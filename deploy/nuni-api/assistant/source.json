@@ -1,7 +1,7 @@
 {
   "schema": "campus.assistant-source/v1",
   "inputTree": "4c7919d6cff32789acb06e2b9f4edb180cdad3a1",
-  "candidateTree": "67e9e508c3416d7de5ee13db807818ec49a32df0",
+  "candidateTree": "50ae03a743a6bb4fa71cdf50879a317321c43e58",
   "files": {
     "deploy/nuni-api/assistant/confirmation.ts": "c0c1c4ffc8d0d994e8fc5285b067148d470557ba9104d6b22ee758665a147cd0",
     "deploy/nuni-api/assistant/fake.ts": "18396d587227fe36f6888fa7e037b2a63b9dbd4bc45407dfb3f3b95dcb0189f2",
@@ -11,7 +11,7 @@
     "deploy/nuni-api/assistant/publicContext.ts": "9e5bd8fba0f409bea988922c4867c9a29fe895921699b5202ad40dec4c237e55",
     "deploy/nuni-api/assistant/routes.ts": "e74557a5a133a13639ca09411da661b8cd3ade262fa044de99f97cd12612baf4",
     "deploy/nuni-api/assistant/service.ts": "e1453c6f3c4bea0f2cdc76f60d20fae01e0d4d6614070988bcaf0f8bb390ddcc",
-    "packages/shared/src/assistantPermissions.ts": "22f14e600555a6e5167007b080d0914f8cbf3b2121c1f20f9a8eeeb5f31e960c",
+    "packages/shared/src/assistantPermissions.ts": "7f90d968d045b480b9b83378e7386d0c9cb37b6b596a9f5d058bc15ffe769f29",
     "packages/shared/src/campusMapLookup.ts": "f864101ec100f99bd6da9eb8af73d3fe59d854574bd21c669b0cad6c7a30d445"
   },
   "releaseSourceCommit": "c93b4ac3851df68f76d607af29b086030735dc55",

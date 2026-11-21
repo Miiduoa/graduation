@@ -107,7 +107,8 @@ export async function requireAcademicAccount(
   ]);
   const account = profile.data();
   if (!profile.exists || account?.schoolId !== 'pu' ||
-    account.accountDeletionInProgress === true || account.status === 'deleted' ||
+    account.accountDeletionInProgress === true ||
+    ['deleted', 'disabled', 'suspended', 'inactive'].includes(String(account.status)) ||
     !membership.exists || membership.data()?.status !== 'active') {
     throw new HttpsError('permission-denied', '目前無法確認你的在校身分。');
   }

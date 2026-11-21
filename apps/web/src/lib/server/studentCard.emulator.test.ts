@@ -18,6 +18,7 @@ describe.skipIf(!local)('student card presentation', { timeout: 25000 }, () => {
   };
   const verificationId = '12345678-1234-4123-8123-123456789abc';
   const otherVerificationId = '87654321-4321-4321-9321-cba987654321';
+  const unavailableStatuses = ['deleted', 'disabled', 'suspended', 'inactive'];
   beforeAll(() => {
     app = initializeApp({ projectId: 'demo-campus-cards' }, 'student-cards');
     db = getFirestore(app);
@@ -59,6 +60,44 @@ describe.skipIf(!local)('student card presentation', { timeout: 25000 }, () => {
       schoolName: '靜宜大學',
     });
   });
+
+  it.each(unavailableStatuses)(
+    'refuses issuance for an unavailable account (%s)',
+    async (status) => {
+      await db.doc('users/alice').update({ status });
+      await expect(issueStudentCard(db, account, 'pu')).rejects.toThrow('SCHOOL_SIGN_IN_REQUIRED');
+      expect((await db.doc('_studentCardPresentations/alice').get()).exists).toBe(false);
+    },
+  );
+
+  it.each(unavailableStatuses)(
+    'refuses first redemption after the account becomes unavailable (%s)',
+    async (status) => {
+      const card = await issueStudentCard(db, account, 'pu');
+      await db.doc('users/alice').update({ status });
+      await expect(redeemStudentCard(db, card.token, verificationId)).rejects.toThrow(
+        'CARD_UNAVAILABLE',
+      );
+      expect(
+        (await db.doc('_studentCardPresentations/alice').get()).get('receipt'),
+      ).toBeUndefined();
+    },
+  );
+
+  it.each(unavailableStatuses)(
+    'refuses a saved receipt after the account becomes unavailable (%s)',
+    async (status) => {
+      const card = await issueStudentCard(db, account, 'pu');
+      const receipt = await redeemStudentCard(db, card.token, verificationId);
+      await db.doc('users/alice').update({ status });
+      await expect(redeemStudentCard(db, card.token, verificationId)).rejects.toThrow(
+        'CARD_UNAVAILABLE',
+      );
+      expect((await db.doc('_studentCardPresentations/alice').get()).get('receipt')).toEqual(
+        receipt,
+      );
+    },
+  );
 
   it('rejects replaced and expired codes', async () => {
     const first = await issueStudentCard(db, account, 'pu');
