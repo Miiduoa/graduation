@@ -50,17 +50,16 @@ function ScopedCreatorCardPanel({
   const [attempt, setAttempt] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
-  const [saving, setSaving] = useState(false);
-  // A write can succeed while its server confirmation read fails. Avoid
-  // automatically sending a second write until the student checks the server.
-  const [needsConfirmation, setNeedsConfirmation] = useState(false);
-  // The ref is authoritative even for callbacks retained from an older render.
-  // React state alone can be stale while an uncertain write awaits recheck.
-  const needsConfirmationRef = useRef(false);
-  const markConfirmationRequired = (required: boolean) => {
-    needsConfirmationRef.current = required;
-    setNeedsConfirmation(required);
+  const currentDraft = useRef(draft);
+  const replaceDraft = (value: CreatorCard) => {
+    currentDraft.current = value;
+    setDraft(value);
   };
+  const [saving, setSaving] = useState(false);
+  // Keep the submitted draft and its normalized server fields until a read
+  // resolves the uncertain write. The ref also guards stale button callbacks.
+  const pendingWrite = useRef<{ draft: CreatorCard; expected: CreatorCard } | null>(null);
+  const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const savingFlight = useRef(false);
   const [openingLink, setOpeningLink] = useState(false);
   const openingLinkFlight = useRef(false);
@@ -89,79 +88,96 @@ function ScopedCreatorCardPanel({
   }, [schoolId, ownerUid, attempt]);
 
   const beginEdit = () => {
-    if (!own || state.status !== 'ready') return;
-    setDraft(state.value ?? EMPTY_CREATOR_CARD);
-    markConfirmationRequired(false);
-    setFeedback('');
+    if (!own || savingFlight.current || state.status !== 'ready') return;
+    if (!pendingWrite.current) {
+      replaceDraft(state.value ?? EMPTY_CREATOR_CARD);
+      setFeedback('');
+    }
     setEditing(true);
   };
 
   const changeDraft = (field: keyof CreatorCard, value: string) => {
-    setDraft((previous) => ({ ...previous, [field]: value }));
-    markConfirmationRequired(false);
-    setFeedback('');
+    replaceDraft({ ...currentDraft.current, [field]: value });
+    if (!pendingWrite.current) setFeedback('');
+  };
+
+  const cancelEdit = () => {
+    if (savingFlight.current) return;
+    setEditing(false);
+    if (!pendingWrite.current) setFeedback('');
   };
 
   const confirmPreviousSave = async () => {
-    if (!mounted.current || !own || !needsConfirmationRef.current || savingFlight.current || state.status !== 'ready') return;
+    const submitted = pendingWrite.current;
+    if (!mounted.current || !own || !submitted || savingFlight.current || state.status !== 'ready') return;
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
+    let latest: CreatorCard | null;
     try {
-      // readCreatorCard is server-only: cached or stale local values cannot
-      // claim that an ambiguous prior write was persisted.
-      const latest = await readCreatorCard(schoolId, ownerUid);
-      if (!mounted.current) return;
-      const expected = validateCreatorCard(draft);
-      if (latest &&
-        latest.headline === expected.headline &&
-        latest.bio === expected.bio &&
-        latest.linkUrl === expected.linkUrl) {
-        currentPortfolioLink.current = latest.linkUrl;
-        setLinkError('');
-        setState({ status: 'ready', value: latest });
-        setEditing(false);
-        markConfirmationRequired(false);
-        setFeedback('社群簡介已儲存。');
-      } else {
-        markConfirmationRequired(false);
-        setFeedback('伺服器資料與草稿不同，草稿已保留。確認後可重新儲存。');
-      }
+      latest = await readCreatorCard(schoolId, ownerUid);
     } catch {
       if (mounted.current) {
         setFeedback('仍無法核對伺服器資料，草稿已保留，請稍後重試核對。');
       }
+      return;
     } finally {
       if (mounted.current) {
         savingFlight.current = false;
         setSaving(false);
       }
     }
+    if (!mounted.current) return;
+
+    currentPortfolioLink.current = latest?.linkUrl ?? '';
+    setLinkError('');
+    setState({ status: 'ready', value: latest });
+    pendingWrite.current = null;
+    setNeedsConfirmation(false);
+    const { expected } = submitted;
+    if (latest && latest.headline === expected.headline &&
+      latest.bio === expected.bio && latest.linkUrl === expected.linkUrl) {
+      finishSave(submitted.draft);
+    } else {
+      setFeedback('伺服器資料與上次送出的內容不同，草稿已保留。確認後可重新儲存。');
+    }
+  };
+
+  const finishSave = (submittedDraft: CreatorCard) => {
+    if (currentDraft.current === submittedDraft) {
+      setEditing(false);
+      setFeedback('社群簡介已儲存。');
+    } else {
+      setFeedback('上一筆已確認儲存，後續修改仍保留在草稿。');
+    }
   };
 
   const submit = async () => {
-    // A synchronous ref guards multiple taps in the same render before React
-    // commits the disabled state. A failed write releases it for a real retry.
-    if (!mounted.current || !own || needsConfirmationRef.current || needsConfirmation || savingFlight.current || state.status !== 'ready') return;
+    if (!mounted.current || !own || pendingWrite.current || savingFlight.current || state.status !== 'ready') return;
+    const submittedDraft = currentDraft.current;
+    let expected: CreatorCard;
+    try {
+      expected = validateCreatorCard(submittedDraft);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : '簡介格式有誤，請檢查後重試。');
+      return;
+    }
+
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
-    markConfirmationRequired(false);
     try {
-      const confirmed = await saveCreatorCard(schoolId, ownerUid, draft);
+      const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft);
       if (!mounted.current) return;
       currentPortfolioLink.current = confirmed.linkUrl;
       setLinkError('');
-      markConfirmationRequired(false);
       setState({ status: 'ready', value: confirmed });
-      setEditing(false);
-      setFeedback('社群簡介已儲存。');
-    } catch (error) {
+      finishSave(submittedDraft);
+    } catch {
       if (!mounted.current) return;
-      const validationError = error instanceof Error && /最多|HTTPS|有效/.test(error.message);
-      markConfirmationRequired(!validationError);
-      setFeedback(validationError ? error.message
-        : '無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
+      pendingWrite.current = { draft: submittedDraft, expected };
+      setNeedsConfirmation(true);
+      setFeedback('無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
     } finally {
       if (mounted.current) {
         savingFlight.current = false;
@@ -255,7 +271,7 @@ function ScopedCreatorCardPanel({
                 disabled={saving} busy={saving} onPress={() => void confirmPreviousSave()} />
             )}
             <CardButton label="取消編輯" disabled={saving}
-              onPress={() => { setEditing(false); markConfirmationRequired(false); setFeedback(''); }} />
+              onPress={cancelEdit} />
           </View>
         </View>
       ) : (
@@ -282,7 +298,7 @@ function ScopedCreatorCardPanel({
               <CardButton label={state.value ? '編輯社群簡介' : '建立社群簡介'} onPress={beginEdit} />
             </View>
           )}
-          {!!feedback && <Text accessibilityRole="text" style={styles.success}>{feedback}</Text>}
+          {!needsConfirmation && !!feedback && <Text accessibilityRole="text" style={styles.success}>{feedback}</Text>}
         </View>
       )}
     </View>
