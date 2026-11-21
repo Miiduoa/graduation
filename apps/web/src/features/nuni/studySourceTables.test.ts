@@ -1388,6 +1388,45 @@ describe('invalid CSS declarations cannot override hidden teacher-only source ta
 });
 
 
+describe('context-dependent CSS-wide values must not publish derived teacher tables', () => {
+  it.each([
+    '<div style="display:none;display:inherit">',
+    '<section style="display:none!important;display:revert!important">',
+    '<aside style="visibility:hidden;visibility:unset">',
+    '<p style="opacity:0;opacity:inherit">',
+    '<div style="content-visibility:hidden;content-visibility:revert-layer">',
+    // No literal hidden declaration is required: an ancestor or stylesheet
+    // can make these context-dependent values invisible at render time.
+    '<section style="display:inherit">',
+    '<div style="visibility:unset">',
+    '<aside style="opacity:revert">',
+    '<p style="content-visibility:revert-layer">',
+  ])('withholds a context-dependent table but preserves later public rows: %s', (opening) => {
+    const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
+    const source = [
+      opening,
+      '| 尚未確認可見的教材 | 分數 |',
+      '| --- | --- |',
+      '| 必須略過 | 99 |',
+      `</${tag}>`,
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it.each([
+    '<div style="display:none;display:initial">',
+    '<section style="visibility:hidden;visibility:initial">',
+    '<aside style="opacity:0;opacity:initial">',
+    '<p style="content-visibility:hidden;content-visibility:initial">',
+    '<div style="color:inherit;display:block">',
+  ])('still reads tables with known visible values or unrelated CSS properties: %s', (opening) => {
+    const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
+    expect(extractStudySourceTables([opening, ...visibleTable, `</${tag}>`].join('\n')))
+      .toEqual(realTable(2));
+  });
+});
+
 describe('classic Mac and mixed-line-ending course handouts', () => {
   it('reconstructs a public Markdown table from CR-only TXT without changing the source line', () => {
     const source = ['講義封面', '', ...visibleTable].join('\r');

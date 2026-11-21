@@ -1,3 +1,9 @@
+## 2026-11-21：CSS 繼承／回復值不可當成教材可見的證據
+
+- 課程講義若含 `display:none; display:inherit`、`visibility:unset`、`opacity:revert` 或 `content-visibility:revert-layer`，這些 CSS-wide 宣告的實際結果可能受上層元素、樣式層或瀏覽器規則影響。舊版掃描器將其當作確定可見的覆寫值，可能另外衍生出原本在畫面上隱藏的教師答案表格。
+- 現在對四種與環境有關的 `inherit`／`unset`／`revert`／`revert-layer` 只取消**選用的衍生表格**，不動原始教材與正常公開的後續表格。可確定結果的 `initial`、`display:block` 等仍維持既有處理；其他不影響可見性的 CSS 屬性也不阻擋教材。
+- 補上九種保守拒收、五種正常可見的 Vitest 正反案例，涵蓋重要度相同的覆寫、無明確前置隱藏宣告與後續教材行號。這是靜態來源掃描界線，不是瀏覽器計算樣式、iOS／Android 真機或 Ahaboard 同條件實測；不新增套件、不外傳私人教材，不動閱讀 v1/v2 與練習 v1 備份，PR 仍 Draft、不合併、不部署。
+
 ## 2026-11-21：手機 WebView 剪貼簿異常回覆保守處理
 
 - 修正教材表格「複製原文」的非標準 WebView 回覆判定：標準 `Clipboard.writeText()` Promise<void>（resolve undefined）和明確 true 維持既有接受提示；如果手機 App bridge 的 Promise 卻 resolve false、null、0、"false" 或不明物件，就**不宣告複製成功**，改以既有唯讀原文欄位、選取範圍與長按／鍵盤複製提示作為備援。這只表示瀏覽器回覆已收到，不保證系統剪貼簿的實際內容。

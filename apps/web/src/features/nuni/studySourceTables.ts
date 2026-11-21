@@ -131,7 +131,12 @@ function decodeCssEscapes(value: string): string {
 // "display:none;display:not-a-mode" must remain hidden in the derived table.
 // This intentionally covers plain literal values only; function-based and
 // multi-token CSS still require a real browser's computed style.
-const CSS_WIDE_VALUES = new Set(['initial', 'inherit', 'unset', 'revert', 'revert-layer']);
+// 'initial' is a known literal for the four tracked properties. In contrast,
+// inherit/unset/revert/revert-layer can depend on an ancestor, user-agent rules
+// or cascade layers that this source-text scanner cannot inspect. A later
+// contextual declaration must never be treated as proof that a previously
+// hidden teacher-only table is now visible.
+const CSS_CONTEXTUAL_WIDE_VALUES = new Set(['inherit', 'unset', 'revert', 'revert-layer']);
 const CSS_DISPLAY_KEYWORDS = new Set([
   'none', 'contents', 'block', 'inline', 'run-in', 'flow-root',
   'inline-block', 'inline-flex', 'inline-grid', 'inline-table',
@@ -142,7 +147,7 @@ const CSS_DISPLAY_KEYWORDS = new Set([
   'ruby', 'ruby-base', 'ruby-text', 'ruby-base-container', 'ruby-text-container',
 ]);
 function isRecognizedInlineCssValue(name: string, value: string): boolean {
-  if (CSS_WIDE_VALUES.has(value)) return true;
+  if (value === 'initial') return true;
   if (name === 'opacity') {
     // CSS <alpha-value>: an ordinary number/percentage, or a functional
     // expression whose computed value cannot be established by this scanner.
@@ -186,7 +191,7 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
     const name = property[1].toLowerCase();
     const important = importantSuffix.test(property[2]);
     const value = property[2].replace(importantSuffix, '').trim().toLowerCase();
-    if (UNRESOLVED_VISIBILITY_FUNCTION.test(value)) {
+    if (UNRESOLVED_VISIBILITY_FUNCTION.test(value) || CSS_CONTEXTUAL_WIDE_VALUES.has(value)) {
       unresolvedVisibility = true;
       continue;
     }
