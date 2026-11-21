@@ -1,6 +1,6 @@
 import { courseStudyBackupFilenameStem } from './courseStudyBackupFilename';
 import { splitStudySection, type StudyMode, type StudySource } from '@/lib/studyTutor';
-import { hasVisibleStudyAttempt, type StudyPassageMemory } from './courseStudySession';
+import { hasVisibleStudyAttempt, hasVisibleStudyContent, type StudyPassageMemory } from './courseStudySession';
 
 const modes: { value: StudyMode; label: string }[] = [
   { value: 'understand', label: '理解概念' },
@@ -29,12 +29,16 @@ export function buildCourseStudyNotes(
   source.sections.forEach((section, sectionIndex) => {
     splitStudySection(section).forEach((passage, passageIndex) => {
       const memory = passages[`${sectionIndex}:${passageIndex}`];
-      if (!memory || (!memory.note.trim() && !memory.needsReview &&
-        !modes.some((mode) => memory.modes[mode.value].lessons.length))) return;
+      if (!memory) return;
+      // Invisible-only drafts stay editable in the study session, but must not
+      // count as completed notes or create a misleading TXT export entry.
+      const hasNote = hasVisibleStudyContent(memory.note);
+      if (!hasNote && !memory.needsReview &&
+        !modes.some((mode) => memory.modes[mode.value].lessons.length)) return;
       included += 1;
       lines.push('', '────────────────────', passage.label);
       if (memory.needsReview) lines.push('複習標記：待複習');
-      if (memory.note.trim()) lines.push('', '我的筆記：', memory.note);
+      if (hasNote) lines.push('', '我的筆記：', memory.note);
       lines.push('', '原文：', passage.text);
 
       for (const mode of modes) {

@@ -63,6 +63,31 @@ describe('course study note downloads', () => {
     expect(text).toContain('非正式評分');
   });
 
+  it('keeps invisible-only note drafts out of TXT without losing review flags or source data', () => {
+    for (const invisible of ['\u200b', '\u200d\u0301', '\u2800', ' \u2060\u2800 \n']) {
+      const memory = { ...emptyStudyPassage(), note: invisible };
+      const original = JSON.stringify(memory);
+      const text = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
+      expect(text).toContain('本次尚未留下筆記、待複習標記或 AI 講解。');
+      expect(text).not.toContain('我的筆記：');
+      expect(text).not.toContain('教材原文 · 第 1 段');
+      expect(JSON.stringify(memory)).toBe(original);
+
+      const flagged = { ...memory, needsReview: true };
+      const flaggedText = buildCourseStudyNotes('資料庫', source, { '0:0': flagged });
+      expect(flaggedText).toContain('複習標記：待複習');
+      expect(flaggedText).not.toContain('我的筆記：');
+      expect(flagged.note).toBe(invisible);
+    }
+    // Punctuation, accented words, mathematics and joined emoji are real notes.
+    for (const visible of ['？', 'e\u0301', 'x²+y²', '👩‍💻', '⠃']) {
+      const memory = { ...emptyStudyPassage(), note: visible };
+      const text = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
+      expect(text).toContain(`我的筆記：\n${visible}\n`);
+      expect(text).toContain('教材原文 · 第 1 段');
+    }
+  });
+
   it('keeps mode-specific lessons, their actual questions, citations and attempts separate', () => {
     let memory = withLesson();
     memory.modes.understand.lessons[0].attempt = '我認為不能共用。';
