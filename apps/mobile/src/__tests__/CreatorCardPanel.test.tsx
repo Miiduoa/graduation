@@ -208,6 +208,61 @@ test('portfolio URL cannot open: no duplicate external handoff and a visible ret
   }
 });
 
+test('changing a portfolio URL releases the obsolete OS handoff without unlocking the new one', async () => {
+  let rejectOld!: (error: Error) => void;
+  let rejectNew!: (error: Error) => void;
+  const oldHandoff = new Promise<void>((_, reject) => { rejectOld = reject; });
+  const newHandoff = new Promise<void>((_, reject) => { rejectNew = reject; });
+  const openURL = jest.spyOn(Linking, 'openURL')
+    .mockImplementationOnce(() => oldHandoff)
+    .mockImplementationOnce(() => newHandoff)
+    .mockResolvedValue(undefined);
+  jest.mocked(readCreatorCard).mockResolvedValue({
+    headline: '社團', bio: '作品', linkUrl: 'https://old.example.org/',
+  });
+  jest.mocked(saveCreatorCard).mockResolvedValue({
+    headline: '社團', bio: '作品', linkUrl: 'https://new.example.org/',
+  });
+  try {
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+    fireEvent.press(await view.findByLabelText('查看作品連結'));
+    expect(openURL).toHaveBeenCalledWith('https://old.example.org/');
+
+    fireEvent.press(view.getByLabelText('編輯社群簡介'));
+    fireEvent.changeText(view.getByLabelText('作品連結'), 'https://new.example.org/');
+    await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+
+    // The old OS request is deliberately still pending, but the new URL
+    // must be actionable rather than inheriting the obsolete busy state.
+    expect(view.getByLabelText('查看作品連結').props.accessibilityState)
+      .toMatchObject({ disabled: false, busy: false });
+    act(() => { fireEvent.press(view.getByLabelText('查看作品連結')); });
+    expect(openURL).toHaveBeenCalledTimes(2);
+    expect(openURL).toHaveBeenNthCalledWith(2, 'https://new.example.org/');
+    expect(view.getByLabelText('查看作品連結').props.accessibilityState)
+      .toMatchObject({ disabled: true, busy: true });
+
+    // Settling the old handoff cannot release the new handoff's lock or show
+    // an error for the URL that has already replaced it.
+    await act(async () => { rejectOld(new Error('old handoff failed')); });
+    expect(view.queryByText('無法開啟作品連結，請稍後再試。')).toBeNull();
+    expect(view.getByLabelText('查看作品連結').props.accessibilityState)
+      .toMatchObject({ disabled: true, busy: true });
+    act(() => { fireEvent.press(view.getByLabelText('查看作品連結')); });
+    expect(openURL).toHaveBeenCalledTimes(2);
+
+    await act(async () => { rejectNew(new Error('new handoff failed')); });
+    expect(view.getByText('無法開啟作品連結，請稍後再試。').props.accessibilityRole)
+      .toBe('alert');
+    expect(view.getByLabelText('查看作品連結').props.accessibilityState)
+      .toMatchObject({ disabled: false, busy: false });
+    await act(async () => { fireEvent.press(view.getByLabelText('查看作品連結')); });
+    expect(openURL).toHaveBeenCalledTimes(3);
+  } finally {
+    openURL.mockRestore();
+  }
+});
+
 test('a late failure from the old portfolio URL does not mark a newly saved link as broken', async () => {
   let rejectOld: (reason: Error) => void = () => undefined;
   const openURL = jest.spyOn(Linking, 'openURL')
