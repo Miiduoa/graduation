@@ -540,7 +540,7 @@ test('the campus chat confirms the chosen washing cancellation and opens its act
   }));
   expect(view.getByText('洗衣預約已取消')).toBeTruthy();
   fireEvent.press(view.getByText('開啟服務頁核對紀錄'));
-  expect(navigate).toHaveBeenCalledWith('校園', { screen: 'Dormitory', params: undefined });
+  expect(navigate).toHaveBeenCalledWith('校園', { screen: 'Dormitory', params: undefined, initial: false });
 });
 
 test('a user explicitly syncs authorized context before it reaches local inference', async () => {

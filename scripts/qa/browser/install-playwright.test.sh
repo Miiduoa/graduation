@@ -66,6 +66,12 @@ set -euo pipefail
 printf 'dpkg:%s\n' "$*" >> "$MOCK_LOG"
 if [[ "${MOCK_REPAIR_FAIL:-0}" == 1 ]]; then exit 1; fi
 if [[ "${MOCK_PROCESS_TEST:-0}" == 1 ]]; then
+  # timeout can exit before the killed process group releases its lock FDs.
+  # Recovery must follow the retry backoff, even when cleanup happens quickly.
+  if ! grep -q '^sleep:15$' "$MOCK_LOG"; then
+    echo 'Package recovery started before the lock-release backoff' >&2
+    exit 1
+  fi
   flock -n "$MOCK_LOCK" true
   rm -f "$MOCK_LOCK.interrupted"
 fi
@@ -74,6 +80,11 @@ cat > "$mock_dir/bin/sleep" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'sleep:%s\n' "$*" >> "$MOCK_LOG"
+if [[ "${MOCK_PROCESS_TEST:-0}" == 1 ]]; then
+  # Preserve the real delay only for the process/lock test; a no-op sleep
+  # would reintroduce the race between timeout exiting and child cleanup.
+  /bin/sleep "$@"
+fi
 MOCK
 cat > "$mock_dir/bin/timeout" <<'MOCK'
 #!/usr/bin/env bash

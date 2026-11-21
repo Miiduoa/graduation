@@ -11,6 +11,7 @@
  */
 
 const https = require('https');
+const { parseFragment } = require('parse5');
 const { sendWithCampusFetch, setCampusHttpFetch } = require('./lib/puCampusTransport');
 
 const TC_BASE = 'https://tronclass.pu.edu.tw';
@@ -100,6 +101,34 @@ function isCredentialError(body) {
     body.includes('Invalid credentials') ||
     body.includes('帳號或密碼錯誤')
   );
+}
+
+const LOGIN_ERROR_NON_TEXT = new Set([
+  '#comment', 'script', 'style', 'template', 'noscript', 'input', 'textarea', 'select', 'button',
+]);
+
+function parseLoginErrorText(html) {
+  const pending = [{ node: parseFragment(html), inError: false }];
+  const parts = [];
+  while (pending.length > 0) {
+    const { node, inError } = pending.pop();
+    if (LOGIN_ERROR_NON_TEXT.has(node.nodeName) || node.attrs?.some(({ name, value }) =>
+      name === 'hidden' ||
+      (name === 'aria-hidden' && value.toLowerCase() === 'true') ||
+      (name === 'style' && /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i.test(value)),
+    )) continue;
+    const isError = inError || (node.nodeName === 'span' &&
+      node.attrs?.some(({ name, value }) => name === 'id' && value === 'error-message'));
+    if (isError && node.nodeName === '#text') parts.push(node.value);
+    if (isError && node.nodeName === 'br') parts.push(' ');
+    for (let index = (node.childNodes?.length ?? 0) - 1; index >= 0; index -= 1) {
+      pending.push({ node: node.childNodes[index], inError: isError });
+    }
+  }
+  // Extract text from the complete parse tree, never strip tags with regex.
+  // Entities are decoded once by parse5. Remove individual angle brackets
+  // left in malformed/literal text so concatenation cannot recreate markup.
+  return parts.join('').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim();
 }
 
 function cancelledRead() {
@@ -540,14 +569,7 @@ async function tcLoginCas(uid, password) {
       return { success: false, cookies: {}, session: null, error: 'TronClass CAS 帳號或密碼錯誤' };
     }
 
-    const errMsgMatch = loginResult.body.match(
-      /<span[^>]*id=["']error-message["'][^>]*>([\s\S]*?)<\/span>/i,
-    );
-    const keycloakErrorText =
-      errMsgMatch?.[1]
-        ?.replace(/<[^>]+>/g, '')
-        .replace(/\s+/g, ' ')
-        .trim() ?? '';
+    const keycloakErrorText = parseLoginErrorText(loginResult.body);
 
     if (keycloakErrorText) {
       return {
