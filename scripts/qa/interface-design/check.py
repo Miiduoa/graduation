@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 
 from playwright.async_api import async_playwright, expect
 from quick_search import check_quick_search
+from feedback import check_action_feedback
 
 OUTPUT = Path(__file__).resolve().parents[3] / 'artifacts' / 'interface-design'
 SCENARIOS = [
@@ -422,6 +423,7 @@ async def scenario(browser, origin, config, reports):
     try:
         params = {key: value for key, value in config.items() if key in ('theme', 'role', 'text', 'motion', 'font')}
         await page.goto(origin + '/?' + urlencode(params))
+        await page.bring_to_front()
         await expect(page.get_by_role('heading', name='今天', exact=True)).to_be_visible()
         try:
             report['fontEvidence'] = await font_evidence(context, page)
@@ -552,9 +554,38 @@ async def scenario(browser, origin, config, reports):
               return toast.bottom <= nav.top && toast.left >= 0 && toast.right <= innerWidth;
             }'''), 'Toast overlapped mobile navigation or viewport'
         await capture('toast', full_page=False)
+        text_sizes = await notification.evaluate('''node => {
+          const root = getComputedStyle(document.documentElement);
+          return { title: getComputedStyle(node.firstElementChild).fontSize,
+            message: getComputedStyle(node.lastElementChild).fontSize,
+            bodyToken: root.getPropertyValue('--font-body-size').trim(),
+            detailToken: root.getPropertyValue('--font-body-sm-size').trim(),
+            rootSize: parseFloat(root.fontSize) };
+        }''')
+        assert abs(float(text_sizes['title'].removesuffix('px')) - float(text_sizes['bodyToken'].removesuffix('rem')) * text_sizes['rootSize']) < .1, text_sizes
+        assert abs(float(text_sizes['message'].removesuffix('px')) - float(text_sizes['detailToken'].removesuffix('rem')) * text_sizes['rootSize']) < .1, text_sizes
         await trigger.focus()
         await expect(notification).to_have_count(0, timeout=5000)
         report['checks'].append('Pressed feedback respects motion preferences; completion toast fits, announces status, pauses during focus and resumes afterward')
+
+        # A real foreground change must preserve the remaining reading time.
+        # Hover and keyboard focus are outside the notification in this case.
+        await trigger.click()
+        await page.mouse.move(1, 1)
+        await expect(notification).to_be_visible()
+        other_page = await context.new_page()
+        try:
+            await other_page.bring_to_front()
+            await page.wait_for_function("document.visibilityState !== 'visible' || !document.hasFocus()")
+            await page.wait_for_timeout(1800)
+            await expect(notification).to_be_visible()
+            await page.bring_to_front()
+            await page.wait_for_function("document.visibilityState === 'visible' && document.hasFocus()")
+            await expect(notification).to_have_count(0, timeout=5000)
+        finally:
+            await other_page.close()
+            await page.bring_to_front()
+        report['checks'].append('Notification follows text preference and retains its reading time across a real browser page focus change')
 
         # Collect the independent new form/short-window checks even if one
         # fails. A failure stays a failure; reset the synthetic page afterward
@@ -574,6 +605,7 @@ async def scenario(browser, origin, config, reports):
                 await expect(page.get_by_role('heading', name='今天', exact=True)).to_be_visible()
 
         await check_section('forms', lambda: check_dialogs_and_fields(page, config, report, capture))
+        await check_section('action-feedback', lambda: check_action_feedback(page, config, report, capture))
         await check_section('quick-search', lambda: check_quick_search(page, config, report, capture))
         if config['name'] in ('desktop-light', 'compact-dark-site-motion'):
             await check_section('short-services', lambda: check_short_service_menu(page, report, capture))
