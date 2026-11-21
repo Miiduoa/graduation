@@ -1531,9 +1531,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 <p className={styles.category}>{place.category}</p>
                 <h3 aria-live="polite" aria-atomic="true">{place.name}</h3>
                 {place.description && <p>{place.description}</p>}
+                {/* A changing live status distinguishes same-name scene markers even when the heading stays identical. */}
                 {repeatedNames.has(place.name) && (
-                  <p className={styles.note}>
-                    同名地點：目前選擇「{place.category || '未分類'}」，地圖標記座標 {place.lat}, {place.lng}。
+                  <p className={styles.note} role="status" aria-live="polite" aria-atomic="true">
+                    同名地點：目前選擇「{place.category || '未分類'}」，地圖標記座標 {place.lat}, {place.lng}，清單第 {index + 1} 項。
                     這是地點標記，不代表已核實的建築入口；請核對位置再開啟導航。
                   </p>
                 )}

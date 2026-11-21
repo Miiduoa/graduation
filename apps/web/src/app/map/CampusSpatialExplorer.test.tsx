@@ -93,8 +93,24 @@ it('disambiguates same-name campus markers before opening walking or flat-map na
   expect(new Set(options.map((option) => option.text)).size).toBe(options.length);
 
   fireEvent.change(picker, { target: { value: 'same-c' } });
-  expect(within(dialog).getByText(/同名地點：目前選擇/).textContent)
-    .toContain('24.229, 120.582');
+  const duplicateNotice = within(dialog).getByText(/同名地點：目前選擇/);
+  expect(duplicateNotice.getAttribute('role')).toBe('status');
+  expect(duplicateNotice.getAttribute('aria-live')).toBe('polite');
+  expect(duplicateNotice.getAttribute('aria-atomic')).toBe('true');
+  expect(duplicateNotice.textContent).toContain('24.229, 120.582，清單第 3 項');
+  // A 3D marker click leaves the same visible heading. The live status must
+  // change to the newly selected marker so a reader can hear the distinction.
+  const sceneSelect = scene.create.mock.calls[0][2].onSelect;
+  act(() => sceneSelect('same-a'));
+  expect(within(dialog).getByRole('heading', { name: '教學大樓' })).toBeTruthy();
+  expect(duplicateNotice.textContent).toContain('24.225, 120.58，清單第 1 項');
+  expect(new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!)
+    .searchParams.get('destination')).toBe('24.225,120.58');
+  act(() => sceneSelect('same-c'));
+  expect(duplicateNotice.textContent).toContain('24.229, 120.582，清單第 3 項');
+  expect(new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!)
+    .searchParams.get('destination')).toBe('24.229,120.582');
+  expect(scene.create).toHaveBeenCalledTimes(1);
   // The range control is a second way to choose destinations. Its spoken
   // value must disambiguate duplicate POIs just like the select menu.
   const progress = within(dialog).getByRole('slider', { name: /導覽進度/ }) as HTMLInputElement;
