@@ -63,6 +63,15 @@ class OverpassRateLimitError extends Error {
   }
 }
 
+// HTTP Retry-After dates must use IMF-fixdate, not ISO dates or permissive
+// Date.parse formats. Intermediaries can send malformed Date headers; accepting
+// one as the origin clock can falsely lock out the public map for 24 hours.
+function canonicalHttpDateMillis(value: string | null): number | null {
+  if (value === null) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toUTCString() === value ? parsed : null;
+}
+
 function overpassRetryAfterMs(header: string | null, now: number, serverDate: string | null = null): number {
   if (!header) return ERROR_COOLDOWN_MS;
   const value = header.trim();
@@ -76,14 +85,13 @@ function overpassRetryAfterMs(header: string | null, now: number, serverDate: st
     requestedMs = digits.length > 5 || (digits.length === 5 && digits >= '86400')
       ? MAX_RETRY_AFTER_MS : Number(digits) * 1000;
   } else {
-    const dateMs = Date.parse(value);
-    // HTTP-date Retry-After and the upstream Date share the same server clock.
-    // If our host is ahead, local subtraction alone can shorten a one-hour
-    // pause to the ten-minute default and repeatedly overload public Overpass.
-    // Keep the more conservative of the local and server-relative durations.
-    const originMs = serverDate === null ? NaN : Date.parse(serverDate);
-    requestedMs = Number.isFinite(dateMs)
-      ? Math.max(dateMs - now, Number.isFinite(originMs) ? dateMs - originMs : -Infinity)
+    const dateMs = canonicalHttpDateMillis(value);
+    // Only a canonical HTTP Date is a trustworthy origin-clock reference.
+    // Invalid intermediary dates must never amplify a ten-minute fallback
+    // into a 24-hour cooldown or silently shorten a valid server pause.
+    const originMs = canonicalHttpDateMillis(serverDate);
+    requestedMs = dateMs !== null
+      ? Math.max(dateMs - now, originMs !== null ? dateMs - originMs : -Infinity)
       : NaN;
   }
   if (!Number.isFinite(requestedMs) || requestedMs <= 0) return ERROR_COOLDOWN_MS;
