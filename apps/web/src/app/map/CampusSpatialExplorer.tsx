@@ -936,23 +936,30 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [coordinateCopyState, setCoordinateCopyState] = useState<'idle' | 'copied' | 'unavailable'>('idle');
   const markerIdentity = place ? spatialDestinationIdentity(place) : null;
   const currentMarkerIdentity = useRef(markerIdentity);
+  // Clipboard permission prompts can resolve out of order, even after A -> B -> A.
+  // Only the newest request for the committed marker may update feedback.
+  const copyRequestGenerationRef = useRef(0);
   useEffect(() => {
     // Revoke clipboard feedback on the committed selection; never mutate a
     // ref during render (React may discard an interrupted render).
     currentMarkerIdentity.current = markerIdentity;
+    copyRequestGenerationRef.current += 1;
     setCoordinateCopyState('idle');
   }, [markerIdentity]);
   const copyMarkerCoordinates = async () => {
     if (!place) return;
     const identity = spatialDestinationIdentity(place);
+    const requestGeneration = ++copyRequestGenerationRef.current;
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
       await navigator.clipboard.writeText(`${place.lat},${place.lng}`);
       // A pending clipboard permission prompt can outlive a POI refresh or
       // selection change. Do not announce success for a different destination.
-      if (currentMarkerIdentity.current === identity) setCoordinateCopyState('copied');
+      if (currentMarkerIdentity.current === identity &&
+        copyRequestGenerationRef.current === requestGeneration) setCoordinateCopyState('copied');
     } catch {
-      if (currentMarkerIdentity.current === identity) setCoordinateCopyState('unavailable');
+      if (currentMarkerIdentity.current === identity &&
+        copyRequestGenerationRef.current === requestGeneration) setCoordinateCopyState('unavailable');
     }
   };
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);

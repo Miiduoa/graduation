@@ -185,6 +185,67 @@ it('reveals and copies the original POI marker coordinate without claiming an en
   }
 });
 
+it('does not accept an old clipboard result when the student returns to the original POI', async () => {
+  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  let resolveOldCopy: (() => void) | undefined;
+  const writeText = vi.fn()
+    .mockImplementationOnce(() => new Promise<void>((resolve) => { resolveOldCopy = resolve; }))
+    .mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const picker = within(dialog).getByRole('combobox', { name: '想去哪裡' });
+    const copy = within(dialog).getByRole('button', { name: '複製地圖標記座標' });
+
+    fireEvent.click(copy);
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('24.226,120.58');
+    fireEvent.change(picker, { target: { value: 'dorm' } });
+    fireEvent.change(picker, { target: { value: 'library' } });
+    expect(within(dialog).getByText('地圖標記座標：24.226, 120.58（非建築入口）')).toBeTruthy();
+
+    // A -> B -> A has the same final identity as the first request.
+    // The earlier permission result must not be reported as the latest copy.
+    await act(async () => { resolveOldCopy?.(); });
+    expect(within(dialog).queryByText('已複製目前地點標記座標。')).toBeNull();
+
+    fireEvent.click(copy);
+    await waitFor(() => expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy());
+    expect(writeText).toHaveBeenLastCalledWith('24.226,120.58');
+  } finally {
+    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
+
+it('does not let an older clipboard rejection overwrite a newer successful copy', async () => {
+  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  let rejectOldCopy: ((reason?: Error) => void) | undefined;
+  const writeText = vi.fn()
+    .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectOldCopy = reject; }))
+    .mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const copy = within(dialog).getByRole('button', { name: '複製地圖標記座標' });
+
+    fireEvent.click(copy);
+    fireEvent.click(copy);
+    expect(writeText).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy());
+
+    await act(async () => { rejectOldCopy?.(new Error('old clipboard permission denied')); });
+    expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy();
+    expect(within(dialog).queryByText(/無法自動複製/)).toBeNull();
+  } finally {
+    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
+
 it('keeps verified marker coordinates readable when a WebView has no Clipboard API', async () => {
   const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
