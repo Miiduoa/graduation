@@ -11,6 +11,7 @@ import {
 import { getStudyTutorAvailability, runStudyTutor, type StudyTutorTiming } from '@/lib/studyTutorRuntime';
 import {
   appendStudyLesson,
+  hasVisibleStudyAttempt,
   studyLessonHistory,
   STUDY_SESSION_LIMITS,
   updateStudyMode,
@@ -56,6 +57,8 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const lessonId = useId();
   const modeMemory = memory.modes[mode];
   const selected = modeMemory.lessons.find((lesson) => lesson.id === modeMemory.selectedLessonId);
+  // A restored/edited invisible-only draft must never unlock or display an answer.
+  const canReviewAnswer = selected ? hasVisibleStudyAttempt(selected.attempt) : false;
   const result = selected?.response;
   const activeStepIndex = stepSelection?.lessonId === selected?.id ? stepSelection?.index ?? 0 : 0;
   const activeStep = result?.steps?.[activeStepIndex];
@@ -305,10 +308,13 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
                   <textarea id={attemptId} rows={3} maxLength={STUDY_SESSION_LIMITS.attemptCharacters} value={selected.attempt}
                     onChange={(event) => { const attempt = event.target.value; changeLesson((previous) => ({ ...previous, attempt, answerVisible: false })); }} />
                 </label>
-                <button type="button" className={styles.button} disabled={!selected.attempt.trim()}
-                  onClick={() => changeLesson((previous) => ({ ...previous, answerVisible: !previous.answerVisible }))}
-                  aria-expanded={selected.answerVisible}>{selected.answerVisible ? '收起參考回答' : '對照參考回答'}</button>
-                {selected.answerVisible && <p className={styles.referenceAnswer}>{result.answer}</p>}
+                <button type="button" className={styles.button} disabled={!canReviewAnswer}
+                  onClick={() => changeLesson((previous) => hasVisibleStudyAttempt(previous.attempt)
+                    ? { ...previous, answerVisible: !previous.answerVisible } : previous)}
+                  aria-expanded={selected.answerVisible && canReviewAnswer}>
+                  {selected.answerVisible && canReviewAnswer ? '收起參考回答' : '對照參考回答'}
+                </button>
+                {selected.answerVisible && canReviewAnswer && <p className={styles.referenceAnswer}>{result.answer}</p>}
                 <p className={styles.note}>這是自我檢查，不會自動評分，也不會影響課程成績或作業繳交狀態。</p>
               </div>
             </section>

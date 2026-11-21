@@ -1,3 +1,188 @@
+## 2026-11-21：避免巢狀非顯示 HTML 教材提前洩漏教師答案
+
+- 來源表格掃描器原先會在 `<template><template>…</template>` 等同名巢狀區塊的**內層**關閉時，錯誤結束外層非顯示範圍，讓仍在外層的 Markdown 答案表格被另外衍生成學生可選取／匯出的表格。現在對 `template`、`pre`、`code`、`svg`、`math` 同名巢狀容器逐層平衡，保持後續真正公開的原文表格與原始行號。
+- 新增五類巢狀正反案例及全部關閉後公開表格的回歸測試；這只處理靜態來源界線，不宣稱可取代瀏覽器 HTML 解析、計算樣式或手機真機驗收。不新增套件、不傳輸私人教材、不修改 v1/v2 閱讀及 v1 練習備份格式。完整 CI／CodeQL、指定 App 5504170 審查、Maestro／手機與 Ahaboard 同教材同題同機驗證未齊前，PR 保持 Draft、不合併、不部署。
+
+## 2026-11-21：修復來源百分比正反回歸測試的過時期待
+
+- 依精確 head `746ce798cd73fc36c69d32493aadb9ae88b74658` 的 [CI #44889677078](https://github.com/Miiduoa/graduation/actions/runs/44889677078) Web Tests job `136802564547` 實際日誌，19,766 通過、1 失敗、115 略過；唯一失敗為 `StudySourceTables.test.tsx:2781`。案例仍把 `７５ ％` 的**單一空格**視為非法，與上一輪已加入的有效單一空格功能矛盾，並非正式元件錯誤。
+- 正反案例已同步：`７５  ％`（兩個空格）仍不可衍生百分比圖，`７５ ％`／`５０％`（同表內單空格與無空格）明確列入有效案例。原值、行號、選取與讀屏內容保持原樣，未擴大對 Tab、混合數字系統、無百分號等不明格式的接受範圍。
+- 此輪修補測試與文件，沒有修改正式百分比演算法、私人教材、checkpoint 或其他模組；在新 SHA 的完整 CI、CodeQL、指定 App 5504170 APPROVED、Maestro／真機與 Ahaboard 同教材同題同機比較完成前，PR 維持 Draft、不合併、不部署。
+
+## 2026-11-21：帶單一空格的教材百分比保持可核對的比較圖
+
+- 修復完整的來源百分比欄位在數字與 %／％ 間使用**一個半形空格、NBSP 或窄型不換行空格**時，原本無法顯示 100% 固定滿格比較的問題，例如 `75 %`、`７５ ％`、`７５．５０ ％`。只在明確 0–100% 百分比欄及每列格式一致時產生可選展開的衍生 meter；不重新解讀沒有百分號的純數字。
+- 原始表格字元、螢幕閱讀器逐字數值、原文行號、複製與 TXT 仍保留教材原樣；雙空格、Tab、混用全半形數字、超界或缺失百分號仍不衍生圖表。新增 React DOM 正反回歸案例，未新增依賴、不改進度格式、不傳輸私人教材。
+- 本項屬來源表格的資料呈現修補，單元測試與 CI／CodeQL 應對精確 SHA 重新驗證；**不是** iOS／Android 真機、WebGPU 教學或 Ahaboard 同條件競品驗收。PR 繼續 Draft、不合併、不部署。
+
+## 2026-11-21：修復 Web Tests 中程式碼行數被識別碼規則誤擋
+
+- 精確前版 `fa751d460744f2aec3f55ed45d4c82be8a6d4899` 的 [CI #44880285552](https://github.com/Miiduoa/graduation/actions/runs/44880285552) Web Tests 日誌確認：19,748 通過、1 失敗、115 略過；失敗位置 `StudySourceTables.test.tsx:2805`，明確數量欄的測試預期數值比較卻得到空列表。問題是通用尾碼 `Code` 識別碼防護把 `Lines of Code`（程式碼行數）當作識別碼排除。
+- 對 `Lines of Code`、`Number of Lines of Code`、`Count of Lines of Code` 這些明確計數欄位開放來源數值比較，但 `Course Code`、`Verification Code`、單獨 `Code`、`Student ID` 仍不可衍生倍數圖。把原本逐欄迴圈改為帶欄名的參數化 Vitest，失敗時可直接指出哪個欄名；新增正反案例。
+- 只更動白板元件、回歸測試及文件；不新增套件、不外傳私人教材、不變更閱讀 v1/v2／練習 v1 checkpoint。完整新 SHA CI、CodeQL、App 5504170 審查、Maestro／真機及 Ahaboard 同條件對照未齊前保持 Draft、不合併、不部署。
+
+## 2026-11-21：表單選項中的表格形狀文字不另行公開為教材表格
+
+- 修正原文表格掃描器：HTML select、datalist、optgroup、option、button 等表單控制項的內文，可能含有表格形狀的示範或尚未公開選項，卻不是獨立渲染的 Markdown 表格。現在於對應標籤區塊內保守停止衍生學生可複製表格，直到明確關閉；後續公開表格保持原樣與來源行號。
+- 新增五種表單元素、跨行開啟標籤及 Markdown 跳脫字面範例的正反 Vitest 回歸。這只驗證來源文字分析，**不是瀏覽器 computed style 或 iOS／Android 真機驗收**；未改既有授權教材、v1/v2 閱讀進度／v1 練習 checkpoint，不新增依賴或私人教材傳輸。指定 App 5504170 APPROVED、實機／Maestro、WebGPU 繁中及 Ahaboard 同條件比較尚缺證據，PR 維持 Draft、不合併、不部署。
+
+## 2026-11-21：標準 HTML 標籤的全域 hidden 屬性不可漏出教師答案
+
+- 修正教材表格的靜態來源掃描：HTML 的 `hidden`、`aria-hidden="true"` 與明確隱藏的 inline CSS 不只會用在 div 或自訂元素，也能出現在舊教材常見的 `<center>`、`<address>`、`<dl>`、`<a>`、`<em>` 等標準語意標籤。此前漏追這些元素可能把其內的教師答案 Markdown 表格額外衍生為可複製的學生白板。現在在相同保守條件下追蹤這些容器，並維持同名巢狀／跨行屬性邊界。
+- 新增八組不同標籤的隱藏反例、巢狀關閉、跨行行號與公開內容正例；維持原授權教材與字元不動。這是純文字來源分析，沒有聲稱已計算瀏覽器 CSS、已做 iOS／Android 實機讀屏或超越 Ahaboard。未新增套件、網路上傳或更動 v1/v2 學習進度與練習 checkpoint。未齊全 CI／CodeQL、App 5504170 審查、Maestro／真機與同教材同題同機競品驗收之前，PR 保持 Draft、不合併、不部署。
+
+## 2026-11-21：自訂 HTML 教材容器不可漏出隱藏的教師答案
+
+- 修復教材原文表格掃描的隱藏邊界：原本只追蹤常見 HTML 標籤，遇到 `<course-answer hidden>`、`<nuni-lesson-key aria-hidden="true">` 這類合法的連字號自訂元素時，可能把其中的教師專用 Markdown 表格另外衍生成可選取的原文表格。現在用相同的隱藏屬性檢查追蹤自訂 HTML 容器；同名內層關閉不會提前釋放隱藏外層，且跨行屬性維持原始行號。
+- 新增自訂容器 hidden、ARIA、inline CSS、巢狀同名、跨行與可見／跳脫語法的正反回歸案例；正常公開的教材表格仍可核對、複製與匯出。這是純文字來源掃描的保守界線，不代表已計算 CSS 或真正由瀏覽器/手機渲染後驗證。
+- 基準精確 head `51b87f5dbc5b84f19e82ed3ea33efed2606f5ee7` 的 CI #44861301406、CodeQL #44861301409、Course access review #44861301432 已成功（僅限舊 SHA）；新 SHA 必須重新查核。GitHub App 5504170 正式 APPROVED、Maestro、iOS/Android 真機、WebGPU 繁中與 Ahaboard 同教材／同題／同機對照仍待驗收，PR 保持 Draft、不合併、不部署。不新增套件、私人教材外傳或變更進度 checkpoint。
+
+## 2026-11-21：CSS 繼承／回復值不可當成教材可見的證據
+
+- 課程講義若含 `display:none; display:inherit`、`visibility:unset`、`opacity:revert` 或 `content-visibility:revert-layer`，這些 CSS-wide 宣告的實際結果可能受上層元素、樣式層或瀏覽器規則影響。舊版掃描器將其當作確定可見的覆寫值，可能另外衍生出原本在畫面上隱藏的教師答案表格。
+- 現在對四種與環境有關的 `inherit`／`unset`／`revert`／`revert-layer` 只取消**選用的衍生表格**，不動原始教材與正常公開的後續表格。可確定結果的 `initial`、`display:block` 等仍維持既有處理；其他不影響可見性的 CSS 屬性也不阻擋教材。
+- 補上九種保守拒收、五種正常可見的 Vitest 正反案例，涵蓋重要度相同的覆寫、無明確前置隱藏宣告與後續教材行號。這是靜態來源掃描界線，不是瀏覽器計算樣式、iOS／Android 真機或 Ahaboard 同條件實測；不新增套件、不外傳私人教材，不動閱讀 v1/v2 與練習 v1 備份，PR 仍 Draft、不合併、不部署。
+
+## 2026-11-21：手機 WebView 剪貼簿異常回覆保守處理
+
+- 修正教材表格「複製原文」的非標準 WebView 回覆判定：標準 `Clipboard.writeText()` Promise<void>（resolve undefined）和明確 true 維持既有接受提示；如果手機 App bridge 的 Promise 卻 resolve false、null、0、"false" 或不明物件，就**不宣告複製成功**，改以既有唯讀原文欄位、選取範圍與長按／鍵盤複製提示作為備援。這只表示瀏覽器回覆已收到，不保證系統剪貼簿的實際內容。
+- 加入 5 類拒絕回覆與 1 類成功回覆的模擬 React DOM 回歸，核對原始單列文字、全選範圍與狀態；無新套件、外部傳輸或 checkpoint 變更。模擬測試不能代替 iPhone Safari／Android Chrome 的實機複製、貼上及讀屏驗收。
+- 本次基準 head `53f96bebc618fd996934ff84374f06d2a9f928b8` 的 [CI #44820413044](https://github.com/Miiduoa/graduation/actions/runs/44820413044) **整體失敗**：Web Tests 有 8 個 `Assistant.roleReadBoundary.test.tsx` 非白板路徑失敗；Web/Mobile Build、Lint/TypeCheck、Security、Functions、Firestore、Assistant 與 [CodeQL #44820413042](https://github.com/Miiduoa/graduation/actions/runs/44820413042) 個別成功。未修改其他 Agent 任務，也不能將舊綠燈沿用到新 SHA。GitHub App 5504170 正式 APPROVED、Maestro、實機與 Ahaboard 同教材同題同裝置比較缺證據；PR 必須維持 Draft、不合併、不部署。
+
+## 2026-11-21：財務／教學季度序號不再誤當倍數圖
+
+- 由有權使用的教材表格顯示「第 1 季／第 4 季」或「Fiscal Quarter 1／4」時，季度是年內位置，不能推論第 4 季是第 1 季的四倍。現在對明確的季度、季別、季次、Quarter／Qtr 等序號欄位只保留可核對的原文表格，不衍生長條圖；真正的「季度數量／Quarter Count／Quarterly Revenue」等量值繼續可比較。
+- 新增 17 個季度序號與 8 個真實計數／量值的 React DOM 正反回歸，核對來源表格數字保持原樣、誤導圖表不存在及真量值圖仍可使用。這只是程式與模擬 DOM 防護，不表示財報圖表理解、真機或競品測試通過。未新增套件、不傳輸私人教材、不更動閱讀／練習 checkpoint。
+- 上一精確 SHA `4c5476d8b15f37b6791d08e067a6430bfe82a5c8` 的 [CI #44811311353](https://github.com/Miiduoa/graduation/actions/runs/44811311353) 確認失敗：Web Tests 有 9 個失敗（19,640 通過／115 略過），其中 8 個為 `Assistant.roleReadBoundary.test.tsx`，另 1 個為其他助理 UI 測試，皆不在本輪白板修改路徑；其 CodeQL、Course access review、Build Web／Mobile、Security Gates、Lint／TypeCheck 等分項成功，不能算完整 CI 通過。新 SHA 仍須逐一驗證，App 5504170 APPROVED、Maestro、iOS／Android 實機、WebGPU 繁中與 Ahaboard 同教材同題同機未驗收前 PR 保持 Draft，不合併、不部署。
+
+## 2026-11-21：班級與考試排名不再誤呈現為倍數圖
+
+- 發現「期末考排名／班級名次／Class Rank／Exam Ranking」等帶限定詞的欄名，先前未被單字型排名欄位規則攔截，可能把第 4 名誤畫成第 1 名的四倍。這些數字代表**序位**，不是從零起算的量值；現在保留教材原表、逐字行號、選取／複製／TXT，對此類欄位不產生衍生長條圖。
+- 明確的「排名人數／名次數量／Rank Count／Number of Rankings」仍是可比較的實際計數，不因名稱含「排名」而被全部擋掉。新增 12 組序位欄名及 8 組計數欄名的 React DOM 正反回歸。新 head 的 CI 與 CodeQL 須獨立重新驗證；沒有新增套件、外傳教材或修改備份格式。
+- 前版精確 head `d1b758becade3b14141875ed7dc71b813672d1d5` 的 [CI #44802527389](https://github.com/Miiduoa/graduation/actions/runs/44802527389) 失敗：Web Tests 的 8 項失敗集中於 `Assistant.roleReadBoundary.test.tsx`，實際 log 指向本人課表／個人行程／學生成績來源未出現，非白板修改路徑；前版其他 Build、Lint、Mobile、Security 與 CodeQL individually 成功，不能當作整體 CI 成功。保持 Agent 任務隔離，不以遮蔽測試解決。正式 App 5504170 審查、Maestro、iOS／Android、WebGPU 繁中與 Ahaboard 同條件比較仍未通過，不合併、不部署。
+
+## 2026-11-21：圖表每筆數值可由讀屏器直接追溯到原文行
+
+- 白板衍生數值比較／固定 100% 百分比圖的 meter 原先只在**重複項目名稱**時把教材行號放入讀屏名稱；名稱不重複時，使用者若靠讀屏器跳轉各 meter，未必能獲得其相鄰「原文第 N 行」按鈕的來源位置。這次讓每筆 meter 的 `aria-describedby` 精確指向**同筆資料**已有的原文核對按鈕，保留 `aria-label`、原始數值與 `aria-valuetext`；以 React `useId` 避免同頁多張表格出現 ID 衝突。學生仍可按原按鈕返回可選取、可複製的原教材。
+- 新增模擬 React DOM 正反回歸，涵蓋一般數值與百分比、各列描述 ID 唯一、對應來源行號，以及更換授權教材後不誤指舊行號。這是 DOM 層級的可存取性關聯修補，**不等於 VoiceOver／TalkBack 真機驗證**；新 head 的正式 CI／CodeQL、App 5504170 APPROVED、Maestro、WebGPU 繁中品質及 Ahaboard 同教材同題同機對照仍需獨立核對。未新增套件、外傳教材或變更 checkpoint 格式；PR 保持 Draft，不合併、不部署。
+
+## 2026-11-21：來源含 Unicode 雙向控制時，不生成可能視覺顛倒的比較圖
+
+- 找到另一項原文忠實度問題：衍生數值／百分比圖先前只檢查欄名與列名是否有可見字元，即使其中混入 U+202E 覆寫、U+2066 隔離或 U+200F 方向標記，圖名仍可能在手機瀏覽器或讀屏器中以不同順序呈現，讓學生誤將長條歸給錯誤項目。現在只有標籤本身可讀且**不含 Unicode Bidi_Control**時才繪製可選圖；原教材表格、逐字來源行、選取／複製／TXT 仍保留，不修改任何來源文字。
+- 新增模擬 React DOM 正反回歸，涵蓋 12 種方向控制字元 × 數值與百分比 × 欄名／列名，並確認沒有控制字元的阿拉伯語、希伯來語、中文與完整 Emoji 仍可比較。這只是圖表呈現保守防護，不推論教材語意，也不是手機或競品實測。未新增套件、付費 API、私人教材外傳或 checkpoint 格式變更。新 SHA 的 CI／CodeQL、App 5504170 APPROVED、Maestro、iOS／Android 真機、WebGPU 與 Ahaboard 同教材同題同機仍需另行驗收；PR 繼續 Draft，不合併、不部署。
+
+## 2026-11-20：超大額原文數值避免 JavaScript 浮點捨入誤導圖表
+
+- 教材若列出 \`1,000,000,000,000,000.01\` 等千分位金額，舊程式直接轉成 JavaScript Number，可能把原文的 \`.01\` 捨去，導致衍生比較條的數值與來源不一致。現在按原文小數位（最多兩位）先換算為**安全整數最小單位**，只有 \`Number.isSafeInteger\` 成立才計算條長；超出安全精度的欄位只顯示原始教材表格、可選取複製及行號，不提供不可信的比較圖。對精度安全的大額數值仍正常繪製。
+- 新增模擬 DOM 正反回歸，涵蓋安全的千分位小數、超過最大安全整數及超出安全分精度的金額；另以 Node.js 字面運算核對實際捨入案例。未加入 BigInt／套件或付費 API，不改教材、checkpoint 或其他任務。CI／CodeQL 須依本次精確新 SHA 驗證；App 5504170 正式 APPROVED、Maestro／iOS／Android 真機、WebGPU 中文教學與 Ahaboard 同題同機比較仍未完成。PR 保持 Draft，不合併、不部署。
+
+## 2026-11-20：教材千分位數量能按原值比較，混合／錯誤格式不推測
+
+- 財務、商管及流量教材的兩欄原文表格若所有數值均明確使用正確的千分位逗號（例如 `1,200`、`2,450.50`），可選擇展開原文數值比較；條形以解析出的 1200／2450.5 計算，但畫面、讀屏及回原文仍完整保留來源的逗號、精度、行號，不替換教材文字。
+- **全欄同格式才允許：** `1,000` 與 `200` 混寫、`1,20`、`12,34,567`、前導零、百分號、三位以上小數或無意義的版本編號，仍只顯示原文表格。這避免猜測其他地區的逗號小數慣例；只有符合明確三位分組格式才繪圖，不補單位、不加總也不自動判讀圖意。
+- 增加 React DOM 正反回歸，搭配獨立 12 組字面規則檢查；後者不能代表正式 Vitest、手機 WebView、Maestro、WebGPU 繁中或 Ahaboard 同教材同題同機實測。只修改白板圖表、測試及文件，不新增套件／外傳私人教材／變動閱讀 v1/v2 或練習 v1 checkpoint。必須以本版 SHA 的 CI／CodeQL／App 5504170 審查等 gate 重新驗收；PR 維持 Draft，不合併、不部署。
+
+## 2026-11-20：即使 WebView 分段器靜默拆開字素，AI 原文引句也不得誤標
+
+- 修復部分內嵌瀏覽器的 `Intl.Segmenter` 回傳「連續且逐字正確」卻把組合音標、ZWJ 表情、旗幟、韓文音節拆成獨立碼點時，原文引用可能錯把半個可見字素當成完整教材證據的問題。既有的字串覆蓋驗證不足以阻止這類靜默誤分段。
+- 對高風險 Unicode 接縫採用既有保守字素邊界備援交叉核對；一般中英文字維持原生快速路徑，不更動來源全文、不使用正規化或模糊匹配。包含 `containing` 與 iterator-only 兩種錯誤實作的模擬回歸，確認殘缺字素被拒絕、後續完整出現仍可精確定位。
+- 只修改 `studyEvidence.ts`、對應測試與本文件；不新增套件、付費 API、私人教材傳輸或學習進度格式改動。這是程式與模擬 WebView 測試，非 iOS／Android 真機、讀屏、WebGPU 教學或 Ahaboard 比較驗收。須重新查核新 head 所有 CI、CodeQL、指定 App 5504170 與實機 gate；PR 維持 Draft，不合併、不部署。
+
+## 2026-11-20：部分手機 WebView 的 Intl.Segmenter 異常不再中斷原文佐證
+
+- 修正 AI 讀書白板的原文精確引句定位：部分 iOS／Android 內嵌瀏覽器可能存在不完整的 Intl.Segmenter，建構、segment、containing、迭代時拋錯或靜默回傳殘缺分段，舊版會中斷原文核對或信任錯誤分段。現在只在異常時懶載入既有 UTF-16／Unicode 字素邊界備援，並逐段驗證 iterator 的連續性、原字元內容和完整覆蓋。正常 Segmenter 仍維持原效能路徑。
+- 新增七種模擬失效模式的 Vitest 回歸，驗證正常可見教材引句與完整 Emoji 可以定位，半個合成字／旗幟不可被誤標為完整教材原文；不修改教材、AI 解釋、閱讀 v1/v2、練習 checkpoint v1，也沒有新增依賴或外部傳輸。
+- 模擬 Node／WebView 異常不是 iOS Safari、Android Chrome、VoiceOver／TalkBack 或 Ahaboard 真機驗收；正式 CI／CodeQL、App 5504170 APPROVED、Maestro、WebGPU 繁體中文與競品同教材同題同機比較仍須依最新 SHA 查核。PR 保持 Draft，不合併、不部署。
+
+## 2026-11-20：英文傳輸速率可核對比較，其他 Rate 仍禁止誤導圖
+
+- 在原文兩欄 Markdown 教材中，英文 Data Rate、Bit Rate、Transfer Rate、Download Rate 等是具有量值意義的傳輸速率，但舊版只因包含 Rate 就全部隱藏數值比較；這次只為明確且完整的英文速率欄名開放非負原始數值長條，支援可選擇的原文逐列回查、保留逐字數值／單位欄名。含括號的原始單位（如 Mbps、MB/s）可保留。
+- 泛稱 Rate、Exchange/Interest/Error/Success/Conversion/Growth Rate、複合模糊欄名及含明示百分號的速率欄，仍不得將裸數字轉成數值比例圖。只有原儲存格逐字寫出 0–100% 才顯示固定 100% 百分比圖。新增模擬 React DOM 正反回歸，包含圖表比例、讀屏數值、原文未變及百分比限制；另以獨立 JavaScript 規則煙測檢查 22 種欄名（非正式 Vitest、瀏覽器或真機）。
+- 只改 `StudySourceTables.tsx`、對應測試與本文件。不新增套件、API、外部教材傳輸或 checkpoint 變更。新精確 SHA 的 CI/CodeQL、指定 App 5504170 APPROVED、Maestro／iOS Safari／Android Chrome 實機及 Ahaboard 同教材同題同機比較仍須各自驗收；PR 維持 Draft，不合併、不部署。
+
+## 2026-11-20：中文網路量測欄位不再被誤當埠號／頻道編碼
+
+- 修正白板衍生長條圖的欄名判定：先前以部分字串比對「連接埠」「頻道」「通道」等識別碼，連「連接埠吞吐量」「頻道頻寬」「通道寬度」這類真正量測也被錯誤禁止。現在僅完整欄名為網路埠號／頻道號／協定層級等識別碼時禁止零起點比例圖；含量測後綴的欄名可依原本數值安全條件繪製。既有中文、英文識別碼和明確計數仍保留原行文字及語意。
+- 新增模擬 React DOM 正反回歸：TCP／UDP 埠號、Wi-Fi 頻道及其編號等只提供原文表格；中文吞吐量、流量、頻寬、寬度、速率、容量、負載則可產生原文量值圖，保留每格原始數字與回原文功能。獨立 17 個識別碼／14 個量測欄名規則煙測通過，不代表 Vitest、Safari／Chrome 真機或競品同機驗收。
+- 未變更教材、個人資料、閱讀 v1/v2、練習 v1 checkpoint、套件或第三方 API。仍須依新 SHA 重新驗證 CI／CodeQL、App 5504170 審查、Maestro／真機、WebGPU 繁中及 Ahaboard 同教材同題同機比較；PR 保持 Draft，不合併、不部署。
+
+## 2026-11-20：資料庫主外鍵與 VLAN／ASN 編號不再誤作量值圖
+
+- 資料庫教材的主鍵、外鍵、候選鍵及代理鍵，即使資料為純數字也屬識別碼；網路教材的 VLAN ID、ASN／自治系統號碼亦然。避免把 200 號識別碼畫成 100 號兩倍的零起點長條。
+- 僅在**完整欄名**代表識別碼時停用衍生數值圖，保留原始行號、來源表格、文字選取、逐列複製及 TXT。主鍵數量、VLAN Count、VLAN Throughput、VLAN Bandwidth 等明確計數或量測仍可選擇比較。
+- 新增模擬 React DOM 正反回歸案例；不新增依賴、付費 API、私人教材傳輸，也不改動閱讀／練習 checkpoint。這些測試不能替代 iOS／Android 實機、WebGPU 繁體中文教學與 Ahaboard 同教材同題同機驗收；PR 保持 Draft，未合併、未部署。
+
+## 2026-11-20：網路埠號與通訊層級不再顯示錯誤倍數圖
+
+- 修正資管／資安教材將 TCP/UDP 連接埠 443／80、Wi-Fi 通道或 OSI Layer 7／4 畫成零起點倍數長條的問題：這些數字是識別／層級，不代表流量、速度或規模。僅關閉此類標籤的衍生比較圖；教材原始表格、來源行號、可選取文字、逐列複製／TXT 匯出仍保持不變。
+- 對明確的「連接埠數／通道數／網路層數」及 Port Count、Number of Channels、Layer Count 等真實數量保留可選數值圖，並避免將 Port Throughput、Layer Thickness、Channel Width 等量測欄一併禁止。
+- 新增 28 組識別碼反例與 16 組計數／量測正例的模擬 DOM 回歸。無新套件、教材傳輸、學習進度格式或其他任務修改。DOM 回歸不等於真實 iOS／Android、Maestro、WebGPU 中文教學或 Ahaboard 同教材同題同機驗收；所有 CI/CodeQL 與 App 5504170 審查須以精確新 head 為準，PR 保持 Draft，不合併、不部署。
+
+## 2026-11-20：優先級、風險等級與難度不得誤畫成倍數比較
+
+- 資管、資安教材中的「優先級 1／4」「嚴重程度 1／4」「風險等級 1／4」及英文 Priority、Severity、Risk Level、Difficulty、Level、Tier 是**順序／分類刻度**，不能將第 4 級畫成第 1 級的四倍。這類表格仍保留逐字來源、讀屏與原文選取／複製／TXT，但不產生誤導的零起點比例圖。
+- 明確的類別**計數**，例如「優先級數」「風險等級數量」「各難度人數」、Level Count、Priority Count、Severity Count、Number of Levels，仍允許可選原文數值比較。新增 17 種負例、9 種正例 DOM 回歸及獨立正則煙測；不更動教材、來源行、閱讀 v1/v2、練習 checkpoint v1、依賴與私人資料傳輸。
+- 純規則煙測非正式 Vitest／CI，須以新提交 SHA 核對 Web/Mobile Tests、Build、Lint/TypeCheck、Security、CodeQL 及 App 5504170 APPROVED；Maestro、iOS/Android 真機、WebGPU 中文與 Ahaboard 同教材同題同機比較仍未驗收。PR 保持 Draft，不合併、不部署。
+
+## 2026-11-20：相同分類名稱的教材資料列可逐筆比較與回原文
+
+- 教材表格可能重複使用「必修」「同一班級」等分類名稱，並以**不同來源列**記載學分或 0–100% 百分比。過去只因第一欄名稱相同就隱藏整張可選比較圖，學生無法看到這些分開的記錄。
+- 數值與百分比圖現在保留各筆不同來源列，不合併、不加總、不覆寫；以教材原文行號作為 React 列身份。對同名列的讀屏名稱額外加入各自行號，並可各自「回表格核對」及返回原圖表。欄位是否具備比例意義、所有原值與 PDF／Markdown 行號仍遵循既有規則。
+- 新增模擬 React DOM 測試檢查同名數值／百分比的兩筆分開顯示、可辨識的無障礙名稱、來源列焦點與返回、原表格未變。此測試不等於 iOS／Android 真機、WebGPU 中文教學、指定 App 5504170 或 Ahaboard 同機對照。保留閱讀／練習 checkpoint、私人教材只在裝置處理；未新增套件或修改其他任務。PR 仍 Draft，不合併、不部署。
+
+## 2026-11-20：狀態與布林代碼不再被誤畫為數量比例
+
+- 「是否完成」「有無繳交」「啟用狀態」、`Status`、`Is Active`、`Flag` 等表格欄位中的 0／1 或狀態代碼是**類別**，不是可比較倍數；現在只保留原始可讀屏表格及原文選取／TXT，不顯示錯誤的零起點比例圖。
+- 真正計數的「通過人數」「完成數量」「狀態數量」與 `Status Count`、`Number of Enabled Users` 仍可產生數量圖。新增 23 個狀態欄位與 11 個計數欄位的模擬 DOM 正反回歸；本地規則煙測不代表正式 Vitest 或真機通過。
+- 前一精確 head `efdde0e22161b74908b1c0502c6b869374747c2e` 的 CI #44567174997（含 Web／Mobile Tests、Build、Lint/TypeCheck、Security）、CodeQL #44567175053 與 Course access review #44567175003 已完成成功，**不適用於本次新提交**。沒有新增套件、改動閱讀／練習 checkpoint、外傳教材或修改其他任務。指定 App 5504170 APPROVED、Maestro、iOS／Android 真機、WebGPU 教學品質與 Ahaboard 同條件驗收仍無證據；PR 繼續 Draft、不合併、不部署。
+
+## 2026-11-20：軟體版本／修訂版／Build 識別值不可誤作數量圖
+
+- 電腦與資管課程常以純數字標示 Version、Revision、Edition、Release、Build Number，或「版本／版次／修訂號／編譯號」。這些是版本識別或順序，不能將第 4 版畫成第 2 版的兩倍；現在保留可讀屏表格與逐列原文複製／下載，但不顯示比例長條。
+- 明確寫成「版本數／版本數量／修訂次數／發行次數」與 `Version Count`、`Number of Versions`、`Release Total` 等真正的計數仍可比較。新增模擬 DOM 正反測試，逐字核對來源欄位及圖表存在與否。只涉及白板表格與測試，未改教材、checkpoint 格式、API、依賴或其他模組。
+- 先前 head `75a0ab43fc8816513530627fe2021f720d3fab22` 的 CI／CodeQL／Course access review 在精確該版成功；不可視為新提交通過。GitHub App 5504170 正式 APPROVED、Maestro、iOS／Android 真機及 Ahaboard 同教材同題同機實測仍未取得；PR 維持 Draft，不合併、不部署。
+
+## 2026-11-19：教材週次／章節／單元編號不再被畫成倍數
+
+- 課程表格若將 Week Number、Chapter、Lesson、Unit ID 或「章節」「單元」「課次」存為純數字，這些是教材的**位置與順序**，第 4 章不能因此顯示為第 2 章的兩倍。現在保留原文表格、可選取複製與下載，但不為這類欄位產生比例長條。
+- 「章節數量」「單元數」「Number of Chapters」「Week Count」「Lesson Count」等**明確的數量**仍可做原文數值比較。新增繁中、英文及具括號欄名的模擬 DOM 正反測試，保留每格教材原文字元。只改白板表格 UI、測試與文件，不更動閱讀 v1/v2、練習 v1 checkpoint 或私人教材傳輸。
+- 前一精確 head `7d0e0b67e884f842b8e07b7e3a487513021adb74` 的 CI #44543856985、CodeQL #44543857086、Course access review #44543857009 均成功；**該綠燈不適用本次新 commit**。指定 App 5504170 APPROVED、Maestro、iOS／Android 真機與 Ahaboard 同教材同題同機客觀對照仍無證據；PR 持續 Draft，不合併、不部署。
+
+## 2026-11-19：教室與座位編號保留原文，不誤畫倍數圖
+
+- 兩欄課表若寫「教室 301／205」、「房號」、「座位」或英文 Room／Classroom／Lab No.，那些是**位置與識別碼**，不能因為儲存成數字就顯示為以最大值為滿格的比例長條。這次讓此類欄名只顯示可讀屏原文表格及既有的原文複製／下載，不產生誤導比較；課表的原始行與儲存格式完全不改。
+- 真正有數量意義的「教室數」「實驗室數量」「座位數」「Number of Rooms」「Room Count」仍保留選用數值比較。新增繁體中文與英文的拒收／保留 DOM 回歸，驗證表格儲存格逐字保留。
+- 前版精確 `b6b03994cf7f0e535760ea9c1de5ab865fa8f1a4` 的 CI #44533787250、CodeQL #44533787313、Course access review #44533787715 全部成功，**僅適用前版**。新 head 仍需完整 CI／CodeQL／App 5504170 APPROVED、Maestro、iOS／Android 真機與 Ahaboard 同條件比較；未完成保持 Draft、不合併、不部署。
+
+## 2026-11-19：標點符號不能單獨冒充 AI 原文佐證
+
+- 原文定位器過去只要找到相同位元組，就可能把「？」、「……」、「，。」或括號等**純標點引句**標示為「已定位」。即使原文確實有那些標點，也無法支持 AI 對教材內容的解釋，容易造成學生誤認佐證已核對。
+- 原文定位器現在額外拒絕全部由 Unicode 標點、空白或不可見字元組成的模型引句；保留教材原文不變。完整中文字句、附著標點的語句、數學式與 Emoji 原文仍可依字素邊界逐位元定位。新增純標點正反回歸（單字與完整可見引句仍必須成功，候選引句若只有標點必須失敗）。
+- 這只保證「不能以純標點當證據」，**不代表**已判斷引用的事實相關性或模型回答正確。正式 Vitest／CI、CodeQL、指定 App 5504170 APPROVED、Maestro、iOS／Android 真機和 Ahaboard 同教材同題同裝置仍須按新 head 逐一驗收；PR 保持 Draft，不合併、不部署。不增加套件或上傳私人教材，閱讀／練習 checkpoint 格式不變。
+
+## 2026-11-19：雙向排版控制字元不可被當成可目視核對的原文引句
+
+- 重新核對 PR #719 前版精確 head `1e10c347177930e54ae1dece1d827bb92d0e0c2a`：CI #44488465714 的 Web/Mobile、Web/Mobile Build、Lint/TypeCheck、Security Gates、Firestore/Functions/Assistant 均成功，CodeQL #44488465463 與 Course access review #44488465510 也成功；這些僅適用於**前版** SHA。GitHub App 5504170 的 APPROVED、Maestro／iOS／Android 真機及 Ahaboard 同條件驗收仍未取得。
+- 原文定位器先前只拒絕 U+202D/U+202E 兩種覆寫控制；實際上含 U+202A/U+202B 嵌入、U+202C 結束記號、U+2066–U+2069 隔離與 U+061C／U+200E／U+200F 方向標記的引句，也可能在原文逐位元命中卻無法由人眼按畫面顯示核對。現在只對**AI 提取的引句**排除 Unicode `Bidi_Control` 類別；教材原文字元不刪改，普通阿拉伯文／希伯來文、Emoji／數學引句仍逐字定位。來源含格式控制但所引片段為完整可見文字時，仍可依原文定位。
+- 新增 12 種控制字元的拒收回歸與原始 RTL 引句可定位的正例。不改備份格式、私人教材傳輸、依賴或其他模組。此純函式測試不是模型繁中正確率、手機讀屏、WebGPU 或競品實測；新 head 必須重跑 GitHub 全部 gate，未齊前 PR 保持 Draft、不合併、不部署。
+
+## 2026-11-19：修正原文引句視覺反轉與半個 Emoji 誤定位
+
+- 依 PR #719 精確 head `1e5adddaa07486203000f55eeb0d436bf3dae461` 核對最新版本：本版 CI（Web／Mobile Tests、Build Web／Mobile、Lint/TypeCheck、Functions、Firestore、Assistant、Security）、Course access review 與 CodeQL 均已成功；此結果**只屬舊 head**。App 5504170 未有 APPROVED、Maestro、iOS／Android 真機與 Ahaboard 同機比較仍無通過證據。
+- 修補 `locateStudyEvidence`：若模型輸出的逐字引句含 Unicode 左右向視覺覆寫控制 U+202D/U+202E，或只有 UTF-16 配對代理字元的半邊（如 Emoji 的高／低 surrogate），即使 `indexOf` 可在教材找到相同位元，也不得標示「原文已定位」。使用原有來源核對提示，教材位元、正常文字、阿拉伯語／希伯來語、完整 Emoji、ZWJ 與數學式皆保留逐字匹配。新增 Vitest 回歸涵蓋拒絕與可用正例，另以 Node 22 獨立執行 12 個邏輯煙測。
+- 僅更動原文證據定位器、相關測試與本文件。沒有新增套件、網路 API、AI 自動判分或變動閱讀／練習 checkpoint；不修改 TronClass、社群或跨校模組。更新後需按新 commit SHA 重新完整驗證 CI/CodeQL/審查，不沿用前述舊綠燈；Draft 不合併、不部署。
+
+## 2026-11-19：原文證據定位 Vitest 修正 TypeScript 嚴格空值檢查
+
+- 精確 PR #719 head `eecd94a0741c59955de6d6a873eaf0bece9244c2` 的 [CI #44458547965](https://github.com/Miiduoa/graduation/actions/runs/44458547965) 已結束失敗：Web/Mobile、Functions、Firestore、Assistant、Security 和 Course access review 通過，CodeQL 成功，但 Lint & Type Check 的 `tsc` 在 `studyEvidence.test.ts:66` 報 TS18048（兩處 `found` 欄位可能為 `undefined`）；Build Web/Mobile 因 gate 失敗被跳過。這不是要放寬生產程式的原文核對。
+- 新回歸測試在還原整段原文前，明確要求每段正常可見引句的 `locateStudyEvidence` 不得回傳 `null`，並使用 TypeScript 可識別的中止分支作為型別收斂；失去定位時測試會失敗，不會靠 optional chaining 偷偷略過。產品程式、學生原文、v1/v2 閱讀與 v1 練習 checkpoint 均維持不變。此修正仍需依**新 head** 重跑完整 CI／CodeQL，不能沿用前版。指定 App 5504170 APPROVED、Maestro／真機與 Ahaboard 同條件對照仍無通過證據；PR 繼續 Draft，不合併、不部署。
+
+## 2026-11-19：原文引句只有隱形字元時不再誤標為可核對證據
+
+- 學生按「查看原文提示」時，若裝置端講解只產生零寬字元、Unicode 雙向控制符、獨立組合記號或盲文空白作為引句，過去只要教材含同樣位元，白板便可能標示為「已定位」，即使讀者看不到任何可核對文字。現在定位器會拒絕這類純不可見引句，UI 沿用既有「無法在原文定位，請回白板核對」提示；保留整段原文、原試答及揭答狀態。
+- 可見中文、數學式、含格式符號的 emoji 與附著組合重音的文字仍採逐字（不正規化）比對，保留原始來源位置與重複引句導航。新增 Vitest 正反回歸案例；另以 Node 22 單獨執行 12 項邏輯煙測通過。此項不等於真人核對解釋正確性、iOS／Android 真機、WebGPU 繁體中文品質或 Ahaboard 同條件實測。
+- 基於前輪 PR #687 已於 2026-11-19 合併進 main，本次修補另開隔離 Draft PR；不改教材、checkpoint、套件、付費 API、E 校園抓取或其他任務程式。所有 CI／CodeQL、App 審查、Maestro／真機及競品測試依新 SHA 重新驗證，未齊前不合併、不部署。
+
 ## 2026-11-19：逐題草稿導覽補上往前尋找
 
 - 學生原本只能按「下一題草稿待自評」向後尋找，回看較早題目仍要反覆翻頁。新增「上一題草稿待自評」：從目前題往前搜尋，必要時從首題循環到末題；僅找其他有可見草稿且尚未自評的題，略過純隱形字元、空白、已自評及已略過題目。不更動草稿、揭答、提示、來源及自評。
@@ -1811,3 +1996,152 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 精確舊 head `179598760f0c4c5ea78b84143392b5635f4f4e62` 的 [Web Tests CI #44392380126](https://github.com/Miiduoa/graduation/actions/runs/44392380126/job/135113166620) 完成 17,029 通過、115 跳過、1 失敗；失敗是 `CourseStudyPracticeBoundaries.test.tsx` 的取消進度讀取→回到第 1 題→取消略過案例，舊斷言仍要求總覽標記「未完成」。實際 DOM 已正確顯示「草稿待自評」，因為原先輸入的草稿在取消略過後仍存在，符合近期正式介面狀態規則。
 - 只將該斷言改為預期「草稿待自評」，仍必須證明讀檔取消不丟失原草稿、取消略過前為「略過」、取消後可繼續作答、未揭露答案及第二題草稿不受影響。不能為了讓 CI 綠燈而清除草稿或撤回正式介面的狀態區分。
 - 本次沒有修改產品邏輯、checkpoint、私有教材處理、依賴或其他任務；本修補版本仍須重新跑完全部 CI／CodeQL、指定 GitHub App 5504170 審查、Maestro、iOS／Android 真機與 Ahaboard 同教材同題同機對照。PR 保持 Draft，不合併、不部署。
+
+### 2026-11-19：原文引句不可切開 Unicode 顯示字素
+
+- `String.indexOf` 即使逐位元完全相同，仍可能把 `e + 組合重音` 的單獨 `e`、`👩‍💻` 的 `👩`、國旗中的半個區域符號，或按鍵表情中的數字當成完整教材原文引句。這些局部字串不是學生可逐字核對的完整顯示字素，不能標示「已定位」。
+- `studyEvidence.ts` 保留原文與引句的位元、非重疊匹配及指定重複次數，但用 `Intl.Segmenter` 的 Unicode grapheme 邊界剔除局部命中；只計入完整命中且讓 `occurrence` 對應真正可核對的引用。若 WebView 缺少 `containing()`，改用可迭代的分段結果；缺少 `Intl.Segmenter` 時，使用保守的字素邊界檢查，仍可定位一般中文引句，並避免拆開組合重音、Emoji 或國旗。
+- Vitest 新增組合重音、ZWJ emoji、國旗、按鍵符號的正反回歸，以及同一引句先在字素內部、後在獨立字素出現的重複計數；沿用既有閱讀／練習 checkpoint 與權限，不增加套件、雲端模型或私人教材外傳。
+- 本輪獨立 Node 22 針對核心定位邏輯的 13 組驗證通過；此結果不等同正式 Vitest、瀏覽器、Maestro、iOS／Android 真機、WebGPU 或 Ahaboard 同機對照。推送後以新 head 重新查 CI／CodeQL；指定 GitHub App 5504170 的 APPROVED 與真機仍未取得前保持 Draft、不合併、不部署。
+
+### 2026-11-19：重複引句定位不再保存全部候選索引
+
+- 原文引句的完整字素驗證不變，但舊版先把每個 `indexOf` 命中存進陣列、再為所有候選建立兩組 `Set`；同一引句在長教材中大量重複時，這些額外資料結構會隨候選數增加，拖慢瀏覽器並消耗記憶體。
+- 現在逐筆檢查候選命中的 `Intl.Segmenter` 起訖字素邊界；只有完整命中才計數、跳過已用範圍，部分字素命中則只前進一個 UTF-16 單位以避免漏掉後續重疊的合法引用。不再累積全數匹配索引／候選邊界集合；`occurrence` 與非重疊計數、原文字節、出處與顯示字素規則維持原狀。舊 WebView 缺少分段器或 `containing` 時仍拒絕宣稱定位成功。
+- 新增 20,000 次重複引用的後段定位、超出範圍及重疊的 Vitest 回歸。獨立 Node 22 的舊／新演算法隨機差異測試共 8,624 組結果一致（不等同瀏覽器／真機）；本地 100 萬字元單字重複的舊版約 900 ms、新版約 650 ms，僅為一次環境特定的輔助觀察，不作為手機效能保證。
+- 不修改學生教材、閱讀 v1/v2 或逐題練習 v1 checkpoint、不增加套件／付費服務、不上傳私人教材。此 commit 的正式 CI／CodeQL、指定 GitHub App 5504170 APPROVED、Maestro／iOS／Android 真機及 Ahaboard 同教材同題同機對照仍須獨立驗收；PR 保持 Draft，不合併、不部署。
+
+### 2026-11-19：練習進度還原與現場作答採同一個「有效試答」規則
+
+- 修正 v1 練習 checkpoint 匯入驗證使用 `String.trim()` 判斷試答的落差：單獨零寬字元、字元連接／變體選擇符、組合重音及 U+2800 盲文空白即使沒有可見試答，仍可能被手動編輯的 JSON 標成「已揭答」或「自評理解／待加強」。現與 live reducer 共用 `hasVisibleStudyAttempt`，拒絕矛盾的揭答／自評檔案，不讓偽造的完成紀錄污染摘要。
+- 不改 v1 格式及原有成功檔案的進度、模式、題號、草稿或提示；未自評的純隱形草稿仍可原樣保留而不揭答，已自評但主動收起參考回答且具可見試答仍可正常恢復。加入 Unicode 拒收、保留草稿、繁體中文／數學／Emoji／組合字母正反回歸。
+- 本次僅改 checkpoint parser、測試及本文，沒有新增套件／API、私有教材上傳、合併或部署。Node 本地規則煙測不能代替這個 head 的 Vitest/CI／CodeQL、指定 App 5504170 APPROVED、Maestro、iOS／Android 真機或 Ahaboard 同題同機驗收；PR 維持 Draft。
+
+## 2026-11-19：閱讀備份與 TXT 匯出共用可見試答判斷
+
+- 修正閱讀進度 v1／v2 還原時僅以 `trim()` 判定是否曾作答：單獨的零寬字元、盲文空白與組合記號不再能讓讀檔後的參考回答呈現「已展開」。無效來源匯入會中止還原，不清除原有學習狀態；若從未揭答，原始草稿仍可保留。
+- TXT 學習筆記下載同步使用相同判斷，避免從異常的記憶體狀態匯出未經有效試答的參考回答。與逐題練習、練習 checkpoint 共用 `hasVisibleStudyAttempt`，避免不同備份入口逐漸分歧。保留中文、公式、完整 Emoji、附著重音及非空白點字。
+- 新增 v1/v2 閱讀備份與 TXT 匯出的 Vitest 正反測試；不修改 checkpoint 格式、原始教材、私有筆記，也不新增套件、傳送教材或啟用 E 校園抓取。需以本次精確 head 再驗證全部 CI/CodeQL；App 5504170、Maestro、手機真機與 Ahaboard 同教材同題同機仍需獨立驗收，PR 保持 Draft，不合併、不部署。
+
+## 2026-11-19：閱讀畫面試答按鈕與備份／下載的揭答規則對齊
+
+- 原頁自我檢查題仍有 `selected.attempt.trim()`：在學生只輸入零寬字元、盲文空白等不可見內容時，瀏覽器按鈕可能被誤啟用。現在 `CourseStudyPassage` 的按鈕 disabled、`aria-expanded`、參考回答渲染與實際更新事件全使用相同 `hasVisibleStudyAttempt` 門檻；即使舊狀態的 `answerVisible` 為 true，只有有效試答才能顯示答案。
+- 補實際 React DOM 模擬互動回歸，逐一確認不可見內容無法揭答，合法中文／公式／Emoji／附著重音／非空白點字可使用；已揭答後更改答案會重新鎖定。正式 Vitest/CI、iOS Safari／Android Chrome 真機仍須在精確 SHA 重新取得結果，不能視為已驗收。
+
+### 2026-11-19：來源表格的題號不可被誤畫成數量比較
+
+- 修正原文 Markdown 表格中「題號／題次／作業題號」或 `Question ID`、`Question Number`、`Question No.`、`Problem Number`、`Exercise ID` 欄位：即使儲存格是 1、2、3 等可解析數字，這些都是識別題目的序數，不能用以零為起點的長條誤導成相對大小。現在保留原表格逐字可讀，但不提供數值比例圖。
+- 回歸測試涵蓋中英文序數欄位，並確認真正的題目數量「練習題數」與 `Number of Questions` 仍可產生明確數值比較；沒有自動判分、推斷圖片意義或改寫教材。
+- 只改原文表格的衍生圖形條件、測試與本文件；不增加套件／付費 API、不更改學生閱讀 v1/v2 或逐題練習 v1 checkpoint、不外傳私人教材。須按新 SHA 獨立驗證正式 Web/Build/Lint/CodeQL、GitHub App 5504170、Maestro／iOS／Android 真機及 Ahaboard 同教材同題同機比較；PR 保持 Draft，不合併、不部署。
+
+
+### 2026-11-20：衍生長條逐筆標示教材原文行號
+
+- 課堂 Markdown 表格的可選數值長條與固定 100% 百分比長條，現在每筆直接標示「原文第 N 行」，讓學生可回到原表核對，不必猜測圖形源於哪一列。行號依解析器的原始 `startLine` 加上表頭、分隔行及資料列序號計算；不依 UI 排版或重組後文字推算。
+- 每筆圖形仍使用原教材的標籤與原文數字，不換算、不補值、不傳送私人教材，也不宣稱由圖片辨識或 AI 推論得出。切換教材後，行號會隨當前 source 重新計算，不沿用舊教材行號。
+- 新增模擬 DOM 的數值／百分比表格行號正反檢查（含不同起始行與來源替換），保持閱讀 v1/v2、練習 v1 checkpoint、讀屏原始表格及複製／下載界線不變。獨立文字檢查不代表正式 GitHub Vitest／iOS／Android 實測；指定 App 5504170、Maestro、WebGPU 教學與 Ahaboard 同教材同題同機測試仍待驗收，PR 保持 Draft。
+
+
+### 2026-11-20：衍生圖表可直接回到教材原文資料列
+
+- 數值及百分比比較每筆長條旁加入「原文第 N 行 · 回表格核對」，操作後焦點直接回到同一張授權原文表格的正確資料列，並嘗試捲入畫面。學生不必再人工尋找長教材的對應行。
+- 原文列可由程式聚焦但不增加一般 Tab 順序。原文、數字與複製／TXT 內容均不改動；瀏覽器不提供捲動 API 時仍可焦點定位；切換教材後指向新資料列。新增數值／百分比與來源替換的模擬 DOM 回歸。
+- 不加套件、付費 API 或私人教材外傳，不改閱讀與練習 checkpoint。正式 CI/CodeQL、App 5504170、Maestro、iOS/Android、WebGPU 與 Ahaboard 同條件對照未齊前仍保持 Draft、不合併、不部署。
+
+### 2026-11-20：圖表跳回原文後可返回比較，並處理不能聚焦表格列的 WebView
+
+- 從來源數值／百分比長條按「回表格核對」定位原始表格資料列後，現在會在表格後方提供「返回原文第 N 行的圖表」。鍵盤使用者從原文列按 Tab 可前往返回控制；返回時聚焦原本點擊的圖表按鈕並嘗試捲回，不會失去比較位置。
+- iOS Safari／內嵌 WebView 若拒絕聚焦 `tr`，改以該列首個 `th/td` 作為不加入正常 Tab 順序的備援焦點。更換教材會立即隱藏舊的返回控制並清理舊來源按鈕參照，不會返回已離開的教材。
+- 新增模擬 React DOM 測試涵蓋原文→圖表焦點往返、無法聚焦列的備援，以及替換教材後不能沿用舊返回連結。沒有改寫教材、來源數字或學習 checkpoint；模擬 DOM 不能取代 iOS／Android 真機讀屏驗收，仍保持 Draft、不合併、不部署。
+
+
+### 2026-11-20：原文核對後可返回已收合的圖表，WebView 聚焦失敗有備援
+
+- 學生從數值／百分比長條跳到教材原文後，若手動收合比較圖，再按「返回原文第 N 行的圖表」，會先重新展開原本的比較區，再恢復原按鈕焦點；不把焦點送到被收合的隱藏按鈕。
+- 當內嵌 WebView 拒絕聚焦原長條按鈕時，改定位該比較區的 summary，保留鍵盤繼續操作的入口；不修改原始教材、圖表數值、行號、選取範圍或備份格式。
+- 新增 React DOM 模擬回歸涵蓋收合後的返回與按鈕聚焦拋錯；這不代表已通過 VoiceOver／TalkBack 實機。GitHub CI、CodeQL、指定 GitHub App 5504170、Maestro／真機與 Ahaboard 同教材同題同機對照仍須依本次精確 SHA 驗收；維持 Draft，不合併、不部署。
+
+### 2026-11-20：手機 WebView 同時拒絕圖表與標題聚焦時保留返回操作
+
+- 學生從圖表跳回教材原文後，若內嵌 WebView 同時拒絕聚焦原圖表按鈕及比較區標題，舊介面會直接移除「返回圖表」按鈕，導致鍵盤使用者無法重試。現在僅在焦點確實成功返回原圖表按鈕或比較區標題後，才清除返回控制；兩者都失敗時仍展開比較區，略過捲回圖表的動作，讓原文旁的返回按鈕留在可視範圍內，供重試與 Tab 導航。
+- 新增模擬 DOM 回歸：兩個 focus 目標都拋錯時，原文與返回控制必須保持，恢復可聚焦後可成功返回且才移除控制。教材數值、原文行號、TXT/JSON 和進度格式均不變。這不是 iOS Safari／Android Chrome／VoiceOver／TalkBack 真機驗收，也不能替代指定 App 5504170 或 Ahaboard 同教材同題同機測試。PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-20：手機 WebView 無法聚焦原文列與儲存格時提供表格區備援
+
+- 修正衍生比較圖「回表格核對」在部分 WebView 靜默忽略 `tr.focus()` 和第一格 `th/td.focus()` 時，鍵盤焦點仍留在下方比較圖的問題。依序確認原始列、第一格是否真的取得焦點；若皆未取得，改聚焦已具 `tabIndex=0` 且有表格來源行號標籤的原文捲動區，仍嘗試將精確原始列捲入畫面。
+- 若連表格區聚焦也被拒絕，原文、返回圖表控制與原有複製／TXT 退路都不消失；不把 focus 呼叫成功當作焦點確實移動。新增 React DOM 模擬 WebView 的「靜默不聚焦」及「三層皆拋錯」正反案例，驗證返回原圖表、原始數值不變與導覽不斷。
+- 只更動白板來源表格元件、測試及本文件，不增加依賴、不修改教材或 v1/v2 閱讀／v1 逐題 checkpoint，也不外傳私人教材。本輪不是 iOS／Android 真機、VoiceOver／TalkBack 或 Ahaboard 同機驗收。完整 CI／CodeQL、指定 App 5504170 APPROVED、Maestro 及競品實測仍須依此新 SHA 核對；PR 保持 Draft、不合併、不部署。
+
+
+### 2026-11-20：手機瀏覽器靜默拒絕選取教材時不再誤報全選
+
+- 「全選表格原文」現在核對原始唯讀文字區是否真的取得焦點，以及選取範圍是否從第 0 個字元涵蓋全文。部分 iOS／Android 內嵌 WebView 即使 `focus()`、`select()`、`setSelectionRange()` 沒有拋錯，也可能靜默忽略操作；遇到這類情況，介面明確提示改以長按原文或鍵盤選取，不宣稱複製成功。即使瀏覽器回報範圍正確，也只說明「回報已全選」，不保證系統複製選單或下載完成。
+- React DOM 模擬回歸覆蓋正常全選、雙 API 拋錯與三個 API 全部靜默忽略；保留原始教材、CRLF、逐列範圍與既有複製／TXT 備援，不新增套件、傳輸私人教材或更動 checkpoint。這不是 Safari／Chrome／VoiceOver／TalkBack 實機驗收；PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-20：修復 Web Tests 實際失敗的「速率」欄位誤判
+
+- 精確 head \`9871bc83a9cc240d1d6ed75b418ba430b0e147ea\` 的 CI #44695682447 真實 Web Tests job #136151748861 失敗（19,572 通過、1 失敗）：\`StudySourceTables.test.tsx\` 的網路量測正例要求「無線頻道速率」可選比較，卻被通用中文字「率」匹配器錯認為百分率，導致原文數值比較區被隱藏；同 SHA 的 Build Web/Mobile、Lint/TypeCheck、Mobile Tests、Security Gates、CodeQL 已通過，但 CI Summary 失敗。
+- 修改只針對百分比／一般比率欄的判斷：將「速率」視為可量測的非負數值（仍需全部資料列為同欄、同格式的純數字），保留真正的「錯誤率」「通過率」「利率」「比率」對缺少 % 的數值不推測為 0–100% 圖。新增「傳輸速率」「下載速率」正例與 5 組一般比率反例，原始授權教材、行號與讀屏表格內容保持不變。
+- 使用不需正規式 lookbehind 的寫法，避免較舊 Safari/WebView 解析失敗。不新增套件、不改 v1/v2 閱讀備份或逐題 checkpoint、不外傳私人教材；待新 head 重新跑全套 CI、CodeQL。指定 App 5504170 APPROVED、Maestro／手機真機與 Ahaboard 同教材同題同機測試未齊前保持 Draft，不合併、不部署。
+
+
+### 2026-11-20：課表星期序號不再被誤畫為倍數長條
+
+- 修正兩欄教材表中的「星期幾／上課星期／週別／Weekday／Day of Week」若使用 1、5 等星期序號，系統過去可能將星期五畫成星期一的五倍。星期是日曆位置而非具有比例零點的數量；現在保留逐字原表、行號、選取／複製／TXT，不產生誤導性數值圖。
+- 具有量值的「每週上課天數／星期數量／Number of Weekdays／Study Hours」仍顯示原文比較，不因此被誤擋。新增 15 組星期序號及 9 組真實數量的 React DOM 正反測試，另以獨立 JS 規則煙測核對（不是正式 Vitest 或實機驗收）。
+- 僅變更 `StudySourceTables.tsx`、對應測試與本文件，保留原始教材、閱讀 v1/v2 與練習 v1 checkpoint、私人資料界線，不加入套件或 API。必須以此新 SHA 重新查核 CI／CodeQL，指定 App 5504170、Maestro、iOS／Android、WebGPU 教學及 Ahaboard 同機對照仍待驗收；PR 保持 Draft，不合併、不部署。
+
+### 2026-11-20：原文表格有不可讀列標籤時不產生無名比較圖
+
+- 修補可選數值與 0–100% 比較圖的列標籤界線：原本只用 `trim()` 檢查第一欄，零寬字元、盲文空白或孤立組合重音可被誤認為有內容，讓畫面與讀屏器出現「有數值、沒有可讀項目名稱」的長條。
+- 兩種衍生圖改共用既有 `hasVisibleStudyContent`，只要有一列沒有可辨識的項目名稱便不產生該圖；授權教材原表格、字元、行號、選取、複製與 TXT 全部保留。正常中文、數學符號、完整 Emoji 及合法點字仍能顯示來源比較，不新增套件、付費 API 或私人教材傳輸，不改閱讀 v1/v2 或練習 v1 checkpoint。
+- 新增 React DOM 正反案例，涵蓋數值與百分比、四種不可讀標籤及四種可讀標籤。模擬測試不代表 iOS／Android 實機驗收；最新 CI／CodeQL、指定 GitHub App 5504170、Maestro、WebGPU 與 Ahaboard 同教材同題同機比較仍須按新 SHA 取證。PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-21：單列摘錄可選擇附上教材原文欄名
+
+- 逐列複習的 TXT／剪貼簿摘錄過去只有一列數值；貼到筆記後若忘記欄位順序，容易誤讀學分、人數或單位。現在於選擇單一資料列後可**明確勾選「連同原文欄名與分隔列」**；直接從已授權教材取出欄名、Markdown 分隔列、指定資料列原文字元及各自原始換行符號，不重造欄位、不插入另一列或隱藏答案。未勾選時仍保持既有單列行為。
+- 切換資料列、整表模式或替換教材時取消勾選並撤銷未完成剪貼簿回覆；在讀屏／鍵盤路徑保留可辨識勾選標籤與下方唯讀原文。新增 DOM 模擬測試驗證 CRLF、跳脫管線、隱藏答案隔離與重新選列。這不代表 iOS Safari／Android Chrome 真機或 Ahaboard 同條件驗收；新 SHA 的完整 CI、CodeQL 與指定 App 5504170 尚須核對。PR 維持 Draft，不合併、不部署。
+
+### 2026-11-21：選擇教材表格摘錄時公布精確原文行號
+
+- 整表、單列、單列加欄名三種摘錄模式，新增 `aria-live=polite` 原文範圍提示。特別標明「原文欄名＋分隔列＋第 N 行資料列」並非連續區間，不含其他資料列，讓使用鍵盤及讀屏的學生在複製／TXT 匯出前能核對來源。
+- 保留原始教材、CRLF、跳脫字元、剪貼簿、下載、長按備援與隱藏答案隔離，提示不進入複製內容。增加 React DOM 模擬互動案例，驗證切換、非連續來源與更換教材後行號及文字一致。
+- 模擬 DOM 不代表 VoiceOver／TalkBack 真機測試；完整 CI、CodeQL、App 5504170 APPROVED、Maestro、WebGPU 及 Ahaboard 同教材同題同裝置實測未齊前保持 Draft，不合併、不部署。
+
+
+### 2026-11-21：逐列複習摘錄可加精確原文行號
+
+- 原文表格的整表、單列及附欄名摘錄新增「摘錄開頭加上教材原文行號（註記非原文）」選項。預設關閉，原有 TXT、複製及長按文字內容逐字不變；啟用才在開頭額外加明示的來源行號，保留其後原文每個字元和 CRLF／混合換行。
+- 單列附欄名及分隔列時，如果中間略過其他資料列，會標出三個非連續行號；第一筆資料列則正確標記連續範圍。切換範圍即時計算，換教材時取消選項。唯讀手動選取備援、剪貼簿和 TXT 使用同一摘錄負載，避免瀏覽器拒絕複製後備援內容與請求不同。
+- React DOM 模擬回歸涵蓋多行註記、非連續列、CRLF、原文不變及來源替換。這不是 iOS／Android 真機、VoiceOver／TalkBack、GitHub App 5504170、WebGPU 或 Ahaboard 實測，不新增套件／付費 API／私人教材傳輸、不改閱讀與練習 checkpoint；保持 Draft、不合併、不部署。
+
+
+### 2026-11-21：動態 CSS 隱藏狀態不再暴露未授權來源表格
+
+- 來源 Markdown 含 HTML 包裝時，原本只檢查明確的 `display:none`／`visibility:hidden`／`opacity:0`。若樣式使用 `display:var(--answer-display)`、`opacity:calc(0)` 等動態 CSS，純文字掃描器不能確認瀏覽器實際顯示／隱藏狀態，卻可能把包裝內教師未公開表格衍生為可見表格。
+- 現在對影響 display／visibility／content-visibility／opacity 的 `var`、`env`、`calc`、`min`、`max`、`clamp` 選擇保守不衍生表格，即使前後有靜態宣告也不猜測計算結果；離開包裝後的正常教材表格仍可解析。一般 `display:block`、`opacity:1` 與不影響可見性的 `transform` 維持原行為。新增 Node/Vitest 來源邊界正反測試。
+- 這是**教材來源可見性防護**而非 CSS 完整渲染器；外部 CSS、真實瀏覽器 computed style 及使用者授權仍須另行核對。未新增套件、付費 API、私人教材傳輸或改動 checkpoint。完整 CI／CodeQL、指定 App 5504170 APPROVED、Maestro／iOS／Android 真機、WebGPU 與 Ahaboard 同教材同題同機比較未齊前維持 Draft，不合併、不部署。
+
+
+## 2026-11-21：全形數字百分比可核對來源、仍保留原文字元
+
+- 繁中教材可能寫作 `７５％`、`７５．５０％`。在欄名明確表示界限 0–100% 百分率、整欄同為全形數字格式且原值合規時，白板可選擇顯示固定 100% 上限的百分比圖。只將全形數字與全形小數點換成 meter 的數值；原文格、來源行號、讀屏內容、剪貼簿、TXT 一律保留教材原來字元。
+- 混用半/全形數字、前導零、超過兩位小數、超過 100%、空白或小數點格式不明時，只保留完整原文表格，不衍生可能誤解的圖表。新增 3 組正常與 7 組不合規的 React DOM 回歸，驗證刻度、來源原文、讀屏數值及文字選取。無新增依賴、付費 API、資料外傳及 checkpoint 格式變更。
+- 此為程式與 DOM 測試案例，正式 CI／CodeQL、App 5504170 APPROVED、Maestro／iOS／Android 真機、WebGPU 繁中與 Ahaboard 同教材同題同機對照須依本輪精確新 SHA 另行驗證；PR 維持 Draft，不合併、不部署。
+
+
+### 2026-11-21：修補多詞 CSS 覆寫造成的隱藏教材誤列風險
+
+- 來源 Markdown 若寫 `display:none;display:banana block`、`visibility:hidden;visibility:visible hidden` 等不合法的多詞 CSS，原掃描器會將後者當成可用覆寫，可能把教師尚未公開的表格當成公開內容衍生顯示。現在不能確認有效的多詞宣告不再覆蓋前方明確隱藏值；常見有效 `inline flex`、`block grid` 仍維持可見性判斷。
+- 不只 `var()`／`calc()`，未知或未來 CSS 函數（如 `future-display()`）也不再被當成已確定可見，而是保守不建立衍生表格；原始教材文字保持不動。新增正反來源解析測試，涵蓋 invalid multi-token、unknown function、合法 multi-keyword override 與隱藏內容之後的公開表格。
+- 只調整本機教材衍生視圖、測試及文件，不新增套件、不外傳教材、不變更閱讀／練習備份。不宣稱完整 CSS computed style 或瀏覽器／實機驗收；須以新 SHA 完整 CI、CodeQL、指定 App 5504170、Maestro 和 Ahaboard 同條件對照為準。PR 保持 Draft，不合併、不部署。
+
+
+### 2026-11-21：來源行號／資料列序／步驟序號不可誤畫成數量倍數
+
+- 教材表格「行號、資料行號、原始碼行號、列號、步驟編號」以及 Line Number、Row No.、Step Index 等是文件／操作的**位置識別碼**，不是有比例零點的量值。原本 2、4 可能被畫成二倍長條；現在只保留原文表格、精確來源行號、逐字 TXT／複製與讀屏，不衍生誤導圖。
+- 「程式碼行數、資料列數、步驟數量、Line Count、Row Count、Number of Steps」是真正的計數，仍可選用來源數值比較。新增 14 個位置欄名與 10 個計數欄名的 React DOM 正反回歸；不更動 PDF/TXT/Markdown 解析、閱讀 v1/v2 與逐題 v1 checkpoint，不新增套件或外傳私人教材。
+- 本次是明確規則修補與測試案例，須以本 SHA 的 CI/CodeQL 實際完成結果為準，不能視為 iOS/Android、VoiceOver/TalkBack、WebGPU 或 Ahaboard 同教材同題同機驗收。指定 App 5504170 APPROVED、Maestro 與客觀競品對照未齊前維持 Draft，不合併、不部署。

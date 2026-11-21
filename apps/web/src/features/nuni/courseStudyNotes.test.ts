@@ -103,6 +103,27 @@ describe('course study note downloads', () => {
     }
   });
 
+  it('keeps invalid invisible attempts from exposing saved reference answers in TXT exports', () => {
+    for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f']) {
+      const memory = withLesson();
+      memory.modes.understand.lessons[0].attempt = invisible;
+      memory.modes.understand.lessons[0].answerVisible = true;
+      const exportText = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
+      expect(exportText).not.toContain('參考解答秘密：不可以。');
+      expect(exportText).not.toContain('參考回答（已展開）');
+      expect(exportText).not.toContain('我的試答：');
+      expect(memory.modes.understand.lessons[0].attempt).toBe(invisible);
+    }
+    for (const visible of ['主鍵', 'x²+y²', '👩‍💻', 'e\u0301', '⠃']) {
+      const memory = withLesson();
+      memory.modes.understand.lessons[0].attempt = visible;
+      memory.modes.understand.lessons[0].answerVisible = true;
+      const exportText = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
+      expect(exportText).toContain('參考解答秘密：不可以。');
+      expect(exportText).toContain(`我的試答：\n${visible}`);
+    }
+  });
+
   it('exports all step titles, explanations, quotes and optional formulas in order as plain text', () => {
     const formulaSource = studySourceFromText({
       id: 'formula-notes', title: '公式與符號', text: '平均數公式：μ = Σx / n。\r\n比較符號 x < y 表示 x 小於 y。',

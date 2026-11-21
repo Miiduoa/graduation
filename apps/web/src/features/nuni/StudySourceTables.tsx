@@ -1,11 +1,62 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { extractStudySourceTables, type StudySourceTable } from './studySourceTables';
+import { hasVisibleStudyContent } from './courseStudySession';
 import styles from './CourseStudyPanel.module.css';
 
 
-type SourceValueRow = { label: string; original: string; amount: number };
+// Software release labels are identifiers, not ratio-scale measurements:
+// version 4 is not twice version 2, and build 300 is not three times build 100.
+// Explicit counts of versions/releases are measured quantities, however.
+const NON_RATIO_RELEASE_COLUMN =
+  /(?:版本|版次|修訂(?:版|號)|發行版|發行號|編譯號|\b(?:version|revision|edition|release)\b|\bbuild\s+(?:number|no\.?|id)\b)/iu;
+const RELEASE_COUNT_COLUMN = /(?:版本(?:數量|總數|數)|修訂(?:次數|總數)|發行(?:次數|總數))/u;
+const ENGLISH_RELEASE_COUNT_COLUMN =
+  /\b(?:number\s+of\s+(?:versions|revisions|editions|releases)|(?:version|revision|edition|release)\s+(?:count|total))\b/iu;
+
+// Binary and categorical state codes are labels, not measurements:
+// a status code of 2 is not twice the status of 1. Only explicit counts
+// (e.g. 通過人數 / Status Count) may use a zero-based quantity chart.
+const NON_RATIO_STATUS_COLUMN = /(?:是否|有無|與否|狀態|狀況|標記|布林|真假|開關|啟用|停用|有效性)/u;
+const ENGLISH_NON_RATIO_STATUS_COLUMN =
+  /(?:\b(?:status|flag|boolean|bool)\b|\b(?:is|has)\s+(?:active|completed|enabled|present|passed|valid|access|permission)\b|\bstate(?:\s*\([^)]{1,40}\))?$|^(?:enabled|disabled|active|inactive|checked)(?:\s*\([^)]{1,40}\))?$)/iu;
+const STATUS_COUNT_COLUMN = /(?:人數|數量|總數|次數|筆數|件數|個數|數目)/u;
+const ENGLISH_STATUS_COUNT_COLUMN = /\b(?:count|total|number\s+of|quantity)\b/iu;
+
+// Network port numbers, radio channels and OSI protocol layers identify a
+// position in a namespace, not an amount: TCP port 443 is not 5.5 times
+// port 80. Keep source rows, copying and exporting unchanged. Explicit counts
+// of ports/channels/layers remain measurable quantities.
+// Match whole identifier headers. A numeric channel or port label is not a
+// ratio-scale measurement, but "頻道頻寬" and "連接埠吞吐量" describe real
+// measured quantities and must not be rejected just for containing the noun.
+const NON_RATIO_NETWORK_IDENTIFIER_COLUMN =
+  /^(?:(?:tcp|udp|wi-?fi|osi|無線|網路)\s*)?(?:埠號|連接埠|通訊埠|通信埠|網路埠|服務埠|來源埠|目的埠|頻道|通道|網路層級|協定號碼)(?:\s*(?:編號|號碼|號|id|no\.?|#))?(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+const ENGLISH_NON_RATIO_NETWORK_IDENTIFIER_COLUMN =
+  /^(?:(?:(?:tcp|udp|src|dst|source|destination|service|network)\s+)?ports?(?:\s+(?:number|no\.?|id|#))?|(?:(?:wi-?fi|wireless|radio|network)\s+)?channels?(?:\s+(?:number|no\.?|id|#))?|(?:(?:osi|network|protocol)\s+)?layers?(?:\s+(?:number|no\.?|id|#))?|protocol\s+(?:number|no\.?|id))(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+// A VLAN tag / ASN and a database key are identifiers, not measured
+// magnitudes. Numeric key 200 is not twice numeric key 100. Match complete
+// headers to avoid hiding real VLAN traffic or counts of primary keys.
+const NON_RATIO_NETWORK_NAMESPACE_COLUMN =
+  /^(?:vlan(?:\s*(?:id|number|no\.?|#|編號))?|asn|as\s+(?:number|no\.?|id)|autonomous\s+system(?:\s+(?:number|no\.?|id))?|虛擬區域網路?(?:編號|識別碼|號碼|號)?|自治系統(?:編號|號碼|號)?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+const NON_RATIO_DATABASE_KEY_COLUMN =
+  /^(?:(?:主鍵|外鍵|候選鍵|代理鍵)(?:值|編號|識別碼)?|(?:primary|foreign|candidate|surrogate)\s+key(?:\s+(?:id|number|no\.?|value))?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+
+const NETWORK_IDENTIFIER_COUNT_COLUMN =
+  /(?:埠(?:號)?(?:數量|總數|個數|數)|通道(?:數量|總數|個數|數)|頻道(?:數量|總數|個數|數)|層(?:數量|總數|個數|數)|\b(?:count|total|number\s+of|quantity)\b)/iu;
+
+// Carry the exact Markdown source line through both derived views, so students
+// can cross-check every bar against the original authorized lesson table.
+// Unicode direction controls can visually reorder an otherwise readable label.
+// Keep the authorized table byte-for-byte, but never derive a chart whose
+// labels a student or screen reader cannot reliably compare to that source.
+const STUDY_CHART_BIDI_CONTROL = /\p{Bidi_Control}/u;
+function hasUnambiguousChartLabel(label: string): boolean {
+  return hasVisibleStudyContent(label) && !STUDY_CHART_BIDI_CONTROL.test(label);
+}
+
+type SourceValueRow = { label: string; original: string; amount: number; sourceLine: number };
 
 // A mobile WebView can leave clipboard.writeText() unresolved indefinitely.
 // After this limit, restore a clear manual-copy route without changing the source.
@@ -15,11 +66,20 @@ const SOURCE_PERCENT_COLUMN = /(?:百分比|百分率|佔比|占比|完成率|�
 const ENGLISH_PERCENT_COLUMN =
   /\b(?:percent(?:age)?|progress(?:\s+rate)?|completion\s+rate|accuracy(?:\s+rate)?|attendance\s+rate|participation\s+rate|retention\s+rate|conversion\s+rate|error\s+rate|dropout\s+rate|pass(?:ing)?\s+rate|success\s+rate)\b/iu;
 
+// English transfer/bit/data rates are measurable speeds rather than
+// dimensionless percentages. Accept only complete, explicit speed labels;
+// generic rates (error, interest, conversion, success) remain ambiguous.
+// A trailing percent unit still takes precedence over this exemption.
+const ENGLISH_MEASURED_SPEED_RATE_COLUMN =
+  /^(?:data|bit|transfer|transmission|download|upload|network|link|baud|sample|sampling)\s+rate(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 // An English rate header must not quietly use max-of-column scaling, and
 // raw numbers without an explicit percent sign remain ambiguous.
 // A generic rate/ratio header is not a quantity even if it contains bare
 // numbers. Never scale 75 to a 100%-looking bar just because it is the maximum.
-const SOURCE_RATE_OR_RATIO_COLUMN = /(?:率|比例|比率|佔比|占比)/u;
+// A speed (速率) is a measured quantity, unlike an unqualified rate or
+// proportion. Do not interpret plain speed figures as 0–100% percentages.
+// Avoid lookbehind here so older mobile Safari/WebViews can parse this file.
+const SOURCE_RATE_OR_RATIO_COLUMN = /(?:比例|比率|佔比|占比|(?:^|[^速])率)/u;
 const ENGLISH_RATE_OR_RATIO_COLUMN = /\b(?:rate|ratio|share)\b/iu;
 // Changes, investment returns and interest can exceed 100% or be negative.
 // A fixed 100% meter would claim a ceiling that the lesson never established.
@@ -41,6 +101,25 @@ const NON_RATIO_SCIENCE_COLUMN =
 const ENGLISH_NON_RATIO_SCIENCE_COLUMN =
   /\b(?:temperature|temp\.?|celsius|fahrenheit|pH|decibels?|richter)\b/iu;
 const DECIBEL_UNIT_COLUMN = /\bdB(?:A|C|FS|m|W)?\b/u;
+// A weekday number is a calendar position, not an elapsed duration or
+// quantity: Friday (5) is not five times Monday (1). Counts of teaching days
+// and actual study hours must remain eligible for measured comparisons.
+const NON_RATIO_WEEKDAY_COLUMN =
+  /^(?:(?:上課|開課|考試|測驗|授課)?(?:星期|禮拜|週|周)(?:幾|別|序號|編號|次序)?|(?:class|course|exam)\s+(?:weekday|day[\s-]*of[\s-]*(?:the[\s-]*)?week)|(?:weekday|week[\s-]*day|day[\s-]*of[\s-]*(?:the[\s-]*)?week)(?:\s+(?:number|no\.?|index|code|id))?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+
+// A fiscal/calendar quarter NUMBER is a position in a year, not a quantity.
+// In a lesson table, Q4 must not appear four times Q1. Explicit quarter counts
+// (季度數量 / Quarter Count) still represent measured quantities.
+const NON_RATIO_QUARTER_POSITION_COLUMN =
+  /^(?:(?:(?:會計|財政|財務|營運|學年|曆年)\s*)?(?:季度|季別|季次|第幾季|第幾季度|季序號|季度序號|季度編號|季度代碼)|(?:(?:fiscal|calendar|academic)\s+)?(?:quarter|qtr)(?:\s+(?:number|no\.?|index|code|id))?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+
+// A source line, spreadsheet row or exercise step number marks a position
+// in a document or procedure, not a quantity with a meaningful ratio zero.
+// Do not imply that line 4 is twice line 2. Counts of lines/rows/steps
+// remain eligible for a source-grounded comparison.
+const NON_RATIO_SOURCE_POSITION_COLUMN =
+  /^(?:(?:(?:教材|程式碼|原始碼|來源|資料|表格|檔案)?(?:行號|列號|行序號|列序號))|(?:(?:操作|解題|實驗|作業)?(?:步驟|步序)(?:號|次|編號|序號)?)|(?:(?:(?:source|code|text|file|table|data)\s+)?(?:line|row|step|record)\s+(?:number|no\.?|index|id|#))|(?:(?:source|code)\s+line))(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+
 // Clock readings and geographic coordinates have conventional origins.
 // Even positive bare figures (8 vs 12 o'clock, 24 vs 25 degrees east)
 // are not ratios; retain the original table without a zero-based chart.
@@ -71,9 +150,27 @@ const ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN =
 const SCORE_COUNT_COLUMN =
   /(?:人數|筆數|次數|數量|總數|件數|\b(?:count|number\s+of|quantity|entries)\b)/iu;
 
+// Ranked priority, severity and difficulty levels are ORDINAL, not quantities.
+// Do not imply that level 4 is twice level 2; counts OF levels remain measurable.
+const NON_RATIO_ORDINAL_LEVEL_COLUMN =
+  /(?:優先(?:順序|序位|級別|等級|級)|優先度|嚴重(?:程度|度|等級)|風險(?:等級|級別|程度)|難度(?:等級|級別)?|危險(?:等級|程度)|等級|級別)/u;
+const ENGLISH_NON_RATIO_ORDINAL_LEVEL_COLUMN =
+  /\b(?:priority|severity|difficulty|tier|level|risk\s+(?:level|grade|category))\b/iu;
+const ORDINAL_COUNT_COLUMN =
+  /(?:人數|數量|總數|次數|筆數|件數|個數|級數|\b(?:count|total|number\s+of|quantity|entries)\b)/iu;
+
+// Exam and class ranks are ordinal positions, not ratio-scale quantities:
+// rank 4 is not four times rank 1. Counts *of* ranks are still quantities.
+const NON_RATIO_RANK_POSITION_COLUMN = /(?:排名|名次|名列)/u;
+const ENGLISH_NON_RATIO_RANK_POSITION_COLUMN =
+  /\b(?:rank(?:ing)?s?|(?:position|place)\s+in\s+(?:class|school|cohort|exam))\b/iu;
+const RANK_COUNT_COLUMN =
+  /(?:人數|數量|總數|次數|筆數|件數|個數|數目|\b(?:count|total|number\s+of|quantity|entries)\b)/iu;
+
 function isPercentageColumn(header: string): boolean {
   return SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header) ||
-    SOURCE_RATE_OR_RATIO_COLUMN.test(header) || ENGLISH_RATE_OR_RATIO_COLUMN.test(header);
+    SOURCE_RATE_OR_RATIO_COLUMN.test(header) ||
+    (ENGLISH_RATE_OR_RATIO_COLUMN.test(header) && !ENGLISH_MEASURED_SPEED_RATE_COLUMN.test(header));
 }
 
 // Only columns with an established 0–100 interpretation receive a 100% meter.
@@ -84,10 +181,75 @@ function isBoundedPercentageColumn(header: string): boolean {
     !ENGLISH_UNBOUNDED_RATE_COLUMN.test(header);
 }
 
+function isNonRatioColumn(header: string): boolean {
+  const column = header.trim().replace(/\s*(?:[（(]\s*[%％]\s*[）)]|[%％])$/u, '').trim();
+  // A percent unit alone does not turn a status or release label into a rate.
+  const describesBoundedRate = isBoundedPercentageColumn(header) &&
+    (isBoundedPercentageColumn(column) || /率|\brate\b/iu.test(column));
+  if (((NON_RATIO_NETWORK_IDENTIFIER_COLUMN.test(column) ||
+         ENGLISH_NON_RATIO_NETWORK_IDENTIFIER_COLUMN.test(column)) &&
+        !NETWORK_IDENTIFIER_COUNT_COLUMN.test(column)) ||
+      NON_RATIO_NETWORK_NAMESPACE_COLUMN.test(column) ||
+      NON_RATIO_DATABASE_KEY_COLUMN.test(column) ||
+      AMBIGUOUS_TIME_COLUMN.test(column) ||
+      NON_RATIO_WEEKDAY_COLUMN.test(column) ||
+      NON_RATIO_QUARTER_POSITION_COLUMN.test(column) ||
+      NON_RATIO_SOURCE_POSITION_COLUMN.test(column) ||
+      NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
+      DECIBEL_UNIT_COLUMN.test(column) ||
+      NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
+      ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
+      (!describesBoundedRate &&
+       (NON_RATIO_STATUS_COLUMN.test(column) ||
+        ENGLISH_NON_RATIO_STATUS_COLUMN.test(column)) &&
+       !STATUS_COUNT_COLUMN.test(column) &&
+       !ENGLISH_STATUS_COUNT_COLUMN.test(column)) ||
+      ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
+        ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN.test(column)) &&
+       !SCORE_COUNT_COLUMN.test(column)) ||
+       ((NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column) ||
+         ENGLISH_NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column)) &&
+        !ORDINAL_COUNT_COLUMN.test(column)) ||
+      ((NON_RATIO_RANK_POSITION_COLUMN.test(column) ||
+         ENGLISH_NON_RATIO_RANK_POSITION_COLUMN.test(column)) &&
+        !RANK_COUNT_COLUMN.test(column))) return true;
+  if (/(?:^|[^0-9０-９])(?:[0０]\s*(?:[/／]|\bor\b)\s*[1１]|[1１]\s*(?:[/／]|\bor\b)\s*[0０])(?:$|[^0-9０-９])/iu.test(column)) return true;
+  const unqualifiedColumn = column.replace(/(?:\s*[（(][^）)]*[）)])+$/u, '').trim();
+  // "Lines of Code" is a count, not an identifying code. Keep
+  // "Course Code", "Verification Code", and standalone "Code" excluded.
+  // Recognize only explicit count phrases, never arbitrary headers ending in Code.
+  if (/(?:^|\s)(?:id|uuid|code|no\.?|#)$/iu.test(unqualifiedColumn) &&
+      !/^(?:(?:number|count)\s+of\s+)?lines?\s+of\s+code$/iu.test(unqualifiedColumn)) return true;
+  // A question number identifies an exercise; its magnitude is not a measured result.
+  // Keep the exact table, but never turn "第 2 題" vs "第 4 題" into a 2× bar.
+  if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|題號|題次|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
+      /\b(?:question|problem|exercise|item)\s+(?:id|number|no\.?)(?:\b|$)/iu.test(column) ||
+      /^(?:年度|year|number)$/iu.test(column) ||
+      // A number identifying a term, page, floor or class is an ordinal or
+      // category, not a comparable measure. Parenthetical source qualifiers
+      // (e.g. 學年（民國）) must not turn it into a bar.
+      /^(?:學年|學期|年級|班級|頁碼|頁次|週次|樓層|排名|名次|月份|民國年|西元年)(?:\s*[（(][^）)]*[）)])?$/u.test(column) ||
+      /^(?:semester|term|month|rank|ranking|floor|grade|page)$/iu.test(column) ||
+      /\b(?:academic\s+(?:year|term|semester)|student\s+(?:id|number)|course\s+(?:id|code|number)|postal\s+code|zip\s+code|phone\s+number|account\s+(?:id|number)|page\s+(?:no\.?|number)|sequence\s+number|floor\s+number)\b/iu.test(column)) return true;
+  // A textbook's week, chapter or lesson ordinal is a position, not a
+  // measurement. "Chapter 4" must not appear twice as large as "Chapter 2".
+  // Count headers (e.g. Number of Chapters / 章節數量) remain eligible.
+  if (/^(?:章節|章次|章號|單元|單元號|單元編號|課次|講次|節次|第幾週)(?:\s*[（(][^）)]{1,40}[）)])?$/u.test(column) ||
+      /^(?:week|chapter|unit|lesson|module|section|lecture|session)(?:\s+(?:number|no\.?|id|#))?(?:\s*\([^)]{1,40}\))?$/iu.test(column)) return true;
+  // Numeric room and seat labels identify where a student belongs, not
+  // quantities: classroom 301 is not 1.5 times classroom 205. A real
+  // "教室數" / "Room Count" header remains a valid measured quantity.
+  if (/^(?:教室|實驗室|房號|寢室|寢室號|宿舍房號|房間號碼|校舍|大樓|座位|座位號|位置|地點)(?:\s*[（(][^）)]{1,40}[）)])?$/u.test(column) ||
+      /^(?:classroom|room|dorm(?:itory)?\s+room|lab(?:oratory)?|building|location|seat)(?:\s+(?:no\.?|number|id|code|#))?(?:\s*\([^)]{1,40}\))?$/iu.test(column)) return true;
+  return /^build(?:\s+number)?$/iu.test(unqualifiedColumn) || (!describesBoundedRate && NON_RATIO_RELEASE_COLUMN.test(column) &&
+    !RELEASE_COUNT_COLUMN.test(column) && !ENGLISH_RELEASE_COUNT_COLUMN.test(column));
+}
+
 /**
- * Optional, source-grounded comparison of plain non-negative values only.
- * A number with units, a percentage, a date or an expression is not a scalar
- * measure we can safely turn into a bar. No AI inference or source rewriting.
+ * Optional, source-grounded comparison of non-negative source numbers only.
+ * Strict comma-grouped thousands are accepted only when every row shares that
+ * format. Units, percentages, dates, expressions and mixed formats are omitted.
+ * No AI inference or source rewriting.
  */
 function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
@@ -95,41 +257,37 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   // them as bars would imply a magnitude that the source does not support.
   const column = table.headers[1].trim();
   // An unlabeled number in a percentage column is ambiguous: do not scale it to the largest row.
-  if (isPercentageColumn(column) ||
-      AMBIGUOUS_TIME_COLUMN.test(column) ||
-      NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
-      DECIBEL_UNIT_COLUMN.test(column) ||
-      NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
-      ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
-      ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
-        ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN.test(column)) &&
-       !SCORE_COUNT_COLUMN.test(column))) return null;
-  if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
-      /^(?:年度|year|date|id|uuid|no\.?|number)$/iu.test(column) ||
-      // A number identifying a term, page, floor or class is an ordinal or
-      // category, not a comparable measure. Parenthetical source qualifiers
-      // (e.g. 學年（民國）) must not turn it into a bar.
-      /^(?:學年|學期|年級|班級|頁碼|頁次|週次|樓層|排名|名次|月份|民國年|西元年)(?:\s*[（(][^）)]*[）)])?$/u.test(column) ||
-      /^(?:semester|term|month|rank|ranking|floor|grade|page)$/iu.test(column) ||
-      /\b(?:academic\s+(?:year|term|semester)|student\s+(?:id|number)|course\s+(?:id|code|number)|postal\s+code|zip\s+code|phone\s+number|account\s+(?:id|number)|page\s+(?:no\.?|number)|sequence\s+number|floor\s+number)\b/iu.test(column)) return null;
+  if (!hasUnambiguousChartLabel(column) || isPercentageColumn(column) || isNonRatioColumn(column)) return null;
   // Repeated "學分" is an explicit source unit, not a value to infer.
   // Accept it only in a credit column and when ALL rows use the same format.
   const plainNumber = /^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/u;
+  // Course finance tables often use commas for thousands. Require every
+  // source row to use strict three-digit grouping before comparing any bar;
+  // mixing 1,000 with 200, or malformed 1,20, remains unverified source text.
+  const groupedNumber = /^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d{1,2})?$/u;
   const creditNumber = /^((?:0|[1-9]\d{0,5})(?:\.\d{1,2})?) ?學分$/u;
   const creditsColumn = /(?:學分|credits?)/iu.test(column);
-  let rowFormat: 'plain' | 'credits' | null = null;
+  let rowFormat: 'plain' | 'grouped' | 'credits' | null = null;
   const rows: SourceValueRow[] = [];
-  const labels = new Set<string>();
-  for (const [label, original] of table.rows) {
-    if (!label?.trim() || !original || labels.has(label.trim())) return null;
+  // Invisible row labels cannot identify a derived bar to students or screen readers.
+  // Keep the exact original table, but skip optional graphs without readable keys.
+  for (const [rowIndex, [label, original]] of table.rows.entries()) {
+    if (!hasUnambiguousChartLabel(label ?? '') || !original) return null;
     const creditMatch = creditsColumn ? creditNumber.exec(original) : null;
-    const format = plainNumber.test(original) ? 'plain' : creditMatch ? 'credits' : null;
+    const format = plainNumber.test(original) ? 'plain'
+      : groupedNumber.test(original) ? 'grouped' : creditMatch ? 'credits' : null;
     if (!format || (rowFormat !== null && format !== rowFormat)) return null;
     rowFormat = format;
-    const amount = Number(creditMatch?.[1] ?? original);
-    if (!Number.isFinite(amount)) return null;
-    labels.add(label.trim());
-    rows.push({ label, original, amount });
+    // Parsing a long decimal directly as Number can silently round away a
+    // source cent (e.g. 1,000,000,000,000,000.01). Only graph quantities
+    // whose integer minor units are exactly representable; keep every other
+    // source row verbatim in the original table without a derived bar.
+    const [whole, fraction = ''] = (creditMatch?.[1] ?? original).replace(/,/gu, '').split('.');
+    const scale = 10 ** fraction.length;
+    const minorUnits = Number(whole) * scale + Number(fraction || '0');
+    if (!Number.isSafeInteger(minorUnits)) return null;
+    const amount = minorUnits / scale;
+    rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
   }
   return rows.some((row) => row.amount > 0) ? rows : null;
 }
@@ -141,23 +299,56 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
  */
 function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
-  if (!isBoundedPercentageColumn(table.headers[1])) return null;
+  const column = table.headers[1];
+  if (!hasUnambiguousChartLabel(column) || !isBoundedPercentageColumn(column) || isNonRatioColumn(column)) return null;
   const rows: SourceValueRow[] = [];
-  const labels = new Set<string>();
-  for (const [label, original] of table.rows) {
-    if (!label?.trim() || !original ||
-        !/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[%％]$/u.test(original) ||
-        labels.has(label.trim())) return null;
-    const amount = Number(original.slice(0, -1));
+  // Taiwanese lesson materials sometimes use fullwidth digits and decimal
+  // punctuation throughout an explicitly bounded percentage column.
+  // Convert only these known glyphs for the meter's quantity; the original
+  // source, export, citation and accessible reading must remain untouched.
+  // Course handouts may place one regular or no-break space before the %
+  // sign (e.g. "75 %" or "７５ ％"). Preserve every original character in
+  // source cells, screen-reader labels, clipboard text and TXT exports.
+  // Do not accept tabs, multiple spaces, mixed digit scripts or missing %.
+  const asciiPercent = /^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[ \u00a0\u202f]?[%％]$/u;
+  const fullwidthPercent = /^(?:０|[１-９][０-９]?|１００)(?:．[０-９]{1,2})?[ \u00a0\u202f]?[%％]$/u;
+  let digitFormat: 'ascii' | 'fullwidth' | null = null;
+  for (const [rowIndex, [label, original]] of table.rows.entries()) {
+    if (!hasUnambiguousChartLabel(label ?? '') || !original) return null;
+    const format = asciiPercent.test(original) ? 'ascii'
+      : fullwidthPercent.test(original) ? 'fullwidth' : null;
+    // A mixed digit script could represent copied or transcribed source
+    // errors: keep the complete table, but do not infer a derived graph.
+    if (!format || (digitFormat !== null && format !== digitFormat)) return null;
+    digitFormat = format;
+    const printedNumber = original.slice(0, -1);
+    const normalizedNumber = format === 'fullwidth'
+      ? printedNumber.replace(/[０-９]/gu, (digit) =>
+          String.fromCharCode(digit.charCodeAt(0) - 0xfee0)).replace('．', '.')
+      : printedNumber;
+    const amount = Number(normalizedNumber);
     if (!Number.isFinite(amount) || amount > 100) return null;
-    labels.add(label.trim());
-    rows.push({ label, original, amount });
+    rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
   }
   return rows;
 }
 
-function StudySourcePercentComparison({ table }: { table: StudySourceTable }) {
+// Repeated row labels are valid in source textbooks (e.g. two "必修" rows).
+// Distinguish their accessible meters by the exact source line, rather than
+// silently hiding the chart or merging values from different rows.
+function chartRowAccessibleLabel(row: SourceValueRow, rows: SourceValueRow[]): string {
+  const label = row.label + '：' + row.original;
+  return rows.some((other) => other !== row && other.label.trim() === row.label.trim())
+    ? label + '；教材原文第 ' + row.sourceLine + ' 行'
+    : label;
+}
+
+function StudySourcePercentComparison({ table, onJumpToSource }: {
+  table: StudySourceTable;
+  onJumpToSource: (rowIndex: number, origin: HTMLButtonElement) => void;
+}) {
   const rows = sourcePercentRows(table);
+  const sourceDescriptionPrefix = useId();
   if (!rows) return null;
   return (
     <details className={styles.sourceValueComparison}>
@@ -168,13 +359,19 @@ function StudySourcePercentComparison({ table }: { table: StudySourceTable }) {
       </p>
       <ul className={styles.sourceValueList} aria-label={table.headers[1] + ' 原文百分比'}>
         {rows.map((row) => (
-          <li key={row.label}>
+          <li key={row.sourceLine}>
             <div className={styles.sourceValueRow}>
               <span>{row.label}</span>
               <span>{row.original}</span>
             </div>
+            <button type="button" className={styles.sourceLineJump}
+              id={`${sourceDescriptionPrefix}-row-${row.sourceLine}`}
+              onClick={(event) => onJumpToSource(row.sourceLine - table.startLine - 2, event.currentTarget)}>
+              原文第 {row.sourceLine} 行 · 回表格核對
+            </button>
             <meter min={0} max={100} value={row.amount}
-              aria-label={row.label + '：' + row.original}
+              aria-describedby={`${sourceDescriptionPrefix}-row-${row.sourceLine}`}
+              aria-label={chartRowAccessibleLabel(row, rows)}
               aria-valuetext={row.original + '；滿格 100%'} />
           </li>
         ))}
@@ -184,8 +381,12 @@ function StudySourcePercentComparison({ table }: { table: StudySourceTable }) {
 }
 
 /** Keep the original table visible; numeric bars are an opt-in derived view. */
-function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
+function StudySourceValueComparison({ table, onJumpToSource }: {
+  table: StudySourceTable;
+  onJumpToSource: (rowIndex: number, origin: HTMLButtonElement) => void;
+}) {
   const rows = sourceValueRows(table);
+  const sourceDescriptionPrefix = useId();
   if (!rows) return null;
   const maxRow = rows.reduce((best, row) => row.amount > best.amount ? row : best);
   const max = maxRow.amount;
@@ -193,18 +394,24 @@ function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
     <details className={styles.sourceValueComparison}>
       <summary>展開第 2 欄「{table.headers[1]}」的原文數值比較</summary>
       <p className={styles.note}>
-        只比較明確的非負純數字，或學分欄每列都寫出「學分」的非負數；以本欄最大值為滿格。
-        不換算單位、不混用純數字與附單位數值，也不比較日期或編號；請核對上方原文。
+        只比較格式一致的非負純數字（包含每列皆以逗號正確分隔千位），或學分欄每列都寫出「學分」的非負數；以本欄最大值為滿格。
+        不換算單位、不混用不同數字格式或附單位數值，也不比較日期或編號；請核對上方原文。
       </p>
       <ul className={styles.sourceValueList} aria-label={table.headers[1] + ' 原文數值比較'}>
         {rows.map((row) => (
-          <li key={row.label}>
+          <li key={row.sourceLine}>
             <div className={styles.sourceValueRow}>
               <span>{row.label}</span>
               <span>{row.original}</span>
             </div>
+            <button type="button" className={styles.sourceLineJump}
+              id={`${sourceDescriptionPrefix}-row-${row.sourceLine}`}
+              onClick={(event) => onJumpToSource(row.sourceLine - table.startLine - 2, event.currentTarget)}>
+              原文第 {row.sourceLine} 行 · 回表格核對
+            </button>
             <meter min={0} max={max} value={row.amount}
-              aria-label={row.label + '：' + row.original}
+              aria-describedby={`${sourceDescriptionPrefix}-row-${row.sourceLine}`}
+              aria-label={chartRowAccessibleLabel(row, rows)}
               aria-valuetext={row.original + '；本欄最大值 ' + maxRow.original} />
           </li>
         ))}
@@ -229,13 +436,20 @@ function splitOriginalSourceLines(source: string): OriginalSourceLine[] {
 }
 
 /** Select only the source's original table lines; never reserialize hidden cells. */
-function tableSourceSelection(lines: OriginalSourceLine[], table: StudySourceTable, rowIndex: number | null = null): string {
+function tableSourceSelection(lines: OriginalSourceLine[], table: StudySourceTable, rowIndex: number | null = null, includeHeader = false): string {
   const start = table.startLine - 1;
   if (rowIndex !== null) {
-    // A single data row is copied as its exact source line, without
-    // synthesizing headers, omitting a hidden cell or joining non-adjacent rows.
+    // The default remains the exact data row. Students can explicitly include
+    // its literal header and Markdown separator for a meaningful study excerpt.
+    // Take only authorized source lines, never reserialize cells or include
+    // intervening answers from another row.
     if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= table.rows.length) return '';
-    return lines[start + 2 + rowIndex]?.text ?? '';
+    const chosen = lines[start + 2 + rowIndex];
+    if (!includeHeader) return chosen?.text ?? '';
+    const header = lines[start];
+    const divider = lines[start + 1];
+    if (!header || !divider || !chosen) return '';
+    return header.text + header.separator + divider.text + divider.separator + chosen.text;
   }
   const end = start + table.rows.length + 2;
   const selected = lines.slice(start, end);
@@ -248,12 +462,20 @@ function tableSourceSelection(lines: OriginalSourceLine[], table: StudySourceTab
 // A few iOS Safari and in-app WebViews throw when select() is called on a
 // readonly textarea. Keep the original table text in place and try a precise
 // selection range too, so a failed browser selection never breaks copying.
-function selectOriginalTableText(field: HTMLTextAreaElement | null) {
-  if (!field) return;
+function selectOriginalTableText(field: HTMLTextAreaElement | null): boolean {
+  if (!field) return false;
   try { field.focus(); } catch { /* The student can still long-press the source. */ }
   try { field.select(); } catch { /* Try the explicit selection range below. */ }
   try { field.setSelectionRange(0, field.value.length); }
   catch { /* The unchanged source remains available for native selection. */ }
+  // Some in-app WebViews silently ignore both APIs. A successful method call
+  // is not evidence that text was selected. Even reported selection bounds
+  // cannot guarantee a native menu, so the message must remain cautious.
+  try {
+    return document.activeElement === field &&
+      field.selectionStart === 0 && field.selectionEnd === field.value.length &&
+      field.value.length > 0;
+  } catch { return false; }
 }
 
 /** Keep per-table selection local and reset it when the authorized source changes. */
@@ -263,9 +485,24 @@ function StudySourceSelection({ table, index, sourceLines }: {
   sourceLines: OriginalSourceLine[];
 }) {
   const [rowIndex, setRowIndex] = useState(-1);
-  // Use the authorized source, not textarea.value: textareas normalize CRLF
-  // to LF, and a stale WebView DOM value is not evidence from the lesson.
-  const selectedSource = tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex);
+  const [includeHeader, setIncludeHeader] = useState(false);
+  const [includeSourceCitation, setIncludeSourceCitation] = useState(false);
+  // Keep original excerpt bytes separate from optional, visibly marked metadata.
+  // Neither the Markdown source nor its cell order is ever rewritten.
+  const originalRowLine = table.startLine + rowIndex + 2;
+  const originalExcerpt = tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex, includeHeader);
+  const citation = rowIndex < 0
+    ? `教材原文第 ${table.startLine} 至 ${table.startLine + table.rows.length + 1} 行`
+    : !includeHeader
+      ? `教材原文第 ${originalRowLine} 行`
+      : rowIndex === 0
+        ? `教材原文第 ${table.startLine} 至 ${originalRowLine} 行`
+        : `教材原文第 ${table.startLine}、${table.startLine + 1}、${originalRowLine} 行（非連續）`;
+  const citationNewline = sourceLines[table.startLine - 1]?.separator || '\n';
+  // The selectable fallback, clipboard and TXT must use identical payloads.
+  const selectedSource = includeSourceCitation
+    ? `[${citation}]${citationNewline}${originalExcerpt}`
+    : originalExcerpt;
   const [copyFeedback, setCopyFeedback] = useState('');
   const originalText = useRef<HTMLTextAreaElement>(null);
   const copyRequest = useRef(0);
@@ -282,6 +519,8 @@ function StudySourceSelection({ table, index, sourceLines }: {
   useEffect(() => {
     invalidateCopy();
     setRowIndex(-1);
+    setIncludeHeader(false);
+    setIncludeSourceCitation(false);
     setCopyFeedback('');
   }, [sourceLines, invalidateCopy]);
   useEffect(() => () => { invalidateCopy(); }, [invalidateCopy]);
@@ -292,13 +531,13 @@ function StudySourceSelection({ table, index, sourceLines }: {
       setCopyFeedback('瀏覽器未確認複製；原文仍保留在下方，請長按選取或使用鍵盤複製。');
     }
   };
-  const selectSelectedOriginal = () => {
+  const selectSelectedOriginal = (): boolean => {
     const field = originalText.current;
-    if (!field) return;
+    if (!field) return false;
     // Readonly DOM values can still drift after an embedded WebView glitch.
     // Repair the long-press fallback before selection and clipboard access.
     if (field.value !== selectedSource.replace(/\r\n?/gu, '\n')) field.value = selectedSource;
-    selectOriginalTableText(field);
+    return selectOriginalTableText(field);
   };
   const copySelectedOriginal = () => {
     const field = originalText.current;
@@ -327,7 +566,11 @@ function StudySourceSelection({ table, index, sourceLines }: {
       void Promise.resolve(result as PromiseLike<unknown>).then(
         (acknowledged) => {
           if (copyRequest.current !== request) return;
-          if (acknowledged === false) manualCopy(request);
+          // Native Clipboard.writeText() resolves with void (undefined).
+          // Some in-app WebView bridges resolve false, null, 0, a string or
+          // an object instead of rejecting a denied/unsupported copy.
+          // Those nonstandard acknowledgements do not prove success.
+          if (acknowledged !== undefined && acknowledged !== true) manualCopy(request);
           else {
             invalidateCopy();
             setCopyFeedback('瀏覽器已接受複製指令；若無法貼上，仍可長按下方原文。');
@@ -383,12 +626,21 @@ function StudySourceSelection({ table, index, sourceLines }: {
     }
   };
 
+  // Tell screen readers exactly which original lines an excerpt covers.
+  // A single row with its header skips intervening lesson rows.
+  const selectionAnnouncement = rowIndex < 0
+    ? `目前選取整張表格：原文第 ${table.startLine} 至 ${table.startLine + table.rows.length + 1} 行，包含欄名、分隔列與全部資料列。`
+    : includeHeader
+      ? `目前選取第 ${rowIndex + 1} 列：原文第 ${table.startLine}、${table.startLine + 1} 行欄名與分隔列，以及第 ${originalRowLine} 行資料列；不包含其他資料列。`
+      : `目前只選取第 ${rowIndex + 1} 列：原文第 ${originalRowLine} 行資料列，未包含欄名與分隔列。`;
+
   return (
     <details className={styles.sourceTableSelection}>
       <summary>選取第 {index + 1} 張表格的原文（可複製）</summary>
       <p className={styles.note}>
         可選整張表格或單一資料列的原始 Markdown 行，不重新編造欄位內容。
-        單列不包含欄名，請對照上方表格；可以直接複製，若瀏覽器阻擋剪貼簿權限，仍可長按或鍵盤選取原文。
+        單列預設不包含欄名；可勾選附上原始欄名及分隔列，或在摘錄開頭另加教材行號註記。
+        行號註記不屬於教材原文，未勾選時逐字不變；若瀏覽器阻擋剪貼簿權限，仍可長按或鍵盤選取下方文字。
       </p>
       <label>
         原文範圍
@@ -400,6 +652,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
               invalidateCopy();
               setCopyFeedback('');
               setRowIndex(next);
+              setIncludeHeader(false);
             }
           }}>
           <option value={-1}>整張表格（含欄名）</option>
@@ -409,7 +662,33 @@ function StudySourceSelection({ table, index, sourceLines }: {
             </option>)}
         </select>
       </label>
-      <button type="button" onClick={selectSelectedOriginal}>
+      {rowIndex >= 0 && (
+        <label>
+          <input type="checkbox" checked={includeHeader} onChange={(event) => {
+            invalidateCopy();
+            setCopyFeedback('');
+            setIncludeHeader(event.target.checked);
+          }} />
+          連同原文欄名與分隔列
+        </label>
+      )}
+      <label>
+        <input type="checkbox" checked={includeSourceCitation} onChange={(event) => {
+          invalidateCopy();
+          setCopyFeedback('');
+          setIncludeSourceCitation(event.target.checked);
+        }} />
+        摘錄開頭加上教材原文行號（註記非原文）
+      </label>
+      <p className={styles.note} aria-live="polite" aria-atomic="true">
+        {selectionAnnouncement}
+      </p>
+      <button type="button" onClick={() => {
+        const selected = selectSelectedOriginal();
+        setCopyFeedback(selected
+          ? '瀏覽器回報已全選下方原文；可用鍵盤複製，或長按原文使用系統複製選單。'
+          : '瀏覽器未確認全選；下方原文仍保留，請長按重新選取或使用鍵盤複製。');
+      }}>
         {rowIndex < 0
           ? `全選第 ${index + 1} 張表格原文`
           : `全選第 ${index + 1} 張表格第 ${rowIndex + 1} 列原文`}
@@ -430,7 +709,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
         aria-label={`原文表格 ${index + 1} 的可選取文字`}
         readOnly
         spellCheck={false}
-        rows={rowIndex < 0 ? Math.min(8, table.rows.length + 2) : 2}
+        rows={rowIndex < 0 ? Math.min(8, table.rows.length + 2) : includeHeader ? 4 : 2}
         value={selectedSource}
       />
     </details>
@@ -441,6 +720,59 @@ function StudySourceSelection({ table, index, sourceLines }: {
 export function StudySourceTables({ text }: { text: string }) {
   const tables = useMemo(() => extractStudySourceTables(text), [text]);
   const sourceLines = useMemo(() => splitOriginalSourceLines(text), [text]);
+  const sourceRowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const [returnTarget, setReturnTarget] = useState<{
+    sourceLines: OriginalSourceLine[];
+    startLine: number;
+    rowIndex: number;
+    origin: HTMLButtonElement;
+  } | null>(null);
+  // A replaced lesson must never retain the previous chart's DOM button or text.
+  useEffect(() => { setReturnTarget(null); }, [sourceLines]);
+  // Focus the original row; some Safari/WebViews cannot focus table rows, so
+  // fall back to its first cell without adding a normal Tab stop.
+  const jumpToSource = (startLine: number, rowIndex: number, origin: HTMLButtonElement) => {
+    const row = sourceRowRefs.current.get(`${startLine}:${rowIndex}`);
+    if (!row) return;
+    setReturnTarget({ sourceLines, startLine, rowIndex, origin });
+    try { row.focus(); } catch { /* Try a focusable source cell below. */ }
+    if (document.activeElement !== row && !row.contains(document.activeElement)) {
+      try { row.querySelector<HTMLElement>('th, td')?.focus(); }
+      catch { /* Try the keyboard-focusable original table region below. */ }
+    }
+    if (document.activeElement !== row && !row.contains(document.activeElement)) {
+      // Some WebViews silently ignore focus() on both <tr> and its cells.
+      // Keep students near the original row instead of leaving focus in the
+      // comparison below the table. The source region already has tabindex=0.
+      try { row.closest<HTMLElement>('[role="region"]')?.focus(); }
+      catch { /* The source and return control must remain available. */ }
+    }
+    try { row.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }
+    catch { /* A failed scroll must not prevent keyboard focus. */ }
+  };
+  const returnToChart = () => {
+    const origin = returnTarget?.origin;
+    if (!origin?.isConnected) {
+      setReturnTarget(null);
+      return;
+    }
+    // The student may close the comparison disclosure while checking the
+    // source row. Reopen it before returning focus: a hidden chart button
+    // cannot reliably receive focus in Safari, WebView or keyboard navigation.
+    const disclosure = origin.closest('details');
+    if (disclosure && !disclosure.open) disclosure.open = true;
+    try { origin.focus(); } catch { /* Fall back to the disclosure heading. */ }
+    const summary = disclosure?.querySelector<HTMLElement>('summary');
+    if (document.activeElement !== origin) {
+      try { summary?.focus(); } catch { /* The return control must remain available. */ }
+    }
+    const destination = document.activeElement === origin ? origin : summary;
+    // Keep the retry in view if the WebView refuses both focus attempts.
+    if (!destination || document.activeElement !== destination) return;
+    try { destination.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }
+    catch { /* A failed scroll must not prevent keyboard focus. */ }
+    setReturnTarget(null);
+  };
   if (!tables.length) return null;
 
   return (
@@ -462,15 +794,27 @@ export function StudySourceTables({ text }: { text: string }) {
             </thead>
             <tbody>
               {table.rows.map((row, rowIndex) =>
-                <tr key={rowIndex}>{row.map((cell, column) =>
+                <tr key={rowIndex} tabIndex={-1}
+                  ref={(element) => {
+                    const key = `${table.startLine}:${rowIndex}`;
+                    if (element) sourceRowRefs.current.set(key, element);
+                    else sourceRowRefs.current.delete(key);
+                  }}>{row.map((cell, column) =>
                   column === 0 && cell.trim()
-                    ? <th scope="row" key={column}>{cell}</th>
-                    : <td key={column}>{cell}</td>)}</tr>)}
+                    ? <th scope="row" key={column} tabIndex={-1}>{cell}</th>
+                    : <td key={column} tabIndex={column === 0 ? -1 : undefined}>{cell}</td>)}</tr>)}
             </tbody>
           </table>
+          {returnTarget?.sourceLines === sourceLines && returnTarget.startLine === table.startLine && (
+            <button type="button" className={styles.sourceLineJump} onClick={returnToChart}>
+              返回原文第 {table.startLine + 2 + returnTarget.rowIndex} 行的圖表
+            </button>
+          )}
           <StudySourceSelection table={table} index={index} sourceLines={sourceLines} />
-          <StudySourceValueComparison table={table} />
-          <StudySourcePercentComparison table={table} />
+          <StudySourceValueComparison table={table}
+            onJumpToSource={(rowIndex, origin) => jumpToSource(table.startLine, rowIndex, origin)} />
+          <StudySourcePercentComparison table={table}
+            onJumpToSource={(rowIndex, origin) => jumpToSource(table.startLine, rowIndex, origin)} />
         </div>
       ))}
     </section>
