@@ -2079,3 +2079,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 來源 Markdown 含 HTML 包裝時，原本只檢查明確的 `display:none`／`visibility:hidden`／`opacity:0`。若樣式使用 `display:var(--answer-display)`、`opacity:calc(0)` 等動態 CSS，純文字掃描器不能確認瀏覽器實際顯示／隱藏狀態，卻可能把包裝內教師未公開表格衍生為可見表格。
 - 現在對影響 display／visibility／content-visibility／opacity 的 `var`、`env`、`calc`、`min`、`max`、`clamp` 選擇保守不衍生表格，即使前後有靜態宣告也不猜測計算結果；離開包裝後的正常教材表格仍可解析。一般 `display:block`、`opacity:1` 與不影響可見性的 `transform` 維持原行為。新增 Node/Vitest 來源邊界正反測試。
 - 這是**教材來源可見性防護**而非 CSS 完整渲染器；外部 CSS、真實瀏覽器 computed style 及使用者授權仍須另行核對。未新增套件、付費 API、私人教材傳輸或改動 checkpoint。完整 CI／CodeQL、指定 App 5504170 APPROVED、Maestro／iOS／Android 真機、WebGPU 與 Ahaboard 同教材同題同機比較未齊前維持 Draft，不合併、不部署。
+
+
+## 2026-11-21：全形數字百分比可核對來源、仍保留原文字元
+
+- 繁中教材可能寫作 `７５％`、`７５．５０％`。在欄名明確表示界限 0–100% 百分率、整欄同為全形數字格式且原值合規時，白板可選擇顯示固定 100% 上限的百分比圖。只將全形數字與全形小數點換成 meter 的數值；原文格、來源行號、讀屏內容、剪貼簿、TXT 一律保留教材原來字元。
+- 混用半/全形數字、前導零、超過兩位小數、超過 100%、空白或小數點格式不明時，只保留完整原文表格，不衍生可能誤解的圖表。新增 3 組正常與 7 組不合規的 React DOM 回歸，驗證刻度、來源原文、讀屏數值及文字選取。無新增依賴、付費 API、資料外傳及 checkpoint 格式變更。
+- 此為程式與 DOM 測試案例，正式 CI／CodeQL、App 5504170 APPROVED、Maestro／iOS／Android 真機、WebGPU 繁中與 Ahaboard 同教材同題同機對照須依本輪精確新 SHA 另行驗證；PR 維持 Draft，不合併、不部署。

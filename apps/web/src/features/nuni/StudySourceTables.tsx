@@ -290,12 +290,27 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   const column = table.headers[1];
   if (!hasUnambiguousChartLabel(column) || !isBoundedPercentageColumn(column) || isNonRatioColumn(column)) return null;
   const rows: SourceValueRow[] = [];
-  // Invisible row labels cannot identify a derived bar to students or screen readers.
-  // Keep the exact original table, but skip optional graphs without readable keys.
+  // Taiwanese lesson materials sometimes use fullwidth digits and decimal
+  // punctuation throughout an explicitly bounded percentage column.
+  // Convert only these known glyphs for the meter's quantity; the original
+  // source, export, citation and accessible reading must remain untouched.
+  const asciiPercent = /^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[%％]$/u;
+  const fullwidthPercent = /^(?:０|[１-９][０-９]?|１００)(?:．[０-９]{1,2})?[%％]$/u;
+  let digitFormat: 'ascii' | 'fullwidth' | null = null;
   for (const [rowIndex, [label, original]] of table.rows.entries()) {
-    if (!hasUnambiguousChartLabel(label ?? '') || !original ||
-        !/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[%％]$/u.test(original)) return null;
-    const amount = Number(original.slice(0, -1));
+    if (!hasUnambiguousChartLabel(label ?? '') || !original) return null;
+    const format = asciiPercent.test(original) ? 'ascii'
+      : fullwidthPercent.test(original) ? 'fullwidth' : null;
+    // A mixed digit script could represent copied or transcribed source
+    // errors: keep the complete table, but do not infer a derived graph.
+    if (!format || (digitFormat !== null && format !== digitFormat)) return null;
+    digitFormat = format;
+    const printedNumber = original.slice(0, -1);
+    const normalizedNumber = format === 'fullwidth'
+      ? printedNumber.replace(/[０-９]/gu, (digit) =>
+          String.fromCharCode(digit.charCodeAt(0) - 0xfee0)).replace('．', '.')
+      : printedNumber;
+    const amount = Number(normalizedNumber);
     if (!Number.isFinite(amount) || amount > 100) return null;
     rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
   }

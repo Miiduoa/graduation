@@ -2724,3 +2724,46 @@ it('switches citation between full table, adjacent first row and exact single ro
   expect(field.value).toContain('| C | 4 |');
   view.unmount();
 });
+
+
+it.each([
+  { header: '完成率', values: ['７５％', '２５％'], expected: ['75', '25'] },
+  { header: '正確率', values: ['７５．５０％', '０％'], expected: ['75.5', '0'] },
+  { header: 'Completion Rate', values: ['１００．００%', '９９．５％'], expected: ['100', '99.5'] },
+])('keeps fullwidth percentage source bytes while comparing against a fixed 100% ($header)', ({ header, values, expected }) => {
+  const material = ['| 科目 | ' + header + ' |', '| --- | --- |',
+    '| 資料庫 | ' + values[0] + ' |', '| 網路 | ' + values[1] + ' |'].join('\n');
+  const view = render(<StudySourceTables text={material} />);
+  const meters = Array.from(view.container.querySelectorAll('meter'));
+  expect(meters.map((bar) => bar.getAttribute('value'))).toEqual(expected);
+  expect(meters.map((bar) => bar.getAttribute('max'))).toEqual(['100', '100']);
+  expect(meters.map((bar) => bar.getAttribute('aria-valuetext'))).toEqual(
+    values.map((source) => source + '；滿格 100%'),
+  );
+  expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(values);
+  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
+  expect((screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement).value)
+    .toBe(material);
+  expect(meters[0].getAttribute('aria-describedby')).toBeTruthy();
+  view.unmount();
+});
+
+it.each([
+  ['１００．０１％', '９９％'], // Greater than 100
+  ['０１％', '１０％'], // Leading zero
+  ['７５.５％', '５０％'], // Mixed decimal punctuation
+  ['７5％', '５０％'], // Mixed digits within one value
+  ['７５％', '25%'], // Mixed digit formats in one table
+  ['７５％', '５０．１２３％'], // Unsupported precision
+  ['７５ ％', '５０％'], // Unsupported inserted whitespace
+])('retains invalid or ambiguous fullwidth percentage source without derived meters (%s, %s)', (first, second) => {
+  const material = ['| 科目 | 完成率 |', '| --- | --- |',
+    '| 資料庫 | ' + first + ' |', '| 網路 | ' + second + ' |'].join('\n');
+  const view = render(<StudySourceTables text={material} />);
+  expect(screen.getByRole('table')).toBeTruthy();
+  expect(comparisonSummaries(view.container)).toEqual([]);
+  expect(view.container.querySelector('meter')).toBeNull();
+  expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+    .toEqual([first, second]);
+  view.unmount();
+});
