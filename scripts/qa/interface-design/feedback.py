@@ -12,6 +12,43 @@ ACTION_NAMES = {
 }
 GEOMETRY_IDS = [*ACTION_NAMES, 'feedback-neighbor', 'feedback-unavailable']
 
+KEYBOARD_TARGET_METRICS = '''node => {
+  const rect=node.getBoundingClientRect(), style=getComputedStyle(node);
+  const top=document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2);
+  const describe=element => element ? {
+    tag:element.tagName,id:element.id,role:element.getAttribute('role'),
+    name:(element.getAttribute('aria-label') || element.textContent || '').trim().slice(0,80),
+  } : null;
+  return {target:describe(node),width:rect.width,height:rect.height,
+    top:rect.top,bottom:rect.bottom,left:rect.left,right:rect.right,
+    outline:parseFloat(style.outlineWidth),outlineStyle:style.outlineStyle,
+    focused:document.activeElement===node,focusVisible:node.matches(':focus-visible'),
+    unobscured:top===node || node.contains(top),hitTarget:describe(top),
+    scrollY,viewportHeight:innerHeight,
+    scrollPaddingBottom:getComputedStyle(document.documentElement).scrollPaddingBottom};
+}'''
+
+FORCED_COLOR_METRICS = '''() => {
+  const node=document.getElementById('feedback-plain');
+  const unavailableNode=document.getElementById('feedback-unavailable');
+  if (!node || !unavailableNode) return null;
+  const style=getComputedStyle(node), unavailable=getComputedStyle(unavailableNode);
+  const rail=node.querySelector(':scope > span[aria-hidden="true"]');
+  if (!rail) return null;
+  const stroke=getComputedStyle(rail,'::after');
+  return {active:matchMedia('(forced-colors: active)').matches,
+    foreground:style.color,background:style.backgroundColor,border:style.borderTopColor,
+    rail:stroke.backgroundColor,unavailable:unavailable.color,
+    strokeColor:stroke.color,strokeAdjustment:stroke.forcedColorAdjust,
+    buttonAdjustment:style.forcedColorAdjust,strokeImage:stroke.backgroundImage,
+    strokeAnimation:stroke.animationName,strokeTransition:stroke.transitionDuration,
+    colorScheme:style.colorScheme,systemReduced:matchMedia('(prefers-reduced-motion: reduce)').matches};
+}'''
+
+FORCED_COLOR_READABLE = '''value && value.active && value.foreground !== value.background
+  && value.border !== value.background && value.rail !== value.background
+  && value.foreground !== value.unavailable'''
+
 
 async def measure_actions(page):
     # Document coordinates let native keyboard scrolling happen without
@@ -33,16 +70,24 @@ def same_geometry(before, after, label):
         assert before[identity]['iconCount'] == after[identity]['iconCount'], (label, identity, 'icon removed')
 
 
-async def visible_keyboard_target(page, target):
+async def visible_keyboard_target(page, target, report):
     await expect(target).to_be_focused()
     await expect(target).to_be_in_viewport(ratio=1)
-    metrics = await target.evaluate('''node => {
-      const rect=node.getBoundingClientRect(), style=getComputedStyle(node);
-      const top=document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2);
-      return {width:rect.width,height:rect.height,outline:parseFloat(style.outlineWidth),
-        outlineStyle:style.outlineStyle,focusVisible:node.matches(':focus-visible'),
-        unobscured:top===node || node.contains(top)};
-    }''')
+    initial = await target.evaluate(KEYBOARD_TARGET_METRICS)
+    try:
+        # Native smooth scrolling can put the target inside the viewport before
+        # it clears the fixed navigation. Observe it settling; never scroll or
+        # move focus on the product's behalf, and keep the same strict oracle.
+        await page.wait_for_function(
+            f'''node => {{ const value=({KEYBOARD_TARGET_METRICS})(node);
+              return value.focused && value.focusVisible && value.unobscured
+                && value.outline >= 2 && value.outlineStyle !== 'none'; }}''',
+            arg=await target.element_handle(), timeout=2000)
+    finally:
+        metrics = await target.evaluate(KEYBOARD_TARGET_METRICS)
+        if not initial['unobscured'] or not metrics['unobscured']:
+            report.setdefault('keyboardTargetSettling', []).append({'initial': initial, 'settled': metrics})
+    await expect(target).to_be_in_viewport(ratio=1)
     assert metrics['width'] >= 43.99 and metrics['height'] >= 43.99, metrics
     assert metrics['focusVisible'] and metrics['outline'] >= 2 and metrics['outlineStyle'] != 'none', metrics
     assert metrics['unobscured'], ('Focused control is obscured', metrics)
@@ -84,7 +129,7 @@ async def check_action_feedback(page, config, report, capture):
     await start.focus()
     for identity in ('feedback-plain', 'feedback-neighbor', 'feedback-left', 'feedback-right', 'feedback-icon', 'feedback-full'):
         await page.keyboard.press('Tab')
-        await visible_keyboard_target(page, page.locator('#' + identity))
+        await visible_keyboard_target(page, page.locator('#' + identity), report)
     before = await measure_actions(page)
     await capture('action-feedback-idle')
 
@@ -123,21 +168,25 @@ async def check_action_feedback(page, config, report, capture):
     pending = await measure_actions(page)
     same_geometry(before, pending, 'busy')
     await page.keyboard.press('Tab')
-    await visible_keyboard_target(page, page.locator('#feedback-neighbor'))
+    await visible_keyboard_target(page, page.locator('#feedback-neighbor'), report)
     await page.keyboard.press('Tab')
     # Every remaining pending action and the unavailable action must be skipped.
-    await visible_keyboard_target(page, page.get_by_role('button', name='顯示完成通知', exact=True))
+    await visible_keyboard_target(page, page.get_by_role('button', name='顯示完成通知', exact=True), report)
     await capture('action-feedback-busy')
 
     try:
         await page.emulate_media(forced_colors='active')
-        forced = await page.locator('#feedback-plain').evaluate('''node => {
-          const style=getComputedStyle(node), unavailable=getComputedStyle(document.getElementById('feedback-unavailable'));
-          const rail=node.querySelector(':scope > span[aria-hidden="true"]');
-          return {active:matchMedia('(forced-colors: active)').matches,
-            foreground:style.color,background:style.backgroundColor,border:style.borderTopColor,
-            rail:getComputedStyle(rail,'::after').backgroundColor,unavailable:unavailable.color};
-        }''')
+        initial_forced = await page.evaluate(FORCED_COLOR_METRICS)
+        try:
+            # The protocol media change can precede the rendering update.
+            # Wait for the existing contrast conditions, not for a guessed
+            # delay; a persistently invisible stroke still fails this gate.
+            await page.wait_for_function(
+                f'''() => {{ const value=({FORCED_COLOR_METRICS})();
+                  return {FORCED_COLOR_READABLE}; }}''', timeout=2000)
+        finally:
+            forced = await page.evaluate(FORCED_COLOR_METRICS)
+            report['forcedColorSettling'] = {'initial': initial_forced, 'settled': forced}
         assert forced['active'] and forced['foreground'] != forced['background'], forced
         assert forced['border'] != forced['background'] and forced['rail'] != forced['background'], forced
         assert forced['foreground'] != forced['unavailable'], forced
@@ -170,10 +219,10 @@ async def check_action_feedback(page, config, report, capture):
     await page.locator('#page-content').focus()
     for target in (return_life, all_services):
         await page.keyboard.press('Tab')
-        await visible_keyboard_target(page, target)
+        await visible_keyboard_target(page, target, report)
     await capture('recovery-missing')
     await page.keyboard.press('Shift+Tab')
-    await visible_keyboard_target(page, return_life)
+    await visible_keyboard_target(page, return_life, report)
     await return_life.press('Enter')
     ledger = await page.evaluate('window.__interfaceQA.snapshot()')
     assert ledger['navigations'][-1] == life_href and ledger['state']['pathname'] == '/life', ledger
@@ -192,11 +241,11 @@ async def check_action_feedback(page, config, report, capture):
     await page.locator('#page-content').focus()
     for target in (retry, return_connect, all_services):
         await page.keyboard.press('Tab')
-        await visible_keyboard_target(page, target)
+        await visible_keyboard_target(page, target, report)
     await capture('recovery-error')
     for target in (return_connect, retry):
         await page.keyboard.press('Shift+Tab')
-        await visible_keyboard_target(page, target)
+        await visible_keyboard_target(page, target, report)
     await retry.press('Enter')
     await expect(page.get_by_role('heading', name='今天', exact=True)).to_be_visible()
     ledger = await page.evaluate('window.__interfaceQA.snapshot()')

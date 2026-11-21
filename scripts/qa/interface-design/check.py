@@ -69,20 +69,31 @@ async def check_notification_activity(page, report):
 async def assert_modal_tab_boundary(page, key, expected, report):
     # Native dialog traversal may visit browser chrome at a document boundary.
     # https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation
-    # A native scrollable region can also be a focusable area whose DOM anchor
-    # is its element: https://html.spec.whatwg.org/multipage/interaction.html#focusable-area
-    # Each exact intermediate state is allowed only once. Background page
-    # controls, unrelated dialog controls and repeated boundaries always fail.
-    seen = set()
-    for step in (1, 2, 3):
-        await page.keyboard.press(key)
-        state = await expected.evaluate('''expected => {
+    # A scrollable dialog can also be a focusable area without a tabindex.
+    # Watch actual focus events throughout the boundary, including while waiting
+    # for the renderer/browser focus state to agree. A background control never
+    # becomes an acceptable intermediate stop.
+    probe = await expected.evaluate_handle('''expected => {
+      const dialog = expected.closest('dialog');
+      const outsideFocusEvents = [];
+      const recordFocus = event => {
+        if (event.target instanceof Element && !dialog.contains(event.target)) {
+          outsideFocusEvents.push({
+            tag: event.target.tagName,
+            name: event.target.getAttribute('aria-label') || event.target.textContent?.trim().slice(0, 80),
+          });
+        }
+      };
+      document.addEventListener('focusin', recordFocus, true);
+      return {
+        release: () => document.removeEventListener('focusin', recordFocus, true),
+        read: () => {
           const active = document.activeElement;
-          const dialog = expected.closest('dialog');
           return {
             documentFocused: document.hasFocus(),
             activeTag: active?.tagName ?? null,
             activeName: active?.getAttribute('aria-label') || active?.textContent?.trim().slice(0, 80),
+            activeMatchesFocus: Boolean(active?.matches(':focus')),
             insideDialog: Boolean(dialog?.contains(active)),
             expectedActive: active === expected,
             nativeModal: Boolean(dialog?.matches(':modal')),
@@ -91,25 +102,56 @@ async def assert_modal_tab_boundary(page, key, expected, report):
             dialogOverflowY: dialog ? getComputedStyle(dialog).overflowY : null,
             dialogScrollHeight: dialog?.scrollHeight,
             dialogClientHeight: dialog?.clientHeight,
+            outsideFocusEvents: [...outsideFocusEvents],
           };
-        }''')
-        state.update({'key': key, 'step': step})
-        report.setdefault('dialogFocusBoundaries', []).append(state)
-        assert state['nativeModal'], f'Modal state lost at keyboard boundary: {state}'
-        if state['documentFocused'] and state['expectedActive'] and state['insideDialog']:
-            return
-        kind = None
-        if not state['documentFocused'] and state['activeTag'] == 'BODY':
-            kind = 'browser-ui'
-        elif (state['documentFocused'] and state['dialogActive'] and state['insideDialog']
-              and state['dialogTabIndex'] is None
-              and state['dialogOverflowY'] in ('auto', 'scroll')
-              and state['dialogClientHeight'] > 0
-              and state['dialogScrollHeight'] > state['dialogClientHeight'] + 1):
-            kind = 'dialog-scroller'
-        assert step < 3 and kind is not None and kind not in seen, (
-            f'Focus escaped, repeated a boundary, or missed the expected control: {state}')
-        seen.add(kind)
+        },
+      };
+    }''')
+    seen = set()
+    try:
+        for step in (1, 2, 3):
+            await page.keyboard.press(key)
+            started = asyncio.get_running_loop().time()
+            state = await probe.evaluate('probe => probe.read()')
+            immediate = dict(state)
+            samples = 1
+            # activeElement falls back to BODY after the last control blurs.
+            # document.hasFocus may not yet reflect the browser UI handoff.
+            # Wait only for that empty-focus transient, without another key or
+            # any focus call; the exact same strict states below must still pass.
+            while (state['nativeModal'] and state['documentFocused']
+                   and state['activeTag'] == 'BODY' and not state['activeMatchesFocus']
+                   and not state['outsideFocusEvents']
+                   and asyncio.get_running_loop().time() - started < .5):
+                await asyncio.sleep(.02)
+                state = await probe.evaluate('probe => probe.read()')
+                samples += 1
+            elapsed = round((asyncio.get_running_loop().time() - started) * 1000, 1)
+            report.setdefault('dialogFocusTransitions', []).append({
+                'key': key, 'step': step, 'immediate': immediate,
+                'settled': dict(state), 'elapsedMs': elapsed, 'samples': samples,
+            })
+            state.update({'key': key, 'step': step})
+            report.setdefault('dialogFocusBoundaries', []).append(state)
+            assert state['nativeModal'], f'Modal state lost at keyboard boundary: {state}'
+            assert not state['outsideFocusEvents'], f'Background content received focus: {state}'
+            if state['documentFocused'] and state['expectedActive'] and state['insideDialog']:
+                return
+            kind = None
+            if not state['documentFocused'] and state['activeTag'] == 'BODY':
+                kind = 'browser-ui'
+            elif (state['documentFocused'] and state['dialogActive'] and state['insideDialog']
+                  and state['dialogTabIndex'] is None
+                  and state['dialogOverflowY'] in ('auto', 'scroll')
+                  and state['dialogClientHeight'] > 0
+                  and state['dialogScrollHeight'] > state['dialogClientHeight'] + 1):
+                kind = 'dialog-scroller'
+            assert step < 3 and kind is not None and kind not in seen, (
+                f'Focus escaped, repeated a boundary, or missed the expected control: {state}')
+            seen.add(kind)
+    finally:
+        await probe.evaluate('probe => probe.release()')
+        await probe.dispose()
 
 
 async def check_dialogs_and_fields(page, config, report, capture, suffix=''):
@@ -443,7 +485,32 @@ async def scenario(browser, origin, config, reports):
         filename = config['name'] + '-' + name + '.png'
         # Pixel evidence records the settled interface, not a random reveal
         # frame. Motion behavior is asserted separately before capture.
-        await page.screenshot(path=str(OUTPUT / filename), full_page=full_page, animations='disabled')
+        async def paint_ready():
+            await page.evaluate('''async () => {
+              await document.fonts.ready;
+              await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            }''')
+
+        await paint_ready()
+        try:
+            await page.screenshot(path=str(OUTPUT / filename), full_page=full_page, animations='disabled')
+        except Exception as error:
+            # Chromium can reject the first surface capture while a headed
+            # window is settling. Retry only that protocol error, once, with
+            # the exact same capture extent; never substitute a smaller image.
+            if 'Page.captureScreenshot' not in str(error) or 'Unable to capture screenshot' not in str(error):
+                raise
+            report.setdefault('captureRetries', []).append({
+                'name': name, 'fullPage': full_page, 'error': repr(error),
+                'layout': await page.evaluate('''() => ({
+                  width: innerWidth, height: innerHeight, scrollX, scrollY,
+                  contentWidth: document.documentElement.scrollWidth,
+                  contentHeight: document.documentElement.scrollHeight,
+                  focused: document.hasFocus(), visibility: document.visibilityState,
+                })'''),
+            })
+            await paint_ready()
+            await page.screenshot(path=str(OUTPUT / filename), full_page=full_page, animations='disabled')
         report['screenshots'].append(filename)
 
     async def layout(name):
