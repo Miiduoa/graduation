@@ -113,6 +113,13 @@ const NON_RATIO_WEEKDAY_COLUMN =
 const NON_RATIO_QUARTER_POSITION_COLUMN =
   /^(?:(?:(?:會計|財政|財務|營運|學年|曆年)\s*)?(?:季度|季別|季次|第幾季|第幾季度|季序號|季度序號|季度編號|季度代碼)|(?:(?:fiscal|calendar|academic)\s+)?(?:quarter|qtr)(?:\s+(?:number|no\.?|index|code|id))?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 
+// A source line, spreadsheet row or exercise step number marks a position
+// in a document or procedure, not a quantity with a meaningful ratio zero.
+// Do not imply that line 4 is twice line 2. Counts of lines/rows/steps
+// remain eligible for a source-grounded comparison.
+const NON_RATIO_SOURCE_POSITION_COLUMN =
+  /^(?:(?:(?:教材|程式碼|原始碼|來源|資料|表格|檔案)?(?:行號|列號|行序號|列序號))|(?:(?:操作|解題|實驗|作業)?(?:步驟|步序)(?:號|次|編號|序號)?)|(?:(?:(?:source|code|text|file|table|data)\s+)?(?:line|row|step|record)\s+(?:number|no\.?|index|id|#))|(?:(?:source|code)\s+line))(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+
 // Clock readings and geographic coordinates have conventional origins.
 // Even positive bare figures (8 vs 12 o'clock, 24 vs 25 degrees east)
 // are not ratios; retain the original table without a zero-based chart.
@@ -187,6 +194,7 @@ function isNonRatioColumn(header: string): boolean {
       AMBIGUOUS_TIME_COLUMN.test(column) ||
       NON_RATIO_WEEKDAY_COLUMN.test(column) ||
       NON_RATIO_QUARTER_POSITION_COLUMN.test(column) ||
+      NON_RATIO_SOURCE_POSITION_COLUMN.test(column) ||
       NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
       DECIBEL_UNIT_COLUMN.test(column) ||
       NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||

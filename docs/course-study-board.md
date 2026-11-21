@@ -2115,3 +2115,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 來源 Markdown 若寫 `display:none;display:banana block`、`visibility:hidden;visibility:visible hidden` 等不合法的多詞 CSS，原掃描器會將後者當成可用覆寫，可能把教師尚未公開的表格當成公開內容衍生顯示。現在不能確認有效的多詞宣告不再覆蓋前方明確隱藏值；常見有效 `inline flex`、`block grid` 仍維持可見性判斷。
 - 不只 `var()`／`calc()`，未知或未來 CSS 函數（如 `future-display()`）也不再被當成已確定可見，而是保守不建立衍生表格；原始教材文字保持不動。新增正反來源解析測試，涵蓋 invalid multi-token、unknown function、合法 multi-keyword override 與隱藏內容之後的公開表格。
 - 只調整本機教材衍生視圖、測試及文件，不新增套件、不外傳教材、不變更閱讀／練習備份。不宣稱完整 CSS computed style 或瀏覽器／實機驗收；須以新 SHA 完整 CI、CodeQL、指定 App 5504170、Maestro 和 Ahaboard 同條件對照為準。PR 保持 Draft，不合併、不部署。
+
+
+### 2026-11-21：來源行號／資料列序／步驟序號不可誤畫成數量倍數
+
+- 教材表格「行號、資料行號、原始碼行號、列號、步驟編號」以及 Line Number、Row No.、Step Index 等是文件／操作的**位置識別碼**，不是有比例零點的量值。原本 2、4 可能被畫成二倍長條；現在只保留原文表格、精確來源行號、逐字 TXT／複製與讀屏，不衍生誤導圖。
+- 「程式碼行數、資料列數、步驟數量、Line Count、Row Count、Number of Steps」是真正的計數，仍可選用來源數值比較。新增 14 個位置欄名與 10 個計數欄名的 React DOM 正反回歸；不更動 PDF/TXT/Markdown 解析、閱讀 v1/v2 與逐題 v1 checkpoint，不新增套件或外傳私人教材。
+- 本次是明確規則修補與測試案例，須以本 SHA 的 CI/CodeQL 實際完成結果為準，不能視為 iOS/Android、VoiceOver/TalkBack、WebGPU 或 Ahaboard 同教材同題同機驗收。指定 App 5504170 APPROVED、Maestro 與客觀競品對照未齊前維持 Draft，不合併、不部署。

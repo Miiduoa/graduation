@@ -2767,3 +2767,42 @@ it.each([
     .toEqual([first, second]);
   view.unmount();
 });
+
+it('does not depict source line, data row or procedural step positions as magnitudes', () => {
+  const positionHeaders = [
+    '行號', '列號', '資料行號', '原始碼行號', '操作步驟', '步驟編號', '步序號',
+    'Line Number', 'Source Line', 'Row No.', 'Record Number',
+    'Step Index', 'Data Row ID', 'Code Line (Python)',
+  ];
+  for (const header of positionHeaders) {
+    const lesson = [
+      '| 教材 | ' + header + ' |', '| --- | --- |',
+      '| 資料庫 | 2 |', '| 網路 | 4 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={lesson} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual(['2', '4']);
+    expect(container.querySelectorAll('meter')).toHaveLength(0);
+    expect(comparisonSummaries(container)).toEqual([]);
+    unmount();
+  }
+});
+
+it('still compares explicit quantities of lines, rows and steps', () => {
+  const quantityHeaders = [
+    '程式碼行數', '資料列數', '步驟數量', '步驟總數',
+    'Lines of Code', 'Line Count', 'Row Count', 'Number of Steps',
+    'Step Count', 'Record Count',
+  ];
+  for (const header of quantityHeaders) {
+    const lesson = [
+      '| 教材 | ' + header + ' |', '| --- | --- |',
+      '| 資料庫 | 2 |', '| 網路 | 4 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={lesson} />);
+    expect(Array.from(container.querySelectorAll('meter'))
+      .map((bar) => [bar.getAttribute('value'), bar.getAttribute('max')]))
+      .toEqual([['2', '4'], ['4', '4']]);
+    unmount();
+  }
+});
