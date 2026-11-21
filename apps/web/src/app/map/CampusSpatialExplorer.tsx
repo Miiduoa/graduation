@@ -1651,7 +1651,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                   {coordinateCopyState === 'copied'
                     ? '已複製目前地點標記座標。'
                     : '無法自動複製，請手動選取上方的地圖標記座標。'}
-                </span>
+                </span>}
                 <p id={directionsNoteId} className={styles.note}>導航僅以目前地點標記為目的地，並非已核實的校舍入口、可通行道路或無障礙動線；請依現場指標確認。</p>
                 <button className="btn" type="button" onClick={() => setBuildingPlanOpen(true)}>平面圖建模預覽</button>
                 {source && <a className={styles.source} href={source} target="_blank" rel="noopener noreferrer">查看地點資料來源 ↗</a>}
