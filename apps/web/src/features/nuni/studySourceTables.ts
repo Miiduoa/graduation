@@ -49,6 +49,22 @@ const TABLE_SUPPRESSED_HTML_TAGS = new Set([
   'xmp', 'iframe', 'noembed', 'noframes', 'title', 'plaintext',
 ]);
 
+// HTML custom elements use hyphenated tag names. A teacher-only
+// <lesson-answer hidden> must be treated like <div hidden>, including nested
+// same-name wrappers. Do not guess visibility of unrelated unknown tags.
+function isCustomHtmlContainer(tag: string): boolean {
+  return /^[a-z][a-z0-9_-]*-[a-z0-9_-]+$/u.test(tag);
+}
+function isTrackedHtmlTag(tag: string): boolean {
+  return TABLE_SUPPRESSED_HTML_TAGS.has(tag) || isCustomHtmlContainer(tag);
+}
+function isNestableHtmlTag(tag: string): boolean {
+  return NESTABLE_HTML_BLOCKS.has(tag) || isCustomHtmlContainer(tag);
+}
+function canCarryHiddenHtmlAttribute(tag: string): boolean {
+  return HIDDEN_HTML_CONTAINERS.has(tag) || isCustomHtmlContainer(tag);
+}
+
 /** Split CSS declarations without treating semicolons in strings, URLs or comments as separators. */
 function splitInlineCssDeclarations(style: string): string[] {
   const declarations: string[] = [];
@@ -382,7 +398,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
     (token, tag: string, offset: number) => {
       // Do not fold a Markdown-escaped example into an active HTML tag.
       if (isEscapedMarkdownTag(source, offset)) return token;
-      if (!TABLE_SUPPRESSED_HTML_TAGS.has(tag.toLowerCase()) || !/[\r\n]/u.test(token)) return token;
+      if (!isTrackedHtmlTag(tag.toLowerCase()) || !/[\r\n]/u.test(token)) return token;
       const newlines = token.match(/\r\n|\r|\n/gu) ?? [];
       return token.replace(/\r\n|\r|\n/gu, ' ') + '\n'.repeat(newlines.length);
     },
@@ -426,7 +442,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
       // Raw <pre>/<code> blocks are HTML, not Markdown inline-code contexts.
       if (!inHtmlComment &&
           (htmlCodeBlocks.length === 0 ||
-            NESTABLE_HTML_BLOCKS.has(htmlCodeBlocks[htmlCodeBlocks.length - 1])) &&
+            isNestableHtmlTag(htmlCodeBlocks[htmlCodeBlocks.length - 1])) &&
           isInsideInlineCode(line, match.index ?? 0)) continue;
       if (inHtmlComment) {
         if (token === '-->' || token === '--!>') inHtmlComment = false;
@@ -448,7 +464,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         continue;
       }
       const tag = match[1]?.toLowerCase();
-      if (!tag || !TABLE_SUPPRESSED_HTML_TAGS.has(tag)) continue;
+      if (!tag || !isTrackedHtmlTag(tag)) continue;
       // Preformatted examples contain literal tag-looking text. In contrast,
       // nested containers of the same type inside a hidden wrapper must be
       // balanced, or the inner closing tag could expose unpublished rows.
@@ -463,10 +479,10 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         // </plaintext> must not expose a teacher-only table below it.
         if (closing && current === tag && current !== 'plaintext') htmlCodeBlocks.pop();
         else if (!closing && !selfClosing && !RAW_HTML_TEXT_BLOCKS.has(current) &&
-            ((current === tag && NESTABLE_HTML_BLOCKS.has(tag)) || RAW_HTML_TEXT_BLOCKS.has(tag)))
+            ((current === tag && isNestableHtmlTag(tag)) || RAW_HTML_TEXT_BLOCKS.has(tag)))
           htmlCodeBlocks.push(tag);
       } else if (!closing && !selfClosing &&
-          (!HIDDEN_HTML_CONTAINERS.has(tag) || hasHiddenHtmlAttribute(token))) {
+          (!canCarryHiddenHtmlAttribute(tag) || hasHiddenHtmlAttribute(token))) {
         htmlCodeBlocks.push(tag);
       }
       hiddenLine = true;

@@ -1473,3 +1473,67 @@ describe('classic Mac and mixed-line-ending course handouts', () => {
     expect(extractStudySourceTables(source)).toEqual(realTable(3));
   });
 });
+
+
+describe('hyphenated custom HTML lesson wrappers keep teacher-only rows hidden', () => {
+  it.each([
+    '<teacher-answer hidden>',
+    '<nuni-lesson-key aria-hidden="true">',
+    '<course-answer style="display:none">',
+  ])('omits a concealed custom element %s but retains the later public source', (opening) => {
+    const tag = /^<([a-z][a-z0-9-]*)/u.exec(opening)?.[1] ?? 'teacher-answer';
+    const source = [
+      opening,
+      '| 尚未公開答案 | 分數 |',
+      '| --- | --- |',
+      '| 教師專用 | 99 |',
+      '</' + tag + '>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('does not let an inner custom element with the same name release its hidden parent', () => {
+    const source = [
+      '<lesson-answer hidden>',
+      '<lesson-answer>',
+      '| 內層未公布 | 分數 |',
+      '| --- | --- |',
+      '| 答案 | 99 |',
+      '</lesson-answer>',
+      '| 外層仍未公布 | 分數 |',
+      '| --- | --- |',
+      '| 答案 | 88 |',
+      '</lesson-answer>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(11));
+  });
+
+  it('folds multiline hidden custom tags without shifting the public table source line', () => {
+    const source = [
+      '<course-answer',
+      ' aria-hidden="true">',
+      '| 隱藏 | 分數 |',
+      '| --- | --- |',
+      '| 教師答案 | 100 |',
+      '</course-answer>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(7));
+  });
+
+  it('preserves an ordinary visible custom element and an escaped hidden example', () => {
+    const source = [
+      '<course-outline>',
+      ...visibleTable,
+      '</course-outline>',
+      '\\<course-answer hidden>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([
+      ...realTable(2),
+      ...realTable(7),
+    ]);
+  });
+});

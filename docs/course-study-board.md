@@ -1,3 +1,9 @@
+## 2026-11-21：自訂 HTML 教材容器不可漏出隱藏的教師答案
+
+- 修復教材原文表格掃描的隱藏邊界：原本只追蹤常見 HTML 標籤，遇到 `<course-answer hidden>`、`<nuni-lesson-key aria-hidden="true">` 這類合法的連字號自訂元素時，可能把其中的教師專用 Markdown 表格另外衍生成可選取的原文表格。現在用相同的隱藏屬性檢查追蹤自訂 HTML 容器；同名內層關閉不會提前釋放隱藏外層，且跨行屬性維持原始行號。
+- 新增自訂容器 hidden、ARIA、inline CSS、巢狀同名、跨行與可見／跳脫語法的正反回歸案例；正常公開的教材表格仍可核對、複製與匯出。這是純文字來源掃描的保守界線，不代表已計算 CSS 或真正由瀏覽器/手機渲染後驗證。
+- 基準精確 head `51b87f5dbc5b84f19e82ed3ea33efed2606f5ee7` 的 CI #44861301406、CodeQL #44861301409、Course access review #44861301432 已成功（僅限舊 SHA）；新 SHA 必須重新查核。GitHub App 5504170 正式 APPROVED、Maestro、iOS/Android 真機、WebGPU 繁中與 Ahaboard 同教材／同題／同機對照仍待驗收，PR 保持 Draft、不合併、不部署。不新增套件、私人教材外傳或變更進度 checkpoint。
+
 ## 2026-11-21：CSS 繼承／回復值不可當成教材可見的證據
 
 - 課程講義若含 `display:none; display:inherit`、`visibility:unset`、`opacity:revert` 或 `content-visibility:revert-layer`，這些 CSS-wide 宣告的實際結果可能受上層元素、樣式層或瀏覽器規則影響。舊版掃描器將其當作確定可見的覆寫值，可能另外衍生出原本在畫面上隱藏的教師答案表格。
