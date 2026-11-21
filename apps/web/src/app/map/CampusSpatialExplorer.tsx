@@ -627,11 +627,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // IntersectionObserver may report isIntersecting=true when the
           // canvas only touches the viewport boundary. A zero-area map has
           // no visible pixels and must not allocate or resume mobile WebGL.
-          // Older WebViews that omit usable rectangle dimensions still use
-          // the boolean intersection flag and retain the manual-start path.
+          // Older WebViews that omit the entire intersectionRect still use
+          // the boolean flag and retain the manual-start path.
           const rect = latest.intersectionRect;
-          const hasMeasuredArea = rect &&
-            Number.isFinite(rect.width) && Number.isFinite(rect.height);
+          // An absent intersectionRect is possible in legacy observer shims.
+          // But a present rectangle with invalid dimensions cannot prove that
+          // the host has visible pixels: fail closed to avoid waking WebGL.
+          // In particular NaN/Infinity must not be treated as "unmeasured".
           // A callback queued before bfcache scroll restoration can carry a
           // *newer* timestamp and a positive historical intersectionRect.
           // Do not wake the GPU if the host is demonstrably offscreen now.
@@ -642,7 +644,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // visual viewport becomes measurable again.
           const position = hostViewportVisibility();
           const confirmedIntersecting = latest.isIntersecting &&
-            (!hasMeasuredArea || (rect.width > 0 && rect.height > 0));
+            (!rect || (Number.isFinite(rect.width) && Number.isFinite(rect.height) &&
+              rect.width > 0 && rect.height > 0));
           // An initial positive callback can arrive during Safari's 0/NaN
           // VisualViewport transition. Do not strand the initial render if
           // no second observer callback follows; require valid on-screen

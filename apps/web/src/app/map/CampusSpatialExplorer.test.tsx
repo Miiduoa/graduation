@@ -140,7 +140,12 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
     act(() => intersection?.(entries, {} as IntersectionObserver));
   };
   notify(100, 0, 160);
-  expect(scene.create).not.toHaveBeenCalled();
+  // Invalid-but-present rectangles must not be treated as old WebViews that
+  // omit intersectionRect. No GPU allocation should occur.
+  for (const [index, width] of [Number.NaN, Number.POSITIVE_INFINITY, -2].entries()) {
+    notify(101 + index, width, 160);
+    expect(scene.create).not.toHaveBeenCalled();
+  }
   expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
@@ -150,6 +155,11 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
 
   notify(120, 280, 0);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  // Invalid subsequent positive callbacks cannot reactivate a suspended GPU.
+  for (const [index, width] of [Number.NaN, Number.POSITIVE_INFINITY, -2].entries()) {
+    notify(121 + index, width, 160);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  }
   notify(130, 280, 160);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
