@@ -293,11 +293,20 @@ it('uses the latest viewport state when a fast mobile scroll batches observer en
   act(() => intersection?.(tiedOnscreen, {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
 
-  // A later callback with the SAME time is not reliable ordering evidence.
-  const callsBeforeStale = scene.setActive.mock.calls.length;
-  const staleEqualTime = [{ isIntersecting: false, time: 310 }] as unknown as IntersectionObserverEntry[];
-  act(() => intersection?.(staleEqualTime, {} as IntersectionObserver));
-  expect(scene.setActive.mock.calls.length).toBe(callsBeforeStale);
+  // Two callbacks can share a rounded timestamp. An equal-time offscreen
+  // record must immediately suspend GPU instead of continuing to render offscreen.
+  // The equally ambiguous positive record cannot override that safe pause.
+  const tiedNegative = [{ isIntersecting: false, time: 310 }] as unknown as IntersectionObserverEntry[];
+  act(() => intersection?.(tiedNegative, {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  const callsAfterTiedPause = scene.setActive.mock.calls.length;
+  const tiedPositive = [{ isIntersecting: true, time: 310 }] as unknown as IntersectionObserverEntry[];
+  act(() => intersection?.(tiedPositive, {} as IntersectionObserver));
+  expect(scene.setActive.mock.calls.length).toBe(callsAfterTiedPause);
+  // A genuinely newer visible observation can reuse the existing scene.
+  const confirmedNewer = [{ isIntersecting: true, time: 311 }] as unknown as IntersectionObserverEntry[];
+  act(() => intersection?.(confirmedNewer, {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });

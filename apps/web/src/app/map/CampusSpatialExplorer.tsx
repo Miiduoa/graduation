@@ -615,11 +615,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
             }
             // A delayed older callback may arrive after a newer one, even
             // if it is the sole entry in its own callback.
-            // Coarse timestamp precision can assign the same time to
-            // separate batches. Equality cannot prove that a delayed
-            // intersecting callback happened after an offscreen callback;
-            // keep the known state until a strictly newer observation.
-            if (latest.time <= lastObservationTime) return;
+            // Quantized timestamps can tie across separate callbacks.
+            // Never wake GPU on an ambiguous equal-time positive event,
+            // but accept an equal-time negative event to fail closed: keeping
+            // an offscreen WebGL scene active wastes mobile power. A newer
+            // positive event (or explicit manual recovery) can resume it.
+            if (latest.time < lastObservationTime ||
+                (latest.time === lastObservationTime && latest.isIntersecting)) return;
             lastObservationTime = latest.time;
           } else {
             if (lastObservationTime !== -Infinity) return;
