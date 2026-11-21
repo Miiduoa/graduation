@@ -1018,3 +1018,11 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - 最小 fail-closed 防線：對含 `teacherNotes` 的既有混合文件，學生評閱者／被評閱者的整筆 GET 改為拒絕，仍僅允許具即時校籍及課程教師權限者讀；不含該欄位的普通評閱內容正常可讀，未修改寫入許可。此規則也會讓含空字串 `teacherNotes` 的舊收據暫時無法由學生 GET，須完成歷史資料盤點與合法分離遷移後恢復相容；不能直接將資料清掉。
 - 合成 Emulator 回歸：教師正常讀取，評閱者與被評閱學生拒讀混合欄位，無關同學拒讀，重放拒絕，合成移除教師備註後正常讀取恢復、重新加入備註即撤權，教師轉校雙欄位衝突拒絕與恢復。既有測試中含 `teacherNotes` 的學生 GET 預期改為拒絕。
 - **隔離驗證與發布**：本次仍需依新 SHA GitHub Firestore 工作流程核對結果；完整 CI、CodeQL、Supabase permissions、Python、Mobile Agent、適用 Maestro 及指定 App 5504170 精確 head 核可不得繼承。後續需將真正 staff-only 欄位拆到僅教師可讀的獨立文件、做受控且可回復的歷史資料遷移及 Web/Mobile 讀取相容測試。其他 `gradeScore` 等欄位是否屬於教師私密資料，須按資料契約獨立調查。教師部分轉校的評分寫入撤權、GCS/Supabase 已發網址撤權及 Storage CAS 仍未結案。未處理正式資料、金鑰、附件 token、migration、部署或 E 校園，也不執行未授權 npm/pnpm audit。
+
+
+### 2026-11-21｜peerReviews 收據 reviewerId 與文件路徑衝突的越權（隔離修補候選）
+
+- **已確認來源缺口：** `groups/{groupId}/assignments/{assignmentId}/peerReviews/{reviewerId}` 的學生 GET 只比對路徑 `reviewerId == request.auth.uid`，student UPDATE 僅要求路徑是本人且更新前後的內嵌 `reviewerId` 相同。若歷史匯入／管理者修正造成文件路徑屬 Alice、但收據明確 `reviewerId = Bob`，Alice 原可讀取並更改 Bob 的評閱回饋；此為來源授權漏洞，不代表已發現正式資料誤綁或外洩。
+- **最小修補：** 學生 GET 若收據有 `reviewerId` 欄位，須同時與路徑及登入者一致；僅完全缺欄的歷史文件保留路徑 GET 相容，明確 null／衝突均拒絕。學生 UPDATE 則必須有明確且與登入者一致的原始 `reviewerId`，不能自行修復他人的收據；教師原有的合法修正及已提交的被評閱者讀取仍保留。`teacherNotes` 的整筆 GET 拒讀保持原安全規則。
+- **可重跑回歸：** `backend/tests/security-rules.test.js` 新增合成 Firestore Emulator 情境，測試跨帳號讀／寫雙拒絕、被評閱者及教師正常讀取、教師修正後合法回饋、同一 token 的跨校欄位衝突／退課撤權／重放、重新授權、再次錯綁撤權及缺欄 legacy GET。推送前未在本環境執行 Firebase Emulator，須核對**精確新 SHA** 的 feature-only Firestore workflow 實際結果；其他測試與正式資料不以靜態推演代替。
+- **發布與已知限制：** 有明確錯綁的歷史收據會拒絕路徑學生讀寫，應離線盤點及教師修正，而不可放寬授權。提交前已確認 main `27ad30c0a098908b2161950303fcf9209764a083`，來源 security 三檔未被 main 新增提交改動；使用原 feature 分支、原 head `1e6090abb2eae7c652eaff7be680215a8b202ed6` 的 `expected_sha` 非強制前進，避免影響其他排程。新 SHA 尚需完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro 及指定 App 5504170 的精確「審查通過」；舊 #517/#577 核可無效。既有 npm/pnpm audit 外送拒絕仍維持，不新增可觸發外送流程的 PR，不合併或部署；無正式資料／金鑰／附件 token／migration／E 校園。另有 GCS／Supabase 已發網址撤權、真 Storage CAS、教師跨校 grading 寫入及歷史 staff-only 欄位遷移待驗證。

@@ -614,7 +614,9 @@ service cloud.firestore {
       return canManageCurrentGroup(groupId)
         || (!data.keys().hasAny(['teacherNotes'])
           && isActiveCurrentGroupMember(groupId)
-          && (reviewerId == request.auth.uid
+          && ((reviewerId == request.auth.uid
+              && (!data.keys().hasAny(['reviewerId'])
+                || data.get('reviewerId', null) == request.auth.uid))
             || (data.submissionOwnerId == request.auth.uid && data.submittedAt != null)));
     }
 
@@ -1587,6 +1589,9 @@ service cloud.firestore {
             || (
               isActiveCurrentGroupMember(groupId)
               && reviewerId == request.auth.uid
+              // A mis-keyed imported receipt must not grant its path owner
+              // permission to edit another person's explicitly owned review.
+              && resource.data.get('reviewerId', null) == request.auth.uid
               && request.resource.data.reviewerId == resource.data.reviewerId
               && request.resource.data.submissionOwnerId == resource.data.submissionOwnerId
               && validReviewerFeedbackUpdate()
