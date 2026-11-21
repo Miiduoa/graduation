@@ -456,10 +456,22 @@ service cloud.firestore {
         );
     }
 
-    // Private submissions, peer reviews and revision logs must not be managed
-    // through a leftover old-campus teacher membership after a transfer.
+    // canManageGroup already checks the live course and school memberships.
+    // Check only the canonical server-bound profile here: running the full
+    // membership predicate twice exhausts the 1000-expression Rules budget
+    // during an otherwise valid atomic grade correction.
     function canManageCurrentGroup(groupId) {
-      return canManageGroup(groupId) && isActiveCurrentGroupMember(groupId);
+      let profilePath = /databases/$(database)/documents/users/$(request.auth.uid);
+      let found = exists(profilePath);
+      let profile = found ? get(profilePath).data : {};
+      let schoolId = get(/databases/$(database)/documents/groups/$(groupId)).data.get('schoolId', '');
+      let school = profile.get('schoolId', null);
+      let primary = profile.get('primarySchoolId', null);
+      return canManageGroup(groupId)
+        && found
+        && (school == schoolId || primary == schoolId)
+        && (school == null || school == '' || school == schoolId)
+        && (primary == null || primary == '' || primary == schoolId);
     }
 
     function isAssignedReviewer(groupId, assignmentId, submissionId, data) {
