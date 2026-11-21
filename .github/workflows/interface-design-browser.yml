@@ -47,6 +47,7 @@ jobs:
     env:
       TZ: Asia/Taipei
       NEXT_TELEMETRY_DISABLED: '1'
+      INTERFACE_BROWSER_HEADED: '1'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -70,7 +71,8 @@ jobs:
       - name: Bundle real interface with explicit synthetic data boundaries
         run: node scripts/qa/interface-design/build.mjs
       - name: Verify interface, forms and accessibility scenarios
-        run: python scripts/qa/interface-design/check.py
+        # Native tab visibility/focus is not represented by separate headless pages.
+        run: xvfb-run -a python scripts/qa/interface-design/check.py
       - name: Upload rendered evidence and source hashes
         if: always()
         uses: actions/upload-artifact@v7

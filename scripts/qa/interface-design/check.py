@@ -28,6 +28,41 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+async def check_notification_activity(page, report):
+    trigger = page.get_by_role('button', name='顯示完成通知', exact=True)
+    notification = page.get_by_role('status').filter(has_text='已儲存安排')
+    await page.bring_to_front()
+    await trigger.click()
+    await page.mouse.move(1, 1)
+    await expect(notification).to_be_visible()
+    activity = []
+    report['notificationActivity'] = activity
+
+    async def record(stage):
+        activity.append({'stage': stage, **await page.evaluate('''() => ({
+          visibility: document.visibilityState, focused: document.hasFocus(),
+          activeControl: document.activeElement?.textContent?.trim(),
+        })''')})
+
+    await record('before-switch')
+    other_page = await page.context.new_page()
+    try:
+        await other_page.bring_to_front()
+        await record('after-switch')
+        await page.wait_for_function("document.visibilityState !== 'visible' || !document.hasFocus()")
+        await page.wait_for_timeout(1800)
+        await expect(notification).to_be_visible()
+        await record('reading-time-preserved')
+        await page.bring_to_front()
+        await record('returned')
+        await page.wait_for_function("document.visibilityState === 'visible' && document.hasFocus()")
+        await expect(notification).to_have_count(0, timeout=5000)
+    finally:
+        await other_page.close()
+        await page.bring_to_front()
+    report['checks'].append('Notification retains its reading time across a real browser tab focus change and expires after returning')
+
+
 async def assert_modal_tab_boundary(page, key, expected, report):
     # Native dialog traversal may visit browser chrome at a document boundary.
     # https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation
@@ -568,24 +603,7 @@ async def scenario(browser, origin, config, reports):
         await expect(notification).to_have_count(0, timeout=5000)
         report['checks'].append('Pressed feedback respects motion preferences; completion toast fits, announces status, pauses during focus and resumes afterward')
 
-        # A real foreground change must preserve the remaining reading time.
-        # Hover and keyboard focus are outside the notification in this case.
-        await trigger.click()
-        await page.mouse.move(1, 1)
-        await expect(notification).to_be_visible()
-        other_page = await context.new_page()
-        try:
-            await other_page.bring_to_front()
-            await page.wait_for_function("document.visibilityState !== 'visible' || !document.hasFocus()")
-            await page.wait_for_timeout(1800)
-            await expect(notification).to_be_visible()
-            await page.bring_to_front()
-            await page.wait_for_function("document.visibilityState === 'visible' && document.hasFocus()")
-            await expect(notification).to_have_count(0, timeout=5000)
-        finally:
-            await other_page.close()
-            await page.bring_to_front()
-        report['checks'].append('Notification follows text preference and retains its reading time across a real browser page focus change')
+        report['checks'].append('Notification title and detail follow the active site text preference')
 
         # Collect the independent new form/short-window checks even if one
         # fails. A failure stays a failure; reset the synthetic page afterward
@@ -604,6 +622,7 @@ async def scenario(browser, origin, config, reports):
                 await page.goto(origin + '/?' + urlencode(params))
                 await expect(page.get_by_role('heading', name='今天', exact=True)).to_be_visible()
 
+        await check_section('notification-activity', lambda: check_notification_activity(page, report))
         await check_section('forms', lambda: check_dialogs_and_fields(page, config, report, capture))
         await check_section('action-feedback', lambda: check_action_feedback(page, config, report, capture))
         await check_section('quick-search', lambda: check_quick_search(page, config, report, capture))
@@ -642,7 +661,9 @@ async def main():
     reports = []
     try:
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(executable_path=os.environ.get('CHROME_PATH'))
+            browser = await playwright.chromium.launch(
+                executable_path=os.environ.get('CHROME_PATH'),
+                headless=os.environ.get('INTERFACE_BROWSER_HEADED') != '1')
             try:
                 for config in SCENARIOS:
                     await scenario(browser, f'http://127.0.0.1:{server.server_port}', config, reports)
