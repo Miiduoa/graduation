@@ -97,6 +97,8 @@
 }
 
 .section {
+  container-name: today-section;
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -105,6 +107,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
+  font-size: var(--font-body-size);
 }
 
 .sectionHeading {
@@ -471,6 +474,58 @@
   }
   .time {
     flex-basis: 3.8rem;
+  }
+}
+
+/* Give the course or task the full reading width as text grows within a card. */
+@container today-section (max-width: 18em) {
+  .classRowWithMap {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .scheduleRow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'time chevron'
+      'body body';
+    align-items: start;
+    gap: 8px 12px;
+  }
+
+  .scheduleRow .time {
+    grid-area: time;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+  }
+
+  .scheduleRow .rowBody {
+    grid-area: body;
+  }
+
+  .scheduleRow .rowChevron {
+    grid-area: chevron;
+    align-self: center;
+  }
+
+  .workItem {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .workItem > .row {
+    flex: none;
+  }
+
+  .classroomLink,
+  .submit {
+    align-self: start;
+    justify-self: start;
+    max-width: calc(100% - 24px);
+    margin: -4px 12px 8px;
   }
 }
 
