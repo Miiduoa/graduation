@@ -29,6 +29,13 @@ const HIDDEN_HTML_CONTAINERS = new Set([
   // Scan explicit hidden attributes/styles on these elements as well, while
   // leaving ordinary visible HTML wrappers eligible for source tables.
   'span', 'p', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
+  // The HTML hidden attribute is global, including older <center> handouts,
+  // definition lists and inline semantic wrappers. If these are omitted,
+  // teacher-only Markdown-looking rows can escape into the derived study view.
+  // Only explicit source attributes/styles are checked, not computed CSS.
+  'center', 'address', 'hgroup', 'dl', 'dt', 'dd',
+  'a', 'em', 'strong', 'b', 'i', 'u', 'small', 'mark', 'time',
+  'output', 'ins', 'del', 'sup', 'sub',
 ]);
 // HTML disclosure / dialog bodies are not standalone Markdown tables. Keep
 // nested disclosures balanced so a closed inner example cannot expose its parent.

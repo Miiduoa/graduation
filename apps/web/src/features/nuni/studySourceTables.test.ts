@@ -1537,3 +1537,71 @@ describe('hyphenated custom HTML lesson wrappers keep teacher-only rows hidden',
     ]);
   });
 });
+
+
+describe('global hidden HTML attributes on standard course handout wrappers', () => {
+  it.each([
+    { opening: '<center hidden>', closing: '</center>' },
+    { opening: '<address aria-hidden="true">', closing: '</address>' },
+    { opening: '<dl style="display:none">', closing: '</dl>' },
+    { opening: '<a hidden="false">', closing: '</a>' },
+    { opening: '<em style="visibility:hidden">', closing: '</em>' },
+    { opening: '<hgroup hidden>', closing: '</hgroup>' },
+    { opening: '<strong aria-hidden="true">', closing: '</strong>' },
+    { opening: '<time style="opacity:0">', closing: '</time>' },
+  ])('omits a teacher-only table in $opening, then keeps a public table', ({ opening, closing }) => {
+    const source = [
+      opening,
+      '| 教師未公布答案 | 分數 |',
+      '| --- | --- |',
+      '| 隱藏答案 | 99 |',
+      closing,
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('does not release a hidden center when its same-name inner element closes', () => {
+    const source = [
+      '<center hidden>',
+      '<center>',
+      '| 內層答案 | 分數 |',
+      '| --- | --- |',
+      '| 不可見 | 99 |',
+      '</center>',
+      '| 外層仍隱藏 | 分數 |',
+      '| --- | --- |',
+      '| 不可見 | 88 |',
+      '</center>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(11));
+  });
+
+  it('folds a multiline hidden definition-list tag and keeps the actual public line number', () => {
+    const source = [
+      '<dl',
+      ' aria-hidden="true">',
+      '| 隱藏 | 分數 |',
+      '| --- | --- |',
+      '| 未公開 | 100 |',
+      '</dl>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(7));
+  });
+
+  it('does not suppress ordinary visible wrappers or Markdown-escaped tag examples', () => {
+    const source = [
+      '<center>',
+      ...visibleTable,
+      '</center>',
+      '\\<center hidden>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([
+      ...realTable(2),
+      ...realTable(7),
+    ]);
+  });
+});
