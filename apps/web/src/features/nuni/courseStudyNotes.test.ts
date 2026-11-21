@@ -247,18 +247,18 @@ describe('course study note downloads', () => {
       { title: '延伸推測', explanation: '這不是教材上的式子。', sourceQuote: 'x²+y²', formula: 'x²+y³' },
       { title: '殘缺字素', explanation: '不能只引用半個 Emoji。', sourceQuote: '👩‍💻', formula: '👩' },
       { title: '空白符號', explanation: '只有標點不算公式證據。', sourceQuote: 'x²+y²', formula: '。' },
-      { title: '隱形草稿', explanation: '不匯出看不見的公式。', sourceQuote: 'x²+y²', formula: '\\u200b\\u0301' },
+      { title: '隱形草稿', explanation: '不匯出看不見的公式。', sourceQuote: 'x²+y²', formula: '\u200b\u0301' },
     ];
     const original = JSON.stringify(memory);
     const output = buildCourseStudyNotes('資料庫', formulaSource, { '0:0': memory });
-    expect(output).toContain('第 1 步：教材公式\\n本步講解：\\n先找到原文。\\n本步引用原文：\\nx²+y²\\n原文公式：\\nx²+y²');
-    expect(output).toContain('第 2 步：延伸推測\\n本步講解：\\n這不是教材上的式子。\\n本步引用原文：\\nx²+y²\\nAI 公式（無法在本段逐字定位）：\\nx²+y³');
-    expect(output).toContain('AI 公式（無法在本段逐字定位）：\\n👩');
-    expect(output).toContain('AI 公式（無法在本段逐字定位）：\\n。');
-    expect(output).not.toContain('原文公式：\\nx²+y³');
-    expect(output).not.toContain('原文公式：\\n👩');
-    expect(output).not.toContain('原文公式：\\n。');
-    expect(output).not.toContain('\\u200b\\u0301');
+    expect(output).toContain('第 1 步：教材公式\n本步講解：\n先找到原文。\n本步引用原文：\nx²+y²\n原文公式：\nx²+y²');
+    expect(output).toContain('第 2 步：延伸推測\n本步講解：\n這不是教材上的式子。\n本步引用原文：\nx²+y²\nAI 公式（無法在本段逐字定位）：\nx²+y³');
+    expect(output).toContain('AI 公式（無法在本段逐字定位）：\n👩');
+    expect(output).toContain('AI 公式（無法在本段逐字定位）：\n。');
+    expect(output).not.toContain('原文公式：\nx²+y³');
+    expect(output).not.toContain('原文公式：\n👩');
+    expect(output).not.toContain('原文公式：\n。');
+    expect(output).not.toContain('\u200b\u0301');
     expect(output.match(/原文公式：/g)).toHaveLength(1);
     expect(JSON.stringify(memory)).toBe(original);
   });
@@ -276,8 +276,8 @@ describe('course study note downloads', () => {
     ];
     const output = buildCourseStudyNotes('數學', pdf, { '0:0': memory });
     expect(output).toContain('第 1 頁 · 第 1 段');
-    expect(output).toContain('AI 公式（無法在本段逐字定位）：\\nz=7');
-    expect(output).not.toContain('原文公式：\\nz=7');
+    expect(output).toContain('AI 公式（無法在本段逐字定位）：\nz=7');
+    expect(output).not.toContain('原文公式：\nz=7');
   });
 
   it('preserves Unicode, multiline notes and source text verbatim as plain text', () => {
