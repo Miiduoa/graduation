@@ -530,10 +530,10 @@ it('still recognizes indented closing HTML tags inside real HTML blocks', () => 
   }
 });
 
-it('shows the visible table after preformatted HTML teaching code mentions nested tags', () => {
+it('shows the visible table after escaped preformatted HTML teaching code examples', () => {
   const content = [
     '<pre class="lesson">',
-    'HTML 教學的字面範例：<code> 與 <pre> 標記',
+    'HTML 教學的字面範例：&lt;code&gt; 與 &lt;pre&gt; 標記',
     '| 範例科目 | 假學分 |',
     '| --- | --- |',
     '| 測試 | 999 |',
@@ -544,6 +544,26 @@ it('shows the visible table after preformatted HTML teaching code mentions neste
   ].join('\n');
   expect(extractStudySourceTables(content)).toEqual([{
     startLine: 7,
+    headers: ['正式課程', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});
+
+it('keeps unpublished rows inside actual nested pre tags, even when one starts in prose', () => {
+  const content = [
+    '<pre class="lesson">',
+    '這行是未跳脫的 HTML：<pre> 會真的建立巢狀元素',
+    '</pre>',
+    '| 教師尚未公開 | 分數 |',
+    '| --- | --- |',
+    '| 答案 | 99 |',
+    '</pre>',
+    '| 正式課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 8,
     headers: ['正式課程', '學分'],
     rows: [['資料庫', '3']],
   }]);
