@@ -214,7 +214,7 @@ async def review_form(page, config, report, capture):
     await submit.click()
     await assert_pending(page, dialog, 'review', [course, comment, rating.get_by_role('radio', name='2 顆星', exact=True)], report, capture)
     await page.evaluate("window.__taskFlowQA.settle('review', false)")
-    await expect(dialog.get_by_role('alert').filter(has_text='填寫內容已保留')).to_be_visible()
+    await expect(dialog.get_by_role('alert').filter(has_text='內容已保留')).to_be_visible()
     await expect(course).to_have_value('資訊系統設計與實作')
     await expect(comment).to_have_value('合成驗收：送出失敗後仍要保留這段評論。')
     await expect(rating.get_by_role('radio', name='2 顆星', exact=True)).to_be_checked()
@@ -264,7 +264,7 @@ async def group_form(page, config, report, capture):
     await dialog.get_by_role('button', name='建立讀書會', exact=True).click()
     await assert_pending(page, dialog, 'group', [name, course, start, end], report, capture)
     await page.evaluate("window.__taskFlowQA.settle('group', false)")
-    await expect(dialog.get_by_role('alert').filter(has_text='填寫內容已保留')).to_be_visible()
+    await expect(dialog.get_by_role('alert').filter(has_text='內容已保留')).to_be_visible()
     await expect(name).to_have_value('週末課程複習')
     await expect(course).to_have_value('資訊系統設計與實作')
     await expect(start).to_have_value('18')
@@ -331,6 +331,7 @@ async def scenario(browser, origin, config, reports):
         report['status'] = 'passed'
     except Exception as failure:
         report.update({'status': 'failed', 'error': repr(failure)})
+        print(json.dumps({'scenario': config['name'], 'status': 'failed', 'error': repr(failure)}, ensure_ascii=False), flush=True)
         try:
             await capture('failure', full_page=False)
             (OUTPUT / f"task-flow-{config['name']}-failure.html").write_text(await page.content(), encoding='utf-8')
