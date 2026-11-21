@@ -989,3 +989,11 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **合成回歸：** 新增相同 Firebase auth context 的雙向校籍衝突、正常 GET/LIST、收據 CREATE/GET、舊校 GET/LIST 拒絕、跨校發布與刪除拒絕、恢復及單欄位歷史 profile 相容案例。須在真正 Firebase Emulator 和相關現有工作流程對精確 head 重跑，不能沿用上輪 `6a582961...` 的成功。
 - **限制與發布閘門：** 真 GCS 已發 URL、Storage 附件 token 撤銷、Supabase URL、隔離 Storage 競態仍未結案；正式歷史雙校籍資料盤點、完整 CI／CodeQL／Supabase permissions／Python security／Mobile Agent Regression／適用 Maestro、nuni-merge-gate App 5504170 的精確 head「審查通過」、回復與部署尚未完成。未執行被拒絕的 npm/pnpm audit，也不透過其他方式外送相同依賴清單；不使用正式資料、金鑰、token、migration、E 校園。正式合併／發布由既有主線窗口處理。
 
+
+### 2026-11-21｜群組作業收據：文件 ID 不得覆蓋明確學生 owner（獨立候選）
+
+- 本輪精確已讀基準：安全分支 `e031a8774e2fb91a309149ef6ad959292bb0bd6d`、main `cea4084fff5347b5d3203d9cadb499db439040b7`，兩者已分歧 9 ahead／9 behind；#517、#577 已合併，其原核可只屬原 head。原 `e031a8774e2fb91a309149ef6ad959292bb0bd6d` 的 Firestore-only workflow #44813405090 已完成成功，本候選尚不得沿用。
+- 發現 `groups/{groupId}/assignments/{assignmentId}/submissions/{submissionId}` 單筆讀取，原規則以 `submissionId == request.auth.uid || canReadSubmissionDoc(...)` 授權。若歷史／匯入資料的文件 ID 是 Alice，但明確 `userId` 是 Bob，同課程的 Alice 可讀到 Bob 的私人作答與已發布評語。這是由精確現有 Rules 可證的授權條件缺口；**不是**已觀察到正式資料錯配或實際外洩。
+- 最小修改保留「本人查詢尚未建立的收據」的既有空文件 GET（`resource == null`），但有實際文件時一律呼叫 `canReadSubmissionDoc`，以明確 owner 為準。合法真 owner、教師及指派評閱者仍按原授權，無 `userId/uid/studentId` 的舊收據才依既有 owner helper 回退至文件 ID；明確 null 不回退。
+- 新增合成 Firebase Emulator 回歸：雙向錯配、正確 owner、opaque 路徑、舊收據、null owner、非會員、教師、同一登入狀態的退課／校籍撤權與恢復。沒有操作正式資料或既有收據。
+- **驗證分層：** 提交前做來源錨點與 JS 語法檢查；新 head Emulator／HTTP／DM／TypeCheck／Web Build 必須以本輪 GitHub workflow 實際結果回填；完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、指定 App 5504170 對新 head 的 APPROVED、歷史資料盤點、發布回復及真 GCS／Supabase 已發 URL 撤銷仍未完成。這次沒有改 migration、部署、金鑰或 E 校園；未執行或繞道未授權 npm/pnpm audit。

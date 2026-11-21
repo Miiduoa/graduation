@@ -2830,6 +2830,57 @@ describe('firestore security rules', () => {
     );
   });
 
+  test('nested submission IDs cannot override explicit owner identity', async () => {
+    const group = 'groups/nested-submission-owner-conflict';
+    const base = `${group}/assignments/task/submissions`;
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      await db.doc(`${group}/assignments/task`).set({ title: 'Private task' });
+      for (const uid of ['alice', 'bob', 'charlie', 'dave', 'teacher', 'outsider']) {
+        await db.doc(`users/${uid}`).set({ schoolId: 'pu', status: 'active' });
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
+      }
+      for (const uid of ['alice', 'bob', 'charlie', 'dave', 'teacher']) {
+        await db.doc(`${group}/members/${uid}`).set({
+          status: 'active', role: uid === 'teacher' ? 'instructor' : 'member',
+        });
+      }
+      await db.doc(`${base}/alice`).set({ userId: 'bob', content: 'Bob confidential answer' });
+      await db.doc(`${base}/bob`).set({ userId: 'alice', content: 'Alice confidential answer' });
+      await db.doc(`${base}/opaque`).set({ userId: 'alice', content: 'Alice opaque receipt' });
+      await db.doc(`${base}/charlie`).set({ content: 'Legacy owner by document ID' });
+      await db.doc(`${base}/dave`).set({ userId: null, content: 'Explicit null owner' });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const dave = testEnv.authenticatedContext('dave').firestore();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const outsider = testEnv.authenticatedContext('outsider').firestore();
+
+    // The old ID shortcut leaked the first two receipts to the wrong user.
+    await assertFails(alice.doc(`${base}/alice`).get({ source: 'server' }));
+    await assertFails(bob.doc(`${base}/bob`).get({ source: 'server' }));
+    await assertSucceeds(bob.doc(`${base}/alice`).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(`${base}/bob`).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(`${base}/opaque`).get({ source: 'server' }));
+    await assertSucceeds(charlie.doc(`${base}/charlie`).get({ source: 'server' }));
+    await assertFails(dave.doc(`${base}/dave`).get({ source: 'server' }));
+    await assertFails(outsider.doc(`${base}/alice`).get({ source: 'server' }));
+    await assertSucceeds(teacher.doc(`${base}/alice`).get({ source: 'server' }));
+
+    // A live token cannot replay a receipt after group or school revocation.
+    await seedFirestore(db => db.doc(`${group}/members/alice`).update({ status: 'removed' }));
+    await assertFails(alice.doc(`${base}/bob`).get({ source: 'server' }));
+    await seedFirestore(db => db.doc(`${group}/members/alice`).update({ status: 'active' }));
+    await assertSucceeds(alice.doc(`${base}/bob`).get({ source: 'server' }));
+    await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'removed' }));
+    await assertFails(alice.doc(`${base}/bob`).get({ source: 'server' }));
+    await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.doc(`${base}/bob`).get({ source: 'server' }));
+  });
+
   test("deny students from reading classmates' submissions", async () => {
     await seedFirestore(async (db) => {
       await db.collection('groups').doc('group-1').set({
