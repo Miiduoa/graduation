@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   NuniError,
   type NuniAssignment,
@@ -7,6 +7,9 @@ import {
   type NuniWorkspace,
 } from '@campus/shared/src/nuni';
 import { AssignmentCard, assignmentReceiptDomId } from './AssignmentCard';
+
+const originalShow = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
 
 const state = vi.hoisted(() => ({
   context: 'session-a',
@@ -75,6 +78,30 @@ beforeEach(() => {
   state.fileSubmit = false;
   state.request.mockReset().mockResolvedValue({ submissions: [submission] });
   state.upload.mockReset();
+  // jsdom exercises the submit/preview lifecycle; browser QA verifies native
+  // modal focus containment and inert background behavior.
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    writable: true,
+    value: vi.fn(function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    }),
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+    configurable: true,
+    writable: true,
+    value: vi.fn(function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    }),
+  });
+});
+afterEach(() => {
+  cleanup();
+  if (originalShow) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShow);
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+  if (originalClose) Object.defineProperty(HTMLDialogElement.prototype, 'close', originalClose);
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
+  document.body.style.removeProperty('overflow');
 });
 async function openSubmissions() {
   fireEvent.click(screen.getByRole('button', { name: '查看繳交內容' }));
@@ -125,11 +152,9 @@ it.each(['student', 'owner-teacher'] as const)(
 
 it('requires a teacher decision when a student updates the answer under a dirty feedback draft', async () => {
   const original = reviewed();
-  state.request
-    .mockResolvedValueOnce({ submissions: [original] })
-    .mockResolvedValueOnce({
-      submissions: [{ ...original, body: '學生新稿', submittedAt: '2026-10-08T10:00:00.000Z' }],
-    });
+  state.request.mockResolvedValueOnce({ submissions: [original] }).mockResolvedValueOnce({
+    submissions: [{ ...original, body: '學生新稿', submittedAt: '2026-10-08T10:00:00.000Z' }],
+  });
   render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} />);
   const editor = await openSubmissions();
   fireEvent.change(editor, { target: { value: '尚未儲存的舊稿回饋' } });
@@ -672,7 +697,9 @@ it('previews a photo and shows a late receipt after a confirmed file submit', as
     />,
   );
   expect(screen.getByText('已過截止時間，現在送出會標為遲交')).toBeTruthy();
-  expect(screen.getByText('網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。')).toBeTruthy();
+  expect(
+    screen.getByText('網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。'),
+  ).toBeTruthy();
   const photo = new File([new Uint8Array([0xff, 0xd8, 0xff, 0x00])], 'shot.jpg', {
     type: 'image/jpeg',
   });
@@ -682,7 +709,7 @@ it('previews a photo and shows a late receipt after a confirmed file submit', as
   expect(screen.getByRole('list', { name: '即將繳交的檔案' }).textContent).toMatch(/B|KB|MB/);
   fireEvent.click(screen.getByRole('button', { name: '放大預覽 shot.jpg' }));
   expect(screen.getByRole('dialog', { name: 'shot.jpg' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+  fireEvent.click(screen.getByRole('button', { name: '關閉預覽' }));
   fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
   expect(await screen.findByText('上傳中 0/1，請保持網路連線。')).toBeTruthy();
   await act(async () => finishUpload(mine.files[0]));
@@ -865,9 +892,7 @@ it('saves feedback and opens the next awaiting receipt only after server success
   fireEvent.click(within(firstReceipt).getByRole('button', { name: '儲存回饋並查看下一份' }));
   await screen.findByText('回饋已儲存。已移到 陳同學 的繳交。');
   const peerReceipt = screen.getByRole('article', { name: '陳同學的繳交' });
-  expect(
-    within(peerReceipt).getByText(/待回饋第 1／1 份/),
-  ).toBeTruthy();
+  expect(within(peerReceipt).getByText(/待回饋第 1／1 份/)).toBeTruthy();
   expect(within(peerReceipt).getByText(/目前批改這一份/)).toBeTruthy();
   expect(within(peerReceipt).getByLabelText('給陳同學的回饋')).toBeTruthy();
   expect(within(peerReceipt).getByRole('button', { name: '儲存回饋' })).toBeTruthy();
@@ -1009,14 +1034,24 @@ it('reveals the next receipt only inside the activity that saved, not a sibling 
   expect(firstScroll).not.toHaveBeenCalled();
 });
 
-
 it('送出中與離線不產生已繳收據，收到伺服器回覆後才確認同一份作業', async () => {
   let resolve!: (result: unknown) => void;
   let reject!: (error: Error) => void;
-  state.request.mockReturnValueOnce(new Promise((yes, no) => { resolve = yes; reject = no; }));
+  state.request.mockReturnValueOnce(
+    new Promise((yes, no) => {
+      resolve = yes;
+      reject = no;
+    }),
+  );
   const onConfirmed = vi.fn();
-  render(<AssignmentCard item={{ ...assignment, dueAt: '2099-12-31T00:00:00Z' }}
-    workspace={{ ...workspace, memberRole: 'student' }} reload={reload} onConfirmed={onConfirmed} />);
+  render(
+    <AssignmentCard
+      item={{ ...assignment, dueAt: '2099-12-31T00:00:00Z' }}
+      workspace={{ ...workspace, memberRole: 'student' }}
+      reload={reload}
+      onConfirmed={onConfirmed}
+    />,
+  );
   fireEvent.change(screen.getByLabelText('作業內容'), { target: { value: '我的資料表' } });
   fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
   expect(screen.queryByRole('region', { name: '我的繳交紀錄' })).toBeNull();
@@ -1025,16 +1060,31 @@ it('送出中與離線不產生已繳收據，收到伺服器回覆後才確認�
   expect(screen.queryByRole('region', { name: '我的繳交紀錄' })).toBeNull();
   expect(onConfirmed).not.toHaveBeenCalled();
   expect((screen.getByLabelText('作業內容') as HTMLTextAreaElement).value).toBe('我的資料表');
-  state.request.mockReturnValueOnce(new Promise((yes) => { resolve = yes; }));
+  state.request.mockReturnValueOnce(
+    new Promise((yes) => {
+      resolve = yes;
+    }),
+  );
   fireEvent.submit(screen.getByLabelText('作業內容').closest('form')!);
-  const confirmed = { ...assignment, mySubmission: { ...submission,
-    platformAccountId: 'pa_11111111-1111-4111-8111-111111111111', body: '我的資料表' } };
+  const confirmed = {
+    ...assignment,
+    mySubmission: {
+      ...submission,
+      platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
+      body: '我的資料表',
+    },
+  };
   await act(async () => resolve(confirmed));
-  expect((await screen.findByRole('region', { name: '我的繳交紀錄' })).textContent).toContain('我的資料表');
-  expect(onConfirmed).toHaveBeenCalledWith(expect.objectContaining({
-    id: assignment.id, workspaceId: workspace.id,
-    mySubmission: expect.objectContaining({ assignmentId: assignment.id, state: 'submitted' }),
-  }));
+  expect((await screen.findByRole('region', { name: '我的繳交紀錄' })).textContent).toContain(
+    '我的資料表',
+  );
+  expect(onConfirmed).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: assignment.id,
+      workspaceId: workspace.id,
+      mySubmission: expect.objectContaining({ assignmentId: assignment.id, state: 'submitted' }),
+    }),
+  );
 });
 it('withdraws a submission and keeps the cleared receipt visible after confirmation', async () => {
   state.fileSubmit = true;
@@ -1277,25 +1327,41 @@ it('採用新同步的撤回結果並保留尚未送出的草稿', async () => {
 it('收件讀取晚到時保留剛儲存的回饋，並在慢讀取完成後才安排下一次', async () => {
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
-  render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion="first" />);
+  render(
+    <AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion="first" />,
+  );
   const feedback = await openSubmissions();
   // 先讓收件 live effect 掛上 pageshow，再切 fake timers，避免監聽尚未註冊。
-  await act(async () => { await Promise.resolve(); });
+  await act(async () => {
+    await Promise.resolve();
+  });
   vi.useFakeTimers();
   try {
     let finish!: (value: unknown) => void;
-    const older = new Promise((resolve) => { finish = resolve; });
-    state.request.mockImplementation((path: string) => path.endsWith('/feedback') ? Promise.resolve(reviewed('新的回饋')) : older);
-    await act(async () => { window.dispatchEvent(new Event('pageshow')); });
+    const older = new Promise((resolve) => {
+      finish = resolve;
+    });
+    state.request.mockImplementation((path: string) =>
+      path.endsWith('/feedback') ? Promise.resolve(reviewed('新的回饋')) : older,
+    );
+    await act(async () => {
+      window.dispatchEvent(new Event('pageshow'));
+    });
     expect(typeof finish).toBe('function');
     const calls = state.request.mock.calls.length;
-    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
     expect(state.request).toHaveBeenCalledTimes(calls);
     fireEvent.change(feedback, { target: { value: '新的回饋' } });
-    await act(async () => { fireEvent.submit(feedback.closest('form')!); });
+    await act(async () => {
+      fireEvent.submit(feedback.closest('form')!);
+    });
     expect(screen.getByText('回饋已儲存，學生現在可以查看。')).toBeTruthy();
     state.request.mockResolvedValue({ submissions: [reviewed('新的回饋')] });
-    await act(async () => { finish({ submissions: [submission] }); });
+    await act(async () => {
+      finish({ submissions: [submission] });
+    });
     expect(screen.getByRole('region', { name: '目前老師回饋' }).textContent).toContain('新的回饋');
   } finally {
     vi.useRealTimers();
@@ -1306,24 +1372,46 @@ it('收件讀取晚到時保留剛儲存的回饋，並在慢讀取完成後才�
 it('背景再回前景先丟棄舊收件，不等待主清單更新', async () => {
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
-  const view = render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion="first" />);
+  const view = render(
+    <AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion="first" />,
+  );
   await openSubmissions();
-  await act(async () => { await Promise.resolve(); });
+  await act(async () => {
+    await Promise.resolve();
+  });
   try {
     let finish!: (value: unknown) => void;
-    state.request.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
-    await act(async () => { window.dispatchEvent(new Event('pageshow')); });
+    state.request.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await act(async () => {
+      window.dispatchEvent(new Event('pageshow'));
+    });
     expect(typeof finish).toBe('function');
     await act(async () => {
       window.dispatchEvent(new Event('pagehide'));
       window.dispatchEvent(new Event('pageshow'));
     });
     let fresh!: (value: unknown) => void;
-    state.request.mockImplementationOnce(() => new Promise((resolve) => { fresh = resolve; }));
-    await act(async () => { finish({ submissions: [reviewed('背景前的舊回饋')] }); });
+    state.request.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          fresh = resolve;
+        }),
+    );
+    await act(async () => {
+      finish({ submissions: [reviewed('背景前的舊回饋')] });
+    });
     expect(screen.queryByText('背景前的舊回饋')).toBeNull();
-    await act(async () => { fresh({ submissions: [reviewed('前景的新回饋')] }); });
-    expect(screen.getByRole('region', { name: '目前老師回饋', hidden: true }).textContent).toContain('前景的新回饋');
+    await act(async () => {
+      fresh({ submissions: [reviewed('前景的新回饋')] });
+    });
+    expect(
+      screen.getByRole('region', { name: '目前老師回饋', hidden: true }).textContent,
+    ).toContain('前景的新回饋');
     view.unmount();
   } finally {
     vi.restoreAllMocks();
@@ -1331,35 +1419,78 @@ it('背景再回前景先丟棄舊收件，不等待主清單更新', async () =
 });
 
 it('主清單頻繁更新不作廢慢收件，隱藏卡片停止自動讀取', async () => {
-  const view = render(<AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion="first" />);
+  const view = render(
+    <AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion="first" />,
+  );
   await openSubmissions();
   await screen.findByRole('button', { name: '更新繳交內容' });
   vi.useFakeTimers();
   try {
     // 停掉真實時鐘上的 initialDelay，改在假時鐘下重新訂閱，避免 pageshow／計時器競態
     view.rerender(
-      <AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion="first" receiptActive={false} />,
+      <AssignmentCard
+        item={assignment}
+        workspace={workspace}
+        reload={reload}
+        syncVersion="first"
+        receiptActive={false}
+      />,
     );
     await act(async () => {});
     view.rerender(
-      <AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion="first" receiptActive={true} />,
+      <AssignmentCard
+        item={assignment}
+        workspace={workspace}
+        reload={reload}
+        syncVersion="first"
+        receiptActive={true}
+      />,
     );
     await act(async () => {});
     let finish: ((value: unknown) => void) | undefined;
-    state.request.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+    state.request.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60000);
+    });
     expect(finish).toEqual(expect.any(Function));
     const before = state.request.mock.calls.length;
     for (let i = 0; i < 4; i++) {
-      view.rerender(<AssignmentCard item={assignment} workspace={workspace} reload={reload} syncVersion={`next-${i}`} />);
-      await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+      view.rerender(
+        <AssignmentCard
+          item={assignment}
+          workspace={workspace}
+          reload={reload}
+          syncVersion={`next-${i}`}
+        />,
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000);
+      });
     }
     expect(state.request).toHaveBeenCalledTimes(before);
-    await act(async () => { finish!({ submissions: [{ ...submission, body: '慢讀取的新內容' }] }); });
+    await act(async () => {
+      finish!({ submissions: [{ ...submission, body: '慢讀取的新內容' }] });
+    });
     expect(screen.getByText('慢讀取的新內容')).toBeTruthy();
-    view.rerender(<AssignmentCard item={assignment} workspace={workspace} reload={reload} receiptActive={false} />);
-    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    view.rerender(
+      <AssignmentCard
+        item={assignment}
+        workspace={workspace}
+        reload={reload}
+        receiptActive={false}
+      />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
     expect(state.request).toHaveBeenCalledTimes(before);
     view.unmount();
-  } finally { vi.useRealTimers(); }
+  } finally {
+    vi.useRealTimers();
+  }
 });
