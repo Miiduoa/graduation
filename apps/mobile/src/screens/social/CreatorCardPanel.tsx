@@ -7,6 +7,7 @@ import { readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 
+const CREATOR_CARD_SAVE_TIMEOUT_MS = 15_000;
 const CREATOR_CARD_CONFIRM_TIMEOUT_MS = 15_000;
 const CREATOR_CARD_READ_TIMEOUT_MS = 15_000;
 
@@ -209,8 +210,20 @@ function ScopedCreatorCardPanel({
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
+    let saveTimeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft);
+      // Firestore may leave a write pending when the connection is lost.
+      // Release the UI after a bounded wait, but treat the write as uncertain:
+      // never resubmit it without an explicit server-only confirmation.
+      // This timeout does not cancel the underlying SDK write.
+      const confirmed = await Promise.race([
+        saveCreatorCard(schoolId, ownerUid, submittedDraft),
+        new Promise<never>((_, reject) => {
+          saveTimeout = setTimeout(() => {
+            reject(new Error('Creator card save timed out'));
+          }, CREATOR_CARD_SAVE_TIMEOUT_MS);
+        }),
+      ]);
       if (!mounted.current) return;
       acceptSavedPortfolioLink(confirmed.linkUrl);
       setState({ status: 'ready', value: confirmed });
@@ -221,6 +234,7 @@ function ScopedCreatorCardPanel({
       setNeedsConfirmation(true);
       setFeedback('無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
     } finally {
+      if (saveTimeout !== undefined) clearTimeout(saveTimeout);
       if (mounted.current) {
         savingFlight.current = false;
         setSaving(false);

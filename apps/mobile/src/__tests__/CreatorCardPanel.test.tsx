@@ -523,3 +523,52 @@ test('a stalled server confirmation times out, permits a read-only retry, and ig
     jest.useRealTimers();
   }
 });
+
+test('a stalled initial save releases the UI for read-only confirmation and ignores late success', async () => {
+  jest.useFakeTimers();
+  try {
+    const card = { headline: '', bio: '我的校園作品', linkUrl: '' };
+    let resolveStalled!: (value: Awaited<ReturnType<typeof saveCreatorCard>>) => void;
+    const stalled = new Promise<Awaited<ReturnType<typeof saveCreatorCard>>>((resolve) => {
+      resolveStalled = resolve;
+    });
+    jest.mocked(readCreatorCard).mockResolvedValueOnce(null).mockResolvedValueOnce(card);
+    jest.mocked(saveCreatorCard).mockReturnValueOnce(stalled);
+
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.press(view.getByLabelText('建立社群簡介'));
+    fireEvent.changeText(view.getByLabelText('個人簡介'), card.bio);
+    act(() => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+    expect(view.getByLabelText('正在確認儲存…').props.accessibilityState)
+      .toMatchObject({ disabled: true, busy: true });
+    expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      jest.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(view.getByText(/無法確認簡介是否已儲存/).props.accessibilityRole).toBe('alert');
+    expect(view.getByLabelText('個人簡介').props.value).toBe(card.bio);
+    expect(view.getByLabelText('儲存簡介').props.accessibilityState)
+      .toMatchObject({ disabled: true, busy: false });
+    expect(view.getByLabelText('核對儲存結果').props.accessibilityState)
+      .toMatchObject({ disabled: false, busy: false });
+    expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+
+    // A fresh server-only read confirms the original payload; no second
+    // write is allowed even when the timed-out SDK request settles late.
+    await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+    expect(readCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice');
+    expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+    await act(async () => {
+      resolveStalled({ ...card, bio: '不應出現的過時結果' });
+      await Promise.resolve();
+    });
+    expect(view.queryByText('不應出現的過時結果')).toBeNull();
+    expect(view.getByText(card.bio)).toBeTruthy();
+    expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  } finally {
+    jest.useRealTimers();
+  }
+});
