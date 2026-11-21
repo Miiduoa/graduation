@@ -759,7 +759,7 @@ describe('nested non-rendered HTML wrappers preserve the outer source boundary',
         '| 不可複製的答案 | 88 |',
         `</${tag}>`,
         ...visibleTable,
-      ].join('\\n');
+      ].join('\n');
       expect(extractStudySourceTables(source)).toEqual(realTable(11));
     },
   );
@@ -770,7 +770,7 @@ describe('nested non-rendered HTML wrappers preserve the outer source boundary',
       '| 教師答案 | 數量 |', '| --- | --- |', '| 隱藏 | 99 |',
       '</template>', '</template>',
       ...visibleTable,
-    ].join('\\n');
+    ].join('\n');
     expect(extractStudySourceTables(source)).toEqual(realTable(8));
   });
 });
