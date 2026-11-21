@@ -2303,6 +2303,47 @@ it('requires a fresh choice when the selected location disappears instead of usi
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null }));
 });
 
+it('requires a fresh choice when the source reuses an inherited POI ID at a different destination', async () => {
+  const onSelect = vi.fn();
+  const props = { school: 'other-school', onSelect };
+  const view = render(<CampusSpatialExplorer {...props} locations={places} selected={places[0]} />);
+  const dialog = await open();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+  const replacement = { ...places[0], lat: places[0].lat + 0.002, name: '新圖書館' };
+  view.rerender(<CampusSpatialExplorer {...props} locations={[replacement, places[1]]} selected={places[0]} />);
+  expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null }));
+  expect(onSelect).not.toHaveBeenCalled();
+
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: replacement.id } });
+  const directions = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  expect(directions.searchParams.get('destination')).toBe(`${replacement.lat},${replacement.lng}`);
+  fireEvent.click(within(dialog).getByRole('button', { name: '在平面地圖查看' }));
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith(replacement);
+});
+
+it('revokes a deliberate 3D choice if its ID is reused at a changed coordinate, even with the same name', async () => {
+  const onSelect = vi.fn();
+  const props = { school: 'other-school', selected: null, onSelect };
+  const view = render(<CampusSpatialExplorer {...props} locations={places} />);
+  const dialog = await open();
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'dorm' } });
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+  const movedDorm = { ...places[1], lng: places[1].lng + 0.003 };
+  view.rerender(<CampusSpatialExplorer {...props} locations={[places[0], movedDorm]} />);
+  expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect(onSelect).not.toHaveBeenCalled();
+
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'dorm' } });
+  const directions = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  expect(directions.searchParams.get('destination')).toBe(`${movedDorm.lat},${movedDorm.lng}`);
+  expect(within(dialog).getByRole('heading', { name: movedDorm.name })).toBeTruthy();
+});
+
 it('opens a scoped building preview with one dialog and releases the campus graphics', async () => {
   const onSelect = vi.fn();
   render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={onSelect} />);

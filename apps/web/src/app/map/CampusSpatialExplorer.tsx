@@ -845,6 +845,17 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   );
 }
 
+// A POI ID alone is not a stable navigation destination. The same ID can be
+// reused with a different location or building after a live map refresh.
+// Freeze the identity used for a choice; the user must explicitly select a
+// replacement before a new coordinate can be sent to walking directions.
+function spatialDestinationIdentity(place: MapLocation): string {
+  return JSON.stringify([
+    place.id, place.name, place.category, place.lat, place.lng,
+    place.building ?? null, place.floor ?? null,
+  ]);
+}
+
 function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props & { onClose: () => void }) {
   const model = useMemo(() => buildCampusSpatialModel(locations), [locations]);
   // Two map records can have the same public-facing name (including two
@@ -881,7 +892,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const hasOutlineCandidate = auditedWayCandidateCount > 0;
   // Only a deliberate in-dialog choice overrides the current map selection. If the
   // source withdraws an automatic match, do not silently navigate to its first replacement.
-  const [selection, setSelection] = useState<string | null>(null);
+  const [selection, setSelection] = useState<{ id: string; identity: string } | null>(null);
   const [overview, setOverview] = useState(!selected);
   const [overhead, setOverhead] = useState(false);
   const [buildingPlanOpen, setBuildingPlanOpen] = useState(false);
@@ -912,7 +923,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const restoredCooldownRef = useRef(footprintRetryAfter !== null);
   const [camera, setCamera] = useState<CampusSpatialCamera>({ bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   const changeCamera = useCallback((next: CampusSpatialCamera) => setCamera(normalizeSpatialCamera(next)), []);
-  const selectedPoint = model.points.find((point) => point.id === (selection ?? selected?.id));
+  const chosen = selection ?? (selected ? {
+    id: selected.id, identity: spatialDestinationIdentity(selected),
+  } : null);
+  const selectedPoint = model.points.find((point) =>
+    point.id === chosen?.id && spatialDestinationIdentity(point.location) === chosen.identity);
   const showOverview = overview || !selectedPoint;
   const place = selectedPoint?.location;
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);
@@ -922,10 +937,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const footprintCooldownNoteId = useId();
   const footprintRefreshingNoteId = useId();
   const selectPlace = useCallback((id: string) => {
-    setSelection(id);
+    const point = model.points.find((candidate) => candidate.id === id);
+    if (!point) return;
+    setSelection({ id, identity: spatialDestinationIdentity(point.location) });
     setOverview(false);
     setCamera((previous) => ({ ...previous, zoom: 1 }));
-  }, []);
+  }, [model.points]);
   const source = place ? providencePlaceSourceUrl(school, place) : null;
   // The map can be filtered while a spatial dialog remains open. Never count,
   // attribute or frame OSM buildings whose POIs are no longer in that view.
