@@ -2072,3 +2072,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 原文表格的整表、單列及附欄名摘錄新增「摘錄開頭加上教材原文行號（註記非原文）」選項。預設關閉，原有 TXT、複製及長按文字內容逐字不變；啟用才在開頭額外加明示的來源行號，保留其後原文每個字元和 CRLF／混合換行。
 - 單列附欄名及分隔列時，如果中間略過其他資料列，會標出三個非連續行號；第一筆資料列則正確標記連續範圍。切換範圍即時計算，換教材時取消選項。唯讀手動選取備援、剪貼簿和 TXT 使用同一摘錄負載，避免瀏覽器拒絕複製後備援內容與請求不同。
 - React DOM 模擬回歸涵蓋多行註記、非連續列、CRLF、原文不變及來源替換。這不是 iOS／Android 真機、VoiceOver／TalkBack、GitHub App 5504170、WebGPU 或 Ahaboard 實測，不新增套件／付費 API／私人教材傳輸、不改閱讀與練習 checkpoint；保持 Draft、不合併、不部署。
+
+
+### 2026-11-21：動態 CSS 隱藏狀態不再暴露未授權來源表格
+
+- 來源 Markdown 含 HTML 包裝時，原本只檢查明確的 `display:none`／`visibility:hidden`／`opacity:0`。若樣式使用 `display:var(--answer-display)`、`opacity:calc(0)` 等動態 CSS，純文字掃描器不能確認瀏覽器實際顯示／隱藏狀態，卻可能把包裝內教師未公開表格衍生為可見表格。
+- 現在對影響 display／visibility／content-visibility／opacity 的 `var`、`env`、`calc`、`min`、`max`、`clamp` 選擇保守不衍生表格，即使前後有靜態宣告也不猜測計算結果；離開包裝後的正常教材表格仍可解析。一般 `display:block`、`opacity:1` 與不影響可見性的 `transform` 維持原行為。新增 Node/Vitest 來源邊界正反測試。
+- 這是**教材來源可見性防護**而非 CSS 完整渲染器；外部 CSS、真實瀏覽器 computed style 及使用者授權仍須另行核對。未新增套件、付費 API、私人教材傳輸或改動 checkpoint。完整 CI／CodeQL、指定 App 5504170 APPROVED、Maestro／iOS／Android 真機、WebGPU 與 Ahaboard 同教材同題同機比較未齊前維持 Draft，不合併、不部署。

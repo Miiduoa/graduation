@@ -1303,6 +1303,40 @@ describe('zero-opacity CSS exponent notation cannot expose unpublished source ta
   });
 });
 
+describe('dynamic inline CSS never promotes ambiguous lesson content into a source table', () => {
+  it.each([
+    '<div style="display:var(--answer-display)">',
+    '<section style="visibility:var(--lesson-visibility)">',
+    '<aside style="content-visibility:var(--answer-visibility)">',
+    '<p style="opacity:calc(0)">',
+    '<h2 style="opacity:clamp(0, 0, 1)">',
+    '<div style="display:none;display:var(--answer-display)">',
+    '<span style="opacity:0;opacity:calc(1)">',
+    '<div style="display:block;display:var(--answer-display)">',
+    '<section style="visibility:env(safe-area-inset-top)">',
+  ])('omits an unresolved %s while retaining the later public table', (opening) => {
+    const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
+    const source = [
+      opening,
+      '| 尚未授權的表格 | 分數 |',
+      '| --- | --- |',
+      '| 教師答案 | 99 |',
+      `</${tag}>`,
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('keeps normal static visible declarations and unrelated CSS functions readable', () => {
+    const source = [
+      '<div style="display:block; opacity:1; transform:translateX(0)">',
+      ...visibleTable,
+      '</div>',
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+});
+
 describe('invalid CSS declarations cannot override hidden teacher-only source tables', () => {
   it.each([
     '<div style="display:none;display:banana">',

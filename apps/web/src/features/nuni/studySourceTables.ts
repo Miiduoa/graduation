@@ -158,12 +158,18 @@ function isRecognizedInlineCssValue(name: string, value: string): boolean {
   return true;
 }
 
+// Inline CSS functions can depend on unavailable custom properties, viewport
+// settings or browser computation. We cannot prove their rendered visibility
+// from Markdown source text, so withhold optional derived tables rather than
+// accidentally show a teacher-only table that the renderer may hide.
+const UNRESOLVED_VISIBILITY_FUNCTION = /\b(?:var|env|calc|min|max|clamp)\s*\(/iu;
 function hasExplicitHiddenInlineStyle(style: string): boolean {
   // Only recognize literal inline visibility declarations. CSS properties
   // cascade independently; a visible value for one property cannot override
   // a hidden value for another. Same-property !important and order still apply.
   // This is not a computed-style parser (external styles and var() are unknown).
   const effective = new Map<string, { value: string; important: boolean }>();
+  let unresolvedVisibility = false;
   // CSS permits whitespace (including comments) between ! and important.
   // The comment splitter above normalizes /* ... */ to whitespace.
   const importantSuffix = /\s*!\s*important\s*$/iu;
@@ -174,6 +180,10 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
     const name = property[1].toLowerCase();
     const important = importantSuffix.test(property[2]);
     const value = property[2].replace(importantSuffix, '').trim().toLowerCase();
+    if (UNRESOLVED_VISIBILITY_FUNCTION.test(value)) {
+      unresolvedVisibility = true;
+      continue;
+    }
     if (!value || !isRecognizedInlineCssValue(name, value)) continue;
     const previous = effective.get(name);
     if (!previous || important || !previous.important)
@@ -186,7 +196,7 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
   // are otherwise visible. Do not infer variables, calc(), animations or
   // external CSS; only literal zero numbers/percentages with cascade applied.
   const opacity = effective.get('opacity')?.value;
-  return effective.get('display')?.value === 'none' ||
+  return unresolvedVisibility || effective.get('display')?.value === 'none' ||
     ['hidden', 'collapse'].includes(effective.get('visibility')?.value ?? '') ||
     effective.get('content-visibility')?.value === 'hidden' ||
     (opacity !== undefined && /^[+-]?(?:0+(?:\.0+)?|\.0+)(?:e[+-]?\d+)?%?$/u.test(opacity));
