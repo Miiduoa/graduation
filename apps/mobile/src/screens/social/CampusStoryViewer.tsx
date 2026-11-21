@@ -530,8 +530,10 @@ function StoryClip({
   const [failed, setFailed] = useState(false);
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [positionSeconds, setPositionSeconds] = useState(0);
-  // Native callbacks may arrive after a swipe, close or pause.
-  const session = useMemo(() => ({ playing }), [playing]);
+  const [retryGeneration, setRetryGeneration] = useState(0);
+  // Both pause/resume and an explicit retry replace the native player's attempt.
+  // A late callback from the previous attempt cannot fail the newly loaded clip.
+  const session = useMemo(() => ({ playing, uri, retryGeneration }), [playing, uri, retryGeneration]);
   const current = React.useRef<typeof session | null>(null);
   React.useLayoutEffect(() => {
     current.current = session;
@@ -547,7 +549,14 @@ function StoryClip({
           <Pressable
             accessibilityRole="button"
             style={styles.step}
-            onPress={() => setFailed(false)}
+            onPress={() => {
+              setMuted(true);
+              setDurationSeconds(0);
+              setPositionSeconds(0);
+              fill.setValue(0);
+              setRetryGeneration((generation) => generation + 1);
+              setFailed(false);
+            }}
           >
             <Text style={styles.stepText}>重新載入影片</Text>
           </Pressable>
@@ -558,6 +567,7 @@ function StoryClip({
   return (
     <View style={styles.photo}>
       <StoryVideoPlayer
+        key={JSON.stringify([uri, retryGeneration])}
         source={{ uri, overrideFileExtensionAndroid: 'mp4' }}
         style={styles.photo}
         accessibilityLabel="限時動態影片"

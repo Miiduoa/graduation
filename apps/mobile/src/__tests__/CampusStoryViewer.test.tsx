@@ -457,6 +457,43 @@ describe('story playback clock', () => {
     view.unmount();
   });
 
+  test('a paused video retry ignores a late decoder failure from the previous player', () => {
+    const view = render(
+      <Shelf
+        rows={[{
+          ...common,
+          id: 'video-retry-late-error',
+          kind: 'video',
+          mediaUrl: 'https://example.com/retry.mp4',
+          expiresAt: Date.now() + 100_000,
+        }]}
+      />,
+    );
+    fireEvent.press(view.getByText('開啟bob'));
+    const firstPlayer = view.getByLabelText('限時動態影片');
+    const staleError = firstPlayer.props.onError;
+    // A paused player can fail before the student has pressed Play.
+    fireEvent(firstPlayer, 'error', 'first decoder error');
+    expect(view.getByText('影片暫時無法播放')).toBeTruthy();
+
+    fireEvent.press(view.getByText('重新載入影片'));
+    const retryPlayer = view.getByLabelText('限時動態影片');
+    expect(retryPlayer.props.isMuted).toBe(true);
+    expect(retryPlayer.props.shouldPlay).toBe(false);
+
+    // A queued callback from the replaced native player must not fail the retry.
+    act(() => staleError('old decoder callback after retry'));
+    expect(view.queryByText('影片暫時無法播放')).toBeNull();
+    expect(view.getByLabelText('限時動態影片')).toBeTruthy();
+
+    // A real failure from the current player still has to be shown.
+    fireEvent(retryPlayer, 'error', 'current decoder error');
+    expect(view.getByText('影片暫時無法播放')).toBeTruthy();
+    fireEvent.press(view.getByText('看完了'));
+    expect(view.queryByLabelText('限時動態影片')).toBeNull();
+    view.unmount();
+  });
+
   test('a failed video retains navigation and can be loaded again muted', () => {
     const view = render(
       <Shelf
