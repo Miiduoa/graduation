@@ -1169,7 +1169,7 @@ it.each([
   { name: 'narrow no-break space and fullwidth decimals', values: ['７５．５０\u202f％', '２４．５０\u202f％'], amounts: ['75.5', '24.5'] },
 ])('compares percent signs separated by a single source space ($name), without rewriting evidence', ({ values, amounts }) => {
   const material = ['| 課程 | 完成率 |', '| --- | --- |',
-    '| 資料庫 | ' + values[0] + ' |', '| 網路 | ' + values[1] + ' |'].join('\\n');
+    '| 資料庫 | ' + values[0] + ' |', '| 網路 | ' + values[1] + ' |'].join('\n');
   const { container } = render(<StudySourceTables text={material} />);
   expect(Array.from(container.querySelectorAll('meter')).map((bar) =>
     [bar.getAttribute('value'), bar.getAttribute('max'), bar.getAttribute('aria-valuetext')]))
@@ -1187,7 +1187,7 @@ it('does not infer percentage charts from ambiguous headers or out-of-range sour
     { header: '正確率', values: ['-1%', '25%'] },
     { header: '出席率', values: ['50.123%', '75%'] },
     { header: '通過率', values: ['50  %', '75%'] },
-    { header: '通過率', values: ['50\\t%', '75%'] },
+    { header: '通過率', values: ['50\t%', '75%'] },
     { header: '通過率', values: ['５０ %', '75%'] },
     { header: '完成率', values: ['50%', '25 公斤'] },
   ];
