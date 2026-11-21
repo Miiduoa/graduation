@@ -76,7 +76,6 @@ jobs:
             src/__tests__/services/campusClockAvailability.test.ts \
             src/__tests__/services/campusAssignmentReminders.test.ts \
             src/__tests__/services/campusAssignmentTarget.test.ts \
-            src/__tests__/services/campusAssignmentQuery.test.ts \
             src/__tests__/services/campusAssignmentPreview.test.ts \
             src/__tests__/services/campusAssignmentQuery.test.ts \
             src/__tests__/services/campusSenseSnapshot.test.ts \
