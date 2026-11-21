@@ -427,8 +427,8 @@ describe('account data writes and authoritative receipts', () => {
     const changed = { ...original, revision: 8, permissions: { ...original.permissions, food: false } };
     harness.request.mockResolvedValueOnce({ demo: changed });
     fireEvent.click(screen.getByRole('button', { name: '重新讀取帳號資料' }));
-    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
-    expect(screen.getByTestId('revision').textContent).toBe('8');
+    await waitFor(() => expect(screen.getByTestId('revision').textContent).toBe('8'));
+    expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.getByTestId('food-permission').textContent).toBe('false');
     expect(harness.request).toHaveBeenCalledTimes(3);
   });
