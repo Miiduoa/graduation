@@ -3129,3 +3129,42 @@ it('does not resurface an obsolete mobile clipboard backup after the note change
     else Reflect.deleteProperty(window.navigator, 'clipboard');
   }
 });
+
+
+it('checks real mobile fallback selection instead of trusting WebView select() without an error', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '不可遺失的私人閱讀備份' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    const manual = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    const backup = manual.value;
+    manual.setSelectionRange(3, 7);
+
+    // Simulate a WebView that silently ignores both methods (no exceptions).
+    const select = vi.spyOn(manual, 'select').mockImplementation(() => {});
+    const range = vi.spyOn(manual, 'setSelectionRange').mockImplementation(() => {});
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '全選上方文字' }));
+      expect(manual.selectionStart).toBe(3);
+      expect(manual.selectionEnd).toBe(7);
+      expect(screen.getByText(/瀏覽器未確認全文已選取/).textContent).toContain('長按文字');
+      expect(screen.queryByText(/瀏覽器回報已全選備份文字/)).toBeNull();
+      expect(manual.value).toBe(backup);
+    } finally {
+      select.mockRestore();
+      range.mockRestore();
+    }
+    fireEvent.click(screen.getByRole('button', { name: '全選上方文字' }));
+    expect(manual.selectionStart).toBe(0);
+    expect(manual.selectionEnd).toBe(backup.length);
+    expect(screen.getByText(/瀏覽器回報已全選備份文字/).textContent).toContain('確認貼上內容');
+    expect(parseCourseStudyProgress(manual.value, scope).passages['0:0'].note)
+      .toBe('不可遺失的私人閱讀備份');
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});

@@ -109,10 +109,19 @@ function studyClipboardWriter(): ((text: string) => Promise<void>) | null {
 // iOS/WebKit can ignore or reject textarea.select() on a readonly backup.
 // Apply an explicit range as well; if either API fails, leave the original
 // local text available for long-press selection rather than losing the backup.
-function selectManualCopyText(input: HTMLTextAreaElement) {
+function selectManualCopyText(input: HTMLTextAreaElement): boolean {
   try { input.select(); } catch { /* Try a direct selection range below. */ }
   try { input.setSelectionRange(0, input.value.length); }
   catch { /* The student can still select the unchanged text manually. */ }
+  // Some WebViews silently ignore both calls without throwing. Never tell the
+  // student that the JSON/TXT is selected unless the live input reports it.
+  // Even a reported selection is not proof that the system copied anything.
+  try {
+    return document.activeElement === input && input.value.length > 0 &&
+      input.selectionStart === 0 && input.selectionEnd === input.value.length;
+  } catch {
+    return false;
+  }
 }
 
 function initialMaterial(material?: Material): { source: StudySource | null; error: string } {
@@ -329,6 +338,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   const [confirmClose, setConfirmClose] = useState(false);
   const [pendingSource, setPendingSource] = useState<PendingSource | null>(null);
   const [manualCopyText, setManualCopyText] = useState<string | null>(null);
+  const [manualSelectFeedback, setManualSelectFeedback] = useState('');
   const [manualCopyKind, setManualCopyKind] = useState<ManualCopyKind>('notes');
   const downloadUrl = useRef<string | null>(null);
   const manualCopyInput = useRef<HTMLTextAreaElement>(null);
@@ -538,6 +548,9 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     (target?.isConnected ? target : heading.current)?.focus();
     manualCopyReturnTarget.current = null;
   }, [manualCopyText]);
+
+  // New selectable backups must not inherit a previous export's selection claim.
+  useEffect(() => { setManualSelectFeedback(''); }, [manualCopyText]);
 
   // A cancelled/failed import removes its status button. Return focus to the
   // file picker if its details are open, otherwise to the visible summary.
@@ -1213,9 +1226,13 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
           <button type="button" className={styles.button}
             onClick={() => { void retryManualCopy(); }}>再次嘗試複製到剪貼簿</button>
           <button type="button" className={styles.button} onClick={() => {
-            manualCopyInput.current?.focus();
-            if (manualCopyInput.current) selectManualCopyText(manualCopyInput.current);
+            const input = manualCopyInput.current;
+            input?.focus();
+            setManualSelectFeedback(input && selectManualCopyText(input)
+              ? '瀏覽器回報已全選備份文字；請再使用裝置的複製功能，並確認貼上內容。'
+              : '瀏覽器未確認全文已選取；請長按文字手動選取並複製，備份內容仍保留。');
           }}>全選上方文字</button>
+          {manualSelectFeedback && <p className={styles.note} role="status" aria-live="polite">{manualSelectFeedback}</p>}
           <p className={styles.note}>可長按選取文字或按「全選上方文字」，再用手機的「複製」功能。這是本機顯示，不會自動傳送或保存；
             內容可能含教材與個人試答，請注意貼上位置。</p>
           <button type="button" className={styles.button} onClick={() => {
