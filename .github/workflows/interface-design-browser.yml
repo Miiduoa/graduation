@@ -6,6 +6,8 @@ on:
     paths:
       - 'apps/web/src/components/AppHeader*'
       - 'apps/web/src/components/CampusServiceMenu*'
+      - 'apps/web/src/components/ServiceDirectory*'
+      - 'apps/web/src/components/TodayCampusEntry*'
       - 'apps/web/src/components/SchoolSelector*'
       - 'apps/web/src/components/QuickCampusEntry*'
       - 'apps/web/src/components/VoiceDictationButton*'
@@ -21,6 +23,9 @@ on:
       - 'apps/web/src/app/home.module.css'
       - 'apps/web/src/lib/campusNavigation*'
       - 'apps/web/src/lib/primaryNavigation*'
+      - 'apps/web/src/lib/currentTabNavigation*'
+      - 'apps/web/src/lib/menuNavigationReturn*'
+      - 'apps/web/src/lib/mobileNavigationInset*'
       - 'apps/web/src/lib/campusServices*'
       - 'scripts/qa/interface-design/**'
       - 'scripts/qa/browser/**'

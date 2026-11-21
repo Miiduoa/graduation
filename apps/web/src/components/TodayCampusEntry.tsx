@@ -43,11 +43,13 @@ function TodayConversation({
   schoolId,
   cloudEnabled,
   preferredWorkContext,
+  onNavigate,
 }: {
   account: Account;
   schoolId: string;
   cloudEnabled: boolean;
   preferredWorkContext?: AssistantWorkContext;
+  onNavigate?: (href: string) => void;
 }) {
   const [text, setText] = useState('');
   const [nuniFreeform, setNuniFreeform] = useState(false);
@@ -77,6 +79,7 @@ function TodayConversation({
         {searchOpen && (
           <QuickCampusEntry
             compact
+            onNavigate={onNavigate}
             onAsk={
               canAsk
                 ? (phrase) => {
@@ -123,8 +126,10 @@ export function TodayCampusEntry({
   focusRequest = 0,
   returnAnchor = 'today-voice-entry',
   preferredWorkContext,
+  onNavigate,
 }: {
   preferredWorkContext?: AssistantWorkContext;
+  onNavigate?: (href: string) => void;
   active?: boolean;
   focusRequest?: number;
   returnAnchor?: 'today-voice-entry' | 'campus-assistant-entry';
@@ -172,13 +177,23 @@ export function TodayCampusEntry({
   }, [active, focusRequest]);
   return (
     <div ref={entry}>
-      <CampusEntryContent returnPath={returnPath} preferredWorkContext={preferredWorkContext} />
+      <CampusEntryContent
+        returnPath={returnPath}
+        preferredWorkContext={preferredWorkContext}
+        onNavigate={onNavigate}
+      />
     </div>
   );
 }
 
-function CampusEntryContent({ returnPath, preferredWorkContext }: {
-  returnPath: string; preferredWorkContext?: AssistantWorkContext;
+function CampusEntryContent({
+  returnPath,
+  preferredWorkContext,
+  onNavigate,
+}: {
+  returnPath: string;
+  preferredWorkContext?: AssistantWorkContext;
+  onNavigate?: (href: string) => void;
 }) {
   const hydrated = useClientHydrated();
   const auth = useAuth();
@@ -222,6 +237,7 @@ function CampusEntryContent({ returnPath, preferredWorkContext }: {
           compact
           key={JSON.stringify([uid, session?.context, campus.schoolId])}
           onAsk={null}
+          onNavigate={onNavigate}
         />
       </>
     );
@@ -229,6 +245,7 @@ function CampusEntryContent({ returnPath, preferredWorkContext }: {
   return (
     <TodayConversation
       preferredWorkContext={preferredWorkContext}
+      onNavigate={onNavigate}
       key={JSON.stringify([
         uid,
         session?.context,
@@ -348,7 +365,13 @@ export function TodayAssistantDisclosure({
         <span className={styles.triggerHint}>打字或語音詢問</span>
       </summary>
       <div className={styles.body}>
-        {hasOpened && <TodayCampusEntry active={opened} focusRequest={focusRequest} preferredWorkContext={preferredWorkContext} />}
+        {hasOpened && (
+          <TodayCampusEntry
+            active={opened}
+            focusRequest={focusRequest}
+            preferredWorkContext={preferredWorkContext}
+          />
+        )}
       </div>
     </details>
   );

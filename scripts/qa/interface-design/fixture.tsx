@@ -10,17 +10,17 @@ import { Input, Textarea, Select } from '../../../apps/web/src/components/ui/Inp
 import { CampusIcon } from '../../../apps/web/src/components/CampusIcon';
 import { QuickCampusEntry } from '../../../apps/web/src/components/QuickCampusEntry';
 import { PageRecovery } from '../../../apps/web/src/components/PageRecovery';
+import { ServiceDirectory } from '../../../apps/web/src/components/ServiceDirectory';
 import {
   applyWebAppearancePreferences,
   defaultWebPreferences,
 } from '../../../apps/web/src/lib/webPreferences';
 import { SchoolLmsReadonlyProvider } from '../../../apps/web/src/components/SchoolLmsReadonlyProvider';
-import { navigate, usePathname } from './boundaries';
+import { fixtureOptions as query, navigate, usePathname } from './boundaries';
 import home from '../../../apps/web/src/app/home.module.css';
 import '../../../apps/web/src/app/globals.css';
 
 const now = new Date('2026-11-18T09:00:00+08:00');
-const query = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = query.get('theme') === 'dark' ? 'dark' : 'light';
 if (query.get('motion') === 'reduce') document.documentElement.dataset.reducedMotion = 'true';
 if (query.get('text') === '200') document.documentElement.style.fontSize = '200%';
@@ -307,6 +307,13 @@ function Fixture() {
               </>
             ) : pathname === '/interface-feedback' ? (
               <ActionFeedback />
+            ) : pathname === '/life' || pathname === '/connect' ? (
+              <>
+                <div className={home.heading}>
+                  <h1>{pathname === '/life' ? '生活' : '交流'}</h1>
+                </div>
+                <ServiceDirectory journey={pathname === '/life' ? 'life' : 'connect'} />
+              </>
             ) : pathname === '/library/fixture-missing' ? (
               <PageRecovery kind="missing" />
             ) : pathname === '/community/fixture-error' ? (

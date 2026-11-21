@@ -69,6 +69,9 @@ vi.mock('@/features/nuni/Assistant', async () => {
         </label>
         <VoiceDictationButton onTranscript={inlineDraft.setText} />
         <button type="submit">送出問題</button>
+        <a href="/library?campus=pu" onClick={(event) => event.preventDefault()}>
+          查看參考服務
+        </a>
       </form>
     ),
   };
@@ -131,7 +134,8 @@ it('refreshes disclosure clearance after the header moves and releases its layou
     fireEvent(window, new Event('scroll'));
     expect(navigation.style.getPropertyValue('--navigation-header-bottom')).toBe('0px');
     view.unmount();
-    expect(disconnect).toHaveBeenCalledTimes(1);
+    // Header clearance and the independently sized mobile bar both release.
+    expect(disconnect).toHaveBeenCalledTimes(2);
     bottom = 220;
     fireEvent(window, new Event('resize'));
     fireEvent(window, new Event('scroll'));
@@ -141,6 +145,50 @@ it('refreshes disclosure clearance after the header moves and releases its layou
     view.unmount();
     geometry.mockRestore();
   }
+});
+
+it.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }])(
+  'keeps the account menu open when a link opens in a different tab or window: %o',
+  (modifier) => {
+    render(<AppHeader />);
+    const trigger = screen.getByLabelText('帳號');
+    const menu = trigger.closest('details')!;
+    fireEvent.click(trigger);
+    const link = screen.getByRole('link', { name: '我的帳號' });
+    fireEvent.click(link, modifier);
+    expect(menu.open).toBe(true);
+    fireEvent.click(link);
+    expect(menu.open).toBe(false);
+  },
+);
+
+it('keeps the assistant draft and voice session when a link has not navigated this tab', async () => {
+  const start = vi.fn();
+  const abort = vi.fn();
+  vi.stubGlobal(
+    'SpeechRecognition',
+    class {
+      start = start;
+      abort = abort;
+    },
+  );
+  const view = render(<AppHeader />);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園助理' }));
+  const field = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '問題' });
+  fireEvent.change(field, { target: { value: '我還在安排明天的課程' } });
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const reference = screen.getByRole('link', { name: '查看參考服務' });
+  fireEvent.click(reference, { metaKey: true });
+  // A cancelled ordinary link is not a completed navigation either.
+  fireEvent.click(reference);
+  expect(screen.getByRole('dialog', { name: '校園助理' })).toBeTruthy();
+  expect(field.value).toBe('我還在安排明天的課程');
+  expect(abort).not.toHaveBeenCalled();
+  expect(state.ask).not.toHaveBeenCalled();
+  state.pathname = '/calendar';
+  view.rerender(<AppHeader />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(abort).toHaveBeenCalledOnce();
 });
 
 it('opens the actual account conversation without a search detour, recording, or automatic submission', async () => {

@@ -59,6 +59,7 @@ const inputs = [
     'scripts/qa/interface-design/build.mjs',
     'scripts/qa/interface-design/check.py',
     'scripts/qa/interface-design/quick_search.py',
+    'scripts/qa/interface-design/navigation.py',
     'scripts/qa/interface-design/feedback.py',
     'scripts/qa/browser/install-playwright.sh',
     'package.json',
@@ -95,9 +96,9 @@ await writeFile(
   path.join(output, 'index.html'),
   `<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>nuni 介面驗收｜合成資料</title><link rel="stylesheet" href="fixture.css">
+<title>nuni 介面驗收｜合成資料</title><link rel="stylesheet" href="/fixture.css">
 <style>.fixture-controls{margin-top:32px;padding-top:24px;border-top:1px solid var(--border)}.fixture-controls>p,.fixture-copy{font-size:.875rem;line-height:1.7;color:var(--muted);overflow-wrap:anywhere}.fixture-buttons{display:flex;flex-wrap:wrap;gap:10px}.fixture-buttons>button{max-width:100%}.fixture-reading-space{height:900px}</style>
-</head><body><div id="root"></div><script type="module" src="fixture.js"></script></body></html>`,
+</head><body><div id="root"></div><script type="module" src="/fixture.js"></script></body></html>`,
 );
 log(
   `Built real interface components; ${files.length} source hashes, ${replaced.size} explicit import boundaries.`,
