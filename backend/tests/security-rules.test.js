@@ -2868,6 +2868,75 @@ describe('firestore security rules', () => {
     await assertSucceeds(teacher.get({ source: 'server' }));
   });
 
+
+  test('peer review path ID never overrides an explicitly different reviewerId on GET or UPDATE', async () => {
+    const group = 'groups/review-owner-mismatch-1';
+    const receipt = group + '/assignments/work-1/peerReviews/alice';
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      for (const [uid, role] of [
+        ['alice', 'member'], ['bob', 'member'], ['carol', 'member'],
+        ['teacher', 'instructor'], ['outsider', 'member'],
+      ]) {
+        await db.doc('users/' + uid).set({
+          status: 'active', schoolId: 'pu', primarySchoolId: 'pu',
+        });
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+        await db.doc(group + '/members/' + uid).set({ status: 'active', role });
+      }
+      // A legacy import can mis-key the document path while explicitly
+      // assigning its contents to somebody else. No teacher-only fields.
+      await db.doc(receipt).set({
+        reviewerId: 'bob', submissionOwnerId: 'carol',
+        comment: 'Bob feedback', scores: {},
+        submittedAt: new Date('2026-11-01T00:00:00Z'),
+      });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore().doc(receipt);
+    const bob = testEnv.authenticatedContext('bob').firestore().doc(receipt);
+    const carol = testEnv.authenticatedContext('carol').firestore().doc(receipt);
+    const teacher = testEnv.authenticatedContext('teacher').firestore().doc(receipt);
+    const outsider = testEnv.authenticatedContext('outsider').firestore().doc(receipt);
+
+    // The path holder must neither read nor overwrite another reviewer.
+    await assertFails(alice.get({ source: 'server' }));
+    await assertFails(alice.update({ comment: 'Forged feedback' }));
+    await assertFails(bob.get({ source: 'server' }));
+    await assertFails(outsider.get({ source: 'server' }));
+    // A valid recipient and teacher still retain their legitimate reads.
+    await assertSucceeds(carol.get({ source: 'server' }));
+    await assertSucceeds(teacher.get({ source: 'server' }));
+
+    // Staff correction of the mismatched owner restores legitimate feedback.
+    await assertSucceeds(teacher.update({ reviewerId: 'alice' }));
+    await assertSucceeds(alice.get({ source: 'server' }));
+    await assertSucceeds(alice.update({ comment: 'Authorized feedback' }));
+    await assertSucceeds(carol.get({ source: 'server' }));
+    // Live campus revocation must apply to the very same authenticated client.
+    await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'other' }));
+    await assertFails(alice.get({ source: 'server' }));
+    await assertFails(alice.update({ comment: 'Replay after transfer' }));
+    await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'pu' }));
+    await assertSucceeds(alice.get({ source: 'server' }));
+
+    await seedFirestore(db => db.doc(group + '/members/alice').update({ status: 'removed' }));
+    await assertFails(alice.get({ source: 'server' }));
+    await assertFails(alice.update({ comment: 'Replay after removal' }));
+    await seedFirestore(db => db.doc(group + '/members/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.get({ source: 'server' }));
+    // If the staff repair is reverted, stale path access must fail again.
+    await assertSucceeds(teacher.update({ reviewerId: 'bob' }));
+    await assertFails(alice.get({ source: 'server' }));
+    await assertFails(alice.update({ comment: 'Stale owner replay' }));
+
+    // Missing reviewerId is a distinct historical case: permit the same
+    // narrowly scoped legacy GET, but never a student UPDATE without owner.
+    await assertSucceeds(teacher.update({ reviewerId: deleteField() }));
+    await assertSucceeds(alice.get({ source: 'server' }));
+    await assertFails(alice.update({ comment: 'Unowned review edit' }));
+    await assertSucceeds(teacher.get({ source: 'server' }));
+  });
+
   test('gradebook owner and teacher grants require current course and canonical campus membership', async () => {
     const group = 'groups/gradebook-revoke-1';
     const row = `${group}/gradebook/bob`;
