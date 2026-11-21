@@ -65,6 +65,45 @@ test('read error is retryable and never shown as unpublished', async () => {
 });
 
 
+
+test('a stalled initial profile read allows retry and ignores its late result', async () => {
+  jest.useFakeTimers();
+  try {
+    let resolveOld!: (value: Awaited<ReturnType<typeof readCreatorCard>>) => void;
+    const stalled = new Promise<Awaited<ReturnType<typeof readCreatorCard>>>((resolve) => {
+      resolveOld = resolve;
+    });
+    jest.mocked(readCreatorCard)
+      .mockReturnValueOnce(stalled)
+      .mockResolvedValueOnce({ headline: '新的社團介紹', bio: '社團活動', linkUrl: '' });
+
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} />);
+    expect(view.getByText('正在讀取社群簡介…')).toBeTruthy();
+    await act(async () => {
+      jest.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(view.getByText('讀取社群簡介逾時，請重新讀取。').props.accessibilityRole)
+      .toBe('alert');
+    fireEvent.press(view.getByLabelText('重新讀取社群簡介'));
+    await act(async () => { await Promise.resolve(); });
+    expect(readCreatorCard).toHaveBeenCalledTimes(2);
+    expect(view.getByText('新的社團介紹')).toBeTruthy();
+
+    // The first server request is still alive; it cannot restore stale
+    // content over the successful retry or leak an old author's card.
+    await act(async () => {
+      resolveOld({ headline: '上次無效舊資料', bio: '', linkUrl: '' });
+      await Promise.resolve();
+    });
+    expect(view.queryByText('上次無效舊資料')).toBeNull();
+    expect(view.getByText('新的社團介紹')).toBeTruthy();
+    expect(saveCreatorCard).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test('rapid taps never duplicate an ambiguous save before a fresh server check', async () => {
   let rejectFirst: (reason: Error) => void = () => undefined;
   jest.mocked(saveCreatorCard).mockImplementationOnce(() => (

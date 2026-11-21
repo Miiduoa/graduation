@@ -8,10 +8,11 @@ import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 
 const CREATOR_CARD_CONFIRM_TIMEOUT_MS = 15_000;
+const CREATOR_CARD_READ_TIMEOUT_MS = 15_000;
 
 type CardState =
   | { status: 'loading' }
-  | { status: 'error' }
+  | { status: 'error'; timedOut: boolean }
   | { status: 'ready'; value: CreatorCard | null };
 
 function CardButton({ label, onPress, disabled = false, primary = false, busy = false }: {
@@ -92,12 +93,26 @@ function ScopedCreatorCardPanel({
   useEffect(() => {
     let live = true;
     setState({ status: 'loading' });
+    // A server-only read can remain pending indefinitely on a bad connection.
+    // Give the student a retry instead of trapping the profile in loading.
+    // The SDK call is not cancelled; late replies cannot replace a new read.
+    const timeout = setTimeout(() => {
+      if (!live) return;
+      live = false;
+      setState({ status: 'error', timedOut: true });
+    }, CREATOR_CARD_READ_TIMEOUT_MS);
     void readCreatorCard(schoolId, ownerUid).then((value) => {
-      if (live) setState({ status: 'ready', value });
+      if (!live) return;
+      live = false;
+      clearTimeout(timeout);
+      setState({ status: 'ready', value });
     }).catch(() => {
-      if (live) setState({ status: 'error' });
+      if (!live) return;
+      live = false;
+      clearTimeout(timeout);
+      setState({ status: 'error', timedOut: false });
     });
-    return () => { live = false; };
+    return () => { live = false; clearTimeout(timeout); };
   }, [schoolId, ownerUid, attempt]);
 
   const beginEdit = () => {
@@ -243,7 +258,9 @@ function ScopedCreatorCardPanel({
   );
   if (state.status === 'error') return (
     <View style={styles.container}>
-      <Text accessibilityRole="alert" style={styles.note}>社群簡介暫時無法讀取。</Text>
+      <Text accessibilityRole="alert" style={styles.note}>{state.timedOut
+        ? '讀取社群簡介逾時，請重新讀取。'
+        : '社群簡介暫時無法讀取。'}</Text>
       <CardButton label="重新讀取社群簡介" onPress={() => setAttempt((n) => n + 1)} />
     </View>
   );
