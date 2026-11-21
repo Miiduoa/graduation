@@ -1,5 +1,5 @@
 import React from 'react';
-import { Linking } from 'react-native';
+import { Linking, Pressable } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { CreatorCardPanel } from '../screens/social/CreatorCardPanel';
 import { readCreatorCard, saveCreatorCard } from '../services/creatorCard';
@@ -71,6 +71,11 @@ test('rapid taps never duplicate an ambiguous save before a fresh server check',
   const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
   fireEvent.press(await view.findByLabelText('建立社群簡介'));
   fireEvent.changeText(view.getByLabelText('個人簡介'), '校園社團活動與攝影作品');
+  // Retain the actual composite Pressable callback before its disabled state
+  // is committed. The host View returned by getByLabelText has no onPress.
+  const staleOnPress = view.UNSAFE_getAllByType(Pressable)
+    .find((node) => node.props.accessibilityLabel === '儲存簡介')?.props.onPress as (() => void) | undefined;
+  expect(staleOnPress).toEqual(expect.any(Function));
   act(() => {
     const saveButton = view.getByLabelText('儲存簡介');
     fireEvent.press(saveButton);
@@ -88,7 +93,7 @@ test('rapid taps never duplicate an ambiguous save before a fresh server check',
   // Even if a stale callback is invoked directly, an unconfirmed prior write
   // must not be resent. Pressable disabled alone is not the service boundary.
   await act(async () => {
-    view.getByLabelText('儲存簡介').props.onPress();
+    staleOnPress!();
   });
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
   expect(view.getByLabelText('核對儲存結果')).toBeTruthy();
