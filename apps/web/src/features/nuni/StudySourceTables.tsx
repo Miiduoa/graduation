@@ -306,8 +306,12 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   // punctuation throughout an explicitly bounded percentage column.
   // Convert only these known glyphs for the meter's quantity; the original
   // source, export, citation and accessible reading must remain untouched.
-  const asciiPercent = /^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[%％]$/u;
-  const fullwidthPercent = /^(?:０|[１-９][０-９]?|１００)(?:．[０-９]{1,2})?[%％]$/u;
+  // Course handouts may place one regular or no-break space before the %
+  // sign (e.g. "75 %" or "７５ ％"). Preserve every original character in
+  // source cells, screen-reader labels, clipboard text and TXT exports.
+  // Do not accept tabs, multiple spaces, mixed digit scripts or missing %.
+  const asciiPercent = /^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[ \u00a0\u202f]?[%％]$/u;
+  const fullwidthPercent = /^(?:０|[１-９][０-９]?|１００)(?:．[０-９]{1,2})?[ \u00a0\u202f]?[%％]$/u;
   let digitFormat: 'ascii' | 'fullwidth' | null = null;
   for (const [rowIndex, [label, original]] of table.rows.entries()) {
     if (!hasUnambiguousChartLabel(label ?? '') || !original) return null;

@@ -1163,6 +1163,21 @@ it('visualizes exact source percentages on a fixed 100% scale without changing s
   expect(container.querySelector('meter')).toBeNull();
 });
 
+it.each([
+  { name: 'regular space', values: ['75 %', '25 %'], amounts: ['75', '25'] },
+  { name: 'no-break space and fullwidth digits', values: ['７５\u00a0％', '２５\u00a0％'], amounts: ['75', '25'] },
+  { name: 'narrow no-break space and fullwidth decimals', values: ['７５．５０\u202f％', '２４．５０\u202f％'], amounts: ['75.5', '24.5'] },
+])('compares percent signs separated by a single source space ($name), without rewriting evidence', ({ values, amounts }) => {
+  const material = ['| 課程 | 完成率 |', '| --- | --- |',
+    '| 資料庫 | ' + values[0] + ' |', '| 網路 | ' + values[1] + ' |'].join('\\n');
+  const { container } = render(<StudySourceTables text={material} />);
+  expect(Array.from(container.querySelectorAll('meter')).map((bar) =>
+    [bar.getAttribute('value'), bar.getAttribute('max'), bar.getAttribute('aria-valuetext')]))
+    .toEqual(amounts.map((amount, index) => [amount, '100', values[index] + '；滿格 100%']));
+  expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+    .toEqual(values);
+});
+
 it('does not infer percentage charts from ambiguous headers or out-of-range source', () => {
   const examples = [
     { header: '分數', values: ['75%', '100%'] },
@@ -1171,7 +1186,9 @@ it('does not infer percentage charts from ambiguous headers or out-of-range sour
     { header: '完成率', values: ['100.01%', '99%'] },
     { header: '正確率', values: ['-1%', '25%'] },
     { header: '出席率', values: ['50.123%', '75%'] },
-    { header: '通過率', values: ['50 %', '75%'] },
+    { header: '通過率', values: ['50  %', '75%'] },
+    { header: '通過率', values: ['50\\t%', '75%'] },
+    { header: '通過率', values: ['５０ %', '75%'] },
     { header: '完成率', values: ['50%', '25 公斤'] },
   ];
   for (const { header, values } of examples) {
