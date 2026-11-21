@@ -947,7 +947,7 @@ it('does not partially import mixed-semester or duplicate public listings', asyn
 
 it('protects an existing draft, and clears batch selections when a search changes', async () => {
   const second = { ...course, code: '130021', section: 'b', title: '資料結構', time: '3cd4i' };
-  const fetcher = vi.fn().mockResolvedValue(response([course, second]));
+  const fetcher = vi.fn().mockImplementation(async () => response([course, second]));
   vi.stubGlobal('fetch', fetcher);
   render(<PublicCourseSearch {...props} />);
   submit('課');
