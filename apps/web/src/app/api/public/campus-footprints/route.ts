@@ -63,13 +63,27 @@ class OverpassRateLimitError extends Error {
   }
 }
 
-// HTTP Retry-After dates must use IMF-fixdate, not ISO dates or permissive
-// Date.parse formats. Intermediaries can send malformed Date headers; accepting
-// one as the origin clock can falsely lock out the public map for 24 hours.
-function canonicalHttpDateMillis(value: string | null): number | null {
+// HTTP-date permits IMF-fixdate and two legacy wire formats (RFC 9110 §5.6.7).
+// Date.parse accepts additional non-HTTP strings such as ISO calendar dates;
+// allowing those as a proxy's Date/Retry-After can falsely lock the campus map
+// for 24 hours. Reconstruct each allowed wire representation from the parsed
+// UTC instant, rejecting normalized/impossible dates and arbitrary formats.
+const HTTP_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const HTTP_LONG_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const HTTP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function parseHttpDateMillis(value: string | null): number | null {
   if (value === null) return null;
   const parsed = Date.parse(value);
-  return Number.isFinite(parsed) && new Date(parsed).toUTCString() === value ? parsed : null;
+  if (!Number.isFinite(parsed)) return null;
+  const date = new Date(parsed);
+  if (date.toUTCString() === value) return parsed;
+  const day = String(date.getUTCDate());
+  const month = HTTP_MONTHS[date.getUTCMonth()];
+  const time = date.toUTCString().slice(17, 25);
+  const rfc850 = `${HTTP_LONG_WEEKDAYS[date.getUTCDay()]}, ${day.padStart(2, '0')}-${month}-${String(date.getUTCFullYear() % 100).padStart(2, '0')} ${time} GMT`;
+  const asctime = `${HTTP_WEEKDAYS[date.getUTCDay()]} ${month} ${day.padStart(2, ' ')} ${time} ${date.getUTCFullYear()}`;
+  return value === rfc850 || value === asctime ? parsed : null;
 }
 
 function overpassRetryAfterMs(header: string | null, now: number, serverDate: string | null = null): number {
@@ -85,11 +99,11 @@ function overpassRetryAfterMs(header: string | null, now: number, serverDate: st
     requestedMs = digits.length > 5 || (digits.length === 5 && digits >= '86400')
       ? MAX_RETRY_AFTER_MS : Number(digits) * 1000;
   } else {
-    const dateMs = canonicalHttpDateMillis(value);
+    const dateMs = parseHttpDateMillis(value);
     // Only a canonical HTTP Date is a trustworthy origin-clock reference.
     // Invalid intermediary dates must never amplify a ten-minute fallback
     // into a 24-hour cooldown or silently shorten a valid server pause.
-    const originMs = canonicalHttpDateMillis(serverDate);
+    const originMs = parseHttpDateMillis(serverDate);
     requestedMs = dateMs !== null
       ? Math.max(dateMs - now, originMs !== null ? dateMs - originMs : -Infinity)
       : NaN;
