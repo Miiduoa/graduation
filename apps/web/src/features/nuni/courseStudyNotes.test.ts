@@ -168,6 +168,30 @@ describe('course study note downloads', () => {
     }
   });
 
+  it('marks missing or invisible model citations explicitly rather than emitting blank-looking TXT evidence', () => {
+    for (const quote of ['', '\u200b', '\u2060\u200d\u0301', '\u2800', ' \n\t', '\u202e']) {
+      const memory = withLesson();
+      const lesson = memory.modes.understand.lessons[0];
+      lesson.response = {
+        ...lesson.response, sourceQuote: quote,
+        steps: [
+          { title: '缺少引句', explanation: '先回到原文核對。', sourceQuote: quote },
+          { title: '有原文', explanation: '這段可在教材定位。', sourceQuote: '主鍵' },
+          { title: '未核對的 AI 引句', explanation: '推測仍需查證。', sourceQuote: '未出現的詞' },
+        ],
+      };
+      const original = JSON.stringify(memory);
+      const text = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
+      expect(text).toContain('AI 講解：\n主鍵像是每位學生的學號。\n\nAI 引句：未提供可讀引句');
+      expect(text).toContain('本步講解：\n先回到原文核對。\n本步 AI 引句：未提供可讀引句');
+      expect(text).toContain('本步引用原文：\n主鍵');
+      expect(text).toContain('本步 AI 引句（無法在本段逐字定位）：\n未出現的詞');
+      expect(text).not.toContain('\n引用原文：\n');
+      if (/[^\p{White_Space}]/u.test(quote)) expect(text).not.toContain(quote);
+      expect(JSON.stringify(memory)).toBe(original);
+    }
+  });
+
   it('exports all step titles, explanations, quotes and optional formulas in order as plain text', () => {
     const formulaSource = studySourceFromText({
       id: 'formula-notes', title: '公式與符號', text: '平均數公式：μ = Σx / n。\r\n比較符號 x < y 表示 x 小於 y。',

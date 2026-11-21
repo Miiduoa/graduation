@@ -30,6 +30,18 @@ function txtFormulaLabel(passageText: string, formula: string): string {
     : 'AI 公式（無法在本段逐字定位）：';
 }
 
+/**
+ * Saved model responses may contain invisible-only quotations. Do not export
+ * a blank-looking citation or hidden controls as though they were source text.
+ */
+function appendTxtCitation(lines: string[], passageText: string, quote: string, step = false): void {
+  if (!hasVisibleStudyContent(quote)) {
+    lines.push(step ? '本步 AI 引句：未提供可讀引句' : 'AI 引句：未提供可讀引句');
+    return;
+  }
+  lines.push(txtCitationLabel(passageText, quote, step), quote);
+}
+
 /** Plain text only. Source/session ownership is maintained by CourseStudyPanel. */
 export function buildCourseStudyNotes(
   courseTitle: string,
@@ -71,15 +83,15 @@ export function buildCourseStudyNotes(
           if (hasVisibleStudyContent(lesson.question)) lines.push('我的問題：', lesson.question);
           lines.push(
             `講解標題：${lesson.response.title}`,
-            'AI 講解：', lesson.response.explanation,
-            '', txtCitationLabel(passage.text, lesson.response.sourceQuote), lesson.response.sourceQuote,
+            'AI 講解：', lesson.response.explanation, '',
           );
+          appendTxtCitation(lines, passage.text, lesson.response.sourceQuote);
           if (lesson.response.steps?.length) {
             lines.push('', '分步講解：');
             lesson.response.steps.forEach((step, index) => {
               lines.push('', `第 ${index + 1} 步：${step.title}`,
-                '本步講解：', step.explanation,
-                txtCitationLabel(passage.text, step.sourceQuote, true), step.sourceQuote);
+                '本步講解：', step.explanation);
+              appendTxtCitation(lines, passage.text, step.sourceQuote, true);
               if (step.formula && hasVisibleStudyContent(step.formula))
                 lines.push(txtFormulaLabel(passage.text, step.formula), step.formula);
             });
