@@ -2828,6 +2828,8 @@ describe('firestore security rules', () => {
     const draft = base + 'draft';
     const published = base + 'published';
     const fresh = base + 'new-assignment';
+    const unexpected = base + 'unexpected';
+    const restored = base + 'restored';
 
     await seedFirestore(async (db) => {
       await db.doc(group).set({ schoolId: 'pu', type: 'course' });
@@ -2852,7 +2854,7 @@ describe('firestore security rules', () => {
       title, lastEditedBy: 'teacher', updatedAt: serverTimestamp(),
     });
     const cannotWrite = async () => {
-      await assertFails(teacher.doc(fresh).set({ type: 'assignment', title: 'Unexpected' }));
+      await assertFails(teacher.doc(unexpected).set({ type: 'assignment', title: 'Unexpected' }));
       await assertFails(teacher.doc(draft).update({ title: 'Unauthorized edit' }));
       await assertFails(teacher.doc(draft).delete());
       await assertFails(teacher.doc(published).update(revised('Unauthorized published edit')));
@@ -2882,7 +2884,7 @@ describe('firestore security rules', () => {
     await cannotWrite();
     await seedFirestore(db => db.doc('users/teacher').set(campusBoundProfile('pu')));
 
-    await assertSucceeds(teacher.doc(fresh).set({ type: 'assignment', title: 'Restored task' }));
+    await assertSucceeds(teacher.doc(restored).set({ type: 'assignment', title: 'Restored task' }));
     await assertSucceeds(teacher.doc(published).update(revised('Restored published edit')));
     await assertSucceeds(teacher.doc(draft).delete());
   });
