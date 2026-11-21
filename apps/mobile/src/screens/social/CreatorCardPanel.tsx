@@ -64,7 +64,7 @@ function ScopedCreatorCardPanel({
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const savingFlight = useRef(false);
   const [openingLink, setOpeningLink] = useState(false);
-  const openingLinkFlight = useRef(false);
+  const openingLinkFlight = useRef<{ url: string } | null>(null);
   const [linkError, setLinkError] = useState('');
   // A pending OS handoff belongs to the URL visible when it was pressed.
   // A later edit may replace that URL before the old handoff rejects.
@@ -72,6 +72,17 @@ function ScopedCreatorCardPanel({
   const mounted = useRef(false);
   const [feedback, setFeedback] = useState('');
   currentPortfolioLink.current = state.status === 'ready' ? state.value?.linkUrl ?? '' : '';
+
+  const acceptSavedPortfolioLink = (url: string) => {
+    if (currentPortfolioLink.current !== url) {
+      // A handoff for a replaced URL no longer owns the visible link's busy
+      // state. The OS Promise can still resolve, but it must not touch this UI.
+      openingLinkFlight.current = null;
+      setOpeningLink(false);
+    }
+    currentPortfolioLink.current = url;
+    setLinkError('');
+  };
 
   useEffect(() => {
     mounted.current = true;
@@ -147,8 +158,7 @@ function ScopedCreatorCardPanel({
     }
     if (!mounted.current) return;
 
-    currentPortfolioLink.current = latest?.linkUrl ?? '';
-    setLinkError('');
+    acceptSavedPortfolioLink(latest?.linkUrl ?? '');
     setState({ status: 'ready', value: latest });
     pendingWrite.current = null;
     setNeedsConfirmation(false);
@@ -187,8 +197,7 @@ function ScopedCreatorCardPanel({
     try {
       const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft);
       if (!mounted.current) return;
-      currentPortfolioLink.current = confirmed.linkUrl;
-      setLinkError('');
+      acceptSavedPortfolioLink(confirmed.linkUrl);
       setState({ status: 'ready', value: confirmed });
       finishSave(submittedDraft);
     } catch {
@@ -205,21 +214,23 @@ function ScopedCreatorCardPanel({
   };
 
   const openPortfolioLink = async (url: string) => {
-    // Linking is an OS handoff: even a valid HTTPS URL may be rejected. Prevent
-    // a second tap from launching another handoff while the first is pending.
+    // One handoff per currently visible URL. When a newly saved URL replaces
+    // it, the old unresolved OS Promise loses ownership of the busy state.
     if (openingLinkFlight.current) return;
-    openingLinkFlight.current = true;
+    const handoff = { url };
+    openingLinkFlight.current = handoff;
     setOpeningLink(true);
     setLinkError('');
     try {
       await Linking.openURL(url);
     } catch {
-      if (mounted.current && currentPortfolioLink.current === url) {
+      if (mounted.current && openingLinkFlight.current === handoff &&
+        currentPortfolioLink.current === url) {
         setLinkError('無法開啟作品連結，請稍後再試。');
       }
     } finally {
-      if (mounted.current) {
-        openingLinkFlight.current = false;
+      if (mounted.current && openingLinkFlight.current === handoff) {
+        openingLinkFlight.current = null;
         setOpeningLink(false);
       }
     }
