@@ -100,7 +100,7 @@ function overpassRetryAfterMs(header: string | null, now: number, serverDate: st
       ? MAX_RETRY_AFTER_MS : Number(digits) * 1000;
   } else {
     const dateMs = parseHttpDateMillis(value);
-    // Only a canonical HTTP Date is a trustworthy origin-clock reference.
+    // Only a recognized HTTP-date is a trustworthy origin-clock reference.
     // Invalid intermediary dates must never amplify a ten-minute fallback
     // into a 24-hour cooldown or silently shorten a valid server pause.
     const originMs = parseHttpDateMillis(serverDate);
