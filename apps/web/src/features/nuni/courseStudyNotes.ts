@@ -44,7 +44,9 @@ export function buildCourseStudyNotes(
       for (const mode of modes) {
         for (const lesson of memory.modes[mode.value].lessons) {
           lines.push('', `${mode.label}・第 ${lesson.id} 次講解`);
-          if (lesson.question.trim()) lines.push('我的問題：', lesson.question);
+          // Zero-width or detached-mark questions can survive trim(), but
+          // should not create an apparently blank question in a student TXT.
+          if (hasVisibleStudyContent(lesson.question)) lines.push('我的問題：', lesson.question);
           lines.push(
             `講解標題：${lesson.response.title}`,
             'AI 講解：', lesson.response.explanation,
