@@ -110,6 +110,11 @@ it('disambiguates same-name campus markers before opening walking or flat-map na
   expect(duplicateNotice.textContent).toContain('24.229, 120.582，清單第 3 項');
   expect(new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!)
     .searchParams.get('destination')).toBe('24.229,120.582');
+  const appleDirections = new URL(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' }).getAttribute('href')!);
+  expect(appleDirections.origin).toBe('https://maps.apple.com');
+  expect(appleDirections.searchParams.get('daddr')).toBe('24.229,120.582');
+  expect(appleDirections.searchParams.get('dirflg')).toBe('w');
+  expect(appleDirections.searchParams.has('saddr')).toBe(false);
   expect(scene.create).toHaveBeenCalledTimes(1);
   // Before taking a step, assistive technology announces which duplicate POI
   // that button will select. Unambiguous adjacent places keep short labels.
@@ -2325,6 +2330,7 @@ it('requires a fresh choice when the source reuses an inherited POI ID at a diff
   // scene and asynchronously imports/creates the replacement scene, so its
   // setView() call is not guaranteed during the same React render tick.
   expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect(within(dialog).queryByRole('link', { name: '開啟 Apple 地圖步行導航' })).toBeNull();
   expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
   expect(scene.dispose).toHaveBeenCalledTimes(1);
   expect(onSelect).not.toHaveBeenCalled();
@@ -2336,6 +2342,9 @@ it('requires a fresh choice when the source reuses an inherited POI ID at a diff
   fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: replacement.id } });
   const directions = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
   expect(directions.searchParams.get('destination')).toBe(`${replacement.lat},${replacement.lng}`);
+  const updatedApple = new URL(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' }).getAttribute('href')!);
+  expect(updatedApple.searchParams.get('daddr')).toBe(`${replacement.lat},${replacement.lng}`);
+  expect(updatedApple.searchParams.get('dirflg')).toBe('w');
   fireEvent.click(within(dialog).getByRole('button', { name: '在平面地圖查看' }));
   expect(onSelect).toHaveBeenCalledExactlyOnceWith(replacement);
 });

@@ -2,6 +2,8 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import {
   distanceMeters,
   formatDistance,
+  walkingDirectionsUrl,
+  appleWalkingDirectionsUrl,
   loadMapFavorites,
   loadMapLocations,
   MapSourceTimeoutError,
@@ -52,6 +54,25 @@ const entry = (id: string, data: Record<string, unknown>) => ({ id, data: () => 
 const snapshot = (...docs: ReturnType<typeof entry>[]) => ({ empty: docs.length === 0, docs });
 const respond = (value: ReturnType<typeof snapshot>) =>
   vi.mocked(getDocsFromServer).mockResolvedValueOnce(value as never);
+
+it('builds Google and Apple walking links from exact marker coordinates without inventing an entrance', () => {
+  const google = new URL(walkingDirectionsUrl(location));
+  const apple = new URL(appleWalkingDirectionsUrl(location));
+  expect(google.origin).toBe('https://www.google.com');
+  expect(google.searchParams.get('destination')).toBe('24.2275,120.5635');
+  expect(google.searchParams.get('travelmode')).toBe('walking');
+  expect(google.searchParams.has('origin')).toBe(false);
+  expect(apple.origin).toBe('https://maps.apple.com');
+  expect(apple.searchParams.get('daddr')).toBe('24.2275,120.5635');
+  expect(apple.searchParams.get('dirflg')).toBe('w');
+  expect(apple.searchParams.has('saddr')).toBe(false);
+
+  const start = { lat: 24.23, lng: 120.56 };
+  expect(new URL(appleWalkingDirectionsUrl(location, start)).searchParams.get('saddr'))
+    .toBe('24.23,120.56');
+  expect(new URL(walkingDirectionsUrl(location, start)).searchParams.get('origin'))
+    .toBe('24.23,120.56');
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
