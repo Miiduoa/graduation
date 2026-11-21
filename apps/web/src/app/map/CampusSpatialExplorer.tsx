@@ -417,7 +417,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Geometry is only affirmative when both the host and the effective
     // viewport have valid, positive bounds. Unknown WebView measurements must
     // never be interpreted as proof that the map is back on screen.
-    const hostViewportVisibility = (): 'onscreen' | 'offscreen' | 'unknown' | 'invalid-visual-viewport' => {
+    const hostViewportVisibility = (): 'onscreen' | 'offscreen' | 'unknown' | 'invalid-visual-viewport' | 'invalid-host-rect' => {
       // Some embedded Safari/WebViews expose VisualViewport but throw when a
       // dimension is read during keyboard, zoom or bfcache transitions. Read
       // each getter once; an exception is *not* permission to fall back to
@@ -448,6 +448,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           width, height, left, top, right, bottom].every(Number.isFinite) ||
           rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0 ||
           right <= left || bottom <= top) return 'unknown';
+        // A WebView can expose positive width/height while its DOMRect edges
+        // are reversed or collapsed. These bounds never prove the host visible.
+        if (rect.right <= rect.left || rect.bottom <= rect.top) return 'invalid-host-rect';
         return rect.bottom <= top || rect.top >= bottom ||
           rect.right <= left || rect.left >= right ? 'offscreen' : 'onscreen';
       } catch {
@@ -462,7 +465,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // can still use a real observer signal or the manual-start control.
     const hostMustStaySuspended = () => {
       const position = hostViewportVisibility();
-      return position === 'offscreen' || position === 'invalid-visual-viewport';
+      return position === 'offscreen' || position === 'invalid-visual-viewport' || position === 'invalid-host-rect';
     };
     // Keep a way back when pageshow/visibilitychange (not a resize event)
     // invalidates an already-running scene. Safari may not issue another
@@ -554,7 +557,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         if (position !== 'unknown') visible = position === 'onscreen';
       } else if (!manualStart && typeof IntersectionObserver !== 'undefined') {
         const position = hostViewportVisibility();
-        if (position === 'offscreen' || position === 'invalid-visual-viewport') {
+        if (position === 'offscreen' || position === 'invalid-visual-viewport' || position === 'invalid-host-rect') {
           if (visible && started) suspendedByViewport = true;
           visible = false;
         } else if (position === 'onscreen' && pendingInitialViewportConfirmation && !started) {
@@ -663,7 +666,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // geometry on the later viewport event before starting.
           if (!started) {
             pendingInitialViewportConfirmation =
-              position === 'invalid-visual-viewport' && confirmedIntersecting;
+              (position === 'invalid-visual-viewport' || position === 'invalid-host-rect') && confirmedIntersecting;
           }
           if (!confirmedIntersecting) {
             // A newer negative observer record revokes the viewport-only
@@ -671,11 +674,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
             // resurrect a scene the observer has explicitly marked hidden.
             // Wait for the next genuine positive intersection instead.
             suspendedByViewport = false;
-          } else if (position === 'invalid-visual-viewport' && visible && started) {
+          } else if ((position === 'invalid-visual-viewport' || position === 'invalid-host-rect') && visible && started) {
             suspendedByViewport = true;
           }
           visible = confirmedIntersecting &&
-            position !== 'offscreen' && position !== 'invalid-visual-viewport';
+            position !== 'offscreen' && position !== 'invalid-visual-viewport' && position !== 'invalid-host-rect';
           if (visible) suspendedByViewport = false;
           updateVisibility();
           startWhenVisible();
