@@ -997,3 +997,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - 最小修改保留「本人查詢尚未建立的收據」的既有空文件 GET（`resource == null`），但有實際文件時一律呼叫 `canReadSubmissionDoc`，以明確 owner 為準。合法真 owner、教師及指派評閱者仍按原授權，無 `userId/uid/studentId` 的舊收據才依既有 owner helper 回退至文件 ID；明確 null 不回退。
 - 新增合成 Firebase Emulator 回歸：雙向錯配、正確 owner、opaque 路徑、舊收據、null owner、非會員、教師、同一登入狀態的退課／校籍撤權與恢復。沒有操作正式資料或既有收據。
 - **驗證分層：** 提交前做來源錨點與 JS 語法檢查；新 head Emulator／HTTP／DM／TypeCheck／Web Build 必須以本輪 GitHub workflow 實際結果回填；完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、指定 App 5504170 對新 head 的 APPROVED、歷史資料盤點、發布回復及真 GCS／Supabase 已發 URL 撤銷仍未完成。這次沒有改 migration、部署、金鑰或 E 校園；未執行或繞道未授權 npm/pnpm audit。
+
+
+### 2026-11-21｜教師舊校資格重放：私人作業收據、同儕互評及成績修訂（隔離候選）
+
+- **已讀基準**：main `67ed7458339e4db981ed016926affa465d995d2f`；既有安全分支精確父提交 `a32859ba3203f301388d70d071f0fcc816e31d5f`（10 ahead／11 behind）。原安全 PR #517/#577 均已合併，但核可不可移植。main 的 CI #44861099479（含現有 Security Gates、Firestore、Mobile／Web）及 CodeQL #44861099489 成功；本安全分支上一提交 Firestore #44845858468 成功。新提交的結果須另行核實。
+- **授權缺口**：`canManageGroup` 以殘留群組教師資格和舊校會員資格認定管理者，未重新核對 server-bound `users/{uid}.schoolId/primarySchoolId`。當使用者部分轉校且舊資格未撤除，仍可讀取 nested／legacy 私人作業提交、同儕互評（含教師備註）、gradeRevisions，並可能操作教師端評分與互評。這是從 Rules 可重現的邊界缺口，未發現正式環境利用證據。
+- **最小修補**：新增 `canManageCurrentGroup`，沿用已存在的 `isActiveCurrentGroupMember`，只套用於上述敏感教師授權分支（含教師 grade update、peer review 建立／修改／刪除和 revisions 建立），保留其他一般群組管理語義，不更改任何正式資料或歷史文件。學生本人與合法指派評閱者原權限保留。修正一份舊教師測試 fixture，使其具備真實 server-bound 校籍。
+- **可重跑回歸**：`backend/tests/security-rules.test.js` 新增真 Firebase Emulator 案例，涵蓋合法教師 GET/CREATE/DELETE、同校無關帳號拒絕、合法學生評閱讀取、同一登入 context 的雙向校籍衝突、課程／學校會員撤權、帳號刪除、拒絕重放與恢復。未宣稱真實寫入競態已測；GCS/Supabase 已發 URL／真 Storage CAS 仍另列。
+- **驗收與禁止事項**：新 head 的 Firestore workflow、完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、指定 nuni-merge-gate App 5504170 對精確 head「審查通過」、發布及回復均需獨立核對；不將原 SHA 的結果視為新 SHA。沿用 feature-only branch，不主動建立會外送 npm/pnpm audit payload 的 PR。未接觸正式資料、金鑰、附件 token、migration、部署或 E 校園。無 staging GCS bucket 憑證，已發簽名 URL 撤銷仍是獨立發布阻礙。

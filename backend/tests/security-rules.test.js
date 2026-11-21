@@ -2731,6 +2731,96 @@ describe('firestore security rules', () => {
     await assertSucceeds(alice.doc(opaque).get({ source: 'server' }));
   });
 
+
+  test('stale campus staff grants cannot replay private receipts and grading metadata', async () => {
+    const group = 'groups/staff-campus-replay-1';
+    const assignment = group + '/assignments/work-1';
+    const nested = assignment + '/submissions/bob';
+    const legacy = 'submissions/staff-campus-replay-legacy';
+    const review = assignment + '/peerReviews/alice';
+    const extraReview = assignment + '/peerReviews/extra';
+    const revision = nested + '/gradeRevisions/rev-1';
+
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      await db.doc(assignment).set({ type: 'assignment', published: true });
+      for (const [uid, role] of [
+        ['teacher', 'instructor'], ['bob', 'member'], ['alice', 'member'], ['carol', 'member'],
+      ]) {
+        await db.doc('users/' + uid).set(campusBoundProfile('pu'));
+        await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+        await db.doc(group + '/members/' + uid).set({ status: 'active', role });
+      }
+      await db.doc(nested).set({ userId: 'bob', content: 'Private submitted answer' });
+      await db.doc(legacy).set({
+        groupId: 'staff-campus-replay-1', assignmentId: 'work-1',
+        userId: 'bob', content: 'Private legacy answer',
+      });
+      await db.doc(review).set({
+        reviewerId: 'alice', submissionOwnerId: 'bob', submittedAt: null,
+        comment: 'Not yet released', teacherNotes: 'Restricted teacher note',
+      });
+      await db.doc(revision).set({ changedBy: 'teacher', beforeScore: 60, afterScore: 80 });
+    });
+
+    const teacherDb = testEnv.authenticatedContext('teacher').firestore();
+    const carolDb = testEnv.authenticatedContext('carol').firestore();
+    const aliceDb = testEnv.authenticatedContext('alice').firestore();
+    const managerReadPaths = [nested, legacy, review, revision];
+    async function allowStaffReads() {
+      for (const p of managerReadPaths) {
+        await assertSucceeds(teacherDb.doc(p).get({ source: 'server' }));
+      }
+    }
+    async function denyStaleStaff() {
+      for (const p of managerReadPaths) {
+        await assertFails(teacherDb.doc(p).get({ source: 'server' }));
+      }
+      await assertFails(teacherDb.doc(extraReview).set({
+        reviewerId: 'extra', submissionOwnerId: 'bob',
+      }));
+      await assertFails(teacherDb.doc(extraReview).delete());
+    }
+
+    await allowStaffReads();
+    await assertSucceeds(teacherDb.doc(extraReview).set({
+      reviewerId: 'extra', submissionOwnerId: 'bob',
+    }));
+    await assertFails(carolDb.doc(nested).get({ source: 'server' }));
+    await assertFails(carolDb.doc(legacy).get({ source: 'server' }));
+    await assertFails(carolDb.doc(revision).get({ source: 'server' }));
+    await assertSucceeds(aliceDb.doc(review).get({ source: 'server' }));
+
+    // Old membership remains active, but the profile has a conflicting school.
+    // The same authenticated client must lose every staff-only route immediately.
+    await seedFirestore((db) => db.doc('users/teacher').update({ primarySchoolId: 'other' }));
+    await denyStaleStaff();
+    await denyStaleStaff();
+    await seedFirestore((db) => db.doc('users/teacher').update({ primarySchoolId: 'pu' }));
+    await allowStaffReads();
+
+    await seedFirestore((db) => db.doc('users/teacher').update({ schoolId: 'other' }));
+    await denyStaleStaff();
+    await seedFirestore((db) => db.doc('users/teacher').update({ schoolId: 'pu' }));
+    await allowStaffReads();
+
+    await seedFirestore((db) => db.doc('schools/pu/members/teacher').update({ status: 'removed' }));
+    await denyStaleStaff();
+    await seedFirestore((db) => db.doc('schools/pu/members/teacher').update({ status: 'active' }));
+    await allowStaffReads();
+
+    await seedFirestore((db) => db.doc(group + '/members/teacher').update({ status: 'removed' }));
+    await denyStaleStaff();
+    await seedFirestore((db) => db.doc(group + '/members/teacher').update({ status: 'active' }));
+    await allowStaffReads();
+
+    await seedFirestore((db) => db.doc('users/teacher').delete());
+    await denyStaleStaff();
+    await seedFirestore((db) => db.doc('users/teacher').set(campusBoundProfile('pu')));
+    await allowStaffReads();
+    await assertSucceeds(teacherDb.doc(extraReview).delete());
+  });
+
   test('gradebook owner and teacher grants require current course and canonical campus membership', async () => {
     const group = 'groups/gradebook-revoke-1';
     const row = `${group}/gradebook/bob`;
@@ -4750,6 +4840,7 @@ describe('course assignment submissions', () => {
       await db.doc('schools/school-1/members/teacher').set({ role: 'faculty', status: 'active' });
       await db.doc('groups/course-1/members/alice').set({ role: 'member', status: 'active' });
       await db.doc('groups/course-1/members/teacher').set({ role: 'instructor', status: 'active' });
+      await db.doc('users/teacher').set(campusBoundProfile('school-1'));
       await db.doc('groups/course-1/assignments/work-1').set({ title: 'Work', published: true, ...overrides });
     });
   }

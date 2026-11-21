@@ -456,6 +456,12 @@ service cloud.firestore {
         );
     }
 
+    // Private submissions, peer reviews and revision logs must not be managed
+    // through a leftover old-campus teacher membership after a transfer.
+    function canManageCurrentGroup(groupId) {
+      return canManageGroup(groupId) && isActiveCurrentGroupMember(groupId);
+    }
+
     function isAssignedReviewer(groupId, assignmentId, submissionId, data) {
       return isActiveCurrentGroupMember(groupId)
         && exists(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/peerReviews/$(request.auth.uid))
@@ -464,7 +470,7 @@ service cloud.firestore {
     }
 
     function canReadSubmissionDoc(groupId, assignmentId, submissionId, data) {
-      return canManageGroup(groupId)
+      return canManageCurrentGroup(groupId)
         || isSubmissionOwner(data, submissionId)
         || isAssignedReviewer(groupId, assignmentId, submissionId, data);
     }
@@ -603,7 +609,7 @@ service cloud.firestore {
     }
 
     function canReadPeerReviewDoc(groupId, assignmentId, reviewerId, data) {
-      return canManageGroup(groupId)
+      return canManageCurrentGroup(groupId)
         || (isActiveCurrentGroupMember(groupId)
           && (reviewerId == request.auth.uid
             || (data.submissionOwnerId == request.auth.uid && data.submittedAt != null)));
@@ -1528,7 +1534,7 @@ service cloud.firestore {
               'userId', 'groupId', 'assignmentId', 'content', 'attachments', 'answers', 'status', 'submittedAt', 'updatedAt'
             ]);
           allow update: if (
-            canManageGroup(groupId)
+            canManageCurrentGroup(groupId)
             && (
               validFirstPublishedGrade(groupId, assignmentId, submissionId)
               || validFirstLegacyGrade(groupId, assignmentId, submissionId)
@@ -1546,8 +1552,8 @@ service cloud.firestore {
           allow delete: if false;
 
           match /gradeRevisions/{revisionId} {
-            allow read: if canManageGroup(groupId);
-            allow create: if canManageGroup(groupId)
+            allow read: if canManageCurrentGroup(groupId);
+            allow create: if canManageCurrentGroup(groupId)
               && validGradeRevisionLog(groupId, assignmentId, submissionId, revisionId);
             allow update, delete: if false;
           }
@@ -1572,9 +1578,9 @@ service cloud.firestore {
           }
 
           allow read: if canReadPeerReviewDoc(groupId, assignmentId, reviewerId, resource.data);
-          allow create: if canManageGroup(groupId)
+          allow create: if canManageCurrentGroup(groupId)
             && request.resource.data.reviewerId == reviewerId;
-          allow update: if canManageGroup(groupId)
+          allow update: if canManageCurrentGroup(groupId)
             || (
               isActiveCurrentGroupMember(groupId)
               && reviewerId == request.auth.uid
@@ -1582,7 +1588,7 @@ service cloud.firestore {
               && request.resource.data.submissionOwnerId == resource.data.submissionOwnerId
               && validReviewerFeedbackUpdate()
             );
-          allow delete: if canManageGroup(groupId);
+          allow delete: if canManageCurrentGroup(groupId);
         }
       }
 
@@ -2491,7 +2497,7 @@ service cloud.firestore {
       allow read: if isSubmissionOwner(resource.data, docId)
         || (
           resource.data.groupId != null
-          && canManageGroup(resource.data.groupId)
+          && canManageCurrentGroup(resource.data.groupId)
         )
         || (
           resource.data.groupId != null
