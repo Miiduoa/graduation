@@ -444,8 +444,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         const top = visualBounds?.top ?? 0;
         const right = left + (visualBounds?.width ?? width);
         const bottom = top + (visualBounds?.height ?? height);
-        if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height,
-          width, height, left, top, right, bottom].every(Number.isFinite) ||
+        // A malformed *reported* host coordinate is not an absent layout
+        // measurement. In particular NaN/Infinity must never allow the
+        // no-observer WebView fallback to start offscreen WebGL.
+        if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height]
+          .every(Number.isFinite)) return 'invalid-host-rect';
+        if (![width, height, left, top, right, bottom].every(Number.isFinite) ||
           rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0 ||
           right <= left || bottom <= top) return 'unknown';
         // A WebView can expose positive width/height while its DOMRect edges
