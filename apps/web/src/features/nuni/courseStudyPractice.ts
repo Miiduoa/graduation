@@ -1,5 +1,6 @@
 import type { StudyMode, StudyPassage } from '@/lib/studyTutor';
-import { STUDY_SESSION_LIMITS, hasVisibleStudyAttempt, type StudyPassageMemory } from './courseStudySession';
+import { STUDY_SESSION_LIMITS, hasVisibleStudyAttempt, hasVisibleStudyContent, type StudyPassageMemory } from './courseStudySession';
+import { locateStudyEvidence } from './studyEvidence';
 import { courseStudyNotesFilename } from './courseStudyNotes';
 
 export type StudyPracticeCard = {
@@ -285,8 +286,20 @@ export function buildCourseStudyPracticeNotes(
       `原文提示：${response.hintVisible ? '已展開' : '未展開'}`,
     );
     if (canRevealAnswer) lines.push('', '參考回答（本輪已展開）：', card.answer);
-    if (response.hintVisible || canRevealAnswer)
-      lines.push('', '原文引句：', card.sourceQuote, '本段原文：', card.sourceText);
+    if (response.hintVisible || canRevealAnswer) {
+      // Practice cards snapshot a generated quote. Only the exact current
+      // passage can justify an "original source quote" label in exported TXT.
+      // An opened hint never turns an AI fabrication into source evidence.
+      lines.push('');
+      if (!hasVisibleStudyContent(card.sourceQuote)) {
+        lines.push('AI 引句：未提供可讀引句');
+      } else if (locateStudyEvidence(card.sourceText, card.sourceQuote)) {
+        lines.push('原文引句：', card.sourceQuote);
+      } else {
+        lines.push('AI 引句（無法在本段逐字定位）：', card.sourceQuote);
+      }
+      lines.push('本段原文：', card.sourceText);
+    }
   });
   return `${lines.join('\n')}\n`;
 }
