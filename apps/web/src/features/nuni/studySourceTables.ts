@@ -48,10 +48,17 @@ const RAW_HTML_TEXT_BLOCKS = new Set([
   // In these raw-text/RCDATA elements, a literal </div> is not an HTML tag.
   'xmp', 'iframe', 'noembed', 'noframes', 'title', 'plaintext',
 ]);
+// Form controls are not standalone Markdown table containers. Their options,
+// labels and fallbacks may contain table-shaped text which must not be
+// reconstructed into a separate public study table.
+const HTML_FORM_TEXT_BLOCKS = new Set([
+  'select', 'datalist', 'optgroup', 'option', 'button',
+]);
 // Scan every syntactically complete tag so quoted attributes on other HTML
 // elements cannot smuggle fake opening/closing tags into the block tracker.
 const TABLE_SUPPRESSED_HTML_TAGS = new Set([
-  ...NESTABLE_HTML_BLOCKS, 'pre', 'code', 'script', 'style', 'textarea',
+  ...NESTABLE_HTML_BLOCKS, ...HTML_FORM_TEXT_BLOCKS,
+  'pre', 'code', 'script', 'style', 'textarea',
   'template', 'noscript', 'svg', 'math', 'table',
   'xmp', 'iframe', 'noembed', 'noframes', 'title', 'plaintext',
 ]);

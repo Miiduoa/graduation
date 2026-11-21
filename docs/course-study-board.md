@@ -1,3 +1,8 @@
+## 2026-11-21：表單選項中的表格形狀文字不另行公開為教材表格
+
+- 修正原文表格掃描器：HTML select、datalist、optgroup、option、button 等表單控制項的內文，可能含有表格形狀的示範或尚未公開選項，卻不是獨立渲染的 Markdown 表格。現在於對應標籤區塊內保守停止衍生學生可複製表格，直到明確關閉；後續公開表格保持原樣與來源行號。
+- 新增五種表單元素、跨行開啟標籤及 Markdown 跳脫字面範例的正反 Vitest 回歸。這只驗證來源文字分析，**不是瀏覽器 computed style 或 iOS／Android 真機驗收**；未改既有授權教材、v1/v2 閱讀進度／v1 練習 checkpoint，不新增依賴或私人教材傳輸。指定 App 5504170 APPROVED、實機／Maestro、WebGPU 繁中及 Ahaboard 同條件比較尚缺證據，PR 維持 Draft、不合併、不部署。
+
 ## 2026-11-21：標準 HTML 標籤的全域 hidden 屬性不可漏出教師答案
 
 - 修正教材表格的靜態來源掃描：HTML 的 `hidden`、`aria-hidden="true"` 與明確隱藏的 inline CSS 不只會用在 div 或自訂元素，也能出現在舊教材常見的 `<center>`、`<address>`、`<dl>`、`<a>`、`<em>` 等標準語意標籤。此前漏追這些元素可能把其內的教師答案 Markdown 表格額外衍生為可複製的學生白板。現在在相同保守條件下追蹤這些容器，並維持同名巢狀／跨行屬性邊界。
