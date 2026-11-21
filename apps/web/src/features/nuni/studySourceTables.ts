@@ -39,7 +39,13 @@ const HIDDEN_HTML_CONTAINERS = new Set([
 ]);
 // HTML disclosure / dialog bodies are not standalone Markdown tables. Keep
 // nested disclosures balanced so a closed inner example cannot expose its parent.
-const NESTABLE_HTML_BLOCKS = new Set([...HIDDEN_HTML_CONTAINERS, 'details', 'dialog']);
+// HTML templates, preformatted examples, nested code and SVG/MathML roots
+// can contain another same-name wrapper. An inner closing tag must not
+// release the outer suppressed content and expose a teacher-only table.
+const NESTABLE_HTML_BLOCKS = new Set([
+  ...HIDDEN_HTML_CONTAINERS, 'details', 'dialog',
+  'template', 'pre', 'code', 'svg', 'math',
+]);
 // Raw-text/RCDATA children can contain a literal closing tag for their parent.
 // Track them even inside a hidden wrapper: </div> in a script string must not
 // release unpublished answer rows. This is source-boundary tracking, not an HTML parser.
