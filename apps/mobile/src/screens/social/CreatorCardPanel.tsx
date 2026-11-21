@@ -54,6 +54,13 @@ function ScopedCreatorCardPanel({
   // A write can succeed while its server confirmation read fails. Avoid
   // automatically sending a second write until the student checks the server.
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
+  // The ref is authoritative even for callbacks retained from an older render.
+  // React state alone can be stale while an uncertain write awaits recheck.
+  const needsConfirmationRef = useRef(false);
+  const markConfirmationRequired = (required: boolean) => {
+    needsConfirmationRef.current = required;
+    setNeedsConfirmation(required);
+  };
   const savingFlight = useRef(false);
   const [openingLink, setOpeningLink] = useState(false);
   const openingLinkFlight = useRef(false);
@@ -84,19 +91,19 @@ function ScopedCreatorCardPanel({
   const beginEdit = () => {
     if (!own || state.status !== 'ready') return;
     setDraft(state.value ?? EMPTY_CREATOR_CARD);
-    setNeedsConfirmation(false);
+    markConfirmationRequired(false);
     setFeedback('');
     setEditing(true);
   };
 
   const changeDraft = (field: keyof CreatorCard, value: string) => {
     setDraft((previous) => ({ ...previous, [field]: value }));
-    setNeedsConfirmation(false);
+    markConfirmationRequired(false);
     setFeedback('');
   };
 
   const confirmPreviousSave = async () => {
-    if (!own || !needsConfirmation || savingFlight.current || state.status !== 'ready') return;
+    if (!mounted.current || !own || !needsConfirmationRef.current || savingFlight.current || state.status !== 'ready') return;
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
@@ -114,10 +121,10 @@ function ScopedCreatorCardPanel({
         setLinkError('');
         setState({ status: 'ready', value: latest });
         setEditing(false);
-        setNeedsConfirmation(false);
+        markConfirmationRequired(false);
         setFeedback('社群簡介已儲存。');
       } else {
-        setNeedsConfirmation(false);
+        markConfirmationRequired(false);
         setFeedback('伺服器資料與草稿不同，草稿已保留。確認後可重新儲存。');
       }
     } catch {
@@ -135,24 +142,24 @@ function ScopedCreatorCardPanel({
   const submit = async () => {
     // A synchronous ref guards multiple taps in the same render before React
     // commits the disabled state. A failed write releases it for a real retry.
-    if (!own || needsConfirmation || savingFlight.current || state.status !== 'ready') return;
+    if (!mounted.current || !own || needsConfirmationRef.current || needsConfirmation || savingFlight.current || state.status !== 'ready') return;
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
-    setNeedsConfirmation(false);
+    markConfirmationRequired(false);
     try {
       const confirmed = await saveCreatorCard(schoolId, ownerUid, draft);
       if (!mounted.current) return;
       currentPortfolioLink.current = confirmed.linkUrl;
       setLinkError('');
-      setNeedsConfirmation(false);
+      markConfirmationRequired(false);
       setState({ status: 'ready', value: confirmed });
       setEditing(false);
       setFeedback('社群簡介已儲存。');
     } catch (error) {
       if (!mounted.current) return;
       const validationError = error instanceof Error && /最多|HTTPS|有效/.test(error.message);
-      setNeedsConfirmation(!validationError);
+      markConfirmationRequired(!validationError);
       setFeedback(validationError ? error.message
         : '無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
     } finally {
@@ -248,7 +255,7 @@ function ScopedCreatorCardPanel({
                 disabled={saving} busy={saving} onPress={() => void confirmPreviousSave()} />
             )}
             <CardButton label="取消編輯" disabled={saving}
-              onPress={() => { setEditing(false); setNeedsConfirmation(false); setFeedback(''); }} />
+              onPress={() => { setEditing(false); markConfirmationRequired(false); setFeedback(''); }} />
           </View>
         </View>
       ) : (
