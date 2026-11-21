@@ -1714,6 +1714,52 @@ it('refetches same-session cached courseware with a legacy 401 error rather than
   expect((store.docs.get(CACHE)!.extras as typeof extras)['10001'].errors).toEqual([]);
 });
 
+it('refetches same-session cached homework containing a foreign course row', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const cached = store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot;
+  cached.homework[0].courseId = 99999;
+  cached.homework[0].title = '其他課程的舊作業';
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request();
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.homework).toHaveLength(2);
+  expect(body.result.homework.every((item: { courseId: number }) => item.courseId === 10001)).toBe(true);
+  expect(JSON.stringify(body)).not.toContain('其他課程的舊作業');
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+  expect((store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot).homework[0].courseId).toBe(10001);
+});
+
+it('refetches course contents when foreign rows are nested under an allowed cache key', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const extras = store.docs.get(CACHE)!.extras as Record<string, {
+    announcements: { courseId: number; title: string }[];
+    materials: { courseId: number; title: string }[];
+  }>;
+  extras['10001'].announcements[0].courseId = 99999;
+  extras['10001'].announcements[0].title = '其他課程的舊公告';
+  extras['10001'].materials[0].courseId = 99999;
+  extras['10001'].materials[0].title = '其他課程的舊教材';
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.announcements).toHaveLength(1);
+  expect(body.result.materials).toHaveLength(1);
+  expect(JSON.stringify(body)).not.toMatch(/其他課程的舊公告|其他課程的舊教材/);
+  expect(source.fetchCourses).not.toHaveBeenCalled();
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+  const saved = (store.docs.get(CACHE)!.extras as typeof extras)['10001'];
+  expect(saved.announcements[0].courseId).toBe(10001);
+  expect(saved.materials[0].courseId).toBe(10001);
+});
+
 it('makes no LMS calls when the read-only feature flag is disabled', async () => {
   const { request, source, store } = setup();
   const doc = vi.spyOn(store.db, 'doc');
