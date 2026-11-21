@@ -160,6 +160,94 @@ it('blocks no-IntersectionObserver WebView when host DOMRect dimensions are non-
   }
 });
 
+
+it('defers legacy WebView GPU for invalid layout viewport then pauses and resumes the same scene', async () => {
+  vi.stubGlobal('IntersectionObserver', undefined);
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const validRect = {
+    x: 12, y: 16, left: 12, top: 16, right: 312, bottom: 176,
+    width: 300, height: 160, toJSON: () => ({}),
+  } as DOMRect;
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('aria-label') === '校園地點空間圖' ? validRect : original.call(this);
+    });
+  try {
+    vi.stubGlobal('innerWidth', Number.NaN);
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    expect(scene.create).not.toHaveBeenCalled();
+
+    vi.stubGlobal('innerWidth', width);
+    fireEvent(window, new Event('scroll'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    vi.stubGlobal('innerHeight', Number.POSITIVE_INFINITY);
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    vi.stubGlobal('innerHeight', height);
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+it('requires restored layout viewport after positive observer before allocating WebGL', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const validRect = {
+    x: 12, y: 16, left: 12, top: 16, right: 312, bottom: 176,
+    width: 300, height: 160, toJSON: () => ({}),
+  } as DOMRect;
+  vi.stubGlobal('innerWidth', Number.POSITIVE_INFINITY);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(validRect);
+  try {
+    act(() => intersection?.([{
+      isIntersecting: true, target: graphics, time: 100,
+      intersectionRect: validRect, boundingClientRect: validRect,
+      rootBounds: validRect, intersectionRatio: 1,
+    } satisfies IntersectionObserverEntry], {} as IntersectionObserver));
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+
+    vi.stubGlobal('innerWidth', width);
+    fireEvent(window, new Event('resize'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    vi.stubGlobal('innerHeight', Number.NaN);
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    vi.stubGlobal('innerHeight', height);
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('refuses contradictory host DOMRect bounds until WebView layout recovers without rebuilding WebGL', async () => {
   // A mobile WebView can expose positive dimensions with collapsed edges
   // while keyboard, zoom or bfcache layout is being restored.
