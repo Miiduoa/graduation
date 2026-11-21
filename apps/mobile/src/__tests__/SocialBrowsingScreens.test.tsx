@@ -472,6 +472,60 @@ test('a failed unsubscribe re-read keeps the subscription even when the list omi
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
+test('an older failed-write re-read never overwrites a newer re-read', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  const first = deferred();
+  jest.mocked(subscribeToBoard).mockImplementationOnce(() => first.promise);
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+  const firstRead = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => firstRead.promise);
+  await act(async () => { first.reject(new Error('offline')); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  const second = deferred();
+  jest.mocked(subscribeToBoard).mockImplementationOnce(() => second.promise);
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+  const secondRead = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => secondRead.promise);
+  await act(async () => { second.reject(new Error('offline')); });
+  expect(alertSpy).toHaveBeenLastCalledWith('訂閱失敗', 'offline');
+
+  // Newer re-read: another device left the board unsubscribed.
+  await act(async () => { secondRead.resolve(false); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  await act(async () => { firstRead.resolve(true); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+});
+
+test('a late failed-write re-read never restores a board after access is revoked', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  const write = deferred();
+  jest.mocked(unsubscribeFromBoard).mockImplementationOnce(() => write.promise);
+  fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
+  const reRead = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => reRead.promise);
+  await act(async () => { write.reject(new Error('offline')); });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  jest.mocked(listBoards).mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'permission-denied' }));
+  await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  expect(view.queryByText('讀書會')).toBeNull();
+  expect(view.getByText('暫時無法更新看板。請確認網路與登入狀態，再試一次。')).toBeTruthy();
+
+  await act(async () => { reRead.resolve(true); });
+  expect(view.queryByText('讀書會')).toBeNull();
+  expect(view.queryByLabelText('取消訂閱讀書會')).toBeNull();
+});
+
 test('two native presses before a rerender toggle from the newest choice', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const view = render(<BoardsScreen />);

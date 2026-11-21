@@ -163,6 +163,9 @@ function BoardsContent() {
   const reconcileBoardSubscription = useCallback(async (boardId: string, uid: string, sid: string) => {
     const revisionAtRead = subscriptionRevision.current;
     const appliedReadAtStart = appliedReadRevision.current;
+    // latestIntent only moves forward and is never restored after a failed
+    // write, so an older re-read cannot clobber a newer one for this board.
+    const intentAtStart = latestIntent.current.get(boardId);
     try {
       // Read this board only. listSubscribedBoardIds is capped at 100 and
       // must not treat a missing id as "unsubscribed".
@@ -171,6 +174,7 @@ function BoardsContent() {
       if (pendingSubscriptionCounts.current.has(boardId)) return;
       if ((boardWriteRevision.current.get(boardId) ?? -1) > revisionAtRead) return;
       if (appliedReadRevision.current !== appliedReadAtStart) return;
+      if (latestIntent.current.get(boardId) !== intentAtStart) return;
       applySubscribed((previous) => {
         if (previous.has(boardId) === serverSubscribed) return previous;
         const next = new Set(previous);
