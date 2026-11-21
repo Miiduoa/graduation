@@ -1,3 +1,9 @@
+## 2026-11-21：修復 Web Tests 中程式碼行數被識別碼規則誤擋
+
+- 精確前版 `fa751d460744f2aec3f55ed45d4c82be8a6d4899` 的 [CI #44880285552](https://github.com/Miiduoa/graduation/actions/runs/44880285552) Web Tests 日誌確認：19,748 通過、1 失敗、115 略過；失敗位置 `StudySourceTables.test.tsx:2805`，明確數量欄的測試預期數值比較卻得到空列表。問題是通用尾碼 `Code` 識別碼防護把 `Lines of Code`（程式碼行數）當作識別碼排除。
+- 對 `Lines of Code`、`Number of Lines of Code`、`Count of Lines of Code` 這些明確計數欄位開放來源數值比較，但 `Course Code`、`Verification Code`、單獨 `Code`、`Student ID` 仍不可衍生倍數圖。把原本逐欄迴圈改為帶欄名的參數化 Vitest，失敗時可直接指出哪個欄名；新增正反案例。
+- 只更動白板元件、回歸測試及文件；不新增套件、不外傳私人教材、不變更閱讀 v1/v2／練習 v1 checkpoint。完整新 SHA CI、CodeQL、App 5504170 審查、Maestro／真機及 Ahaboard 同條件對照未齊前保持 Draft、不合併、不部署。
+
 ## 2026-11-21：表單選項中的表格形狀文字不另行公開為教材表格
 
 - 修正原文表格掃描器：HTML select、datalist、optgroup、option、button 等表單控制項的內文，可能含有表格形狀的示範或尚未公開選項，卻不是獨立渲染的 Markdown 表格。現在於對應標籤區塊內保守停止衍生學生可複製表格，直到明確關閉；後續公開表格保持原樣與來源行號。

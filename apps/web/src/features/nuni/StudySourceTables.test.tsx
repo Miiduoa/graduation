@@ -2788,21 +2788,30 @@ it('does not depict source line, data row or procedural step positions as magnit
   }
 });
 
-it('still compares explicit quantities of lines, rows and steps', () => {
-  const quantityHeaders = [
-    '程式碼行數', '資料列數', '步驟數量', '步驟總數',
-    'Lines of Code', 'Line Count', 'Row Count', 'Number of Steps',
-    'Step Count', 'Record Count',
-  ];
-  for (const header of quantityHeaders) {
+it.each([
+  '程式碼行數', '資料列數', '步驟數量', '步驟總數',
+  'Lines of Code', 'Number of Lines of Code', 'Count of Lines of Code',
+  'Line Count', 'Row Count', 'Number of Steps', 'Step Count', 'Record Count',
+])('still compares explicit quantities of lines, rows and steps (%s)', (header) => {
+  const lesson = [
+    '| 教材 | ' + header + ' |', '| --- | --- |',
+    '| 資料庫 | 2 |', '| 網路 | 4 |',
+  ].join('\n');
+  const { container, unmount } = render(<StudySourceTables text={lesson} />);
+  expect(Array.from(container.querySelectorAll('meter'))
+    .map((bar) => [bar.getAttribute('value'), bar.getAttribute('max')]))
+    .toEqual([['2', '4'], ['4', '4']]);
+  unmount();
+});
+
+it.each(['Course Code', 'Verification Code', 'Code', 'Student ID'])
+  ('keeps identifiers as source text without derived quantity bars (%s)', (header) => {
     const lesson = [
       '| 教材 | ' + header + ' |', '| --- | --- |',
       '| 資料庫 | 2 |', '| 網路 | 4 |',
     ].join('\n');
     const { container, unmount } = render(<StudySourceTables text={lesson} />);
-    expect(Array.from(container.querySelectorAll('meter'))
-      .map((bar) => [bar.getAttribute('value'), bar.getAttribute('max')]))
-      .toEqual([['2', '4'], ['4', '4']]);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(container.querySelector('meter')).toBeNull();
     unmount();
-  }
-});
+  });
