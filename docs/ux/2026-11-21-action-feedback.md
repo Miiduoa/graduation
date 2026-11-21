@@ -31,8 +31,9 @@
 - 頁面恢復驗證五個目的區域、校園更新、不限校園、查詢參數白名單、根頁不繞圈以及明確重試。
 - 既有 `scripts/qa/interface-design/` 使用真實產品元件與樣式；只替換帳號、網路與 Next 路由邊界。新增載入前後幾何比較、恢復入口、實際瀏覽器前景切換與文字偏好檢查。
 - 瀏覽器情境沿用桌機、390px／320px、深色、200% 文字、站內大字及兩種減少動態設定；輸出截圖與來源 SHA-256，另檢查強制色彩。
-- 真實視窗驗收使用可容納桌機的 Xvfb 顯示範圍，整個情境關閉 Playwright 強制頁面持續有焦點的模擬，讓切換分頁及 Tab 進入瀏覽器列的紀錄反映原生焦點；產品事件與計時器不替換。
-- 對話視窗邊界以 X11 XTEST 送出 Tab／Shift+Tab。Chromium 的 CDP 鍵盤派送會先把焦點交給網頁 widget，連 keyUp 也一樣，會干擾剛交給瀏覽器列的焦點。驗收仍要求鍵盤返回精確的對話視窗控制項，任何背景元素收到焦點都失敗。
+- 完整介面、表單與鍵盤驗收沿用專案既有的 headless Chromium 環境，保留精確目的控制項、最多三步的邊界檢查，另記錄任何背景元素收到焦點的事件。
+- 通知的真實分頁切換另用 Xvfb 下的獨立 headed Chromium，關閉該頁的強制焦點模擬，七種情境各自驗證背景閱讀時間。兩組都通過才算整體通過；產品事件、幾何與計時器不替換。
+- 分離的原因有原始碼與獨立實驗支持：Chromium CDP 鍵盤事件會重新聚焦網頁 widget，可能干擾瀏覽器工具列的焦點。網頁表單測試沿用原本環境，跨視窗通知以真實焦點驗證，不把不同輸入管道混成一組鍵盤循環。
 - 正式 Next build、Web TypeScript、ESLint、格式與 UI design gate。精確 head 的實際結果以本輪 PR 與 Actions 為準。
 
 本機 Chromium 啟動受 `socket() Operation not permitted` 限制，瀏覽器檢查由 GitHub Actions 執行。合成資料的元件驗收不等於正式帳號操作或 Safari、iPhone、Android 實機驗收；沒有將其描述為正式站已上線。
@@ -41,4 +42,4 @@
 
 - [Apple — Motion](https://developer.apple.com/design/human-interface-guidelines/motion)：讓動效清楚表達狀態與操作回饋，並尊重減少動態。
 - [Apple — Accessibility](https://developer.apple.com/design/human-interface-guidelines/accessibility)：保持文字可讀、控制可操作與不同輸入方式的一致性。
-- [Chromium — InputInjector::InjectKeyboardEvent](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/content/browser/devtools/protocol/input_handler.cc)：CDP 鍵盤事件轉送前會呼叫 widget 的 `Focus()`；原生瀏覽器列邊界改以 XTEST 鍵盤驗收。
+- [Chromium — InputInjector::InjectKeyboardEvent](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/content/browser/devtools/protocol/input_handler.cc)：CDP 鍵盤事件轉送前會呼叫 widget 的 `Focus()`，因此真實跨視窗焦點與既有表單驗收使用各自適合的瀏覽器環境。

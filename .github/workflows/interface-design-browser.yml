@@ -47,7 +47,6 @@ jobs:
     env:
       TZ: Asia/Taipei
       NEXT_TELEMETRY_DISABLED: '1'
-      INTERFACE_BROWSER_HEADED: '1'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -68,12 +67,11 @@ jobs:
         run: |
           python -m pip install playwright==1.57.0
           bash scripts/qa/browser/install-playwright.sh --fonts-noto-cjk
-          sudo apt-get install --no-install-recommends -y xdotool
       - name: Bundle real interface with explicit synthetic data boundaries
         run: node scripts/qa/interface-design/build.mjs
       - name: Verify interface, forms and accessibility scenarios
-        # Native tab visibility/focus is not represented by separate headless pages.
-        # The display must also contain the 1440px desktop window and its chrome.
+        # Keep the existing interface suite headless. A separate headed browser
+        # measures real notification focus changes on this display.
         run: xvfb-run -a -s "-screen 0 1920x1440x24" python scripts/qa/interface-design/check.py
       - name: Upload rendered evidence and source hashes
         if: always()
