@@ -70,27 +70,24 @@ const documentFixture = (): PersonalImportDocument => ({
 });
 
 
-describe('reject unreadable model citations before saving a lesson', () => {
+describe('exact source quotations in new and saved explanations', () => {
   it.each([
     ['combining accent', 'é', 'e'],
     ['joined emoji', '👩‍💻', '👩'],
     ['regional flag', '🇹🇼', '🇹'],
     ['keycap', '2️⃣', '2'],
-  ])('requires complete grapheme boundaries for %s in new main and step citations', (_name, complete, partial) => {
+  ])('accepts partial graphemes for %s in main and step citations', (_name, complete, partial) => {
     const original = { ...passage, text: passage.text + '前' + complete + '後' };
     expect(original.text.includes(partial)).toBe(true);
 
-    const brokenMain = { ...explanation(), sourceQuote: partial };
-    expect(() => parseTutorExplanation(JSON.stringify(brokenMain), original))
-      .toThrow('未對齊完整原文字素');
-    // Old reading backups are not reinterpreted or altered by new generation rules.
-    expect(parseSavedTutorExplanation(JSON.stringify(brokenMain), original).sourceQuote).toBe(partial);
+    const partialMain = { ...explanation(), sourceQuote: partial };
+    expect(parseTutorExplanation(JSON.stringify(partialMain), original).sourceQuote).toBe(partial);
+    expect(parseSavedTutorExplanation(JSON.stringify(partialMain), original).sourceQuote).toBe(partial);
 
-    const brokenSteps = steppedExplanation();
-    brokenSteps.steps[0].sourceQuote = partial;
-    expect(() => parseTutorExplanation(JSON.stringify(brokenSteps), original))
-      .toThrow('未對齊完整原文字素');
-    expect(parseSavedTutorExplanation(JSON.stringify(brokenSteps), original).steps?.[0].sourceQuote).toBe(partial);
+    const partialSteps = steppedExplanation();
+    partialSteps.steps[0].sourceQuote = partial;
+    expect(parseTutorExplanation(JSON.stringify(partialSteps), original).steps?.[0].sourceQuote).toBe(partial);
+    expect(parseSavedTutorExplanation(JSON.stringify(partialSteps), original).steps?.[0].sourceQuote).toBe(partial);
 
     const validSteps = steppedExplanation();
     validSteps.sourceQuote = complete;
@@ -109,11 +106,11 @@ describe('reject unreadable model citations before saving a lesson', () => {
     ['isolated high surrogate', '\ud83d'],
     ['broken surrogate suffix after a readable word', '主鍵\ud83d'],
     ['isolated low surrogate', '\ude00'],
-  ])('rejects a byte-matching but unreadable %s quotation', (_name, quote) => {
+  ])('accepts an exact %s quotation', (_name, quote) => {
     const original = { ...passage, text: '前' + quote + '後' };
     expect(original.text.includes(quote)).toBe(true);
-    expect(() => parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original))
-      .toThrow('AI 引句無可讀的教材內容');
+    expect(parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original).sourceQuote)
+      .toBe(quote);
   });
 
   it.each([
@@ -158,9 +155,9 @@ describe('reject unreadable model citations before saving a lesson', () => {
     stepOnly.steps[0].sourceQuote = quote;
     expect(() => parseTutorExplanation(JSON.stringify(stepOnly), passage))
       .toThrow('步驟引用的句子不在這段原文');
-    expect(() => parseTutorExplanation(JSON.stringify(response), {
+    expect(parseTutorExplanation(JSON.stringify(response), {
       ...passage, text: passage.text + quote + '\u0301',
-    })).toThrow('引句無可讀');
+    })).toEqual(response);
   });
 
   it.each(['مرحبا \u2067שלום\u2069', '主\u202e鍵\u202c', '\u2067外鍵\u2069', '主\u202a鍵\u202c\u200b'])(
@@ -177,18 +174,17 @@ describe('reject unreadable model citations before saving a lesson', () => {
     },
   );
 
-  it.each(['\u200e', '\u061c\u200b', '\u2800\u2060', '\ufff9\u0301'])('rejects direction marks without readable content (%#)', (quote) => {
+  it.each(['\u200e', '\u061c\u200b', '\u2800\u2060', '\ufff9\u0301'])('accepts exact direction marks without visible characters (%#)', (quote) => {
     const original = { ...passage, text: passage.text + quote };
     const previous = { ...turn(), response: { ...explanation(), sourceQuote: quote } };
-    expect(() => parseTutorExplanation(JSON.stringify(previous.response), original)).toThrow('引句無可讀');
+    expect(parseTutorExplanation(JSON.stringify(previous.response), original).sourceQuote).toBe(quote);
   });
 
-  it('rejects an unreadable step citation even when the main quote is valid', () => {
+  it('accepts an exact zero-width step citation alongside a visible main quote', () => {
     const original = { ...passage, text: passage.text + '\u200b' };
     const reply = steppedExplanation();
     reply.steps![1].sourceQuote = '\u200b';
-    expect(() => parseTutorExplanation(JSON.stringify(reply), original))
-      .toThrow('AI 步驟引句無可讀的教材內容');
+    expect(parseTutorExplanation(JSON.stringify(reply), original).steps?.[1].sourceQuote).toBe('\u200b');
   });
 
   it.each(['x²+y²', '👩‍💻', '#️⃣', 'العربية', 'שלום', 'e\u0301', '主鍵\u200b唯一'])(

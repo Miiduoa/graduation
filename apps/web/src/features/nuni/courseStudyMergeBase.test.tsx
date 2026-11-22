@@ -1,5 +1,5 @@
 import { render } from '@testing-library/react';
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { parseTutorExplanation, studySourceFromText } from '@/lib/studyTutor';
 import { buildCourseStudyNotes } from './courseStudyNotes';
 import { parseCourseStudyProgress, serializeCourseStudyProgress } from './courseStudyProgress';
@@ -7,6 +7,9 @@ import { appendStudyLesson, canReviewStudyAnswer, emptyStudyPassage } from './co
 import { locateStudyEvidence } from './studyEvidence';
 import { StudySourceTables } from './StudySourceTables';
 import { extractStudySourceTables } from './studySourceTables';
+import { extractStudySourceTables as extractBaselineTables } from './__fixtures__/courseStudyMergeBase/studySourceTables';
+import { sourcePercentRows, sourceValueRows } from './__fixtures__/courseStudyMergeBase/chartRows';
+import { parseTutorExplanation as parseBaselineExplanation } from './__fixtures__/courseStudyMergeBase/studyTutor';
 
 // Baseline outputs from 2232ee5c9e4340fc6fba8ca56c2916f976fa4bbb.
 const percentageMeters = [[25, 100], [75, 100]];
@@ -122,9 +125,130 @@ it.each([
 ])('compares generated citation parsing and evidence location for $quote', ({ quote, text, baseline, change }) => {
   const passage = { id: 'lesson:1', label: '原文', text };
   const response = { ...reply, sourceQuote: quote };
-  const accepted = change ?? baseline;
-  expect(!!locateStudyEvidence(text, quote)).toBe(accepted);
+  expect(!!locateStudyEvidence(text, quote)).toBe(change ?? baseline);
   const parse = () => parseTutorExplanation(JSON.stringify(response), passage);
-  if (accepted) expect(parse().sourceQuote).toBe(quote);
+  if (baseline) expect(parse().sourceQuote).toBe(quote);
   else expect(parse).toThrow();
+});
+
+// Each suite starts with its own fixed seed. Failure messages include the exact input.
+function seededPicker() {
+  let state = 719;
+  return <T,>(options: readonly T[]): T => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return options[Math.floor((state / 2 ** 32) * options.length)];
+  };
+}
+
+const marks = ['', '\u061c', '\u200e', '\u200f', '\u202a', '\u202e', '\u2066', '\u2069',
+  '\u200b', '\u200c', '\u200d', '\u2060', '\ufeff', '\u034f', '\u0301', '\u2800'];
+const headers = ['完成率', '出席率', 'Completion Rate', '版本更新次數', '版本', '版本總數',
+  '編號', '識別碼', '學生識別碼總數', '題號', 'Version Count', 'Verification Code',
+  '一次性驗證碼 (%)', 'ISBN', 'SKU', '貨號', '郵政編碼', '文件識別碼', '時間', '溫度'];
+const valuePairs = [['25%', '75%'], ['2', '4'], ['２５％', '７５％'], ['1,200', '2,300']];
+
+describe('merge-base differential', () => {
+  it('extracts at least the same number of tables across HTML and Markdown boundaries', () => {
+    const table = tableText('完成率', '25%', '75%');
+    const tags = ['pre', 'code', 'script', 'style', 'div', 'details', 'template', 'svg', 'math',
+      'select', 'button', 'center', 'strong', 'lesson-answer'];
+    const ticks = ['', '`', '``'];
+    const examples = tags.flatMap((tag) => ticks.map((tick) =>
+      [`<${tag}>`, table, `${tick}</${tag}>${tick}`, '', table].join('\n')));
+    examples.push(...tags.map((tag) =>
+      [`<${tag}>`, `<${tag}>`, table, `</${tag}>`, table, `</${tag}>`, '', table].join('\n')));
+    const pick = seededPicker();
+    for (let i = 0; i < 150; i++) {
+      const parent = pick(tags);
+      const child = pick(tags);
+      const tick = pick(ticks);
+      const separator = pick(['\n', '\r\n', '\r']);
+      const body = [`<${child}>`, table, `</${child}>`].join('\n');
+      examples.push([
+        pick([`<${parent} hidden>`, `<${parent}>`, `<${parent} style="display:none">`]),
+        pick([body, `<!--\n${body}\n-->`, `${tick}${body}${tick}`]),
+        `${tick}</${parent}>${tick}`, '', table, '', table,
+      ].join('\n').replaceAll('\n', separator));
+    }
+    for (const source of examples) {
+      expect(extractStudySourceTables(source).length, JSON.stringify(source))
+        .toBeGreaterThanOrEqual(extractBaselineTables(source).length);
+    }
+  });
+
+  it('renders every merge-base table comparison with its original values and scale', () => {
+    const makeTable = (header: string, firstLabel: string, [first, second]: string[]) =>
+      tableText(header, first, second).replace('| 甲 |', () => `| ${firstLabel} |`);
+    const tables = [
+      ...marks.map((mark) => makeTable('完成率', mark + '甲', valuePairs[0])),
+      ...headers.flatMap((header) => valuePairs.map((pair) => makeTable(header, '甲', pair))),
+    ];
+    const pick = seededPicker();
+    for (let i = 0; i < 150; i++) {
+      const header = pick(headers);
+      tables.push(makeTable(pick([pick(marks) + header, header + pick(marks)]),
+        pick(marks) + pick(['甲', 'e\u0301', 'က္က', '👩‍💻', '乙', '']), pick(valuePairs)));
+    }
+
+    for (let i = 0; i < tables.length; i += 3) {
+      const source = tables.slice(i, i + 3).join('\n\n');
+      const baseline = extractBaselineTables(source);
+      const view = render(<StudySourceTables text={source} />);
+      try {
+        const liveTables = view.container.querySelectorAll('table');
+        for (const [index, table] of baseline.entries()) {
+          const valueRows = sourceValueRows(table);
+          const percentRows = sourcePercentRows(table);
+          const sourceTable = liveTables[index].closest('[role="region"]');
+          for (const [rows, suffix, max] of [
+            [valueRows, '原文數值比較', valueRows && Math.max(...valueRows.map((row) => row.amount))],
+            [percentRows, '原文百分比', 100],
+          ] as const) {
+            if (!rows) continue;
+            const list = Array.from(sourceTable?.querySelectorAll('ul[aria-label]') ?? [])
+              .find((element) => element.getAttribute('aria-label') === `${table.headers[1]} ${suffix}`);
+            expect(Array.from(list?.querySelectorAll('meter') ?? [], (meter) => [meter.value, meter.max]),
+              JSON.stringify(table)).toEqual(rows.map((row) => [row.amount, max]));
+          }
+        }
+      } finally {
+        view.unmount();
+      }
+    }
+  });
+
+  it('accepts every explanation and step with a merge-base quotation', () => {
+    const graphemes = ['cafe\u0301', 'က္က', 'ကေ', 'ကါ', 'का', 'কি', '👩‍💻', '🇹🇼', '1️⃣'];
+    const quotes = [
+      ...graphemes.flatMap((source) => Array.from({ length: source.length }, (_, i) =>
+        ({ source, quote: source.slice(0, i + 1) }))),
+      ...marks.flatMap((mark) => [mark, '甲' + mark + '乙'].map((quote) => ({ source: quote, quote }))),
+      { source: '原文', quote: '沒有命中' },
+    ];
+    const pick = seededPicker();
+    for (let i = 0; i < 150; i++) {
+      const source = pick(graphemes) + pick(marks) + pick(graphemes);
+      const start = pick(Array.from({ length: source.length }, (_, index) => index));
+      const end = pick(Array.from({ length: source.length - start }, (_, index) => start + index + 1));
+      quotes.push({ source, quote: source.slice(start, end) });
+    }
+    for (const { source, quote } of quotes) {
+      const passage = { id: 'lesson:1', label: '原文', text: `甲${source}乙。共同引句` };
+      const step = { title: '步驟', explanation: '說明', sourceQuote: '共同引句' };
+      for (const response of [
+        { ...reply, sourceQuote: quote },
+        { ...reply, sourceQuote: '共同引句', steps: [{ ...step, sourceQuote: quote }, step] },
+      ]) {
+        const raw = JSON.stringify(response);
+        let baseline;
+        try {
+          baseline = parseBaselineExplanation(raw, passage);
+        } catch {
+          continue;
+        }
+        expect(() => parseTutorExplanation(raw, passage), JSON.stringify({ source, response })).not.toThrow();
+        expect(parseTutorExplanation(raw, passage)).toEqual(baseline);
+      }
+    }
+  });
 });

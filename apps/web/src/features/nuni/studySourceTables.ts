@@ -30,24 +30,9 @@ const HIDDEN_HTML_CONTAINERS = new Set([
   // leaving ordinary visible HTML wrappers eligible for source tables.
   'span', 'p', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
 ]);
-const ADDITIONAL_HIDDEN_HTML_CONTAINERS = new Set([
-  // The HTML hidden attribute is global, including older <center> handouts,
-  // definition lists and inline semantic wrappers. If these are omitted,
-  // teacher-only Markdown-looking rows can escape into the derived study view.
-  // These additional wrappers support the explicit hidden and aria-hidden attributes.
-  'center', 'address', 'hgroup', 'dl', 'dt', 'dd',
-  'a', 'em', 'strong', 'b', 'i', 'u', 'small', 'mark', 'time',
-  'output', 'ins', 'del', 'sup', 'sub',
-]);
 // HTML disclosure / dialog bodies are not standalone Markdown tables. Keep
 // nested disclosures balanced so a closed inner example cannot expose its parent.
-// HTML templates, preformatted examples, nested code and SVG/MathML roots
-// can contain another same-name wrapper. An inner closing tag must not
-// release the outer suppressed content and expose a teacher-only table.
-const NESTABLE_HTML_BLOCKS = new Set([
-  ...HIDDEN_HTML_CONTAINERS, ...ADDITIONAL_HIDDEN_HTML_CONTAINERS, 'details', 'dialog',
-  'template', 'pre', 'code', 'svg', 'math',
-]);
+const NESTABLE_HTML_BLOCKS = new Set([...HIDDEN_HTML_CONTAINERS, 'details', 'dialog']);
 // Raw-text/RCDATA children can contain a literal closing tag for their parent.
 // Track them even inside a hidden wrapper: </div> in a script string must not
 // release unpublished answer rows. This is source-boundary tracking, not an HTML parser.
@@ -56,36 +41,13 @@ const RAW_HTML_TEXT_BLOCKS = new Set([
   // In these raw-text/RCDATA elements, a literal </div> is not an HTML tag.
   'xmp', 'iframe', 'noembed', 'noframes', 'title', 'plaintext',
 ]);
-// Form controls are not standalone Markdown table containers. Their options,
-// labels and fallbacks may contain table-shaped text which must not be
-// reconstructed into a separate public study table.
-const HTML_FORM_TEXT_BLOCKS = new Set([
-  'select', 'datalist', 'optgroup', 'option', 'button',
-]);
 // Scan every syntactically complete tag so quoted attributes on other HTML
 // elements cannot smuggle fake opening/closing tags into the block tracker.
 const TABLE_SUPPRESSED_HTML_TAGS = new Set([
-  ...NESTABLE_HTML_BLOCKS, ...HTML_FORM_TEXT_BLOCKS,
-  'pre', 'code', 'script', 'style', 'textarea',
+  ...NESTABLE_HTML_BLOCKS, 'pre', 'code', 'script', 'style', 'textarea',
   'template', 'noscript', 'svg', 'math', 'table',
   'xmp', 'iframe', 'noembed', 'noframes', 'title', 'plaintext',
 ]);
-
-// HTML custom elements use hyphenated tag names. A teacher-only
-// <lesson-answer hidden> must be treated like <div hidden>, including nested
-// same-name wrappers. Do not guess visibility of unrelated unknown tags.
-function isCustomHtmlContainer(tag: string): boolean {
-  return /^[a-z][a-z0-9_-]*-[a-z0-9_-]+$/u.test(tag);
-}
-function isTrackedHtmlTag(tag: string): boolean {
-  return TABLE_SUPPRESSED_HTML_TAGS.has(tag) || isCustomHtmlContainer(tag);
-}
-function isNestableHtmlTag(tag: string): boolean {
-  return NESTABLE_HTML_BLOCKS.has(tag) || isCustomHtmlContainer(tag);
-}
-function canCarryHiddenHtmlAttribute(tag: string): boolean {
-  return HIDDEN_HTML_CONTAINERS.has(tag) || ADDITIONAL_HIDDEN_HTML_CONTAINERS.has(tag) || isCustomHtmlContainer(tag);
-}
 
 /** Split CSS declarations without treating semicolons in strings, URLs or comments as separators. */
 function splitInlineCssDeclarations(style: string): string[] {
@@ -230,7 +192,7 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
     (opacity !== undefined && /^[+-]?(?:0+(?:\.0+)?|\.0+)(?:e[+-]?\d+)?%?$/u.test(opacity));
 }
 
-function hasHiddenHtmlAttribute(token: string, checkStyle: boolean): boolean {
+function hasHiddenHtmlAttribute(token: string): boolean {
   // Only actual HTML attributes count. Searching the whole token for words
   // such as "hidden" also matches a quoted title/description and can hide a
   // legitimate course table that students need to read.
@@ -242,7 +204,7 @@ function hasHiddenHtmlAttribute(token: string, checkStyle: boolean): boolean {
     const attributeValue = decodeHtmlAttributeReferences(match[2] ?? match[3] ?? match[4] ?? '');
     // HTML's boolean hidden attribute is active even when written hidden="false".
     if (name === 'hidden') return true;
-    if (checkStyle && name === 'style' && hasExplicitHiddenInlineStyle(attributeValue))
+    if (name === 'style' && hasExplicitHiddenInlineStyle(attributeValue))
       return true;
     if (name === 'aria-hidden' &&
         attributeValue.trim().toLowerCase() === 'true') return true;
@@ -399,7 +361,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
     (token, tag: string, offset: number) => {
       // Do not fold a Markdown-escaped example into an active HTML tag.
       if (isEscapedMarkdownTag(source, offset)) return token;
-      if (!isTrackedHtmlTag(tag.toLowerCase()) || !/[\r\n]/u.test(token)) return token;
+      if (!TABLE_SUPPRESSED_HTML_TAGS.has(tag.toLowerCase()) || !/[\r\n]/u.test(token)) return token;
       const newlines = token.match(/\r\n|\r|\n/gu) ?? [];
       return token.replace(/\r\n|\r|\n/gu, ' ') + '\n'.repeat(newlines.length);
     },
@@ -443,7 +405,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
       // Raw <pre>/<code> blocks are HTML, not Markdown inline-code contexts.
       if (!inHtmlComment &&
           (htmlCodeBlocks.length === 0 ||
-            isNestableHtmlTag(htmlCodeBlocks[htmlCodeBlocks.length - 1])) &&
+            NESTABLE_HTML_BLOCKS.has(htmlCodeBlocks[htmlCodeBlocks.length - 1])) &&
           isInsideInlineCode(line, match.index ?? 0)) continue;
       if (inHtmlComment) {
         if (token === '-->' || token === '--!>') inHtmlComment = false;
@@ -465,7 +427,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         continue;
       }
       const tag = match[1]?.toLowerCase();
-      if (!tag || !isTrackedHtmlTag(tag)) continue;
+      if (!tag || !TABLE_SUPPRESSED_HTML_TAGS.has(tag)) continue;
       // Preformatted examples contain literal tag-looking text. In contrast,
       // nested containers of the same type inside a hidden wrapper must be
       // balanced, or the inner closing tag could expose unpublished rows.
@@ -480,10 +442,10 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         // </plaintext> must not expose a teacher-only table below it.
         if (closing && current === tag && current !== 'plaintext') htmlCodeBlocks.pop();
         else if (!closing && !selfClosing && !RAW_HTML_TEXT_BLOCKS.has(current) &&
-            ((current === tag && isNestableHtmlTag(tag)) || RAW_HTML_TEXT_BLOCKS.has(tag)))
+            ((current === tag && NESTABLE_HTML_BLOCKS.has(tag)) || RAW_HTML_TEXT_BLOCKS.has(tag)))
           htmlCodeBlocks.push(tag);
       } else if (!closing && !selfClosing &&
-          (!canCarryHiddenHtmlAttribute(tag) || hasHiddenHtmlAttribute(token, HIDDEN_HTML_CONTAINERS.has(tag)))) {
+          (!HIDDEN_HTML_CONTAINERS.has(tag) || hasHiddenHtmlAttribute(token))) {
         htmlCodeBlocks.push(tag);
       }
       hiddenLine = true;

@@ -336,20 +336,22 @@ function isNonRatioColumn(
     !RELEASE_COUNT_COLUMN.test(column) && !ENGLISH_RELEASE_COUNT_COLUMN.test(column));
 }
 
+const PLAIN_NUMBER = /^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/u;
+const CREDIT_NUMBER = /^((?:0|[1-9]\d{0,5})(?:\.\d{1,2})?) ?學分$/u;
+
 /**
  * Optional, source-grounded comparison of non-negative source numbers only.
  * Strict comma-grouped thousands are accepted only when every row shares that
  * format. Units, percentages, dates, expressions and mixed formats are omitted.
  * No AI inference or source rewriting.
  */
-function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
+function expandedValueRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
   const column = measuredColumnLabel(table.headers[1]);
-  const plainNumber = /^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/u;
   // Keep merge-base scaling for catalogue headers with legacy plain values.
   // The identifier-word guard still applies to headers such as 物料編號.
   const allowPlainCatalogValues = NON_RATIO_CATALOG_IDENTIFIER_COLUMN.test(column) &&
-    table.rows.every(([, value]) => plainNumber.test(value));
+    table.rows.every(([, value]) => PLAIN_NUMBER.test(value));
   // An unlabeled number in a percentage column is ambiguous: do not scale it to the largest row.
   if (!hasUnambiguousChartLabel(table.headers[1]) || isPercentageColumn(column) ||
       isNonRatioColumn(column, { allowPlainCatalogValues })) return null;
@@ -358,7 +360,6 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   // mixing 1,000 with 200, or malformed 1,20, remains unverified source text.
   const groupedNumber = /^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d{1,2})?$/u;
   // Accept the explicit credit unit only in a credit column with a uniform format.
-  const creditNumber = /^((?:0|[1-9]\d{0,5})(?:\.\d{1,2})?) ?學分$/u;
   const creditsColumn = /(?:學分|credits?)/iu.test(column);
   let rowFormat: 'plain' | 'grouped' | 'credits' | null = null;
   const exactAmounts = new Map<number, bigint>();
@@ -367,8 +368,8 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   // Keep the exact original table, but skip optional graphs without readable keys.
   for (const [rowIndex, [label, original]] of table.rows.entries()) {
     if (!hasUnambiguousChartLabel(label ?? '') || !original) return null;
-    const creditMatch = creditsColumn ? creditNumber.exec(original) : null;
-    const format = plainNumber.test(original) ? 'plain'
+    const creditMatch = creditsColumn ? CREDIT_NUMBER.exec(original) : null;
+    const format = PLAIN_NUMBER.test(original) ? 'plain'
       : groupedNumber.test(original) ? 'grouped' : creditMatch ? 'credits' : null;
     if (!format || (rowFormat !== null && format !== rowFormat)) return null;
     rowFormat = format;
@@ -395,7 +396,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
  * source values can be shown on a fixed 100% scale. Do not reinterpret raw
  * scores, relative growth over 100%, dates, IDs or unit-bearing quantities.
  */
-function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
+function expandedPercentRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
   const header = table.headers[1];
   const column = measuredColumnLabel(header);
@@ -403,8 +404,7 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
       NON_RATIO_AUTH_TOKEN_COLUMN.test(withoutPercentUnit(column))) return null;
   // Preserve fixed-scale eligibility for the original header. Apply the
   // additional label checks only to formats recognized by the newer rules.
-  const originallyBounded = (ORIGINAL_SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header)) &&
-    !hasUnboundedRateLabel(header);
+  const originallyBounded = isOriginalBoundedPercentageColumn(header);
   if (!originallyBounded &&
       (!isBoundedPercentageColumn(column) || isNonRatioColumn(column, { percentage: true }))) return null;
   const rows: SourceValueRow[] = [];
@@ -439,6 +439,92 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   return rows;
 }
 
+// Established source comparisons take priority. Additional formats use
+// their own eligibility checks only when the original parser has no rows.
+const ORIGINAL_SOURCE_RATE_OR_RATIO_COLUMN = /(?:率|比例|比率|佔比|占比)/u;
+
+function isOriginalPercentageColumn(header: string): boolean {
+  return ORIGINAL_SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header) ||
+    ORIGINAL_SOURCE_RATE_OR_RATIO_COLUMN.test(header) || ENGLISH_RATE_OR_RATIO_COLUMN.test(header);
+}
+
+function isOriginalBoundedPercentageColumn(header: string): boolean {
+  return (ORIGINAL_SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header)) &&
+    !SOURCE_UNBOUNDED_RATE_COLUMN.test(header) &&
+    !ENGLISH_UNBOUNDED_RATE_COLUMN.test(header);
+}
+
+/**
+ * Optional, source-grounded comparison of plain non-negative values only.
+ * A number with units, a percentage, a date or an expression is not a scalar
+ * measure we can safely turn into a bar. No AI inference or source rewriting.
+ */
+function originalValueRows(table: StudySourceTable): SourceValueRow[] | null {
+  if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
+  // Numeric-looking years and identifiers are not scalar measures; comparing
+  // them as bars would imply a magnitude that the source does not support.
+  const column = table.headers[1].trim();
+  // An unlabeled number in a percentage column is ambiguous: do not scale it to the largest row.
+  if (isOriginalPercentageColumn(column) ||
+      AMBIGUOUS_TIME_COLUMN.test(column) ||
+      NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
+      DECIBEL_UNIT_COLUMN.test(column) ||
+      NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
+      ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
+      COORDINATE_COLUMN.test(column) ||
+      ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
+        ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN.test(column)) &&
+       !SCORE_COUNT_COLUMN.test(column))) return null;
+  if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
+      /^(?:年度|year|date|id|uuid|no\.?|number)$/iu.test(column) ||
+      // A number identifying a term, page, floor or class is an ordinal or
+      // category, not a comparable measure. Parenthetical source qualifiers
+      // (e.g. 學年（民國）) must not turn it into a bar.
+      /^(?:學年|學期|年級|班級|頁碼|頁次|週次|樓層|排名|名次|月份|民國年|西元年)(?:\s*[（(][^）)]*[）)])?$/u.test(column) ||
+      /^(?:semester|term|month|rank|ranking|floor|grade|page)$/iu.test(column) ||
+      /\b(?:academic\s+(?:year|term|semester)|student\s+(?:id|number)|course\s+(?:id|code|number)|postal\s+code|zip\s+code|phone\s+number|account\s+(?:id|number)|page\s+(?:no\.?|number)|sequence\s+number|floor\s+number)\b/iu.test(column)) return null;
+  // Repeated "學分" is an explicit source unit, not a value to infer.
+  // Accept it only in a credit column and when ALL rows use the same format.
+  const creditsColumn = /(?:學分|credits?)/iu.test(column);
+  let rowFormat: 'plain' | 'credits' | null = null;
+  const rows: SourceValueRow[] = [];
+  const labels = new Set<string>();
+  for (const [rowIndex, [label, original]] of table.rows.entries()) {
+    if (!label?.trim() || !original || labels.has(label.trim())) return null;
+    const creditMatch = creditsColumn ? CREDIT_NUMBER.exec(original) : null;
+    const format = PLAIN_NUMBER.test(original) ? 'plain' : creditMatch ? 'credits' : null;
+    if (!format || (rowFormat !== null && format !== rowFormat)) return null;
+    rowFormat = format;
+    const amount = Number(creditMatch?.[1] ?? original);
+    if (!Number.isFinite(amount)) return null;
+    labels.add(label.trim());
+    rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
+  }
+  return rows.some((row) => row.amount > 0) ? rows : null;
+}
+
+/**
+ * Only an explicitly percentage-labelled column containing literal 0–100%
+ * source values can be shown on a fixed 100% scale. Do not reinterpret raw
+ * scores, relative growth over 100%, dates, IDs or unit-bearing quantities.
+ */
+function originalPercentRows(table: StudySourceTable): SourceValueRow[] | null {
+  if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
+  if (!isOriginalBoundedPercentageColumn(table.headers[1])) return null;
+  const rows: SourceValueRow[] = [];
+  const labels = new Set<string>();
+  for (const [rowIndex, [label, original]] of table.rows.entries()) {
+    if (!label?.trim() || !original ||
+        !/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[%％]$/u.test(original) ||
+        labels.has(label.trim())) return null;
+    const amount = Number(original.slice(0, -1));
+    if (!Number.isFinite(amount) || amount > 100) return null;
+    labels.add(label.trim());
+    rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
+  }
+  return rows;
+}
+
 // Repeated row labels are valid in source textbooks (e.g. two "必修" rows).
 // Distinguish their accessible meters by the exact source line, rather than
 // silently hiding the chart or merging values from different rows.
@@ -453,7 +539,7 @@ function StudySourcePercentComparison({ table, onJumpToSource }: {
   table: StudySourceTable;
   onJumpToSource: (rowIndex: number, origin: HTMLButtonElement) => void;
 }) {
-  const rows = sourcePercentRows(table);
+  const rows = originalPercentRows(table) ?? expandedPercentRows(table);
   const sourceDescriptionPrefix = useId();
   if (!rows) return null;
   return (
@@ -491,7 +577,7 @@ function StudySourceValueComparison({ table, onJumpToSource }: {
   table: StudySourceTable;
   onJumpToSource: (rowIndex: number, origin: HTMLButtonElement) => void;
 }) {
-  const rows = sourceValueRows(table);
+  const rows = originalValueRows(table) ?? expandedValueRows(table);
   const sourceDescriptionPrefix = useId();
   if (!rows) return null;
   const maxRow = rows.reduce((best, row) => row.amount > best.amount ? row : best);

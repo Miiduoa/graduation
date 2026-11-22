@@ -1,4 +1,3 @@
-import { locateStudyEvidence } from '@/features/nuni/studyEvidence';
 import {
   PERSONAL_IMPORT_DOCUMENT_LIMITS,
   validatePersonalImportDocument,
@@ -226,7 +225,7 @@ function readStudyTurns(turns: readonly StudyTutorTurn[], passage: StudyPassage)
     try {
       return {
         question: turn.question,
-        response: parseSavedTutorExplanation(JSON.stringify(turn.response), passage),
+        response: parseTutorExplanation(JSON.stringify(turn.response), passage),
       };
     } catch {
       throw new Error('先前講解無法對照目前的原文，請不帶追問紀錄重新講解。');
@@ -326,9 +325,7 @@ const stepLimits = {
   sourceQuote: 400,
 } as const;
 
-type TutorCitationPolicy = 'generated' | 'backup';
-
-function readTutorSteps(value: unknown, passage: StudyPassage, policy: TutorCitationPolicy): StudyTutorStep[] {
+function readTutorSteps(value: unknown, passage: StudyPassage): StudyTutorStep[] {
   const invalid = () => new Error('AI 分步講解不完整或無法對照本段原文，請重試。');
   if (!Array.isArray(value) || value.length < 2 || value.length > 4) throw invalid();
   const keys = Object.keys(stepLimits) as Array<keyof typeof stepLimits>;
@@ -342,8 +339,6 @@ function readTutorSteps(value: unknown, passage: StudyPassage, policy: TutorCita
     const parsed = data as StudyTutorStep;
     if (!passage.text.includes(parsed.sourceQuote))
       throw new Error('AI 步驟引用的句子不在這段原文中，這次講解未採用。請重試。');
-    if (policy === 'generated' && !locateStudyEvidence(passage.text, parsed.sourceQuote))
-      throw new Error('AI 步驟引句無可讀的教材內容或未對齊完整原文字素，這次講解未採用。請重試。');
     if (hasFormula && !parsed.sourceQuote.includes(parsed.formula!))
       throw new Error('AI 步驟公式不是該步引句的原文，這次講解未採用。請重試。');
     return {
@@ -357,15 +352,6 @@ function readTutorSteps(value: unknown, passage: StudyPassage, policy: TutorCita
 
 /** A matching quotation establishes provenance, not the correctness of the explanation. */
 export function parseTutorExplanation(raw: string, passage: StudyPassage): TutorExplanation {
-  return readTutorExplanation(raw, passage, 'generated');
-}
-
-/** Backups retain the original exact-match citation rules. */
-export function parseSavedTutorExplanation(raw: string, passage: StudyPassage): TutorExplanation {
-  return readTutorExplanation(raw, passage, 'backup');
-}
-
-function readTutorExplanation(raw: string, passage: StudyPassage, policy: TutorCitationPolicy): TutorExplanation {
   validatePassage(passage);
   const invalid = () => new Error('AI 回覆不完整或無法對照本段原文，請重試。');
   if (typeof raw !== 'string' || raw.length > 8_192) throw invalid();
@@ -387,14 +373,15 @@ function readTutorExplanation(raw: string, passage: StudyPassage, policy: TutorC
   const explanation = data as TutorExplanation;
   if (!passage.text.includes(explanation.sourceQuote))
     throw new Error('AI 引用的句子不在這段原文中，這次講解未採用。請重試。');
-  if (policy === 'generated' && !locateStudyEvidence(passage.text, explanation.sourceQuote))
-    throw new Error('AI 引句無可讀的教材內容或未對齊完整原文字素，這次講解未採用。請重試。');
   return {
     title: explanation.title.trim(),
     explanation: explanation.explanation.trim(),
     sourceQuote: explanation.sourceQuote,
     question: explanation.question.trim(),
     answer: explanation.answer.trim(),
-    ...(hasSteps ? { steps: readTutorSteps(data.steps, passage, policy) } : {}),
+    ...(hasSteps ? { steps: readTutorSteps(data.steps, passage) } : {}),
   };
 }
+
+// Reading saved and generated explanations uses the same source validation.
+export const parseSavedTutorExplanation = parseTutorExplanation;
