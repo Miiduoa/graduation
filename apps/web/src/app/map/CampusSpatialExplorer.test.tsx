@@ -3267,6 +3267,44 @@ it.each(['', '\n'])(
   },
 );
 
+// Fetch decodes Content-Encoding before exposing arrayBuffer(). Some embedded
+// WebViews supply those decoded bytes but neither a ReadableStream nor text().
+// Never use eager json() when bytes can be size-checked before parsing.
+it.each(['valid', 'oversized'] as const)(
+  'bounds a %s compressed OSM snapshot from a byte-only WebView before JSON.parse',
+  async (caseName) => {
+    const { library, buildings, body } = sourcedLibraryFootprintFixture();
+    const raw = caseName === 'oversized'
+      ? JSON.stringify({ ...JSON.parse(body) as Record<string, unknown>, padding: 'x'.repeat(2_000_001) })
+      : body;
+    const bytes = new TextEncoder().encode(raw);
+    const arrayBuffer = vi.fn().mockResolvedValue(bytes.buffer);
+    const json = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200, body: null,
+      headers: new Headers({ 'Content-Encoding': 'gzip', 'Content-Length': '100' }),
+      arrayBuffer, json,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    if (caseName === 'valid') {
+      expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+      await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
+    } else {
+      expect(bytes.byteLength).toBeGreaterThan(2_000_000);
+      expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+      expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+      const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+      await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    }
+    expect(arrayBuffer).toHaveBeenCalledTimes(1);
+    expect(json).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  },
+);
+
 it('keeps JSON-only WebView compressed responses usable without comparing wire and decoded lengths', async () => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
   const json = vi.fn().mockResolvedValue(JSON.parse(body));
