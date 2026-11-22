@@ -18,19 +18,22 @@ function fixture() {
 beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(now));
 afterEach(() => vi.restoreAllMocks());
 
-it('completes an order-to-calendar dependency without a provider, then writes and verifies only on confirmation', async () => {
+it.each([
+  { phrase: question, endTime: '12:15' },
+  { phrase: question.replace('15分鐘', '30分鐘'), endTime: '12:30' },
+])('completes a source-bound pickup calendar request after confirmation: $phrase', async ({ phrase, endTime }) => {
   const f = fixture(), model = vi.fn().mockRejectedValue(new Error('provider unavailable'));
   const courses = vi.spyOn(f.adapter, 'courses');
-  const result = await run({ question, history: [], binding, adapter: f.adapter, model,
+  const result = await run({ question: phrase, history: [], binding, adapter: f.adapter, model,
     secret, now, writes: true, signal: signal(), log: () => {} });
   expect(result).toMatchObject({ dataRead: true, modelCalls: 0, stopReason: '' });
   expect(result.cards).toHaveLength(1);
   const card = result.cards[0];
   expect(card).toMatchObject({ sourceBound: 'food-pickup', tool: 'propose_personal_event', args: {
-    title: '取餐：合成蔬食餐廳', date: '2026-11-04', startTime: '12:00', endTime: '12:15', allDay: false,
+    title: '取餐：合成蔬食餐廳', date: '2026-11-04', startTime: '12:00', endTime, allDay: false,
   } });
   expect(card.token.length).toBeLessThanOrEqual(2048);
-  expect(result.answer).toContain('12:00–12:15');
+  expect(result.answer).toContain(`12:00–${endTime}`);
   expect(result.answer).toContain('目前尚未加入行事曆');
   expect(model).not.toHaveBeenCalled();
   expect(courses).not.toHaveBeenCalled();
@@ -56,10 +59,14 @@ it('uses the requested duration and records a cross-midnight end date', async ()
   expect(result?.answer).toContain('23:50–2026-11-05 00:20');
 });
 
-it('keeps unsupported qualifiers out of the model and does not partially read or prepare', async () => {
+it.each([
+  question + '，順便幫我取消訂單',
+  '退掉昨天訂單，確認取餐時間是否已加入行事曆',
+  '幫我把最近一筆訂單的取餐時間記到行事曆',
+])('intercepts unsupported pickup requests before source reads, writes, or model calls: %s', async phrase => {
   const f = fixture(), model = vi.fn();
   const orders = vi.spyOn(f.adapter, 'orders'), ledger = vi.spyOn(f.adapter, 'ledger');
-  const result = await run({ question: question + '，順便幫我取消訂單', history: [], binding,
+  const result = await run({ question: phrase, history: [], binding,
     adapter: f.adapter, model, secret, now, writes: true, signal: signal(), log: () => {} });
   expect(result).toMatchObject({ dataRead: true, cards: [], stopReason: 'INVALID_FOOD_PICKUP_REQUEST' });
   expect(orders).not.toHaveBeenCalled();
