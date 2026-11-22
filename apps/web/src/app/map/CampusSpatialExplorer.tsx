@@ -302,12 +302,15 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   // Some mobile WebViews never report a fresh onscreen entry after suspending a
   // running scene. Keep a visible recovery control instead of a frozen canvas.
   const [renderSuspended, setRenderSuspended] = useState(false);
-  const [deferredCause, setDeferredCause] = useState<'background' | 'offscreen'>('background');
+  const [deferredCause, setDeferredCause] = useState<'background' | 'offscreen' | 'data-saver'>('background');
   const [attempt, setAttempt] = useState(0);
   // An embedded WebView may construct an observer but never deliver entries.
   // An explicit user choice can start the scene before the first entry.
   const [manualStart, setManualStart] = useState(0);
   const handledManualStart = useRef(0);
+  // Explicit opt-in persists through camera/footprint effect rebuilds, but not
+  // when the dialog is closed and later reopened with Save-Data enabled.
+  const dataSaverConsent = useRef(false);
   const viewportPausedHost = useRef<HTMLDivElement | null>(null);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
@@ -334,6 +337,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // the loading spinner even after fallback geometry proved the map offscreen.
     // A manual request applies to this particular scene startup.
     const manuallyStarted = manualStart !== handledManualStart.current;
+    if (manuallyStarted) dataSaverConsent.current = true;
+    // Avoid loading the optional Three.js bundle or allocating WebGL when the
+    // browser requests reduced data use. Marker details and walking links
+    // remain available; the visitor can explicitly opt into 3D at any time.
+    const saveData = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true;
     let visible = manuallyStarted;
     handledManualStart.current = manualStart;
     let pageSuspended = false;
@@ -341,9 +349,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Safari can fire pagehide before visibilitychange when entering bfcache.
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended || document.hidden;
-    const isDeferred = () => isBackgrounded() || !visible;
+    const isDeferred = () => isBackgrounded() || !visible || (saveData && !dataSaverConsent.current);
     const defer = () => {
-      setDeferredCause(isBackgrounded() ? 'background' : 'offscreen');
+      setDeferredCause(isBackgrounded() ? 'background' :
+        saveData && !dataSaverConsent.current ? 'data-saver' : 'offscreen');
       setStatus('deferred');
     };
     if (isDeferred()) defer();
@@ -807,13 +816,15 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
             deferredCause === 'background'
               ? <p>目前位於背景分頁，返回導覽後才會啟動立體畫面；仍可查看地點與步行導航。</p>
               : <>
-                <p>尚未確認立體畫面在可見範圍；滑動至空間圖後才載入，以節省手機效能與電力。若沒有自動載入，可手動開啟。地點資訊與步行導航仍可使用。</p>
+                <p>{deferredCause === 'data-saver'
+                  ? '瀏覽器已開啟省流量模式，因此立體畫面不會自動載入；仍可直接查看地點資訊與步行導航。需要 3D 時可自行開啟。'
+                  : '尚未確認立體畫面在可見範圍；滑動至空間圖後才載入，以節省手機效能與電力。若沒有自動載入，可手動開啟。地點資訊與步行導航仍可使用。'}</p>
                 <button className="btn" type="button" onClick={() => {
                   // The launch button disappears as loading begins. Preserve
                   // keyboard/screen-reader focus on the map instead of body.
                   host?.focus();
                   setManualStart((value) => value + 1);
-                }}>手動開啟立體畫面</button>
+                }}>{deferredCause === 'data-saver' ? '仍要開啟立體畫面' : '手動開啟立體畫面'}</button>
               </>
           ) : <>
             <p>這次無法顯示立體畫面。你仍可選擇地點，查看資訊與導航。</p>
