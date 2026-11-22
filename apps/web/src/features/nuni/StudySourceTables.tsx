@@ -136,6 +136,10 @@ const NON_RATIO_DOCUMENT_IDENTIFIER_COLUMN =
 // One-time sign-in, card verification and pickup codes are opaque tokens.
 // A PIN of 2468 is not twice a PIN of 1234. Match complete field names so
 // actual numbers of failed logins / OTP attempts can still be compared.
+// SKU, ISBN and retail barcodes are identifiers, not additive measurements.
+// A product code of 200 is not twice a product code of 100. Real SKU
+// counts stay eligible for an explicit quantity comparison.
+const NON_RATIO_CATALOG_IDENTIFIER_COLUMN = /^(?:(?:商品|產品|貨品|物料|零件|品項)?(?:貨號|料號|品號|條碼)|(?:商品|產品|貨品|物料|零件)(?:編號|識別碼)|(?:SKU|ASIN|ISBN(?:-1[03])?|ISSN|(?:EAN|UPC|GTIN)(?:-?(?:8|12|13|14|A|E))?)(?:\s+(?:number|no\.?|id|code|編號|條碼))?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 const NON_RATIO_AUTH_TOKEN_COLUMN =
   /^(?:(?:驗證碼|認證碼|安全碼|動態密碼|一次性密碼|登入碼|交易密碼|取件碼|核銷碼|信用卡安全碼|卡片驗證碼|卡片安全碼)(?:\s*(?:編號|號碼|數值|值))?|(?:(?:(?:credit[\s-]*card|bank|card|sms|email)\s+)?(?:otp|totp|hotp|pin|cvv2?|cvc2?|one[\s-]*time\s+(?:password|passcode)|(?:(?:verification|authentication|security|recovery|access|login|transaction|pickup|redemption|2fa|mfa)\s+(?:code|pin|passcode|otp)))(?:\s*(?:number|value|digits?))?))(?:(?:\s*[（(][^）)]{1,40}[）)])?)$/iu;
 
@@ -270,6 +274,7 @@ function isNonRatioColumn(header: string, percentage = false): boolean {
       ENGLISH_NON_RATIO_POSTAL_IDENTIFIER_COLUMN.test(column) ||
       NON_RATIO_DOCUMENT_IDENTIFIER_COLUMN.test(column) ||
       NON_RATIO_AUTH_TOKEN_COLUMN.test(column) ||
+      NON_RATIO_CATALOG_IDENTIFIER_COLUMN.test(column) ||
       AMBIGUOUS_TIME_COLUMN.test(column) ||
       NON_RATIO_WEEKDAY_COLUMN.test(column) ||
       NON_RATIO_QUARTER_POSITION_COLUMN.test(column) ||

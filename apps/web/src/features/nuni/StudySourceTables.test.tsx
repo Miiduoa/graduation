@@ -3119,3 +3119,43 @@ it('keeps intact emoji, RTL text and combining accents in chart labels', () => {
     view.unmount();
   }
 });
+
+
+it.each([
+  '貨號', '品號', '料號', '商品貨號', '產品條碼', '物料編號',
+  '商品貨號（ERP）', '零件料號', 'SKU', 'SKU ID',
+  'ASIN', 'ISBN', 'ISBN-13', 'ISSN', 'EAN-13', 'UPC-A', 'GTIN-14',
+])('shows catalogue identifiers without false proportional source charts (%s)', (header) => {
+  const source = ['| 品項 | ' + header + ' |', '| --- | --- |',
+    '| 第一件 | 100 |', '| 第二件 | 200 |'].join('\n');
+  const { container, unmount } = render(<StudySourceTables text={source} />);
+  expect(within(screen.getByRole('table')).getAllByRole('cell')
+    .map((cell) => cell.textContent)).toEqual(['100', '200']);
+  expect(comparisonSummaries(container)).toEqual([]);
+  expect(container.querySelectorAll('meter')).toHaveLength(0);
+  unmount();
+});
+
+it.each(['SKU Count', 'Number of SKUs', '商品貨號數量', '商品總數', '產品數量', 'Book Count', '零件數量'])(
+  'keeps genuine item-count charts available despite identifier examples (%s)', (header) => {
+    const source = ['| 分組 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 100 |', '| 乙 | 200 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={source} />);
+    expect(Array.from(container.querySelectorAll('meter'))
+      .map((bar) => [bar.getAttribute('value'), bar.getAttribute('max')]))
+      .toEqual([['100', '200'], ['200', '200']]);
+    unmount();
+  },
+);
+
+it.each(['SKU (%)', 'ISBN-13 (%)', '商品條碼（%）'])(
+  'does not transform catalog identifiers into 100 percent meters (%s)', (header) => {
+    const source = ['| 品項 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 25% |', '| 乙 | 75% |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={source} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual(['25%', '75%']);
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  },
+);
