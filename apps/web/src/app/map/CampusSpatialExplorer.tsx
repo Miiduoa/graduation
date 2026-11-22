@@ -48,6 +48,14 @@ const POTENTIAL_OUTLINE_POI_IDS = new Set(
       /^https:\/\/www\.openstreetmap\.org\/way\/[1-9]\d*$/.test(place.sourceUrl))
     .map((place) => place.id),
 );
+function requestsReducedData(): boolean {
+  try {
+    return (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true;
+  } catch {
+    return false;
+  }
+}
+
 const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
 // Link the original university building-unit listing, not the virtual tour.
 // No university photographs or floor plans are copied into nuni.
@@ -66,49 +74,79 @@ const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 // Response.json() buffers the entire document before our snapshot validator
 // runs. Bound the *actual decoded bytes* so untrusted downstream responses
 // cannot exhaust mobile memory even without a reliable Content-Length.
-// Fallback is only for non-streaming WebViews / synthetic fetch stubs.
+// Fall back to supported response readers and check size after parsing if needed.
 async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
-  if (!response.body || typeof response.body.getReader !== 'function') {
-    // A native reader may still be available when a WebView hides it on the instance.
-    const readBytes = typeof response.arrayBuffer === 'function' ? response.arrayBuffer :
-      typeof Response !== 'undefined' && response instanceof Response ? Response.prototype.arrayBuffer : undefined;
-    if (typeof readBytes === 'function') {
-      const bytes = await readBytes.call(response);
-      if (signal?.aborted) throw new Error('Building outline read aborted');
-      if (bytes.byteLength > MAX_DECLARED_FOOTPRINT_BYTES) {
-        throw new Error('Building outline response exceeded byte limit');
-      }
-      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
+  let decoder: TextDecoder | undefined;
+  let encoder: TextEncoder | undefined;
+  try {
+    const candidate = new TextDecoder('utf-8', { fatal: true });
+    if (candidate.decode(new Uint8Array([0xe4, 0xb8, 0xad])) === '中') decoder = candidate;
+  } catch { /* WebView may only support Response.json() */ }
+  try {
+    const candidate = new TextEncoder();
+    if (candidate.encode('中').byteLength === 3) encoder = candidate;
+  } catch { /* Use the string length when byte measurement is unavailable. */ }
+
+  const checkSize = (length: number) => {
+    if (length > MAX_DECLARED_FOOTPRINT_BYTES) {
+      throw new Error('Building outline response exceeded byte limit');
     }
-    // Old embedded WebViews can expose a Response without a usable stream.
-    // We cannot stop their text() buffering mid-flight, but reject decoded
-    // content before JSON.parse() allocates a potentially huge object tree.
-    // Check UTF-16 length first (a lower bound on encoded UTF-8 bytes) to
-    // avoid creating an extra giant byte array for clearly oversized bodies.
-    if (typeof response.text === 'function') {
-      const raw = await response.text();
-      if (signal?.aborted) throw new Error('Building outline read aborted');
-      if (raw.length > MAX_DECLARED_FOOTPRINT_BYTES) {
-        throw new Error('Building outline response exceeded byte limit');
+  };
+  const checkTextSize = (raw: string) => {
+    checkSize(raw.length);
+    let length: number | undefined;
+    try { length = encoder?.encode(raw).byteLength; }
+    catch { /* Fall back to the string length already checked. */ }
+    if (length !== undefined) checkSize(length);
+  };
+
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  if (decoder) {
+    try {
+      const body = response.body;
+      reader = body?.getReader?.();
+      if (reader && typeof reader.read !== 'function') {
+        reader.releaseLock?.();
+        reader = undefined;
       }
-      const decodedBytes = new TextEncoder().encode(raw).byteLength;
-      if (decodedBytes > MAX_DECLARED_FOOTPRINT_BYTES) {
-        throw new Error('Building outline response exceeded byte limit');
+    } catch { reader = undefined; }
+  }
+  if (!reader || !decoder) {
+    if (decoder) {
+      let bytes: ArrayBuffer | undefined;
+      try {
+        const readBytes = response.arrayBuffer ??
+          (typeof Response !== 'undefined' && response instanceof Response ? Response.prototype.arrayBuffer : undefined);
+        bytes = await readBytes?.call(response);
+      } catch (error) {
+        if (response.bodyUsed) throw error;
       }
-      return JSON.parse(raw) as unknown;
+      if (bytes && (Object.prototype.toString.call(bytes) === '[object ArrayBuffer]' || ArrayBuffer.isView(bytes))) {
+        if (signal?.aborted) throw new Error('Building outline read aborted');
+        checkSize(bytes.byteLength);
+        return JSON.parse(decoder.decode(bytes)) as unknown;
+      }
     }
-    // JSON-only WebViews expose no raw bytes. Check size after parsing.
+    if (encoder) {
+      let raw: string | undefined;
+      try { raw = await response.text?.(); }
+      catch (error) {
+        if (response.bodyUsed) throw error;
+      }
+      if (typeof raw === 'string') {
+        if (signal?.aborted) throw new Error('Building outline read aborted');
+        checkTextSize(raw);
+        return JSON.parse(raw) as unknown;
+      }
+    }
+    // JSON-only WebViews can still apply a limit after parsing.
     const payload: unknown = await response.json();
     if (signal?.aborted) throw new Error('Building outline read aborted');
     const normalized = JSON.stringify(payload);
-    if (typeof normalized !== 'string' ||
-        normalized.length > MAX_DECLARED_FOOTPRINT_BYTES ||
-        new TextEncoder().encode(normalized).byteLength > MAX_DECLARED_FOOTPRINT_BYTES) {
-      throw new Error('Building outline response exceeded byte limit');
-    }
+    if (typeof normalized !== 'string') throw new Error('Invalid building outline response');
+    checkTextSize(normalized);
     return payload;
   }
-  const reader = response.body.getReader();
   // A mobile pagehide/unmount/timeout may arrive after the fetch headers but
   // while response-body streaming is still pending. Abort the *reader* as well
   // as fetch, so background tabs stop consuming OSM data on WebViews whose
@@ -162,10 +200,10 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
     }
   } finally {
     signal?.removeEventListener('abort', cancelReader);
-    reader.releaseLock();
+    try { reader.releaseLock(); } catch { /* Partially implemented reader. */ }
   }
   if (signal?.aborted) throw new Error('Building outline read aborted');
-  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, total))) as unknown;
+  return JSON.parse(decoder.decode(bytes.subarray(0, total))) as unknown;
 }
 const OSM_COOLDOWN_STORAGE_KEY = 'nuni:pu:osm-footprint-cooldown-until';
 
@@ -310,7 +348,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Avoid loading the optional Three.js bundle or allocating WebGL when the
     // browser requests reduced data use. Marker details and walking links
     // remain available; the visitor can explicitly opt into 3D at any time.
-    const saveData = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true;
+    const saveData = requestsReducedData();
     let observerVisible = manuallyStarted;
     let visible = false;
     let scene: CampusSpatialScene | null = null;
@@ -397,25 +435,22 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
     // Use current host, dialog and visual viewport bounds. Older WebViews
     // with unmeasurable layout can still use an observer or manual start.
-    const scrollDialog = host.closest('dialog');
+    let scrollDialog: Element | null | undefined;
+    try { scrollDialog = host.closest?.('dialog'); }
+    catch { /* Dialog clipping is optional when this API is unavailable. */ }
     const hostViewportVisibility = (): boolean | null => {
-      // Some embedded Safari/WebViews expose VisualViewport but throw when a
-      // dimension is read during keyboard, zoom or bfcache transitions. Read
-      // each getter once; an exception is *not* permission to fall back to
-      // the larger layout viewport and wake a hidden WebGL context.
       let visualBounds: { left: number; top: number; width: number; height: number } | null = null;
-      let visualViewport: VisualViewport | null;
-      try { visualViewport = window.visualViewport; }
-      catch { return false; }
-      if (visualViewport) {
-        try {
-          const { width, height, offsetLeft, offsetTop } = visualViewport;
-          if (![width, height, offsetLeft, offsetTop].every(Number.isFinite) ||
-            width <= 0 || height <= 0) return false;
+      try {
+        const viewport = window.visualViewport;
+        if (viewport) {
+          const { width, height, offsetLeft, offsetTop } = viewport;
+          if (![width, height, offsetLeft, offsetTop, offsetLeft + width, offsetTop + height].every(Number.isFinite) ||
+            width <= 0 || height <= 0) return null;
           visualBounds = { left: offsetLeft, top: offsetTop, width, height };
-        } catch {
-          return false;
         }
+      } catch {
+        // An unavailable viewport measurement leaves visibility to the observer.
+        return null;
       }
       try {
         const rect = host.getBoundingClientRect();
@@ -425,20 +460,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         const top = visualBounds?.top ?? 0;
         const right = left + (visualBounds?.width ?? width);
         const bottom = top + (visualBounds?.height ?? height);
-        // A malformed *reported* host coordinate is not an absent layout
-        // measurement. In particular NaN/Infinity must never allow the
-        // no-observer WebView fallback to start offscreen WebGL.
-        if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height]
-          .every(Number.isFinite)) return false;
-        // Reported non-finite layout viewport values are not unknown legacy
-        // measurements: never let the WebView fallback activate offscreen GPU.
-        if (![width, height, left, top, right, bottom].every(Number.isFinite))
-          return false;
-        if (rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0 ||
+        // Partial geometry is unavailable. Only a current, coherent
+        // measurement can override the observer's visibility signal.
+        if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height,
+          width, height, left, top, right, bottom].every(Number.isFinite) ||
+          rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0 ||
+          rect.right <= rect.left || rect.bottom <= rect.top ||
           right <= left || bottom <= top) return null;
-        // A WebView can expose positive width/height while its DOMRect edges
-        // are reversed or collapsed. These bounds never prove the host visible.
-        if (rect.right <= rect.left || rect.bottom <= rect.top) return false;
         // The dialog clips its overflowing contents even where the window
         // still has visible pixels outside the dialog.
         const dialogRect = scrollDialog?.getBoundingClientRect();
@@ -510,9 +538,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
 
     let intersection: IntersectionObserver | null = null;
     let observerLive = true;
-    if (typeof IntersectionObserver !== 'undefined') {
+    let Observer: typeof IntersectionObserver | undefined;
+    try { Observer = globalThis.IntersectionObserver; }
+    catch { /* Some WebViews expose a throwing constructor getter. */ }
+    if (Observer) {
       try {
-        intersection = new IntersectionObserver((entries) => {
+        intersection = new Observer((entries) => {
           // A WebView can deliver an already-queued callback after disconnect
           // (including after the modal closes). Do not reactivate a disposed
           // WebGL scene or issue state updates from the previous dialog.
@@ -520,41 +551,39 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // Only entries for this canvas host may change its visibility.
           // Legacy callback shims may omit target; a *different* explicit
           // target is never proof that our map entered the viewport.
-          const hostEntries = entries.filter((entry) => !entry.target || entry.target === host);
+          const hostEntries = entries.filter((entry) => {
+            try {
+              const target = entry.target;
+              return !target || target === host;
+            } catch {
+              return true;
+            }
+          });
           // Observer entries are queued in transition order. Use the last
           // host entry even when timestamps are rounded, missing or repeated.
           const latest = hostEntries[hostEntries.length - 1];
           if (!latest) return;
-          // IntersectionObserver may report isIntersecting=true when the
-          // canvas only touches the viewport boundary. A zero-area map has
-          // no visible pixels and must not allocate or resume mobile WebGL.
-          // Older WebViews that omit the entire intersectionRect still use
-          // the boolean flag and retain the manual-start path.
-          // Some embedded WebViews deliver an intersection rectangle with
-          // positive dimensions but invalid origin/edge coordinates, or throw
-          // when a DOMRect getter is read after tab restoration. Neither is
-          // evidence of visible pixels. Ignore omitted coordinate fields in
-          // legacy shims, but fail closed for any provided non-finite value.
-          // A callback queued before bfcache scroll restoration can also
-          // describe an old on-screen position.
-          let confirmedIntersecting = false;
-          try {
-            const rect = latest.intersectionRect;
-            confirmedIntersecting = Boolean(latest.isIntersecting) && (!rect ||
-              (Number.isFinite(rect.width) && Number.isFinite(rect.height) &&
-                rect.width > 0 && rect.height > 0 &&
-                [rect.x, rect.y, rect.left, rect.top, rect.right, rect.bottom]
-                  .every((value) => value === undefined || Number.isFinite(value)) &&
-                // Some WebViews report positive width/height alongside an
-                // impossible or zero-area edge pair. An explicitly supplied
-                // right/bottom edge must be beyond its matching start edge;
-                // fully omitted legacy-shim coordinates remain supported.
-                (rect.left === undefined || rect.right === undefined || rect.right > rect.left) &&
-                (rect.top === undefined || rect.bottom === undefined || rect.bottom > rect.top)));
-          } catch {
-            // A partially implemented DOMRect getter cannot wake mobile GPU.
+          // Fall back to the original boolean when the optional rectangle
+          // is unavailable. A valid zero-area intersection is an edge touch.
+          try { observerVisible = latest.isIntersecting === true; }
+          catch { return; }
+          if (observerVisible) {
+            try {
+              const rect = latest.intersectionRect;
+              if (rect) {
+                const { width, height, x, y, left, top, right, bottom } = rect;
+                if (Number.isFinite(width) && Number.isFinite(height) &&
+                    width >= 0 && height >= 0 &&
+                    [x, y, left, top, right, bottom].every((value) => value === undefined || Number.isFinite(value)) &&
+                    !(left !== undefined && right !== undefined && right < left) &&
+                    !(top !== undefined && bottom !== undefined && bottom < top)) {
+                  observerVisible = width > 0 && height > 0 &&
+                    (left === undefined || right === undefined || right > left) &&
+                    (top === undefined || bottom === undefined || bottom > top);
+                }
+              }
+            } catch { /* Legacy observer boolean still applies. */ }
           }
-          observerVisible = confirmedIntersecting;
           syncViewport();
         }, { threshold: VIEWPORT_THRESHOLDS });
         // An edge-touch (isIntersecting=true, zero area) and a sliver of
@@ -576,10 +605,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     document.addEventListener('visibilitychange', syncViewport);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
-    window.addEventListener('resize', syncViewport);
     // Nested dialog scroll can move the canvas without an observer callback.
-    window.addEventListener('scroll', syncViewport, { capture: true, passive: true });
-    window.addEventListener('focus', syncViewport);
+    const viewportEvents = ['resize', 'scroll', 'focus'] as const;
+    for (const event of viewportEvents) {
+      try { window.addEventListener(event, syncViewport, event === 'scroll' ? { capture: true, passive: true } : false); }
+      catch { /* Observer and page events still report visibility. */ }
+    }
     syncViewport();
     return () => {
       active = false;
@@ -590,9 +621,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       document.removeEventListener('visibilitychange', syncViewport);
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
-      window.removeEventListener('resize', syncViewport);
-      window.removeEventListener('scroll', syncViewport, true);
-      window.removeEventListener('focus', syncViewport);
+      for (const event of viewportEvents) {
+        try { window.removeEventListener(event, syncViewport, event === 'scroll'); }
+        catch { /* Complete the remaining cleanup. */ }
+      }
       // Always attempt both removals even if the first WebView API throws.
       // Otherwise a retained scroll handler can touch a disposed GPU scene.
       for (const event of ['resize', 'scroll'] as const) {
@@ -605,6 +637,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
   }, [host, model, onSelect, onCameraChange, footprints, manualStart]);
 
+  const startManually = () => {
+    // Keep focus inside the map when its start control disappears.
+    try { host?.focus(); } catch { /* Focus is advisory. */ }
+    onManualStart();
+  };
   return (
     <>
     <div className={styles.scene} data-spatial-state={status}>
@@ -625,22 +662,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
                 <p>{deferredCause === 'data-saver'
                   ? '瀏覽器已開啟省流量模式，因此立體畫面不會自動載入；仍可直接查看地點資訊與步行導航。需要 3D 時可自行開啟。'
                   : '尚未確認立體畫面在可見範圍；滑動至空間圖後才載入，以節省手機效能與電力。若沒有自動載入，可手動開啟。地點資訊與步行導航仍可使用。'}</p>
-                <button className="btn" type="button" onClick={() => {
-                  // The launch button disappears as loading begins. Preserve
-                  // keyboard/screen-reader focus on the map instead of body.
-                  host?.focus();
-                  onManualStart();
-                }}>{deferredCause === 'data-saver' ? '仍要開啟立體畫面' : '手動開啟立體畫面'}</button>
+                <button className="btn" type="button" onClick={startManually}>{deferredCause === 'data-saver' ? '仍要開啟立體畫面' : '手動開啟立體畫面'}</button>
               </>
           ) : <>
             <p>這次無法顯示立體畫面。你仍可選擇地點，查看資訊與導航。</p>
-            <button className="btn" type="button" onClick={() => {
-              // Retry replaces this button with a loading/status layer.
-              // Keep keyboard and screen-reader focus inside the map instead
-              // of losing focus when the button is removed from the dialog.
-              host?.focus();
-              onManualStart();
-            }}>
+            <button className="btn" type="button" onClick={startManually}>
               重試立體畫面
             </button>
           </>}
@@ -649,12 +675,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       {status === 'ready' && renderSuspended && (
         <div className={styles.sceneMessage} role="status">
           <p>立體畫面已暫停。回到空間圖會自動恢復；若沒有恢復，可手動重新啟動。</p>
-          <button className="btn" type="button" onClick={() => {
-            // The recovery button disappears while the scene restarts; keep
-            // keyboard focus within the tour instead of losing it to body.
-            host?.focus();
-            onManualStart();
-          }}>重新啟動立體畫面</button>
+          <button className="btn" type="button" onClick={startManually}>重新啟動立體畫面</button>
         </div>
       )}
       <span className={styles.sceneCaption}>地點位置示意</span>
@@ -739,9 +760,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
   const hasOutlineCandidate = auditedWayCandidateCount > 0;
   // A student's explicit 3D start also authorizes its optional OSM transfer.
   // Save-Data must defer BOTH WebGL and the parent dialog's network request.
-  const deferOutlinesForSaveData = typeof navigator !== 'undefined' &&
-    (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true &&
-    manualStart === 0;
+  const deferOutlinesForSaveData = manualStart === 0 && requestsReducedData();
   // Capture the inherited destination when the dialog opens. MapClient may
   // resolve the same selected ID to a different location after a source update.
   const [selection, setSelection] = useState<{ id: string; identity: string; inherited?: boolean } | 'revoked' | null>(() =>

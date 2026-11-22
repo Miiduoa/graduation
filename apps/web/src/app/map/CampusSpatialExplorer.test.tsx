@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import CampusSpatialExplorer from './CampusSpatialExplorer';
 import type { MapLocation } from './mapService';
 import { PROVIDENCE_BUS_STOPS, PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
-import { parseProvidenceOsmFootprints } from './providenceFootprints';
+import { parseProvidenceFootprintSnapshot, parseProvidenceOsmFootprints } from './providenceFootprints';
 import { DEFAULT_SPATIAL_BEARING, MAX_SPATIAL_ZOOM, MIN_SPATIAL_ZOOM } from './campusSpatialCamera';
 
 const scene = vi.hoisted(() => ({
@@ -174,7 +174,7 @@ it('shows the original marker coordinate and updates both navigation destination
   expect(apple.searchParams.get('daddr')).toBe('24.228,120.582');
 });
 
-it('rejects non-finite host DOMRect coordinates before first WebGL allocation and during scene restore', async () => {
+it('uses the observer during startup and restore when host coordinates are non-finite', async () => {
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) { intersection = callback; }
     observe() {}
@@ -202,10 +202,8 @@ it('rejects non-finite host DOMRect coordinates before first WebGL allocation an
       intersectionRect: { width: 280, height: 160 } as DOMRect,
       boundingClientRect: validRect, rootBounds: validRect, intersectionRatio: 1,
     } satisfies IntersectionObserverEntry], {} as IntersectionObserver));
-    expect(scene.create).not.toHaveBeenCalled();
-    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    await waitFor(() => expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready'));
 
-    // This is a fresh, measurable host viewport, not a second observer permit.
     currentRect = validRect;
     fireEvent(window, new Event('resize'));
     await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
@@ -213,7 +211,7 @@ it('rejects non-finite host DOMRect coordinates before first WebGL allocation an
 
     currentRect = { ...validRect, bottom: Number.POSITIVE_INFINITY };
     fireEvent(window, new Event('resize'));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
     currentRect = validRect;
     fireEvent(window, new Event('resize'));
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
@@ -224,7 +222,7 @@ it('rejects non-finite host DOMRect coordinates before first WebGL allocation an
   }
 });
 
-it('blocks no-IntersectionObserver WebView when host DOMRect dimensions are non-finite', async () => {
+it('uses the legacy default when no observer or finite host dimensions are available', async () => {
   vi.stubGlobal('IntersectionObserver', undefined);
   const validRect = {
     x: 12, y: 16, left: 12, top: 16, right: 312, bottom: 176,
@@ -243,8 +241,7 @@ it('blocks no-IntersectionObserver WebView when host DOMRect dimensions are non-
     fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
     const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
     const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
-    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
-    expect(scene.create).not.toHaveBeenCalled();
+    await waitFor(() => expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready'));
 
     currentRect = validRect;
     fireEvent(window, new Event('scroll'));
@@ -252,7 +249,7 @@ it('blocks no-IntersectionObserver WebView when host DOMRect dimensions are non-
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     currentRect = { ...validRect, right: Number.NEGATIVE_INFINITY };
     fireEvent(window, new Event('scroll'));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
     currentRect = validRect;
     fireEvent(window, new Event('scroll'));
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
@@ -264,7 +261,7 @@ it('blocks no-IntersectionObserver WebView when host DOMRect dimensions are non-
 });
 
 
-it('defers legacy WebView GPU for invalid layout viewport then pauses and resumes the same scene', async () => {
+it('keeps the legacy scene active when layout viewport dimensions are unavailable', async () => {
   vi.stubGlobal('IntersectionObserver', undefined);
   const width = window.innerWidth;
   const height = window.innerHeight;
@@ -284,8 +281,7 @@ it('defers legacy WebView GPU for invalid layout viewport then pauses and resume
     fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
     const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
     const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
-    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
-    expect(scene.create).not.toHaveBeenCalled();
+    await waitFor(() => expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready'));
 
     vi.stubGlobal('innerWidth', width);
     fireEvent(window, new Event('scroll'));
@@ -294,7 +290,7 @@ it('defers legacy WebView GPU for invalid layout viewport then pauses and resume
 
     vi.stubGlobal('innerHeight', Number.POSITIVE_INFINITY);
     fireEvent(window, new Event('resize'));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
     vi.stubGlobal('innerHeight', height);
     fireEvent(window, new Event('resize'));
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
@@ -305,7 +301,7 @@ it('defers legacy WebView GPU for invalid layout viewport then pauses and resume
   }
 });
 
-it('requires restored layout viewport after positive observer before allocating WebGL', async () => {
+it('starts with a positive observer when layout viewport dimensions are unavailable', async () => {
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) { intersection = callback; }
     observe() {}
@@ -330,8 +326,7 @@ it('requires restored layout viewport after positive observer before allocating 
       intersectionRect: validRect, boundingClientRect: validRect,
       rootBounds: validRect, intersectionRatio: 1,
     } satisfies IntersectionObserverEntry], {} as IntersectionObserver));
-    expect(scene.create).not.toHaveBeenCalled();
-    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    await waitFor(() => expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready'));
 
     vi.stubGlobal('innerWidth', width);
     fireEvent(window, new Event('resize'));
@@ -340,7 +335,7 @@ it('requires restored layout viewport after positive observer before allocating 
 
     vi.stubGlobal('innerHeight', Number.NaN);
     fireEvent(window, new Event('resize'));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
     vi.stubGlobal('innerHeight', height);
     fireEvent(window, new Event('resize'));
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
@@ -351,7 +346,7 @@ it('requires restored layout viewport after positive observer before allocating 
   }
 });
 
-it('refuses contradictory host DOMRect bounds until WebView layout recovers without rebuilding WebGL', async () => {
+it('uses observer visibility when host edges contradict its dimensions', async () => {
   // A mobile WebView can expose positive dimensions with collapsed edges
   // while keyboard, zoom or bfcache layout is being restored.
   vi.stubGlobal('IntersectionObserver', class {
@@ -381,11 +376,8 @@ it('refuses contradictory host DOMRect bounds until WebView layout recovers with
       rootBounds: validRect,
       intersectionRatio: 1,
     } satisfies IntersectionObserverEntry], {} as IntersectionObserver));
-    expect(scene.create).not.toHaveBeenCalled();
-    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    await waitFor(() => expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready'));
 
-    // An earlier positive observer record is not enough; valid current
-    // host geometry is required before the first GPU allocation.
     rect.mockReturnValue(validRect);
     fireEvent(window, new Event('resize'));
     await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
@@ -393,7 +385,7 @@ it('refuses contradictory host DOMRect bounds until WebView layout recovers with
 
     rect.mockReturnValue({ ...validRect, bottom: validRect.top });
     fireEvent(window, new Event('resize'));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
 
     rect.mockReturnValue(validRect);
     fireEvent(window, new Event('resize'));
@@ -405,7 +397,7 @@ it('refuses contradictory host DOMRect bounds until WebView layout recovers with
   }
 });
 
-it('keeps legacy no-observer WebGL deferred when host edges contradict dimensions', async () => {
+it('uses the legacy default without an observer when host edges contradict its dimensions', async () => {
   vi.stubGlobal('IntersectionObserver', undefined);
   const validRect = {
     x: 12, y: 16, left: 12, top: 16, right: 312, bottom: 176,
@@ -423,8 +415,7 @@ it('keeps legacy no-observer WebGL deferred when host edges contradict dimension
     fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
     const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
     const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
-    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
-    expect(scene.create).not.toHaveBeenCalled();
+    await waitFor(() => expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready'));
 
     currentRect = validRect;
     fireEvent(window, new Event('scroll'));
@@ -515,42 +506,19 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
     act(() => intersection?.(entries, {} as IntersectionObserver));
   };
   notify(100, 0, 160);
-  // Invalid-but-present rectangles must not be treated as old WebViews that
-  // omit intersectionRect. No GPU allocation should occur.
-  for (const [index, width] of [Number.NaN, Number.POSITIVE_INFINITY, -2].entries()) {
-    notify(101 + index, width, 160);
-    expect(scene.create).not.toHaveBeenCalled();
-  }
-  // Dimensions alone are insufficient: broken WebViews may return a
-  // positive area with invalid coordinates, or throw on DOMRect access.
-  for (const [index, coordinate] of [
-    { x: Number.NaN }, { y: Number.POSITIVE_INFINITY },
-    { left: Number.NaN }, { top: Number.POSITIVE_INFINITY },
-    { right: Number.NEGATIVE_INFINITY }, { bottom: Number.NaN },
-  ].entries()) {
-    notify(104 + index, 280, 160, coordinate);
-    expect(scene.create).not.toHaveBeenCalled();
-  }
-  // An inconsistent WebView DOMRect can claim positive dimensions but
-  // explicitly report an empty or inverted edge interval. Never allocate GPU.
-  notify(109.1, 280, 160, { left: 20, right: 20 });
-  notify(109.2, 280, 160, { top: 30, bottom: 10 });
-  expect(scene.create).not.toHaveBeenCalled();
-  notifyThrowingRect(109.5);
   expect(scene.create).not.toHaveBeenCalled();
   expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
-  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
-  notify(110, 280, 160);
+  // A broken rectangle getter leaves the legacy positive flag usable.
+  notifyThrowingRect(101);
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
 
   notify(120, 280, 0);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  // Invalid subsequent positive callbacks cannot reactivate a suspended GPU.
   for (const [index, width] of [Number.NaN, Number.POSITIVE_INFINITY, -2].entries()) {
     notify(121 + index, width, 160);
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
   }
   for (const [index, coordinate] of [
     { x: Number.NaN }, { y: Number.POSITIVE_INFINITY },
@@ -558,13 +526,12 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
     { right: Number.NEGATIVE_INFINITY }, { bottom: Number.NaN },
   ].entries()) {
     notify(124 + index, 280, 160, coordinate);
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
   }
   notify(129.1, 280, 160, { left: 20, right: 20 });
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
   notify(129.2, 280, 160, { top: 30, bottom: 10 });
-  expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  notifyThrowingRect(129.5);
-  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
   notify(130, 280, 160);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
@@ -1036,7 +1003,7 @@ it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'callback'] 
 
       const notify = (isIntersecting: boolean, time: number) => act(() =>
         intersection?.([observerEntry(host, isIntersecting, undefined, time)], {} as IntersectionObserver));
-      viewport.height = mode === 'negative' ? 0 : 110;
+      viewport.height = 110;
       act(() => viewport.dispatchEvent(new Event('resize')));
       expect(scene.setActive).toHaveBeenLastCalledWith(false);
       if (mode === 'negative') notify(false, 1);
@@ -1439,7 +1406,7 @@ it.each(['missing', 'constructor', 'observe'] as const)(
   },
 );
 
-it('blocks legacy no-observer WebGL during an invalid VisualViewport and resumes from viewport events', async () => {
+it('uses the legacy visibility default when both observer and viewport bounds are unavailable', async () => {
   // Some legacy WebViews omit IntersectionObserver while exposing a transient
   // zero-height VisualViewport during soft-keyboard and return transitions.
   vi.stubGlobal('IntersectionObserver', undefined);
@@ -1456,16 +1423,13 @@ it('blocks legacy no-observer WebGL during an invalid VisualViewport and resumes
         width: 300, height: 180, toJSON: () => ({}),
       } as DOMRect;
     });
-  const timerSpy = vi.spyOn(window, 'setTimeout');
   try {
     const { unmount } = render(<CampusSpatialExplorer school="other-school"
       locations={places} selected={places[0]} onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
     const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
     const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
-    expect(host.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
-    expect(scene.create).not.toHaveBeenCalled();
-    expect(timerSpy.mock.calls.some(([, delay]) => delay === 12_000)).toBe(false);
+    await waitFor(() => expect(host.parentElement?.getAttribute('data-spatial-state')).toBe('ready'));
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
     viewport.height = window.innerHeight;
@@ -1474,7 +1438,7 @@ it('blocks legacy no-observer WebGL during an invalid VisualViewport and resumes
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     viewport.height = 0;
     act(() => viewport.dispatchEvent(new Event('resize')));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
     viewport.height = window.innerHeight;
     act(() => viewport.dispatchEvent(new Event('scroll')));
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
@@ -1487,7 +1451,6 @@ it('blocks legacy no-observer WebGL during an invalid VisualViewport and resumes
     expect(scene.setActive).toHaveBeenCalledTimes(calls);
     expect(scene.dispose).toHaveBeenCalledTimes(1);
   } finally {
-    timerSpy.mockRestore();
     rectSpy.mockRestore();
   }
 });
@@ -1908,7 +1871,7 @@ it('starts deferred Safari 3D on foreground visibilitychange without pageshow or
 });
 
 it.each(['pageshow', 'visibilitychange'] as const)(
-  'starts Safari 3D on resize after a temporarily invalid viewport on %s',
+  'starts Safari 3D with a positive observer and an invalid viewport on %s',
   async (foregroundEvent) => {
     const viewport = Object.assign(new EventTarget(), {
       width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
@@ -1936,8 +1899,7 @@ it.each(['pageshow', 'visibilitychange'] as const)(
       viewport.height = 0;
       Object.defineProperty(document, 'hidden', { configurable: true, value: false });
       await act(async () => fireEvent(target, new Event(foregroundEvent)));
-      expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
-      expect(scene.create).not.toHaveBeenCalled();
+      await waitFor(() => expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready'));
 
       viewport.height = window.innerHeight;
       act(() => viewport.dispatchEvent(new Event('resize')));
@@ -1963,6 +1925,7 @@ it('resumes existing Safari 3D on foreground visibilitychange without pageshow o
     width: 320, height: 180, toJSON: () => ({}),
   } as DOMRect);
   try {
+    act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
     viewport.height = 0;
     act(() => viewport.dispatchEvent(new Event('resize')));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
@@ -1989,10 +1952,7 @@ it('resumes existing Safari 3D on foreground visibilitychange without pageshow o
   }
 });
 
-it('keeps a viewport-paused 3D scene suspended while iOS VisualViewport reports invalid bounds', async () => {
-  // Safari keyboard and pinch transitions can briefly expose 0/NaN dimensions.
-  // The larger layout viewport must not count as proof that an obscured canvas
-  // has re-entered the actually visible region.
+it('keeps a negative observer result during invalid viewport bounds and recovers with valid bounds', async () => {
   const viewport = Object.assign(new EventTarget(), {
     width: window.innerWidth,
     height: window.innerHeight,
@@ -2013,6 +1973,7 @@ it('keeps a viewport-paused 3D scene suspended while iOS VisualViewport reports 
     viewport.height = top - 10;
     act(() => viewport.dispatchEvent(new Event('resize')));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
     const callsBeforeInvalid = scene.setActive.mock.calls.length;
     for (const invalidHeight of [0, Number.NaN, -1]) {
       viewport.height = invalidHeight;
@@ -2044,10 +2005,7 @@ it('keeps a viewport-paused 3D scene suspended while iOS VisualViewport reports 
   }
 });
 
-it('does not reactivate Safari WebGL from a queued observer entry while visual viewport bounds are invalid', async () => {
-  // A WebView may deliver an apparently current positive intersection while
-  // the visual viewport is briefly 0/NaN during soft-keyboard or zoom changes.
-  // A stale callback must not bypass the fail-closed viewport resize gate.
+it('resumes Safari WebGL from a positive observer while viewport bounds stay invalid', async () => {
   const viewport = Object.assign(new EventTarget(), {
     width: window.innerWidth,
     height: window.innerHeight,
@@ -2071,15 +2029,14 @@ it('does not reactivate Safari WebGL from a queued observer entry while visual v
   };
   try {
     for (const invalidHeight of [0, Number.NaN]) {
+      act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
       viewport.height = invalidHeight;
       act(() => viewport.dispatchEvent(new Event('resize')));
       expect(scene.setActive).toHaveBeenLastCalledWith(false);
-      const pausedAt = scene.setActive.mock.calls.length;
-      notify(1000 + pausedAt);
-      expect(scene.setActive.mock.calls.slice(pausedAt)
-        .every(([enabled]) => enabled === false)).toBe(true);
+      notify(1000);
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
       expect(scene.create).toHaveBeenCalledTimes(1);
-      expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+      expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
     }
 
     // Recover without another observer callback once the viewport is valid.
@@ -2088,11 +2045,11 @@ it('does not reactivate Safari WebGL from a queued observer entry while visual v
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     expect(scene.create).toHaveBeenCalledTimes(1);
 
-    // A bfcache restore cannot bypass the same guard either.
+    // A bfcache restore can reuse the positive observer result.
     fireEvent(window, new Event('pagehide'));
     viewport.offsetTop = Number.NaN;
     fireEvent(window, new Event('pageshow'));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
     expect(scene.create).toHaveBeenCalledTimes(1);
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     // The invalid geometry was first noticed by pageshow, not resize or
@@ -2115,10 +2072,7 @@ it('does not reactivate Safari WebGL from a queued observer entry while visual v
   }
 });
 
-it('keeps Safari WebGL paused when a VisualViewport getter throws, then recovers', async () => {
-  // A partially implemented iOS WebView can expose the API but throw while
-  // reading a property during keyboard/bfcache restoration. A queued positive
-  // observer entry must not wake the GPU or bypass the fail-closed pause.
+it('uses observer visibility when a VisualViewport dimension getter throws', async () => {
   const viewport = Object.assign(new EventTarget(), {
     width: window.innerWidth,
     height: window.innerHeight,
@@ -2135,20 +2089,19 @@ it('keeps Safari WebGL paused when a VisualViewport getter throws, then recovers
     width: 320, height: 180, toJSON: () => ({}),
   } as DOMRect);
   try {
+    act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
     Object.defineProperty(viewport, 'height', {
       configurable: true,
       get() { throw new Error('transient visual viewport read failure'); },
     });
     act(() => viewport.dispatchEvent(new Event('resize')));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
-    const pausedAt = scene.setActive.mock.calls.length;
     act(() => intersection?.([{
       target: graphics, time: 4100, isIntersecting: true,
       intersectionRect: { width: 320, height: 180 },
     }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
-    expect(scene.setActive.mock.calls.slice(pausedAt)
-      .every(([enabled]) => enabled === false)).toBe(true);
-    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
     // Safari recovers the getter but emits no second IntersectionObserver.
@@ -2251,10 +2204,7 @@ it.each(
   },
 );
 
-it('starts first WebGL render after Safari initial invalid VisualViewport recovers without another observer callback', async () => {
-  // The initial positive observer callback can race a keyboard transition
-  // which temporarily exposes height=0. We must not start then, but a valid
-  // measurable on-screen viewport later is sufficient to finish the two gates.
+it('starts first WebGL render with a positive observer and initially invalid viewport', async () => {
   const viewport = Object.assign(new EventTarget(), {
     width: window.innerWidth, height: 0, offsetLeft: 0, offsetTop: 0,
   });
@@ -2270,8 +2220,7 @@ it('starts first WebGL render after Safari initial invalid VisualViewport recove
   } as DOMRect);
   try {
     // The default observer mock has already delivered a positive intersection.
-    expect(scene.create).not.toHaveBeenCalled();
-    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    await waitFor(() => expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready'));
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     viewport.height = window.innerHeight;
     act(() => viewport.dispatchEvent(new Event('resize')));
@@ -2290,7 +2239,7 @@ it('starts first WebGL render after Safari initial invalid VisualViewport recove
   }
 });
 
-it('starts deferred first WebGL on Safari pageshow when VisualViewport becomes valid with no resize event', async () => {
+it('recovers first WebGL on Safari pageshow when VisualViewport becomes valid', async () => {
   const viewport = Object.assign(new EventTarget(), {
     width: window.innerWidth, height: 0, offsetLeft: 0, offsetTop: 0,
   });
@@ -2305,10 +2254,9 @@ it('starts deferred first WebGL on Safari pageshow when VisualViewport becomes v
     width: 320, height: 180, toJSON: () => ({}),
   } as DOMRect);
   try {
-    // The first observer was positive, but invalid iOS geometry blocked startup.
+    fireEvent(window, new Event('pagehide'));
     expect(scene.create).not.toHaveBeenCalled();
     expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
-    fireEvent(window, new Event('pagehide'));
     viewport.height = window.innerHeight;
     // Safari may restore a valid viewport only on pageshow. No resize/scroll
     // or second intersection callback is dispatched in this regression.
@@ -2324,7 +2272,7 @@ it('starts deferred first WebGL on Safari pageshow when VisualViewport becomes v
   }
 });
 
-it('resumes an existing Safari 3D scene on pageshow after invalid VisualViewport without a resize event', async () => {
+it('resumes an existing Safari 3D scene on pageshow while VisualViewport is invalid', async () => {
   const viewport = Object.assign(new EventTarget(), {
     width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
   });
@@ -2341,8 +2289,8 @@ it('resumes an existing Safari 3D scene on pageshow after invalid VisualViewport
     fireEvent(window, new Event('pagehide'));
     viewport.height = 0;
     fireEvent(window, new Event('pageshow'));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
-    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
     fireEvent(window, new Event('pagehide'));
     viewport.height = window.innerHeight;
     // An accessible recovery no longer depends on the WebView sending a
@@ -2380,6 +2328,7 @@ it.each(['first startup', 'running scene'] as const)(
     const resize = () => act(() => viewport.dispatchEvent(new Event('resize')));
     if (phase === 'running scene') {
       await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+      notify(false, 19);
       viewport.height = 0;
       resize();
       expect(scene.setActive).toHaveBeenLastCalledWith(false);
@@ -3566,6 +3515,158 @@ function sourcedLibraryFootprintFixture() {
     fetchedAt: new Date().toISOString(), stale: false, buildings,
   }) };
 }
+
+// 52403426 readBoundedFootprintJson falls back to response.json() without a
+// reader. Its streaming path parses the same UTF-8 JSON for these fixtures.
+// The snapshot validator is shared. Its canvas starts each foreground mount,
+// defaults to visible, and uses isIntersecting to suspend/resume rendering.
+const capabilityCases = [
+  'all available', 'no TextDecoder', 'no TextEncoder', 'no body.getReader',
+  'invalid viewport', 'throwing viewport', 'no IntersectionObserver',
+  'partial TextDecoder', 'partial TextEncoder', 'throwing body.getReader',
+] as const;
+it.each(capabilityCases.flatMap((capability) =>
+  (['small', 'large', 'incomplete'] as const).map((payload) => ({ capability, payload })),
+))('matches merge-base visible outcomes with $capability / $payload', async ({ capability, payload }) => {
+  const { library, body, buildings } = sourcedLibraryFootprintFixture();
+  // Exercise an accepted large payload below the retained 2 MB cap.
+  const raw = payload === 'incomplete' ? body.slice(0, -1) : payload === 'large'
+    ? JSON.stringify({ ...JSON.parse(body), padding: 'x'.repeat(1_900_000) }) : body;
+  const json = async () => JSON.parse(raw) as unknown;
+  const baselineSnapshot = await json().then((value) => parseProvidenceFootprintSnapshot(value), () => null);
+  const NativeEncoder = TextEncoder;
+  const makeResponse = () => {
+    if (capability === 'no TextDecoder' || capability === 'partial TextDecoder') {
+      return { ok: true, status: 200, json, arrayBuffer: async () => new NativeEncoder().encode(raw).buffer };
+    }
+    if (capability === 'no TextEncoder' || capability === 'partial TextEncoder') {
+      return { ok: true, status: 200, json, text: async () => raw };
+    }
+    if (capability === 'no body.getReader') return { ok: true, status: 200, json, body: {} };
+    if (capability === 'throwing body.getReader') return {
+      ok: true, status: 200, json,
+      body: { get getReader() { throw new TypeError('stream reader unavailable'); } },
+    };
+    return new Response(raw, { headers: { 'Content-Type': 'application/json' } });
+  };
+  if (capability === 'no TextDecoder') vi.stubGlobal('TextDecoder', undefined);
+  if (capability === 'no TextEncoder') vi.stubGlobal('TextEncoder', undefined);
+  if (capability === 'partial TextDecoder') vi.stubGlobal('TextDecoder', class {});
+  if (capability === 'partial TextEncoder') vi.stubGlobal('TextEncoder', class {});
+  vi.stubGlobal('fetch', vi.fn(async () => makeResponse()));
+
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: capability === 'invalid viewport' ? 0 : window.innerHeight,
+    offsetLeft: 0, offsetTop: 0,
+  });
+  if (capability === 'throwing viewport') Object.defineProperty(viewport, 'height', {
+    get() { throw new Error('viewport dimensions unavailable'); },
+  });
+  vi.stubGlobal('visualViewport', viewport);
+
+  const inViewTop = 40;
+  const offscreenTop = window.innerHeight + 40;
+  let top = inViewTop;
+  let reportOnObserve = true;
+  const layout = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    return this.getAttribute('aria-label') === '校園地點空間圖' ? new DOMRect(0, top, 320, 180) : new DOMRect();
+  });
+  vi.stubGlobal('IntersectionObserver', capability === 'no IntersectionObserver' ? undefined : class {
+    constructor(private callback: IntersectionObserverCallback) { intersection = callback; }
+    observe(target: Element) {
+      if (reportOnObserve) this.callback([observerEntry(target, top === inViewTop)], {} as IntersectionObserver);
+    }
+    disconnect() {}
+  });
+
+  const onSelect = vi.fn();
+  const explorer = (locations: MapLocation[]) =>
+    <CampusSpatialExplorer school="pu" locations={locations} selected={library} onSelect={onSelect} />;
+  const { rerender, unmount } = render(explorer([library]));
+  const dialog = () => screen.getByRole('dialog');
+  const host = () => within(dialog()).getByRole('group', { name: '校園地點空間圖' });
+  const notify = (visible: boolean) => act(() =>
+    intersection?.([observerEntry(host(), visible)], {} as IntersectionObserver));
+  const check = async (action: string) => {
+    // Compare the observable successful outcomes, after reaching foreground
+    // and reporting a visible host when the action uses the observer.
+    const expected = ['3D', ...(baselineSnapshot ? ['outlines'] : [])];
+    const outlineStatus = baselineSnapshot ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/;
+    await within(dialog()).findByText(outlineStatus);
+    await waitFor(() => {
+      const lastScene = scene.create.mock.calls.at(-1);
+      const actual = [
+        ...(host().parentElement?.dataset.spatialState === 'ready' &&
+          scene.setActive.mock.lastCall?.[0] ? ['3D'] : []),
+        ...(lastScene?.[2].footprints.length ? ['outlines'] : []),
+      ];
+      expect(actual, action).toEqual(expect.arrayContaining(expected));
+      expect(lastScene?.[2].footprints, action).toEqual(baselineSnapshot ? buildings : []);
+    });
+  };
+  const scrollOffscreen = () => {
+    top = offscreenTop;
+    notify(false);
+    fireEvent.scroll(dialog());
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  };
+
+  try {
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    await check('automatic startup');
+
+    fireEvent(window, new Event('pagehide'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    fireEvent(window, new Event('pageshow'));
+    await check('page restore');
+
+    scrollOffscreen();
+    top = inViewTop;
+    notify(true);
+    fireEvent.scroll(dialog());
+    await check('scroll into view');
+
+    scrollOffscreen();
+    top = inViewTop;
+    reportOnObserve = false;
+    const created = scene.create.mock.calls.length;
+    fireEvent.click(within(dialog()).getByRole('button', { name: '重新啟動立體畫面' }));
+    await check('manual restart before another observer callback');
+    expect(scene.create.mock.calls.length).toBeGreaterThan(created);
+
+    reportOnObserve = true;
+    const previous = scene.create.mock.calls.length;
+    rerender(explorer([library, places[0]]));
+    await check('rebuild');
+    expect(scene.create.mock.calls.length).toBeGreaterThan(previous);
+
+    fireEvent.click(within(dialog()).getByRole('button', { name: '關閉視窗' }));
+    top = offscreenTop;
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    top = inViewTop;
+    reportOnObserve = false;
+    fireEvent.click(within(dialog()).getByRole('button', { name: '手動開啟立體畫面' }));
+    await check('manual startup before another observer callback');
+  } finally {
+    unmount();
+    layout.mockRestore();
+  }
+});
+
+it.each(['TextDecoder', 'TextEncoder'] as const)(
+  'keeps the post-JSON size cap when %s is missing',
+  async (codec) => {
+    const { library, body } = sourcedLibraryFootprintFixture();
+    const json = vi.fn(async () => ({ ...JSON.parse(body), padding: 'x'.repeat(2_000_001) }));
+    vi.stubGlobal(codec, undefined);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json })));
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(json).toHaveBeenCalledOnce();
+    expect(scene.create.mock.lastCall?.[2].footprints).toEqual([]);
+  },
+);
 
 it.each([
   { length: '0', accepted: false },
@@ -5501,9 +5602,9 @@ it('discloses missing audited way outlines without treating a partial OSM reply 
 });
 
 
-it('does not crash or eagerly start WebGL when a WebView VisualViewport getter throws, then recovers', async () => {
+it('starts with the observer when the VisualViewport getter throws and binds later events', async () => {
   // Some embedded browsers expose a VisualViewport property that throws
-  // during restoration. This is not equivalent to an API being unsupported.
+  // during restoration. The observer still reports visibility.
   const original = Object.getOwnPropertyDescriptor(window, 'visualViewport');
   const viewport = Object.assign(new EventTarget(), {
     width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
@@ -5527,11 +5628,9 @@ it('does not crash or eagerly start WebGL when a WebView VisualViewport getter t
       width: 320, height: 180, toJSON: () => ({}),
     } as DOMRect);
     try {
-      expect(scene.create).not.toHaveBeenCalled();
-      expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+      await waitFor(() => expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready'));
       expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-      // No second observer result: window.resize is enough to recover an
-      // already confirmed intersection once the getter and geometry work.
+      // Window resize also registers listeners when the getter recovers.
       throwOnRead = false;
       fireEvent(window, new Event('resize'));
       await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
