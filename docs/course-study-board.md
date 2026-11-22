@@ -1,3 +1,9 @@
+## 2026-11-23：手機切換 App 或瀏覽器分頁後不自動搶走讀書焦點
+
+- 修補裝置端 AI 耗時 JSON 的剪貼簿五秒逾時／權限拒絕備援：原先只檢查複製按鈕與表單焦點，若學生按下複製後立刻切換 App／分頁，WebView 仍保留按鈕焦點時，晚到的備援可能自動選取 JSON。現在同一筆待處理複製會記錄 window blur 與 document visibilitychange；只要曾進入背景，或目前不是可見頁面，就**不移動焦點或文字選取**，改為清楚提示可手動按「全選量測 JSON」。
+- 單純的剪貼簿成功仍只提示瀏覽器已接受指令，不等同驗證貼上；下一次複製可重試，當前主動按全選仍可正常保存。請求完成、重試或元件卸載時移除全部頁面／焦點監聽器；無新套件、帳號或教材傳輸，也不改 v1/v2 閱讀與 v1 練習備份。
+- 新增 React DOM 模擬回歸，覆蓋背景分頁的 window blur、hidden 後返回 visible 仍不得自動選取、學生主動全選和仍在前景的逾時回退。正式 CI／CodeQL、iOS Safari／Android Chrome／VoiceOver／TalkBack、WebGPU 中文教學與 Ahaboard 同機對照仍須獨立驗收；Draft PR 不合併、不部署。
+
 ## 2026-11-23：WebGPU 量測 JSON 支援安全的一鍵複製
 
 - 在已存在的本機 AI 耗時 JSON「下載／全選」旁新增「複製量測 JSON」。標準 Clipboard.writeText() 回傳 Promise<void> 且成功時才提示「瀏覽器已接受複製指令，請貼上確認」。權限遭拒、缺少 API、非標準 WebView 回覆（如 true）、五秒未回應時，保留原文並切換到可長按／鍵盤全選備援，不誤報已複製。

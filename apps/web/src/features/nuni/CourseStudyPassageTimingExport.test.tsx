@@ -205,6 +205,42 @@ it.each([false, true])('preserves note input after a clipboard timeout (note blu
   });
 });
 
+it.each(['tab blur', 'background then return'])(
+  'does not steal focus after %s while clipboard acknowledgement is pending', async (scenario) => {
+    const { copy, output } = await openTimingExport();
+    await withClipboardTimers(() => new Promise(() => {}), async () => {
+      copy.focus();
+      fireEvent.click(copy);
+      expect(document.activeElement).toBe(copy);
+      const previousVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+      try {
+        if (scenario === 'tab blur') {
+          window.dispatchEvent(new Event('blur'));
+        } else {
+          let visible = false;
+          Object.defineProperty(document, 'visibilityState', {
+            configurable: true, get: () => visible ? 'visible' : 'hidden',
+          });
+          document.dispatchEvent(new Event('visibilitychange'));
+          visible = true;
+          document.dispatchEvent(new Event('visibilitychange'));
+        }
+        act(() => vi.advanceTimersByTime(5000));
+        expect(document.activeElement).toBe(copy);
+        expect(output.selectionStart).toBe(0);
+        expect(output.selectionEnd).toBe(0);
+        expect(screen.getByText(/瀏覽器未確認複製/)).toBeTruthy();
+        fireEvent.click(screen.getByRole('button', { name: '全選量測 JSON' }));
+        expect(document.activeElement).toBe(output);
+        expect([output.selectionStart, output.selectionEnd]).toEqual([0, output.value.length]);
+      } finally {
+        if (previousVisibility) Object.defineProperty(document, 'visibilityState', previousVisibility);
+        else Reflect.deleteProperty(document, 'visibilityState');
+      }
+    });
+  },
+);
+
 it('focuses and selects the fallback on timeout while the copy button retains focus', async () => {
   const { copy, output } = await openTimingExport();
   await withClipboardTimers(() => new Promise(() => {}), async () => {

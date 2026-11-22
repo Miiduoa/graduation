@@ -192,12 +192,20 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
     const request = timingCopyRequest.current;
     const focusIsUnclaimed = () => document.activeElement === document.body || document.activeElement === null;
     let focusedElsewhere = document.activeElement !== button && !focusIsUnclaimed();
+    // A pending WebView clipboard request must not refocus a hidden tab or a
+    // page the student has left, even when its copy button kept DOM focus.
+    let pageWasBackgrounded = document.visibilityState !== 'visible';
     const trackFocus = (event: FocusEvent) => {
       if (event.target !== button && event.target !== document.body) focusedElsewhere = true;
     };
+    const trackPageBlur = () => { pageWasBackgrounded = true; };
+    const trackVisibility = () => {
+      if (document.visibilityState !== 'visible') pageWasBackgrounded = true;
+    };
     const manual = () => {
       if (timingCopyRequest.current !== request) return;
-      if (document.activeElement === button || (focusIsUnclaimed() && !focusedElsewhere)) {
+      if (!pageWasBackgrounded && document.visibilityState === 'visible' &&
+        (document.activeElement === button || (focusIsUnclaimed() && !focusedElsewhere))) {
         selectTimingExport();
       } else {
         invalidateTimingCopy();
@@ -215,7 +223,13 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
       }
       setTimingExportMessage('正在等待瀏覽器確認複製；仍可全選下方 JSON 手動保存。');
       document.addEventListener('focusin', trackFocus);
-      stopWatchingTimingCopyFocus.current = () => document.removeEventListener('focusin', trackFocus);
+      window.addEventListener('blur', trackPageBlur);
+      document.addEventListener('visibilitychange', trackVisibility);
+      stopWatchingTimingCopyFocus.current = () => {
+        document.removeEventListener('focusin', trackFocus);
+        window.removeEventListener('blur', trackPageBlur);
+        document.removeEventListener('visibilitychange', trackVisibility);
+      };
       timingCopyTimeout.current = setTimeout(manual, 5000);
       void Promise.resolve(result as PromiseLike<unknown>).then(
         (acknowledged) => {
