@@ -139,7 +139,7 @@ describe('reject unreadable model citations before saving a lesson', () => {
     },
   );
 
-  it.each(['\u200e', '，\u200f。', '\u061c\u200b'])('rejects direction marks without readable content (%#)', (quote) => {
+  it.each(['\u200e', '\u061c\u200b', '\u2800\u2060', '\ufff9\u0301'])('rejects direction marks without readable content (%#)', (quote) => {
     const original = { ...passage, text: passage.text + quote };
     const previous = { ...turn(), response: { ...explanation(), sourceQuote: quote } };
     expect(() => parseTutorExplanation(JSON.stringify(previous.response), original)).toThrow('引句無可讀');
@@ -164,14 +164,20 @@ describe('reject unreadable model citations before saving a lesson', () => {
     },
   );
 
-  it('uses exact punctuation-only citations in retained follow-up context', () => {
-    const previous = { ...turn(), response: { ...explanation(), sourceQuote: '。' } };
-    const prepared = prepareStudyTutorHistory(passage, 'understand', [previous]);
-    expect(prepared).toEqual(history([previous]));
-    const prompt = buildStudyTutorPrompt(passage, 'understand', '繼續', prepared);
-    expect(promptData(prompt, 'HISTORY_DATA')).toEqual([previous]);
-    expect(() => parseTutorExplanation(JSON.stringify(previous.response), passage)).toThrow('引句無可讀');
-  });
+  it.each(['。', '，\u200f。', '（\u200b）', '主\u200d鍵', '主\u2060鍵', '主\ufff9鍵'])(
+    'uses exact visible legacy citations in the main reply and steps (%#)', (quote) => {
+      const original = { ...passage, text: passage.text + quote };
+      const response = { ...steppedExplanation(), sourceQuote: quote };
+      response.steps[0].sourceQuote = quote;
+      const previous = { ...turn(), response: parseSavedTutorExplanation(JSON.stringify(response), original) };
+      const prepared = prepareStudyTutorHistory(original, 'understand', [previous]);
+      expect(promptData(buildStudyTutorPrompt(original, 'understand', '繼續', prepared), 'HISTORY_DATA'))
+        .toEqual([previous]);
+      if (quote !== '。') {
+        expect(() => prepareStudyTutorHistory(passage, 'understand', [previous])).toThrow('先前講解無法對照');
+      }
+    },
+  );
 
   it('revalidates older model replies before using them as follow-up context', () => {
     const original = { ...passage, text: passage.text + '\u200b' };

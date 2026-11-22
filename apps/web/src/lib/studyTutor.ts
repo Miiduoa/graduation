@@ -60,8 +60,9 @@ function hasReadableTutorCitation(quote: string, isHistory: boolean): boolean {
   // Readable exact history citations can retain legacy directional controls.
   // New citations permit direction marks alongside readable words.
   if (!isHistory && /\p{Bidi_Control}/u.test(quote.replace(/[\u061c\u200e\u200f]/gu, ''))) return false;
-  const hasContent = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\p{P}\u2800\ufff9-\ufffb]/u.test(quote) ||
-    /[0-9#*]\ufe0f?\u20e3/u.test(quote) || (isHistory && !/\p{Bidi_Control}/u.test(quote) && /\p{P}/u.test(quote));
+  const content = isHistory ? quote : quote.replace(/\p{P}/gu, '');
+  const hasContent = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800\ufff9-\ufffb]/u.test(content) ||
+    /[0-9#*]\ufe0f?\u20e3/u.test(quote);
   if (!hasContent) return false;
   for (let index = 0; index < quote.length; index += 1) {
     const unit = quote.charCodeAt(index);

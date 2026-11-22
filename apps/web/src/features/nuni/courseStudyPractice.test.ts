@@ -554,7 +554,7 @@ describe('practice TXT source quote verification', () => {
       { sourceText: '第 3 頁：主鍵用來唯一識別資料。', quote: '主鍵用來唯一識別資料', valid: true },
       { sourceText: '第 3 頁：主鍵用來唯一識別資料。', quote: '外鍵建立關聯', valid: false },
       { sourceText: '第 7 頁：e\u0301', quote: 'e', valid: false },
-      { sourceText: '第 3 頁：主鍵用來唯一識別資料。', quote: '。', valid: false },
+      { sourceText: '第 3 頁：主鍵用來唯一識別資料。', quote: '。', valid: true },
       { sourceText: '第 7 頁：👩‍💻 課堂示例', quote: '👩‍💻', valid: true },
     ];
     for (const { sourceText, quote, valid } of cases) {

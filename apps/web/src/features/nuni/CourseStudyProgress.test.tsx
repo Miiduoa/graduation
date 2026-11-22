@@ -281,6 +281,7 @@ it.each(['\u200b', '\ufff9', '\u2060\ufe0f', '\ufeff'])('restores and reopens a 
   mode.lessons[0].attempt = attempt;
   const legacy = JSON.parse(serializeCourseStudyProgress(data));
   legacy.version = 1;
+  legacy.passages['1:1'].modes.exam.lessons[0].attempt = attempt;
   selectFile(progressFile(JSON.stringify(legacy)));
   await screen.findByRole('region', { name: '閱讀進度預覽' });
   fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
@@ -300,7 +301,7 @@ it.each(['\u200b', '\ufff9', '\u2060\ufe0f', '\ufeff'])('restores and reopens a 
   fireEvent.click(screen.getByRole('button', { name: '儲存閱讀進度' }));
   const backup = await readBlob(create.mock.calls[0][0] as Blob);
   const saved = parseCourseStudyProgress(backup, scope).passages['1:1'].modes.exam.lessons[0];
-  expect(saved).toMatchObject({ attempt, answerVisible: false });
+  expect(saved).toMatchObject({ attempt: attempt.trim() ? attempt : attempt + '\u200b', answerVisible: false });
   selectFile(progressFile(backup));
   await screen.findByRole('region', { name: '閱讀進度預覽' });
   fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));

@@ -215,7 +215,8 @@ function isNonRatioColumn(header: string, percentage = false): boolean {
   // describes what the percentage measures.
   const measuredLabel = percentage ? unqualifiedColumn.split(/\s+by\s+/iu, 1)[0] : column;
   const statusMatch = NON_RATIO_STATUS_COLUMN.exec(measuredLabel) ?? ENGLISH_NON_RATIO_STATUS_COLUMN.exec(measuredLabel);
-  const describesBoundedRate = isBoundedPercentageColumn(header) &&
+  const hasBoundedPercentValues = percentage && isBoundedPercentageColumn(header);
+  const describesBoundedRate = hasBoundedPercentValues &&
     (isBoundedPercentageColumn(measuredLabel) || /率|\brate\b/iu.test(measuredLabel));
   const isIdentifier = percentage
     ? !describesBoundedRate && IDENTIFIER_LABEL_END.test(measuredLabel)
@@ -242,10 +243,10 @@ function isNonRatioColumn(header: string, percentage = false): boolean {
        statusMatch && (!percentage || statusMatch[0] === measuredLabel) &&
        !STATUS_COUNT_COLUMN.test(column) &&
        !ENGLISH_STATUS_COUNT_COLUMN.test(column)) ||
-      ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
+      (!hasBoundedPercentValues && (NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
         ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN.test(column)) &&
        !SCORE_COUNT_COLUMN.test(column)) ||
-      (!isBoundedPercentageColumn(header) &&
+      (!hasBoundedPercentValues &&
        (NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column) ||
         ENGLISH_NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column)) &&
        !ORDINAL_COUNT_COLUMN.test(column)) ||

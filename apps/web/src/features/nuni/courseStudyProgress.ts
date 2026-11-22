@@ -225,6 +225,21 @@ function checkBytes(value: string) {
 /** Explicit, unencrypted local backup; no session token or automatic storage is involved. */
 export function serializeCourseStudyProgress(data: CourseStudyProgressData): string {
   const canonical = readData(data, VERSION);
+  // Keep the v2 lesson shape and encode eligibility using the legacy rule.
+  for (const passage of Object.values(canonical.passages)) {
+    for (const mode of Object.values(passage.modes)) {
+      for (const lesson of mode.lessons) {
+        if (lesson.answerReviewAllowed === false) {
+          lesson.attempt = '';
+          lesson.answerVisible = false;
+        } else if ((lesson.answerVisible || lesson.answerReviewAllowed) && !lesson.attempt.trim()) {
+          // An eligible empty attempt needs a trim()-accepted placeholder.
+          lesson.attempt = lesson.attempt.slice(0, STUDY_SESSION_LIMITS.attemptCharacters - 1) + '\u200b';
+        }
+        delete lesson.answerReviewAllowed;
+      }
+    }
+  }
   const passageLengths = canonical.source.sections.map((section) => splitStudySection(section).map((part) => part.text.length));
   const serialized = JSON.stringify({ format: FORMAT, version: VERSION, ...canonical, passageLengths });
   checkBytes(serialized);

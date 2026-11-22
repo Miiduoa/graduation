@@ -2946,6 +2946,30 @@ it.each(['寄送件數', '郵件件數', 'Parcel Count'])(
 );
 
 it.each([
+  '滿意度（%）', '完成狀況（%）', '服務等級佔比', '評級百分比', 'Satisfaction (%)',
+  'Percentage by Risk Level', 'Rating (%)', '風險等級（％）',
+])('charts the measured percentage on a fixed scale (%s)', (header) => {
+  const material = ['| 組別 | ' + header + ' |', '| --- | --- |',
+    '| 甲 | 25% |', '| 乙 | 75% |'].join('\n');
+  const view = render(<StudySourceTables text={material} />);
+  expect(Array.from(view.container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+    .toEqual([[25, 100], [75, 100]]);
+  view.unmount();
+});
+
+it.each(['文件編號（%）', '訂單編號（%）', 'Serial Number (%)', 'Order Number (ERP) (%)'])(
+  'does not chart identifiers even when the header and values use percent signs (%s)', (header) => {
+    const material = ['| 組別 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 25% |', '| 乙 | 75% |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+      .toEqual(['25%', '75%']);
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  },
+);
+
+it.each([
   ['百分位', ['25', '75']],
   ['第 75 百分位數', ['25', '75']],
   ['百分等級', ['25', '75']],

@@ -87,7 +87,7 @@ function canCarryHiddenHtmlAttribute(tag: string): boolean {
 }
 
 /** Split CSS declarations without treating semicolons in strings, URLs or comments as separators. */
-function splitInlineCssDeclarations(style: string): string[] {
+function splitCssDeclarations(style: string, stylesheet = false): string[] {
   const declarations: string[] = [];
   let current = '';
   let quote: '"' | "'" | null = null;
@@ -117,7 +117,7 @@ function splitInlineCssDeclarations(style: string): string[] {
     } else if (char === ')') {
       nestedFunctions = Math.max(0, nestedFunctions - 1);
       current += char;
-    } else if (char === ';' && nestedFunctions === 0) {
+    } else if (nestedFunctions === 0 && (char === ';' || (stylesheet && (char === '{' || char === '}')))) {
       declarations.push(current);
       current = '';
     } else current += char;
@@ -177,8 +177,12 @@ const CSS_DISPLAY_KEYWORDS = new Set([
   'ruby', 'ruby-base', 'ruby-text', 'ruby-base-container', 'ruby-text-container',
 ]);
 const CSS_ALPHA_VALUE = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?%?$/iu;
-const CSS_FUNCTION = /\b[a-z][a-z\d-]*\(/iu;
-const CSS_CUSTOM_PROPERTY = /(--[\w\p{L}\p{N}-]+)\s*:/gu;
+// Opacity accepts numeric math functions. Other literal functions are invalid for it.
+const CSS_MATH_FUNCTION = /^(?:calc|min|max|clamp|round|mod|rem|sin|cos|tan|asin|acos|atan|atan2|pow|sqrt|hypot|log|exp|abs|sign|progress|media-progress|container-progress|random|sibling-count|sibling-index)\(/iu;
+const CSS_SUBSTITUTION_FUNCTION = /\b(?:var|env|attr|if)\(/iu;
+const CSS_CUSTOM_PROPERTY = /^\s*(--[\w\p{L}\p{N}-]+)\s*:\s*([\s\S]*?)\s*$/u;
+const HTML_BOUNDARY_TOKEN = /<!--|--!?>|<\/?([A-Za-z][\w:-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
+const HTML_ATTRIBUTE = /\s+([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'\x60=<>]+)))?/gu;
 const CSS_IMPORTANT_SUFFIX = /\s*!\s*important\s*$/iu;
 
 function isRecognizedInlineCssValue(name: string, value: string): boolean {
@@ -201,7 +205,7 @@ function isRecognizedInlineCssValue(name: string, value: string): boolean {
 }
 
 function resolveInlineVisibilityValue(
-  value: string, localProperties: ReadonlyMap<string, string>, customProperties: ReadonlySet<string>,
+  name: string, value: string, localProperties: ReadonlyMap<string, string>, customProperties: ReadonlySet<string>,
 ): string | undefined {
   // Resolve nested var() fallbacks when the referenced name has no known
   // inline definition. A definition may be inherited, so never use a
@@ -209,27 +213,31 @@ function resolveInlineVisibilityValue(
   for (let substitutions = 0; substitutions < 32; substitutions += 1) {
     const variable = /\bvar\(\s*(--[\w\p{L}\p{N}-]+)\s*/iu.exec(value);
     if (!variable) {
-      if (!CSS_FUNCTION.test(value)) return value.toLowerCase();
+      if (CSS_SUBSTITUTION_FUNCTION.test(value)) return undefined;
+      if (name !== 'opacity' || !CSS_MATH_FUNCTION.test(value)) return value.toLowerCase();
       // A numeric visibility value must be a single complete function.
       // The math evaluator also accepts fragments and multiple CSS tokens.
-      if (!/^[a-z][a-z\d-]*\(/iu.test(value)) return undefined;
       let depth = 0;
       for (const parenthesis of value.matchAll(/[()]/gu)) {
         depth += parenthesis[0] === '(' ? 1 : -1;
-        if (depth === 0 && parenthesis.index !== value.length - 1) return undefined;
+        if (depth === 0 && parenthesis.index !== value.length - 1) return value.toLowerCase();
         if (depth > 32) return undefined;
       }
       if (depth !== 0) return undefined;
       const computed = calc(value, { rawPercentages: true });
       if (/^calc\(\+?infinity%?\)$/iu.test(computed)) return '1';
       if (/^calc\(-infinity%?\)$/iu.test(computed)) return '0';
-      return CSS_ALPHA_VALUE.test(computed) ? computed : undefined;
+      // A reduced dimension (such as a length) is invalid for opacity.
+      // An expression the evaluator cannot reduce remains ambiguous.
+      return /[()]/u.test(computed) ? undefined : computed;
     }
     const argumentEnd = variable.index + variable[0].length;
-    const localValue = localProperties.get(variable[1]);
+    const definition = localProperties.get(variable[1]);
+    const isGuaranteedInvalid = definition?.toLowerCase() === 'initial';
+    const localValue = isGuaranteedInvalid ? undefined : definition;
     const hasFallback = value[argumentEnd] === ',';
     if (!hasFallback && value[argumentEnd] !== ')') return undefined;
-    if (localValue === undefined && (!hasFallback || customProperties.has(variable[1]))) return undefined;
+    if (localValue === undefined && (!hasFallback || (!isGuaranteedInvalid && customProperties.has(variable[1])))) return undefined;
     let depth = 1;
     let end = argumentEnd;
     while (end < value.length && depth > 0) {
@@ -240,7 +248,7 @@ function resolveInlineVisibilityValue(
     if (depth !== 0) return undefined;
     const replacement = localValue ?? value.slice(argumentEnd + 1, end - 1).trim();
     if (localValue !== undefined &&
-        (CSS_CONTEXTUAL_WIDE_VALUES.has(localValue.toLowerCase()) || localValue.toLowerCase() === 'initial')) {
+        CSS_CONTEXTUAL_WIDE_VALUES.has(localValue.toLowerCase())) {
       return undefined;
     }
     value = value.slice(0, variable.index) + ' ' + replacement + ' ' + value.slice(end);
@@ -253,11 +261,11 @@ function hasExplicitHiddenInlineStyle(style: string, customProperties: ReadonlyS
   // Apply order and !important independently for each property. Unsupported
   // literals are ignored. Unresolved winning declarations remain ambiguous.
   const effective = new Map<string, { value: string | undefined; important: boolean }>();
-  const declarations = splitInlineCssDeclarations(style).map(decodeCssEscapes);
+  const declarations = splitCssDeclarations(style).map(decodeCssEscapes);
   const localProperties = new Map<string, string>();
   const importantCustomProperties = new Set<string>();
   for (const declaration of declarations) {
-    const property = /^\s*(--[\w\p{L}\p{N}-]+)\s*:\s*(.*?)\s*$/u.exec(declaration);
+    const property = CSS_CUSTOM_PROPERTY.exec(declaration);
     if (!property) continue;
     const [, name, raw] = property;
     if (CSS_IMPORTANT_SUFFIX.test(raw)) importantCustomProperties.add(name);
@@ -265,12 +273,12 @@ function hasExplicitHiddenInlineStyle(style: string, customProperties: ReadonlyS
     localProperties.set(name, raw.replace(CSS_IMPORTANT_SUFFIX, ''));
   }
   for (const declaration of declarations) {
-    const property = /^\s*(display|visibility|content-visibility|opacity)\s*:\s*(.*?)\s*$/iu.exec(declaration);
+    const property = /^\s*(display|visibility|content-visibility|opacity)\s*:\s*([\s\S]*?)\s*$/iu.exec(declaration);
     if (!property) continue;
     const name = property[1].toLowerCase();
     const important = CSS_IMPORTANT_SUFFIX.test(property[2]);
     const declared = property[2].replace(CSS_IMPORTANT_SUFFIX, '').trim();
-    const resolved = resolveInlineVisibilityValue(declared, localProperties, customProperties);
+    const resolved = resolveInlineVisibilityValue(name, declared, localProperties, customProperties);
     const value = resolved === 'unset' && name !== 'visibility' ? 'initial' : resolved;
     const recognized = value !== undefined && isRecognizedInlineCssValue(name, value);
     const unresolved = value === undefined || CSS_CONTEXTUAL_WIDE_VALUES.has(value) || /\bvar\(/iu.test(declared);
@@ -295,7 +303,7 @@ function hasHiddenHtmlAttribute(token: string, customProperties: ReadonlySet<str
   const opening = /^<[A-Za-z][\w:-]*/u.exec(token);
   if (!opening) return false;
   const attributes = token.slice(opening[0].length);
-  for (const match of attributes.matchAll(/\s+([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'\x60=<>]+)))?/gu)) {
+  for (const match of attributes.matchAll(HTML_ATTRIBUTE)) {
     const name = match[1].toLowerCase();
     const attributeValue = decodeHtmlAttributeReferences(match[2] ?? match[3] ?? match[4] ?? '');
     // HTML's boolean hidden attribute is active even when written hidden="false".
@@ -443,6 +451,68 @@ function isInsideInlineCode(line: string, target: number): boolean {
   return false;
 }
 
+function collectCustomProperties(lines: string[]): Set<string> {
+  const names = new Set<string>();
+  let inComment = false;
+  let rawTag: string | undefined;
+  let stylesheet = '';
+  let fence: ReturnType<typeof fenceMarker> = null;
+  const record = (css: string, fromStylesheet = false) => {
+    for (const declaration of splitCssDeclarations(css, fromStylesheet)) {
+      const property = CSS_CUSTOM_PROPERTY.exec(decodeCssEscapes(declaration));
+      if (property) names.add(property[1]);
+    }
+  };
+  for (const line of lines) {
+    const marker = fenceMarker(line);
+    if (fence) {
+      if (marker && fence.character === marker.character &&
+          marker.length >= fence.length && !marker.suffix.trim()) fence = null;
+      continue;
+    }
+    if (!inComment && !rawTag && marker) {
+      fence = marker;
+      continue;
+    }
+    if (!inComment && !rawTag && /^(?: {4}| {0,3}\t)/u.test(line)) continue;
+    let cssStart = 0;
+    for (const match of line.matchAll(HTML_BOUNDARY_TOKEN)) {
+      const [token, rawName] = match;
+      const tag = rawName?.toLowerCase();
+      if (rawTag) {
+        if (tag === rawTag && rawTag !== 'plaintext' && token.startsWith('</')) {
+          if (rawTag === 'style') {
+            record(stylesheet + line.slice(cssStart, match.index), true);
+            stylesheet = '';
+          }
+          rawTag = undefined;
+        }
+        continue;
+      }
+      if (inComment) {
+        if (token === '-->' || token === '--!>') inComment = false;
+        continue;
+      }
+      if (isEscapedMarkdownTag(line, match.index) || isInsideInlineCode(line, match.index)) continue;
+      if (token === '<!--') inComment = true;
+      if (!tag || token.startsWith('</')) continue;
+      const attributes = token.slice(1 + tag.length);
+      for (const attribute of attributes.matchAll(HTML_ATTRIBUTE)) {
+        if (attribute[1].toLowerCase() !== 'style') continue;
+        record(decodeHtmlAttributeReferences(attribute[2] ?? attribute[3] ?? attribute[4] ?? ''));
+        break;
+      }
+      if (RAW_HTML_TEXT_BLOCKS.has(tag)) {
+        rawTag = tag;
+        cssStart = match.index + token.length;
+      }
+    }
+    if (rawTag === 'style') stylesheet += line.slice(cssStart) + '\n';
+  }
+  if (stylesheet) record(stylesheet, true);
+  return names;
+}
+
 export function extractStudySourceTables(source: string): StudySourceTable[] {
   if (!source.includes('|')) return [];
   // A valid HTML opening/closing tag may wrap its attributes across lines:
@@ -462,11 +532,8 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
       return token.replace(/\r\n|\r|\n/gu, ' ') + '\n'.repeat(newlines.length);
     },
   );
-  const customProperties = new Set(
-    Array.from(decodeCssEscapes(decodeHtmlAttributeReferences(scanSource)).matchAll(CSS_CUSTOM_PROPERTY),
-      (property) => property[1]),
-  );
   const lines = scanSource.split(/\r\n|\r|\n/u);
+  const customProperties = collectCustomProperties(lines);
   const tables: StudySourceTable[] = [];
   let fence: { character: string; length: number } | null = null;
   let inHtmlComment = false;
@@ -493,7 +560,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         /^(?: {4}| {0,3}\t)/u.test(line)) continue;
     // HTML boundaries follow source order; Markdown inline code is literal.
     let hiddenLine = inHtmlComment || htmlCodeBlocks.length > 0;
-    for (const match of line.matchAll(/<!--|--!?>|<\/?([A-Za-z][\w:-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*>/giu)) {
+    for (const match of line.matchAll(HTML_BOUNDARY_TOKEN)) {
       const token = match[0];
       // A Markdown escape outside HTML/comment blocks is visible syntax,
       // not a hidden element or an opening comment.

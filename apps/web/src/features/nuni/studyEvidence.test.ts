@@ -78,17 +78,11 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
-  it('does not mislabel punctuation-only text as a verifiable AI source quotation', () => {
+  it('locates exact visible punctuation alongside words and symbols', () => {
     const original = '主鍵？（主鍵）……—，。\n公式 x²+y²，圖示 👩‍💻。';
-    // Exact punctuation may appear repeatedly, but it cannot by itself
-    // support an explanation; never show a misleading "source located" label.
-    for (const quote of ['？', '（', '）', '……', '—', '，。']) {
-      expect(original.includes(quote)).toBe(true);
-      expect(locateStudyEvidence(original, quote)).toBeNull();
-    }
-    // Complete words, punctuation attached to words, mathematics and emoji
-    // must still be located at their exact unnormalized source positions.
-    for (const quote of ['主鍵？', '（主鍵）', 'x²+y²', '👩‍💻']) {
+    expect(locateStudyEvidence('括號（範例）', '（')?.quote).toBe('（');
+    expect(locateStudyEvidence(original, '！？')).toBeNull();
+    for (const quote of ['？', '（', '）', '……', '—', '，。', '主鍵？', '（主鍵）', 'x²+y²', '👩‍💻']) {
       const located = locateStudyEvidence(original, quote);
       if (!located) throw new Error('Readable source quotation unexpectedly rejected');
       expect(located.quote).toBe(quote);
@@ -176,14 +170,13 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
-  it('accepts complete keycap emoji while excluding punctuation-only citations', () => {
+  it('locates complete keycaps and standalone punctuation at different offsets', () => {
     const source = '#️⃣ *️⃣ 1️⃣ # *';
-    for (const quote of ['#️⃣', '*️⃣', '1️⃣']) {
+    for (const quote of ['#️⃣', '*️⃣', '1️⃣', '# *']) {
       expect(locateStudyEvidence(source, quote)?.quote).toBe(quote);
     }
-    for (const quote of ['#', '*', '# *']) {
-      expect(locateStudyEvidence(source, quote)).toBeNull();
-    }
+    expect(locateStudyEvidence(source, '#')?.before).toBe('#️⃣ *️⃣ 1️⃣ ');
+    expect(locateStudyEvidence(source, '*')?.before).toBe('#️⃣ *️⃣ 1️⃣ # ');
   });
 
   it.each([true, false])('locates readable Myanmar and direction-marked citations (Segmenter: %s)', (native) => {

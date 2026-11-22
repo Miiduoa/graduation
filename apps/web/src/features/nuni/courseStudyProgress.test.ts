@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { splitStudySection, studySourceFromDocument, studySourceFromText, type TutorExplanation } from '@/lib/studyTutor';
-import { appendStudyLesson, emptyStudyPassage, studyLessonHistory, type StudyModeMemory } from './courseStudySession';
+import { appendStudyLesson, canReviewStudyAnswer, emptyStudyPassage, studyLessonHistory, type StudyModeMemory } from './courseStudySession';
 import {
   COURSE_STUDY_PROGRESS_LIMITS,
   courseStudyProgressFilename,
@@ -328,6 +328,42 @@ describe('lesson and draft validation', () => {
     expect(restored).toEqual(expected);
     expect(parseCourseStudyProgress(serializeCourseStudyProgress(restored), scope)).toEqual(expected);
   });
+
+  it.each([
+    ['\u200b', false, false, '', false],
+    [' \u2060\u0301 ', false, false, '', false],
+    ['\u2800\ufff9', false, false, '', false],
+    [' \t', false, false, ' \t', false],
+    ['作答', true, false, '作答', true],
+    ['\u200b', true, false, '\u200b', true],
+    ['\u2060', undefined, true, '\u2060', true],
+    ['', true, false, '\u200b', true],
+    ['', undefined, true, '\u200b', true],
+  ])('writes legacy v2 fields and preserves reveal behavior (%#)',
+    (attempt, answerReviewAllowed, answerVisible, exportedAttempt, canReview) => {
+      const saved = data();
+      const lesson = saved.passages['0:0'].modes.understand.lessons[0];
+      Object.assign(lesson, { attempt, answerVisible });
+      if (answerReviewAllowed !== undefined) lesson.answerReviewAllowed = answerReviewAllowed;
+      const before = JSON.stringify(saved);
+      const raw = serializeCourseStudyProgress(saved);
+      const exported = JSON.parse(raw) as Envelope;
+      expect(exported.version).toBe(2);
+      const exportedLesson = mode(exported).lessons[0];
+      expect(Object.keys(exportedLesson).sort()).toEqual([
+        'answerVisible', 'attempt', 'id', 'previousLessonId', 'question', 'response',
+      ]);
+      expect(exportedLesson.attempt).toBe(exportedAttempt);
+      expect(exportedLesson.answerVisible).toBe(answerVisible);
+      expect(!exportedLesson.answerVisible || !!exportedLesson.attempt.trim()).toBe(true);
+      expect(!!exportedLesson.attempt.trim()).toBe(canReview);
+
+      const restored = parseCourseStudyProgress(raw, scope);
+      expect(canReviewStudyAnswer(restored.passages['0:0'].modes.understand.lessons[0])).toBe(canReview);
+      expect(serializeCourseStudyProgress(restored)).toBe(raw);
+      expect(JSON.stringify(saved)).toBe(before);
+    },
+  );
 
   it('preserves legacy reveals in v1/v2 regardless of draft visibility', () => {
     for (const version of [1, 2]) {

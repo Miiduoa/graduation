@@ -165,11 +165,8 @@ function studyGraphemeBoundary(source: string): (index: number) => boolean {
 }
 
 export function locateStudyEvidence(source: string, quote: string, occurrence = 0): StudyEvidenceLocation | null {
-  // A model's "quotation" made entirely of punctuation, invisible formatting,
-  // isolated combining marks or Braille blank is not readable source evidence, even
-  // when identical bytes occur in the PDF. Keep real words, maths and emoji
-  // unchanged, including any format characters attached to them.
-  if (!source || !hasVisibleStudyContent(quote, { ignorePunctuation: true })) return null;
+  // Visible punctuation can be located just like words or symbols.
+  if (!source || !hasVisibleStudyContent(quote)) return null;
   // Keep direction marks attached to readable text, while excluding controls
   // that explicitly open or close embeddings, overrides or isolates.
   if (/[\u202a-\u202e\u2066-\u2069]/u.test(quote)) return null;

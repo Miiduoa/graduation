@@ -1385,7 +1385,6 @@ describe('dynamic inline CSS never promotes ambiguous lesson content into a sour
     '<div style="opacity:calc(100% - 100%)">',
     '<div style="opacity:calc(-1 / 0)">',
     '<div style="opacity:calc(0 / 0)">',
-    '<div style="opacity:calc(1px)">',
     '<div style="--state:collapse;visibility:var(--state, visible)">',
     '<div style="opacity:calc(1">',
     '<div style="opacity:0;opacity:calc(1)%">',
@@ -1394,8 +1393,6 @@ describe('dynamic inline CSS never promotes ambiguous lesson content into a sour
     '<div style="--alpha:var(--alpha);opacity:calc(var(--alpha, 1))">',
     '<div style="display:block;display:var(--answer-display)">',
     '<section style="visibility:env(safe-area-inset-top)">',
-    '<div style="display:future-display(block)">',
-    '<p style="opacity:future-alpha(1)">',
   ])('omits an unresolved %s while retaining the later public table', (opening) => {
     const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
     const source = [
@@ -1447,6 +1444,45 @@ describe('dynamic inline CSS never promotes ambiguous lesson content into a sour
       expect(extractStudySourceTables(source)).toEqual([]);
     },
   );
+
+  it.each([
+    ['<!-- --alpha:0 -->', 'opacity:var(--alpha, 1)'],
+    ['<!-- <div style="--mode:none"> -->', 'display:var(--mode, block)'],
+    ['<!--\n<style>:root { --alpha:0 }</style>\n--!>', 'opacity:var(--alpha, calc(1))'],
+    ['<style>/* :root { --alpha:0 } */</style>', 'opacity:var(--alpha, 1)'],
+    ['<style>p::before { content: "{ --alpha:0"; }</style>', 'opacity:var(--alpha, 1)'],
+    ['<div style="/* --alpha:0; */ color:red"></div>', 'opacity:var(--alpha, 1)'],
+    ['`<!-- <div style="--alpha:0">`', 'opacity:var(--alpha, 1)'],
+    ['```html\n<div style="--alpha:0">\n```', 'opacity:var(--alpha, 1)'],
+    ['<div title="--alpha:0"></div>', 'opacity:var(--alpha, 1)'],
+    ['', '--alpha:initial;opacity:var(--alpha, 1)'],
+    ['', 'opacity:1;opacity:rgb(0 0 0)'],
+    ['', 'opacity:1;opacity:calc(1px)'],
+    ['', 'opacity:1;opacity:calc(0)%'],
+    ['<div style="font-family:\'--alpha:0\'"></div>', 'opacity:var(--alpha, 1)'],
+    ['', 'opacity:calc(1);opacity:hsl(0 0% 0%) !important'],
+    ['', 'display:block;display:translateX(0)'],
+    ['', 'visibility:visible;visibility:calc(0)'],
+    ['', 'content-visibility:visible;content-visibility:future-mode(hidden)'],
+  ])('keeps tables visible when inactive declarations cannot override a visible value (%s, %s)', (prefix, style) => {
+    const source = [prefix, `<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
+    expect(extractStudySourceTables(source)).toHaveLength(1);
+  });
+
+  it.each([
+    ['<style>\n:root { --alpha:0 }\n</style>', 'opacity:var(--alpha, 1)'],
+    ['<style>@media print { :root { color:red; --alpha:0 } }</style>', 'opacity:var(--alpha, 1)'],
+    ['`<!--`\n<style>:root { --alpha:0 }</style>', 'opacity:var(--alpha, 1)'],
+    ['<!-- unrelated --><div style="--alpha:0"></div>', 'opacity:var(--alpha, 1)'],
+    ['', 'opacity:0;opacity:rgb(255 255 255)'],
+    ['', 'opacity:1;opacity:calc(1em / 2em)'],
+    ['', 'opacity:1;opacity:sibling-index()'],
+    ['', 'opacity:1;opacity:var(--missing, 0)'],
+    ['', 'display:block;display:env(unknown-mode)'],
+  ])('omits tables with hidden or unresolved winning declarations (%s, %s)', (prefix, style) => {
+    const source = [prefix, `<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([]);
+  });
 
   it('does not let a var fallback override a potentially inherited hidden value', () => {
     const source = ['<div style="--mode:none">', '<section style="display:var(--mode, block)">',
