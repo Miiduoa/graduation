@@ -501,7 +501,6 @@ it('retains reply actions when the deletion write fails', async () => {
 it.each([
   [false, 'success'], [true, 'success'],
   [false, 'failure'], [true, 'failure'],
-  [false, 'timeout'], [true, 'timeout'],
 ])('keeps like locked through a slow %s → %s refresh', async (liked, outcome) => {
   const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
   ownPost();
@@ -512,7 +511,6 @@ it.each([
   render(<PostDetailPage />);
   const button = await screen.findByRole<HTMLButtonElement>('button', { name: liked ? /❤️/ : /🤍/ });
 
-  vi.useFakeTimers();
   let resolve!: (value: unknown) => void;
   let reject!: (error: Error) => void;
   mocks.getPost.mockImplementationOnce(() => new Promise((done, fail) => {
@@ -534,8 +532,7 @@ it.each([
 
   await act(async () => {
     if (outcome === 'success') resolve({ ...confirmed, content: '伺服器最新內文' });
-    else if (outcome === 'failure') reject(new Error('offline'));
-    else await vi.advanceTimersByTimeAsync(45_000);
+    else reject(new Error('offline'));
   });
   expect(button.disabled).toBe(false);
   expect(button.textContent).toContain(liked ? '🤍' : '❤️');
@@ -545,7 +542,6 @@ it.each([
     expect(screen.getByText('伺服器最新內文')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '重新讀取' })).toBeNull();
   } else {
-    if (outcome === 'timeout') await act(async () => resolve({ ...original, content: '過期內文' }));
     expect(screen.getByText('原內文')).toBeTruthy();
     mocks.getPost.mockResolvedValue({ ...confirmed, content: '重試後的內文' });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新讀取' })));
@@ -554,14 +550,13 @@ it.each([
   expect(mocks.toggleLike).toHaveBeenCalledOnce();
 });
 
-it.each(['success', 'failure', 'timeout'])('keeps the post and replies visible through a slow %s refresh', async (outcome) => {
+it.each(['success', 'failure'])('keeps the post and replies visible through a slow %s refresh', async (outcome) => {
   ownPost();
   const original = await mocks.getPost();
   const reply = { id: 'r-1', authorUid: 'alice', content: '原留言', threadDepth: 0 };
   mocks.listReplies.mockResolvedValue([reply]);
   render(<PostDetailPage />);
   await screen.findByText('原留言');
-  vi.useFakeTimers();
   let finishPost!: (value: unknown) => void;
   let finishReplies!: (value: unknown) => void;
   let failPost!: (error: Error) => void;
@@ -584,16 +579,14 @@ it.each(['success', 'failure', 'timeout'])('keeps the post and replies visible t
   };
   await act(async () => {
     if (outcome === 'success') finish();
-    else if (outcome === 'timeout') await vi.advanceTimersByTimeAsync(45_000);
     else {
       failPost(new Error('offline'));
       failReplies(new Error('offline'));
     }
   });
-  if (outcome === 'timeout') await act(async () => finish());
   const refreshed = outcome === 'success';
   expect(screen.getByText(refreshed ? '刷新後的內文' : '原內文')).toBeTruthy();
-  expect(screen.getByText(outcome === 'failure' ? '原留言' : '刷新後的留言')).toBeTruthy();
+  expect(screen.getByText(refreshed ? '刷新後的留言' : '原留言')).toBeTruthy();
   expect(Boolean(screen.queryByRole('button', { name: '重新讀取' }))).toBe(!refreshed);
 });
 

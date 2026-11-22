@@ -13,7 +13,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { withSchoolDataDeadline } from '@/lib/schoolDataRequest';
 import { CommunityAccess } from '../../_components/CommunityAccess';
 import { ReportPostDialog, type ReportPostSubmitPayload } from '../../_components/ReportPostDialog';
 import { SiteShell } from '@/components/SiteShell';
@@ -178,8 +177,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     const isCurrent = () =>
       postDeletion.current !== 'confirmed' && request > Math.max(reads.settled, reads.confirmed);
     try {
-      const read = () => getCampusPostById(schoolId, postId, source);
-      const row = await (initialRead ? read() : withSchoolDataDeadline(read));
+      const row = await getCampusPostById(schoolId, postId, source);
       if (!isCurrent()) return;
       reads.settled = request;
       setPost(row ? { ...row, title: row.title ?? '' } : null);

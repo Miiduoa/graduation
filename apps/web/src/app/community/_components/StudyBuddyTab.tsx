@@ -25,7 +25,6 @@ import {
 } from './useCommunityFormSession';
 import formStyles from './CommunityForm.module.css';
 import modalStyles from '@/components/ui/Modal.module.css';
-import { withSchoolDataDeadline } from '@/lib/schoolDataRequest';
 import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
 import { useAuth } from '@/components/AuthGuard';
 import {
@@ -175,7 +174,7 @@ export function CourseReviewSection(props: {
       setReviews([]);
       return;
     }
-    const rows = await withSchoolDataDeadline(() => listCourseReviews(schoolId, { lim: 80 }));
+    const rows = await listCourseReviews(schoolId, { lim: 80 });
     if (!isCurrent()) return;
     const firstReview = firstReviewRef.current;
     if (rows.length > 0 && firstReview && firstReview.ownerDocument.activeElement === firstReview) {
@@ -760,14 +759,13 @@ export function StudyGroupSection(props: {
       return;
     }
     const groupsCollection = collection(getDb(), 'schools', schoolId, 'studyGroups');
-    const snap = await withSchoolDataDeadline(async (signal) => {
-      try {
-        return await getDocs(query(groupsCollection, orderBy('createdAt', 'desc'), limit(60)));
-      } catch (error) {
-        if (signal.aborted || !isCurrent()) throw error;
-        return getDocs(query(groupsCollection, limit(60)));
-      }
-    });
+    let snap;
+    try {
+      snap = await getDocs(query(groupsCollection, orderBy('createdAt', 'desc'), limit(60)));
+    } catch (error) {
+      if (!isCurrent()) throw error;
+      snap = await getDocs(query(groupsCollection, limit(60)));
+    }
     if (isCurrent()) {
       setGroups(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WebStudyGroup, 'id'>) })));
     }

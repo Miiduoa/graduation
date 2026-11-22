@@ -818,8 +818,8 @@ it.each(
 
 
 it.each([
-  ['review', 'success'], ['review', 'failure'], ['review', 'timeout'],
-  ['group', 'success'], ['group', 'failure'], ['group', 'timeout'],
+  ['review', 'success'], ['review', 'failure'],
+  ['group', 'success'], ['group', 'failure'],
 ])('keeps the %s list visible and locks its toggle through a slow %s refresh', async (kind, outcome) => {
   const isReview = kind === 'review';
   const read = isReview ? mocks.listReviews : mocks.getDocs;
@@ -836,7 +836,6 @@ it.each([
   await screen.findByText(originalName);
   const button = screen.getByRole<HTMLButtonElement>('button', { name: isReview ? /有幫助 · 0/ : '申請加入' });
 
-  vi.useFakeTimers();
   let resolve!: (value: unknown) => void;
   let reject!: (error: Error) => void;
   read.mockImplementationOnce(() => new Promise((done, fail) => {
@@ -856,7 +855,6 @@ it.each([
 
   await act(async () => {
     if (outcome === 'success') resolve(updated);
-    else if (outcome === 'timeout') await vi.advanceTimersByTimeAsync(45_000);
     else {
       if (!isReview) read.mockRejectedValueOnce(new Error('offline'));
       reject(new Error('offline'));
@@ -866,7 +864,6 @@ it.each([
   expect(button.textContent).toContain(isReview ? '有幫助 · 1' : '已加入');
   if (isReview) expect(screen.getByText('/ 5 · 1 則')).toBeTruthy();
   if (outcome !== 'success') {
-    if (outcome === 'timeout') await act(async () => resolve(updated));
     expect(screen.getByText(originalName)).toBeTruthy();
     read.mockResolvedValue(updated);
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新讀取' })));
@@ -889,4 +886,30 @@ it.each(['review', 'group'])('can retry a first %s load failure', async (kind) =
   await act(async () => fireEvent.click(retry));
   expect(screen.getByText(empty)).toBeTruthy();
   expect(screen.queryByRole('button', { name: '重新讀取' })).toBeNull();
+});
+
+it.each(['review', 'group'])('displays the first %s load when it succeeds after 45 seconds', async (kind) => {
+  vi.useFakeTimers();
+  const isReview = kind === 'review';
+  const read = isReview ? mocks.listReviews : mocks.getDocs;
+  const name = isReview ? '延遲載入的課程' : '延遲載入的讀書會';
+  const result = isReview ? [{ ...existingReview, courseName: name }] : groupSnapshot(name, ['bob']);
+  let resolve!: (value: unknown) => void;
+  read.mockImplementationOnce(() => new Promise((done) => {
+    resolve = done;
+  }));
+
+  render(<StudyBuddyTab schoolId="pu" />);
+  if (!isReview) fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
+  await act(async () => {});
+  expect(read).toHaveBeenCalledOnce();
+
+  await act(() => vi.advanceTimersByTimeAsync(46_000));
+  expect(screen.queryByText(name)).toBeNull();
+  expect(screen.queryByText(/暫時無法讀取(課程評價|讀書會)/)).toBeNull();
+  expect(screen.queryByRole('button', { name: '重新讀取' })).toBeNull();
+
+  await act(async () => resolve(result));
+  expect(screen.getByText(name)).toBeTruthy();
+  expect(screen.queryByText(/暫時無法讀取(課程評價|讀書會)/)).toBeNull();
 });
