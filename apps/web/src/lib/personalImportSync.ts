@@ -61,8 +61,8 @@ export const hasPersonalImportSyncPause = (scope: PersonalImportScope) =>
 
 export function cancelPersonalImportSyncPause(scope: PersonalImportScope, active: () => boolean) {
   if (!active()) return;
-  localStorage.removeItem(pauseKey(scope));
   cancelPersonalImportSync(scope);
+  localStorage.removeItem(pauseKey(scope));
   window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
 }
 
@@ -81,8 +81,8 @@ function persistPersonalImportSyncPause(scope: PersonalImportScope, intent: stri
     // Cancellation can remove the marker while the ledger lock is held.
     if (!(await checkpoint(disabled, isCurrent))) return { state, result: undefined };
     if (isCurrent()) {
-      localStorage.removeItem(key);
       cancelPersonalImportSync(scope);
+      localStorage.removeItem(key);
       window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
     }
     return { state: disabled, result: undefined };
@@ -118,9 +118,18 @@ export async function setPersonalImportSyncEnabled(
   // Invalidate a request still reading before it can upload. A write already sent may
   // finish on the server; the next opt-in reconciles that acknowledgement safely.
   if (!enabled) {
-    const intent = crypto.randomUUID();
-    localStorage.setItem(pauseKey(scope), intent);
     cancelPersonalImportSync(scope);
+    const intent = crypto.randomUUID();
+    try {
+      localStorage.setItem(pauseKey(scope), intent);
+    } catch (error) {
+      throw new Error(
+        error instanceof DOMException && error.name === 'QuotaExceededError'
+          ? '裝置空間不足，無法保存暫停設定。'
+          : '無法保存暫停設定。',
+        { cause: error },
+      );
+    }
     window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {

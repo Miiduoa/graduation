@@ -186,8 +186,6 @@ export function CourseReviewSection(props: {
   }, [reviews, filter]);
   const agg = useMemo(() => aggregateReviews(filtered), [filtered]);
 
-  if (denied) return <CommunityLoadError message={error} retry={refresh} />;
-
   return (
     <div>
       <div
@@ -221,9 +219,9 @@ export function CourseReviewSection(props: {
       </div>
 
       {error && <CommunityLoadError message={error} retry={refresh} />}
-      {agg.totalCount > 0 && <ReviewSummary agg={agg} />}
+      {!denied && agg.totalCount > 0 && <ReviewSummary agg={agg} />}
 
-      {!loaded && loading ? (
+      {denied ? null : !loaded && loading ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
           載入中…
         </div>
@@ -799,8 +797,6 @@ export function StudyGroupSection(props: {
     }
   };
 
-  if (denied) return <CommunityLoadError message={error} retry={refresh} />;
-
   return (
     <div>
       <div
@@ -827,7 +823,7 @@ export function StudyGroupSection(props: {
       </div>
 
       {error && <CommunityLoadError message={error} retry={refresh} />}
-      {!loaded && loading ? (
+      {denied ? null : !loaded && loading ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
           載入中…
         </div>

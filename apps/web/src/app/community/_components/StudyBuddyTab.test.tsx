@@ -1039,14 +1039,14 @@ it.each(readFailureCases)('$kind at $boundary with $code shows only permitted ro
   const retry = await screen.findByRole('button', { name: '重新讀取' });
   // Both base sections replace their rows on error. The mounted refresh is the retention exception.
   expect(Boolean(screen.queryByText(row))).toBe(temporary && retainsRowsOnRefresh);
-  expect(Boolean(screen.queryByRole('button', { name: action }))).toBe(temporary);
+  expect(screen.getByRole('button', { name: action })).toBeTruthy();
   expect(read).toHaveBeenCalledTimes(!isReview && temporary ? 2 : 1);
 
   if (!temporary) {
     read.mockRejectedValue(new Error('offline'));
     await act(async () => fireEvent.click(retry));
     expect(screen.queryByText(row)).toBeNull();
-    expect(screen.queryByRole('button', { name: action })).toBeNull();
+    expect(screen.getByRole('button', { name: action })).toBeTruthy();
   }
 
   read.mockResolvedValue(empty);
@@ -1054,4 +1054,71 @@ it.each(readFailureCases)('$kind at $boundary with $code shows only permitted ro
   expect(screen.queryByText(row)).toBeNull();
   expect(screen.queryByRole('alert')).toBeNull();
   expect(screen.getByRole('button', { name: action })).toBeTruthy();
+});
+
+const draftReadCases = ['review', 'group'].flatMap((kind) =>
+  ['success', 'permission-denied', 'unauthenticated', 'offline'].flatMap((outcome) =>
+    [false, true].map((open) => ({ kind, outcome, open })),
+  ),
+);
+
+it.each(draftReadCases)('$kind keeps form state through loading and $outcome (open=$open)', async ({
+  kind, outcome, open,
+}) => {
+  const isReview = kind === 'review';
+  const read = isReview ? mocks.listReviews : mocks.getDocs;
+  const result = isReview ? [existingReview] : groupSnapshot('原讀書會', ['bob']);
+  const row = isReview ? '原課程' : '原讀書會';
+  const fields = [
+    ['課程名稱', '資料庫'],
+    isReview ? ['評論（選填）', '保留的心得'] : ['讀書會名稱', '保留的名稱'],
+  ];
+  let finish!: () => void;
+  read.mockImplementationOnce(() => new Promise((resolve, reject) => {
+    finish = () => {
+      if (outcome === 'success') resolve(result);
+      else reject(Object.assign(new Error(outcome), { code: outcome }));
+    };
+  }));
+  if (outcome === 'offline') read.mockRejectedValue(new Error('offline'));
+
+  render(<StudyBuddyTab schoolId="pu" />);
+  if (!isReview) fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
+  await waitFor(() => expect(read).toHaveBeenCalledOnce());
+  expect(screen.getByText('載入中…')).toBeTruthy();
+  if (open) {
+    fireEvent.click(screen.getByRole('button', { name: isReview ? '＋ 寫評價' : '＋ 建立讀書會' }));
+    for (const [label, value] of fields) fill(label, value);
+  }
+  const dialog = open ? screen.getByRole('dialog') : null;
+  const expectDraft = () => {
+    // The base retains the section's open flag on load failure. Keep the same
+    // dialog and its fields as well, as required for draft preservation.
+    expect(screen.queryByRole('dialog')).toBe(dialog);
+    if (dialog) {
+      for (const [label, value] of fields) {
+        expect(within(dialog).getByLabelText<HTMLInputElement | HTMLTextAreaElement>(label).value)
+          .toBe(value);
+      }
+    }
+  };
+  expectDraft();
+  await act(async () => finish());
+  expectDraft();
+
+  if (outcome !== 'success') {
+    expect(screen.queryByText(row)).toBeNull();
+    const retry = screen.getByRole('button', { name: '重新讀取' });
+    let completeRetry!: () => void;
+    read.mockImplementationOnce(() => new Promise((resolve) => {
+      completeRetry = () => resolve(result);
+    }));
+    await act(async () => fireEvent.click(retry));
+    expectDraft();
+    expect(screen.queryByText(row)).toBeNull();
+    await act(async () => completeRetry());
+    expectDraft();
+  }
+  expect(screen.getByText(row)).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
 });
