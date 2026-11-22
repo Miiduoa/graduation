@@ -1306,6 +1306,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // Missing Content-Type remains compatible with legacy WebView bridges.
         const contentType = response.headers?.get('content-type')?.trim().toLowerCase() ?? '';
         const mediaType = contentType.split(';', 1)[0]?.trim() ?? '';
+        // The public API emits identity JSON. Browsers can also expose a
+        // transparently decoded single gzip/br/deflate response. A proxy's
+        // unknown or stacked coding prevents trustworthy response framing:
+        // never promote its geometry into a sourced campus building.
+        const coding = response.headers?.get('content-encoding')?.trim().toLowerCase() ?? 'identity';
+        const invalidContentCoding = !['identity', 'gzip', 'br', 'deflate'].includes(coding);
         const invalidMediaType = mediaType !== '' && mediaType !== 'application/json' &&
           !/^application\/[a-z0-9][a-z0-9!#$&^_.+-]*\+json$/.test(mediaType);
         // RFC Content-Length is a decimal byte count, not a fraction, hex
@@ -1321,7 +1327,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
             Number(contentLength) === 0 ||
             Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
-            contentRange !== null || invalidContentLength || invalidMediaType) {
+            contentRange !== null || invalidContentLength || invalidMediaType || invalidContentCoding) {
           // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
           // can still stream a large body; release it without awaiting an
           // uncooperative proxy, rather than waste mobile bandwidth/memory.
@@ -1349,7 +1355,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
             status < 300 && status !== 200;
           const rateLimitedOrIncomplete = invalidSuccessStatus || status === 304 || status === 408 ||
             status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
-            contentRange !== null || invalidContentLength || invalidMediaType;
+            contentRange !== null || invalidContentLength || invalidMediaType || invalidContentCoding;
           // A proxy can return an incomplete 206/Content-Range document or
           // a 408 without Retry-After. These responses cannot be trusted as
           // complete OSM geometry and should not trigger a manual retry loop.
@@ -1359,7 +1365,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           const fallbackBackoff = invalidSuccessStatus || status === 304 ||
             status === 408 || status === 429 || status === 502 ||
             status === 503 || status === 504 || contentRange !== null || invalidContentLength ||
-            invalidMediaType;
+            invalidMediaType || invalidContentCoding;
           const seconds = rateLimitedOrIncomplete
             ? (footprintCooldownSeconds(response) ?? (fallbackBackoff ? 60 : null))
             : null;
