@@ -24,7 +24,6 @@ type SubmittedWrite = {
   draft: CreatorCard;
   expected: CreatorCard;
   edits: readonly CardField[];
-  manualCheckStarted: boolean;
   revisions: FieldRevisions;
 };
 
@@ -96,9 +95,9 @@ function ScopedCreatorCardPanel({
   const pendingWrite = useRef<SubmittedWrite | null>(null);
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const savingFlight = useRef(false);
-  const confirmationFlight = useRef(false);
+  const confirmationFlight = useRef<object | null>(null);
   const [checking, setChecking] = useState(false);
-  const editorLocked = () => savingFlight.current || confirmationFlight.current;
+  const editorLocked = () => savingFlight.current || confirmationFlight.current !== null;
   const actionsDisabled = saving || checking;
   const [openingLink, setOpeningLink] = useState(false);
   const openingLinkFlight = useRef<{ url: string } | null>(null);
@@ -177,9 +176,14 @@ function ScopedCreatorCardPanel({
     setFeedback('');
   };
 
-  const settleWrite = (submitted: SubmittedWrite, latest: CreatorCard | null) => {
+  const settleWrite = (submitted: SubmittedWrite, latest: CreatorCard | null, manual: boolean) => {
     const matches = latest && CARD_FIELDS.every((field) =>
       creatorCardFieldMatches(latest, field, submitted.expected[field]));
+    if (!matches && !manual) {
+      setNeedsConfirmation(true);
+      setFeedback('伺服器資料與上次送出的內容不同。草稿已保留，請先核對伺服器資料，避免重複送出。');
+      return;
+    }
     const snapshot = currentDraft.current;
     const activeEdits = editedFields.current;
     if (!matches) {
@@ -223,33 +227,37 @@ function ScopedCreatorCardPanel({
   const checkServer = async (
     submitted: SubmittedWrite, read: () => Promise<CreatorCard | null>, manual = false,
   ) => {
-    confirmationFlight.current = true;
+    // The read started after acknowledgement owns confirmation over an older manual read.
+    const check = {};
+    confirmationFlight.current = check;
+    const isCurrent = () => mounted.current && pendingWrite.current === submitted &&
+      confirmationFlight.current === check;
     setChecking(true);
     const timeout = manual ? setTimeout(() => {
-      if (mounted.current) setFeedback('核對等待逾時，草稿已保留，仍在等待伺服器回應。');
+      if (isCurrent()) setFeedback('核對等待逾時，草稿已保留，仍在等待伺服器回應。');
     }, CREATOR_CARD_CONFIRM_TIMEOUT_MS) : undefined;
 
     try {
       const latest = await read();
-      if (mounted.current && pendingWrite.current === submitted) settleWrite(submitted, latest);
+      if (isCurrent()) settleWrite(submitted, latest, manual);
       return latest;
     } catch (error) {
-      if (mounted.current && pendingWrite.current === submitted && (manual || !savingFlight.current)) {
+      if (isCurrent() && (manual || !savingFlight.current)) {
         setFeedback('仍無法核對伺服器資料，草稿已保留，請稍後重試核對。');
       }
       throw error;
     } finally {
       if (timeout !== undefined) clearTimeout(timeout);
-      confirmationFlight.current = false;
-      if (mounted.current) setChecking(false);
+      if (confirmationFlight.current === check) {
+        confirmationFlight.current = null;
+        if (mounted.current) setChecking(false);
+      }
     }
   };
 
   const confirmPreviousSave = async () => {
     const submitted = pendingWrite.current;
     if (!mounted.current || !own || !submitted || editorLocked() || state.status !== 'ready') return;
-    // A delayed write acknowledgement must leave this and any later checks to the user.
-    submitted.manualCheckStarted = true;
     setFeedback('');
     try {
       await checkServer(submitted,
@@ -319,7 +327,7 @@ function ScopedCreatorCardPanel({
     setSaving(true);
     setFeedback('');
     const submitted: SubmittedWrite = {
-      draft: submittedDraft, expected, edits, manualCheckStarted: false,
+      draft: submittedDraft, expected, edits,
       revisions: { ...revisions.current },
     };
     for (const field of edits) {
@@ -331,6 +339,7 @@ function ScopedCreatorCardPanel({
       setFeedback('無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
     };
     let timedOut = false;
+    let readCompleted = false;
     // Allow manual verification after timeout once any active server read settles.
     const saveTimeout = setTimeout(() => {
       timedOut = true;
@@ -342,18 +351,21 @@ function ScopedCreatorCardPanel({
     try {
       const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft,
         (read) => {
-          if (!mounted.current || pendingWrite.current !== submitted || submitted.manualCheckStarted) {
+          if (!mounted.current || pendingWrite.current !== submitted) {
             throw new Error('Creator card save superseded');
           }
-          return checkServer(submitted, read);
+          return checkServer(submitted, read).then((latest) => {
+            readCompleted = true;
+            return latest;
+          });
         });
-      if (mounted.current && pendingWrite.current === submitted && !submitted.manualCheckStarted) {
+      if (mounted.current && pendingWrite.current === submitted) {
         pendingWrite.current = null;
         setNeedsConfirmation(false);
         finishSave(confirmed, submitted);
       }
     } catch {
-      if (mounted.current && !timedOut && pendingWrite.current === submitted) markUnconfirmed();
+      if (mounted.current && !timedOut && !readCompleted && pendingWrite.current === submitted) markUnconfirmed();
     } finally {
       clearTimeout(saveTimeout);
       if (mounted.current && !timedOut) {

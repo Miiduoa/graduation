@@ -1142,45 +1142,156 @@ describe.each(['manual', 'automatic'] as const)('%s confirmation', (kind) => {
   );
 });
 
-test.each(['acknowledgement during check', 'acknowledgement after failure'] as const)(
-  '%s cannot start a background confirmation or unblock saving', async (timing) => {
-    jest.useFakeTimers();
-    try {
-      const card = { headline: '', bio: '送出的簡介', linkUrl: '' };
-      const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
-      jest.mocked(saveCreatorCard).mockImplementationOnce(service.saveCreatorCard);
-      let acknowledgeWrite!: () => void;
-      jest.mocked(setDoc).mockReturnValueOnce(new Promise((resolve) => { acknowledgeWrite = resolve; }));
-      let rejectManual!: (error: Error) => void;
-      jest.mocked(readCreatorCard).mockResolvedValueOnce(null)
-        .mockReturnValueOnce(new Promise((_, reject) => { rejectManual = reject; }))
-        .mockResolvedValueOnce(card);
+describe('confirmation state machine compared with merge-base', () => {
+  const original = { headline: '舊標題', bio: '舊簡介', linkUrl: '' };
+  const submitted = { ...original, headline: '送出的標題' };
+  type Card = typeof original;
+  const manualStates = ['not started', 'in progress', 'failed', 'differs', 'matches'] as const;
+  const readResults = ['matches', 'differs', 'failed'] as const;
+  const cases = [
+    ...readResults.map((automatic) => ({ write: 'success', manual: 'not started', automatic })),
+    { write: 'failure', manual: 'not started', automatic: 'none' },
+    ...manualStates.map((manual) => ({ write: 'late failure', manual, automatic: 'none' })),
+    ...manualStates.flatMap((manual) => (manual === 'differs' || manual === 'matches'
+      ? [{ write: 'late success', manual, automatic: 'none' }]
+      : readResults.map((automatic) => ({ write: 'late success', manual, automatic })))),
+  ];
 
-      const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
-      await act(async () => { await Promise.resolve(); });
-      fireEvent.press(view.getByLabelText('建立社群簡介'));
-      fireEvent.changeText(view.getByLabelText('個人簡介'), card.bio);
-      fireEvent.press(view.getByLabelText('儲存簡介'));
-      act(() => { jest.advanceTimersByTime(15_000); });
-      fireEvent.press(view.getByLabelText('核對儲存結果'));
+  describe.each(cases)('$write / manual $manual / automatic $automatic', ({ write, manual, automatic }) => {
+    describe.each([false, true])('other device updated: %s', (updated) => {
+      test.each([
+        'save directly', 'manual match', 'manual mismatch', 'manual failure', 'cancel and reopen',
+      ] as const)('%s', async (action) => {
+        jest.useFakeTimers();
+        try {
+          const different = updated ? { ...submitted, bio: '他機更新的簡介' } : original;
+          const snapshot = (card: Card) => ({
+            exists: () => true,
+            data: () => ({ schoolId: 'pu', ownerUid: 'alice', ...card }),
+            metadata: { hasPendingWrites: false },
+          } as Awaited<ReturnType<typeof getDocFromServer>>);
+          const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
+          const reads = jest.mocked(getDocFromServer).mockResolvedValueOnce(snapshot(original));
+          const writes = jest.mocked(setDoc);
+          jest.mocked(readCreatorCard).mockImplementation(service.readCreatorCard);
+          jest.mocked(saveCreatorCard).mockImplementationOnce(service.saveCreatorCard);
+          let finishWrite!: () => void;
+          let failWrite!: (error: Error) => void;
+          if (write.startsWith('late')) {
+            writes.mockReturnValueOnce(new Promise((resolve, reject) => {
+              finishWrite = resolve;
+              failWrite = reject;
+            }));
+          } else if (write === 'failure') {
+            writes.mockRejectedValueOnce(new Error('write failed'));
+          } else {
+            writes.mockResolvedValueOnce(undefined);
+          }
+          const arrangeAutomaticRead = () => {
+            if (automatic === 'failed') reads.mockRejectedValueOnce(new Error('automatic read failed'));
+            else if (automatic !== 'none') {
+              reads.mockResolvedValueOnce(snapshot(automatic === 'matches' ? submitted : different));
+            }
+          };
+          if (write === 'success') arrangeAutomaticRead();
 
-      if (timing === 'acknowledgement during check') {
-        await act(async () => { acknowledgeWrite(); });
-        expect(view.getByText('核對中')).toBeTruthy();
-      }
-      await act(async () => { rejectManual(new Error('offline')); });
-      if (timing === 'acknowledgement after failure') await act(async () => { acknowledgeWrite(); });
-      expect(getDocFromServer).not.toHaveBeenCalled();
-      expect(view.getByText(/仍無法核對伺服器資料/)).toBeTruthy();
-      expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
-      await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
-      expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
-      expect(setDoc).toHaveBeenCalledTimes(1);
-    } finally {
-      jest.useRealTimers();
-    }
-  },
-);
+          const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+          const press = (label: string) => fireEvent.press(view.getByLabelText(label));
+          const run = (label: string) => act(async () => { press(label); });
+          await act(async () => {});
+          press('編輯社群簡介');
+          fireEvent.changeText(view.getByLabelText('一句話介紹'), submitted.headline);
+          await run('儲存簡介');
+
+          if (write.startsWith('late')) act(() => { jest.advanceTimersByTime(15_000); });
+          let finishManual!: (value: ReturnType<typeof snapshot>) => void;
+          let failManual!: (error: Error) => void;
+          if (manual !== 'not started') {
+            if (manual === 'in progress') {
+              reads.mockReturnValueOnce(new Promise((resolve, reject) => {
+                finishManual = resolve;
+                failManual = reject;
+              }));
+            } else if (manual === 'failed') {
+              reads.mockRejectedValueOnce(new Error('manual read failed'));
+            } else {
+              reads.mockResolvedValueOnce(snapshot(manual === 'matches' ? submitted : different));
+            }
+            await run('核對儲存結果');
+          }
+
+          const overlappingMatch = manual === 'in progress' && automatic === 'matches';
+          if (overlappingMatch) {
+            let finishAutomatic!: (value: ReturnType<typeof snapshot>) => void;
+            reads.mockReturnValueOnce(new Promise((resolve) => { finishAutomatic = resolve; }));
+            await act(async () => { finishWrite(); });
+            await act(async () => { failManual(new Error('older manual read failed')); });
+            expect(view.getByText('核對中')).toBeTruthy();
+            expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+            await run('儲存簡介');
+            expect(writes).toHaveBeenCalledTimes(1);
+            await act(async () => { finishAutomatic(snapshot(submitted)); });
+          } else if (write === 'late success') {
+            arrangeAutomaticRead();
+            await act(async () => { finishWrite(); });
+          }
+          if (write === 'late failure') {
+            await act(async () => { failWrite(new Error('late write failure')); });
+          }
+          if (manual === 'in progress' && !overlappingMatch) {
+            // An older manual mismatch cannot release a newer automatic check.
+            await act(async () => { finishManual(snapshot(different)); });
+          }
+
+          // 27ad30c0: service lines 28–36 reject automatic mismatch/failure.
+          // Panel lines 90–107, 110–143 and 155–180 block resend until
+          // confirmation, preserve the open draft and reload after reopening.
+          // Timeout/manual overlap extends those transitions to the new timeout.
+          const confirmed = automatic === 'matches' || manual === 'matches';
+          let released = confirmed || manual === 'differs' ||
+            (manual === 'in progress' && write === 'late failure');
+          let baseline = confirmed ? submitted : released ? different : original;
+          expect(Boolean(view.queryByText('社群簡介已儲存。'))).toBe(confirmed);
+          expect(reads).toHaveBeenCalledTimes(1 + Number(manual !== 'not started') + Number(automatic !== 'none'));
+          const saveButton = () => view.queryByLabelText('儲存簡介');
+          if (!confirmed) expect(saveButton()?.props.accessibilityState.disabled).toBe(!released);
+
+          if (action.startsWith('manual') && !released) {
+            if (action === 'manual failure') reads.mockRejectedValueOnce(new Error('retry read failed'));
+            else reads.mockResolvedValueOnce(snapshot(action === 'manual match' ? submitted : different));
+            await run('核對儲存結果');
+            released = action !== 'manual failure';
+            baseline = action === 'manual match' ? submitted : different;
+            expect(Boolean(view.queryByText('社群簡介已儲存。'))).toBe(action === 'manual match');
+          }
+          if (action === 'cancel and reopen') {
+            if (saveButton()) press('取消編輯');
+            press('編輯社群簡介');
+          }
+          if (saveButton()) {
+            expect(saveButton()?.props.accessibilityState.disabled).toBe(!released);
+            const retry = action === 'cancel and reopen' && released ? baseline : submitted;
+            expect(view.getByLabelText('個人簡介').props.value).toBe(retry.bio);
+            jest.mocked(saveCreatorCard).mockImplementationOnce(service.saveCreatorCard);
+            writes.mockResolvedValueOnce(undefined);
+            reads.mockResolvedValueOnce(snapshot(retry));
+            await run('儲存簡介');
+            expect(writes).toHaveBeenCalledTimes(released ? 2 : 1);
+            if (released) {
+              expect(writes).toHaveBeenLastCalledWith(undefined, {
+                schoolId: 'pu', ownerUid: 'alice', ...retry, updatedAt: 'SERVER_TIME',
+              }, { merge: true });
+            }
+          } else {
+            expect(writes).toHaveBeenCalledTimes(1);
+          }
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+    });
+  });
+});
 
 test.each([
   { hasPendingWrites: false },
@@ -1556,14 +1667,16 @@ describe('saving merges creator card changes under the document rules', () => {
             // A missing field displays as empty but cannot confirm a complete write.
             const incomplete: Record<string, unknown> = { ...raw };
             delete incomplete.linkUrl;
-            jest.mocked(getDocFromServer).mockResolvedValueOnce({
+            const incompleteSnapshot = {
               exists: () => true, data: () => incomplete, metadata: { hasPendingWrites: false },
-            } as never);
+            } as Awaited<ReturnType<typeof getDocFromServer>>;
+            const reads = jest.mocked(getDocFromServer).mockResolvedValueOnce(incompleteSnapshot);
+            if (scenario === 'confirmation mismatch') reads.mockResolvedValueOnce(incompleteSnapshot);
           }
           try {
             await save();
             if (timeout) act(() => { jest.advanceTimersByTime(15_000); });
-            if (timeout || scenario === 'network failure') {
+            if (scenario !== 'first write') {
               await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
             }
             if (scenario !== 'first write') {
