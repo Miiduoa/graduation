@@ -1,9 +1,12 @@
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
-import { parseCampusAssignmentSource } from './campusAssignmentSource';
+import { parseCampusAssignmentSource, type CampusAssignmentSource } from './campusAssignmentSource';
 
 /** Display identity is not authority; it must match exactly one current source row. */
 export interface CampusAssignmentIdentity {
   title: string;
+  /** Live plans preserve the full title and the original source through a refresh. */
+  fullAssignmentTitle?: string;
+  expectedSource?: CampusAssignmentSource;
   groupName?: string;
   dueAt?: string | null;
 }
@@ -26,21 +29,29 @@ function hasCutoffSpace(rawTitle: string, title: string): boolean {
   return rawTitle.length === DISPLAY_TITLE_LIMIT && rawTitle === title + ' ';
 }
 
-/** Reminder cards may carry the original 130-character display title, including its final space. */
-export function matchingCampusReminderAssignments(
+/** Resolve identity across the whole course/deadline scope before checking the original ID. */
+export function matchCampusAssignment(
   snapshot: CampusSenseSnapshot,
   assignment: CampusAssignmentIdentity,
 ) {
-  const title = normalizeCampusAssignmentTitle(assignment.title);
-  if (snapshot.assignments.status !== 'available' || !title) return [];
-  const displayTitle = hasCutoffSpace(assignment.title, title) ? assignment.title : title;
-  return snapshot.assignments.items.filter((row) => {
-    if (row.groupName !== (assignment.groupName ?? '') ||
-        row.dueAt !== (assignment.dueAt ?? null)) return false;
-    return displayTitle.length === DISPLAY_TITLE_LIMIT
-      ? campusAssignmentDisplayTitle(row.title) === displayTitle
-      : normalizeCampusAssignmentTitle(row.title) === title;
-  });
+  const rawTitle = assignment.fullAssignmentTitle ?? assignment.title;
+  if (snapshot.assignments.status !== 'available' || typeof rawTitle !== 'string') return null;
+  const title = normalizeCampusAssignmentTitle(rawTitle);
+  if (!title || hasCutoffSpace(rawTitle, title)) return null;
+  const rows = snapshot.assignments.items.filter((row) =>
+    row.groupName === (assignment.groupName ?? '') &&
+    row.dueAt === (assignment.dueAt ?? null));
+  const matches = rows.filter((row) => normalizeCampusAssignmentTitle(row.title) === title);
+  if (matches.length !== 1) return null;
+  // A title at the display cutoff can also stand for a longer title in this scope.
+  if (title.length === DISPLAY_TITLE_LIMIT && rows.some((row) =>
+    row !== matches[0] && normalizeCampusAssignmentTitle(row.title).startsWith(title))) return null;
+  if (assignment.expectedSource) {
+    const source = parseCampusAssignmentSource(matches[0].source);
+    if (source?.groupId !== assignment.expectedSource.groupId ||
+        source?.assignmentId !== assignment.expectedSource.assignmentId) return null;
+  }
+  return matches[0];
 }
 
 /**
@@ -57,19 +68,9 @@ export function resolveCampusAssignmentTarget(input: {
   const now = input.now ?? Date.now();
   if (!Number.isFinite(now)) return null;
   const snapshot = validCampusSenseSnapshot(input.snapshot, input.scope, now);
-  if (!snapshot || snapshot.assignments.status !== 'available' ||
-      typeof input.assignment.title !== 'string' || !input.assignment.title.trim()) return null;
-  const title = normalizeCampusAssignmentTitle(input.assignment.title);
-  if (hasCutoffSpace(input.assignment.title, title)) return null;
-  const rows = snapshot.assignments.items.filter((row) =>
-    row.groupName === (input.assignment.groupName ?? '') &&
-    row.dueAt === (input.assignment.dueAt ?? null));
-  const matches = rows.filter((row) => normalizeCampusAssignmentTitle(row.title) === title);
-  if (matches.length !== 1) return null;
-  // At the cutoff, the same display title may also represent a longer assignment.
-  if (title.length === DISPLAY_TITLE_LIMIT && rows.some((row) =>
-    row !== matches[0] && campusAssignmentDisplayTitle(row.title) === title)) return null;
-  const source = parseCampusAssignmentSource(matches[0].source);
+  if (!snapshot) return null;
+  const match = matchCampusAssignment(snapshot, input.assignment);
+  const source = parseCampusAssignmentSource(match?.source);
   if (!source) return null;
   return {
     route: 'HomeworkSubmit',

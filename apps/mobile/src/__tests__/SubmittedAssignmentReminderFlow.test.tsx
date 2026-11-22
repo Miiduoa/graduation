@@ -169,11 +169,11 @@ function planCard(snapshot: CampusSenseSnapshot) {
     },
   });
   if (!plan) throw new Error('Expected an assignment plan');
-  return {
-    plan,
-    view: render(<CampusEvidencePlanCard plan={plan} disabled={false}
-      reminderContext={{ userId: scope.uid, schoolId: scope.schoolId, snapshot, isCurrent: current }} />),
-  };
+  const navigation = { navigate: jest.fn() };
+  const card = (currentSnapshot: CampusSenseSnapshot) => <CampusEvidencePlanCard
+    plan={plan} disabled={false} navigation={navigation}
+    reminderContext={{ userId: scope.uid, schoolId: scope.schoolId, snapshot: currentSnapshot, isCurrent: current }} />;
+  return { plan, navigation, card, view: render(card(snapshot)) };
 }
 
 test('計畫卡可為唯一的 134 字作業設定本機提醒', async () => {
@@ -181,8 +181,14 @@ test('計畫卡可為唯一的 134 字作業設定本機提醒', async () => {
   const title = '長'.repeat(130) + '期末報告';
   snapshot.assignments.items[0].title = title;
   mockReader.getAssignment.mockResolvedValue({ id: 'work', groupId: 'course', title, dueAt });
-  const { plan, view } = planCard(snapshot);
+  const { plan, view, navigation } = planCard(snapshot);
   expect(plan.steps[0].title).toBe(title.slice(0, 130));
+  fireEvent.press(view.getAllByText('查看這份作業')[0]);
+  expect(navigation.navigate).toHaveBeenCalledWith('學習', {
+    initial: false,
+    screen: 'HomeworkSubmit',
+    params: { groupId: 'course', assignmentId: 'work' },
+  });
   fireEvent.press(await view.findByText('設定手機本機截止提醒'));
   fireEvent.press(view.getByText('確認設定本機提醒'));
   expect(await view.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
@@ -245,22 +251,87 @@ test.each([false, true].flatMap((reverse) => [
   expect(mockStorage.size).toBe(0);
 });
 
-test.each([false, true])('截斷的計畫標題撞上另一筆完整標題時，拒絕建立提醒（反序=%s）', async (reverse) => {
+test.each([false, true])('完整標題碰撞時拒絕作業交辦與提醒（反序=%s）', async (reverse) => {
   const snapshot = mockSnapshot();
-  const title = '長'.repeat(130);
+  const title = '長'.repeat(130) + '後綴';
   snapshot.assignments.items[0].title = title;
   snapshot.assignments.items.push({
-    ...snapshot.assignments.items[0], title: title + '後綴', source: { ...source, assignmentId: 'other' },
+    ...snapshot.assignments.items[0], title, source: { ...source, assignmentId: 'other' },
   });
   snapshot.assignments.count = 2;
   if (reverse) snapshot.assignments.items.reverse();
   const { plan, view } = planCard(snapshot);
-  await expect(scheduleCampusAssignmentReminder({
-    scope, step: plan.steps[1], snapshot, leadMinutes: 60, isCurrent: current,
-  })).rejects.toThrow('invalid-source');
+  for (const step of plan.steps) {
+    await expect(scheduleCampusAssignmentReminder({
+      scope, step, snapshot, leadMinutes: 60, isCurrent: current,
+    })).rejects.toThrow('invalid-source');
+  }
+  expect(view.queryByText('查看這份作業')).toBeNull();
   expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
   expect(mockAlarms.size).toBe(0);
 });
+
+test.each([
+  { prefix: '長'.repeat(129) + ' ', suffix: '新版', assignmentId: 'other' },
+  { prefix: '長'.repeat(130), suffix: '新版', assignmentId: 'other' },
+  { prefix: '長'.repeat(130), suffix: '', assignmentId: 'other' },
+  { prefix: '長'.repeat(130), suffix: '新版', assignmentId: 'work' },
+  { prefix: '短標題', suffix: '原稿', assignmentId: 'other' },
+])('同步後舊卡不會改綁作業（後綴=$suffix，來源=$assignmentId）', async ({ prefix, suffix, assignmentId }) => {
+  const snapshot = mockSnapshot();
+  const title = prefix + '原稿';
+  snapshot.assignments.items[0].title = title;
+  mockReader.getAssignment.mockResolvedValue({ id: 'work', groupId: 'course', title, dueAt });
+  const { plan, card, view } = planCard(snapshot);
+  expect(plan.steps[0].title).toBe(title.slice(0, 130));
+  fireEvent.press(await view.findByText('設定手機本機截止提醒'));
+  fireEvent.press(view.getByText('確認設定本機提醒'));
+  expect(await view.findByText('取消這項本機提醒')).toBeTruthy();
+
+  const replacement = mockSnapshot();
+  const replacementTitle = prefix + suffix;
+  replacement.assignments.items[0] = {
+    ...replacement.assignments.items[0], title: replacementTitle, source: { ...source, assignmentId },
+  };
+  mockReader.getAssignment.mockResolvedValue({ id: assignmentId, groupId: 'course', title: replacementTitle, dueAt });
+  await scheduleCampusAssignmentReminder({
+    scope, step: { ...step, title: replacementTitle }, snapshot: replacement, leadMinutes: 60, isCurrent: current,
+  });
+  const alarms = [...mockAlarms.keys()];
+  const reads = mockReader.getAssignment.mock.calls.length;
+  await act(async () => view.rerender(card(replacement)));
+
+  expect(view.queryByText('查看這份作業')).toBeNull();
+  expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
+  expect(view.queryByText('已設定截止前 1 小時提醒')).toBeNull();
+  expect(view.queryByText('取消這項本機提醒')).toBeNull();
+  const stale = { scope, step: plan.steps[0], snapshot: replacement, leadMinutes: 60 as const, isCurrent: current };
+  const { cancelCampusAssignmentReminder, getCampusAssignmentReminderStatus } =
+    require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+  await expect(scheduleCampusAssignmentReminder(stale)).rejects.toThrow('invalid-source');
+  await expect(getCampusAssignmentReminderStatus(stale)).resolves.toEqual([]);
+  await expect(cancelCampusAssignmentReminder(stale)).rejects.toThrow('invalid-source');
+  expect(mockReader.getAssignment).toHaveBeenCalledTimes(reads);
+  expect([...mockAlarms.keys()]).toEqual(alarms);
+});
+
+test.each(['長'.repeat(129) + ' ', '長'.repeat(130)])(
+  '只有顯示標題的舊計畫，即使同步後只剩一筆候選也不能操作',
+  async (displayTitle) => {
+    const snapshot = mockSnapshot();
+    snapshot.assignments.items[0].title = displayTitle + '原稿';
+    const { plan, card, view } = planCard(snapshot);
+    delete plan.steps[0].fullAssignmentTitle;
+    delete plan.steps[0].expectedSource;
+    delete plan.agenda;
+    const replacement = mockSnapshot();
+    replacement.assignments.items[0].title = displayTitle.trimEnd();
+    await act(async () => view.rerender(card(replacement)));
+    expect(view.queryByText('查看這份作業')).toBeNull();
+    expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
+    expect(view.queryByText('取消這項本機提醒')).toBeNull();
+  },
+);
 
 test('使用者設定提醒，伺服器確認已繳後取消；撤回後恢復原提醒', async () => {
   let view = await optIn();

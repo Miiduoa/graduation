@@ -41,7 +41,7 @@ function plan(): CampusEvidencePlan {
   return {
     title: '今日優先行動', overview: '依據已同步資料', checkedAt: new Date(now).toISOString(),
     limitations: [], content: '本機規劃',
-    steps: [{ ...assignment, id: 'assignment-0', detail: '核對繳交要求',
+    steps: [{ ...assignment, expectedSource: snapshot().assignments.items[0].source, id: 'assignment-0', detail: '核對繳交要求',
       evidence: 'authorized-assignments', priority: 'urgent', route: '/classroom' }],
   };
 }
@@ -113,8 +113,8 @@ test('daily and undated task entries retain exact assignment navigation', () => 
   fullPlan.agenda = {
     timetableAvailable: false, assignmentsAvailable: true, ignoredCourses: 0,
     days: [{ date: '2026-10-27', label: '10/27（週二）', courses: [], gaps: [], conflicts: [],
-      deadlines: [{ ...assignment, timeLabel: '20:00', overdue: false }] }],
-    outsideWindow: [{ title: '未訂截止的作業', groupName: '程式設計', dueAt: null, reason: 'undated' }],
+      deadlines: [{ ...assignment, expectedSource: value.assignments.items[0].source, timeLabel: '20:00', overdue: false }] }],
+    outsideWindow: [{ title: '未訂截止的作業', groupName: '程式設計', dueAt: null, expectedSource: value.assignments.items[1].source, reason: 'undated' }],
   };
   const navigate = jest.fn();
   const view = render(<CampusEvidencePlanCard plan={fullPlan} disabled={false}

@@ -832,6 +832,7 @@ test('source-verified assignment requires review and confirmation before a local
   };
   const step = {
     id: 'assignment-0', title: '可信任的期末報告',
+    fullAssignmentTitle: sense.assignments.items[0].title, expectedSource: sense.assignments.items[0].source,
     groupName: '資訊管理', dueAt, priority: 'normal',
     evidence: 'authorized-assignments', route: '/classroom',
     detail: '請核對作業頁面的截止與繳交狀態。',
@@ -897,6 +898,7 @@ test('an already scheduled local reminder is restored when reopening the assista
   };
   const step = {
     id: 'assignment-0', title: '可信任的期末報告',
+    fullAssignmentTitle: sense.assignments.items[0].title, expectedSource: sense.assignments.items[0].source,
     groupName: '資訊管理', dueAt, priority: 'normal',
     evidence: 'authorized-assignments', route: '/classroom',
     detail: '請核對作業頁面的截止與繳交狀態。',
@@ -941,6 +943,7 @@ test('unverified OS reminder status blocks scheduling until a successful recheck
   };
   const step = {
     id: 'assignment-0', title: '可信任的期末報告',
+    fullAssignmentTitle: sense.assignments.items[0].title, expectedSource: sense.assignments.items[0].source,
     groupName: '資訊管理', dueAt, priority: 'normal',
     evidence: 'authorized-assignments', route: '/classroom',
     detail: '請核對作業頁面的截止與繳交狀態。',

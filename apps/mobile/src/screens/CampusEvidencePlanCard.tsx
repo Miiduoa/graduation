@@ -75,7 +75,7 @@ export function CampusEvidencePlanCard({
   const assignmentAction = (assignment: CampusAssignmentIdentity & NuniPlanActivityIdentity) => {
     if (historical) return null;
     if (renderAssignmentAction) return renderAssignmentAction(assignment);
-    if (assignment.kind === 'quiz') return null;
+    if (assignment.kind === 'quiz' || !assignment.expectedSource) return null;
     return reminderContext && navigation ? (
       <CampusAssignmentOpenButton
         assignment={assignment}
@@ -168,9 +168,9 @@ export function CampusEvidencePlanCard({
                 onPress={() => onOpenRoute(step.route)}
               />
             ) : null}
-            {!historical && reminderContext && step.kind !== 'quiz' ? (
+            {!historical && reminderContext && step.kind !== 'quiz' && step.expectedSource ? (
               <CampusAssignmentReminderAction
-                key={step.id + ':' + step.dueAt}
+                key={JSON.stringify([step.id, step.expectedSource, step.fullAssignmentTitle, step.dueAt])}
                 step={step}
                 snapshot={reminderContext.snapshot}
                 userId={reminderContext.userId}

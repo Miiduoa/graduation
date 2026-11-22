@@ -1,3 +1,4 @@
+import type { CampusAssignmentIdentity } from './campusAssignmentTarget';
 import type { OnDeviceSchoolContext } from './onDeviceSchoolContext';
 import type { CampusSenseSnapshot } from './campusSenseSnapshot';
 import { CAMPUS_SENSE_MAX_AGE_MS } from './campusSenseSnapshot';
@@ -18,7 +19,7 @@ export type CampusPlanRoute = '/classroom' | '/timetable' | '/announcements';
 export type CampusPlanPriority = 'overdue' | 'urgent' | 'soon' | 'normal' | 'verify';
 export type CampusPlanEvidence = 'authorized-assignments' | 'authorized-quizzes' | 'saved-timetable' | 'authorized-announcements' | 'verification';
 
-export interface CampusPlanStep {
+export interface CampusPlanStep extends Pick<CampusAssignmentIdentity, 'fullAssignmentTitle' | 'expectedSource'> {
   /** Absent on older plans, whose course tasks are assignments. */
   kind?: 'assignment' | 'quiz';
   id: string;
@@ -127,7 +128,9 @@ export function buildOfflineCampusPlan(input: {
   const agenda = buildCampusStudyAgenda({
     window, now,
     courses: hasTimetable ? input.context.timetable.courses : null,
-    assignments: sense?.assignments.status === 'available' ? sense.assignments.items : null,
+    assignments: sense?.assignments.status === 'available' ? sense.assignments.items.map((assignment) => ({
+      ...assignment, expectedSource: parseCampusAssignmentSource(assignment.source) ?? undefined,
+    })) : null,
   });
 
   if (sense?.assignments.status === 'available') {
@@ -149,9 +152,11 @@ export function buildOfflineCampusPlan(input: {
       const due = confirmedDueAt
         ? '截止 ' + localDate(confirmedDueAt) + '；' + priorityLabel(priority)
         : '來源沒有可核對的截止日期；請先核對作業頁';
+      const expectedSource = parseCampusAssignmentSource(assignment.source);
       steps.push({
         id: 'assignment-' + index,
         title: cleaned(assignment.title),
+        ...(expectedSource ? { fullAssignmentTitle: assignment.title, expectedSource } : {}),
         detail: (assignment.groupName ? cleaned(assignment.groupName) + '｜' : '') +
           due + '。請到課程頁確認繳交方式與最新狀態。',
         priority, evidence: 'authorized-assignments', route: '/classroom',

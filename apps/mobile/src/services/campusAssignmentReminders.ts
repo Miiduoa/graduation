@@ -12,7 +12,7 @@ import { getAuthInstance, isFirebaseMockMode } from '../firebase';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
 import type { CampusPlanStep } from './offlineCampusPlanner';
 
-import { campusAssignmentDisplayTitle as normalizeTitle, matchingCampusReminderAssignments } from './campusAssignmentTarget';
+import { campusAssignmentDisplayTitle as normalizeTitle, matchCampusAssignment } from './campusAssignmentTarget';
 import { parseCampusAssignmentSource } from './campusAssignmentSource';
 import {
   adoptSubmittedAssignmentReminder, linkedReminderIdentifiers,
@@ -20,7 +20,8 @@ import {
   cancelSubmittedAssignmentReminder, clearSubmittedAssignmentReminders, resumeSubmittedAssignmentReminders,
 } from './submittedAssignmentReminders';
 
-export type ReminderAssignment = Pick<CampusPlanStep, 'evidence' | 'route' | 'title' | 'groupName' | 'dueAt'>;
+export type ReminderAssignment = Pick<CampusPlanStep,
+  'evidence' | 'route' | 'title' | 'groupName' | 'dueAt' | 'fullAssignmentTitle' | 'expectedSource'>;
 export type CampusReminderLead = 60 | 1440;
 export type CampusReminderOutcome = 'scheduled' | 'already-scheduled' | 'submitted' | 'inactive';
 
@@ -84,11 +85,8 @@ function validateAssignment(
   }
   const snapshot = validCampusSenseSnapshot(req.snapshot, req.scope, now);
   if (!snapshot) throw new CampusReminderError('expired-source');
-  if (snapshot.assignments.status !== 'available') throw new CampusReminderError('invalid-source');
-
-  const matches = matchingCampusReminderAssignments(snapshot, req.step);
-  const item = matches[0];
-  if (matches.length !== 1 || !item.dueAt) throw new CampusReminderError('invalid-source');
+  const item = matchCampusAssignment(snapshot, req.step);
+  if (!item?.dueAt) throw new CampusReminderError('invalid-source');
 
   const due = Date.parse(item.dueAt);
   if (!Number.isFinite(due) || due - now > 366 * 86_400_000) {
@@ -106,14 +104,13 @@ function validateAssignment(
 }
 
 // Reading or cancelling an owned alarm may use its last known source even after the preview expires.
-function knownReminderSource(input: {
+function knownReminderAssignment(input: {
   scope: CampusReminderScope; step: ReminderAssignment; snapshot?: CampusSenseSnapshot | null;
 }) {
   const snapshot = input.snapshot;
   if (!snapshot || snapshot.userId !== input.scope.uid || snapshot.schoolId !== input.scope.schoolId ||
-      snapshot.assignments.status !== 'available') return null;
-  const matches = matchingCampusReminderAssignments(snapshot, input.step);
-  return matches.length === 1 ? parseCampusAssignmentSource(matches[0].source) : null;
+      input.step.evidence !== 'authorized-assignments' || input.step.route !== '/classroom') return null;
+  return matchCampusAssignment(snapshot, input.step);
 }
 
 function supportsLocalNotification() {
@@ -295,14 +292,15 @@ export async function getCampusAssignmentReminderStatus(input: {
   isCurrent: () => boolean;
   scheduledOnly?: boolean;
 }): Promise<CampusReminderLead[]> {
-  const source = knownReminderSource(input);
+  const assignment = knownReminderAssignment(input);
+  const source = parseCampusAssignmentSource(assignment?.source);
   if (source) {
     await adoptCampusReminderSnapshot(input);
     return submittedAssignmentReminderStatus({ ...input, source });
   }
   const epoch = reminderEpoch;
   checkAccount(input.scope, input.isCurrent, epoch);
-  if (!input.step.dueAt || !input.step.title ||
+  if ((input.snapshot && !assignment) || input.step.expectedSource || !input.step.dueAt || !input.step.title ||
       input.step.evidence !== 'authorized-assignments' || input.step.route !== '/classroom') {
     return [];
   }
@@ -370,14 +368,16 @@ export async function cancelCampusAssignmentReminder(input: {
   leadMinutes: CampusReminderLead;
   isCurrent: () => boolean;
 }): Promise<boolean> {
-  const source = knownReminderSource(input);
+  const assignment = knownReminderAssignment(input);
+  const source = parseCampusAssignmentSource(assignment?.source);
   if (source) {
     await adoptCampusReminderSnapshot(input);
     return cancelSubmittedAssignmentReminder({ ...input, source });
   }
   const epoch = reminderEpoch;
   checkAccount(input.scope, input.isCurrent, epoch);
-  if (input.step.evidence !== 'authorized-assignments' || !input.step.dueAt) {
+  if ((input.snapshot && !assignment) || input.step.expectedSource ||
+      input.step.evidence !== 'authorized-assignments' || !input.step.dueAt) {
     throw new CampusReminderError('invalid-source');
   }
   const lock = busyKey(input);

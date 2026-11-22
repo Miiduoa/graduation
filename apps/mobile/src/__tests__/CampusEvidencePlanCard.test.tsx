@@ -238,7 +238,10 @@ test('an injected renderer that declines a source does not fall through into a F
 
 test('without the platform renderer the existing live Firebase action still receives its own context', () => {
   const navigation = { navigate: jest.fn() };
-  render(<CampusEvidencePlanCard plan={plan()} disabled={false}
+  const livePlan = plan();
+  livePlan.steps[0].expectedSource = { kind: 'group-assignment', groupId: 'course', assignmentId: 'work' };
+  livePlan.steps[0].fullAssignmentTitle = livePlan.steps[0].title;
+  render(<CampusEvidencePlanCard plan={livePlan} disabled={false}
     reminderContext={reminderContext} navigation={navigation} />);
   expect(CampusAssignmentOpenButton).toHaveBeenCalledWith(expect.objectContaining({
     assignment: expect.objectContaining({ title: '資料庫報告' }), context: reminderContext, navigation, disabled: false,

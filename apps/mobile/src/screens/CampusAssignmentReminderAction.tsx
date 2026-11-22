@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
-import { matchingCampusReminderAssignments } from '../services/campusAssignmentTarget';
+import { matchCampusAssignment } from '../services/campusAssignmentTarget';
 import { parseCampusAssignmentSource } from '../services/campusAssignmentSource';
 import type { CampusReminderLead, ReminderAssignment } from '../services/campusAssignmentReminders';
 
@@ -70,10 +70,11 @@ export function CampusAssignmentReminderAction({
   const scope = { uid: userId, schoolId };
   const verified = validCampusSenseSnapshot(snapshot, scope);
   const deadline = step.dueAt ? Date.parse(step.dueAt) : NaN;
-  const matches = verified ? matchingCampusReminderAssignments(verified, step) : [];
+  const match = snapshot?.userId === userId && snapshot.schoolId === schoolId
+    ? matchCampusAssignment(snapshot, step) : null;
+  const hasSource = Boolean(userId && schoolId && parseCampusAssignmentSource(match?.source));
   const canUse = Boolean(
-    userId && matches.length === 1 && parseCampusAssignmentSource(matches[0].source) &&
-    step.evidence === 'authorized-assignments' &&
+    verified && hasSource && step.evidence === 'authorized-assignments' &&
     Number.isFinite(deadline) && deadline > Date.now() + 61 * 60_000,
   );
   const oneDayAvailable = Number.isFinite(deadline) && deadline > Date.now() + (1441 * 60_000);
@@ -84,9 +85,10 @@ export function CampusAssignmentReminderAction({
   useEffect(() => {
     let active = true;
     if (!userId || !schoolId || !step.dueAt ||
-        step.evidence !== 'authorized-assignments' || !snapshot) {
+        step.evidence !== 'authorized-assignments' || !hasSource || !snapshot) {
       setConfirmedLead(null);
       setStatusError('');
+      setStatusLoading(false);
       return () => { active = false; };
     }
     setStatusLoading(true);
@@ -109,7 +111,7 @@ export function CampusAssignmentReminderAction({
         if (active && isCurrent()) setStatusLoading(false);
       });
     return () => { active = false; };
-  }, [userId, schoolId, step.title, step.groupName, step.dueAt, snapshot?.checkedAt, statusRefresh]);
+  }, [userId, schoolId, step.title, step.fullAssignmentTitle, step.groupName, step.dueAt, hasSource, snapshot, statusRefresh]);
 
   const schedule = async () => {
     if (lock.current || statusLoading || statusError || disabled || !canUse ||
@@ -147,7 +149,7 @@ export function CampusAssignmentReminderAction({
   };
 
   const cancel = async () => {
-    if (lock.current || disabled || confirmedLead === null || !isCurrent()) return;
+    if (lock.current || disabled || !hasSource || statusLoading || confirmedLead === null || !isCurrent()) return;
     lock.current = true;
     setSaving(true);
     setMessage('');
@@ -169,7 +171,7 @@ export function CampusAssignmentReminderAction({
     }
   };
 
-  if (step.evidence !== 'authorized-assignments' || !step.dueAt ||
+  if (!hasSource || step.evidence !== 'authorized-assignments' || !step.dueAt ||
       !Number.isFinite(deadline)) return null;
   if (!canUse && confirmedLead === null) return null;
 
@@ -201,7 +203,7 @@ export function CampusAssignmentReminderAction({
             label={saving ? '正在確認取消…' : '取消這項本機提醒'}
             variant="ghost"
             size="sm"
-            disabled={saving || disabled}
+            disabled={saving || disabled || statusLoading}
             onPress={() => void cancel()}
           />
         </>
