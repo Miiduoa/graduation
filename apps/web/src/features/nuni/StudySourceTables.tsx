@@ -672,11 +672,11 @@ function StudySourceSelection({ table, index, sourceLines }: {
       void Promise.resolve(result as PromiseLike<unknown>).then(
         (acknowledged) => {
           if (copyRequest.current !== request) return;
-          // Native Clipboard.writeText() resolves with void (undefined).
-          // Some in-app WebView bridges resolve false, null, 0, a string or
-          // an object instead of rejecting a denied/unsupported copy.
-          // Those nonstandard acknowledgements do not prove success.
-          if (acknowledged !== undefined && acknowledged !== true) manualCopy(request);
+          // Native Clipboard.writeText() is Promise<void>: only undefined
+          // is its standard fulfillment value. In-app WebView bridges may
+          // resolve true or { success: true } without copying any bytes.
+          // Keep the verbatim selectable source on every nonstandard value.
+          if (acknowledged !== undefined) manualCopy(request);
           else {
             invalidateCopy();
             setCopyFeedback('瀏覽器已接受複製指令；若無法貼上，仍可長按下方原文。');

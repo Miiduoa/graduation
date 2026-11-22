@@ -2325,3 +2325,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 授權教材的表格欄名或列標籤可能夾帶未配對 UTF-16 surrogate、NUL、ESC、DEL 等控制字元。原先這些標籤只要有可讀文字，就可能被重新整理成數值或百分比長條，呈現替代字元或干擾讀屏，讓圖表不再可靠對照原文。現在跳過**衍生圖表**，但保留原始表格、來源行號、選取、複製與匯出原字元。
 - Unicode 模式的 Cc／Cs 辨識不會拒絕完整 Emoji、阿拉伯／希伯來文、重音字母或點字。新增 React DOM 正反回歸涵蓋欄名及列標籤、數值及百分比、非法高／低代理碼與控制碼，正常完整字素仍能顯示量值比較。
 - 不新增套件、不變更閱讀 v1/v2 或練習 v1 JSON checkpoint、無私人教材外傳。單元與 DOM 測試並非 iOS／Android、VoiceOver／TalkBack、WebGPU 或 Ahaboard 同條件實測；完整 CI／CodeQL、App 5504170 APPROVED 與真機尚須依最新 SHA 驗證。PR 維持 Draft、不合併、不部署。
+
+### 2026-11-22：來源表格複製只接受標準 Clipboard Promise 確認
+
+- 修補來源表格的複製成功回饋：原本內嵌 WebView 的 `clipboard.writeText()` 若回傳 `Promise.resolve(true)`，介面會標示「瀏覽器已接受複製指令」，但標準 Clipboard API 是 `Promise<void>`，`true` 並不能證實真的寫入。現在只有 `undefined` 的標準履約可顯示瀏覽器已接受指令；`true`、`{ success: true }`、字串與其他非標準回覆一律保留原文與手動長按／鍵盤選取路徑，顯示「未確認複製」，不誤導學生以為資料已備份。
+- React DOM 回歸涵蓋錯誤 `true` 回覆、假陽性物件／文字訊息、正常標準回覆，以及原文與選取範圍不遺失；保持逾時、切換列使舊回覆失效、精確 CRLF 與 TXT 下載原行為。不修改授權教材、v1/v2 閱讀進度、v1 逐題 checkpoint；不增套件／付費 API／私人教材外傳。
+- 這是程式與模擬 DOM 修補，不代表 iOS／Android／VoiceOver／TalkBack 真機確認；完整 GitHub CI／CodeQL、指定 App 5504170 APPROVED、Maestro、WebGPU 與 Ahaboard 同教材同題同機驗收仍須以此新 head 另行取得。PR 保持 Draft、不合併、不部署、不宣稱超越競品。

@@ -1923,6 +1923,8 @@ it.each([
   { acknowledgement: null, label: 'null' },
   { acknowledgement: 'false', label: 'string false' },
   { acknowledgement: { success: false }, label: 'object failure' },
+  { acknowledgement: { success: true }, label: 'object success' },
+  { acknowledgement: 'ok', label: 'string ok' },
 ])('does not claim clipboard success for a WebView bridge returning $label', async ({ acknowledgement }) => {
   const copy = vi.fn(() => Promise.resolve(acknowledgement));
   await withSourceClipboard({ value: { writeText: copy } }, async () => {
@@ -1942,14 +1944,17 @@ it.each([
   });
 });
 
-it('accepts an explicit true acknowledgement without losing the manual source', async () => {
+it('does not claim a copy for a nonstandard true acknowledgement but retains manual source selection', async () => {
   await withSourceClipboard({ value: { writeText: () => Promise.resolve(true) } }, async () => {
     const view = render(<StudySourceTables text={source} />);
     fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
     fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格原文' }));
-    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('已接受複製指令'));
-    expect((screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement).value)
-      .toContain('| 資料庫 | 3 | 301 |');
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('未確認複製'));
+    expect(screen.getByRole('status').textContent).not.toContain('已接受複製指令');
+    const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+    expect(field.value).toContain('| 資料庫 | 3 | 301 |');
+    expect(field.selectionStart).toBe(0);
+    expect(field.selectionEnd).toBe(field.value.length);
     view.unmount();
   });
 });
