@@ -235,6 +235,33 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
+  it.each([true, false])('does not cite half an Indic conjunct across ZWJ or combining marks (Segmenter: %s)', (native) => {
+    if (!native) vi.stubGlobal('Intl', { Segmenter: undefined });
+    try {
+      // Native Segmenter and the mobile fallback must agree about whole
+      // source glyphs; a consonant after the linker is not a separate quote.
+      for (const [cluster, partial] of [
+        ['क्\u200dष', 'ष'], // Devanagari virama + ZWJ
+        ['ক্\u200dষ', 'ষ'], // Bengali virama + ZWJ
+        ['क्\u0301ष', 'ष'], // combining mark after the linker
+        ['क\u200d्\u200dष', 'ष'], // Extend also precedes the linker
+      ]) {
+        expect(locateStudyEvidence(cluster, partial)).toBeNull();
+        expect(locateStudyEvidence(cluster + ' ' + partial, partial)).toEqual({
+          before: cluster + ' ', quote: partial, after: '', occurrences: 1,
+        });
+        expect(locateStudyEvidence(cluster, cluster)?.quote).toBe(cluster);
+      }
+      // ZWNJ deliberately separates letters. Treating it as a linker
+      // continuation would hide a valid independently readable citation.
+      expect(locateStudyEvidence('क्\u200cष', 'ष')).toEqual({
+        before: 'क्\u200c', quote: 'ष', after: '', occurrences: 1,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each(['Segmenter', 'containing'] as const)('locates whole graphemes without %s', (missing) => {
     const NativeSegmenter = Intl.Segmenter;
     const mockIntl = Object.create(Intl);

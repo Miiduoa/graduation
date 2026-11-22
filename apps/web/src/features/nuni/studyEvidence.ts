@@ -72,8 +72,19 @@ function fallbackBoundaries(source: string): Uint8Array {
     if (!joinsPrevious) boundaries[index] = 1;
     followsEmojiZwj = current === '\u200d' && followsPictographic;
     followsPictographic = isPictographic || (followsPictographic && emojiExtend.test(current));
-    followsIndicLinker = hasIndicBase && indicLinker.test(current);
-    hasIndicBase = isIndicConsonant;
+    // GB9c keeps an Indic consonant-linker sequence joined across Extend
+    // marks and ZWJ. The previous single-code-point check lost its linker
+    // state at ZWJ, allowing a citation to begin midway through a conjunct.
+    // ZWNJ is Grapheme_Extend but explicitly interrupts an Indic conjunct.
+    if (isIndicConsonant) {
+      hasIndicBase = true;
+      followsIndicLinker = false;
+    } else if (hasIndicBase && indicLinker.test(current)) {
+      followsIndicLinker = true;
+    } else if (!continuesGrapheme || current === '\u200c') {
+      hasIndicBase = false;
+      followsIndicLinker = false;
+    }
     regionalRun = regional ? regionalRun + 1 : 0;
     previous = current;
     previousIsControl = isControl;
