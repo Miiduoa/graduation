@@ -159,196 +159,19 @@ it('disambiguates same-name campus markers before opening walking or flat-map na
   expect(onSelect).toHaveBeenCalledWith(duplicatePlaces[2]);
 });
 
-it('reveals and copies the original POI marker coordinate without claiming an entrance or stale selection', async () => {
-  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-  let finishFirstCopy: (() => void) | undefined;
-  const writeText = vi.fn()
-    .mockImplementationOnce(() => new Promise<void>((resolve) => { finishFirstCopy = resolve; }))
-    .mockResolvedValue(undefined);
-  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-  try {
-    render(<CampusSpatialExplorer school="other-school" locations={places}
-      selected={places[0]} onSelect={vi.fn()} />);
-    const dialog = await open();
-    const picker = within(dialog).getByRole('combobox', { name: '想去哪裡' });
-    const copyButton = within(dialog).getByRole('button', { name: '複製地圖標記座標' });
+it('shows the original marker coordinate and updates both navigation destinations on selection', async () => {
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const picker = within(dialog).getByRole('combobox', { name: '想去哪裡' });
+  expect(within(dialog).getByText('地圖標記座標：24.226, 120.58（非建築入口）')).toBeTruthy();
 
-    expect(within(dialog).getByText('地圖標記座標：24.226, 120.58（非建築入口）')).toBeTruthy();
-    expect(copyButton.getAttribute('aria-describedby')).toBeTruthy();
-    expect(writeText).not.toHaveBeenCalled();
-    fireEvent.click(copyButton);
-    expect(writeText).toHaveBeenCalledExactlyOnceWith('24.226,120.58');
-
-    // Clipboard permission may remain unresolved while the student switches POIs.
-    // The old operation must never announce success for a newly selected marker.
-    fireEvent.change(picker, { target: { value: 'dorm' } });
-    expect(within(dialog).getByText('地圖標記座標：24.228, 120.582（非建築入口）')).toBeTruthy();
-    await act(async () => { finishFirstCopy?.(); });
-    expect(within(dialog).queryByText('已複製目前地點標記座標。')).toBeNull();
-
-    fireEvent.click(copyButton);
-    expect(writeText).toHaveBeenLastCalledWith('24.228,120.582');
-    await waitFor(() => expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy());
-    const google = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
-    const apple = new URL(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' }).getAttribute('href')!);
-    expect(google.searchParams.get('destination')).toBe('24.228,120.582');
-    expect(apple.searchParams.get('daddr')).toBe('24.228,120.582');
-  } finally {
-    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
-    else Reflect.deleteProperty(navigator, 'clipboard');
-  }
-});
-
-it('does not accept an old clipboard result when the student returns to the original POI', async () => {
-  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-  let resolveOldCopy: (() => void) | undefined;
-  const writeText = vi.fn()
-    .mockImplementationOnce(() => new Promise<void>((resolve) => { resolveOldCopy = resolve; }))
-    .mockResolvedValue(undefined);
-  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-  try {
-    render(<CampusSpatialExplorer school="other-school" locations={places}
-      selected={places[0]} onSelect={vi.fn()} />);
-    const dialog = await open();
-    const picker = within(dialog).getByRole('combobox', { name: '想去哪裡' });
-    const copy = within(dialog).getByRole('button', { name: '複製地圖標記座標' });
-
-    fireEvent.click(copy);
-    expect(writeText).toHaveBeenCalledExactlyOnceWith('24.226,120.58');
-    fireEvent.change(picker, { target: { value: 'dorm' } });
-    fireEvent.change(picker, { target: { value: 'library' } });
-    expect(within(dialog).getByText('地圖標記座標：24.226, 120.58（非建築入口）')).toBeTruthy();
-
-    // A -> B -> A has the same final identity as the first request.
-    // The earlier permission result must not be reported as the latest copy.
-    await act(async () => { resolveOldCopy?.(); });
-    expect(within(dialog).queryByText('已複製目前地點標記座標。')).toBeNull();
-
-    fireEvent.click(copy);
-    await waitFor(() => expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy());
-    expect(writeText).toHaveBeenLastCalledWith('24.226,120.58');
-  } finally {
-    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
-    else Reflect.deleteProperty(navigator, 'clipboard');
-  }
-});
-
-it.each(['late success', 'late failure', 'never settles', 'close and reopen'] as const)(
-  'copies the new marker immediately when the first clipboard request has %s',
-  async (outcome) => {
-    const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-    let settleFirstWrite!: () => void;
-    const writeText = vi.fn()
-      .mockImplementationOnce(() => new Promise<void>((resolve, reject) => {
-        settleFirstWrite = () => outcome === 'late failure' ? reject(new Error('permission denied')) : resolve();
-      }))
-      .mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    try {
-      render(<CampusSpatialExplorer school="other-school" locations={places}
-        selected={places[0]} onSelect={vi.fn()} />);
-      let dialog = await open();
-      const copy = () => fireEvent.click(within(dialog).getByRole('button', { name: '複製地圖標記座標' }));
-
-      copy();
-      if (outcome === 'close and reopen') {
-        fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
-        expect(screen.queryByRole('dialog')).toBeNull();
-        fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
-        dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
-      }
-      fireEvent.change(within(dialog).getByRole('combobox', { name: '想去哪裡' }),
-        { target: { value: 'dorm' } });
-      copy();
-      expect(writeText.mock.calls).toEqual([['24.226,120.58'], ['24.228,120.582']]);
-      expect(await within(dialog).findByText('已複製目前地點標記座標。')).toBeTruthy();
-
-      if (outcome === 'late success' || outcome === 'late failure') {
-        await act(async () => { settleFirstWrite(); });
-      }
-      expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy();
-      expect(within(dialog).queryByText(/無法自動複製/)).toBeNull();
-    } finally {
-      if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
-      else Reflect.deleteProperty(navigator, 'clipboard');
-    }
-  },
-);
-
-it('uses only the latest result when copy is clicked repeatedly for the same marker', async () => {
-  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-  let resolveFirstWrite!: () => void;
-  const writeText = vi.fn()
-    .mockImplementationOnce(() => new Promise<void>((resolve) => { resolveFirstWrite = resolve; }))
-    .mockResolvedValueOnce(undefined)
-    .mockRejectedValueOnce(new Error('permission denied'));
-  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-  try {
-    render(<CampusSpatialExplorer school="other-school" locations={places}
-      selected={places[0]} onSelect={vi.fn()} />);
-    const dialog = await open();
-    const copy = within(dialog).getByRole('button', { name: '複製地圖標記座標' });
-    fireEvent.click(copy);
-    fireEvent.click(copy);
-    fireEvent.click(copy);
-    expect(writeText.mock.calls).toEqual([['24.226,120.58'], ['24.226,120.58'], ['24.226,120.58']]);
-    expect(await within(dialog).findByText(/無法自動複製/)).toBeTruthy();
-
-    await act(async () => { resolveFirstWrite(); });
-    expect(within(dialog).getByText(/無法自動複製/)).toBeTruthy();
-    expect(within(dialog).queryByText('已複製目前地點標記座標。')).toBeNull();
-  } finally {
-    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
-    else Reflect.deleteProperty(navigator, 'clipboard');
-  }
-});
-
-it('offers manual copy after three seconds and permits another clipboard request', async () => {
-  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-  let resolveFirstWrite!: () => void;
-  const writeText = vi.fn()
-    .mockImplementationOnce(() => new Promise<void>((resolve) => { resolveFirstWrite = resolve; }))
-    .mockResolvedValueOnce(undefined);
-  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-  try {
-    render(<CampusSpatialExplorer school="other-school" locations={places}
-      selected={places[0]} onSelect={vi.fn()} />);
-    const dialog = await open();
-    const copy = within(dialog).getByRole('button', { name: '複製地圖標記座標' });
-    vi.useFakeTimers();
-    fireEvent.click(copy);
-    await act(async () => { await vi.advanceTimersByTimeAsync(2_999); });
-    expect(within(dialog).queryByText(/無法自動複製/)).toBeNull();
-    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(within(dialog).getByText(/無法自動複製/)).toBeTruthy();
-
-    await act(async () => { resolveFirstWrite(); });
-    expect(within(dialog).getByText(/無法自動複製/)).toBeTruthy();
-    await act(async () => { fireEvent.click(copy); });
-    expect(writeText).toHaveBeenCalledTimes(2);
-    expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy();
-  } finally {
-    vi.useRealTimers();
-    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
-    else Reflect.deleteProperty(navigator, 'clipboard');
-  }
-});
-
-it('keeps verified marker coordinates readable when a WebView has no Clipboard API', async () => {
-  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
-  try {
-    render(<CampusSpatialExplorer school="other-school" locations={places}
-      selected={places[0]} onSelect={vi.fn()} />);
-    const dialog = await open();
-    expect(within(dialog).getByText('地圖標記座標：24.226, 120.58（非建築入口）')).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole('button', { name: '複製地圖標記座標' }));
-    await waitFor(() => expect(within(dialog).getByText('無法自動複製，請手動選取上方的地圖標記座標。')).toBeTruthy());
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-  } finally {
-    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
-    else Reflect.deleteProperty(navigator, 'clipboard');
-  }
+  fireEvent.change(picker, { target: { value: 'dorm' } });
+  expect(within(dialog).getByText('地圖標記座標：24.228, 120.582（非建築入口）')).toBeTruthy();
+  const google = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  const apple = new URL(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' }).getAttribute('href')!);
+  expect(google.searchParams.get('destination')).toBe('24.228,120.582');
+  expect(apple.searchParams.get('daddr')).toBe('24.228,120.582');
 });
 
 it('rejects non-finite host DOMRect coordinates before first WebGL allocation and during scene restore', async () => {
@@ -1245,7 +1068,7 @@ it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'callback'] 
 
       const notify = (isIntersecting: boolean, time: number) => act(() =>
         intersection?.([observerEntry(host, isIntersecting, undefined, time)], {} as IntersectionObserver));
-      viewport.height = 110;
+      viewport.height = mode === 'negative' ? 0 : 110;
       act(() => viewport.dispatchEvent(new Event('resize')));
       expect(scene.setActive).toHaveBeenLastCalledWith(false);
       if (mode === 'negative') notify(false, 1);
@@ -1255,9 +1078,8 @@ it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'callback'] 
 
       if (mode === 'negative') {
         notify(false, 2);
-        fireEvent.scroll(dialog);
         expect(scene.setActive).toHaveBeenLastCalledWith(false);
-        notify(true, 3);
+        fireEvent.scroll(dialog);
         expect(scene.setActive).toHaveBeenLastCalledWith(true);
       }
       // The host is still inside the window, but has scrolled above the dialog.
@@ -1300,7 +1122,7 @@ it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'callback'] 
 );
 
 it.each(['location update', 'public outlines'] as const)(
-  'waits for a fresh observer after manual startup, offscreen notification and %s',
+  'waits for confirmed visibility after manual startup, offscreen notification and %s',
   async (update) => {
     const observe = vi.fn();
     vi.stubGlobal('IntersectionObserver', class {
@@ -1343,12 +1165,9 @@ it.each(['location update', 'public outlines'] as const)(
     expect(scene.create).toHaveBeenCalledTimes(1);
 
     vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 320, 180));
-    await act(async () => {
-      previousObserver?.([observerEntry(graphics, true, undefined, 1)], {} as IntersectionObserver);
-      fireEvent(window, new Event('resize'));
-    });
+    await act(async () => previousObserver?.([observerEntry(graphics, true, undefined, 1)], {} as IntersectionObserver));
     expect(scene.create).toHaveBeenCalledTimes(1);
-    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    fireEvent(window, new Event('resize'));
     await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
     expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(update === 'public outlines' ? buildings : []);
   },
@@ -2125,6 +1944,10 @@ it('resumes existing Safari 3D on foreground visibilitychange without pageshow o
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
     Object.defineProperty(document, 'hidden', { configurable: true, value: true });
     fireEvent(document, new Event('visibilitychange'));
+    act(() => intersection?.([observerEntry(graphics, false, undefined, 1)], {} as IntersectionObserver));
+    await act(async () => { document.documentElement.dataset.reducedMotion = 'true'; });
+    expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ motion: false }));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
     viewport.height = window.innerHeight;
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
     // A tab return does not necessarily trigger bfcache pageshow.
@@ -2455,94 +2278,58 @@ it('resumes an existing Safari 3D scene on pageshow after invalid VisualViewport
   }
 });
 
-it('cancels pending first WebGL startup if a newer observer record says the map is offscreen', async () => {
-  const viewport = Object.assign(new EventTarget(), {
-    width: window.innerWidth, height: Number.NaN, offsetLeft: 0, offsetTop: 0,
-  });
-  vi.stubGlobal('visualViewport', viewport);
-  render(<CampusSpatialExplorer school="other-school" locations={places}
-    selected={places[0]} onSelect={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
-  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
-  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
-  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
-    x: 0, y: 40, left: 0, top: 40, right: 320, bottom: 220,
-    width: 320, height: 180, toJSON: () => ({}),
-  } as DOMRect);
-  try {
-    expect(scene.create).not.toHaveBeenCalled();
-    // A later negative observer entry invalidates the pending initial permit,
-    // even if the host's layout rectangle appears on screen.
-    act(() => intersection?.([{
-      target: graphics, time: 20, isIntersecting: false,
-      intersectionRect: { width: 0, height: 0 },
-    }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
-    viewport.height = window.innerHeight;
-    act(() => viewport.dispatchEvent(new Event('resize')));
-    expect(scene.create).not.toHaveBeenCalled();
-    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-    // A fresh positive observer record remains required after that denial.
-    act(() => intersection?.([{
-      target: graphics, time: 21, isIntersecting: true,
-      intersectionRect: { width: 320, height: 180 },
-    }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
-    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
-    expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  } finally {
-    bounds.mockRestore();
-  }
-});
+it.each(['first startup', 'running scene'] as const)(
+  'recovers %s after a zero-height viewport and a negative observer entry',
+  async (phase) => {
+    const viewport = Object.assign(new EventTarget(), {
+      width: window.innerWidth, height: phase === 'first startup' ? 0 : window.innerHeight,
+      offsetLeft: 0, offsetTop: 0,
+    });
+    vi.stubGlobal('visualViewport', viewport);
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog');
+    const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    let top = 40;
+    vi.spyOn(host, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, top, 320, 180));
+    const notify = (visible: boolean, time: number) => act(() =>
+      intersection?.([observerEntry(host, visible, undefined, time)], {} as IntersectionObserver));
+    const resize = () => act(() => viewport.dispatchEvent(new Event('resize')));
+    if (phase === 'running scene') {
+      await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+      viewport.height = 0;
+      resize();
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    }
+    notify(false, 20);
+    resize();
+    expect(scene.create).toHaveBeenCalledTimes(phase === 'first startup' ? 0 : 1);
 
-it('does not resume WebGL after a newer offscreen observer cancels viewport recovery', async () => {
-  // An invalid Safari viewport can pause a scene before the observer reports
-  // that the host has moved offscreen. Once the *newer* negative entry
-  // arrives, a viewport resize alone must not override that observation.
-  const viewport = Object.assign(new EventTarget(), {
-    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
-  });
-  vi.stubGlobal('visualViewport', viewport);
-  render(<CampusSpatialExplorer school="other-school" locations={places}
-    selected={places[0]} onSelect={vi.fn()} />);
-  const dialog = await open();
-  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
-  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
-    x: 0, y: 20, left: 0, top: 20,
-    right: 320, bottom: 200, width: 320, height: 180,
-    toJSON: () => ({}),
-  } as DOMRect);
-  try {
-    viewport.height = 0;
-    act(() => viewport.dispatchEvent(new Event('resize')));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
-
-    act(() => intersection?.([{
-      target: graphics, time: 300, isIntersecting: false,
-      intersectionRect: { width: 0, height: 0 },
-    }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
-    // The geometry is measurable again, but the *latest observer* explicitly
-    // revoked visibility. There is no new affirmative observer evidence.
+    // Valid dimensions alone are insufficient while the host remains offscreen.
+    top = window.innerHeight + 10;
     viewport.height = window.innerHeight;
-    act(() => viewport.dispatchEvent(new Event('resize')));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    resize();
+    expect(scene.create).toHaveBeenCalledTimes(phase === 'first startup' ? 0 : 1);
+    expect(scene.setActive).not.toHaveBeenLastCalledWith(true);
+
+    top = 40;
+    resize();
+    await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
     expect(scene.create).toHaveBeenCalledTimes(1);
-    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
-    act(() => intersection?.([{
-      target: graphics, time: 301, isIntersecting: true,
-      intersectionRect: { width: 320, height: 180 },
-    }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
+    notify(false, 21);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    notify(true, 22);
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     expect(scene.create).toHaveBeenCalledTimes(1);
+
     fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
     scene.setActive.mockClear();
-    act(() => viewport.dispatchEvent(new Event('resize')));
+    resize();
     expect(scene.setActive).not.toHaveBeenCalled();
-  } finally {
-    bounds.mockRestore();
-  }
-});
+  },
+);
 
 it('pauses a ready mobile WebGL scene when viewport resize moves the host offscreen', async () => {
   // Rotating the device or showing the soft keyboard can change viewport
