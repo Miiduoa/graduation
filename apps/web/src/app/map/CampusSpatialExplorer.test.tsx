@@ -1027,6 +1027,48 @@ it('keeps Save-Data browsers marker-only until explicit 3D consent, including af
   }
 });
 
+it('does not transfer optional Providence OSM geometry in Save-Data before explicit 3D consent', async () => {
+  const previousConnection = Object.getOwnPropertyDescriptor(navigator, 'connection');
+  Object.defineProperty(navigator, 'connection', {
+    configurable: true, value: { saveData: true },
+  });
+  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
+    headers: { 'Content-Type': 'application/json' },
+  }));
+  vi.stubGlobal('fetch', fetchMock);
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    let dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    expect(await within(dialog).findByText(/省流量模式已暫停下載靜宜建築輪廓/)).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' })).toBeTruthy();
+    fireEvent(window, new Event('pageshow'));
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '仍要開啟立體畫面' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledWith('/api/public/campus-footprints',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(await within(dialog).findByText('1 棟公開建築輪廓')).toBeTruthy();
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    expect(await within(dialog).findByText(/省流量模式已暫停下載靜宜建築輪廓/)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: '仍要開啟立體畫面' })).toBeTruthy();
+  } finally {
+    if (previousConnection) Object.defineProperty(navigator, 'connection', previousConnection);
+    else Reflect.deleteProperty(navigator, 'connection');
+  }
+});
+
 it('lets a student manually start 3D if a WebView never reports canvas visibility', async () => {
   // The API exists and observe() succeeds, but the WebView never invokes its
   // callback. Avoid an infinite offscreen wait without eagerly allocating GPU.

@@ -944,6 +944,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
       providencePlaceSourceUrl(school, point.location) !== null).length
     : 0;
   const hasOutlineCandidate = auditedWayCandidateCount > 0;
+  // A student's explicit 3D start also authorizes its optional OSM transfer.
+  // Save-Data must defer BOTH WebGL and the parent dialog's network request.
+  const deferOutlinesForSaveData = typeof navigator !== 'undefined' &&
+    (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true &&
+    manualStart === 0;
   // Capture the inherited destination when the dialog opens. MapClient may
   // resolve the same selected ID to a different location after a source update.
   const [selection, setSelection] = useState<{ id: string; identity: string; inherited?: boolean } | 'revoked' | null>(() =>
@@ -1236,6 +1241,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
       setFootprintStatus('unavailable');
       return;
     }
+    if (deferOutlinesForSaveData) {
+      // Leave the verified POI and external walking links usable without
+      // downloading optional whole-campus geometry on metered connections.
+      // Reopening the dialog resets consent; manualStart changes this gate.
+      setFootprintStatus((current) => current === 'ready' ? current : 'deferred');
+      return;
+    }
     if (restoredCooldownRef.current) {
       // A resumed or hidden dialog must not bypass the previous failed request.
       if (footprintRetryAfter !== null || footprintAttempt === 0) {
@@ -1500,7 +1512,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
       document.removeEventListener('visibilitychange', onVisibilityChange);
       controller.abort();
     };
-  }, [school, model.unavailableReason, hasOutlineCandidate, footprintAttempt]);
+  }, [school, model.unavailableReason, hasOutlineCandidate, footprintAttempt, deferOutlinesForSaveData]);
 
   // Replace the spatial modal so there is only one focus trap and graphics context.
   // The key prevents a late local-file read from crossing a school/building boundary.
@@ -1559,7 +1571,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
             {school === 'pu' && (
               <div className={styles.footprintInfo}>
                 {hasOutlineCandidate && footprintStatus === 'loading' && <span role="status">正在讀取靜宜建築輪廓；地點標記仍可操作。</span>}
-                {hasOutlineCandidate && footprintStatus === 'deferred' && <span role="status">目前位於背景分頁，返回導覽後才會讀取靜宜建築輪廓；地點標記與導航仍可使用。</span>}
+                {hasOutlineCandidate && footprintStatus === 'deferred' && <span role="status">
+                  {deferOutlinesForSaveData
+                    ? '省流量模式已暫停下載靜宜建築輪廓；選擇「仍要開啟立體畫面」後才會讀取。地點標記與導航仍可使用。'
+                    : '目前位於背景分頁，返回導覽後才會讀取靜宜建築輪廓；地點標記與導航仍可使用。'}
+                </span>}
                 {!hasOutlineCandidate && <span role="status">
                   目前篩選的地點沒有已核對的 OSM 建築輪廓候選來源，不下載整座校園的建築資料；地點標記與步行導航仍可使用。
                 </span>}
