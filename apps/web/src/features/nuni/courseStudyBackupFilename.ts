@@ -1,5 +1,3 @@
-import { hasVisibleStudyContent } from './courseStudySession';
-
 /**
  * A visible local filename stem shared by note TXT, reading JSON and practice
  * JSON exports. Do not leak invisible format controls into mobile file lists.
@@ -122,5 +120,5 @@ export function courseStudyBackupFilenameStem(sourceTitle: string): string {
   // but a title made ONLY of default-ignorable characters would leave a
   // seemingly blank filename in iOS Files and Android Downloads.
   // Retain visible source spelling; change only the local export filename.
-  return hasVisibleStudyContent(stem) ? stem : '讀書白板';
+  return /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800\ufff9-\ufffb]/u.test(stem) ? stem : '讀書白板';
 }

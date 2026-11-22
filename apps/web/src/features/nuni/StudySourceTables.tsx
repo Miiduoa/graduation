@@ -4,19 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { extractStudySourceTables, type StudySourceTable } from './studySourceTables';
 import styles from './CourseStudyPanel.module.css';
 
-
-export type StudySourceLocation = {
-  lineOffset: number;
-  passageNumber: number;
-  startsOnLine: boolean;
-  endsOnLine: boolean;
-};
-
-const standaloneLocation: StudySourceLocation = {
-  lineOffset: 0, passageNumber: 1, startsOnLine: true, endsOnLine: true,
-};
-
-type SourceValueRow = { label: string; original: string; amount: number; sourceLine: number };
+type SourceValueRow = { label: string; original: string; amount: number; rowIndex: number };
 
 // A mobile WebView can leave clipboard.writeText() unresolved indefinitely.
 // After this limit, restore a clear manual-copy route without changing the source.
@@ -140,7 +128,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
     const amount = Number(creditMatch?.[1] ?? original);
     if (!Number.isFinite(amount)) return null;
     labels.add(label.trim());
-    rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
+    rows.push({ label, original, amount, rowIndex });
   }
   return rows.some((row) => row.amount > 0) ? rows : null;
 }
@@ -162,7 +150,7 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
     const amount = Number(original.slice(0, -1));
     if (!Number.isFinite(amount) || amount > 100) return null;
     labels.add(label.trim());
-    rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
+    rows.push({ label, original, amount, rowIndex });
   }
   return rows;
 }
@@ -183,18 +171,18 @@ function StudySourcePercentComparison({ table, onJumpToSource }: {
       </p>
       <ul className={styles.sourceValueList} aria-label={table.headers[1] + ' 原文百分比'}>
         {rows.map((row) => (
-          <li key={row.sourceLine}>
+          <li key={row.rowIndex}>
             <div className={styles.sourceValueRow}>
               <span>{row.label}</span>
               <span>{row.original}</span>
             </div>
             <button type="button" className={styles.sourceLineJump}
-              id={`${sourceDescriptionPrefix}-row-${row.sourceLine}`}
-              onClick={(event) => onJumpToSource(row.sourceLine - table.startLine - 2, event.currentTarget)}>
-              原文第 {row.sourceLine} 行 · 回表格核對
+              id={`${sourceDescriptionPrefix}-row-${row.rowIndex}`}
+              onClick={(event) => onJumpToSource(row.rowIndex, event.currentTarget)}>
+              {row.label} · 回表格核對
             </button>
             <meter min={0} max={100} value={row.amount}
-              aria-describedby={`${sourceDescriptionPrefix}-row-${row.sourceLine}`}
+              aria-describedby={`${sourceDescriptionPrefix}-row-${row.rowIndex}`}
               aria-label={row.label + '：' + row.original}
               aria-valuetext={row.original + '；滿格 100%'} />
           </li>
@@ -223,18 +211,18 @@ function StudySourceValueComparison({ table, onJumpToSource }: {
       </p>
       <ul className={styles.sourceValueList} aria-label={table.headers[1] + ' 原文數值比較'}>
         {rows.map((row) => (
-          <li key={row.sourceLine}>
+          <li key={row.rowIndex}>
             <div className={styles.sourceValueRow}>
               <span>{row.label}</span>
               <span>{row.original}</span>
             </div>
             <button type="button" className={styles.sourceLineJump}
-              id={`${sourceDescriptionPrefix}-row-${row.sourceLine}`}
-              onClick={(event) => onJumpToSource(row.sourceLine - table.startLine - 2, event.currentTarget)}>
-              原文第 {row.sourceLine} 行 · 回表格核對
+              id={`${sourceDescriptionPrefix}-row-${row.rowIndex}`}
+              onClick={(event) => onJumpToSource(row.rowIndex, event.currentTarget)}>
+              {row.label} · 回表格核對
             </button>
             <meter min={0} max={max} value={row.amount}
-              aria-describedby={`${sourceDescriptionPrefix}-row-${row.sourceLine}`}
+              aria-describedby={`${sourceDescriptionPrefix}-row-${row.rowIndex}`}
               aria-label={row.label + '：' + row.original}
               aria-valuetext={row.original + '；本欄最大值 ' + maxRow.original} />
           </li>
@@ -303,35 +291,14 @@ function selectOriginalTableText(field: HTMLTextAreaElement | null): boolean {
 }
 
 /** Keep per-table selection local and reset it when the authorized source changes. */
-function StudySourceSelection({ table, index, sourceLines, sourceLocation }: {
+function StudySourceSelection({ table, index, sourceLines }: {
   table: StudySourceTable;
   index: number;
   sourceLines: OriginalSourceLine[];
-  sourceLocation: StudySourceLocation | null;
 }) {
   const [rowIndex, setRowIndex] = useState(-1);
   const [includeHeader, setIncludeHeader] = useState(false);
-  const [includeSourceCitation, setIncludeSourceCitation] = useState(false);
-  // Keep original excerpt bytes separate from optional, visibly marked metadata.
-  // Neither the Markdown source nor its cell order is ever rewritten.
-  const canCite = sourceLocation !== null &&
-    (sourceLocation.startsOnLine || table.startLine > 1) &&
-    (sourceLocation.endsOnLine || table.startLine + table.rows.length + 1 < sourceLines.length);
-  const headerLine = table.startLine + (sourceLocation?.lineOffset ?? 0);
-  const originalRowLine = headerLine + rowIndex + 2;
-  const originalExcerpt = tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex, includeHeader);
-  const citation = rowIndex < 0
-    ? `教材原文第 ${headerLine} 至 ${headerLine + table.rows.length + 1} 行`
-    : !includeHeader
-      ? `教材原文第 ${originalRowLine} 行`
-      : rowIndex === 0
-        ? `教材原文第 ${headerLine} 至 ${originalRowLine} 行`
-        : `教材原文第 ${headerLine}、${headerLine + 1}、${originalRowLine} 行（非連續）`;
-  const citationNewline = sourceLines[table.startLine - 1]?.separator || '\n';
-  // The selectable fallback, clipboard and TXT must use identical payloads.
-  const selectedSource = canCite && includeSourceCitation
-    ? `[第 ${sourceLocation.passageNumber} 段 · ${citation}]${citationNewline}${originalExcerpt}`
-    : originalExcerpt;
+  const selectedSource = tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex, includeHeader);
   const [copyFeedback, setCopyFeedback] = useState('');
   const originalText = useRef<HTMLTextAreaElement>(null);
   const copyRequest = useRef(0);
@@ -349,7 +316,6 @@ function StudySourceSelection({ table, index, sourceLines, sourceLocation }: {
     invalidateCopy();
     setRowIndex(-1);
     setIncludeHeader(false);
-    setIncludeSourceCitation(false);
     setCopyFeedback('');
   }, [sourceLines, invalidateCopy]);
   useEffect(() => () => { invalidateCopy(); }, [invalidateCopy]);
@@ -455,21 +421,19 @@ function StudySourceSelection({ table, index, sourceLines, sourceLocation }: {
     }
   };
 
-  // Tell screen readers exactly which original lines an excerpt covers.
-  // A single row with its header skips intervening lesson rows.
   const selectionAnnouncement = rowIndex < 0
-    ? `目前選取整張表格：原文第 ${table.startLine} 至 ${table.startLine + table.rows.length + 1} 行，包含欄名、分隔列與全部資料列。`
+    ? `目前選取整張表格：包含欄名、分隔列與全部資料列。`
     : includeHeader
-      ? `目前選取第 ${rowIndex + 1} 列：原文第 ${table.startLine}、${table.startLine + 1} 行欄名與分隔列，以及第 ${originalRowLine} 行資料列；不包含其他資料列。`
-      : `目前只選取第 ${rowIndex + 1} 列：原文第 ${originalRowLine} 行資料列，未包含欄名與分隔列。`;
+      ? `目前選取第 ${rowIndex + 1} 列：包含欄名、分隔列與所選資料列；不包含其他資料列。`
+      : `目前只選取第 ${rowIndex + 1} 列：未包含欄名與分隔列。`;
 
   return (
     <details className={styles.sourceTableSelection}>
       <summary>選取第 {index + 1} 張表格的原文（可複製）</summary>
       <p className={styles.note}>
         可選整張表格或單一資料列的原始 Markdown 行，不重新編造欄位內容。
-        單列預設不包含欄名；可勾選附上原始欄名及分隔列，或在摘錄開頭另加教材行號註記。
-        行號註記不屬於教材原文，未勾選時逐字不變；若瀏覽器阻擋剪貼簿權限，仍可長按或鍵盤選取下方文字。
+        單列預設不包含欄名；可勾選附上原始欄名及分隔列。
+        若瀏覽器阻擋剪貼簿權限，仍可長按或鍵盤選取下方文字。
       </p>
       <label>
         原文範圍
@@ -501,14 +465,6 @@ function StudySourceSelection({ table, index, sourceLines, sourceLocation }: {
           連同原文欄名與分隔列
         </label>
       )}
-      {canCite && <label>
-        <input type="checkbox" checked={includeSourceCitation} onChange={(event) => {
-          invalidateCopy();
-          setCopyFeedback('');
-          setIncludeSourceCitation(event.target.checked);
-        }} />
-        摘錄開頭加上教材原文行號（註記非原文）
-      </label>}
       <p className={styles.note} aria-live="polite" aria-atomic="true">
         {selectionAnnouncement}
       </p>
@@ -546,17 +502,13 @@ function StudySourceSelection({ table, index, sourceLines, sourceLocation }: {
 }
 
 /** Optional accessible table layout derived solely from the exact source text. */
-export function StudySourceTables({ text, sourceLocation = standaloneLocation }: {
-  text: string;
-  sourceLocation?: StudySourceLocation | null;
-}) {
+export function StudySourceTables({ text }: { text: string }) {
   const tables = useMemo(() => extractStudySourceTables(text), [text]);
   const sourceLines = useMemo(() => splitOriginalSourceLines(text), [text]);
   const sourceRowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const [returnTarget, setReturnTarget] = useState<{
     sourceLines: OriginalSourceLine[];
     startLine: number;
-    rowIndex: number;
     origin: HTMLButtonElement;
   } | null>(null);
   // A replaced lesson must never retain the previous chart's DOM button or text.
@@ -566,7 +518,7 @@ export function StudySourceTables({ text, sourceLocation = standaloneLocation }:
   const jumpToSource = (startLine: number, rowIndex: number, origin: HTMLButtonElement) => {
     const row = sourceRowRefs.current.get(`${startLine}:${rowIndex}`);
     if (!row) return;
-    setReturnTarget({ sourceLines, startLine, rowIndex, origin });
+    setReturnTarget({ sourceLines, startLine, origin });
     try { row.focus(); } catch { /* Try a focusable source cell below. */ }
     if (document.activeElement !== row && !row.contains(document.activeElement)) {
       try { row.querySelector<HTMLElement>('th, td')?.focus(); }
@@ -639,11 +591,10 @@ export function StudySourceTables({ text, sourceLocation = standaloneLocation }:
           </table>
           {returnTarget?.sourceLines === sourceLines && returnTarget.startLine === table.startLine && (
             <button type="button" className={styles.sourceLineJump} onClick={returnToChart}>
-              返回原文第 {table.startLine + 2 + returnTarget.rowIndex} 行的圖表
+              返回圖表
             </button>
           )}
-          <StudySourceSelection table={table} index={index} sourceLines={sourceLines}
-            sourceLocation={sourceLocation} />
+          <StudySourceSelection table={table} index={index} sourceLines={sourceLines} />
           <StudySourceValueComparison table={table}
             onJumpToSource={(rowIndex, origin) => jumpToSource(table.startLine, rowIndex, origin)} />
           <StudySourcePercentComparison table={table}

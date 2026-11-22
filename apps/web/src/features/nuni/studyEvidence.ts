@@ -1,7 +1,3 @@
-export function hasVisibleStudyContent(text: string): boolean {
-  return /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800\ufff9-\ufffb]/u.test(text);
-}
-
 /**
  * Highlight the exact quoted span of the *current* passage. Locating a quote
  * only proves character overlap, never the correctness of a model explanation.

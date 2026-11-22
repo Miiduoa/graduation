@@ -2173,36 +2173,6 @@ it.each([
 });
 
 
-it('shows the exact authorized source line beside each derived bar and updates it on lesson replacement', () => {
-  const numeric = [
-    '教材說明：這些數字均來自下表。',
-    '',
-    '| 課程 | 學分 |',
-    '| --- | --- |',
-    '| 資料庫 | 3 |',
-    '| 網路 | 2 |',
-  ].join('\n');
-  const view = render(<StudySourceTables text={numeric} />);
-  const valueMeters = Array.from(view.container.querySelectorAll('meter'));
-  expect(valueMeters).toHaveLength(2);
-  expect(valueMeters[0].closest('li')?.textContent).toContain('資料庫3原文第 5 行');
-  expect(valueMeters[1].closest('li')?.textContent).toContain('網路2原文第 6 行');
-
-  const percentages = [
-    '另一份教材',
-    '| 課程 | 完成率 |',
-    '| --- | --- |',
-    '| 資料庫 | 75% |',
-    '| 網路 | 50% |',
-  ].join('\n');
-  view.rerender(<StudySourceTables text={percentages} />);
-  const percentMeters = Array.from(view.container.querySelectorAll('meter'));
-  expect(percentMeters).toHaveLength(2);
-  expect(percentMeters[0].closest('li')?.textContent).toContain('資料庫75%原文第 4 行');
-  expect(percentMeters[1].closest('li')?.textContent).toContain('網路50%原文第 5 行');
-  expect(screen.queryByText('原文第 6 行')).toBeNull();
-});
-
 it('returns from numeric and percentage bars to the exact original row with keyboard focus', () => {
   const numeric = [
     '教材段落', '| 課程 | 學分 |', '| --- | --- |',
@@ -2217,9 +2187,9 @@ it('returns from numeric and percentage bars to the exact original row with keyb
   };
   const originalRows = () => Array.from(view.container.querySelectorAll('tbody tr'));
   const sourceBefore = originalRows().map((row) => row.textContent);
-  fireEvent.click(jump('原文第 4 行 · 回表格核對'));
+  fireEvent.click(jump('資料庫 · 回表格核對'));
   expect(document.activeElement).toBe(originalRows()[0]);
-  fireEvent.click(jump('原文第 5 行 · 回表格核對'));
+  fireEvent.click(jump('網路 · 回表格核對'));
   expect(document.activeElement).toBe(originalRows()[1]);
   expect(originalRows().map((row) => row.textContent)).toEqual(sourceBefore);
 
@@ -2228,7 +2198,7 @@ it('returns from numeric and percentage bars to the exact original row with keyb
     '| 新資料 | 80% |', '| 新網路 | 50% |',
   ].join('\n');
   view.rerender(<StudySourceTables text={percentages} />);
-  fireEvent.click(jump('原文第 6 行 · 回表格核對'));
+  fireEvent.click(jump('新網路 · 回表格核對'));
   expect(document.activeElement).toBe(originalRows()[1]);
   expect(document.activeElement?.textContent).toContain('新網路50%');
   expect(view.container.textContent).not.toContain('資料庫');
@@ -2243,17 +2213,17 @@ it('returns keyboard focus to the exact comparison button after inspecting a sou
   ].join('\n');
   const view = render(<StudySourceTables text={material} />);
   fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
-  const jump = screen.getByRole('button', { name: '原文第 4 行 · 回表格核對' });
+  const jump = screen.getByRole('button', { name: '資料庫 · 回表格核對' });
   const firstRow = view.container.querySelector('tbody tr');
   expect(firstRow).not.toBeNull();
   fireEvent.click(jump);
   expect(document.activeElement).toBe(firstRow);
-  const back = screen.getByRole('button', { name: '返回原文第 4 行的圖表' });
+  const back = screen.getByRole('button', { name: '返回圖表' });
   if (!firstRow) throw new Error('Expected a source row for chart focus navigation');
   expect(firstRow.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   fireEvent.click(back);
   expect(document.activeElement).toBe(jump);
-  expect(screen.queryByRole('button', { name: '返回原文第 4 行的圖表' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '返回圖表' })).toBeNull();
 });
 
 it('falls back to the first source cell when a mobile WebView cannot focus a table row', () => {
@@ -2267,12 +2237,12 @@ it('falls back to the first source cell when a mobile WebView cannot focus a tab
   if (!firstRow) return;
   Object.defineProperty(firstRow, 'focus', { configurable: true, value: () => {} });
   fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
-  fireEvent.click(screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' }));
+  fireEvent.click(screen.getByRole('button', { name: '資料庫 · 回表格核對' }));
   const firstCell = firstRow.querySelector('th');
   expect(firstCell?.tabIndex).toBe(-1);
   expect(document.activeElement).toBe(firstCell);
-  fireEvent.click(screen.getByRole('button', { name: '返回原文第 3 行的圖表' }));
-  expect(document.activeElement?.textContent).toContain('原文第 3 行 · 回表格核對');
+  fireEvent.click(screen.getByRole('button', { name: '返回圖表' }));
+  expect(document.activeElement?.textContent).toContain('資料庫 · 回表格核對');
 });
 
 it('focuses the original table region when a WebView silently ignores row and cell focus', () => {
@@ -2288,12 +2258,12 @@ it('focuses the original table region when a WebView silently ignores row and ce
   Object.defineProperty(sourceRow, 'focus', { configurable: true, value: () => {} });
   Object.defineProperty(sourceCell, 'focus', { configurable: true, value: () => {} });
   fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
-  const jump = screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' });
+  const jump = screen.getByRole('button', { name: '資料庫 · 回表格核對' });
   fireEvent.click(jump);
   expect(document.activeElement).toBe(region);
   expect(region.getAttribute('aria-label')).toContain('原文表格 1');
   expect(sourceRow.textContent).toBe('資料庫3');
-  fireEvent.click(screen.getByRole('button', { name: '返回原文第 3 行的圖表' }));
+  fireEvent.click(screen.getByRole('button', { name: '返回圖表' }));
   expect(document.activeElement).toBe(jump);
 });
 
@@ -2314,11 +2284,11 @@ it('keeps the source and return action when row, cell and region focus all fail'
     });
   }
   fireEvent.click(screen.getByText('展開第 2 欄「完成率」的原文百分比（100% 滿格）'));
-  const jump = screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' });
+  const jump = screen.getByRole('button', { name: '資料庫 · 回表格核對' });
   expect(() => fireEvent.click(jump)).not.toThrow();
   expect(sourceRow.textContent).toBe('資料庫75%');
-  expect(screen.getByRole('button', { name: '返回原文第 3 行的圖表' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '返回原文第 3 行的圖表' }));
+  expect(screen.getByRole('button', { name: '返回圖表' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '返回圖表' }));
   expect(document.activeElement).toBe(jump);
 });
 
@@ -2333,16 +2303,16 @@ it('reopens a collapsed comparison to return from its exact authorized source ro
   expect(disclosure).not.toBeNull();
   if (!disclosure) throw new Error('Expected a comparison disclosure');
   disclosure.open = true;
-  const jump = screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' });
+  const jump = screen.getByRole('button', { name: '資料庫 · 回表格核對' });
   fireEvent.click(jump);
   const sourceRow = view.container.querySelector('tbody tr');
   expect(document.activeElement).toBe(sourceRow);
   // The user may close this disclosure while studying the original row.
   disclosure.open = false;
-  fireEvent.click(screen.getByRole('button', { name: '返回原文第 3 行的圖表' }));
+  fireEvent.click(screen.getByRole('button', { name: '返回圖表' }));
   expect(disclosure.open).toBe(true);
   expect(document.activeElement).toBe(jump);
-  expect(screen.queryByRole('button', { name: '返回原文第 3 行的圖表' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '返回圖表' })).toBeNull();
   expect(sourceRow?.textContent).toBe('資料庫3');
 });
 
@@ -2358,12 +2328,12 @@ it('falls back to a comparison summary when a WebView rejects chart button focus
   if (!disclosure) throw new Error('Expected a percentage disclosure');
   disclosure.open = true;
   summary.setAttribute('tabindex', '0');
-  const jump = screen.getByRole('button', { name: '原文第 4 行 · 回表格核對' });
+  const jump = screen.getByRole('button', { name: '網路 · 回表格核對' });
   fireEvent.click(jump);
   expect(document.activeElement).toBe(view.container.querySelectorAll('tbody tr')[1]);
   Object.defineProperty(jump, 'focus', { configurable: true, value: () => { throw new Error('WebView focus refused'); } });
   disclosure.open = false;
-  fireEvent.click(screen.getByRole('button', { name: '返回原文第 4 行的圖表' }));
+  fireEvent.click(screen.getByRole('button', { name: '返回圖表' }));
   expect(disclosure.open).toBe(true);
   expect(document.activeElement).toBe(summary);
   expect(view.container.querySelectorAll('tbody tr')[1]?.textContent).toBe('網路50%');
@@ -2379,11 +2349,11 @@ it('retains the return control when a WebView refuses both chart and summary foc
   const disclosure = summary.closest('details');
   if (!disclosure) throw new Error('Expected comparison disclosure');
   disclosure.open = true;
-  const jump = screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' });
+  const jump = screen.getByRole('button', { name: '資料庫 · 回表格核對' });
   fireEvent.click(jump);
   const sourceRow = view.container.querySelector('tbody tr');
   expect(document.activeElement).toBe(sourceRow);
-  const back = screen.getByRole('button', { name: '返回原文第 3 行的圖表' });
+  const back = screen.getByRole('button', { name: '返回圖表' });
   Object.defineProperty(jump, 'focus', { configurable: true, value: () => { throw new Error('chart focus blocked'); } });
   Object.defineProperty(summary, 'focus', { configurable: true, value: () => { throw new Error('summary focus blocked'); } });
   const scrollChart = vi.fn();
@@ -2398,14 +2368,14 @@ it('retains the return control when a WebView refuses both chart and summary foc
   expect(document.activeElement).toBe(sourceRow);
   // The student must not lose the only working return action after the focus
   // attempt fails. Native keyboard navigation can still reach this button.
-  expect(screen.getByRole('button', { name: '返回原文第 3 行的圖表' })).toBe(back);
+  expect(screen.getByRole('button', { name: '返回圖表' })).toBe(back);
   expect(view.container.querySelector('tbody tr')?.textContent).toBe('資料庫3');
   Reflect.deleteProperty(jump, 'focus');
   Reflect.deleteProperty(summary, 'focus');
   fireEvent.click(back);
   expect(document.activeElement).toBe(jump);
   expect(scrollChart).toHaveBeenCalledOnce();
-  expect(screen.queryByRole('button', { name: '返回原文第 3 行的圖表' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '返回圖表' })).toBeNull();
 });
 
 it('never shows a stale return-to-chart control after the authorized source changes', () => {
@@ -2419,14 +2389,14 @@ it('never shows a stale return-to-chart control after the authorized source chan
   ].join('\n');
   const view = render(<StudySourceTables text={oldMaterial} />);
   fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
-  fireEvent.click(screen.getByRole('button', { name: '原文第 3 行 · 回表格核對' }));
-  expect(screen.getByRole('button', { name: '返回原文第 3 行的圖表' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '舊課程一 · 回表格核對' }));
+  expect(screen.getByRole('button', { name: '返回圖表' })).toBeTruthy();
   view.rerender(<StudySourceTables text={newMaterial} />);
-  expect(screen.queryByRole('button', { name: /返回原文第 .* 行的圖表/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: '返回圖表' })).toBeNull();
   fireEvent.click(screen.getByText('展開第 2 欄「學分」的原文數值比較'));
-  fireEvent.click(screen.getByRole('button', { name: '原文第 4 行 · 回表格核對' }));
+  fireEvent.click(screen.getByRole('button', { name: '新課程一 · 回表格核對' }));
   expect(document.activeElement?.textContent).toContain('新課程一4');
-  expect(screen.getByRole('button', { name: '返回原文第 4 行的圖表' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '返回圖表' })).toBeTruthy();
 });
 
 it.each([
@@ -2654,7 +2624,7 @@ it('still allows charts for readable RTL names, ordinary Chinese and complete em
 });
 
 
-it('announces exact original lines for full-table, chosen row, and row plus headers', () => {
+it('announces the selected scope without source line numbers for full-table, chosen row, and row plus headers', () => {
   const lesson = [
     '前言', '| 科目 | 學分 |', '| --- | --- |',
     '| 資料庫 | 3 |', '| 網路 | 2 |', '後記',
@@ -2663,18 +2633,18 @@ it('announces exact original lines for full-table, chosen row, and row plus head
   fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
   const message = view.container.querySelector('[aria-live="polite"][aria-atomic="true"]');
   expect(message?.textContent?.trim()).toBe(
-    '目前選取整張表格：原文第 2 至 5 行，包含欄名、分隔列與全部資料列。',
+    '目前選取整張表格：包含欄名、分隔列與全部資料列。',
   );
   fireEvent.change(screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }),
     { target: { value: '1' } });
   expect(message?.textContent?.trim()).toBe(
-    '目前只選取第 2 列：原文第 5 行資料列，未包含欄名與分隔列。',
+    '目前只選取第 2 列：未包含欄名與分隔列。',
   );
   const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
   expect(field.value).toBe('| 網路 | 2 |');
   fireEvent.click(screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }));
   expect(message?.textContent?.trim()).toBe(
-    '目前選取第 2 列：原文第 2、3 行欄名與分隔列，以及第 5 行資料列；不包含其他資料列。',
+    '目前選取第 2 列：包含欄名、分隔列與所選資料列；不包含其他資料列。',
   );
   expect(field.value).toBe(['| 科目 | 學分 |', '| --- | --- |', '| 網路 | 2 |'].join('\n'));
   expect(field.value).not.toContain('| 資料庫 | 3 |');
@@ -2684,12 +2654,12 @@ it('announces exact original lines for full-table, chosen row, and row plus head
     ['新教材', '| 科目 | 次數 |', '| --- | --- |', '| 新課 | 8 |'].join('\n')
   } />);
   expect(message?.textContent?.trim()).toBe(
-    '目前選取整張表格：原文第 2 至 4 行，包含欄名、分隔列與全部資料列。',
+    '目前選取整張表格：包含欄名、分隔列與全部資料列。',
   );
   expect(field.value).toBe(['| 科目 | 次數 |', '| --- | --- |', '| 新課 | 8 |'].join('\n'));
 });
 
-it('makes each numeric and percentage meter announce its precise original source-line action', () => {
+it('makes each numeric and percentage meter describe its corresponding source-row action', () => {
   // A screen reader jumping directly between meter controls otherwise misses
   // the provenance button, particularly for unique row labels.
   for (const [heading, first, second] of [
@@ -2712,12 +2682,12 @@ it('makes each numeric and percentage meter announce its precise original source
     for (const [index, meter] of meters.entries()) {
       const sourceButton = Array.from(view.container.querySelectorAll('button'))
         .find((button) => button.id === meter.getAttribute('aria-describedby'));
-      expect(sourceButton?.textContent?.trim()).toBe('原文第 ' + (index + 4) + ' 行 · 回表格核對');
+      expect(sourceButton?.textContent?.trim()).toBe((index === 0 ? '資料庫' : '網路') + ' · 回表格核對');
       expect(meter.getAttribute('aria-label')).toContain(index === 0 ? first : second);
     }
 
     // Rerendering a different authorized lesson must not leave accessible
-    // descriptions pointing to the previous lesson's line numbers.
+    // descriptions pointing to the previous lesson's buttons.
     view.rerender(<StudySourceTables text={[
       '新的教材前言', '第二行', '第三行',
       '| 項目 | ' + heading + ' |', '| --- | --- |',
@@ -2728,7 +2698,7 @@ it('makes each numeric and percentage meter announce its precise original source
     for (const [index, meter] of revisedMeters.entries()) {
       const sourceButton = Array.from(view.container.querySelectorAll('button'))
         .find((button) => button.id === meter.getAttribute('aria-describedby'));
-      expect(sourceButton?.textContent?.trim()).toBe('原文第 ' + (index + 6) + ' 行 · 回表格核對');
+      expect(sourceButton?.textContent?.trim()).toBe((index === 0 ? '資料庫' : '網路') + ' · 回表格核對');
       expect(meter.getAttribute('aria-describedby')).toBeTruthy();
     }
     view.unmount();
@@ -2736,7 +2706,7 @@ it('makes each numeric and percentage meter announce its precise original source
 });
 
 
-it('adds optional non-contiguous source-line evidence to copied study excerpts without unrelated rows', async () => {
+it('copies an excerpt with headers and the selected row verbatim', async () => {
   const lesson = [
     '本週課程',
     '| 課程 | 學分 |',
@@ -2752,9 +2722,7 @@ it('adds optional non-contiguous source-line evidence to copied study excerpts w
     fireEvent.change(screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }),
       { target: { value: '2' } });
     fireEvent.click(screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: '摘錄開頭加上教材原文行號（註記非原文）' }));
     const expected = [
-      '[第 1 段 · 教材原文第 2、3、6 行（非連續）]',
       '| 課程 | 學分 |',
       '| :--- | ---: |',
       '| 網路 | 1 |',
@@ -2768,31 +2736,6 @@ it('adds optional non-contiguous source-line evidence to copied study excerpts w
     view.unmount();
   });
 });
-
-it('switches citation between full table, adjacent first row and exact single row, resetting on source replacement', () => {
-  const lesson = ['| 科目 | 學分 |', '| --- | --- |', '| A | 3 |', '| B | 2 |'].join('\n');
-  const view = render(<StudySourceTables text={lesson} />);
-  fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
-  const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
-  const citation = screen.getByRole('checkbox', { name: '摘錄開頭加上教材原文行號（註記非原文）' });
-  const range = screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' });
-  expect(field.value).toBe(lesson);
-  fireEvent.click(citation);
-  expect(field.value).toBe('[第 1 段 · 教材原文第 1 至 4 行]\n' + lesson);
-  fireEvent.change(range, { target: { value: '0' } });
-  expect(field.value).toBe('[第 1 段 · 教材原文第 3 行]\n| A | 3 |');
-  fireEvent.click(screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }));
-  expect(field.value).toBe('[第 1 段 · 教材原文第 1 至 3 行]\n| 科目 | 學分 |\n| --- | --- |\n| A | 3 |');
-  fireEvent.change(range, { target: { value: '1' } });
-  expect(field.value).toBe('[第 1 段 · 教材原文第 4 行]\n| B | 2 |');
-  fireEvent.click(citation);
-  expect(field.value).toBe('| B | 2 |');
-  view.rerender(<StudySourceTables text={lesson.replace('| A | 3 |', '| C | 4 |')} />);
-  expect((screen.getByRole('checkbox', { name: '摘錄開頭加上教材原文行號（註記非原文）' }) as HTMLInputElement).checked).toBe(false);
-  expect(field.value).toContain('| C | 4 |');
-  view.unmount();
-});
-
 
 it.each([
   { header: '完成率', values: ['７５％', '２５％'] },

@@ -13,7 +13,6 @@ import {
   appendStudyLesson,
   canReviewStudyAnswer,
   hasRevealedStudyAnswer,
-  hasVisibleStudyContent,
   studyLessonHistory,
   STUDY_SESSION_LIMITS,
   updateStudyMode,
@@ -21,20 +20,19 @@ import {
   type StudyPassageMemory,
 } from './courseStudySession';
 import { StudyReadAloud } from './StudyReadAloud';
-import { StudySourceTables, type StudySourceLocation } from './StudySourceTables';
+import { StudySourceTables } from './StudySourceTables';
 import { CourseStudySteps } from './CourseStudySteps';
 import { locateStudyEvidence } from './studyEvidence';
 import styles from './CourseStudyPanel.module.css';
 
 type Props = {
   passage: StudyPassage;
-  sourceLocation?: StudySourceLocation;
   mode: StudyMode;
   memory: StudyPassageMemory;
   onChange: (update: (previous: StudyPassageMemory) => StudyPassageMemory) => void;
 };
 
-export function CourseStudyPassage({ passage, sourceLocation, mode, memory, onChange }: Props) {
+export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const [availability, setAvailability] = useState<ReturnType<typeof getStudyTutorAvailability> | null>(null);
   const [busy, setBusy] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -67,10 +65,6 @@ export function CourseStudyPassage({ passage, sourceLocation, mode, memory, onCh
   const canReviewAnswer = !!selected && canReviewStudyAnswer(selected);
   const answerRevealed = !!selected && hasRevealedStudyAnswer(selected);
   const result = selected?.response;
-  // A model can return invisible-only text. Keep student attempts and disclosure
-  // state intact, but never display an empty-looking prompt or reference answer.
-  const hasReadableCheckQuestion = !!result && hasVisibleStudyContent(result.question);
-  const hasReadableReferenceAnswer = !!result && hasVisibleStudyContent(result.answer);
   const activeStepIndex = stepSelection?.lessonId === selected?.id ? stepSelection?.index ?? 0 : 0;
   const activeStep = result?.steps?.[activeStepIndex];
   // The student can listen to the entire cited teaching sequence in one gesture.
@@ -196,7 +190,7 @@ export function CourseStudyPassage({ passage, sourceLocation, mode, memory, onCh
         {evidence ? <>{evidence.before}<mark ref={evidenceMark} tabIndex={-1}
           className={styles.evidenceHighlight}>{evidence.quote}</mark>{evidence.after}</> : passage.text}
       </blockquote>
-      <StudySourceTables text={passage.text} sourceLocation={sourceLocation ?? null} />
+      <StudySourceTables text={passage.text} />
       {!passage.text.trim() && <p className={styles.note}>這一段只有空白，可直接前往下一段。</p>}
       {result && !busy && <label className={styles.field}>朗讀內容
         <select value={narrationTarget} onChange={(event) =>
@@ -345,7 +339,7 @@ export function CourseStudyPassage({ passage, sourceLocation, mode, memory, onCh
               <p className={styles.evidenceStepHeading}>03 · 自己試答</p>
               <div className={styles.exercise}>
                 <h4>換你試試</h4>
-                <p>{hasReadableCheckQuestion ? result.question : 'AI 未提供可讀的自我檢查題。請依本段教材自行整理一個問題，再寫下你的想法。'}</p>
+                <p>{result.question}</p>
                 <label className={styles.field} htmlFor={attemptId}>先寫下你的想法
                   <textarea id={attemptId} rows={3} maxLength={STUDY_SESSION_LIMITS.attemptCharacters} value={selected.attempt}
                     onChange={(event) => {
@@ -361,9 +355,7 @@ export function CourseStudyPassage({ passage, sourceLocation, mode, memory, onCh
                   aria-expanded={answerRevealed}>
                   {answerRevealed ? '收起參考回答' : '對照參考回答'}
                 </button>
-                {answerRevealed && <p className={styles.referenceAnswer}>
-                  {hasReadableReferenceAnswer ? result.answer : 'AI 未提供可讀的參考回答。請回到本段原文核對，不要把空白內容視為已驗證答案。'}
-                </p>}
+                {answerRevealed && <p className={styles.referenceAnswer}>{result.answer}</p>}
                 <p className={styles.note}>這是自我檢查，不會自動評分，也不會影響課程成績或作業繳交狀態。</p>
               </div>
             </section>

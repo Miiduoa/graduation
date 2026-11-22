@@ -3350,32 +3350,6 @@ it.each([
   }
 });
 
-it('flags unreadable AI self-check question and revealed answer in the reading UI without losing the student attempt', async () => {
-  const invisible = '\u200d\u2066\u0301\u2800';
-  mocks.run.mockResolvedValueOnce({ ...explanation, question: invisible, answer: invisible });
-  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
-  const lesson = await screen.findByRole('region', { name: '本段 AI 講解' });
-  expect(within(lesson).getByText(/AI 未提供可讀的自我檢查題/)).toBeTruthy();
-  expect(within(lesson).queryByText(/AI 未提供可讀的參考回答/)).toBeNull();
-
-  const compare = within(lesson).getByRole('button', { name: '對照參考回答' }) as HTMLButtonElement;
-  expect(compare.disabled).toBe(true);
-  fireEvent.click(compare);
-  expect(within(lesson).queryByText(/AI 未提供可讀的參考回答/)).toBeNull();
-
-  const attempt = within(lesson).getByLabelText('先寫下你的想法') as HTMLTextAreaElement;
-  fireEvent.change(attempt, { target: { value: '每個學生學號都應不同。' } });
-  expect(compare.disabled).toBe(false);
-  fireEvent.click(compare);
-  expect(within(lesson).getByText(/AI 未提供可讀的參考回答/)).toBeTruthy();
-  expect(compare.getAttribute('aria-expanded')).toBe('true');
-  expect(attempt.value).toBe('每個學生學號都應不同。');
-  fireEvent.change(attempt, { target: { value: '我需要再核對教材。' } });
-  expect(within(lesson).queryByText(/AI 未提供可讀的參考回答/)).toBeNull();
-  expect(mocks.run).toHaveBeenCalledTimes(1);
-});
-
 it('retains readable Chinese and combined emoji AI self-check content while keeping answers hidden until disclosure', async () => {
   const question = '主鍵和👩‍💻的例子有何不同？';
   const answer = '每位學生的主鍵不可重複，e\u0301 與 👩‍💻 都能正常顯示。';

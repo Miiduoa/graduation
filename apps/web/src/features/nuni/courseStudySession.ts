@@ -1,7 +1,5 @@
 import { STUDY_TUTOR_LIMITS, type StudyMode, type StudyTutorTurn } from '@/lib/studyTutor';
 
-export { hasVisibleStudyContent } from './studyEvidence';
-
 export const STUDY_SESSION_LIMITS = {
   lessonsPerMode: 6,
   noteCharacters: 2_000,

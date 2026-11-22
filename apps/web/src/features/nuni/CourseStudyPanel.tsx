@@ -65,26 +65,6 @@ const STUDY_CLIPBOARD_CONFIRM_MS = 5000;
 // stalls, fail without replacing the existing course or unsaved notes.
 const STUDY_LOCAL_FILE_READ_TIMEOUT_MS = 30_000;
 
-// Keep the linear line-number accumulator outside React's render/useMemo scope.
-// Mutating a captured render variable in a nested map violates the React
-// Compiler immutability rule even when the offsets are otherwise correct.
-function collectStudyPassageLocations(sectionPassages: ReadonlyArray<ReturnType<typeof splitStudySection>>) {
-  let lineOffset = 0;
-  let passageNumber = 0;
-  return sectionPassages.map((parts) => parts.map((part, index) => {
-    // Keep CRLF as a single line ending, and add one boundary between sections.
-    const location = {
-      lineOffset,
-      passageNumber: ++passageNumber,
-      startsOnLine: index === 0 || /[\r\n]$/u.test(parts[index - 1].text),
-      endsOnLine: index === parts.length - 1 || /^[\r\n]/u.test(parts[index + 1].text) || /[\r\n]$/u.test(part.text),
-    };
-    lineOffset += (part.text.match(/\r\n|\r|\n/gu) ?? []).length;
-    if (index === parts.length - 1) lineOffset += 1;
-    return location;
-  }));
-}
-
 // Mobile browsers and embedded WebViews may throw SecurityError merely when
 // reading navigator.clipboard or clipboard.writeText. Fall back to a selectable
 // local snapshot instead of losing the student's export before a write starts.
@@ -398,7 +378,6 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   const replaceHeadingId = useId();
   const practiceConfirmHeadingId = useId();
   const sectionPassages = useMemo(() => source?.sections.map(splitStudySection) ?? [], [source]);
-  const passageLocations = useMemo(() => collectStudyPassageLocations(sectionPassages), [sectionPassages]);
   const section = source?.sections[sectionIndex];
   const passages = sectionPassages[sectionIndex] ?? [];
   const passage = passages[passageIndex];
@@ -1326,7 +1305,6 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
             <span>第 {passageIndex + 1} 段，共 {passages.length} 段</span><span>{section?.label}</span>
           </div>
           <CourseStudyPassage key={`${session.revision}:${passageKey}:${mode}`} passage={passage} mode={mode} memory={memory}
-            sourceLocation={passageLocations[sectionIndex][passageIndex]}
             onChange={(update) => {
               invalidateCopyFeedback();
               setSession((previous) => previous.revision !== session.revision ? previous : {

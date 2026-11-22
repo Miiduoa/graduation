@@ -313,15 +313,15 @@ function expectBaselineTxt(actual: string, baseline: string, input: string) {
 
 it('preserves merge-base reading and practice fields, checkpoints and reveal controls', () => {
   const pick = seededPicker();
-  const samples = [...marks, ' \t', ...Array.from({ length: 28 }, () =>
+  const samples = [...marks, '\u0903', '\u20dd', '\ufe0f', ' \t', ...Array.from({ length: 28 }, () =>
     pick(marks) + pick(['', '甲', 'က္က', '禰', ' ']) + pick(marks))];
   const callbacks = { onChange: vi.fn(), onAction: vi.fn(), onExit: vi.fn(),
     onReadSource: vi.fn(), onDownload: vi.fn() };
 
-  for (const [index, draft] of samples.entries()) {
+  for (const draft of samples) {
     const attempt = draft;
-    const answerVisible = !!attempt.trim() && index % 2 === 0;
-    const quote = '禰';
+    const answerVisible = !!attempt.trim();
+    const quote = draft.trim() ? draft : '禰';
     const source = studySourceFromText({ id: 'lesson', title: '教材' + draft,
       text: `禰\u{e0100}是姓氏。原文${draft}。` });
     const response = { ...reply, sourceQuote: quote, question: draft || reply.question,
@@ -362,20 +362,47 @@ it('preserves merge-base reading and practice fields, checkpoints and reveal con
     expectBaselineTxt(practice.buildCourseStudyPracticeNotes('國文', source.title, restored.round),
       baselinePractice.buildCourseStudyPracticeNotes('國文', source.title, baseline.round), draft);
 
-    const reading = { passage, memory, mode: 'understand' as const, onChange: callbacks.onChange };
+    // A valid attempt exposes the saved answer even when the answer text itself
+    // would not qualify as a practice attempt.
+    const withRevealedAnswer = (round: practice.StudyPracticeRound) => {
+      const id = round.cards[0].id;
+      return { ...round, responses: { ...round.responses,
+        [id]: { ...round.responses[id], attempt: '已試答', answerVisible: true } } };
+    };
+    const reading = { passage, mode: 'understand' as const, onChange: callbacks.onChange };
     const examples = [
-      { before: <BaselinePassage {...reading} />, after: <CourseStudyPassage {...reading} /> },
+      { before: <BaselinePassage {...reading} memory={baseline.progress.passages['0:0']} />,
+        after: <CourseStudyPassage {...reading} memory={restored.progress.passages['0:0']} /> },
       { before: <BaselinePractice {...callbacks} round={baseline.round} />,
         after: <CourseStudyPractice {...callbacks} round={restored.round} /> },
+      { before: <BaselinePractice {...callbacks} round={withRevealedAnswer(baseline.round)} />,
+        after: <CourseStudyPractice {...callbacks} round={withRevealedAnswer(restored.round)} /> },
     ];
     const reveal = /^(收起|對照)參考回答$/;
     for (const { before, after } of examples) {
       const view = render(<div><section data-testid="base">{before}</section><section data-testid="pr">{after}</section></div>);
       try {
+        // Compare raw DOM text so variation selectors and controls are checked as stored.
+        const text = (id: string, selector: string) =>
+          Array.from(view.getByTestId(id).querySelectorAll(selector), (node) => node.textContent);
+        for (const field of [response.question, response.answer]) {
+          const matches = (id: string) => text(id, 'p').filter((value) => value === field);
+          expect(matches('pr'), JSON.stringify(field)).toEqual(matches('base'));
+        }
+        expect(text('pr', 'blockquote')).toEqual(text('base', 'blockquote'));
+        const attempts = (id: string) => Array.from(view.getByTestId(id)
+          .querySelectorAll('textarea'), (node) => node.value);
+        expect(attempts('pr')).toEqual(attempts('base'));
         const read = (id: string) => within(view.getByTestId(id)).getByRole('button', { name: reveal });
         if (before.type === BaselinePassage) {
           const locate = (id: string) => within(view.getByTestId(id)).getByRole('button', { name: '定位原文引句' });
           expect(locate('pr').hasAttribute('disabled')).toBe(locate('base').hasAttribute('disabled'));
+          if (!locate('base').hasAttribute('disabled')) {
+            fireEvent.click(locate('base'));
+            fireEvent.click(locate('pr'));
+            expect(text('base', 'blockquote mark')).toEqual([quote]);
+            expect(text('pr', 'blockquote mark')).toEqual(text('base', 'blockquote mark'));
+          }
         }
         expect(read('pr').getAttribute('aria-expanded'), JSON.stringify(draft)).toBe(read('base').getAttribute('aria-expanded'));
         expect(read('pr').hasAttribute('disabled'), JSON.stringify(draft)).toBe(read('base').hasAttribute('disabled'));
@@ -469,11 +496,34 @@ describe.each([1, 2, 3])('reading v%i import compatibility', (readingVersion) =>
 });
 
 
+it('keeps the second passage chart and excerpt announcement free of added line numbers', () => {
+  const firstPassage = '文'.repeat(1580) + '\n'.repeat(20);
+  const body = firstPassage + tableText('學分', '2', '3');
+  const material = { id: 'two-passages', title: '表格教材', body };
+  const view = render(<CourseStudyPanel scope={context.scope} courseTitle="國文" material={material} onClose={vi.fn()} />);
+  fireEvent.click(view.getByRole('button', { name: '下一段' }));
+  expect(view.getByRole('table', { name: '原文第 1 行起的表格' })).toBeTruthy();
+  fireEvent.click(view.getByText('展開第 2 欄「學分」的原文數值比較'));
+  const jump = view.getByRole('button', { name: '甲 · 回表格核對' });
+  fireEvent.click(jump);
+  expect(document.activeElement?.textContent).toBe('甲2');
+  fireEvent.click(view.getByRole('button', { name: '返回圖表' }));
+  expect(document.activeElement).toBe(jump);
+
+  fireEvent.click(view.getByText('選取第 1 張表格的原文（可複製）'));
+  fireEvent.change(view.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }), { target: { value: '0' } });
+  fireEvent.click(view.getByRole('checkbox', { name: '連同原文欄名與分隔列' }));
+  const excerpt = view.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+  expect(excerpt.value).toBe('| 組別 | 學分 |\n| --- | --- |\n| 甲 | 2 |');
+  const announcement = excerpt.closest('details')?.querySelector('[aria-live="polite"][aria-atomic="true"]');
+  expect(announcement?.textContent).toBe('目前選取第 1 列：包含欄名、分隔列與所選資料列；不包含其他資料列。');
+});
+
 describe.each(['\n', '\r\n'])('table excerpts with %j line endings', (newline) => {
   const flags = [false, true];
   const cases = flags.flatMap((multi) => flags.flatMap((blank) =>
     flags.map((atStart) => ({ multi, blank, atStart }))));
-  it.each(cases)('keeps whole-source citations for $multi/$blank/$atStart', async ({ multi, blank, atStart }) => {
+  it.each(cases)('keeps verbatim excerpt exports for $multi/$blank/$atStart', async ({ multi, blank, atStart }) => {
     const rowLabels = multi ? ['甲', '乙'] : ['甲'];
     const paragraphs = rowLabels.map((label) => {
       const rows = ['| 組別 | 學分 |', '| --- | --- |', `| ${label} | 2 |`];
@@ -501,7 +551,6 @@ describe.each(['\n', '\r\n'])('table excerpts with %j line endings', (newline) =
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
     vi.stubGlobal('Blob', NodeBlob);
     try {
-      const citedLines = new Set<number>();
       for (const [index, label] of rowLabels.entries()) {
         for (const panel of [baseline, current]) {
           fireEvent.click(panel.getByText('選取第 1 張表格的原文（可複製）'));
@@ -509,20 +558,16 @@ describe.each(['\n', '\r\n'])('table excerpts with %j line endings', (newline) =
             { target: { value: '0' } });
         }
         expect(baseline.queryByRole('checkbox', { name })).toBeNull();
+        expect(current.queryByRole('checkbox', { name })).toBeNull();
         fireEvent.click(baseline.getByRole('button', { name: '複製第 1 張表格第 1 列原文' }));
         const original = `| ${label} | 2 |`;
         expect(writeText).toHaveBeenLastCalledWith(original);
         fireEvent.click(baseline.getByRole('button', { name: '下載第 1 張表格第 1 列原文 TXT' }));
         expect(await create.mock.lastCall?.[0].text()).toBe(original);
-        const line = lines.indexOf(original) + 1;
-        expect(citedLines.has(line)).toBe(false);
-        citedLines.add(line);
-        fireEvent.click(current.getByRole('checkbox', { name }));
         fireEvent.click(current.getByRole('button', { name: '複製第 1 張表格第 1 列原文' }));
-        const expected = `[第 ${index + 1} 段 · 教材原文第 ${line} 行]${newline}${original}`;
-        expect(writeText).toHaveBeenLastCalledWith(expected);
+        expect(writeText).toHaveBeenLastCalledWith(original);
         fireEvent.click(current.getByRole('button', { name: '下載第 1 張表格第 1 列原文 TXT' }));
-        expect(await create.mock.lastCall?.[0].text()).toBe(expected);
+        expect(await create.mock.lastCall?.[0].text()).toBe(original);
         if (index < rowLabels.length - 1) {
           for (const panel of [baseline, current]) fireEvent.click(panel.getByRole('button', { name: '下一段' }));
         }
