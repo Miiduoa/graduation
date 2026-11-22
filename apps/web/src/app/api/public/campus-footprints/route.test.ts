@@ -126,8 +126,8 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
-  // Oracle: merge-base 52403426 reads through EOF under the byte/deadline
-  // limits, then validates JSON and audited ways, irrespective of Content-Type.
+  // Explicit non-JSON media must now fail before the stream is consumed.
+  // Legacy no-header and UTF-8 text/plain Overpass replies remain supported.
   const contentTypes = [
     null, '', 'application/json; charset=utf-8', 'application/vnd.overpass+json',
     'text/plain; charset=utf-8', 'text/html; charset=utf-8', 'application/xhtml+xml',
@@ -137,7 +137,7 @@ describe('public Providence building geometry route', () => {
   const bodies = ['complete', 'incomplete', 'oversized', 'empty', 'unclosed'] as const;
   it.each(contentTypes.flatMap((contentType) => encodings.flatMap((encoding) =>
     bodies.map((kind) => ({ contentType, encoding, kind })),
-  )))('matches merge-base for MIME $contentType / encoding $encoding / $kind', async ({
+  )))('validates upstream MIME $contentType / encoding $encoding / $kind', async ({
     contentType, encoding, kind,
   }) => {
     vi.useFakeTimers();
@@ -169,7 +169,10 @@ describe('public Providence building geometry route', () => {
     await vi.advanceTimersByTimeAsync(12_000);
     const response = await request;
 
-    const baseAccepts = kind === 'complete' &&
+    const allowedMedia = contentType === null ||
+      ['application/json; charset=utf-8', 'application/vnd.overpass+json',
+        'text/plain; charset=utf-8'].includes(contentType);
+    const baseAccepts = kind === 'complete' && allowedMedia &&
       [null, 'identity', 'gzip', 'br', 'deflate'].includes(encoding);
     expect(response.status).toBe(baseAccepts ? 200 : 503);
     if (baseAccepts) {
@@ -184,7 +187,41 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledOnce();
   });
 
-  it('keeps dated stale outlines after HTML 200 and refreshes them from a complete octet-stream', async () => {
+  it.each([
+    'text/html; charset=utf-8',
+    'application/xhtml+xml',
+    'application/octet-stream',
+    'application/json, text/html',
+    'application/json; charset=iso-8859-1',
+    '',
+  ])('rejects invalid HTTP 200 MIME %j before reading a stalled Overpass body', async (type) => {
+    // The body is intentionally valid JSON but never closes. The server must
+    // reject the explicit incompatible media header without waiting 12 seconds,
+    // decoding a byte, caching a false building, or awaiting a stuck cancel.
+    let cancelled = 0;
+    let pulls = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull() { pulls += 1; return new Promise<void>(() => {}); },
+      cancel() { cancelled += 1; return new Promise<void>(() => {}); },
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(stream, {
+      status: 200, headers: { 'Content-Type': type },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const result = await GET();
+    expect(result.status).toBe(503);
+    expect(result.headers.get('Cache-Control')).toBe('no-store');
+    expect(result.headers.get('Retry-After')).toBeTruthy();
+    expect(cancelled).toBe(1);
+    // The fixture's stream source may be pulled speculatively by the runtime,
+    // but no data from it can be accepted or read as a valid Overpass snapshot.
+    expect(pulls).toBeLessThanOrEqual(1);
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps dated stale outlines after an HTML 200 and refreshes from a valid JSON media type', async () => {
     const start = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
@@ -196,7 +233,7 @@ describe('public Providence building geometry route', () => {
           status: 200, headers: { 'Content-Type': 'text/html', 'Retry-After': '1800' },
         }))
         .mockImplementationOnce(async () => new Response(osmPayload, {
-          status: 200, headers: { 'Content-Type': 'application/octet-stream' },
+          status: 200, headers: { 'Content-Type': 'application/vnd.overpass+json' },
         }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
