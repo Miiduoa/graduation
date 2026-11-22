@@ -32,12 +32,12 @@ export function campusAssignmentDisplayTitle(value: string): string {
  * Never accept IDs, URLs, route names or submission content from generated text.
  * The destination still performs its normal live permission and record checks.
  */
-export function resolveCampusAssignmentTarget(input: {
+export function resolveCampusAssignmentMatch(input: {
   assignment: CampusAssignmentIdentity;
   snapshot: CampusSenseSnapshot | null | undefined;
   scope: { uid: string; schoolId: string };
   now?: number;
-}): CampusAssignmentTarget | null {
+}): { target: CampusAssignmentTarget; fullTitle: string | null } | null {
   const now = input.now ?? Date.now();
   if (!Number.isFinite(now)) return null;
   const snapshot = validCampusSenseSnapshot(input.snapshot, input.scope, now);
@@ -50,10 +50,20 @@ export function resolveCampusAssignmentTarget(input: {
     row.dueAt === (input.assignment.dueAt ?? null));
   // Same-title tasks must never pick whichever happens to appear first.
   if (matches.length !== 1) return null;
-  const source = parseCampusAssignmentSource(matches[0].source);
+  const [row] = matches;
+  const source = parseCampusAssignmentSource(row.source);
   if (!source) return null;
   return {
-    route: 'HomeworkSubmit',
-    params: { groupId: source.groupId, assignmentId: source.assignmentId },
+    target: {
+      route: 'HomeworkSubmit',
+      params: { groupId: source.groupId, assignmentId: source.assignmentId },
+    },
+    fullTitle: row.titleMayBeTruncated === true ? null : row.title,
   };
+}
+
+export function resolveCampusAssignmentTarget(
+  input: Parameters<typeof resolveCampusAssignmentMatch>[0],
+): CampusAssignmentTarget | null {
+  return resolveCampusAssignmentMatch(input)?.target ?? null;
 }

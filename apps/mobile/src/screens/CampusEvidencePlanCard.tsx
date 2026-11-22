@@ -3,7 +3,7 @@ import { Platform, Pressable, Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { CampusEvidencePlan, CampusPlanPriority, CampusPlanRoute } from '../services/offlineCampusPlanner';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
-import type { CampusAssignmentIdentity } from '../services/campusAssignmentTarget';
+import { resolveCampusAssignmentMatch, type CampusAssignmentIdentity } from '../services/campusAssignmentTarget';
 import type { NuniPlanActivityIdentity } from '../services/nuniPlanAssignmentTarget';
 import type { safeNavigate } from '../utils/safeNavigate';
 import { CampusAssignmentReminderAction } from './CampusAssignmentReminderAction';
@@ -72,10 +72,12 @@ export function CampusEvidencePlanCard({
   useEffect(() => {
     spacePressedStep.current = null;
   }, [disabled, plan]);
+  const usesCampusAssignmentAction = (assignment: CampusAssignmentIdentity & NuniPlanActivityIdentity) =>
+    assignment.kind !== 'quiz' && (!assignment.nuniSource || Boolean(assignment.expectedSource));
   const assignmentAction = (assignment: CampusAssignmentIdentity & NuniPlanActivityIdentity) => {
     if (historical) return null;
     if (renderAssignmentAction) return renderAssignmentAction(assignment);
-    if (assignment.kind === 'quiz' || (assignment.nuniSource && !assignment.expectedSource)) return null;
+    if (!usesCampusAssignmentAction(assignment)) return null;
     return reminderContext && navigation ? (
       <CampusAssignmentOpenButton
         assignment={assignment}
@@ -99,7 +101,18 @@ export function CampusEvidencePlanCard({
         </Text>
       </View>
       {plan.steps.map((step, index) => {
-        const displayTitle = step.fullAssignmentTitle ?? step.title;
+        const match = step.fullAssignmentTitle && step.evidence === 'authorized-assignments' &&
+          !historical && !renderAssignmentAction && usesCampusAssignmentAction(step) &&
+          reminderContext && typeof navigation?.navigate === 'function' && reminderContext.isCurrent()
+          ? resolveCampusAssignmentMatch({
+            assignment: step,
+            snapshot: reminderContext.snapshot,
+            scope: { uid: reminderContext.userId, schoolId: reminderContext.schoolId },
+          })
+          : null;
+        const displayTitle = match?.fullTitle === step.fullAssignmentTitle
+          ? step.fullAssignmentTitle ?? step.title
+          : step.title;
         const priorityColor = historical ? aiTokens.muted : step.priority === 'overdue' || step.priority === 'urgent'
           ? aiTokens.danger : step.priority === 'soon' ? aiTokens.warning : aiTokens.muted;
         const done = progress?.completedStepIds.includes(step.id) ?? false;

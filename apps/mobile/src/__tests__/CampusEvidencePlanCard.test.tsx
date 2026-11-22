@@ -40,7 +40,7 @@ const reminderContext = { userId: 'firebase-user', schoolId: 'pu', snapshot: nul
 beforeEach(() => jest.clearAllMocks());
 afterEach(() => jest.restoreAllMocks());
 
-test.each([12, 47, 130])('完整標題可以換行，進度標籤也能區分截斷或加省略號的步驟（%i 字）', (width) => {
+test.each([12, 47, 130])('無法確認開啟目標時，標題與進度標籤保留原本的步驟文字（%i 字）', (width) => {
   const input = plan();
   const prefix = '課堂實作'.repeat(40);
   const fullTitles = ['原稿', '修訂稿'].map((suffix) => prefix + suffix);
@@ -54,14 +54,15 @@ test.each([12, 47, 130])('完整標題可以換行，進度標籤也能區分截
   const onToggleStep = jest.fn();
   const view = render(<CampusEvidencePlanCard plan={input} disabled={false}
     progress={{ completedStepIds: [], onToggleStep }} />);
-  fullTitles.forEach((title, index) => {
-    const heading = view.getByText(title);
+  const headings = view.getAllByText(input.steps[0].title);
+  expect(headings).toHaveLength(input.steps.length);
+  headings.forEach((heading, index) => {
     expect(heading.props.numberOfLines).toBeUndefined();
     expect(heading.props.ellipsizeMode).toBeUndefined();
-    fireEvent.press(view.getByRole('checkbox', { name: '我已處理：' + title }));
+    fireEvent.press(view.getAllByRole('checkbox', { name: '我已處理：' + input.steps[index].title })[index]);
     expect(onToggleStep).toHaveBeenLastCalledWith(input.steps[index].id, true);
   });
-  expect(view.queryByText(input.steps[0].title)).toBeNull();
+  fullTitles.forEach((title) => expect(view.queryByText(title)).toBeNull());
 });
 
 function renderProgressCard(disabled = false) {

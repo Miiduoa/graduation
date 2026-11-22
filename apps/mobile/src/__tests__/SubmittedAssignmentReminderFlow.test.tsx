@@ -498,7 +498,7 @@ test.each([
   ['長'.repeat(130), 0],
   ['長'.repeat(130), 1_000],
   ['資料庫作業：' + '正規化與索引實作'.repeat(4), 1_000],
-])('同名課程的作業完整顯示，前綴與期限須能唯一比對才開啟（前綴=%s，截止差=%i 毫秒）', (prefix, dueOffset) => {
+])('同名課程的作業須能唯一比對才開啟並顯示完整標題（前綴=%s，截止差=%i 毫秒）', (prefix, dueOffset) => {
   const snapshot = mockSnapshot();
   const dueMinute = Math.floor(Date.parse(dueAt) / 60_000) * 60_000;
   const rows = ['第 1 題', '第 2 題', '第 3 題'].map((suffix, index) => ({
@@ -515,8 +515,12 @@ test.each([
   const buttons = view.queryAllByText('查看這份作業');
   expect(buttons).toHaveLength(targets.filter(Boolean).length);
   for (const [index, row] of rows.entries()) {
+    if (!targets[index]) {
+      expect(view.queryByText(row.title)).toBeNull();
+      expect(view.getAllByText(plan.steps[index].title)).toHaveLength(rows.length);
+      continue;
+    }
     expect(view.getAllByText(row.title).some((node) => node.props.numberOfLines == null)).toBe(true);
-    if (!targets[index]) continue;
     fireEvent.press(buttons[index]);
     expect(navigation.navigate).toHaveBeenLastCalledWith('學習', {
       initial: false,
@@ -568,6 +572,10 @@ test.each([
   expect(Boolean(baseline)).toBe(opens);
   await act(async () => view.rerender(card(snapshot)));
 
+  if (initialTitle !== title && initialTitle !== plan.steps[0].title) {
+    expect(view.queryByText(initialTitle)).toBeNull();
+    expect(view.getByText(plan.steps[0].title)).toBeTruthy();
+  }
   const button = view.queryByText('查看這份作業');
   expect(Boolean(button)).toBe(opens);
   if (button && baseline) {
@@ -577,6 +585,62 @@ test.each([
     });
   }
 });
+
+const displayTitleCases = [129, 130, 131, 139, 140, 141].flatMap((length) =>
+  [false, true].flatMap((initialMarked) =>
+    [false, true].flatMap((currentMarked) =>
+      [false, true].flatMap((titleChanged) =>
+        [false, true].flatMap((idChanged) =>
+          [1, 2].map((count) => ({ length, initialMarked, currentMarked, titleChanged, idChanged, count })))))));
+
+test.each(displayTitleCases)(
+  '計畫卡差異矩陣 長度=$length 原始截斷=$initialMarked 同步截斷=$currentMarked 改名=$titleChanged 換ID=$idChanged 候選=$count',
+  ({ length, initialMarked, currentMarked, titleChanged, idChanged, count }) => {
+    // Inject both marker states independently. The wire cutoff is covered by the sync tests.
+    const seed = mockSnapshot();
+    const initialTitle = '長'.repeat(length - 1) + '甲';
+    const initialRow = {
+      ...seed.assignments.items[0], title: initialTitle,
+      titleMayBeTruncated: initialMarked ? true as const : undefined,
+    };
+    const initial = { ...seed, assignments: { ...seed.assignments, items: [initialRow] } };
+    const currentRow = {
+      ...initialRow,
+      title: titleChanged ? '長'.repeat(length - 1) + '乙' : initialTitle,
+      titleMayBeTruncated: currentMarked ? true as const : undefined,
+      source: { ...source, assignmentId: idChanged ? 'replacement' : source.assignmentId },
+    };
+    const items = count === 1 ? [currentRow] : [
+      currentRow,
+      { ...currentRow, title: length > 130 ? currentRow.title.slice(0, -1) + '丙' : currentRow.title,
+        source: { ...source, assignmentId: 'duplicate-prefix' } },
+    ];
+    const snapshot = { ...seed, assignments: { ...seed.assignments, count, items } };
+    const { plan, view, card, navigation } = planCard(initial);
+    view.rerender(card(snapshot));
+
+    const assignment = plan.steps[0];
+    const baselineTitle = base.campusAssignmentDisplayTitle(initialTitle);
+    expect(assignment.title).toBe(baselineTitle);
+    const baseline = base.resolveCampusAssignmentTarget({ assignment, snapshot, scope });
+    const targetRow = items.find(({ source }) => source.assignmentId === baseline?.params.assignmentId);
+    const displayFullTitle = !initialMarked && !targetRow?.titleMayBeTruncated && targetRow?.title === initialTitle;
+    const expectedTitle = displayFullTitle ? initialTitle : baselineTitle;
+    expect(view.getByText(expectedTitle).props.numberOfLines).toBeUndefined();
+    if (initialTitle !== baselineTitle) {
+      expect(view.queryByText(displayFullTitle ? baselineTitle : initialTitle)).toBeNull();
+    }
+
+    const buttons = view.queryAllByText('查看這份作業');
+    expect(buttons).toHaveLength(baseline ? 1 : 0);
+    if (baseline) {
+      fireEvent.press(buttons[0]);
+      expect(navigation.navigate).toHaveBeenCalledWith('學習', {
+        initial: false, screen: baseline.route, params: baseline.params,
+      });
+    }
+  },
+);
 
 test('單筆回覆的同前綴作業無法唯一比對時不顯示交辦或提醒', () => {
   const snapshot = mockSnapshot();
