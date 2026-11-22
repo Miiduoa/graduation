@@ -18,7 +18,8 @@ export function AssistantReplyLink({ onClick, ...props }: ComponentProps<typeof 
         const link = event.currentTarget;
         if (
           onNavigate &&
-          link.href === window.location.href &&
+          link.origin === window.location.origin &&
+          link.protocol === window.location.protocol &&
           isCurrentTabNavigationClick(event, link)
         ) {
           onNavigate(`${link.pathname}${link.search}${link.hash}`);

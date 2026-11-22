@@ -94,31 +94,29 @@ function TodayConversation({
         )}
       </div>
       <div ref={conversation}>
-        <AssistantLinkNavigation.Provider value={onNavigate}>
-          <Suspense fallback={<p role="status">正在開啟校園助理…</p>}>
-            {account.kind === 'nuni' ? (
-              <NuniConversation
-                preferredWorkContext={preferredWorkContext}
-                context={account.context}
-                accountId={account.accountId}
-                schoolId={schoolId}
-                cloudEnabled={cloudEnabled}
-                inlineDraft={draft}
-                onFreeformReady={setNuniFreeform}
-              />
-            ) : (
-              <SchoolConversation
-                userId={account.uid}
-                localOwner={account.localOwner}
-                groupId=""
-                initialDraft=""
-                schoolId={schoolId}
-                inline
-                inlineDraft={draft}
-              />
-            )}
-          </Suspense>
-        </AssistantLinkNavigation.Provider>
+        <Suspense fallback={<p role="status">正在開啟校園助理…</p>}>
+          {account.kind === 'nuni' ? (
+            <NuniConversation
+              preferredWorkContext={preferredWorkContext}
+              context={account.context}
+              accountId={account.accountId}
+              schoolId={schoolId}
+              cloudEnabled={cloudEnabled}
+              inlineDraft={draft}
+              onFreeformReady={setNuniFreeform}
+            />
+          ) : (
+            <SchoolConversation
+              userId={account.uid}
+              localOwner={account.localOwner}
+              groupId=""
+              initialDraft=""
+              schoolId={schoolId}
+              inline
+              inlineDraft={draft}
+            />
+          )}
+        </Suspense>
       </div>
     </section>
   );
@@ -180,11 +178,13 @@ export function TodayCampusEntry({
   }, [active, focusRequest]);
   return (
     <div ref={entry}>
-      <CampusEntryContent
-        returnPath={returnPath}
-        preferredWorkContext={preferredWorkContext}
-        onNavigate={onNavigate}
-      />
+      <AssistantLinkNavigation.Provider value={onNavigate}>
+        <CampusEntryContent
+          returnPath={returnPath}
+          preferredWorkContext={preferredWorkContext}
+          onNavigate={onNavigate}
+        />
+      </AssistantLinkNavigation.Provider>
     </div>
   );
 }

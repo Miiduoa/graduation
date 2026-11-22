@@ -46,6 +46,8 @@ vi.mock('@/lib/functionsUrl', async (original) => ({
   areFunctionsConfigured: () => false,
 }));
 vi.mock('@/features/nuni/Assistant', async () => {
+  const { AssistantReplyLink } = await import('./AssistantReplyLink');
+  const { SpokenReply } = await import('./SpokenReply');
   const { VoiceDictationButton } = await import('./VoiceDictationButton');
   return {
     Conversation: ({
@@ -69,9 +71,12 @@ vi.mock('@/features/nuni/Assistant', async () => {
         </label>
         <VoiceDictationButton onTranscript={inlineDraft.setText} />
         <button type="submit">送出問題</button>
-        <a href="/library?campus=pu" onClick={(event) => event.preventDefault()}>
+        <AssistantReplyLink href="/library?campus=pu" onClick={(event) => event.preventDefault()}>
           查看參考服務
-        </a>
+        </AssistantReplyLink>
+        <SpokenReply text="請查看開館時間">
+          <AssistantReplyLink href="#hours">查看開館時間</AssistantReplyLink>
+        </SpokenReply>
       </form>
     ),
   };
@@ -189,6 +194,61 @@ it('keeps the assistant draft and voice session when a link has not navigated th
   view.rerender(<AppHeader />);
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(abort).toHaveBeenCalledOnce();
+});
+
+it('closes and stops playback on a fragment link before the route or hash changes', async () => {
+  const cancel = vi.fn();
+  const speak = vi.fn();
+  vi.stubGlobal('speechSynthesis', {
+    cancel,
+    speak,
+    getVoices: () => [{ localService: true, lang: 'zh-TW' }],
+  });
+  vi.stubGlobal('SpeechSynthesisUtterance', class {});
+  const overflow = () => [document.body.style.overflow, document.documentElement.style.overflow];
+  const initialOverflow = overflow();
+  render(<AppHeader />);
+  const trigger = screen.getByRole('button', { name: '開啟校園助理' });
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByRole('button', { name: '朗讀回覆' }));
+  expect(speak).toHaveBeenCalledOnce();
+  const link = screen.getByRole<HTMLAnchorElement>('link', { name: '查看開館時間' });
+  fireEvent.click(link, { ctrlKey: true });
+  expect(cancel).not.toHaveBeenCalled();
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  expect(overflow()).toEqual(initialOverflow);
+
+  fireEvent.click(link);
+  expect(window.location.hash).toBe('');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  window.history.pushState({}, '', link.href);
+  expect(window.location.hash).toBe('#hours');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(document.activeElement).toBe(trigger);
+  expect(overflow()).toEqual(initialOverflow);
+});
+
+it.each([
+  ['快速搜尋', '開啟校園地圖', 'schoolId=pu&campus=pu&school=PU'],
+  ['服務總覽', '有哪些服務', 'schoolId=pu'],
+])('closes on a same-page map link from %s', async (_case, query, search) => {
+  state.pathname = '/map';
+  state.search = search;
+  window.history.replaceState({}, '', `/map?${search}`);
+  render(<AppHeader />);
+  const trigger = screen.getByRole('button', { name: '開啟校園助理' });
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByRole('button', { name: '找校園服務' }));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } });
+  const link = screen.getByRole<HTMLAnchorElement>('link', { name: /校園地圖/ });
+  expect(link.href).toBe(window.location.href);
+
+  fireEvent.click(link, { metaKey: true });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  fireEvent.click(link);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(trigger);
 });
 
 it('opens the actual account conversation without a search detour, recording, or automatic submission', async () => {
