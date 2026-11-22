@@ -21,7 +21,7 @@ const questionEnding = '(?:啊|呢|嗎)?[?]*$';
 const standaloneReadPrompt = new RegExp('^(?:' + readPrompt + '|' + polite + ')' + questionEnding);
 const orderWriteVerb =
   '鎖定|解鎖|凍結|取消|撤銷|撤回|作廢|刪|移除|移走|清除|清空|封存|編輯|改|變更|調整|更新|更換|' +
-  '下單|訂購|重訂|付款|結帳|退款|退訂|退單|退費|送出|提交|延後|提前|延期|重排|標記|備註';
+  '下單|訂購|重訂|付款|結帳|退款|退訂|退單|退費|送出|提交|延後|提前|延期|重排|標記|備註|同步';
 // Order qualifiers are open-ended, so exclude action verbs and request prefixes
 // here. Calendar placement verbs are allowed only in the status question itself.
 const order = '(?:(?!' + pickupVerb.source +
@@ -65,7 +65,19 @@ const calendarAbsenceQuestion = new RegExp(
     missingCalendarEntry + '|' + reason + calendarVisibility + pickupSubject + '|' +
     pickupSubject + missingCalendarEntry + '(?=嗎|[?]))' + questionEnding,
 );
-const reasonFollowup = new RegExp('^' + readPrompt + '?' + reason + questionEnding);
+const sync = '(?:有)?同步(?:完成|成功|好|到' + calendarLocation + ')?';
+const diagnosticState = '(?:(?:還沒(?:有)?|尚未|未|沒有|沒)' + sync + '|同步(?:失敗|異常|出錯|延遲)|' +
+  '(?:同步|系統|日曆|行事曆)(?:有(?:了)?問題|出(?:了)?(?:問題|錯)|異常|錯誤|故障)|' +
+  '(?:同步|系統)(?:的)?問題)';
+const visibilityFollowup = '(?:(?:還沒(?:有)?|尚未|未|沒有|沒)(?:出現|顯示)(?:在' + calendarLocation + ')?|看不到|找不到)';
+const reasonFollowup = new RegExp(
+  '^' + readPrompt + '?(?:' + reason + '(?:(?:還是|仍然|還|仍)?(?:' +
+    missingCalendarEntry + '|' + visibilityFollowup + '|' + diagnosticState + '))?|' +
+    '(?:會不會是|是不是|是否|難道是|是)(?:因為)?' + diagnosticState + '|' +
+    '(?:同步|系統)(?:是不是|是否|有沒有|有無)(?:有)?(?:問題|異常|出錯|故障)|' +
+    '(?:有沒有|有無|是否)(?:已經|已)?' + sync + '|' +
+    sync + '(?:了嗎|了沒|沒有|沒)|' + diagnosticState + '(?=嗎|[?]))' + questionEnding,
+);
 
 function isReadOnlyPickupQuestion(text: string): boolean {
   const clauses = text.split(/[;,、。.!]+|(?<=\?)(?=[^?])/)
@@ -76,11 +88,9 @@ function isReadOnlyPickupQuestion(text: string): boolean {
       calendarStatus.test(clause) || calendarSlotLookup.test(clause) ||
       calendarAbsenceQuestion.test(clause) || calendarVisibilityLookup.test(clause) ||
       orderLookup.test(clause) || pickupTimeLookup.test(clause) ||
-      // A trailing reason question can refer to the immediately preceding absence statement.
+      // Follow-ups borrow their subject from a preceding read clause.
       (missingCalendarStatus.test(clause) && reasonFollowup.test(clauses[index + 1] ?? '')) ||
-      (reasonFollowup.test(clause) &&
-        (missingCalendarStatus.test(clauses[index - 1] ?? '') ||
-          calendarVisibilityLookup.test(clauses[index - 1] ?? ''))));
+      (index > 0 && reasonFollowup.test(clause)));
 }
 const hours: Readonly<Record<string, number>> = {
   半小時: 30,

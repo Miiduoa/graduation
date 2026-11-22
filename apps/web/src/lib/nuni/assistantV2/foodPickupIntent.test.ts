@@ -78,7 +78,7 @@ it.each([
 });
 
 it.each(['我的訂單好了嗎', '開啟行事曆', '幫我明天12:00到12:15安排取餐', '把最近借書期限加入行事曆',
-  '取消昨天訂單', '把最新訂單的取餐時間改到明天', '刪掉日曆裡的取餐時間',
+  '取消昨天訂單', '把最新訂單的取餐時間改到明天', '刪掉日曆裡的取餐時間', '鎖定昨天訂單',
   '幫我新增個人行程明天 19:00 到 20:00 整理訂單',
   '幫我新增個人行程明天 19:00 到 20:00 核對訂單取餐時間'])
   ('leaves unrelated tasks on their existing route: %s', question => {
@@ -136,4 +136,62 @@ it.each([
   '昨天訂單的取餐時間記在日曆的哪一天？取餐時間是幾點？',
 ])('keeps calendar status questions on the existing read route: %s', question => {
   expect(parse(question)).toBeNull();
+});
+
+const diagnosticQuestions = [
+  '請問是不是同步有問題？',
+  '是不是還沒同步？',
+  '是否尚未同步到日曆？',
+  '是因為還沒有同步完成嗎？',
+  '同步了嗎？',
+  '有沒有同步成功？',
+  '是不是同步延遲？',
+  '是不是系統錯誤？',
+  '會不會是系統出了問題？',
+  '為什麼還沒出現？',
+  '為何尚未顯示在行事曆上？',
+  '為何還是找不到？',
+  '怎麼還沒記入行事曆？',
+];
+
+it.each([
+  '我在日曆上看不到昨天訂單的取餐時間',
+  '在行事曆裡找不到上週訂單的預定取餐時間，請幫忙查一下',
+  '昨天訂單的取餐時間在日曆上沒出現；請幫忙看一下',
+  '請幫忙確認一下，昨天訂單的取餐時間在行事曆上沒有顯示',
+  '昨天訂單的取餐時間尚未被記入行事曆',
+  '查一下昨天訂單的取餐時間，確認是否已記入日曆？',
+  '昨天訂單的取餐時間記在日曆的哪個時段？',
+])('keeps diagnostic follow-ups on the read route after %s', lookup => {
+  for (const followup of diagnosticQuestions) {
+    const separator = lookup.endsWith('？') ? '' : '，';
+    expect(parse(lookup + separator + followup), followup).toBeNull();
+  }
+});
+
+it('keeps multiple diagnostic questions on the read route', () => {
+  expect(parse('昨天訂單的取餐時間在日曆上沒出現，請幫忙確認一下，是不是還沒同步？為什麼還沒顯示？')).toBeNull();
+});
+
+it.each([
+  '再把取餐時間記到日曆',
+  '幫我建立取餐行程',
+  '改成明天',
+  '取消該筆訂單',
+  '順便刪除該筆訂單',
+  '把那筆訂單鎖定',
+  '如果還沒同步就幫我同步',
+  '幫我同步到日曆',
+])('rejects a diagnostic query mixed with a write: %s', action => {
+  expect(parse('在日曆上找不到昨天訂單的取餐時間，是不是還沒同步？' + action)?.kind).toBe('invalid');
+});
+
+it.each([
+  '在日曆上找不到昨天訂單的取餐時間，是不是還沒同步就幫我同步？',
+  '在日曆上找不到昨天訂單的取餐時間，為什麼還沒出現並幫我取消那筆訂單？',
+  '請幫我同步到日曆，昨天訂單的取餐時間在日曆上沒出現，是不是還沒同步？',
+  '同步昨天訂單的取餐時間在日曆上沒出現，是不是系統錯誤？',
+  '是不是還沒同步？幫我把最近一筆訂單的取餐時間加入日曆',
+])('rejects writes before or within a diagnostic query: %s', question => {
+  expect(parse(question)?.kind).toBe('invalid');
 });
