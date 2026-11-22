@@ -258,8 +258,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const isMine = !!(post && !post.anonymous && post.authorUid && post.authorUid === user?.uid);
 
   const submitReply = async () => {
-    if (!user?.uid || !schoolId || !postId || sendingReply || postDeletion.current || !replyText.trim()) return;
-    if (replyParentId && replyDeletions.current.has(replyParentId)) return;
+    if (!user?.uid || !schoolId || !postId || sendingReply || !replyText.trim()) return;
     setSendingReply(true);
     const boardForAlias = post?.boardId ?? 'general';
     let aliasSnap: string | undefined;
@@ -358,7 +357,6 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
       }
       replyDeletions.current.set(r.id, 'confirmed');
       setReplies((current) => current.map((reply) => reply.id === r.id ? deletedReply(reply) : reply));
-      setReplyParentId((current) => current === r.id ? null : current);
       await refreshThreadAfterWrite();
     })();
   };

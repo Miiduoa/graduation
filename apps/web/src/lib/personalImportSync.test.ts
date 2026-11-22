@@ -169,6 +169,114 @@ describe('browser personal import synchronization', () => {
     },
   );
 
+  it.each(['cancelled', 'replaced'] as const)(
+    'does not write a pause whose marker was %s after the decision inside the lock',
+    async (change) => {
+      await savePersonalImportBatch(scope, rows());
+      await setPersonalImportSyncEnabled(scope, true, () => true);
+      const key = personalImportsStorageKey(scope);
+      const marker = `${key}:pause`;
+      const before = localStorage.getItem(key);
+      const getItem = Storage.prototype.getItem;
+      const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
+        this: Storage,
+        name,
+      ) {
+        const value = getItem.call(this, name);
+        if (name === marker && value !== null) {
+          read.mockRestore();
+          // The other tab changes the marker after this tab reads its value.
+          if (change === 'cancelled') cancelPersonalImportSyncPause(scope, () => true);
+          else localStorage.setItem(marker, 'new-pause');
+        }
+        return value;
+      });
+      try {
+        await setPersonalImportSyncEnabled(scope, false, () => true);
+      } finally {
+        read.mockRestore();
+      }
+      expect(localStorage.getItem(key)).toBe(before);
+      expect(localStorage.getItem(marker)).toBe(change === 'cancelled' ? null : 'new-pause');
+      expect(browserRequest).not.toHaveBeenCalled();
+      if (change === 'replaced') {
+        await syncPersonalImports(scope, identity, () => true);
+        expect(readPersonalImportSyncState(scope).enabled).toBe(false);
+        expect(hasPersonalImportSyncPause(scope)).toBe(false);
+      }
+    },
+  );
+
+  it('serializes a new pause after cancellation invalidates the in-flight pause', async () => {
+    await setPersonalImportSyncEnabled(scope, true, () => true);
+    const key = personalImportsStorageKey(scope);
+    const marker = `${key}:pause`;
+    const getItem = Storage.prototype.getItem;
+    let newer: Promise<void> | undefined;
+    const markersAtWrite: (string | null)[] = [];
+    const setItem = Storage.prototype.setItem;
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      name,
+      value,
+    ) {
+      if (name === key) markersAtWrite.push(getItem.call(this, marker));
+      setItem.call(this, name, value);
+    });
+    let replacement: string | null = null;
+    const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
+      this: Storage,
+      name,
+    ) {
+      const value = getItem.call(this, name);
+      if (name === marker && value !== null) {
+        read.mockRestore();
+        cancelPersonalImportSyncPause(scope, () => true);
+        newer = setPersonalImportSyncEnabled(scope, false, () => true);
+        replacement = getItem.call(this, marker);
+        expect(replacement).not.toBe(value);
+      }
+      return value;
+    });
+    try {
+      await setPersonalImportSyncEnabled(scope, false, () => true);
+      await newer;
+      expect(replacement).not.toBeNull();
+      expect(markersAtWrite).toEqual([replacement]);
+      expect(readPersonalImportSyncState(scope).enabled).toBe(false);
+      expect(hasPersonalImportSyncPause(scope)).toBe(false);
+    } finally {
+      read.mockRestore();
+      write.mockRestore();
+    }
+  });
+
+  it('keeps the ledger intact and lets the user cancel after a failed pause write', async () => {
+    await savePersonalImportBatch(scope, rows());
+    await setPersonalImportSyncEnabled(scope, true, () => true);
+    const key = personalImportsStorageKey(scope);
+    const before = localStorage.getItem(key);
+    const setItem = Storage.prototype.setItem;
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      name,
+      value,
+    ) {
+      if (name === key) throw new Error('quota');
+      setItem.call(this, name, value);
+    });
+    try {
+      await expect(setPersonalImportSyncEnabled(scope, false, () => true)).rejects.toThrow('空間不足');
+    } finally {
+      write.mockRestore();
+    }
+    expect(localStorage.getItem(key)).toBe(before);
+    expect(hasPersonalImportSyncPause(scope)).toBe(true);
+    cancelPersonalImportSyncPause(scope, () => true);
+    expect(hasPersonalImportSyncPause(scope)).toBe(false);
+    expect(localStorage.getItem(key)).toBe(before);
+  });
+
   it('requires per-account and per-school consent before any network request', async () => {
     await savePersonalImportBatch(scope, rows());
     await syncPersonalImports(scope, identity, () => true);

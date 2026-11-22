@@ -54,7 +54,7 @@ export function cancelPersonalImportSync(scope: PersonalImportScope) {
 
 const SYNC_LOCK_WAIT_MS = 15_000;
 
-const pauseWrites = new Map<string, Promise<void>>();
+const pauseWrites = new Map<string, { intent: string; write: Promise<void> }>();
 const pauseKey = (scope: PersonalImportScope) => `${personalImportsStorageKey(scope)}:pause`;
 export const hasPersonalImportSyncPause = (scope: PersonalImportScope) =>
   localStorage.getItem(pauseKey(scope)) !== null;
@@ -66,20 +66,21 @@ export function cancelPersonalImportSyncPause(scope: PersonalImportScope, active
   window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
 }
 
-function persistPersonalImportSyncPause(scope: PersonalImportScope) {
+function persistPersonalImportSyncPause(scope: PersonalImportScope, intent: string) {
   const key = pauseKey(scope);
   const pending = pauseWrites.get(key);
-  if (pending) return pending;
+  if (pending?.intent === intent) return pending.write;
+  const isCurrent = () => localStorage.getItem(key) === intent;
   // The UI can stop waiting while the scoped opt-out stays in the lock queue.
   const write = withPersonalImportSyncLock(scope, async (state, checkpoint) => {
-    const intent = localStorage.getItem(key);
-    if (intent === null) return { state, result: undefined };
+    if (!isCurrent()) return { state, result: undefined };
     const disabled = {
       ...state,
       sync: { ...state.sync, enabled: false, base: state.sync?.base || null },
     };
-    await checkpoint(disabled);
-    if (localStorage.getItem(key) === intent) {
+    // Cancellation can remove the marker while the ledger lock is held.
+    if (!(await checkpoint(disabled, isCurrent))) return { state, result: undefined };
+    if (isCurrent()) {
       localStorage.removeItem(key);
       cancelPersonalImportSync(scope);
       window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
@@ -87,7 +88,7 @@ function persistPersonalImportSyncPause(scope: PersonalImportScope) {
     return { state: disabled, result: undefined };
   })
     .catch((error) => {
-      if (hasPersonalImportSyncPause(scope)) {
+      if (isCurrent()) {
         const reason =
           error instanceof DOMException && ['SecurityError', 'NotAllowedError'].includes(error.name)
             ? '目前環境拒絕跨分頁鎖請求。'
@@ -99,8 +100,10 @@ function persistPersonalImportSyncPause(scope: PersonalImportScope) {
       }
       throw error;
     })
-    .finally(() => pauseWrites.delete(key));
-  pauseWrites.set(key, write);
+    .finally(() => {
+      if (pauseWrites.get(key)?.write === write) pauseWrites.delete(key);
+    });
+  pauseWrites.set(key, { intent, write });
   return write;
 }
 
@@ -115,16 +118,17 @@ export async function setPersonalImportSyncEnabled(
   // Invalidate a request still reading before it can upload. A write already sent may
   // finish on the server; the next opt-in reconciles that acknowledgement safely.
   if (!enabled) {
-    localStorage.setItem(pauseKey(scope), crypto.randomUUID());
+    const intent = crypto.randomUUID();
+    localStorage.setItem(pauseKey(scope), intent);
     cancelPersonalImportSync(scope);
     window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
-        persistPersonalImportSyncPause(scope),
+        persistPersonalImportSyncPause(scope, intent),
         new Promise<void>((resolve, reject) => {
           timer = setTimeout(() => {
-            if (hasPersonalImportSyncPause(scope))
+            if (localStorage.getItem(pauseKey(scope)) === intent)
               reject(new Error('等待其他分頁已逾時，暫停要求會在可寫入時完成。'));
             else resolve();
           }, SYNC_LOCK_WAIT_MS);
@@ -158,8 +162,9 @@ export function syncPersonalImports(
     !active()
   )
     return Promise.resolve();
-  if (hasPersonalImportSyncPause(scope))
-    return persistPersonalImportSyncPause(scope).catch(() => {
+  const intent = localStorage.getItem(pauseKey(scope));
+  if (intent !== null)
+    return persistPersonalImportSyncPause(scope, intent).catch(() => {
       // Retain the intent for the next sync trigger if the local write fails.
     });
   const storageKey = personalImportsStorageKey(scope);
@@ -184,7 +189,9 @@ export function syncPersonalImports(
             (path, input) => browserRequest(path, identity.context, input),
             current,
             resolution,
-            checkpoint,
+            async (next) => {
+              await checkpoint(next);
+            },
           );
           return { state: result.state, result };
         },

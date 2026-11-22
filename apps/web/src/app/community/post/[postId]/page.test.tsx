@@ -336,6 +336,8 @@ it.each(['post', 'replies', 'both'])(
     render(<PostDetailPage />);
     const remove = await screen.findByRole('button', { name: /^刪除$/ });
     fireEvent.click(screen.getByRole('button', { name: '回覆' }));
+    const input = screen.getByPlaceholderText<HTMLTextAreaElement>('輸入留言⋯');
+    fireEvent.change(input, { target: { value: '仍在回覆' } });
     if (failedRead !== 'replies') mocks.getPost.mockRejectedValueOnce(new Error('offline'));
     if (failedRead !== 'post') mocks.listReplies.mockRejectedValueOnce(new Error('offline'));
 
@@ -347,7 +349,8 @@ it.each(['post', 'replies', 'both'])(
     expect(screen.queryByRole('button', { name: /^刪除$/ })).toBeNull();
     expect(screen.queryByRole('button', { name: '回覆' })).toBeNull();
     expect(screen.queryByText('我的留言')).toBeNull();
-    expect(screen.queryByText('正在回覆⋯')).toBeNull();
+    expect(screen.getByText('正在回覆⋯')).toBeTruthy();
+    expect(input.value).toBe('仍在回覆');
     expect(screen.getByText('（此留言已被作者刪除）')).toBeTruthy();
     expect(screen.getByRole('status').textContent).toContain('操作已完成，但部分資料無法更新。');
 
@@ -357,8 +360,67 @@ it.each(['post', 'replies', 'both'])(
     expect(screen.queryByRole('button', { name: /^刪除$/ })).toBeNull();
     expect(mocks.deleteReply).toHaveBeenCalledOnce();
     expect(alert).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '送出留言' })));
+    expect(mocks.addReply).toHaveBeenCalledExactlyOnceWith('pu', 'p-1', expect.objectContaining({
+      content: '仍在回覆',
+      parentReplyId: 'r-1',
+    }));
   },
 );
+
+it.each([
+  ['post', 'child', 'success', 'during'],
+  ['post', 'child', 'failure', 'after'],
+  ['parent', 'child', 'success', 'after'],
+  ['child', 'child', 'success', 'during'],
+  ['child', 'child', 'failure', 'after'],
+  ['other', 'child', 'success', 'after'],
+  ['parent', null, 'success', 'during'],
+] as const)('preserves reply submission when deleting %s (target %s, %s, %s)', async (
+  deletion, target, outcome, sendWhen,
+) => {
+  vi.spyOn(window, 'alert').mockImplementation(() => {});
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  ownPost();
+  const rows = [
+    { id: 'parent', authorUid: 'alice', content: '父留言', threadDepth: 0 },
+    { id: 'child', authorUid: 'alice', content: '子留言', depth: 1, threadDepth: 1, parentReplyId: 'parent' },
+    { id: 'other', authorUid: 'alice', content: '其他留言', threadDepth: 0 },
+  ];
+  mocks.listReplies.mockResolvedValue(rows);
+  let finishDeletion!: () => void;
+  const write = deletion === 'post' ? mocks.deletePost : mocks.deleteReply;
+  write.mockImplementationOnce(() => new Promise<void>((resolve, reject) => {
+    finishDeletion = outcome === 'success' ? resolve : () => reject(new Error('offline'));
+  }));
+  render(<PostDetailPage />);
+  const input = await screen.findByPlaceholderText<HTMLTextAreaElement>('輸入留言⋯');
+  if (target) fireEvent.click(screen.getAllByRole('button', { name: '回覆' })[1]);
+  fireEvent.change(input, { target: { value: '等候刪除時的草稿' } });
+  const remove = deletion === 'post'
+    ? screen.getByRole('button', { name: /🗑 刪除/ })
+    : screen.getAllByRole('button', { name: /^刪除$/ })[rows.findIndex(({ id }) => id === deletion)];
+  fireEvent.click(remove);
+  fireEvent.click(remove);
+  expect(write).toHaveBeenCalledOnce();
+  const assertDraft = () => {
+    expect(input.value).toBe('等候刪除時的草稿');
+    expect(Boolean(screen.queryByText('正在回覆⋯'))).toBe(Boolean(target));
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '送出留言' }).disabled).toBe(false);
+  };
+  assertDraft();
+  if (sendWhen === 'after') {
+    await act(async () => finishDeletion());
+    assertDraft();
+  }
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '送出留言' })));
+  expect(mocks.addReply).toHaveBeenCalledExactlyOnceWith('pu', 'p-1', expect.objectContaining({
+    content: '等候刪除時的草稿',
+    parentReplyId: target,
+    depth: target ? 2 : 0,
+  }));
+  if (sendWhen === 'during') await act(async () => finishDeletion());
+});
 
 it('keeps a deleted reply hidden when an earlier thread read arrives late', async () => {
   vi.spyOn(window, 'confirm').mockReturnValue(true);

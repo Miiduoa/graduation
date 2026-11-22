@@ -77,12 +77,13 @@ export async function withPersonalImportSyncLock<T>(
   scope: PersonalImportScope,
   action: (
     state: PersonalImportLocalState,
-    checkpoint: (state: PersonalImportLocalState) => Promise<void>,
+    checkpoint: (state: PersonalImportLocalState, shouldWrite?: () => boolean) => Promise<boolean>,
   ) => Promise<{ state: PersonalImportLocalState; result: T }>,
   active = () => true,
   waitTimeoutMs?: number,
 ): Promise<T> {
   if (!canLockPersonalImportSync()) throw new Error(PERSONAL_IMPORT_SYNC_LOCK_UNAVAILABLE);
+  const key = personalImportsStorageKey(scope);
   const controller = waitTimeoutMs === undefined ? undefined : new AbortController();
   const timeout = controller && setTimeout(() => controller.abort(), waitTimeoutMs);
   const run = async () => {
@@ -93,25 +94,25 @@ export async function withPersonalImportSyncLock<T>(
       records: readPersonalImports(scope),
       sync: readPersonalImportSyncState(scope),
     };
-    const checkpoint = async (state: PersonalImportLocalState) => {
+    const checkpoint = async (state: PersonalImportLocalState, shouldWrite = () => true) => {
+      const changed = JSON.stringify(persisted) !== JSON.stringify(state);
+      const value = changed ? JSON.stringify({ version: 1, ...state }) : '';
       if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
-      if (JSON.stringify(persisted) === JSON.stringify(state)) return;
+      if (!shouldWrite()) return false;
+      if (!changed) return true;
       try {
-        localStorage.setItem(
-          personalImportsStorageKey(scope),
-          JSON.stringify({ version: 1, ...state }),
-        );
+        localStorage.setItem(key, value);
       } catch {
         throw new Error('裝置空間不足，這次同步未能保存；原資料仍保留，請先下載備份。');
       }
       persisted = state;
       window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
+      return true;
     };
     const { state, result } = await action(persisted, checkpoint);
     await checkpoint(state);
     return result;
   };
-  const key = personalImportsStorageKey(scope);
   if (!controller) return navigator.locks.request(key, run);
   try {
     return await navigator.locks.request(key, { signal: controller.signal }, run);
