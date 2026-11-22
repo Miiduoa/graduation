@@ -96,8 +96,16 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       }
       return JSON.parse(raw) as unknown;
     }
-    // JSON-only WebViews expose the parsed payload. Check its serialized
-    // size here and use the declared size limit enforced at the headers.
+    // A JSON-only WebView bridge has discarded the raw HTTP representation.
+    // JSON.stringify changes whitespace and escapes, so even a matching
+    // serialized length cannot prove an identity-framed body is complete.
+    // Never display unverifiable OSM geometry; keep the existing POI and
+    // walking directions available in the surrounding dialog.
+    if (identityLength !== null) {
+      throw new Error('Unverifiable building outline response length');
+    }
+    // Without identity framing, retain the legacy bounded JSON-only path.
+    // It cannot cap the initial allocation by the WebView bridge.
     const payload: unknown = await response.json();
     if (signal?.aborted) throw new Error('Building outline read aborted');
     const normalized = JSON.stringify(payload);
