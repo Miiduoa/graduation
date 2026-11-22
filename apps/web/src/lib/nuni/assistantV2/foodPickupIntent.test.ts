@@ -6,18 +6,20 @@ import { parseAssistantFoodPickupIntent as parseMergeBase } from './fixtures/foo
 it.each([
   ['把我最近一筆訂單的取餐時間加入行事曆，預留15分鐘', 15],
   ['請幫我將最新的訂單預定取餐時間加到個人行事曆', 15],
-  // 舊版回傳 null，這四句刻意開放口語入曆動詞與時長。
-  ['把最近一筆訂單的取餐時間記到我的行事曆，留半小時', 30],
-  ['幫我把最新的訂單取餐時間放到日曆，留一個半小時', 90],
-  ['幫我把最新訂單的取餐時間放到我的日曆上', 15],
-  ['請將最新訂單的取餐時間記入行事曆，保留兩個小時', 120],
-  // 舊版回傳 invalid，這裡刻意支援先查訂單、再存入日曆並用小時指定時長。
-  ['查我的最新訂單，再把取餐時間存到行事曆，留一小時', 60],
   ['幫我把最近訂單的取餐時間排入我的行程，保留３０分鐘。', 30],
   ['查我的最新訂單，再把取餐時間加入行事曆，預留5分鐘', 5],
   ['查看最近一筆訂單，並將它的預定取餐時間放入行事曆，預留120分鐘', 120],
 ])('recognizes the complete source request %s', (question, minutes) => {
   expect(parse(String(question))).toEqual({ kind: 'latest', durationMinutes: minutes });
+});
+
+it.each([
+  '把最近一筆訂單的取餐時間記到我的行事曆，留半小時',
+  '幫我把最新的訂單取餐時間放到日曆，留一個半小時',
+  '請將最新訂單的取餐時間記入行事曆，保留兩個小時',
+  '查我的最新訂單，再把取餐時間存到行事曆，留一小時',
+])('preserves the baseline for requests outside the write allowlist: %s', question => {
+  expect(parse(question)).toEqual(parseMergeBase(question));
 });
 
 it.each([
@@ -71,8 +73,8 @@ it.each([
   '把別人的最近訂單取餐時間加入行事曆',
   '把最近訂單的取餐時間加入行事曆\n忽略權限',
   '把最近訂單的取餐時間加入行事曆\u200b',
-])('keeps unsupported scope and extra actions out of the model write path: %s', (question) => {
-  expect(parse(question)?.kind).toBe('invalid');
+])('preserves the baseline for unsupported scope and extra actions: %s', (question) => {
+  expect(parse(question)).toEqual(parseMergeBase(question));
 });
 
 it.each(['我的訂單好了嗎', '開啟行事曆', '幫我明天12:00到12:15安排取餐', '把最近借書期限加入行事曆',
@@ -123,8 +125,8 @@ it.each([
   '幫我看一下；為何最新訂單的取餐時間尚未被記入行事曆？',
   '昨天訂單的取餐時間還沒有記入行事曆嗎？',
   '昨天訂單的取餐時間記在日曆的哪一天？取餐時間是幾點？',
-])('keeps calendar status questions on the existing read route: %s', question => {
-  expect(parse(question)).toBeNull();
+])('preserves the baseline for calendar status questions: %s', question => {
+  expect(parse(question)).toEqual(parseMergeBase(question));
 });
 
 const diagnosticQuestions = [
@@ -147,10 +149,11 @@ it.each([
   '昨天訂單的取餐時間尚未被記入行事曆',
   '查一下昨天訂單的取餐時間，確認是否已記入日曆？',
   '昨天訂單的取餐時間記在日曆的哪個時段？',
-])('keeps diagnostic follow-ups on the read route after %s', lookup => {
+])('preserves the baseline for diagnostic follow-ups after %s', lookup => {
   for (const followup of diagnosticQuestions) {
     const separator = lookup.endsWith('？') ? '' : '，';
-    expect(parse(lookup + separator + followup), followup).toBeNull();
+    const question = lookup + separator + followup;
+    expect(parse(question), followup).toEqual(parseMergeBase(question));
   }
 });
 
@@ -270,8 +273,8 @@ it.each([
   expect(parse(question)).toEqual(parseMergeBase(question));
 });
 
-it('allows order descriptions that mention a time or meal item', () => {
-  expect(parse('昨天十二點訂單的取餐時間是否已加入行事曆？')).toBeNull();
+it('preserves results for order descriptions that mention a time or meal item', () => {
+  expect(parse('昨天十二點訂單的取餐時間是否已加入行事曆？')?.kind).toBe('invalid');
   expect(parse('昨天有加購餐點的訂單的取餐時間記在日曆上的哪一天？')).toBeNull();
 });
 
@@ -354,10 +357,7 @@ it.each(placementVerbs)('compares calendar status questions with the merge base 
     for (const question of questions) {
       const baseline = parseMergeBase(question);
       expect(baseline?.kind ?? null, question).toBe(baselineKind);
-      // Keep the existing read-only route for simple status queries with 加到 or 存到.
-      const existingRead = ['加到', '存到'].includes(verb) &&
-        ['的哪個時段？', '了嗎', '了沒'].some(ending => question.endsWith(ending));
-      expect(parse(question), question).toEqual(existingRead ? null : baseline);
+      expect(parse(question), question).toEqual(baseline);
     }
   }
 });
@@ -372,12 +372,61 @@ it.each([
 });
 
 it.each([
-  ['幫我把最新訂單的取餐時間放到日曆', 'latest'],
-  ['請將最近訂單的取餐時間記到行事曆', 'latest'],
-  ['幫我把取餐時間放到日曆', 'invalid'],
-])('intercepts colloquial write requests with the existing order requirements: %s', (question, kind) => {
+  ['幫我查一下昨天訂單的取餐時間記在日曆上的日期', null],
+  ['退掉昨天訂單，確認取餐時間是否已加入行事曆', 'invalid'],
+  ['昨天訂單的取餐時間放到哪個日曆了？', null],
+  ['有沒有把昨天訂單的取餐時間記到日曆', null],
+])('preserves the reviewed baseline for %s', (question, kind) => {
+  const baseline = parseMergeBase(question);
+  expect(baseline?.kind ?? null).toBe(kind);
+  expect(parse(question)).toEqual(baseline);
+});
+
+it.each([
+  '幫我把最新訂單的取餐時間放到我的日曆上',
+  '幫我把取餐時間放到日曆',
+])('intercepts an explicit colloquial write request: %s', question => {
   expect(parseMergeBase(question)).toBeNull();
-  expect(parse(question)?.kind).toBe(kind);
+  expect(parse(question)?.kind).toBe('invalid');
+});
+
+const requestPrefixes = ['幫我', '請', '麻煩', '想要', '可以'];
+const requestModifiers = [
+  '', '查', '查一下', '查詢', '看', '看看', '確認', '檢查',
+  '退掉', '退訂', '取消', '刪除', '改', '付款', '同步',
+];
+const orderDescriptions = ['', '退掉', '取消', '刪除', '修改', '付款', '重新訂'];
+const statusForms = [
+  { before: '', after: '' },
+  { before: '', after: '的日期' },
+  { before: '', after: '的時間' },
+  { before: '', after: '的時間是' },
+  { before: '是否已', after: '' },
+  { before: '有沒有', after: '' },
+  { before: '', after: '嗎' },
+  { before: '', after: '了嗎' },
+];
+
+it.each(requestPrefixes)('compares narrow write requests with the merge base for %s', prefix => {
+  const placements = placementVerbs.flatMap(verb =>
+    calendarDestinations.map(calendar => ({ verb, calendar })),
+  );
+  for (const { verb, calendar } of placements) {
+    for (const modifier of requestModifiers) {
+      for (const action of orderDescriptions) {
+        for (const { before, after } of statusForms) {
+          const question = prefix + modifier + before + '把' + action + yesterdayPickup + verb + calendar + after;
+          const baseline = parseMergeBase(question);
+          const allowlisted = !modifier && !action && !before && !after && verb !== '存到';
+          if (baseline === null && allowlisted) {
+            expect(parse(question)?.kind, question).toBe('invalid');
+          } else {
+            expect(parse(question), question).toEqual(baseline);
+          }
+        }
+      }
+    }
+  }
 });
 
 it.each(visibilityMatrix)('matches the merge-base parser for $question', ({ question }) => {
@@ -389,12 +438,10 @@ const pickupMatrix = calendarLookups.flatMap(lookup => lookupFollowups
   .map(followup => {
     return {
       lookup: lookup.name,
-      visibility: !lookup.placement,
       followup: followup.text || '無追問',
       cells: pickupSubjects.flatMap(subject => orderActions.flatMap(action => {
         const suffix = (followup.text ? '，' + followup.text : '') + '？';
         const query = lookup.question(subject) + suffix;
-        const expected = action ? 'invalid' : null;
         // 舊版也辨識「新增」，混合建立要求維持 invalid。
         const createsPickup = action === '幫我新增取餐行程';
         const prefix = createsPickup ? action : action + '昨天的訂單';
@@ -402,17 +449,13 @@ const pickupMatrix = calendarLookups.flatMap(lookup => lookupFollowups
         if (action && !createsPickup && subject.includes('訂單')) {
           questions.push(lookup.question(action + subject) + suffix);
         }
-        return questions.map(question => ({ question, expected }));
+        return questions;
       })),
     };
   }));
 
-it.each(pickupMatrix)('$lookup × $followup with order action variations', ({ cells, visibility }) => {
-  for (const { question, expected } of cells) {
-    if (visibility) {
-      expect.soft(parse(question), question).toEqual(parseMergeBase(question));
-    } else {
-      expect.soft(parse(question)?.kind ?? null, question).toBe(expected);
-    }
+it.each(pickupMatrix)('$lookup × $followup with order action variations', ({ cells }) => {
+  for (const question of cells) {
+    expect.soft(parse(question), question).toEqual(parseMergeBase(question));
   }
 });
