@@ -115,10 +115,8 @@ export function courseStudyBackupFilenameStem(sourceTitle: string): string {
     .trim()
     .replace(/\.(pdf|txt|md|markdown)$/i, '')
     .replace(/^[. ]+|[. ]+$/gu, '');
-  const stem = truncateFilenameStem(safe).trim();
-  // Joiners are meaningful inside Persian/Indic words and emoji sequences,
-  // but a title made ONLY of default-ignorable characters would leave a
-  // seemingly blank filename in iOS Files and Android Downloads.
-  // Retain visible source spelling; change only the local export filename.
-  return /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800\ufff9-\ufffb]/u.test(stem) ? stem : '讀書白板';
+  // Check the entire cleaned title so truncation cannot hide visible text
+  // from this decision. Default-ignorable code points include variation selectors.
+  if (!/[^\p{White_Space}\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]/u.test(safe)) return '讀書白板';
+  return truncateFilenameStem(safe).trim() || '讀書白板';
 }
