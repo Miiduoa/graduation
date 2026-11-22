@@ -527,6 +527,40 @@ test('editing a pending draft keeps the save blocked and an invalid URL does not
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
 });
 
+test('a cancelled uncertain edit can be confirmed from the published view without a second write', async () => {
+  const published = { headline: '社團簡介', bio: '已發布的介紹', linkUrl: '' };
+  const submitted = { ...published, bio: '新的校園社團活動' };
+  jest.mocked(readCreatorCard).mockResolvedValueOnce(published)
+    .mockRejectedValueOnce(new Error('offline during confirmation'))
+    .mockResolvedValueOnce(submitted);
+  jest.mocked(saveCreatorCard).mockRejectedValueOnce(new Error('confirmation lost after write'));
+
+  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+  fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), submitted.bio);
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+
+  fireEvent.press(view.getByLabelText('取消編輯'));
+  expect(view.getByText(published.bio)).toBeTruthy();
+  expect(view.getByText(/儲存結果尚未確認/).props.accessibilityRole).toBe('alert');
+  const recheck = view.getByLabelText('核對儲存結果');
+  expect(recheck.props.accessibilityState).toMatchObject({ disabled: false, busy: false });
+  expect(view.queryByLabelText('個人簡介')).toBeNull();
+
+  await act(async () => { fireEvent.press(recheck); });
+  expect(view.getByText(/仍無法核對伺服器資料/).props.accessibilityRole).toBe('alert');
+  expect(view.getByLabelText('核對儲存結果')).toBeTruthy();
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+
+  await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+  expect(readCreatorCard).toHaveBeenLastCalledWith('pu', 'alice', { requireCommitted: true });
+  expect(view.getByText(submitted.bio)).toBeTruthy();
+  expect(view.queryByLabelText('核對儲存結果')).toBeNull();
+  expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+});
+
 test('canceling and reopening retains the pending draft and requires confirmation', async () => {
   jest.mocked(readCreatorCard).mockResolvedValueOnce({ headline: '', bio: '已發布的介紹', linkUrl: '' });
   jest.mocked(saveCreatorCard).mockRejectedValueOnce(new Error('offline after write'));
