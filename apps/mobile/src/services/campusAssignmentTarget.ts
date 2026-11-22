@@ -20,10 +20,24 @@ export function campusAssignmentDisplayTitle(value: string): string {
   return normalizeCampusAssignmentTitle(value).slice(0, 130);
 }
 
-export function matchesCampusAssignmentTitle(fullTitle: string, candidate: string): boolean {
+function matchesCampusAssignmentTitle(fullTitle: string, candidate: string): boolean {
   const title = normalizeCampusAssignmentTitle(candidate);
   return normalizeCampusAssignmentTitle(fullTitle) === title ||
     campusAssignmentDisplayTitle(fullTitle).trimEnd() === title;
+}
+
+/** Reminder cards may carry the original 130-character display title, including its final space. */
+export function matchingCampusReminderAssignments(
+  snapshot: CampusSenseSnapshot,
+  assignment: CampusAssignmentIdentity,
+) {
+  const title = normalizeCampusAssignmentTitle(assignment.title);
+  if (snapshot.assignments.status !== 'available' || !title) return [];
+  return snapshot.assignments.items.filter((row) =>
+    row.groupName === (assignment.groupName ?? '') &&
+    row.dueAt === (assignment.dueAt ?? null) &&
+    (normalizeCampusAssignmentTitle(row.title) === title ||
+      campusAssignmentDisplayTitle(row.title) === assignment.title));
 }
 
 /**

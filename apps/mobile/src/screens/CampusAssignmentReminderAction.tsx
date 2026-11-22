@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
-import { resolveCampusAssignmentTarget } from '../services/campusAssignmentTarget';
+import { matchingCampusReminderAssignments } from '../services/campusAssignmentTarget';
+import { parseCampusAssignmentSource } from '../services/campusAssignmentSource';
 import type { CampusReminderLead, ReminderAssignment } from '../services/campusAssignmentReminders';
 
 function deadlineLabel(iso: string) {
@@ -69,8 +70,10 @@ export function CampusAssignmentReminderAction({
   const scope = { uid: userId, schoolId };
   const verified = validCampusSenseSnapshot(snapshot, scope);
   const deadline = step.dueAt ? Date.parse(step.dueAt) : NaN;
+  const matches = verified ? matchingCampusReminderAssignments(verified, step) : [];
   const canUse = Boolean(
-    userId && resolveCampusAssignmentTarget({ assignment: step, snapshot: verified, scope }) && step.evidence === 'authorized-assignments' && verified &&
+    userId && matches.length === 1 && parseCampusAssignmentSource(matches[0].source) &&
+    step.evidence === 'authorized-assignments' &&
     Number.isFinite(deadline) && deadline > Date.now() + 61 * 60_000,
   );
   const oneDayAvailable = Number.isFinite(deadline) && deadline > Date.now() + (1441 * 60_000);

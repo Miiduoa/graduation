@@ -12,7 +12,7 @@ import { getAuthInstance, isFirebaseMockMode } from '../firebase';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
 import type { CampusPlanStep } from './offlineCampusPlanner';
 
-import { campusAssignmentDisplayTitle as normalizeTitle, matchesCampusAssignmentTitle, resolveCampusAssignmentTarget } from './campusAssignmentTarget';
+import { campusAssignmentDisplayTitle as normalizeTitle, matchingCampusReminderAssignments } from './campusAssignmentTarget';
 import { parseCampusAssignmentSource } from './campusAssignmentSource';
 import {
   adoptSubmittedAssignmentReminder, linkedReminderIdentifiers,
@@ -75,7 +75,7 @@ function validateAssignment(
   req: CampusReminderRequest,
   now: number,
   expectedEpoch = reminderEpoch,
-): { dueAt: string; triggerAt: number; title: string; groupName: string } {
+) {
   checkAccount(req.scope, req.isCurrent, expectedEpoch);
   if (req.leadMinutes !== 60 && req.leadMinutes !== 1440 ||
       req.step.evidence !== 'authorized-assignments' || req.step.route !== '/classroom' ||
@@ -86,11 +86,9 @@ function validateAssignment(
   if (!snapshot) throw new CampusReminderError('expired-source');
   if (snapshot.assignments.status !== 'available') throw new CampusReminderError('invalid-source');
 
-  const item = snapshot.assignments.items.find((assignment) =>
-    matchesCampusAssignmentTitle(assignment.title, req.step.title) &&
-    assignment.dueAt === req.step.dueAt &&
-    (assignment.groupName || '') === (req.step.groupName || ''));
-  if (!item || !item.dueAt) throw new CampusReminderError('invalid-source');
+  const matches = matchingCampusReminderAssignments(snapshot, req.step);
+  const item = matches[0];
+  if (matches.length !== 1 || !item.dueAt) throw new CampusReminderError('invalid-source');
 
   const due = Date.parse(item.dueAt);
   if (!Number.isFinite(due) || due - now > 366 * 86_400_000) {
@@ -103,6 +101,7 @@ function validateAssignment(
     triggerAt,
     title: normalizeTitle(item.title),
     groupName: item.groupName || '',
+    assignmentSource: parseCampusAssignmentSource(item.source),
   };
 }
 
@@ -113,9 +112,7 @@ function knownReminderSource(input: {
   const snapshot = input.snapshot;
   if (!snapshot || snapshot.userId !== input.scope.uid || snapshot.schoolId !== input.scope.schoolId ||
       snapshot.assignments.status !== 'available') return null;
-  const matches = snapshot.assignments.items.filter((row) =>
-    matchesCampusAssignmentTitle(row.title, input.step.title) && row.dueAt === input.step.dueAt &&
-    (row.groupName || '') === (input.step.groupName || ''));
+  const matches = matchingCampusReminderAssignments(snapshot, input.step);
   return matches.length === 1 ? parseCampusAssignmentSource(matches[0].source) : null;
 }
 
@@ -184,22 +181,17 @@ function busyKey(input: Pick<CampusReminderRequest, 'scope' | 'step' | 'leadMinu
 export async function scheduleCampusAssignmentReminder(
   input: CampusReminderRequest,
 ): Promise<CampusReminderReceipt> {
-  const target = resolveCampusAssignmentTarget({ assignment: input.step, snapshot: input.snapshot, scope: input.scope });
-  if (target) {
-    validateAssignment(input, Date.now());
+  const source = validateAssignment(input, Date.now());
+  if (source.assignmentSource) {
     await adoptCampusReminderSnapshot(input);
     if ((await unlinkedLegacyReminders()).length) throw new CampusReminderError('legacy-cleanup-required');
-    return scheduleSubmittedAssignmentReminder({ ...input,
-      source: { kind: 'group-assignment', ...target.params },
-    });
+    return scheduleSubmittedAssignmentReminder({ ...input, source: source.assignmentSource });
   }
   const lock = busyKey(input);
   if (pending.has(lock)) throw new CampusReminderError('busy');
   pending.add(lock);
   const epoch = reminderEpoch;
   try {
-    const now = Date.now();
-    const source = validateAssignment(input, now, epoch);
     if (!supportsLocalNotification()) throw new CampusReminderError('unsupported');
     const key = await reminderKey(input.scope, {
       title: source.title, groupName: source.groupName, dueAt: source.dueAt,

@@ -2,11 +2,13 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { LegacyAssignmentReminders } from '../screens/LegacyAssignmentReminders';
 import { CampusAssignmentReminderAction } from '../screens/CampusAssignmentReminderAction';
+import { CampusEvidencePlanCard } from '../screens/CampusEvidencePlanCard';
+import { scheduleCampusAssignmentReminder } from '../services/campusAssignmentReminders';
 import { AssignmentReplyActions } from '../screens/AssignmentReplyActions';
 import { reconcileSubmittedAssignmentReminders } from '../services/submittedAssignmentReminders';
 import { useSubmittedAssignmentReminders } from '../app/useSubmittedAssignmentReminders';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
-import type { CampusPlanStep } from '../services/offlineCampusPlanner';
+import { buildOfflineCampusPlan, type CampusPlanStep } from '../services/offlineCampusPlanner';
 import { AppState } from 'react-native';
 
 type Alarm = {
@@ -152,6 +154,77 @@ test('單筆回覆保留完整長標題，可新增並重新讀取本機提醒',
   view.unmount();
   const reopened = render(reply);
   expect(await reopened.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
+});
+
+function planCard(snapshot: CampusSenseSnapshot) {
+  const plan = buildOfflineCampusPlan({
+    question: '安排未來七天作業計畫',
+    uid: scope.uid,
+    snapshot,
+    context: {
+      checkedAt: snapshot.checkedAt,
+      schoolId: scope.schoolId,
+      schoolName: '靜宜大學',
+      timetable: { source: 'not-available', updatedAt: null, courses: [] },
+    },
+  });
+  if (!plan) throw new Error('Expected an assignment plan');
+  return {
+    plan,
+    view: render(<CampusEvidencePlanCard plan={plan} disabled={false}
+      reminderContext={{ userId: scope.uid, schoolId: scope.schoolId, snapshot, isCurrent: current }} />),
+  };
+}
+
+test('計畫卡可為唯一的 134 字作業設定本機提醒', async () => {
+  const snapshot = mockSnapshot();
+  const title = '長'.repeat(130) + '期末報告';
+  snapshot.assignments.items[0].title = title;
+  mockReader.getAssignment.mockResolvedValue({ id: 'work', groupId: 'course', title, dueAt });
+  const { plan, view } = planCard(snapshot);
+  expect(plan.steps[0].title).toBe(title.slice(0, 130));
+  fireEvent.press(await view.findByText('設定手機本機截止提醒'));
+  fireEvent.press(view.getByText('確認設定本機提醒'));
+  expect(await view.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
+  expect(mockReader.getAssignment).toHaveBeenCalledWith('work', 'course');
+  expect(mockAlarms.size).toBe(1);
+});
+
+test('另一筆作業的截斷標題以空格結尾時，仍可查看和退訂原有提醒', async () => {
+  const snapshot = mockSnapshot();
+  const title = '長'.repeat(129);
+  snapshot.assignments.items[0].title = title;
+  mockReader.getAssignment.mockResolvedValue({ id: 'work', groupId: 'course', title, dueAt });
+  await scheduleCampusAssignmentReminder({
+    scope, step: { ...step, title }, snapshot, leadMinutes: 60, isCurrent: current,
+  });
+  snapshot.assignments.items.push({
+    ...snapshot.assignments.items[0], title: title + ' 後綴', source: { ...source, assignmentId: 'other' },
+  });
+  snapshot.assignments.count = 2;
+  const { plan, view } = planCard(snapshot);
+  expect(plan.steps.map((item) => item.title)).toEqual([title, title + ' ']);
+  expect(await view.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
+  fireEvent.press(view.getByText('取消這項本機提醒'));
+  await view.findByText('已退訂並清除提醒偏好，撤回或延期後也不會自動恢復。');
+  expect(mockAlarms.size).toBe(0);
+  expect(mockStorage.size).toBe(0);
+});
+
+test('截斷的計畫標題撞上另一筆完整標題時，拒絕建立提醒', async () => {
+  const snapshot = mockSnapshot();
+  const title = '長'.repeat(130);
+  snapshot.assignments.items[0].title = title;
+  snapshot.assignments.items.push({
+    ...snapshot.assignments.items[0], title: title + '後綴', source: { ...source, assignmentId: 'other' },
+  });
+  snapshot.assignments.count = 2;
+  const { plan, view } = planCard(snapshot);
+  await expect(scheduleCampusAssignmentReminder({
+    scope, step: plan.steps[1], snapshot, leadMinutes: 60, isCurrent: current,
+  })).rejects.toThrow('invalid-source');
+  expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
+  expect(mockAlarms.size).toBe(0);
 });
 
 test('使用者設定提醒，伺服器確認已繳後取消；撤回後恢復原提醒', async () => {
