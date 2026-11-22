@@ -1,9 +1,15 @@
 import React from 'react';
 import { Linking } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
+import { getDocFromServer } from 'firebase/firestore';
 import { CreatorCardPanel } from '../screens/social/CreatorCardPanel';
 import { readCreatorCard, saveCreatorCard } from '../services/creatorCard';
 
+jest.mock('../firebase', () => ({ getDb: () => ({}) }));
+jest.mock('firebase/firestore', () => ({
+  doc: jest.fn(),
+  getDocFromServer: jest.fn(),
+}));
 jest.mock('../services/creatorCard', () => ({
   readCreatorCard: jest.fn(),
   saveCreatorCard: jest.fn(),
@@ -63,7 +69,27 @@ test('read error is retryable and never shown as unpublished', async () => {
   expect(await view.findByLabelText('建立社群簡介')).toBeTruthy();
   expect(readCreatorCard).toHaveBeenCalledTimes(2);
 });
+test('an initial profile read can succeed after timeout before retry', async () => {
+  jest.useFakeTimers();
+  try {
+    const card = { headline: '既有社群簡介', bio: '社團活動', linkUrl: '' };
+    let resolveRead!: (value: typeof card) => void;
+    jest.mocked(readCreatorCard).mockReturnValueOnce(new Promise((resolve) => {
+      resolveRead = resolve;
+    }));
 
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} />);
+    act(() => { jest.advanceTimersByTime(15_000); });
+    expect(view.getByText('讀取社群簡介逾時，請重新讀取。')).toBeTruthy();
+
+    await act(async () => { resolveRead(card); });
+    expect(view.getByText(card.headline)).toBeTruthy();
+    expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
+    expect(readCreatorCard).toHaveBeenCalledTimes(1);
+  } finally {
+    jest.useRealTimers();
+  }
+});
 
 
 test('a stalled initial profile read allows retry and ignores its late result', async () => {
@@ -149,7 +175,7 @@ test('rapid taps never duplicate an ambiguous save before a fresh server check',
   // choose a second write. This is a simulated service response, not emulator proof.
   await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
   expect(readCreatorCard).toHaveBeenCalledTimes(2);
-  expect(readCreatorCard).toHaveBeenLastCalledWith('pu', 'alice');
+  expect(readCreatorCard).toHaveBeenLastCalledWith('pu', 'alice', { requireCommitted: true });
   expect(view.getByText(/伺服器資料與上次送出的內容不同/)).toBeTruthy();
   expect(view.getByLabelText('儲存簡介').props.accessibilityState)
     .toMatchObject({ disabled: false, busy: false });
@@ -411,7 +437,7 @@ test('an ambiguous save is confirmed by a fresh read without sending a duplicate
   expect(readCreatorCard).toHaveBeenCalledTimes(1);
 
   await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
-  expect(readCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice');
+  expect(readCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice', { requireCommitted: true });
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
   expect(view.queryByLabelText('個人簡介')).toBeNull();
   expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
@@ -581,7 +607,7 @@ test('a stalled server confirmation times out, permits a read-only retry, and ig
   }
 });
 
-test('a stalled initial save releases the UI for read-only confirmation and ignores late success', async () => {
+test('a stalled save preserves the draft until matching fields have no pending writes', async () => {
   jest.useFakeTimers();
   try {
     const card = { headline: '', bio: '我的校園作品', linkUrl: '' };
@@ -589,7 +615,18 @@ test('a stalled initial save releases the UI for read-only confirmation and igno
     const stalled = new Promise<Awaited<ReturnType<typeof saveCreatorCard>>>((resolve) => {
       resolveStalled = resolve;
     });
-    jest.mocked(readCreatorCard).mockResolvedValueOnce(null).mockResolvedValueOnce(card);
+    const actualRead = jest.requireActual<typeof import('../services/creatorCard')>(
+      '../services/creatorCard',
+    ).readCreatorCard;
+    const snapshot = {
+      exists: () => true,
+      data: () => ({ schoolId: 'pu', ownerUid: 'alice', ...card }),
+    };
+    jest.mocked(getDocFromServer)
+      .mockResolvedValueOnce({ ...snapshot, metadata: { hasPendingWrites: true } } as never)
+      .mockResolvedValueOnce({ ...snapshot, metadata: { hasPendingWrites: false } } as never);
+    jest.mocked(readCreatorCard).mockResolvedValueOnce(null)
+      .mockImplementationOnce(actualRead).mockImplementationOnce(actualRead);
     jest.mocked(saveCreatorCard).mockReturnValueOnce(stalled);
 
     const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
@@ -613,10 +650,15 @@ test('a stalled initial save releases the UI for read-only confirmation and igno
       .toMatchObject({ disabled: false, busy: false });
     expect(saveCreatorCard).toHaveBeenCalledTimes(1);
 
-    // A fresh server-only read confirms the original payload; no second
-    // write is allowed even when the timed-out SDK request settles late.
     await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
-    expect(readCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice');
+    expect(view.queryByText('社群簡介已儲存。')).toBeNull();
+    expect(view.getByText(/仍無法核對伺服器資料/)).toBeTruthy();
+    expect(view.getByLabelText('個人簡介').props.value).toBe(card.bio);
+    expect(view.getByLabelText('儲存簡介').props.accessibilityState)
+      .toMatchObject({ disabled: true, busy: false });
+
+    await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+    expect(getDocFromServer).toHaveBeenCalledTimes(2);
     expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
     await act(async () => {
       resolveStalled({ ...card, bio: '不應出現的過時結果' });

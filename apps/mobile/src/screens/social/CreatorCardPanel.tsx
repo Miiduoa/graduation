@@ -100,7 +100,6 @@ function ScopedCreatorCardPanel({
     // The SDK call is not cancelled; late replies cannot replace a new read.
     const timeout = setTimeout(() => {
       if (!live) return;
-      live = false;
       setState({ status: 'error', timedOut: true });
     }, CREATOR_CARD_READ_TIMEOUT_MS);
     void readCreatorCard(schoolId, ownerUid).then((value) => {
@@ -151,7 +150,7 @@ function ScopedCreatorCardPanel({
       // discards late replies after a timeout; a new explicit tap performs
       // another server read without ever resending the uncertain write.
       latest = await Promise.race([
-        readCreatorCard(schoolId, ownerUid),
+        readCreatorCard(schoolId, ownerUid, { requireCommitted: true }),
         new Promise<never>((_, reject) => {
           timeout = setTimeout(() => {
             timedOut = true;

@@ -10,8 +10,14 @@ function cardRef(schoolId: string, ownerUid: string) {
 }
 
 /** The school-owned directory stays read-only. Creator card fields are opt-in. */
-export async function readCreatorCard(schoolId: string, ownerUid: string): Promise<CreatorCard | null> {
+export async function readCreatorCard(
+  schoolId: string, ownerUid: string, { requireCommitted = false } = {},
+): Promise<CreatorCard | null> {
   const snapshot = await getDocFromServer(cardRef(schoolId, ownerUid));
+  // A server read can still include local changes awaiting acknowledgement.
+  if (requireCommitted && snapshot.metadata.hasPendingWrites) {
+    throw new Error('Creator card has pending writes');
+  }
   if (!snapshot.exists()) return null;
   const data = snapshot.data() as Record<string, unknown>;
   if (data.schoolId !== schoolId || data.ownerUid !== ownerUid) {
