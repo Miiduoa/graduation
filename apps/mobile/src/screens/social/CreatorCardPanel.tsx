@@ -11,7 +11,6 @@ import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 
 const CREATOR_CARD_SAVE_TIMEOUT_MS = 15_000;
 const CREATOR_CARD_CONFIRM_TIMEOUT_MS = 15_000;
-const CREATOR_CARD_READ_TIMEOUT_MS = 15_000;
 const CREATOR_CARD_LINK_TIMEOUT_MS = 15_000;
 
 const CARD_FIELDS = ['headline', 'bio', 'linkUrl'] as const;
@@ -30,6 +29,7 @@ type SubmittedWrite = {
 
 type CardState =
   | { status: 'loading' }
+  | { status: 'error' }
   | { status: 'ready'; value: CreatorCard | null };
 
 function CardButton({ label, onPress, disabled = false, primary = false, busy = false }: {
@@ -67,11 +67,7 @@ function ScopedCreatorCardPanel({
 }: CreatorCardPanelProps) {
   const styles = useThemeStyleSheet(createStyles);
   const [state, setState] = useState<CardState>({ status: 'loading' });
-  const [readError, setReadError] = useState<'timeout' | 'failed' | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const profileReads = useRef({
-    acceptedAttempt: -1, closed: false,
-  });
   const [editing, setEditing] = useState(false);
   const editingNow = useRef(false);
   const editorSession = useRef(0);
@@ -141,24 +137,13 @@ function ScopedCreatorCardPanel({
   };
 
   useEffect(() => {
-    const reads = profileReads.current;
-    if (reads.closed) return;
-    let latestAttempt = true;
-    // A timed-out read can still supply a result until a newer success is accepted.
-    const canApply = () => mounted.current && !reads.closed && attempt > reads.acceptedAttempt;
-    const canShowError = () => canApply() && latestAttempt;
-    const timeout = setTimeout(() => {
-      if (canShowError()) setReadError('timeout');
-    }, CREATOR_CARD_READ_TIMEOUT_MS);
+    let live = true;
     void readCreatorCard(schoolId, ownerUid).then((value) => {
-      if (!canApply()) return;
-      if (latestAttempt) setReadError(null);
-      reads.acceptedAttempt = attempt;
-      acceptCard(value);
+      if (live) acceptCard(value);
     }).catch(() => {
-      if (canShowError()) setReadError('failed');
-    }).finally(() => clearTimeout(timeout));
-    return () => { latestAttempt = false; clearTimeout(timeout); };
+      if (live) setState({ status: 'error' });
+    });
+    return () => { live = false; };
   }, [schoolId, ownerUid, attempt]);
 
   const beginEdit = () => {
@@ -319,8 +304,6 @@ function ScopedCreatorCardPanel({
       return;
     }
     editedFields.current.clear();
-    profileReads.current.closed = true;
-    setReadError(null);
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
@@ -405,25 +388,22 @@ function ScopedCreatorCardPanel({
     }
   };
 
-  const readNotice = readError && (
-    <>
-      <Text accessibilityRole="alert" style={styles.note}>{readError === 'timeout'
-        ? '讀取社群簡介逾時，請重新讀取。'
-        : '社群簡介暫時無法讀取。'}</Text>
-      <CardButton label="重新讀取社群簡介" onPress={() => {
-        setReadError(null);
-        setAttempt(attempt + 1);
-      }} />
-    </>
-  );
   if (state.status === 'loading') return (
     <View style={styles.container}>
-      {readNotice || <Text accessibilityRole="text" style={styles.note}>正在讀取社群簡介…</Text>}
+      <Text accessibilityRole="text" style={styles.note}>正在讀取社群簡介…</Text>
+    </View>
+  );
+  if (state.status === 'error') return (
+    <View style={styles.container}>
+      <Text accessibilityRole="alert" style={styles.note}>社群簡介暫時無法讀取。</Text>
+      <CardButton label="重新讀取社群簡介" onPress={() => {
+        setState({ status: 'loading' });
+        setAttempt((n) => n + 1);
+      }} />
     </View>
   );
   return (
     <View style={styles.container} accessibilityLabel="社群簡介">
-      {readNotice}
       {editing ? (
         <View style={styles.editor}>
           <Text style={styles.label}>一句話介紹 · {draft.headline.length}/{CREATOR_CARD_LIMITS.headline}</Text>

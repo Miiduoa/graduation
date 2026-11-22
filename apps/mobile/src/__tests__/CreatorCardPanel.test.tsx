@@ -66,249 +66,111 @@ test('peer sees chosen published content but cannot edit', async () => {
   expect(saveCreatorCard).not.toHaveBeenCalled();
 });
 
-test('read error is retryable and never shown as unpublished', async () => {
-  jest.mocked(readCreatorCard).mockRejectedValueOnce(new Error('denied')).mockResolvedValueOnce(null);
-  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
-  fireEvent.press(await view.findByLabelText('重新讀取社群簡介'));
-  expect(await view.findByLabelText('建立社群簡介')).toBeTruthy();
-  expect(readCreatorCard).toHaveBeenCalledTimes(2);
-});
-test('an initial profile read can succeed after timeout before retry', async () => {
+const existingCard = {
+  headline: '原有標題', bio: '原有簡介', linkUrl: 'https://example.org',
+};
+
+test('a stalled profile read keeps loading without allowing a retry or save', () => {
   jest.useFakeTimers();
   try {
-    const card = { headline: '既有社群簡介', bio: '社團活動', linkUrl: '' };
-    let resolveRead!: (value: typeof card) => void;
-    jest.mocked(readCreatorCard).mockReturnValueOnce(new Promise((resolve) => {
-      resolveRead = resolve;
-    }));
-
-    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} />);
-    act(() => { jest.advanceTimersByTime(15_000); });
-    expect(view.getByText('讀取社群簡介逾時，請重新讀取。')).toBeTruthy();
-
-    await act(async () => { resolveRead(card); });
-    expect(view.getByText(card.headline)).toBeTruthy();
-    expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
-    expect(readCreatorCard).toHaveBeenCalledTimes(1);
-  } finally {
-    jest.useRealTimers();
-  }
-});
-
-
-test.each([false, true])('a successful profile retry ignores a late initial result (rejects: %s)', async (rejects) => {
-  jest.useFakeTimers();
-  try {
-    let resolveOld!: (value: Awaited<ReturnType<typeof readCreatorCard>>) => void;
-    let rejectOld!: (error: Error) => void;
-    const stalled = new Promise<Awaited<ReturnType<typeof readCreatorCard>>>((resolve, reject) => {
-      resolveOld = resolve;
-      rejectOld = reject;
-    });
-    jest.mocked(readCreatorCard)
-      .mockReturnValueOnce(stalled)
-      .mockResolvedValueOnce({ headline: '新的社團介紹', bio: '社團活動', linkUrl: '' });
-
-    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} />);
+    jest.mocked(readCreatorCard).mockReturnValueOnce(new Promise(() => {}));
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+    act(() => { jest.advanceTimersByTime(30_000); });
     expect(view.getByText('正在讀取社群簡介…')).toBeTruthy();
-    await act(async () => {
-      jest.advanceTimersByTime(15_000);
-      await Promise.resolve();
-    });
-    expect(view.getByText('讀取社群簡介逾時，請重新讀取。').props.accessibilityRole)
-      .toBe('alert');
-    fireEvent.press(view.getByLabelText('重新讀取社群簡介'));
-    await act(async () => { await Promise.resolve(); });
-    expect(readCreatorCard).toHaveBeenCalledTimes(2);
-    expect(view.getByText('新的社團介紹')).toBeTruthy();
-
-    // The first server request is still alive; it cannot restore stale
-    // content over the successful retry or leak an old author's card.
-    await act(async () => {
-      if (rejects) rejectOld(new Error('initial read failed'));
-      else resolveOld({ headline: '上次無效舊資料', bio: '', linkUrl: '' });
-      await Promise.resolve();
-    });
-    expect(view.queryByText('上次無效舊資料')).toBeNull();
     expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
-    expect(view.getByText('新的社團介紹')).toBeTruthy();
+    expect(view.queryByLabelText('建立社群簡介')).toBeNull();
+    expect(view.queryByLabelText('儲存簡介')).toBeNull();
+    expect(readCreatorCard).toHaveBeenCalledTimes(1);
     expect(saveCreatorCard).not.toHaveBeenCalled();
   } finally {
     jest.useRealTimers();
   }
 });
 
-const readOutcomes = ['empty', 'card', 'error'] as const;
-test.each(readOutcomes.flatMap((initial) => readOutcomes.flatMap((retry) =>
-  [false, true].map((retryFirst) => [initial, retry, retryFirst] as const),
-)))('initial %s and retry %s (retry settles first: %s)', async (initial, retry, retryFirst) => {
-  jest.useFakeTimers();
-  try {
-    const cards = [
-      { headline: '首次讀到的卡片', bio: '', linkUrl: '' },
-      { headline: '重試讀到的卡片', bio: '', linkUrl: '' },
-    ];
-    const reads = [initial, retry].map((outcome, index) => {
-      let settle!: () => void;
-      jest.mocked(readCreatorCard).mockReturnValueOnce(new Promise((resolve, reject) => {
-        settle = () => {
-          if (outcome === 'error') reject(new Error('read failed'));
-          else resolve(outcome === 'card' ? cards[index] : null);
-        };
-      }));
-      return settle;
-    });
-    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
-    act(() => { jest.advanceTimersByTime(15_000); });
-    fireEvent.press(view.getByLabelText('重新讀取社群簡介'));
-    expect(view.getByText('正在讀取社群簡介…')).toBeTruthy();
-    expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
-
-    const expectResult = (outcome: typeof initial, index: number) => {
-      expect(Boolean(view.queryByLabelText('建立社群簡介'))).toBe(outcome === 'empty');
-      cards.forEach((card, cardIndex) => {
-        expect(Boolean(view.queryByText(card.headline))).toBe(outcome === 'card' && cardIndex === index);
-      });
-    };
-    const firstIndex = retryFirst ? 1 : 0;
-    await act(async () => { reads[firstIndex](); });
-    expectResult(retryFirst ? retry : initial, firstIndex);
-    await act(async () => { reads[1 - firstIndex](); });
-    expectResult(retry === 'error' ? initial : retry, retry === 'error' ? 0 : 1);
-    expect(Boolean(view.queryByLabelText('重新讀取社群簡介'))).toBe(retry === 'error');
-
-    if (retry === 'error') {
-      jest.mocked(readCreatorCard).mockResolvedValueOnce(cards[1]);
-      await act(async () => { fireEvent.press(view.getByLabelText('重新讀取社群簡介')); });
-      expectResult('card', 1);
-      expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
-    }
-  } finally {
-    jest.useRealTimers();
+test.each([
+  ['initial card', 0, existingCard],
+  ['initial null', 0, null],
+  ['retried card', 1, existingCard],
+  ['retried null after another failure', 2, null],
+] as const)('%s gates saving until the read succeeds', async (_scenario, failures, card) => {
+  for (let i = 0; i < failures; i += 1) {
+    jest.mocked(readCreatorCard).mockRejectedValueOnce(new Error('read failed'));
   }
-});
+  let resolveRead!: (value: typeof card) => void;
+  jest.mocked(readCreatorCard).mockReturnValueOnce(new Promise((resolve) => {
+    resolveRead = resolve;
+  }));
+  const saved = { ...(card ?? { bio: '', linkUrl: '' }), headline: '新標題' };
+  jest.mocked(saveCreatorCard).mockResolvedValueOnce(saved);
 
-test('a timed-out retry keeps the initial success visible until the retry succeeds', async () => {
-  jest.useFakeTimers();
-  try {
-    let resolveInitial!: (value: null) => void;
-    let resolveRetry!: (value: Awaited<ReturnType<typeof readCreatorCard>>) => void;
-    jest.mocked(readCreatorCard)
-      .mockReturnValueOnce(new Promise((resolve) => { resolveInitial = resolve; }))
-      .mockReturnValueOnce(new Promise((resolve) => { resolveRetry = resolve; }));
-    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
-    act(() => { jest.advanceTimersByTime(15_000); });
-    fireEvent.press(view.getByLabelText('重新讀取社群簡介'));
-    await act(async () => { resolveInitial(null); });
-    act(() => { jest.advanceTimersByTime(15_000); });
-    expect(view.getByLabelText('建立社群簡介')).toBeTruthy();
-    expect(view.getByText('讀取社群簡介逾時，請重新讀取。')).toBeTruthy();
-
-    await act(async () => { resolveRetry({ headline: '重試讀到的卡片', bio: '', linkUrl: '' }); });
-    expect(view.getByText('重試讀到的卡片')).toBeTruthy();
+  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+  for (let i = 0; i < failures; i += 1) {
+    const retry = await view.findByLabelText('重新讀取社群簡介');
+    expect(view.getByText('社群簡介暫時無法讀取。')).toBeTruthy();
     expect(view.queryByLabelText('建立社群簡介')).toBeNull();
-    expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
-  } finally {
-    jest.useRealTimers();
+    expect(view.queryByLabelText('編輯社群簡介')).toBeNull();
+    expect(view.queryByLabelText('儲存簡介')).toBeNull();
+    fireEvent.press(retry);
+    expect(view.getByText('正在讀取社群簡介…')).toBeTruthy();
   }
+
+  expect(view.getByText('正在讀取社群簡介…')).toBeTruthy();
+  expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
+  expect(view.queryByLabelText('建立社群簡介')).toBeNull();
+  expect(view.queryByLabelText('編輯社群簡介')).toBeNull();
+  expect(view.queryByLabelText('儲存簡介')).toBeNull();
+  expect(saveCreatorCard).not.toHaveBeenCalled();
+
+  await act(async () => { resolveRead(card); });
+  fireEvent.press(view.getByLabelText(card ? '編輯社群簡介' : '建立社群簡介'));
+  fireEvent.changeText(view.getByLabelText('一句話介紹'), saved.headline);
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  expect(saveCreatorCard).toHaveBeenCalledWith('pu', 'alice', saved);
+  expect(view.getByText(saved.headline)).toBeTruthy();
+  expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+  expect(readCreatorCard).toHaveBeenCalledTimes(failures + 1);
 });
 
 test.each([
-  [false, false],
-  [true, false],
-  [false, true],
-])('overlapping reads (latest arrives first: %s, link explicitly cleared: %s)', async (latestFirst, clearLink) => {
-  jest.useFakeTimers();
-  try {
-    const old = { headline: '舊標題', bio: '舊簡介', linkUrl: 'https://example.org/old' };
-    const latest = { headline: '新標題', bio: '新簡介', linkUrl: 'https://example.org/new' };
-    const reads = [old, old, latest].map((card) => {
-      let resolveRead!: (value: typeof card) => void;
-      jest.mocked(readCreatorCard).mockReturnValueOnce(new Promise((resolve) => { resolveRead = resolve; }));
-      return () => resolveRead(card);
-    });
-    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
-    for (let retry = 0; retry < 2; retry++) {
-      act(() => { jest.advanceTimersByTime(15_000); });
-      fireEvent.press(view.getByLabelText('重新讀取社群簡介'));
-    }
+  ['before save', false, false],
+  ['after save', true, false],
+  ['after save with a rejection', true, true],
+] as const)('a superseded profile read that settles %s cannot affect the retried card', async (
+  _scenario, settleAfterSave, rejectOld,
+) => {
+  let settleOldRead!: () => void;
+  let resolveRetry!: (value: typeof existingCard) => void;
+  jest.mocked(readCreatorCard)
+    .mockReturnValueOnce(new Promise((resolve, reject) => {
+      settleOldRead = () => {
+        if (rejectOld) reject(new Error('old read failed'));
+        else resolve(null);
+      };
+    }))
+    .mockRejectedValueOnce(new Error('read failed'))
+    .mockReturnValueOnce(new Promise((resolve) => { resolveRetry = resolve; }));
+  const saved = { ...existingCard, headline: '新標題' };
+  jest.mocked(saveCreatorCard).mockResolvedValueOnce(saved);
+  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="bob" own />);
+  view.rerender(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+  fireEvent.press(await view.findByLabelText('重新讀取社群簡介'));
 
-    await act(async () => { reads[latestFirst ? 2 : 0](); });
-    fireEvent.press(view.getByLabelText('編輯社群簡介'));
-    fireEvent.changeText(view.getByLabelText('一句話介紹'), '我的標題');
-    if (clearLink) fireEvent.changeText(view.getByLabelText('作品連結'), '');
-    await act(async () => { reads[latestFirst ? 0 : 2](); });
-    await act(async () => { reads[1](); });
+  if (!settleAfterSave) await act(async () => { settleOldRead(); });
+  expect(view.getByText('正在讀取社群簡介…')).toBeTruthy();
+  expect(view.queryByLabelText('建立社群簡介')).toBeNull();
+  expect(view.queryByLabelText('儲存簡介')).toBeNull();
 
-    expect(view.getByLabelText('一句話介紹').props.value).toBe('我的標題');
-    expect(view.getByLabelText('個人簡介').props.value).toBe(latest.bio);
-    const linkUrl = clearLink ? '' : latest.linkUrl;
-    expect(view.getByLabelText('作品連結').props.value).toBe(linkUrl);
-    await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
-    expect(saveCreatorCard).toHaveBeenCalledWith('pu', 'alice', {
-      ...latest, headline: '我的標題', linkUrl,
-    });
-  } finally {
-    jest.useRealTimers();
-  }
-});
-
-test('the latest empty result allows creation while an older read remains pending', async () => {
-  jest.useFakeTimers();
-  try {
-    let resolveOld!: (value: Awaited<ReturnType<typeof readCreatorCard>>) => void;
-    jest.mocked(readCreatorCard)
-      .mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }))
-      .mockResolvedValueOnce(null);
-    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
-    act(() => { jest.advanceTimersByTime(15_000); });
-    await act(async () => { fireEvent.press(view.getByLabelText('重新讀取社群簡介')); });
-    fireEvent.press(view.getByLabelText('建立社群簡介'));
-    fireEvent.changeText(view.getByLabelText('一句話介紹'), '新草稿');
-
-    await act(async () => { resolveOld({ headline: '舊標題', bio: '舊簡介', linkUrl: '' }); });
-    expect(view.getByLabelText('一句話介紹').props.value).toBe('新草稿');
-    expect(view.getByLabelText('個人簡介').props.value).toBe('');
-    fireEvent.press(view.getByLabelText('取消編輯'));
-    expect(view.getByLabelText('建立社群簡介')).toBeTruthy();
-    expect(view.queryByText('舊標題')).toBeNull();
-  } finally {
-    jest.useRealTimers();
-  }
-});
-
-test('a saved card supersedes all outstanding profile reads across multiple retries', async () => {
-  jest.useFakeTimers();
-  try {
-    const published = { headline: '第一次讀到的卡片', bio: '', linkUrl: '' };
-    const saved = { ...published, headline: '剛儲存的標題' };
-    const reads = Array.from({ length: 3 }, () => {
-      let resolveRead!: (value: typeof published | null) => void;
-      jest.mocked(readCreatorCard).mockReturnValueOnce(new Promise((resolve) => {
-        resolveRead = resolve;
-      }));
-      return resolveRead;
-    });
-    jest.mocked(saveCreatorCard).mockResolvedValueOnce(saved);
-    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
-    for (let retry = 0; retry < 2; retry++) {
-      act(() => { jest.advanceTimersByTime(15_000); });
-      fireEvent.press(view.getByLabelText('重新讀取社群簡介'));
-    }
-    expect(readCreatorCard).toHaveBeenCalledTimes(3);
-
-    await act(async () => { reads[1](null); });
-    expect(view.getByLabelText('建立社群簡介')).toBeTruthy();
-    await act(async () => { reads[0](published); });
-    fireEvent.press(view.getByLabelText('建立社群簡介'));
-    fireEvent.changeText(view.getByLabelText('一句話介紹'), saved.headline);
-    await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
-    await act(async () => { reads[2]({ ...published, headline: '重試讀到的舊資料' }); });
-    expect(view.getByText(saved.headline)).toBeTruthy();
-    expect(view.queryByText('重試讀到的舊資料')).toBeNull();
-  } finally {
-    jest.useRealTimers();
-  }
+  await act(async () => { resolveRetry(existingCard); });
+  fireEvent.press(view.getByLabelText('編輯社群簡介'));
+  fireEvent.changeText(view.getByLabelText('一句話介紹'), saved.headline);
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  if (settleAfterSave) await act(async () => { settleOldRead(); });
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  expect(saveCreatorCard).toHaveBeenCalledWith('pu', 'alice', saved);
+  expect(view.getByText(saved.headline)).toBeTruthy();
+  expect(view.getByText(saved.bio)).toBeTruthy();
+  expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
 });
 
 test('rapid taps never duplicate an ambiguous save before a fresh server check', async () => {
