@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { formatEventWhen, formatPickup, formatYuan, inAppHref, pageLabel } from './copy';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { canConfirmAction, firstUnverifiedCalendarAction, priorCalendarActionHint, priorCalendarActionsVerified } from './execution';
@@ -22,7 +22,7 @@ function Status({ value, card, pending, onReconcile }: {
     const href = inAppHref(value.href);
     return <div>
       <p className={styles.note}>{value.message}</p>
-      {href && <Link className={styles.pageLink} href={href}>開啟確認的頁面</Link>}
+      {href && <AssistantReplyLink className={styles.pageLink} href={href}>開啟確認的頁面</AssistantReplyLink>}
     </div>;
   }
   if (value.status === 'verified') {
@@ -32,10 +32,10 @@ function Status({ value, card, pending, onReconcile }: {
       <p className={styles.note}>核對時間：{formatTaipeiDateTime(value.receipt.verifiedAt, { seconds: true })}（台灣時間）</p>
       {value.verificationWarning && <p className={styles.reason}>{value.verificationWarning}</p>}
       {value.local === 'ready'
-        ? <Link className={styles.pageLink} href={href + '&eventId=' + encodeURIComponent(value.receipt.record.id)}>開啟這筆行程</Link>
+        ? <AssistantReplyLink className={styles.pageLink} href={href + '&eventId=' + encodeURIComponent(value.receipt.record.id)}>開啟這筆行程</AssistantReplyLink>
         : <>
           <p className={styles.reason}>帳號中已儲存，此裝置尚未更新。{value.localMessage}</p>
-          <Link className={styles.pageLink} href={href}>開啟個人行事曆</Link>
+          <AssistantReplyLink className={styles.pageLink} href={href}>開啟個人行事曆</AssistantReplyLink>
         </>}
       {onReconcile && <button type="button" className={styles.secondary} disabled={pending} onClick={() => onReconcile(card)}>
         {value.local === 'ready' ? '重新核對結果' : '重新核對並更新此裝置'}
@@ -52,7 +52,7 @@ function Status({ value, card, pending, onReconcile }: {
   return <div>
     <p className={`${styles.status} ${styles.statusMuted}`}>{message}</p>
     {canCheck && onReconcile && <button type="button" className={styles.secondary} disabled={pending} onClick={() => onReconcile(card)}>重新核對結果</button>}
-    {value.status === 'conflict' && <Link className={styles.pageLink} href={'/calendar?schoolId=' + encodeURIComponent(card.schoolId)}>開啟個人行事曆</Link>}
+    {value.status === 'conflict' && <AssistantReplyLink className={styles.pageLink} href={'/calendar?schoolId=' + encodeURIComponent(card.schoolId)}>開啟個人行事曆</AssistantReplyLink>}
   </div>;
 }
 
@@ -116,9 +116,9 @@ function FoodBody({ card }: { card: V2Card }) {
           : '按下確認可能直接送出訂單。請先核對品項、金額與取餐時間；付款狀態以店家實際紀錄為準。'}
       </p>
       {pageOnly && href ? (
-        <Link className={styles.pageLink} href={href}>
+        <AssistantReplyLink className={styles.pageLink} href={href}>
           前往點餐頁
-        </Link>
+        </AssistantReplyLink>
       ) : null}
     </>
   );

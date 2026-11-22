@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { useSearchParams } from 'next/navigation';
 import {
   Suspense,
@@ -297,10 +297,10 @@ export function AssistantConversation({
             </div>
           )}
           <nav aria-label="直接開啟服務" className={styles.serviceLinks}>
-            <Link href="/timetable">我的課表</Link>
-            <Link href="/#courses">課程</Link>
-            <Link href="/map">校園地圖</Link>
-            <Link href="/cafeteria">餐廳</Link>
+            <AssistantReplyLink href="/timetable">我的課表</AssistantReplyLink>
+            <AssistantReplyLink href="/#courses">課程</AssistantReplyLink>
+            <AssistantReplyLink href="/map">校園地圖</AssistantReplyLink>
+            <AssistantReplyLink href="/cafeteria">餐廳</AssistantReplyLink>
           </nav>
         </div>
       )}
@@ -341,7 +341,7 @@ export function AssistantConversation({
                 </div>
                 {isWebOnlineOrderingEnabled() && hasOrderProposal(message.response) && (
                   <p className={styles.note}>
-                    這段對話不會送出訂單。訂單狀態和取餐號碼請看<Link href="/orders">我的訂單</Link>
+                    這段對話不會送出訂單。訂單狀態和取餐號碼請看<AssistantReplyLink href="/orders">我的訂單</AssistantReplyLink>
                     。
                   </p>
                 )}

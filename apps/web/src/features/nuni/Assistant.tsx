@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { Suspense, useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
@@ -187,11 +188,11 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
       {ready && (
         <>
           <nav aria-label="公開服務入口">
-            <Link href={'/map?schoolId=' + encodeURIComponent(schoolId)}>直接開啟校園地圖</Link> ·{' '}
-            <Link href={'/bus?schoolId=' + encodeURIComponent(schoolId)}>直接開啟公車資訊</Link> ·{' '}
-            <Link href={'/cafeteria?schoolId=' + encodeURIComponent(schoolId)}>
+            <AssistantReplyLink href={'/map?schoolId=' + encodeURIComponent(schoolId)}>直接開啟校園地圖</AssistantReplyLink> ·{' '}
+            <AssistantReplyLink href={'/bus?schoolId=' + encodeURIComponent(schoolId)}>直接開啟公車資訊</AssistantReplyLink> ·{' '}
+            <AssistantReplyLink href={'/cafeteria?schoolId=' + encodeURIComponent(schoolId)}>
               直接開啟餐廳資訊
-            </Link>
+            </AssistantReplyLink>
           </nav>
           {!providerReady && <p role="status">模型目前無法使用，可直接開啟公開服務入口。</p>}
           <p>請選擇公開服務。確認摘要後才會將公開服務資料傳送給模型。</p>
@@ -242,7 +243,7 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
               )}
             </div>
           )}
-          {href && <Link href={href}>開啟服務頁面</Link>}
+          {href && <AssistantReplyLink href={href}>開啟服務頁面</AssistantReplyLink>}
           {source && (
             <a href={source} target="_blank" rel="noopener noreferrer">
               學校官方公開導覽

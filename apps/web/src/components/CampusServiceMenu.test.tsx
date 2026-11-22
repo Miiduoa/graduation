@@ -8,6 +8,16 @@ import { MENU_RETURN_STATE_KEY, setMenuReturnScope } from '@/lib/menuNavigationR
 import { NuniSessionProvider, useOptionalNuniSession } from '@/features/nuni/Session';
 
 const navigation = vi.hoisted(() => ({ pathname: '/map', search: '' }));
+const selection = vi.hoisted(() => ({
+  current: null as null | {
+    loading: boolean;
+    catalogStatus: 'loading' | 'ready' | 'error';
+    selectedSchool: { id: string; name: string } | null;
+  },
+}));
+vi.mock('./SelectedSchoolProvider', () => ({
+  useOptionalSelectedSchool: () => selection.current,
+}));
 const auth = vi.hoisted(() => ({
   session: null as null | {
     platformAccountId: string;
@@ -102,6 +112,7 @@ beforeEach(() => {
   auth.useProvider = false;
   firebase.user = null;
   firebase.error = null;
+  selection.current = null;
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -1201,6 +1212,58 @@ it('preserves a real return when the destination normalizes the same campus para
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
 });
 
+it.each([
+  ['/map', '/library?campus=nthu', 'history'],
+  ['/events', '/library', 'history'],
+  ['/classroom', '/library?campus=nthu', 'legacy'],
+  ['/bus', '/library', 'legacy'],
+] as const)('restores a %s origin after campus loading at %s (%s)', (path, destination, kind) => {
+  const school = { id: 'nthu', name: '清華大學' };
+  firebase.user = { uid: 'school-a' };
+  selection.current = { loading: false, catalogStatus: 'ready', selectedSchool: school };
+  returnToMenuOrigin({ url: path, state: {} });
+  const first = render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
+  const query = destination.includes('?') ? '教材' : '';
+  if (query) fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } });
+  else fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
+  fireEvent.click(screen.getByRole('link', { name: '教材收藏' }));
+  const origin = captureMenuOrigin();
+  const historyKey = 'campus.menu.return.v1';
+  const stored = sessionStorage.getItem(historyKey)!;
+  expect(stored).toBeTruthy();
+  first.unmount();
+  // Reset document scope while retaining the tab's persisted draft.
+  setMenuReturnScope(null);
+  const [snapshot] = JSON.parse(stored);
+  if (kind === 'history') sessionStorage.setItem(historyKey, stored);
+  else {
+    sessionStorage.setItem('campus.directory.search.v1', JSON.stringify({
+      menu: { ...snapshot, path, destination, open: true },
+    }));
+  }
+  visitMenuDestination(destination);
+  selection.current = { loading: true, catalogStatus: 'loading', selectedSchool: null };
+  const view = render(<CampusServiceMenu />);
+  const confirmCampus = () => {
+    selection.current = { loading: false, catalogStatus: 'ready', selectedSchool: school };
+    view.rerender(<CampusServiceMenu />);
+  };
+  if (query) confirmCampus();
+  returnToMenuOrigin(origin);
+  view.rerender(<CampusServiceMenu />);
+  if (!query) {
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+    expect(sessionStorage.length).toBe(1);
+    confirmCampus();
+  }
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(query);
+  expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe('true');
+  if (!query) expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
+});
+
 it('captures a real return while the header is unmounted without storing account/session material', () => {
   auth.session = {
     platformAccountId: 'private-account',
@@ -1230,6 +1293,8 @@ it.each([
   'session',
   'campus',
   'campus during platform error',
+  'campus after selection loading',
+  'school-account during selection loading',
   'logout',
 ])(
   'discards a pending menu after changing %s even if the old scope returns',
@@ -1242,6 +1307,10 @@ it.each([
     };
     navigation.search = 'campus=pu';
     window.history.replaceState({}, '', '/map?campus=pu');
+    const school = { id: 'pu', name: '靜宜大學' };
+    if (kind.includes('selection loading')) {
+      selection.current = { loading: false, catalogStatus: 'ready', selectedSchool: school };
+    }
     const view = render(<CampusServiceMenu />);
     fireEvent.click(screen.getByText('所有服務'));
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
@@ -1255,14 +1324,30 @@ it.each([
       view.rerender(<CampusServiceMenu />);
       expect(sessionStorage.length).toBe(1);
     }
+    if (kind.includes('selection loading')) {
+      sessionStorage.setItem('campus.directory.search.v1', JSON.stringify({
+        menu: { path: '/map', destination: '/library', query: '借書', category: 'campus', open: true },
+      }));
+      selection.current = { loading: true, catalogStatus: 'loading', selectedSchool: null };
+      view.rerender(<CampusServiceMenu />);
+      expect(sessionStorage.length).toBe(2);
+    }
     if (kind.startsWith('school-account')) firebase.user = { uid: 'school-b' };
     if (kind === 'platform-account')
       auth.session = { ...auth.session!, platformAccountId: 'platform-b' };
     if (kind === 'session') auth.session = { ...auth.session!, context: 'session-b' };
     if (kind.startsWith('campus')) visitMenuDestination('/library?campus=nthu');
+    if (kind === 'campus after selection loading') {
+      selection.current = {
+        loading: false, catalogStatus: 'ready', selectedSchool: { id: 'nthu', name: '清華大學' },
+      };
+    }
     if (kind === 'logout') auth.pendingLogout = true;
     view.rerender(<CampusServiceMenu />);
     expect(sessionStorage.length).toBe(0);
+    if (kind.includes('selection loading')) {
+      selection.current = { loading: false, catalogStatus: 'ready', selectedSchool: school };
+    }
     firebase.user = { uid: 'school-a' };
     auth.session = {
       platformAccountId: 'platform-a',

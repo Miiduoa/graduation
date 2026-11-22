@@ -4,6 +4,7 @@ import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvi
 
 import Link from 'next/link';
 import { CampusIcon } from './CampusIcon';
+import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { sha256 } from 'js-sha256';
@@ -101,14 +102,18 @@ export function CampusServiceMenu() {
   const params = useSearchParams();
   const queryString = params?.toString() || '';
   const context = useCampusNavigationSearch(params);
+  const selection = useOptionalSelectedSchool();
   const account = useCampusFinderAccount();
   const { schoolDraftOwner, platformDraftOwner } = account;
-  const campusId = resolveSchoolPageContext(
-    Object.fromEntries(new URLSearchParams(context)),
-  ).schoolId;
+  // When the provider is present, URL parameters are provisional until it resolves.
+  const campusId =
+    selection && (selection.loading || selection.catalogStatus !== 'ready')
+      ? undefined
+      : resolveSchoolPageContext(Object.fromEntries(new URLSearchParams(context))).schoolId;
   const returnScope = sha256(JSON.stringify([account.ownerScope, campusId]));
   const checkingAccount = account.status === 'checking';
   const canRemember =
+    campusId !== undefined &&
     account.canRemember && schoolDraftOwner !== undefined && platformDraftOwner !== undefined;
   const scopeUnavailable = !canRemember && !checkingAccount;
   const draftScope = account.status === 'signing-out' ? null : canRemember ? returnScope : undefined;

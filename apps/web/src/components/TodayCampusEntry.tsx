@@ -18,6 +18,7 @@ import { areFunctionsConfigured } from '@/lib/functionsUrl';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { currentReturnPath } from '@/lib/navigation';
+import { AssistantLinkNavigation } from './AssistantReplyLink';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { useAssistantEnabled } from './AssistantEnabledProvider';
 import { useAuth } from './AuthGuard';
@@ -93,29 +94,31 @@ function TodayConversation({
         )}
       </div>
       <div ref={conversation}>
-        <Suspense fallback={<p role="status">正在開啟校園助理…</p>}>
-          {account.kind === 'nuni' ? (
-            <NuniConversation
-              preferredWorkContext={preferredWorkContext}
-              context={account.context}
-              accountId={account.accountId}
-              schoolId={schoolId}
-              cloudEnabled={cloudEnabled}
-              inlineDraft={draft}
-              onFreeformReady={setNuniFreeform}
-            />
-          ) : (
-            <SchoolConversation
-              userId={account.uid}
-              localOwner={account.localOwner}
-              groupId=""
-              initialDraft=""
-              schoolId={schoolId}
-              inline
-              inlineDraft={draft}
-            />
-          )}
-        </Suspense>
+        <AssistantLinkNavigation.Provider value={onNavigate}>
+          <Suspense fallback={<p role="status">正在開啟校園助理…</p>}>
+            {account.kind === 'nuni' ? (
+              <NuniConversation
+                preferredWorkContext={preferredWorkContext}
+                context={account.context}
+                accountId={account.accountId}
+                schoolId={schoolId}
+                cloudEnabled={cloudEnabled}
+                inlineDraft={draft}
+                onFreeformReady={setNuniFreeform}
+              />
+            ) : (
+              <SchoolConversation
+                userId={account.uid}
+                localOwner={account.localOwner}
+                groupId=""
+                initialDraft=""
+                schoolId={schoolId}
+                inline
+                inlineDraft={draft}
+              />
+            )}
+          </Suspense>
+        </AssistantLinkNavigation.Provider>
       </div>
     </section>
   );

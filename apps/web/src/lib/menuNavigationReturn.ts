@@ -16,7 +16,7 @@ export type MenuNavigationReturn = {
 };
 
 type MenuReturnBoundary = {
-  campus: string;
+  campus: string | undefined;
   schoolOwner: string | undefined;
   platformOwner: string | undefined;
 };
@@ -140,16 +140,18 @@ export function setMenuReturnScope(scope: string | null | undefined, boundary?: 
     const { campus, schoolOwner, platformOwner } = boundary;
     boundaryChanged =
       !!lastBoundary &&
-      (lastBoundary.campus !== campus ||
+      ((campus !== undefined &&
+          lastBoundary.campus !== undefined &&
+          lastBoundary.campus !== campus) ||
         (schoolOwner !== undefined &&
           lastBoundary.schoolOwner !== undefined &&
           schoolOwner !== lastBoundary.schoolOwner) ||
         (platformOwner !== undefined &&
           lastBoundary.platformOwner !== undefined &&
           platformOwner !== lastBoundary.platformOwner));
-    // Keep the last known owner for each source until it can be verified again.
+    // Keep the last confirmed campus and owners while verification is outstanding.
     lastBoundary = {
-      campus,
+      campus: campus ?? lastBoundary?.campus,
       schoolOwner: schoolOwner ?? lastBoundary?.schoolOwner,
       platformOwner: platformOwner ?? lastBoundary?.platformOwner,
     };

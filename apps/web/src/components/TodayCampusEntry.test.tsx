@@ -8,6 +8,7 @@ import {
   rocSchoolYear,
 } from '@campus/shared/src/campusAnnouncementQuality';
 import { AssistantEnabledProvider } from './AssistantEnabledProvider';
+import { AppHeader } from './AppHeader';
 import {
   TodayAssistantDisclosure,
   TodayCampusEntry,
@@ -34,6 +35,7 @@ vi.mock('./AuthGuard', () => ({
     error: null,
   }),
 }));
+vi.mock('./SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/features/nuni/Session', () => {
   const session = () => ({
     session: state.context ? { context: state.context, platformAccountId: state.accountId } : null,
@@ -609,6 +611,46 @@ it('keeps the visible answer and follow-up input usable without a speech engine'
   expect(screen.getByText(/此瀏覽器不支援朗讀回覆/)).toBeTruthy();
   fireEvent.change(field, { target: { value: '教室在哪裡？' } });
   expect(field.value).toBe('教室在哪裡？');
+});
+
+it('closes the header panel for a same-page answer link opened in the current tab', async () => {
+  state.pathname = '/map';
+  state.search = 'campus=pu';
+  window.history.replaceState({}, '', '/map?campus=pu');
+  mockNuniAsk(() => reply(
+    '[目前地圖](/map?campus=pu) [其他校園](/map?campus=nthu) [地圖區段](/map?campus=pu#places)',
+  ));
+  render(<AssistantEnabledProvider enabled><AppHeader /></AssistantEnabledProvider>);
+  const trigger = screen.getByRole('button', { name: '開啟校園助理' });
+  fireEvent.click(trigger);
+  const field = await screen.findByRole('textbox', { name: '問題' }, { timeout: 5000 });
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '校園地圖' } });
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  const link = await screen.findByRole('link', { name: '目前地圖' });
+  const panel = screen.getByRole('dialog', { name: '校園助理' });
+  link.addEventListener('click', (event) => event.preventDefault(), { once: true });
+  fireEvent.click(link);
+  expect(panel.hidden).toBe(false);
+  fireEvent.click(link, { ctrlKey: true });
+  expect(panel.hidden).toBe(false);
+  link.setAttribute('target', '_blank');
+  fireEvent.click(link);
+  expect(panel.hidden).toBe(false);
+  link.removeAttribute('target');
+  link.setAttribute('download', '');
+  fireEvent.click(link);
+  expect(panel.hidden).toBe(false);
+  link.removeAttribute('download');
+  for (const name of ['其他校園', '地圖區段']) {
+    const other = screen.getByRole('link', { name });
+    other.addEventListener('click', (event) => event.preventDefault(), { once: true });
+    fireEvent.click(other);
+    expect(panel.hidden).toBe(false);
+  }
+  fireEvent.click(link);
+  expect(panel.hidden).toBe(true);
+  expect(document.activeElement).toBe(trigger);
 });
 
 it('keeps a guest Today assistant login in the selected campus and returns to the same disclosure', () => {
