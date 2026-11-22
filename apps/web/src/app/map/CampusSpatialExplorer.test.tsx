@@ -637,19 +637,6 @@ it('uses the latest viewport state when a fast mobile scroll batches observer en
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
 
-  // Browser entries carry timestamps. If a WebView presents an older
-  // transition last in a batch, follow the newest observation, not the
-  // final array item. Test doubles above omit time to verify fallback.
-  act(() => intersection?.([
-    { isIntersecting: false, time: 220 }, { isIntersecting: true, time: 210 },
-  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
-  expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  act(() => intersection?.([
-    { isIntersecting: true, time: 240 }, { isIntersecting: false, time: 230 },
-  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
-  expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  expect(scene.create).toHaveBeenCalledTimes(1);
-
   // A WebView may round two transitions within one callback to the same
   // timestamp. Prefer the final queued transition, not the first one.
   const tiedOffscreen = [
@@ -666,28 +653,23 @@ it('uses the latest viewport state when a fast mobile scroll batches observer en
   act(() => intersection?.(tiedOnscreen, {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
 
-  // Two callbacks can share a rounded timestamp. An equal-time offscreen
-  // record must immediately suspend GPU instead of continuing to render offscreen.
-  // The equally ambiguous positive record cannot override that safe pause.
-  const tiedNegative = [{ isIntersecting: false, time: 310 }] as unknown as IntersectionObserverEntry[];
-  act(() => intersection?.(tiedNegative, {} as IntersectionObserver));
+  // Separate callbacks can share a rounded timestamp in either direction.
+  vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 40, 320, 180));
+  const notify = (isIntersecting: boolean) => act(() =>
+    intersection?.([observerEntry(graphics, isIntersecting, undefined, 310)], {} as IntersectionObserver));
+  notify(false);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  const callsAfterTiedPause = scene.setActive.mock.calls.length;
-  const tiedPositive = [{ isIntersecting: true, time: 310 }] as unknown as IntersectionObserverEntry[];
-  act(() => intersection?.(tiedPositive, {} as IntersectionObserver));
-  expect(scene.setActive.mock.calls.length).toBe(callsAfterTiedPause);
-  // A genuinely newer visible observation can reuse the existing scene.
-  const confirmedNewer = [{ isIntersecting: true, time: 311 }] as unknown as IntersectionObserverEntry[];
-  act(() => intersection?.(confirmedNewer, {} as IntersectionObserver));
+  notify(true);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  notify(false);
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  notify(true);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-it('ignores foreign and older viewport callbacks without disabling walking navigation', async () => {
-  // Synthetic WebView race: a callback for an unrelated element must not
-  // allocate our scene, and a timestamp older than an already-processed
-  // callback must not wake GPU rendering after the map has moved offscreen.
+it('checks current geometry for a delayed entry and ignores foreign targets', async () => {
   let observedHost: Element | null = null;
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) { intersection = callback; }
@@ -714,14 +696,15 @@ it('ignores foreign and older viewport callbacks without disabling walking navig
 
   act(() => intersection?.(([{ isIntersecting: false, time: 200, target: graphics }] as unknown as IntersectionObserverEntry[]), {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  const countBeforeDelayedCallback = scene.setActive.mock.calls.length;
-  // Mobile WebViews may quantize observer timestamps. An equal-time callback
-  // delivered in another batch is not proof that the map is back onscreen.
-  const ambiguousTie = [{ isIntersecting: true, time: 200, target: graphics }] as unknown as IntersectionObserverEntry[];
-  act(() => intersection?.(ambiguousTie, {} as IntersectionObserver));
-  expect(scene.setActive.mock.calls.length).toBe(countBeforeDelayedCallback);
-  act(() => intersection?.(([{ isIntersecting: true, time: 150, target: graphics }] as unknown as IntersectionObserverEntry[]), {} as IntersectionObserver));
-  expect(scene.setActive.mock.calls.length).toBe(countBeforeDelayedCallback);
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, window.innerHeight + 10, 320, 180));
+  const notify = () => act(() =>
+    intersection?.([observerEntry(graphics, true, undefined, 150)], {} as IntersectionObserver));
+  notify();
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  bounds.mockReturnValue(new DOMRect(0, 40, 320, 180));
+  notify();
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
 
   act(() => intersection?.(([
@@ -786,10 +769,7 @@ it('offers an accessible way to recover a suspended scene when mobile visibility
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-it('does not let untimed WebView records override newer timestamped visibility', async () => {
-  // A partially implemented mobile IntersectionObserver can mix entries
-  // without time into a batch, and deliver old untimed callbacks later.
-  // In neither case should an offscreen WebGL scene resume by mistake.
+it('uses queue order when a batch mixes timed and untimed entries', async () => {
   let observedHost: Element | null = null;
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) { intersection = callback; }
@@ -808,23 +788,12 @@ it('does not let untimed WebView records override newer timestamped visibility',
     const entries = records.map((record) => ({ ...record, target: graphics })) as unknown as IntersectionObserverEntry[];
     act(() => intersection?.(entries, {} as IntersectionObserver));
   };
-  // An earlier timed on-screen entry remains valid even when an untimed
-  // offscreen record happens to be last in the batch.
-  notify([{ isIntersecting: true, time: 100 }, { isIntersecting: false }]);
-  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
-  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  notify([{ isIntersecting: false, time: 100 }, { isIntersecting: true }]);
+  await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
 
-  notify([{ isIntersecting: false, time: 300 }, { isIntersecting: true }]);
+  notify([{ isIntersecting: true, time: 300 }, { isIntersecting: false }]);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  const pausedCalls = scene.setActive.mock.calls.length;
-
-  // No timestamp means no evidence that this record is newer; reject it
-  // once the observer has established a trustworthy timestamp order.
   notify([{ isIntersecting: true }]);
-  notify([{ isIntersecting: true, time: 250 }, { isIntersecting: true }]);
-  expect(scene.setActive.mock.calls.length).toBe(pausedCalls);
-
-  notify([{ isIntersecting: true, time: 400 }]);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
@@ -976,7 +945,7 @@ it('lets a student manually start 3D if a WebView never reports canvas visibilit
     {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
   vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 320, 180));
-  act(() => intersection?.([observerEntry(graphics, true, undefined, 1)],
+  act(() => intersection?.([observerEntry(graphics, true)],
     {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(2);
@@ -2320,7 +2289,7 @@ it.each(['first startup', 'running scene'] as const)(
 
     notify(false, 21);
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
-    notify(true, 22);
+    notify(true, 21);
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     expect(scene.create).toHaveBeenCalledTimes(1);
 
@@ -2651,7 +2620,11 @@ it('keeps motion and theme preferences reactive on Safari with legacy MediaQuery
 
 it('suspends graphics when the page is hidden or the canvas is outside the viewport', async () => {
   render(<CampusSpatialExplorer school="other-school" locations={places} selected={null} onSelect={vi.fn()} />);
-  await open();
+  const dialog = await open();
+  const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(host, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 40, 320, 180));
+  const notify = (isIntersecting: boolean) =>
+    intersection?.([observerEntry(host, isIntersecting, undefined, 42)], {} as IntersectionObserver);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   act(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: true });
@@ -2660,11 +2633,13 @@ it('suspends graphics when the page is hidden or the canvas is outside the viewp
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
   act(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
-    intersection?.([{ isIntersecting: false }] as IntersectionObserverEntry[], {} as IntersectionObserver);
+    bounds.mockReturnValue(new DOMRect(0, window.innerHeight + 10, 320, 180));
+    notify(false);
     document.dispatchEvent(new Event('visibilitychange'));
   });
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  act(() => intersection?.([{ isIntersecting: true }] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  bounds.mockReturnValue(new DOMRect(0, 40, 320, 180));
+  act(() => notify(true));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
 });
 
@@ -3168,16 +3143,13 @@ it.each(['ASCII', 'UTF-8'] as const)(
 it.each([
   { name: 'no headers', encoding: null, length: null, result: 'accept' },
   { name: 'identity without length', encoding: 'identity', length: null, result: 'accept' },
-  // A parsed JSON object cannot prove identity HTTP framing, even when a
-  // stringified payload happens to be the advertised size. The raw response
-  // has a trailing newline that is absent from the parsed JSON object.
-  { name: 'identity with length', encoding: 'identity', length: 'actual', result: 'skip' },
-  { name: 'implicit identity with length', encoding: null, length: 'actual', result: 'skip' },
+  { name: 'identity with length', encoding: 'identity', length: 'actual', result: 'accept' },
+  { name: 'implicit identity with length', encoding: null, length: 'actual', result: 'accept' },
   { name: 'oversized declaration', encoding: null, length: '2000001', result: 'skip' },
-  { name: 'gzip', encoding: 'gzip', length: '100', result: 'skip' },
-  { name: 'gzip without length', encoding: 'gzip', length: null, result: 'skip' },
+  { name: 'gzip', encoding: 'gzip', length: '100', result: 'accept' },
+  { name: 'gzip without length', encoding: 'gzip', length: null, result: 'accept' },
   { name: 'oversized UTF-8 payload without length', encoding: null, length: null, oversized: true, result: 'reject' },
-  { name: 'oversized identity payload', encoding: 'identity', length: '100', oversized: true, result: 'skip' },
+  { name: 'oversized identity payload', encoding: 'identity', length: '100', oversized: true, result: 'reject' },
   { name: 'invalid snapshot', encoding: null, length: null, result: 'reject' },
 ])('validates JSON-only WebView snapshots ($name)', async ({ name, encoding, length, oversized, result }) => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
@@ -3272,82 +3244,40 @@ it.each([
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  const valid = ['exact', 'trailing whitespace', 'escaped text', 'missing length', 'conflicting framing'].includes(variant);
+  const valid = !['truncated', 'invalid JSON', 'invalid snapshot', 'invalid length'].includes(variant);
   expect(await within(dialog).findByText(valid ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(valid ? buildings : []);
   expect(json).not.toHaveBeenCalled();
 });
 
-// An HTTP 200 with Content-Length: 0 cannot hold any JSON, whether identity
-// or compressed. The body may even be a valid-looking JSON prefix followed by
-// a stalled stream; reject at headers and cancel without ever getting a reader.
 it.each([
   { coding: 'identity', length: '0' },
   { coding: 'identity', length: '000' },
   { coding: 'gzip', length: '0' },
   { coding: 'gzip', length: '000' },
 ] as const)(
-  'rejects zero-length $coding / $length outline before reading a stalled body',
+  'reads and rejects a genuinely empty $coding outline with length $length',
   async ({ coding, length }) => {
-    const { library, body } = sourcedLibraryFootprintFixture();
-    let cancelled = 0;
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) { controller.enqueue(new TextEncoder().encode(body)); },
-      cancel() { cancelled += 1; },
-    });
-    const response = new Response(stream, {
+    const { library } = sourcedLibraryFootprintFixture();
+    const response = new Response('', {
       headers: { 'Content-Length': length, 'Content-Encoding': coding },
     });
     const read = vi.spyOn(response.body!, 'getReader');
-    const fetchMock = vi.fn().mockResolvedValue(response);
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
     render(<CampusSpatialExplorer school="pu" locations={[library]}
       selected={library} onSelect={vi.fn()} />);
     const dialog = await open();
     expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    await waitFor(() => expect(cancelled).toBe(1));
-    expect(read).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledOnce();
     expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
     expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
-    expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-    expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' })).toBeTruthy();
-  },
-);
-
-// A downstream intermediary can change Content-Encoding independently of the
-// trusted API. An unknown or stacked coding makes identity framing ambiguous;
-// never accept its OSM buildings even when the proxy advertises HTTP 200.
-// Reject at headers time without waiting for a stalled body in a mobile WebView.
-it.each(['unknown', 'gzip, br', 'zstd, identity', 'zstd;q=1', 'gzip;q=1', ''] as const)(
-  'rejects ambiguous Content-Encoding %j without loading an OSM building',
-  async (coding) => {
-    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
-    const cancel = vi.fn();
-    const stalledBody = new ReadableStream<Uint8Array>({ cancel });
-    const fetchMock = vi.fn().mockResolvedValue(new Response(stalledBody, {
-      status: 200, headers: { 'Content-Encoding': coding },
-    }));
-    vi.stubGlobal('fetch', fetchMock);
-    render(<CampusSpatialExplorer school="pu" locations={[library]}
-      selected={library} onSelect={vi.fn()} />);
-    const dialog = await open();
-    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
-    expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-    expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' })).toBeTruthy();
   },
 );
 
 const footprintContentTypes = [
   'application/json', 'text/plain', null, 'text/html', 'application/octet-stream',
   'application/json; charset=UTF-8', 'text/plain; charset=UTF-8',
-  'application/vnd.example_campus+json',
+  'application/vnd.example_campus+json', ' APPLICATION/JSON ', 'application/json, text/html', '',
 ];
 
 it.each(footprintContentTypes.flatMap((contentType) =>
@@ -3369,39 +3299,12 @@ it.each(footprintContentTypes.flatMap((contentType) =>
   render(<CampusSpatialExplorer school="pu" locations={[library]}
     selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  const incompatible = contentType === 'text/html' || contentType === 'application/octet-stream';
-  const valid = payload === 'valid' && !incompatible;
+  const valid = payload === 'valid';
   expect(await within(dialog).findByText(valid ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(read).toHaveBeenCalledTimes(incompatible ? 0 : 1);
+  expect(read).toHaveBeenCalledOnce();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(valid ? buildings : []);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
-
-it.each(['text/html', 'application/octet-stream', 'application/json, text/html', ''])(
-  'rejects a stalled 200 footprint response with Content-Type %j before reading its body',
-  async (contentType) => {
-    const { library, body } = sourcedLibraryFootprintFixture();
-    let cancelled = 0;
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) { controller.enqueue(new TextEncoder().encode(body)); },
-      cancel() { cancelled += 1; },
-    });
-    const response = new Response(stream, { status: 200, headers: { 'Content-Type': contentType } });
-    const read = vi.spyOn(response.body!, 'getReader');
-    const fetchMock = vi.fn().mockResolvedValue(response);
-    vi.stubGlobal('fetch', fetchMock);
-    render(<CampusSpatialExplorer school="pu" locations={[library]}
-      selected={library} onSelect={vi.fn()} />);
-    const dialog = await open();
-    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    await waitFor(() => expect(cancelled).toBe(1));
-    expect(read).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-  },
-);
 
 it('reads the final successful outline response after a redirect', async () => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
@@ -3488,9 +3391,6 @@ it('accepts a complete, correctly sized JSON snapshot with a valid Content-Lengt
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-// A 200 JSON body can be syntactically valid despite missing/trailing bytes.
-// Only an identity-encoded Content-Length can be compared with decoded bytes:
-// on gzip/br, browsers deliver decompressed bytes but keep the wire length.
 function sourcedLibraryFootprintFixture() {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
@@ -3510,63 +3410,48 @@ function sourcedLibraryFootprintFixture() {
   }) };
 }
 
-it.each(['understated', 'overstated'] as const)(
-  'rejects valid-looking 200 outline JSON with %s identity Content-Length',
-  async (difference) => {
-    const { library, body } = sourcedLibraryFootprintFixture();
-    const bytes = new TextEncoder().encode(body);
-    const declared = bytes.byteLength + (difference === 'understated' ? -5 : 5);
-    const response = new Response(new ReadableStream<Uint8Array>({
-      start(controller) { controller.enqueue(bytes); controller.close(); },
-    }), {
-      status: 200,
-      headers: { 'Content-Length': String(declared), 'Content-Type': 'application/json' },
-    });
-    const json = vi.spyOn(response, 'json');
-    const fetchMock = vi.fn().mockResolvedValue(response);
-    vi.stubGlobal('fetch', fetchMock);
-    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-    const dialog = await open();
-    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    expect(json).not.toHaveBeenCalled();
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
-    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
-    fireEvent.click(retry);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  },
-);
-
 it.each([
-  { description: 'shorter than identity Content-Length', oversized: false },
-  { description: 'over the UTF-8 byte limit without Content-Length', oversized: true },
-])('rejects a legacy non-streaming WebView text body $description', async ({ oversized }) => {
+  { length: '0', accepted: true },
+  { length: '000', accepted: true },
+  { length: '1', accepted: true },
+  { length: '2000000', accepted: true },
+  { length: ' 0040 ', accepted: true },
+  { length: '', accepted: false },
+  { length: '40, 40', accepted: false },
+  { length: '2000001', accepted: false },
+])('matches merge-base for Content-Length $length', async ({ length, accepted }) => {
+  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  const response = new Response(body, { headers: { 'Content-Length': length } });
+  const read = vi.spyOn(response.body!, 'getReader');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(accepted ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(read).toHaveBeenCalledTimes(accepted ? 1 : 0);
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(accepted ? buildings : []);
+});
+
+it('rejects a legacy WebView text body over the decoded UTF-8 byte limit', async () => {
   const { library, body } = sourcedLibraryFootprintFixture();
-  const raw = oversized
-    ? JSON.stringify({ ...JSON.parse(body) as Record<string, unknown>, padding: '中'.repeat(700_000) })
-    : body;
-  const headers = new Headers();
-  if (!oversized) {
-    headers.set('Content-Length', String(new TextEncoder().encode(raw).byteLength + 1));
-  }
-  const json = vi.fn();
+  const raw = JSON.stringify({ ...JSON.parse(body) as Record<string, unknown>, padding: '中'.repeat(700_000) });
   const textBody = vi.fn().mockResolvedValue(raw);
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, status: 200, body: null,
-    headers, text: textBody, json,
+    ok: true, status: 200, body: null, text: textBody,
   }));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
   expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(textBody).toHaveBeenCalledTimes(1);
-  expect(json).not.toHaveBeenCalled();
+  expect(textBody).toHaveBeenCalledOnce();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-it.each(['gzip', 'x-gzip', 'br', 'deflate', 'zstd', 'dcb', 'dcz'] as const)(
-  'accepts an already-decoded %s map body with a different wire Content-Length', async (coding) => {
+// Merge-base reads Fetch's decoded body independently of Content-Encoding.
+it.each([
+  'gzip', 'GZIP', 'x-gzip', ' br ', 'deflate', 'zstd', 'dcb', 'dcz',
+  'gzip, br', 'zstd, deflate, GZIP, br', 'br, gzip, gzip', 'identity, gzip',
+  'identity', '', 'unknown', 'gzip;q=1', 'gzip, unknown',
+])(
+  'matches merge-base for decoded outline data with Content-Encoding %j', async (coding) => {
     const { library, buildings, body } = sourcedLibraryFootprintFixture();
     // Browser fetch has already decoded the body before exposing the ReadableStream.
     const bytes = new TextEncoder().encode(body);

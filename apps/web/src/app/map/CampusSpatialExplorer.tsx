@@ -68,13 +68,6 @@ const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 // cannot exhaust mobile memory even without a reliable Content-Length.
 // Fallback is only for non-streaming WebViews / synthetic fetch stubs.
 async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
-  // Content-Length counts transport bytes. The browser delivers decoded
-  // bytes, so enforce exact framing only for identity responses:
-  // a truncated but syntactically valid JSON document is not a complete map.
-  const encoding = response.headers?.get('content-encoding')?.trim().toLowerCase() ?? null;
-  const declared = response.headers?.get('content-length') ?? null;
-  const identity = encoding === null || encoding === 'identity';
-  const identityLength = identity && declared !== null ? Number(declared) : null;
   if (!response.body || typeof response.body.getReader !== 'function') {
     // A native reader may still be available when a WebView hides it on the instance.
     const readBytes = typeof response.arrayBuffer === 'function' ? response.arrayBuffer :
@@ -84,9 +77,6 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       if (signal?.aborted) throw new Error('Building outline read aborted');
       if (bytes.byteLength > MAX_DECLARED_FOOTPRINT_BYTES) {
         throw new Error('Building outline response exceeded byte limit');
-      }
-      if (identityLength !== null && bytes.byteLength !== identityLength) {
-        throw new Error('Incomplete building outline response');
       }
       return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
     }
@@ -105,21 +95,9 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       if (decodedBytes > MAX_DECLARED_FOOTPRINT_BYTES) {
         throw new Error('Building outline response exceeded byte limit');
       }
-      if (identityLength !== null && decodedBytes !== identityLength) {
-        throw new Error('Incomplete building outline response');
-      }
       return JSON.parse(raw) as unknown;
     }
-    if (!identity) throw new Error('Cannot verify decoded building outline bytes');
-    // JSON-only WebView bridges discard the raw HTTP representation. Even an
-    // apparently matching JSON.stringify length cannot establish the original
-    // identity Content-Length: whitespace and escapes disappear on parsing.
-    // Do not promote unverifiable bytes into a source-checked 3D building.
-    if (identityLength !== null) {
-      throw new Error('Cannot verify identity building outline length without raw bytes');
-    }
-    // Without an advertised length, legacy JSON-only bridges can only be
-    // size-checked after parsing; never claim this bounds peak parse memory.
+    // JSON-only WebViews expose no raw bytes. Check size after parsing.
     const payload: unknown = await response.json();
     if (signal?.aborted) throw new Error('Building outline read aborted');
     const normalized = JSON.stringify(payload);
@@ -166,10 +144,6 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
         throw new Error('Building outline response exceeded byte/chunk limit');
       }
       const end = total + value.byteLength;
-      if (identityLength !== null && end > identityLength) {
-        cancelReader();
-        throw new Error('Building outline response length mismatch');
-      }
       if (end > bytes.byteLength) {
         const larger = new Uint8Array(Math.min(MAX_DECLARED_FOOTPRINT_BYTES,
           Math.max(bytes.byteLength * 2, end)));
@@ -191,9 +165,6 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
     reader.releaseLock();
   }
   if (signal?.aborted) throw new Error('Building outline read aborted');
-  if (identityLength !== null && total !== identityLength) {
-    throw new Error('Incomplete building outline response');
-  }
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, total))) as unknown;
 }
 const OSM_COOLDOWN_STORAGE_KEY = 'nuni:pu:osm-footprint-cooldown-until';
@@ -612,9 +583,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // the safe fallback is the existing eager startup path.
     let intersection: IntersectionObserver | null = null;
     let observerLive = true;
-    // Keep timestamps across observer callbacks, not only within one batch:
-    // an old, queued notification must not restart offscreen mobile WebGL.
-    let lastObservationTime = -Infinity;
     if (typeof IntersectionObserver !== 'undefined') {
       try {
         intersection = new IntersectionObserver((entries) => {
@@ -626,42 +594,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // Legacy callback shims may omit target; a *different* explicit
           // target is never proof that our map entered the viewport.
           const hostEntries = entries.filter((entry) => !entry.target || entry.target === host);
-          // A fast scroll can batch several transitions. Real observer
-          // entries expose time; use the most recent timestamp rather than
-          // trusting array order. Keep last-entry fallback for legacy WebViews
-          // or test shims without timestamps; an empty batch changes nothing.
-          if (!hostEntries.length) return;
-          // Some embedded WebViews include a time only on *some* entries.
-          // An untimed final item must not hide a newer timed transition,
-          // and an untimed callback cannot safely supersede a timestamped
-          // offscreen event delivered earlier. Purely untimed legacy shims
-          // still follow array order until a trustworthy time is observed.
-          const timed = hostEntries.filter((entry) => Number.isFinite(entry.time));
-          let latest: IntersectionObserverEntry;
-          if (timed.length) {
-            latest = timed[0];
-            // Equal timestamps can occur when a browser rounds time values.
-            // Entries within one callback are queued in transition order,
-            // so the last tied entry describes the latest state in that batch.
-            // Equal-time records from a DIFFERENT callback remain ambiguous
-            // and are rejected by the strict cross-batch check below.
-            for (const entry of timed) {
-              if (entry.time >= latest.time) latest = entry;
-            }
-            // A delayed older callback may arrive after a newer one, even
-            // if it is the sole entry in its own callback.
-            // Quantized timestamps can tie across separate callbacks.
-            // Never wake GPU on an ambiguous equal-time positive event,
-            // but accept an equal-time negative event to fail closed: keeping
-            // an offscreen WebGL scene active wastes mobile power. A newer
-            // positive event (or explicit manual recovery) can resume it.
-            if (latest.time < lastObservationTime ||
-                (latest.time === lastObservationTime && latest.isIntersecting)) return;
-            lastObservationTime = latest.time;
-          } else {
-            if (lastObservationTime !== -Infinity) return;
-            latest = hostEntries[hostEntries.length - 1];
-          }
+          // Observer entries are queued in transition order. Use the last
+          // host entry even when timestamps are rounded, missing or repeated.
+          const latest = hostEntries[hostEntries.length - 1];
+          if (!latest) return;
           // IntersectionObserver may report isIntersecting=true when the
           // canvas only touches the viewport boundary. A zero-area map has
           // no visible pixels and must not allocate or resume mobile WebGL.
@@ -673,7 +609,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // evidence of visible pixels. Ignore omitted coordinate fields in
           // legacy shims, but fail closed for any provided non-finite value.
           // A callback queued before bfcache scroll restoration can also
-          // carry a newer timestamp for an old on-screen position.
+          // describe an old on-screen position.
           const position = hostViewportVisibility();
           let confirmedIntersecting = false;
           try {
@@ -1293,34 +1229,17 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
         // or partial representation into a trusted 3D building snapshot.
         const contentRange = response.headers?.get('content-range') ?? null;
         const contentLength = response.headers?.get('content-length') ?? null;
-        // This endpoint emits JSON. Reject an explicit captive portal / HTML
-        // login or binary body *before* reading a stalled mobile response.
-        // text/plain and application/*+json remain compatible with older
-        // proxies; their payloads still require complete OSM validation.
-        const declaredContentType = response.headers?.get('content-type') ?? null;
-        const mime = declaredContentType?.split(';', 1)[0].trim().toLowerCase();
-        const invalidContentType = mime !== undefined &&
-          mime !== 'application/json' && mime !== 'text/plain' &&
-          !/^application\/[a-z0-9][a-z0-9!#$&^_.+-]*\+json$/.test(mime);
-        // The public API emits identity JSON. Fetch can also expose responses
-        // transparently decoded by the browser with a single coding. A proxy's
-        // unknown or stacked coding prevents trustworthy response framing:
-        // never promote its geometry into a sourced campus building.
-        const coding = response.headers?.get('content-encoding')?.trim().toLowerCase() ?? 'identity';
-        const invalidContentCoding =
-          !['identity', 'gzip', 'x-gzip', 'br', 'deflate', 'zstd', 'dcb', 'dcz'].includes(coding);
         // RFC Content-Length is a decimal byte count, not a fraction, hex
-        // number or comma-separated value. A declared zero-byte HTTP 200 cannot
-        // contain a JSON map, even when Fetch has not delivered the body yet.
-        // Reject it before reading: a stalled proxy must not hold mobile UI for
-        // the 15-second timeout. This also applies to compressed wire bodies.
+        // number or comma-separated value. Do not trust a 200 JSON body whose
+        // advertised size is invalid or implausibly large for this API.
+        // Fetch exposes the decoded body, so validate its size and JSON
+        // independently of Content-Encoding, Content-Type and wire length.
         const invalidContentLength = contentLength !== null &&
           (!/^\d+$/.test(contentLength) ||
             !Number.isSafeInteger(Number(contentLength)) ||
-            Number(contentLength) === 0 ||
             Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
-            contentRange !== null || invalidContentLength || invalidContentCoding || invalidContentType) {
+            contentRange !== null || invalidContentLength) {
           // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
           // can still stream a large body; release it without awaiting an
           // uncooperative proxy, rather than waste mobile bandwidth/memory.
@@ -1348,7 +1267,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
             status < 300 && status !== 200;
           const rateLimitedOrIncomplete = invalidSuccessStatus || status === 304 || status === 408 ||
             status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
-            contentRange !== null || invalidContentLength || invalidContentCoding || invalidContentType;
+            contentRange !== null || invalidContentLength;
           // A proxy can return an incomplete 206/Content-Range document or
           // a 408 without Retry-After. These responses cannot be trusted as
           // complete OSM geometry and should not trigger a manual retry loop.
@@ -1357,8 +1276,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
           // ordinary 500 keeps its existing manual-retry behavior.
           const fallbackBackoff = invalidSuccessStatus || status === 304 ||
             status === 408 || status === 429 || status === 502 ||
-            status === 503 || status === 504 || contentRange !== null || invalidContentLength ||
-            invalidContentCoding || invalidContentType;
+            status === 503 || status === 504 || contentRange !== null || invalidContentLength;
           const seconds = rateLimitedOrIncomplete
             ? (footprintCooldownSeconds(response) ?? (fallbackBackoff ? 60 : null))
             : null;
