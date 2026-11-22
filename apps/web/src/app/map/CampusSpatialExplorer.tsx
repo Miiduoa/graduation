@@ -432,7 +432,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Geometry is only affirmative when both the host and the effective
     // viewport have valid, positive bounds. Unknown WebView measurements must
     // never be interpreted as proof that the map is back on screen.
-    const scrollDialog = manuallyStarted ? host.closest('dialog') : null;
+    // The dialog is a scroll/clipping ancestor regardless of whether the scene
+    // was manually started. A WebView can report a positive window-root
+    // intersection for a canvas clipped outside the open dialog; do not
+    // allocate or resume WebGL until it actually overlaps the dialog viewport.
+    const scrollDialog = host.closest('dialog');
     const hostViewportVisibility = (): 'onscreen' | 'offscreen' | 'visual-offscreen' | 'unknown' | 'invalid-visual-viewport' | 'invalid-layout-viewport' | 'invalid-host-rect' => {
       // Some embedded Safari/WebViews expose VisualViewport but throw when a
       // dimension is read during keyboard, zoom or bfcache transitions. Read
