@@ -7106,6 +7106,8 @@ describe('reviewed course legacy access boundaries', () => {
     await seedFirestore(async (db) => {
       await db.doc('groups/review-boundary').set({ schoolId: 'pu', createdBy: 'owner', type: 'course', verification: { status: 'unverified' }, name: 'Course' });
       for (const uid of ['owner', 'student']) {
+        // This case asserts active same-school authorization, not schoolless legacy writes.
+        await db.doc(`users/${uid}`).set(campusBoundProfile('pu'));
         await db.doc(`schools/pu/members/${uid}`).set({ status: 'active', role: 'student' });
         await db.doc(`groups/review-boundary/members/${uid}`).set({ status: 'active', role: uid === 'owner' ? 'owner' : 'member', uid });
       }

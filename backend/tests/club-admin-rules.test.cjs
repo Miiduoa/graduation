@@ -25,6 +25,8 @@ before(async () => {
       ['moderator', 'moderator'],
       ['instructor', 'instructor'],
     ]) {
+      // A current staff member must have a server-issued canonical campus binding.
+      await db.doc(`users/${uid}`).set({ status: 'active', schoolId: 'school', primarySchoolId: 'school' });
       await db.doc(`schools/school/members/${uid}`).set({ status: 'active' });
       await db
         .doc(`groups/club/members/${uid}`)
