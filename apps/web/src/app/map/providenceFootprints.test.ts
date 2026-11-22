@@ -122,8 +122,8 @@ describe('Providence OSM building outlines', () => {
         schoolId: 'pu', buildings: parsed,
       })).toEqual(parsed);
     }
-    // Do not interpret non-metric values, ranges or out-of-bound measurements.
-    for (const height of ['18,125 m', '18-20 m', '59 yd', '2.499 m', '100.001 m']) {
+    // Do not interpret malformed values, ranges or out-of-bound measurements.
+    for (const height of ['18,125 m', '18-20 m', '59 cubits', '2.499 m', '100.001 m']) {
       expect(parseProvidenceOsmFootprints({
         elements: [way(255784049, library, { building: 'yes', height })],
       }), height).toEqual([]);
@@ -204,7 +204,7 @@ describe('Providence OSM building outlines', () => {
       }), height).toEqual(parsed);
     }
     for (const height of ["50' 6\"", "50'12\"", '50 ft; 60 ft',
-      '1,000 ft', '333 ft', '50 foot', '50 yd', "5'99\"", '12 inch', "7'4\""]) {
+      '1,000 ft', '333 ft', '50 foot', '50 furlongs', "5'99\"", '12 inch', "7'4\""]) {
       expect(parseProvidenceOsmFootprints({
         elements: [way(255784049, library, { building: 'yes', height })],
       }), height).toEqual([]);
