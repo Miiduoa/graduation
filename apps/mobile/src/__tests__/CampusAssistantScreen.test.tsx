@@ -71,11 +71,20 @@ jest.mock('../screens/AssistantClassNowHint', () => ({
   AssistantClassNowHint: ({ children }: { children: (upcoming: boolean) => React.ReactNode }) => children(mockUpcomingClass),
 }));
 jest.mock('../screens/LegacyAssignmentReminders', () => ({ LegacyAssignmentReminders: () => null }));
-jest.mock('../services/campusAssignmentReminders', () => ({
-  scheduleCampusAssignmentReminder: jest.fn(),
-  cancelCampusAssignmentReminder: jest.fn(),
-  getCampusAssignmentReminderStatus: jest.fn(async () => []),
-}));
+jest.mock('../services/campusAssignmentReminders', () => {
+  const reminders = {
+    scheduleCampusAssignmentReminder: jest.fn(),
+    cancelCampusAssignmentReminder: jest.fn(),
+    getCampusAssignmentReminderStatus: jest.fn(async (_input?: unknown): Promise<number[]> => []),
+    // Mirrors the real batch cancel: look up every scheduled lead, then cancel each in turn.
+    cancelCampusAssignmentReminders: jest.fn(async (input: Record<string, unknown>) => {
+      for (const leadMinutes of await reminders.getCampusAssignmentReminderStatus(input))
+        await reminders.cancelCampusAssignmentReminder({ ...input, leadMinutes });
+      return true;
+    }),
+  };
+  return reminders;
+});
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 const request = askCampusAssistant as jest.Mock;
 function openCampusTools(view: ReturnType<typeof render>) {
