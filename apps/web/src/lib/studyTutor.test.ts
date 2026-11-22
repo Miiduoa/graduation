@@ -77,6 +77,8 @@ describe('reject unreadable model citations before saving a lesson', () => {
     ['punctuation only', '，。'],
     ['annotation marker', '\ufff9'],
     ['isolated high surrogate', '\ud83d'],
+    ['broken surrogate suffix after a readable word', '主鍵\ud83d'],
+    ['isolated low surrogate', '\ude00'],
   ])('rejects a byte-matching but unreadable %s quotation', (_name, quote) => {
     const original = { ...passage, text: '前' + quote + '後' };
     expect(original.text.includes(quote)).toBe(true);
