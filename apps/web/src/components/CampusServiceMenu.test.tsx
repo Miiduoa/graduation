@@ -15,12 +15,14 @@ const auth = vi.hoisted(() => ({
     context?: string;
   },
   loading: false,
+  error: '',
   pendingLogout: false,
   logout: vi.fn(),
   useProvider: false,
 }));
 const firebase = vi.hoisted(() => ({
   user: null as { uid: string } | null,
+  error: null as Error | null,
 }));
 vi.mock('./SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/features/nuni/Session', async (importOriginal) => {
@@ -39,7 +41,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(navigation.search),
 }));
 vi.mock('./AuthGuard', () => ({
-  useAuth: () => ({ user: firebase.user, signOutUser: vi.fn() }),
+  useAuth: () => ({ user: firebase.user, error: firebase.error, signOutUser: vi.fn() }),
 }));
 
 // jsdom exposes descendants of closed <details> in role queries; check native disclosure state.
@@ -95,9 +97,11 @@ beforeEach(() => {
   setMenuReturnScope(null);
   auth.session = null;
   auth.loading = false;
+  auth.error = '';
   auth.pendingLogout = false;
   auth.useProvider = false;
   firebase.user = null;
+  firebase.error = null;
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -947,8 +951,68 @@ function testSessionResponse() {
 
 function SessionStatus() {
   const session = useOptionalNuniSession();
-  return <output>{session?.loading ? 'checking' : session?.session ? 'signed-in' : 'guest'}</output>;
+  const status = session?.loading
+    ? 'checking'
+    : session?.error
+      ? 'verification failed'
+      : session?.session
+        ? 'signed-in'
+        : 'guest';
+  return <output>{status}</output>;
 }
+
+it.each(['unavailable', 'connection lost', 'invalid session'])(
+  'restores the same account’s search after a session recheck fails (%s)',
+  async (failure) => {
+    auth.useProvider = true;
+    if (failure !== 'unavailable') firebase.user = { uid: 'school-a' };
+    const fetchSession = vi.fn().mockResolvedValueOnce(testSessionResponse());
+    if (failure === 'connection lost') fetchSession.mockRejectedValueOnce(new TypeError());
+    else {
+      fetchSession.mockResolvedValueOnce(
+        failure === 'unavailable' ? new Response(null, { status: 503 }) : Response.json({}),
+      );
+    }
+    let finishRefresh!: (response: Response) => void;
+    fetchSession.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
+    vi.stubGlobal('fetch', fetchSession);
+    const tree = () => (
+      <NuniSessionProvider>
+        <SessionStatus />
+        <CampusServiceMenu />
+      </NuniSessionProvider>
+    );
+    const view = render(tree());
+    await screen.findByText('signed-in');
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.click(screen.getByRole('button', { name: '篩選校園生活' }));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+    const origin = captureMenuOrigin();
+    visitMenuDestination('/library');
+    view.rerender(tree());
+    fireEvent(window, new PageTransitionEvent('pageshow', { persisted: true }));
+    await screen.findByText('verification failed');
+
+    returnToMenuOrigin(origin);
+    view.rerender(tree());
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+    fireEvent(window, new PageTransitionEvent('pageshow', { persisted: true }));
+    expect(screen.getByText('checking')).toBeTruthy();
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+    await act(async () => finishRefresh(testSessionResponse()));
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+    expect(screen.getByRole('button', { name: '篩選校園生活' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+  },
+);
 
 it.each([
   ['visibilitychange', { ctrlKey: true }],
@@ -1050,10 +1114,14 @@ it.each(['教材', ''])(
       }),
     );
     visitMenuDestination(destination);
+    firebase.error = new Error('School account unavailable');
     const view = render(<CampusServiceMenu />);
     expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
 
     returnToMenuOrigin(origin);
+    view.rerender(<CampusServiceMenu />);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+    firebase.error = null;
     view.rerender(<CampusServiceMenu />);
     const expectDraft = () => {
       expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
@@ -1155,7 +1223,15 @@ it('captures a real return while the header is unmounted without storing account
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
 });
 
-it.each(['school-account', 'platform-account', 'session', 'campus', 'logout'])(
+it.each([
+  'school-account',
+  'school-account during platform error',
+  'platform-account',
+  'session',
+  'campus',
+  'campus during platform error',
+  'logout',
+])(
   'discards a pending menu after changing %s even if the old scope returns',
   (kind) => {
     firebase.user = { uid: 'school-a' };
@@ -1173,11 +1249,17 @@ it.each(['school-account', 'platform-account', 'session', 'campus', 'logout'])(
     const origin = captureMenuOrigin();
     visitMenuDestination('/library?campus=pu');
     view.rerender(<CampusServiceMenu />);
-    if (kind === 'school-account') firebase.user = { uid: 'school-b' };
+    if (kind.endsWith('during platform error')) {
+      auth.session = null;
+      auth.error = 'Session unavailable';
+      view.rerender(<CampusServiceMenu />);
+      expect(sessionStorage.length).toBe(1);
+    }
+    if (kind.startsWith('school-account')) firebase.user = { uid: 'school-b' };
     if (kind === 'platform-account')
       auth.session = { ...auth.session!, platformAccountId: 'platform-b' };
     if (kind === 'session') auth.session = { ...auth.session!, context: 'session-b' };
-    if (kind === 'campus') visitMenuDestination('/library?campus=nthu');
+    if (kind.startsWith('campus')) visitMenuDestination('/library?campus=nthu');
     if (kind === 'logout') auth.pendingLogout = true;
     view.rerender(<CampusServiceMenu />);
     expect(sessionStorage.length).toBe(0);
@@ -1188,6 +1270,7 @@ it.each(['school-account', 'platform-account', 'session', 'campus', 'logout'])(
       context: 'session-a',
     };
     auth.pendingLogout = false;
+    auth.error = '';
     returnToMenuOrigin(origin);
     view.rerender(<CampusServiceMenu />);
     expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);

@@ -102,12 +102,16 @@ export function CampusServiceMenu() {
   const queryString = params?.toString() || '';
   const context = useCampusNavigationSearch(params);
   const account = useCampusFinderAccount();
+  const { schoolDraftOwner, platformDraftOwner } = account;
   const campusId = resolveSchoolPageContext(
     Object.fromEntries(new URLSearchParams(context)),
   ).schoolId;
   const returnScope = sha256(JSON.stringify([account.ownerScope, campusId]));
   const checkingAccount = account.status === 'checking';
-  const scopeUnavailable = !account.canRemember && !checkingAccount;
+  const canRemember =
+    account.canRemember && schoolDraftOwner !== undefined && platformDraftOwner !== undefined;
+  const scopeUnavailable = !canRemember && !checkingAccount;
+  const draftScope = account.status === 'signing-out' ? null : canRemember ? returnScope : undefined;
   const historyReturn = useSyncExternalStore(
     subscribeMenuReturn,
     getMenuReturn,
@@ -141,8 +145,12 @@ export function CampusServiceMenu() {
     skipToggleSideEffects.current = false;
   }
   useLayoutEffect(() => {
-    setMenuReturnScope(scopeUnavailable ? null : returnScope, checkingAccount);
-  }, [returnScope, scopeUnavailable, checkingAccount]);
+    setMenuReturnScope(draftScope, {
+      campus: campusId,
+      schoolOwner: schoolDraftOwner,
+      platformOwner: platformDraftOwner,
+    });
+  }, [draftScope, campusId, schoolDraftOwner, platformDraftOwner]);
   useLayoutEffect(() => {
     assignMenuOpen(false);
     composing.current = false;
@@ -151,7 +159,7 @@ export function CampusServiceMenu() {
     setRestoredExpanded([]);
   }, [pathname, queryString, returnScope, scopeUnavailable]);
   useLayoutEffect(() => {
-    if (!account.canRemember) return;
+    if (!canRemember) return;
     // The browser URL can change before Next renders the matching route.
     if (
       pathname !== window.location.pathname ||
@@ -188,7 +196,7 @@ export function CampusServiceMenu() {
     ) {
       previouslyFocused.focus({ preventScroll: true });
     }
-  }, [historyReturn, pathname, queryString, returnScope, account.canRemember]);
+  }, [historyReturn, pathname, queryString, returnScope, canRemember]);
   useEffect(() => {
     function dismiss(event: PointerEvent) {
       const element = menu.current;
@@ -243,7 +251,7 @@ export function CampusServiceMenu() {
     closeMenu();
   }
   function persistAndClose(destination: string) {
-    if (account.canRemember) {
+    if (canRemember) {
       rememberMenuReturn(destination, {
         scope: returnScope,
         query,

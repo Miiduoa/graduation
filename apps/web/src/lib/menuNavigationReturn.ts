@@ -15,12 +15,20 @@ export type MenuNavigationReturn = {
   open?: boolean;
 };
 
+type MenuReturnBoundary = {
+  campus: string;
+  schoolOwner: string | undefined;
+  platformOwner: string | undefined;
+};
+
 // History carries only an opaque marker. The tab stores drafts with a hashed scope.
 const snapshots = new Map<string, MenuNavigationReturn>();
 const listeners = new Set<() => void>();
 let pending: MenuNavigationReturn | null = null;
 let observedWindow: Window | undefined;
 let activeScope: string | null | undefined;
+let scopeConfirmed = false;
+let lastBoundary: MenuReturnBoundary | undefined;
 let storedSnapshots: string | null | undefined;
 let sequence = 0;
 
@@ -103,6 +111,8 @@ function observeWindow() {
     snapshots.clear();
     pending = null;
     activeScope = undefined;
+    scopeConfirmed = false;
+    lastBoundary = undefined;
     storedSnapshots = undefined;
     // A new document can mount on the origin after the browser has already returned.
     captureReturnState(window.history.state);
@@ -121,18 +131,35 @@ export function subscribeMenuReturn(listener: () => void) {
 export const getMenuReturn = () => pending;
 export const getServerMenuReturn = () => null;
 
-export function setMenuReturnScope(scope: string | null, checking = false) {
+// undefined means verification is outstanding. null explicitly invalidates the draft.
+export function setMenuReturnScope(scope: string | null | undefined, boundary?: MenuReturnBoundary) {
   observeWindow();
-  if (checking) {
-    // A recheck can retain the previous identity while requests are in flight.
-    if (activeScope == null || activeScope === scope) return;
-    scope = null;
+  scopeConfirmed = typeof scope === 'string';
+  let boundaryChanged = false;
+  if (boundary) {
+    const { campus, schoolOwner, platformOwner } = boundary;
+    boundaryChanged =
+      !!lastBoundary &&
+      (lastBoundary.campus !== campus ||
+        (schoolOwner !== undefined &&
+          lastBoundary.schoolOwner !== undefined &&
+          schoolOwner !== lastBoundary.schoolOwner) ||
+        (platformOwner !== undefined &&
+          lastBoundary.platformOwner !== undefined &&
+          platformOwner !== lastBoundary.platformOwner));
+    // Keep the last known owner for each source until it can be verified again.
+    lastBoundary = {
+      campus,
+      schoolOwner: schoolOwner ?? lastBoundary?.schoolOwner,
+      platformOwner: platformOwner ?? lastBoundary?.platformOwner,
+    };
   }
-  if (activeScope === scope) return;
+  if (scope === null) lastBoundary = undefined;
+  if (!boundaryChanged && (scope === undefined || activeScope === scope)) return;
   loadSnapshots();
   const previousScope = activeScope;
-  activeScope = scope;
-  if (previousScope != null || scope === null) {
+  activeScope = scope ?? null;
+  if (boundaryChanged || previousScope != null || scope === null) {
     snapshots.clear();
     saveSnapshots();
     forgetDirectorySearch('menu');
@@ -173,6 +200,7 @@ export function rememberMenuReturn(
   destination: string,
   draft: Pick<MenuNavigationReturn, 'scope' | 'query' | 'category' | 'expanded' | 'open'>,
 ) {
+  if (!scopeConfirmed) return;
   discardMenuReturn();
   const safeDestination = internalSitePath(destination);
   const url = currentMenuReturnUrl();
@@ -198,6 +226,7 @@ export function rememberMenuReturn(
 
 /** Acknowledge this return after the route catches up, keeping the entry for future returns. */
 export function consumeMenuReturn(snapshot: MenuNavigationReturn, scope: string): boolean {
+  if (!scopeConfirmed) return false;
   loadSnapshots();
   if (
     pending !== snapshot ||

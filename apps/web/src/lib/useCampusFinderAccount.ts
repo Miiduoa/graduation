@@ -10,6 +10,8 @@ export function useCampusFinderAccount() {
   const auth = useAuth();
   const platform = useOptionalNuniSession();
   const uid = auth.user?.uid || '';
+  const platformAccountId = platform?.session?.platformAccountId || '';
+  const platformContext = platform?.session?.context || '';
   const checking = Boolean(auth.loading || platform?.loading);
   const signingOut = Boolean(platform?.pendingLogout);
   const schoolAvailable = Boolean(uid && !auth.loading && !auth.error);
@@ -28,13 +30,7 @@ export function useCampusFinderAccount() {
           ? 'error'
           : 'guest';
   // Keep session binding in the scope without persisting the session context itself.
-  const ownerScope = sha256(
-    JSON.stringify([
-      uid,
-      platform?.session?.platformAccountId || '',
-      platform?.session?.context || '',
-    ]),
-  );
+  const ownerScope = sha256(JSON.stringify([uid, platformAccountId, platformContext]));
   const responseScope = JSON.stringify([
     ownerScope,
     status,
@@ -50,6 +46,12 @@ export function useCampusFinderAccount() {
     canUseAssistant,
     platformAudience: platformAvailable,
     ownerScope,
+    // A failed verification can omit the identity for just one source.
+    schoolDraftOwner: auth.loading || auth.error ? undefined : sha256(uid),
+    platformDraftOwner:
+      platform?.loading || platform?.error
+        ? undefined
+        : sha256(JSON.stringify([platformAccountId, platformContext])),
     responseScope,
     status,
     canRemember: status === 'ready' || status === 'guest',

@@ -38,11 +38,13 @@ afterEach(() => vi.restoreAllMocks());
 it('restores all draft fields after reloading the service and waits for scope confirmation', async () => {
   const { originState } = await startJourney();
   const reloaded = await loadDocument();
-  reloaded.setMenuReturnScope('unresolved', true);
+  reloaded.setMenuReturnScope(undefined);
   expect(reloaded.getMenuReturn()).toBeNull();
   backToOrigin(originState);
   const pending = reloaded.getMenuReturn()!;
   expect(pending).toMatchObject({ ...draft, url: originUrl });
+  expect(reloaded.consumeMenuReturn(pending, draft.scope)).toBe(false);
+  reloaded.setMenuReturnScope(undefined);
   reloaded.setMenuReturnScope(draft.scope);
   expect(reloaded.consumeMenuReturn(pending, draft.scope)).toBe(true);
   expect(reloaded.getMenuReturn()).toBeNull();
