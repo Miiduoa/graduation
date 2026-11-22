@@ -103,13 +103,13 @@ describe('collectLocalFiles', () => {
     const oversized = file('large.pdf', 'application/pdf');
     Object.defineProperty(oversized, 'size', { value: 20 * 1024 * 1024 + 1 });
     const selection = collectLocalFileSelection([], [
-      file('empty.jpg', 'image/jpeg', 0),
+      file('empty.pdf', 'application/pdf', 0),
       file('blank.pdf', '   '),
       oversized,
       file('valid.pdf', 'application/pdf'),
     ]);
     expect(selection.files.map(({ file }) => file.name)).toEqual(['valid.pdf']);
-    expect(selection.rejected.map(({ name }) => name)).toEqual(['empty.jpg', 'blank.pdf', 'large.pdf']);
+    expect(selection.rejected.map(({ name }) => name)).toEqual(['empty.pdf', 'blank.pdf', 'large.pdf']);
   });
 
   it('does not override an explicitly mismatched MIME to accept a file', () => {
@@ -173,6 +173,93 @@ describe('compressAssignmentImageFile', () => {
 });
 
 describe('uploadAndSubmitFiles', () => {
+  // Oracle from 27ad30c0a: the submission path compresses queued images
+  // before createIntent checks their MIME, extension and size. At that revision
+  // the picker itself already filtered BMP, GIF and SVG.
+  const baseFormats = [
+    { extension: 'bmp', mime: 'image/bmp', acceptsOriginal: false, canTranscode: true },
+    { extension: 'heic', mime: 'image/heic', acceptsOriginal: true, canTranscode: false },
+    { extension: 'webp', mime: 'image/webp', acceptsOriginal: true, canTranscode: true },
+    { extension: 'gif', mime: 'image/gif', acceptsOriginal: false, canTranscode: true },
+    { extension: 'png', mime: 'image/png', acceptsOriginal: true, canTranscode: true },
+    { extension: 'jpeg', mime: 'image/jpeg', acceptsOriginal: true, canTranscode: true },
+    { extension: 'svg', mime: 'image/svg+xml', acceptsOriginal: false, canTranscode: true },
+  ];
+
+  const cases = baseFormats.flatMap((format) =>
+    [1999, 2000, 2001].flatMap((edge) =>
+      [80, 2 * 1024 * 1024, 10 * 1024 * 1024 + 1].flatMap((originalBytes) =>
+        [true, false].flatMap((bitmapAvailable) =>
+          [true, false].flatMap((smaller) =>
+            [true, false].map((hasMime) => ({
+              ...format, edge, originalBytes, bitmapAvailable, smaller, hasMime,
+            })),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  it.each(cases)(
+    'matches merge-base upload for .$extension at $edge px, $originalBytes bytes, bitmap=$bitmapAvailable, smaller=$smaller, MIME=$hasMime',
+    async ({
+      extension, mime, acceptsOriginal, canTranscode, edge, originalBytes, bitmapAvailable, smaller, hasMime,
+    }) => {
+      const name = `photo.${extension}`;
+      const original = file(name, hasMime ? mime : '');
+      Object.defineProperty(original, 'size', { value: originalBytes });
+      const bitmap = vi.fn(async () => ({ width: edge, height: edge, close: vi.fn() }));
+      vi.stubGlobal('createImageBitmap', bitmapAvailable ? bitmap : undefined);
+      const jpeg = new Blob([new Uint8Array(12)], { type: 'image/jpeg' });
+      if (!smaller) Object.defineProperty(jpeg, 'size', { value: originalBytes + 1 });
+      const canvas = {
+        getContext: () => ({ drawImage: vi.fn() }),
+        toBlob: (callback: (blob: Blob) => void) => callback(jpeg),
+      };
+      const nativeCreate = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation((tag, options) =>
+        tag === 'canvas' ? (canvas as unknown as HTMLCanvasElement) : nativeCreate(tag, options),
+      );
+
+      const transcodes =
+        hasMime && canTranscode && bitmapAvailable && (edge > 2000 || originalBytes > 1.5 * 1024 * 1024);
+      const usesJpeg = transcodes && smaller;
+      const rejectsType = !usesJpeg && !acceptsOriginal;
+      const rejectsSize = !usesJpeg && originalBytes > 10 * 1024 * 1024;
+      const accepts = hasMime && !rejectsType && !rejectsSize;
+      const createAssignmentFileIntents = vi.fn(async () => [
+        { id: 'photo', uploadPath: 'photo', contentType: usesJpeg ? 'image/jpeg' : mime },
+      ]);
+      const uploadAssignmentFile = vi.fn(async () => {});
+      const submitFiles = vi.fn(async () => ({}));
+      const classes = { createAssignmentFileIntents, uploadAssignmentFile, submitFiles } as never;
+      const { files } = collectLocalFileSelection([], [original]);
+      expect(files.map(({ kind }) => kind)).toEqual(hasMime ? ['image'] : []);
+      if (hasMime) {
+        const submission = uploadAndSubmitFiles(classes, 'workspace', 'assignment', '', files, 'key');
+        if (accepts) await submission;
+        else await expect(submission).rejects.toMatchObject({
+          code: rejectsType ? 'ASSIGNMENT_FILE_TYPE_REJECTED' : 'ASSIGNMENT_FILE_TOO_LARGE',
+        });
+      }
+      expect(bitmap).toHaveBeenCalledTimes(Number(hasMime && canTranscode && bitmapAvailable));
+      expect(createAssignmentFileIntents).toHaveBeenCalledTimes(Number(accepts));
+      expect(uploadAssignmentFile).toHaveBeenCalledTimes(Number(accepts));
+      expect(submitFiles).toHaveBeenCalledTimes(Number(accepts));
+      if (accepts) {
+        expect(createAssignmentFileIntents).toHaveBeenCalledWith('workspace', 'assignment', {
+          idempotencyKey: 'key:intents',
+          files: [{
+            originalName: usesJpeg ? 'photo.jpg' : name,
+            contentType: usesJpeg ? 'image/jpeg' : mime,
+            byteSize: usesJpeg ? jpeg.size : originalBytes,
+            idempotencyKey: 'key:file:0',
+          }],
+        });
+      }
+    },
+  );
+
   it('uploads the accepted batch with the original MIME declarations', async () => {
     const files = collectLocalFiles([], [
       ...Array.from({ length: 8 }, (_, index) => file(`shot-${index}.jpg`, index === 0 ? 'image/jpg' : 'image/jpeg')),
@@ -212,6 +299,11 @@ describe('uploadAndSubmitFiles', () => {
     {
       files: [file('valid.pdf', 'application/pdf'), file('empty.pdf', 'application/pdf', 0)],
       kind: 'file' as const,
+      code: 'ASSIGNMENT_FILE_SIZE_REJECTED',
+    },
+    {
+      files: [file('empty.jpg', 'image/jpeg', 0)],
+      kind: 'image' as const,
       code: 'ASSIGNMENT_FILE_SIZE_REJECTED',
     },
     ...[

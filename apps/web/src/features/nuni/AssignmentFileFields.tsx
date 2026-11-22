@@ -62,9 +62,10 @@ function localAssignmentFileType(file: File) {
 }
 
 function validateSelectedAssignmentFile(file: File) {
+  // The server's format and size limits apply to the prepared image.
+  if (file.type.startsWith('image/')) return 'image';
   const { kind } = localAssignmentFileType(file);
-  // A photo's size limit applies to the prepared file after compression.
-  if (kind === 'file' || file.size === 0) assertAssignmentFileSize(kind, file.size);
+  assertAssignmentFileSize(kind, file.size);
   return kind;
 }
 
