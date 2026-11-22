@@ -18,7 +18,11 @@ import {
   type CampusService,
   type ServiceCategory,
 } from '@/lib/campusServices';
-import { expandedDirectorySections } from '@/lib/campusDirectorySearch';
+import {
+  expandedDirectorySections,
+  forgetDirectorySearch,
+  restoreDirectorySearch,
+} from '@/lib/campusDirectorySearch';
 import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
 import { useCampusFinderAccount } from '@/lib/useCampusFinderAccount';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
@@ -143,18 +147,25 @@ export function CampusServiceMenu() {
     setRestoredExpanded([]);
   }, [pathname, queryString, returnScope, account.canRemember]);
   useLayoutEffect(() => {
-    if (!historyReturn || !account.canRemember) return;
-    // popstate can arrive before Next renders the original route. Ordinary
-    // navigation, a refresh, or a different campus/account cannot opt in.
+    if (!account.canRemember) return;
+    // The browser URL can change before Next renders the matching route.
     if (
       pathname !== window.location.pathname ||
       queryString !== new URLSearchParams(window.location.search).toString()
     )
       return;
-    if (!consumeMenuReturn(historyReturn, returnScope)) return;
-    setQuery(historyReturn.query);
-    setCategory(historyReturn.category);
-    setRestoredExpanded(historyReturn.expanded);
+    if (historyReturn && !consumeMenuReturn(historyReturn, returnScope)) return;
+    const snapshot = historyReturn ?? restoreDirectorySearch('menu', pathname);
+    if (!snapshot) return;
+    if ('open' in snapshot) {
+      // Older entries only recorded the origin pathname in sessionStorage.
+      forgetDirectorySearch('menu');
+      if (snapshot.scope !== undefined && snapshot.scope !== returnScope) return;
+    }
+    setQuery(snapshot.query.slice(0, 100));
+    setCategory(snapshot.category);
+    setRestoredExpanded(snapshot.expanded ?? []);
+    if ('open' in snapshot && !snapshot.open) return;
     const previouslyFocused = document.activeElement;
     assignMenuOpen(true);
     if (

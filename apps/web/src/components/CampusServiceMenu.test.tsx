@@ -915,7 +915,7 @@ it('closes a normal click on the exact current service without creating a return
   expect(window.history.state).toEqual({ unrelated: 'keep' });
 });
 
-it('does not mistake a new visit or reload of the same URL for history return', () => {
+it('does not restore a current-format draft on a new visit or from a history marker alone', () => {
   const view = render(<CampusServiceMenu />);
   fireEvent.click(screen.getByText('所有服務'));
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
@@ -935,6 +935,50 @@ it('does not mistake a new visit or reload of the same URL for history return', 
   render(<CampusServiceMenu />);
   expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
 });
+
+it.each(['教材', ''])(
+  'restores a legacy sessionStorage menu draft after loading the updated page (query %j)',
+  (query) => {
+    const origin = captureMenuOrigin();
+    const destination = '/classroom/material-bookmarks';
+    const quick = {
+      path: '/map',
+      destination: '/library',
+      query: '借書',
+      category: 'campus',
+      open: true,
+    };
+    sessionStorage.setItem(
+      'campus.directory.search.v1',
+      JSON.stringify({
+        quick,
+        menu: {
+          path: '/map',
+          destination,
+          query,
+          category: 'study',
+          open: true,
+          expanded: ['service:/classroom'],
+        },
+      }),
+    );
+    visitMenuDestination(destination);
+    const view = render(<CampusServiceMenu />);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+
+    returnToMenuOrigin(origin);
+    view.rerender(<CampusServiceMenu />);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(query);
+    expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    if (!query) {
+      expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
+    }
+    expect(JSON.parse(sessionStorage.getItem('campus.directory.search.v1')!)).toEqual({ quick });
+  },
+);
 
 it('waits for the Next route after popstate and consumes the original entry once', () => {
   const routerTree = { segment: 'map', children: ['unchanged'] };
