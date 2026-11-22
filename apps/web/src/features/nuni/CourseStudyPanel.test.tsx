@@ -2758,6 +2758,7 @@ it('keeps selectable local timing samples without exporting source text or answe
   let run = 0;
   mocks.run.mockImplementation(async (request) => {
     run += 1;
+    if (run === 1) request.onProgress?.('正在下載講解模型（已接收 35 MB）');
     request.onTiming?.({
       preparationMs: 800 + run, generationMs: run === 2 ? null : 1300 + run,
       totalMs: 2100 + run, outcome: run === 2 ? 'failed' : 'success',
@@ -2773,12 +2774,14 @@ it('keeps selectable local timing samples without exporting source text or answe
   expect(output.readOnly).toBe(true);
   expect(JSON.parse(output.value)).toEqual({
     format: 'nuni-study-tutor-timing', version: 1,
-    measurements: [{ run: 1, outcome: 'success', preparationMs: 801, generationMs: 1301, totalMs: 2101 }],
+    measurements: [{ run: 1, outcome: 'success', downloadProgressObserved: true,
+      preparationMs: 801, generationMs: 1301, totalMs: 2101 }],
   });
   fireEvent.click(screen.getByRole('button', { name: '只依原文重新講解' }));
   await waitFor(() => expect(JSON.parse(output.value).measurements).toHaveLength(2));
   expect(JSON.parse(output.value).measurements[1]).toEqual({
-    run: 2, outcome: 'failed', preparationMs: 802, generationMs: null, totalMs: 2102,
+    run: 2, outcome: 'failed', downloadProgressObserved: false,
+    preparationMs: 802, generationMs: null, totalMs: 2102,
   });
   expect(output.value).not.toContain(material.body);
   expect(output.value).not.toContain(material.title);
@@ -2817,10 +2820,12 @@ it('retains original run numbers after the ten-sample timing window rolls over',
   expect(report.measurements.map((entry: { run: number }) => entry.run))
     .toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   expect(report.measurements[1]).toEqual({
-    run: 4, outcome: 'failed', preparationMs: 4, generationMs: null, totalMs: 12,
+    run: 4, outcome: 'failed', downloadProgressObserved: false,
+    preparationMs: 4, generationMs: null, totalMs: 12,
   });
   expect(report.measurements[9]).toEqual({
-    run: 12, outcome: 'success', preparationMs: 12, generationMs: 24, totalMs: 36,
+    run: 12, outcome: 'success', downloadProgressObserved: false,
+    preparationMs: 12, generationMs: 24, totalMs: 36,
   });
   expect(output.value).not.toContain(material.body);
   expect(output.value).not.toContain(explanation.answer);

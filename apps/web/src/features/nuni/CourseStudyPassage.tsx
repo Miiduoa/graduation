@@ -48,7 +48,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   // Keep a monotonic attempt number even when the ten-sample window rolls over.
   // It is scoped to this mounted passage/mode, and never contains lesson text.
   const timingSequence = useRef(0);
-  const [timingLog, setTimingLog] = useState<Array<{ run: number; timing: StudyTutorTiming }>>([]);
+  const [timingLog, setTimingLog] = useState<Array<{ run: number; timing: StudyTutorTiming; downloadProgressObserved: boolean }>>([]);
   const [stepSelection, setStepSelection] = useState<{ lessonId: number; index: number } | null>(null);
   // A citation position belongs to its mode, lesson and teaching step. Reusing
   // an index for another quote can incorrectly report that an exact quote is absent.
@@ -143,6 +143,9 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
     const controller = new AbortController();
     current.current = controller;
     const question = modeMemory.question.trim();
+    // Only observed local worker progress counts. Missing progress is not proof
+    // of a cached model or a warm start; keep this flag scoped to one attempt.
+    let downloadProgressObserved = false;
     setBusy(true);
     setError('');
     setTiming(null);
@@ -154,13 +157,16 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
       const explanation = await runStudyTutor({ passage, mode, question: question || undefined, history,
         signal: controller.signal,
         onProgress: (message) => {
-          if (current.current === controller && !controller.signal.aborted) setProgress(message);
+          if (current.current === controller && !controller.signal.aborted) {
+            if (message.startsWith('正在下載講解模型（已接收 ')) downloadProgressObserved = true;
+            setProgress(message);
+          }
         },
         onTiming: (measurement) => {
           if (current.current === controller) {
             setTiming(measurement);
             const run = ++timingSequence.current;
-            setTimingLog((previous) => [...previous, { run, timing: measurement }].slice(-10));
+            setTimingLog((previous) => [...previous, { run, timing: measurement, downloadProgressObserved }].slice(-10));
           }
         },
       });
@@ -278,7 +284,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
         {timingLog.length > 0 && <details>
           <summary>本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）</summary>
           <p className={styles.note}>可長按或鍵盤選取下方 JSON，逐次保存成功、失敗與取消的瀏覽器量測。
-            不包含教材、問題或個人筆記，也不是可還原的閱讀進度。冷啟／暖啟、實際裝置與網路條件仍需另外註記；
+            不包含教材、問題或個人筆記，也不是可還原的閱讀進度。downloadProgressObserved 僅表示本次收到模型下載進度；false 不代表快取命中或暖啟。冷啟／暖啟、實際裝置與網路條件仍需另外註記；
             不代表已驗證回答正確或優於其他產品。</p>
           <label className={styles.field}>本段裝置端 AI 耗時紀錄 JSON
             <textarea readOnly spellCheck={false} rows={8}
@@ -288,6 +294,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
                 measurements: timingLog.map((entry) => ({
                   run: entry.run,
                   outcome: entry.timing.outcome,
+                  downloadProgressObserved: entry.downloadProgressObserved,
                   preparationMs: Math.round(entry.timing.preparationMs),
                   generationMs: entry.timing.generationMs === null ? null : Math.round(entry.timing.generationMs),
                   totalMs: Math.round(entry.timing.totalMs),
