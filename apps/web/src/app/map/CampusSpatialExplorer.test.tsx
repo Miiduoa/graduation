@@ -878,6 +878,39 @@ it('does not transfer optional Providence OSM geometry in Save-Data before expli
   }
 });
 
+it('scrolls an offscreen 3D host into the modal before manual recovery', async () => {
+  // A mobile WebView may not scroll to a programmatically focused element.
+  // Merely incrementing manualStart would leave this host outside the viewport
+  // forever, even though the recovery button is visible below the scene.
+  let top = window.innerHeight + 40;
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe(target: Element) {
+      vi.spyOn(target, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, top, 320, 180));
+    }
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const scrollToCanvas = vi.fn(() => { top = 40; });
+  Object.defineProperty(graphics, 'scrollIntoView', { configurable: true, value: scrollToCanvas });
+
+  expect(graphics.parentElement?.dataset.spatialState).toBe('deferred');
+  expect(scene.create).not.toHaveBeenCalled();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+  fireEvent.click(within(dialog).getByRole('button', { name: '手動開啟立體畫面' }));
+  expect(scrollToCanvas).toHaveBeenCalledExactlyOnceWith({
+    block: 'nearest', inline: 'nearest', behavior: 'auto',
+  });
+  expect(document.activeElement).toBe(graphics);
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  expect(graphics.parentElement?.dataset.spatialState).toBe('ready');
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+});
+
 it('lets a student manually start 3D if a WebView never reports canvas visibility', async () => {
   // The API exists and observe() succeeds, but the WebView never invokes its
   // callback. Avoid an infinite offscreen wait without eagerly allocating GPU.
