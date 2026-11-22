@@ -233,32 +233,62 @@ it('does not accept an old clipboard result when the student returns to the orig
   }
 });
 
-it('does not let an older clipboard rejection overwrite a newer successful copy', async () => {
-  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-  let rejectOldCopy: ((reason?: Error) => void) | undefined;
-  const writeText = vi.fn()
-    .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectOldCopy = reject; }))
-    .mockResolvedValue(undefined);
-  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-  try {
-    render(<CampusSpatialExplorer school="other-school" locations={places}
-      selected={places[0]} onSelect={vi.fn()} />);
-    const dialog = await open();
-    const copy = within(dialog).getByRole('button', { name: '複製地圖標記座標' });
+it.each(['success', 'failure', 'close', 'reopen'] as const)(
+  'serializes coordinate writes and skips superseded requests after %s',
+  async (outcome) => {
+    const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    let settleFirstWrite!: () => void;
+    let contents: string | undefined;
+    const writeText = vi.fn(async (text: string) => { contents = text; })
+      .mockImplementationOnce(async (text: string) => {
+        await new Promise<void>((resolve, reject) => {
+          settleFirstWrite = () => outcome === 'failure' ? reject(new Error('permission denied')) : resolve();
+        });
+        contents = text;
+      });
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    try {
+      render(<CampusSpatialExplorer school="other-school" locations={places}
+        selected={places[0]} onSelect={vi.fn()} />);
+      let dialog = await open();
+      const copy = () => fireEvent.click(within(dialog).getByRole('button', { name: '複製地圖標記座標' }));
+      const selectDorm = () => fireEvent.change(within(dialog).getByRole('combobox', { name: '想去哪裡' }),
+        { target: { value: 'dorm' } });
 
-    fireEvent.click(copy);
-    fireEvent.click(copy);
-    expect(writeText).toHaveBeenCalledTimes(2);
-    await waitFor(() => expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy());
+      copy();
+      copy();
+      selectDorm();
+      copy();
+      expect(writeText).toHaveBeenCalledExactlyOnceWith('24.226,120.58');
 
-    await act(async () => { rejectOldCopy?.(new Error('old clipboard permission denied')); });
-    expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy();
-    expect(within(dialog).queryByText(/無法自動複製/)).toBeNull();
-  } finally {
-    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
-    else Reflect.deleteProperty(navigator, 'clipboard');
-  }
-});
+      if (outcome === 'close' || outcome === 'reopen') {
+        fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+        expect(screen.queryByRole('dialog')).toBeNull();
+      }
+      if (outcome === 'reopen') {
+        fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+        dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+        selectDorm();
+        copy();
+        expect(writeText).toHaveBeenCalledTimes(1);
+      }
+      await act(async () => { settleFirstWrite(); });
+
+      if (outcome === 'close') {
+        expect(writeText).toHaveBeenCalledTimes(1);
+        expect(screen.queryByText('已複製目前地點標記座標。')).toBeNull();
+      } else {
+        expect(writeText.mock.calls).toEqual([['24.226,120.58'], ['24.228,120.582']]);
+        expect(contents).toBe('24.228,120.582');
+        expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy();
+        expect(within(dialog).queryByText(/無法自動複製/)).toBeNull();
+      }
+    } finally {
+      if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  },
+);
 
 it('keeps verified marker coordinates readable when a WebView has no Clipboard API', async () => {
   const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
@@ -1050,7 +1080,7 @@ it('keeps automatic WebGL deferred when an intersecting canvas is clipped by the
   }
 });
 
-it.each(['silent', 'missing', 'constructor', 'observe', 'negative'] as const)(
+it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'callback'] as const)(
   'checks dialog clipping after manual startup with a %s observer',
   async (mode) => {
     const viewport = Object.assign(new EventTarget(), {
@@ -1079,48 +1109,69 @@ it.each(['silent', 'missing', 'constructor', 'observe', 'negative'] as const)(
         if (this.getAttribute('aria-label') === '校園地點空間圖') return new DOMRect(0, top, 320, 50);
         return originalRect.call(this);
       });
-    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
-    const dialog = screen.getByRole('dialog');
-    const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
-    top = 120;
-    fireEvent.click(within(dialog).getByRole('button', { name: '手動開啟立體畫面' }));
-    await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
-    fireEvent.scroll(dialog);
-    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+      const dialog = screen.getByRole('dialog');
+      const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+      top = 120;
+      fireEvent.click(within(dialog).getByRole('button', { name: '手動開啟立體畫面' }));
+      await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+      fireEvent.scroll(dialog);
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
 
-    viewport.height = 110;
-    act(() => viewport.dispatchEvent(new Event('resize')));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
-    viewport.height = window.innerHeight;
-    act(() => viewport.dispatchEvent(new Event('resize')));
-    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+      const notify = (isIntersecting: boolean, time: number) => act(() =>
+        intersection?.([observerEntry(host, isIntersecting, undefined, time)], {} as IntersectionObserver));
+      viewport.height = 110;
+      act(() => viewport.dispatchEvent(new Event('resize')));
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      if (mode === 'negative') notify(false, 1);
+      viewport.height = window.innerHeight;
+      act(() => viewport.dispatchEvent(new Event('resize')));
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
 
-    if (mode === 'negative') {
-      act(() => intersection?.([observerEntry(host, false, undefined, 1)], {} as IntersectionObserver));
+      if (mode === 'negative') {
+        notify(false, 2);
+        fireEvent.scroll(dialog);
+        expect(scene.setActive).toHaveBeenLastCalledWith(false);
+        notify(true, 3);
+        expect(scene.setActive).toHaveBeenLastCalledWith(true);
+      }
+      // The host is still inside the window, but has scrolled above the dialog.
+      top = 40;
+      if (mode === 'callback' || mode === 'negative') notify(false, 4);
+      else fireEvent.scroll(dialog);
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      top = 120;
+      if (mode === 'callback') notify(true, 5);
+      else fireEvent.scroll(dialog);
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
+      expect(scene.create).toHaveBeenCalledTimes(1);
+
+      top = 40;
       fireEvent.scroll(dialog);
       expect(scene.setActive).toHaveBeenLastCalledWith(false);
-      act(() => intersection?.([observerEntry(host, true, undefined, 2)], {} as IntersectionObserver));
+      await act(async () => view.rerender(<CampusSpatialExplorer {...props} locations={places.slice(0, -1)} />));
+      expect(scene.dispose).toHaveBeenCalledTimes(1);
+      expect(scene.create).toHaveBeenCalledTimes(1);
+      top = 120;
+      fireEvent.scroll(dialog);
+      await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
       expect(scene.setActive).toHaveBeenLastCalledWith(true);
-    }
-    // The host is still inside the window, but has scrolled above the dialog.
-    top = 40;
-    fireEvent.scroll(dialog);
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
-    top = 120;
-    fireEvent.scroll(dialog);
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
-    expect(scene.create).toHaveBeenCalledTimes(1);
 
-    view.rerender(<CampusSpatialExplorer {...props} locations={places.slice(0, -1)} />);
-    expect(scene.dispose).toHaveBeenCalledTimes(1);
-    fireEvent.scroll(dialog);
-    expect(scene.create).toHaveBeenCalledTimes(1);
-    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
-    const updates = scene.setActive.mock.calls.length;
-    fireEvent.scroll(window);
-    expect(scene.setActive).toHaveBeenCalledTimes(updates);
-    expect(scene.dispose).toHaveBeenCalledTimes(1);
-    layout.mockRestore();
+      top = 40;
+      fireEvent.scroll(dialog);
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+      const updates = scene.setActive.mock.calls.length;
+      top = 120;
+      fireEvent.scroll(window);
+      if (mode === 'callback') notify(true, 6);
+      expect(scene.setActive).toHaveBeenCalledTimes(updates);
+      expect(scene.create).toHaveBeenCalledTimes(2);
+      expect(scene.dispose).toHaveBeenCalledTimes(2);
+    } finally {
+      layout.mockRestore();
+    }
   },
 );
 
@@ -2374,7 +2425,7 @@ it('ignores a late positive viewport notification when Safari restored the host 
       toJSON: () => ({}),
     } as DOMRect);
     fireEvent(window, new Event('resize'));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
 
     act(() => intersection?.([{
       isIntersecting: true, target: graphics, time: 101,

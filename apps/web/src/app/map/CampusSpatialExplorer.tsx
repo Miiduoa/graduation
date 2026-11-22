@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { buildCampusSpatialModel } from './campusSpatialModel';
 import {
@@ -308,6 +308,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   // An explicit user choice can start the scene before the first entry.
   const [manualStart, setManualStart] = useState(0);
   const handledManualStart = useRef(0);
+  const viewportPausedHost = useRef<HTMLDivElement | null>(null);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
   const view = useMemo(() => ({
@@ -515,6 +516,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       position: ReturnType<typeof hostViewportVisibility>,
       canRender: boolean,
     ) => {
+      // Keep a measured offscreen pause across rebuilds of the same canvas.
+      if ((scene || (manuallyStarted && visible)) &&
+          (position === 'offscreen' || position === 'visual-offscreen')) {
+        viewportPausedHost.current = host;
+      }
+      if (canRender && position === 'onscreen') viewportPausedHost.current = null;
       suspendedByViewport = started && canRender && position !== 'offscreen' &&
         hostMustStaySuspended(position);
     };
@@ -556,8 +563,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
     // iOS VisualViewport can expand/scroll back into view without firing a
     // second IntersectionObserver callback. Resume a viewport-paused scene
-    // once current geometry confirms positive overlap. Layout offscreen
-    // measurements and negative observer records revoke that recovery.
+    // once current geometry confirms positive overlap. A negative observer
+    // record alone does not establish a measured offscreen-to-onscreen transition.
     // Page restore can replace the VisualViewport object. Transfer the two
     // listeners to the current instance, without leaving callbacks on an old
     // viewport or interpreting a throwing getter as an absent API.
@@ -589,11 +596,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     const onViewportResize = () => {
       if (!active) return;
       refreshVisualViewportListeners();
-      if (observerFallback && manualStart === 0) {
-        const position = hostViewportVisibility();
+      const position = hostViewportVisibility();
+      if (position === 'onscreen' && viewportPausedHost.current === host) {
+        viewportPausedHost.current = null;
+        visible = true;
+      }
+      if (observerFallback && !manuallyStarted) {
         if (position !== 'unknown') visible = position === 'onscreen';
       } else {
-        const position = hostViewportVisibility();
         if (hostMustStaySuspended(position)) {
           rememberViewportPause(position, visible || suspendedByViewport);
           if (position === 'offscreen') {
@@ -710,7 +720,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
                 position === 'invalid-layout-viewport' || position === 'invalid-host-rect') && confirmedIntersecting;
           }
           rememberViewportPause(position, confirmedIntersecting);
-          visible = confirmedIntersecting && !hostMustStaySuspended(position);
+          visible = confirmedIntersecting && !hostMustStaySuspended(position) &&
+            (position === 'onscreen' || viewportPausedHost.current !== host);
           updateVisibility();
           startWhenVisible();
           syncPendingStartup();
@@ -729,36 +740,29 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         observerLive = false;
         intersection = null;
         observerFallback = true;
-        const position = hostViewportVisibility();
-        // A broken observer does not authorize starting a measurable offscreen
-        // host (or one hidden by an invalid iOS VisualViewport). Older WebViews
-        // whose host geometry is unknown still retain their eager fallback.
-        visible = visible || (manualStart === 0 && (position === 'onscreen' || position === 'unknown'));
       }
-    }
-    // Legacy WebViews with no IntersectionObserver should share the same
-    // measured fallback as a broken observer, not eagerly start offscreen GPU.
-    // The capture scroll listener below can wake the canvas once it appears.
-    if (typeof IntersectionObserver === 'undefined') {
+    } else {
       observerFallback = true;
+    }
+    // A missing or broken observer uses the same geometry fallback. Preserve
+    // eager startup for older WebViews with unmeasurable initial geometry.
+    if (observerFallback && !manuallyStarted) {
       const position = hostViewportVisibility();
-      visible = visible || (manualStart === 0 && (position === 'onscreen' || position === 'unknown'));
+      visible = position === 'onscreen' || (position === 'unknown' && viewportPausedHost.current !== host);
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('resize', onViewportResize);
-    // Manual startup can run before the observer delivers a usable callback.
-    // Check nested scrolling for the lifetime of that manual scene.
-    const checkScroll = observerFallback || manuallyStarted;
-    if (checkScroll) window.addEventListener('scroll', onViewportResize, { capture: true, passive: true });
+    // Nested dialog scroll can move the canvas without an observer callback.
+    window.addEventListener('scroll', onViewportResize, { capture: true, passive: true });
     // Safari's visual viewport can resize/scroll without a layout resize or
     // a timely IntersectionObserver callback. Listen to both dimensions;
     // older WebViews without this optional API keep the window fallback.
     // An embedded WebView may support only one VisualViewport event. Register
     // independently: a throwing resize listener must not suppress scroll,
     // which is the only signal sent after certain keyboard/pinch changes.
-    if (manuallyStarted) onViewportResize();
+    if (manuallyStarted || viewportPausedHost.current === host) onViewportResize();
     else {
       refreshVisualViewportListeners();
       startWhenVisible();
@@ -773,7 +777,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('resize', onViewportResize);
-      if (checkScroll) window.removeEventListener('scroll', onViewportResize, true);
+      window.removeEventListener('scroll', onViewportResize, true);
       // Always attempt both removals even if the first WebView API throws.
       // Otherwise a retained scroll handler can touch a disposed GPU scene.
       for (const event of ['resize', 'scroll'] as const) {
@@ -878,7 +882,10 @@ function spatialDestinationIdentity(place: MapLocation): string {
   ]);
 }
 
-function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props & { onClose: () => void }) {
+function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboardWrite }: Props & {
+  onClose: () => void;
+  clipboardWrite: { current: Promise<void> | null };
+}) {
   const model = useMemo(() => buildCampusSpatialModel(locations), [locations]);
   // Two map records can have the same public-facing name (including two
   // buildings of the same category). A screen reader or keyboard user must
@@ -960,32 +967,34 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   // Copying is optional because older Safari/WebViews may deny clipboard access.
   const [coordinateCopyState, setCoordinateCopyState] = useState<'idle' | 'copied' | 'unavailable'>('idle');
   const markerIdentity = place ? spatialDestinationIdentity(place) : null;
-  const currentMarkerIdentity = useRef(markerIdentity);
-  // Clipboard permission prompts can resolve out of order, even after A -> B -> A.
-  // Only the newest request for the committed marker may update feedback.
   const copyRequestGenerationRef = useRef(0);
-  useEffect(() => {
-    // Revoke clipboard feedback on the committed selection; never mutate a
-    // ref during render (React may discard an interrupted render).
-    currentMarkerIdentity.current = markerIdentity;
-    copyRequestGenerationRef.current += 1;
+  useLayoutEffect(() => {
     setCoordinateCopyState('idle');
+    return () => { copyRequestGenerationRef.current += 1; };
   }, [markerIdentity]);
-  const copyMarkerCoordinates = async () => {
+  const copyMarkerCoordinates = () => {
     if (!place) return;
-    const identity = spatialDestinationIdentity(place);
     const requestGeneration = ++copyRequestGenerationRef.current;
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
-      await navigator.clipboard.writeText(`${place.lat},${place.lng}`);
-      // A pending clipboard permission prompt can outlive a POI refresh or
-      // selection change. Do not announce success for a different destination.
-      if (currentMarkerIdentity.current === identity &&
-        copyRequestGenerationRef.current === requestGeneration) setCoordinateCopyState('copied');
-    } catch {
-      if (currentMarkerIdentity.current === identity &&
-        copyRequestGenerationRef.current === requestGeneration) setCoordinateCopyState('unavailable');
-    }
+    const isCurrent = () => copyRequestGenerationRef.current === requestGeneration;
+    const previousWrite = clipboardWrite.current;
+    setCoordinateCopyState('idle');
+    const write = (async () => {
+      // An in-flight browser write cannot be canceled. Let it settle before
+      // submitting the newest request, and skip superseded queued requests.
+      if (previousWrite) await previousWrite;
+      if (!isCurrent()) return;
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+        await navigator.clipboard.writeText(`${place.lat},${place.lng}`);
+        if (isCurrent()) setCoordinateCopyState('copied');
+      } catch {
+        if (isCurrent()) setCoordinateCopyState('unavailable');
+      }
+    })();
+    clipboardWrite.current = write;
+    void write.then(() => {
+      if (clipboardWrite.current === write) clipboardWrite.current = null;
+    });
   };
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);
   const previousPoint = model.points[index - 1];
@@ -1684,7 +1693,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 </button>
                 <a className="btn" href={walkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟步行導航</a>
                 <a className="btn" href={appleWalkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟 Apple 地圖步行導航</a>
-                <button className="btn" type="button" onClick={() => { void copyMarkerCoordinates(); }}
+                <button className="btn" type="button" onClick={copyMarkerCoordinates}
                   aria-describedby={directionsNoteId}>複製地圖標記座標</button>
                 {coordinateCopyState !== 'idle' && <span className={styles.note} role="status" aria-live="polite">
                   {coordinateCopyState === 'copied'
@@ -1709,12 +1718,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
 
 function AvailableSpatialExplorer(props: Props) {
   const [open, setOpen] = useState(false);
+  const clipboardWrite = useRef<Promise<void> | null>(null);
   const close = useCallback(() => setOpen(false), []);
   return <>
     <button className="btn" type="button" aria-haspopup="dialog" onClick={() => setOpen(true)}>
       空間導覽
     </button>
-    {open && <SpatialDialog {...props} key={props.school} onClose={close} />}
+    {open && <SpatialDialog {...props} key={props.school} onClose={close} clipboardWrite={clipboardWrite} />}
   </>;
 }
 
