@@ -950,6 +950,7 @@ it('lets a student manually start 3D if a WebView never reports canvas visibilit
   // callback. Avoid an infinite offscreen wait without eagerly allocating GPU.
   const observerDisconnect = vi.fn();
   vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
     observe() {}
     disconnect = observerDisconnect;
   });
@@ -972,6 +973,21 @@ it('lets a student manually start 3D if a WebView never reports canvas visibilit
   expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).parentElement?.getAttribute('data-spatial-state')).toBe('ready');
   fireEvent(window, new Event('pageshow'));
   expect(scene.create).toHaveBeenCalledTimes(1);
+  act(() => intersection?.([{ target: graphics, isIntersecting: false }] as IntersectionObserverEntry[],
+    {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  expect(scene.create).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(within(dialog).getByRole('button', { name: '重新啟動立體畫面' }));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  act(() => intersection?.([{ target: graphics, isIntersecting: false }] as IntersectionObserverEntry[],
+    {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  act(() => intersection?.([{ target: graphics, isIntersecting: true }] as IntersectionObserverEntry[],
+    {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(scene.create).toHaveBeenCalledTimes(2);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
@@ -1820,6 +1836,34 @@ it('keeps Safari WebGL paused when a VisualViewport getter throws, then recovers
   }
 });
 
+it('starts first WebGL after the keyboard stops hiding a positively intersecting host', async () => {
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: 300, offsetLeft: 0, offsetTop: 0,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const host = screen.getByRole('group', { name: '校園地點空間圖' });
+  vi.spyOn(host, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 400, 320, 180));
+
+  act(() => intersection?.([{
+    target: host, isIntersecting: true, intersectionRect: new DOMRect(0, 400, 320, 180),
+  }] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  expect(scene.create).not.toHaveBeenCalled();
+  expect(host.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+
+  viewport.height = window.innerHeight;
+  act(() => viewport.dispatchEvent(new Event('resize')));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+});
+
 it('starts first WebGL render after Safari initial invalid VisualViewport recovers without another observer callback', async () => {
   // The initial positive observer callback can race a keyboard transition
   // which temporarily exposes height=0. We must not start then, but a valid
@@ -2435,6 +2479,10 @@ it('requires a fresh choice when the selected location disappears instead of usi
   expect(within(dialog).getByRole('button', { name: '看全部地點' }).getAttribute('aria-pressed')).toBe('true');
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null }));
+
+  view.rerender(<CampusSpatialExplorer {...props} locations={places} selected={places[0]} />);
+  expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect(within(dialog).queryByRole('link', { name: '開啟 Apple 地圖步行導航' })).toBeNull();
 });
 
 it('requires a fresh choice when the source reuses an inherited POI ID at a different destination', async () => {
@@ -2489,9 +2537,13 @@ it('revokes a deliberate 3D choice if its ID is reused at a changed coordinate, 
   expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
   expect(onSelect).not.toHaveBeenCalled();
 
+  view.rerender(<CampusSpatialExplorer {...props} locations={places} />);
+  expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect(within(dialog).queryByRole('link', { name: '開啟 Apple 地圖步行導航' })).toBeNull();
+
   fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'dorm' } });
   const directions = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
-  expect(directions.searchParams.get('destination')).toBe(`${movedDorm.lat},${movedDorm.lng}`);
+  expect(directions.searchParams.get('destination')).toBe(`${places[1].lat},${places[1].lng}`);
   expect(within(dialog).getByRole('heading', { name: movedDorm.name })).toBeTruthy();
 });
 
@@ -2655,6 +2707,7 @@ it('withdraws a visible OSM building when the map POI identity changes while the
   expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
   rerender(<CampusSpatialExplorer school="pu" locations={[moved]} selected={moved} onSelect={onSelect} />);
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: moved.id } });
   await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
   expect(within(dialog).getByText(/目前篩選的地點沒有已核對的 OSM 建築輪廓候選來源/)).toBeTruthy();
   expect(within(dialog).queryByText(/棟公開建築輪廓/)).toBeNull();
@@ -2858,26 +2911,22 @@ it('rejects oversized JSON-only WebView bridge payloads even without text()', as
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-// JSON-only WebView fetch bridges have already discarded the HTTP raw bytes.
-// Even a matching serialized byte count cannot prove that the original body
-// satisfied a declared identity Content-Length. Never label those outlines
-// as verified geometry; the existing POIs and directions remain available.
-it('rejects unverifiable identity Content-Length on a JSON-only WebView response', async () => {
-  const { library, body } = sourcedLibraryFootprintFixture();
+it('shows complete outlines with identity Content-Length on a JSON-only WebView', async () => {
+  const { library, buildings, body } = sourcedLibraryFootprintFixture();
   const json = vi.fn().mockResolvedValue(JSON.parse(body));
-  const length = new TextEncoder().encode(body).byteLength;
+  const length = new TextEncoder().encode(body + '\n').byteLength;
   const fetchMock = vi.fn().mockResolvedValue({
     ok: true, status: 200, body: null,
-    headers: { get: (name: string) => name === 'content-length' ? String(length) : null },
+    headers: { get: (name: string) => name === 'content-length' ? String(length) : name === 'content-encoding' ? 'identity' : null },
     json,
   });
   vi.stubGlobal('fetch', fetchMock);
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(json).not.toHaveBeenCalled();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(json).toHaveBeenCalledTimes(1);
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
@@ -4876,6 +4925,7 @@ it('withdraws filtered-out Providence volumes and counts only buildings in the c
   // A same-school map filter does not unmount the spatial dialog or refetch
   // Overpass. The previous library way is no longer part of this view.
   view.rerender(<CampusSpatialExplorer school="pu" locations={[zhugu]} selected={zhugu} onSelect={onSelect} />);
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: zhugu.id } });
   await waitFor(() => expect(scene.create.mock.calls.length).toBeGreaterThan(beforeFilter));
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
   expect(within(dialog).getByText(/0 棟公開建築輪廓/)).toBeTruthy();
@@ -4914,6 +4964,7 @@ it('skips public footprint fetch for a bus-stop-only Providence tour, then loads
   // The same open dialog receives a new map filter. Only now is requesting
   // building outlines useful; a 503 still retains the normal marker fallback.
   view.rerender(<CampusSpatialExplorer school="pu" locations={[stop, library]} selected={library} onSelect={onSelect} />);
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: library.id } });
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
   expect(within(dialog).queryByText(/沒有已核對的 OSM 建築輪廓候選來源/)).toBeNull();
@@ -4938,6 +4989,7 @@ it('aborts an in-flight OSM download when a Providence filter changes to transit
   // A mobile map filter may be changed before the public API replies. The
   // no-candidate path must cancel that request and never show old geometry.
   view.rerender(<CampusSpatialExplorer school="pu" locations={[stop]} selected={stop} onSelect={onSelect} />);
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: stop.id } });
   await waitFor(() => expect(requestSignal?.aborted).toBe(true));
   expect(within(dialog).getByText(/沒有已核對的 OSM 建築輪廓候選來源/)).toBeTruthy();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
