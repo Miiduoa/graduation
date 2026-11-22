@@ -49,7 +49,7 @@
   background: transparent;
   color: var(--text);
   font-size: max(16px, var(--font-body-size));
-  line-height: 24px;
+  line-height: 1.5;
   box-shadow: none;
 }
 .searchField input:focus-visible {
@@ -68,6 +68,10 @@
   background: transparent;
   color: var(--muted);
   font-size: var(--font-label-size);
+  border-radius: var(--radius-sm);
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
 }
 .filterBar {
   display: flex;
@@ -89,7 +93,11 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: var(--font-label-size);
-  line-height: 22px;
+  line-height: 1.5;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
 }
 .categories button[aria-pressed='true'] {
   color: var(--text);
@@ -101,7 +109,7 @@
   margin: 0;
   color: var(--muted);
   font-size: var(--font-label-sm-size);
-  line-height: 22px;
+  line-height: 1.5;
 }
 .publicFilter {
   display: inline-flex;
@@ -165,7 +173,7 @@
   min-height: 116px;
   padding: 18px;
   border-radius: var(--radius);
-  transition: background-color 160ms ease;
+  transition: background-color var(--motion-fast) var(--ease-out);
 }
 .service > svg {
   margin-top: 10px;
@@ -225,9 +233,13 @@
   padding: 12px 0;
   color: var(--muted);
   font-size: var(--font-label-size);
-  line-height: 20px;
+  line-height: 1.5;
   cursor: pointer;
   overflow-wrap: anywhere;
+  border-radius: var(--radius-sm);
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
 }
 .related ul {
   list-style: none;
@@ -243,6 +255,10 @@
   padding: 10px 0;
   color: var(--text);
   font-size: var(--font-label-size);
+  border-radius: var(--radius-sm);
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
 }
 .related small {
   color: var(--muted);
@@ -297,6 +313,23 @@
     color: var(--brand);
   }
 }
+.service:active,
+.categories button:active,
+.clearSearch:active,
+.resetFilters:active,
+.related a:active,
+.related summary:active {
+  background: var(--panel2);
+}
+.related a:active,
+.related summary:active {
+  color: var(--brand);
+}
+.categories button[aria-pressed='true']:is(:hover, :active) {
+  color: var(--text);
+  background: var(--surface-strong);
+  border-color: var(--text);
+}
 @media (max-width: 700px) {
   .serviceList {
     grid-template-columns: 1fr;
@@ -327,11 +360,13 @@
     padding-inline: 10px;
   }
 }
-:global([data-reduced-motion='true']) .service {
+:global([data-reduced-motion='true'])
+  .directory
+  :is(.service, .categories button, .clearSearch, .related a, .related summary) {
   transition: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .service {
+  .directory :is(.service, .categories button, .clearSearch, .related a, .related summary) {
     transition: none;
   }
 }

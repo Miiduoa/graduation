@@ -3,6 +3,7 @@
   --button-hover: var(--panel);
   --button-foreground: var(--text);
   --button-border: var(--border);
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -111,6 +112,42 @@
   box-shadow: none;
 }
 
+.button.loading:global(.btn):disabled {
+  opacity: 1;
+  cursor: progress;
+}
+
+/* Keep the action and its icons in place. This rail never participates in layout. */
+.activity {
+  position: absolute;
+  inset-inline: 10px;
+  bottom: 4px;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  pointer-events: none;
+}
+
+.activity::after {
+  content: '';
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+  animation: activity 1200ms ease-in-out infinite alternate;
+}
+
+@keyframes activity {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(150%);
+  }
+}
+
 .spinner {
   flex-shrink: 0;
   animation: spin 800ms linear infinite;
@@ -134,6 +171,11 @@
   .spinner {
     animation: none;
   }
+
+  .activity::after {
+    animation: none;
+    transform: translateX(75%);
+  }
 }
 
 :global(:root[data-reduced-motion='true']) .button:global(.btn) {
@@ -148,6 +190,11 @@
   animation: none;
 }
 
+:global(:root[data-reduced-motion='true']) .activity::after {
+  animation: none;
+  transform: translateX(75%);
+}
+
 @media (forced-colors: active) {
   .button:global(.btn) {
     --button-background: ButtonFace;
@@ -160,6 +207,22 @@
     border-color: GrayText;
     color: GrayText;
     opacity: 1;
+  }
+
+  .button.loading:global(.btn):disabled {
+    border-color: ButtonText;
+    color: ButtonText;
+  }
+
+  .activity {
+    background: Canvas;
+  }
+
+  .activity::after {
+    /* This decorative stroke uses a foreground system color as its fill.
+       Keep that fill from being remapped to the button's background color. */
+    forced-color-adjust: none;
+    background: ButtonText;
   }
 
   .button:global(.btn):focus-visible {

@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { useEffect, useState } from 'react';
 import { parseAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
 import { getAssistantService } from '@campus/shared/src/assistantServices';
@@ -144,9 +144,9 @@ export function AssistantTaskPlan({ plan, cards, states, retry: rawRetry, pendin
               disabled={pending || expired} onClick={() => onRetry([step.id])}>
               重新查詢
             </button>}
-            {href && service && <Link className={styles.link} href={href}>
+            {href && service && <AssistantReplyLink className={styles.link} href={href}>
               {status === 'handoff' ? `開啟${service.label}` : '查看來源'}
-            </Link>}
+            </AssistantReplyLink>}
           </div>
         </li>;
       })}

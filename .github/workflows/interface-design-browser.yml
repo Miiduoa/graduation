@@ -12,9 +12,14 @@ on:
       - 'apps/web/src/components/PWAInstallBanner*'
       - 'apps/web/src/components/SystemNotice*'
       - 'apps/web/src/components/CampusServiceMenu*'
+      - 'apps/web/src/components/ServiceDirectory*'
+      - 'apps/web/src/components/TodayCampusEntry*'
       - 'apps/web/src/components/SchoolSelector*'
       - 'apps/web/src/components/QuickCampusEntry*'
       - 'apps/web/src/components/VoiceDictationButton*'
+      - 'apps/web/src/components/PageRecovery*'
+      - 'apps/web/src/app/error.tsx'
+      - 'apps/web/src/app/not-found.tsx'
       - 'apps/web/src/app/search/**'
       - 'apps/web/src/lib/useCampusFinderAccount*'
       - 'apps/web/src/components/academic/**'
@@ -35,6 +40,9 @@ on:
       - 'apps/web/src/app/home.module.css'
       - 'apps/web/src/lib/campusNavigation*'
       - 'apps/web/src/lib/primaryNavigation*'
+      - 'apps/web/src/lib/currentTabNavigation*'
+      - 'apps/web/src/lib/menuNavigationReturn*'
+      - 'apps/web/src/lib/mobileNavigationInset*'
       - 'apps/web/src/lib/campusServices*'
       - 'scripts/qa/interface-design/**'
       - 'scripts/qa/browser/**'
@@ -84,7 +92,9 @@ jobs:
       - name: Bundle real interface with explicit synthetic data boundaries
         run: node scripts/qa/interface-design/build.mjs
       - name: Verify interface, forms and accessibility scenarios
-        run: python scripts/qa/interface-design/check.py
+        # Keep the existing interface suite headless. A separate headed browser
+        # measures real notification focus changes on this display.
+        run: xvfb-run -a -s "-screen 0 1920x1440x24" python scripts/qa/interface-design/check.py
       - name: Verify teacher tasks, attachment feedback and real community forms
         if: success() || failure()
         run: python scripts/qa/interface-design/task_flow.py
