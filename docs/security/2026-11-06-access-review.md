@@ -1095,3 +1095,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **驗證界線**：精確新 SHA 必須由真 Firebase Emulator／既有 CI 重新驗證；未取得前不能宣稱 GREEN。完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、nuni-merge-gate App 5504170 對精確整合 head 審查及正式發布仍為獨立限制。正式校籍資料缺失者將 fail-closed，需隔離盤點補齊，不做正式 migration。GCS/Supabase 已發網址撤銷、Storage 競態、教師成績寫入、教師備註歷史移轉、minimatch 相容性仍未結案。未執行遭拒的 npm/pnpm audit，未動正式資料、金鑰、token、E 校園、合併或部署。
 
 - **首次 Emulator 失敗與合法 fixture 補正（2026-11-22 12:47 UTC）**：新安全 SHA `04387a7de1fc7259b4dcd8502e78b72f296e717f` 的 [Security rules and transactions #45023813110](https://github.com/Miiduoa/graduation/actions/runs/45023813110) 及 [CI Firestore #45023818780](https://github.com/Miiduoa/graduation/actions/runs/45023818780) 為 **557/558 pass、1 fail、0 skipped**。新加入的 `transferred staff cannot replay attendance QR secrets, private roster or correction logs` 確實 `ok 4`，原有 `only active instructors may read immutable attendance corrections` 因測試教師只有舊校與班級 membership、缺 `users/teacher` 的 server-bound canonical 校籍而被新的 fail-closed 規則拒讀。此次**只**用隔離測試管理者補上該合法教師的 `campusBoundProfile('tw-demo-uni')`，不降低安全規則。新提交的 CI／Emulator 成果需要重新核對。正式歷史教師缺 canonical 校籍的相容性仍需受控盤點，不執行正式 migration。
+
+
+## 2026-11-23｜私有 AI 知識片段的舊校籍重放讀取（隔離候選）
+
+- **現象與範圍**：舊校 `schools/{schoolId}/aiKnowledge` 的 school visibility 及 editor 私有片段，只核對可殘留的學校會員角色；`groups/{groupId}/aiKnowledge` 私有課程片段只核對可殘留的群組／舊校會員。已轉校者若會員尚未被移除，原本的授權規則仍可能接受同一個登入 session 的 GET。這是規則上的可達邊界，未對正式用戶或資料驗證，也不代表已發生資料外洩。
+- **最小修補**：學校 scope 保留 public 可匿名讀取；school 或僅 editor 可讀取的片段改要求既有雙校籍欄位一致的 canonical profile 與 active 校籍。群組私有片段改要求 `isActiveCurrentGroupMember(groupId)`，保留有效群組成員正常讀取；兩種路徑維持伺服器唯寫。
+- **合成回歸**：新增 `transferred campus members cannot replay private AI knowledge reads`，覆蓋正常 school/student/editor、公開片段、陌生帳號、連續舊會話重放、校籍遷移與雙欄位衝突、校籍／群組撤銷、刪除 canonical 帳號與恢復。本次測試不連學校、正式環境或外部 RAG 服務。
+- **精確來源**：前一版完整 CI/CodeQL 對應 `15e833793af4ff7d22d3c7595db454a91c278275`，兩者已 success；新測試-only RED commit `b9f3b34cb4cd81889d84c00d4531d86e73a21a74`；本次 GREEN Rules/文件提交須以 GitHub 新 SHA 自動回歸結果確認，不能提前宣稱通過。
+- **尚未發布**：CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、review threads 與指定 nuni-merge-gate App 5504170 必須依最終精確 head 再核對。正式 GCS/Storage token 清理與 staging 競態、歷史備註分離、成績原子更正仍未解決；本次沒有部署、migration、正式金鑰及 E 校園存取。直接 npm/pnpm audit 的外送限制持續維持。

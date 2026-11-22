@@ -1034,9 +1034,11 @@ service cloud.firestore {
       }
 
       match /aiKnowledge/{chunkId} {
+        // Public fragments remain public. Private school/editor fragments require
+        // a live canonical campus binding, not a stale school role after transfer.
         allow read: if resource.data.visibility == 'public'
-          || (resource.data.visibility == 'school' && isSchoolMember(schoolId))
-          || hasEditorRole(schoolId);
+          || (isConsistentRootPostSchoolMember(schoolId)
+            && (resource.data.visibility == 'school' || hasEditorRole(schoolId)));
         allow write: if false;
       }
 
@@ -1475,7 +1477,8 @@ service cloud.firestore {
       }
 
       match /aiKnowledge/{chunkId} {
-        allow read: if isActiveGroupMember(groupId);
+        // Old course membership alone must not expose private RAG fragments.
+        allow read: if isActiveCurrentGroupMember(groupId);
         allow write: if false;
       }
 
