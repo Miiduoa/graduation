@@ -143,6 +143,74 @@ describe('firestore security rules', () => {
     await assertSucceeds(createGroup('school-create-restored'));
   });
 
+  test('stale campus managers cannot rewrite course materials and quizzes after transfer', async () => {
+    const groupId = 'course-curriculum-replay';
+    const root = 'groups/' + groupId;
+    const paths = [
+      root + '/knowledgeBase/course-handout',
+      root + '/modules/week-one',
+      root + '/modules/week-one/materials/lecture',
+      root + '/quizzes/unit-quiz',
+      root + '/milestones/first-milestone',
+    ];
+    await seedFirestore(async (db) => {
+      await db.doc(root).set({ schoolId: 'pu', type: 'course', createdBy: 'teacher' });
+      await db.doc('users/teacher').set(campusBoundProfile('pu'));
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/teacher').set({ role: 'faculty', status: 'active' });
+      await db.doc('schools/pu/members/alice').set({ role: 'student', status: 'active' });
+      await db.doc(root + '/members/teacher').set({ role: 'instructor', status: 'active' });
+      await db.doc(root + '/members/alice').set({ role: 'member', status: 'active' });
+      for (const [i, p] of paths.entries()) {
+        await db.doc(p).set({ title: 'Original ' + i, type: 'reference' });
+      }
+    });
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const student = testEnv.authenticatedContext('alice').firestore();
+    // Normal instructor workflows remain possible; students cannot edit them.
+    for (const p of paths) {
+      await assertFails(student.doc(p).update({ title: 'Student takeover' }));
+      await assertSucceeds(teacher.doc(p).update({ title: 'Current instructor edit' }));
+    }
+
+    // Reuse the authenticated client: old group and school memberships remain
+    // active despite the canonical account transferring to a new campus.
+    await seedFirestore(db => db.doc('users/teacher').set(campusBoundProfile('other-school')));
+    for (const [i, p] of paths.entries()) {
+      await assertFails(teacher.doc(p).update({ title: 'Stale manager write' }));
+      await assertFails(teacher.doc(p).delete());
+      await assertFails(teacher.doc(p + '-replay-' + i).set({ title: 'Replayed new item' }));
+    }
+    // During a partially applied school transfer neither conflicting binding
+    // authorizes access to the old campus.
+    await seedFirestore(db => db.doc('users/teacher').set({
+      status: 'active', schoolId: 'other-school', primarySchoolId: 'pu',
+    }));
+    for (const p of paths) {
+      await assertFails(teacher.doc(p).update({ title: 'Conflicting campus' }));
+    }
+    await seedFirestore(async db => {
+      await db.doc('users/teacher').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/teacher').update({ status: 'revoked' });
+    });
+    for (const p of paths) {
+      await assertFails(teacher.doc(p).update({ title: 'School revoked' }));
+    }
+    await seedFirestore(async db => {
+      await db.doc('schools/pu/members/teacher').update({ status: 'active' });
+      await db.doc(root + '/members/teacher').update({ status: 'revoked' });
+    });
+    for (const p of paths) {
+      await assertFails(teacher.doc(p).update({ title: 'Course revoked' }));
+    }
+    await seedFirestore(db => db.doc(root + '/members/teacher').update({ status: 'active' }));
+    for (const [i, p] of paths.entries()) {
+      await assertSucceeds(teacher.doc(p).update({ title: 'Reauthorized edit ' + i }));
+      await assertSucceeds(teacher.doc(p).delete());
+      await assertSucceeds(teacher.doc(p + '-restored-' + i).set({ title: 'Reauthorized create' }));
+    }
+  });
+
   test('transferred group managers cannot replay membership and group administration writes', async () => {
     const groupPath = 'groups/campus-admin-replay';
     const memberPath = groupPath + '/members/alice';

@@ -1449,9 +1449,10 @@ service cloud.firestore {
 
       match /knowledgeBase/{entryId} {
         allow read: if isActiveGroupMember(groupId);
-        allow create: if canManageGroup(groupId);
+        // Stale teacher membership cannot write old-campus course content.
+        allow create: if canManageCurrentGroup(groupId);
         allow delete: if false;
-        allow update: if canManageGroup(groupId) && (
+        allow update: if canManageCurrentGroup(groupId) && (
           resource.data.get('type', '') != 'assignment'
           || (
             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -1480,17 +1481,17 @@ service cloud.firestore {
 
       match /modules/{moduleId} {
         allow read: if isActiveGroupMember(groupId);
-        allow create, update, delete: if canManageGroup(groupId);
+        allow create, update, delete: if canManageCurrentGroup(groupId);
 
         match /materials/{materialId} {
           allow read: if isActiveGroupMember(groupId);
-          allow create, update, delete: if canManageGroup(groupId);
+          allow create, update, delete: if canManageCurrentGroup(groupId);
         }
       }
 
       match /quizzes/{quizId} {
         allow read: if isActiveGroupMember(groupId);
-        allow create, update, delete: if canManageGroup(groupId);
+        allow create, update, delete: if canManageCurrentGroup(groupId);
       }
 
       match /assignments/{assignmentId} {
@@ -1625,7 +1626,7 @@ service cloud.firestore {
 
       match /milestones/{milestoneId} {
         allow read: if isActiveGroupMember(groupId);
-        allow create, update, delete: if canManageGroup(groupId);
+        allow create, update, delete: if canManageCurrentGroup(groupId);
       }
 
       match /liveSessions/{sessionId} {
