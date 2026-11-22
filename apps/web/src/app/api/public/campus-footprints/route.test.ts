@@ -1570,6 +1570,43 @@ describe('public Providence building geometry route', () => {
   });
 
   it.each([
+    {
+      label: 'just beyond fifty full years',
+      retryAfter: 'Monday, 23-Nov-76 00:00:00 GMT',
+      expectedCooldown: '600',
+    },
+    {
+      label: 'still inside fifty full years',
+      retryAfter: 'Saturday, 21-Nov-76 00:00:00 GMT',
+      expectedCooldown: '86400',
+    },
+  ])('resolves an RFC 850 date $label by the whole 50-year deadline', async ({
+    retryAfter, expectedCooldown,
+  }) => {
+    // At 2026-11-22, 2076-11-23 is >50 years in the future and must
+    // become 1976-11-23; its weekday is Tuesday, not Monday. The old
+    // year-only pivot would falsely accept 2076 and back off for a day.
+    // 2076-11-21 remains within 50 calendar years and is still valid.
+    const start = Date.parse('2026-11-22T00:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn().mockResolvedValue(new Response('busy', {
+        status: 503, headers: { 'Retry-After': retryAfter },
+      }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Retry-After')).toBe(expectedCooldown);
+      expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([
     ['RFC 850', 'Sunday, 15-Nov-26 23:00:00 GMT'],
     ['asctime', 'Sun Nov 15 23:00:00 2026'],
   ])('honours a valid legacy %s HTTP-date Retry-After (RFC 9110)', async (_format, retryAfter) => {

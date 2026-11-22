@@ -84,7 +84,14 @@ function parseHttpDateMillis(value: string | null, now: number): number | null {
     if (monthIndex < 0) return null;
     const referenceYear = new Date(now).getUTCFullYear();
     let year = Math.floor(referenceYear / 100) * 100 + Number(legacy[4]);
-    if (year > referenceYear + 50) year -= 100;
+    // The RFC 9110 limit is a complete 50-year period, not only a
+    // difference between year numbers. At 2026-11-22, 2076-11-23 is
+    // already more than 50 years ahead and must be read as 1976.
+    const fiftyYearCutoff = new Date(now);
+    fiftyYearCutoff.setUTCFullYear(referenceYear + 50);
+    const candidate = Date.UTC(year, monthIndex, Number(legacy[2]),
+      Number(legacy[5]), Number(legacy[6]), Number(legacy[7]));
+    if (candidate > fiftyYearCutoff.getTime()) year -= 100;
     else if (year < referenceYear - 50) year += 100;
     const parsed = Date.UTC(year, monthIndex, Number(legacy[2]),
       Number(legacy[5]), Number(legacy[6]), Number(legacy[7]));
