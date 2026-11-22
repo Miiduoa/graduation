@@ -129,6 +129,11 @@ it.each([
   '為何在日曆上看不到昨天訂單的取餐時間？',
   '昨天訂單的取餐時間在行事曆上還找不到，請問為什麼？',
   '我在日曆上看不到昨天訂單的取餐時間，能幫我查一下嗎？',
+  '為什麼我的日曆上看不到昨天的取餐時間',
+  '我在日曆上看不到昨天訂單的取餐時間，可以告訴我原因嗎？',
+  '我在日曆上看不到昨天訂單的取餐時間，請幫我查一下昨天的訂單編號。',
+  '我在日曆上看不到昨天訂單的取餐時間，請幫我確認昨天的訂單狀態。',
+  '我在日曆上看不到昨天訂單的取餐時間，確認是否已加入行事曆',
   '在行事曆裡找不到上週訂單的預定取餐時間；可以幫我看一下嗎？',
   '昨天訂單的取餐時間在我的日曆上沒出現，麻煩你，能否幫忙確認一下？',
   '請幫忙查一下，在行事曆上沒有顯示那筆訂單的取餐時間',
@@ -179,6 +184,9 @@ it('keeps multiple diagnostic questions on the read route', () => {
 
 it.each([
   '再把取餐時間記到日曆',
+  '幫我加入行事曆',
+  '寫入日曆',
+  '修改該筆訂單',
   '幫我建立取餐行程',
   '改成明天',
   '取消該筆訂單',
@@ -245,44 +253,55 @@ const calendarLookups = [
   { name: '看不到', question: (subject: string) => '為什麼我的日曆上看不到' + subject, placement: false },
   { name: '找不到', question: (subject: string) => '在行事曆上找不到' + subject, placement: false },
   { name: '沒顯示', question: (subject: string) => subject + '在日曆上沒顯示', placement: false },
+  { name: '沒出現', question: (subject: string) => subject + '在日曆上沒出現', placement: false },
   { name: '有沒有', question: (subject: string) => subject + '有沒有加入行事曆', placement: true },
   { name: '是否已加入', question: (subject: string) => subject + '是否已加入行事曆', placement: true },
 ];
 const lookupFollowups = [
   { text: '', placement: false },
   { text: '為什麼', placement: false },
+  { text: '請問原因', placement: false, visibilityOnly: true },
+  { text: '可以告訴我原因嗎', placement: false, visibilityOnly: true },
+  { text: '請幫我查一下昨天的訂單編號', placement: false, visibilityOnly: true },
+  { text: '請幫我查一下訂單金額', placement: false, visibilityOnly: true },
   { text: '請問我該去哪裡查', placement: false },
   { text: '是不是同步有問題', placement: false },
   { text: '確認取餐時間是否已加入行事曆', placement: true },
 ];
 const orderActions = [
-  '', '再點一次', '再訂', '重訂', '幫忙買', '幫我點', '幫我訂', '幫忙訂', '代買', '代訂',
-  '下單', '取消', '鎖定', '買', '點', '訂', '請幫忙購買',
+  '', '再點一次', '再訂', '重訂', '幫忙買', '幫忙點', '幫我點', '幫我訂', '幫忙訂', '代買', '代訂',
+  '下單', '取消', '鎖定', '買', '點', '訂', '請幫忙購買', '幫我新增取餐行程',
 ];
 
-const pickupMatrix = calendarLookups.flatMap(lookup => lookupFollowups.map(followup => {
-  // 以 cea4084ff 的解析器逐格核對過，矩陣內只有「加入」命中舊版的入曆動詞。
-  const baseDetectsPickup = lookup.placement || followup.placement;
-  return {
-    lookup: lookup.name,
-    followup: followup.text || '無追問',
-    readDifference: baseDetectsPickup ? '舊版 invalid → null：加入行事曆是狀態問句' : '唯讀維持 null',
-    writeDifference: baseDetectsPickup ? '寫入維持 invalid' : '舊版 null → invalid：日曆可見性觸發混合寫入限制',
-    cells: pickupSubjects.flatMap(subject => orderActions.flatMap(action => {
-      const suffix = (followup.text ? '，' + followup.text : '') + '？';
-      const query = lookup.question(subject) + suffix;
-      const expected = action ? 'invalid' : null;
-      const questions = action ? [action + '昨天的訂單，' + query] : [query];
-      if (action && subject.includes('訂單')) {
-        questions.push(lookup.question(action + subject) + suffix);
-      }
-      return questions.map(question => ({ question, expected }));
-    })),
-  };
-}));
+const pickupMatrix = calendarLookups.flatMap(lookup => lookupFollowups
+  .filter(followup => !lookup.placement || !followup.visibilityOnly)
+  .map(followup => {
+    // 以 cea4084ff 的解析器逐格核對。查詢中的「加入」仍會觸發舊版的入曆判斷。
+    const baseDetectsPickup = lookup.placement || followup.placement;
+    return {
+      lookup: lookup.name,
+      followup: followup.text || '無追問',
+      cells: pickupSubjects.flatMap(subject => orderActions.flatMap(action => {
+        const suffix = (followup.text ? '，' + followup.text : '') + '？';
+        const query = lookup.question(subject) + suffix;
+        const expected = action ? 'invalid' : null;
+        // 舊版也辨識「新增」，混合建立要求維持 invalid。
+        const createsPickup = action === '幫我新增取餐行程';
+        const prefix = createsPickup ? action : action + '昨天的訂單';
+        const questions = action ? [prefix + '，' + query] : [query];
+        if (action && !createsPickup && subject.includes('訂單')) {
+          questions.push(lookup.question(action + subject) + suffix);
+        }
+        // 舊版把詢問「是否已加入」視為入曆要求，因此唯讀格從 invalid 改為 null。
+        // 沒有舊版入曆動詞的混合請求從 null 改為 invalid，避免寫入轉入一般問答。
+        const baseExpected = baseDetectsPickup || createsPickup ? 'invalid' : null;
+        return questions.map(question => ({ question, expected, baseExpected }));
+      })),
+    };
+  }));
 
-it.each(pickupMatrix)('$lookup × $followup（$readDifference；$writeDifference）', ({ cells }) => {
-  for (const { question, expected } of cells) {
-    expect.soft(parse(question)?.kind ?? null, question).toBe(expected);
+it.each(pickupMatrix)('$lookup × $followup compared with the merge base', ({ cells }) => {
+  for (const { question, expected, baseExpected } of cells) {
+    expect.soft(parse(question)?.kind ?? null, question + '（舊版 ' + baseExpected + '）').toBe(expected);
   }
 });

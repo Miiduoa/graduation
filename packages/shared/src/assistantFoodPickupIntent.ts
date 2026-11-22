@@ -21,17 +21,20 @@ const questionEnding = '(?:啊|呢|嗎)?[?]*$';
 const standaloneReadPrompt = new RegExp('^(?:' + readPrompt + '|' + polite + ')' + questionEnding);
 const calendarVisibility = '(?:我)?(?:在)?' + calendarLocation + '(?:還是|仍然|還|仍)?' +
   '(?:找不到|看不到|(?:沒有|沒|未)(?:找到|看到|出現|顯示))';
-const orderWriteVerb =
-  '鎖定|解鎖|凍結|取消|撤銷|撤回|作廢|刪|移除|移走|清除|清空|封存|編輯|改|變更|調整|更新|更換|' +
-  '下單|下訂|訂購|加點|補訂|重(?:新)?(?:點|訂|買|購)|再(?:點|訂|買|購)|付款|結帳|退款|退訂|退單|退費|送出|提交|延後|提前|延期|重排|標記|備註|同步';
 // Order qualifiers are open-ended, so exclude action verbs and request prefixes
 // here. Calendar placement verbs are allowed only in the status question itself.
 // Bare order verbs can begin a request, while words such as 餐點 can describe an order.
 const orderRequest = '(?:點|訂(?!單)|買|購買)';
 const delegatedOrderRequest = '(?:幫忙|幫我|替我|代)' + orderRequest;
-const order = '(?!' + readPrompt + '?' + orderRequest + ')(?:(?!' + pickupVerb.source +
-  '|' + calendarVisibility + '|' + orderWriteVerb + '|' + delegatedOrderRequest +
-  '|(?:並且?|接著|然後|順便|也|另外)' + orderRequest +
+const connectedOrderRequest = '(?:並且?|接著|然後|順便|也|另外)' + orderRequest;
+// Avoid treating the boundary in 「查一下訂單」 as the verb 「下訂」.
+const orderWriteVerb =
+  '鎖定|解鎖|凍結|取消|撤銷|撤回|作廢|刪|移除|移走|清除|清空|封存|編輯|改|變更|調整|更新|更換|' +
+  '下單|(?<!一)下訂|訂購|加點|補訂|重(?:新)?(?:點|訂|買|購)|再(?:點|訂|買|購)|付款|結帳|退款|退訂|退單|退費|送出|提交|延後|提前|延期|重排|標記|備註|同步|' +
+  delegatedOrderRequest + '|' + connectedOrderRequest;
+const bareOrderRequest = readPrompt + '?' + orderRequest;
+const order = '(?!' + bareOrderRequest + ')(?:(?!' + pickupVerb.source +
+  '|' + calendarVisibility + '|' + orderWriteVerb +
   '|請|麻煩|幫我|替我|我想|不要|不用|如果|假設|翻譯)[^,;、。.!?]){0,80}訂單';
 const orderLookup = new RegExp(
   '^' + readPrompt + '?' + order + '(?:的?' + pickupTime +
@@ -59,10 +62,6 @@ const calendarSlotLookup = new RegExp(
     '的?(?:是|在)?' + calendarSlot + questionEnding,
 );
 const calendarVisibilityPattern = new RegExp(calendarVisibility);
-const calendarVisibilityLookup = new RegExp(
-  '^' + readPrompt + '?(?:' + pickupSubject + calendarVisibility + '|' +
-    calendarVisibility + pickupSubject + ')' + questionEnding,
-);
 const missingCalendarEntry = '(?:(?:還沒(?:有)?|尚未|沒有|沒|未)(?:被)?' + calendarEntry +
   '|' + calendarVisibility + '|(?:找不到|看不到))';
 const reason = '(?:為什麼|為何|怎麼|怎會)';
@@ -76,14 +75,15 @@ const sync = '(?:有)?同步(?:完成|成功|好|到' + calendarLocation + ')?';
 const diagnosticState = '(?:(?:還沒(?:有)?|尚未|未|沒有|沒)' + sync + '|同步(?:失敗|異常|出錯|延遲)|' +
   '(?:同步|系統|日曆|行事曆)(?:有(?:了)?問題|出(?:了)?(?:問題|錯)|異常|錯誤|故障)|' +
   '(?:同步|系統)(?:的)?問題)';
+const syncStatus = '(?:有沒有|有無|是否)(?:已經|已)?' + sync + '|' +
+  sync + '(?:了嗎|了沒|沒有|沒)';
 const visibilityFollowup = '(?:(?:還沒(?:有)?|尚未|未|沒有|沒)(?:出現|顯示)(?:在' + calendarLocation + ')?|看不到|找不到)';
 const reasonFollowup = new RegExp(
   '^' + readPrompt + '?(?:' + reason + '(?:(?:還是|仍然|還|仍)?(?:' +
     missingCalendarEntry + '|' + visibilityFollowup + '|' + diagnosticState + '))?|' +
     '(?:會不會是|是不是|是否|難道是|是)(?:因為)?' + diagnosticState + '|' +
     '(?:同步|系統)(?:是不是|是否|有沒有|有無)(?:有)?(?:問題|異常|出錯|故障)|' +
-    '(?:有沒有|有無|是否)(?:已經|已)?' + sync + '|' +
-    sync + '(?:了嗎|了沒|沒有|沒)|' + diagnosticState + '(?=嗎|[?]))' + questionEnding,
+    syncStatus + '|' + diagnosticState + '(?=嗎|[?]))' + questionEnding,
 );
 
 const lookupFollowup = new RegExp(
@@ -93,14 +93,39 @@ const lookupFollowup = new RegExp(
     questionEnding,
 );
 
+function pickupClauses(text: string): string[] {
+  return text.split(/[;,、。.!]+|(?<=\?)(?=[^?])/)
+    .map(clause => clause.replace(/^(?:也|順便|另外|再(?!點|訂|買|購)|然後|接著|並且|並)+/, ''));
+}
+
+const explicitOrderWrite = new RegExp(
+  '(?:^|' + calendarVisibility + ')' + bareOrderRequest + '|' + orderWriteVerb,
+);
+const syncDiagnosis = new RegExp(
+  diagnosticState + '|' + syncStatus +
+  '|同步(?:是不是|是否|有沒有|有無)(?:有)?(?:問題|異常|出錯|故障)',
+  'g',
+);
+const explicitCalendarWrite = new RegExp(pickupVerb.source + '|寫入|放進' + calendarLocation);
+
+function hasPickupWriteIntent(text: string): boolean {
+  return pickupClauses(text).some(clause => {
+    if (calendarStatus.test(clause) || calendarSlotLookup.test(clause) ||
+        calendarAbsenceQuestion.test(clause) || missingCalendarStatus.test(clause)) return false;
+    // A sync diagnosis can mention the sync action. Scan the remaining text
+    // for writes, including a request appended without punctuation.
+    const action = clause.replace(syncDiagnosis, '');
+    return explicitOrderWrite.test(action) || explicitCalendarWrite.test(action);
+  });
+}
+
 function isReadOnlyPickupQuestion(text: string): boolean {
-  const clauses = text.split(/[;,、。.!]+|(?<=\?)(?=[^?])/)
-    .map(clause => clause.replace(/^(?:也|順便|另外|再(?!點|訂|買|購)|然後|接著|並且|並)+/, ''))
+  const clauses = pickupClauses(text)
     .filter(clause => clause && !standaloneReadPrompt.test(clause));
   return clauses.length > 0 &&
     clauses.every((clause, index) =>
       calendarStatus.test(clause) || calendarSlotLookup.test(clause) ||
-      calendarAbsenceQuestion.test(clause) || calendarVisibilityLookup.test(clause) ||
+      calendarAbsenceQuestion.test(clause) ||
       orderLookup.test(clause) || pickupTimeLookup.test(clause) ||
       // Follow-ups borrow their subject from a preceding read clause.
       (missingCalendarStatus.test(clause) &&
@@ -143,12 +168,16 @@ export function parseAssistantFoodPickupIntent(question: string): AssistantFoodP
   if (typeof question !== 'string') return null;
   const text = question.normalize('NFKC').trim();
   const compact = text.replace(/\s+/g, '');
+  const checksCalendarVisibility = calendarVisibilityPattern.test(compact);
   if (!/取餐/.test(text) || !/訂單|取餐時間/.test(text) || !/行事曆|日曆|行程/.test(text) ||
-      !(pickupVerb.test(text) || calendarEntryPattern.test(text) || calendarVisibilityPattern.test(compact))) return null;
+      !(pickupVerb.test(text) || calendarEntryPattern.test(text) || checksCalendarVisibility)) return null;
   // A user-specified appointment can mention order work in its title. Preserve
   // the complete existing appointment grammar, including its invalid-time help.
   if (parseAssistantCalendarIntent(text)) return null;
   const invalid = (): AssistantFoodPickupIntent => ({ kind: 'invalid', message: guidance });
+  // Visibility reports can carry arbitrary read follow-ups. Scan for writes
+  // across the whole request instead of requiring each follow-up to match.
+  if (checksCalendarVisibility) return hasPickupWriteIntent(compact) ? invalid() : null;
   if (text.length > 1000 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}「」『』“”"'`]/u.test(text)) return invalid();
   if (isReadOnlyPickupQuestion(compact)) return null;
   if (/不要|不用|不必|無須|不需要|不想|先別|別幫|不是|翻譯|例句|範例|假設|如果/.test(text)) return invalid();
