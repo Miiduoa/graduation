@@ -163,7 +163,7 @@ it.each([
   ['unsigned-scope', '先選擇校園'],
   ['empty', '還沒有課表'],
 ] as const)('does not claim there are no classes while the timetable is %s', (status, message) => {
-  render(today({ timetableStatus: status, classes: [klass] }));
+  render(today({ timetableStatus: status, classes: status === 'loading' ? [] : [klass] }));
   const timetable = screen.getByRole('region', { name: TODAY_FLOW_CLASS_TITLE });
   expect(within(timetable).getByText(new RegExp(message))).toBeTruthy();
   expect(within(timetable).queryByText(/今天沒有排課/)).toBeNull();
@@ -270,7 +270,7 @@ it.each(['ntu', 'personal'])('shows imported classes and retries when the %s man
     state.records.manual = null;
     state.records.error = '手動課表暫時讀不到。';
 
-    render(boundToday());
+    const view = render(boundToday());
 
     const timetable = within(screen.getByRole('region', { name: TODAY_FLOW_CLASS_TITLE }));
     expect(timetable.getByText('已匯入授課')).toBeTruthy();
@@ -278,6 +278,12 @@ it.each(['ntu', 'personal'])('shows imported classes and retries when the %s man
     expect(timetable.queryByText(/今天沒有排課/)).toBeNull();
     fireEvent.click(timetable.getByRole('button', { name: '重新讀取課表' }));
     expect(state.records.retry).toHaveBeenCalledTimes(1);
+
+    state.records.loaded = false;
+    state.records.error = '';
+    view.rerender(boundToday());
+    expect(timetable.getByRole('status').textContent).toBe('正在確認今天的課表…');
+    expect(timetable.getByText('已匯入授課')).toBeTruthy();
   },
 );
 
@@ -298,4 +304,17 @@ it('keeps classroom navigation scoped to the actual timetable and hides it durin
   expect(screen.getByText('正在確認今天的課表…')).toBeTruthy();
   expect(screen.queryByRole('link', { name: /^找教室/ })).toBeNull();
   expect(screen.queryByText('已匯入授課')).toBeNull();
+});
+
+it('shows today’s imported classes as soon as they arrive while the manual source is pending', () => {
+  state.records.loaded = false;
+  state.records.manual = null;
+  state.records.imported.records = [importedClass];
+
+  render(boundToday());
+
+  const timetable = within(screen.getByRole('region', { name: TODAY_FLOW_CLASS_TITLE }));
+  expect(timetable.getByRole('status').textContent).toBe('正在確認今天的課表…');
+  expect(timetable.getByText('已匯入授課')).toBeTruthy();
+  expect(timetable.queryByText(/今天沒有排課/)).toBeNull();
 });

@@ -162,18 +162,19 @@ export function CourseReviewSection(props: {
   const filterRef = useRef<HTMLInputElement>(null);
   const [formDisplay, setFormDisplay] = useState<CommunityFormDisplay>('closed');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isCurrent: () => boolean) => {
     if (!schoolId) {
       setReviews([]);
       return;
     }
     const rows = await listCourseReviews(schoolId, { lim: 80 });
-    setReviews(rows);
+    if (isCurrent()) setReviews(rows);
   }, [schoolId]);
 
   const { loading, error, refresh } = useCommunityLoad(
     load,
     '暫時無法讀取課程評價，請確認連線後重試。',
+    props.active,
   );
 
   const filtered = useMemo(() => {
@@ -706,7 +707,7 @@ export function StudyGroupSection(props: {
   const [groups, setGroups] = useState<WebStudyGroup[]>([]);
   const [formDisplay, setFormDisplay] = useState<CommunityFormDisplay>('closed');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isCurrent: () => boolean) => {
     if (!schoolId) {
       setGroups([]);
       return;
@@ -720,18 +721,24 @@ export function StudyGroupSection(props: {
           limit(60),
         ),
       );
-      setGroups(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WebStudyGroup, 'id'>) })));
+      if (isCurrent()) {
+        setGroups(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WebStudyGroup, 'id'>) })));
+      }
     } catch {
+      if (!isCurrent()) return;
       const snap = await getDocs(
         query(collection(db, 'schools', schoolId, 'studyGroups'), limit(60)),
       );
-      setGroups(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WebStudyGroup, 'id'>) })));
+      if (isCurrent()) {
+        setGroups(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WebStudyGroup, 'id'>) })));
+      }
     }
   }, [schoolId]);
 
   const { loading, error, refresh } = useCommunityLoad(
     load,
     '暫時無法讀取讀書會，請確認連線後重試。',
+    props.active,
   );
 
   const onJoin = async (g: WebStudyGroup) => {

@@ -154,7 +154,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const loadPost = useCallback(async () => {
     if (!postId || !schoolId) return;
     const row = await getCampusPostById(schoolId, postId);
-    setPost(row);
+    setPost(row ? { ...row, title: row.title ?? '' } : null);
   }, [postId, schoolId]);
 
   const loadReplies = useCallback(async () => {
@@ -714,19 +714,12 @@ function EditPostModal(props: {
   const [title, setTitle] = useState(props.initial.title);
   const [content, setContent] = useState(props.initial.content);
   const [tagsRaw, setTagsRaw] = useState(props.initial.tagsRaw);
-  const [validated, setValidated] = useState(false);
-  const titleRequired = Boolean(props.initial.title.trim());
   const titleRef = useRef<HTMLInputElement>(null);
   const formId = useId();
   const session = useCommunityFormSession(props.onClose);
 
   function submit() {
     if (session.busy) return;
-    setValidated(true);
-    if (titleRequired && !title.trim()) {
-      titleRef.current?.focus();
-      return;
-    }
     const patch = {
       title: title.trim(),
       content: content.trim(),
@@ -781,10 +774,8 @@ function EditPostModal(props: {
           <Input
             ref={titleRef}
             label="標題"
-            required={titleRequired}
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            error={validated && titleRequired && !title.trim() ? '請填寫標題。' : undefined}
           />
           <Textarea
             label="內文"

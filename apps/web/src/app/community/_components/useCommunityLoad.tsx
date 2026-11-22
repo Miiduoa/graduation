@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import styles from '../community.module.css';
 
-export function useCommunityLoad(load: () => Promise<void>, message: string) {
+export function useCommunityLoad(
+  load: (isCurrent: () => boolean) => Promise<void>,
+  message: string,
+  active = true,
+) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const generation = useRef(0);
@@ -12,7 +16,7 @@ export function useCommunityLoad(load: () => Promise<void>, message: string) {
     setLoading(true);
     setError('');
     try {
-      await load();
+      await load(() => generation.current === current);
       return true;
     } catch {
       if (generation.current === current) setError(message);
@@ -22,13 +26,17 @@ export function useCommunityLoad(load: () => Promise<void>, message: string) {
     }
   }, [load, message]);
   useEffect(() => {
-    let active = true;
-    void Promise.resolve().then(() => { if (active) void refresh(); });
+    let mounted = true;
+    if (active) {
+      void Promise.resolve().then(() => {
+        if (mounted) void refresh();
+      });
+    }
     return () => {
-      active = false;
+      mounted = false;
       generation.current += 1;
     };
-  }, [refresh]);
+  }, [active, refresh]);
   return { loading, error, refresh };
 }
 

@@ -91,13 +91,11 @@ export function usePersonalTodayRecords() {
       document.removeEventListener('visibilitychange', visible);
     };
   }, [uid, owner, schoolId, scopeKey, context.loading, attempt]);
-  const visible =
-    !context.loading && manualState?.key === scopeKey && manualState.attempt === attempt
-      ? manualState
-      : null;
+  const visible = !context.loading && manualState?.key === scopeKey ? manualState : null;
   const manual = visible?.records ?? null;
-  const loaded = !imported.loading && visible !== null;
-  const error = imported.error || visible?.error || '';
+  const manualLoaded = visible?.attempt === attempt;
+  const loaded = !imported.loading && manualLoaded;
+  const error = imported.error || (manualLoaded ? visible?.error : '') || '';
   return {
     context,
     imported: { ...imported, records: withClassExceptions(imported.records, visible?.exceptions) },

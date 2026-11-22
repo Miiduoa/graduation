@@ -174,14 +174,14 @@ it('still explains a non-permission bookmark read failure', async () => {
   );
 });
 
-function ownPost(title = '原標題') {
+function ownPost(title: string | null = '原標題') {
   mocks.getPost.mockResolvedValue({
     id: 'p-1',
     schoolId: 'pu',
     boardId: 'board',
     anonymous: false,
     authorUid: 'alice',
-    title,
+    ...(title === null ? {} : { title }),
     content: '原內文',
     likes: 0,
     likedBy: [],
@@ -247,6 +247,28 @@ it('holds one edit write, prevents dismissal while pending, and updates the conf
   expect(screen.getByText('新標題')).toBeTruthy();
   expect(screen.getByText('新內文')).toBeTruthy();
   expect(mocks.getPost).toHaveBeenCalledOnce();
+});
+
+it.each([
+  { name: 'a nonempty title cleared by the author', title: '原標題', entered: '' },
+  { name: 'a missing legacy title', title: null },
+  { name: 'an existing whitespace-only title', title: '   ' },
+  { name: 'a title replaced with whitespace', title: '原標題', entered: '   ' },
+])('saves $name as an empty string', async ({ title, entered }) => {
+  ownPost(title);
+  render(<PostDetailPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '✏️ 編輯' }));
+  const input = screen.getByLabelText<HTMLInputElement>('標題');
+  expect(input.value).toBe(title ?? '');
+  if (entered !== undefined) fireEvent.change(input, { target: { value: entered } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存' }));
+
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(mocks.updatePost).toHaveBeenCalledExactlyOnceWith('pu', 'p-1', {
+    title: '',
+    content: '原內文',
+    tags: ['課程'],
+  });
 });
 
 it('lets the author save an untitled legacy post and retains the draft after a lost response', async () => {

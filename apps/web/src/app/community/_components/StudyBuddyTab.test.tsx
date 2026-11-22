@@ -377,6 +377,60 @@ it('distinguishes a filtered empty result and restores both the list and search 
   expect(document.activeElement).toBe(input);
 });
 
+it.each([
+  { previous: ['bob', 'carol'], next: ['bob'], before: '已滿員', after: '申請加入' },
+  { previous: ['bob'], next: ['bob', 'carol'], before: '申請加入', after: '已滿員' },
+])('refreshes group capacity on return from $before to $after', async ({
+  previous,
+  next,
+  before,
+  after,
+}) => {
+  function snapshot(members: string[]) {
+    return {
+      docs: [
+        {
+          id: 'group-1',
+          data: () => ({
+            name: '演算法讀書會',
+            courseName: '演算法',
+            courseCode: 'CS101',
+            location: '圖書館',
+            style: 'collaborative',
+            dayOfWeek: 1,
+            startHour: 10,
+            endHour: 11,
+            maxMembers: 2,
+            members,
+            organizerUid: 'bob',
+          }),
+        },
+      ],
+    };
+  }
+
+  mocks.getDocs.mockResolvedValue(snapshot(previous));
+  render(<StudyBuddyTab schoolId="pu" />);
+  await screen.findByText('尚無評價');
+  expect(mocks.getDocs).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
+  expect((await screen.findByRole<HTMLButtonElement>('button', { name: before })).disabled).toBe(
+    before === '已滿員',
+  );
+  fireEvent.click(screen.getByRole('tab', { name: '課程評價' }));
+  await waitFor(() => expect(mocks.listReviews).toHaveBeenCalledTimes(2));
+
+  mocks.getDocs.mockResolvedValue(snapshot(next));
+  fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
+
+  expect((await screen.findByRole<HTMLButtonElement>('button', { name: after })).disabled).toBe(
+    after === '已滿員',
+  );
+  expect(screen.queryByRole('button', { name: before })).toBeNull();
+  expect(mocks.getDocs).toHaveBeenCalledTimes(2);
+});
+
 it('validates group time, locks pending writes, and keeps the Firestore schema unchanged', async () => {
   let resolve!: (value: { id: string }) => void;
   mocks.addDoc.mockImplementation(

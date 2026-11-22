@@ -105,11 +105,12 @@ export function TeacherToday({
                 </button>
               </>
             )}
-            {timetableStatus === 'loading' ? (
+            {timetableStatus === 'loading' && (
               <p className={styles.empty} role="status">
                 正在確認今天的課表…
               </p>
-            ) : timetableStatus === 'unsigned-scope' ? (
+            )}
+            {timetableStatus === 'unsigned-scope' ? (
               <>
                 <p className={styles.empty}>先選擇校園，就能查看或建立這所學校的課表。</p>
                 <Link className={styles.import} href={timetableHref}>
@@ -252,7 +253,7 @@ export function TeacherTodayPage(props: BoundProps) {
     schoolId,
     now,
   });
-  const classes = todayClassesFromSchedule(schedule.today, now);
+  const classes = scope.loading ? [] : todayClassesFromSchedule(schedule.today, now);
   const timetableStatus: Props['timetableStatus'] =
     scope.loading || !records.loaded
       ? 'loading'
