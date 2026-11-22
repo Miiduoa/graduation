@@ -53,6 +53,7 @@ function ScopedCreatorCardPanel({
   const styles = useThemeStyleSheet(createStyles);
   const [state, setState] = useState<CardState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
+  const initialReadSucceeded = useRef(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const currentDraft = useRef(draft);
@@ -63,7 +64,7 @@ function ScopedCreatorCardPanel({
   const [saving, setSaving] = useState(false);
   // Keep the submitted draft and its normalized server fields until a read
   // resolves the uncertain write. The ref also guards stale button callbacks.
-  const pendingWrite = useRef<{ draft: CreatorCard; expected: CreatorCard; allowLateSave: boolean } | null>(null);
+  const pendingWrite = useRef<{ draft: CreatorCard; expected: CreatorCard; confirmationAttempt: number } | null>(null);
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const savingFlight = useRef(false);
   const [openingLink, setOpeningLink] = useState(false);
@@ -93,27 +94,25 @@ function ScopedCreatorCardPanel({
   }, []);
 
   useEffect(() => {
-    let live = true;
+    if (initialReadSucceeded.current) return;
+    let latestAttempt = true;
     setState({ status: 'loading' });
     // A server-only read can remain pending indefinitely on a bad connection.
     // Give the student a retry instead of trapping the profile in loading.
-    // The SDK call is not cancelled; late replies cannot replace a new read.
+    // Any successful read can resolve loading. Only the latest attempt can
+    // show an error, and a retry must never overwrite an already loaded card.
+    const canShowError = () => latestAttempt && mounted.current && !initialReadSucceeded.current;
     const timeout = setTimeout(() => {
-      if (!live) return;
-      setState({ status: 'error', timedOut: true });
+      if (canShowError()) setState({ status: 'error', timedOut: true });
     }, CREATOR_CARD_READ_TIMEOUT_MS);
     void readCreatorCard(schoolId, ownerUid).then((value) => {
-      if (!live) return;
-      live = false;
-      clearTimeout(timeout);
+      if (!mounted.current || initialReadSucceeded.current) return;
+      initialReadSucceeded.current = true;
       setState({ status: 'ready', value });
     }).catch(() => {
-      if (!live) return;
-      live = false;
-      clearTimeout(timeout);
-      setState({ status: 'error', timedOut: false });
-    });
-    return () => { live = false; clearTimeout(timeout); };
+      if (canShowError()) setState({ status: 'error', timedOut: false });
+    }).finally(() => clearTimeout(timeout));
+    return () => { latestAttempt = false; clearTimeout(timeout); };
   }, [schoolId, ownerUid, attempt]);
 
   const beginEdit = () => {
@@ -139,49 +138,46 @@ function ScopedCreatorCardPanel({
   const confirmPreviousSave = async () => {
     const submitted = pendingWrite.current;
     if (!mounted.current || !own || !submitted || savingFlight.current || state.status !== 'ready') return;
-    submitted.allowLateSave = false;
+    const attempt = ++submitted.confirmationAttempt;
+    const isPending = () => mounted.current && pendingWrite.current === submitted;
+    const isLatest = () => isPending() && submitted.confirmationAttempt === attempt;
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
+    // Keep listening after the UI timeout. An older check can still confirm
+    // the submitted fields, while only the latest check can report a mismatch.
+    const timeout = setTimeout(() => {
+      if (!isLatest()) return;
+      savingFlight.current = false;
+      setSaving(false);
+      setFeedback('核對等待逾時，草稿已保留，請重新核對；不會自動再次儲存。');
+    }, CREATOR_CARD_CONFIRM_TIMEOUT_MS);
     let latest: CreatorCard | null;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    let timedOut = false;
     try {
-      // Bound only the UI wait, not the SDK network request. Promise.race
-      // discards late replies after a timeout; a new explicit tap performs
-      // another server read without ever resending the uncertain write.
-      latest = await Promise.race([
-        readCreatorCard(schoolId, ownerUid, { requireCommitted: true }),
-        new Promise<never>((_, reject) => {
-          timeout = setTimeout(() => {
-            timedOut = true;
-            reject(new Error('Creator card confirmation timed out'));
-          }, CREATOR_CARD_CONFIRM_TIMEOUT_MS);
-        }),
-      ]);
+      latest = await readCreatorCard(schoolId, ownerUid, { requireCommitted: true });
     } catch {
-      if (mounted.current) {
-        setFeedback(timedOut
-          ? '核對等待逾時，草稿已保留，請重新核對；不會自動再次儲存。'
-          : '仍無法核對伺服器資料，草稿已保留，請稍後重試核對。');
+      if (isLatest()) {
+        savingFlight.current = false;
+        setSaving(false);
+        setFeedback('仍無法核對伺服器資料，草稿已保留，請稍後重試核對。');
       }
       return;
     } finally {
-      if (timeout !== undefined) clearTimeout(timeout);
-      if (mounted.current) {
-        savingFlight.current = false;
-        setSaving(false);
-      }
+      clearTimeout(timeout);
     }
-    if (!mounted.current) return;
 
+    const { expected } = submitted;
+    const matches = latest && latest.headline === expected.headline &&
+      latest.bio === expected.bio && latest.linkUrl === expected.linkUrl;
+    if (!isPending() || (!matches && !isLatest())) return;
+
+    pendingWrite.current = null;
+    savingFlight.current = false;
+    setSaving(false);
+    setNeedsConfirmation(false);
     acceptSavedPortfolioLink(latest?.linkUrl ?? '');
     setState({ status: 'ready', value: latest });
-    pendingWrite.current = null;
-    setNeedsConfirmation(false);
-    const { expected } = submitted;
-    if (latest && latest.headline === expected.headline &&
-      latest.bio === expected.bio && latest.linkUrl === expected.linkUrl) {
+    if (matches) {
       finishSave(submitted.draft);
     } else {
       setFeedback('伺服器資料與上次送出的內容不同，草稿已保留。確認後可重新儲存。');
@@ -211,15 +207,14 @@ function ScopedCreatorCardPanel({
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
-    const submitted = { draft: submittedDraft, expected, allowLateSave: true };
+    const submitted = { draft: submittedDraft, expected, confirmationAttempt: 0 };
     const markUnconfirmed = () => {
       pendingWrite.current = submitted;
       setNeedsConfirmation(true);
       setFeedback('無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
     };
     let timedOut = false;
-    // Release the UI while keeping the original confirmation eligible until
-    // the user starts a manual check.
+    // Release the UI while the original save can still confirm this pending write.
     const saveTimeout = setTimeout(() => {
       timedOut = true;
       if (!mounted.current) return;
@@ -229,9 +224,11 @@ function ScopedCreatorCardPanel({
     }, CREATOR_CARD_SAVE_TIMEOUT_MS);
     try {
       const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft);
-      if (!mounted.current || !submitted.allowLateSave) return;
+      if (!mounted.current || (timedOut && pendingWrite.current !== submitted)) return;
       if (timedOut) {
         pendingWrite.current = null;
+        savingFlight.current = false;
+        setSaving(false);
         setNeedsConfirmation(false);
       }
       acceptSavedPortfolioLink(confirmed.linkUrl);

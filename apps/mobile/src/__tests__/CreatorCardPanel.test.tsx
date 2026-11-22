@@ -94,12 +94,14 @@ test('an initial profile read can succeed after timeout before retry', async () 
 });
 
 
-test('a stalled initial profile read allows retry and ignores its late result', async () => {
+test.each([false, true])('a successful profile retry ignores a late initial result (rejects: %s)', async (rejects) => {
   jest.useFakeTimers();
   try {
     let resolveOld!: (value: Awaited<ReturnType<typeof readCreatorCard>>) => void;
-    const stalled = new Promise<Awaited<ReturnType<typeof readCreatorCard>>>((resolve) => {
+    let rejectOld!: (error: Error) => void;
+    const stalled = new Promise<Awaited<ReturnType<typeof readCreatorCard>>>((resolve, reject) => {
       resolveOld = resolve;
+      rejectOld = reject;
     });
     jest.mocked(readCreatorCard)
       .mockReturnValueOnce(stalled)
@@ -121,12 +123,44 @@ test('a stalled initial profile read allows retry and ignores its late result', 
     // The first server request is still alive; it cannot restore stale
     // content over the successful retry or leak an old author's card.
     await act(async () => {
-      resolveOld({ headline: '上次無效舊資料', bio: '', linkUrl: '' });
+      if (rejects) rejectOld(new Error('initial read failed'));
+      else resolveOld({ headline: '上次無效舊資料', bio: '', linkUrl: '' });
       await Promise.resolve();
     });
     expect(view.queryByText('上次無效舊資料')).toBeNull();
+    expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
     expect(view.getByText('新的社團介紹')).toBeTruthy();
     expect(saveCreatorCard).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test.each([false, true])('an initial success survives a failed retry (retry fails first: %s)', async (retryFailsFirst) => {
+  jest.useFakeTimers();
+  try {
+    const card = { headline: '既有社群簡介', bio: '', linkUrl: '' };
+    let resolveInitial!: (value: typeof card) => void;
+    let rejectRetry!: (error: Error) => void;
+    jest.mocked(readCreatorCard)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveInitial = resolve; }))
+      .mockReturnValueOnce(new Promise((_, reject) => { rejectRetry = reject; }));
+
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} />);
+    act(() => { jest.advanceTimersByTime(15_000); });
+    fireEvent.press(view.getByLabelText('重新讀取社群簡介'));
+
+    const failRetry = async () => act(async () => { rejectRetry(new Error('retry failed')); });
+    if (retryFailsFirst) {
+      await failRetry();
+      expect(view.getByText('社群簡介暫時無法讀取。')).toBeTruthy();
+    }
+    await act(async () => { resolveInitial(card); });
+    if (!retryFailsFirst) await failRetry();
+
+    expect(view.getByText(card.headline)).toBeTruthy();
+    expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
+    expect(readCreatorCard).toHaveBeenCalledTimes(2);
   } finally {
     jest.useRealTimers();
   }
@@ -558,7 +592,8 @@ test('an offline confirmation can be retried without resending the save', async 
   expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
 });
 
-test('a stalled server confirmation times out, permits a read-only retry, and ignores the old reply', async () => {
+test.each(['late success', 'successful retry', 'failed retry'])(
+  'a stalled server confirmation times out and then resolves through %s', async (outcome) => {
   jest.useFakeTimers();
   try {
     const card = { headline: '', bio: '這次儲存的校園介紹', linkUrl: '' };
@@ -567,7 +602,10 @@ test('a stalled server confirmation times out, permits a read-only retry, and ig
     jest.mocked(readCreatorCard)
       .mockResolvedValueOnce(null)
       .mockReturnValueOnce(stalled)
-      .mockResolvedValueOnce(card);
+      .mockImplementationOnce(async () => {
+        if (outcome === 'failed retry') throw new Error('retry failed');
+        return card;
+      });
     jest.mocked(saveCreatorCard).mockRejectedValueOnce(new Error('confirmation lost after write'));
 
     const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
@@ -590,17 +628,20 @@ test('a stalled server confirmation times out, permits a read-only retry, and ig
     expect(view.getByLabelText('個人簡介').props.value).toBe(card.bio);
     expect(saveCreatorCard).toHaveBeenCalledTimes(1);
 
-    await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
-    expect(readCreatorCard).toHaveBeenCalledTimes(3);
-    expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
-    expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+    if (outcome !== 'late success') {
+      await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+      expect(readCreatorCard).toHaveBeenCalledTimes(3);
+      if (outcome === 'failed retry') {
+        expect(view.getByText(/仍無法核對伺服器資料/)).toBeTruthy();
+      }
+    }
 
-    // The first stalled read may still resolve; it must not overwrite the
-    // successful retry or turn the confirmed card into a different result.
     await act(async () => {
-      resolveStalled({ ...card, bio: '過時的舊讀取結果' });
-      await Promise.resolve();
+      resolveStalled(outcome === 'successful retry' ? { ...card, bio: '過時的舊讀取結果' } : card);
     });
+    expect(readCreatorCard).toHaveBeenLastCalledWith('pu', 'alice', { requireCommitted: true });
+    expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+    expect(view.queryByLabelText('核對儲存結果')).toBeNull();
     expect(view.getByText('這次儲存的校園介紹')).toBeTruthy();
     expect(view.queryByText('過時的舊讀取結果')).toBeNull();
     expect(saveCreatorCard).toHaveBeenCalledTimes(1);
@@ -609,7 +650,13 @@ test('a stalled server confirmation times out, permits a read-only retry, and ig
   }
 });
 
-test.each([false, true])('a late save before manual confirmation respects pending writes (%s)', async (hasPendingWrites) => {
+test.each([
+  { hasPendingWrites: false, manualCheck: false },
+  { hasPendingWrites: true, manualCheck: false },
+  { hasPendingWrites: false, manualCheck: true },
+])('a late save respects pending writes ($hasPendingWrites) during a manual check ($manualCheck)', async ({
+  hasPendingWrites, manualCheck,
+}) => {
   jest.useFakeTimers();
   try {
     const card = { headline: '', bio: '我的校園作品', linkUrl: '' };
@@ -626,6 +673,11 @@ test.each([false, true])('a late save before manual confirmation respects pendin
       jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard').saveCreatorCard,
     );
 
+    let resolveCheck!: (value: null) => void;
+    jest.mocked(readCreatorCard).mockResolvedValueOnce(null).mockReturnValueOnce(
+      new Promise((resolve) => { resolveCheck = resolve; }),
+    );
+
     const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
     await act(async () => { await Promise.resolve(); });
     fireEvent.press(view.getByLabelText('建立社群簡介'));
@@ -635,13 +687,17 @@ test.each([false, true])('a late save before manual confirmation respects pendin
     expect(view.getByText(/無法確認簡介是否已儲存/)).toBeTruthy();
     expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
 
+    if (manualCheck) {
+      fireEvent.press(view.getByLabelText('核對儲存結果'));
+      expect(view.getByLabelText('正在核對伺服器…')).toBeTruthy();
+    }
     await act(async () => {
       jest.advanceTimersByTime(1_000);
       resolveWrite();
     });
     expect(setDoc).toHaveBeenCalledTimes(1);
     expect(getDocFromServer).toHaveBeenCalledTimes(1);
-    expect(readCreatorCard).toHaveBeenCalledTimes(1);
+    expect(readCreatorCard).toHaveBeenCalledTimes(manualCheck ? 2 : 1);
     if (hasPendingWrites) {
       expect(view.queryByText('社群簡介已儲存。')).toBeNull();
       expect(view.getByLabelText('個人簡介').props.value).toBe(card.bio);
@@ -651,6 +707,13 @@ test.each([false, true])('a late save before manual confirmation respects pendin
       expect(view.getByText(card.bio)).toBeTruthy();
       expect(view.queryByLabelText('核對儲存結果')).toBeNull();
       expect(view.queryByLabelText('個人簡介')).toBeNull();
+    }
+    if (manualCheck) {
+      await act(async () => { resolveCheck(null); });
+      expect(view.getByText(card.bio)).toBeTruthy();
+      expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+      fireEvent.press(view.getByLabelText('編輯社群簡介'));
+      expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(false);
     }
   } finally {
     jest.useRealTimers();
