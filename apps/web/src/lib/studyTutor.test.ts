@@ -72,7 +72,7 @@ const documentFixture = (): PersonalImportDocument => ({
 
 describe('reject unreadable model citations before saving a lesson', () => {
   it.each([
-    ['combining accent', 'e\\u0301', 'e'],
+    ['combining accent', 'é', 'e'],
     ['joined emoji', '👩‍💻', '👩'],
     ['regional flag', '🇹🇼', '🇹'],
     ['keycap', '2️⃣', '2'],
