@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import {
   assistantServiceHref,
   ASSISTANT_SERVICE_CATEGORY_LABELS,
@@ -25,10 +25,10 @@ export function AssistantServiceLinks({
   const links = (items: typeof services) => (
     <nav className={styles.grid} aria-label="接續服務">
       {items.map((service) => (
-        <Link className={styles.link} href={service.href} key={service.id}>
+        <AssistantReplyLink className={styles.link} href={service.href} key={service.id}>
           <strong>開啟{service.label}</strong>
           <span>{service.summary}</span>
-        </Link>
+        </AssistantReplyLink>
       ))}
     </nav>
   );

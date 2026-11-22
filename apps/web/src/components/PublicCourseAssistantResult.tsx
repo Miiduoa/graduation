@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { AssistantReplyAnchor, AssistantReplyLink } from '@/components/AssistantReplyLink';
 import type { PublicCourseAssistantRead } from '@campus/shared/src/publicCourseAssistantClient';
 import { formatPublicCatalogFetchedAt } from '@campus/shared/src/publicCourseCatalog';
 import { publicCourseFilterLabel, publicCourseWeekdays } from '@campus/shared/src/publicCourseFilters';
@@ -55,8 +55,8 @@ export function PublicCourseAssistantResult({ read }: { read: PublicCourseAssist
         </>
       ) : <p>這次暫時無法取得可核對的課程資料，請至查課頁重試或查看校方來源。</p>}
       <div className={styles.links}>
-        <Link href={read.href}>查看課程與課表核對</Link>
-        <a href={read.sourceUrl} target="_blank" rel="noopener noreferrer">校方資料來源</a>
+        <AssistantReplyLink href={read.href}>查看課程與課表核對</AssistantReplyLink>
+        <AssistantReplyAnchor href={read.sourceUrl} target="_blank" rel="noopener noreferrer">校方資料來源</AssistantReplyAnchor>
       </div>
       <p className={styles.meta}>到查課頁選擇課程，再按「帶入課表核對」確認學期、時段與教室。</p>
     </section>
