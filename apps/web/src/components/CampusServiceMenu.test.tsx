@@ -1415,3 +1415,128 @@ it('lets Enter choose Chinese characters before allowing an explicit full-search
   expect(follow.mock.results[0].value).toBe('/search?q=%E5%9C%96%E6%9B%B8%E9%A4%A8');
   expect(window.history.state[MENU_RETURN_STATE_KEY]).toEqual(expect.any(String));
 });
+
+it.each(['account', 'campus', 'temporary failure', 'different account', 'different campus'])(
+  'keeps live menu state and focus until a real boundary changes (%s)',
+  (transition) => {
+    const school = { id: 'pu', name: '靜宜大學' };
+    const ready = { loading: false, catalogStatus: 'ready', selectedSchool: school } as const;
+    const loading = { loading: true, catalogStatus: 'loading', selectedSchool: null } as const;
+    firebase.user = { uid: 'school-a' };
+    selection.current = transition === 'campus' ? loading : ready;
+    auth.loading = transition === 'account';
+    navigation.search = 'campus=pu';
+    window.history.replaceState({}, '', '/map?campus=pu');
+    const view = render(<CampusServiceMenu />);
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
+    fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
+    const menu = screen.getByText('所有服務').closest('details')!;
+    const search = screen.getByRole<HTMLInputElement>('searchbox');
+    const related = screen.getByRole('link', { name: '教材收藏' }).closest('details')!;
+    act(() => search.focus());
+
+    if (transition === 'temporary failure') {
+      firebase.user = null;
+      firebase.error = new Error('Verification unavailable');
+      selection.current = loading;
+      navigation.search = '';
+      window.history.replaceState({}, '', '/map');
+      view.rerender(<CampusServiceMenu />);
+      expect(menu.open).toBe(true);
+      expect(document.activeElement).toBe(search);
+      expect(related.open).toBe(true);
+    }
+
+    auth.loading = false;
+    auth.session =
+      transition === 'account' ? { platformAccountId: 'a', isPlatformOperator: false } : null;
+    firebase.error = null;
+    firebase.user = { uid: transition === 'different account' ? 'school-b' : 'school-a' };
+    selection.current =
+      transition === 'different campus'
+        ? { ...ready, selectedSchool: { id: 'nthu', name: '清華大學' } }
+        : ready;
+    navigation.search = transition === 'different campus' ? 'campus=nthu' : 'campus=pu';
+    window.history.replaceState({}, '', `/map?${navigation.search}`);
+    if (transition === 'account' || transition === 'temporary failure') {
+      fireEvent.change(search, { target: { value: '教材' } });
+    }
+    view.rerender(<CampusServiceMenu />);
+
+    expect(screen.getByRole('searchbox')).toBe(search);
+    if (transition.startsWith('different')) {
+      expect(menu.open).toBe(false);
+      expect(related.open).toBe(false);
+      expect(search.value).toBe('');
+      expect(
+        screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed'),
+      ).toBe('false');
+      return;
+    }
+    expect(menu.open).toBe(true);
+    expect(document.activeElement).toBe(search);
+    expect(
+      screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    if (transition === 'campus') expect(related.open).toBe(true);
+    else expect(search.value).toBe('教材');
+  },
+);
+
+it.each([
+  ['account', false],
+  ['campus', false],
+  ['account', true],
+] as const)(
+  'saves a return before %s confirmation (dismiss before confirmation: %s)',
+  (pending, dismiss) => {
+    const school = { id: 'pu', name: '靜宜大學' };
+    auth.loading = pending === 'account';
+    if (pending === 'campus') {
+      selection.current = { loading: true, catalogStatus: 'loading', selectedSchool: null };
+    }
+    const view = render(<CampusServiceMenu />);
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
+    if (pending === 'account') {
+      fireEvent.change(screen.getByRole('searchbox'), { target: { value: '教材' } });
+    } else {
+      fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
+    }
+    const link = screen.getByRole<HTMLAnchorElement>('link', { name: '教材收藏' });
+    fireEvent.click(link);
+    const origin = captureMenuOrigin();
+    expect(origin.state).toHaveProperty(MENU_RETURN_STATE_KEY);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+    visitMenuDestination(link.href);
+    view.rerender(<CampusServiceMenu />);
+    returnToMenuOrigin(origin);
+    view.rerender(<CampusServiceMenu />);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+
+    if (dismiss) {
+      fireEvent.click(screen.getByText('所有服務'));
+      fireEvent.click(screen.getByRole('button', { name: '關閉所有服務' }));
+    }
+    auth.loading = false;
+    if (pending === 'account') auth.session = { platformAccountId: 'a', isPlatformOperator: false };
+    else selection.current = { loading: false, catalogStatus: 'ready', selectedSchool: school };
+    view.rerender(<CampusServiceMenu />);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(!dismiss);
+    if (dismiss) {
+      expect(window.history.state).not.toHaveProperty(MENU_RETURN_STATE_KEY);
+      expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
+      return;
+    }
+    expect(
+      screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(
+      pending === 'account' ? '教材' : '',
+    );
+    if (pending === 'campus') {
+      expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
+    }
+  },
+);

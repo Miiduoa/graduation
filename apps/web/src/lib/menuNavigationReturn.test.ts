@@ -88,3 +88,67 @@ it('requires both the original URL and the history marker', async () => {
   backToOrigin(originState);
   expect(reloaded.getMenuReturn()).toMatchObject(draft);
 });
+
+it.each(['current URL', 'history failure', 'storage quota'])(
+  'keeps the legacy and current drafts when replacement encounters %s',
+  async (failure) => {
+    const { menu, originState } = await startJourney();
+    backToOrigin(originState);
+    const original = menu.getMenuReturn();
+    const historyKey = 'campus.menu.return.v1';
+    const legacyKey = 'campus.directory.search.v1';
+    const legacy = JSON.stringify({
+      menu: { path: '/map', destination, query: '教材', category: 'study', open: true },
+    });
+    sessionStorage.setItem(legacyKey, legacy);
+    const saved = sessionStorage.getItem(historyKey);
+    const mock =
+      failure === 'history failure'
+        ? vi.spyOn(window.history, 'replaceState').mockImplementationOnce(() => {
+            throw new DOMException('History unavailable', 'SecurityError');
+          })
+        : failure === 'storage quota'
+          ? vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+              throw new DOMException('Storage full', 'QuotaExceededError');
+            })
+          : undefined;
+
+    menu.rememberMenuReturn(failure === 'current URL' ? originUrl : destination, {
+      ...draft,
+      query: 'new draft',
+      expanded: [],
+    });
+
+    mock?.mockRestore();
+    expect(window.history.state).toEqual(originState);
+    expect(sessionStorage.getItem(historyKey)).toBe(saved);
+    expect(sessionStorage.getItem(legacyKey)).toBe(legacy);
+    expect(menu.getMenuReturn()).toBe(original);
+    backToOrigin(originState);
+    expect(menu.consumeMenuReturn(original!, draft.scope)).toBe(true);
+  },
+);
+
+it.each(['same', 'schoolOwner', 'platformOwner', 'campus'] as const)(
+  'checks the known provisional boundary after a reload (%s)',
+  async (changed) => {
+    const menu = await loadDocument();
+    const known = { campus: 'pu', schoolOwner: 'school-a', platformOwner: 'platform-a' };
+    menu.setMenuReturnScope(draft.scope, known);
+    menu.setMenuReturnScope(undefined, {});
+    menu.rememberMenuReturn(destination, { ...draft, expanded: [...draft.expanded] });
+    const originState = window.history.state;
+    window.history.pushState({}, '', destination);
+
+    const reloaded = await loadDocument();
+    reloaded.setMenuReturnScope(undefined, {});
+    backToOrigin(originState);
+    const pending = reloaded.getMenuReturn()!;
+    expect(pending).toBeTruthy();
+    expect(reloaded.consumeMenuReturn(pending, draft.scope)).toBe(false);
+    const confirmed = changed === 'same' ? known : { ...known, [changed]: 'different' };
+    const scope = changed === 'same' ? draft.scope : 'different-scope';
+    reloaded.setMenuReturnScope(scope, confirmed);
+    expect(reloaded.consumeMenuReturn(pending, scope)).toBe(changed === 'same');
+  },
+);

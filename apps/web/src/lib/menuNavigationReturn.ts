@@ -13,13 +13,31 @@ export type MenuNavigationReturn = {
   category: ServiceCategory | 'all';
   expanded: string[];
   open?: boolean;
+  provisionalBoundary?: MenuReturnBoundary;
 };
 
-type MenuReturnBoundary = {
-  campus: string | undefined;
-  schoolOwner: string | undefined;
-  platformOwner: string | undefined;
-};
+type MenuReturnBoundary = Partial<Record<'campus' | 'schoolOwner' | 'platformOwner', string>>;
+
+const boundaryFields = ['campus', 'schoolOwner', 'platformOwner'] as const;
+
+function boundaryChanged(previous: MenuReturnBoundary, next: MenuReturnBoundary) {
+  return boundaryFields.some(
+    (field) =>
+      previous[field] !== undefined && next[field] !== undefined && previous[field] !== next[field],
+  );
+}
+
+function validBoundary(value: unknown): value is MenuReturnBoundary {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    boundaryFields.every((field) => {
+      const entry = (value as Record<string, unknown>)[field];
+      return entry === undefined || typeof entry === 'string';
+    })
+  );
+}
 
 // History carries only an opaque marker. The tab stores drafts with a hashed scope.
 const snapshots = new Map<string, MenuNavigationReturn>();
@@ -27,7 +45,7 @@ const listeners = new Set<() => void>();
 let pending: MenuNavigationReturn | null = null;
 let observedWindow: Window | undefined;
 let activeScope: string | null | undefined;
-let scopeConfirmed = false;
+let lastConfirmedScope: string | undefined;
 let lastBoundary: MenuReturnBoundary | undefined;
 let storedSnapshots: string | null | undefined;
 let sequence = 0;
@@ -79,7 +97,8 @@ function loadSnapshots() {
           SERVICE_CATEGORIES.some(({ id }) => id === snapshot.category)) &&
         Array.isArray(snapshot.expanded) &&
         snapshot.expanded.every((id: unknown) => typeof id === 'string') &&
-        (snapshot.open === undefined || typeof snapshot.open === 'boolean')
+        (snapshot.open === undefined || typeof snapshot.open === 'boolean') &&
+        (snapshot.provisionalBoundary === undefined || validBoundary(snapshot.provisionalBoundary))
       ) {
         snapshots.set(snapshot.token, snapshot);
       }
@@ -89,18 +108,19 @@ function loadSnapshots() {
   }
 }
 
-function saveSnapshots() {
+function saveSnapshots(drafts = snapshots): boolean {
   try {
-    if (snapshots.size) {
-      const raw = JSON.stringify([...snapshots.values()]);
+    if (drafts.size) {
+      const raw = JSON.stringify([...drafts.values()]);
       window.sessionStorage.setItem(STORAGE_KEY, raw);
       storedSnapshots = raw;
     } else {
       window.sessionStorage.removeItem(STORAGE_KEY);
       storedSnapshots = null;
     }
+    return true;
   } catch {
-    // The in-memory drafts still work when storage is unavailable.
+    return false;
   }
 }
 
@@ -111,7 +131,7 @@ function observeWindow() {
     snapshots.clear();
     pending = null;
     activeScope = undefined;
-    scopeConfirmed = false;
+    lastConfirmedScope = undefined;
     lastBoundary = undefined;
     storedSnapshots = undefined;
     // A new document can mount on the origin after the browser has already returned.
@@ -131,47 +151,51 @@ export function subscribeMenuReturn(listener: () => void) {
 export const getMenuReturn = () => pending;
 export const getServerMenuReturn = () => null;
 
-// undefined means verification is outstanding. null explicitly invalidates the draft.
-export function setMenuReturnScope(scope: string | null | undefined, boundary?: MenuReturnBoundary) {
+// Undefined keeps the known parts of the boundary while verification is outstanding.
+export function setMenuReturnScope(
+  scope: string | null | undefined,
+  boundary?: MenuReturnBoundary,
+) {
   observeWindow();
-  scopeConfirmed = typeof scope === 'string';
-  let boundaryChanged = false;
-  if (boundary) {
-    const { campus, schoolOwner, platformOwner } = boundary;
-    boundaryChanged =
-      !!lastBoundary &&
-      ((campus !== undefined &&
-          lastBoundary.campus !== undefined &&
-          lastBoundary.campus !== campus) ||
-        (schoolOwner !== undefined &&
-          lastBoundary.schoolOwner !== undefined &&
-          schoolOwner !== lastBoundary.schoolOwner) ||
-        (platformOwner !== undefined &&
-          lastBoundary.platformOwner !== undefined &&
-          platformOwner !== lastBoundary.platformOwner));
-    // Keep the last confirmed campus and owners while verification is outstanding.
+  const changed =
+    scope === null ||
+    (!!boundary && !!lastBoundary && boundaryChanged(lastBoundary, boundary)) ||
+    (typeof scope === 'string' && lastConfirmedScope !== undefined && lastConfirmedScope !== scope);
+  const previousScope = activeScope;
+  activeScope = scope;
+  if (typeof scope === 'string' || changed) lastConfirmedScope = scope ?? undefined;
+  if (scope === null) lastBoundary = undefined;
+  else if (boundary) {
     lastBoundary = {
-      campus: campus ?? lastBoundary?.campus,
-      schoolOwner: schoolOwner ?? lastBoundary?.schoolOwner,
-      platformOwner: platformOwner ?? lastBoundary?.platformOwner,
+      campus: boundary.campus ?? lastBoundary?.campus,
+      schoolOwner: boundary.schoolOwner ?? lastBoundary?.schoolOwner,
+      platformOwner: boundary.platformOwner ?? lastBoundary?.platformOwner,
     };
   }
-  if (scope === null) lastBoundary = undefined;
-  if (!boundaryChanged && (scope === undefined || activeScope === scope)) return;
+  if (!changed && (scope === undefined || previousScope === scope)) return false;
+
   loadSnapshots();
-  const previousScope = activeScope;
-  activeScope = scope ?? null;
-  if (boundaryChanged || previousScope != null || scope === null) {
+  if (changed) {
     snapshots.clear();
     saveSnapshots();
     forgetDirectorySearch('menu');
-  } else {
+  } else if (typeof scope === 'string') {
     for (const [token, snapshot] of snapshots) {
-      if (snapshot.scope !== scope) snapshots.delete(token);
+      if (
+        snapshot.provisionalBoundary &&
+        boundary &&
+        !boundaryChanged(snapshot.provisionalBoundary, boundary)
+      ) {
+        snapshot.scope = scope;
+        delete snapshot.provisionalBoundary;
+      } else if (snapshot.provisionalBoundary || snapshot.scope !== scope) {
+        snapshots.delete(token);
+      }
     }
     saveSnapshots();
   }
   if (pending && !snapshots.has(pending.token)) publish(null);
+  return changed;
 }
 
 function removeCurrentMarker(token: string) {
@@ -202,11 +226,18 @@ export function rememberMenuReturn(
   destination: string,
   draft: Pick<MenuNavigationReturn, 'scope' | 'query' | 'category' | 'expanded' | 'open'>,
 ) {
-  if (!scopeConfirmed) return;
-  discardMenuReturn();
   const safeDestination = internalSitePath(destination);
   const url = currentMenuReturnUrl();
-  if (!safeDestination || safeDestination === url || draft.scope !== activeScope) return;
+  if (
+    !safeDestination ||
+    safeDestination === url ||
+    activeScope === null ||
+    (activeScope !== undefined && draft.scope !== activeScope)
+  )
+    return;
+  loadSnapshots();
+  const state = window.history.state;
+  const previousToken = marker(state);
   const token = window.crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${++sequence}`;
   const snapshot: MenuNavigationReturn = {
     ...draft,
@@ -214,26 +245,39 @@ export function rememberMenuReturn(
     url,
     query: draft.query.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, 100),
     expanded: [...draft.expanded],
+    ...(activeScope === undefined ? { provisionalBoundary: lastBoundary ?? {} } : {}),
   };
-  try {
-    window.history.replaceState({ ...window.history.state, [MENU_RETURN_STATE_KEY]: token }, '');
-    snapshots.set(token, snapshot);
-    // A tab only needs a small number of pending menu journeys.
-    while (snapshots.size > MAX_SNAPSHOTS) snapshots.delete(snapshots.keys().next().value!);
-    saveSnapshots();
-  } catch {
-    // History can be unavailable; opening the destination must still work.
+  // Keep the old snapshot until both the storage write and the history update succeed.
+  const staged = new Map(snapshots);
+  staged.set(token, snapshot);
+  if (staged.size > MAX_SNAPSHOTS) {
+    const oldest = [...snapshots.keys()].find((key) => key !== previousToken);
+    if (oldest) staged.delete(oldest);
   }
+  if (!saveSnapshots(staged)) return;
+  try {
+    window.history.replaceState({ ...state, [MENU_RETURN_STATE_KEY]: token }, '');
+  } catch {
+    saveSnapshots();
+    return;
+  }
+  const replacedPrevious = previousToken !== null && staged.delete(previousToken);
+  snapshots.clear();
+  for (const [key, value] of staged) snapshots.set(key, value);
+  if (replacedPrevious) saveSnapshots();
+  forgetDirectorySearch('menu');
+  publish(null);
 }
 
 /** Acknowledge this return after the route catches up, keeping the entry for future returns. */
 export function consumeMenuReturn(snapshot: MenuNavigationReturn, scope: string): boolean {
-  if (!scopeConfirmed) return false;
+  if (typeof activeScope !== 'string') return false;
   loadSnapshots();
   if (
     pending !== snapshot ||
     snapshots.get(snapshot.token) !== snapshot ||
     activeScope !== scope ||
+    snapshot.provisionalBoundary !== undefined ||
     snapshot.scope !== scope ||
     snapshot.url !== currentMenuReturnUrl() ||
     marker(window.history.state) !== snapshot.token

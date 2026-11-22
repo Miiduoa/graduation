@@ -29,6 +29,7 @@ import { useCampusFinderAccount } from '@/lib/useCampusFinderAccount';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import {
   consumeMenuReturn,
+  currentMenuReturnUrl,
   discardMenuReturn,
   getMenuReturn,
   getServerMenuReturn,
@@ -111,11 +112,9 @@ export function CampusServiceMenu() {
       ? undefined
       : resolveSchoolPageContext(Object.fromEntries(new URLSearchParams(context))).schoolId;
   const returnScope = sha256(JSON.stringify([account.ownerScope, campusId]));
-  const checkingAccount = account.status === 'checking';
   const canRemember =
     campusId !== undefined &&
     account.canRemember && schoolDraftOwner !== undefined && platformDraftOwner !== undefined;
-  const scopeUnavailable = !canRemember && !checkingAccount;
   const draftScope = account.status === 'signing-out' ? null : canRemember ? returnScope : undefined;
   const historyReturn = useSyncExternalStore(
     subscribeMenuReturn,
@@ -135,6 +134,7 @@ export function CampusServiceMenu() {
   const [category, setCategory] = useState<ServiceCategory | 'all'>('all');
   const [restoredExpanded, setRestoredExpanded] = useState<string[]>([]);
   const id = useId();
+  const previousPathname = useRef(pathname);
   function assignMenuOpen(open: boolean) {
     const element = menu.current;
     if (!element || element.open === open) return;
@@ -150,19 +150,25 @@ export function CampusServiceMenu() {
     skipToggleSideEffects.current = false;
   }
   useLayoutEffect(() => {
-    setMenuReturnScope(draftScope, {
+    const changed = setMenuReturnScope(draftScope, {
       campus: campusId,
       schoolOwner: schoolDraftOwner,
       platformOwner: platformDraftOwner,
     });
-  }, [draftScope, campusId, schoolDraftOwner, platformDraftOwner]);
-  useLayoutEffect(() => {
+    const changedPage = previousPathname.current !== pathname;
+    previousPathname.current = pathname;
+    if (!changed && !changedPage) return;
     assignMenuOpen(false);
+    if (changed && !changedPage) {
+      results.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach((section) => {
+        section.open = false;
+      });
+    }
     composing.current = false;
     setQuery('');
     setCategory('all');
     setRestoredExpanded([]);
-  }, [pathname, queryString, returnScope, scopeUnavailable]);
+  }, [pathname, draftScope, campusId, schoolDraftOwner, platformDraftOwner]);
   useLayoutEffect(() => {
     if (!canRemember) return;
     // The browser URL can change before Next renders the matching route.
@@ -172,6 +178,7 @@ export function CampusServiceMenu() {
     )
       return;
     if (historyReturn && !consumeMenuReturn(historyReturn, returnScope)) return;
+    if (menu.current?.open) return;
     const snapshot = historyReturn ?? restoreDirectorySearch('menu', pathname);
     if (!snapshot) return;
     if ('destination' in snapshot) {
@@ -256,14 +263,16 @@ export function CampusServiceMenu() {
     closeMenu();
   }
   function persistAndClose(destination: string) {
-    if (canRemember) {
-      rememberMenuReturn(destination, {
-        scope: returnScope,
-        query,
-        category,
-        expanded: expandedDirectorySections(results.current),
-      });
+    if (destination === currentMenuReturnUrl()) {
+      dismissMenu();
+      return;
     }
+    rememberMenuReturn(destination, {
+      scope: returnScope,
+      query,
+      category,
+      expanded: expandedDirectorySections(results.current),
+    });
     closeMenu();
   }
   function resetSearch() {
@@ -320,7 +329,7 @@ export function CampusServiceMenu() {
       ref={menu}
       name="campus-navigation-popover"
       className={styles.menu}
-      key={`${pathname}:${returnScope}`}
+      key={pathname}
       onToggle={(event) => {
         // Nested service disclosures must not reset the surrounding search or menu.
         if (event.target !== event.currentTarget) return;
