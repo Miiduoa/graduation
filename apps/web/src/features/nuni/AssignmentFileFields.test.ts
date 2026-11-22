@@ -34,6 +34,35 @@ describe('collectLocalFiles', () => {
     expect(next.some((item) => item.file.name.endsWith('.exe'))).toBe(false);
   });
 
+  it('counts each distinct file once even when all file properties match', () => {
+    const options = { type: 'image/jpeg', lastModified: 123 };
+    const first = new File(['first'], 'same.jpg', options);
+    const second = new File(['other'], 'same.jpg', options);
+    const reselected = new File(['first'], 'same.jpg', options);
+    const existing = collectLocalFiles([], [
+      ...Array.from({ length: 5 }, (_, index) => file(`shot-${index}.jpg`, 'image/jpeg')),
+      first,
+    ]);
+    const selection = collectLocalFileSelection(existing, [
+      first,
+      second,
+      second,
+      reselected,
+      new File(['extra'], 'same.jpg', options),
+      file('report.pdf', 'application/pdf'),
+    ]);
+
+    expect(selection.added).toBe(3);
+    expect(selection.files[6]?.file).toBe(second);
+    expect(selection.files[7]?.file).toBe(reselected);
+    expect(selection.files[8]?.file.name).toBe('report.pdf');
+    expect(selection.rejected.map(({ reason }) => reason)).toEqual([
+      '這個檔案已在待送出清單中。',
+      '這個檔案已在待送出清單中。',
+      '照片最多 8 張，請先刪除不需要的照片。',
+    ]);
+  });
+
   it.each(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'JPG', 'pdf', 'doc', 'docx', 'txt', 'zip', 'exe'])(
     'rejects a MIME-less .%s before it reserves quota',
     (extension) => {

@@ -77,10 +77,7 @@ export function collectLocalFileSelection(
   let images = next.filter(({ kind }) => kind === 'image').length;
   let documents = next.length - images;
   for (const file of Array.from(incoming)) {
-    if (next.some(({ file: selected }) =>
-      selected.name === file.name && selected.type === file.type &&
-      selected.size === file.size && selected.lastModified === file.lastModified
-    )) {
+    if (next.some(({ file: selected }) => selected === file)) {
       rejected.push({ name: file.name, reason: '這個檔案已在待送出清單中。' });
       continue;
     }

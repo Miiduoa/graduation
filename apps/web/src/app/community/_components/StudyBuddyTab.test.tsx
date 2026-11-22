@@ -364,6 +364,97 @@ it('focuses the persistent review button when the first review is submitted', as
   expect(document.activeElement).toBe(screen.getByRole('button', { name: '＋ 寫評價' }));
 });
 
+it.each([
+  { kind: 'review', outcome: 'success', switchTabs: false },
+  { kind: 'review', outcome: 'failure', switchTabs: false },
+  { kind: 'review', outcome: 'success', switchTabs: true },
+  { kind: 'review', outcome: 'failure', switchTabs: true },
+  { kind: 'group', outcome: 'success', switchTabs: false },
+  { kind: 'group', outcome: 'failure', switchTabs: false },
+  { kind: 'group', outcome: 'success', switchTabs: true },
+  { kind: 'group', outcome: 'failure', switchTabs: true },
+])('opens a blank $kind during a $outcome refresh (switch tabs: $switchTabs)', async ({
+  kind, outcome, switchTabs,
+}) => {
+  const isReview = kind === 'review';
+  const read = isReview ? mocks.listReviews : mocks.getDocs;
+  const write = isReview ? mocks.submitReview : mocks.addDoc;
+  const openerName = isReview ? '＋ 寫評價' : '＋ 建立讀書會';
+  const field = isReview ? '課程名稱' : '讀書會名稱';
+  const tab = isReview ? '課程評價' : '讀書會';
+  const otherTab = isReview ? '讀書會' : '課程評價';
+  render(<StudyBuddyTab schoolId="pu" />);
+  await screen.findByText('尚無評價');
+  if (!isReview) {
+    fireEvent.click(screen.getByRole('tab', { name: tab }));
+    await screen.findByText('暫無讀書會');
+  }
+
+  const opener = screen.getByRole('button', { name: openerName });
+  const initialOpener = isReview ? screen.getByRole('button', { name: '寫第一則評價' }) : opener;
+  initialOpener.focus();
+  fireEvent.click(initialOpener);
+  if (isReview) {
+    completeReview();
+    fill('評論（選填）', '已送出的評價');
+  } else {
+    fill(field, '已建立的讀書會');
+    fill('課程名稱', '資料庫');
+  }
+
+  let finishRefresh!: () => void;
+  read.mockImplementationOnce(() => new Promise((resolve, reject) => {
+    finishRefresh = () => {
+      if (outcome === 'failure') {
+        // A current group refresh retries without ordering before showing an error.
+        if (!isReview && !switchTabs) read.mockRejectedValueOnce(new Error('offline'));
+        reject(new Error('offline'));
+      } else {
+        resolve(isReview ? [] : { docs: [] });
+      }
+    };
+  }));
+
+  const form = screen.getByRole('dialog').querySelector('form')!;
+  await act(async () => {
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+  });
+  expect(write).toHaveBeenCalledOnce();
+  expect(screen.getByText('載入中…')).toBeTruthy();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.body.style.overflow).toBe('');
+  expect(document.activeElement).toBe(opener);
+
+  if (switchTabs) {
+    fireEvent.click(screen.getByRole('tab', { name: otherTab }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: tab }));
+  }
+  fireEvent.click(opener);
+  expect(screen.getByLabelText<HTMLInputElement>(field).value).toBe('');
+  if (isReview) {
+    expect(screen.getByLabelText<HTMLTextAreaElement>('評論（選填）').value).toBe('');
+    expect(screen.queryByRole('radio', { checked: true })).toBeNull();
+  } else {
+    expect(screen.getByLabelText<HTMLInputElement>('課程名稱').value).toBe('');
+  }
+  const freshForm = screen.getByRole('dialog').querySelector('form')!;
+  fireEvent.submit(freshForm);
+  expect(write).toHaveBeenCalledOnce();
+  fill(field, '新草稿');
+
+  await act(async () => finishRefresh());
+  expect(screen.getByRole('dialog').querySelector('form')).toBe(freshForm);
+  expect(screen.getByLabelText<HTMLInputElement>(field).value).toBe('新草稿');
+  expect(Boolean(screen.queryByText(/暫時無法讀取(課程評價|讀書會)/))).toBe(
+    outcome === 'failure' && !switchTabs,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(document.body.style.overflow).toBe('');
+  expect(write).toHaveBeenCalledOnce();
+});
+
 it('distinguishes a filtered empty result and restores both the list and search focus', async () => {
   mocks.listReviews.mockResolvedValue([
     {
