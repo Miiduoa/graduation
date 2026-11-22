@@ -3572,13 +3572,18 @@ it.each([
   { length: '000', accepted: false },
   { length: '1', accepted: true },
   { length: '2000000', accepted: true },
-  { length: ' 0040 ', accepted: false },
+  // The Fetch Headers constructor strips surrounding HTTP OWS before JS sees it.
+  // The normalized value '0040' is legal; actual decoded bytes are capped separately.
+  { length: ' 0040 ', accepted: true },
   { length: '', accepted: false },
   { length: '40, 40', accepted: false },
   { length: '2000001', accepted: false },
 ])('checks declared Content-Length $length before reading', async ({ length, accepted }) => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
   const response = new Response(body, { headers: { 'Content-Length': length } });
+  if (length === ' 0040 ') {
+    expect(response.headers.get('content-length')).toBe('0040');
+  }
   const read = vi.spyOn(response.body!, 'getReader');
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
