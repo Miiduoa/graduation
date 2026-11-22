@@ -1,3 +1,5 @@
+import { subscribeMediaQuery } from './subscribeMediaQuery';
+
 const INSET_PROPERTY = '--mobile-nav-measured-offset';
 
 type RootInset = {
@@ -51,6 +53,8 @@ export function observeMobileNavigationInset(navigation: HTMLElement): () => voi
   const view = navigation.ownerDocument.defaultView;
   if (!view) return () => {};
 
+  const media =
+    typeof view.matchMedia === 'function' ? view.matchMedia('(max-width: 760px)') : null;
   let state = rootInsets.get(root);
   if (!state) {
     state = { observers: 0, heights: new Map(), previous: null, applied: null };
@@ -59,9 +63,9 @@ export function observeMobileNavigationInset(navigation: HTMLElement): () => voi
   const inset = state;
   inset.observers += 1;
   const owner = {};
-  const media =
-    typeof view.matchMedia === 'function' ? view.matchMedia('(max-width: 760px)') : null;
   let active = true;
+  let observer: ResizeObserver | undefined;
+  let unsubscribeMedia: (() => void) | undefined;
 
   const update = () => {
     if (!active) return;
@@ -76,23 +80,30 @@ export function observeMobileNavigationInset(navigation: HTMLElement): () => voi
     publishInset(root, inset);
   };
 
-  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
-  // Border-box observation also catches padding/safe-area changes, while label
-  // wrapping and text preferences change the bar's natural height.
-  observer?.observe(navigation, { box: 'border-box' });
-  view.addEventListener('resize', update);
-  media?.addEventListener('change', update);
-  update();
-
-  return () => {
+  const release = () => {
     if (!active) return;
     active = false;
-    observer?.disconnect();
     view.removeEventListener('resize', update);
-    media?.removeEventListener('change', update);
+    observer?.disconnect();
+    unsubscribeMedia?.();
     inset.heights.delete(owner);
     publishInset(root, inset);
     inset.observers -= 1;
     if (!inset.observers) rootInsets.delete(root);
   };
+
+  try {
+    // Border-box observation also catches padding and safe-area changes.
+    if (typeof ResizeObserver === 'function') {
+      observer = new ResizeObserver(update);
+      observer.observe(navigation, { box: 'border-box' });
+    }
+    view.addEventListener('resize', update);
+    unsubscribeMedia = subscribeMediaQuery(media, update);
+  } catch {
+    release();
+    return release;
+  }
+  update();
+  return release;
 }

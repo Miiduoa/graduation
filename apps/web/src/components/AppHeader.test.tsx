@@ -108,6 +108,42 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals());
 
+it.each(['legacy', 'missing matchMedia', 'missing removal'] as const)(
+  'mounts and unmounts with %s media support and releases resize listeners',
+  (support) => {
+    const addListener = vi.fn();
+    const removeListener = vi.fn();
+    const query = {
+      matches: true,
+      addListener,
+      removeListener: support === 'legacy' ? removeListener : undefined,
+    };
+    vi.stubGlobal('ResizeObserver', undefined);
+    vi.stubGlobal('matchMedia', support === 'missing matchMedia' ? undefined : () => query);
+    const add = vi.spyOn(window, 'addEventListener');
+    const remove = vi.spyOn(window, 'removeEventListener');
+    try {
+      const view = render(<AppHeader />);
+      expect(screen.getByRole('banner')).toBeTruthy();
+      const resizeListeners = add.mock.calls.filter(([type]) => type === 'resize');
+      expect(resizeListeners.length).toBeGreaterThanOrEqual(2);
+      view.unmount();
+      for (const [, listener] of resizeListeners) {
+        expect(remove).toHaveBeenCalledWith('resize', listener);
+      }
+      if (support === 'legacy') {
+        expect(addListener).toHaveBeenCalledOnce();
+        expect(removeListener).toHaveBeenCalledWith(addListener.mock.calls[0][0]);
+      } else {
+        expect(addListener).not.toHaveBeenCalled();
+      }
+    } finally {
+      add.mockRestore();
+      remove.mockRestore();
+    }
+  },
+);
+
 it('refreshes disclosure clearance after the header moves and releases its layout observers', () => {
   let onResize: (() => void) | undefined;
   const observe = vi.fn();
