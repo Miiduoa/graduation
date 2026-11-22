@@ -72,28 +72,14 @@ export function CampusEvidencePlanCard({
   useEffect(() => {
     spacePressedStep.current = null;
   }, [disabled, plan]);
-  const reminderOwner = useRef<{ plan: CampusEvidencePlan; userId: string; schoolId: string } | null>(null);
-  if (reminderContext && reminderOwner.current?.plan !== plan) {
-    reminderOwner.current = { plan, userId: reminderContext.userId, schoolId: reminderContext.schoolId };
-  }
-  const activeReminderContext = useRef(reminderContext);
-  activeReminderContext.current = reminderContext;
-  const isReminderCurrent = () => {
-    const active = activeReminderContext.current;
-    return Boolean(active && reminderOwner.current?.plan === plan &&
-      reminderOwner.current.userId === active.userId &&
-      reminderOwner.current.schoolId === active.schoolId && active.isCurrent());
-  };
-  const currentReminderContext = reminderContext && isReminderCurrent()
-    ? { ...reminderContext, isCurrent: isReminderCurrent } : undefined;
   const assignmentAction = (assignment: CampusAssignmentIdentity & NuniPlanActivityIdentity) => {
     if (historical) return null;
     if (renderAssignmentAction) return renderAssignmentAction(assignment);
     if (assignment.kind === 'quiz' || (assignment.nuniSource && !assignment.expectedSource)) return null;
-    return currentReminderContext && navigation ? (
+    return reminderContext && navigation ? (
       <CampusAssignmentOpenButton
         assignment={assignment}
-        context={currentReminderContext}
+        context={reminderContext}
         navigation={navigation}
         disabled={disabled}
       />

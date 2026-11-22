@@ -270,12 +270,14 @@ test('without the platform renderer the existing live Firebase action still rece
   const view = render(card());
   expect(CampusAssignmentOpenButton).toHaveBeenCalledWith(expect.objectContaining({
     assignment: expect.objectContaining({ title: '資料庫報告' }),
-    context: { ...reminderContext, isCurrent: expect.any(Function) }, navigation, disabled: false,
+    context: reminderContext, navigation, disabled: false,
   }), undefined);
-  const [{ context: { isCurrent } }] = jest.mocked(CampusAssignmentOpenButton).mock.calls[0];
-  expect(isCurrent()).toBe(true);
-  view.rerender(card({ ...reminderContext, schoolId: 'other' }));
-  expect(isCurrent()).toBe(false);
+  const nextContext = { ...reminderContext, isCurrent: () => false };
+  view.rerender(card(nextContext));
+  const calls = jest.mocked(CampusAssignmentOpenButton).mock.calls;
+  expect(calls[0][0].context).toBe(reminderContext);
+  expect(calls[0][0].context.isCurrent()).toBe(true);
+  expect(calls[calls.length - 1][0].context).toBe(nextContext);
 });
 
 test('quiz steps, daily deadlines and undated work preserve their kind and live target without enabling assignment reminders', () => {

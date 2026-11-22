@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import { safeNavigate } from '../utils/safeNavigate';
@@ -21,8 +21,6 @@ export function CampusAssignmentOpenButton({ assignment, context, navigation, di
     assignment, snapshot: context.snapshot,
     scope: { uid: context.userId, schoolId: context.schoolId },
   };
-  const latestSnapshot = useRef(context.snapshot);
-  latestSnapshot.current = context.snapshot;
   const available = Boolean(resolveCampusAssignmentTarget(input));
   if (typeof navigation?.navigate !== 'function' || (!available && !error)) return null;
   return (
@@ -34,7 +32,7 @@ export function CampusAssignmentOpenButton({ assignment, context, navigation, di
           disabled={disabled}
           onPress={() => {
             if (disabled || !context.isCurrent()) return;
-            const target = resolveCampusAssignmentTarget({ ...input, snapshot: latestSnapshot.current });
+            const target = resolveCampusAssignmentTarget(input);
             if (!target) {
               setError('作業來源已過期或不再相符，請重新同步，或從課程總覽核對。');
               return;
