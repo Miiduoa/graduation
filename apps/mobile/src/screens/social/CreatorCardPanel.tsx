@@ -53,11 +53,13 @@ function ScopedCreatorCardPanel({
   const styles = useThemeStyleSheet(createStyles);
   const [state, setState] = useState<CardState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
-  const initialReadSucceeded = useRef(false);
+  const profileReads = useRef({
+    pending: 0, latestWasEmpty: false, cardAttempt: -1, closed: false,
+  });
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const currentDraft = useRef(draft);
-  const hasUnsavedDraft = useRef(false);
+  const preserveDraft = useRef(false);
   const replaceDraft = (value: CreatorCard) => {
     currentDraft.current = value;
     setDraft(value);
@@ -95,30 +97,44 @@ function ScopedCreatorCardPanel({
   }, []);
 
   useEffect(() => {
-    if (initialReadSucceeded.current) return;
+    const reads = profileReads.current;
+    if (reads.closed || reads.cardAttempt >= 0) return;
     let latestAttempt = true;
-    setState({ status: 'loading' });
+    reads.pending++;
+    reads.latestWasEmpty = false;
     // A server-only read can remain pending indefinitely on a bad connection.
     // Give the student a retry instead of trapping the profile in loading.
-    // Any successful read can resolve loading. Only the latest attempt can
-    // show an error, and a retry must never overwrite an already loaded card.
-    const canShowError = () => latestAttempt && mounted.current && !initialReadSucceeded.current;
+    const canApply = () => mounted.current && !reads.closed;
+    const canShowError = () => canApply() && latestAttempt && reads.cardAttempt < 0;
     const timeout = setTimeout(() => {
       if (canShowError()) setState({ status: 'error', timedOut: true });
     }, CREATOR_CARD_READ_TIMEOUT_MS);
     void readCreatorCard(schoolId, ownerUid).then((value) => {
-      if (!mounted.current || initialReadSucceeded.current) return;
-      initialReadSucceeded.current = true;
+      if (!canApply()) return;
+      if (value === null) {
+        if (latestAttempt) reads.latestWasEmpty = true;
+        return;
+      }
+      if (attempt <= reads.cardAttempt) return;
+      reads.cardAttempt = attempt;
       setState({ status: 'ready', value });
     }).catch(() => {
       if (canShowError()) setState({ status: 'error', timedOut: false });
-    }).finally(() => clearTimeout(timeout));
+    }).finally(() => {
+      clearTimeout(timeout);
+      reads.pending--;
+      // Only an empty latest read can establish absence, once no outstanding
+      // read can still supply a published card.
+      if (canApply() && reads.pending === 0 && reads.latestWasEmpty && reads.cardAttempt < 0) {
+        setState({ status: 'ready', value: null });
+      }
+    });
     return () => { latestAttempt = false; clearTimeout(timeout); };
   }, [schoolId, ownerUid, attempt]);
 
   const beginEdit = () => {
     if (!own || savingFlight.current || state.status !== 'ready') return;
-    if (!pendingWrite.current && !hasUnsavedDraft.current) {
+    if (!preserveDraft.current) {
       replaceDraft(state.value ?? EMPTY_CREATOR_CARD);
       setFeedback('');
     }
@@ -127,7 +143,6 @@ function ScopedCreatorCardPanel({
 
   const changeDraft = (field: keyof CreatorCard, value: string) => {
     if (currentDraft.current[field] === value) return;
-    hasUnsavedDraft.current = true;
     replaceDraft({ ...currentDraft.current, [field]: value });
     if (!pendingWrite.current) setFeedback('');
   };
@@ -135,6 +150,9 @@ function ScopedCreatorCardPanel({
   const cancelEdit = () => {
     if (savingFlight.current) return;
     setEditing(false);
+    if (!preserveDraft.current && state.status === 'ready') {
+      replaceDraft(state.value ?? EMPTY_CREATOR_CARD);
+    }
     if (!pendingWrite.current) setFeedback('');
   };
 
@@ -187,8 +205,10 @@ function ScopedCreatorCardPanel({
   };
 
   const finishSave = (submittedDraft: CreatorCard) => {
+    // Only the submitted version was confirmed. Edits delivered during
+    // confirmation still belong to the draft that the editor must retain.
+    preserveDraft.current = currentDraft.current !== submittedDraft;
     if (currentDraft.current === submittedDraft) {
-      hasUnsavedDraft.current = false;
       setEditing(false);
       setFeedback('社群簡介已儲存。');
     } else {
@@ -207,12 +227,13 @@ function ScopedCreatorCardPanel({
       return;
     }
 
-    hasUnsavedDraft.current = true;
+    profileReads.current.closed = true;
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
     const submitted = { draft: submittedDraft, expected, confirmationAttempt: 0 };
     const markUnconfirmed = () => {
+      preserveDraft.current = true;
       pendingWrite.current = submitted;
       setNeedsConfirmation(true);
       setFeedback('無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
@@ -391,7 +412,8 @@ function ScopedCreatorCardPanel({
             <View style={styles.actions}>
               {!state.value?.headline && !state.value?.bio && !state.value?.linkUrl &&
                 <Text style={styles.note}>介紹你的興趣或作品，讓同學更容易認識你。</Text>}
-              <CardButton label={state.value ? '編輯社群簡介' : '建立社群簡介'} onPress={beginEdit} />
+              <CardButton label={state.value ? '編輯社群簡介' : '建立社群簡介'}
+                disabled={saving} onPress={beginEdit} />
             </View>
           )}
           {!needsConfirmation && !!feedback && <Text accessibilityRole="text" style={styles.success}>{feedback}</Text>}

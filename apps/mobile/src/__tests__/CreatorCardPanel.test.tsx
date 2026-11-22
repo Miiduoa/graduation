@@ -166,6 +166,99 @@ test.each([false, true])('an initial success survives a failed retry (retry fail
   }
 });
 
+test.each([
+  ['empty', 'card', false],
+  ['empty', 'card', true],
+  ['card', 'empty', false],
+  ['card', 'empty', true],
+  ['card', 'card', false],
+  ['empty', 'empty', false],
+  ['empty', 'empty', true],
+  ['empty', 'error', false],
+  ['empty', 'error', true],
+  ['error', 'empty', true],
+] as const)('initial %s and retry %s (retry settles first: %s)', async (initial, retry, retryFirst) => {
+  jest.useFakeTimers();
+  try {
+    const cards = [
+      { headline: '首次讀到的卡片', bio: '', linkUrl: '' },
+      { headline: '重試讀到的卡片', bio: '', linkUrl: '' },
+    ];
+    const reads = [initial, retry].map((outcome, index) => {
+      let settle!: () => void;
+      jest.mocked(readCreatorCard).mockReturnValueOnce(new Promise((resolve, reject) => {
+        settle = () => {
+          if (outcome === 'error') reject(new Error('read failed'));
+          else resolve(outcome === 'card' ? cards[index] : null);
+        };
+      }));
+      return settle;
+    });
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+    act(() => { jest.advanceTimersByTime(15_000); });
+    fireEvent.press(view.getByLabelText('重新讀取社群簡介'));
+    expect(view.getByLabelText('重新讀取社群簡介')).toBeTruthy();
+
+    await act(async () => { reads[retryFirst ? 1 : 0](); });
+    if ((retryFirst ? retry : initial) !== 'card') {
+      expect(view.getByLabelText('重新讀取社群簡介')).toBeTruthy();
+      expect(view.queryByLabelText('建立社群簡介')).toBeNull();
+    }
+    await act(async () => { reads[retryFirst ? 0 : 1](); });
+
+    if (retry === 'card' || initial === 'card') {
+      expect(view.getByText(cards[retry === 'card' ? 1 : 0].headline)).toBeTruthy();
+      expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
+    } else if (retry === 'empty') {
+      expect(view.getByLabelText('建立社群簡介')).toBeTruthy();
+      expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
+    } else {
+      expect(view.getByLabelText('重新讀取社群簡介')).toBeTruthy();
+      expect(view.queryByLabelText('建立社群簡介')).toBeNull();
+
+      jest.mocked(readCreatorCard).mockResolvedValueOnce(cards[1]);
+      await act(async () => { fireEvent.press(view.getByLabelText('重新讀取社群簡介')); });
+      expect(view.getByText(cards[1].headline)).toBeTruthy();
+    }
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test('a saved card supersedes all outstanding profile reads across multiple retries', async () => {
+  jest.useFakeTimers();
+  try {
+    const published = { headline: '第一次讀到的卡片', bio: '', linkUrl: '' };
+    const saved = { ...published, headline: '剛儲存的標題' };
+    const reads = Array.from({ length: 3 }, () => {
+      let resolveRead!: (value: typeof published | null) => void;
+      jest.mocked(readCreatorCard).mockReturnValueOnce(new Promise((resolve) => {
+        resolveRead = resolve;
+      }));
+      return resolveRead;
+    });
+    jest.mocked(saveCreatorCard).mockResolvedValueOnce(saved);
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+    for (let retry = 0; retry < 2; retry++) {
+      act(() => { jest.advanceTimersByTime(15_000); });
+      fireEvent.press(view.getByLabelText('重新讀取社群簡介'));
+    }
+    expect(readCreatorCard).toHaveBeenCalledTimes(3);
+
+    await act(async () => { reads[1](null); });
+    expect(view.getByLabelText('重新讀取社群簡介')).toBeTruthy();
+    await act(async () => { reads[0](published); });
+    fireEvent.press(view.getByLabelText('編輯社群簡介'));
+    fireEvent.changeText(view.getByLabelText('一句話介紹'), saved.headline);
+    await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+    await act(async () => { reads[2]({ ...published, headline: '重試讀到的舊資料' }); });
+    expect(view.getByText(saved.headline)).toBeTruthy();
+    expect(view.queryByText('重試讀到的舊資料')).toBeNull();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test('rapid taps never duplicate an ambiguous save before a fresh server check', async () => {
   let rejectFirst: (reason: Error) => void = () => undefined;
   jest.mocked(saveCreatorCard).mockImplementationOnce(() => (
@@ -554,6 +647,9 @@ test('a cancelled uncertain edit can be confirmed from the published view withou
   expect(view.getByText(/仍無法核對伺服器資料/).props.accessibilityRole).toBe('alert');
   expect(view.getByLabelText('核對儲存結果')).toBeTruthy();
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  fireEvent.press(view.getByLabelText('編輯社群簡介'));
+  expect(view.getByLabelText('個人簡介').props.value).toBe(submitted.bio);
+  fireEvent.press(view.getByLabelText('取消編輯'));
 
   await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
   expect(readCreatorCard).toHaveBeenLastCalledWith('pu', 'alice', { requireCommitted: true });
@@ -580,17 +676,36 @@ test('canceling and reopening retains the pending draft and requires confirmatio
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
 });
 
-test('canceling and reopening retains changes before the first submission', async () => {
-  const published = { headline: '舊標題', bio: '已發布的介紹', linkUrl: '' };
+test.each([
+  [{ headline: '舊標題', bio: '已發布的介紹', linkUrl: 'https://example.org' }, '', ''],
+  [{ headline: '舊標題', bio: '已發布的介紹', linkUrl: 'https://example.org' }, '未送出的簡介', '無效網址'],
+  [null, '未送出的簡介', 'https://example.net'],
+] as const)('cancel discards unsubmitted fields (published: %j, bio: %s, link: %s)', async (
+  published, bio, link,
+) => {
   jest.mocked(readCreatorCard).mockResolvedValueOnce(published);
   const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
-  fireEvent.press(await view.findByLabelText('編輯社群簡介'));
-  fireEvent.changeText(view.getByLabelText('個人簡介'), '');
+  const editLabel = published ? '編輯社群簡介' : '建立社群簡介';
+  fireEvent.press(await view.findByLabelText(editLabel));
+  fireEvent.changeText(view.getByLabelText('一句話介紹'), '取消的標題');
+  fireEvent.changeText(view.getByLabelText('個人簡介'), bio);
+  fireEvent.changeText(view.getByLabelText('作品連結'), link);
+  if (link === '無效網址') {
+    fireEvent.press(view.getByLabelText('儲存簡介'));
+    expect(view.getByRole('alert')).toBeTruthy();
+  }
   fireEvent.press(view.getByLabelText('取消編輯'));
-  expect(view.getByText(published.bio)).toBeTruthy();
-  fireEvent.press(view.getByLabelText('編輯社群簡介'));
-  expect(view.getByLabelText('個人簡介').props.value).toBe('');
   expect(saveCreatorCard).not.toHaveBeenCalled();
+
+  fireEvent.press(view.getByLabelText(editLabel));
+  expect(view.getByLabelText('一句話介紹').props.value).toBe(published?.headline ?? '');
+  expect(view.getByLabelText('個人簡介').props.value).toBe(published?.bio ?? '');
+  expect(view.getByLabelText('作品連結').props.value).toBe(published?.linkUrl ?? '');
+  fireEvent.changeText(view.getByLabelText('一句話介紹'), '新標題');
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  expect(saveCreatorCard).toHaveBeenCalledWith('pu', 'alice', {
+    headline: '新標題', bio: published?.bio ?? '', linkUrl: published?.linkUrl ?? '',
+  });
 });
 
 test.each([
@@ -763,9 +878,11 @@ test.each([2, 3])('only the latest of %i published-view checks can update the ca
 
     for (let i = 0; i < checkCount; i++) {
       fireEvent.press(view.getByLabelText('核對儲存結果'));
+      expect(view.getByLabelText('編輯社群簡介').props.accessibilityState.disabled).toBe(true);
       if (i < checkCount - 1) {
         act(() => { jest.advanceTimersByTime(15_000); });
         expect(view.getByText(/核對等待逾時/)).toBeTruthy();
+        expect(view.getByLabelText('編輯社群簡介').props.accessibilityState.disabled).toBe(false);
       }
     }
     expect(readCreatorCard).toHaveBeenCalledTimes(checkCount + 1);
@@ -787,6 +904,7 @@ test.each([2, 3])('only the latest of %i published-view checks can update the ca
     expect(view.queryByText(submitted.bio)).toBeNull();
     expect(view.queryByLabelText('核對儲存結果')).toBeNull();
     expect(view.getByText(/伺服器資料與上次送出的內容不同/)).toBeTruthy();
+    expect(view.getByLabelText('編輯社群簡介').props.accessibilityState.disabled).toBe(false);
     fireEvent.press(view.getByLabelText('編輯社群簡介'));
     expect(view.getByLabelText('個人簡介').props.value).toBe(submitted.bio);
     expect(saveCreatorCard).toHaveBeenCalledTimes(1);
