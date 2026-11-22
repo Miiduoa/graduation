@@ -463,9 +463,18 @@ it('keeps a deleted reply hidden when an earlier thread read arrives late', asyn
     parentReplyId: 'r-1',
   }));
 
-  mocks.listReplies.mockRejectedValueOnce(new Error('offline'));
+  let failDeletionRefresh!: (error: Error) => void;
+  mocks.listReplies.mockImplementationOnce(() => new Promise((_, reject) => {
+    failDeletionRefresh = reject;
+  }));
   await act(async () => fireEvent.click(remove));
+  expect(screen.getByText('（此留言已被作者刪除）')).toBeTruthy();
+  expect(screen.queryByText('尚無留言，當第一人吧。')).toBeNull();
+  expect(screen.queryByRole('status')).toBeNull();
+
+  await act(async () => failDeletionRefresh(new Error('offline')));
   await act(async () => resolveEarlierRead(oldReplies));
+  expect(screen.getByRole('status').textContent).toContain('部分資料無法更新。');
   expect(screen.getByText('（此留言已被作者刪除）')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /^刪除$/ })).toBeNull();
   expect(screen.queryByRole('button', { name: '回覆' })).toBeNull();
@@ -520,6 +529,8 @@ it.each([
   expect(mocks.toggleLike).toHaveBeenCalledOnce();
   expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'server');
   expect(screen.getByText('原內文')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '討論串 · 0' })).toBeTruthy();
+  expect(mocks.listReplies).toHaveBeenCalledOnce();
 
   await act(async () => {
     if (outcome === 'success') resolve({ ...confirmed, content: '伺服器最新內文' });
@@ -582,19 +593,63 @@ it.each(['success', 'failure', 'timeout'])('keeps the post and replies visible t
   if (outcome === 'timeout') await act(async () => finish());
   const refreshed = outcome === 'success';
   expect(screen.getByText(refreshed ? '刷新後的內文' : '原內文')).toBeTruthy();
-  expect(screen.getByText(refreshed ? '刷新後的留言' : '原留言')).toBeTruthy();
+  expect(screen.getByText(outcome === 'failure' ? '原留言' : '刷新後的留言')).toBeTruthy();
   expect(Boolean(screen.queryByRole('button', { name: '重新讀取' }))).toBe(!refreshed);
 });
 
-it.each(['post', 'replies'])('offers a retry after a first %s read fails', async (failedRead) => {
-  const isPost = failedRead === 'post';
-  (isPost ? mocks.getPost : mocks.listReplies).mockRejectedValueOnce(new Error('offline'));
-  render(<PostDetailPage />);
-  const retry = await screen.findByRole('button', { name: isPost ? '重試' : '重新讀取' });
-  expect(Boolean(screen.queryByText('小明的貼文'))).toBe(!isPost);
-  await act(async () => fireEvent.click(retry));
+it.each([
+  [false, false], [false, true], [true, false], [true, true],
+])('waits for replies before showing the thread (past 45 seconds: %s, has replies: %s)', async (
+  late, hasReplies,
+) => {
+  vi.useFakeTimers();
+  const reply = { id: 'r-1', authorUid: 'bob', content: '既有留言', threadDepth: 0 };
+  let finishReplies!: (rows: (typeof reply)[]) => void;
+  mocks.listReplies.mockReturnValueOnce(new Promise((resolve) => { finishReplies = resolve; }));
+
+  await act(async () => { render(<PostDetailPage />); });
+  expect(mocks.getPost).toHaveBeenCalledOnce();
+  if (late) await act(async () => vi.advanceTimersByTimeAsync(46_000));
+  expect(screen.getByText('載入中…')).toBeTruthy();
+  expect(screen.queryByText('小明的貼文')).toBeNull();
+  expect(screen.queryByRole('heading', { name: /討論串/ })).toBeNull();
+  expect(screen.queryByText('尚無留言，當第一人吧。')).toBeNull();
+  expect(screen.queryByPlaceholderText('輸入留言⋯')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+
+  await act(async () => finishReplies(hasReplies ? [reply] : []));
   expect(screen.getByText('小明的貼文')).toBeTruthy();
-  expect(screen.queryByRole('button', { name: /重試|重新讀取/ })).toBeNull();
+  expect(screen.getByRole('heading', { name: `討論串 · ${Number(hasReplies)}` })).toBeTruthy();
+  expect(Boolean(screen.queryByText('既有留言'))).toBe(hasReplies);
+  expect(Boolean(screen.queryByText('尚無留言，當第一人吧。'))).toBe(!hasReplies);
+  expect(mocks.listReplies).toHaveBeenCalledOnce();
+});
+
+it.each([
+  ['post', 'offline'], ['replies', 'offline'], ['replies', 'deadline-exceeded'],
+])('offers a full-page retry after a first %s read fails with %s', async (failedRead, reason) => {
+  const read = failedRead === 'post' ? mocks.getPost : mocks.listReplies;
+  read.mockRejectedValueOnce(new Error(reason)).mockRejectedValueOnce(new Error(reason));
+  render(<PostDetailPage />);
+  const retry = await screen.findByRole('button', { name: '重試' });
+  expect(screen.getByRole('alert').textContent).toContain('無法讀取貼文，請確認連線與學校資格後重試。');
+  expect(screen.queryByRole('heading', { name: /討論串/ })).toBeNull();
+  expect(screen.queryByText('尚無留言，當第一人吧。')).toBeNull();
+
+  await act(async () => fireEvent.click(retry));
+  expect(screen.getByRole('alert').textContent).toContain('無法讀取貼文，請稍後重試。');
+
+  let finishReplies!: (rows: unknown[]) => void;
+  mocks.listReplies.mockReturnValueOnce(new Promise((resolve) => { finishReplies = resolve; }));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重試' })));
+  expect(screen.getByText('載入中…')).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: /討論串/ })).toBeNull();
+  await act(async () => finishReplies([]));
+  expect(screen.getByText('小明的貼文')).toBeTruthy();
+  expect(screen.getByText('尚無留言，當第一人吧。')).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(mocks.getPost).toHaveBeenCalledTimes(3);
+  expect(mocks.listReplies).toHaveBeenCalledTimes(3);
 });
 
 it.each(['like', 'reply', 'delete'] as const)(

@@ -94,6 +94,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [replyText, setReplyText] = useState('');
   const [replyAnonymous, setReplyAnonymous] = useState(true);
   const [replyParentId, setReplyParentId] = useState<string | null>(null);
@@ -169,7 +170,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     }
   };
 
-  const loadPost = useCallback(async (source: 'default' | 'server' = 'default') => {
+  const loadPost = useCallback(async (source: 'default' | 'server' = 'default', initialRead = false) => {
     if (!postId || !schoolId) return;
     const reads = postReads.current;
     const request = ++reads.started;
@@ -177,32 +178,35 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     const isCurrent = () =>
       postDeletion.current !== 'confirmed' && request > Math.max(reads.settled, reads.confirmed);
     try {
-      const row = await withSchoolDataDeadline(() => getCampusPostById(schoolId, postId, source));
+      const read = () => getCampusPostById(schoolId, postId, source);
+      const row = await (initialRead ? read() : withSchoolDataDeadline(read));
       if (!isCurrent()) return;
       reads.settled = request;
       setPost(row ? { ...row, title: row.title ?? '' } : null);
       setPostRefreshError(false);
-    } catch {
+    } catch (error) {
+      if (initialRead) throw error;
       if (!isCurrent()) return;
       reads.settled = request;
       setPostRefreshError(true);
     }
   }, [postId, schoolId]);
 
-  const loadReplies = useCallback(async (source: 'default' | 'server' = 'default') => {
+  const loadReplies = useCallback(async (initialRead = false) => {
     if (!postId || !schoolId) return;
     const reads = replyReads.current;
     const request = ++reads.started;
     const isCurrent = () => request > Math.max(reads.settled, reads.confirmed);
     try {
-      const rows = await withSchoolDataDeadline(() => listCampusReplies(schoolId, postId, source));
+      const rows = await listCampusReplies(schoolId, postId, 'default');
       if (!isCurrent()) return;
       reads.settled = request;
       setReplies(rows.map((reply) =>
         replyDeletions.current.get(reply.id) === 'confirmed' ? deletedReply(reply) : reply,
       ));
       setRepliesRefreshError(false);
-    } catch {
+    } catch (error) {
+      if (initialRead) throw error;
       if (!isCurrent()) return;
       reads.settled = request;
       setRepliesRefreshError(true);
@@ -238,13 +242,20 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     setAvatarByUid(a);
   }, [schoolId, post, replies]);
 
-  const readThread = useCallback(() => {
-    void loadPost().finally(() => setLoading(false));
-    void loadReplies();
+  const readThread = useCallback(async (errorMessage: string) => {
+    setLoadError('');
+    setLoading(true);
+    try {
+      await Promise.all([loadPost('default', true), loadReplies(true)]);
+    } catch {
+      setLoadError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
   }, [loadPost, loadReplies]);
 
   useEffect(() => {
-    readThread();
+    void readThread('無法讀取貼文，請確認連線與學校資格後重試。');
   }, [readThread]);
 
   useEffect(() => {
@@ -395,24 +406,21 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     }
   };
 
-  if (!post && loading) {
+  if (loading) {
     return (
       <div className="card" style={{ padding: 24 }}>
         載入中…
       </div>
     );
   }
-  if (!post && postRefreshError) {
+  if (loadError || (!post && postRefreshError)) {
     return (
       <div role="alert" className="card" style={{ padding: 24 }}>
-        <p>無法讀取貼文，請確認連線與學校資格後重試。</p>
+        <p>{loadError || '無法讀取貼文，請確認連線與學校資格後重試。'}</p>
         <button
           type="button"
           className="btn"
-          onClick={() => {
-            setLoading(true);
-            readThread();
-          }}
+          onClick={() => void readThread('無法讀取貼文，請稍後重試。')}
         >
           重試
         </button>
@@ -455,7 +463,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
           部分資料無法更新。{' '}
           <button
             type="button"
-            onClick={readThread}
+            onClick={() => void Promise.all([loadPost(), loadReplies()])}
           >
             重新讀取
           </button>
