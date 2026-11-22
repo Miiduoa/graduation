@@ -49,12 +49,13 @@ export async function readCreatorCard(
 /** Save all public fields and confirm them against the server. */
 export async function saveCreatorCard(
   schoolId: string, ownerUid: string, draft: CreatorCard,
+  confirm = (read: () => Promise<CreatorCard | null>) => read(),
 ): Promise<CreatorCard> {
   const normalized = validateCreatorCard(draft);
   await setDoc(cardRef(schoolId, ownerUid), {
     schoolId, ownerUid, ...normalized, updatedAt: serverTimestamp(),
   }, { merge: true });
-  const confirmed = await readCreatorCard(schoolId, ownerUid, { requireCommitted: true });
+  const confirmed = await confirm(() => readCreatorCard(schoolId, ownerUid, { requireCommitted: true }));
   if (!confirmed || CARD_FIELDS.some((field) => !creatorCardFieldMatches(confirmed, field, normalized[field]))) {
     throw new Error('Creator card update was not confirmed');
   }
