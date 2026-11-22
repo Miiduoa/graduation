@@ -187,7 +187,6 @@ function ScopedCreatorCardPanel({
     }
 
     const unconfirmed: RecoverableDraft = {};
-    const next = { ...(latest ?? EMPTY_CREATOR_CARD) };
     for (const field of CARD_FIELDS) {
       const edited = activeEdits.has(field);
       if (latest && !edited) continue;
@@ -198,7 +197,6 @@ function ScopedCreatorCardPanel({
         revision: revisions.current[field] ?? 0,
         onlyWhenMissing: !edited,
       };
-      if (edited) next[field] = value;
     }
 
     pendingWrite.current = null;
@@ -219,8 +217,7 @@ function ScopedCreatorCardPanel({
       }
       return nextRecoverable;
     });
-    if (editingNow.current) replaceDraft(next);
-    else activeEdits.clear();
+    if (!editingNow.current) activeEdits.clear();
   };
 
   const checkServer = async (

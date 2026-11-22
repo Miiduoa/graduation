@@ -213,6 +213,130 @@ describe.each(['open', 'closed', 'reopened'] as const)('confirmation with editor
   });
 });
 
+describe.each([
+  ['complete card', { ...existingCard, linkUrl: 'https://example.org/' }],
+  ['card with missing fields', { headline: '原有標題', bio: '', linkUrl: '' }],
+] as const)('manual confirmation of a %s', (card, original) => {
+  describe.each([
+    ['headline only', { headline: '新標題' }],
+    ['bio only', { bio: '新簡介' }],
+    ['all fields', { headline: '新標題', bio: '新簡介', linkUrl: 'https://example.com/' }],
+  ] as const)('editing %s', (_changes, changes) => {
+    describe.each(['missing', 'mismatch', 'match', 'failure', 'timeout'] as const)('%s', (outcome) => {
+      describe.each(['stays open', 'closes and reopens'] as const)('%s', (editor) => {
+        test.each(['save again', 'cancel', 'restore'] as const)('%s', async (action) => {
+          jest.useFakeTimers();
+          try {
+            const empty = { headline: '', bio: '', linkUrl: '' };
+            const remote = { headline: '伺服器標題', bio: '伺服器簡介', linkUrl: 'https://example.net/' };
+            const submitted = { ...original, ...changes };
+            const laterEdit = outcome === 'match' ? ('headline' in changes
+              ? { headline: '送出後追加的標題' } : { bio: '送出後追加的簡介' }) : {};
+            const local = { ...submitted, ...laterEdit };
+            const latest = outcome === 'missing' ? null : outcome === 'match' ? submitted : remote;
+            const fields = [
+              ['headline', '一句話介紹'], ['bio', '個人簡介'], ['linkUrl', '作品連結'],
+            ] as const;
+            const reads = jest.mocked(readCreatorCard);
+            const saves = jest.mocked(saveCreatorCard);
+            const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
+            const originalDocument = card === 'complete card' ? original : { headline: original.headline };
+            jest.mocked(getDocFromServer).mockResolvedValueOnce({
+              exists: () => true,
+              data: () => ({ schoolId: 'pu', ownerUid: 'alice', ...originalDocument }),
+            } as Awaited<ReturnType<typeof getDocFromServer>>);
+            reads.mockImplementationOnce(service.readCreatorCard);
+            saves.mockRejectedValueOnce(new Error('confirmation lost'));
+            const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+            await act(async () => {});
+            const press = (label: string) => fireEvent.press(view.getByLabelText(label));
+            const save = () => act(async () => { press('儲存簡介'); });
+            const check = () => act(async () => { press('核對儲存結果'); });
+            const expectDraft = (expected: typeof empty) => {
+              for (const [field, label] of fields) {
+                expect(view.getByLabelText(label).props.value).toBe(expected[field]);
+              }
+            };
+
+            press('編輯社群簡介');
+            for (const [field, label] of fields) {
+              if (field in changes) fireEvent.changeText(view.getByLabelText(label), submitted[field]);
+            }
+            await save();
+            for (const [field, label] of fields) {
+              if (field in laterEdit) fireEvent.changeText(view.getByLabelText(label), local[field]);
+            }
+            if (editor === 'closes and reopens') press('取消編輯');
+
+            if (outcome === 'failure') {
+              reads.mockRejectedValueOnce(new Error('offline'));
+              await check();
+              if (editor === 'closes and reopens') press('編輯社群簡介');
+              expectDraft(local);
+              await save();
+              expect(saves).toHaveBeenCalledTimes(1);
+              expect(view.queryByLabelText('還原未確認的草稿')).toBeNull();
+              if (editor === 'closes and reopens') press('取消編輯');
+            }
+
+            if (outcome === 'timeout') {
+              let resolveCheck!: (value: typeof empty | null) => void;
+              reads.mockReturnValueOnce(new Promise((resolve) => { resolveCheck = resolve; }));
+              await check();
+              act(() => { jest.advanceTimersByTime(15_000); });
+              expect(view.getByText(/核對等待逾時/)).toBeTruthy();
+              if (editor === 'stays open') {
+                expectDraft(local);
+                await save();
+                press('取消編輯');
+                expectDraft(local);
+                expect(view.queryByLabelText('還原未確認的草稿')).toBeNull();
+              }
+              expect(saves).toHaveBeenCalledTimes(1);
+              await act(async () => { resolveCheck(latest); });
+            } else {
+              reads.mockResolvedValueOnce(latest);
+              await check();
+            }
+
+            // Merge-base confirmPreviousSave keeps the open draft and submit sends it whole.
+            // After closing, merge-base beginEdit instead loads the last successful read.
+            const reopen = () => press(latest ? '編輯社群簡介' : '建立社群簡介');
+            let expected = local;
+            if (editor === 'closes and reopens') {
+              reopen();
+              expected = latest ?? empty;
+            }
+            expectDraft(expected);
+
+            if (action === 'cancel') {
+              press('取消編輯');
+              expect(view.queryByLabelText('儲存簡介')).toBeNull();
+              reopen();
+              expectDraft(latest ?? empty);
+              expect(saves).toHaveBeenCalledTimes(1);
+              return;
+            }
+            if (action === 'restore') {
+              press('還原未確認的草稿');
+              if (editor === 'closes and reopens') {
+                expected = !latest ? local : outcome === 'match'
+                  ? { ...latest, ...laterEdit } : { ...latest, ...changes };
+              }
+              expectDraft(expected);
+            }
+            await save();
+            expect(saves).toHaveBeenCalledTimes(2);
+            expect(saves).toHaveBeenNthCalledWith(2, 'pu', 'alice', expected, expect.any(Function));
+          } finally {
+            jest.useRealTimers();
+          }
+        });
+      });
+    });
+  });
+});
+
 test('a stalled profile read keeps loading without allowing a retry or save', () => {
   jest.useFakeTimers();
   try {
@@ -643,8 +767,8 @@ test('confirmation requires every submitted field and retains the editor on mism
   await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
 
   expect(view.getByText(/伺服器資料與上次送出的內容不同/)).toBeTruthy();
-  expect(view.getByLabelText('個人簡介').props.value).toBe(latest.bio);
-  expect(view.getByLabelText('作品連結').props.value).toBe(latest.linkUrl);
+  expect(view.getByLabelText('個人簡介').props.value).toBe(published.bio);
+  expect(view.getByLabelText('作品連結').props.value).toBe(published.linkUrl);
   expect(view.queryByLabelText('核對儲存結果')).toBeNull();
   expect(view.getByLabelText('還原未確認的草稿')).toBeTruthy();
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
@@ -682,7 +806,7 @@ test.each([
   jest.mocked(saveCreatorCard).mockResolvedValueOnce({ ...card, [field]: value });
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice',
-    { ...card, [field]: value }, expect.any(Function));
+    { ...card, bio: ` ${card.bio} `, [field]: value }, expect.any(Function));
 });
 
 test('clearing a hidden link during confirmation preserves the explicit edit', async () => {
@@ -897,8 +1021,8 @@ test.each([
   expect(view.queryByLabelText('核對儲存結果')).toBeNull();
   expect(view.getByLabelText('儲存簡介').props.accessibilityState).toMatchObject({ disabled: false });
 
-  expect(view.getByLabelText('一句話介紹').props.value).toBe(latest.headline);
-  expect(view.getByLabelText('作品連結').props.value).toBe(latest.linkUrl);
+  expect(view.getByLabelText('一句話介紹').props.value).toBe(draft.headline);
+  expect(view.getByLabelText('作品連結').props.value).toBe(draft.linkUrl);
   if (cancel) {
     fireEvent.press(view.getByLabelText('取消編輯'));
     expect(view.getByText(latest.bio)).toBeTruthy();
@@ -915,7 +1039,7 @@ test.each([
   }
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice',
-    cancel ? { ...latest, headline: '重新編輯的標題' } : { ...latest, bio: draft.bio },
+    cancel ? { ...latest, headline: '重新編輯的標題' } : draft,
     expect.any(Function));
 });
 
@@ -1005,9 +1129,9 @@ describe.each(['manual', 'automatic'] as const)('%s confirmation', (kind) => {
         fireEvent.press(view.getByLabelText('儲存簡介'));
         expect(saves).toHaveBeenCalledTimes(1);
         await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
-        expect(view.getByLabelText('個人簡介').props.value).toBe(newer.bio);
-        expect(view.getByLabelText('作品連結').props.value).toBe(newer.linkUrl);
-        const next = { ...newer, headline: '下一次修改的標題' };
+        expect(view.getByLabelText('個人簡介').props.value).toBe(original.bio);
+        expect(view.getByLabelText('作品連結').props.value).toBe(original.linkUrl);
+        const next = { ...original, headline: '下一次修改的標題' };
         saves.mockResolvedValueOnce(next);
         await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
         expect(saves).toHaveBeenNthCalledWith(2, 'pu', 'alice', next, expect.any(Function));
