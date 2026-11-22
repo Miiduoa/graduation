@@ -718,27 +718,62 @@ it('does not replay a restored draft after focus dismisses the menu', async () =
   expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
 });
 
-it('keeps the directory usable when sessionStorage throws', () => {
-  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-    throw new Error('blocked');
-  });
-  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-    throw new Error('quota');
-  });
-  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
-    throw new Error('blocked');
-  });
-  try {
-    render(<CampusServiceMenu />);
+it.each([
+  ['success', false],
+  ['success', true],
+  ['storage blocked', false],
+  ['storage blocked', true],
+  ['storage quota', false],
+] as const)('restores the latest menu after %s (History rejected: %s)', (storage, historyRejected) => {
+  for (const query of ['借書', '']) {
+    const view = render(<CampusServiceMenu />);
+    const menu = screen.getByText('所有服務').closest('details')!;
+    const search = screen.getByRole<HTMLInputElement>('searchbox');
     fireEvent.click(screen.getByText('所有服務'));
-    fireEvent.change(screen.getByRole('searchbox', { name: '搜尋服務' }), {
-      target: { value: '借書' },
-    });
-    expect(screen.getByRole('link', { name: '圖書館' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-  } finally {
-    vi.restoreAllMocks();
+    fireEvent.change(search, { target: { value: query } });
+    const link = screen.getByRole('link', { name: '圖書館' });
+    const previousState = window.history.state;
+    const write = vi.spyOn(Storage.prototype, 'setItem');
+    const replace = vi.spyOn(window.history, 'replaceState');
+    if (storage !== 'success') {
+      write.mockImplementationOnce(() => {
+        throw new DOMException('Storage unavailable', storage === 'storage quota' ? 'QuotaExceededError' : 'SecurityError');
+      });
+    }
+    if (historyRejected) {
+      replace.mockImplementation(() => {
+        throw new DOMException('History unavailable', 'SecurityError');
+      });
+    }
+
+    try {
+      if (storage !== 'success') {
+        expect(fireEvent.click(link)).toBe(false);
+        expect(menu.open).toBe(true);
+        expect(search.value).toBe(query);
+        expect(screen.getByText('搜尋草稿暫時無法儲存，請稍後再試。')).toBeTruthy();
+        expect(replace).not.toHaveBeenCalled();
+        expect(window.history.state).toEqual(previousState);
+        expect(sessionStorage.getItem('campus.menu.return.v1')).toBeNull();
+      }
+      fireEvent.click(link);
+      expect(menu.open).toBe(false);
+    } finally {
+      write.mockRestore();
+      replace.mockRestore();
+    }
+
+    const origin = captureMenuOrigin();
+    visitMenuDestination('/library');
+    view.rerender(<CampusServiceMenu />);
+    returnToMenuOrigin(origin);
+    view.rerender(<CampusServiceMenu />);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(query);
+    view.unmount();
+    sessionStorage.clear();
+    visitMenuDestination('/map');
+    setMenuReturnScope(null);
   }
 });
 
@@ -1743,6 +1778,54 @@ it.each([
     }
   },
 );
+
+it.each([
+  ['query', 'same account'],
+  ['query', 'guest'],
+  ['query', 'different account'],
+  ['expanded family', 'same account'],
+  ['expanded family', 'guest'],
+  ['expanded family', 'different account'],
+  ['empty', 'same account'],
+  ['closed', 'same account'],
+] as const)('preserves the %s menu while logout waits and fails, then confirms %s', (input, outcome) => {
+  const account = { platformAccountId: 'platform-a', isPlatformOperator: false };
+  auth.session = account;
+  const view = render(<CampusServiceMenu />);
+  const menu = screen.getByText('所有服務').closest('details')!;
+  const search = screen.getByRole<HTMLInputElement>('searchbox');
+  const category = screen.getByRole('button', { name: '篩選學習與課務' });
+  if (input !== 'closed') fireEvent.click(screen.getByText('所有服務'));
+  if (input === 'query' || input === 'expanded family') fireEvent.click(category);
+  const family = screen.getByLabelText('課程與作業的相關服務').closest('details')!;
+  if (input === 'query') fireEvent.change(search, { target: { value: '教材' } });
+  if (input === 'expanded family') fireEvent.click(family.querySelector('summary')!);
+
+  function checkMenu(retained: boolean) {
+    expect(menu.open).toBe(retained && input !== 'closed');
+    expect(search.value).toBe(retained && input === 'query' ? '教材' : '');
+    expect(category.getAttribute('aria-pressed')).toBe(String(retained && (input === 'query' || input === 'expanded family')));
+    if (input === 'expanded family') expect(family.open).toBe(retained);
+  }
+
+  auth.pendingLogout = true;
+  auth.loading = true;
+  auth.session = null;
+  view.rerender(<CampusServiceMenu />);
+  checkMenu(true);
+  auth.loading = false;
+  auth.error = '登出尚未完成';
+  view.rerender(<CampusServiceMenu />);
+  checkMenu(true);
+
+  auth.pendingLogout = false;
+  auth.error = '';
+  auth.session = outcome === 'guest' ? null : outcome === 'same account'
+    ? account
+    : { ...account, platformAccountId: 'platform-b' };
+  view.rerender(<CampusServiceMenu />);
+  checkMenu(outcome === 'same account');
+});
 
 it.each([
   ['history', 'failed'],

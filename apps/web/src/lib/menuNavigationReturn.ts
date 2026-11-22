@@ -19,6 +19,7 @@ export type MenuNavigationReturn = {
   category: ServiceCategory | 'all';
   expanded: string[];
   open?: boolean;
+  previousMarker?: string | null;
   provisionalBoundary?: MenuReturnBoundary;
   publicLegacy?: true;
   // Keep the original binding when a legacy draft is restored before confirmation.
@@ -54,6 +55,7 @@ function validBoundary(value: unknown): value is MenuReturnBoundary {
 const snapshots = new Map<string, MenuNavigationReturn>();
 const listeners = new Set<() => void>();
 let pending: MenuNavigationReturn | null = null;
+let acknowledgedToken: string | undefined;
 let observedWindow: Window | undefined;
 let activeScope: string | null | undefined;
 let lastConfirmedScope: string | undefined;
@@ -87,11 +89,19 @@ function publish(value: MenuNavigationReturn | null) {
   listeners.forEach((listener) => listener());
 }
 
+function currentSnapshot(state: unknown) {
+  const token = marker(state);
+  const marked = token ? snapshots.get(token) : undefined;
+  if (marked) return matchesReturnUrl(marked) ? marked : undefined;
+  // A rejected marker update leaves the origin at its previous marker (or none).
+  return [...snapshots.values()].reverse().find(
+    (snapshot) => snapshot.previousMarker === token && matchesReturnUrl(snapshot),
+  );
+}
+
 function captureReturnState(state: unknown) {
   loadSnapshots();
-  const token = marker(state);
-  const snapshot = token ? snapshots.get(token) : null;
-  publish(snapshot && matchesReturnUrl(snapshot) ? snapshot : null);
+  publish(currentSnapshot(state) ?? null);
 }
 
 function captureReturn(event: PopStateEvent) {
@@ -121,6 +131,8 @@ function loadSnapshots() {
         Array.isArray(snapshot.expanded) &&
         snapshot.expanded.every((id: unknown) => typeof id === 'string') &&
         (snapshot.open === undefined || typeof snapshot.open === 'boolean') &&
+        (snapshot.previousMarker === undefined || snapshot.previousMarker === null ||
+          typeof snapshot.previousMarker === 'string') &&
         (snapshot.provisionalBoundary === undefined || validBoundary(snapshot.provisionalBoundary)) &&
         (snapshot.publicLegacy === undefined ||
           (snapshot.publicLegacy === true && snapshot.provisionalBoundary !== undefined)) &&
@@ -161,6 +173,7 @@ function observeWindow() {
     observedWindow = window;
     snapshots.clear();
     pending = null;
+    acknowledgedToken = undefined;
     activeScope = undefined;
     lastConfirmedScope = undefined;
     lastConfirmedGuest = false;
@@ -171,7 +184,10 @@ function observeWindow() {
     const navigation = window.performance.getEntriesByType?.('navigation')[0] as
       | PerformanceNavigationTiming
       | undefined;
-    if (navigation?.type === 'back_forward' || state?.[ACKNOWLEDGED_STATE_KEY] !== marker(state)) {
+    if (
+      navigation?.type === 'back_forward' ||
+      (marker(state) !== null && state?.[ACKNOWLEDGED_STATE_KEY] !== marker(state))
+    ) {
       captureReturnState(state);
     }
     // Keep observing while a destination without this header is mounted. Only
@@ -190,6 +206,12 @@ export const getMenuReturn = () => pending;
 export const getServerMenuReturn = () => null;
 export const isMenuReturnSuspended = () => activeScope === null;
 
+export function restoreLegacyMenuReturn(pathname: string) {
+  loadSnapshots();
+  if (currentSnapshot(window.history.state)) return null;
+  return restoreDirectorySearch('menu', pathname);
+}
+
 export function matchesKnownMenuReturnScope(scope: string) {
   return lastConfirmedScope === undefined || lastConfirmedScope === scope;
 }
@@ -207,6 +229,7 @@ export function setMenuReturnScope(
     lastConfirmedGuest = false;
     lastBoundary = undefined;
     activeScope = undefined;
+    acknowledgedToken = undefined;
     publish(null);
     return false;
   }
@@ -249,6 +272,7 @@ export function setMenuReturnScope(
     saveSnapshots();
     forgetDirectorySearch('menu');
   } else if (typeof scope === 'string' && previousScope !== scope) {
+    let updated = false;
     for (const [token, snapshot] of snapshots) {
       const previous = snapshot.provisionalBoundary;
       if (
@@ -260,17 +284,19 @@ export function setMenuReturnScope(
         delete snapshot.provisionalBoundary;
         delete snapshot.publicLegacy;
         delete snapshot.legacyScope;
+        updated = true;
       } else if (snapshot.provisionalBoundary || snapshot.scope !== scope) {
         if (
           (snapshot.legacyScope !== undefined || snapshot.publicLegacy) &&
-          window.history.state?.[ACKNOWLEDGED_STATE_KEY] === token
+          (acknowledgedToken === token || window.history.state?.[ACKNOWLEDGED_STATE_KEY] === token)
         ) {
           invalidatedRestoredDraft = true;
         }
         snapshots.delete(token);
+        updated = true;
       }
     }
-    saveSnapshots();
+    if (updated) saveSnapshots();
   } else if (scope === undefined && lastBoundary) {
     let updated = false;
     for (const [token, snapshot] of snapshots) {
@@ -279,7 +305,7 @@ export function setMenuReturnScope(
       if (boundaryChanged(previous, lastBoundary, guest)) {
         if (
           (snapshot.legacyScope !== undefined || snapshot.publicLegacy) &&
-          window.history.state?.[ACKNOWLEDGED_STATE_KEY] === token
+          (acknowledgedToken === token || window.history.state?.[ACKNOWLEDGED_STATE_KEY] === token)
         ) {
           invalidatedRestoredDraft = true;
         }
@@ -299,7 +325,7 @@ export function setMenuReturnScope(
     if (updated) saveSnapshots();
   }
   if (pending && !snapshots.has(pending.token)) publish(null);
-  return changed || invalidatedRestoredDraft || (scope === null && previousScope !== null);
+  return changed || invalidatedRestoredDraft;
 }
 
 function removeCurrentMarker(token: string) {
@@ -318,11 +344,15 @@ function removeCurrentMarker(token: string) {
 export function discardMenuReturn() {
   if (activeScope === null) return;
   loadSnapshots();
-  const token = marker(window.history.state);
-  if (token) {
-    snapshots.delete(token);
-    saveSnapshots();
-    removeCurrentMarker(token);
+  const state = window.history.state;
+  const snapshot = currentSnapshot(state);
+  if (snapshot) {
+    const staged = new Map(snapshots);
+    staged.delete(snapshot.token);
+    if (!saveSnapshots(staged)) return;
+    snapshots.delete(snapshot.token);
+    const token = marker(state);
+    if (token) removeCurrentMarker(token);
   }
   if (restoreDirectorySearch('menu', window.location.pathname)) forgetDirectorySearch('menu');
   publish(null);
@@ -346,7 +376,7 @@ export function rememberMenuReturn(
   loadSnapshots();
   const state = window.history.state;
   const previousToken = marker(state);
-  const previous = previousToken ? snapshots.get(previousToken) : undefined;
+  const previous = currentSnapshot(state);
   const provisional = activeScope === undefined;
   const legacy = provisional && !alreadyRestored
     ? restoreDirectorySearch('menu', window.location.pathname)
@@ -366,6 +396,7 @@ export function rememberMenuReturn(
   const snapshot: MenuNavigationReturn = {
     ...draft,
     token,
+    previousMarker: previousToken,
     urlDigest: returnUrlDigest(token, url),
     query: draft.query.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, 100),
     expanded: [...draft.expanded],
@@ -374,27 +405,24 @@ export function rememberMenuReturn(
       ? { legacyScope }
       : provisional && alreadyRestored ? { publicLegacy: true } : {}),
   };
-  // Keep the old snapshot until both the storage write and the history update succeed.
   const staged = new Map(snapshots);
+  if (previous) staged.delete(previous.token);
   staged.set(token, snapshot);
   if (staged.size > MAX_SNAPSHOTS) {
-    const oldest = [...snapshots.keys()].find((key) => key !== previousToken);
-    if (oldest) staged.delete(oldest);
+    staged.delete(staged.keys().next().value!);
   }
-  if (!saveSnapshots(staged)) return;
+  if (!saveSnapshots(staged)) return false;
+  snapshots.clear();
+  for (const [key, value] of staged) snapshots.set(key, value);
   try {
     const nextState: Record<string, unknown> = { ...state, [MENU_RETURN_STATE_KEY]: token };
     delete nextState[ACKNOWLEDGED_STATE_KEY];
     if (alreadyRestored) nextState[ACKNOWLEDGED_STATE_KEY] = token;
     window.history.replaceState(nextState, '');
   } catch {
-    saveSnapshots();
-    return;
+    // The stored draft still matches its origin if the marker cannot be updated.
   }
-  const replacedPrevious = previousToken !== null && staged.delete(previousToken);
-  snapshots.clear();
-  for (const [key, value] of staged) snapshots.set(key, value);
-  if (replacedPrevious) saveSnapshots();
+  acknowledgedToken = alreadyRestored ? token : undefined;
   if (alreadyRestored || legacy || restoreDirectorySearch('menu', window.location.pathname)) {
     forgetDirectorySearch('menu');
   }
@@ -416,19 +444,24 @@ export function consumeMenuReturn(snapshot: MenuNavigationReturn, scope: string)
     snapshots.get(snapshot.token) !== snapshot ||
     (!unverifiedLegacy && !confirmedDraft) ||
     !matchesReturnUrl(snapshot) ||
-    marker(window.history.state) !== snapshot.token
+    currentSnapshot(window.history.state) !== snapshot
   ) {
     if (pending === snapshot) publish(null);
     return false;
   }
   try {
     const state = window.history.state;
-    if (state[ACKNOWLEDGED_STATE_KEY] !== snapshot.token) {
-      window.history.replaceState({ ...state, [ACKNOWLEDGED_STATE_KEY]: snapshot.token }, '');
+    if (state?.[ACKNOWLEDGED_STATE_KEY] !== snapshot.token) {
+      window.history.replaceState({
+        ...state,
+        [MENU_RETURN_STATE_KEY]: snapshot.token,
+        [ACKNOWLEDGED_STATE_KEY]: snapshot.token,
+      }, '');
     }
   } catch {
     // The active document can still acknowledge the return in memory.
   }
+  acknowledgedToken = snapshot.token;
   publish(null);
   return true;
 }

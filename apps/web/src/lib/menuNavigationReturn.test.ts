@@ -126,7 +126,7 @@ it('matches each history marker to its own path, query and fragment', async () =
   const otherState = window.history.state;
   expect(otherState).not.toEqual(originState);
 
-  backToOrigin({}, originUrl);
+  backToOrigin({}, '/map?campus=pu#other');
   expect(reloaded.getMenuReturn()).toBeNull();
   for (const mismatchedUrl of [otherUrl, '/map?campus=pu#other', '/bus?campus=pu#services']) {
     backToOrigin(originState, mismatchedUrl);
@@ -161,7 +161,7 @@ it('scrubs raw URLs from existing drafts and still restores the matching entry',
   expect(menu.consumeMenuReturn(pending, draft.scope)).toBe(true);
 });
 
-it.each(['current URL', 'history failure', 'storage quota'])(
+it.each(['current URL', 'storage quota'])(
   'keeps the legacy and current drafts when replacement encounters %s',
   async (failure) => {
     const { menu, originState } = await startJourney();
@@ -174,16 +174,11 @@ it.each(['current URL', 'history failure', 'storage quota'])(
     });
     sessionStorage.setItem(legacyKey, legacy);
     const saved = sessionStorage.getItem(historyKey);
-    const mock =
-      failure === 'history failure'
-        ? vi.spyOn(window.history, 'replaceState').mockImplementationOnce(() => {
-            throw new DOMException('History unavailable', 'SecurityError');
-          })
-        : failure === 'storage quota'
-          ? vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
-              throw new DOMException('Storage full', 'QuotaExceededError');
-            })
-          : undefined;
+    const mock = failure === 'storage quota'
+      ? vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+          throw new DOMException('Storage full', 'QuotaExceededError');
+        })
+      : undefined;
 
     menu.rememberMenuReturn(failure === 'current URL' ? originUrl : destination, {
       ...draft,
@@ -200,6 +195,83 @@ it.each(['current URL', 'history failure', 'storage quota'])(
     expect(menu.consumeMenuReturn(original!, draft.scope)).toBe(true);
   },
 );
+
+it.each([false, true])(
+  'restores the new sessionStorage draft after a rejected marker update (previous marker: %s)',
+  async (hasPreviousMarker) => {
+    const menu = await loadDocument();
+    menu.setMenuReturnScope(draft.scope);
+    if (hasPreviousMarker) {
+      menu.rememberMenuReturn(destination, { ...draft, expanded: [...draft.expanded] });
+    }
+    const originState = window.history.state;
+    const history = vi.spyOn(window.history, 'replaceState').mockImplementationOnce(() => {
+      throw new DOMException('History unavailable', 'SecurityError');
+    });
+    const latest = { ...draft, query: '本次輸入', category: 'campus', expanded: [] } as const;
+    menu.rememberMenuReturn(destination, { ...latest, expanded: [] });
+    expect(window.history.state).toEqual(originState);
+    expect(JSON.parse(sessionStorage.getItem('campus.menu.return.v1')!)).toEqual([
+      expect.objectContaining(latest),
+    ]);
+    history.mockRestore();
+
+    window.history.pushState({}, '', destination);
+    const reloaded = await loadDocument();
+    reloaded.setMenuReturnScope(draft.scope);
+    backToOrigin(originState);
+    const pending = reloaded.getMenuReturn()!;
+    expect(pending).toMatchObject(latest);
+    const acknowledgement = vi.spyOn(window.history, 'replaceState').mockImplementationOnce(() => {
+      throw new DOMException('History unavailable', 'SecurityError');
+    });
+    expect(reloaded.consumeMenuReturn(pending, draft.scope)).toBe(true);
+    acknowledgement.mockRestore();
+    backToOrigin(originState);
+    expect(reloaded.getMenuReturn()).toMatchObject(latest);
+
+    reloaded.discardMenuReturn();
+    backToOrigin(originState);
+    expect(reloaded.getMenuReturn()).toBeNull();
+  },
+);
+
+it('prefers the committed draft when legacy cleanup and History marking both fail', async () => {
+  const menu = await loadDocument();
+  menu.setMenuReturnScope(draft.scope);
+  const legacyKey = 'campus.directory.search.v1';
+  const legacy = JSON.stringify({
+    menu: { ...draft, path: '/map', destination, open: true },
+  });
+  sessionStorage.setItem(legacyKey, legacy);
+  const cleanup = vi.spyOn(Storage.prototype, 'removeItem').mockImplementationOnce(() => {
+    throw new DOMException('Storage unavailable', 'SecurityError');
+  });
+  const history = vi.spyOn(window.history, 'replaceState').mockImplementationOnce(() => {
+    throw new DOMException('History unavailable', 'SecurityError');
+  });
+  menu.rememberMenuReturn(destination, { ...draft, query: '本次輸入', expanded: [] });
+  expect(sessionStorage.getItem(legacyKey)).toBe(legacy);
+  cleanup.mockRestore();
+  history.mockRestore();
+
+  const originState = window.history.state;
+  const reloaded = await loadDocument();
+  reloaded.setMenuReturnScope(draft.scope);
+  expect(reloaded.getMenuReturn()).toBeNull();
+  expect(reloaded.restoreLegacyMenuReturn('/map')).toBeNull();
+
+  window.history.pushState({}, '', destination);
+  const returned = await loadDocument();
+  vi.spyOn(window.performance, 'getEntriesByType').mockReturnValue([
+    { type: 'back_forward' } as PerformanceNavigationTiming,
+  ]);
+  window.history.replaceState(originState, '', originUrl);
+  returned.setMenuReturnScope(draft.scope);
+  const pending = returned.getMenuReturn()!;
+  expect(pending.query).toBe('本次輸入');
+  expect(returned.consumeMenuReturn(pending, draft.scope)).toBe(true);
+});
 
 it.each(['same', 'schoolOwner', 'platformOwner', 'campus'] as const)(
   'checks the known provisional boundary after a reload (%s)',
