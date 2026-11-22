@@ -12,7 +12,7 @@ import { LegacyAssignmentReminders } from '../screens/LegacyAssignmentReminders'
 import { CampusAssignmentReminderAction } from '../screens/CampusAssignmentReminderAction';
 import { reconcileSubmittedAssignmentReminders, scheduleSubmittedAssignmentReminder } from '../services/submittedAssignmentReminders';
 import { useSubmittedAssignmentReminders } from '../app/useSubmittedAssignmentReminders';
-import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
+import { ASSIGNMENT_SUMMARY_TITLE_LIMIT, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import { buildOfflineCampusPlan, type CampusPlanStep } from '../services/offlineCampusPlanner';
 import { AppState } from 'react-native';
 
@@ -26,9 +26,12 @@ const mockAlarms = new Map<string, Alarm>();
 let mockScheduleFailure = false;
 let mockCancelFailure = false;
 const mockReader = { getAssignment: jest.fn(), getSubmission: jest.fn() };
+const mockSenseCallable = jest.fn();
+jest.mock('firebase/functions', () => ({ httpsCallable: () => mockSenseCallable }));
 jest.mock('../firebase', () => ({
   isFirebaseMockMode: () => false,
   getAuthInstance: () => ({ currentUser: { uid: 'alice' } }),
+  getFunctionsInstance: () => ({}),
 }));
 jest.mock('../services/campusSenseSnapshot', () => ({
   ...jest.requireActual('../services/campusSenseSnapshot'),
@@ -672,13 +675,99 @@ test('排隊中的確認沿用送出時的摘要來源', async () => {
   expect(mockReader.getAssignment).not.toHaveBeenCalledWith('other', 'course');
 });
 
+const titleForms = [
+  ['控制字元', '\u0001'],
+  ['DEL', '\u007F'],
+  ['零寬字元', '\u200B'],
+  ['全形空白', '\u3000'],
+  ['結尾空白', ' '],
+  ['連續空白', '   字'],
+  ['代理對／emoji', '📚'],
+  ['組合字元（NFC）', 'e\u0301'],
+  ['相容字元（NFKC）', 'ﬃ'],
+  ['換行', '\n字'],
+  ['tab', '\t字'],
+] as const;
+
+const titleMatrix = titleForms.flatMap(([kind, suffix]) =>
+  [129, 130, 131, 139, 140, 141].flatMap((length) =>
+    [0, 1, 2].map((count) => ({ kind, suffix, length, count }))));
+
+test.each(titleMatrix)('作業開啟差異矩陣 $kind 原始長度=$length 摘要相符=$count', async ({ suffix, length, count }) => {
+  const { refreshCampusSenseSnapshot } = jest.requireActual<typeof import('../services/campusSenseSnapshot')>(
+    '../services/campusSenseSnapshot',
+  );
+  const rawTitle = '長'.repeat(length - suffix.length) + suffix;
+  const seed = mockSnapshot();
+  const rawRow = { ...seed.assignments.items[0], title: rawTitle };
+  async function sync(items: CampusSenseSnapshot['assignments']['items']) {
+    mockSenseCallable.mockResolvedValueOnce({ data: {
+      ...seed, assignments: { status: 'available', count: items.length, items },
+    } });
+    return refreshCampusSenseSnapshot({ scope, isCurrent: current });
+  }
+  const initial = await sync([rawRow]);
+  const [row] = initial.assignments.items;
+  const capped = length >= ASSIGNMENT_SUMMARY_TITLE_LIMIT;
+  expect(row.titleMayBeTruncated).toBe(capped ? true : undefined);
+  const snapshot = count === 1 ? initial : await sync(count === 0
+    ? [{ ...rawRow, title: '另一份作業', source: { ...source, assignmentId: 'other' } }]
+    : [rawRow, { ...rawRow, source: { ...source, assignmentId: 'other' } }]);
+
+  const { plan, view, card, navigation } = planCard(initial);
+  view.rerender(card(snapshot));
+  const planStep = plan.steps[0];
+  const day = plan.agenda!.days.find(({ deadlines }) => deadlines.length > 0)!;
+  expect(capped ? planStep.summaryAssignmentTitle : planStep.fullAssignmentTitle).toBe(row.title);
+  const openLabel = '查看這份作業';
+  const stepButtons = view.queryAllByText(openLabel);
+  fireEvent.press(view.getByLabelText(day.label + '逐日安排'));
+  const agendaButtons = view.queryAllByText(openLabel).slice(stepButtons.length);
+
+  const replyButtons = () => render(<AssignmentReplyActions
+    read={{ userId: scope.uid, schoolId: scope.schoolId, checkedAt: initial.checkedAt,
+      filterQuestion: row.title, items: [row] }}
+    snapshot={snapshot}
+    context={{ userId: scope.uid, schoolId: scope.schoolId, isCurrent: current, navigation }}
+    disabled={false}
+    onAsk={jest.fn()}
+  />).queryAllByText(openLabel);
+
+  for (const [entry, title, findButtons] of [
+    ['計畫步驟', planStep.title, () => stepButtons],
+    ['逐日清單', day.deadlines[0].title, () => agendaButtons],
+    ['單筆回覆', row.title, replyButtons],
+  ] as const) {
+    const buttons = findButtons();
+    const assignment = { title, groupName: row.groupName, dueAt: row.dueAt };
+    const input = { assignment, snapshot, scope };
+    const baseline = base.resolveCampusAssignmentTarget(input);
+    expect({ entry, target: resolveCampusAssignmentTarget(input) }).toEqual({ entry, target: baseline });
+    if (count < 2 && !capped && baseline) {
+      expect({ entry, opens: buttons.length > 0 }).toEqual({ entry, opens: true });
+    }
+    // An unchanged, unique server summary can still be paired with its source.
+    expect({ entry, buttons: buttons.length }).toEqual({ entry, buttons: count === 1 ? 1 : 0 });
+    if (buttons.length) {
+      fireEvent.press(buttons[0]);
+      expect({ entry, calls: navigation.navigate.mock.calls }).toEqual({ entry, calls: [['學習', {
+        initial: false, screen: 'HomeworkSubmit', params: { groupId: source.groupId, assignmentId: source.assignmentId },
+      }]] });
+      navigation.navigate.mockClear();
+    }
+  }
+});
+
 const reminderMatrix = (['source', 'v1', 'v1 with digest'] as const).flatMap((kind) =>
   [4, 129, 130, 131, 134, 139, 140, 141].flatMap((length) =>
     [0, 1, 2].map((count) => ({ kind, length, count }))));
 
 test.each(reminderMatrix)('提醒與交辦差異矩陣 $kind $length 字 $count 筆', async ({ kind, length, count }) => {
   const rawTitle = '長'.repeat(length);
-  const row = { title: rawTitle.slice(0, 140), groupName: step.groupName ?? '', dueAt, source };
+  const row = {
+    title: rawTitle.slice(0, 140), groupName: step.groupName ?? '', dueAt, source,
+    ...(length >= 140 ? { titleMayBeTruncated: true as const } : {}),
+  };
   const snapshot = mockSnapshot();
   snapshot.assignments = { status: 'available', count, items: [
     row, { ...row, source: { ...source, assignmentId: 'other' } },

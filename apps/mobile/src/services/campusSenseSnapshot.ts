@@ -126,11 +126,10 @@ function parseSnapshot(payload: unknown, userId: string, schoolId: string): Pars
             if (!row) throw new Error('invalid-sense-response');
             const source = row.source === undefined ? null : parseCampusAssignmentSource(row.source);
             if (row.source !== undefined && !source) throw new Error('invalid-sense-response');
-            const title = requiredText(row.title, ASSIGNMENT_SUMMARY_TITLE_LIMIT);
-            // Trimming can hide that the raw summary reached the server's cutoff.
+            // Classify the wire title before trimming or replacing control characters.
             const titleMayBeTruncated = typeof row.title === 'string' && row.title.length >= ASSIGNMENT_SUMMARY_TITLE_LIMIT;
             return {
-              title,
+              title: requiredText(row.title, ASSIGNMENT_SUMMARY_TITLE_LIMIT),
               ...(titleMayBeTruncated ? { titleMayBeTruncated: true as const } : {}),
               groupName: typeof row.groupName === 'string' ? row.groupName.trim().slice(0, 100) : '',
               dueAt: dateString(row.dueAt),

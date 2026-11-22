@@ -229,9 +229,12 @@ test('comparison does not turn date-only deadlines or a missing identity into co
 });
 
 test.each([139, 140, 141])('a %i-character assignment keeps the appropriate title identity', (length) => {
-  const title = '長'.repeat(length);
+  const title = '長'.repeat(Math.min(length, 140));
   const current = { ...snapshot, assignments: {
-    ...snapshot.assignments, count: 1, items: [{ ...snapshot.assignments.items[1], title }],
+    ...snapshot.assignments, count: 1, items: [{
+      ...snapshot.assignments.items[1], title,
+      ...(length >= 140 ? { titleMayBeTruncated: true as const } : {}),
+    }],
   } };
   const assignment = plan('今天要先處理什麼？', { snapshot: current })?.steps
     .find((step) => step.evidence === 'authorized-assignments');

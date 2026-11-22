@@ -10,7 +10,7 @@ export interface AgendaCourse {
   end: number;
   room?: string;
 }
-export interface AgendaAssignment extends Pick<CampusAssignmentIdentity, 'expectedSource'> {
+export interface AgendaAssignment extends Pick<CampusAssignmentIdentity, 'fullAssignmentTitle' | 'summaryAssignmentTitle' | 'expectedSource'> {
   /** Absent on older saved plans, whose deadlines are assignments. */
   kind?: 'assignment' | 'quiz';
   title: string;

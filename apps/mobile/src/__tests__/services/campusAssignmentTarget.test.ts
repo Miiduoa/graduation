@@ -178,7 +178,8 @@ test.each([
   { lengths: [141, 139], samePrefix: true, opens: false },
   { lengths: [141, 139], samePrefix: false, opens: true },
   { lengths: [139, 139], samePrefix: true, opens: true },
-])('checks summary titles $lengths with same prefix=$samePrefix', ({ lengths, samePrefix, opens }) => {
+])('checks summary titles $lengths with same prefix=$samePrefix', async ({ lengths, samePrefix, opens }) => {
+  jest.spyOn(Date, 'now').mockReturnValue(now);
   const { serializeAssignmentRow } = require('../../../../../backend/functions/agent/assignmentSummary');
   const value = snapshot();
   const rawTitles = lengths.map((length, index) => {
@@ -190,18 +191,20 @@ test.each([
     ...assignment, title, id: 'work_' + index, groupId: source.groupId,
   }));
   value.assignments.count = lengths.length;
-  value.assignments.items.forEach((row, index) => {
+  mockCallable.mockResolvedValueOnce({ data: value });
+  const refreshed = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
+  refreshed.assignments.items.forEach((row, index) => {
     const title = rawTitles[index];
     expect(row.title).toHaveLength(Math.min(ASSIGNMENT_SUMMARY_TITLE_LIMIT, title.length));
     const identity = campusAssignmentTitleIdentity(row);
     expect(identity.fullAssignmentTitle).toBe(title.length < ASSIGNMENT_SUMMARY_TITLE_LIMIT ? title : undefined);
     const target = resolveCampusAssignmentTarget({
-      assignment: { ...row, ...identity }, snapshot: value, scope, now,
+      assignment: { ...row, ...identity }, snapshot: refreshed, scope, now,
     });
     expect(target?.params.assignmentId).toBe(opens ? 'work_' + index : undefined);
     // Cards created before the summary limit was recognized follow the same collision rule.
     const previousCard = { ...row, fullAssignmentTitle: row.title, expectedSource: row.source };
-    expect(resolveCampusAssignmentTarget({ assignment: previousCard, snapshot: value, scope, now }))
+    expect(resolveCampusAssignmentTarget({ assignment: previousCard, snapshot: refreshed, scope, now }))
       .toEqual(target);
   });
 });

@@ -1,4 +1,4 @@
-import { ASSIGNMENT_SUMMARY_TITLE_LIMIT, validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
+import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
 import { parseCampusAssignmentSource, type CampusAssignmentSource } from './campusAssignmentSource';
 
 /** Display identity is not authority; it must match exactly one current source row. */
@@ -24,7 +24,7 @@ function normalizeCampusAssignmentTitle(value: string): string {
 const DISPLAY_TITLE_LIMIT = 130;
 
 function mayHaveTruncatedTitle(row: { title: string; titleMayBeTruncated?: true }): boolean {
-  return row.titleMayBeTruncated === true || row.title.length >= ASSIGNMENT_SUMMARY_TITLE_LIMIT;
+  return row.titleMayBeTruncated === true;
 }
 
 export function campusAssignmentTitleIdentity(row: { title: string; titleMayBeTruncated?: true }) {
@@ -35,10 +35,6 @@ export function campusAssignmentTitleIdentity(row: { title: string; titleMayBeTr
 
 export function campusAssignmentDisplayTitle(value: string): string {
   return normalizeCampusAssignmentTitle(value).slice(0, DISPLAY_TITLE_LIMIT);
-}
-
-function hasCutoffSpace(rawTitle: string, title: string): boolean {
-  return rawTitle.length === DISPLAY_TITLE_LIMIT && rawTitle === title + ' ';
 }
 
 function campusAssignmentLegacyMatches(snapshot: CampusSenseSnapshot, assignment: CampusAssignmentIdentity) {
@@ -64,8 +60,8 @@ function matchCampusAssignment(
     const [candidate] = prefixMatches;
     if (prefixMatches.length !== 1) return null;
     if (assignment.expectedSource === undefined) return candidate;
-    if (hasCutoffSpace(rawTitle, title) && snapshot.assignments.items.some((row) =>
-      row.groupName === candidate.groupName && row.dueAt === candidate.dueAt &&
+    if (snapshot.assignments.items.some((row) =>
+      row !== candidate && row.groupName === candidate.groupName && row.dueAt === candidate.dueAt &&
       campusAssignmentDisplayTitle(row.title) === rawTitle)) return null;
     const source = parseCampusAssignmentSource(candidate.source);
     return source && source.groupId === assignment.expectedSource?.groupId &&
@@ -74,14 +70,12 @@ function matchCampusAssignment(
   const rows = snapshot.assignments.items.filter((row) =>
     row.groupName === (assignment.groupName ?? '') &&
     row.dueAt === (assignment.dueAt ?? null));
-  if (hasCutoffSpace(rawTitle, title)) return null;
-  const mayBeTruncated = assignment.summaryAssignmentTitle !== undefined || rawTitle.length >= ASSIGNMENT_SUMMARY_TITLE_LIMIT;
+  const mayBeTruncated = assignment.summaryAssignmentTitle !== undefined;
   if ((mayBeTruncated || prefixMatches.some(mayHaveTruncatedTitle)) &&
       prefixMatches.length !== 1) return null;
   const matches = mayBeTruncated
     ? prefixMatches.filter((row) => mayHaveTruncatedTitle(row) &&
-        normalizeCampusAssignmentTitle(row.title.slice(0, ASSIGNMENT_SUMMARY_TITLE_LIMIT)) ===
-        normalizeCampusAssignmentTitle(rawTitle.slice(0, ASSIGNMENT_SUMMARY_TITLE_LIMIT)))
+        normalizeCampusAssignmentTitle(row.title) === title)
     : rows.filter((row) => normalizeCampusAssignmentTitle(row.title) === title);
   if (matches.length !== 1) return null;
   // A title at the display cutoff can also stand for a longer title in this scope.

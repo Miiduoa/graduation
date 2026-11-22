@@ -129,7 +129,8 @@ export function buildOfflineCampusPlan(input: {
     window, now,
     courses: hasTimetable ? input.context.timetable.courses : null,
     assignments: sense?.assignments.status === 'available' ? sense.assignments.items.map((assignment) => ({
-      ...assignment, expectedSource: parseCampusAssignmentSource(assignment.source) ?? undefined,
+      ...assignment, ...campusAssignmentTitleIdentity(assignment),
+      expectedSource: parseCampusAssignmentSource(assignment.source) ?? undefined,
     })) : null,
   });
 
