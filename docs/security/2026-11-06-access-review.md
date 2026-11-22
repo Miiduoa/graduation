@@ -1113,3 +1113,9 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - 最小修補：將上述三條教師寫入支線改為 `canManageCurrentGroup(groupId)`。學生首次作答分支、正式成績的欄位限制／必須同交易寫入稽核紀錄，以及唯新增且不可竄改 revision 的條件均保持原樣。
 - 新增 `transferred teachers cannot replay initial grading or audited corrections with old memberships` 真 Firebase emulator 測試，使用合成資料與同一登入 context，涵蓋正常第一筆正式／舊版評分、原子修訂、跨帳號拒絕、雙向校籍衝突、學校／課程撤權、連續重放與恢復。需核對精確新 SHA 的 emulator，尤其原子修訂 Firestore Rules 1,000-expression 上限；本紀錄尚不宣稱已驗證通過。
 - 保持 npm/pnpm audit 外送限制、E 校園暫停、正式資料／金鑰／token／migration／部署禁止條件。正式 GCS/Supabase 舊 URL 撤銷與真 Storage CAS、歷史 teacherNotes 移轉、minimatch 相容性及指定 App 5504170 核可仍未解決。
+
+### 2026-11-23：首次成績撤權修補造成既有合法評分拒絕，進行規則運算量精簡
+
+- GitHub 精確 6418245b1cf183f55439f8345057f8ee73ea113a 的 Firestore Rules workflow 45067898798 實際失敗：560 tests，557 passed、3 failed、0 skipped。失敗包括 legacy first grade、新增 transfer grading，以及原子 immutable revision；原因均為 Firestore 1000 expressions evaluated 上限，並非越權操作成功。
+- 此修補繼續強制教師目前校籍與有效教學資格，減少重複評估 group manager 角色、重複 group-school membership 及 grade helper 中已受外層 current manager 保護的 school membership。不修改稽核欄位與原子修訂相互驗證。必須在新精確 head 完成 Emulator 及 CI 才能宣稱修復。
+- 仍禁止未授權直接 pnpm/npm audit；未操作正式資料、金鑰、歷史附件 token、migration、E 校園、main 合併或部署。指定 App 5504170 審查、GCS/Supabase 已發網址撤銷、Storage 真實競態、教師備註移轉仍未結案。

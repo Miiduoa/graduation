@@ -163,12 +163,8 @@ service cloud.firestore {
 
     function canManageGroup(groupId) {
       return isActiveGroupMember(groupId)
-        && (
-          get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'admin'
-          || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'owner'
-          || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'instructor'
-          || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'moderator'
-        );
+        && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role
+          in ['admin', 'owner', 'instructor', 'moderator'];
     }
 
     // An active old-school membership alone must not permit access after transfer.
@@ -459,7 +455,11 @@ service cloud.firestore {
     // Sensitive reads and peer-review edits require current campus binding.
     // Grade write paths have a separate atomic audit verification budget.
     function canManageCurrentGroup(groupId) {
-      return canManageGroup(groupId) && isActiveCurrentGroupMember(groupId);
+      // canManageGroup already verifies the live group and school membership.
+      return canManageGroup(groupId)
+        && isConsistentRootPostSchoolMember(
+          get(/databases/$(database)/documents/groups/$(groupId)).data.get('schoolId', '')
+        );
     }
 
     function isAssignedReviewer(groupId, assignmentId, submissionId, data) {
@@ -488,7 +488,6 @@ service cloud.firestore {
       let before = resource.data;
       let after = request.resource.data;
       return group.get('type', '') == 'course'
-        && isSchoolMember(group.get('schoolId', ''))
         && assignment.get('type', '') == 'assignment'
         && assignment.get('points', 0) is number
         && assignment.get('points', 0) > 0
@@ -512,13 +511,10 @@ service cloud.firestore {
     // Earlier clients write a provisional grade/feedback pair. Keep the first
     // write compatible while disallowing silent revisions and answer edits.
     function validFirstLegacyGrade(groupId, assignmentId, studentId) {
-      let group = get(/databases/$(database)/documents/groups/$(groupId)).data;
       let assignment = get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)).data;
       let before = resource.data;
       let after = request.resource.data;
-      return (group.get('type', '') != 'course'
-          || isSchoolMember(group.get('schoolId', '')))
-        && before.get('userId', '') == studentId
+      return before.get('userId', '') == studentId
         && before.get('submittedAt', null) != null
         && before.get('gradePublished', false) != true
         && before.get('grade', null) == null
@@ -548,7 +544,6 @@ service cloud.firestore {
       let revisionId = after.get('gradeRevisionId', '');
       let revisionPath = /databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/submissions/$(studentId)/gradeRevisions/$(revisionId);
       return group.get('type', '') == 'course'
-        && isSchoolMember(group.get('schoolId', ''))
         && revisionId is string && revisionId.size() >= 10 && revisionId.size() <= 150
         && revisionId != before.get('gradeRevisionId', '')
         && after.diff(before).affectedKeys().hasOnly([
@@ -584,7 +579,6 @@ service cloud.firestore {
       let after = getAfter(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/submissions/$(studentId)).data;
       let change = request.resource.data;
       return group.get('type', '') == 'course'
-        && isSchoolMember(group.get('schoolId', ''))
         && previous.get('gradePublished', false) == true
         && after.get('gradePublished', false) == true
         && change.keys().hasAll([
