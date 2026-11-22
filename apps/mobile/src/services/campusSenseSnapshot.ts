@@ -158,6 +158,14 @@ export function validCampusSenseSnapshot(
       snapshot.userId !== scope.uid || snapshot.schoolId !== scope.schoolId) return null;
   // A rollover such as February 30 must not become a fresh, trusted snapshot.
   if (!isRealTimestamp(snapshot.checkedAt)) return null;
+  // Recheck a snapshot held in memory as well as fresh callable data. A source
+  // accepted by an older parser must never regain trusted status on reuse.
+  if (!Array.isArray(snapshot.assignments?.items) ||
+      snapshot.assignments.items.some((row) => !row ||
+        (row.dueAt !== null && !isRealTimestamp(row.dueAt))) ||
+      !Array.isArray(snapshot.announcements?.items) ||
+      snapshot.announcements.items.some((row) => !row ||
+        (row.publishedAt !== null && !isRealTimestamp(row.publishedAt)))) return null;
   const savedAt = Date.parse(snapshot.checkedAt);
   if (!Number.isFinite(savedAt) || savedAt > now + 30_000 || now - savedAt > CAMPUS_SENSE_MAX_AGE_MS) return null;
   return snapshot;

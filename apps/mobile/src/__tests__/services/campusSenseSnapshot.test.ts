@@ -170,3 +170,37 @@ test('rejects a restored impossible checkedAt even when Date.parse would roll it
   const pretendNow = Date.parse('2026-03-02T08:00:00Z');
   expect(validCampusSenseSnapshot({ ...snapshot, checkedAt: rollover }, scope, pretendNow)).toBeNull();
 });
+
+test('does not reuse a recent snapshot containing an impossible source date from an older parser', async () => {
+  const snapshot = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
+  const now = Date.parse(snapshot.checkedAt);
+  expect(validCampusSenseSnapshot(snapshot, scope, now)).not.toBeNull();
+  const assignment = {
+    ...snapshot,
+    assignments: {
+      ...snapshot.assignments,
+      items: snapshot.assignments.items.map((row, index) =>
+        index === 0 ? { ...row, dueAt: '2026-02-30T08:00:00Z' } : row),
+    },
+  };
+  const announcement = {
+    ...snapshot,
+    announcements: {
+      ...snapshot.announcements,
+      items: snapshot.announcements.items.map((row, index) =>
+        index === 0 ? { ...row, publishedAt: '2026-04-31T09:00:00Z' } : row),
+    },
+  };
+  expect(validCampusSenseSnapshot(assignment, scope, now)).toBeNull();
+  expect(validCampusSenseSnapshot(announcement, scope, now)).toBeNull();
+  // Missing deadlines are permitted; they must not be invented or treated as invalid.
+  expect(validCampusSenseSnapshot({
+    ...snapshot,
+    assignments: { ...snapshot.assignments, items: snapshot.assignments.items.map(
+      (row) => ({ ...row, dueAt: null }),
+    ) },
+    announcements: { ...snapshot.announcements, items: snapshot.announcements.items.map(
+      (row) => ({ ...row, publishedAt: null }),
+    ) },
+  }, scope, now)).not.toBeNull();
+});
