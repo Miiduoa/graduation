@@ -110,7 +110,21 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       if (bytes.byteLength !== identityLength) throw new Error('Incomplete building outline response');
       return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
     }
-    // For a browser-decoded coding, the wire length cannot be compared.
+    // A compressed HTTP response is already decoded by Fetch before it
+    // reaches arrayBuffer(). Check those bytes before JSON.parse: a legacy
+    // WebView without text()/streams can otherwise allocate an unbounded
+    // object graph through json() even when it exposes raw decoded bytes.
+    // Do not compare compressed *wire* Content-Length to decoded bytes.
+    if (typeof response.arrayBuffer === 'function') {
+      const decoded = await response.arrayBuffer();
+      if (signal?.aborted) throw new Error('Building outline read aborted');
+      if (decoded.byteLength > MAX_DECLARED_FOOTPRINT_BYTES) {
+        throw new Error('Building outline response exceeded byte limit');
+      }
+      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(decoded)) as unknown;
+    }
+    // JSON-only legacy bridges have neither decoded bytes nor text(). The
+    // post-parse size limit below is a weaker, last-resort compatibility path.
     const payload: unknown = await response.json();
     if (signal?.aborted) throw new Error('Building outline read aborted');
     const normalized = JSON.stringify(payload);
