@@ -11,7 +11,14 @@ const placement = '加(?:入|到|進)|排入|放(?:入|到)|記(?:入|到)|存(?
 const pickupVerb = new RegExp(placement + '|建立|新增|安排|儲存');
 const polite = '(?:(?:請|麻煩你?|幫我|替我|我想){0,3})';
 const latest = '(?:我(?:的)?)?(?:最近|最新)(?:的)?(?:一筆|一張)?(?:的)?訂單';
+const pickupTime = '(?:預定)?取餐時間';
+const latestPickupTime = latest + '的?' + pickupTime;
 const destination = '(?:' + placement + ')(?:我(?:的)?)?(?:個人)?(?:行事曆|日曆|行程)(?:中|裡|內)?';
+const calendarStatus = new RegExp(
+  '^(?:' + polite + '(?:查詢|查看|查)' + latest + '(?:的?' + pickupTime + ')?[,;、])?' +
+    polite + '(?:(?:確認|查詢|查看|查)(?:一下)?)?(?:(?:' + latest + '的?)?' + pickupTime + ')?' +
+    '(?:有沒有|是否|是不是)(?:已經|已)?' + destination + '(?:了|嗎|呢)?[。.!?]?$',
+);
 const hours: Readonly<Record<string, number>> = {
   半小時: 30,
   半個小時: 30,
@@ -26,14 +33,15 @@ const duration =
   Object.keys(hours).join('|') +
   ')))?[。.!！]?';
 const direct = new RegExp(
-  '^' + polite + '(?:把|將)?' + latest + '的?(?:預定)?取餐時間' + destination + duration + '$',
+  '^' + polite + '(?:把|將)?' + latestPickupTime + destination + duration + '$',
 );
 const readThenPlan = new RegExp(
   '^' +
     polite +
     '(?:查詢|查看|查)' +
     latest +
-    '[,;](?:然後|接著|再|並且|並)?(?:把|將)(?:它的|該筆訂單的)?(?:預定)?取餐時間' +
+    '[,;](?:然後|接著|再|並且|並)?(?:把|將)(?:它的|該筆訂單的)?' +
+    pickupTime +
     destination +
     duration +
     '$',
@@ -52,9 +60,10 @@ export function parseAssistantFoodPickupIntent(question: string): AssistantFoodP
   // the complete existing appointment grammar, including its invalid-time help.
   if (parseAssistantCalendarIntent(text)) return null;
   const invalid = (): AssistantFoodPickupIntent => ({ kind: 'invalid', message: guidance });
-  if (text.length > 1000 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}「」『』“”"'`]/u.test(text) ||
-      /不要|不用|不必|無須|不需要|不想|先別|別幫|不是|翻譯|例句|範例|假設|如果/.test(text)) return invalid();
+  if (text.length > 1000 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}「」『』“”"'`]/u.test(text)) return invalid();
   const compact = text.replace(/\s+/g, '');
+  if (calendarStatus.test(compact)) return null;
+  if (/不要|不用|不必|無須|不需要|不想|先別|別幫|不是|翻譯|例句|範例|假設|如果/.test(text)) return invalid();
   const match = direct.exec(compact) || readThenPlan.exec(compact);
   if (!match) return invalid();
   const [, numericMinutes, hourLabel] = match;

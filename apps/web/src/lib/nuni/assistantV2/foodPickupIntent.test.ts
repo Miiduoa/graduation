@@ -28,6 +28,7 @@ it.each([
   '把最近訂單的取餐時間放到日曆，留半小時或兩小時',
   '把最近訂單的取餐時間記到行事曆，留三小時',
   '把最近訂單的取餐時間記到行事曆，留半小時，順便付款',
+  '查我的最新訂單的取餐時間，我想確認有沒有記到行事曆，沒有就記到行事曆',
   '翻譯「把最近訂單的取餐時間加入行事曆」',
   '如果有空就把最近訂單的取餐時間加入行事曆',
   '把最近訂單的取餐時間加入行事曆，預留0分鐘',
@@ -46,3 +47,12 @@ it.each(['我的訂單好了嗎', '開啟行事曆', '幫我明天12:00到12:15�
   ('leaves unrelated tasks on their existing route: %s', question => {
     expect(parse(question)).toBeNull();
   });
+
+it.each([
+  '查我的最新訂單的取餐時間，我想確認有沒有記到行事曆',
+  '我想確認最新訂單的取餐時間是否已經放到日曆？',
+  '最近一筆訂單的取餐時間有沒有存到我的個人行事曆？',
+  '查看我的最新訂單，確認取餐時間是不是已經加入行事曆',
+])('keeps calendar status questions on the existing read route: %s', question => {
+  expect(parse(question)).toBeNull();
+});
