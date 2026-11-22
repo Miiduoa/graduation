@@ -2900,6 +2900,37 @@ it.each([
   unmount();
 });
 
+it.each([
+  'Serial Number', 'Serial No.', 'Invoice Number', 'Order No.', 'Order Number (ERP)',
+  'Transaction ID', 'Receipt #', 'Tracking Number', 'Reference Number',
+  '發票號碼', '訂單號', '交易號碼', '收據號', '流水號', '物流單號',
+])('keeps document and purchase identifiers as exact source text, not 2x quantity bars (%s)', (header) => {
+  const source = [
+    '| 項目 | ' + header + ' |', '| --- | --- |',
+    '| 甲 | 100 |', '| 乙 | 200 |',
+  ].join('\n');
+  const { container, unmount } = render(<StudySourceTables text={source} />);
+  expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+    .toEqual(['100', '200']);
+  expect(comparisonSummaries(container)).toEqual([]);
+  expect(container.querySelectorAll('meter')).toHaveLength(0);
+  unmount();
+});
+
+it.each([
+  'Order Count', 'Number of Orders', 'Invoice Count', 'Transaction Total',
+  '訂單數量', '發票張數', '交易筆數', 'Invoice Amount',
+])('still permits genuine counts and amounts beside document identifiers (%s)', (header) => {
+  const source = [
+    '| 組別 | ' + header + ' |', '| --- | --- |',
+    '| 甲 | 100 |', '| 乙 | 200 |',
+  ].join('\n');
+  const { container, unmount } = render(<StudySourceTables text={source} />);
+  expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+    .toEqual([[100, 200], [200, 200]]);
+  unmount();
+});
+
 it.each(['寄送件數', '郵件件數', 'Parcel Count'])(
   'still compares genuine delivered-item quantities (%s)', (header) => {
     const lesson = [

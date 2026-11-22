@@ -1,3 +1,9 @@
+## 2026-11-22：訂單與發票號碼不是倍數量值
+
+- 修正原文表格的選用圖表：`Order No.`、`Invoice Number`、`Transaction ID`、`Serial Number`、`Tracking Number`、`發票號碼`、`訂單號`、`流水號` 等只是識別用的字串，100 與 200 不應被表現成兩倍的購買量。只對完整識別碼欄名停用衍生零起點量值圖，原表、100／200 原值、來源行號、複製、下載一律不改。
+- `Order Count`、`Number of Orders`、`Invoice Amount`、`發票張數` 等真正的計數與金額仍可在既有嚴格數值格式下比較；新增 React DOM 正反測試，不新增套件、傳送私人教材或變更任何進度 checkpoint。這是來源表格的量尺保護，不能視為 AI 理解圖像。
+- 已完成獨立欄名規則的正反煙測；本 SHA 正式 Web／Mobile CI、Build、Lint、Security、CodeQL、指定 App 5504170 審查、Maestro 與 iOS／Android 實機及 Ahaboard 同教材同題同機比較，仍須分別取證。保持 Draft，不合併、不部署。
+
 ## 2026-11-22：百分位排名不再被誤當倍數長條圖
 
 - 修補衍生圖表的量尺判斷：教材的「百分位／百分位數／百分等級／Percentile Rank／Percentile Score」是分布中的**序位**，第 80 百分位不能解讀成第 40 百分位的兩倍。即使欄名附「(%)」且原表寫出 25%／75%，也不另外生成 100% 滿格的比較圖。

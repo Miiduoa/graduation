@@ -121,6 +121,12 @@ const NON_RATIO_POSTAL_IDENTIFIER_COLUMN =
 const ENGLISH_NON_RATIO_POSTAL_IDENTIFIER_COLUMN =
   /^(?:post[\s-]*code|postcode|zip(?:[\s-]*code)?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 
+// Invoice, purchase, tracking and serial identifiers are opaque labels.
+// Order No. 200 is not twice Order No. 100. Match whole headers only;
+// real counts and monetary amounts stay eligible for measured comparisons.
+const NON_RATIO_DOCUMENT_IDENTIFIER_COLUMN =
+  /^(?:(?:serial|invoice|order|transaction|receipt|ticket|tracking|reference)\s+(?:number|no\.?|id|#)|(?:發票|訂單|交易|收據|票券|物流單|追蹤|序列|流水)\s*(?:號碼|編號|序號|識別碼|代碼|號))(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+
 // A source line, spreadsheet row or exercise step number marks a position
 // in a document or procedure, not a quantity with a meaningful ratio zero.
 // Do not imply that line 4 is twice line 2. Counts of lines/rows/steps
@@ -221,6 +227,7 @@ function isNonRatioColumn(header: string, percentage = false): boolean {
       NON_RATIO_DATABASE_KEY_COLUMN.test(column) ||
       NON_RATIO_POSTAL_IDENTIFIER_COLUMN.test(column) ||
       ENGLISH_NON_RATIO_POSTAL_IDENTIFIER_COLUMN.test(column) ||
+      NON_RATIO_DOCUMENT_IDENTIFIER_COLUMN.test(column) ||
       AMBIGUOUS_TIME_COLUMN.test(column) ||
       NON_RATIO_WEEKDAY_COLUMN.test(column) ||
       NON_RATIO_QUARTER_POSITION_COLUMN.test(column) ||
