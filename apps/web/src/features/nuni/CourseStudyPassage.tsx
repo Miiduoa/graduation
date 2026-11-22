@@ -25,14 +25,23 @@ import { CourseStudySteps } from './CourseStudySteps';
 import { locateStudyEvidence } from './studyEvidence';
 import styles from './CourseStudyPanel.module.css';
 
+export type StudyTimingSample = {
+  timing: StudyTutorTiming;
+  downloadProgressObserved: boolean;
+};
+
+export type StudyTimingEntry = StudyTimingSample & { run: number };
+
 type Props = {
   passage: StudyPassage;
   mode: StudyMode;
   memory: StudyPassageMemory;
+  timingLog: readonly StudyTimingEntry[];
+  onTiming: (sample: StudyTimingSample) => void;
   onChange: (update: (previous: StudyPassageMemory) => StudyPassageMemory) => void;
 };
 
-export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
+export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming, onChange }: Props) {
   const [availability, setAvailability] = useState<ReturnType<typeof getStudyTutorAvailability> | null>(null);
   const [busy, setBusy] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -44,13 +53,8 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [timing, setTiming] = useState<StudyTutorTiming | null>(null);
-  // Keep a monotonic attempt number even when the ten-sample window rolls over.
-  // It is scoped to this mounted passage/mode, and never contains lesson text.
-  const timingSequence = useRef(0);
-  const [timingLog, setTimingLog] = useState<Array<{ run: number; timing: StudyTutorTiming; downloadProgressObserved: boolean }>>([]);
   const [timingExportMessage, setTimingExportMessage] = useState('');
   const timingExportInput = useRef<HTMLTextAreaElement>(null);
-  const timingDownloadUrl = useRef<string | null>(null);
   // The downloadable file and manually selectable field must contain exactly
   // the same privacy-scoped measurements, never lesson or student text.
   const timingExportText = useMemo(() => JSON.stringify({
@@ -118,12 +122,6 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
     return () => {
       current.current?.abort();
       current.current = null;
-      // Some mobile download managers consume the Blob asynchronously. Keep
-      // its URL until this reader closes instead of revoking after click().
-      if (timingDownloadUrl.current) {
-        try { URL.revokeObjectURL(timingDownloadUrl.current); } catch { /* Best effort only. */ }
-        timingDownloadUrl.current = null;
-      }
     };
   }, []);
 
@@ -187,19 +185,18 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
       anchor.hidden = true;
       document.body.append(anchor);
       anchor.click();
-      const previous = timingDownloadUrl.current;
-      timingDownloadUrl.current = url;
-      if (previous) {
-        try { URL.revokeObjectURL(previous); } catch { /* Previous request already dispatched. */ }
-      }
       setTimingExportMessage('已交給瀏覽器下載量測 JSON，但無法確認檔案是否已儲存；若沒有檔案，請改用「全選量測 JSON」。');
     } catch {
-      if (url) {
-        try { URL.revokeObjectURL(url); } catch { /* Preserve manual text fallback. */ }
-      }
       setTimingExportMessage('瀏覽器未接受量測 JSON 下載；完整紀錄仍保留，可按「全選量測 JSON」手動保存。');
     } finally {
       anchor.remove();
+      if (url !== null) {
+        // Mobile download managers can consume the Blob after the reader unmounts.
+        const downloadUrl = url;
+        setTimeout(() => {
+          try { URL.revokeObjectURL(downloadUrl); } catch { /* Best effort only. */ }
+        }, 60_000);
+      }
     }
   }
 
@@ -230,8 +227,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
         onTiming: (measurement) => {
           if (current.current === controller) {
             setTiming(measurement);
-            const run = ++timingSequence.current;
-            setTimingLog((previous) => [...previous, { run, timing: measurement, downloadProgressObserved }].slice(-10));
+            onTiming({ timing: measurement, downloadProgressObserved });
             setTimingExportMessage('');
           }
         },

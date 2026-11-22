@@ -11,7 +11,7 @@ import {
   type StudyMode,
   type StudySource,
 } from '@/lib/studyTutor';
-import { CourseStudyPassage } from './CourseStudyPassage';
+import { CourseStudyPassage, type StudyTimingEntry } from './CourseStudyPassage';
 import { CourseStudyPractice } from './CourseStudyPractice';
 import { emptyStudyPassage, type StudySessionMemory } from './courseStudySession';
 import { adjacentStudyReview } from './courseStudyReview';
@@ -323,6 +323,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   const [pendingPracticeAction, setPendingPracticeAction] = useState<'replace' | 'discard' | null>(null);
   const revision = useRef(0);
   const [mode, setMode] = useState<StudyMode>('understand');
+  const [timingLogs, setTimingLogs] = useState(() => new Map<string, StudyTimingEntry[]>());
   const [paste, setPaste] = useState('');
   const [textEncoding, setTextEncoding] = useState<StudyTextEncoding>('utf-8');
   const [progressPaste, setProgressPaste] = useState('');
@@ -382,6 +383,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   const passages = sectionPassages[sectionIndex] ?? [];
   const passage = passages[passageIndex];
   const passageKey = `${sectionIndex}:${passageIndex}`;
+  const timingKey = `${session.revision}:${passageKey}`;
   const currentLocation = { sectionNumber: sectionIndex, partNumber: passageIndex };
   const previousPassage = adjacentStudyPassage(sectionPassages, currentLocation, 'previous');
   const nextPassage = adjacentStudyPassage(sectionPassages, currentLocation, 'next');
@@ -1304,7 +1306,21 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
             aria-label={`目前閱讀段落：${passage.label}`}>
             <span>第 {passageIndex + 1} 段，共 {passages.length} 段</span><span>{section?.label}</span>
           </div>
-          <CourseStudyPassage key={`${session.revision}:${passageKey}:${mode}`} passage={passage} mode={mode} memory={memory}
+          <CourseStudyPassage key={`${timingKey}:${mode}`} passage={passage} mode={mode} memory={memory}
+            timingLog={timingLogs.get(timingKey) ?? []}
+            onTiming={(sample) => setTimingLogs((previous) => {
+              const entries = previous.get(timingKey) ?? [];
+              const run = (entries.at(-1)?.run ?? 0) + 1;
+              const updated = new Map(previous);
+              updated.delete(timingKey);
+              updated.set(timingKey, [...entries, { run, ...sample }].slice(-10));
+              // Keep only the 20 most recently measured passages in this board.
+              if (updated.size > 20) {
+                const oldest = updated.keys().next();
+                if (!oldest.done) updated.delete(oldest.value);
+              }
+              return updated;
+            })}
             onChange={(update) => {
               invalidateCopyFeedback();
               setSession((previous) => previous.revision !== session.revision ? previous : {

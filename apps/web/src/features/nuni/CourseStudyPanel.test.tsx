@@ -2790,6 +2790,35 @@ it('keeps selectable local timing samples without exporting source text or answe
   expect(screen.getByText(/不代表已驗證回答正確或優於其他產品/)).toBeTruthy();
 });
 
+it('recovers the same manually selectable timing JSON after switching mode and passage', async () => {
+  mocks.run.mockImplementationOnce(async (request) => {
+    request.onTiming?.({ preparationMs: 21, generationMs: 32, totalMs: 53, outcome: 'success' });
+    return explanation;
+  });
+  const longMaterial = { ...material, body: `${material.body}${'甲'.repeat(1600)}${'乙'.repeat(1600)}` };
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={longMaterial} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  const summary = '本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）';
+  const field = () => screen.getByRole('textbox', { name: '本段裝置端 AI 耗時紀錄 JSON' }) as HTMLTextAreaElement;
+  fireEvent.click(await screen.findByText(summary));
+  const original = field().value;
+
+  fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'exam' } });
+  fireEvent.click(screen.getByText(summary));
+  expect(field().value).toBe(original);
+
+  fireEvent.click(screen.getByRole('button', { name: '下一段' }));
+  expect(screen.queryByText(summary)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '上一段' }));
+  fireEvent.click(screen.getByText(summary));
+  fireEvent.click(screen.getByRole('button', { name: '全選量測 JSON' }));
+  const recovered = field();
+  expect(recovered.value).toBe(original);
+  expect(document.activeElement).toBe(recovered);
+  expect(recovered.selectionStart).toBe(0);
+  expect(recovered.selectionEnd).toBe(original.length);
+});
+
 it('retains original run numbers after the ten-sample timing window rolls over', async () => {
   let attempts = 0;
   mocks.run.mockImplementation(async (request) => {
