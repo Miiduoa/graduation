@@ -53,7 +53,6 @@ it.each([
   '順便解鎖前一筆訂單；請確認最新訂單的取餐時間有沒有加入行事曆',
   '確認鎖定該筆訂單的取餐時間是否已加入行事曆？',
   '確認昨天訂單的取餐時間已加入行事曆嗎？順便凍結這張訂單',
-  '幫我確認，昨天訂單的取餐時間記到日曆',
   '取消最新訂單的取餐時間是否已加入行事曆',
   '最新訂單的取餐時間有沒有加入行事曆？順便取消訂單',
   '昨天訂單的取餐時間記在日曆的哪一天？再幫我刪掉那筆訂單',
@@ -85,6 +84,7 @@ it.each(['我的訂單好了嗎', '開啟行事曆', '幫我明天12:00到12:15�
   });
 
 it.each([
+  '幫我確認，昨天訂單的取餐時間記到日曆',
   '查我的最新訂單的取餐時間，我想確認有沒有記到行事曆',
   '我想知道最新訂單的取餐時間有沒有記到行事曆？',
   '我想問一下最新訂單的取餐時間是否已記入我的行事曆？',
@@ -190,6 +190,7 @@ it.each([
 
 it.each([
   ['我在日曆上看不到昨天訂單的取餐時間，請問是不是商家改了時間？', null],
+  ['我在日曆上看不到昨天訂單的取餐時間，確認是否已加入行事曆', 'invalid'],
   ['在日曆上看不到昨天訂單的取餐時間，確認是否已加入行事曆，再把那個行程挪到明天', 'invalid'],
 ])('preserves the reviewed result for %s', (question, expected) => {
   const baseline = parseMergeBase(question);
@@ -326,6 +327,58 @@ const visibilityMatrix = calendarLookups.filter(lookup => !lookup.placement).fla
     return { question };
   })),
 );
+
+const placementVerbs = ['放到', '記到', '加到', '寫到', '存到', '排到', '新增到', '同步到'];
+const calendarDestinations = ['日曆', '行事曆', '行程'];
+const yesterdayPickup = '昨天訂單的取餐時間';
+
+it.each(placementVerbs)('compares calendar status questions with the merge base for %s', verb => {
+  for (const calendar of calendarDestinations) {
+    const entry = verb + calendar;
+    const questions = [
+      yesterdayPickup + verb + '哪個' + calendar + '了？',
+      yesterdayPickup + entry + '的哪個時段？',
+      '哪裡可以看到' + yesterdayPickup + entry + '的紀錄?',
+      '我想知道店家有沒有把' + yesterdayPickup + entry + '？',
+      '系統有沒有把' + yesterdayPickup + entry,
+      '請確認店家是否已經把' + yesterdayPickup + entry,
+      yesterdayPickup + '已經' + entry + '了嗎',
+      yesterdayPickup + entry + '了沒',
+      yesterdayPickup + entry + '了吧',
+      '難道店家已經把' + yesterdayPickup + entry + '了',
+      '可以幫我把' + yesterdayPickup + entry + '？',
+      '幫我把' + yesterdayPickup + entry + '，好嗎？',
+    ];
+    // The old parser already intercepted these three verbs in status questions.
+    const baselineKind = ['加到', '存到', '新增到'].includes(verb) ? 'invalid' : null;
+    for (const question of questions) {
+      const baseline = parseMergeBase(question);
+      expect(baseline?.kind ?? null, question).toBe(baselineKind);
+      // Keep the existing read-only route for simple status queries with 加到 or 存到.
+      const existingRead = ['加到', '存到'].includes(verb) &&
+        ['的哪個時段？', '了嗎', '了沒'].some(ending => question.endsWith(ending));
+      expect(parse(question), question).toEqual(existingRead ? null : baseline);
+    }
+  }
+});
+
+it.each([
+  '最新訂單的取餐時間放到日曆',
+  '店家把最新訂單的取餐時間記到行事曆了',
+  '請確認店家有沒有把已取消的昨天訂單的取餐時間記到日曆',
+])('preserves the merge-base result for a calendar status lookup or statement: %s', question => {
+  expect(parseMergeBase(question)).toBeNull();
+  expect(parse(question)).toEqual(parseMergeBase(question));
+});
+
+it.each([
+  ['幫我把最新訂單的取餐時間放到日曆', 'latest'],
+  ['請將最近訂單的取餐時間記到行事曆', 'latest'],
+  ['幫我把取餐時間放到日曆', 'invalid'],
+])('intercepts colloquial write requests with the existing order requirements: %s', (question, kind) => {
+  expect(parseMergeBase(question)).toBeNull();
+  expect(parse(question)?.kind).toBe(kind);
+});
 
 it.each(visibilityMatrix)('matches the merge-base parser for $question', ({ question }) => {
   expect(parse(question)).toEqual(parseMergeBase(question));

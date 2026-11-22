@@ -47,6 +47,14 @@ const pickupTimeLookup = new RegExp(
 );
 const calendarEntry = '(?:' + placement + '|放進|記在)' + calendarLocation;
 const calendarEntryPattern = new RegExp(calendarEntry);
+const colloquialEntry = /(?:放到|記到|加到|寫到|存到|排到|新增到|同步到|記入|存入|放進|記在)/;
+const statusQuestion = /哪|幾點|幾號|什麼|何時|何處|如何|怎麼|怎樣|為何|有沒有|有無|是否|是不是|難道|會不會|想知道|請問|確認|已經|[?]|(?:了|嗎|呢|了沒|了吧|了沒有)$/;
+const statusQuestionTail = /^(?:好嗎|可以嗎|行嗎|對嗎|是嗎|了嗎|了沒|了吧)[?]*$/;
+const colloquialRequest = /^(?:(?:沒有|還沒)就|(?:不要|不用|先別)?(?:把|將|請(?!問)|麻煩|幫我|替我|(?:我)?(?:想(?!知道)|要)|可以|能不能|可不可以))/;
+const otherWrite = new RegExp(
+  '(?:^|並且?|接著|然後|順便|另外|沒有就|還沒就)(?:' + readPrompt + '|' + polite + ')(?:' +
+    orderWriteVerb + '|修改|建立|新增|安排|儲存|' + placement + ')',
+);
 const pickupSubject = '(?:' + pickupQualifier + '?' + pickupTime + ')?';
 const calendarSubject = readPrompt + '?' + pickupSubject;
 const calendarStatus = new RegExp(
@@ -98,7 +106,7 @@ function pickupClauses(text: string): string[] {
     .map(clause => clause.replace(/^(?:也|順便|另外|再(?!點|訂|買|購)|然後|接著|並且|並)+/, ''));
 }
 
-function isReadOnlyPickupQuestion(text: string): boolean {
+function isReadOnlyPickupQuestion(text: string, checkColloquialStatus = false): boolean {
   const clauses = pickupClauses(text)
     .filter(clause => clause && !standaloneReadPrompt.test(clause));
   return clauses.length > 0 &&
@@ -106,6 +114,11 @@ function isReadOnlyPickupQuestion(text: string): boolean {
       calendarStatus.test(clause) || calendarSlotLookup.test(clause) ||
       calendarAbsenceQuestion.test(clause) ||
       orderLookup.test(clause) || pickupTimeLookup.test(clause) ||
+      (checkColloquialStatus && (
+        (colloquialEntry.test(clause) && !otherWrite.test(clause.replace(colloquialEntry, '')) &&
+          (statusQuestion.test(clause) || statusQuestionTail.test(clauses[index + 1] ?? ''))) ||
+        (statusQuestionTail.test(clause) && colloquialEntry.test(clauses[index - 1] ?? ''))
+      )) ||
       // Follow-ups borrow their subject from a preceding read clause.
       (missingCalendarStatus.test(clause) &&
         (reasonFollowup.test(clauses[index + 1] ?? '') || lookupFollowup.test(clauses[index + 1] ?? ''))) ||
@@ -172,6 +185,13 @@ export function parseAssistantFoodPickupIntent(question: string): AssistantFoodP
   const text = question.normalize('NFKC').trim();
   const compact = text.replace(/\s+/g, '');
   if (calendarVisibilityPattern.test(compact)) return legacyClassify(text, compact);
+  if (colloquialEntry.test(compact) && legacyClassify(text, compact) === null) {
+    // Only a request can opt in to placement that the old grammar did not catch.
+    if (isReadOnlyPickupQuestion(compact, true) ||
+        !pickupClauses(compact).some(clause =>
+          (colloquialRequest.test(clause) && !standaloneReadPrompt.test(clause)) ||
+          otherWrite.test(clause.replace(colloquialEntry, '')))) return null;
+  }
   if (!/取餐/.test(text) || !/訂單|取餐時間/.test(text) || !/行事曆|日曆|行程/.test(text) ||
       !(pickupVerb.test(text) || calendarEntryPattern.test(text))) return null;
   // A user-specified appointment can mention order work in its title. Preserve
