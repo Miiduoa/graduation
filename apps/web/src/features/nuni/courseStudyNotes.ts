@@ -102,9 +102,10 @@ export function buildCourseStudyNotes(
             lines.push('', '自我檢查題：', lesson.response.question);
           else
             lines.push('', '自我檢查題：AI 未提供可讀題目，請對照原文自行練習');
-          if (hasVisibleStudyAttempt(lesson.attempt)) lines.push('', '我的試答：', lesson.attempt);
-          // Downloading must not bypass the same self-check condition as the panel.
-          if (lesson.answerVisible && hasVisibleStudyAttempt(lesson.attempt)) {
+          const hasRevealedAnswer = lesson.answerVisible && !!lesson.attempt.trim();
+          if (hasVisibleStudyAttempt(lesson.attempt) || hasRevealedAnswer)
+            lines.push('', '我的試答：', lesson.attempt);
+          if (hasRevealedAnswer) {
             if (hasVisibleStudyContent(lesson.response.answer))
               lines.push('', '參考回答（已展開）：', lesson.response.answer);
             else

@@ -165,8 +165,8 @@ function decodeCssEscapes(value: string): string {
 // Browsers discard unsupported literal declarations instead of letting them
 // override an earlier valid hidden value. A fallback such as
 // "display:none;display:not-a-mode" must remain hidden in the derived table.
-// This intentionally covers plain literal values only; function-based and
-// multi-token CSS still require a real browser's computed style.
+// This covers literal values and simple display fallbacks. Other CSS functions
+// and combinations can depend on the browser's computed style.
 // 'initial' is a known literal for the four tracked properties. In contrast,
 // inherit/unset/revert/revert-layer can depend on an ancestor, user-agent rules
 // or cascade layers that this source-text scanner cannot inspect. A later
@@ -195,7 +195,7 @@ function isRecognizedInlineCssValue(name: string, value: string): boolean {
   // by the browser. Recognize common valid two-keyword display values only;
   // keep other ambiguous combinations out of the optional source table.
   if (name === 'display' &&
-      /^(?:block|inline|run-in)\s+(?:flow|flow-root|flex|grid|table|ruby)$/u.test(value)) return true;
+      /^(?:(?:block|inline|run-in)\s+(?:flow|flow-root|flex|grid|table|ruby)|(?:flow|flow-root|flex|grid|table|ruby)\s+(?:block|inline|run-in))$/u.test(value)) return true;
   if (!/^[a-z-]+$/u.test(value)) return false;
   if (name === 'display') return CSS_DISPLAY_KEYWORDS.has(value);
   if (name === 'visibility') return ['visible', 'hidden', 'collapse'].includes(value);
@@ -203,7 +203,7 @@ function isRecognizedInlineCssValue(name: string, value: string): boolean {
   return true;
 }
 
-// Inline CSS functions can depend on unavailable custom properties, viewport
+// Unresolved inline CSS functions can depend on custom properties, viewport
 // settings or browser computation. We cannot prove their rendered visibility
 // from Markdown source text, so withhold optional derived tables rather than
 // accidentally show a teacher-only table that the renderer may hide.
@@ -211,10 +211,10 @@ function isRecognizedInlineCssValue(name: string, value: string): boolean {
 // assume a rendered display state from their source-text spelling.
 const UNRESOLVED_VISIBILITY_FUNCTION = /\b[a-z][a-z-]*\s*\(/iu;
 function hasExplicitHiddenInlineStyle(style: string): boolean {
-  // Only recognize literal inline visibility declarations. CSS properties
+  // Recognize literal inline values and explicit display fallbacks. CSS properties
   // cascade independently; a visible value for one property cannot override
   // a hidden value for another. Same-property !important and order still apply.
-  // This is not a computed-style parser (external styles and var() are unknown).
+  // Custom property values from the rendered cascade are unavailable.
   const effective = new Map<string, { value: string; important: boolean; unresolved: boolean }>();
   // CSS permits whitespace (including comments) between ! and important.
   // The comment splitter above normalizes /* ... */ to whitespace.
@@ -225,7 +225,12 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
     if (!property) continue;
     const name = property[1].toLowerCase();
     const important = importantSuffix.test(property[2]);
-    const value = property[2].replace(importantSuffix, '').trim().toLowerCase();
+    const declaredValue = property[2].replace(importantSuffix, '').trim().toLowerCase();
+    const displayFallback = name === 'display'
+      ? /^var\(\s*--[^\s,()]+\s*,\s*([^(),]+?)\s*\)$/u.exec(declaredValue)?.[1]
+      : undefined;
+    const value = displayFallback && isRecognizedInlineCssValue(name, displayFallback)
+      ? displayFallback : declaredValue;
     const unresolved = UNRESOLVED_VISIBILITY_FUNCTION.test(value) || CSS_CONTEXTUAL_WIDE_VALUES.has(value);
     if (!unresolved && !isRecognizedInlineCssValue(name, value)) continue;
     const previous = effective.get(name);

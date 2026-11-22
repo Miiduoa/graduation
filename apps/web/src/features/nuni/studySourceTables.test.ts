@@ -1398,14 +1398,24 @@ describe('dynamic inline CSS never promotes ambiguous lesson content into a sour
     expect(extractStudySourceTables(source)).toEqual(realTable(6));
   });
 
-  it.each(['display:var(--mode); display:block', 'display:var(--mode)!important; display:block!important'])(
+  it.each([
+    'display:var(--mode); display:block',
+    'display:var(--mode)!important; display:block!important',
+    'display:var(--missing, block)',
+    'display:none;display:flow block',
+  ])(
     'extracts tables when a later visible declaration wins (%s)', (style) => {
       const source = [`<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
       expect(extractStudySourceTables(source)).toEqual(realTable(2));
     },
   );
 
-  it.each(['display:var(--mode); display:none', 'display:var(--mode)!important; display:block'])(
+  it.each([
+    'display:var(--mode); display:none',
+    'display:var(--mode)!important; display:block',
+    'display:var(--missing, none)',
+    'display:var(--missing, not-a-mode)',
+  ])(
     'omits tables when the winning display is hidden or unresolved (%s)', (style) => {
       const source = [`<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
       expect(extractStudySourceTables(source)).toEqual([]);

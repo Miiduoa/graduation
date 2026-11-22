@@ -110,6 +110,15 @@ describe('reject unreadable model citations before saving a lesson', () => {
     },
   );
 
+  it('uses exact punctuation-only citations in retained follow-up context', () => {
+    const previous = { ...turn(), response: { ...explanation(), sourceQuote: '。' } };
+    const prepared = prepareStudyTutorHistory(passage, 'understand', [previous]);
+    expect(prepared).toEqual(history([previous]));
+    const prompt = buildStudyTutorPrompt(passage, 'understand', '繼續', prepared);
+    expect(promptData(prompt, 'HISTORY_DATA')).toEqual([previous]);
+    expect(() => parseTutorExplanation(JSON.stringify(previous.response), passage)).toThrow('引句無可讀');
+  });
+
   it('revalidates older model replies before using them as follow-up context', () => {
     const original = { ...passage, text: passage.text + '\u200b' };
     const previous = { ...turn(), response: { ...explanation(), sourceQuote: '\u200b' } };

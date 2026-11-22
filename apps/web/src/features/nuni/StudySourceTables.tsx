@@ -217,7 +217,7 @@ function isNonRatioColumn(header: string): boolean {
       ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
         ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN.test(column)) &&
        !SCORE_COUNT_COLUMN.test(column)) ||
-      (!describesBoundedRate &&
+      (!isBoundedPercentageColumn(header) &&
        (NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column) ||
         ENGLISH_NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column)) &&
        !ORDINAL_COUNT_COLUMN.test(column)) ||

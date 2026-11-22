@@ -269,6 +269,28 @@ it('can save just the reading position before any note or model use', async () =
   } finally { view.unmount(); }
 });
 
+it('restores an expanded reference answer for a legacy zero-width attempt', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const data = progress();
+  const mode = data.passages['1:1'].modes.exam;
+  mode.selectedLessonId = 1;
+  mode.lessons[0].attempt = '\u200b';
+  const legacy = JSON.parse(serializeCourseStudyProgress(data));
+  legacy.version = 1;
+  selectFile(progressFile(JSON.stringify(legacy)));
+  await screen.findByRole('region', { name: '閱讀進度預覽' });
+  fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+
+  await screen.findByRole('heading', { name: '第一輪講解' });
+  expect(inputValue('先寫下你的想法')).toBe('\u200b');
+  expect(screen.getByText('第一輪的參考回答。')).toBeTruthy();
+  const collapse = screen.getByRole('button', { name: '收起參考回答' });
+  expect(collapse.getAttribute('aria-expanded')).toBe('true');
+  expect(collapse.hasAttribute('disabled')).toBe(false);
+  fireEvent.click(collapse);
+  expect(screen.queryByText('第一輪的參考回答。')).toBeNull();
+});
+
 it('restores the selected PDF page, mode, notes and lesson branch without automatically generating', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
   const data = progress();

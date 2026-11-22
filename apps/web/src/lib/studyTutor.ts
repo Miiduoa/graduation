@@ -56,10 +56,10 @@ function nonempty(value: unknown, max: number): value is string {
  * reordered model citation. Reject it before recording the generated lesson;
  * the original licensed material is never edited.
  */
-function hasReadableTutorCitation(quote: string): boolean {
+function hasReadableTutorCitation(quote: string, allowPunctuation: boolean): boolean {
   if (/[\u202a-\u202e\u2066-\u2069]/u.test(quote)) return false;
   const hasContent = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\p{P}\u2800\ufff9-\ufffb]/u.test(quote) ||
-    /[0-9#*]\ufe0f?\u20e3/u.test(quote);
+    /[0-9#*]\ufe0f?\u20e3/u.test(quote) || (allowPunctuation && /\p{P}/u.test(quote));
   if (!hasContent) return false;
   for (let index = 0; index < quote.length; index += 1) {
     const unit = quote.charCodeAt(index);
@@ -248,7 +248,7 @@ function readStudyTurns(turns: readonly StudyTutorTurn[], passage: StudyPassage)
     try {
       return {
         question: turn.question,
-        response: parseTutorExplanation(JSON.stringify(turn.response), passage),
+        response: readTutorExplanation(JSON.stringify(turn.response), passage, 'history'),
       };
     } catch {
       throw new Error('先前講解無法對照目前的原文，請不帶追問紀錄重新講解。');
@@ -348,7 +348,9 @@ const stepLimits = {
   sourceQuote: 400,
 } as const;
 
-function readTutorSteps(value: unknown, passage: StudyPassage, saved: boolean): StudyTutorStep[] {
+type TutorCitationPolicy = 'generated' | 'history' | 'backup';
+
+function readTutorSteps(value: unknown, passage: StudyPassage, policy: TutorCitationPolicy): StudyTutorStep[] {
   const invalid = () => new Error('AI 分步講解不完整或無法對照本段原文，請重試。');
   if (!Array.isArray(value) || value.length < 2 || value.length > 4) throw invalid();
   const keys = Object.keys(stepLimits) as Array<keyof typeof stepLimits>;
@@ -362,7 +364,7 @@ function readTutorSteps(value: unknown, passage: StudyPassage, saved: boolean): 
     const parsed = data as StudyTutorStep;
     if (!passage.text.includes(parsed.sourceQuote))
       throw new Error('AI 步驟引用的句子不在這段原文中，這次講解未採用。請重試。');
-    if (!saved && !hasReadableTutorCitation(parsed.sourceQuote))
+    if (policy !== 'backup' && !hasReadableTutorCitation(parsed.sourceQuote, policy === 'history'))
       throw new Error('AI 步驟引句無可讀的教材內容或含方向控制字元，這次講解未採用。請重試。');
     if (hasFormula && !parsed.sourceQuote.includes(parsed.formula!))
       throw new Error('AI 步驟公式不是該步引句的原文，這次講解未採用。請重試。');
@@ -377,15 +379,15 @@ function readTutorSteps(value: unknown, passage: StudyPassage, saved: boolean): 
 
 /** A matching quotation establishes provenance, not the correctness of the explanation. */
 export function parseTutorExplanation(raw: string, passage: StudyPassage): TutorExplanation {
-  return readTutorExplanation(raw, passage, false);
+  return readTutorExplanation(raw, passage, 'generated');
 }
 
 /** Backups retain the original exact-match citation rules. */
 export function parseSavedTutorExplanation(raw: string, passage: StudyPassage): TutorExplanation {
-  return readTutorExplanation(raw, passage, true);
+  return readTutorExplanation(raw, passage, 'backup');
 }
 
-function readTutorExplanation(raw: string, passage: StudyPassage, saved: boolean): TutorExplanation {
+function readTutorExplanation(raw: string, passage: StudyPassage, policy: TutorCitationPolicy): TutorExplanation {
   validatePassage(passage);
   const invalid = () => new Error('AI 回覆不完整或無法對照本段原文，請重試。');
   if (typeof raw !== 'string' || raw.length > 8_192) throw invalid();
@@ -407,7 +409,7 @@ function readTutorExplanation(raw: string, passage: StudyPassage, saved: boolean
   const explanation = data as TutorExplanation;
   if (!passage.text.includes(explanation.sourceQuote))
     throw new Error('AI 引用的句子不在這段原文中，這次講解未採用。請重試。');
-  if (!saved && !hasReadableTutorCitation(explanation.sourceQuote))
+  if (policy !== 'backup' && !hasReadableTutorCitation(explanation.sourceQuote, policy === 'history'))
     throw new Error('AI 引句無可讀的教材內容或含方向控制字元，這次講解未採用。請重試。');
   return {
     title: explanation.title.trim(),
@@ -415,6 +417,6 @@ function readTutorExplanation(raw: string, passage: StudyPassage, saved: boolean
     sourceQuote: explanation.sourceQuote,
     question: explanation.question.trim(),
     answer: explanation.answer.trim(),
-    ...(hasSteps ? { steps: readTutorSteps(data.steps, passage, saved) } : {}),
+    ...(hasSteps ? { steps: readTutorSteps(data.steps, passage, policy) } : {}),
   };
 }

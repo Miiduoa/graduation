@@ -58,8 +58,9 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const lessonId = useId();
   const modeMemory = memory.modes[mode];
   const selected = modeMemory.lessons.find((lesson) => lesson.id === modeMemory.selectedLessonId);
-  // A restored/edited invisible-only draft must never unlock or display an answer.
-  const canReviewAnswer = selected ? hasVisibleStudyAttempt(selected.attempt) : false;
+  // Saved reveals used a trimmed attempt check. Editing clears the reveal.
+  const canReviewAnswer = !!selected && (hasVisibleStudyAttempt(selected.attempt) ||
+    (selected.answerVisible && !!selected.attempt.trim()));
   const result = selected?.response;
   // A model can return invisible-only text. Keep student attempts and disclosure
   // state intact, but never display an empty-looking prompt or reference answer.
@@ -314,7 +315,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
                     onChange={(event) => { const attempt = event.target.value; changeLesson((previous) => ({ ...previous, attempt, answerVisible: false })); }} />
                 </label>
                 <button type="button" className={styles.button} disabled={!canReviewAnswer}
-                  onClick={() => changeLesson((previous) => hasVisibleStudyAttempt(previous.attempt)
+                  onClick={() => changeLesson((previous) => previous.answerVisible || hasVisibleStudyAttempt(previous.attempt)
                     ? { ...previous, answerVisible: !previous.answerVisible } : previous)}
                   aria-expanded={selected.answerVisible && canReviewAnswer}>
                   {selected.answerVisible && canReviewAnswer ? '收起參考回答' : '對照參考回答'}

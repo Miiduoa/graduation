@@ -122,6 +122,8 @@ describe('course study note downloads', () => {
   it.each([
     { attempt: '', visible: false, exported: false },
     { attempt: ' \n\t', visible: true, exported: false },
+    { attempt: '\u200b', visible: false, exported: false },
+    { attempt: '\u200b', visible: true, exported: true },
     { attempt: '我自己的答案', visible: false, exported: false },
     { attempt: '我自己的答案', visible: true, exported: true },
   ])('includes a reference answer only after an attempt and explicit reveal (%#)', ({ attempt, visible, exported }) => {
@@ -136,14 +138,15 @@ describe('course study note downloads', () => {
       const text = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
       expect(text.includes('參考解答秘密：不可以。')).toBe(exported);
       expect(text.includes('參考回答（已展開）：')).toBe(exported);
+      if (exported) expect(text).toContain(`我的試答：\n${attempt}`);
     }
   });
 
-  it('keeps invalid invisible attempts from exposing saved reference answers in TXT exports', () => {
+  it('keeps unrevealed invisible attempts out of TXT exports', () => {
     for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f']) {
       const memory = withLesson();
       memory.modes.understand.lessons[0].attempt = invisible;
-      memory.modes.understand.lessons[0].answerVisible = true;
+      memory.modes.understand.lessons[0].answerVisible = false;
       const exportText = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
       expect(exportText).not.toContain('參考解答秘密：不可以。');
       expect(exportText).not.toContain('參考回答（已展開）');
@@ -337,7 +340,7 @@ describe('course study note downloads', () => {
       expect(buildCourseStudyNotes('資料庫', source, { '0:0': memory }))
         .not.toContain('參考回答：AI 未提供可讀回答');
       lesson.answerVisible = true;
-      lesson.attempt = ' \u200b ';
+      lesson.attempt = ' \t ';
       expect(buildCourseStudyNotes('資料庫', source, { '0:0': memory }))
         .not.toContain('參考回答：AI 未提供可讀回答');
     }
