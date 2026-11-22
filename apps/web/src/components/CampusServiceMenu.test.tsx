@@ -1290,7 +1290,7 @@ it.each([
   returnToMenuOrigin(origin);
   view.rerender(<CampusServiceMenu />);
   if (!query) {
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(kind === 'legacy');
     expect(sessionStorage.length).toBe(1);
     confirmCampus();
   }
@@ -1298,6 +1298,95 @@ it.each([
   expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(query);
   expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe('true');
   if (!query) expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
+});
+
+it.each([
+  ['public', 'error', 'error'],
+  ['bound', 'error', 'error'],
+  ['public', 'loading', 'error'],
+  ['bound', 'loading', 'error'],
+  ['public', 'error', 'same'],
+  ['bound', 'error', 'same'],
+  ['public', 'error', 'account source error'],
+  ['bound', 'loading', 'different campus'],
+  ['bound', 'error', 'different account'],
+] as const)('restores a %s legacy draft during catalog %s, then handles %s', (kind, status, outcome) => {
+  const school = { id: 'pu', name: '靜宜大學' };
+  const ready = { loading: false, catalogStatus: 'ready', selectedSchool: school } as const;
+  const origin = { url: '/map?campus=pu', state: {} };
+  firebase.user = { uid: 'school-a' };
+  selection.current = ready;
+  returnToMenuOrigin(origin);
+  const first = render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
+  const query = status === 'loading' ? '教材' : '';
+  if (query) fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } });
+  else fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
+  const link = screen.getByRole<HTMLAnchorElement>('link', { name: '教材收藏' });
+  const destination = link.href;
+  fireEvent.click(link);
+  const [{ scope, category, expanded }] = JSON.parse(sessionStorage.getItem('campus.menu.return.v1')!);
+  first.unmount();
+  setMenuReturnScope(null);
+  sessionStorage.setItem('campus.directory.search.v1', JSON.stringify({
+    menu: {
+      path: '/map', destination: new URL(destination).pathname, query, category, expanded, open: true,
+      ...(kind === 'bound' ? { scope } : {}),
+    },
+  }));
+
+  visitMenuDestination(destination);
+  selection.current = { loading: status === 'loading', catalogStatus: status, selectedSchool: null };
+  if (outcome === 'account source error') {
+    firebase.user = null;
+    firebase.error = new Error('School account unavailable');
+  }
+  const view = render(<CampusServiceMenu />);
+  const menu = () => screen.getByText('所有服務').closest('details')!;
+  const search = () => screen.getByRole<HTMLInputElement>('searchbox');
+  expect(menu().open).toBe(false);
+  expect(sessionStorage.getItem('campus.directory.search.v1')).toBeTruthy();
+  returnToMenuOrigin(origin);
+  view.rerender(<CampusServiceMenu />);
+  const expectDraft = () => {
+    expect(menu().open).toBe(true);
+    expect(search().value).toBe(query);
+    expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe('true');
+    if (!query) expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
+  };
+  expectDraft();
+  expect(sessionStorage.getItem('campus.directory.search.v1')).toBeNull();
+  const migratedOrigin = captureMenuOrigin();
+
+  if (outcome === 'error' || outcome === 'account source error') {
+    selection.current = { loading: false, catalogStatus: 'error', selectedSchool: null };
+  } else if (outcome === 'different campus') {
+    selection.current = { ...ready, selectedSchool: { id: 'nthu', name: '清華大學' } };
+    navigation.search = 'campus=nthu';
+    window.history.replaceState(migratedOrigin.state, '', '/map?campus=nthu');
+  } else if (outcome === 'different account') {
+    firebase.user = { uid: 'school-b' };
+  } else {
+    selection.current = ready;
+  }
+  view.rerender(<CampusServiceMenu />);
+  const changed = outcome.startsWith('different');
+  if (changed) {
+    expect(menu().open).toBe(false);
+    expect(search().value).toBe('');
+    expect(sessionStorage.getItem('campus.menu.return.v1')).toBeNull();
+    firebase.user = { uid: 'school-a' };
+    selection.current = ready;
+  } else {
+    expectDraft();
+  }
+  visitMenuDestination(destination);
+  view.rerender(<CampusServiceMenu />);
+  returnToMenuOrigin(migratedOrigin);
+  view.rerender(<CampusServiceMenu />);
+  if (changed) expect(menu().open).toBe(false);
+  else expectDraft();
 });
 
 it('captures a real return while the header is unmounted without storing account/session material', () => {

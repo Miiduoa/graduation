@@ -33,6 +33,7 @@ import {
   discardMenuReturn,
   getMenuReturn,
   getServerMenuReturn,
+  matchesKnownMenuReturnScope,
   rememberMenuReturn,
   setMenuReturnScope,
   subscribeMenuReturn,
@@ -170,7 +171,7 @@ export function CampusServiceMenu() {
     setRestoredExpanded([]);
   }, [pathname, draftScope, campusId, schoolDraftOwner, platformDraftOwner]);
   useLayoutEffect(() => {
-    if (draftScope === null || campusId === undefined || account.status === 'checking') return;
+    if (draftScope === null || account.status === 'checking') return;
     // The browser URL can change before Next renders the matching route.
     if (
       pathname !== window.location.pathname ||
@@ -182,10 +183,7 @@ export function CampusServiceMenu() {
     const snapshot = historyReturn ?? restoreDirectorySearch('menu', pathname);
     if (!snapshot) return;
     if ('destination' in snapshot) {
-      // Unbound legacy drafts belong to the public menu at their source path.
-      // A bound draft still needs its original account and campus confirmed.
-      if (snapshot.scope !== undefined && !canRemember) return;
-      if (snapshot.scope !== undefined && snapshot.scope !== returnScope) {
+      if (snapshot.scope !== undefined && !matchesKnownMenuReturnScope(snapshot.scope)) {
         forgetDirectorySearch('menu');
         return;
       }
@@ -200,6 +198,7 @@ export function CampusServiceMenu() {
           open: snapshot.open,
         },
         true,
+        snapshot.scope,
       );
     }
     setQuery(snapshot.query.slice(0, 100));
@@ -215,9 +214,7 @@ export function CampusServiceMenu() {
     ) {
       previouslyFocused.focus({ preventScroll: true });
     }
-  }, [
-    historyReturn, pathname, queryString, returnScope, canRemember, draftScope, campusId, account.status,
-  ]);
+  }, [historyReturn, pathname, queryString, returnScope, draftScope, account.status]);
   useEffect(() => {
     function dismiss(event: PointerEvent) {
       const element = menu.current;

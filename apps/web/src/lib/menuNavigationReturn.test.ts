@@ -190,3 +190,49 @@ it.each(['same', 'schoolOwner', 'platformOwner', 'campus'] as const)(
     expect(reloaded.consumeMenuReturn(pending, scope)).toBe(changed === 'same');
   },
 );
+
+it.each(['same', 'different'] as const)(
+  'acknowledges a bound legacy draft before campus confirmation and checks its original scope (%s)',
+  async (outcome) => {
+    const menu = await loadDocument();
+    const unresolved = { schoolOwner: 'school-a' };
+    menu.setMenuReturnScope(undefined, unresolved);
+    const provisionalScope = 'campus-unresolved';
+    menu.rememberMenuReturn(
+      destination,
+      { ...draft, scope: provisionalScope, expanded: [...draft.expanded] },
+      true,
+      draft.scope,
+    );
+
+    const reloaded = await loadDocument();
+    reloaded.setMenuReturnScope(undefined, unresolved);
+    expect(reloaded.getMenuReturn()).toBeNull();
+    const originState = window.history.state;
+    window.history.pushState({}, '', destination);
+    backToOrigin(originState);
+    const pending = reloaded.getMenuReturn()!;
+    expect(reloaded.consumeMenuReturn(pending, provisionalScope)).toBe(true);
+
+    // A second service visit while campus is unresolved must retain the original scope.
+    reloaded.rememberMenuReturn(destination, {
+      ...draft,
+      scope: provisionalScope,
+      expanded: [...draft.expanded],
+    });
+    const nextOriginState = window.history.state;
+    window.history.pushState({}, '', destination);
+    backToOrigin(nextOriginState);
+    expect(reloaded.consumeMenuReturn(reloaded.getMenuReturn()!, provisionalScope)).toBe(true);
+    const changed = outcome === 'different';
+    expect(reloaded.setMenuReturnScope(changed ? 'different-scope' : draft.scope, {
+      ...unresolved,
+      campus: changed ? 'nthu' : 'pu',
+    })).toBe(changed);
+    const acknowledged = window.history.state;
+    window.history.pushState({}, '', destination);
+    backToOrigin(acknowledged);
+    if (changed) expect(reloaded.getMenuReturn()).toBeNull();
+    else expect(reloaded.getMenuReturn()).toMatchObject(draft);
+  },
+);
