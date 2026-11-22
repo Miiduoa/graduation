@@ -30,6 +30,15 @@ const OVERPASS_REQUEST_DEADLINE_MS = 12_000;
 // time. A freshly fetched HTTP response can still contain days-old map state.
 const MAX_OVERPASS_REPLICATION_LAG_MS = 48 * 60 * 60 * 1000;
 
+// Match the public campus browser's OSM media contract at the upstream edge.
+// Older Overpass instances may omit Content-Type or send UTF-8 text/plain.
+// An explicit HTML, binary, empty, multi-valued or non-UTF-8 declaration is
+// not evidence of a complete JSON map even if its body happens to parse.
+function supportedOverpassMediaType(declared: string | null): boolean {
+  if (declared === null) return true;
+  return /^(?:application\/(?:json|[a-z0-9][a-z0-9!#$&^_.+-]*\+json)|text\/plain)(?:\s*;\s*charset\s*=\s*(?:"utf-8"|utf-8))?$/i.test(declared.trim());
+}
+
 function verifyOverpassReplicationTime(payload: unknown, now: number): string | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
   const metadata = (payload as Record<string, unknown>).osm3s;
@@ -325,6 +334,15 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     if (response.body) void response.body.cancel().catch(() => {});
     // Even HTTP 200 is not a complete source when a proxy sends Content-Range.
     // Retain any upstream cooldown instead of retrying a partial response at 10m.
+    throw new OverpassRateLimitError(overpassRetryAfterMs(
+      response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
+    ));
+  }
+  // A captive portal or reverse proxy may return HTTP 200 with an explicit
+  // HTML/binary MIME while providing JSON-shaped data. Do not turn that into
+  // a 24-hour audited building snapshot. Cancel a stalled body immediately.
+  if (!supportedOverpassMediaType(response.headers.get('content-type'))) {
+    if (response.body) void response.body.cancel().catch(() => {});
     throw new OverpassRateLimitError(overpassRetryAfterMs(
       response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));
