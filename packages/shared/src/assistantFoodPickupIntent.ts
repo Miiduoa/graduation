@@ -16,7 +16,7 @@ const latestPickupTime = latest + '的?' + pickupTime;
 const destination = '(?:' + placement + ')(?:我(?:的)?)?(?:個人)?(?:行事曆|日曆|行程)(?:中|裡|內)?';
 const calendarStatus = new RegExp(
   '^(?:' + polite + '(?:查詢|查看|查)' + latest + '(?:的?' + pickupTime + ')?[,;、])?' +
-    polite + '(?:(?:確認|查詢|查看|查)(?:一下)?)?(?:(?:' + latest + '的?)?' + pickupTime + ')?' +
+    polite + '(?:(?:確認|查詢|查看|查|知道|詢問|問)(?:一下)?)?(?:(?:' + latest + '的?)?' + pickupTime + ')?' +
     '(?:有沒有|是否|是不是)(?:已經|已)?' + destination + '(?:了|嗎|呢)?[。.!?]?$',
 );
 const hours: Readonly<Record<string, number>> = {
