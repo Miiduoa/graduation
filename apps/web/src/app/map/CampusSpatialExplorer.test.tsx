@@ -2915,12 +2915,12 @@ it('withdraws a visible OSM building when the map POI identity changes while the
 it('falls back after 15 seconds even if an OSM proxy ignores abort, and ignores late success', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   let signal: AbortSignal | undefined;
-  let resolveFetch: ((value: { ok: true; json: () => Promise<unknown> }) => void) | undefined;
+  let resolveFetch: ((value: { ok: true; text: () => Promise<string> }) => void) | undefined;
   // Simulate a response that ignores AbortSignal entirely: abort alone must
   // never leave the campus browser stuck on its loading message.
   vi.stubGlobal('fetch', vi.fn((_url: string, init: { signal: AbortSignal }) => {
     signal = init.signal;
-    return new Promise<{ ok: true; json: () => Promise<unknown> }>((resolve) => {
+    return new Promise<{ ok: true; text: () => Promise<string> }>((resolve) => {
       resolveFetch = resolve;
     });
   }));
