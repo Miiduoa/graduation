@@ -111,7 +111,15 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       return JSON.parse(raw) as unknown;
     }
     if (!identity) throw new Error('Cannot verify decoded building outline bytes');
-    // JSON-only legacy bridges can only be size-checked after parsing.
+    // JSON-only WebView bridges discard the raw HTTP representation. Even an
+    // apparently matching JSON.stringify length cannot establish the original
+    // identity Content-Length: whitespace and escapes disappear on parsing.
+    // Do not promote unverifiable bytes into a source-checked 3D building.
+    if (identityLength !== null) {
+      throw new Error('Cannot verify identity building outline length without raw bytes');
+    }
+    // Without an advertised length, legacy JSON-only bridges can only be
+    // size-checked after parsing; never claim this bounds peak parse memory.
     const payload: unknown = await response.json();
     if (signal?.aborted) throw new Error('Building outline read aborted');
     const normalized = JSON.stringify(payload);

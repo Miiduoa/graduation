@@ -3337,7 +3337,11 @@ it.each(['ASCII', 'UTF-8'] as const)(
 it.each([
   { name: 'no headers', encoding: null, length: null, result: 'accept' },
   { name: 'identity without length', encoding: 'identity', length: null, result: 'accept' },
-  { name: 'identity with length', encoding: 'identity', length: 'actual', result: 'accept' },
+  // A parsed JSON object cannot prove identity HTTP framing, even when a
+  // stringified payload happens to be the advertised size. The raw response
+  // has a trailing newline that is absent from the parsed JSON object.
+  { name: 'identity with length', encoding: 'identity', length: 'actual', result: 'skip' },
+  { name: 'implicit identity with length', encoding: null, length: 'actual', result: 'skip' },
   { name: 'oversized declaration', encoding: null, length: '2000001', result: 'skip' },
   { name: 'gzip', encoding: 'gzip', length: '100', result: 'skip' },
   { name: 'gzip without length', encoding: 'gzip', length: null, result: 'skip' },
