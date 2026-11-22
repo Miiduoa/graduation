@@ -1,10 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { runInNewContext } from 'node:vm';
 import { beforeEach, expect, it, vi } from 'vitest';
-import type { TutorExplanation } from '@/lib/studyTutor';
+import { studySourceFromText, type TutorExplanation } from '@/lib/studyTutor';
 import { CourseStudyPanel, readStudyFileBytes } from './CourseStudyPanel';
-import { COURSE_STUDY_PROGRESS_LIMITS, parseCourseStudyProgress } from './courseStudyProgress';
+import { COURSE_STUDY_PROGRESS_LIMITS, parseCourseStudyProgress, serializeCourseStudyProgress } from './courseStudyProgress';
 import { parseStudyPracticeCheckpoint } from './courseStudyPracticeCheckpoint';
+import { emptyStudyPassage } from './courseStudySession';
 
 const mocks = vi.hoisted(() => ({ run: vi.fn(), read: vi.fn(), available: true }));
 vi.mock('@/lib/studyTutorRuntime', () => ({
@@ -22,6 +23,53 @@ const explanation: TutorExplanation = {
 };
 beforeEach(() => { mocks.read.mockReset(); mocks.run.mockReset(); mocks.available = true; mocks.run.mockResolvedValue(explanation); });
 
+
+
+it('keeps invisible-only note drafts out of TXT actions while still protecting them from accidental close', () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  const download = screen.getByRole('button', { name: '下載本次筆記' });
+  const copy = screen.getByRole('button', { name: '複製本次筆記' });
+  const invisible = '\u200d\u0301\u2800';
+
+  expect(download.hasAttribute('disabled')).toBe(true);
+  fireEvent.change(note, { target: { value: invisible } });
+  expect(download.hasAttribute('disabled')).toBe(true);
+  expect(copy.hasAttribute('disabled')).toBe(true);
+
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  expect(screen.getByRole('heading', { name: '要關閉讀書白板嗎？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '繼續讀書' }));
+  expect(note.value).toBe(invisible);
+
+  fireEvent.change(note, { target: { value: '主鍵整理：不能重複' } });
+  expect(download.hasAttribute('disabled')).toBe(false);
+  expect(copy.hasAttribute('disabled')).toBe(false);
+  fireEvent.change(note, { target: { value: invisible } });
+  expect(download.hasAttribute('disabled')).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
+  expect(download.hasAttribute('disabled')).toBe(false);
+  expect(copy.hasAttribute('disabled')).toBe(false);
+  expect(note.value).toBe(invisible);
+});
+
+it('counts only readable notes in a progress preview without deleting saved invisible drafts', () => {
+  const source = studySourceFromText({ id: material.id, title: material.title, text: material.body });
+  const invisible = '\u200d\u0301\u2800';
+  const progress = serializeCourseStudyProgress({
+    scope, source, position: { sectionIndex: 0, passageIndex: 0, mode: 'understand' },
+    passages: { '0:0': { ...emptyStudyPassage(), note: invisible } },
+  });
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText('貼上已備份的進度 JSON'), { target: { value: progress } });
+  fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
+  const preview = screen.getByRole('region', { name: '閱讀進度預覽' });
+  expect(within(preview).getByText('個人筆記').parentElement?.querySelector('dd')?.textContent).toBe('0 段');
+
+  fireEvent.click(within(preview).getByRole('button', { name: '還原這份進度' }));
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value).toBe(invisible);
+  expect(screen.getByRole('button', { name: '下載本次筆記' }).hasAttribute('disabled')).toBe(true);
+});
 
 it('isolates study notes when two different account/course scopes share an ambiguous colon-joined key', () => {
   // These scopes have the same old key, "student:course:one".
@@ -3078,6 +3126,148 @@ it('does not resurface an obsolete mobile clipboard backup after the note change
     view.unmount();
     vi.useRealTimers();
     if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+
+it('checks real mobile fallback selection instead of trusting WebView select() without an error', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '不可遺失的私人閱讀備份' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    const manual = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    const backup = manual.value;
+    manual.setSelectionRange(3, 7);
+
+    // Simulate a WebView that silently ignores both methods (no exceptions).
+    const select = vi.spyOn(manual, 'select').mockImplementation(() => {});
+    const range = vi.spyOn(manual, 'setSelectionRange').mockImplementation(() => {});
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '全選上方文字' }));
+      expect(manual.selectionStart).toBe(3);
+      expect(manual.selectionEnd).toBe(7);
+      expect(screen.getByText(/瀏覽器未確認全文已選取/).textContent).toContain('長按文字');
+      expect(screen.queryByText(/瀏覽器回報已全選備份文字/)).toBeNull();
+      expect(manual.value).toBe(backup);
+    } finally {
+      select.mockRestore();
+      range.mockRestore();
+    }
+    fireEvent.click(screen.getByRole('button', { name: '全選上方文字' }));
+    expect(manual.selectionStart).toBe(0);
+    expect(manual.selectionEnd).toBe(backup.length);
+    expect(screen.getByText(/瀏覽器回報已全選備份文字/).textContent).toContain('確認貼上內容');
+    expect(parseCourseStudyProgress(manual.value, scope).passages['0:0'].note)
+      .toBe('不可遺失的私人閱讀備份');
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+it('returns keyboard focus to the export control after a blocked JSON download fallback closes', () => {
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL {
+    static createObjectURL = vi.fn(() => 'blob:blocked-focus-json');
+    static revokeObjectURL = vi.fn();
+  });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+    .mockImplementation(() => { throw new Error('mobile download blocked'); });
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  try {
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '鍵盤操作時不可遺失的筆記' } });
+    const save = screen.getByRole('button', { name: '儲存閱讀進度' });
+    save.focus();
+    expect(document.activeElement).toBe(save);
+    fireEvent.click(save);
+    const backup = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(backup);
+    expect(parseCourseStudyProgress(backup.value, scope).passages['0:0'].note)
+      .toBe('鍵盤操作時不可遺失的筆記');
+    fireEvent.click(screen.getByRole('button', { name: '收起手動複製文字' }));
+    expect(screen.queryByRole('textbox', { name: '可選取的閱讀進度 JSON' })).toBeNull();
+    expect(document.activeElement).toBe(save);
+  } finally {
+    view.unmount();
+    click.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('restores focus to the manual backup trigger even if a mobile pointer tap did not focus its button', () => {
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL {
+    static createObjectURL = vi.fn(() => 'blob:ignored-focus-download');
+    static revokeObjectURL = vi.fn();
+  });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  try {
+    const note = screen.getByLabelText(noteLabel) as HTMLTextAreaElement;
+    fireEvent.change(note, { target: { value: '保持完整的備份內容' } });
+    fireEvent.click(screen.getByRole('button', { name: '下載本次筆記' }));
+    const showBackup = screen.getByRole('button', { name: '沒有下載到檔案？顯示完整手動備份' });
+    note.focus();
+    expect(document.activeElement).toBe(note);
+    // fireEvent.click deliberately does not give the button focus, like some iOS pointer taps.
+    fireEvent.click(showBackup);
+    const backup = screen.getByRole('textbox', { name: '可選取的本次筆記文字' }) as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(backup);
+    expect(backup.value).toContain('保持完整的備份內容');
+    fireEvent.click(screen.getByRole('button', { name: '收起手動複製文字' }));
+    expect(document.activeElement).toBe(showBackup);
+  } finally {
+    view.unmount();
+    click.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
+
+it.each([
+  ['複製本次筆記', '可選取的本次筆記文字'],
+  ['複製閱讀進度 JSON', '可選取的閱讀進度 JSON'],
+  ['下載本次筆記', '可選取的本次筆記文字'],
+  ['儲存閱讀進度', '可選取的閱讀進度 JSON'],
+] as const)('returns focus to the actual %s button after a mobile pointer export fails', (actionLabel, fieldLabel) => {
+  const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL {
+    static createObjectURL = vi.fn(() => 'blob:blocked-pointer-export');
+    static revokeObjectURL = vi.fn();
+  });
+  const anchor = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+    .mockImplementation(() => { throw new Error('WebView download blocked'); });
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  try {
+    const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+    fireEvent.change(note, { target: { value: '使用觸控備份的私人筆記' } });
+    note.focus();
+    const exportButton = screen.getByRole('button', { name: actionLabel });
+    expect(document.activeElement).toBe(note);
+    // A pointer click can dispatch without shifting focus from the textarea.
+    fireEvent.click(exportButton);
+    const fallback = screen.getByRole('textbox', { name: fieldLabel }) as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(fallback);
+    expect(fallback.value).toContain('使用觸控備份的私人筆記');
+    if (fieldLabel.includes('JSON')) {
+      expect(parseCourseStudyProgress(fallback.value, scope).passages['0:0'].note)
+        .toBe('使用觸控備份的私人筆記');
+    }
+    fireEvent.click(screen.getByRole('button', { name: '收起手動複製文字' }));
+    expect(screen.queryByRole('textbox', { name: fieldLabel })).toBeNull();
+    expect(document.activeElement).toBe(exportButton);
+    expect(note.value).toBe('使用觸控備份的私人筆記');
+  } finally {
+    view.unmount();
+    anchor.mockRestore();
+    vi.unstubAllGlobals();
+    if (originalClipboard) Object.defineProperty(window.navigator, 'clipboard', originalClipboard);
     else Reflect.deleteProperty(window.navigator, 'clipboard');
   }
 });

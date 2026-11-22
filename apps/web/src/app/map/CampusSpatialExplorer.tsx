@@ -14,7 +14,7 @@ import {
   type CampusSpatialCamera,
 } from './campusSpatialCamera';
 import type { CampusSpatialScene } from './campusSpatialScene';
-import { walkingDirectionsUrl, type MapLocation } from './mapService';
+import { appleWalkingDirectionsUrl, walkingDirectionsUrl, type MapLocation } from './mapService';
 import { isProvidencePendingVerification, providencePlaceSourceUrl } from './providenceCampus';
 import { PROVIDENCE_CAMPUS_PLACES, PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
 import { parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
@@ -417,7 +417,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Geometry is only affirmative when both the host and the effective
     // viewport have valid, positive bounds. Unknown WebView measurements must
     // never be interpreted as proof that the map is back on screen.
-    const hostViewportVisibility = (): 'onscreen' | 'offscreen' | 'unknown' | 'invalid-visual-viewport' | 'invalid-host-rect' => {
+    const hostViewportVisibility = (): 'onscreen' | 'offscreen' | 'unknown' | 'invalid-visual-viewport' | 'invalid-layout-viewport' | 'invalid-host-rect' => {
       // Some embedded Safari/WebViews expose VisualViewport but throw when a
       // dimension is read during keyboard, zoom or bfcache transitions. Read
       // each getter once; an exception is *not* permission to fall back to
@@ -444,9 +444,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         const top = visualBounds?.top ?? 0;
         const right = left + (visualBounds?.width ?? width);
         const bottom = top + (visualBounds?.height ?? height);
-        if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height,
-          width, height, left, top, right, bottom].every(Number.isFinite) ||
-          rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0 ||
+        // A malformed *reported* host coordinate is not an absent layout
+        // measurement. In particular NaN/Infinity must never allow the
+        // no-observer WebView fallback to start offscreen WebGL.
+        if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height]
+          .every(Number.isFinite)) return 'invalid-host-rect';
+        // Reported non-finite layout viewport values are not unknown legacy
+        // measurements: never let the WebView fallback activate offscreen GPU.
+        if (![width, height, left, top, right, bottom].every(Number.isFinite))
+          return 'invalid-layout-viewport';
+        if (rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0 ||
           right <= left || bottom <= top) return 'unknown';
         // A WebView can expose positive width/height while its DOMRect edges
         // are reversed or collapsed. These bounds never prove the host visible.
@@ -465,7 +472,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // can still use a real observer signal or the manual-start control.
     const hostMustStaySuspended = () => {
       const position = hostViewportVisibility();
-      return position === 'offscreen' || position === 'invalid-visual-viewport' || position === 'invalid-host-rect';
+      return position === 'offscreen' || position === 'invalid-visual-viewport' ||
+        position === 'invalid-layout-viewport' || position === 'invalid-host-rect';
     };
     // Keep a way back when pageshow/visibilitychange (not a resize event)
     // invalidates an already-running scene. Safari may not issue another
@@ -557,7 +565,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         if (position !== 'unknown') visible = position === 'onscreen';
       } else if (!manualStart && typeof IntersectionObserver !== 'undefined') {
         const position = hostViewportVisibility();
-        if (position === 'offscreen' || position === 'invalid-visual-viewport' || position === 'invalid-host-rect') {
+        if (position === 'offscreen' || position === 'invalid-visual-viewport' ||
+            position === 'invalid-layout-viewport' || position === 'invalid-host-rect') {
           if (visible && started) suspendedByViewport = true;
           visible = false;
         } else if (position === 'onscreen' && pendingInitialViewportConfirmation && !started) {
@@ -666,7 +675,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // geometry on the later viewport event before starting.
           if (!started) {
             pendingInitialViewportConfirmation =
-              (position === 'invalid-visual-viewport' || position === 'invalid-host-rect') && confirmedIntersecting;
+              (position === 'invalid-visual-viewport' || position === 'invalid-layout-viewport' ||
+                position === 'invalid-host-rect') && confirmedIntersecting;
           }
           if (!confirmedIntersecting) {
             // A newer negative observer record revokes the viewport-only
@@ -674,11 +684,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
             // resurrect a scene the observer has explicitly marked hidden.
             // Wait for the next genuine positive intersection instead.
             suspendedByViewport = false;
-          } else if ((position === 'invalid-visual-viewport' || position === 'invalid-host-rect') && visible && started) {
+          } else if ((position === 'invalid-visual-viewport' || position === 'invalid-layout-viewport' ||
+            position === 'invalid-host-rect') && visible && started) {
             suspendedByViewport = true;
           }
           visible = confirmedIntersecting &&
-            position !== 'offscreen' && position !== 'invalid-visual-viewport' && position !== 'invalid-host-rect';
+            position !== 'offscreen' && position !== 'invalid-visual-viewport' &&
+            position !== 'invalid-layout-viewport' && position !== 'invalid-host-rect';
           if (visible) suspendedByViewport = false;
           updateVisibility();
           startWhenVisible();
@@ -833,8 +845,42 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   );
 }
 
+// A POI ID alone is not a stable navigation destination. The same ID can be
+// reused with a different location or building after a live map refresh.
+// Freeze the identity used for a choice; the user must explicitly select a
+// replacement before a new coordinate can be sent to walking directions.
+function spatialDestinationIdentity(place: MapLocation): string {
+  return JSON.stringify([
+    place.id, place.name, place.category, place.lat, place.lng,
+    place.building ?? null, place.floor ?? null,
+  ]);
+}
+
 function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props & { onClose: () => void }) {
   const model = useMemo(() => buildCampusSpatialModel(locations), [locations]);
+  // Two map records can have the same public-facing name (including two
+  // buildings of the same category). A screen reader or keyboard user must
+  // be able to distinguish the exact pinned destination before navigating.
+  // Only use existing marker/category data; coordinates are not entrances.
+  const { optionLabels, repeatedNames } = useMemo(() => {
+    const nameCounts = new Map<string, number>();
+    const categoryCounts = new Map<string, number>();
+    for (const point of model.points) {
+      nameCounts.set(point.name, (nameCounts.get(point.name) ?? 0) + 1);
+      const group = JSON.stringify([point.name, point.category]);
+      categoryCounts.set(group, (categoryCounts.get(group) ?? 0) + 1);
+    }
+    const repeatedNames = new Set([...nameCounts].filter(([, count]) => count > 1).map(([name]) => name));
+    const optionLabels = new Map(model.points.map((point, index) => {
+      if (!repeatedNames.has(point.name)) return [point.id, point.name] as const;
+      const sameCategory = (categoryCounts.get(JSON.stringify([point.name, point.category])) ?? 0) > 1;
+      const detail = sameCategory
+        ? ` · 地圖座標 ${point.location.lat}, ${point.location.lng} · 清單第 ${index + 1} 項`
+        : '';
+      return [point.id, `${point.name}（${point.category || '未分類'}${detail}）`] as const;
+    }));
+    return { optionLabels, repeatedNames };
+  }, [model.points]);
   // A matching ID alone is not an audited source: Firestore can reuse a POI
   // ID at different coordinates, under a new name or with a new category.
   // Skip the whole-campus download unless a *visible* marker still matches
@@ -846,7 +892,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const hasOutlineCandidate = auditedWayCandidateCount > 0;
   // Only a deliberate in-dialog choice overrides the current map selection. If the
   // source withdraws an automatic match, do not silently navigate to its first replacement.
-  const [selection, setSelection] = useState<string | null>(null);
+  const [selection, setSelection] = useState<{ id: string; identity: string } | null>(null);
   const [overview, setOverview] = useState(!selected);
   const [overhead, setOverhead] = useState(false);
   const [buildingPlanOpen, setBuildingPlanOpen] = useState(false);
@@ -877,20 +923,60 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const restoredCooldownRef = useRef(footprintRetryAfter !== null);
   const [camera, setCamera] = useState<CampusSpatialCamera>({ bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   const changeCamera = useCallback((next: CampusSpatialCamera) => setCamera(normalizeSpatialCamera(next)), []);
-  const selectedPoint = model.points.find((point) => point.id === (selection ?? selected?.id));
+  const chosen = selection ?? (selected ? {
+    id: selected.id, identity: spatialDestinationIdentity(selected),
+  } : null);
+  const selectedPoint = model.points.find((point) =>
+    point.id === chosen?.id && spatialDestinationIdentity(point.location) === chosen.identity);
   const showOverview = overview || !selectedPoint;
   const place = selectedPoint?.location;
+  // Show the original marker coordinate even for uniquely named buildings:
+  // students can compare it against a real map before following directions.
+  // Copying is optional because older Safari/WebViews may deny clipboard access.
+  const [coordinateCopyState, setCoordinateCopyState] = useState<'idle' | 'copied' | 'unavailable'>('idle');
+  const markerIdentity = place ? spatialDestinationIdentity(place) : null;
+  const currentMarkerIdentity = useRef(markerIdentity);
+  // Clipboard permission prompts can resolve out of order, even after A -> B -> A.
+  // Only the newest request for the committed marker may update feedback.
+  const copyRequestGenerationRef = useRef(0);
+  useEffect(() => {
+    // Revoke clipboard feedback on the committed selection; never mutate a
+    // ref during render (React may discard an interrupted render).
+    currentMarkerIdentity.current = markerIdentity;
+    copyRequestGenerationRef.current += 1;
+    setCoordinateCopyState('idle');
+  }, [markerIdentity]);
+  const copyMarkerCoordinates = async () => {
+    if (!place) return;
+    const identity = spatialDestinationIdentity(place);
+    const requestGeneration = ++copyRequestGenerationRef.current;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+      await navigator.clipboard.writeText(`${place.lat},${place.lng}`);
+      // A pending clipboard permission prompt can outlive a POI refresh or
+      // selection change. Do not announce success for a different destination.
+      if (currentMarkerIdentity.current === identity &&
+        copyRequestGenerationRef.current === requestGeneration) setCoordinateCopyState('copied');
+    } catch {
+      if (currentMarkerIdentity.current === identity &&
+        copyRequestGenerationRef.current === requestGeneration) setCoordinateCopyState('unavailable');
+    }
+  };
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);
+  const previousPoint = model.points[index - 1];
+  const nextPoint = model.points[index + 1];
   const selectId = useId();
   const progressId = useId();
   const directionsNoteId = useId();
   const footprintCooldownNoteId = useId();
   const footprintRefreshingNoteId = useId();
   const selectPlace = useCallback((id: string) => {
-    setSelection(id);
+    const point = model.points.find((candidate) => candidate.id === id);
+    if (!point) return;
+    setSelection({ id, identity: spatialDestinationIdentity(point.location) });
     setOverview(false);
     setCamera((previous) => ({ ...previous, zoom: 1 }));
-  }, []);
+  }, [model.points]);
   const source = place ? providencePlaceSourceUrl(school, place) : null;
   // The map can be filtered while a spatial dialog remains open. Never count,
   // attribute or frame OSM buildings whose POIs are no longer in that view.
@@ -1468,7 +1554,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 <label htmlFor={selectId}>想去哪裡</label>
                 <select id={selectId} value={place?.id ?? ''} onChange={(event) => selectPlace(event.target.value)}>
                   {!place && <option value="" disabled>請選擇地點</option>}
-                  {model.points.map((point) => <option key={point.id} value={point.id}>{point.name}</option>)}
+                  {model.points.map((point) => <option key={point.id} value={point.id}>{optionLabels.get(point.id) ?? point.name}</option>)}
                 </select>
               </div>
               {place ? <>
@@ -1481,21 +1567,35 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                   max={Math.max(0, model.points.length - 1)}
                   value={Math.max(0, index)}
                   disabled={model.points.length < 2}
-                  aria-valuetext={`第 ${index + 1} 個地點，共 ${model.points.length} 個：${place.name}`}
+                  aria-valuetext={`第 ${index + 1} 個地點，共 ${model.points.length} 個：${optionLabels.get(place.id) ?? place.name}`}
                   onChange={(event) => {
                     const point = model.points[Number(event.target.value)];
                     if (point) selectPlace(point.id);
                   }}
                 />
                 <div className={styles.steps}>
-                  <button className="btn" type="button" disabled={index <= 0} onClick={() => selectPlace(model.points[index - 1].id)}>上一個地點</button>
-                  <button className="btn" type="button" disabled={index >= model.points.length - 1} onClick={() => selectPlace(model.points[index + 1].id)}>下一個地點</button>
+                  <button className="btn" type="button" disabled={index <= 0}
+                    aria-label={previousPoint && repeatedNames.has(previousPoint.name)
+                      ? `上一個地點：${optionLabels.get(previousPoint.id) ?? previousPoint.name}` : undefined}
+                    onClick={() => { if (previousPoint) selectPlace(previousPoint.id); }}>上一個地點</button>
+                  <button className="btn" type="button" disabled={index >= model.points.length - 1}
+                    aria-label={nextPoint && repeatedNames.has(nextPoint.name)
+                      ? `下一個地點：${optionLabels.get(nextPoint.id) ?? nextPoint.name}` : undefined}
+                    onClick={() => { if (nextPoint) selectPlace(nextPoint.id); }}>下一個地點</button>
                 </div>
               </div>
               <section className={styles.place} aria-label="導覽地點資訊">
                 <p className={styles.category}>{place.category}</p>
                 <h3 aria-live="polite" aria-atomic="true">{place.name}</h3>
                 {place.description && <p>{place.description}</p>}
+                <p className={styles.note}>地圖標記座標：{place.lat}, {place.lng}（非建築入口）</p>
+                {/* A changing live status distinguishes same-name scene markers even when the heading stays identical. */}
+                {repeatedNames.has(place.name) && (
+                  <p className={styles.note} role="status" aria-live="polite" aria-atomic="true">
+                    同名地點：目前選擇「{place.category || '未分類'}」，地圖標記座標 {place.lat}, {place.lng}，清單第 {index + 1} 項。
+                    這是地點標記，不代表已核實的建築入口；請核對位置再開啟導航。
+                  </p>
+                )}
                 {(place.building || place.floor) && <p>{[place.building, place.floor && `樓層：${place.floor}`].filter(Boolean).join(' · ')}</p>}
                 {Boolean(place.facilities?.length) && <p>設施：{place.facilities!.join('、')}</p>}
                 {school === 'pu' && footprintStatus === 'ready' && (
@@ -1551,11 +1651,23 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                   在平面地圖查看
                 </button>
                 <a className="btn" href={walkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟步行導航</a>
+                <a className="btn" href={appleWalkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟 Apple 地圖步行導航</a>
+                <button className="btn" type="button" onClick={() => { void copyMarkerCoordinates(); }}
+                  aria-describedby={directionsNoteId}>複製地圖標記座標</button>
+                {coordinateCopyState !== 'idle' && <span className={styles.note} role="status" aria-live="polite">
+                  {coordinateCopyState === 'copied'
+                    ? '已複製目前地點標記座標。'
+                    : '無法自動複製，請手動選取上方的地圖標記座標。'}
+                </span>}
                 <p id={directionsNoteId} className={styles.note}>導航僅以目前地點標記為目的地，並非已核實的校舍入口、可通行道路或無障礙動線；請依現場指標確認。</p>
                 <button className="btn" type="button" onClick={() => setBuildingPlanOpen(true)}>平面圖建模預覽</button>
                 {source && <a className={styles.source} href={source} target="_blank" rel="noopener noreferrer">查看地點資料來源 ↗</a>}
               </div>
-              </> : <p className={styles.note} role="status">請選擇地點，確認位置後再開啟導航。</p>}
+              </> : <p className={styles.note} role="status" aria-live="polite" aria-atomic="true">
+                {chosen && !selectedPoint
+                  ? '先前選擇的地點已變更或不在目前地圖範圍，已停用導航。請重新選擇地點，核對標記位置後再開啟導航。'
+                  : '請選擇地點，確認位置後再開啟導航。'}
+              </p>}
             </div>
         </div>
       )}

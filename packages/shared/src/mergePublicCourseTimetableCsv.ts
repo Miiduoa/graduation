@@ -29,7 +29,10 @@ export function mergePublicCourseTimetableCsv(
 
     // Duplicate listings of the same course/section must not create duplicate
     // review rows. Preserve different sections of one course.
-    const identity = JSON.stringify([course.code, course.section]);
+    // Feed rows may differ only in surrounding whitespace. Do not let that
+    // produce duplicate sessions in one personal-import draft; do not alter
+    // the original official identifiers written by the school converter.
+    const identity = JSON.stringify([course.code.trim(), course.section.trim()]);
     if (seen.has(identity)) return null;
     seen.add(identity);
 

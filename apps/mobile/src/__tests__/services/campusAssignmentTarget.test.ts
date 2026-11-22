@@ -87,12 +87,28 @@ test('different groups distinguish otherwise identical task titles', () => {
   expect(resolve(value)?.params.groupId).toBe('course_1');
 });
 
-test('normalizes the planner display title without accepting a fabricated source on the candidate', () => {
+test('a complete long title opens only its verified source, ignoring fabricated candidate IDs', () => {
   const value = snapshot();
-  value.assignments.items[0].title = '長'.repeat(140);
-  const candidate = { ...assignment, title: '長'.repeat(130), source: { ...source, assignmentId: 'fake' } };
-  expect(resolveCampusAssignmentTarget({ assignment: candidate, snapshot: value, scope, now })?.params.assignmentId)
-    .toBe('work_1');
+  const fullTitle = '長'.repeat(130) + '原始作業';
+  value.assignments.items[0].title = fullTitle;
+  const candidate = { ...assignment, title: fullTitle, source: { ...source, assignmentId: 'fake' } };
+  expect(resolveCampusAssignmentTarget({ assignment: candidate, snapshot: value, scope, now }))
+    .toEqual({ route: 'HomeworkSubmit', params: { groupId: 'course_1', assignmentId: 'work_1' } });
+});
+
+test('does not use a 130-character display prefix to open a different original assignment', () => {
+  const value = snapshot();
+  const prefix = '長'.repeat(130);
+  value.assignments.items[0].title = prefix + '期末報告';
+  const target = (title: string) => resolveCampusAssignmentTarget({
+    assignment: { ...assignment, title }, snapshot: value, scope, now,
+  });
+  // Previously both a truncated plan title and a different full title opened work_1.
+  expect(target(prefix)).toBeNull();
+  expect(target(prefix + '另一份作業')).toBeNull();
+  expect(target(prefix + '期末報告')).toEqual({
+    route: 'HomeworkSubmit', params: { groupId: 'course_1', assignmentId: 'work_1' },
+  });
 });
 
 test('the live snapshot parser retains only valid handoff references', async () => {

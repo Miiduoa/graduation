@@ -530,10 +530,10 @@ it('still recognizes indented closing HTML tags inside real HTML blocks', () => 
   }
 });
 
-it('shows the visible table after preformatted HTML teaching code mentions nested tags', () => {
+it('shows the visible table after escaped preformatted HTML teaching code examples', () => {
   const content = [
     '<pre class="lesson">',
-    'HTML 教學的字面範例：<code> 與 <pre> 標記',
+    'HTML 教學的字面範例：&lt;code&gt; 與 &lt;pre&gt; 標記',
     '| 範例科目 | 假學分 |',
     '| --- | --- |',
     '| 測試 | 999 |',
@@ -544,6 +544,26 @@ it('shows the visible table after preformatted HTML teaching code mentions neste
   ].join('\n');
   expect(extractStudySourceTables(content)).toEqual([{
     startLine: 7,
+    headers: ['正式課程', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});
+
+it('keeps unpublished rows inside actual nested pre tags, even when one starts in prose', () => {
+  const content = [
+    '<pre class="lesson">',
+    '這行是未跳脫的 HTML：<pre> 會真的建立巢狀元素',
+    '</pre>',
+    '| 教師尚未公開 | 分數 |',
+    '| --- | --- |',
+    '| 答案 | 99 |',
+    '</pre>',
+    '| 正式課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 8,
     headers: ['正式課程', '學分'],
     rows: [['資料庫', '3']],
   }]);
@@ -1163,6 +1183,22 @@ it('visualizes exact source percentages on a fixed 100% scale without changing s
   expect(container.querySelector('meter')).toBeNull();
 });
 
+it.each([
+  { name: 'regular space', values: ['75 %', '25 %'], amounts: ['75', '25'] },
+  { name: 'no-break space and fullwidth digits', values: ['７５\u00a0％', '２５\u00a0％'], amounts: ['75', '25'] },
+  { name: 'narrow no-break space and fullwidth decimals', values: ['７５．５０\u202f％', '２４．５０\u202f％'], amounts: ['75.5', '24.5'] },
+  { name: 'mixed spaced and unspaced fullwidth percentage rows', values: ['７５ ％', '５０％'], amounts: ['75', '50'] },
+])('compares percent signs separated by a single source space ($name), without rewriting evidence', ({ values, amounts }) => {
+  const material = ['| 課程 | 完成率 |', '| --- | --- |',
+    '| 資料庫 | ' + values[0] + ' |', '| 網路 | ' + values[1] + ' |'].join('\n');
+  const { container } = render(<StudySourceTables text={material} />);
+  expect(Array.from(container.querySelectorAll('meter')).map((bar) =>
+    [bar.getAttribute('value'), bar.getAttribute('max'), bar.getAttribute('aria-valuetext')]))
+    .toEqual(amounts.map((amount, index) => [amount, '100', values[index] + '；滿格 100%']));
+  expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+    .toEqual(values);
+});
+
 it('does not infer percentage charts from ambiguous headers or out-of-range source', () => {
   const examples = [
     { header: '分數', values: ['75%', '100%'] },
@@ -1171,7 +1207,9 @@ it('does not infer percentage charts from ambiguous headers or out-of-range sour
     { header: '完成率', values: ['100.01%', '99%'] },
     { header: '正確率', values: ['-1%', '25%'] },
     { header: '出席率', values: ['50.123%', '75%'] },
-    { header: '通過率', values: ['50 %', '75%'] },
+    { header: '通過率', values: ['50  %', '75%'] },
+    { header: '通過率', values: ['50\t%', '75%'] },
+    { header: '通過率', values: ['５０ %', '75%'] },
     { header: '完成率', values: ['50%', '25 公斤'] },
   ];
   for (const { header, values } of examples) {
@@ -2755,7 +2793,7 @@ it.each([
   ['７5％', '５０％'], // Mixed digits within one value
   ['７５％', '25%'], // Mixed digit formats in one table
   ['７５％', '５０．１２３％'], // Unsupported precision
-  ['７５ ％', '５０％'], // Unsupported inserted whitespace
+  ['７５  ％', '５０％'], // Two inserted spaces remain ambiguous; one is intentionally supported
 ])('retains invalid or ambiguous fullwidth percentage source without derived meters (%s, %s)', (first, second) => {
   const material = ['| 科目 | 完成率 |', '| --- | --- |',
     '| 資料庫 | ' + first + ' |', '| 網路 | ' + second + ' |'].join('\n');
@@ -2767,3 +2805,51 @@ it.each([
     .toEqual([first, second]);
   view.unmount();
 });
+
+it('does not depict source line, data row or procedural step positions as magnitudes', () => {
+  const positionHeaders = [
+    '行號', '列號', '資料行號', '原始碼行號', '操作步驟', '步驟編號', '步序號',
+    'Line Number', 'Source Line', 'Row No.', 'Record Number',
+    'Step Index', 'Data Row ID', 'Code Line (Python)',
+  ];
+  for (const header of positionHeaders) {
+    const lesson = [
+      '| 教材 | ' + header + ' |', '| --- | --- |',
+      '| 資料庫 | 2 |', '| 網路 | 4 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={lesson} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual(['2', '4']);
+    expect(container.querySelectorAll('meter')).toHaveLength(0);
+    expect(comparisonSummaries(container)).toEqual([]);
+    unmount();
+  }
+});
+
+it.each([
+  '程式碼行數', '資料列數', '步驟數量', '步驟總數',
+  'Lines of Code', 'Number of Lines of Code', 'Count of Lines of Code',
+  'Line Count', 'Row Count', 'Number of Steps', 'Step Count', 'Record Count',
+])('still compares explicit quantities of lines, rows and steps (%s)', (header) => {
+  const lesson = [
+    '| 教材 | ' + header + ' |', '| --- | --- |',
+    '| 資料庫 | 2 |', '| 網路 | 4 |',
+  ].join('\n');
+  const { container, unmount } = render(<StudySourceTables text={lesson} />);
+  expect(Array.from(container.querySelectorAll('meter'))
+    .map((bar) => [bar.getAttribute('value'), bar.getAttribute('max')]))
+    .toEqual([['2', '4'], ['4', '4']]);
+  unmount();
+});
+
+it.each(['Course Code', 'Verification Code', 'Code', 'Student ID'])
+  ('keeps identifiers as source text without derived quantity bars (%s)', (header) => {
+    const lesson = [
+      '| 教材 | ' + header + ' |', '| --- | --- |',
+      '| 資料庫 | 2 |', '| 網路 | 4 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={lesson} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  });

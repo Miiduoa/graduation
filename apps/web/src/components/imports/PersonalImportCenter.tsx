@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { ConfirmModal } from '@/components/ui/Modal';
 import {
   createPersonalImportId,
   serializePersonalImportsCsv,
@@ -495,7 +496,6 @@ function ImportWorkspace({
   const reviewRows = useRef(new Map<string, HTMLElement>());
   const pdfInput = useRef<HTMLInputElement>(null);
   const review = useRef<HTMLElement>(null);
-  const undoKeep = useRef<HTMLButtonElement>(null);
   const keepAiDraft = useRef<HTMLButtonElement>(null);
   const setPreview = (url: string) => {
     if (previewUrl.current === url) return;
@@ -515,9 +515,6 @@ function ImportWorkspace({
     // Focus only after React commits both the recovered text and the enabled fieldset.
     if (!saving && !rows.length && !importDocument) originalText.current?.focus();
   }, [importDocument, paused, reading, rows.length, saving, sourceImage, text]);
-  useEffect(() => {
-    if (undoOpen) undoKeep.current?.focus();
-  }, [undoOpen]);
   useEffect(() => {
     if (pendingAi) keepAiDraft.current?.focus();
   }, [pendingAi]);
@@ -1295,7 +1292,11 @@ function ImportWorkspace({
       if (active.current) setSaving(false);
     }
   };
-  const mutate = async (action: () => Promise<unknown>, message: string) => {
+  const mutate = async (
+    action: () => Promise<unknown>,
+    message: string,
+    options: { propagateError?: boolean } = {},
+  ) => {
     if (writing.current) return;
     writing.current = true;
     setSaving(true);
@@ -1307,6 +1308,7 @@ function ImportWorkspace({
       }
     } catch (error) {
       if (active.current) setNotice(errorMessage(error));
+      if (options.propagateError) throw error;
     } finally {
       writing.current = false;
       if (active.current) setSaving(false);
@@ -1536,8 +1538,16 @@ function ImportWorkspace({
           >
             <span className={styles.sourceNumber}>02</span>
             <strong>AI 讀取截圖</strong>
-            <span>{cloudImageConsent && kind === 'timetable' ? '雲端視覺模型直接看原圖，依畫面位置辨識課表。' : '本機先讀取文字；也可勾選下方選項改用雲端看圖。'}</span>
-            <small>{cloudImageConsent && kind === 'timetable' ? '雲端看圖 · 逐筆核對' : '本機 OCR · 雲端文字整理'}</small>
+            <span>
+              {cloudImageConsent && kind === 'timetable'
+                ? '雲端視覺模型直接看原圖，依畫面位置辨識課表。'
+                : '本機先讀取文字；也可勾選下方選項改用雲端看圖。'}
+            </span>
+            <small>
+              {cloudImageConsent && kind === 'timetable'
+                ? '雲端看圖 · 逐筆核對'
+                : '本機 OCR · 雲端文字整理'}
+            </small>
           </button>
           <button
             type="button"
@@ -1558,7 +1568,8 @@ function ImportWorkspace({
               : '目前先由本機 OCR 讀取圖片，再以雲端整理文字。原圖不會上傳，送出文字前會遮罩可辨識個資；雲端無法使用時改用本機備援。'
             : aiAvailability.reason ||
               '目前瀏覽器無法使用裝置端 AI，可使用學校表格、檔案或一般圖片讀取。'}
-          {aiAvailability.available && ` 本機備援模型首次下載${aiAvailability.downloadLabel}，請留意網路流量與裝置儲存空間。`}
+          {aiAvailability.available &&
+            ` 本機備援模型首次下載${aiAvailability.downloadLabel}，請留意網路流量與裝置儲存空間。`}
         </p>
         <div className={styles.modelTools}>
           <button
@@ -1616,7 +1627,10 @@ function ImportWorkspace({
           </p>
         </details>
         {kind === 'timetable' && (
-          <label className={styles.note} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 12 }}>
+          <label
+            className={styles.note}
+            style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 12 }}
+          >
             <input
               type="checkbox"
               checked={cloudImageConsent}
@@ -1654,7 +1668,8 @@ function ImportWorkspace({
               requestAi({
                 input: { image: file },
                 source: { type: 'screenshot', name: file.name },
-                cloudImageConsent: kind === 'timetable' && !!nuni?.session?.context && cloudImageConsent,
+                cloudImageConsent:
+                  kind === 'timetable' && !!nuni?.session?.context && cloudImageConsent,
               });
             event.target.value = '';
           }}
@@ -1874,8 +1889,13 @@ function ImportWorkspace({
                   className="btn"
                   disabled={reading || saving || removingAiModel || !aiAvailability.available}
                   onClick={() =>
-                    sourceImage && requestAi({ input: { image: sourceImage }, source,
-                      cloudImageConsent: kind === 'timetable' && !!nuni?.session?.context && cloudImageConsent })
+                    sourceImage &&
+                    requestAi({
+                      input: { image: sourceImage },
+                      source,
+                      cloudImageConsent:
+                        kind === 'timetable' && !!nuni?.session?.context && cloudImageConsent,
+                    })
                   }
                 >
                   AI 重新讀取圖片
@@ -2684,56 +2704,39 @@ function ImportWorkspace({
             ))}
           </ul>
         )}
-        {undoOpen && lastBatch && (
-          <div className={styles.dialogMask}>
-            <div
-              className={styles.dialog}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="personal-import-undo-title"
-            >
-              <h3 id="personal-import-undo-title">{PERSONAL_IMPORT_UNDO_TITLE}</h3>
-              <p>
-                {personalImportUndoBody(
-                  ledger.records.filter((row) => row.batchId === lastBatch).length,
-                )}
-              </p>
-              <div className={styles.dialogActions}>
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  disabled={saving}
-                  onClick={() => {
+        {undoOpen && lastBatch && !paused && (
+          <ConfirmModal
+            isOpen
+            title={PERSONAL_IMPORT_UNDO_TITLE}
+            message={personalImportUndoBody(
+              ledger.records.filter((row) => row.batchId === lastBatch).length,
+            )}
+            variant="danger"
+            confirmText={PERSONAL_IMPORT_UNDO_CONFIRM}
+            cancelText={PERSONAL_IMPORT_UNDO_KEEP}
+            loading={saving}
+            onClose={() => setUndoOpen(false)}
+            onConfirm={() => {
+              if (!active.current || suspended.current || !lastBatch) return;
+              return mutate(
+                async () => {
+                  await undoPersonalImports(
+                    scope,
+                    lastBatch,
+                    () => active.current && !suspended.current,
+                  );
+                  if (active.current) {
+                    setLastBatch('');
                     setUndoOpen(false);
-                    void mutate(
-                      async () => {
-                        await undoPersonalImports(
-                          scope,
-                          lastBatch,
-                          () => active.current && !suspended.current,
-                        );
-                        if (active.current) setLastBatch('');
-                      },
-                      personalImportUndoneNotice(
-                        ledger.records.filter((row) => row.batchId === lastBatch).length,
-                      ),
-                    );
-                  }}
-                >
-                  {PERSONAL_IMPORT_UNDO_CONFIRM}
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  ref={undoKeep}
-                  disabled={saving}
-                  onClick={() => setUndoOpen(false)}
-                >
-                  {PERSONAL_IMPORT_UNDO_KEEP}
-                </button>
-              </div>
-            </div>
-          </div>
+                  }
+                },
+                personalImportUndoneNotice(
+                  ledger.records.filter((row) => row.batchId === lastBatch).length,
+                ),
+                { propagateError: true },
+              );
+            }}
+          />
         )}
         {editing && (
           <section className={styles.row} aria-label="編輯個人紀錄">

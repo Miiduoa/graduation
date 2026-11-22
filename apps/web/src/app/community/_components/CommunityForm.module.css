@@ -1,0 +1,149 @@
+.fields {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 16px;
+  min-width: 0;
+}
+
+.rating {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rating legend {
+  margin-bottom: 8px;
+  padding: 0;
+  color: var(--text);
+  font-size: var(--font-label-size, 0.875rem);
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+.stars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.star {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.star input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.star span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 10px);
+  color: var(--warning);
+  font-size: max(24px, var(--font-h2-size, 1.5rem));
+}
+
+.star input:checked + span {
+  background: var(--accent-soft);
+  border-color: var(--border-strong);
+}
+
+.star input:focus-visible + span {
+  outline: 3px solid var(--focus-ring, var(--brand));
+  outline-offset: 2px;
+}
+
+.fields:disabled .star {
+  cursor: not-allowed;
+}
+.fields:disabled .star span {
+  color: var(--muted);
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  color: var(--text);
+  font-size: var(--font-body-size, 0.9375rem);
+  line-height: 1.6;
+}
+
+.checkbox input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--brand);
+}
+
+.hint,
+.error {
+  margin: 8px 0 0;
+  font-size: var(--font-body-sm-size, 0.875rem);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.hint {
+  color: var(--muted);
+}
+.error {
+  color: var(--danger);
+}
+
+.empty {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+.empty h3,
+.empty p {
+  margin: 0;
+}
+.empty p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+@media (forced-colors: active) {
+  .star span {
+    color: CanvasText;
+  }
+  .star input:checked + span {
+    background: Canvas;
+    border-color: Highlight;
+  }
+  .star input:focus-visible + span {
+    outline-color: Highlight;
+  }
+  .error {
+    color: CanvasText;
+  }
+}

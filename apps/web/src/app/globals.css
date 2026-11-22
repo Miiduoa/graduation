@@ -16,7 +16,10 @@ textarea::placeholder {
   --on-brand: #ffffff;
   --page-width: 1264px;
   --mobile-nav-height: 72px;
-  --mobile-nav-offset: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
+  --mobile-nav-offset: var(
+    --mobile-nav-measured-offset,
+    calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px))
+  );
   --page-padding-inline: 48px;
   --page-padding-block: 46px;
   --page-title-size: clamp(25px, 3vw, 38px);

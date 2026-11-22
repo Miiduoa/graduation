@@ -128,11 +128,12 @@ async def clears(page):
 
 
 async def assert_native_tab_boundary(page, key, expected):
-    # Native dialog traversal may visit browser chrome at a document boundary.
+    # Native modal focus may pass through browser chrome and then the dialog
+    # element itself before reaching the first/last descendant control.
     # https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation
-    # Accept that transition only when the document lost focus and BODY is its
-    # active element. A second key must return to the exact dialog boundary.
-    for step in (1, 2):
+    # Require the exact expected endpoint within four key presses; never accept
+    # focus on an arbitrary page element or silently skip a lost modal state.
+    for step in (1, 2, 3, 4):
         await page.keyboard.press(key)
         state = await expected.evaluate("""expected => {
           const active = document.activeElement;
@@ -143,6 +144,7 @@ async def assert_native_tab_boundary(page, key, expected):
             activeName: active?.getAttribute('aria-label') || active?.textContent?.trim().slice(0, 80),
             insideDialog: Boolean(dialog?.contains(active)),
             expectedActive: active === expected,
+            dialogRootFocused: active === dialog,
             nativeModal: Boolean(dialog?.matches(':modal')),
           };
         }""")
@@ -151,8 +153,11 @@ async def assert_native_tab_boundary(page, key, expected):
         assert state["nativeModal"], f"Dialog stopped being modal during {key}: {state}"
         if state["documentFocused"] and state["expectedActive"] and state["insideDialog"]:
             return
-        assert step == 1 and not state["documentFocused"] and state["activeTag"] == "BODY", (
-            f"{key} did not reach the expected dialog control or an unfocused browser boundary: {state}"
+        browser_boundary = not state["documentFocused"] and state["activeTag"] == "BODY"
+        modal_root_boundary = (state["documentFocused"] and state["dialogRootFocused"]
+                               and state["insideDialog"] and state["activeTag"] == "DIALOG")
+        assert step < 4 and (browser_boundary or modal_root_boundary), (
+            f"{key} did not reach the expected dialog control through safe native boundaries: {state}"
         )
 
 

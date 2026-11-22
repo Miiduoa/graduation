@@ -1,0 +1,152 @@
+{
+  "repository": "Miiduoa/graduation",
+  "captured_at": "2026-11-22T10:08:34+08:00",
+  "base_main": "d31a3faa5a36dd12ce559be49aac75a92fca1bfc",
+  "previous_integration": "000fd11ca9736878e86dacc0a3727f547d25736e",
+  "branches": [
+    {
+      "branch": "feat/agent-washing-cancellation-cloud-20261117",
+      "sha": "3205c5a88bfe6f4f325a8a7b2b994cec637eea8a",
+      "pull_request": 703,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "feat/assistant-food-pickup-colloquial",
+      "sha": "f4a945702cfd2de73a0a3f2d8ccdd8d1f4b3db3f",
+      "pull_request": 734,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "feat/multi-school-batch-course-review-20261121",
+      "sha": "3e819208f99fd7c723f3fcad2f4c9af801aa1782",
+      "pull_request": 737,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "feat/nuni-flow-polish-20261121",
+      "sha": "a69efb2371025ded776489760e2e506034d6f4b0",
+      "pull_request": 735,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "feat/nuni-task-flow-20261121",
+      "sha": "4caa5fa0177a9f967acf658bec8a8d25e2c11100",
+      "pull_request": 739,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "feat/tronclass-native-submit-20261113",
+      "sha": "600a7c2f154bb068005ceb3cbab55b2e3469a715",
+      "pull_request": 616,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "feature/security-assignment-transfer-red-20261122",
+      "sha": "817b8b746048bb2cfca48af5ccf3bfe2a483ee32",
+      "pull_request": null,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "feature/security-group-admin-transfer-red-20261122",
+      "sha": "33e9706109a0ab987f2d8255ab71ac00d043400b",
+      "pull_request": null,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "feature/security-peer-review-owner-mismatch-red-20261121",
+      "sha": "ab069ac8a4ac3858b6c3c5c2267b705191eadbe5",
+      "pull_request": null,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "feature/security-peer-review-revocation-20261120",
+      "sha": "6d42b9dbb4995037cbdefb556f05f5b9758d4a9d",
+      "pull_request": null,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "feature/security-review-assignment-red-20261122",
+      "sha": "53b3fece25940350dbebe7a8e8613fc2b595607e",
+      "pull_request": null,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "feature/security-root-like-receipt-privacy-20261120",
+      "sha": "ad94b4f6a4018ff73077def6d1f0ec8716c400f9",
+      "pull_request": null,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "feature/security-root-post-emulator-20261120",
+      "sha": "a5d2ac48b7092e254728976f901fcb6f6d9d5cd9",
+      "pull_request": null,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "fix/campus-spatial-offscreen-webgl-start-20261119",
+      "sha": "f253cb924aab2925d577556eec38b14aac7469fd",
+      "pull_request": 722,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "fix/course-study-invisible-source-evidence-20261119",
+      "sha": "c39fa413ae55ab27005afdb392e85c799a20e7be",
+      "pull_request": 719,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "fix/course-study-pre-escaped-fixture-20261121",
+      "sha": "a2feb31b2b7e45a503d80c4a51193b3e1dbed7c8",
+      "pull_request": null,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "fix/mobile-agent-exact-homework-handoff-20261122",
+      "sha": "d20a82b2c291e84e2d6f96b3bf5aca71d780e415",
+      "pull_request": 741,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "fix/mobile-board-subscribe-pending-20261120",
+      "sha": "0759938b30860382073b33904255b6c125720d35",
+      "pull_request": 729,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "fix/mobile-creator-card-confirm-timeout-20261121",
+      "sha": "591a64d3a8010bc401204004dc1a882eeafe432d",
+      "pull_request": 740,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "fix/mobile-story-photo-retry-20261119",
+      "sha": "5be553e20c8cb704b2259e9f0b5f3fea6f94acb9",
+      "pull_request": null,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "fix/security-legacy-root-post-visibility-20261120",
+      "sha": "8f94c3670b97d98c6c5ed451626133e87a1a59ad",
+      "pull_request": null,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "integration/all-branches-20261121",
+      "sha": "000fd11ca9736878e86dacc0a3727f547d25736e",
+      "pull_request": 738,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "integration/campus-services-20261106",
+      "sha": "8e07b78a90c751cc616c761a19580f86a0e44775",
+      "pull_request": 515,
+      "included_as_ancestor": true
+    },
+    {
+      "branch": "main",
+      "sha": "d31a3faa5a36dd12ce559be49aac75a92fca1bfc",
+      "pull_request": null,
+      "included_as_ancestor": true
+    }
+  ]
+}

@@ -23,6 +23,19 @@ describe('mobile backup filename grapheme boundaries', () => {
     expect(courseStudyPracticeCheckpointFilename(title)).toBe(prefix + '-逐題練習.campus-practice.json');
   });
 
+  it('uses a readable stem for invisible-only source titles across TXT and both JSON backups', () => {
+    for (const invisibleTitle of ['\u200c', '\u200d\u200d', '\u0301', '\u2800\u200d', '\u200d.md']) {
+      expect(courseStudyBackupFilenameStem(invisibleTitle)).toBe('讀書白板');
+      expect(courseStudyNotesFilename(invisibleTitle)).toBe('讀書白板-學習筆記.txt');
+      expect(courseStudyProgressFilename(invisibleTitle)).toBe('讀書白板-閱讀進度.campus-study.json');
+      expect(courseStudyPracticeCheckpointFilename(invisibleTitle)).toBe('讀書白板-逐題練習.campus-practice.json');
+    }
+    // A joiner between visible characters is a meaningful part of a name.
+    expect(courseStudyBackupFilenameStem('👩‍💻.md')).toBe('👩‍💻');
+    expect(courseStudyBackupFilenameStem('می‌روم.md')).toBe('می‌روم');
+    expect(courseStudyBackupFilenameStem('資料庫.md')).toBe('資料庫');
+  });
+
   it('preserves a complete boundary cluster and the original 48-code-point cap', () => {
     const full = '課'.repeat(45) + '👩‍💻';
     expect(courseStudyBackupFilenameStem(full + '後續文字.md')).toBe(full);

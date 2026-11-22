@@ -113,6 +113,13 @@ const NON_RATIO_WEEKDAY_COLUMN =
 const NON_RATIO_QUARTER_POSITION_COLUMN =
   /^(?:(?:(?:會計|財政|財務|營運|學年|曆年)\s*)?(?:季度|季別|季次|第幾季|第幾季度|季序號|季度序號|季度編號|季度代碼)|(?:(?:fiscal|calendar|academic)\s+)?(?:quarter|qtr)(?:\s+(?:number|no\.?|index|code|id))?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 
+// A source line, spreadsheet row or exercise step number marks a position
+// in a document or procedure, not a quantity with a meaningful ratio zero.
+// Do not imply that line 4 is twice line 2. Counts of lines/rows/steps
+// remain eligible for a source-grounded comparison.
+const NON_RATIO_SOURCE_POSITION_COLUMN =
+  /^(?:(?:(?:教材|程式碼|原始碼|來源|資料|表格|檔案)?(?:行號|列號|行序號|列序號))|(?:(?:操作|解題|實驗|作業)?(?:步驟|步序)(?:號|次|編號|序號)?)|(?:(?:(?:source|code|text|file|table|data)\s+)?(?:line|row|step|record)\s+(?:number|no\.?|index|id|#))|(?:(?:source|code)\s+line))(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+
 // Clock readings and geographic coordinates have conventional origins.
 // Even positive bare figures (8 vs 12 o'clock, 24 vs 25 degrees east)
 // are not ratios; retain the original table without a zero-based chart.
@@ -187,6 +194,7 @@ function isNonRatioColumn(header: string): boolean {
       AMBIGUOUS_TIME_COLUMN.test(column) ||
       NON_RATIO_WEEKDAY_COLUMN.test(column) ||
       NON_RATIO_QUARTER_POSITION_COLUMN.test(column) ||
+      NON_RATIO_SOURCE_POSITION_COLUMN.test(column) ||
       NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
       DECIBEL_UNIT_COLUMN.test(column) ||
       NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
@@ -207,7 +215,11 @@ function isNonRatioColumn(header: string): boolean {
         !RANK_COUNT_COLUMN.test(column))) return true;
   if (/(?:^|[^0-9０-９])(?:[0０]\s*(?:[/／]|\bor\b)\s*[1１]|[1１]\s*(?:[/／]|\bor\b)\s*[0０])(?:$|[^0-9０-９])/iu.test(column)) return true;
   const unqualifiedColumn = column.replace(/(?:\s*[（(][^）)]*[）)])+$/u, '').trim();
-  if (/(?:^|\s)(?:id|uuid|code|no\.?|#)$/iu.test(unqualifiedColumn)) return true;
+  // "Lines of Code" is a count, not an identifying code. Keep
+  // "Course Code", "Verification Code", and standalone "Code" excluded.
+  // Recognize only explicit count phrases, never arbitrary headers ending in Code.
+  if (/(?:^|\s)(?:id|uuid|code|no\.?|#)$/iu.test(unqualifiedColumn) &&
+      !/^(?:(?:number|count)\s+of\s+)?lines?\s+of\s+code$/iu.test(unqualifiedColumn)) return true;
   // A question number identifies an exercise; its magnitude is not a measured result.
   // Keep the exact table, but never turn "第 2 題" vs "第 4 題" into a 2× bar.
   if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|題號|題次|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
@@ -294,8 +306,12 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   // punctuation throughout an explicitly bounded percentage column.
   // Convert only these known glyphs for the meter's quantity; the original
   // source, export, citation and accessible reading must remain untouched.
-  const asciiPercent = /^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[%％]$/u;
-  const fullwidthPercent = /^(?:０|[１-９][０-９]?|１００)(?:．[０-９]{1,2})?[%％]$/u;
+  // Course handouts may place one regular or no-break space before the %
+  // sign (e.g. "75 %" or "７５ ％"). Preserve every original character in
+  // source cells, screen-reader labels, clipboard text and TXT exports.
+  // Do not accept tabs, multiple spaces, mixed digit scripts or missing %.
+  const asciiPercent = /^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[ \u00a0\u202f]?[%％]$/u;
+  const fullwidthPercent = /^(?:０|[１-９][０-９]?|１００)(?:．[０-９]{1,2})?[ \u00a0\u202f]?[%％]$/u;
   let digitFormat: 'ascii' | 'fullwidth' | null = null;
   for (const [rowIndex, [label, original]] of table.rows.entries()) {
     if (!hasUnambiguousChartLabel(label ?? '') || !original) return null;

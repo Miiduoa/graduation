@@ -447,6 +447,10 @@ function readCachedExtras(value: unknown, nowMs: number, allowedCourseIds: Set<n
       !Number.isFinite(fetchedAtMs) || !Number.isFinite(effectiveExpiresAtMs) ||
       effectiveExpiresAtMs <= nowMs ||
       !Array.isArray(row.announcements) || !Array.isArray(row.materials) || !validCourseErrors(row.errors) ||
+      // The outer extras key does not prove the nested rows still belong to
+      // this course. Reject the entire entry, then refetch the requested course.
+      row.announcements.some(item => record(item).courseId !== courseId) ||
+      row.materials.some(item => record(item).courseId !== courseId) ||
       // A legacy cache may contain an auth-rejected per-feed response. Treat
       // it as stale rather than letting its partial contents mask expired login.
       row.errors.some(error => error.courseId !== courseId || error.status === 401)) {
@@ -477,6 +481,18 @@ function publicSnapshot(value: unknown, uid: string, nowMs: number): LmsReadonly
     !Array.isArray(row.courses) || !Array.isArray(row.contentsLoadedFor) ||
     !Array.isArray(row.homework) || !Array.isArray(row.announcements) || !Array.isArray(row.materials) ||
     !validCourseErrors(row.courseErrors)) return null;
+  // A matching session version is not proof that every row in an older
+  // snapshot belongs to one of the courses in that snapshot. Never display
+  // cached homework or course errors for a foreign course.
+  const courseIds = new Set<number>();
+  for (const item of row.courses) {
+    const id = positiveId(record(item).id);
+    if (!id || courseIds.has(id)) return null;
+    courseIds.add(id);
+  }
+  if (row.homework.some(item => !courseIds.has(positiveId(record(item).courseId) ?? 0)) ||
+    row.contentsLoadedFor.some(id => !courseIds.has(positiveId(id) ?? 0)) ||
+    (row.courseErrors as LmsCourseError[]).some(error => !courseIds.has(error.courseId))) return null;
   // Legacy partial snapshots can still have an outer ten-minute TTL. Clamp
   // them by fetchedAt as well, without trusting the stored expiry alone.
   if (Date.parse(row.fetchedAt as string) + baseSnapshotRetryMs(

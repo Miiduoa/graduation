@@ -5,7 +5,15 @@ on:
     branches: [main, develop]
     paths:
       - 'apps/web/src/components/AppHeader*'
+      - 'apps/web/src/components/AppFrame*'
+      - 'apps/web/src/components/SiteShell*'
+      - 'apps/web/src/components/OfflineBanner*'
+      - 'apps/web/src/components/UpdateBanner*'
+      - 'apps/web/src/components/PWAInstallBanner*'
+      - 'apps/web/src/components/SystemNotice*'
       - 'apps/web/src/components/CampusServiceMenu*'
+      - 'apps/web/src/components/ServiceDirectory*'
+      - 'apps/web/src/components/TodayCampusEntry*'
       - 'apps/web/src/components/SchoolSelector*'
       - 'apps/web/src/components/QuickCampusEntry*'
       - 'apps/web/src/components/VoiceDictationButton*'
@@ -17,10 +25,24 @@ on:
       - 'apps/web/src/components/academic/**'
       - 'apps/web/src/components/today/**'
       - 'apps/web/src/components/ui/**'
+      - 'apps/web/src/features/nuni/AssignmentFileFields*'
+      - 'apps/web/src/features/nuni/CourseLearning.module.css'
+      - 'apps/web/src/features/nuni/NuniApp.module.css'
+      - 'apps/web/src/features/nuni/PhotoPdfEditor*'
+      - 'apps/web/src/features/nuni/photoPdf*'
+      - 'apps/web/src/app/community/_components/StudyBuddyTab*'
+      - 'apps/web/src/app/community/_components/CommunityForm*'
+      - 'apps/web/src/app/community/_components/useCommunityFormSession*'
+      - 'apps/web/src/lib/community/firestore.ts'
+      - 'apps/web/src/app/page.tsx'
+      - 'packages/shared/src/assignmentFiles.ts'
       - 'apps/web/src/app/globals.css'
       - 'apps/web/src/app/home.module.css'
       - 'apps/web/src/lib/campusNavigation*'
       - 'apps/web/src/lib/primaryNavigation*'
+      - 'apps/web/src/lib/currentTabNavigation*'
+      - 'apps/web/src/lib/menuNavigationReturn*'
+      - 'apps/web/src/lib/mobileNavigationInset*'
       - 'apps/web/src/lib/campusServices*'
       - 'scripts/qa/interface-design/**'
       - 'scripts/qa/browser/**'
@@ -73,6 +95,9 @@ jobs:
         # Keep the existing interface suite headless. A separate headed browser
         # measures real notification focus changes on this display.
         run: xvfb-run -a -s "-screen 0 1920x1440x24" python scripts/qa/interface-design/check.py
+      - name: Verify teacher tasks, attachment feedback and real community forms
+        if: success() || failure()
+        run: python scripts/qa/interface-design/task_flow.py
       - name: Upload rendered evidence and source hashes
         if: always()
         uses: actions/upload-artifact@v7

@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from playwright.async_api import async_playwright, expect
 from quick_search import check_quick_search
 from feedback import check_action_feedback
+from navigation import check_navigation_geometry, check_service_navigation, check_today_reading_width
 
 OUTPUT = Path(__file__).resolve().parents[3] / 'artifacts' / 'interface-design'
 SCENARIOS = [
@@ -20,12 +21,20 @@ SCENARIOS = [
     {'name': 'compact-dark-site-motion', 'width': 320, 'height': 740, 'theme': 'dark', 'role': 'operator', 'text': '200', 'motion': 'reduce'},
     {'name': 'guest-light', 'width': 390, 'height': 844, 'theme': 'light', 'role': 'guest'},
     {'name': 'large-preference', 'width': 390, 'height': 844, 'theme': 'light', 'role': 'student', 'font': 'large'},
+    {'name': 'compact-large-200', 'width': 320, 'height': 740, 'theme': 'dark', 'role': 'student', 'font': 'large', 'text': '200', 'motion': 'reduce'},
 ]
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *_args):
         pass
+
+    def do_GET(self):
+        # Synthetic route data is served by the same app fixture; assets keep
+        # their normal paths, including when a real new tab opens a deep link.
+        if not Path(self.path.split('?', 1)[0]).suffix:
+            self.path = '/index.html'
+        super().do_GET()
 
 
 async def check_notification_activity(page, report):
@@ -203,6 +212,9 @@ async def check_dialogs_and_fields(page, config, report, capture, suffix=''):
         target = dialog.locator(selector)
         await expect(target).to_be_focused()
         if selector == '#fixture-note':
+            # Read after the product's single-frame keyboard reveal has settled.
+            # The test never scrolls before checking the two-line reading area.
+            await page.evaluate('() => new Promise(resolve => requestAnimationFrame(resolve))')
             visibility = await target.evaluate('''node => {
               const field = node.getBoundingClientRect();
               const dialog = node.closest('dialog');
@@ -520,6 +532,8 @@ async def scenario(browser, origin, config, report):
             # Font provenance is diagnostic; the existing interaction gates remain unchanged.
             report['fontEvidence'] = {'error': repr(error)}
         await layout('today')
+        await check_navigation_geometry(page, config, report)
+        await check_today_reading_width(page, config, report)
         await capture('today')
         if config['role'] == 'guest':
             await expect(page.get_by_role('link', name='匯入我的課表', exact=True)).to_be_visible()
@@ -613,6 +627,7 @@ async def scenario(browser, origin, config, report):
         await layout('academic')
         await current.focus()
         await capture('academic', full_page=False)
+        await check_navigation_geometry(page, config, report)
         report['checks'].append('Current academic section and keyboard focus are visible; local resize adjustment preserves page scroll and focus')
 
         trigger = page.get_by_role('button', name='顯示完成通知', exact=True)
@@ -679,6 +694,7 @@ async def scenario(browser, origin, config, report):
         await check_section('forms', lambda: check_dialogs_and_fields(page, config, report, capture))
         await check_section('action-feedback', lambda: check_action_feedback(page, config, report, capture))
         await check_section('quick-search', lambda: check_quick_search(page, config, report, capture))
+        await check_section('service-navigation', lambda: check_service_navigation(page, config, report, capture))
         if config['name'] in ('desktop-light', 'compact-dark-site-motion'):
             await check_section('short-services', lambda: check_short_service_menu(page, report, capture))
             await check_section('short-navigation', lambda: check_short_navigation_panels(page, report, capture))

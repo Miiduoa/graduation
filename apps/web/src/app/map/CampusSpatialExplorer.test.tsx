@@ -71,6 +71,375 @@ async function open() {
   return screen.getByRole('dialog', { name: '校園空間導覽' });
 }
 
+it('disambiguates same-name campus markers before opening walking or flat-map navigation', async () => {
+  const duplicatePlaces: MapLocation[] = [
+    { id: 'same-a', name: '教學大樓', category: '教學', description: '', lat: 24.225, lng: 120.58 },
+    { id: 'same-b', name: '教學大樓', category: '行政', description: '', lat: 24.227, lng: 120.581 },
+    { id: 'same-c', name: '教學大樓', category: '教學', description: '', lat: 24.229, lng: 120.582 },
+    { id: 'unique', name: '圖書館', category: '學習', description: '', lat: 24.226, lng: 120.583 },
+  ];
+  const onSelect = vi.fn();
+  render(<CampusSpatialExplorer school="other-school" locations={duplicatePlaces}
+    selected={null} onSelect={onSelect} />);
+  const dialog = await open();
+  const picker = within(dialog).getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement;
+  const options = Array.from(picker.options).filter((option) => option.value);
+  expect(options.map((option) => option.text)).toEqual([
+    '教學大樓（教學 · 地圖座標 24.225, 120.58 · 清單第 1 項）',
+    '教學大樓（行政）',
+    '教學大樓（教學 · 地圖座標 24.229, 120.582 · 清單第 3 項）',
+    '圖書館',
+  ]);
+  expect(new Set(options.map((option) => option.text)).size).toBe(options.length);
+
+  fireEvent.change(picker, { target: { value: 'same-c' } });
+  const duplicateNotice = within(dialog).getByText(/同名地點：目前選擇/);
+  expect(duplicateNotice.getAttribute('role')).toBe('status');
+  expect(duplicateNotice.getAttribute('aria-live')).toBe('polite');
+  expect(duplicateNotice.getAttribute('aria-atomic')).toBe('true');
+  expect(duplicateNotice.textContent).toContain('24.229, 120.582，清單第 3 項');
+  // A 3D marker click leaves the same visible heading. The live status must
+  // change to the newly selected marker so a reader can hear the distinction.
+  const sceneSelect = scene.create.mock.calls[0][2].onSelect;
+  act(() => sceneSelect('same-a'));
+  expect(within(dialog).getByRole('heading', { name: '教學大樓' })).toBeTruthy();
+  expect(duplicateNotice.textContent).toContain('24.225, 120.58，清單第 1 項');
+  expect(new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!)
+    .searchParams.get('destination')).toBe('24.225,120.58');
+  act(() => sceneSelect('same-c'));
+  expect(duplicateNotice.textContent).toContain('24.229, 120.582，清單第 3 項');
+  expect(new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!)
+    .searchParams.get('destination')).toBe('24.229,120.582');
+  const appleDirections = new URL(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' }).getAttribute('href')!);
+  expect(appleDirections.origin).toBe('https://maps.apple.com');
+  expect(appleDirections.searchParams.get('daddr')).toBe('24.229,120.582');
+  expect(appleDirections.searchParams.get('dirflg')).toBe('w');
+  expect(appleDirections.searchParams.has('saddr')).toBe(false);
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  // Before taking a step, assistive technology announces which duplicate POI
+  // that button will select. Unambiguous adjacent places keep short labels.
+  expect(within(dialog).getByRole('button', { name: '上一個地點：教學大樓（行政）' })).toBeTruthy();
+  expect(within(dialog).getByRole('button', { name: '下一個地點' })).toBeTruthy();
+  // The range control is a second way to choose destinations. Its spoken
+  // value must disambiguate duplicate POIs just like the select menu.
+  const progress = within(dialog).getByRole('slider', { name: /導覽進度/ }) as HTMLInputElement;
+  expect(progress.getAttribute('aria-valuetext')).toBe(
+    '第 3 個地點，共 4 個：教學大樓（教學 · 地圖座標 24.229, 120.582 · 清單第 3 項）',
+  );
+  fireEvent.change(progress, { target: { value: '0' } });
+  expect(picker.value).toBe('same-a');
+  expect(within(dialog).getByRole('button', { name: '下一個地點：教學大樓（行政）' })).toBeTruthy();
+  expect(progress.getAttribute('aria-valuetext')).toBe(
+    '第 1 個地點，共 4 個：教學大樓（教學 · 地圖座標 24.225, 120.58 · 清單第 1 項）',
+  );
+  fireEvent.change(progress, { target: { value: '3' } });
+  expect(picker.value).toBe('unique');
+  expect(progress.getAttribute('aria-valuetext')).toBe('第 4 個地點，共 4 個：圖書館');
+  const previous = within(dialog).getByRole('button', {
+    name: '上一個地點：教學大樓（教學 · 地圖座標 24.229, 120.582 · 清單第 3 項）',
+  });
+  fireEvent.click(previous);
+  expect(picker.value).toBe('same-c');
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole('button', { name: '在平面地圖查看' }));
+  expect(onSelect).toHaveBeenCalledWith(duplicatePlaces[2]);
+});
+
+it('reveals and copies the original POI marker coordinate without claiming an entrance or stale selection', async () => {
+  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  let finishFirstCopy: (() => void) | undefined;
+  const writeText = vi.fn()
+    .mockImplementationOnce(() => new Promise<void>((resolve) => { finishFirstCopy = resolve; }))
+    .mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const picker = within(dialog).getByRole('combobox', { name: '想去哪裡' });
+    const copyButton = within(dialog).getByRole('button', { name: '複製地圖標記座標' });
+
+    expect(within(dialog).getByText('地圖標記座標：24.226, 120.58（非建築入口）')).toBeTruthy();
+    expect(copyButton.getAttribute('aria-describedby')).toBeTruthy();
+    expect(writeText).not.toHaveBeenCalled();
+    fireEvent.click(copyButton);
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('24.226,120.58');
+
+    // Clipboard permission may remain unresolved while the student switches POIs.
+    // The old operation must never announce success for a newly selected marker.
+    fireEvent.change(picker, { target: { value: 'dorm' } });
+    expect(within(dialog).getByText('地圖標記座標：24.228, 120.582（非建築入口）')).toBeTruthy();
+    await act(async () => { finishFirstCopy?.(); });
+    expect(within(dialog).queryByText('已複製目前地點標記座標。')).toBeNull();
+
+    fireEvent.click(copyButton);
+    expect(writeText).toHaveBeenLastCalledWith('24.228,120.582');
+    await waitFor(() => expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy());
+    const google = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+    const apple = new URL(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' }).getAttribute('href')!);
+    expect(google.searchParams.get('destination')).toBe('24.228,120.582');
+    expect(apple.searchParams.get('daddr')).toBe('24.228,120.582');
+  } finally {
+    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
+
+it('does not accept an old clipboard result when the student returns to the original POI', async () => {
+  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  let resolveOldCopy: (() => void) | undefined;
+  const writeText = vi.fn()
+    .mockImplementationOnce(() => new Promise<void>((resolve) => { resolveOldCopy = resolve; }))
+    .mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const picker = within(dialog).getByRole('combobox', { name: '想去哪裡' });
+    const copy = within(dialog).getByRole('button', { name: '複製地圖標記座標' });
+
+    fireEvent.click(copy);
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('24.226,120.58');
+    fireEvent.change(picker, { target: { value: 'dorm' } });
+    fireEvent.change(picker, { target: { value: 'library' } });
+    expect(within(dialog).getByText('地圖標記座標：24.226, 120.58（非建築入口）')).toBeTruthy();
+
+    // A -> B -> A has the same final identity as the first request.
+    // The earlier permission result must not be reported as the latest copy.
+    await act(async () => { resolveOldCopy?.(); });
+    expect(within(dialog).queryByText('已複製目前地點標記座標。')).toBeNull();
+
+    fireEvent.click(copy);
+    await waitFor(() => expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy());
+    expect(writeText).toHaveBeenLastCalledWith('24.226,120.58');
+  } finally {
+    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
+
+it('does not let an older clipboard rejection overwrite a newer successful copy', async () => {
+  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  let rejectOldCopy: ((reason?: Error) => void) | undefined;
+  const writeText = vi.fn()
+    .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectOldCopy = reject; }))
+    .mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const copy = within(dialog).getByRole('button', { name: '複製地圖標記座標' });
+
+    fireEvent.click(copy);
+    fireEvent.click(copy);
+    expect(writeText).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy());
+
+    await act(async () => { rejectOldCopy?.(new Error('old clipboard permission denied')); });
+    expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy();
+    expect(within(dialog).queryByText(/無法自動複製/)).toBeNull();
+  } finally {
+    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
+
+it('keeps verified marker coordinates readable when a WebView has no Clipboard API', async () => {
+  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(within(dialog).getByText('地圖標記座標：24.226, 120.58（非建築入口）')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '複製地圖標記座標' }));
+    await waitFor(() => expect(within(dialog).getByText('無法自動複製，請手動選取上方的地圖標記座標。')).toBeTruthy());
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
+
+it('rejects non-finite host DOMRect coordinates before first WebGL allocation and during scene restore', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  const validRect = {
+    x: 12, y: 16, left: 12, top: 16, right: 312, bottom: 176,
+    width: 300, height: 160, toJSON: () => ({}),
+  } as DOMRect;
+  let currentRect: DOMRect = { ...validRect, left: Number.NaN };
+  const originalRect = HTMLElement.prototype.getBoundingClientRect;
+  const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('aria-label') === '校園地點空間圖'
+        ? currentRect : originalRect.call(this);
+    });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    act(() => intersection?.([{
+      isIntersecting: true, target: graphics, time: 1,
+      intersectionRect: { width: 280, height: 160 } as DOMRect,
+      boundingClientRect: validRect, rootBounds: validRect, intersectionRatio: 1,
+    } satisfies IntersectionObserverEntry], {} as IntersectionObserver));
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+
+    // This is a fresh, measurable host viewport, not a second observer permit.
+    currentRect = validRect;
+    fireEvent(window, new Event('resize'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    currentRect = { ...validRect, bottom: Number.POSITIVE_INFINITY };
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    currentRect = validRect;
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+it('blocks no-IntersectionObserver WebView when host DOMRect dimensions are non-finite', async () => {
+  vi.stubGlobal('IntersectionObserver', undefined);
+  const validRect = {
+    x: 12, y: 16, left: 12, top: 16, right: 312, bottom: 176,
+    width: 300, height: 160, toJSON: () => ({}),
+  } as DOMRect;
+  let currentRect: DOMRect = { ...validRect, width: Number.POSITIVE_INFINITY };
+  const originalRect = HTMLElement.prototype.getBoundingClientRect;
+  const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('aria-label') === '校園地點空間圖'
+        ? currentRect : originalRect.call(this);
+    });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    expect(scene.create).not.toHaveBeenCalled();
+
+    currentRect = validRect;
+    fireEvent(window, new Event('scroll'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    currentRect = { ...validRect, right: Number.NEGATIVE_INFINITY };
+    fireEvent(window, new Event('scroll'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    currentRect = validRect;
+    fireEvent(window, new Event('scroll'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+
+it('defers legacy WebView GPU for invalid layout viewport then pauses and resumes the same scene', async () => {
+  vi.stubGlobal('IntersectionObserver', undefined);
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const validRect = {
+    x: 12, y: 16, left: 12, top: 16, right: 312, bottom: 176,
+    width: 300, height: 160, toJSON: () => ({}),
+  } as DOMRect;
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('aria-label') === '校園地點空間圖' ? validRect : original.call(this);
+    });
+  try {
+    vi.stubGlobal('innerWidth', Number.NaN);
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    expect(scene.create).not.toHaveBeenCalled();
+
+    vi.stubGlobal('innerWidth', width);
+    fireEvent(window, new Event('scroll'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    vi.stubGlobal('innerHeight', Number.POSITIVE_INFINITY);
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    vi.stubGlobal('innerHeight', height);
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+it('requires restored layout viewport after positive observer before allocating WebGL', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const validRect = {
+    x: 12, y: 16, left: 12, top: 16, right: 312, bottom: 176,
+    width: 300, height: 160, toJSON: () => ({}),
+  } as DOMRect;
+  vi.stubGlobal('innerWidth', Number.POSITIVE_INFINITY);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(validRect);
+  try {
+    act(() => intersection?.([{
+      isIntersecting: true, target: graphics, time: 100,
+      intersectionRect: validRect, boundingClientRect: validRect,
+      rootBounds: validRect, intersectionRatio: 1,
+    } satisfies IntersectionObserverEntry], {} as IntersectionObserver));
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+
+    vi.stubGlobal('innerWidth', width);
+    fireEvent(window, new Event('resize'));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    vi.stubGlobal('innerHeight', Number.NaN);
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    vi.stubGlobal('innerHeight', height);
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('refuses contradictory host DOMRect bounds until WebView layout recovers without rebuilding WebGL', async () => {
   // A mobile WebView can expose positive dimensions with collapsed edges
   // while keyboard, zoom or bfcache layout is being restored.
@@ -92,11 +461,13 @@ it('refuses contradictory host DOMRect bounds until WebView layout recovers with
     ...validRect, right: validRect.left,
   });
   try {
+    // The legacy viewport shim omits DOMRect coordinates, but the observer
+    // entry itself must satisfy the complete browser type contract.
     act(() => intersection?.([{
       isIntersecting: true, target: graphics, time: 1,
       intersectionRect: { ...validRect, width: 280, right: 292 },
       boundingClientRect: validRect, intersectionRatio: 280 / 300, rootBounds: null,
-    }], {} as IntersectionObserver));
+    } satisfies IntersectionObserverEntry], {} as IntersectionObserver));
     expect(scene.create).not.toHaveBeenCalled();
     expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
 
@@ -2055,10 +2426,71 @@ it('requires a fresh choice when the selected location disappears instead of usi
   view.rerender(<CampusSpatialExplorer {...props} locations={[replacement]} selected={null} />);
   expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
   expect(within(dialog).queryByRole('heading', { name: '本校宿舍' })).toBeNull();
+  const missingGuidance = within(dialog).getByText(/先前選擇的地點已變更或不在目前地圖範圍/);
+  expect(missingGuidance.getAttribute('role')).toBe('status');
+  expect(missingGuidance.getAttribute('aria-live')).toBe('polite');
   expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
   expect(within(dialog).getByRole('button', { name: '看全部地點' }).getAttribute('aria-pressed')).toBe('true');
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null }));
+});
+
+it('requires a fresh choice when the source reuses an inherited POI ID at a different destination', async () => {
+  const onSelect = vi.fn();
+  const props = { school: 'other-school', onSelect };
+  const view = render(<CampusSpatialExplorer {...props} locations={places} selected={places[0]} />);
+  const dialog = await open();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+  const replacement = { ...places[0], lat: places[0].lat + 0.002, name: '新圖書館' };
+  view.rerender(<CampusSpatialExplorer {...props} locations={[replacement, places[1]]} selected={places[0]} />);
+  // The stale destination must disappear synchronously from the accessible
+  // controls. A changed model intentionally disposes the previous WebGL
+  // scene and asynchronously imports/creates the replacement scene, so its
+  // setView() call is not guaranteed during the same React render tick.
+  expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect(within(dialog).queryByRole('link', { name: '開啟 Apple 地圖步行導航' })).toBeNull();
+  const changedGuidance = within(dialog).getByText(/先前選擇的地點已變更或不在目前地圖範圍/);
+  expect(changedGuidance.getAttribute('role')).toBe('status');
+  expect(changedGuidance.getAttribute('aria-atomic')).toBe('true');
+  expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect(scene.dispose).toHaveBeenCalledTimes(1);
+  expect(onSelect).not.toHaveBeenCalled();
+  await waitFor(() => {
+    expect(scene.create).toHaveBeenCalledTimes(2);
+    expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null }));
+  });
+
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: replacement.id } });
+  expect(within(dialog).queryByText(/先前選擇的地點已變更或不在目前地圖範圍/)).toBeNull();
+  const directions = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  expect(directions.searchParams.get('destination')).toBe(`${replacement.lat},${replacement.lng}`);
+  const updatedApple = new URL(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' }).getAttribute('href')!);
+  expect(updatedApple.searchParams.get('daddr')).toBe(`${replacement.lat},${replacement.lng}`);
+  expect(updatedApple.searchParams.get('dirflg')).toBe('w');
+  fireEvent.click(within(dialog).getByRole('button', { name: '在平面地圖查看' }));
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith(replacement);
+});
+
+it('revokes a deliberate 3D choice if its ID is reused at a changed coordinate, even with the same name', async () => {
+  const onSelect = vi.fn();
+  const props = { school: 'other-school', selected: null, onSelect };
+  const view = render(<CampusSpatialExplorer {...props} locations={places} />);
+  const dialog = await open();
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'dorm' } });
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+  const movedDorm = { ...places[1], lng: places[1].lng + 0.003 };
+  view.rerender(<CampusSpatialExplorer {...props} locations={[places[0], movedDorm]} />);
+  expect(within(dialog).queryByText(/先前選擇的地點已變更或不在目前地圖範圍/)).toBeTruthy();
+  expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect(onSelect).not.toHaveBeenCalled();
+
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'dorm' } });
+  const directions = new URL(within(dialog).getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  expect(directions.searchParams.get('destination')).toBe(`${movedDorm.lat},${movedDorm.lng}`);
+  expect(within(dialog).getByRole('heading', { name: movedDorm.name })).toBeTruthy();
 });
 
 it('opens a scoped building preview with one dialog and releases the campus graphics', async () => {

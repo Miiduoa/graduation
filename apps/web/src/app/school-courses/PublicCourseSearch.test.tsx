@@ -770,6 +770,34 @@ it('prepares both meetings for the current owner and opens the review section wi
   expect(readPersonalImports(importContext.scope)).toEqual([]);
 });
 
+it.each([
+  { schoolId: 'ncnu' as const, schoolName: '國立暨南國際大學',
+    url: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall' },
+  { schoolId: 'nthu' as const, schoolName: '國立清華大學',
+    url: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json' },
+])('preserves the verified $schoolId catalog source, actual term and fetch time in the draft', async ({ schoolId, schoolName, url }) => {
+  importContext.scope.schoolId = schoolId;
+  await chooseCourse(schoolId);
+  const draft = readPersonalImportDraft(importContext.scope);
+  expect(draft?.source.name).toBe(
+    `${schoolName}｜115學年度第1學期公開開課資料｜來源：${url}｜資料擷取：2026-11-06 16:00（台灣時間；非校方更新時間）`,
+  );
+  expect(draft?.rows.length).toBe(2);
+  expect(draft?.rows.every(row => row.source.name === draft.source.name)).toBe(true);
+  expect(readPersonalImports(importContext.scope)).toEqual([]);
+});
+
+it('marks a missing public catalog retrieval time as unknown, never as a school update', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt: undefined })));
+  render(<PublicCourseSearch {...props} />);
+  submit('005076');
+  fireEvent.click(await screen.findByRole('button', { name: '帶入課表核對' }));
+  const draft = readPersonalImportDraft(importContext.scope);
+  expect(draft?.source.name).toContain('115學年度第1學期公開開課資料');
+  expect(draft?.source.name).toContain('資料擷取：時間未提供');
+  expect(draft?.source.name).not.toContain('本學期');
+});
+
 it.each((['ncnu', 'nthu'] as const).flatMap((schoolId) =>
   ['full', 'partial', 'corrupt', 'wrong-school', 'unconfirmed', 'storage-error'].map((reason) => ({ schoolId, reason })),
 ))('preserves existing $schoolId work and offers manual copy when $reason', async ({ schoolId, reason }) => {
@@ -842,7 +870,9 @@ it('keeps each NTHU meeting paired with its room and prepares the draft for the 
   fireEvent.click(screen.getByRole('button', { name: '帶入課表核對' }));
   expect(push).toHaveBeenCalledWith('/import?kind=timetable&campus=nthu#import-review');
   const draft = readPersonalImportDraft(importContext.scope);
-  expect(draft?.source.name).toBe('國立清華大學本學期開設課程');
+  expect(draft?.source.name).toBe(
+    '國立清華大學｜115學年度第1學期公開開課資料｜來源：https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json｜資料擷取：2026-11-06 16:00（台灣時間；非校方更新時間）',
+  );
   expect(draft?.rows.map(row => [row.courseCode, row.className, row.dayOfWeek, row.location])).toEqual([
     ['11510AES 520300', '00', 1, 'BMES醫環618'], ['11510AES 520300', '00', 5, 'BMES醫環501'],
   ]);
@@ -925,6 +955,8 @@ it('selects two public courses and creates one scoped review draft with every me
   const draft = readPersonalImportDraft(importContext.scope);
   expect(draft?.year).toBe('115');
   expect(draft?.semester).toBe('1');
+  expect(draft?.source.name).toContain('來源：https://ccweb6.ncnu.edu.tw/');
+  expect(draft?.source.name).toContain('資料擷取：2026-11-06 16:00');
   expect(draft?.rows.map(row => row.dayOfWeek)).toEqual([5, 3, 4]);
   expect(draft?.rows.map(row => row.courseCode)).toEqual(['005076', '130021', '130021']);
   expect(readPersonalImports(importContext.scope)).toEqual([]);
@@ -944,6 +976,32 @@ it('does not partially import mixed-semester or duplicate public listings', asyn
   expect(screen.getByRole('alert').textContent).toContain('不同學期');
   expect(readPersonalImportDraft(importContext.scope)).toBeNull();
   expect(push).not.toHaveBeenCalled();
+});
+
+it('recovers a rejected mixed-term batch with one clear action and no partial draft', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([
+    course, { ...course, code: '130021', section: 'b', semester: '1152', title: '另一學期' },
+  ])));
+  render(<PublicCourseSearch {...props} />);
+  submit('實習');
+  await screen.findByRole('heading', { name: '另一學期' });
+  const checks = screen.getAllByRole('checkbox', { name: /選入批次核對/ }) as HTMLInputElement[];
+  const clear = screen.getByRole('button', { name: '清除已選課程' }) as HTMLButtonElement;
+  expect(clear.disabled).toBe(true);
+  checks.forEach(check => fireEvent.click(check));
+  fireEvent.click(screen.getByRole('button', { name: '將選取的課程一起帶入核對' }));
+  expect(screen.getByRole('alert').textContent).toContain('不同學期');
+  expect(clear.disabled).toBe(false);
+
+  fireEvent.click(clear);
+  expect(checks.every(check => !check.checked)).toBe(true);
+  expect(screen.getByRole('status', { name: '選取課程' }).textContent).toContain('已選 0 門課');
+  expect(clear.disabled).toBe(true);
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+  expect(push).not.toHaveBeenCalled();
+  fireEvent.click(checks[0]);
+  expect(clear.disabled).toBe(false);
 });
 
 it('protects an existing draft, and clears batch selections when a search changes', async () => {

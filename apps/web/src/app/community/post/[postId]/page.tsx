@@ -10,15 +10,22 @@
  *  - 軟刪除自留言
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { CommunityAccess } from '../../_components/CommunityAccess';
-import {
-  ReportPostDialog,
-  type ReportPostSubmitPayload,
-} from '../../_components/ReportPostDialog';
+import { ReportPostDialog, type ReportPostSubmitPayload } from '../../_components/ReportPostDialog';
 import { SiteShell } from '@/components/SiteShell';
+import { Modal } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
+import { Input, Textarea } from '@/components/ui/Input';
+import {
+  COMMUNITY_FORM_PENDING_COPY,
+  useCommunityFormSession,
+  type CommunityFormCloseReason,
+} from '../../_components/useCommunityFormSession';
+import formStyles from '../../_components/CommunityForm.module.css';
+import modalStyles from '@/components/ui/Modal.module.css';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
@@ -48,11 +55,16 @@ import {
 
 export default function PostDetailPage() {
   const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext();
+  const { user } = useAuth();
+  const params = useParams<{ postId: string }>();
   return (
     <SiteShell title="貼文" subtitle="校園交流" schoolName={ready ? schoolName : undefined}>
       {ready ? (
         <CommunityAccess>
-          <PostDetailInner key={schoolId} schoolId={schoolId} />
+          <PostDetailInner
+            key={`${schoolId}:${params?.postId ?? ''}:${user?.uid ?? ''}`}
+            schoolId={schoolId}
+          />
         </CommunityAccess>
       ) : (
         <SchoolScopePlaceholder />
@@ -78,9 +90,11 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const [replyParentId, setReplyParentId] = useState<string | null>(null);
   const [sendingReply, setSendingReply] = useState(false);
   const [likeBusy, setLikeBusy] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
+  const [editSession, setEditSession] = useState<{ scope: string; open: boolean } | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
-  const [bookmarkState, setBookmarkState] = useState<{ scope: string; saved: boolean } | null>(null);
+  const [bookmarkState, setBookmarkState] = useState<{ scope: string; saved: boolean } | null>(
+    null,
+  );
   const [bookmarkBusy, setBookmarkBusy] = useState(false);
   const [bookmarkError, setBookmarkError] = useState('');
   const [bookmarkUnavailable, setBookmarkUnavailable] = useState(false);
@@ -111,7 +125,9 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         setBookmarkUnavailable(false);
         setBookmarkError('無法讀取收藏狀態，請確認校籍與連線。');
       });
-    return () => { live = false; };
+    return () => {
+      live = false;
+    };
   }, [user?.uid, schoolId, postId, bookmarkRevision]);
 
   const onToggleBookmark = async () => {
@@ -394,12 +410,18 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
               >
                 {authorName}
               </Link>
-            ) : authorName}
+            ) : (
+              authorName
+            )}
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             {isMine ? (
               <>
-                <button type="button" onClick={() => setEditOpen(true)} style={btnGhost}>
+                <button
+                  type="button"
+                  onClick={() => setEditSession({ scope: bookmarkScope, open: true })}
+                  style={btnGhost}
+                >
                   ✏️ 編輯
                 </button>
                 <button
@@ -651,28 +673,22 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         </div>
       </div>
 
-      {editOpen && (
+      {editSession?.scope === bookmarkScope && isMine && post.id === postId && (
         <EditPostModal
+          key={bookmarkScope}
+          open={editSession.open}
           initial={{
             title: post.title,
             content: post.content,
             tagsRaw: (post.tags ?? []).join(', '),
           }}
-          onClose={() => setEditOpen(false)}
-          onSubmit={async (patch) => {
-            if (!schoolId || !postId) return;
-            const tags = patch.tagsRaw
-              .split(/[,，、\s]+/)
-              .map((t) => t.trim().replace(/^#/, ''))
-              .filter(Boolean)
-              .slice(0, 5);
-            await updateCampusPost(schoolId, postId, {
-              title: patch.title.trim(),
-              content: patch.content.trim(),
-              tags,
-            });
-            setEditOpen(false);
-            await loadPost();
+          onClose={(reason) =>
+            setEditSession(reason === 'pending' ? { scope: bookmarkScope, open: false } : null)
+          }
+          onSubmit={(patch) => updateCampusPost(schoolId, postId, patch)}
+          onSaved={(patch) => {
+            setEditSession(null);
+            setPost((current) => (current?.id === postId ? { ...current, ...patch } : current));
           }}
         />
       )}
@@ -686,137 +702,114 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   );
 }
 
+type EditPostPatch = { title: string; content: string; tags: string[] };
+
 function EditPostModal(props: {
+  open: boolean;
   initial: { title: string; content: string; tagsRaw: string };
-  onClose: () => void;
-  onSubmit: (patch: { title: string; content: string; tagsRaw: string }) => Promise<void>;
+  onClose: (reason: CommunityFormCloseReason) => void;
+  onSubmit: (patch: EditPostPatch) => Promise<void>;
+  onSaved: (patch: EditPostPatch) => void;
 }) {
   const [title, setTitle] = useState(props.initial.title);
   const [content, setContent] = useState(props.initial.content);
   const [tagsRaw, setTagsRaw] = useState(props.initial.tagsRaw);
-  const [busy, setBusy] = useState(false);
+  const [validated, setValidated] = useState(false);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const formId = useId();
+  const session = useCommunityFormSession(props.onClose);
+
+  function submit() {
+    if (session.busy) return;
+    setValidated(true);
+    if (!title.trim()) {
+      titleRef.current?.focus();
+      return;
+    }
+    const patch = {
+      title: title.trim(),
+      content: content.trim(),
+      tags: tagsRaw
+        .split(/[,，、\s]+/)
+        .map((tag) => tag.trim().replace(/^#/, ''))
+        .filter(Boolean)
+        .slice(0, 5),
+    };
+    void session.submit(
+      () => props.onSubmit(patch),
+      () => props.onSaved(patch),
+      '暫時無法確認儲存結果，修改內容已保留。請先查看貼文，再決定是否重試。',
+    );
+  }
 
   return (
-    <div
-      role="dialog"
-      aria-modal
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 999,
-        background: 'rgba(0,0,0,0.4)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
-      }}
-      onClick={props.onClose}
+    <Modal
+      isOpen={props.open}
+      onClose={session.requestClose}
+      title="編輯貼文"
+      size="lg"
+      initialFocusRef={titleRef}
+      showCloseButton={!session.busy}
+      closeOnEsc={session.canClose}
+      closeOnOverlayClick={session.canClose}
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={session.requestClose}
+            disabled={!session.canClose}
+          >
+            {session.busy && session.slow ? '先關閉' : '取消'}
+          </Button>
+          <Button type="submit" form={formId} variant="primary" loading={session.busy}>
+            {session.busy ? '儲存中…' : '儲存'}
+          </Button>
+        </>
+      }
     >
-      <div
-        className="card"
-        style={{ padding: 24, width: '100%', maxWidth: 540 }}
-        onClick={(e) => e.stopPropagation()}
+      <form
+        id={formId}
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>編輯貼文</h2>
-          <button
-            type="button"
-            onClick={props.onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 18,
-              color: 'var(--muted)',
-            }}
-          >
-            ×
-          </button>
-        </div>
-        <label
-          style={{
-            display: 'block',
-            fontSize: 13,
-            fontWeight: 700,
-            marginTop: 14,
-            marginBottom: 6,
-          }}
-        >
-          標題
-        </label>
-        <input
-          className="input"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          style={{ width: '100%' }}
-        />
-
-        <label
-          style={{
-            display: 'block',
-            fontSize: 13,
-            fontWeight: 700,
-            marginTop: 14,
-            marginBottom: 6,
-          }}
-        >
-          內文
-        </label>
-        <textarea
-          className="input"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          rows={6}
-          style={{
-            width: '100%',
-            boxSizing: 'border-box',
-            resize: 'vertical',
-            fontFamily: 'inherit',
-          }}
-        />
-
-        <label
-          style={{
-            display: 'block',
-            fontSize: 13,
-            fontWeight: 700,
-            marginTop: 14,
-            marginBottom: 6,
-          }}
-        >
-          標籤（逗號分隔）
-        </label>
-        <input
-          className="input"
-          value={tagsRaw}
-          onChange={(e) => setTagsRaw(e.target.value)}
-          style={{ width: '100%' }}
-        />
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
-          <button type="button" className="btn" onClick={props.onClose}>
-            取消
-          </button>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await props.onSubmit({ title, content, tagsRaw });
-              } catch {
-                alert('這次未能儲存，請稍後再試。');
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            {busy ? '儲存中…' : '儲存'}
-          </button>
-        </div>
-      </div>
-    </div>
+        <fieldset className={formStyles.fields} disabled={session.busy}>
+          <Input
+            ref={titleRef}
+            label="標題"
+            required
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            error={validated && !title.trim() ? '請填寫標題。' : undefined}
+          />
+          <Textarea
+            label="內文"
+            value={content}
+            rows={6}
+            onChange={(event) => setContent(event.target.value)}
+          />
+          <Input
+            label="標籤（逗號分隔）"
+            value={tagsRaw}
+            hint="最多 5 個標籤。"
+            onChange={(event) => setTagsRaw(event.target.value)}
+          />
+        </fieldset>
+        {session.busy && (
+          <p role="status" className={modalStyles.notice}>
+            {session.slow ? COMMUNITY_FORM_PENDING_COPY : '正在儲存，請稍候。'}
+          </p>
+        )}
+        {session.error && (
+          <p role="alert" className={modalStyles.error}>
+            {session.error}
+          </p>
+        )}
+      </form>
+    </Modal>
   );
 }
 

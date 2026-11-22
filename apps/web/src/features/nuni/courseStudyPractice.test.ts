@@ -548,6 +548,83 @@ describe('practice note disclosure and filenames', () => {
 });
 
 
+describe('practice TXT source quote verification', () => {
+  it('checks each exported practice hint against its own original passage, never another PDF page', () => {
+    const cases = [
+      { sourceText: '第 3 頁：主鍵用來唯一識別資料。', quote: '主鍵用來唯一識別資料', valid: true },
+      { sourceText: '第 3 頁：主鍵用來唯一識別資料。', quote: '外鍵建立關聯', valid: false },
+      { sourceText: '第 7 頁：e\u0301', quote: 'e', valid: false },
+      { sourceText: '第 3 頁：主鍵用來唯一識別資料。', quote: '。', valid: false },
+      { sourceText: '第 7 頁：👩‍💻 課堂示例', quote: '👩‍💻', valid: true },
+    ];
+    for (const { sourceText, quote, valid } of cases) {
+      const studyRound = round(1);
+      studyRound.cards[0] = { ...studyRound.cards[0], sourceText, sourceQuote: quote };
+      const original = JSON.stringify(studyRound);
+      const opened = updateStudyPracticeRound(studyRound, { type: 'toggle_hint' });
+      const notes = buildCourseStudyPracticeNotes('資料庫', '講義', opened);
+      expect(notes).toContain(`本段原文：\n${sourceText}`);
+      expect(notes).toContain(valid
+        ? `原文引句：\n${quote}`
+        : `AI 引句（無法在本段逐字定位）：\n${quote}`);
+      if (!valid) expect(notes).not.toContain(`\n原文引句：\n${quote}`);
+      expect(JSON.stringify(studyRound)).toBe(original);
+    }
+  });
+
+  it('keeps invisible AI practice quotes out of TXT and does not reveal a hidden reference answer', () => {
+    for (const quote of ['', '\u200b', ' \u2060\u0301 ', '\u2800', '\u202e']) {
+      const studyRound = round(1);
+      studyRound.cards[0] = { ...studyRound.cards[0], sourceQuote: quote };
+      const opened = updateStudyPracticeRound(studyRound, { type: 'toggle_hint' });
+      const notes = buildCourseStudyPracticeNotes('資料庫', '講義', opened);
+      expect(notes).toContain('AI 引句：未提供可讀引句');
+      expect(notes).not.toContain('\n原文引句：');
+      expect(notes).not.toContain('參考答案秘密');
+      expect(notes).toContain(`本段原文：\n${studyRound.cards[0].sourceText}`);
+      if (quote.trim()) expect(notes).not.toContain(quote);
+      const hidden = updateStudyPracticeRound(opened, { type: 'toggle_hint' });
+      expect(buildCourseStudyPracticeNotes('資料庫', '講義', hidden)).not.toContain('AI 引句：');
+    }
+  });
+
+});
+
+
+  it('exports a readable fallback for invisible AI questions and answers without leaking an undisclosed answer', () => {
+    const started = round(1);
+    const invisibleQuestion = '\u200b\u2060\u0301';
+    const invisibleAnswer = '\u2800\ufe0f';
+    started.cards[0] = { ...started.cards[0], question: invisibleQuestion, answer: invisibleAnswer };
+    const before = JSON.stringify(started);
+    const hidden = buildCourseStudyPracticeNotes('資料庫', '講義', started);
+    expect(hidden).toContain('自我檢查題：\nAI 未提供可讀題目，請對照本段原文自行練習');
+    expect(hidden).not.toContain(invisibleQuestion);
+    expect(hidden).not.toContain(invisibleAnswer);
+    expect(hidden).not.toContain('參考回答：');
+    const attempted = change(started, { type: 'attempt', value: '我先試著回答' }, { type: 'toggle_answer' });
+    const revealed = buildCourseStudyPracticeNotes('資料庫', '講義', attempted);
+    expect(revealed).toContain('參考回答：AI 未提供可讀回答，請對照本段原文');
+    expect(revealed).not.toContain('參考回答（本輪已展開）：');
+    expect(revealed).not.toContain(invisibleQuestion);
+    expect(revealed).not.toContain(invisibleAnswer);
+    expect(JSON.stringify(started)).toBe(before);
+  });
+
+  it('keeps real multilingual practice questions and answers verbatim after explicit reveal', () => {
+    const started = round(1);
+    started.cards[0] = { ...started.cards[0],
+      question: '主鍵 e\u0301 👩‍💻 有什麼作用？', answer: '主鍵唯一識別 👩‍💻 的資料。',
+    };
+    const hidden = buildCourseStudyPracticeNotes('資料庫', '講義', started);
+    expect(hidden).toContain('自我檢查題：\n主鍵 e\u0301 👩‍💻 有什麼作用？');
+    expect(hidden).not.toContain('主鍵唯一識別 👩‍💻 的資料。');
+    const revealed = buildCourseStudyPracticeNotes('資料庫', '講義',
+      change(started, { type: 'attempt', value: '唯一識別' }, { type: 'toggle_answer' }));
+    expect(revealed).toContain('參考回答（本輪已展開）：\n主鍵唯一識別 👩‍💻 的資料。');
+    expect(revealed).not.toContain('AI 未提供可讀');
+  });
+
 describe('visible attempts required for self-check', () => {
   it('does not count invisible-only pasted text as a draft or unlock the reference answer', () => {
     const invisible = '\u200b\u2060\u200d\u00ad\ufe0f\u202e \n\t';

@@ -1489,6 +1489,154 @@ describe('public Providence building geometry route', () => {
     vi.restoreAllMocks();
   });
   it.each([
+    {
+      label: 'ISO calendar date instead of an HTTP-date',
+      headers: { 'Retry-After': '2099-01-01' },
+    },
+    {
+      label: 'nonstandard long-weekday date without RFC 850 hyphens',
+      headers: { 'Retry-After': 'Sunday, 15 Nov 2026 23:00:00 GMT' },
+    },
+    {
+      label: 'non-HTTP origin Date that would inflate a legitimate retry to a day',
+      headers: {
+        Date: '2000-01-01',
+        'Retry-After': new Date(Date.parse('2026-11-15T01:00:00Z')).toUTCString(),
+      },
+    },
+  ])('does not trust $label when deciding the public Overpass retry window',
+    async ({ headers }) => {
+      // Synthetic proxy headers, not observations from the live Overpass API.
+      // The local clock is already 90 minutes ahead of the nominal origin.
+      // Bad date formats should use the ordinary 10-minute safety backoff,
+      // rather than locking all campus users out for up to 24 hours.
+      const start = Date.parse('2026-11-15T01:30:00Z');
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        const upstreamHeaders = new Headers();
+        for (const [name, value] of Object.entries(headers)) {
+          if (typeof value === 'string') upstreamHeaders.set(name, value);
+        }
+        const upstream = vi.fn()
+          .mockResolvedValueOnce(new Response('overloaded', { status: 503, headers: upstreamHeaders }))
+          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+
+        const rejected = await GET();
+        expect(rejected.status).toBe(503);
+        expect(rejected.headers.get('Retry-After')).toBe('600');
+        expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+
+        clock.mockReturnValue(start + 9 * 60_000);
+        expect((await GET()).headers.get('Retry-After')).toBe('60');
+        expect(upstream).toHaveBeenCalledTimes(1);
+        clock.mockReturnValue(start + 10 * 60_000 + 1_000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+  it('uses the HTTP RFC 850 year window rather than Date.parse for a 2050 Retry-After', async () => {
+    // In December 2049, year "50" is 2050 (one hour away), not 1950.
+    // Node Date.parse instead interprets 01-Jan-50 as 1950 and sees the
+    // wrong weekday, silently collapsing the provider backoff to 10 minutes.
+    const start = Date.parse('2049-12-31T23:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response('busy', {
+          status: 503, headers: { 'Retry-After': 'Saturday, 01-Jan-50 00:00:00 GMT' },
+        }))
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Retry-After')).toBe('3600');
+      clock.mockReturnValue(start + 59 * 60_000);
+      expect((await GET()).headers.get('Retry-After')).toBe('60');
+      expect(upstream).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(start + 60 * 60_000 + 1000);
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([
+    {
+      label: 'just beyond fifty full years',
+      retryAfter: 'Monday, 23-Nov-76 00:00:00 GMT',
+      expectedCooldown: '600',
+    },
+    {
+      label: 'still inside fifty full years',
+      retryAfter: 'Saturday, 21-Nov-76 00:00:00 GMT',
+      expectedCooldown: '86400',
+    },
+  ])('resolves an RFC 850 date $label by the whole 50-year deadline', async ({
+    retryAfter, expectedCooldown,
+  }) => {
+    // At 2026-11-22, 2076-11-23 is >50 years in the future and must
+    // become 1976-11-23; its weekday is Tuesday, not Monday. The old
+    // year-only pivot would falsely accept 2076 and back off for a day.
+    // 2076-11-21 remains within 50 calendar years and is still valid.
+    const start = Date.parse('2026-11-22T00:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn().mockResolvedValue(new Response('busy', {
+        status: 503, headers: { 'Retry-After': retryAfter },
+      }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Retry-After')).toBe(expectedCooldown);
+      expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([
+    ['RFC 850', 'Sunday, 15-Nov-26 23:00:00 GMT'],
+    ['asctime', 'Sun Nov 15 23:00:00 2026'],
+  ])('honours a valid legacy %s HTTP-date Retry-After (RFC 9110)', async (_format, retryAfter) => {
+    // Both obsolete HTTP-date wire formats remain valid for recipients.
+    // A hard IMF-only check would prematurely hammer a busy OSM instance.
+    const start = Date.parse('2026-11-15T01:30:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response('busy', {
+          status: 503, headers: { 'Retry-After': retryAfter },
+        }))
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Retry-After')).toBe('77400');
+      clock.mockReturnValue(start + 10 * 60_000);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(start + 77401 * 1000);
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([
     { label: 'HTTP 503', mode: 'error' },
     { label: 'HTTP 200 Content-Range', mode: 'range' },
     { label: 'HTTP 200 Overpass remark', mode: 'remark' },

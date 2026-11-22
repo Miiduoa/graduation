@@ -31,7 +31,7 @@
 }
 .noticeCompact .title {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--font-body-size, 0.9375rem);
   font-weight: 600;
   line-height: 1.4;
 }
@@ -49,7 +49,7 @@
 
 .title {
   margin: 0 0 4px;
-  font-size: 15px;
+  font-size: var(--font-body-size, 0.9375rem);
   font-weight: 600;
   line-height: 1.6;
 }
@@ -57,7 +57,7 @@
 .description {
   margin: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--font-body-size, 0.9375rem);
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
@@ -72,7 +72,7 @@
   flex-basis: 100%;
   margin: 0;
   color: var(--danger);
-  font-size: 14px;
+  font-size: var(--font-body-size, 0.9375rem);
   line-height: 1.7;
 }
 
@@ -82,7 +82,7 @@
   color: var(--warning);
   border-bottom: 1px solid var(--border);
   text-align: center;
-  font-size: 14px;
+  font-size: var(--font-body-size, 0.9375rem);
   line-height: 1.7;
 }
 

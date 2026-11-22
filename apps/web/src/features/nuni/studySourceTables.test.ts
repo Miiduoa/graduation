@@ -744,6 +744,37 @@ describe('Markdown programming tables with escaped pipes and inline code', () =>
   });
 });
 
+describe('nested non-rendered HTML wrappers preserve the outer source boundary', () => {
+  it.each(['template', 'pre', 'code', 'svg', 'math'])(
+    'does not expose a table after an inner <%s> closes', (tag) => {
+      const source = [
+        `<${tag}>`,
+        `<${tag}>`,
+        '| 內層教師範例 | 成績 |',
+        '| --- | --- |',
+        '| 不可複製的答案 | 99 |',
+        `</${tag}>`,
+        '| 外層仍未公開 | 成績 |',
+        '| --- | --- |',
+        '| 不可複製的答案 | 88 |',
+        `</${tag}>`,
+        ...visibleTable,
+      ].join('\n');
+      expect(extractStudySourceTables(source)).toEqual(realTable(11));
+    },
+  );
+
+  it('keeps the following public table selectable after all nested wrappers close', () => {
+    const source = [
+      '<template>', '<template>',
+      '| 教師答案 | 數量 |', '| --- | --- |', '| 隱藏 | 99 |',
+      '</template>', '</template>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(8));
+  });
+});
+
 describe('HTML slash endings cannot expose hidden lesson tables', () => {
   it.each([
     ['div', 'hidden'],

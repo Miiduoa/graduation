@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { StudyMode } from '@/lib/studyTutor';
-import { STUDY_SESSION_LIMITS } from './courseStudySession';
+import { STUDY_SESSION_LIMITS, hasVisibleStudyContent } from './courseStudySession';
 import {
   getStudyPracticeSummary,
   hasVisibleStudyAttempt,
@@ -23,10 +23,10 @@ type Props = {
   onAction: (action: StudyPracticeAction) => void;
   onExit: () => void;
   onReadSource: (card: StudyPracticeCard) => void;
-  onDownload: () => void;
-  onCopy?: () => void;
-  onSave?: () => void;
-  onCopyCheckpoint?: () => void;
+  onDownload: (trigger: HTMLElement) => void;
+  onCopy?: (trigger: HTMLElement) => void;
+  onSave?: (trigger: HTMLElement) => void;
+  onCopyCheckpoint?: (trigger: HTMLElement) => void;
 };
 
 const modeLabels: Record<StudyMode, string> = {
@@ -142,10 +142,10 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
       <div className={styles.toolbar}>
         <p className={styles.eyebrow}>逐題複習 · {modeLabels[round.mode]}</p>
         <div className={styles.actions}>
-          {onSave && <button type="button" className={styles.button} onClick={onSave}>儲存練習與閱讀進度</button>}
-          {onCopyCheckpoint && <button type="button" className={styles.button} onClick={onCopyCheckpoint}>複製練習與閱讀進度 JSON</button>}
-          <button type="button" className={styles.button} onClick={onDownload}>下載本輪練習</button>
-          {onCopy && <button type="button" className={styles.button} onClick={onCopy}>複製本輪紀錄</button>}
+          {onSave && <button type="button" className={styles.button} onClick={(event) => onSave(event.currentTarget)}>儲存練習與閱讀進度</button>}
+          {onCopyCheckpoint && <button type="button" className={styles.button} onClick={(event) => onCopyCheckpoint(event.currentTarget)}>複製練習與閱讀進度 JSON</button>}
+          <button type="button" className={styles.button} onClick={(event) => onDownload(event.currentTarget)}>下載本輪練習</button>
+          {onCopy && <button type="button" className={styles.button} onClick={(event) => onCopy(event.currentTarget)}>複製本輪紀錄</button>}
           <button type="button" className={styles.button} onClick={onExit}>回到閱讀</button>
         </div>
       </div>
@@ -190,7 +190,8 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
           <h4 ref={heading} id={headingId} tabIndex={-1}>第 {round.index + 1} 題</h4>
           <span>{card.label} · 第 {card.lessonId} 次講解</span>
         </div>
-        <p className={styles.question}>{card.question}</p>
+        <p className={styles.question}>{hasVisibleStudyContent(card.question)
+          ? card.question : 'AI 未提供可讀題目，請對照本段原文自行練習；也可以略過這題。'}</p>
 
         <button type="button" className={styles.button} aria-expanded={response.hintVisible} aria-controls={response.hintVisible ? hintId : undefined}
           onClick={() => onAction({ type: 'toggle_hint' })}>{response.hintVisible ? '收起原文提示' : '查看原文提示'}</button>
@@ -228,7 +229,8 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
           onClick={() => onAction({ type: 'toggle_answer' })}>{answerVisible ? '收起參考回答' : '對照參考回答'}</button>
         {answerVisible && <section id={answerId} className={styles.answer} aria-label="本題參考回答">
           <h5>參考回答</h5>
-          <p className={styles.answerText}>{card.answer}</p>
+          <p className={styles.answerText}>{hasVisibleStudyContent(card.answer)
+             ? card.answer : 'AI 未提供可讀參考回答，請對照本段原文自行核對。'}</p>
           <p className={styles.note}>參考回答來自既有講解，可能有誤，請對照教材。由你判斷是否理解，不會自動判分。</p>
           <div className={styles.actions} role="group" aria-label="本題自評">
             <button type="button" className={styles.button}

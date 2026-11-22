@@ -63,6 +63,19 @@ describe('multi-course public timetable review', () => {
     expect(mergePublicCourseTimetableCsv('nthu', [nthu, ncnu])).toBeNull();
   });
 
+  it('rejects duplicate NCNU class listings disguised by surrounding whitespace', () => {
+    expect(mergePublicCourseTimetableCsv('ncnu', [
+      ncnu, { ...ncnu, code: ' 005076 ', title: '同一門課的重複公告' },
+    ])).toBeNull();
+    expect(mergePublicCourseTimetableCsv('ncnu', [
+      ncnu, { ...ncnu, section: ' a ', title: '同班別的重複公告' },
+    ])).toBeNull();
+    // A genuinely different section is still a distinct course selection.
+    expect(mergePublicCourseTimetableCsv('ncnu', [
+      ncnu, { ...ncnu, section: 'b' },
+    ])).not.toBeNull();
+  });
+
   it('requires two through ten selected courses and never truncates the eleventh', () => {
     expect(mergePublicCourseTimetableCsv('ncnu', [])).toBeNull();
     expect(mergePublicCourseTimetableCsv('ncnu', [ncnu])).toBeNull();
