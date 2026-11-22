@@ -39,7 +39,7 @@ test('owner edits a public intro and success appears only after confirmation', a
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenCalledWith('pu', 'alice', {
     headline: '校園攝影', bio: '分享校園生活', linkUrl: '',
-  }, ['headline', 'bio', 'linkUrl']);
+  });
   expect(await view.findByText('社群簡介已儲存。')).toBeTruthy();
   expect(view.queryByLabelText('個人簡介')).toBeNull();
 });
@@ -138,48 +138,10 @@ test.each([false, true])('a successful profile retry ignores a late initial resu
   }
 });
 
-test.each([false, true])('an initial success survives a failed retry (retry fails first: %s)', async (retryFailsFirst) => {
-  jest.useFakeTimers();
-  try {
-    const card = { headline: '既有社群簡介', bio: '', linkUrl: '' };
-    let resolveInitial!: (value: typeof card) => void;
-    let rejectRetry!: (error: Error) => void;
-    jest.mocked(readCreatorCard)
-      .mockReturnValueOnce(new Promise((resolve) => { resolveInitial = resolve; }))
-      .mockReturnValueOnce(new Promise((_, reject) => { rejectRetry = reject; }));
-
-    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} />);
-    act(() => { jest.advanceTimersByTime(15_000); });
-    fireEvent.press(view.getByLabelText('重新讀取社群簡介'));
-
-    const failRetry = async () => act(async () => { rejectRetry(new Error('retry failed')); });
-    if (retryFailsFirst) {
-      await failRetry();
-      expect(view.getByText('社群簡介暫時無法讀取。')).toBeTruthy();
-    }
-    await act(async () => { resolveInitial(card); });
-    if (!retryFailsFirst) await failRetry();
-
-    expect(view.getByText(card.headline)).toBeTruthy();
-    expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
-    expect(readCreatorCard).toHaveBeenCalledTimes(2);
-  } finally {
-    jest.useRealTimers();
-  }
-});
-
-test.each([
-  ['empty', 'card', false],
-  ['empty', 'card', true],
-  ['card', 'empty', false],
-  ['card', 'empty', true],
-  ['card', 'card', false],
-  ['empty', 'empty', false],
-  ['empty', 'empty', true],
-  ['empty', 'error', false],
-  ['empty', 'error', true],
-  ['error', 'empty', true],
-] as const)('initial %s and retry %s (retry settles first: %s)', async (initial, retry, retryFirst) => {
+const readOutcomes = ['empty', 'card', 'error'] as const;
+test.each(readOutcomes.flatMap((initial) => readOutcomes.flatMap((retry) =>
+  [false, true].map((retryFirst) => [initial, retry, retryFirst] as const),
+)))('initial %s and retry %s (retry settles first: %s)', async (initial, retry, retryFirst) => {
   jest.useFakeTimers();
   try {
     const cards = [
@@ -202,28 +164,50 @@ test.each([
     expect(view.getByText('正在讀取社群簡介…')).toBeTruthy();
     expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
 
-    await act(async () => { reads[retryFirst ? 1 : 0](); });
-    if (retryFirst ? retry === 'error' : initial !== 'card') {
-      if (retryFirst) expect(view.getByLabelText('重新讀取社群簡介')).toBeTruthy();
-      else expect(view.getByText('正在讀取社群簡介…')).toBeTruthy();
-      expect(view.queryByLabelText('建立社群簡介')).toBeNull();
-    }
-    await act(async () => { reads[retryFirst ? 0 : 1](); });
+    const expectResult = (outcome: typeof initial, index: number) => {
+      expect(Boolean(view.queryByLabelText('建立社群簡介'))).toBe(outcome === 'empty');
+      cards.forEach((card, cardIndex) => {
+        expect(Boolean(view.queryByText(card.headline))).toBe(outcome === 'card' && cardIndex === index);
+      });
+    };
+    const firstIndex = retryFirst ? 1 : 0;
+    await act(async () => { reads[firstIndex](); });
+    expectResult(retryFirst ? retry : initial, firstIndex);
+    await act(async () => { reads[1 - firstIndex](); });
+    expectResult(retry === 'error' ? initial : retry, retry === 'error' ? 0 : 1);
+    expect(Boolean(view.queryByLabelText('重新讀取社群簡介'))).toBe(retry === 'error');
 
-    if (retry === 'card' || (retry === 'error' && initial === 'card')) {
-      expect(view.getByText(cards[retry === 'card' ? 1 : 0].headline)).toBeTruthy();
-      expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
-    } else if (retry === 'empty') {
-      expect(view.getByLabelText('建立社群簡介')).toBeTruthy();
-      expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
-    } else {
-      expect(view.getByLabelText('重新讀取社群簡介')).toBeTruthy();
-      expect(view.queryByLabelText('建立社群簡介')).toBeNull();
-
+    if (retry === 'error') {
       jest.mocked(readCreatorCard).mockResolvedValueOnce(cards[1]);
       await act(async () => { fireEvent.press(view.getByLabelText('重新讀取社群簡介')); });
-      expect(view.getByText(cards[1].headline)).toBeTruthy();
+      expectResult('card', 1);
+      expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
     }
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test('a timed-out retry keeps the initial success visible until the retry succeeds', async () => {
+  jest.useFakeTimers();
+  try {
+    let resolveInitial!: (value: null) => void;
+    let resolveRetry!: (value: Awaited<ReturnType<typeof readCreatorCard>>) => void;
+    jest.mocked(readCreatorCard)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveInitial = resolve; }))
+      .mockReturnValueOnce(new Promise((resolve) => { resolveRetry = resolve; }));
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+    act(() => { jest.advanceTimersByTime(15_000); });
+    fireEvent.press(view.getByLabelText('重新讀取社群簡介'));
+    await act(async () => { resolveInitial(null); });
+    act(() => { jest.advanceTimersByTime(15_000); });
+    expect(view.getByLabelText('建立社群簡介')).toBeTruthy();
+    expect(view.getByText('讀取社群簡介逾時，請重新讀取。')).toBeTruthy();
+
+    await act(async () => { resolveRetry({ headline: '重試讀到的卡片', bio: '', linkUrl: '' }); });
+    expect(view.getByText('重試讀到的卡片')).toBeTruthy();
+    expect(view.queryByLabelText('建立社群簡介')).toBeNull();
+    expect(view.queryByLabelText('重新讀取社群簡介')).toBeNull();
   } finally {
     jest.useRealTimers();
   }
@@ -263,7 +247,7 @@ test.each([
     await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
     expect(saveCreatorCard).toHaveBeenCalledWith('pu', 'alice', {
       ...latest, headline: '我的標題', linkUrl,
-    }, clearLink ? ['headline', 'linkUrl'] : ['headline']);
+    });
   } finally {
     jest.useRealTimers();
   }
@@ -314,9 +298,9 @@ test('a saved card supersedes all outstanding profile reads across multiple retr
     expect(readCreatorCard).toHaveBeenCalledTimes(3);
 
     await act(async () => { reads[1](null); });
-    expect(view.getByText('正在讀取社群簡介…')).toBeTruthy();
+    expect(view.getByLabelText('建立社群簡介')).toBeTruthy();
     await act(async () => { reads[0](published); });
-    fireEvent.press(view.getByLabelText('編輯社群簡介'));
+    fireEvent.press(view.getByLabelText('建立社群簡介'));
     fireEvent.changeText(view.getByLabelText('一句話介紹'), saved.headline);
     await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
     await act(async () => { reads[2]({ ...published, headline: '重試讀到的舊資料' }); });
@@ -383,7 +367,7 @@ test('rapid taps never duplicate an ambiguous save before a fresh server check',
   expect(saveCreatorCard).toHaveBeenCalledTimes(2);
   expect(saveCreatorCard).toHaveBeenLastCalledWith('pu', 'alice', {
     headline: '', bio: '校園社團活動與攝影作品', linkUrl: '',
-  }, ['headline', 'bio', 'linkUrl']);
+  });
   expect(await view.findByText('社群簡介已儲存。')).toBeTruthy();
 });
 
@@ -413,7 +397,7 @@ test('switching school and account mid-save starts a fresh profile and ignores l
   expect(saveCreatorCard).toHaveBeenCalledTimes(2);
   expect(saveCreatorCard).toHaveBeenLastCalledWith('other-school', 'bob', {
     headline: '', bio: 'Bob 的新校園簡介', linkUrl: '',
-  }, ['headline', 'bio', 'linkUrl']);
+  });
   expect(await view.findByText('社群簡介已儲存。')).toBeTruthy();
 });
 
@@ -641,7 +625,7 @@ test('an ambiguous save is confirmed by a fresh read without sending a duplicate
   expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
 });
 
-test('confirmation accepts a saved field alongside newer unedited server fields', async () => {
+test('confirmation requires every submitted field and displays the newer server fields on mismatch', async () => {
   const published = { headline: '舊標題', bio: '舊簡介', linkUrl: '' };
   const latest = { headline: '我的標題', bio: '更新的簡介', linkUrl: 'https://example.org/new' };
   jest.mocked(readCreatorCard).mockResolvedValueOnce(published).mockResolvedValueOnce(latest);
@@ -653,11 +637,11 @@ test('confirmation accepts a saved field alongside newer unedited server fields'
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
 
-  expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
-  expect(view.getByText(latest.bio)).toBeTruthy();
-  expect(view.queryByLabelText('核對儲存結果')).toBeNull();
-  fireEvent.press(view.getByLabelText('編輯社群簡介'));
+  expect(view.getByText('伺服器資料與上次送出的內容不同，已載入伺服器資料。')).toBeTruthy();
+  expect(view.getByLabelText('個人簡介').props.value).toBe(latest.bio);
   expect(view.getByLabelText('作品連結').props.value).toBe(latest.linkUrl);
+  expect(view.queryByLabelText('核對儲存結果')).toBeNull();
+  expect(view.queryByLabelText('還原未確認的草稿')).toBeNull();
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
 });
 
@@ -797,7 +781,7 @@ test.each([
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenCalledWith('pu', 'alice', {
     headline: '新標題', bio: published?.bio ?? '', linkUrl: published?.linkUrl ?? '',
-  }, published ? ['headline'] : ['headline', 'bio', 'linkUrl']);
+  });
 });
 
 test.each([
@@ -835,7 +819,7 @@ test.each([
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice', {
     headline: '重新編輯的標題', bio: latest?.bio ?? '', linkUrl: latest?.linkUrl ?? '',
-  }, latest ? ['headline'] : ['headline', 'bio', 'linkUrl']);
+  });
   fireEvent.press(view.getByLabelText('編輯社群簡介'));
   fireEvent.press(view.getByLabelText('還原未確認的草稿'));
   expect(view.getByLabelText('一句話介紹').props.value).toBe(saved.headline);
@@ -845,7 +829,7 @@ test.each([
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenNthCalledWith(3, 'pu', 'alice', {
     ...saved, bio: draft.bio, linkUrl: draft.linkUrl,
-  }, ['bio', 'linkUrl']);
+  });
   fireEvent.press(view.getByLabelText('編輯社群簡介'));
   expect(view.queryByLabelText('還原未確認的草稿')).toBeNull();
 });
@@ -892,8 +876,7 @@ test.each([
   }
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice',
-    cancel ? { ...latest, headline: '重新編輯的標題' } : { ...latest, bio: draft.bio },
-    cancel ? ['headline'] : ['bio']);
+    cancel ? { ...latest, headline: '重新編輯的標題' } : { ...latest, bio: draft.bio });
 });
 
 test('an offline confirmation can be retried without resending the save', async () => {
@@ -1215,10 +1198,7 @@ describe.each([
       await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
       const expected = { ...card, [field]: '' };
       if (operation === 'untouched') expected[otherField] = '另一欄的新內容';
-      expect(saveCreatorCard).toHaveBeenCalledWith('pu', 'alice', expected,
-        operation === 'untouched' ? ['headline', 'bio', 'linkUrl'].filter(
-          (key) => key === field || key === otherField,
-        ) : [field]);
+      expect(saveCreatorCard).toHaveBeenCalledWith('pu', 'alice', expected);
     },
   );
 });
@@ -1262,7 +1242,7 @@ test('a timed-out clear can be restored after a public check still reads a hidde
     fireEvent.press(view.getByLabelText('還原未確認的草稿'));
     expect(view.getByLabelText('個人簡介').props.value).toBe(latest.bio);
     await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
-    expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice', latest, ['linkUrl']);
+    expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice', latest);
   } finally {
     jest.useRealTimers();
   }
@@ -1310,20 +1290,21 @@ describe('saving merges creator card changes under the document rules', () => {
       ['surrounding spaces', `  ${original[field]}  `, original[field]],
       ['invalid URL', 'http://example.org/', isLink ? '' : 'http://example.org/'],
       ['missing', undefined, ''],
-    ])('%s is repaired only when required by the rules or normalization', async (_scenario, value, expected) => {
+    ])('%s is saved with its normalized value', async (_scenario, value, expected) => {
       const raw: Record<string, unknown> = { ...original, [field]: value };
       if (value === undefined) delete raw[field];
       const edit = field === 'headline' ? { bio: '新簡介' } : { headline: '新標題' };
-      const repair = value === expected ? {} : { [field]: expected };
+      const normalized = { [field]: expected };
       const { view, currentDocument } = await editCard(raw);
       fireEvent.changeText(view.getByLabelText(field === 'headline' ? '個人簡介' : '一句話介紹'),
         field === 'headline' ? '新簡介' : '新標題');
       await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
       expect(setDoc).toHaveBeenCalledTimes(1);
       expect(setDoc).toHaveBeenCalledWith(undefined, {
-        schoolId: 'pu', ownerUid: 'alice', ...repair, ...edit, updatedAt: 'SERVER_TIME',
+        schoolId: 'pu', ownerUid: 'alice', headline: original.headline, bio: original.bio,
+        linkUrl: original.linkUrl, ...normalized, ...edit, updatedAt: 'SERVER_TIME',
       }, { merge: true });
-      expect(currentDocument()).toEqual({ ...raw, ...repair, ...edit, updatedAt: 'SERVER_TIME' });
+      expect(currentDocument()).toEqual({ ...raw, ...normalized, ...edit, updatedAt: 'SERVER_TIME' });
       expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
     });
   });
@@ -1340,17 +1321,20 @@ describe('saving merges creator card changes under the document rules', () => {
     fireEvent.changeText(view.getByLabelText('作品連結'), '');
     await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
     expect(setDoc).toHaveBeenNthCalledWith(2, undefined, {
-      schoolId: 'pu', ownerUid: 'alice', bio: '新簡介', linkUrl: '', updatedAt: 'SERVER_TIME',
+      schoolId: 'pu', ownerUid: 'alice', headline: '新標題', bio: '新簡介', linkUrl: '', updatedAt: 'SERVER_TIME',
     }, { merge: true });
     expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
   });
 
-  test('preserves newer values for legal fields that were left untouched', async () => {
-    const latest = { ...original, linkUrl: 'https://example.net/new', bio: '其他裝置更新的簡介' };
-    const { view, currentDocument } = await editCard(original, latest);
+  test.each(['existing', 'deleted'])('a headline-only edit saves all required fields (%s document)', async (scenario) => {
+    const { view, currentDocument } = await editCard(original, scenario === 'deleted' ? {} : original);
     fireEvent.changeText(view.getByLabelText('一句話介紹'), '新標題');
     await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
-    expect(currentDocument()).toEqual({ ...latest, headline: '新標題', updatedAt: 'SERVER_TIME' });
+    const { pinnedPostId, ...required } = original;
+    expect(currentDocument()).toEqual({
+      ...required, ...(scenario === 'existing' ? { pinnedPostId } : {}),
+      headline: '新標題', updatedAt: 'SERVER_TIME',
+    });
     expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
   });
 
@@ -1410,7 +1394,7 @@ test.each(['none', 'bio', 'all', 'reverted'] as const)(
     await save();
     expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice', {
       ...published, bio: '第二次送出', linkUrl: scenario === 'all' ? 'https://example.com/' : '',
-    }, ['bio', 'linkUrl']);
+    });
     await check();
     fireEvent.press(view.getByLabelText('取消編輯'));
     fireEvent.press(view.getByLabelText('編輯社群簡介'));

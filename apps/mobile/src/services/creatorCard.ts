@@ -9,14 +9,6 @@ const CARD_FIELDS = ['headline', 'bio', 'linkUrl'] as const;
 const hiddenFields = new WeakMap<CreatorCard, ReadonlySet<keyof CreatorCard>>();
 const repairFields = new WeakMap<CreatorCard, ReadonlySet<keyof CreatorCard>>();
 
-export function creatorCardWriteFields(
-  base: CreatorCard | null, edits: readonly (keyof CreatorCard)[],
-): readonly (keyof CreatorCard)[] {
-  if (!base) return CARD_FIELDS;
-  const repairs = repairFields.get(base);
-  return CARD_FIELDS.filter((field) => edits.includes(field) || repairs?.has(field));
-}
-
 export function hasHiddenCreatorCardValue(card: CreatorCard, field: keyof CreatorCard): boolean {
   return hiddenFields.get(card)?.has(field) ?? false;
 }
@@ -54,19 +46,16 @@ export async function readCreatorCard(
   return card;
 }
 
-/** Save the selected public fields and confirm them against the server. */
+/** Save all public fields and confirm them against the server. */
 export async function saveCreatorCard(
   schoolId: string, ownerUid: string, draft: CreatorCard,
-  fields: readonly (keyof CreatorCard)[] = CARD_FIELDS,
 ): Promise<CreatorCard> {
   const normalized = validateCreatorCard(draft);
-  const changes: Partial<CreatorCard> = {};
-  for (const field of fields) changes[field] = normalized[field];
   await setDoc(cardRef(schoolId, ownerUid), {
-    schoolId, ownerUid, ...changes, updatedAt: serverTimestamp(),
+    schoolId, ownerUid, ...normalized, updatedAt: serverTimestamp(),
   }, { merge: true });
   const confirmed = await readCreatorCard(schoolId, ownerUid, { requireCommitted: true });
-  if (!confirmed || fields.some((field) => !creatorCardFieldMatches(confirmed, field, normalized[field]))) {
+  if (!confirmed || CARD_FIELDS.some((field) => !creatorCardFieldMatches(confirmed, field, normalized[field]))) {
     throw new Error('Creator card update was not confirmed');
   }
   return confirmed;

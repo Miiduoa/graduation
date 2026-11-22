@@ -4,7 +4,7 @@ import {
   CREATOR_CARD_LIMITS, EMPTY_CREATOR_CARD, validateCreatorCard, type CreatorCard,
 } from '@campus/shared/src/creatorCard';
 import {
-  creatorCardFieldMatches, creatorCardWriteFields, hasHiddenCreatorCardValue, readCreatorCard, saveCreatorCard,
+  creatorCardFieldMatches, hasHiddenCreatorCardValue, readCreatorCard, saveCreatorCard,
 } from '../../services/creatorCard';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
@@ -22,7 +22,6 @@ type RecoverableDraft = Partial<Record<CardField, { value: string; expected: str
 type SubmittedWrite = {
   draft: CreatorCard;
   expected: CreatorCard;
-  fields: readonly CardField[];
   edits: readonly CardField[];
   confirmationAttempt: number;
   editorSession: number;
@@ -31,7 +30,6 @@ type SubmittedWrite = {
 
 type CardState =
   | { status: 'loading' }
-  | { status: 'error'; timedOut: boolean }
   | { status: 'ready'; value: CreatorCard | null };
 
 function CardButton({ label, onPress, disabled = false, primary = false, busy = false }: {
@@ -69,6 +67,7 @@ function ScopedCreatorCardPanel({
 }: CreatorCardPanelProps) {
   const styles = useThemeStyleSheet(createStyles);
   const [state, setState] = useState<CardState>({ status: 'loading' });
+  const [readError, setReadError] = useState<'timeout' | 'failed' | null>(null);
   const [attempt, setAttempt] = useState(0);
   const profileReads = useRef({
     acceptedAttempt: -1, closed: false,
@@ -145,18 +144,19 @@ function ScopedCreatorCardPanel({
     const reads = profileReads.current;
     if (reads.closed) return;
     let latestAttempt = true;
-    // A timed-out read can still supply a card until a newer result is accepted.
+    // A timed-out read can still supply a result until a newer success is accepted.
     const canApply = () => mounted.current && !reads.closed && attempt > reads.acceptedAttempt;
-    const canShowError = () => canApply() && latestAttempt && reads.acceptedAttempt < 0;
+    const canShowError = () => canApply() && latestAttempt;
     const timeout = setTimeout(() => {
-      if (canShowError()) setState({ status: 'error', timedOut: true });
+      if (canShowError()) setReadError('timeout');
     }, CREATOR_CARD_READ_TIMEOUT_MS);
     void readCreatorCard(schoolId, ownerUid).then((value) => {
-      if (!canApply() || (value === null && !latestAttempt)) return;
+      if (!canApply()) return;
+      if (latestAttempt) setReadError(null);
       reads.acceptedAttempt = attempt;
       acceptCard(value);
     }).catch(() => {
-      if (canShowError()) setState({ status: 'error', timedOut: false });
+      if (canShowError()) setReadError('failed');
     }).finally(() => clearTimeout(timeout));
     return () => { latestAttempt = false; clearTimeout(timeout); };
   }, [schoolId, ownerUid, attempt]);
@@ -223,7 +223,7 @@ function ScopedCreatorCardPanel({
     }
 
     if (!isLatest()) return;
-    const matches = latest && submitted.fields.every((field) =>
+    const matches = latest && CARD_FIELDS.every((field) =>
       creatorCardFieldMatches(latest, field, submitted.expected[field]));
 
     pendingWrite.current = null;
@@ -311,8 +311,8 @@ function ScopedCreatorCardPanel({
     const edits = CARD_FIELDS.filter((field) => editedFields.current.has(field) &&
       (!base || base[field] !== expected[field] ||
         (expected[field] === '' && !creatorCardFieldMatches(base, field, ''))));
-    const fields = creatorCardWriteFields(base, edits);
-    if (base && fields.length === 0) {
+    if (base && edits.length === 0 && CARD_FIELDS.every((field) =>
+      creatorCardFieldMatches(base, field, base[field]))) {
       setEditorOpen(false);
       revisions.current = { ...submittedRevisions.current };
       setFeedback('');
@@ -320,11 +320,12 @@ function ScopedCreatorCardPanel({
     }
     editedFields.current.clear();
     profileReads.current.closed = true;
+    setReadError(null);
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
     const submitted: SubmittedWrite = {
-      draft: submittedDraft, expected, fields, edits, confirmationAttempt: 0,
+      draft: submittedDraft, expected, edits, confirmationAttempt: 0,
       editorSession: editorSession.current, revisions: { ...revisions.current },
     };
     for (const field of edits) {
@@ -345,7 +346,7 @@ function ScopedCreatorCardPanel({
       setSaving(false);
     }, CREATOR_CARD_SAVE_TIMEOUT_MS);
     try {
-      const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft, fields);
+      const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft);
       if (!mounted.current || (timedOut && pendingWrite.current !== submitted)) return;
       if (timedOut) {
         pendingWrite.current = null;
@@ -404,24 +405,25 @@ function ScopedCreatorCardPanel({
     }
   };
 
-  if (state.status === 'loading') return (
-    <View style={styles.container}>
-      <Text accessibilityRole="text" style={styles.note}>正在讀取社群簡介…</Text>
-    </View>
-  );
-  if (state.status === 'error') return (
-    <View style={styles.container}>
-      <Text accessibilityRole="alert" style={styles.note}>{state.timedOut
+  const readNotice = readError && (
+    <>
+      <Text accessibilityRole="alert" style={styles.note}>{readError === 'timeout'
         ? '讀取社群簡介逾時，請重新讀取。'
         : '社群簡介暫時無法讀取。'}</Text>
       <CardButton label="重新讀取社群簡介" onPress={() => {
-        setState({ status: 'loading' });
+        setReadError(null);
         setAttempt(attempt + 1);
       }} />
+    </>
+  );
+  if (state.status === 'loading') return (
+    <View style={styles.container}>
+      {readNotice || <Text accessibilityRole="text" style={styles.note}>正在讀取社群簡介…</Text>}
     </View>
   );
   return (
     <View style={styles.container} accessibilityLabel="社群簡介">
+      {readNotice}
       {editing ? (
         <View style={styles.editor}>
           <Text style={styles.label}>一句話介紹 · {draft.headline.length}/{CREATOR_CARD_LIMITS.headline}</Text>

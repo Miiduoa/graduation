@@ -1,5 +1,5 @@
 import { getDocFromServer, setDoc } from 'firebase/firestore';
-import { creatorCardWriteFields, readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
+import { readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 
 jest.mock('../../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('firebase/firestore', () => ({
@@ -58,21 +58,6 @@ test('a stale read or unsafe URL never reports success', async () => {
   expect(setDoc).not.toHaveBeenCalled();
 });
 
-test('editing selected fields leaves concurrent server changes untouched', async () => {
-  const latest = { ...card, headline: '新的標題', bio: '其他裝置更新的簡介', linkUrl: 'https://example.net/' };
-  jest.mocked(setDoc).mockResolvedValue(undefined);
-  jest.mocked(getDocFromServer).mockResolvedValue(snap(latest) as never);
-
-  await expect(saveCreatorCard('pu', 'alice', {
-    headline: ' 新的標題 ', bio: card.bio, linkUrl: card.linkUrl,
-  }, ['headline'])).resolves.toEqual({
-    headline: latest.headline, bio: latest.bio, linkUrl: latest.linkUrl,
-  });
-  expect(setDoc).toHaveBeenCalledWith('schools/pu/creatorProfiles/alice', {
-    schoolId: 'pu', ownerUid: 'alice', headline: latest.headline, updatedAt: 'SERVER_TIME',
-  }, { merge: true });
-});
-
 test.each([
   ['headline', '  '],
   ['bio', '  '],
@@ -84,10 +69,10 @@ test.each([
     .mockResolvedValueOnce(snap({ ...card, [field]: hidden }) as never)
     .mockResolvedValueOnce(snap({ ...card, [field]: '' }) as never);
 
-  await expect(saveCreatorCard('pu', 'alice', draft, [field])).rejects.toThrow('not confirmed');
-  await expect(saveCreatorCard('pu', 'alice', draft, [field])).resolves.toEqual(draft);
+  await expect(saveCreatorCard('pu', 'alice', draft)).rejects.toThrow('not confirmed');
+  await expect(saveCreatorCard('pu', 'alice', draft)).resolves.toEqual(draft);
   expect(setDoc).toHaveBeenCalledWith('schools/pu/creatorProfiles/alice', {
-    schoolId: 'pu', ownerUid: 'alice', [field]: '', updatedAt: 'SERVER_TIME',
+    ...card, ...draft, updatedAt: 'SERVER_TIME',
   }, { merge: true });
 });
 
@@ -106,31 +91,29 @@ test.each([
   jest.mocked(setDoc).mockResolvedValue(undefined);
   jest.mocked(getDocFromServer).mockResolvedValue(snapshot as never);
 
-  await expect(saveCreatorCard('pu', 'alice', { ...card, linkUrl: '' }, ['linkUrl']))
+  await expect(saveCreatorCard('pu', 'alice', { ...card, linkUrl: '' }))
     .rejects.toThrow(message);
 
   // The service must not retry an ambiguous write internally. Its caller
   // decides when to re-read the committed server state before another save.
   expect(setDoc).toHaveBeenCalledTimes(1);
   expect(setDoc).toHaveBeenCalledWith('schools/pu/creatorProfiles/alice', {
-    schoolId: 'pu', ownerUid: 'alice', linkUrl: '', updatedAt: 'SERVER_TIME',
+    ...card, linkUrl: '', updatedAt: 'SERVER_TIME',
   }, { merge: true });
   expect(getDocFromServer).toHaveBeenCalledTimes(1);
   expect(getDocFromServer).toHaveBeenCalledWith('schools/pu/creatorProfiles/alice');
 });
 
-test('missing required content fields are selected and must exist in the confirmation', async () => {
+test('all required content fields must exist in the confirmation', async () => {
   const legacy = { schoolId: 'pu', ownerUid: 'alice' };
   const draft = { headline: '新標題', bio: '新簡介', linkUrl: '' };
   jest.mocked(getDocFromServer)
     .mockResolvedValueOnce(snap(legacy) as never)
     .mockResolvedValueOnce(snap({ ...legacy, headline: draft.headline, bio: draft.bio }) as never)
     .mockResolvedValueOnce(snap({ ...legacy, ...draft }) as never);
-  const loaded = await readCreatorCard('pu', 'alice');
-  const fields = creatorCardWriteFields(loaded, ['headline', 'bio']);
-  expect(fields).toEqual(['headline', 'bio', 'linkUrl']);
-  await expect(saveCreatorCard('pu', 'alice', draft, fields)).rejects.toThrow('not confirmed');
-  await expect(saveCreatorCard('pu', 'alice', draft, fields)).resolves.toEqual(draft);
+  expect(await readCreatorCard('pu', 'alice')).toEqual({ headline: '', bio: '', linkUrl: '' });
+  await expect(saveCreatorCard('pu', 'alice', draft)).rejects.toThrow('not confirmed');
+  await expect(saveCreatorCard('pu', 'alice', draft)).resolves.toEqual(draft);
   expect(setDoc).toHaveBeenLastCalledWith('schools/pu/creatorProfiles/alice', {
     ...legacy, ...draft, updatedAt: 'SERVER_TIME',
   }, { merge: true });
