@@ -345,7 +345,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const [renderSuspended, setRenderSuspended] = useState(false);
   const [deferredCause, setDeferredCause] = useState<'background' | 'offscreen' | 'data-saver'>('background');
   const pageSuspended = useRef(false);
-  const handledManualStart = useRef(0);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
   const view = useMemo(() => ({
@@ -366,8 +365,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   useEffect(() => {
     if (!host) return;
     let active = true;
-    const manualRequest = manualStart !== handledManualStart.current;
-    handledManualStart.current = manualStart;
     const hasDataConsent = manualStart > 0;
     // Avoid loading the optional Three.js bundle or allocating WebGL when the
     // browser requests reduced data use. Marker details and walking links
@@ -378,9 +375,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Safari can fire pagehide before visibilitychange when entering bfcache.
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended.current || document.hidden;
-    const isDeferred = () => isBackgrounded() || (saveData && !hasDataConsent) ||
-      visibility === 'hidden' ||
-      (visibility === 'unknown' && !manualRequest && hostViewportVisibility() === false);
+    const isOffscreen = () => visibility === 'hidden' || hostViewportVisibility() === false;
+    const isDeferred = () => isBackgrounded() || (saveData && !hasDataConsent) || isOffscreen();
     const defer = () => {
       setDeferredCause(isBackgrounded() ? 'background' :
         saveData && !hasDataConsent ? 'data-saver' : 'offscreen');
@@ -388,7 +384,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
     const updateVisibility = () => {
       if (!scene) return;
-      const shouldRender = visibility !== 'hidden' && !isBackgrounded();
+      const shouldRender = !isBackgrounded() && !isOffscreen();
       scene.setActive(shouldRender);
       setRenderSuspended(!shouldRender);
     };
@@ -468,13 +464,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         const viewport = window.visualViewport;
         if (viewport) {
           const { width, height, offsetLeft, offsetTop } = viewport;
-          if (![width, height, offsetLeft, offsetTop, offsetLeft + width, offsetTop + height].every(Number.isFinite) ||
-            width <= 0 || height <= 0) return null;
-          visualBounds = { left: offsetLeft, top: offsetTop, width, height };
+          if ([width, height, offsetLeft, offsetTop, offsetLeft + width, offsetTop + height].every(Number.isFinite) &&
+            width > 0 && height > 0) {
+            visualBounds = { left: offsetLeft, top: offsetTop, width, height };
+          }
         }
       } catch {
-        // An unavailable viewport measurement leaves visibility to the observer.
-        return null;
+        // The layout viewport can still establish that the host is offscreen.
       }
       try {
         const rect = host.getBoundingClientRect();
