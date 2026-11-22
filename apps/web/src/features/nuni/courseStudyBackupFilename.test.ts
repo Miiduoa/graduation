@@ -30,7 +30,6 @@ describe('backup filename stems compared with merge-base', () => {
     ['emoji with ZWJ', '👩‍💻.md'],
     ['emoji with variation selector', '✈️.pdf'],
     ['long title', '課'.repeat(80) + '.md'],
-    ['visible text past the truncation limit', '\u3164'.repeat(48) + '課.pdf'],
     ['reserved name', 'CON.txt'],
     ['reserved filename characters', '<>:"/\\|?*'],
     ['leading dots', '...課程.pdf'],
@@ -56,6 +55,23 @@ describe('backup filename stems compared with merge-base', () => {
     expect(courseStudyNotesFilename(title)).toBe(defaultStem + '-學習筆記.txt');
     expect(courseStudyProgressFilename(title)).toBe(defaultStem + '-閱讀進度.campus-study.json');
     expect(courseStudyPracticeCheckpointFilename(title)).toBe(defaultStem + '-逐題練習.campus-practice.json');
+  });
+});
+
+describe('backup filename visible truncation', () => {
+  it('falls back when only invisible Hangul fillers fit before the code-point cap', () => {
+    const prefix = '\u3164'.repeat(48);
+    const sourceTitle = prefix + '課程.pdf';
+    expect(courseStudyBackupFilenameStem(sourceTitle)).toBe('讀書白板');
+    expect(courseStudyNotesFilename(sourceTitle)).toBe('讀書白板-學習筆記.txt');
+    expect(courseStudyProgressFilename(sourceTitle)).toBe('讀書白板-閱讀進度.campus-study.json');
+    expect(courseStudyPracticeCheckpointFilename(sourceTitle)).toBe('讀書白板-逐題練習.campus-practice.json');
+  });
+
+  it('keeps an actually visible character that still fits within the cap', () => {
+    const prefix = '\u3164'.repeat(47);
+    expect(courseStudyBackupFilenameStem(prefix + '課程.pdf')).toBe(prefix + '課');
+    expect(courseStudyBackupFilenameStem('課' + '\u3164'.repeat(80))).toBe('課' + '\u3164'.repeat(47));
   });
 });
 

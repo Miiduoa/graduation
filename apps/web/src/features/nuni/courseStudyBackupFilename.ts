@@ -115,8 +115,10 @@ export function courseStudyBackupFilenameStem(sourceTitle: string): string {
     .trim()
     .replace(/\.(pdf|txt|md|markdown)$/i, '')
     .replace(/^[. ]+|[. ]+$/gu, '');
-  // Check the entire cleaned title so truncation cannot hide visible text
-  // from this decision. Default-ignorable code points include variation selectors.
-  if (!/[^\p{White_Space}\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]/u.test(safe)) return '讀書白板';
-  return truncateFilenameStem(safe).trim() || '讀書白板';
+  // Both the cleaned title and its exported 48-code-point prefix must be visible.
+  // Long default-ignorable prefixes can otherwise hide the only readable name.
+  const visibleCharacter = /[^\p{White_Space}\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]/u;
+  if (!visibleCharacter.test(safe)) return '讀書白板';
+  const stem = truncateFilenameStem(safe).trim();
+  return visibleCharacter.test(stem) ? stem : '讀書白板';
 }

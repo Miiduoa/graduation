@@ -1,3 +1,9 @@
+## 2026-11-23：備份檔名截斷不能留下全不可見的字元
+
+- 修補 `courseStudyBackupFilenameStem`：部分課名在前 48 個 Unicode code points 都是 Hangul Filler（U+3164）等 Default-Ignorable 字元，唯一可辨識的「課程」出現在截斷後方。舊版只檢查**整個課名**是否可見，下載 TXT、閱讀進度及逐題練習 JSON 可能留下看似空白的檔名前綴；現在**截斷後再檢查**，若前綴不可見就使用「讀書白板」。
+- 保留原課程標題、正常多語／Emoji 字素與 48-code-point 檔名前綴上限；完全不改教材、備份內容、進度 v1/v2、練習 v1、API 或依賴。新增 Vitest 針對不可見前綴及恰好包含可見文字的邊界案例，並調整舊 merge-base 比較矩陣，明確保留這項安全差異。
+- 這屬於可重現的程式修補，不是 iOS／Android 檔案系統、WebGPU 教學或 Ahaboard 對照實測；新版 GitHub CI／CodeQL、App 5504170 APPROVED、Maestro／真機仍須依新 SHA 驗收。PR 保持 Draft、不合併、不部署。
+
 ## 2026-11-23：手機切換 App 或瀏覽器分頁後不自動搶走讀書焦點
 
 - 修補裝置端 AI 耗時 JSON 的剪貼簿五秒逾時／權限拒絕備援：原先只檢查複製按鈕與表單焦點，若學生按下複製後立刻切換 App／分頁，WebView 仍保留按鈕焦點時，晚到的備援可能自動選取 JSON。現在同一筆待處理複製會記錄 window blur 與 document visibilitychange；只要曾進入背景，或目前不是可見頁面，就**不移動焦點或文字選取**，改為清楚提示可手動按「全選量測 JSON」。
