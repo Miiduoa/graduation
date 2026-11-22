@@ -99,7 +99,7 @@ test('a complete long title opens only its verified source, ignoring fabricated 
     .toEqual({ route: 'HomeworkSubmit', params: { groupId: 'course_1', assignmentId: 'work_1' } });
 });
 
-test.each([false, true])('uses a unique display prefix for old cards and exact titles for new cards (reverse: %s)', (reverse) => {
+test.each([false, true])('requires a unique display prefix even with an exact title (reverse: %s)', (reverse) => {
   const value = snapshot();
   const prefix = '長'.repeat(130);
   const fullTitle = prefix + '期末報告';
@@ -115,7 +115,7 @@ test.each([false, true])('uses a unique display prefix for old cards and exact t
   if (reverse) value.assignments.items.reverse();
   expect(target(prefix)).toBeNull();
   expect(target(prefix + ' ')).toBeNull();
-  expect(target(prefix, fullTitle)?.params.assignmentId).toBe('work_1');
+  expect(target(prefix, fullTitle)).toBeNull();
   value.assignments.items.push({
     ...assignment, title: fullTitle + '  ', source: { ...source, assignmentId: 'work_3' },
   });
@@ -177,7 +177,7 @@ test.each([
   { lengths: [141, 141], samePrefix: false, opens: true },
   { lengths: [141, 139], samePrefix: true, opens: false },
   { lengths: [141, 139], samePrefix: false, opens: true },
-  { lengths: [139, 139], samePrefix: true, opens: true },
+  { lengths: [139, 139], samePrefix: true, opens: false },
 ])('checks summary titles $lengths with same prefix=$samePrefix', async ({ lengths, samePrefix, opens }) => {
   jest.spyOn(Date, 'now').mockReturnValue(now);
   const { serializeAssignmentRow } = require('../../../../../backend/functions/agent/assignmentSummary');

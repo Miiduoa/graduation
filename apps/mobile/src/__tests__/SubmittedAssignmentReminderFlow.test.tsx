@@ -498,7 +498,7 @@ test.each([
   ['長'.repeat(130), 0],
   ['長'.repeat(130), 1_000],
   ['資料庫作業：' + '正規化與索引實作'.repeat(4), 1_000],
-])('同名課程的同前綴作業各自顯示與開啟（前綴=%s，截止差=%i 毫秒）', (prefix, dueOffset) => {
+])('同名課程的作業完整顯示，前綴與期限須能唯一比對才開啟（前綴=%s，截止差=%i 毫秒）', (prefix, dueOffset) => {
   const snapshot = mockSnapshot();
   const dueMinute = Math.floor(Date.parse(dueAt) / 60_000) * 60_000;
   const rows = ['第 1 題', '第 2 題', '第 3 題'].map((suffix, index) => ({
@@ -509,10 +509,15 @@ test.each([
   }));
   snapshot.assignments.items = rows;
   snapshot.assignments.count = rows.length;
-  const { view, navigation } = planCard(snapshot);
+  const { plan, view, navigation } = planCard(snapshot);
+  const targets = plan.steps.map((assignment) => base.resolveCampusAssignmentTarget({ assignment, snapshot, scope }));
+  expect(targets.every(Boolean)).toBe(dueOffset !== 0);
+  const buttons = view.queryAllByText('查看這份作業');
+  expect(buttons).toHaveLength(targets.filter(Boolean).length);
   for (const [index, row] of rows.entries()) {
     expect(view.getAllByText(row.title).some((node) => node.props.numberOfLines == null)).toBe(true);
-    fireEvent.press(view.getAllByText('查看這份作業')[index]);
+    if (!targets[index]) continue;
+    fireEvent.press(buttons[index]);
     expect(navigation.navigate).toHaveBeenLastCalledWith('學習', {
       initial: false,
       screen: 'HomeworkSubmit',
@@ -557,7 +562,7 @@ test.each([
   expect(view.queryByText('查看這份作業')).toBeNull();
 });
 
-test('單筆回覆可精確開啟作業，提醒仍依原本的顯示標題查找', () => {
+test('單筆回覆的同前綴作業無法唯一比對時不顯示交辦或提醒', () => {
   const snapshot = mockSnapshot();
   const prefix = '長'.repeat(130);
   const selected = { ...snapshot.assignments.items[0], title: prefix + '甲' };
@@ -573,10 +578,8 @@ test('單筆回覆可精確開啟作業，提醒仍依原本的顯示標題查�
     disabled={false}
     onAsk={jest.fn()}
   />);
-  fireEvent.press(view.getByText('查看這份作業'));
-  expect(navigation.navigate).toHaveBeenCalledWith('學習', {
-    initial: false, screen: 'HomeworkSubmit', params: { groupId: 'course', assignmentId: 'work' },
-  });
+  expect(base.resolveCampusAssignmentTarget({ assignment: selected, snapshot, scope })).toBeNull();
+  expect(view.queryByText('查看這份作業')).toBeNull();
   expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
 });
 
@@ -689,15 +692,18 @@ const titleForms = [
   ['tab', '\t字'],
 ] as const;
 
-const titleMatrix = titleForms.flatMap(([kind, suffix]) =>
+const titleMatrix: Array<{ kind: string; suffix: string; length: number; count: number }> = titleForms.flatMap(([kind, suffix]) =>
   [129, 130, 131, 139, 140, 141].flatMap((length) =>
     [0, 1, 2].map((count) => ({ kind, suffix, length, count }))));
+titleMatrix.push({ kind: '摘要缺少後綴', suffix: ' ', length: 142, count: 1 });
 
-test.each(titleMatrix)('作業開啟差異矩陣 $kind 原始長度=$length 摘要相符=$count', async ({ suffix, length, count }) => {
+test.each(titleMatrix)('作業開啟差異矩陣 $kind 原始長度=$length 摘要相符=$count', async ({ kind, suffix, length, count }) => {
   const { refreshCampusSenseSnapshot } = jest.requireActual<typeof import('../services/campusSenseSnapshot')>(
     '../services/campusSenseSnapshot',
   );
-  const rawTitle = '長'.repeat(length - suffix.length) + suffix;
+  const rawTitle = kind === '摘要缺少後綴'
+    ? ('甲'.repeat(129) + ' ' + '乙'.repeat(12)).slice(0, ASSIGNMENT_SUMMARY_TITLE_LIMIT)
+    : '長'.repeat(length - suffix.length) + suffix;
   const seed = mockSnapshot();
   const rawRow = { ...seed.assignments.items[0], title: rawTitle };
   async function sync(items: CampusSenseSnapshot['assignments']['items']) {
@@ -718,6 +724,7 @@ test.each(titleMatrix)('作業開啟差異矩陣 $kind 原始長度=$length 摘�
   view.rerender(card(snapshot));
   const planStep = plan.steps[0];
   const day = plan.agenda!.days.find(({ deadlines }) => deadlines.length > 0)!;
+  expect(planStep.title).toBe(base.campusAssignmentDisplayTitle(row.title));
   expect(capped ? planStep.summaryAssignmentTitle : planStep.fullAssignmentTitle).toBe(row.title);
   const openLabel = '查看這份作業';
   const stepButtons = view.queryAllByText(openLabel);
@@ -742,12 +749,12 @@ test.each(titleMatrix)('作業開啟差異矩陣 $kind 原始長度=$length 摘�
     const assignment = { title, groupName: row.groupName, dueAt: row.dueAt };
     const input = { assignment, snapshot, scope };
     const baseline = base.resolveCampusAssignmentTarget(input);
+    if (kind === '摘要缺少後綴' && entry === '計畫步驟') expect(baseline).toBeNull();
     expect({ entry, target: resolveCampusAssignmentTarget(input) }).toEqual({ entry, target: baseline });
     if (count < 2 && !capped && baseline) {
       expect({ entry, opens: buttons.length > 0 }).toEqual({ entry, opens: true });
     }
-    // An unchanged, unique server summary can still be paired with its source.
-    expect({ entry, buttons: buttons.length }).toEqual({ entry, buttons: count === 1 ? 1 : 0 });
+    expect({ entry, buttons: buttons.length }).toEqual({ entry, buttons: count === 1 && baseline ? 1 : 0 });
     if (buttons.length) {
       fireEvent.press(buttons[0]);
       expect({ entry, calls: navigation.navigate.mock.calls }).toEqual({ entry, calls: [['學習', {

@@ -1,3 +1,5 @@
+import * as mergeBase from '../fixtures/campusAssignmentMergeBase';
+import { resolveCampusAssignmentTarget } from '../../services/campusAssignmentTarget';
 import { buildOfflineCampusPlan } from '../../services/offlineCampusPlanner';
 import type { CampusSenseSnapshot } from '../../services/campusSenseSnapshot';
 import type { OnDeviceSchoolContext } from '../../services/onDeviceSchoolContext';
@@ -241,4 +243,45 @@ test.each([139, 140, 141])('a %i-character assignment keeps the appropriate titl
   expect(assignment?.title).toHaveLength(130);
   expect(assignment?.fullAssignmentTitle).toBe(length < 140 ? title : undefined);
   expect(assignment?.summaryAssignmentTitle).toBe(length >= 140 ? title : undefined);
+});
+
+const handoffLengths = [128, 129, 130, 131, 139, 140, 141, 142];
+const handoffSeparators = ['', ' ', '\u0001', '\u007f', '\u3000'];
+const handoffCases = handoffLengths.flatMap((length) =>
+  handoffSeparators.flatMap((separator) =>
+    [false, true].flatMap((trailing) =>
+      [false, true].flatMap((duplicate) =>
+        [false, true].flatMap((sameSource) =>
+          [false, true].map((marked) => ({ length, separator, trailing, duplicate, sameSource, marked })))))));
+
+test.each(handoffCases)('plan handoff versus merge-base %j', ({
+  length, separator, trailing, duplicate, sameSource, marked,
+}) => {
+  const baseRow = snapshot.assignments.items[1];
+  const prefixLength = trailing ? length - separator.length : Math.min(length - separator.length, 129);
+  const rawTitle = '甲'.repeat(prefixLength) + separator +
+    '乙'.repeat(Math.max(0, length - prefixLength - separator.length));
+  const { serializeAssignmentRow } = require('../../../../../backend/functions/agent/assignmentSummary');
+  const wireRow = serializeAssignmentRow({ ...baseRow, title: rawTitle, id: 'original', groupId: 'course' });
+  // The mobile parser trims wire whitespace and replaces control characters with spaces.
+  const title = Array.from(wireRow.title.trim(), (character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127 ? ' ' : character;
+  }).join('');
+  const row = { ...baseRow, title, source: wireRow.source, titleMayBeTruncated: marked ? true as const : undefined };
+  const initial = { ...snapshot, assignments: { ...snapshot.assignments, count: 1, items: [row] } };
+  const assignment = plan('今天要先處理什麼？', { snapshot: initial })!.steps[0];
+  expect(assignment.evidence).toBe('authorized-assignments');
+  expect(assignment.title).toBe(mergeBase.campusAssignmentDisplayTitle(title));
+  const baselineAssignment = { title: mergeBase.campusAssignmentDisplayTitle(title),
+    groupName: assignment.groupName, dueAt: assignment.dueAt };
+  const refreshed = { ...row, source: { ...row.source, assignmentId: sameSource ? 'original' : 'replacement' } };
+  const items = duplicate ? [refreshed, { ...row, source: { ...row.source, assignmentId: 'duplicate' } }] : [refreshed];
+  const input = {
+    snapshot: { ...initial, assignments: { ...initial.assignments, count: items.length, items } },
+    scope: { uid: 'A', schoolId: 'pu' }, now: Date.parse(snapshot.checkedAt),
+  };
+  const baseline = mergeBase.resolveCampusAssignmentTarget({ ...input, assignment: baselineAssignment });
+  expect(resolveCampusAssignmentTarget({ ...input, assignment: baselineAssignment })).toEqual(baseline);
+  expect(resolveCampusAssignmentTarget({ ...input, assignment })).toEqual(sameSource ? baseline : null);
 });

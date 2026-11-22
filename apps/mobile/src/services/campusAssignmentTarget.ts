@@ -37,56 +37,32 @@ export function campusAssignmentDisplayTitle(value: string): string {
   return normalizeCampusAssignmentTitle(value).slice(0, DISPLAY_TITLE_LIMIT);
 }
 
-function campusAssignmentLegacyMatches(snapshot: CampusSenseSnapshot, assignment: CampusAssignmentIdentity) {
+/** Require the original prefix lookup to identify a unique row before checking newer metadata. */
+function matchCampusAssignment(snapshot: CampusSenseSnapshot, assignment: CampusAssignmentIdentity) {
+  if (snapshot.assignments.status !== 'available' ||
+      typeof assignment.title !== 'string' || !assignment.title.trim()) return null;
   const title = campusAssignmentDisplayTitle(assignment.title);
-  return snapshot.assignments.items.filter((row) =>
-    row.groupName === (assignment.groupName ?? '') &&
-    row.dueAt === (assignment.dueAt ?? null) &&
-    campusAssignmentDisplayTitle(row.title) === title);
-}
-
-/** Resolve identity across the whole course/deadline scope before checking the original ID. */
-function matchCampusAssignment(
-  snapshot: CampusSenseSnapshot,
-  assignment: CampusAssignmentIdentity,
-) {
-  const rawTitle = assignment.summaryAssignmentTitle ?? assignment.fullAssignmentTitle ?? assignment.title;
-  if (snapshot.assignments.status !== 'available' || typeof rawTitle !== 'string') return null;
-  const title = normalizeCampusAssignmentTitle(rawTitle);
-  if (!title) return null;
-  const prefixMatches = campusAssignmentLegacyMatches(snapshot, { ...assignment, title: rawTitle });
-  // Cards saved before the identity fields use the original display-title lookup.
-  if (assignment.fullAssignmentTitle === undefined && assignment.summaryAssignmentTitle === undefined) {
-    const [candidate] = prefixMatches;
-    if (prefixMatches.length !== 1) return null;
-    if (assignment.expectedSource === undefined) return candidate;
-    if (snapshot.assignments.items.some((row) =>
-      row !== candidate && row.groupName === candidate.groupName && row.dueAt === candidate.dueAt &&
-      campusAssignmentDisplayTitle(row.title) === rawTitle)) return null;
-    const source = parseCampusAssignmentSource(candidate.source);
-    return source && source.groupId === assignment.expectedSource?.groupId &&
-      source.assignmentId === assignment.expectedSource?.assignmentId ? candidate : null;
-  }
   const rows = snapshot.assignments.items.filter((row) =>
     row.groupName === (assignment.groupName ?? '') &&
     row.dueAt === (assignment.dueAt ?? null));
-  const mayBeTruncated = assignment.summaryAssignmentTitle !== undefined;
-  if ((mayBeTruncated || prefixMatches.some(mayHaveTruncatedTitle)) &&
-      prefixMatches.length !== 1) return null;
-  const matches = mayBeTruncated
-    ? prefixMatches.filter((row) => mayHaveTruncatedTitle(row) &&
-        normalizeCampusAssignmentTitle(row.title) === title)
-    : rows.filter((row) => normalizeCampusAssignmentTitle(row.title) === title);
+  const matches = rows.filter((row) => campusAssignmentDisplayTitle(row.title) === title);
   if (matches.length !== 1) return null;
-  // A title at the display cutoff can also stand for a longer title in this scope.
-  if (title.length === DISPLAY_TITLE_LIMIT && rows.some((row) =>
-    row !== matches[0] && normalizeCampusAssignmentTitle(row.title).startsWith(title))) return null;
-  if (assignment.expectedSource) {
-    const source = parseCampusAssignmentSource(matches[0].source);
-    if (source?.groupId !== assignment.expectedSource.groupId ||
-        source?.assignmentId !== assignment.expectedSource.assignmentId) return null;
+  const [candidate] = matches;
+
+  const referenceTitle = assignment.summaryAssignmentTitle ?? assignment.fullAssignmentTitle;
+  if (referenceTitle !== undefined) {
+    if (typeof referenceTitle !== 'string') return null;
+    const normalizedTitle = normalizeCampusAssignmentTitle(referenceTitle);
+    if (normalizeCampusAssignmentTitle(candidate.title) !== normalizedTitle ||
+        (assignment.summaryAssignmentTitle !== undefined && !mayHaveTruncatedTitle(candidate))) return null;
+    // A cutoff title can also stand for a longer title in this scope.
+    if (normalizedTitle.length === DISPLAY_TITLE_LIMIT && rows.some((row) =>
+      row !== candidate && normalizeCampusAssignmentTitle(row.title).startsWith(normalizedTitle))) return null;
+  } else if (assignment.expectedSource && rows.some((row) =>
+    row !== candidate && campusAssignmentDisplayTitle(row.title) === assignment.title)) {
+    return null;
   }
-  return matches[0];
+  return candidate;
 }
 
 /**
@@ -106,7 +82,9 @@ export function resolveCampusAssignmentTarget(input: {
   if (!snapshot) return null;
   const match = matchCampusAssignment(snapshot, input.assignment);
   const source = parseCampusAssignmentSource(match?.source);
-  if (!source) return null;
+  const expected = input.assignment.expectedSource;
+  if (!source || (expected &&
+      (source.groupId !== expected.groupId || source.assignmentId !== expected.assignmentId))) return null;
   return {
     route: 'HomeworkSubmit',
     params: { groupId: source.groupId, assignmentId: source.assignmentId },
