@@ -19,6 +19,8 @@ const readPrompt = '(?:(?:能不能|可不可以|能否|是否可以|可以|能)
   '(?:確認|核對|查詢|查看|看|查|知道|詢問|問)(?:一下)?)';
 const questionEnding = '(?:啊|呢|嗎)?[?]*$';
 const standaloneReadPrompt = new RegExp('^(?:' + readPrompt + '|' + polite + ')' + questionEnding);
+const calendarVisibility = '(?:我)?(?:在)?' + calendarLocation + '(?:還是|仍然|還|仍)?' +
+  '(?:找不到|看不到|(?:沒有|沒|未)(?:找到|看到|出現|顯示))';
 const orderWriteVerb =
   '鎖定|解鎖|凍結|取消|撤銷|撤回|作廢|刪|移除|移走|清除|清空|封存|編輯|改|變更|調整|更新|更換|' +
   '下單|下訂|訂購|加點|補訂|重(?:新)?(?:點|訂|買|購)|再(?:點|訂|買|購)|付款|結帳|退款|退訂|退單|退費|送出|提交|延後|提前|延期|重排|標記|備註|同步';
@@ -26,18 +28,23 @@ const orderWriteVerb =
 // here. Calendar placement verbs are allowed only in the status question itself.
 // Bare order verbs can begin a request, while words such as 餐點 can describe an order.
 const orderRequest = '(?:點|訂(?!單)|買|購買)';
+const delegatedOrderRequest = '(?:幫忙|幫我|替我|代)' + orderRequest;
 const order = '(?!' + readPrompt + '?' + orderRequest + ')(?:(?!' + pickupVerb.source +
-  '|' + orderWriteVerb + '|(?:並且?|接著|然後|順便)' + orderRequest + '|請|麻煩|幫我|替我|我想|不要|不用|如果|假設|翻譯)[^,;、。.!?]){0,80}訂單';
+  '|' + calendarVisibility + '|' + orderWriteVerb + '|' + delegatedOrderRequest +
+  '|(?:並且?|接著|然後|順便|也|另外)' + orderRequest +
+  '|請|麻煩|幫我|替我|我想|不要|不用|如果|假設|翻譯)[^,;、。.!?]){0,80}訂單';
 const orderLookup = new RegExp(
   '^' + readPrompt + '?' + order + '(?:的?' + pickupTime +
     '(?:是?(?:幾點|什麼時候)(?:啊|呢|嗎)?)?)?[?]*$',
 );
+const pickupDate = '(?:今|昨|前|大前|明|後)天|上(?:一)?次|上(?:個)?(?:週|星期|月)|最近|最新';
+const pickupQualifier = '(?:' + order + '的?|(?:我(?:的)?)?(?:' + pickupDate + ')的?)';
 const pickupTimeLookup = new RegExp(
-  '^' + readPrompt + '?' + pickupTime + '是?(?:幾點|什麼時候)(?:啊|呢|嗎)?[?]*$',
+  '^' + readPrompt + '?' + pickupQualifier + '?' + pickupTime + '是?(?:幾點|什麼時候)(?:啊|呢|嗎)?[?]*$',
 );
 const calendarEntry = '(?:' + placement + '|放進|記在)' + calendarLocation;
 const calendarEntryPattern = new RegExp(calendarEntry);
-const pickupSubject = '(?:(?:' + order + '的?)?' + pickupTime + ')?';
+const pickupSubject = '(?:' + pickupQualifier + '?' + pickupTime + ')?';
 const calendarSubject = readPrompt + '?' + pickupSubject;
 const calendarStatus = new RegExp(
   '^' + calendarSubject +
@@ -51,8 +58,6 @@ const calendarSlotLookup = new RegExp(
   '^' + calendarSubject + '(?:已經|已|有)?' + calendarEntry +
     '的?(?:是|在)?' + calendarSlot + questionEnding,
 );
-const calendarVisibility = '(?:我)?(?:在)?' + calendarLocation + '(?:還是|仍然|還|仍)?' +
-  '(?:找不到|看不到|(?:沒有|沒|未)(?:找到|看到|出現|顯示))';
 const calendarVisibilityPattern = new RegExp(calendarVisibility);
 const calendarVisibilityLookup = new RegExp(
   '^' + readPrompt + '?(?:' + pickupSubject + calendarVisibility + '|' +

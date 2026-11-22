@@ -5,10 +5,12 @@ import { parseAssistantFoodPickupIntent as parse } from '@campus/shared/src/assi
 it.each([
   ['把我最近一筆訂單的取餐時間加入行事曆，預留15分鐘', 15],
   ['請幫我將最新的訂單預定取餐時間加到個人行事曆', 15],
+  // 舊版回傳 null，這四句刻意開放口語入曆動詞與時長。
   ['把最近一筆訂單的取餐時間記到我的行事曆，留半小時', 30],
   ['幫我把最新的訂單取餐時間放到日曆，留一個半小時', 90],
   ['幫我把最新訂單的取餐時間放到我的日曆上', 15],
   ['請將最新訂單的取餐時間記入行事曆，保留兩個小時', 120],
+  // 舊版回傳 invalid，這裡刻意支援先查訂單、再存入日曆並用小時指定時長。
   ['查我的最新訂單，再把取餐時間存到行事曆，留一小時', 60],
   ['幫我把最近訂單的取餐時間排入我的行程，保留３０分鐘。', 30],
   ['查我的最新訂單，再把取餐時間加入行事曆，預留5分鐘', 5],
@@ -32,6 +34,8 @@ it.each([
   '把最近訂單的取餐時間記到行事曆，留半小時，順便付款',
   '查我的最新訂單的取餐時間，我想確認有沒有記到行事曆，沒有就記到行事曆',
   '取消最新訂單，確認取餐時間是否已加入行事曆',
+  '幫忙買昨天的訂單，確認取餐時間是否已加入行事曆',
+  '再點一次昨天的訂單，並確認取餐時間是否已加入行事曆',
   '請幫我取消昨天訂單；確認取餐時間有沒有記在日曆上？',
   '幫我建立取餐行程，確認最新訂單的取餐時間有沒有放到我的日曆上？',
   '修改最新訂單的取餐時間，再確認有沒有記到日曆上',
@@ -231,4 +235,54 @@ it.each([
 it('allows order descriptions that mention a time or meal item', () => {
   expect(parse('昨天十二點訂單的取餐時間是否已加入行事曆？')).toBeNull();
   expect(parse('昨天有加購餐點的訂單的取餐時間記在日曆上的哪一天？')).toBeNull();
+});
+
+const pickupSubjects = ['', '昨天', '今天', '上次', '最新', '前天', '上週'].flatMap(date => [
+  date ? date + '的取餐時間' : '取餐時間',
+  (date ? date + '的訂單' : '我的訂單') + '的取餐時間',
+]);
+const calendarLookups = [
+  { name: '看不到', question: (subject: string) => '為什麼我的日曆上看不到' + subject, placement: false },
+  { name: '找不到', question: (subject: string) => '在行事曆上找不到' + subject, placement: false },
+  { name: '沒顯示', question: (subject: string) => subject + '在日曆上沒顯示', placement: false },
+  { name: '有沒有', question: (subject: string) => subject + '有沒有加入行事曆', placement: true },
+  { name: '是否已加入', question: (subject: string) => subject + '是否已加入行事曆', placement: true },
+];
+const lookupFollowups = [
+  { text: '', placement: false },
+  { text: '為什麼', placement: false },
+  { text: '請問我該去哪裡查', placement: false },
+  { text: '是不是同步有問題', placement: false },
+  { text: '確認取餐時間是否已加入行事曆', placement: true },
+];
+const orderActions = [
+  '', '再點一次', '再訂', '重訂', '幫忙買', '幫我點', '幫我訂', '幫忙訂', '代買', '代訂',
+  '下單', '取消', '鎖定', '買', '點', '訂', '請幫忙購買',
+];
+
+const pickupMatrix = calendarLookups.flatMap(lookup => lookupFollowups.map(followup => {
+  // 以 cea4084ff 的解析器逐格核對過，矩陣內只有「加入」命中舊版的入曆動詞。
+  const baseDetectsPickup = lookup.placement || followup.placement;
+  return {
+    lookup: lookup.name,
+    followup: followup.text || '無追問',
+    readDifference: baseDetectsPickup ? '舊版 invalid → null：加入行事曆是狀態問句' : '唯讀維持 null',
+    writeDifference: baseDetectsPickup ? '寫入維持 invalid' : '舊版 null → invalid：日曆可見性觸發混合寫入限制',
+    cells: pickupSubjects.flatMap(subject => orderActions.flatMap(action => {
+      const suffix = (followup.text ? '，' + followup.text : '') + '？';
+      const query = lookup.question(subject) + suffix;
+      const expected = action ? 'invalid' : null;
+      const questions = action ? [action + '昨天的訂單，' + query] : [query];
+      if (action && subject.includes('訂單')) {
+        questions.push(lookup.question(action + subject) + suffix);
+      }
+      return questions.map(question => ({ question, expected }));
+    })),
+  };
+}));
+
+it.each(pickupMatrix)('$lookup × $followup（$readDifference；$writeDifference）', ({ cells }) => {
+  for (const { question, expected } of cells) {
+    expect.soft(parse(question)?.kind ?? null, question).toBe(expected);
+  }
 });
