@@ -3206,6 +3206,45 @@ it('stops an OSM stream of empty chunks without parsing JSON or hammering the so
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+// A long sequence of immediately resolved chunks must not monopolize a mobile
+// WebView's event loop. Prove that a timer scheduled *after* stream reading
+// starts gets a turn before all chunks are consumed, while the real decoded
+// OSM snapshot remains intact. This is a synthetic transport fixture.
+it('yields between fragmented campus outline chunks without losing valid geometry', async () => {
+  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  let produced = 0;
+  let timerObservedAt: number | null = null;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      produced += 1;
+      // Schedule only after the reader is actively consuming the stream,
+      // not at construction (which could make a pre-fix test pass by chance).
+      if (produced === 64) {
+        window.setTimeout(() => { timerObservedAt = produced; }, 0);
+      }
+      if (produced <= 320) controller.enqueue(new Uint8Array(0));
+      else {
+        controller.enqueue(new TextEncoder().encode(body));
+        controller.close();
+      }
+    },
+  });
+  const fetchMock = vi.fn().mockResolvedValue(new Response(stream, {
+    status: 200, headers: { 'Content-Type': 'application/json' },
+  }));
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]}
+    selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  await waitFor(() => expect(timerObservedAt).not.toBeNull());
+  // Without yielding, the timer runs only after all 321 reads have finished.
+  expect(timerObservedAt).toBeLessThan(320);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 // Fetch may resolve its headers before a suspended WebView delivers the rest
 // of the OSM body. Abort must cancel the acquired reader, not only the fetch
 // controller, so closing or backgrounding the map stops unneeded data work.

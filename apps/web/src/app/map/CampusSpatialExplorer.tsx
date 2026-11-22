@@ -164,6 +164,13 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       }
       bytes.set(value, total);
       total = end;
+      // A hostile proxy can drip already-resolved zero-byte/tiny chunks.
+      // Yield periodically so browser timers, touch input and cancellation
+      // can run before the 8,192-chunk guard is reached on mobile WebViews.
+      if (chunks % 128 === 0) {
+        await new Promise<void>((resolve) => window.setTimeout(() => resolve(), 0));
+        if (signal?.aborted) throw new Error('Building outline read aborted');
+      }
     }
   } finally {
     signal?.removeEventListener('abort', cancelReader);
