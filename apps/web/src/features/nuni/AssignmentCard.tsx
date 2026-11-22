@@ -128,6 +128,10 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
   const setSaved = (value: NuniAssignment) => setSavedSnapshot({ value, version: syncVersion });
   const [localFiles, setLocalFiles] = useState<LocalAssignmentFile[]>([]);
   const [fileReviewRequired, setFileReviewRequired] = useState(false);
+  function clearLocalFiles() {
+    setLocalFiles([]);
+    setFileReviewRequired(false);
+  }
   useAssignmentFilePreviews(localFiles);
   const fileOperation = useRef<AssignmentFileOperation>({});
   const [recovering, setRecovering] = useState(false);
@@ -424,7 +428,7 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
                 fileOperation.current = {};
                 setSavedSnapshot({ value: confirmed, version: latestSnapshot.current.syncVersion });
                 setWithdrawNotice('');
-                setLocalFiles([]);
+                clearLocalFiles();
                 setProgress(null);
                 onConfirmed?.(confirmed);
               } catch (failure) {
@@ -440,7 +444,7 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
                     setSaved(fresh);
                     onConfirmed?.(fresh);
                     fileOperation.current = {};
-                    setLocalFiles([]);
+                    clearLocalFiles();
                   }
                 }
                 if (
@@ -468,7 +472,7 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
                     className={`${shared.button} ${shared.secondary}`}
                     onClick={() => {
                       setBodyEditor({ version: bodyVersion, original: currentBody, text: currentBody });
-                      setLocalFiles([]);
+                      clearLocalFiles();
                       fileOperation.current = {};
                       setBodyExpanded(true);
                       bodyInput.current?.focus();

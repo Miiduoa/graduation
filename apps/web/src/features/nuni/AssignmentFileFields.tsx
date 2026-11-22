@@ -384,7 +384,7 @@ export function AssignmentFilePicker({
       added: result.added,
       rejected: result.rejected.length || !reviewRequired ? result.rejected : previous?.rejected ?? [],
     }));
-    if (result.rejected.length) onReviewRequiredChange(true);
+    onReviewRequiredChange(true);
     if (result.added) onChange(result.files);
   }
   return (
@@ -495,7 +495,14 @@ export function AssignmentFilePicker({
       <p className={styles.note}>
         網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。
       </p>
-      <AssignmentFilePreview files={files} onChange={onChange} disabled={disabled} />
+      <AssignmentFilePreview
+        files={files}
+        onChange={(next) => {
+          onChange(next);
+          onReviewRequiredChange(next.length > 0);
+        }}
+        disabled={disabled}
+      />
       {reviewRequired && (
         <div>
           <p>{files.length ? '請確認上方即將繳交的檔案。' : '目前沒有待送出的附件。'}</p>

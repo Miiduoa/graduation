@@ -128,8 +128,16 @@ async def attachments(page, config, report, capture):
     ]
     async with page.expect_file_chooser() as chooser_info:
         await picker.get_by_role('button', name='檔案', exact=True).click()
-    await (await chooser_info.value).set_files(documents)
-    await expect(picker.get_by_role('status')).to_contain_text('已加入 2 個檔案。')
+    await (await chooser_info.value).set_files(documents[:1])
+    await expect(picker.get_by_role('status')).to_contain_text('已加入 1 個檔案。')
+    confirm = picker.get_by_role('button', name='確認附件清單', exact=True)
+    await confirm.click()
+    await expect(confirm).to_have_count(0)
+    async with page.expect_file_chooser() as chooser_info:
+        await picker.get_by_role('button', name='檔案', exact=True).click()
+    await (await chooser_info.value).set_files(documents[1:])
+    await expect(picker.get_by_role('status')).to_contain_text('已加入 1 個檔案。')
+    await expect(confirm).to_be_visible()
     await expect(picker.get_by_role('list', name='未加入的檔案')).to_contain_text('文件最多 2 個')
     await expect(picker.get_by_role('list', name='即將繳交的檔案').locator(':scope > li')).to_have_count(2)
     async with page.expect_file_chooser() as chooser_info:
