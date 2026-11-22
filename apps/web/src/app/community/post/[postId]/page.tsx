@@ -81,6 +81,11 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
 
   const [post, setPost] = useState<CampusPostDoc | null>(null);
   const postReads = useRef({ started: 0, applied: 0, saved: 0 });
+  const postDeletion = useRef<'pending' | 'confirmed' | null>(null);
+  const replyDeletions = useRef(new Map<string, 'pending' | 'confirmed'>());
+  const likeRefreshAfter = useRef(0);
+  const [refreshError, setRefreshError] = useState(false);
+  const [likeNeedsRefresh, setLikeNeedsRefresh] = useState(false);
   const [replies, setReplies] = useState<CampusReply[]>([]);
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
@@ -158,11 +163,15 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     for (;;) {
       const request = ++reads.started;
       const row = await getCampusPostById(schoolId, postId);
-      if (request < reads.applied) return;
+      if (postDeletion.current === 'confirmed' || request < reads.applied) return;
       // Refresh counts and other fields from a snapshot after the confirmed edit.
       if (request < reads.saved) continue;
       reads.applied = request;
       setPost(row ? { ...row, title: row.title ?? '' } : null);
+      if (request > likeRefreshAfter.current) {
+        likeRefreshAfter.current = 0;
+        setLikeNeedsRefresh(false);
+      }
       return;
     }
   }, [postId, schoolId]);
@@ -170,8 +179,15 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const loadReplies = useCallback(async () => {
     if (!postId || !schoolId) return;
     const rows = await listCampusReplies(schoolId, postId);
-    setReplies(rows);
+    setReplies(rows.map((reply) =>
+      replyDeletions.current.get(reply.id) === 'confirmed' ? deletedReply(reply) : reply,
+    ));
   }, [postId, schoolId]);
+
+  const refreshAfterWrite = async (...reads: (() => Promise<void>)[]) => {
+    const results = await Promise.allSettled(reads.map((read) => read()));
+    if (results.some((result) => result.status === 'rejected')) setRefreshError(true);
+  };
 
   const hydrateProfiles = useCallback(async () => {
     if (!schoolId) return;
@@ -220,7 +236,9 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const isMine = !!(post && !post.anonymous && post.authorUid && post.authorUid === user?.uid);
 
   const submitReply = async () => {
-    if (!user?.uid || !schoolId || !postId || !replyText.trim()) return;
+    if (!user?.uid || !schoolId || !postId || sendingReply || postDeletion.current || !replyText.trim()) return;
+    if (replyParentId && replyDeletions.current.has(replyParentId)) return;
+    setSendingReply(true);
     const boardForAlias = post?.boardId ?? 'general';
     let aliasSnap: string | undefined;
     if (replyAnonymous) {
@@ -230,7 +248,6 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         aliasSnap = '匿名';
       }
     }
-    setSendingReply(true);
     try {
       let depth = 0;
       if (replyParentId) {
@@ -246,8 +263,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
       });
       setReplyText('');
       setReplyParentId(null);
-      // A confirmed write stays successful even when refreshing the page fails.
-      await Promise.allSettled([loadReplies(), loadPost()]);
+      await refreshAfterWrite(loadReplies, loadPost);
     } catch {
       alert('這次未能送出，請稍後再試。');
     } finally {
@@ -256,11 +272,13 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   };
 
   const onToggleLike = async () => {
-    if (!user?.uid || !schoolId || !postId) return;
+    if (!user?.uid || !schoolId || !postId || likeBusy || likeNeedsRefresh || postDeletion.current) return;
     setLikeBusy(true);
     try {
       await toggleCampusPostLike(schoolId, postId, user.uid);
-      await Promise.allSettled([loadPost()]);
+      likeRefreshAfter.current = postReads.current.started;
+      setLikeNeedsRefresh(true);
+      await refreshAfterWrite(loadPost);
     } catch {
       alert('這次未能按讚，請稍後再試。');
     } finally {
@@ -269,16 +287,21 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   };
 
   const onDeletePost = () => {
-    if (!schoolId || !postId) return;
+    if (!schoolId || !postId || postDeletion.current) return;
     if (!confirm('確定要刪除這篇貼文？此操作不可復原。')) return;
+    postDeletion.current = 'pending';
     void (async () => {
       try {
         await deleteCampusPost(schoolId, postId);
-        alert('已刪除');
-        router.push(`/community?schoolId=${encodeURIComponent(schoolId)}`);
       } catch {
+        postDeletion.current = null;
         alert('這次未能刪除，請稍後再試。');
+        return;
       }
+      postDeletion.current = 'confirmed';
+      setPost(null);
+      alert('已刪除');
+      router.push(`/community?schoolId=${encodeURIComponent(schoolId)}`);
     })();
   };
 
@@ -300,15 +323,21 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   };
 
   const onDeleteReply = (r: CampusReply) => {
-    if (!schoolId || !postId) return;
+    if (!schoolId || !postId || postDeletion.current || r.deleted || replyDeletions.current.has(r.id)) return;
     if (!confirm('確定要刪除這則留言？')) return;
+    replyDeletions.current.set(r.id, 'pending');
     void (async () => {
       try {
         await softDeleteCampusReply(schoolId, postId, r.id);
-        await Promise.allSettled([loadReplies(), loadPost()]);
       } catch {
+        replyDeletions.current.delete(r.id);
         alert('這次未能刪除，請稍後再試。');
+        return;
       }
+      replyDeletions.current.set(r.id, 'confirmed');
+      setReplies((current) => current.map((reply) => reply.id === r.id ? deletedReply(reply) : reply));
+      setReplyParentId((current) => current === r.id ? null : current);
+      await refreshAfterWrite(loadReplies, loadPost);
     })();
   };
 
@@ -388,6 +417,20 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
 
   return (
     <div style={{ maxWidth: 720 }}>
+      {refreshError && (
+        <p role="status">
+          操作已完成，但部分資料無法更新。{' '}
+          <button
+            type="button"
+            onClick={() => {
+              setRefreshError(false);
+              void refreshAfterWrite(loadPost, loadReplies);
+            }}
+          >
+            重新讀取
+          </button>
+        </p>
+      )}
       <div className="card" style={{ padding: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div
@@ -520,7 +563,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         )}
 
         <PostActionsRow>
-          <button type="button" onClick={onToggleLike} disabled={likeBusy} style={statChip}>
+          <button type="button" onClick={onToggleLike} disabled={likeBusy || likeNeedsRefresh} style={statChip}>
             <span style={{ color: liked ? 'var(--danger, var(--danger))' : 'var(--muted)' }}>
               {liked ? '❤️' : '🤍'}
             </span>
@@ -712,6 +755,10 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
       />
     </div>
   );
+}
+
+function deletedReply(reply: CampusReply): CampusReply {
+  return { ...reply, deleted: true, content: '（此留言已被作者刪除）' };
 }
 
 type EditPostPatch = { title: string; content: string; tags: string[] };

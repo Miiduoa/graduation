@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   toggleLike: vi.fn(),
   addReply: vi.fn(),
   deleteReply: vi.fn(),
+  deletePost: vi.fn(),
+  push: vi.fn(),
 }));
 
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
@@ -35,7 +37,7 @@ vi.mock('@/components/SiteShell', () => ({
 vi.mock('@/components/SchoolScopePlaceholder', () => ({ SchoolScopePlaceholder: () => null }));
 vi.mock('next/navigation', () => ({
   useParams: () => ({ postId: mocks.postId }),
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useRouter: () => ({ replace: vi.fn(), push: mocks.push }),
 }));
 vi.mock('@/lib/community/firestore', () => ({
   getCampusPostById: mocks.getPost,
@@ -43,7 +45,7 @@ vi.mock('@/lib/community/firestore', () => ({
   fetchSchoolDirectoryProfiles: mocks.profiles,
   flattenCampusRepliesThread: (rows: unknown[]) => rows,
   addCampusReply: mocks.addReply,
-  deleteCampusPost: vi.fn(),
+  deleteCampusPost: mocks.deletePost,
   getOrCreateBoardAlias: vi.fn(),
   softDeleteCampusReply: mocks.deleteReply,
   submitCampusReport: vi.fn(),
@@ -98,6 +100,8 @@ beforeEach(() => {
   mocks.toggleLike.mockReset().mockResolvedValue(undefined);
   mocks.addReply.mockReset().mockResolvedValue(undefined);
   mocks.deleteReply.mockReset().mockResolvedValue(undefined);
+  mocks.deletePost.mockReset().mockResolvedValue(undefined);
+  mocks.push.mockReset();
   mocks.updatePost.mockReset().mockResolvedValue(undefined);
 });
 
@@ -269,6 +273,9 @@ it.each(['post', 'replies', 'both'])(
     expect(mocks.getPost).toHaveBeenCalledTimes(2);
     expect(mocks.listReplies).toHaveBeenCalledTimes(2);
     expect((input as HTMLTextAreaElement).value).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: '送出留言' }));
+    expect(mocks.addReply).toHaveBeenCalledOnce();
+    expect(screen.getByRole('status').textContent).toContain('操作已完成，但部分資料無法更新。');
     expect(alert).not.toHaveBeenCalled();
   },
 );
@@ -286,19 +293,121 @@ it('preserves the reply draft and reports an actual write failure', async () => 
   expect(mocks.listReplies).toHaveBeenCalledOnce();
 });
 
-it('keeps a confirmed reply deletion when both reads fail', async () => {
-  const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+it.each(['post', 'replies', 'both'])(
+  'prevents a second reply deletion when refreshing %s fails',
+  async (failedRead) => {
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    ownPost();
+    const oldReplies = [{ id: 'r-1', authorUid: 'alice', content: '我的留言', threadDepth: 0 }];
+    mocks.listReplies.mockResolvedValue(oldReplies);
+    render(<PostDetailPage />);
+    const remove = await screen.findByRole('button', { name: /^刪除$/ });
+    fireEvent.click(screen.getByRole('button', { name: '回覆' }));
+    if (failedRead !== 'replies') mocks.getPost.mockRejectedValueOnce(new Error('offline'));
+    if (failedRead !== 'post') mocks.listReplies.mockRejectedValueOnce(new Error('offline'));
+
+    await act(async () => {
+      fireEvent.click(remove);
+      fireEvent.click(remove);
+    });
+    expect(mocks.deleteReply).toHaveBeenCalledExactlyOnceWith('pu', 'p-1', 'r-1');
+    expect(screen.queryByRole('button', { name: /^刪除$/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: '回覆' })).toBeNull();
+    expect(screen.queryByText('我的留言')).toBeNull();
+    expect(screen.queryByText('正在回覆⋯')).toBeNull();
+    expect(screen.getByText('（此留言已被作者刪除）')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('操作已完成，但部分資料無法更新。');
+
+    // Even a successful retry can return a stale snapshot.
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新讀取' })));
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^刪除$/ })).toBeNull();
+    expect(mocks.deleteReply).toHaveBeenCalledOnce();
+    expect(alert).not.toHaveBeenCalled();
+  },
+);
+
+it('keeps a deleted reply hidden when an earlier thread read arrives late', async () => {
   vi.spyOn(window, 'confirm').mockReturnValue(true);
-  mocks.listReplies.mockResolvedValueOnce([
-    { id: 'r-1', authorUid: 'alice', content: '我的留言', threadDepth: 0 },
-  ]);
+  const oldReplies = [{ id: 'r-1', authorUid: 'alice', content: '我的留言', threadDepth: 0 }];
+  mocks.listReplies.mockResolvedValue(oldReplies);
   render(<PostDetailPage />);
   const remove = await screen.findByRole('button', { name: /^刪除$/ });
-  mocks.getPost.mockRejectedValueOnce(new Error('offline'));
+  let resolveEarlierRead!: (rows: typeof oldReplies) => void;
+  mocks.listReplies.mockImplementationOnce(() => new Promise((resolve) => {
+    resolveEarlierRead = resolve;
+  }));
+  fireEvent.click(screen.getByRole('button', { name: '回覆' }));
+  fireEvent.change(screen.getByPlaceholderText('輸入留言⋯'), { target: { value: '新回覆' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出留言' }));
+  await waitFor(() => expect(resolveEarlierRead).toBeDefined());
+  expect(mocks.addReply).toHaveBeenCalledWith('pu', 'p-1', expect.objectContaining({
+    content: '新回覆',
+    parentReplyId: 'r-1',
+  }));
+
   mocks.listReplies.mockRejectedValueOnce(new Error('offline'));
   await act(async () => fireEvent.click(remove));
-  expect(mocks.deleteReply).toHaveBeenCalledExactlyOnceWith('pu', 'p-1', 'r-1');
+  await act(async () => resolveEarlierRead(oldReplies));
+  expect(screen.getByText('（此留言已被作者刪除）')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /^刪除$/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: '回覆' })).toBeNull();
+  expect(mocks.deleteReply).toHaveBeenCalledOnce();
+});
+
+it('retains reply actions when the deletion write fails', async () => {
+  const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  mocks.listReplies.mockResolvedValue([
+    { id: 'r-1', authorUid: 'alice', content: '我的留言', threadDepth: 0 },
+  ]);
+  mocks.deleteReply.mockRejectedValueOnce(new Error('offline'));
+  render(<PostDetailPage />);
+  const remove = await screen.findByRole('button', { name: /^刪除$/ });
+  await act(async () => fireEvent.click(remove));
+  expect(alert).toHaveBeenCalledWith('這次未能刪除，請稍後再試。');
+  expect(screen.getByText('我的留言')).toBeTruthy();
+  await act(async () => fireEvent.click(remove));
+  expect(mocks.deleteReply).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole('button', { name: /^刪除$/ })).toBeNull();
+});
+
+it.each([false, true])('blocks a repeated like toggle after a failed read (initially liked: %s)', async (liked) => {
+  const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+  const original = await mocks.getPost();
+  mocks.getPost.mockResolvedValue({ ...original, likedBy: liked ? ['alice'] : [], likes: Number(liked) });
+  render(<PostDetailPage />);
+  const toggle = await screen.findByRole<HTMLButtonElement>('button', { name: liked ? /❤️/ : /🤍/ });
+  mocks.getPost.mockRejectedValueOnce(new Error('offline'));
+  await act(async () => fireEvent.click(toggle));
+  expect(toggle.disabled).toBe(true);
+  fireEvent.click(toggle);
+  expect(mocks.toggleLike).toHaveBeenCalledOnce();
   expect(alert).not.toHaveBeenCalled();
+
+  mocks.getPost.mockResolvedValue({ ...original, likedBy: liked ? [] : ['alice'], likes: Number(!liked) });
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新讀取' })));
+  const refreshed = screen.getByRole<HTMLButtonElement>('button', { name: liked ? /🤍/ : /❤️/ });
+  expect(refreshed.disabled).toBe(false);
+  expect(mocks.toggleLike).toHaveBeenCalledOnce();
+});
+
+it('removes post actions after deletion even while navigation has not changed the page', async () => {
+  const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  ownPost();
+  render(<PostDetailPage />);
+  const remove = await screen.findByRole('button', { name: /🗑 刪除/ });
+  await act(async () => {
+    fireEvent.click(remove);
+    fireEvent.click(remove);
+  });
+  expect(mocks.deletePost).toHaveBeenCalledExactlyOnceWith('pu', 'p-1');
+  expect(mocks.push).toHaveBeenCalledOnce();
+  expect(alert).toHaveBeenCalledExactlyOnceWith('已刪除');
+  expect(screen.getByText('找不到貼文，可能已被刪除。')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /🗑 刪除/ })).toBeNull();
 });
 
 it.each(['like', 'reply', 'both'])(
@@ -337,6 +446,10 @@ it.each(['like', 'reply', 'both'])(
     expect(mocks.toggleLike).toHaveBeenCalledTimes(source === 'reply' ? 0 : 1);
     expect(screen.getByText('已儲存內文')).toBeTruthy();
     expect(screen.queryByText('原內文')).toBeNull();
+    expect(screen.getByRole('status').textContent).toContain('操作已完成，但部分資料無法更新。');
+    fireEvent.click(edit);
+    expect(screen.getByLabelText<HTMLTextAreaElement>('內文').value).toBe('已儲存內文');
+    expect(mocks.updatePost).toHaveBeenCalledOnce();
     expect(screen.getByPlaceholderText<HTMLTextAreaElement>('輸入留言⋯').value).toBe('');
     expect(alert).not.toHaveBeenCalled();
   },
