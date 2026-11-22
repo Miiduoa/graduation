@@ -35,32 +35,27 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ) => {
     return (
       <button
+        {...props}
         ref={ref}
-        aria-busy={loading || undefined}
+        aria-busy={loading || props['aria-busy']}
         disabled={disabled || loading}
         className={[
           'btn',
           styles.button,
           styles[variant],
           styles[size],
+          loading ? styles.loading : '',
           fullWidth ? styles.fullWidth : '',
           className,
-        ].filter(Boolean).join(' ')}
+        ]
+          .filter(Boolean)
+          .join(' ')}
         style={style}
-        {...props}
       >
-        {loading ? (
-          <>
-            <LoadingSpinner size={size === 'sm' ? 13 : size === 'lg' ? 18 : 15} />
-            {children && <span>{children}</span>}
-          </>
-        ) : (
-          <>
-            {icon && iconPosition === 'left' && icon}
-            {children}
-            {icon && iconPosition === 'right' && icon}
-          </>
-        )}
+        {icon && iconPosition === 'left' && icon}
+        {children}
+        {icon && iconPosition === 'right' && icon}
+        {loading && <span className={styles.activity} aria-hidden="true" />}
       </button>
     );
   },

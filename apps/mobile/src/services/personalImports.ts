@@ -183,6 +183,8 @@ export function appendPersonalImports(
         throw new Error('相同課號、班別與時段已有不同教室的個人紀錄；請先核對原有資料。');
       if (changed === 'title')
         throw new Error('相同課號、班別與時段已有不同課名的個人紀錄；請先核對原有資料。');
+      if (changed === 'credits')
+        throw new Error('相同課號、班別與時段已有不同學分的個人紀錄；請先核對原有資料。');
       if (changed === 'time')
         throw new Error('相同課號與班別的原有上課時段與官方資料不同；請先核對原有資料。');
     }

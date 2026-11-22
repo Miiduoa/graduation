@@ -12,16 +12,16 @@
   padding: 10px 12px;
   border-radius: 7px;
   color: var(--muted);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-body-sm-size);
+  line-height: 1.5;
   white-space: nowrap;
   list-style: none;
   cursor: pointer;
   border: 1px solid var(--border);
   background: var(--surface);
   transition:
-    color 160ms ease,
-    background-color 160ms ease;
+    color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
 }
 
 .menu > summary::-webkit-details-marker {
@@ -42,7 +42,7 @@
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: rotate(45deg);
-  transition: transform 160ms ease;
+  transition: transform var(--motion-fast) var(--ease-out);
 }
 
 .menu[open] > summary,
@@ -62,6 +62,8 @@
 }
 
 .menuPanel {
+  container-name: service-menu;
+  container-type: inline-size;
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
@@ -77,8 +79,9 @@
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--surface);
+  font-size: var(--font-body-sm-size);
   box-shadow: var(--shadow-lg);
-  animation: reveal 180ms ease-out both;
+  animation: reveal var(--motion-normal) var(--ease-out) both;
 }
 
 .menuHead {
@@ -110,6 +113,14 @@
   color: var(--muted);
   font-size: var(--font-label-size);
   font-weight: 500;
+}
+
+.searchForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
 }
 
 .searchField {
@@ -146,6 +157,24 @@
   -webkit-appearance: none;
 }
 
+.submitSearch {
+  min-width: 44px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--brand);
+  border-radius: 9px;
+  background: var(--brand);
+  color: var(--on-brand);
+  font: inherit;
+  font-size: var(--font-body-sm-size);
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
+}
+
 .clearSearch,
 .resultSummary button {
   flex-shrink: 0;
@@ -166,7 +195,7 @@
   border-radius: 4px;
   color: var(--muted);
   font-family: inherit;
-  font-size: 10px;
+  font-size: var(--font-label-sm-size);
   white-space: nowrap;
 }
 
@@ -188,6 +217,9 @@
   font: inherit;
   font-size: var(--font-body-sm-size);
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
 }
 
 .filters button[aria-pressed='true'] {
@@ -199,6 +231,7 @@
 
 .resultSummary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -276,13 +309,13 @@
   padding: 12px 14px;
   border-radius: 7px;
   background: var(--accent-soft);
-  font-size: 14px;
+  font-size: var(--font-body-sm-size);
   font-weight: 600;
 }
 
-.menuOverview > span,
-.menuGroup a > span[aria-hidden] {
-  transition: transform 160ms ease;
+.menuOverview > span[aria-hidden='true'],
+.menuGroup a > span[aria-hidden='true'] {
+  transition: transform var(--motion-fast) var(--ease-out);
 }
 
 .menuGroup {
@@ -295,11 +328,11 @@
   min-width: 0;
 }
 
-.secondaryService {
-  min-height: 44px !important;
-  padding: 8px 10px 8px 22px !important;
+.menuGroup a.secondaryService {
+  min-height: 44px;
+  padding: 8px 10px 8px 22px;
   color: var(--muted);
-  font-size: 12px !important;
+  font-size: var(--font-label-size);
 }
 
 .secondaryService .serviceName {
@@ -309,10 +342,10 @@
 .menuGroup h2 {
   margin: 0 10px 6px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-label-sm-size);
   font-weight: 600;
-  line-height: 20px;
-  letter-spacing: 0.1em;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
 }
 
 .menuGroup a {
@@ -327,14 +360,14 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
   transition:
-    color 160ms ease,
-    background-color 160ms ease;
+    color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
 }
 
 .menuGroup a > span[aria-hidden] {
   flex-shrink: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-label-size);
 }
 
 .menuGroup a[aria-current='page'] {
@@ -345,13 +378,61 @@
 
 @media (hover: hover) and (pointer: fine) {
   .menu > summary:hover,
-  .menuPanel a:hover {
+  .menuPanel a:hover,
+  .menuPanel :is(.related, .moreServices) > summary:hover,
+  .filters button:hover,
+  .clearSearch:hover,
+  .resultSummary button:hover {
     color: var(--text);
     background: var(--panel);
   }
 
-  .menuPanel a:hover > span {
+  .menuPanel a:hover > span[aria-hidden='true'] {
     transform: translateX(3px);
+  }
+
+  .submitSearch:hover {
+    border-color: var(--brand2);
+    background: var(--brand2);
+  }
+}
+
+.menu > summary:active,
+.menuPanel a:active,
+.menuPanel :is(.related, .moreServices) > summary:active,
+.filters button:active,
+.clearSearch:active,
+.resultSummary button:active,
+.menuPanel .closeButton:active {
+  background: var(--panel2);
+}
+
+.submitSearch:active {
+  border-color: var(--brand2);
+  background: var(--brand2);
+}
+
+/* Current destinations and filters stay identifiable while pressed or hovered. */
+.menu[open] > summary:is(:hover, :active),
+.menu > summary[aria-current='page']:is(:hover, :active),
+.menuPanel a[aria-current='page']:is(:hover, :active),
+.filters button[aria-pressed='true']:is(:hover, :active) {
+  color: var(--brand);
+  background: var(--accent-soft);
+}
+
+/* em follows this panel's text preference, not a page-wide device breakpoint. */
+@container service-menu (max-width: 32em) {
+  .menuContents {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .searchForm {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shortcut {
+    display: none;
   }
 }
 
@@ -499,10 +580,26 @@
   transition: none !important;
 }
 
+:global([data-reduced-motion='true']) .menu *::after {
+  transition: none !important;
+}
+
+:global([data-reduced-motion='true']) .menuPanel a:hover > span[aria-hidden='true'] {
+  transform: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .menu * {
     animation: none !important;
     transition: none !important;
+  }
+
+  .menu *::after {
+    transition: none !important;
+  }
+
+  .menuPanel a:hover > span[aria-hidden='true'] {
+    transform: none;
   }
 }
 
@@ -510,12 +607,14 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .serviceName small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-label-sm-size);
   font-weight: 400;
+  line-height: 1.5;
 }
 
 .related,
@@ -536,6 +635,10 @@
   cursor: pointer;
   list-style: none;
   overflow-wrap: anywhere;
+  border-radius: 6px;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
 }
 
 .menuPanel :is(.related, .moreServices) > summary::-webkit-details-marker {

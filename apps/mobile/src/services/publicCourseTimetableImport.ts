@@ -68,7 +68,7 @@ export function preparePublicCourseTimetableImport(
 /** A cached catalog offering must not create a second copy of the same slot
  * when the official instructor, classroom or course title has changed.
  * The ledger repeats its own guard under the owner/school write lock. */
-export type CatalogSlotChange = 'teacher' | 'room' | 'title' | 'time';
+export type CatalogSlotChange = 'teacher' | 'room' | 'title' | 'credits' | 'time';
 
 export function findCatalogSameSlotChange(
   incoming: readonly PersonalImportRow[],
@@ -88,6 +88,10 @@ export function findCatalogSameSlotChange(
       if (normalize(saved.teacher) !== normalize(row.teacher)) return 'teacher';
       if (normalize(saved.location) !== normalize(row.location)) return 'room';
       if (normalize(saved.title) !== normalize(row.title)) return 'title';
+      // Credit changes are meaningful even if the same offering still occupies
+      // exactly the same classroom/time. A silent duplicate would retain stale
+      // academic-planning credits in the student's personal ledger.
+      if (saved.credits !== row.credits) return 'credits';
     }
   }
   // Detect removed or moved official meetings even when no clock overlaps.

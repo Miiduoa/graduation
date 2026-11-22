@@ -280,6 +280,49 @@ test.each([
   expect(await AsyncStorage.getItem(ledger.personalImportStorageKey(scope))).toBe(before);
 });
 
+
+test.each(['nthu', 'ncnu'] as const)('changed official %s credits block a silent duplicate and keep the original ledger', async (schoolId) => {
+  mockScope = { owner: scope.owner, schoolId };
+  const course = schoolId === 'nthu' ? nthu : ncnu;
+  const oldPreview = preparePublicCourseTimetableImport(schoolId, { ...course, credits: '2' })!;
+  const currentPreview = preparePublicCourseTimetableImport(schoolId, course)!;
+  expect(oldPreview.rows[0].credits).toBe(2);
+  expect(currentPreview.rows[0].credits).toBe(3);
+  await ledger.appendPersonalImports(mockScope, oldPreview.rows);
+  const key = ledger.personalImportStorageKey(mockScope);
+  const before = await AsyncStorage.getItem(key);
+  jest.clearAllMocks();
+
+  const view = render(<PublicCourseImportAction schoolId={schoolId} course={course} navigation={navigation} />);
+  review(view);
+  confirm(view);
+  await view.findByText(/相同課號、班別與時段的學分與原有個人紀錄不同/);
+  expect(view.getByText('查看原有個人課表')).toBeTruthy();
+  expect(view.queryByText('仍要加入（保留兩門課）')).toBeNull();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(await AsyncStorage.getItem(key)).toBe(before);
+  // UI preflight and the write-lock guard must agree. A caller cannot bypass
+  // the warning by calling the ledger API directly with the official rows.
+  await expect(ledger.appendPersonalImports(mockScope, currentPreview.rows, () => true, {
+    protectCatalogTimetableSlots: true,
+  })).rejects.toThrow(/不同學分/);
+  expect(await AsyncStorage.getItem(key)).toBe(before);
+});
+
+test.each(['nthu', 'ncnu'] as const)('equivalent numeric %s credits do not falsely reject a duplicate', async (schoolId) => {
+  mockScope = { owner: scope.owner, schoolId };
+  const course = schoolId === 'nthu' ? nthu : ncnu;
+  const oldPreview = preparePublicCourseTimetableImport(schoolId, { ...course, credits: '3.00' })!;
+  const currentPreview = preparePublicCourseTimetableImport(schoolId, course)!;
+  expect(oldPreview.rows[0].credits).toBe(3);
+  await ledger.appendPersonalImports(mockScope, oldPreview.rows);
+  const view = render(<PublicCourseImportAction schoolId={schoolId} course={course} navigation={navigation} />);
+  review(view);
+  confirm(view);
+  await view.findByText('這些時段已在個人課表，沒有重複新增。');
+  expect((await ledger.loadPersonalImports(mockScope)).records).toHaveLength(oldPreview.rows.length);
+});
+
 test('the storage write lock rejects moved official meetings without a UI preflight', async () => {
   const previous = preparePublicCourseTimetableImport('nthu', nthu)!;
   await ledger.appendPersonalImports(scope, previous.rows);
