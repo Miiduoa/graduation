@@ -1239,19 +1239,16 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
             !Number.isSafeInteger(Number(contentLength)) ||
             Number(contentLength) === 0 ||
             Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
-        // A successful JSON snapshot cannot be an HTML captive-portal page
-        // or a binary/mixed media response. Reject explicit incompatible
-        // MIME headers before touching the body; older proxies that omit the
-        // header or send text/plain still require full source validation.
+        // Captive portals and intermediaries may return HTML or mixed media
+        // with HTTP 200. Do not read or trust an explicitly non-JSON body.
+        // Keep text/plain and missing MIME compatible with legacy proxies,
+        // but always apply the existing JSON/source/geometry checks afterward.
         const contentType = response.headers?.get('content-type') ?? null;
         const mime = contentType?.split(';', 1)[0].trim().toLowerCase();
         const invalidContentType = contentType !== null &&
           !(mime === 'application/json' || mime === 'text/plain' ||
             (typeof mime === 'string' &&
-              /^application\/[a-z0-9][a-z0-9!#        const invalidContentLength = contentLength !== null &&
-          (!/^\d+$/.test(contentLength) ||
-            !Number.isSafeInteger(Number(contentLength)) ||
-            Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);^_.+-]*\+json$/.test(mime)));
+              /^application\/[a-z0-9][a-z0-9!#$&^_.+-]*\+json$/.test(mime)));
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
             contentRange !== null || invalidContentLength || invalidContentType) {
           // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
