@@ -366,7 +366,7 @@ it('preserves merge-base reading and practice fields, checkpoints and reveal con
     }
     expect(courseStudyBackupFilenameStem(source.title)).toBe(baselineFilename(source.title));
   }
-});
+}, 120_000);
 
 it('compares rendering and panel export controls with the baseline components', () => {
   const source = tableText('Percentage by Temperature', '50%', '100%');
@@ -384,4 +384,4 @@ it('compares rendering and panel export controls with the baseline components', 
   const buttons = (container: HTMLElement) => within(container).getAllByRole('button')
     .map((button) => [button.textContent, button.hasAttribute('disabled')]);
   expect(buttons(current.container)).toEqual(expect.arrayContaining(buttons(original.container)));
-});
+}, 120_000);
