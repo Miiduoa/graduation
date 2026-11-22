@@ -233,62 +233,106 @@ it('does not accept an old clipboard result when the student returns to the orig
   }
 });
 
-it.each(['success', 'failure', 'close', 'reopen'] as const)(
-  'serializes coordinate writes and skips superseded requests after %s',
+it.each(['late success', 'late failure', 'never settles', 'close and reopen'] as const)(
+  'copies the new marker immediately when the first clipboard request has %s',
   async (outcome) => {
     const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
     let settleFirstWrite!: () => void;
-    let contents: string | undefined;
-    const writeText = vi.fn(async (text: string) => { contents = text; })
-      .mockImplementationOnce(async (text: string) => {
-        await new Promise<void>((resolve, reject) => {
-          settleFirstWrite = () => outcome === 'failure' ? reject(new Error('permission denied')) : resolve();
-        });
-        contents = text;
-      });
+    const writeText = vi.fn()
+      .mockImplementationOnce(() => new Promise<void>((resolve, reject) => {
+        settleFirstWrite = () => outcome === 'late failure' ? reject(new Error('permission denied')) : resolve();
+      }))
+      .mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     try {
       render(<CampusSpatialExplorer school="other-school" locations={places}
         selected={places[0]} onSelect={vi.fn()} />);
       let dialog = await open();
       const copy = () => fireEvent.click(within(dialog).getByRole('button', { name: '複製地圖標記座標' }));
-      const selectDorm = () => fireEvent.change(within(dialog).getByRole('combobox', { name: '想去哪裡' }),
-        { target: { value: 'dorm' } });
 
       copy();
-      copy();
-      selectDorm();
-      copy();
-      expect(writeText).toHaveBeenCalledExactlyOnceWith('24.226,120.58');
-
-      if (outcome === 'close' || outcome === 'reopen') {
+      if (outcome === 'close and reopen') {
         fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
         expect(screen.queryByRole('dialog')).toBeNull();
-      }
-      if (outcome === 'reopen') {
         fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
         dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
-        selectDorm();
-        copy();
-        expect(writeText).toHaveBeenCalledTimes(1);
       }
-      await act(async () => { settleFirstWrite(); });
+      fireEvent.change(within(dialog).getByRole('combobox', { name: '想去哪裡' }),
+        { target: { value: 'dorm' } });
+      copy();
+      expect(writeText.mock.calls).toEqual([['24.226,120.58'], ['24.228,120.582']]);
+      expect(await within(dialog).findByText('已複製目前地點標記座標。')).toBeTruthy();
 
-      if (outcome === 'close') {
-        expect(writeText).toHaveBeenCalledTimes(1);
-        expect(screen.queryByText('已複製目前地點標記座標。')).toBeNull();
-      } else {
-        expect(writeText.mock.calls).toEqual([['24.226,120.58'], ['24.228,120.582']]);
-        expect(contents).toBe('24.228,120.582');
-        expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy();
-        expect(within(dialog).queryByText(/無法自動複製/)).toBeNull();
+      if (outcome === 'late success' || outcome === 'late failure') {
+        await act(async () => { settleFirstWrite(); });
       }
+      expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy();
+      expect(within(dialog).queryByText(/無法自動複製/)).toBeNull();
     } finally {
       if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
       else Reflect.deleteProperty(navigator, 'clipboard');
     }
   },
 );
+
+it('uses only the latest result when copy is clicked repeatedly for the same marker', async () => {
+  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  let resolveFirstWrite!: () => void;
+  const writeText = vi.fn()
+    .mockImplementationOnce(() => new Promise<void>((resolve) => { resolveFirstWrite = resolve; }))
+    .mockResolvedValueOnce(undefined)
+    .mockRejectedValueOnce(new Error('permission denied'));
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const copy = within(dialog).getByRole('button', { name: '複製地圖標記座標' });
+    fireEvent.click(copy);
+    fireEvent.click(copy);
+    fireEvent.click(copy);
+    expect(writeText.mock.calls).toEqual([['24.226,120.58'], ['24.226,120.58'], ['24.226,120.58']]);
+    expect(await within(dialog).findByText(/無法自動複製/)).toBeTruthy();
+
+    await act(async () => { resolveFirstWrite(); });
+    expect(within(dialog).getByText(/無法自動複製/)).toBeTruthy();
+    expect(within(dialog).queryByText('已複製目前地點標記座標。')).toBeNull();
+  } finally {
+    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
+
+it('offers manual copy after three seconds and permits another clipboard request', async () => {
+  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  let resolveFirstWrite!: () => void;
+  const writeText = vi.fn()
+    .mockImplementationOnce(() => new Promise<void>((resolve) => { resolveFirstWrite = resolve; }))
+    .mockResolvedValueOnce(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const copy = within(dialog).getByRole('button', { name: '複製地圖標記座標' });
+    vi.useFakeTimers();
+    fireEvent.click(copy);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_999); });
+    expect(within(dialog).queryByText(/無法自動複製/)).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(within(dialog).getByText(/無法自動複製/)).toBeTruthy();
+
+    await act(async () => { resolveFirstWrite(); });
+    expect(within(dialog).getByText(/無法自動複製/)).toBeTruthy();
+    await act(async () => { fireEvent.click(copy); });
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(within(dialog).getByText('已複製目前地點標記座標。')).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+    if (oldClipboard) Object.defineProperty(navigator, 'clipboard', oldClipboard);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
 
 it('keeps verified marker coordinates readable when a WebView has no Clipboard API', async () => {
   const oldClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
@@ -3441,37 +3485,28 @@ it.each([
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  const valid = ['exact', 'trailing whitespace', 'escaped text', 'missing length'].includes(variant);
+  const valid = ['exact', 'trailing whitespace', 'escaped text', 'missing length', 'conflicting framing'].includes(variant);
   expect(await within(dialog).findByText(valid ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(valid ? buildings : []);
   expect(json).not.toHaveBeenCalled();
 });
 
-// A proxy can reply HTTP 200 with an explicit zero-byte representation,
-// then leave its stream open indefinitely. Reject that impossible snapshot at
-// the headers, for identity *and* compressed responses, instead of waiting for
-// the 15-second mobile timeout. This is a synthetic network regression.
 it.each(['identity', 'gzip'] as const)(
-  'rejects HTTP 200 with empty %s framing before reading a stalled body',
+  'reads and rejects an empty JSON body with %s encoding',
   async (coding) => {
-    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
-    const cancel = vi.fn();
-    const neverFinishingBody = new ReadableStream<Uint8Array>({ cancel });
-    const fetchMock = vi.fn().mockResolvedValue(new Response(neverFinishingBody, {
-      status: 200,
+    const { library } = sourcedLibraryFootprintFixture();
+    const response = new Response('', {
       headers: { 'Content-Length': '000', 'Content-Encoding': coding },
-    }));
-    vi.stubGlobal('fetch', fetchMock);
+    });
+    const read = vi.spyOn(response.body!, 'getReader');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
     render(<CampusSpatialExplorer school="pu" locations={[library]}
       selected={library} onSelect={vi.fn()} />);
     const dialog = await open();
     expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledOnce();
     expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
-    expect(retry.hasAttribute('disabled')).toBe(true);
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
   },
 );
 
@@ -3503,61 +3538,49 @@ it.each(['unknown', 'gzip, br', 'zstd, identity', 'zstd;q=1', 'gzip;q=1', ''] as
   },
 );
 
-// Captive portals and upstream auth/error pages can respond 200 with HTML,
-// then stream forever. The campus API's JSON-only contract must reject the
-// misleading media type at headers time, cancel the stream, and keep walking
-// directions usable instead of hanging an embedded mobile WebView.
-it.each([
-  'text/html; charset=UTF-8', 'application/xhtml+xml', 'text/plain; charset=UTF-8',
-  'application/xml', 'image/svg+xml', 'application/octet-stream',
-] as const)(
-  'rejects HTTP 200 incompatible %s map documents before reading a stalled body',
-  async (contentType) => {
-    const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
-    const cancel = vi.fn();
-    const stalledBody = new ReadableStream<Uint8Array>({ cancel });
-    const fetchMock = vi.fn().mockResolvedValue(new Response(stalledBody, {
-      status: 200, headers: { 'Content-Type': contentType, 'Retry-After': '120' },
-    }));
-    vi.stubGlobal('fetch', fetchMock);
-    render(<CampusSpatialExplorer school="pu" locations={[library]}
-      selected={library} onSelect={vi.fn()} />);
-    const dialog = await open();
-    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-  },
-);
+const footprintContentTypes = [
+  'application/json', 'text/plain', null, 'text/html', 'application/octet-stream',
+  'application/json; charset=UTF-8', 'text/plain; charset=UTF-8',
+  'application/vnd.example_campus+json',
+];
 
-// JSON-family media types must still load valid source-checked geometry;
-// a 200 response with an explicit incompatible media type must not.
-it.each([
-  'application/json; charset=UTF-8', 'application/vnd.nuni+json; charset=UTF-8',
-  'application/vnd.example_campus+json', 'application/geo+json',
-] as const)(
-  'accepts a complete %s building snapshot without a fallback',
-  async (contentType) => {
-    const { library, buildings, body } = sourcedLibraryFootprintFixture();
-    const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
-      status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'Content-Length': String(new TextEncoder().encode(body).byteLength),
-      },
-    }));
-    vi.stubGlobal('fetch', fetchMock);
-    render(<CampusSpatialExplorer school="pu" locations={[library]}
-      selected={library} onSelect={vi.fn()} />);
-    const dialog = await open();
-    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-  },
-);
+it.each(footprintContentTypes.flatMap((contentType) =>
+  (['valid', 'invalid JSON', 'unverified source', 'invalid structure'] as const)
+    .map((payload) => ({ contentType, payload })),
+))('validates $payload outline data with Content-Type $contentType', async ({ contentType, payload }) => {
+  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  const raw = {
+    valid: body,
+    'invalid JSON': body + '!',
+    'unverified source': body.replace('OpenStreetMap', 'unknown'),
+    'invalid structure': '{"schoolId":"pu","source":"OpenStreetMap"}',
+  }[payload];
+  const headers = new Headers();
+  if (contentType !== null) headers.set('Content-Type', contentType);
+  const response = new Response(new TextEncoder().encode(raw), { headers });
+  const read = vi.spyOn(response.body!, 'getReader');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+  render(<CampusSpatialExplorer school="pu" locations={[library]}
+    selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const valid = payload === 'valid';
+  expect(await within(dialog).findByText(valid ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(read).toHaveBeenCalledOnce();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(valid ? buildings : []);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('reads the final successful outline response after a redirect', async () => {
+  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  const response = new Response(body, { headers: { 'Content-Type': 'text/plain' } });
+  vi.spyOn(response, 'redirected', 'get').mockReturnValue(true);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+  render(<CampusSpatialExplorer school="pu" locations={[library]}
+    selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+});
 
 it('accepts a small, valid non-streaming text response for legacy WebViews', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;

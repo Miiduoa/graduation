@@ -898,24 +898,8 @@ function spatialDestinationIdentity(place: MapLocation): string {
   ]);
 }
 
-/** Serializes clipboard writes; an in-flight browser write cannot be canceled. */
-function createClipboardWriteQueue() {
-  let tail: Promise<void> | null = null;
-  return {
-    enqueue(task: (previous: Promise<void> | null) => Promise<void>) {
-      const write = task(tail);
-      tail = write;
-      void write.then(() => {
-        if (tail === write) tail = null;
-      });
-    },
-  };
-}
-type ClipboardWriteQueue = ReturnType<typeof createClipboardWriteQueue>;
-
-function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboardWrite, manualStart, onManualStart }: Props & {
+function SpatialDialog({ school, locations, selected, onSelect, onClose, manualStart, onManualStart }: Props & {
   onClose: () => void;
-  clipboardWrite: ClipboardWriteQueue;
   manualStart: number;
   onManualStart: () => void;
 }) {
@@ -1010,24 +994,26 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
     setCoordinateCopyState('idle');
     return () => { copyRequestGenerationRef.current += 1; };
   }, [markerIdentity]);
-  const copyMarkerCoordinates = () => {
+  const copyMarkerCoordinates = async () => {
     if (!place) return;
     const requestGeneration = ++copyRequestGenerationRef.current;
-    const isCurrent = () => copyRequestGenerationRef.current === requestGeneration;
     setCoordinateCopyState('idle');
-    clipboardWrite.enqueue(async (previousWrite) => {
-      // Let any in-flight browser write settle before submitting the newest
-      // request, and skip superseded queued requests.
-      if (previousWrite) await previousWrite;
-      if (!isCurrent()) return;
-      try {
-        if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
-        await navigator.clipboard.writeText(`${place.lat},${place.lng}`);
-        if (isCurrent()) setCoordinateCopyState('copied');
-      } catch {
-        if (isCurrent()) setCoordinateCopyState('unavailable');
-      }
-    });
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let result: 'copied' | 'unavailable';
+    try {
+      const write = navigator.clipboard.writeText(`${place.lat},${place.lng}`);
+      result = await Promise.race([
+        write.then(() => 'copied' as const),
+        new Promise<'unavailable'>((resolve) => {
+          timeout = setTimeout(() => resolve('unavailable'), 3_000);
+        }),
+      ]);
+    } catch {
+      result = 'unavailable';
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (copyRequestGenerationRef.current === requestGeneration) setCoordinateCopyState(result);
   };
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);
   const previousPoint = model.points[index - 1];
@@ -1371,14 +1357,6 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
         // or partial representation into a trusted 3D building snapshot.
         const contentRange = response.headers?.get('content-range') ?? null;
         const contentLength = response.headers?.get('content-length') ?? null;
-        // Captive portals and misconfigured gateways can reply HTTP 200 with
-        // non-JSON documents and a stalled body. Our endpoint only returns
-        // JSON; reject any explicitly incompatible media type before reading
-        // the stream, while accepting application/*+json with parameters
-        // (RFC 6838 restricted-name characters, including `_`).
-        // Missing Content-Type remains compatible with legacy WebView bridges.
-        const contentType = response.headers?.get('content-type')?.trim().toLowerCase() ?? '';
-        const mediaType = contentType.split(';', 1)[0]?.trim() ?? '';
         // The public API emits identity JSON. Fetch can also expose responses
         // transparently decoded by the browser with a single coding. A proxy's
         // unknown or stacked coding prevents trustworthy response framing:
@@ -1386,22 +1364,15 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
         const coding = response.headers?.get('content-encoding')?.trim().toLowerCase() ?? 'identity';
         const invalidContentCoding =
           !['identity', 'gzip', 'x-gzip', 'br', 'deflate', 'zstd', 'dcb', 'dcz'].includes(coding);
-        const invalidMediaType = mediaType !== '' && mediaType !== 'application/json' &&
-          !/^application\/[a-z0-9][a-z0-9!#$&^_.+-]*\+json$/.test(mediaType);
         // RFC Content-Length is a decimal byte count, not a fraction, hex
         // number or comma-separated value. Do not trust a 200 JSON body whose
         // advertised size is invalid or implausibly large for this API.
         const invalidContentLength = contentLength !== null &&
-          (response.headers?.get('transfer-encoding') != null || !/^\d+$/.test(contentLength) ||
+          (!/^\d+$/.test(contentLength) ||
             !Number.isSafeInteger(Number(contentLength)) ||
-            // HTTP 200 with a declared empty representation cannot contain
-            // verified OSM geometry, regardless of identity/gzip encoding.
-            // Reject at headers so a stalled WebView body cannot hold the map
-            // for the full 15-second network deadline.
-            Number(contentLength) === 0 ||
             Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
-            contentRange !== null || invalidContentLength || invalidMediaType || invalidContentCoding) {
+            contentRange !== null || invalidContentLength || invalidContentCoding) {
           // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
           // can still stream a large body; release it without awaiting an
           // uncooperative proxy, rather than waste mobile bandwidth/memory.
@@ -1429,7 +1400,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
             status < 300 && status !== 200;
           const rateLimitedOrIncomplete = invalidSuccessStatus || status === 304 || status === 408 ||
             status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
-            contentRange !== null || invalidContentLength || invalidMediaType || invalidContentCoding;
+            contentRange !== null || invalidContentLength || invalidContentCoding;
           // A proxy can return an incomplete 206/Content-Range document or
           // a 408 without Retry-After. These responses cannot be trusted as
           // complete OSM geometry and should not trigger a manual retry loop.
@@ -1439,7 +1410,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
           const fallbackBackoff = invalidSuccessStatus || status === 304 ||
             status === 408 || status === 429 || status === 502 ||
             status === 503 || status === 504 || contentRange !== null || invalidContentLength ||
-            invalidMediaType || invalidContentCoding;
+            invalidContentCoding;
           const seconds = rateLimitedOrIncomplete
             ? (footprintCooldownSeconds(response) ?? (fallbackBackoff ? 60 : null))
             : null;
@@ -1764,7 +1735,6 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
 
 function AvailableSpatialExplorer(props: Props) {
   const [open, setOpen] = useState(false);
-  const [clipboardWrite] = useState(createClipboardWriteQueue);
   // Keep manual startup intent across canvas and school changes within the open tour.
   const [manualStart, setManualStart] = useState(0);
   const startManually = () => setManualStart((value) => value + 1);
@@ -1776,7 +1746,7 @@ function AvailableSpatialExplorer(props: Props) {
     <button className="btn" type="button" aria-haspopup="dialog" onClick={() => setOpen(true)}>
       空間導覽
     </button>
-    {open && <SpatialDialog {...props} key={props.school} onClose={close} clipboardWrite={clipboardWrite}
+    {open && <SpatialDialog {...props} key={props.school} onClose={close}
       manualStart={manualStart} onManualStart={startManually} />}
   </>;
 }
