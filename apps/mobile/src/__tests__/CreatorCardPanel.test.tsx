@@ -2,7 +2,7 @@ import React from 'react';
 import { Linking } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { getDocFromServer, setDoc } from 'firebase/firestore';
-import { creatorCardDocumentPassesRules, CREATOR_CARD_LIMITS } from '@campus/shared/src/creatorCard';
+import { creatorCardDocumentPassesRules, CREATOR_CARD_LIMITS, readCreatorCardFields, validateCreatorCard } from '@campus/shared/src/creatorCard';
 import { CreatorCardPanel } from '../screens/social/CreatorCardPanel';
 import { readCreatorCard, saveCreatorCard } from '../services/creatorCard';
 
@@ -1293,10 +1293,98 @@ describe('confirmation state machine compared with merge-base', () => {
   });
 });
 
+describe.each([
+  { hasPendingWrites: false, fromCache: false },
+  { hasPendingWrites: false, fromCache: true },
+  { hasPendingWrites: true, fromCache: false },
+  { hasPendingWrites: true, fromCache: true },
+])('merge-base confirmation with metadata %j', (metadata) => {
+  const draft = { headline: '社團 Café', bio: '校園生活', linkUrl: 'https://example.org/Me' };
+  describe.each([
+    ['identical', {}],
+    ['ASCII surrounding spaces', { headline: ' 社團 Café  ' }],
+    ['full-width surrounding spaces', { headline: '　社團 Café　' }],
+    ['URL scheme and host case', { linkUrl: 'HTTPS://EXAMPLE.ORG/Me' }],
+    ['headline case', { headline: '社團 CAFÉ' }],
+    ['URL path case', { linkUrl: 'https://example.org/me' }],
+    ['Unicode composition', { headline: '社團 Cafe\u0301' }],
+    ['pin only', { pinnedPostId: 'new-pin' }],
+    ['timestamp only', { updatedAt: 'NEW_TIME' }],
+    ['different bio from another device', { bio: '他機新簡介' }],
+  ] as const)('%s', (_content, changes) => {
+    test.each(['automatic', 'manual after timeout', 'press save again'] as const)(
+      '%s', async (flow) => {
+        jest.useFakeTimers();
+        try {
+          const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
+          jest.mocked(readCreatorCard).mockImplementation(service.readCreatorCard);
+          jest.mocked(saveCreatorCard).mockImplementation(service.saveCreatorCard);
+          const data = {
+            schoolId: 'pu', ownerUid: 'alice', pinnedPostId: 'old-pin', updatedAt: 'OLD_TIME',
+            ...draft, ...changes,
+          };
+          // Merge-base reads normalized fields and compares all three to the validated draft.
+          const published = readCreatorCardFields(data);
+          const expected = validateCreatorCard(draft);
+          const mergeBaseConfirms = published.headline === expected.headline &&
+            published.bio === expected.bio && published.linkUrl === expected.linkUrl;
+          jest.mocked(getDocFromServer)
+            .mockResolvedValueOnce({ exists: () => false } as never)
+            .mockResolvedValueOnce({ exists: () => true, data: () => data, metadata } as never);
+          let rejectWrite!: (error: Error) => void;
+          if (flow === 'manual after timeout') {
+            jest.mocked(setDoc).mockReturnValueOnce(new Promise<void>((_resolve, reject) => {
+              rejectWrite = reject;
+            }));
+          } else {
+            jest.mocked(setDoc).mockResolvedValueOnce(undefined);
+          }
+
+          const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+          await act(async () => { await Promise.resolve(); });
+          fireEvent.press(view.getByLabelText('建立社群簡介'));
+          fireEvent.changeText(view.getByLabelText('一句話介紹'), draft.headline);
+          fireEvent.changeText(view.getByLabelText('個人簡介'), draft.bio);
+          fireEvent.changeText(view.getByLabelText('作品連結'), draft.linkUrl);
+          const save = view.getByLabelText('儲存簡介');
+          await act(async () => { fireEvent.press(save); });
+          if (flow === 'manual after timeout') {
+            act(() => { jest.advanceTimersByTime(15_000); });
+            await act(async () => { rejectWrite(new Error('write response lost')); });
+            await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+          }
+          if (flow === 'press save again' && view.queryByLabelText('儲存簡介')) {
+            await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+          }
+
+          expect(Boolean(view.queryByText('社群簡介已儲存。'))).toBe(mergeBaseConfirms);
+          expect(setDoc).toHaveBeenCalledTimes(1);
+          if (mergeBaseConfirms) {
+            expect(view.queryByLabelText('核對儲存結果')).toBeNull();
+            expect(view.queryByLabelText('儲存簡介')).toBeNull();
+          } else if (flow === 'manual after timeout') {
+            expect(view.getByText(/伺服器資料與上次送出的內容不同/)).toBeTruthy();
+            fireEvent.press(view.getByLabelText('取消編輯'));
+            fireEvent.press(view.getByLabelText('編輯社群簡介'));
+            expect(view.getByLabelText('個人簡介').props.value).toBe(published.bio);
+            expect(view.getByLabelText('一句話介紹').props.value).toBe(published.headline);
+            expect(view.getByLabelText('作品連結').props.value).toBe(published.linkUrl);
+          } else {
+            expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+            expect(view.getByLabelText('核對儲存結果')).toBeTruthy();
+          }
+        } finally {
+          jest.useRealTimers();
+        }
+      },
+    );
+  });
+});
+
 test.each([
   { hasPendingWrites: false },
   { hasPendingWrites: true },
-])('a late save respects pending writes ($hasPendingWrites) after timeout', async ({
+])('a late acknowledged save confirms with pending metadata $hasPendingWrites after timeout', async ({
   hasPendingWrites,
 }) => {
   jest.useFakeTimers();
@@ -1333,32 +1421,22 @@ test.each([
     expect(setDoc).toHaveBeenCalledTimes(1);
     expect(getDocFromServer).toHaveBeenCalledTimes(1);
     expect(readCreatorCard).toHaveBeenCalledTimes(1);
-    if (hasPendingWrites) {
-      expect(view.queryByText('社群簡介已儲存。')).toBeNull();
-      expect(view.getByLabelText('個人簡介').props.value).toBe(card.bio);
-      expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
-    } else {
-      expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
-      expect(view.getByText(card.bio)).toBeTruthy();
-      expect(view.queryByLabelText('核對儲存結果')).toBeNull();
-      expect(view.queryByLabelText('個人簡介')).toBeNull();
-    }
+    expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+    expect(view.getByText(card.bio)).toBeTruthy();
+    expect(view.queryByLabelText('核對儲存結果')).toBeNull();
+    expect(view.queryByLabelText('個人簡介')).toBeNull();
   } finally {
     jest.useRealTimers();
   }
 });
 
-test('a stalled save preserves the draft until matching fields have no pending writes', async () => {
+test('a known pending intro write keeps matching local fields provisional', async () => {
   jest.useFakeTimers();
   try {
     const card = { headline: '', bio: '我的校園作品', linkUrl: '' };
-    let resolveStalled!: (value: Awaited<ReturnType<typeof saveCreatorCard>>) => void;
-    const stalled = new Promise<Awaited<ReturnType<typeof saveCreatorCard>>>((resolve) => {
-      resolveStalled = resolve;
-    });
-    const actualRead = jest.requireActual<typeof import('../services/creatorCard')>(
-      '../services/creatorCard',
-    ).readCreatorCard;
+    let resolveWrite!: () => void;
+    jest.mocked(setDoc).mockReturnValueOnce(new Promise<void>((resolve) => { resolveWrite = resolve; }));
+    const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
     const snapshot = {
       exists: () => true,
       data: () => ({ schoolId: 'pu', ownerUid: 'alice', ...card }),
@@ -1367,8 +1445,8 @@ test('a stalled save preserves the draft until matching fields have no pending w
       .mockResolvedValueOnce({ ...snapshot, metadata: { hasPendingWrites: true } } as never)
       .mockResolvedValueOnce({ ...snapshot, metadata: { hasPendingWrites: false } } as never);
     jest.mocked(readCreatorCard).mockResolvedValueOnce(null)
-      .mockImplementationOnce(actualRead).mockImplementationOnce(actualRead);
-    jest.mocked(saveCreatorCard).mockReturnValueOnce(stalled);
+      .mockImplementation(service.readCreatorCard);
+    jest.mocked(saveCreatorCard).mockImplementationOnce(service.saveCreatorCard);
 
     const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
     await act(async () => { await Promise.resolve(); });
@@ -1401,11 +1479,8 @@ test('a stalled save preserves the draft until matching fields have no pending w
     await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
     expect(getDocFromServer).toHaveBeenCalledTimes(2);
     expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
-    await act(async () => {
-      resolveStalled({ ...card, bio: '不應出現的過時結果' });
-      await Promise.resolve();
-    });
-    expect(view.queryByText('不應出現的過時結果')).toBeNull();
+    await act(async () => { resolveWrite(); });
+    expect(getDocFromServer).toHaveBeenCalledTimes(2);
     expect(view.getByText(card.bio)).toBeTruthy();
     expect(saveCreatorCard).toHaveBeenCalledTimes(1);
   } finally {
@@ -1663,30 +1738,25 @@ describe('saving merges creator card changes under the document rules', () => {
           const mergeBaseWrite = { ...required, ...normalized, ...edits, updatedAt: 'SERVER_TIME' };
           expect(creatorCardDocumentPassesRules({ ...raw, ...mergeBaseWrite }, 'pu', 'alice', 'SERVER_TIME'))
             .toBe(true);
-          if (scenario !== 'first write' && legacyCase === 'empty fields' && editCase === 'no edits') {
-            // A missing field displays as empty but cannot confirm a complete write.
-            const incomplete: Record<string, unknown> = { ...raw };
-            delete incomplete.linkUrl;
-            const incompleteSnapshot = {
-              exists: () => true, data: () => incomplete, metadata: { hasPendingWrites: false },
-            } as Awaited<ReturnType<typeof getDocFromServer>>;
-            const reads = jest.mocked(getDocFromServer).mockResolvedValueOnce(incompleteSnapshot);
-            if (scenario === 'confirmation mismatch') reads.mockResolvedValueOnce(incompleteSnapshot);
-          }
+          const displayed = readCreatorCardFields(raw);
+          const matchesWithoutWrite = displayed.headline === mergeBaseWrite.headline &&
+            displayed.bio === mergeBaseWrite.bio && displayed.linkUrl === mergeBaseWrite.linkUrl;
           try {
             await save();
             if (timeout) act(() => { jest.advanceTimersByTime(15_000); });
-            if (scenario !== 'first write') {
+            if (view.queryByLabelText('核對儲存結果')) {
               await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
             }
-            if (scenario !== 'first write') {
+            if (scenario !== 'first write' && !matchesWithoutWrite) {
               expect(view.queryByText('社群簡介已儲存。')).toBeNull();
               expect(write).toHaveBeenCalledTimes(1);
               await save();
             }
-            expect(write).toHaveBeenCalledTimes(scenario === 'first write' ? 1 : 2);
+            expect(write).toHaveBeenCalledTimes(scenario === 'first write' || matchesWithoutWrite ? 1 : 2);
             expect(write).toHaveBeenLastCalledWith(undefined, mergeBaseWrite, { merge: true });
-            expect(currentDocument()).toEqual({ ...mergeBaseWrite, pinnedPostId });
+            if (scenario === 'first write' || !matchesWithoutWrite) {
+              expect(currentDocument()).toEqual({ ...mergeBaseWrite, pinnedPostId });
+            }
             expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
           } finally {
             if (timeout) {

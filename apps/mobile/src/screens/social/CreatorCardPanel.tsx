@@ -321,7 +321,7 @@ function ScopedCreatorCardPanel({
     const base = published.current;
     const edits = CARD_FIELDS.filter((field) => editedFields.current.has(field) &&
       (!base || base[field] !== expected[field] ||
-        (expected[field] === '' && !creatorCardFieldMatches(base, field, ''))));
+        (expected[field] === '' && hasHiddenCreatorCardValue(base, field))));
     editedFields.current.clear();
     savingFlight.current = true;
     setSaving(true);
