@@ -48,6 +48,22 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   // It is scoped to this mounted passage/mode, and never contains lesson text.
   const timingSequence = useRef(0);
   const [timingLog, setTimingLog] = useState<Array<{ run: number; timing: StudyTutorTiming; downloadProgressObserved: boolean }>>([]);
+  const [timingExportMessage, setTimingExportMessage] = useState('');
+  const timingExportInput = useRef<HTMLTextAreaElement>(null);
+  const timingDownloadUrl = useRef<string | null>(null);
+  // The downloadable file and manually selectable field must contain exactly
+  // the same privacy-scoped measurements, never lesson or student text.
+  const timingExportText = useMemo(() => JSON.stringify({
+    format: 'nuni-study-tutor-timing', version: 1,
+    measurements: timingLog.map((entry) => ({
+      run: entry.run,
+      outcome: entry.timing.outcome,
+      downloadProgressObserved: entry.downloadProgressObserved,
+      preparationMs: Math.round(entry.timing.preparationMs),
+      generationMs: entry.timing.generationMs === null ? null : Math.round(entry.timing.generationMs),
+      totalMs: Math.round(entry.timing.totalMs),
+    })),
+  }, null, 2), [timingLog]);
   const [stepSelection, setStepSelection] = useState<{ lessonId: number; index: number } | null>(null);
   // A citation position belongs to its mode, lesson and teaching step. Reusing
   // an index for another quote can incorrectly report that an exact quote is absent.
@@ -99,7 +115,16 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
     // Preserve focus on the mode/page select when a keyed passage remounts.
     // Explicit passage navigation and practice return focus the source in the parent.
     if (document.activeElement === document.body) passageHeading.current?.focus();
-    return () => { current.current?.abort(); current.current = null; };
+    return () => {
+      current.current?.abort();
+      current.current = null;
+      // Some mobile download managers consume the Blob asynchronously. Keep
+      // its URL until this reader closes instead of revoking after click().
+      if (timingDownloadUrl.current) {
+        try { URL.revokeObjectURL(timingDownloadUrl.current); } catch { /* Best effort only. */ }
+        timingDownloadUrl.current = null;
+      }
+    };
   }, []);
 
   function changeQuestion(value: string) {
@@ -133,6 +158,51 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
       : '重新檢查後仍無法使用裝置端 AI；原文、筆記與自行練習不受影響。');
   }
 
+  function selectTimingExport() {
+    const field = timingExportInput.current;
+    if (!field) return;
+    try { field.focus(); } catch { /* Manual selection remains available. */ }
+    try { field.select(); } catch { /* Try the explicit range. */ }
+    try { field.setSelectionRange(0, field.value.length); } catch { /* Try long-press or keyboard. */ }
+    let selected = false;
+    try {
+      selected = document.activeElement === field && field.value.length > 0 &&
+        field.selectionStart === 0 && field.selectionEnd === field.value.length;
+    } catch { /* A broken selection API must not claim success. */ }
+    setTimingExportMessage(selected
+      ? '已全選這份量測 JSON；請使用裝置的複製功能，再貼到私人純文字檔。尚未確認寫入剪貼簿。'
+      : '瀏覽器未確認全選；完整 JSON 仍在下方，可長按或用鍵盤自行選取。');
+  }
+
+  function downloadTimingExport() {
+    const anchor = document.createElement('a');
+    let url: string | null = null;
+    try {
+      const created: unknown = URL.createObjectURL(new Blob([timingExportText], { type: 'application/json;charset=utf-8' }));
+      if (typeof created !== 'string' || !created.startsWith('blob:') || created.length <= 5)
+        throw new Error('Local Blob URL unavailable');
+      url = created;
+      anchor.href = url;
+      anchor.download = 'nuni-study-tutor-timing.json';
+      anchor.hidden = true;
+      document.body.append(anchor);
+      anchor.click();
+      const previous = timingDownloadUrl.current;
+      timingDownloadUrl.current = url;
+      if (previous) {
+        try { URL.revokeObjectURL(previous); } catch { /* Previous request already dispatched. */ }
+      }
+      setTimingExportMessage('已交給瀏覽器下載量測 JSON，但無法確認檔案是否已儲存；若沒有檔案，請改用「全選量測 JSON」。');
+    } catch {
+      if (url) {
+        try { URL.revokeObjectURL(url); } catch { /* Preserve manual text fallback. */ }
+      }
+      setTimingExportMessage('瀏覽器未接受量測 JSON 下載；完整紀錄仍保留，可按「全選量測 JSON」手動保存。');
+    } finally {
+      anchor.remove();
+    }
+  }
+
   async function explain(withHistory = true) {
     if (current.current || !availability?.available || !passage.text.trim()) return;
     const controller = new AbortController();
@@ -162,6 +232,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
             setTiming(measurement);
             const run = ++timingSequence.current;
             setTimingLog((previous) => [...previous, { run, timing: measurement, downloadProgressObserved }].slice(-10));
+            setTimingExportMessage('');
           }
         },
       });
@@ -282,20 +353,15 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
             不包含教材、問題或個人筆記，也不是可還原的閱讀進度。downloadProgressObserved 僅表示本次收到模型下載進度；false 不代表快取命中或暖啟。冷啟／暖啟、實際裝置與網路條件仍需另外註記；
             不代表已驗證回答正確或優於其他產品。</p>
           <label className={styles.field}>本段裝置端 AI 耗時紀錄 JSON
-            <textarea readOnly spellCheck={false} rows={8}
+            <textarea ref={timingExportInput} readOnly spellCheck={false} rows={8}
               aria-label="本段裝置端 AI 耗時紀錄 JSON"
-              value={JSON.stringify({
-                format: 'nuni-study-tutor-timing', version: 1,
-                measurements: timingLog.map((entry) => ({
-                  run: entry.run,
-                  outcome: entry.timing.outcome,
-                  downloadProgressObserved: entry.downloadProgressObserved,
-                  preparationMs: Math.round(entry.timing.preparationMs),
-                  generationMs: entry.timing.generationMs === null ? null : Math.round(entry.timing.generationMs),
-                  totalMs: Math.round(entry.timing.totalMs),
-                })),
-              }, null, 2)} />
+              value={timingExportText} />
           </label>
+          <div className={styles.actions}>
+            <button type="button" className={styles.button} onClick={downloadTimingExport}>下載量測 JSON</button>
+            <button type="button" className={styles.button} onClick={selectTimingExport}>全選量測 JSON</button>
+          </div>
+          {timingExportMessage && <p className={styles.note} role="status">{timingExportMessage}</p>}
         </details>}
         {error && <p className={styles.error} role="alert">{error}</p>}
         {selected && result && <section className={styles.explanation} aria-label="本段 AI 講解">
