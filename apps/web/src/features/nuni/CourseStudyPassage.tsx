@@ -13,7 +13,6 @@ import {
   appendStudyLesson,
   canReviewStudyAnswer,
   hasRevealedStudyAnswer,
-  hasVisibleStudyAttempt,
   hasVisibleStudyContent,
   studyLessonHistory,
   STUDY_SESSION_LIMITS,
@@ -345,13 +344,12 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
                       const attempt = event.target.value;
                       changeLesson((previous) => ({
                         ...previous, attempt, answerVisible: false,
-                        answerReviewAllowed: hasVisibleStudyAttempt(attempt),
                       }));
                     }} />
                 </label>
                 <button type="button" className={styles.button} disabled={!canReviewAnswer}
                   onClick={() => changeLesson((previous) => canReviewStudyAnswer(previous)
-                    ? { ...previous, answerVisible: !previous.answerVisible, answerReviewAllowed: true } : previous)}
+                    ? { ...previous, answerVisible: !previous.answerVisible } : previous)}
                   aria-expanded={answerRevealed}>
                   {answerRevealed ? '收起參考回答' : '對照參考回答'}
                 </button>

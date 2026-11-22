@@ -109,11 +109,11 @@ function readRound(value: unknown, progress: CourseStudyProgressData): StudyPrac
 
 /** Self-contained reading snapshot and separately validated practice round. */
 export function serializeStudyPracticeCheckpoint(checkpoint: StudyPracticeCheckpoint): string {
-  const progress = JSON.parse(serializeCourseStudyProgress(checkpoint.progress)) as { version: number };
+  const progress = JSON.parse(serializeCourseStudyProgress(checkpoint.progress)) as unknown;
   const round = checkpoint.round;
   const raw = JSON.stringify({
     format: STUDY_PRACTICE_CHECKPOINT_FORMAT,
-    version: progress.version > 2 ? EXTENDED_CHECKPOINT_VERSION : CHECKPOINT_VERSION,
+    version: CHECKPOINT_VERSION,
     progress,
     practice: {
       mode: round.mode,

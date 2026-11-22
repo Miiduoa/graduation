@@ -283,8 +283,8 @@ it('saves an independent practice checkpoint and restores the exact second-quest
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
-it.each(['\ufff9', '\ufffa\ufffb', '\u200b', '\u2800\u0301'])(
-  'preserves an invisible legacy attempt and reveal flag without disclosing the answer (%#)', async (attempt) => {
+it.each([['\ufff9', true], ['\ufffa\ufffb', true], ['\u200b', false], ['\u2800\u0301', false]])(
+  'preserves legacy practice disclosure according to the original attempt gate (%#)', async (attempt, wasAnswered) => {
     const downloads = downloadMock();
     const view = mount();
     await restore();
@@ -306,14 +306,15 @@ it.each(['\ufff9', '\ufffa\ufffb', '\u200b', '\u2800\u0301'])(
     fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
 
     expect(value(practiceLabel)).toBe(attempt);
-    const reveal = screen.getByRole('button', { name: '對照參考回答', expanded: false }) as HTMLButtonElement;
-    expect(reveal.disabled).toBe(true);
-    expect(screen.queryByText(first.answer)).toBeNull();
+    const reveal = screen.getByRole('button', { name: wasAnswered ? '收起參考回答' : '對照參考回答',
+      expanded: wasAnswered }) as HTMLButtonElement;
+    expect(reveal.disabled).toBe(!wasAnswered);
+    expect(!!screen.queryByText(first.answer)).toBe(wasAnswered);
 
     fireEvent.click(screen.getByRole('button', { name: '下載本輪練習' }));
     const notes = await readBlob(downloads.create.mock.calls[1][0] as Blob);
-    expect(notes).toContain('本輪試答：\n（尚未作答）');
-    expect(notes).not.toContain(first.answer);
+    expect(notes).toContain('本輪試答：\n' + (wasAnswered ? attempt : '（尚未作答）'));
+    expect(notes.includes(first.answer)).toBe(wasAnswered);
     expect(notes).not.toContain(second.answer);
 
     fireEvent.click(screen.getByRole('button', { name: '儲存練習與閱讀進度' }));

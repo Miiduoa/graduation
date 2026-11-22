@@ -1315,3 +1315,32 @@ describe('new local self-check answer disclosure boundary', () => {
     expect(worker.terminate).toHaveBeenCalledOnce();
   });
 });
+
+it('accepts every merge-base worker result across Unicode quote and self-check boundaries', async () => {
+  const { runStudyTutor: runBaseline } = await import('../features/nuni/__fixtures__/courseStudyMergeBase/studyTutorRuntime');
+  const samples = ['\ufff9', '\ufffa', '\ufffb', '\u{e0100}', '\u0301', '\u202e', '\u200b',
+    '禰\u{e0100}', 'က္က', 'က္', '禰', '。'];
+  const source = { ...passage(), text: passage().text + samples.join('、') };
+  let accepted = 0;
+  for (const sample of samples) {
+    for (const response of [
+      { ...lesson(), sourceQuote: sample },
+      { ...lesson(), question: sample },
+      { ...lesson(), answer: sample },
+      { ...lesson(), steps: lesson().steps?.map((step) => ({ ...step, sourceQuote: sample })) },
+    ]) {
+      const evaluate = async (run: typeof runStudyTutor) => {
+        const pending = run({ passage: source, mode: 'understand', signal: new AbortController().signal });
+        const worker = lastWorker();
+        worker.emit({ type: 'result', raw: JSON.stringify(response) });
+        return pending.finally(() => expect(worker.terminate).toHaveBeenCalledOnce());
+      };
+      const baseline = await evaluate(runBaseline).catch(() => undefined);
+      if (baseline) {
+        accepted++;
+        await expect(evaluate(runStudyTutor), JSON.stringify(response)).resolves.toEqual(baseline);
+      }
+    }
+  }
+  expect(accepted).toBeGreaterThan(0);
+});

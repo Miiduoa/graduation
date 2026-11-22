@@ -1,5 +1,4 @@
 import { STUDY_TUTOR_LIMITS, type StudyMode, type StudyTutorTurn } from '@/lib/studyTutor';
-import { hasVisibleStudyContent } from './studyEvidence';
 
 export { hasVisibleStudyContent } from './studyEvidence';
 
@@ -9,21 +8,10 @@ export const STUDY_SESSION_LIMITS = {
   attemptCharacters: 2_000,
 } as const;
 
-/**
- * A response made only of whitespace, direction markers, joiners, variation
- * selectors, isolated combining marks or Braille blank is not an actual answer.
- * Require visible content for a new attempt to unlock a reference answer.
- * Keep real letters, mathematics, full emoji and attached accents intact.
- */
-export function hasVisibleStudyAttempt(attempt: string): boolean {
-  return hasVisibleStudyContent(attempt);
-}
+type StudyAnswerState = Pick<StudyLesson, 'attempt' | 'answerVisible'>;
 
-type StudyAnswerState = Pick<StudyLesson, 'attempt' | 'answerVisible' | 'answerReviewAllowed'>;
-
-export function canReviewStudyAnswer({ attempt, answerReviewAllowed }: StudyAnswerState): boolean {
-  // Legacy backups used trim(), which accepts some invisible attempts.
-  return !!attempt.trim() && (answerReviewAllowed ?? true);
+export function canReviewStudyAnswer({ attempt }: Pick<StudyAnswerState, 'attempt'>): boolean {
+  return !!attempt.trim();
 }
 
 export function hasRevealedStudyAnswer(response: StudyAnswerState): boolean {
@@ -35,7 +23,6 @@ export type StudyLesson = StudyTutorTurn & {
   previousLessonId: number | null;
   attempt: string;
   answerVisible: boolean;
-  answerReviewAllowed?: boolean;
 };
 
 export type StudyModeMemory = {

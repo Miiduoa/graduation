@@ -8,7 +8,7 @@ import {
   type StudySource,
   type TutorExplanation,
 } from '@/lib/studyTutor';
-import { canReviewStudyAnswer, hasRevealedStudyAnswer, STUDY_SESSION_LIMITS, type StudyLesson, type StudyModeMemory, type StudyPassageMemory } from './courseStudySession';
+import { hasRevealedStudyAnswer, STUDY_SESSION_LIMITS, type StudyLesson, type StudyModeMemory, type StudyPassageMemory } from './courseStudySession';
 
 const FORMAT = 'campus-one-study-progress';
 const VERSION = 2;
@@ -113,9 +113,9 @@ function readMode(value: unknown, passage: StudyPassage, version: ProgressVersio
     const parentId = lesson.previousLessonId === null ? null : integer(lesson.previousLessonId, 1, id - 1);
     const attempt = text(lesson.attempt, STUDY_SESSION_LIMITS.attemptCharacters);
     const answerVisible = boolean(lesson.answerVisible);
-    const answerReviewAllowed = Object.hasOwn(lesson, 'answerReviewAllowed')
-      ? boolean(lesson.answerReviewAllowed) : undefined;
-    if (answerVisible && !hasRevealedStudyAnswer({ attempt, answerVisible, answerReviewAllowed }))
+    // Read earlier PR backups, using the saved attempt and reveal state for display.
+    if (Object.hasOwn(lesson, 'answerReviewAllowed')) boolean(lesson.answerReviewAllowed);
+    if (answerVisible && !hasRevealedStudyAnswer({ attempt, answerVisible }))
       invalid('進度檔的試答與參考回答狀態不一致，無法還原。');
     let response: TutorExplanation;
     try {
@@ -129,10 +129,8 @@ function readMode(value: unknown, passage: StudyPassage, version: ProgressVersio
     } catch {
       invalid('進度檔中的講解無法對照該段原文，請重新選擇完整的進度檔。');
     }
-    const restored = { id, previousLessonId: parentId, question: text(lesson.question, STUDY_TUTOR_LIMITS.questionCharacters),
+    return { id, previousLessonId: parentId, question: text(lesson.question, STUDY_TUTOR_LIMITS.questionCharacters),
       response, attempt, answerVisible };
-    return answerReviewAllowed !== undefined && answerReviewAllowed !== canReviewStudyAnswer(restored)
-      ? { ...restored, answerReviewAllowed } : restored;
   });
   const ids = new Set(lessons.map((lesson) => lesson.id));
   for (const lesson of lessons) {
@@ -228,12 +226,7 @@ function checkBytes(value: string) {
 export function serializeCourseStudyProgress(data: CourseStudyProgressData): string {
   const canonical = readData(data, VERSION);
   const passageLengths = canonical.source.sections.map((section) => splitStudySection(section).map((part) => part.text.length));
-  // The v2 reader requires exact lesson keys and a nonblank attempt for reveals.
-  const needsExtendedVersion = Object.values(canonical.passages).some(({ modes }) =>
-    Object.values(modes).some(({ lessons }) => lessons.some(({ answerReviewAllowed }) =>
-      answerReviewAllowed !== undefined)));
-  const version = needsExtendedVersion ? EXTENDED_VERSION : VERSION;
-  const serialized = JSON.stringify({ format: FORMAT, version, ...canonical, passageLengths });
+  const serialized = JSON.stringify({ format: FORMAT, version: VERSION, ...canonical, passageLengths });
   checkBytes(serialized);
   return serialized;
 }

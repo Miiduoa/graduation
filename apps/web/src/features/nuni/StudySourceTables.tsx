@@ -399,9 +399,12 @@ function expandedValueRows(table: StudySourceTable): SourceValueRow[] | null {
 function expandedPercentRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
   const header = table.headers[1];
+  // Grouping words can also be part of the measure, as in “percentage by
+  // which revenue will increase.” Check the full label for an unbounded rate.
+  if (hasUnboundedRateLabel(header) || !hasUnambiguousChartLabel(header) ||
+      NON_RATIO_AUTH_TOKEN_COLUMN.test(withoutPercentUnit(header))) return null;
   const column = measuredColumnLabel(header);
-  if (!hasUnambiguousChartLabel(header) || NON_RATIO_AUTH_TOKEN_COLUMN.test(withoutPercentUnit(header)) ||
-      NON_RATIO_AUTH_TOKEN_COLUMN.test(withoutPercentUnit(column))) return null;
+  if (NON_RATIO_AUTH_TOKEN_COLUMN.test(withoutPercentUnit(column))) return null;
   // Preserve fixed-scale eligibility for the original header. Apply the
   // additional label checks only to formats recognized by the newer rules.
   const originallyBounded = isOriginalBoundedPercentageColumn(header);

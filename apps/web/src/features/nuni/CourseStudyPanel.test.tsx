@@ -165,11 +165,11 @@ it('shows the authorized material without downloading or generating until reques
   expect(screen.getByText(/不會自動評分/)).toBeTruthy();
 });
 
-it('keeps invisible-only self-check drafts from unlocking a reference answer in the reading UI', async () => {
+it('uses the original nonblank self-check gate and resets disclosure on edit', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
   await screen.findByRole('region', { name: '本段 AI 講解' });
-  for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f', '\ufff9', '\ufffa', '\ufffb']) {
+  for (const invisible of [' ', '\t', '\ufeff']) {
     fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: invisible } });
     const compare = screen.getByRole('button', { name: '對照參考回答' }) as HTMLButtonElement;
     expect(compare.disabled).toBe(true);
@@ -177,14 +177,14 @@ it('keeps invisible-only self-check drafts from unlocking a reference answer in 
     fireEvent.click(compare);
     expect(screen.queryByText(explanation.answer)).toBeNull();
   }
-  for (const visible of ['主鍵', 'x²+y²', '👩‍💻', 'e\u0301', '⠃']) {
+  for (const visible of ['主鍵', 'x²+y²', '👩‍💻', 'e\u0301', '⠃', '\u200b', '\u0301', '\ufff9']) {
     fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: visible } });
     const compare = screen.getByRole('button', { name: '對照參考回答' }) as HTMLButtonElement;
     expect(compare.disabled).toBe(false);
     fireEvent.click(compare);
     expect(screen.getByText(explanation.answer)).toBeTruthy();
     // Editing an already revealed response invalidates its disclosure.
-    fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: '\u200b' } });
+    fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: '' } });
     expect(screen.queryByText(explanation.answer)).toBeNull();
   }
 });

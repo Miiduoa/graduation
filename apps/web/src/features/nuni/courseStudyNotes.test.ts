@@ -162,13 +162,13 @@ describe('course study note downloads', () => {
     }
   });
 
-  it('omits invisible-only saved lesson questions while preserving visible questions and the original session', () => {
+  it('exports saved questions verbatim and preserves the original session', () => {
     for (const question of ['\u200b', ' \u2060\u200d\u0301 ', '\u2800', '\u202e']) {
       const memory = withLesson();
       memory.modes.understand.lessons[0].question = question;
       const before = JSON.stringify(memory);
       const exportText = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
-      expect(exportText).not.toContain('我的問題：');
+      expect(exportText).toContain('我的問題：\n' + question + '\n');
       expect(exportText).toContain('講解標題：唯一識別');
       expect(exportText).toContain('引用原文：\n主鍵用來唯一識別資料。');
       expect(JSON.stringify(memory)).toBe(before);
@@ -181,7 +181,7 @@ describe('course study note downloads', () => {
     }
   });
 
-  it('marks missing or invisible model citations explicitly rather than emitting blank-looking TXT evidence', () => {
+  it('labels unmatched citations and keeps their saved text', () => {
     for (const quote of ['', '\u200b', '\u2060\u200d\u0301', '\u2800', ' \n\t', '\u202e']) {
       const memory = withLesson();
       const lesson = memory.modes.understand.lessons[0];
@@ -195,12 +195,11 @@ describe('course study note downloads', () => {
       };
       const original = JSON.stringify(memory);
       const text = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
-      expect(text).toContain('AI 講解：\n主鍵像是每位學生的學號。\n\nAI 引句：未提供可讀引句');
-      expect(text).toContain('本步講解：\n先回到原文核對。\n本步 AI 引句：未提供可讀引句');
+      expect(text).toContain('AI 講解：\n主鍵像是每位學生的學號。\n\nAI 引句（無法在本段逐字定位）：\n' + quote);
+      expect(text).toContain('本步講解：\n先回到原文核對。\n本步 AI 引句（無法在本段逐字定位）：\n' + quote);
       expect(text).toContain('本步引用原文：\n主鍵');
       expect(text).toContain('本步 AI 引句（無法在本段逐字定位）：\n未出現的詞');
       expect(text).not.toContain('\n引用原文：\n');
-      if (/[^\p{White_Space}]/u.test(quote)) expect(text).not.toContain(quote);
       expect(JSON.stringify(memory)).toBe(original);
     }
   });
@@ -262,14 +261,14 @@ describe('course study note downloads', () => {
     expect(JSON.stringify(memory)).toBe(original);
   });
 
-  it('does not accept a substring of a joined emoji as a source citation in exported notes', () => {
+  it('labels a literal substring of a joined emoji as source text', () => {
     const emojiSource = studySourceFromText({
       id: 'grapheme-evidence', title: '符號練習', text: '團隊使用 👩‍💻 合作。'
     });
     const memory = withLesson();
     memory.modes.understand.lessons[0].response.sourceQuote = '👩';
     const text = buildCourseStudyNotes('符號', emojiSource, { '0:0': memory });
-    expect(text).toContain('AI 引句（無法在本段逐字定位）：\n👩');
+    expect(text).toContain('引用原文：\n👩');
     expect(text).toContain('原文：\n團隊使用 👩‍💻 合作。');
   });
 
@@ -290,13 +289,12 @@ describe('course study note downloads', () => {
     const output = buildCourseStudyNotes('資料庫', formulaSource, { '0:0': memory });
     expect(output).toContain('第 1 步：教材公式\n本步講解：\n先找到原文。\n本步引用原文：\nx²+y²\n原文公式：\nx²+y²');
     expect(output).toContain('第 2 步：延伸推測\n本步講解：\n這不是教材上的式子。\n本步引用原文：\nx²+y²\nAI 公式（無法在本段逐字定位）：\nx²+y³');
-    expect(output).toContain('AI 公式（無法在本段逐字定位）：\n👩');
+    expect(output).toContain('原文公式：\n👩');
     expect(output).toContain('AI 公式（無法在本段逐字定位）：\n？');
     expect(output).not.toContain('原文公式：\nx²+y³');
-    expect(output).not.toContain('原文公式：\n👩');
     expect(output).not.toContain('原文公式：\n？');
-    expect(output).not.toContain('\u200b\u0301');
-    expect(output.match(/原文公式：/g)).toHaveLength(1);
+    expect(output).toContain('AI 公式（無法在本段逐字定位）：\n\u200b\u0301');
+    expect(output.match(/原文公式：/g)).toHaveLength(2);
     expect(JSON.stringify(memory)).toBe(original);
   });
 
@@ -317,7 +315,7 @@ describe('course study note downloads', () => {
     expect(output).not.toContain('原文公式：\nz=7');
   });
 
-  it('labels unreadable AI self-check prompts and answers without implying a completed review', () => {
+  it('retains original self-check text and the saved reveal state', () => {
     for (const invisible of ['', '\u200b', ' \u2060\u0301 ', '\u2800']) {
       const memory = withLesson();
       const lesson = memory.modes.understand.lessons[0];
@@ -327,21 +325,19 @@ describe('course study note downloads', () => {
       lesson.answerVisible = true;
       const original = JSON.stringify(memory);
       const output = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
-      expect(output).toContain('自我檢查題：AI 未提供可讀題目，請對照原文自行練習');
-      expect(output).toContain('參考回答：AI 未提供可讀回答，請對照原文');
-      expect(output).not.toContain('自我檢查題：\n');
-      expect(output).not.toContain('參考回答（已展開）：');
+      expect(output).toContain('自我檢查題：\n' + invisible);
+      expect(output).toContain('參考回答（已展開）：\n' + invisible);
       expect(output).toContain('我的試答：\n我的思考');
       expect(output).toContain('引用原文：\n主鍵用來唯一識別資料。');
       expect(JSON.stringify(memory)).toBe(original);
 
       lesson.answerVisible = false;
       expect(buildCourseStudyNotes('資料庫', source, { '0:0': memory }))
-        .not.toContain('參考回答：AI 未提供可讀回答');
+        .not.toContain('參考回答（已展開）：');
       lesson.answerVisible = true;
       lesson.attempt = ' \t ';
       expect(buildCourseStudyNotes('資料庫', source, { '0:0': memory }))
-        .not.toContain('參考回答：AI 未提供可讀回答');
+        .not.toContain('參考回答（已展開）：');
     }
     const memory = withLesson();
     const lesson = memory.modes.understand.lessons[0];

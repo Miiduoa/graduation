@@ -330,22 +330,22 @@ describe('lesson and draft validation', () => {
   });
 
   it.each([
-    ['\u200b\u0301', false, false, false, 3],
-    ['\u200b', false, false, false, 3],
-    [' \u0301 ', false, false, false, 3],
-    ['\u200e\u2060', false, false, false, 3],
-    ['\u2800\ufff9', false, false, false, 3],
+    ['\u200b\u0301', false, false, true, 2],
+    ['\u200b', false, false, true, 2],
+    [' \u0301 ', false, false, true, 2],
+    ['\u200e\u2060', false, false, true, 2],
+    ['\u2800\ufff9', false, false, true, 2],
     [' \t', false, false, false, 2],
     ['作\u200b答 e\u0301\u200f ', true, false, true, 2],
     ['\u200b', true, false, true, 2],
     ['\u2060', undefined, true, true, 2],
-    ['', true, false, false, 3],
+    ['', true, false, false, 2],
   ])('preserves drafts and reveal eligibility verbatim (%#)',
     (attempt, answerReviewAllowed, answerVisible, canReview, version) => {
       const saved = data();
       const lesson = saved.passages['0:0'].modes.understand.lessons[0];
       Object.assign(lesson, { attempt, answerVisible });
-      if (answerReviewAllowed !== undefined) lesson.answerReviewAllowed = answerReviewAllowed;
+      if (answerReviewAllowed !== undefined) Object.assign(lesson, { answerReviewAllowed });
       const before = JSON.stringify(saved);
       const raw = serializeCourseStudyProgress(saved);
       const exported = JSON.parse(raw) as Envelope;

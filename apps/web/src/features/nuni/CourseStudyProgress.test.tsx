@@ -339,7 +339,7 @@ it.each([
   await screen.findByRole('region', { name: '閱讀進度預覽' });
   fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
   expect(inputValue('先寫下你的想法')).toBe('\u200d\u2800');
-  expect(screen.getByRole('button', { name: '對照參考回答' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: '對照參考回答' }).hasAttribute('disabled')).toBe(false);
 });
 
 it('restores the selected PDF page, mode, notes and lesson branch without automatically generating', async () => {
@@ -401,14 +401,14 @@ it('copies and restores the exact self-check draft and follows up with an invisi
     attempt: draft, answerVisible: false,
   });
 
-  expect(JSON.parse(raw).version).toBe(3);
-  expect(raw).toContain('"answerReviewAllowed":false');
+  expect(JSON.parse(raw).version).toBe(2);
+  expect(raw).not.toContain('answerReviewAllowed');
 
   fireEvent.change(screen.getByLabelText(label), { target: { value: '備份以後的草稿' } });
   fireEvent.change(screen.getByLabelText(restoreLabel), { target: { files: [progressFile(raw)] } });
   fireEvent.click(await screen.findByRole('button', { name: '還原這份進度' }));
   expect(inputValue(label)).toBe(draft);
-  expect(screen.getByRole('button', { name: '對照參考回答' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: '對照參考回答' }).hasAttribute('disabled')).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '接著追問' }));
   await waitFor(() => expect(mocks.run).toHaveBeenCalledTimes(1));
   expect(mocks.run.mock.calls[0][0].history.turns.at(-1).response.sourceQuote).toBe(quote);
