@@ -1714,6 +1714,48 @@ it('refetches same-session cached courseware with a legacy 401 error rather than
   expect((store.docs.get(CACHE)!.extras as typeof extras)['10001'].errors).toEqual([]);
 });
 
+it.each(['homework', 'materials', 'announcements'] as const)(
+  'rejects a same-session base cache carrying an old %s HTTP 401 error',
+  async area => {
+    const { request, source, store } = setup();
+    expect((await request()).status).toBe(200);
+    const snapshot = store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot;
+    snapshot.courseErrors = [{
+      courseId: 10001, courseName: LMS_FIXTURE_COURSE.name, area, status: 401,
+    }];
+    snapshot.homework[0].title = '不可沿用的舊快取作業';
+    for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+    const response = await request();
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.result.cache.hit).toBe(false);
+    expect(body.result.courseErrors).toEqual([]);
+    expect(JSON.stringify(body)).not.toContain('不可沿用的舊快取作業');
+    expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+    expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+    expect((store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot).courseErrors).toEqual([]);
+  },
+);
+
+it('does not disclose cached homework when a legacy HTTP 401 is followed by a fresh 401', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const snapshot = store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot;
+  snapshot.courseErrors = [{
+    courseId: 10001, courseName: LMS_FIXTURE_COURSE.name, area: 'homework', status: 401,
+  }];
+  snapshot.homework[0].title = '不應回傳的快取作業';
+  vi.mocked(source.fetchHomeworkPage).mockResolvedValue({ ok: false, status: 401 });
+  vi.mocked(source.fetchCourses).mockClear();
+  const response = await request();
+  const body = await response.json();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.result).toBeUndefined();
+  expect(JSON.stringify(body)).not.toContain('不應回傳的快取作業');
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+});
+
 it('refetches same-session cached homework containing a foreign course row', async () => {
   const { request, source, store } = setup();
   expect((await request()).status).toBe(200);
