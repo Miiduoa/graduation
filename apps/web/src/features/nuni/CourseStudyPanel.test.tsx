@@ -3168,3 +3168,61 @@ it('checks real mobile fallback selection instead of trusting WebView select() w
     else Reflect.deleteProperty(window.navigator, 'clipboard');
   }
 });
+
+it('returns keyboard focus to the export control after a blocked JSON download fallback closes', () => {
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL {
+    static createObjectURL = vi.fn(() => 'blob:blocked-focus-json');
+    static revokeObjectURL = vi.fn();
+  });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+    .mockImplementation(() => { throw new Error('mobile download blocked'); });
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  try {
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '鍵盤操作時不可遺失的筆記' } });
+    const save = screen.getByRole('button', { name: '儲存閱讀進度' });
+    save.focus();
+    expect(document.activeElement).toBe(save);
+    fireEvent.click(save);
+    const backup = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(backup);
+    expect(parseCourseStudyProgress(backup.value, scope).passages['0:0'].note)
+      .toBe('鍵盤操作時不可遺失的筆記');
+    fireEvent.click(screen.getByRole('button', { name: '收起手動複製文字' }));
+    expect(screen.queryByRole('textbox', { name: '可選取的閱讀進度 JSON' })).toBeNull();
+    expect(document.activeElement).toBe(save);
+  } finally {
+    view.unmount();
+    click.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('restores focus to the manual backup trigger even if a mobile pointer tap did not focus its button', () => {
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL {
+    static createObjectURL = vi.fn(() => 'blob:ignored-focus-download');
+    static revokeObjectURL = vi.fn();
+  });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  try {
+    const note = screen.getByLabelText(noteLabel) as HTMLTextAreaElement;
+    fireEvent.change(note, { target: { value: '保持完整的備份內容' } });
+    fireEvent.click(screen.getByRole('button', { name: '下載本次筆記' }));
+    const showBackup = screen.getByRole('button', { name: '沒有下載到檔案？顯示完整手動備份' });
+    note.focus();
+    expect(document.activeElement).toBe(note);
+    // fireEvent.click deliberately does not give the button focus, like some iOS pointer taps.
+    fireEvent.click(showBackup);
+    const backup = screen.getByRole('textbox', { name: '可選取的本次筆記文字' }) as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(backup);
+    expect(backup.value).toContain('保持完整的備份內容');
+    fireEvent.click(screen.getByRole('button', { name: '收起手動複製文字' }));
+    expect(document.activeElement).toBe(showBackup);
+  } finally {
+    view.unmount();
+    click.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});

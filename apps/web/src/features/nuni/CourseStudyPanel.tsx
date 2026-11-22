@@ -648,6 +648,9 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     // A successful download supersedes an older clipboard fallback. If mobile
     // download is blocked, keep that already validated, manually selectable
     // snapshot instead of removing the student's only accessible backup.
+    // Capture the original export control before clicking a temporary Blob
+    // anchor. Mobile browsers may move focus even when that click fails.
+    const exportTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousManualCopy = manualCopyText;
     const previousManualKind = manualCopyKind;
     invalidateCopyFeedback();
@@ -686,8 +689,10 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
         // progress while TXT is selected offers only the OLD notes.
         if (hasNewExport && preparedFallback) setDownloadBackup(preparedFallback);
       } else if (preparedFallback) {
-        // A first-time blocked download still yields the exact TXT/JSON
-        // export as selectable local text, without requiring another action.
+        // A first-time blocked download moves focus to the selectable backup.
+        // Dismissing it must return keyboard/reader focus to the export button
+        // rather than leaving the student at the start of the whole board.
+        manualCopyReturnTarget.current = exportTrigger;
         setManualCopyKind(preparedFallback.kind);
         setManualCopyText(preparedFallback.text);
       }
@@ -1210,8 +1215,10 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
         </div>}
         {!practiceRound && <p className={styles.note}>進度檔可還原閱讀位置、筆記、講解、試答與問題草稿，也含練習參考回答；文字筆記方便直接閱讀。檔案未加密，請自行保管。</p>}
         {downloadStatus && <p className={styles.note} role="status">{downloadStatus}</p>}
-        {downloadBackup && <button type="button" className={styles.button} onClick={() => {
-          manualCopyReturnTarget.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        {downloadBackup && <button type="button" className={styles.button} onClick={(event) => {
+          // Mobile pointer taps need not focus buttons; the real trigger is
+          // more reliable than document.activeElement for return navigation.
+          manualCopyReturnTarget.current = event.currentTarget;
           setManualCopyKind(downloadBackup.kind);
           setManualCopyText(downloadBackup.text);
           setDownloadError('');
