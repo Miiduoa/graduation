@@ -1,4 +1,5 @@
 import { getDocFromServer, setDoc } from 'firebase/firestore';
+import { readCreatorCardFields } from '@campus/shared/src/creatorCard';
 import { readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 
 jest.mock('../../firebase', () => ({ getDb: () => ({}) }));
@@ -27,6 +28,31 @@ test('reads only a school-scoped published card', async () => {
   });
   expect(getDocFromServer).toHaveBeenCalledWith('schools/pu/creatorProfiles/alice');
 });
+
+describe.each(['headline', 'bio', 'linkUrl', 'pinnedPostId', 'extra'] as const)(
+  'merge-base read behavior for %s', (field) => {
+    test.each([
+      ['surrounding spaces', '  https://example.net  '],
+      ['newlines', '\nhttps://example.net\n'],
+      ['indentation', '\t  https://example.net'],
+      ['invalid URL', 'http://example.net/'],
+      ['empty string', ''],
+      ['null', null],
+      ['missing', undefined],
+    ])('%s with valid and invalid portfolio links', async (_scenario, value) => {
+      for (const linkUrl of [card.linkUrl, 'http://example.org/']) {
+        const raw: Record<string, unknown> = {
+          ...card, headline: '  舊標題  ', bio: '\n\t舊簡介\n', linkUrl, [field]: value,
+        };
+        if (value === undefined) delete raw[field];
+        jest.mocked(getDocFromServer).mockResolvedValueOnce(snap(raw) as never);
+        // The merge-base service returns this shared reader directly.
+        expect(await readCreatorCard('pu', 'alice')).toStrictEqual(readCreatorCardFields(raw));
+      }
+      expect(setDoc).not.toHaveBeenCalled();
+    });
+  },
+);
 
 test('an unpublished profile is different from a permission-denied read', async () => {
   jest.mocked(getDocFromServer)

@@ -70,6 +70,122 @@ const existingCard = {
   headline: '原有標題', bio: '原有簡介', linkUrl: 'https://example.org',
 };
 
+describe.each(['open', 'closed', 'reopened'] as const)('confirmation with editor %s', (editor) => {
+  const submitted = { headline: '  送出的標題  ', bio: '\n\t送出的簡介\n', linkUrl: 'https://example.net' };
+  const confirmed = { headline: '送出的標題', bio: '送出的簡介', linkUrl: 'https://example.net/' };
+  const fields = [
+    ['headline', '一句話介紹', '追加標題'],
+    ['bio', '個人簡介', ''],
+    ['linkUrl', '作品連結', '尚未完成的網址'],
+  ] as const;
+  const additions = [
+    ['none', {}],
+    ...fields.map(([field, , value]) => [field, { [field]: value }] as const),
+    ['headline and bio', { headline: fields[0][2], bio: fields[1][2] }],
+    ['headline and linkUrl', { headline: fields[0][2], linkUrl: fields[2][2] }],
+    ['bio and linkUrl', { bio: fields[1][2], linkUrl: fields[2][2] }],
+    ['all', Object.fromEntries(fields.map(([field, , value]) => [field, value]))],
+  ] as const;
+
+  describe.each(additions)('post-submit edits: %s', (_scenario, patch: Partial<typeof submitted>) => {
+    test.each(['late acknowledgement', 'manual match', 'mismatch', 'failure', 'timeout'] as const)(
+      '%s', async (outcome) => {
+        jest.useFakeTimers();
+        try {
+          let acknowledge!: () => void;
+          let completeCheck!: (value: typeof confirmed) => void;
+          let failCheck!: (reason: Error) => void;
+          const check = new Promise<typeof confirmed>((resolve, reject) => {
+            completeCheck = resolve;
+            failCheck = reject;
+          });
+          const saves = jest.mocked(saveCreatorCard);
+          const reads = jest.mocked(readCreatorCard);
+          const getServerCard = jest.fn(() => check);
+          saves.mockImplementationOnce(async (_school, _owner, _draft, confirmWrite) => {
+            await new Promise<void>((resolve) => { acknowledge = resolve; });
+            return confirmWrite!(getServerCard) as Promise<typeof confirmed>;
+          });
+          reads.mockResolvedValueOnce(existingCard).mockReturnValueOnce(check);
+          const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+          await act(async () => {});
+          const open = () => fireEvent.press(view.getByLabelText('編輯社群簡介'));
+          const expectDraft = (expected: typeof submitted) => {
+            for (const [field, label] of fields) {
+              expect(view.getByLabelText(label).props.value).toBe(expected[field]);
+            }
+          };
+
+          open();
+          for (const [field, label] of fields) {
+            fireEvent.changeText(view.getByLabelText(label), submitted[field]);
+          }
+          fireEvent.press(view.getByLabelText('儲存簡介'));
+          act(() => { jest.advanceTimersByTime(15_000); });
+          for (const [field, label] of fields) {
+            const value = patch[field];
+            if (value !== undefined) fireEvent.changeText(view.getByLabelText(label), value);
+          }
+          if (editor !== 'open') fireEvent.press(view.getByLabelText('取消編輯'));
+          if (editor === 'reopened') {
+            open();
+            expectDraft({ ...submitted, ...patch });
+          }
+
+          if (outcome === 'late acknowledgement') await act(async () => { acknowledge(); });
+          else fireEvent.press(view.getByLabelText('核對儲存結果'));
+
+          if (outcome === 'failure') {
+            await act(async () => { failCheck(new Error('offline')); });
+            if (editor === 'closed') open();
+            // A failed read leaves the pending submission and its full draft intact, as at merge-base.
+            expectDraft({ ...submitted, ...patch });
+            expect(view.getByLabelText('核對儲存結果')).toBeTruthy();
+            expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+          } else if (outcome === 'mismatch') {
+            const latest = { ...confirmed, bio: '另一裝置的簡介' };
+            await act(async () => { completeCheck(latest); });
+            if (editor === 'closed') {
+              open();
+              expectDraft(latest);
+            }
+            // Once the check resolves, the merge-base permits saving again.
+            // The PR also loads current server fields and offers recovery for unconfirmed edits.
+            expect(view.queryByLabelText('核對儲存結果')).toBeNull();
+            expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(false);
+            fireEvent.press(view.getByLabelText('還原未確認的草稿'));
+            const retained = editor === 'closed' ? { ...latest, bio: submitted.bio } : submitted;
+            expectDraft({ ...retained, ...patch });
+          } else {
+            if (outcome === 'timeout') {
+              act(() => { jest.advanceTimersByTime(15_000); });
+              expect(view.getByText(/核對等待逾時/)).toBeTruthy();
+              if (editor !== 'closed') {
+                expectDraft({ ...submitted, ...patch });
+                expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+              }
+            }
+            await act(async () => { completeCheck(confirmed); });
+            const hasAdditions = Object.keys(patch).length > 0;
+            // Merge-base closes an unmodified editor on confirmation and keeps
+            // later edits visible in an open editor. Also cover reopening a
+            // draft hidden during the PR's timeout flow, with edits applied to confirmed values.
+            expect(Boolean(view.queryByLabelText('個人簡介'))).toBe(editor !== 'closed' && hasAdditions);
+            if (editor === 'closed' || !hasAdditions) open();
+            expectDraft({ ...confirmed, ...patch });
+            expect(view.queryByLabelText('核對儲存結果')).toBeNull();
+            expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(false);
+          }
+          expect(saves).toHaveBeenCalledTimes(1);
+          expect(getServerCard).toHaveBeenCalledTimes(outcome === 'late acknowledgement' ? 1 : 0);
+        } finally {
+          jest.useRealTimers();
+        }
+      },
+    );
+  });
+});
+
 test('a stalled profile read keeps loading without allowing a retry or save', () => {
   jest.useFakeTimers();
   try {

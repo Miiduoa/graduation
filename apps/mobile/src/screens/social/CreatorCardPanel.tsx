@@ -124,8 +124,8 @@ function ScopedCreatorCardPanel({
     return () => { mounted.current = false; };
   }, []);
 
-  const acceptCard = (value: CreatorCard | null) => {
-    if (editingNow.current) {
+  const acceptCard = (value: CreatorCard | null, keepDraft = editingNow.current) => {
+    if (keepDraft) {
       const next = { ...(value ?? EMPTY_CREATOR_CARD) };
       for (const field of editedFields.current) {
         next[field] = currentDraft.current[field];
@@ -149,8 +149,7 @@ function ScopedCreatorCardPanel({
 
   const beginEdit = () => {
     if (!own || editorLocked() || state.status !== 'ready') return;
-    if (!pendingWrite.current) {
-      editedFields.current.clear();
+    if (!pendingWrite.current && editedFields.current.size === 0) {
       replaceDraft(published.current ?? EMPTY_CREATOR_CARD);
       setFeedback('');
     }
@@ -208,6 +207,8 @@ function ScopedCreatorCardPanel({
       }
       if (editingNow.current) {
         for (const field of submitted.edits) editedFields.current.add(field);
+      } else {
+        editedFields.current.clear();
       }
       setRecoverable((previous) => {
         const remaining = { ...previous };
@@ -282,9 +283,9 @@ function ScopedCreatorCardPanel({
   };
 
   const finishSave = (confirmed: CreatorCard, submitted: SubmittedWrite) => {
-    const hasLaterEdits = editingNow.current && editedFields.current.size > 0;
+    const hasLaterEdits = editedFields.current.size > 0;
     if (!hasLaterEdits) setEditorOpen(false);
-    acceptCard(confirmed);
+    acceptCard(confirmed, hasLaterEdits);
     setRecoverable((previous) => {
       const remaining = { ...previous };
       for (const field of CARD_FIELDS) {

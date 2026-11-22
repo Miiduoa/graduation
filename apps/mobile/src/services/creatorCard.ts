@@ -38,7 +38,7 @@ export async function readCreatorCard(
   if (data.schoolId !== schoolId || data.ownerUid !== ownerUid) {
     throw new Error('Creator card scope mismatch');
   }
-  const card = validateCreatorCard(readCreatorCardFields(data));
+  const card = readCreatorCardFields(data);
   repairFields.set(card, new Set(CARD_FIELDS.filter((field) =>
     !creatorCardFieldPassesRules(field, data[field]) || data[field] !== card[field])));
   hiddenFields.set(card, new Set(CARD_FIELDS.filter((field) =>
