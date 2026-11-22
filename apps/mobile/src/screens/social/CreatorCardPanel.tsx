@@ -22,10 +22,7 @@ type SubmittedWrite = {
   draft: CreatorCard;
   expected: CreatorCard;
   edits: readonly CardField[];
-  readCount: number;
-  readsInFlight: number;
-  latestCard?: { order: number; value: CreatorCard | null };
-  manualCheck?: number;
+  manualCheckStarted: boolean;
   editorSession: number;
   revisions: FieldRevisions;
 };
@@ -100,13 +97,10 @@ function ScopedCreatorCardPanel({
   const pendingWrite = useRef<SubmittedWrite | null>(null);
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const savingFlight = useRef(false);
-  const retryWrite = useRef<SubmittedWrite | null>(null);
-  const [canRetryCheck, setCanRetryCheck] = useState(false);
+  const confirmationFlight = useRef(false);
   const [checking, setChecking] = useState(false);
-  const [manualChecking, setManualChecking] = useState(false);
-  const editorLocked = () => savingFlight.current ||
-    !!(pendingWrite.current ?? retryWrite.current)?.readsInFlight;
-  const editorDisabled = saving || checking;
+  const editorLocked = () => savingFlight.current || confirmationFlight.current;
+  const actionsDisabled = saving || checking;
   const [openingLink, setOpeningLink] = useState(false);
   const openingLinkFlight = useRef<{ url: string } | null>(null);
   const [linkError, setLinkError] = useState('');
@@ -133,8 +127,8 @@ function ScopedCreatorCardPanel({
     return () => { mounted.current = false; };
   }, []);
 
-  const acceptCard = (value: CreatorCard | null, updateDraft = true) => {
-    if (updateDraft && editingNow.current) {
+  const acceptCard = (value: CreatorCard | null) => {
+    if (editingNow.current) {
       const next = { ...(value ?? EMPTY_CREATOR_CARD) };
       for (const field of editedFields.current) {
         next[field] = currentDraft.current[field];
@@ -160,12 +154,13 @@ function ScopedCreatorCardPanel({
     if (!own || editorLocked() || state.status !== 'ready') return;
     editedFields.current.clear();
     replaceDraft(published.current ?? EMPTY_CREATOR_CARD);
-    if (!pendingWrite.current && !retryWrite.current) setFeedback('');
+    if (!pendingWrite.current) setFeedback('');
     setEditorOpen(true);
   };
 
   const changeDraft = (field: keyof CreatorCard, value: string) => {
-    if (!editingNow.current || editorLocked()) return;
+    // Native text events queued before the inputs were disabled can still arrive.
+    if (!editingNow.current) return;
     if (currentDraft.current[field] === value &&
       (value !== '' || !published.current || !hasHiddenCreatorCardValue(published.current, field))) return;
     revisions.current[field] = ++nextRevision.current;
@@ -175,7 +170,7 @@ function ScopedCreatorCardPanel({
       editedFields.current.add(field);
     }
     replaceDraft({ ...currentDraft.current, [field]: value });
-    if (!pendingWrite.current && !retryWrite.current) setFeedback('');
+    if (!pendingWrite.current) setFeedback('');
   };
 
   const cancelEdit = () => {
@@ -184,7 +179,7 @@ function ScopedCreatorCardPanel({
     revisions.current = { ...submittedRevisions.current };
     editedFields.current.clear();
     replaceDraft(published.current ?? EMPTY_CREATOR_CARD);
-    if (!pendingWrite.current && !retryWrite.current) setFeedback('');
+    if (!pendingWrite.current) setFeedback('');
   };
 
   const settleWrite = (submitted: SubmittedWrite, latest: CreatorCard | null) => {
@@ -220,82 +215,42 @@ function ScopedCreatorCardPanel({
     }
   };
 
-  const trackConfirmation = async (
+  const checkServer = async (
     submitted: SubmittedWrite, read: () => Promise<CreatorCard | null>, manual = false,
   ) => {
-    const ownsConfirmation = () => mounted.current &&
-      (pendingWrite.current === submitted || retryWrite.current === submitted);
-    if (!ownsConfirmation()) throw new Error('Creator card confirmation superseded');
-
-    // Use the actual read start, which can follow a delayed write acknowledgement.
-    const order = ++submitted.readCount;
-    submitted.readsInFlight += 1;
+    confirmationFlight.current = true;
     setChecking(true);
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    if (manual) {
-      submitted.manualCheck = order;
-      setManualChecking(true);
-      setFeedback('');
-      timeout = setTimeout(() => {
-        if (!ownsConfirmation() || submitted.manualCheck !== order) return;
-        submitted.manualCheck = undefined;
-        setManualChecking(false);
-        setFeedback('核對等待逾時，草稿已保留，請重新核對；不會自動再次儲存。');
-      }, CREATOR_CARD_CONFIRM_TIMEOUT_MS);
-    }
+    const timeout = manual ? setTimeout(() => {
+      if (mounted.current) setFeedback('核對等待逾時，草稿已保留，仍在等待伺服器回應。');
+    }, CREATOR_CARD_CONFIRM_TIMEOUT_MS) : undefined;
 
     try {
-      const value = await read();
-      if (ownsConfirmation() && order > (submitted.latestCard?.order ?? 0)) {
-        submitted.latestCard = { order, value };
-        if (submitted.readsInFlight > 1) acceptCard(value, false);
+      const latest = await read();
+      if (mounted.current && pendingWrite.current === submitted) settleWrite(submitted, latest);
+      return latest;
+    } catch (error) {
+      if (mounted.current && pendingWrite.current === submitted && (manual || !savingFlight.current)) {
+        setFeedback('仍無法核對伺服器資料，草稿已保留，請稍後重試核對。');
       }
-      return value;
+      throw error;
     } finally {
       if (timeout !== undefined) clearTimeout(timeout);
-      submitted.readsInFlight -= 1;
-
-      if (ownsConfirmation()) {
-        if (submitted.manualCheck === order) {
-          submitted.manualCheck = undefined;
-          setManualChecking(false);
-        }
-        if (submitted.readsInFlight === 0) {
-          setChecking(false);
-          const latest = submitted.latestCard;
-          const failed = !latest || latest.order < submitted.readCount;
-          if (latest) {
-            if (pendingWrite.current === submitted) {
-              settleWrite(submitted, latest.value);
-            } else {
-              acceptCard(latest.value);
-              setFeedback('');
-            }
-            // A retry after settlement starts with a fresh set of results.
-            submitted.latestCard = undefined;
-            retryWrite.current = failed ? submitted : null;
-            setCanRetryCheck(failed);
-          }
-          if (!latest) {
-            setFeedback('仍無法核對伺服器資料，草稿已保留，請稍後重試核對。');
-          } else if (failed) {
-            setFeedback((previous) => previous +
-              '較新的核對失敗，已載入最近一次成功讀取的資料，可重試核對。');
-          }
-        }
-      }
+      confirmationFlight.current = false;
+      if (mounted.current) setChecking(false);
     }
   };
 
   const confirmPreviousSave = async () => {
-    const submitted = pendingWrite.current ?? retryWrite.current;
-    if (!mounted.current || !own || !submitted || savingFlight.current ||
-      submitted.manualCheck !== undefined || state.status !== 'ready') return;
+    const submitted = pendingWrite.current;
+    if (!mounted.current || !own || !submitted || editorLocked() || state.status !== 'ready') return;
+    // A delayed write acknowledgement must leave this and any later checks to the user.
+    submitted.manualCheckStarted = true;
+    setFeedback('');
     try {
-      await trackConfirmation(submitted,
+      await checkServer(submitted,
         () => readCreatorCard(schoolId, ownerUid, { requireCommitted: true }), true);
     } catch {
-      // The shared confirmation handler keeps the last successful result and reports failures.
+      // The pending write stays blocked until a server check succeeds.
     }
   };
 
@@ -365,21 +320,19 @@ function ScopedCreatorCardPanel({
     setSaving(true);
     setFeedback('');
     const submitted: SubmittedWrite = {
-      draft: submittedDraft, expected, edits, readCount: 0, readsInFlight: 0,
+      draft: submittedDraft, expected, edits, manualCheckStarted: false,
       editorSession: editorSession.current, revisions: { ...revisions.current },
     };
     for (const field of edits) {
       submittedRevisions.current[field] = submitted.revisions[field];
     }
-    retryWrite.current = null;
-    setCanRetryCheck(false);
     pendingWrite.current = submitted;
     const markUnconfirmed = () => {
       setNeedsConfirmation(true);
       setFeedback('無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
     };
     let timedOut = false;
-    // Allow manual verification after timeout while tracking any active server read.
+    // Allow manual verification after timeout once any active server read settles.
     const saveTimeout = setTimeout(() => {
       timedOut = true;
       if (!mounted.current) return;
@@ -390,10 +343,12 @@ function ScopedCreatorCardPanel({
     try {
       const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft,
         (read) => {
-          if (pendingWrite.current !== submitted) throw new Error('Creator card save superseded');
-          return trackConfirmation(submitted, read);
+          if (!mounted.current || pendingWrite.current !== submitted || submitted.manualCheckStarted) {
+            throw new Error('Creator card save superseded');
+          }
+          return checkServer(submitted, read);
         });
-      if (mounted.current && pendingWrite.current === submitted && submitted.readCount === 0) {
+      if (mounted.current && pendingWrite.current === submitted && !submitted.manualCheckStarted) {
         pendingWrite.current = null;
         setNeedsConfirmation(false);
         finishSave(confirmed, submitted);
@@ -476,10 +431,10 @@ function ScopedCreatorCardPanel({
             placeholder="例如：記錄校園日常的攝影愛好者"
             placeholderTextColor={theme.colors.textSecondary}
             style={styles.input}
-            editable={!editorDisabled}
+            editable={!actionsDisabled}
           />
           {state.value && hasHiddenCreatorCardValue(state.value, 'headline') && (
-            <CardButton label="清除舊一句話介紹" disabled={editorDisabled}
+            <CardButton label="清除舊一句話介紹" disabled={actionsDisabled}
               onPress={() => changeDraft('headline', '')} />
           )}
           <Text style={styles.label}>個人簡介 · {draft.bio.length}/{CREATOR_CARD_LIMITS.bio}</Text>
@@ -492,11 +447,11 @@ function ScopedCreatorCardPanel({
             placeholder="分享興趣、社團、作品或你想和同學交流的事。"
             placeholderTextColor={theme.colors.textSecondary}
             style={[styles.input, styles.bioInput]}
-            editable={!editorDisabled}
+            editable={!actionsDisabled}
             textAlignVertical="top"
           />
           {state.value && hasHiddenCreatorCardValue(state.value, 'bio') && (
-            <CardButton label="清除舊個人簡介" disabled={editorDisabled}
+            <CardButton label="清除舊個人簡介" disabled={actionsDisabled}
               onPress={() => changeDraft('bio', '')} />
           )}
           <Text style={styles.label}>作品連結（選填）</Text>
@@ -511,26 +466,26 @@ function ScopedCreatorCardPanel({
             placeholder="https://"
             placeholderTextColor={theme.colors.textSecondary}
             style={styles.input}
-            editable={!editorDisabled}
+            editable={!actionsDisabled}
           />
           {state.value && hasHiddenCreatorCardValue(state.value, 'linkUrl') && (
-            <CardButton label="清除舊作品連結" disabled={editorDisabled}
+            <CardButton label="清除舊作品連結" disabled={actionsDisabled}
               onPress={() => changeDraft('linkUrl', '')} />
           )}
           <Text style={styles.note}>這些內容只會顯示給所屬校園成員，不會帶入學號、電話或校務資料。</Text>
           {!needsConfirmation && CARD_FIELDS.some(restorableEntry) && (
-            <CardButton label="還原未確認的草稿" disabled={editorDisabled} onPress={restoreDraft} />
+            <CardButton label="還原未確認的草稿" disabled={actionsDisabled} onPress={restoreDraft} />
           )}
           {!!feedback && <Text accessibilityRole="alert" style={styles.error}>{feedback}</Text>}
           <View style={styles.actions}>
             <CardButton label={saving && !needsConfirmation ? '正在確認儲存…' : '儲存簡介'}
-              primary disabled={editorDisabled || needsConfirmation} busy={editorDisabled}
+              primary disabled={actionsDisabled || needsConfirmation} busy={actionsDisabled}
               onPress={() => void submit()} />
-            {(needsConfirmation || canRetryCheck) && (
-              <CardButton label={manualChecking ? '正在核對伺服器…' : '核對儲存結果'}
-                disabled={saving || manualChecking} busy={manualChecking} onPress={() => void confirmPreviousSave()} />
+            {needsConfirmation && (
+              <CardButton label={checking ? '正在核對伺服器…' : '核對儲存結果'}
+                disabled={actionsDisabled} busy={checking} onPress={() => void confirmPreviousSave()} />
             )}
-            <CardButton label="取消編輯" disabled={editorDisabled}
+            <CardButton label="取消編輯" disabled={actionsDisabled}
               onPress={cancelEdit} />
           </View>
         </View>
@@ -551,15 +506,15 @@ function ScopedCreatorCardPanel({
             </Pressable>
           )}
           {!!linkError && <Text accessibilityRole="alert" style={styles.error}>{linkError}</Text>}
-          {own && (needsConfirmation || canRetryCheck) && (
+          {own && needsConfirmation && (
             <View style={styles.pendingReview}>
               <Text accessibilityRole="alert" style={styles.error}>
-                {needsConfirmation && '儲存結果尚未確認。'}{feedback || '草稿已保留，請先核對伺服器資料。'}
+                儲存結果尚未確認。{feedback || '草稿已保留，請先核對伺服器資料。'}
               </Text>
               <CardButton
-                label={manualChecking ? '正在核對伺服器…' : '核對儲存結果'}
-                disabled={saving || manualChecking}
-                busy={manualChecking}
+                label={checking ? '正在核對伺服器…' : '核對儲存結果'}
+                disabled={actionsDisabled}
+                busy={checking}
                 onPress={() => void confirmPreviousSave()}
               />
             </View>
@@ -569,10 +524,10 @@ function ScopedCreatorCardPanel({
               {!state.value?.headline && !state.value?.bio && !state.value?.linkUrl &&
                 <Text style={styles.note}>介紹你的興趣或作品，讓同學更容易認識你。</Text>}
               <CardButton label={state.value ? '編輯社群簡介' : '建立社群簡介'}
-                disabled={editorDisabled} onPress={beginEdit} />
+                disabled={actionsDisabled} onPress={beginEdit} />
             </View>
           )}
-          {!needsConfirmation && !canRetryCheck && !!feedback && <Text accessibilityRole="text" style={styles.success}>{feedback}</Text>}
+          {!needsConfirmation && !!feedback && <Text accessibilityRole="text" style={styles.success}>{feedback}</Text>}
         </View>
       )}
     </View>
