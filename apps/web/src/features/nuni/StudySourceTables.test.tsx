@@ -2910,3 +2910,35 @@ it.each(['寄送件數', '郵件件數', 'Parcel Count'])(
     unmount();
   },
 );
+
+it.each([
+  ['百分位', ['25', '75']],
+  ['第 75 百分位數', ['25', '75']],
+  ['百分等級', ['25', '75']],
+  ['Percentile Rank', ['25', '75']],
+  ['Percentile Score', ['25', '75']],
+  ['百分位 (%)', ['25%', '75%']],
+  ['Percentile (%)', ['25%', '75%']],
+])('retains source %s without a misleading ratio-scale percentile chart', (header, values) => {
+  const material = ['| 學生 | ' + header + ' |', '| --- | --- |',
+    '| 甲 | ' + values[0] + ' |', '| 乙 | ' + values[1] + ' |'].join('\n');
+  const view = render(<StudySourceTables text={material} />);
+  expect(within(screen.getByRole('table')).getAllByRole('cell')
+    .map((cell) => cell.textContent)).toEqual(values);
+  expect(comparisonSummaries(view.container)).toEqual([]);
+  expect(view.container.querySelector('meter')).toBeNull();
+  view.unmount();
+});
+
+it.each(['百分位人數', 'Percentile Count', 'Number of Percentiles'])(
+  'keeps explicit counts comparable even when the header mentions percentiles (%s)', (header) => {
+    const material = ['| 組別 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 20 |', '| 乙 | 40 |'].join('\n');
+    const view = render(<StudySourceTables text={material} />);
+    expect(Array.from(view.container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual([[20, 40], [40, 40]]);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map((cell) => cell.textContent)).toEqual(['20', '40']);
+    view.unmount();
+  },
+);

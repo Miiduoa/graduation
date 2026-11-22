@@ -147,6 +147,15 @@ const ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN =
 const AMBIGUOUS_TIME_COLUMN =
   /^(?:時間|時段|日|日期|日期時間|time|date|day)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 
+// Percentile ranks name a position in a distribution, not a ratio-scale
+// quantity: the 80th percentile is not twice the 40th percentile. Preserve
+// exact lesson values; an explicitly counted population of percentiles is a
+// separate quantity and may still have a source-grounded count comparison.
+const NON_RATIO_PERCENTILE_COLUMN =
+  /(?:百分位(?:數|階|等級|排名|序|次)?|百分等級|百分排名|百分秩|百分順位|\bpercentiles?\b)/iu;
+const PERCENTILE_COUNT_COLUMN =
+  /(?:百分位(?:人數|數量|總數|筆數|個數)|百分等級(?:人數|數量|總數)|\b(?:count|total|number\s+of)\s+percentiles?\b|\bpercentile\s+(?:count|total)\b)/iu;
+
 // GPA, exam scores, Likert ratings, IQ and index numbers are scale readings,
 // not quantities with a meaningful ratio to zero. A 4.0 GPA does not indicate
 // twice the achievement of a 2.0 GPA. Counts *of* ratings, however, are real
@@ -205,6 +214,8 @@ function isNonRatioColumn(header: string): boolean {
       NON_RATIO_WEEKDAY_COLUMN.test(column) ||
       NON_RATIO_QUARTER_POSITION_COLUMN.test(column) ||
       NON_RATIO_SOURCE_POSITION_COLUMN.test(column) ||
+      (NON_RATIO_PERCENTILE_COLUMN.test(column) &&
+       !PERCENTILE_COUNT_COLUMN.test(column)) ||
       NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
       DECIBEL_UNIT_COLUMN.test(column) ||
       NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
