@@ -337,9 +337,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   if (upstreamContentType !== null) {
     const mime = upstreamContentType.split(';', 1)[0].trim().toLowerCase();
     const jsonCompatible = mime === 'application/json' || mime === 'text/plain' ||
-      /^application\/[a-z0-9][a-z0-9!#  let raw: string;
-  try {
-    raw = await readBoundedResponse(response, signal);^_.+-]*\+json$/.test(mime);
+      /^application\/[a-z0-9][a-z0-9!#$&^_.+-]*\+json$/.test(mime);
     if (!jsonCompatible) {
       if (response.body) void response.body.cancel().catch(() => {});
       // A malformed 200 can include a Retry-After from a busy proxy. Respect
