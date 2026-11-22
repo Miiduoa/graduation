@@ -1056,3 +1056,13 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 
 - **第二輪精確 head GREEN（2026-11-22）**：先以 `expected_sha=ab9f5a8ed6e32b1542320e91b3c5c0e1ad964641`、`force=false` 將合法現職測試 fixture 修正推送為 [`08d6f10d1fbd87cba89eaf66c98f27575fc04b49`](https://github.com/Miiduoa/graduation/commit/08d6f10d1fbd87cba89eaf66c98f27575fc04b49)。[Actions #44968351317](https://github.com/Miiduoa/graduation/actions/runs/44968351317)／job 137042364414 已於 2026-11-22 00:52:43 UTC `completed/success`。真 Firebase Firestore／Storage／交易 **555/555 pass, 0 fail, 0 skipped**，新的 `transferred group managers cannot replay membership and group administration writes` 為 `ok 1`；原本兩個合法管理回歸都由失敗恢復 `ok`。Web Emulator **56/56**、Functions DM **148/148**、Mobile DM **112/112**、Web DM **177/177**，共 **1,048/1,048**，Mobile/Web typecheck、Web ESLint、Web Build 全部成功。RED [#44968036918](https://github.com/Miiduoa/graduation/actions/runs/44968036918) 以原規則重現 554/555 與越權成功；第一次 GREEN [#44968041814](https://github.com/Miiduoa/graduation/actions/runs/44968041814) 553/555 為兩個缺少 server-bound profile 的合法 fixture 問題，已實際修復而非忽略。
 - **封版注意**：這是修補後程式及測試的精確 `08d6f10d...` 成功，不代表後續文件交接提交或完整整合 head 的所有檢查已成功。若本段落作為新提交推送，新 SHA 的定向 CI 亦須重查；完整 PR CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、指定 App 5504170 的精確 head 核可、正式部署及可回復驗證仍未完成。舊校教師的其他 legacy `canManageGroup` 呼叫與 grading write、簽發檔案 URL 撤權和真 Storage CAS 仍待獨立處理。
+
+
+### 2026-11-22｜校籍轉換後的舊校群組建立權限重放（隔離驗證候選）
+
+- **來源缺口**：`groups/{groupId}` 的 create 僅檢查 target `schoolId` 的 membership 與 creator UID。若 canonical `users/{uid}.schoolId/primarySchoolId` 已轉校但舊校 membership 仍 active，持有舊登入狀態者仍可建立舊校群組，造成權限撤銷與新資源建立不一致。此為來源／合成身份的授權缺口，沒有正式環境利用證據。
+- **最小修改**：僅把群組 create 的 membership predicate 替換為既有 `isConsistentRootPostSchoolMember(request.resource.data.schoolId)`；該 helper 要求 server-bound canonical profile、舊校會員有效且兩個有值的校籍欄位無衝突。原 `createdBy` 與 `verification.status=unverified` 限制保留。沒有擴大其他群組操作、教師成績寫入或正式資料權限。
+- **合成回歸**：新增 `new group creation cannot replay stale school membership after transfer`，在真 Firebase Emulator 檢驗同一登入 context 正常建立、跨校拒絕、轉校後同時重放、現職校園建立、衝突校籍、canonical 帳號刪除、學籍撤權與恢復。分開推送原 Rules + 新測試的 RED 版本，便於反證修補必要性。
+- **本文件階段**：僅屬候選原始碼及回歸，精確 SHA 的 GitHub Actions／Emulator RED-GREEN 結果必須由工作流程實際日誌取得；若原合法測試失敗須先修復。完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、指定 App 5504170 審查與正式發布均未因這個候選自動完成。
+- **範圍／限制**：只做隔離合成測試及 GitHub feature 分支推送，不執行遭拒的 npm/pnpm audit，不碰 E 校園、正式資料／金鑰／附件 token、migration、部署。既有 grading 原子更正、歷史 staff-only 備註、GCS／Supabase 已發 URL 撤銷及真 Storage CAS 仍未解決。
+

@@ -1208,7 +1208,9 @@ service cloud.firestore {
       allow read: if isActiveGroupMember(groupId);
       allow create: if isSignedIn()
         && request.resource.data.schoolId != null
-        && isSchoolMember(request.resource.data.schoolId)
+        // A stale school membership must not mint a new old-campus group.
+        // Use the same server-bound school consistency check as private posts.
+        && isConsistentRootPostSchoolMember(request.resource.data.schoolId)
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.get('verification', {'status': 'unverified'}) == {'status': 'unverified'};
       // Stale old-campus membership does not retain group administration.
