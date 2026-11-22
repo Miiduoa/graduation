@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { withSchoolDataDeadline } from '@/lib/schoolDataRequest';
 import { CommunityAccess } from '../../_components/CommunityAccess';
 import { ReportPostDialog, type ReportPostSubmitPayload } from '../../_components/ReportPostDialog';
 import { SiteShell } from '@/components/SiteShell';
@@ -93,7 +94,6 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
   const [replyText, setReplyText] = useState('');
   const [replyAnonymous, setReplyAnonymous] = useState(true);
   const [replyParentId, setReplyParentId] = useState<string | null>(null);
@@ -110,6 +110,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const [bookmarkState, setBookmarkState] = useState<{ scope: string; saved: boolean } | null>(
     null,
   );
+  const bookmarkWritePending = useRef(false);
   const [bookmarkBusy, setBookmarkBusy] = useState(false);
   const [bookmarkError, setBookmarkError] = useState('');
   const [bookmarkUnavailable, setBookmarkUnavailable] = useState(false);
@@ -146,8 +147,9 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   }, [user?.uid, schoolId, postId, bookmarkRevision]);
 
   const onToggleBookmark = async () => {
-    if (!user?.uid || !postId || !bookmarkReady || bookmarkBusy || bookmarkUnavailable) return;
+    if (!user?.uid || !postId || !bookmarkReady || bookmarkWritePending.current || bookmarkUnavailable) return;
     const uid = user.uid;
+    bookmarkWritePending.current = true;
     setBookmarkBusy(true);
     setBookmarkError('');
     try {
@@ -162,11 +164,12 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         setBookmarkError('這次收藏未成功更新，請確認校籍與連線後重試。');
       }
     } finally {
+      bookmarkWritePending.current = false;
       setBookmarkBusy(false);
     }
   };
 
-  const loadPost = useCallback(async (source: 'default' | 'server' = 'default', initial = false) => {
+  const loadPost = useCallback(async (source: 'default' | 'server' = 'default') => {
     if (!postId || !schoolId) return;
     const reads = postReads.current;
     const request = ++reads.started;
@@ -174,34 +177,32 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     const isCurrent = () =>
       postDeletion.current !== 'confirmed' && request > Math.max(reads.settled, reads.confirmed);
     try {
-      const row = await getCampusPostById(schoolId, postId, source);
+      const row = await withSchoolDataDeadline(() => getCampusPostById(schoolId, postId, source));
       if (!isCurrent()) return;
       reads.settled = request;
       setPost(row ? { ...row, title: row.title ?? '' } : null);
       setPostRefreshError(false);
-    } catch (error) {
-      if (initial) throw error;
+    } catch {
       if (!isCurrent()) return;
       reads.settled = request;
       setPostRefreshError(true);
     }
   }, [postId, schoolId]);
 
-  const loadReplies = useCallback(async (source: 'default' | 'server' = 'default', initial = false) => {
+  const loadReplies = useCallback(async (source: 'default' | 'server' = 'default') => {
     if (!postId || !schoolId) return;
     const reads = replyReads.current;
     const request = ++reads.started;
     const isCurrent = () => request > Math.max(reads.settled, reads.confirmed);
     try {
-      const rows = await listCampusReplies(schoolId, postId, source);
+      const rows = await withSchoolDataDeadline(() => listCampusReplies(schoolId, postId, source));
       if (!isCurrent()) return;
       reads.settled = request;
       setReplies(rows.map((reply) =>
         replyDeletions.current.get(reply.id) === 'confirmed' ? deletedReply(reply) : reply,
       ));
       setRepliesRefreshError(false);
-    } catch (error) {
-      if (initial) throw error;
+    } catch {
       if (!isCurrent()) return;
       reads.settled = request;
       setRepliesRefreshError(true);
@@ -237,18 +238,14 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     setAvatarByUid(a);
   }, [schoolId, post, replies]);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        await Promise.all([loadPost('default', true), loadReplies('default', true)]);
-      } catch {
-        setLoadError('無法讀取貼文，請確認連線與學校資格後重試。');
-      } finally {
-        setLoading(false);
-      }
-    })();
+  const readThread = useCallback(() => {
+    void loadPost().finally(() => setLoading(false));
+    void loadReplies();
   }, [loadPost, loadReplies]);
+
+  useEffect(() => {
+    readThread();
+  }, [readThread]);
 
   useEffect(() => {
     void hydrateProfiles().catch(() => {
@@ -303,9 +300,20 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     likeWritePending.current = true;
     setLikeBusy(true);
     try {
-      await toggleCampusPostLike(schoolId, postId, user.uid);
+      const uid = user.uid;
+      const liked = await toggleCampusPostLike(schoolId, postId, uid);
       postReads.current.confirmed = postReads.current.started;
-      void loadPost();
+      setPost((current) => {
+        if (!current || postDeletion.current === 'confirmed') return current;
+        const likedBy = Array.isArray(current.likedBy) ? current.likedBy : [];
+        if (likedBy.includes(uid) === liked) return current;
+        return {
+          ...current,
+          likedBy: liked ? [...likedBy, uid] : likedBy.filter((id) => id !== uid),
+          likes: Math.max(0, (current.likes ?? likedBy.length) + (liked ? 1 : -1)),
+        };
+      });
+      await loadPost('server');
     } catch {
       alert('這次未能按讚，請稍後再試。');
     } finally {
@@ -387,29 +395,27 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     }
   };
 
-  if (loadError)
+  if (!post && loading) {
+    return (
+      <div className="card" style={{ padding: 24 }}>
+        載入中…
+      </div>
+    );
+  }
+  if (!post && postRefreshError) {
     return (
       <div role="alert" className="card" style={{ padding: 24 }}>
-        <p>{loadError}</p>
+        <p>無法讀取貼文，請確認連線與學校資格後重試。</p>
         <button
+          type="button"
           className="btn"
           onClick={() => {
-            setLoadError('');
             setLoading(true);
-            void Promise.all([loadPost('default', true), loadReplies('default', true)])
-              .catch(() => setLoadError('無法讀取貼文，請稍後重試。'))
-              .finally(() => setLoading(false));
+            readThread();
           }}
         >
           重試
         </button>
-      </div>
-    );
-
-  if (loading) {
-    return (
-      <div className="card" style={{ padding: 24 }}>
-        載入中…
       </div>
     );
   }
@@ -446,12 +452,10 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     <div style={{ maxWidth: 720 }}>
       {refreshError && (
         <p role="status">
-          操作已完成，但部分資料無法更新。{' '}
+          部分資料無法更新。{' '}
           <button
             type="button"
-            onClick={() => {
-              void Promise.all([loadPost(), loadReplies()]);
-            }}
+            onClick={readThread}
           >
             重新讀取
           </button>

@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   listReviews: vi.fn(),
   addDoc: vi.fn(),
   getDocs: vi.fn(),
+  joinGroup: vi.fn(),
+  toggleHelpful: vi.fn(),
 }));
 
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
@@ -25,12 +27,12 @@ vi.mock('firebase/firestore', () => ({
   orderBy: (value: string) => value,
   serverTimestamp: () => 'server-time',
   arrayUnion: vi.fn(),
-  updateDoc: vi.fn(),
+  updateDoc: mocks.joinGroup,
 }));
 vi.mock('@/lib/community/firestore', () => ({
   submitCourseReview: mocks.submitReview,
   listCourseReviews: mocks.listReviews,
-  toggleReviewHelpful: vi.fn(),
+  toggleReviewHelpful: mocks.toggleHelpful,
   aggregateReviews: (reviews: unknown[]) => ({
     totalCount: reviews.length,
     avgRating: 4,
@@ -51,6 +53,8 @@ beforeEach(() => {
   mocks.listReviews.mockReset().mockResolvedValue([]);
   mocks.addDoc.mockReset().mockResolvedValue({ id: 'group-1' });
   mocks.getDocs.mockReset().mockResolvedValue({ docs: [] });
+  mocks.joinGroup.mockReset().mockResolvedValue(undefined);
+  mocks.toggleHelpful.mockReset().mockResolvedValue(true);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     writable: true,
@@ -373,6 +377,22 @@ it('focuses the persistent review button when the first review is submitted', as
   expect(document.activeElement).toBe(screen.getByRole('button', { name: '＋ 寫評價' }));
 });
 
+const existingReview = {
+  id: 'r1', courseName: '原課程', courseCode: 'CS101', rating: 4, difficulty: 3,
+  workload: 2, usefulness: 4, comment: '原評價', sentiment: 'positive', tags: [],
+  anonymous: true, helpful: 0, helpfulBy: [],
+};
+
+function groupSnapshot(name: string, members: string[]) {
+  return { docs: [{
+    id: 'group-1',
+    data: () => ({
+      name, members, maxMembers: 4, courseName: '資料庫', courseCode: 'CS102',
+      style: 'discussion', dayOfWeek: 1, startHour: 10, endHour: 12, location: '圖書館',
+    }),
+  }] };
+}
+
 it.each([
   { kind: 'review', outcome: 'success', switchTabs: false },
   { kind: 'review', outcome: 'failure', switchTabs: false },
@@ -392,15 +412,19 @@ it.each([
   const field = isReview ? '課程名稱' : '讀書會名稱';
   const tab = isReview ? '課程評價' : '讀書會';
   const otherTab = isReview ? '讀書會' : '課程評價';
+  const hasRows = outcome === 'failure' && !switchTabs;
+  const previousList = isReview
+    ? (hasRows ? '原課程' : '尚無評價')
+    : (hasRows ? '原讀書會' : '暫無讀書會');
+  if (hasRows) read.mockResolvedValue(isReview ? [existingReview] : groupSnapshot('原讀書會', ['bob']));
   render(<StudyBuddyTab schoolId="pu" />);
-  await screen.findByText('尚無評價');
-  if (!isReview) {
-    fireEvent.click(screen.getByRole('tab', { name: tab }));
-    await screen.findByText('暫無讀書會');
-  }
+  if (!isReview) fireEvent.click(screen.getByRole('tab', { name: tab }));
+  await screen.findByText(previousList);
 
   const opener = screen.getByRole('button', { name: openerName });
-  const initialOpener = isReview ? screen.getByRole('button', { name: '寫第一則評價' }) : opener;
+  const initialOpener = isReview && !hasRows
+    ? screen.getByRole('button', { name: '寫第一則評價' })
+    : opener;
   initialOpener.focus();
   fireEvent.click(initialOpener);
   if (isReview) {
@@ -430,10 +454,10 @@ it.each([
     fireEvent.submit(form);
   });
   expect(write).toHaveBeenCalledOnce();
-  expect(screen.getByText('載入中…')).toBeTruthy();
+  expect(screen.getByText(previousList)).toBeTruthy();
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(document.body.style.overflow).toBe('');
-  expect(document.activeElement).toBe(opener);
+  expect(document.activeElement).toBe(initialOpener);
 
   if (switchTabs) {
     fireEvent.click(screen.getByRole('tab', { name: otherTab }));
@@ -459,6 +483,10 @@ it.each([
   expect(Boolean(screen.queryByText(/暫時無法讀取(課程評價|讀書會)/))).toBe(
     outcome === 'failure' && !switchTabs,
   );
+  if (hasRows) {
+    expect(screen.getByText(previousList)).toBeTruthy();
+    if (isReview) expect(screen.getByText('/ 5 · 1 則')).toBeTruthy();
+  }
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(document.body.style.overflow).toBe('');
   expect(write).toHaveBeenCalledOnce();
@@ -786,4 +814,79 @@ it.each(
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(document.activeElement).toBe(target);
   expect(document.body.style.overflow).toBe('');
+});
+
+
+it.each([
+  ['review', 'success'], ['review', 'failure'], ['review', 'timeout'],
+  ['group', 'success'], ['group', 'failure'], ['group', 'timeout'],
+])('keeps the %s list visible and locks its toggle through a slow %s refresh', async (kind, outcome) => {
+  const isReview = kind === 'review';
+  const read = isReview ? mocks.listReviews : mocks.getDocs;
+  const write = isReview ? mocks.toggleHelpful : mocks.joinGroup;
+  const originalName = isReview ? '原課程' : '原讀書會';
+  const updatedName = isReview ? '更新課程' : '更新讀書會';
+  const updated = isReview
+    ? [{ ...existingReview, courseName: updatedName, helpful: 1, helpfulBy: ['alice'] }]
+    : groupSnapshot(updatedName, ['bob', 'alice']);
+  read.mockResolvedValue(isReview ? [existingReview] : groupSnapshot(originalName, ['bob']));
+
+  render(<StudyBuddyTab schoolId="pu" />);
+  if (!isReview) fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
+  await screen.findByText(originalName);
+  const button = screen.getByRole<HTMLButtonElement>('button', { name: isReview ? /有幫助 · 0/ : '申請加入' });
+
+  vi.useFakeTimers();
+  let resolve!: (value: unknown) => void;
+  let reject!: (error: Error) => void;
+  read.mockImplementationOnce(() => new Promise((done, fail) => {
+    resolve = done;
+    reject = fail;
+  }));
+  await act(async () => {
+    fireEvent.click(button);
+    fireEvent.click(button);
+  });
+  expect(button.disabled).toBe(true);
+  expect(button.textContent).toContain(isReview ? '有幫助 · 1' : '已加入');
+  expect(screen.getByText(originalName)).toBeTruthy();
+  if (isReview) expect(screen.getByText('/ 5 · 1 則')).toBeTruthy();
+  fireEvent.click(button);
+  expect(write).toHaveBeenCalledOnce();
+
+  await act(async () => {
+    if (outcome === 'success') resolve(updated);
+    else if (outcome === 'timeout') await vi.advanceTimersByTimeAsync(45_000);
+    else {
+      if (!isReview) read.mockRejectedValueOnce(new Error('offline'));
+      reject(new Error('offline'));
+    }
+  });
+  expect(button.disabled).toBe(!isReview);
+  expect(button.textContent).toContain(isReview ? '有幫助 · 1' : '已加入');
+  if (isReview) expect(screen.getByText('/ 5 · 1 則')).toBeTruthy();
+  if (outcome !== 'success') {
+    if (outcome === 'timeout') await act(async () => resolve(updated));
+    expect(screen.getByText(originalName)).toBeTruthy();
+    read.mockResolvedValue(updated);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新讀取' })));
+  }
+  expect(screen.getByText(updatedName)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '重新讀取' })).toBeNull();
+  expect(write).toHaveBeenCalledOnce();
+});
+
+it.each(['review', 'group'])('can retry a first %s load failure', async (kind) => {
+  const isReview = kind === 'review';
+  const read = isReview ? mocks.listReviews : mocks.getDocs;
+  read.mockRejectedValueOnce(new Error('offline'));
+  if (!isReview) read.mockRejectedValueOnce(new Error('offline'));
+  render(<StudyBuddyTab schoolId="pu" />);
+  if (!isReview) fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
+  const retry = await screen.findByRole('button', { name: '重新讀取' });
+  const empty = isReview ? '尚無評價' : '暫無讀書會';
+  expect(screen.queryByText(empty)).toBeNull();
+  await act(async () => fireEvent.click(retry));
+  expect(screen.getByText(empty)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '重新讀取' })).toBeNull();
 });

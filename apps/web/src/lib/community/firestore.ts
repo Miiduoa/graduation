@@ -107,7 +107,7 @@ export function rankFeedPosts(posts: CampusPostDoc[], topN = 40): CampusPostDoc[
 export async function toggleCampusPostLike(schoolId: string, postId: string, userId: string) {
   const db = getDb();
   const postRef = doc(db, 'schools', schoolId, 'campusPosts', postId);
-  await runTransaction(db, async (tx) => {
+  return runTransaction(db, async (tx) => {
     const snap = await tx.get(postRef);
     if (!snap.exists()) throw new Error('貼文不存在');
     const d = snap.data() as Record<string, unknown>;
@@ -126,6 +126,7 @@ export async function toggleCampusPostLike(schoolId: string, postId: string, use
         updatedAt: serverTimestamp(),
       });
     }
+    return !liked;
   });
 }
 
@@ -924,16 +925,18 @@ export function aggregateReviews(rows: CourseReviewDoc[]): CourseReviewAggregate
 export async function toggleReviewHelpful(schoolId: string, reviewId: string, uid: string) {
   const db = getDb();
   const ref = doc(db, 'schools', schoolId, 'courseReviews', reviewId);
-  await runTransaction(db, async (tx) => {
+  return runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists()) throw new Error('評價不存在');
     const data = snap.data() as Record<string, unknown>;
     const arr = Array.isArray(data.helpfulBy) ? (data.helpfulBy as string[]) : [];
-    if (arr.includes(uid)) {
+    const helped = arr.includes(uid);
+    if (helped) {
       tx.update(ref, { helpfulBy: arrayRemove(uid), helpful: increment(-1) });
     } else {
       tx.update(ref, { helpfulBy: arrayUnion(uid), helpful: increment(1) });
     }
+    return !helped;
   });
 }
 

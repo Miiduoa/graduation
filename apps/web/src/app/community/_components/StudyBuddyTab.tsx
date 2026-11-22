@@ -25,6 +25,7 @@ import {
 } from './useCommunityFormSession';
 import formStyles from './CommunityForm.module.css';
 import modalStyles from '@/components/ui/Modal.module.css';
+import { withSchoolDataDeadline } from '@/lib/schoolDataRequest';
 import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
 import { useAuth } from '@/components/AuthGuard';
 import {
@@ -161,9 +162,12 @@ export function CourseReviewSection(props: {
   const { schoolId, myUid } = props;
   const [reviews, setReviews] = useState<CourseReviewDoc[]>([]);
   const [filter, setFilter] = useState('');
+  const helpfulPending = useRef(false);
+  const [helpfulBusy, setHelpfulBusy] = useState(false);
   const filterRef = useRef<HTMLInputElement>(null);
   const [formDisplay, setFormDisplay] = useState<CommunityFormDisplay>('closed');
   const writeReviewRef = useRef<HTMLButtonElement>(null);
+  const firstReviewRef = useRef<HTMLButtonElement>(null);
   const restoreReviewFocus = useCommunityCompletionFocus(writeReviewRef, props.active !== false);
 
   const load = useCallback(async (isCurrent: () => boolean) => {
@@ -171,11 +175,16 @@ export function CourseReviewSection(props: {
       setReviews([]);
       return;
     }
-    const rows = await listCourseReviews(schoolId, { lim: 80 });
-    if (isCurrent()) setReviews(rows);
+    const rows = await withSchoolDataDeadline(() => listCourseReviews(schoolId, { lim: 80 }));
+    if (!isCurrent()) return;
+    const firstReview = firstReviewRef.current;
+    if (rows.length > 0 && firstReview && firstReview.ownerDocument.activeElement === firstReview) {
+      writeReviewRef.current?.focus({ preventScroll: true });
+    }
+    setReviews(rows);
   }, [schoolId]);
 
-  const { loading, error, refresh } = useCommunityLoad(
+  const { loading, loaded, error, refresh } = useCommunityLoad(
     load,
     '暫時無法讀取課程評價，請確認連線後重試。',
     props.active,
@@ -226,13 +235,13 @@ export function CourseReviewSection(props: {
       )}
 
       {error && <CommunityLoadError message={error} retry={refresh} />}
-      {!error && agg.totalCount > 0 && <ReviewSummary agg={agg} />}
+      {agg.totalCount > 0 && <ReviewSummary agg={agg} />}
 
-      {loading ? (
+      {!loaded && loading ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
           載入中…
         </div>
-      ) : error ? null : filtered.length === 0 ? (
+      ) : !loaded && error ? null : filtered.length === 0 ? (
         <div className={formStyles.empty}>
           <h3>{filter.trim() ? '找不到符合的課程評價' : '尚無評價'}</h3>
           <p role="status">
@@ -254,6 +263,7 @@ export function CourseReviewSection(props: {
           ) : (
             <Button
               type="button"
+              ref={firstReviewRef}
               variant="primary"
               onClick={() => setFormDisplay('open')}
             >
@@ -268,16 +278,33 @@ export function CourseReviewSection(props: {
               key={r.id}
               review={r}
               myUid={myUid}
+              helpfulBusy={helpfulBusy}
               onHelpful={async () => {
                 if (!myUid) {
                   alert('請先登入');
                   return;
                 }
+                if (helpfulPending.current) return;
+                helpfulPending.current = true;
+                setHelpfulBusy(true);
                 try {
-                  await toggleReviewHelpful(schoolId, r.id, myUid);
+                  const helped = await toggleReviewHelpful(schoolId, r.id, myUid);
+                  setReviews((current) => current.map((review) => {
+                    if (review.id !== r.id) return review;
+                    const helpfulBy = Array.isArray(review.helpfulBy) ? review.helpfulBy : [];
+                    if (helpfulBy.includes(myUid) === helped) return review;
+                    return {
+                      ...review,
+                      helpfulBy: helped ? [...helpfulBy, myUid] : helpfulBy.filter((uid) => uid !== myUid),
+                      helpful: Math.max(0, (review.helpful ?? helpfulBy.length) + (helped ? 1 : -1)),
+                    };
+                  }));
                   await refresh();
                 } catch {
                   alert('這次未能操作，請稍後再試。');
+                } finally {
+                  helpfulPending.current = false;
+                  setHelpfulBusy(false);
                 }
               }}
             />
@@ -386,10 +413,12 @@ function StatPill({ label, value }: { label: string; value: string }) {
 function ReviewCard({
   review,
   myUid,
+  helpfulBusy,
   onHelpful,
 }: {
   review: CourseReviewDoc;
   myUid: string | null;
+  helpfulBusy: boolean;
   onHelpful: () => void | Promise<void>;
 }) {
   const helpedByMe = !!(
@@ -466,6 +495,7 @@ function ReviewCard({
       ) : null}
       <button
         type="button"
+        disabled={helpfulBusy}
         onClick={() => void onHelpful()}
         style={{
           marginTop: 10,
@@ -719,6 +749,8 @@ export function StudyGroupSection(props: {
   const { schoolId, myUid, myName } = props;
   const [groups, setGroups] = useState<WebStudyGroup[]>([]);
   const [formDisplay, setFormDisplay] = useState<CommunityFormDisplay>('closed');
+  const joinPending = useRef(false);
+  const [joinBusy, setJoinBusy] = useState(false);
   const createGroupRef = useRef<HTMLButtonElement>(null);
   const restoreGroupFocus = useCommunityCompletionFocus(createGroupRef, props.active !== false);
 
@@ -727,36 +759,28 @@ export function StudyGroupSection(props: {
       setGroups([]);
       return;
     }
-    const db = getDb();
-    try {
-      const snap = await getDocs(
-        query(
-          collection(db, 'schools', schoolId, 'studyGroups'),
-          orderBy('createdAt', 'desc'),
-          limit(60),
-        ),
-      );
-      if (isCurrent()) {
-        setGroups(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WebStudyGroup, 'id'>) })));
+    const groupsCollection = collection(getDb(), 'schools', schoolId, 'studyGroups');
+    const snap = await withSchoolDataDeadline(async (signal) => {
+      try {
+        return await getDocs(query(groupsCollection, orderBy('createdAt', 'desc'), limit(60)));
+      } catch (error) {
+        if (signal.aborted || !isCurrent()) throw error;
+        return getDocs(query(groupsCollection, limit(60)));
       }
-    } catch {
-      if (!isCurrent()) return;
-      const snap = await getDocs(
-        query(collection(db, 'schools', schoolId, 'studyGroups'), limit(60)),
-      );
-      if (isCurrent()) {
-        setGroups(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WebStudyGroup, 'id'>) })));
-      }
+    });
+    if (isCurrent()) {
+      setGroups(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WebStudyGroup, 'id'>) })));
     }
   }, [schoolId]);
 
-  const { loading, error, refresh } = useCommunityLoad(
+  const { loading, loaded, error, refresh } = useCommunityLoad(
     load,
     '暫時無法讀取讀書會，請確認連線後重試。',
     props.active,
   );
 
   const onJoin = async (g: WebStudyGroup) => {
+    if (joinPending.current) return;
     if (!myUid) {
       alert('請先登入');
       return;
@@ -769,15 +793,25 @@ export function StudyGroupSection(props: {
       alert('讀書會已滿員');
       return;
     }
+    joinPending.current = true;
+    setJoinBusy(true);
     try {
       const db: Firestore = getDb();
       await updateDoc(doc(db, 'schools', schoolId, 'studyGroups', g.id), {
         members: arrayUnion(myUid),
         updatedAt: serverTimestamp(),
       });
+      setGroups((current) => current.map((group) =>
+        group.id === g.id && !group.members.includes(myUid)
+          ? { ...group, members: [...group.members, myUid] }
+          : group,
+      ));
       await refresh();
     } catch {
       alert('這次未能加入，請稍後再試。');
+    } finally {
+      joinPending.current = false;
+      setJoinBusy(false);
     }
   };
 
@@ -812,11 +846,11 @@ export function StudyGroupSection(props: {
       )}
 
       {error && <CommunityLoadError message={error} retry={refresh} />}
-      {loading ? (
+      {!loaded && loading ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
           載入中…
         </div>
-      ) : error ? null : groups.length === 0 ? (
+      ) : !loaded && error ? null : groups.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
           <div style={{ fontSize: 32, marginBottom: 8 }}>👥</div>
           <div style={{ fontWeight: 700, color: 'var(--text)' }}>暫無讀書會</div>
@@ -882,7 +916,7 @@ export function StudyGroupSection(props: {
                 <button
                   type="button"
                   className="btn primary"
-                  disabled={isMember || isFull}
+                  disabled={joinBusy || isMember || isFull}
                   onClick={() => onJoin(g)}
                   style={{
                     marginTop: 10,

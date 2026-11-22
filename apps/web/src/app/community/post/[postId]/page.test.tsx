@@ -97,7 +97,7 @@ beforeEach(() => {
   mocks.isBookmarked.mockReset().mockResolvedValue(false);
   mocks.saveBookmark.mockReset().mockResolvedValue(undefined);
   mocks.removeBookmark.mockReset().mockResolvedValue(undefined);
-  mocks.toggleLike.mockReset().mockResolvedValue(undefined);
+  mocks.toggleLike.mockReset().mockResolvedValue(true);
   mocks.addReply.mockReset().mockResolvedValue(undefined);
   mocks.deleteReply.mockReset().mockResolvedValue(undefined);
   mocks.deletePost.mockReset().mockResolvedValue(undefined);
@@ -152,9 +152,10 @@ it('disables bookmark controls after a permission-denied save instead of offerin
 });
 
 it('keeps bookmark writes retryable after a network failure', async () => {
+  let confirmSave!: () => void;
   mocks.saveBookmark
     .mockRejectedValueOnce(new Error('unavailable'))
-    .mockResolvedValueOnce(undefined);
+    .mockImplementationOnce(() => new Promise<void>((resolve) => { confirmSave = resolve; }));
   render(<PostDetailPage />);
   const bookmark = await screen.findByRole('button', { name: '收藏貼文' });
   await waitFor(() => expect((bookmark as HTMLButtonElement).disabled).toBe(false));
@@ -167,10 +168,13 @@ it('keeps bookmark writes retryable after a network failure', async () => {
     false,
   );
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: '收藏貼文' }));
+    fireEvent.click(bookmark);
+    fireEvent.click(bookmark);
   });
-  await waitFor(() => expect(mocks.saveBookmark).toHaveBeenCalledTimes(2));
-  await waitFor(() => expect(screen.getByRole('button', { name: '取消收藏貼文' })).toBeTruthy());
+  expect((bookmark as HTMLButtonElement).disabled).toBe(true);
+  expect(mocks.saveBookmark).toHaveBeenCalledTimes(2);
+  await act(async () => confirmSave());
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '取消收藏貼文' }).disabled).toBe(false);
 });
 
 it('still explains a non-permission bookmark read failure', async () => {
@@ -299,7 +303,7 @@ it.each(['post', 'replies', 'both'])(
     expect(screen.getByRole('button', { name: '✏️ 編輯' }).matches(':disabled')).toBe(false);
     expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
     expect(mocks.listReplies).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
-    expect(screen.getByRole('status').textContent).toContain('操作已完成，但部分資料無法更新。');
+    expect(screen.getByRole('status').textContent).toContain('部分資料無法更新。');
     expect(alert).not.toHaveBeenCalled();
   },
 );
@@ -370,7 +374,7 @@ it.each(['post', 'replies', 'both'])(
     expect(screen.getByRole('button', { name: '✏️ 編輯' }).matches(':disabled')).toBe(false);
     expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
     expect(mocks.listReplies).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
-    expect(screen.getByRole('status').textContent).toContain('操作已完成，但部分資料無法更新。');
+    expect(screen.getByRole('status').textContent).toContain('部分資料無法更新。');
 
     // Even a successful retry can return a stale snapshot.
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新讀取' })));
@@ -485,26 +489,112 @@ it('retains reply actions when the deletion write fails', async () => {
   expect(screen.queryByRole('button', { name: /^刪除$/ })).toBeNull();
 });
 
-it.each([false, true])('keeps like and editing available after a failed read (initially liked: %s)', async (liked) => {
+it.each([
+  [false, 'success'], [true, 'success'],
+  [false, 'failure'], [true, 'failure'],
+  [false, 'timeout'], [true, 'timeout'],
+])('keeps like locked through a slow %s → %s refresh', async (liked, outcome) => {
   const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
   ownPost();
   const original = await mocks.getPost();
   mocks.getPost.mockResolvedValue({ ...original, likedBy: liked ? ['alice'] : [], likes: Number(liked) });
+  mocks.toggleLike.mockResolvedValue(!liked);
+  const confirmed = { ...original, likedBy: liked ? [] : ['alice'], likes: Number(!liked) };
   render(<PostDetailPage />);
-  const toggle = await screen.findByRole<HTMLButtonElement>('button', { name: liked ? /❤️/ : /🤍/ });
-  mocks.getPost.mockRejectedValueOnce(new Error('offline'));
-  await act(async () => fireEvent.click(toggle));
-  expect(toggle.disabled).toBe(false);
-  expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
-  expect(screen.getByRole('button', { name: '✏️ 編輯' }).matches(':disabled')).toBe(false);
-  expect(mocks.toggleLike).toHaveBeenCalledOnce();
-  expect(alert).not.toHaveBeenCalled();
+  const button = await screen.findByRole<HTMLButtonElement>('button', { name: liked ? /❤️/ : /🤍/ });
 
-  mocks.getPost.mockResolvedValue({ ...original, likedBy: liked ? [] : ['alice'], likes: Number(!liked) });
-  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新讀取' })));
-  const refreshed = screen.getByRole<HTMLButtonElement>('button', { name: liked ? /🤍/ : /❤️/ });
-  expect(refreshed.disabled).toBe(false);
+  vi.useFakeTimers();
+  let resolve!: (value: unknown) => void;
+  let reject!: (error: Error) => void;
+  mocks.getPost.mockImplementationOnce(() => new Promise((done, fail) => {
+    resolve = done;
+    reject = fail;
+  }));
+  await act(async () => {
+    fireEvent.click(button);
+    fireEvent.click(button);
+  });
+  expect(button.disabled).toBe(true);
+  expect(button.textContent).toContain(liked ? '🤍' : '❤️');
+  fireEvent.click(button);
   expect(mocks.toggleLike).toHaveBeenCalledOnce();
+  expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'server');
+  expect(screen.getByText('原內文')).toBeTruthy();
+
+  await act(async () => {
+    if (outcome === 'success') resolve({ ...confirmed, content: '伺服器最新內文' });
+    else if (outcome === 'failure') reject(new Error('offline'));
+    else await vi.advanceTimersByTimeAsync(45_000);
+  });
+  expect(button.disabled).toBe(false);
+  expect(button.textContent).toContain(liked ? '🤍' : '❤️');
+  expect(screen.getByRole('button', { name: '✏️ 編輯' }).matches(':disabled')).toBe(false);
+  expect(alert).not.toHaveBeenCalled();
+  if (outcome === 'success') {
+    expect(screen.getByText('伺服器最新內文')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '重新讀取' })).toBeNull();
+  } else {
+    if (outcome === 'timeout') await act(async () => resolve({ ...original, content: '過期內文' }));
+    expect(screen.getByText('原內文')).toBeTruthy();
+    mocks.getPost.mockResolvedValue({ ...confirmed, content: '重試後的內文' });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新讀取' })));
+    expect(screen.getByText('重試後的內文')).toBeTruthy();
+  }
+  expect(mocks.toggleLike).toHaveBeenCalledOnce();
+});
+
+it.each(['success', 'failure', 'timeout'])('keeps the post and replies visible through a slow %s refresh', async (outcome) => {
+  ownPost();
+  const original = await mocks.getPost();
+  const reply = { id: 'r-1', authorUid: 'alice', content: '原留言', threadDepth: 0 };
+  mocks.listReplies.mockResolvedValue([reply]);
+  render(<PostDetailPage />);
+  await screen.findByText('原留言');
+  vi.useFakeTimers();
+  let finishPost!: (value: unknown) => void;
+  let finishReplies!: (value: unknown) => void;
+  let failPost!: (error: Error) => void;
+  let failReplies!: (error: Error) => void;
+  mocks.getPost.mockImplementationOnce(() => new Promise((resolve, reject) => {
+    finishPost = resolve;
+    failPost = reject;
+  }));
+  mocks.listReplies.mockImplementationOnce(() => new Promise((resolve, reject) => {
+    finishReplies = resolve;
+    failReplies = reject;
+  }));
+  fireEvent.change(screen.getByPlaceholderText('輸入留言⋯'), { target: { value: '新留言' } });
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '送出留言' })));
+  expect(screen.getByText('原內文')).toBeTruthy();
+  expect(screen.getByText('原留言')).toBeTruthy();
+  const finish = () => {
+    finishPost({ ...original, content: '刷新後的內文' });
+    finishReplies([{ ...reply, content: '刷新後的留言' }]);
+  };
+  await act(async () => {
+    if (outcome === 'success') finish();
+    else if (outcome === 'timeout') await vi.advanceTimersByTimeAsync(45_000);
+    else {
+      failPost(new Error('offline'));
+      failReplies(new Error('offline'));
+    }
+  });
+  if (outcome === 'timeout') await act(async () => finish());
+  const refreshed = outcome === 'success';
+  expect(screen.getByText(refreshed ? '刷新後的內文' : '原內文')).toBeTruthy();
+  expect(screen.getByText(refreshed ? '刷新後的留言' : '原留言')).toBeTruthy();
+  expect(Boolean(screen.queryByRole('button', { name: '重新讀取' }))).toBe(!refreshed);
+});
+
+it.each(['post', 'replies'])('offers a retry after a first %s read fails', async (failedRead) => {
+  const isPost = failedRead === 'post';
+  (isPost ? mocks.getPost : mocks.listReplies).mockRejectedValueOnce(new Error('offline'));
+  render(<PostDetailPage />);
+  const retry = await screen.findByRole('button', { name: isPost ? '重試' : '重新讀取' });
+  expect(Boolean(screen.queryByText('小明的貼文'))).toBe(!isPost);
+  await act(async () => fireEvent.click(retry));
+  expect(screen.getByText('小明的貼文')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /重試|重新讀取/ })).toBeNull();
 });
 
 it.each(['like', 'reply', 'delete'] as const)(
@@ -538,7 +628,7 @@ it.each(['like', 'reply', 'delete'] as const)(
     expect(mocks.getPost).toHaveBeenCalledOnce();
     await act(async () => fireEvent.click(button));
     expect(write).toHaveBeenCalledTimes(2);
-    expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
+    expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', action === 'like' ? 'server' : 'default');
   },
 );
 
@@ -595,7 +685,7 @@ it.each(['like', 'reply', 'both'])(
     expect(mocks.toggleLike).toHaveBeenCalledTimes(source === 'reply' ? 0 : 1);
     expect(screen.getByText('已儲存內文')).toBeTruthy();
     expect(screen.queryByText('原內文')).toBeNull();
-    expect(screen.getByRole('status').textContent).toContain('操作已完成，但部分資料無法更新。');
+    expect(screen.getByRole('status').textContent).toContain('部分資料無法更新。');
     fireEvent.click(edit);
     expect(screen.getByLabelText<HTMLTextAreaElement>('內文').value).toBe('已儲存內文');
     fireEvent.click(screen.getByRole('button', { name: '取消' }));

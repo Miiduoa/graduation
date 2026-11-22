@@ -9,6 +9,7 @@ export function useCommunityLoad(
   active = true,
 ) {
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState('');
   const generation = useRef(0);
   const refresh = useCallback(async () => {
@@ -17,6 +18,7 @@ export function useCommunityLoad(
     setError('');
     try {
       await load(() => generation.current === current);
+      if (generation.current === current) setLoaded(true);
       return true;
     } catch {
       if (generation.current === current) setError(message);
@@ -37,7 +39,7 @@ export function useCommunityLoad(
       generation.current += 1;
     };
   }, [active, refresh]);
-  return { loading, error, refresh };
+  return { loading, loaded, error, refresh };
 }
 
 export function CommunityLoadError({
