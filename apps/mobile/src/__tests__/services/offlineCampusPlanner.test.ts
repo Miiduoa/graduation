@@ -283,5 +283,5 @@ test.each(handoffCases)('plan handoff versus merge-base %j', ({
   };
   const baseline = mergeBase.resolveCampusAssignmentTarget({ ...input, assignment: baselineAssignment });
   expect(resolveCampusAssignmentTarget({ ...input, assignment: baselineAssignment })).toEqual(baseline);
-  expect(resolveCampusAssignmentTarget({ ...input, assignment })).toEqual(sameSource ? baseline : null);
+  expect(resolveCampusAssignmentTarget({ ...input, assignment })).toEqual(baseline);
 });

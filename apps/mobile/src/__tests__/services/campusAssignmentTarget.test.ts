@@ -1,3 +1,4 @@
+import * as mergeBase from '../fixtures/campusAssignmentMergeBase';
 import { parseCampusAssignmentSource } from '../../services/campusAssignmentSource';
 import {
   campusAssignmentDisplayTitle, campusAssignmentTitleIdentity,
@@ -108,7 +109,7 @@ test.each([false, true])('requires a unique display prefix even with an exact ti
     assignment: { ...assignment, title, fullAssignmentTitle }, snapshot: value, scope, now,
   });
   expect(target(prefix)?.params.assignmentId).toBe('work_1');
-  expect(target(prefix, prefix + '另一份作業')).toBeNull();
+  expect(target(prefix, prefix + '另一份作業')?.params.assignmentId).toBe('work_1');
   expect(target(prefix, fullTitle)?.params.assignmentId).toBe('work_1');
   value.assignments.items.push({ ...assignment, title: prefix, source: { ...source, assignmentId: 'work_2' } });
   value.assignments.count = 2;
@@ -141,7 +142,7 @@ test.each([false, true])('preserves a trailing display space when checking colli
   expect(target(displayTitle)?.params.assignmentId).toBe('work_1');
   expect(resolveCampusAssignmentTarget({
     assignment: { ...assignment, title: displayTitle, expectedSource: source }, snapshot: value, scope, now,
-  })).toBeNull();
+  })?.params.assignmentId).toBe('work_1');
   value.assignments.items = value.assignments.items.filter((item) => item.title === title);
   value.assignments.count = 1;
   expect(target(displayTitle)?.params.assignmentId).toBe('work_1');
@@ -235,3 +236,50 @@ test('summary parsing preserves the cutoff when trimming trailing whitespace', a
     snapshot: { ...refreshed, assignments: { ...refreshed.assignments, count: 1, items: [capped] } }, scope, now,
   })?.params.assignmentId).toBe('work_0');
 });
+
+const refreshTitleMatrix = [8, 128, 129, 130, 131, 135, 139, 140, 141, 160].flatMap((length) =>
+  ['', ' ', '\u0001', '\u3000'].map((tail) => ({ length, tail })));
+
+test.each(refreshTitleMatrix)('matches the merge-base after a refresh ($length characters plus tail $tail)',
+  async ({ length, tail }) => {
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    const seed = snapshot();
+    const stem = '長'.repeat(length);
+    const initialTitle = (stem + tail).slice(0, ASSIGNMENT_SUMMARY_TITLE_LIMIT);
+    const refresh = async (items: CampusSenseSnapshot['assignments']['items']) => {
+      mockCallable.mockResolvedValueOnce({ data: {
+        ...seed, assignments: { ...seed.assignments, count: items.length, items },
+      } });
+      return refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
+    };
+    const initial = await refresh([{ ...assignment, title: initialTitle, source }]);
+    const [row] = initial.assignments.items;
+    const cards = [row.title, campusAssignmentDisplayTitle(row.title)].map((title) => ({
+      ...row, title, ...campusAssignmentTitleIdentity(row), expectedSource: row.source,
+    }));
+    const refreshedTitles = {
+      unchanged: initialTitle,
+      editedSuffix: (stem.slice(0, 130) + '新版' + tail).slice(0, ASSIGNMENT_SUMMARY_TITLE_LIMIT),
+      removedSuffix: initialTitle.slice(0, 130),
+      removedTail: stem.slice(0, ASSIGNMENT_SUMMARY_TITLE_LIMIT),
+      editedPrefix: '新' + initialTitle.slice(1),
+    };
+    for (const [change, title] of Object.entries(refreshedTitles)) {
+      for (const currentSource of [source, { ...source, assignmentId: 'work_2' }, { ...source, groupId: 'course_2' }, undefined]) {
+        for (const groupName of [assignment.groupName, '另一門課']) {
+          for (const dueAt of [assignment.dueAt, '2026-10-31T09:00:00Z']) {
+            const updated = { title, groupName, dueAt, source: currentSource };
+            const collision = { ...updated, source: { ...source, assignmentId: 'collision' } };
+            for (const items of [[updated], [updated, collision], [collision, updated]]) {
+              const snapshot = await refresh(items);
+              const input = { snapshot, scope, now };
+              const targets = cards.map((assignment) => resolveCampusAssignmentTarget({ ...input, assignment }));
+              const baseline = cards.map((assignment) => mergeBase.resolveCampusAssignmentTarget({ ...input, assignment }));
+              expect({ change, items, targets }).toEqual({ change, items, targets: baseline });
+            }
+          }
+        }
+      }
+    }
+  },
+);

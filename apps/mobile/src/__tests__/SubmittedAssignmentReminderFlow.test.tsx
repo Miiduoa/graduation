@@ -540,26 +540,42 @@ test.each([false, true])('完整標題碰撞時拒絕作業交辦（反序=%s）
 });
 
 test.each([
-  { prefix: '長'.repeat(129) + ' ', suffix: '新版', assignmentId: 'other' },
-  { prefix: '長'.repeat(130), suffix: '新版', assignmentId: 'other' },
-  { prefix: '長'.repeat(130), suffix: '', assignmentId: 'other' },
-  { prefix: '長'.repeat(130), suffix: '新版', assignmentId: 'work' },
-  { prefix: '短標題', suffix: '原稿', assignmentId: 'other' },
-])('同步後帶有身分的計畫卡不會改綁作業（後綴=$suffix，來源=$assignmentId）', async ({ prefix, suffix, assignmentId }) => {
-  const snapshot = mockSnapshot();
-  const title = prefix + '原稿';
-  snapshot.assignments.items[0].title = title;
-  mockReader.getAssignment.mockResolvedValue({ id: 'work', groupId: 'course', title, dueAt });
-  const { plan, card, view } = planCard(snapshot);
-  expect(plan.steps[0].title).toBe(title.slice(0, 130));
-  const replacement = mockSnapshot();
-  const replacementTitle = prefix + suffix;
-  replacement.assignments.items[0] = {
-    ...replacement.assignments.items[0], title: replacementTitle, source: { ...source, assignmentId },
-  };
-  await act(async () => view.rerender(card(replacement)));
+  { initialTitle: '長'.repeat(129) + ' 原稿', title: '長'.repeat(129) + ' 新版', assignmentId: 'other', opens: false },
+  { initialTitle: '長'.repeat(130) + '原稿', title: '長'.repeat(130) + '新版', assignmentId: 'other', opens: true },
+  { initialTitle: '長'.repeat(130) + '原稿', title: '長'.repeat(130), assignmentId: 'other', opens: true },
+  { initialTitle: '長'.repeat(130) + '原稿', title: '長'.repeat(130) + '新版', assignmentId: 'work', opens: true },
+  { initialTitle: '長'.repeat(139) + ' ', title: '長'.repeat(139), assignmentId: 'work', opens: true },
+  { initialTitle: '短標題原稿', title: '短標題原稿', assignmentId: 'other', opens: true },
+])('同步後依原有條件顯示查看作業按鈕（案例 %#）', async ({ initialTitle, title, assignmentId, opens }) => {
+  const { refreshCampusSenseSnapshot } = jest.requireActual<typeof import('../services/campusSenseSnapshot')>(
+    '../services/campusSenseSnapshot',
+  );
+  const seed = mockSnapshot();
+  async function sync(title: string, assignmentId: string) {
+    const items = [{ ...seed.assignments.items[0], title, source: { ...source, assignmentId } }];
+    mockSenseCallable.mockResolvedValueOnce({ data: { ...seed, assignments: { ...seed.assignments, items } } });
+    return refreshCampusSenseSnapshot({ scope, isCurrent: current });
+  }
+  const initial = await sync(initialTitle, source.assignmentId);
+  const { plan, card, view, navigation } = planCard(initial);
+  const snapshot = await sync(title, assignmentId);
+  if (initialTitle === title + ' ') {
+    expect(initial.assignments.items[0].title).toBe(snapshot.assignments.items[0].title);
+    expect(initial.assignments.items[0].titleMayBeTruncated).toBe(true);
+    expect(snapshot.assignments.items[0].titleMayBeTruncated).toBeUndefined();
+  }
+  const baseline = base.resolveCampusAssignmentTarget({ assignment: plan.steps[0], snapshot, scope });
+  expect(Boolean(baseline)).toBe(opens);
+  await act(async () => view.rerender(card(snapshot)));
 
-  expect(view.queryByText('查看這份作業')).toBeNull();
+  const button = view.queryByText('查看這份作業');
+  expect(Boolean(button)).toBe(opens);
+  if (button && baseline) {
+    fireEvent.press(button);
+    expect(navigation.navigate).toHaveBeenCalledWith('學習', {
+      initial: false, screen: baseline.route, params: baseline.params,
+    });
+  }
 });
 
 test('單筆回覆的同前綴作業無法唯一比對時不顯示交辦或提醒', () => {
@@ -790,7 +806,7 @@ test.each(reminderMatrix)('提醒與交辦差異矩陣 $kind $length 字 $count 
   } })).toEqual(baseTarget);
   expect(resolveCampusAssignmentTarget({ ...handoff, assignment: {
     ...card, expectedSource: { ...source, assignmentId: 'other' },
-  } })).toBeNull();
+  } })).toEqual(baseTarget);
 
   mockReader.getAssignment.mockResolvedValue({ ...source, id: source.assignmentId, title: rawTitle, dueAt });
   if (base.reminderCandidate(snapshot, input)) {
