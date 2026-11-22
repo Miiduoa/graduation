@@ -1043,3 +1043,11 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **最小修補**：僅將這個 `assignments` 路徑的 `allow create`／`allow update`／`allow delete` 改用既有 `canManageCurrentGroup(groupId)`；不改學生成績原子更正、儲存或其他群組權限。既有 helper 要求仍有效的群組／校籍 member 與帳號雙校籍一致，已知單欄歷史帳號仍支援。
 - **可重現測試**：新增 `course assignment metadata writes revoke immediately on canonical school transfer` 真 Firebase Emulator 案例，合法教師建立、更新及刪除／更新已發佈作業、學生越權、同登入 token 的雙向轉校衝突、課程／校籍撤銷、停權、連續重放和恢復。另以獨立 test-only 分支保留原規則重現。新提交後須核對精確 SHA 的 Actions 成功結果，不以靜態比對宣稱通過。
 - **合併及發布限制**：本變更不代表其他 `canManageGroup` 路徑或成績修改原子交易已加固。尤其 `submissions` 成績寫入與 `gradeRevisions` 的跨校一致性仍受 Firestore Rules expression budget 限制，須另行分解；GCS／Supabase 已發網址撤銷、真 Storage 競態、歷史資料移轉及正式發布驗收也尚未完成。沿用原 feature branch 與 `expected_sha`，不自行合併、部署或代簽 App 5504170；未使用正式資料／金鑰／E 校園，不重跑被拒的 npm/pnpm audit。
+
+### 2026-11-22｜舊校群組管理資格重放：課程資料、成員及 legacy roster（隔離修補候選）
+
+- **基準與獨立性**：從安全 feature head `06121d6398fda49aeea00560d3def2f9b65669a0` 與 main `d31a3faa5a36dd12ce559be49aac75a92fca1bfc` 核對，兩者 18 ahead／13 behind。#517／#577 已合併；#738 為另一個未合併的整合候選，本輪不改其他分支。
+- **可利用來源缺口**：`groups/{groupId}` UPDATE／DELETE、`groups/{groupId}/members/{uid}` UPDATE／DELETE、legacy `groupMembers/{docId}` UPDATE 沿用 `canManageGroup`。教師 canonical schoolId／primarySchoolId 轉校後，若舊校和群組會員仍 active，原 ID token 可能繼續更新、刪除舊校課程資料及操作成員狀態，屬於撤權重放邊界；沒有正式環境利用證據。
+- **最小補丁**：上述管理寫入改用既有 `canManageCurrentGroup`，同時要求仍具管理角色、現職校籍且雙校籍欄位無衝突；不放寬其他角色、管理欄位禁止修改規則。原有 student／instructor 授權功能不變。未觸碰 grading 原子更正以避免先前的 Firestore 1000-expression 失敗。
+- **可重跑測試**：在 `backend/tests/security-rules.test.js` 新增 `transferred group managers cannot replay membership and group administration writes`，真 Firebase Emulator 使用合成帳號、相同登入 context，驗證合法管理操作、學生越權、完整轉校與衝突雙欄、連續拒絕重放、校籍及班級撤權、復權，涵蓋 group update/delete、nested member update/delete、legacy roster update。精確 SHA 的成功與失敗結果以 GitHub Actions 真實日誌為準，不能以原先 1047 個測試取代。
+- **限制與發布閘門**：group create、一般課堂／群組的其他 `canManageGroup` 路徑、教師成績原子更正、混合 teacherNotes、已發 GCS／Supabase URL、真 Storage CAS、minimatch 兩鎖檔、歷史相容性及正式發布回復仍是獨立項目。完成後仍須精確 head 的完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro 和 App 5504170「審查通過」才可交由主線窗口合併；不自行發布，不碰正式資料、金鑰、token、migration、E 校園，不執行或繞道未授權的 npm/pnpm audit。

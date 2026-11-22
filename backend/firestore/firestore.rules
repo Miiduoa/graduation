@@ -1211,17 +1211,18 @@ service cloud.firestore {
         && isSchoolMember(request.resource.data.schoolId)
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.get('verification', {'status': 'unverified'}) == {'status': 'unverified'};
-      allow update: if canManageGroup(groupId)
+      // Stale old-campus membership does not retain group administration.
+      allow update: if canManageCurrentGroup(groupId)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['schoolId', 'createdBy', 'verification', 'type']);
-      allow delete: if canManageGroup(groupId);
+      allow delete: if canManageCurrentGroup(groupId);
 
       match /members/{uid} {
         allow read: if isActiveGroupMember(groupId);
         allow create: if false;
         // Client may not change role (including promoting to owner). Ownership transfer is server-only.
-        allow update: if canManageGroup(groupId)
+        allow update: if canManageCurrentGroup(groupId)
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['uid', 'role', 'joinedAt']);
-        allow delete: if canManageGroup(groupId);
+        allow delete: if canManageCurrentGroup(groupId);
       }
 
       // Private transfer receipts; Admin SDK / privileged callables only.
@@ -2526,7 +2527,8 @@ service cloud.firestore {
         || isActiveGroupMember(resource.data.groupId)
       );
       allow create: if false;
-      allow update: if canManageGroup(resource.data.groupId)
+      // Legacy membership updates must obey the same live campus binding.
+      allow update: if canManageCurrentGroup(resource.data.groupId)
         && request.resource.data.groupId == resource.data.groupId
         && request.resource.data.userId == resource.data.userId;
       allow delete: if false;

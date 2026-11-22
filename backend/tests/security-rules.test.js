@@ -97,6 +97,79 @@ after(async () => {
 });
 
 describe('firestore security rules', () => {
+  test('transferred group managers cannot replay membership and group administration writes', async () => {
+    const groupPath = 'groups/campus-admin-replay';
+    const memberPath = groupPath + '/members/alice';
+    const managerPath = groupPath + '/members/teacher';
+    const legacyPath = 'groupMembers/campus-admin-replay-alice';
+    await seedFirestore(async (db) => {
+      await db.doc(groupPath).set({
+        schoolId: 'pu', type: 'course', createdBy: 'teacher', title: 'Course',
+      });
+      await db.doc('users/teacher').set(campusBoundProfile('pu'));
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/teacher').set({ status: 'active', role: 'faculty' });
+      await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'student' });
+      await db.doc(managerPath).set({ role: 'instructor', status: 'active' });
+      await db.doc(memberPath).set({ role: 'member', status: 'active' });
+      await db.doc(legacyPath).set({
+        groupId: 'campus-admin-replay', userId: 'alice', role: 'member', status: 'active',
+      });
+    });
+    // Reuse the same authenticated contexts throughout revocation and restoration.
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const group = teacher.doc(groupPath);
+    const member = teacher.doc(memberPath);
+    const legacy = teacher.doc(legacyPath);
+    await assertFails(alice.doc(groupPath).update({ title: 'Student takeover' }));
+    await assertFails(alice.doc(memberPath).update({ status: 'removed' }));
+    await assertFails(alice.doc(legacyPath).update({ status: 'removed' }));
+    await assertSucceeds(group.update({ title: 'Instructor edit' }));
+    await assertSucceeds(member.update({ status: 'removed' }));
+    await assertSucceeds(legacy.update({ status: 'removed' }));
+    await seedFirestore(async (db) => {
+      await db.doc(memberPath).update({ status: 'active' });
+      await db.doc(legacyPath).update({ status: 'active' });
+      await db.doc('users/teacher').set(campusBoundProfile('other-school'));
+    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await assertFails(group.update({ title: 'Stale instructor edit' }));
+      await assertFails(member.update({ status: 'removed' }));
+      await assertFails(member.delete());
+      await assertFails(legacy.update({ status: 'removed' }));
+    }
+    // Conflicting canonical campus fields must not authenticate the old school.
+    await seedFirestore(async (db) => {
+      await db.doc('users/teacher').set({
+        status: 'active', schoolId: 'other-school', primarySchoolId: 'pu',
+      });
+    });
+    await assertFails(group.update({ title: 'Conflicting campus edit' }));
+    await assertFails(member.update({ status: 'removed' }));
+    await assertFails(legacy.update({ status: 'removed' }));
+    await seedFirestore(async (db) => {
+      await db.doc('users/teacher').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/teacher').update({ status: 'removed' });
+    });
+    await assertFails(group.update({ title: 'School revoked' }));
+    await assertFails(member.delete());
+    await assertFails(legacy.update({ status: 'removed' }));
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/teacher').update({ status: 'active' });
+      await db.doc(managerPath).update({ status: 'removed' });
+    });
+    await assertFails(group.update({ title: 'Class revoked' }));
+    await assertFails(member.update({ status: 'removed' }));
+    await seedFirestore(async (db) => {
+      await db.doc(managerPath).update({ status: 'active' });
+    });
+    await assertSucceeds(group.update({ title: 'Restored manager edit' }));
+    await assertSucceeds(legacy.update({ status: 'removed' }));
+    await assertSucceeds(member.delete());
+    await assertSucceeds(group.delete());
+  });
+
   test('post authors cannot reopen manager-held publication states or replay a stale edit', async () => {
     const groupId = 'publication-boundary';
     const path = (name) => `groups/${groupId}/posts/${name}`;
