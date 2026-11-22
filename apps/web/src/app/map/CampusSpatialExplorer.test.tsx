@@ -3021,10 +3021,12 @@ it('rejects oversized JSON-only WebView bridge payloads even without text()', as
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-// The bridge parses away trailing whitespace that Content-Length counts.
+// Parsed JSON cannot attest to the HTTP identity wire length, even if the
+// reserialized byte count happens to match or the body has extra whitespace.
+// A legacy JSON-only bridge must fail closed instead of showing sourced 3D.
 it.each(['', '\n'])(
-  'accepts a complete identity-framed JSON-only WebView snapshot with trailing whitespace %j', async (suffix) => {
-    const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  'rejects an unverifiable identity-framed JSON-only WebView snapshot with suffix %j', async (suffix) => {
+    const { library, body } = sourcedLibraryFootprintFixture();
     const responseBody = body + suffix;
     const json = vi.fn().mockResolvedValue(JSON.parse(responseBody));
     const length = new TextEncoder().encode(responseBody).byteLength;
@@ -3036,10 +3038,12 @@ it.each(['', '\n'])(
     vi.stubGlobal('fetch', fetchMock);
     render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
     const dialog = await open();
-    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
-    expect(json).toHaveBeenCalledTimes(1);
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(json).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    expect(retry.hasAttribute('disabled')).toBe(true);
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   },
 );
