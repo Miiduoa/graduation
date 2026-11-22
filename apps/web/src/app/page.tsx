@@ -373,6 +373,7 @@ export default function HomePage() {
           now={now}
           unsigned={!signedIn}
           teachingCourses={teaching}
+          upcomingTodos={todos}
           coursesLoading={loading}
           coursesError={error}
           onRetryCourses={() => void refresh()}

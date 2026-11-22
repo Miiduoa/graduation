@@ -886,6 +886,40 @@ it.each(['dual', 'student', 'empty'])(
   },
 );
 
+it('shows refreshed assignment links when an open conversation keeps the teacher home visible', async () => {
+  const teaching = { id: 'teach', name: '教學實習', role: 'owner-teacher', unreadCount: 0 };
+  vi.mocked(loadHomeData)
+    .mockResolvedValueOnce(data('教學實習', { courses: [teaching], tasks: [] }))
+    .mockResolvedValueOnce(
+      data('教學實習', {
+        courses: [teaching],
+        tasks: [
+          {
+            id: 'hw-1',
+            courseId: 'teach',
+            courseName: '教學實習',
+            title: '教學實習作業',
+            dueAt: '2099-01-02T12:30:00Z',
+            href: '/course/teach#assignment-hw-1',
+          },
+        ],
+      }),
+    );
+  render(<HomePage />);
+  await screen.findByTestId('teacher-today');
+  fireEvent.click(screen.getByRole('button', { name: '頁首助理' }));
+  const question = await screen.findByRole('searchbox');
+
+  await act(async () => window.dispatchEvent(new Event('pageshow')));
+
+  const teacherToday = within(screen.getByTestId('teacher-today'));
+  const due = within(teacherToday.getByRole('region', { name: '即將到期作業' }));
+  expect(due.getByRole('link', { name: /教學實習作業/ }).getAttribute('href')).toBe(
+    '/course/teach#assignment-hw-1',
+  );
+  expect(screen.getByRole('searchbox')).toBe(question);
+});
+
 it.each(['teacher', 'student'])(
   'retains previous %s data and mode when a background source fails',
   async (mode) => {

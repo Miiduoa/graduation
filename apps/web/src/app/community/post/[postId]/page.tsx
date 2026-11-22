@@ -715,6 +715,7 @@ function EditPostModal(props: {
   const [content, setContent] = useState(props.initial.content);
   const [tagsRaw, setTagsRaw] = useState(props.initial.tagsRaw);
   const [validated, setValidated] = useState(false);
+  const titleRequired = Boolean(props.initial.title.trim());
   const titleRef = useRef<HTMLInputElement>(null);
   const formId = useId();
   const session = useCommunityFormSession(props.onClose);
@@ -722,7 +723,7 @@ function EditPostModal(props: {
   function submit() {
     if (session.busy) return;
     setValidated(true);
-    if (!title.trim()) {
+    if (titleRequired && !title.trim()) {
       titleRef.current?.focus();
       return;
     }
@@ -780,10 +781,10 @@ function EditPostModal(props: {
           <Input
             ref={titleRef}
             label="標題"
-            required
+            required={titleRequired}
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            error={validated && !title.trim() ? '請填寫標題。' : undefined}
+            error={validated && titleRequired && !title.trim() ? '請填寫標題。' : undefined}
           />
           <Textarea
             label="內文"

@@ -174,14 +174,14 @@ it('still explains a non-permission bookmark read failure', async () => {
   );
 });
 
-function ownPost() {
+function ownPost(title = '原標題') {
   mocks.getPost.mockResolvedValue({
     id: 'p-1',
     schoolId: 'pu',
     boardId: 'board',
     anonymous: false,
     authorUid: 'alice',
-    title: '原標題',
+    title,
     content: '原內文',
     likes: 0,
     likedBy: [],
@@ -249,26 +249,27 @@ it('holds one edit write, prevents dismissal while pending, and updates the conf
   expect(mocks.getPost).toHaveBeenCalledOnce();
 });
 
-it('retains the edit draft after a lost response and rejects an empty title', async () => {
-  ownPost();
+it('lets the author save an untitled legacy post and retains the draft after a lost response', async () => {
+  ownPost('');
   mocks.updatePost.mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce(undefined);
   render(<PostDetailPage />);
   fireEvent.click(await screen.findByRole('button', { name: '✏️ 編輯' }));
-  fireEvent.change(screen.getByLabelText('標題'), { target: { value: ' ' } });
-  fireEvent.click(screen.getByRole('button', { name: '儲存' }));
-  expect(mocks.updatePost).not.toHaveBeenCalled();
-  expect(document.activeElement).toBe(screen.getByLabelText('標題'));
-  expect(screen.getByText('請填寫標題。')).toBeTruthy();
-  fireEvent.change(screen.getByLabelText('標題'), { target: { value: '保留的標題' } });
   fireEvent.change(screen.getByLabelText('內文'), { target: { value: '保留的修改內容' } });
+  fireEvent.change(screen.getByLabelText('標籤（逗號分隔）'), { target: { value: '更新標籤' } });
   fireEvent.click(screen.getByRole('button', { name: '儲存' }));
   await screen.findByText('暫時無法確認儲存結果，修改內容已保留。請先查看貼文，再決定是否重試。');
-  expect((screen.getByLabelText('標題') as HTMLInputElement).value).toBe('保留的標題');
+  expect((screen.getByLabelText('標題') as HTMLInputElement).value).toBe('');
   expect((screen.getByLabelText('內文') as HTMLTextAreaElement).value).toBe('保留的修改內容');
   expect(screen.getByLabelText('標題').matches(':disabled')).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '儲存' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(mocks.updatePost).toHaveBeenCalledTimes(2);
+  expect(mocks.updatePost).toHaveBeenLastCalledWith('pu', 'p-1', {
+    title: '',
+    content: '保留的修改內容',
+    tags: ['更新標籤'],
+  });
+  expect(screen.getByText('保留的修改內容')).toBeTruthy();
 });
 
 it('reopens the same slow edit without resubmitting and applies a hidden success without moving focus', async () => {

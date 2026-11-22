@@ -62,6 +62,7 @@ function today(overrides: Partial<ComponentProps<typeof TeacherToday>> = {}) {
       timetableSchoolId="ntu"
       onRetryTimetable={vi.fn()}
       teachingCourses={[course]}
+      upcomingTodos={[]}
       coursesLoading={false}
       coursesError=""
       onRetryCourses={vi.fn()}
@@ -78,6 +79,7 @@ function boundToday() {
       now={now}
       unsigned={false}
       teachingCourses={[course]}
+      upcomingTodos={[]}
       coursesLoading={false}
       coursesError=""
       onRetryCourses={vi.fn()}
@@ -246,20 +248,38 @@ it('maps real loading, failure, missing timetable and unselected campus into dis
   );
 });
 
-it('shows imported classes and retries when the manual timetable fails', () => {
-  state.records.imported.records = [importedClass];
-  state.records.manual = null;
-  state.records.error = '手動課表暫時讀不到。';
+it('shows personal classes even when no campus is selected', () => {
+  state.scope.scope.schoolId = 'personal';
+  state.records.schoolId = 'personal';
+  state.records.scopeKey = 'platform:teacher:personal';
+  state.records.imported.records = [{ ...importedClass, schoolId: 'personal' }];
 
   render(boundToday());
 
   const timetable = within(screen.getByRole('region', { name: TODAY_FLOW_CLASS_TITLE }));
   expect(timetable.getByText('已匯入授課')).toBeTruthy();
-  expect(timetable.getByRole('alert').textContent).toBe('暫時讀不到課表');
-  expect(timetable.queryByText(/今天沒有排課/)).toBeNull();
-  fireEvent.click(timetable.getByRole('button', { name: '重新讀取課表' }));
-  expect(state.records.retry).toHaveBeenCalledTimes(1);
+  expect(timetable.queryByText(/先選擇校園/)).toBeNull();
 });
+
+it.each(['ntu', 'personal'])('shows imported classes and retries when the %s manual timetable fails',
+  (schoolId) => {
+    state.scope.scope.schoolId = schoolId;
+    state.records.schoolId = schoolId;
+    state.records.scopeKey = `platform:teacher:${schoolId}`;
+    state.records.imported.records = [{ ...importedClass, schoolId }];
+    state.records.manual = null;
+    state.records.error = '手動課表暫時讀不到。';
+
+    render(boundToday());
+
+    const timetable = within(screen.getByRole('region', { name: TODAY_FLOW_CLASS_TITLE }));
+    expect(timetable.getByText('已匯入授課')).toBeTruthy();
+    expect(timetable.getByRole('alert').textContent).toBe('暫時讀不到課表');
+    expect(timetable.queryByText(/今天沒有排課/)).toBeNull();
+    fireEvent.click(timetable.getByRole('button', { name: '重新讀取課表' }));
+    expect(state.records.retry).toHaveBeenCalledTimes(1);
+  },
+);
 
 it('keeps classroom navigation scoped to the actual timetable and hides it during a campus change', () => {
   state.records.imported.records = [importedClass];
