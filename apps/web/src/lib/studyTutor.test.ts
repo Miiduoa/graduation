@@ -110,20 +110,28 @@ describe('reject unreadable model citations before saving a lesson', () => {
       .toThrow('AI 步驟引句無可讀的教材內容');
   });
 
-  it.each(['主\u200e鍵', 'א\u200fב', 'م\u061cن'])(
-    'preserves readable direction-mark citations in backups, follow-ups and new lessons (%#)', (quote) => {
-      const original = { ...passage, text: passage.text + quote };
-      const previous = { ...turn(), response: { ...explanation(), sourceQuote: quote } };
-      expect(parseSavedTutorExplanation(JSON.stringify(previous.response), original).sourceQuote).toBe(quote);
-      const prepared = prepareStudyTutorHistory(original, 'understand', [previous]);
-      expect(promptData(buildStudyTutorPrompt(original, 'understand', '繼續', prepared), 'HISTORY_DATA'))
-        .toEqual([previous]);
+  it.each([
+    ['left-to-right mark', '\u200e'],
+    ['right-to-left mark', '\u200f'],
+    ['Arabic letter mark', '\u061c'],
+  ])('rejects %s in new citations but retains exact legacy backups and follow-ups (%#)', (_name, mark) => {
+    const quote = '主' + mark + '鍵';
+    const original = { ...passage, text: passage.text + quote };
+    const response = { ...steppedExplanation(), sourceQuote: quote };
+    response.steps[0].sourceQuote = quote;
+    expect(parseSavedTutorExplanation(JSON.stringify(response), original).sourceQuote).toBe(quote);
+    const previous = { ...turn(), response };
+    const prepared = prepareStudyTutorHistory(original, 'understand', [previous]);
+    expect(promptData(buildStudyTutorPrompt(original, 'understand', '繼續', prepared), 'HISTORY_DATA'))
+      .toEqual([previous]);
 
-      const reply = { ...steppedExplanation(), sourceQuote: quote };
-      reply.steps[0].sourceQuote = quote;
-      expect(parseTutorExplanation(JSON.stringify(reply), original)).toEqual(reply);
-    },
-  );
+    expect(() => parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original))
+      .toThrow('方向控制字元');
+    const stepOnly = steppedExplanation();
+    stepOnly.steps[0].sourceQuote = quote;
+    expect(() => parseTutorExplanation(JSON.stringify(stepOnly), original))
+      .toThrow('AI 步驟引句無可讀的教材內容');
+  });
 
   it.each(['主\u202e鍵\u202c', '\u2067外鍵\u2069', '主\u202a鍵\u202c\u200b'])(
     'keeps readable legacy directional controls in main and step follow-up citations (%#)', (quote) => {

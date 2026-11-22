@@ -57,9 +57,10 @@ function nonempty(value: unknown, max: number): value is string {
  * the original licensed material is never edited.
  */
 function hasReadableTutorCitation(quote: string, isHistory: boolean): boolean {
-  // Readable exact history citations can retain legacy directional controls.
-  // New citations permit direction marks alongside readable words.
-  if (!isHistory && /\p{Bidi_Control}/u.test(quote.replace(/[\u061c\u200e\u200f]/gu, ''))) return false;
+  // Preserve historical exact-match citations when reopening existing notes.
+  // New generated evidence must reject *all* Unicode direction controls:
+  // even LRM/RLM/ALM can reorder a byte-identical bilingual excerpt.
+  if (!isHistory && /\p{Bidi_Control}/u.test(quote)) return false;
   const content = isHistory ? quote : quote.replace(/\p{P}/gu, '');
   const hasContent = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800\ufff9-\ufffb]/u.test(content) ||
     /[0-9#*]\ufe0f?\u20e3/u.test(quote);
