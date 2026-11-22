@@ -1059,6 +1059,43 @@ it('keeps room and seat identifiers as locations, not ratio-style bars', () => {
   }
 });
 
+it('keeps one-time authentication tokens as identifiers, not ratio-style numeric bars', () => {
+  // These values are labels or secrets, not magnitudes; show the authorized
+  // source cells, not a misleading comparison of two access codes.
+  for (const header of [
+    '驗證碼', '登入碼', '動態密碼', '一次性密碼', '交易密碼',
+    '安全碼（銀行）', '取件碼', '核銷碼', 'OTP', 'TOTP', 'HOTP',
+    'PIN', 'PIN Number', 'CVV', 'CVC2', '2FA Code', 'MFA Code',
+    'SMS OTP', 'Email Verification Code', 'Card Security Code',
+    'One-Time Password', 'Verification Code (%)',
+  ]) {
+    const values = header.endsWith('(%)') ? ['50%', '75%'] : ['1234', '2468'];
+    const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | ' + values[0] + ' |', '| 乙 | ' + values[1] + ' |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(within(screen.getByRole('table')).getAllByRole('cell')
+      .map(cell => cell.textContent)).toEqual(values);
+    expect(comparisonSummaries(container)).toEqual([]);
+    expect(container.querySelector('meter')).toBeNull();
+    unmount();
+  }
+});
+
+it('still compares real counts of authentication attempts and failures', () => {
+  for (const header of [
+    '驗證碼數量', '登入失敗次數', 'PIN Attempts', 'OTP Success Count',
+    'CVV Error Count', 'Security Code Count', '2FA Attempts',
+  ]) {
+    const material = ['| 範圍 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter'))
+      .map(bar => [bar.getAttribute('value'), bar.getAttribute('max')]))
+      .toEqual([['2', '4'], ['4', '4']]);
+    unmount();
+  }
+});
+
 it('keeps database keys and VLAN / ASN namespace identifiers as source values, not proportional bars', () => {
   for (const header of [
     '主鍵', '外鍵', '候選鍵', '代理鍵', '主鍵值', '主鍵（資料庫）',

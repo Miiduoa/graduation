@@ -133,6 +133,12 @@ const ENGLISH_NON_RATIO_POSTAL_IDENTIFIER_COLUMN =
 const NON_RATIO_DOCUMENT_IDENTIFIER_COLUMN =
   /^(?:(?:serial|invoice|order|transaction|receipt|ticket|tracking|reference)\s+(?:number|no\.?|id|#)|(?:發票|訂單|交易|收據|票券|物流單|追蹤|序列|流水)\s*(?:號碼|編號|序號|識別碼|代碼|號))(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 
+// One-time sign-in, card verification and pickup codes are opaque tokens.
+// A PIN of 2468 is not twice a PIN of 1234. Match complete field names so
+// actual numbers of failed logins / OTP attempts can still be compared.
+const NON_RATIO_AUTH_TOKEN_COLUMN =
+  /^(?:(?:驗證碼|認證碼|安全碼|動態密碼|一次性密碼|登入碼|交易密碼|取件碼|核銷碼|信用卡安全碼|卡片驗證碼|卡片安全碼)(?:\s*(?:編號|號碼|數值|值))?|(?:(?:(?:credit[\s-]*card|bank|card|sms|email)\s+)?(?:otp|totp|hotp|pin|cvv2?|cvc2?|one[\s-]*time\s+(?:password|passcode)|(?:(?:verification|authentication|security|recovery|access|login|transaction|pickup|redemption|2fa|mfa)\s+(?:code|pin|passcode|otp)))(?:\s*(?:number|value|digits?))?))(?:(?:\s*[（(][^）)]{1,40}[）)])?)$/iu;
+
 // A source line, spreadsheet row or exercise step number marks a position
 // in a document or procedure, not a quantity with a meaningful ratio zero.
 // Do not imply that line 4 is twice line 2. Counts of lines/rows/steps
@@ -263,6 +269,7 @@ function isNonRatioColumn(header: string, percentage = false): boolean {
       NON_RATIO_POSTAL_IDENTIFIER_COLUMN.test(column) ||
       ENGLISH_NON_RATIO_POSTAL_IDENTIFIER_COLUMN.test(column) ||
       NON_RATIO_DOCUMENT_IDENTIFIER_COLUMN.test(column) ||
+      NON_RATIO_AUTH_TOKEN_COLUMN.test(column) ||
       AMBIGUOUS_TIME_COLUMN.test(column) ||
       NON_RATIO_WEEKDAY_COLUMN.test(column) ||
       NON_RATIO_QUARTER_POSITION_COLUMN.test(column) ||
