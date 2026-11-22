@@ -98,6 +98,76 @@ after(async () => {
 
 describe('firestore security rules', () => {
 
+  test('transferred campus members cannot replay private AI knowledge reads', async () => {
+    const group = 'groups/ai-knowledge-campus-transfer';
+    const schoolOnly = 'schools/pu/aiKnowledge/school-only';
+    const staffOnly = 'schools/pu/aiKnowledge/staff-only';
+    const publicChunk = 'schools/pu/aiKnowledge/public-chunk';
+    const groupOnly = group + '/aiKnowledge/private-course-chunk';
+    await seedFirestore(async (db) => {
+      await db.doc(group).set({ schoolId: 'pu', type: 'course' });
+      for (const uid of ['alice', 'editor']) {
+        await db.doc('users/' + uid).set(campusBoundProfile('pu'));
+        await db.doc('schools/pu/members/' + uid)
+          .set({ status: 'active', role: uid === 'editor' ? 'editor' : 'student' });
+        await db.doc(group + '/members/' + uid).set({ status: 'active', role: 'member' });
+      }
+      await db.doc(schoolOnly).set({ visibility: 'school', content: 'Campus-only synthetic fragment' });
+      await db.doc(staffOnly).set({ visibility: 'restricted', content: 'Staff-only synthetic fragment' });
+      await db.doc(publicChunk).set({ visibility: 'public', content: 'Public synthetic fragment' });
+      await db.doc(groupOnly).set({ content: 'Private course synthetic fragment' });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const editor = testEnv.authenticatedContext('editor').firestore();
+    const outsider = testEnv.authenticatedContext('outsider').firestore();
+
+    await assertSucceeds(alice.doc(schoolOnly).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(groupOnly).get({ source: 'server' }));
+    await assertFails(alice.doc(staffOnly).get({ source: 'server' }));
+    await assertSucceeds(editor.doc(staffOnly).get({ source: 'server' }));
+    await assertSucceeds(outsider.doc(publicChunk).get({ source: 'server' }));
+    await assertFails(outsider.doc(schoolOnly).get({ source: 'server' }));
+    await assertFails(outsider.doc(groupOnly).get({ source: 'server' }));
+
+    // Membership and SDK auth context remain unchanged across both transfers.
+    await seedFirestore((db) => db.doc('users/alice').set(campusBoundProfile('other')));
+    for (let replay = 0; replay < 2; replay++) {
+      await assertFails(alice.doc(schoolOnly).get({ source: 'server' }));
+      await assertFails(alice.doc(groupOnly).get({ source: 'server' }));
+    }
+    await assertSucceeds(alice.doc(publicChunk).get({ source: 'server' }));
+    await seedFirestore((db) => db.doc('users/editor').set(campusBoundProfile('other')));
+    await assertFails(editor.doc(staffOnly).get({ source: 'server' }));
+
+    // Partial/contradictory school bindings cannot revive an old private audience.
+    await seedFirestore((db) => db.doc('users/alice').set({
+      status: 'active', schoolId: 'other', primarySchoolId: 'pu',
+    }));
+    await assertFails(alice.doc(schoolOnly).get({ source: 'server' }));
+    await assertFails(alice.doc(groupOnly).get({ source: 'server' }));
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('users/editor').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/alice').update({ status: 'revoked' });
+    });
+    await assertFails(alice.doc(schoolOnly).get({ source: 'server' }));
+    await assertFails(alice.doc(groupOnly).get({ source: 'server' }));
+    await seedFirestore((db) => db.doc('schools/pu/members/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.doc(schoolOnly).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(groupOnly).get({ source: 'server' }));
+    await seedFirestore((db) => db.doc(group + '/members/alice').update({ status: 'revoked' }));
+    await assertFails(alice.doc(groupOnly).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(schoolOnly).get({ source: 'server' }));
+    await seedFirestore((db) => db.doc(group + '/members/alice').update({ status: 'active' }));
+    await assertSucceeds(alice.doc(groupOnly).get({ source: 'server' }));
+    await seedFirestore((db) => db.doc('users/editor').delete());
+    await assertFails(editor.doc(staffOnly).get({ source: 'server' }));
+    await seedFirestore((db) => db.doc('users/editor').set(campusBoundProfile('pu')));
+    await assertSucceeds(editor.doc(staffOnly).get({ source: 'server' }));
+  });
+
+
   test('new group creation cannot replay stale school membership after transfer', async () => {
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
