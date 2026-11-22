@@ -989,6 +989,44 @@ it('ignores a queued visibility callback after the spatial dialog releases WebGL
   expect(scene.create).toHaveBeenCalledTimes(1);
 });
 
+it('keeps Save-Data browsers marker-only until explicit 3D consent, including after reopening', async () => {
+  const previousConnection = Object.getOwnPropertyDescriptor(navigator, 'connection');
+  Object.defineProperty(navigator, 'connection', {
+    configurable: true,
+    value: { saveData: true },
+  });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    let dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const manual = await within(dialog).findByRole('button', { name: '仍要開啟立體畫面' });
+    expect(within(dialog).getByText(/瀏覽器已開啟省流量模式/)).toBeTruthy();
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' })).toBeTruthy();
+
+    manual.focus();
+    fireEvent.click(manual);
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(within(dialog).queryByRole('button', { name: '仍要開啟立體畫面' })).toBeNull();
+    expect(document.activeElement).toBe(within(dialog).getByRole('group', { name: '校園地點空間圖' }));
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    expect(screen.queryByRole('dialog', { name: '校園空間導覽' })).toBeNull();
+    expect(scene.dispose).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    await within(dialog).findByRole('button', { name: '仍要開啟立體畫面' });
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    if (previousConnection) Object.defineProperty(navigator, 'connection', previousConnection);
+    else Reflect.deleteProperty(navigator, 'connection');
+  }
+});
+
 it('lets a student manually start 3D if a WebView never reports canvas visibility', async () => {
   // The API exists and observe() succeeds, but the WebView never invokes its
   // callback. Avoid an infinite offscreen wait without eagerly allocating GPU.
