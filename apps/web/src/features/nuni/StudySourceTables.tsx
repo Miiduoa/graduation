@@ -113,6 +113,14 @@ const NON_RATIO_WEEKDAY_COLUMN =
 const NON_RATIO_QUARTER_POSITION_COLUMN =
   /^(?:(?:(?:會計|財政|財務|營運|學年|曆年)\s*)?(?:季度|季別|季次|第幾季|第幾季度|季序號|季度序號|季度編號|季度代碼)|(?:(?:fiscal|calendar|academic)\s+)?(?:quarter|qtr)(?:\s+(?:number|no\.?|index|code|id))?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 
+// Postal codes identify delivery areas rather than measured amounts. A 200
+// postcode is not twice a 100 postcode. Keep the licensed lesson's original
+// cells and exports; require an exact header so "寄送件數" remains measurable.
+const NON_RATIO_POSTAL_IDENTIFIER_COLUMN =
+  /^(?:郵遞區碼|郵遞編碼|郵政區碼|郵政編碼|郵編)(?:\s*[（(][^）)]{1,40}[）)])?$/u;
+const ENGLISH_NON_RATIO_POSTAL_IDENTIFIER_COLUMN =
+  /^(?:post[\s-]*code|postcode|zip(?:[\s-]*code)?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+
 // A source line, spreadsheet row or exercise step number marks a position
 // in a document or procedure, not a quantity with a meaningful ratio zero.
 // Do not imply that line 4 is twice line 2. Counts of lines/rows/steps
@@ -191,6 +199,8 @@ function isNonRatioColumn(header: string): boolean {
         !NETWORK_IDENTIFIER_COUNT_COLUMN.test(column)) ||
       NON_RATIO_NETWORK_NAMESPACE_COLUMN.test(column) ||
       NON_RATIO_DATABASE_KEY_COLUMN.test(column) ||
+      NON_RATIO_POSTAL_IDENTIFIER_COLUMN.test(column) ||
+      ENGLISH_NON_RATIO_POSTAL_IDENTIFIER_COLUMN.test(column) ||
       AMBIGUOUS_TIME_COLUMN.test(column) ||
       NON_RATIO_WEEKDAY_COLUMN.test(column) ||
       NON_RATIO_QUARTER_POSITION_COLUMN.test(column) ||

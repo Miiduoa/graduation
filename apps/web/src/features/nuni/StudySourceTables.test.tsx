@@ -2861,3 +2861,34 @@ it.each(['Course Code', 'Verification Code', 'Code', 'Student ID'])
     expect(container.querySelector('meter')).toBeNull();
     unmount();
   });
+
+it.each([
+  '郵遞區碼', '郵遞編碼', '郵政區碼', '郵政編碼', '郵編', '郵遞區碼（臺灣）',
+  'Postcode', 'Post Code', 'Post-Code', 'ZIP', 'ZIP Code', 'ZIP (US)',
+])('retains postal identifiers without implying a numerical ratio (%s)', (header) => {
+  // Numeric 100 and 200 would produce a false 2x meter without the guard.
+  const lesson = [
+    '| 收件區域 | ' + header + ' |', '| --- | --- |',
+    '| 甲區 | 100 |', '| 乙區 | 200 |',
+  ].join('\n');
+  const { container, unmount } = render(<StudySourceTables text={lesson} />);
+  expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
+    .toEqual(['100', '200']);
+  expect(comparisonSummaries(container)).toEqual([]);
+  expect(container.querySelectorAll('meter')).toHaveLength(0);
+  unmount();
+});
+
+it.each(['寄送件數', '郵件件數', 'Parcel Count'])(
+  'still compares genuine delivered-item quantities (%s)', (header) => {
+    const lesson = [
+      '| 區域 | ' + header + ' |', '| --- | --- |',
+      '| 甲區 | 100 |', '| 乙區 | 200 |',
+    ].join('\n');
+    const { container, unmount } = render(<StudySourceTables text={lesson} />);
+    expect(Array.from(container.querySelectorAll('meter')).map((meter) =>
+      [meter.getAttribute('value'), meter.getAttribute('max')]))
+      .toEqual([['100', '200'], ['200', '200']]);
+    unmount();
+  },
+);
