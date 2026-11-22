@@ -958,3 +958,73 @@ it.each(
   expect(screen.getByLabelText<HTMLInputElement>(field).value).toBe('');
   expect(screen.queryByText(/內容已保留/)).toBeNull();
 });
+
+const readFailureCases = ['review', 'group'].flatMap((kind) =>
+  ['initial', 'reload', 'tab', 'subtab', 'school', 'account'].flatMap((boundary) =>
+    [
+      { code: 'permission-denied', temporary: false },
+      { code: 'firestore/unauthenticated', temporary: false },
+      { code: 'unavailable', message: 'offline', temporary: true },
+      { code: 'deadline-exceeded', message: 'timeout', temporary: true },
+    ].map((failure) => ({ kind, boundary, ...failure })),
+  ),
+);
+
+it.each(readFailureCases)('$kind at $boundary with $code shows only permitted rows', async ({
+  kind, boundary, code, message, temporary,
+}) => {
+  const isReview = kind === 'review';
+  const read = isReview ? mocks.listReviews : mocks.getDocs;
+  const row = isReview ? '原課程' : '原讀書會';
+  const success = isReview ? [existingReview] : groupSnapshot(row, ['bob']);
+  const empty = isReview ? [] : { docs: [] };
+  const action = isReview ? '＋ 寫評價' : '＋ 建立讀書會';
+  const fail = () => read.mockRejectedValue(Object.assign(new Error(message ?? code), { code }));
+  if (boundary === 'initial') fail();
+  else read.mockResolvedValue(success);
+
+  const view = render(<StudyBuddyTab schoolId="pu" />);
+  if (!isReview) fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
+  if (boundary !== 'initial') {
+    await screen.findByText(row);
+    read.mockClear();
+    fail();
+    if (boundary === 'reload') {
+      fireEvent.click(screen.getByRole('button', { name: isReview ? /有幫助 · 0/ : '申請加入' }));
+    } else if (boundary === 'tab') {
+      view.rerender(<StudyBuddyTab schoolId="pu" active={false} />);
+      view.rerender(<StudyBuddyTab schoolId="pu" active />);
+    } else if (boundary === 'subtab') {
+      fireEvent.click(screen.getByRole('tab', { name: isReview ? '讀書會' : '課程評價' }));
+      fireEvent.click(screen.getByRole('tab', { name: isReview ? '課程評價' : '讀書會' }));
+    } else if (boundary === 'school') {
+      view.rerender(<StudyBuddyTab schoolId="nthu" />);
+    } else {
+      mocks.auth.user = { uid: 'bob', displayName: 'Bob' };
+      view.rerender(<StudyBuddyTab schoolId="pu" />);
+    }
+  }
+
+  const retry = await screen.findByRole('button', { name: '重新讀取' });
+  // At 1a1f36863 both sections return only CommunityLoadError on every failed read.
+  // This PR retains old rows only for a transient failure in the same mounted scope.
+  const mergeBaseShowsRows = false;
+  const retainsRows = temporary && ['reload', 'tab', 'subtab'].includes(boundary);
+  expect(Boolean(screen.queryByText(row))).toBe(mergeBaseShowsRows || retainsRows);
+  expect(Boolean(screen.queryByRole('button', { name: action }))).toBe(temporary);
+  expect(read).toHaveBeenCalledTimes(!isReview && temporary ? 2 : 1);
+
+  if (!temporary) {
+    // A subsequent offline retry must not restore the data that was cleared.
+    read.mockRejectedValue(new Error('offline'));
+    await act(async () => fireEvent.click(retry));
+    expect(screen.queryByText(row)).toBeNull();
+    expect(screen.queryByRole('button', { name: action })).toBeNull();
+  }
+
+  read.mockResolvedValue(empty);
+  await act(async () => fireEvent.click(retry));
+  expect(screen.queryByText(row)).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByRole('button', { name: action })).toBeTruthy();
+});

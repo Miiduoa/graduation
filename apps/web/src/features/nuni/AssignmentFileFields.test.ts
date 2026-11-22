@@ -1,3 +1,4 @@
+import { classifyAssignmentFile } from '@campus/shared/src/assignmentFiles';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   assignmentFileHref,
@@ -63,7 +64,7 @@ describe('collectLocalFiles', () => {
     ]);
   });
 
-  it.each(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'JPG', 'pdf', 'doc', 'docx', 'txt', 'zip', 'exe'])(
+  it.each(['gif', 'bmp', 'svg', 'pdf', 'doc', 'docx', 'txt', 'zip', 'exe'])(
     'rejects a MIME-less .%s before it reserves quota',
     (extension) => {
       const name = `attachment.${extension}`;
@@ -83,7 +84,7 @@ describe('collectLocalFiles', () => {
         ...Array.from({ length: docs }, (_, index) => file(`existing-${index}.pdf`, 'application/pdf')),
       ]);
       const selection = collectLocalFileSelection(existing, [
-        file('unknown.jpg', ''),
+        file('unknown.gif', ''),
         file('unknown.docx', ''),
         file('declared.pdf', 'application/pdf'),
         file('declared.png', 'image/png'),
@@ -94,7 +95,7 @@ describe('collectLocalFiles', () => {
         ...(images === 0 ? ['declared.png'] : []),
       ]);
       expect(selection.rejected.map(({ name }) => name)).toEqual([
-        'unknown.jpg', 'unknown.docx', ...(docs ? ['declared.pdf'] : []), ...(images ? ['declared.png'] : []),
+        'unknown.gif', 'unknown.docx', ...(docs ? ['declared.pdf'] : []), ...(images ? ['declared.png'] : []),
       ]);
     },
   );
@@ -173,9 +174,17 @@ describe('compressAssignmentImageFile', () => {
 });
 
 describe('uploadAndSubmitFiles', () => {
-  // Oracle from 27ad30c0a: the submission path compresses queued images
-  // before createIntent checks their MIME, extension and size. At that revision
-  // the picker itself already filtered BMP, GIF and SVG.
+  // The picker at 1a1f36863 calls this unchanged classifier with the raw MIME,
+  // before checking quota. It never looks at bytes, pixels or canvas support.
+  function mergeBaseAccepts(file: File) {
+    try {
+      classifyAssignmentFile(file.name, file.type);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   const baseFormats = [
     { extension: 'bmp', mime: 'image/bmp', acceptsOriginal: false, canTranscode: true },
     { extension: 'heic', mime: 'image/heic', acceptsOriginal: true, canTranscode: false },
@@ -201,7 +210,7 @@ describe('uploadAndSubmitFiles', () => {
   );
 
   it.each(cases)(
-    'matches merge-base upload for .$extension at $edge px, $originalBytes bytes, bitmap=$bitmapAvailable, smaller=$smaller, MIME=$hasMime',
+    'matches merge-base selection and checks preparation for .$extension at $edge px, $originalBytes bytes, bitmap=$bitmapAvailable, smaller=$smaller, MIME=$hasMime',
     async ({
       extension, mime, acceptsOriginal, canTranscode, edge, originalBytes, bitmapAvailable, smaller, hasMime,
     }) => {
@@ -221,28 +230,34 @@ describe('uploadAndSubmitFiles', () => {
         tag === 'canvas' ? (canvas as unknown as HTMLCanvasElement) : nativeCreate(tag, options),
       );
 
-      const transcodes =
-        hasMime && canTranscode && bitmapAvailable && (edge > 2000 || originalBytes > 1.5 * 1024 * 1024);
-      const usesJpeg = transcodes && smaller;
+      const { files } = collectLocalFileSelection([], [original]);
+      const selected = mergeBaseAccepts(original);
+      expect(files.map(({ kind }) => kind)).toEqual(selected ? [hasMime ? 'image' : 'file'] : []);
+      expect(bitmap).not.toHaveBeenCalled();
+
+      // An already queued BMP keeps its preparation path even though the base picker rejects it.
+      const queuedBmp = hasMime && extension === 'bmp';
+      const prepares = selected || queuedBmp;
+      const decodes = prepares && hasMime && canTranscode && bitmapAvailable;
+      const usesJpeg = decodes && smaller && (edge > 2000 || originalBytes > 1.5 * 1024 * 1024);
       const rejectsType = !usesJpeg && !acceptsOriginal;
       const rejectsSize = !usesJpeg && originalBytes > 10 * 1024 * 1024;
-      const accepts = hasMime && !rejectsType && !rejectsSize;
+      const accepts = prepares && !rejectsType && !rejectsSize;
       const createAssignmentFileIntents = vi.fn(async () => [
         { id: 'photo', uploadPath: 'photo', contentType: usesJpeg ? 'image/jpeg' : mime },
       ]);
       const uploadAssignmentFile = vi.fn(async () => {});
       const submitFiles = vi.fn(async () => ({}));
       const classes = { createAssignmentFileIntents, uploadAssignmentFile, submitFiles } as never;
-      const { files } = collectLocalFileSelection([], [original]);
-      expect(files.map(({ kind }) => kind)).toEqual(hasMime ? ['image'] : []);
-      if (hasMime) {
-        const submission = uploadAndSubmitFiles(classes, 'workspace', 'assignment', '', files, 'key');
+      if (prepares) {
+        const queued = queuedBmp ? [{ file: original, key: name, kind: 'image' as const }] : files;
+        const submission = uploadAndSubmitFiles(classes, 'workspace', 'assignment', '', queued, 'key');
         if (accepts) await submission;
         else await expect(submission).rejects.toMatchObject({
           code: rejectsType ? 'ASSIGNMENT_FILE_TYPE_REJECTED' : 'ASSIGNMENT_FILE_TOO_LARGE',
         });
       }
-      expect(bitmap).toHaveBeenCalledTimes(Number(hasMime && canTranscode && bitmapAvailable));
+      expect(bitmap).toHaveBeenCalledTimes(Number(decodes));
       expect(createAssignmentFileIntents).toHaveBeenCalledTimes(Number(accepts));
       expect(uploadAssignmentFile).toHaveBeenCalledTimes(Number(accepts));
       expect(submitFiles).toHaveBeenCalledTimes(Number(accepts));
@@ -260,10 +275,26 @@ describe('uploadAndSubmitFiles', () => {
     },
   );
 
+  it('leaves the eighth photo slot available for JPEG when selected with a GIF', async () => {
+    const existing = collectLocalFiles([], Array.from({ length: 7 }, (_, i) => file(`photo-${i}.jpg`, 'image/jpeg')));
+    const jpeg = file('valid.jpg', 'image/jpeg');
+    const { files, rejected } = collectLocalFileSelection(existing, [file('invalid.gif', 'image/gif'), jpeg]);
+    expect(rejected.map(({ name }) => name)).toEqual(['invalid.gif']);
+    expect(files[7]?.file).toBe(jpeg);
+    const createAssignmentFileIntents = vi.fn(async () => [{ id: 'valid', uploadPath: 'valid', contentType: 'image/jpeg' }]);
+    const uploadAssignmentFile = vi.fn().mockResolvedValue(undefined);
+    const submitFiles = vi.fn().mockResolvedValue({});
+    await uploadAndSubmitFiles(
+      { createAssignmentFileIntents, uploadAssignmentFile, submitFiles } as never,
+      'workspace', 'assignment', '', files.slice(7), 'key',
+    );
+    expect(uploadAssignmentFile).toHaveBeenCalledWith('valid', expect.any(Uint8Array), 'image/jpeg');
+    expect(submitFiles).toHaveBeenCalledOnce();
+  });
+
   it('uploads the accepted batch with the original MIME declarations', async () => {
     const files = collectLocalFiles([], [
       ...Array.from({ length: 8 }, (_, index) => file(`shot-${index}.jpg`, index === 0 ? 'image/jpg' : 'image/jpeg')),
-      file('missing.webp', ''),
       file('missing.pdf', ''),
       file('notes.pdf', 'application/pdf'),
       file('extra.txt', 'text/plain'),
@@ -309,7 +340,6 @@ describe('uploadAndSubmitFiles', () => {
     ...[
       file('report.pdf', ''),
       file('blank.pdf', '   '),
-      file('missing.jpg', ''),
       file('binary.pdf', 'application/octet-stream'),
       file('mismatch.png', 'application/pdf'),
       file('unsupported.exe', 'application/pdf'),

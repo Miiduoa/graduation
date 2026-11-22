@@ -11,6 +11,7 @@
  *  - 配對 (buddy match)：web 端不做，導向到 mobile 設定課表後再啟用。
  */
 
+import { isReadAccessDeniedError } from '@campus/shared/src/signedInSocialReads';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -181,10 +182,12 @@ export function CourseReviewSection(props: {
     setReviews(rows);
   }, [schoolId]);
 
-  const { loading, loaded, error, refresh } = useCommunityLoad(
+  const clearDeniedData = useCallback(() => setReviews([]), []);
+  const { loading, loaded, error, denied, refresh } = useCommunityLoad(
     load,
     '暫時無法讀取課程評價，請確認連線後重試。',
     props.active,
+    clearDeniedData,
   );
 
   const filtered = useMemo(() => {
@@ -193,6 +196,8 @@ export function CourseReviewSection(props: {
     return reviews.filter((r) => `${r.courseName} ${r.courseCode}`.toLowerCase().includes(q));
   }, [reviews, filter]);
   const agg = useMemo(() => aggregateReviews(filtered), [filtered]);
+
+  if (denied) return <CommunityLoadError message={error} retry={refresh} />;
 
   return (
     <div>
@@ -756,7 +761,7 @@ export function StudyGroupSection(props: {
     try {
       snap = await getDocs(query(groupsCollection, orderBy('createdAt', 'desc'), limit(60)));
     } catch (error) {
-      if (!isCurrent()) throw error;
+      if (!isCurrent() || isReadAccessDeniedError(error)) throw error;
       snap = await getDocs(query(groupsCollection, limit(60)));
     }
     if (isCurrent()) {
@@ -764,10 +769,12 @@ export function StudyGroupSection(props: {
     }
   }, [schoolId]);
 
-  const { loading, loaded, error, refresh } = useCommunityLoad(
+  const clearDeniedData = useCallback(() => setGroups([]), []);
+  const { loading, loaded, error, denied, refresh } = useCommunityLoad(
     load,
     '暫時無法讀取讀書會，請確認連線後重試。',
     props.active,
+    clearDeniedData,
   );
 
   const onJoin = async (g: WebStudyGroup) => {
@@ -805,6 +812,8 @@ export function StudyGroupSection(props: {
       setJoinBusy(new Set(joinPending.current));
     }
   };
+
+  if (denied) return <CommunityLoadError message={error} retry={refresh} />;
 
   return (
     <div>

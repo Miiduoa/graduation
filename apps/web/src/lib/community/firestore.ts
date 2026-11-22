@@ -18,6 +18,7 @@
  *   campusReports/{autoId}
  *   users/{uid}/campusBoardAliases/{boardId}
  */
+import { isReadAccessDeniedError } from '@campus/shared/src/signedInSocialReads';
 import {
   addDoc,
   arrayRemove,
@@ -857,7 +858,8 @@ export async function listCourseReviews(
       query(reviewsCol(db, schoolId), ...filters, orderBy('createdAt', 'desc'), limit(max)),
     );
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CourseReviewDoc, 'id'>) }));
-  } catch {
+  } catch (error) {
+    if (isReadAccessDeniedError(error)) throw error;
     const snap = await getDocs(query(reviewsCol(db, schoolId), limit(Math.min(max, 50))));
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CourseReviewDoc, 'id'>) }));
   }

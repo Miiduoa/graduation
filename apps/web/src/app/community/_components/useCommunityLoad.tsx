@@ -1,16 +1,19 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isReadAccessDeniedError } from '@campus/shared/src/signedInSocialReads';
 import styles from '../community.module.css';
 
 export function useCommunityLoad(
   load: (isCurrent: () => boolean) => Promise<void>,
   message: string,
   active = true,
+  clearDeniedData?: () => void,
 ) {
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState('');
+  const [denied, setDenied] = useState(false);
   const generation = useRef(0);
   const refresh = useCallback(async () => {
     const current = ++generation.current;
@@ -18,15 +21,25 @@ export function useCommunityLoad(
     setError('');
     try {
       await load(() => generation.current === current);
-      if (generation.current === current) setLoaded(true);
+      if (generation.current === current) {
+        setLoaded(true);
+        setDenied(false);
+      }
       return true;
-    } catch {
-      if (generation.current === current) setError(message);
+    } catch (cause) {
+      if (generation.current === current) {
+        if (clearDeniedData && isReadAccessDeniedError(cause)) {
+          clearDeniedData();
+          setLoaded(false);
+          setDenied(true);
+        }
+        setError(message);
+      }
       return false;
     } finally {
       if (generation.current === current) setLoading(false);
     }
-  }, [load, message]);
+  }, [load, message, clearDeniedData]);
   useEffect(() => {
     let mounted = true;
     if (active) {
@@ -39,7 +52,7 @@ export function useCommunityLoad(
       generation.current += 1;
     };
   }, [active, refresh]);
-  return { loading, loaded, error, refresh };
+  return { loading, loaded, error: denied ? message : error, denied, refresh };
 }
 
 export function CommunityLoadError({
