@@ -3411,7 +3411,7 @@ it.each([null, '', 'application/octet-stream', 'text/plain', 'text/html', 'appli
   )))('rejects zero-length WebView MIME $mime / encoding $encoding / $kind', async ({
   mime, encoding, kind,
 }) => {
-  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  const { library, body } = sourcedLibraryFootprintFixture();
   const headers = new Headers({ 'Content-Length': '000' });
   if (mime !== null) headers.set('Content-Type', mime);
   if (encoding !== null) headers.set('Content-Encoding', encoding);
@@ -3576,7 +3576,7 @@ it.each([
   { length: '', accepted: false },
   { length: '40, 40', accepted: false },
   { length: '2000001', accepted: false },
-])('rejects impossible Content-Length $length before reading', async ({ length, accepted }) => {
+])('checks declared Content-Length $length before reading', async ({ length, accepted }) => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
   const response = new Response(body, { headers: { 'Content-Length': length } });
   const read = vi.spyOn(response.body!, 'getReader');
