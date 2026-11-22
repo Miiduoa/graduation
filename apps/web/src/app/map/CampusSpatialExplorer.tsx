@@ -335,7 +335,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const [deferredCause, setDeferredCause] = useState<'background' | 'offscreen' | 'data-saver'>('background');
   const pageSuspended = useRef(false);
   const lastHostVisibility = useRef<{ host: HTMLDivElement; visible: boolean } | null>(null);
-  const previousManualStart = useRef(manualStart);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
   const view = useMemo(() => ({
@@ -361,13 +360,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // browser requests reduced data use. Marker details and walking links
     // remain available; the visitor can explicitly opt into 3D at any time.
     const saveData = requestsReducedData();
-    const requestedManualStart = manualStart !== previousManualStart.current;
-    previousManualStart.current = manualStart;
     // Retain the same host's last decision across scene rebuilds. A silent
     // observer and an unavailable viewport provide no new visibility evidence.
     let previousVisibility = lastHostVisibility.current?.host === host
       ? lastHostVisibility.current.visible : null;
-    if (requestedManualStart || (previousVisibility === null && manuallyStarted)) previousVisibility = true;
     let observerVisible: boolean | null = null;
     let hasObserver = true;
     let visible = false;
@@ -480,8 +476,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         const top = visualBounds?.top ?? 0;
         const right = left + (visualBounds?.width ?? width);
         const bottom = top + (visualBounds?.height ?? height);
-        // Partial geometry is unavailable. Only a current, coherent
-        // measurement can override the observer's visibility signal.
+        // Incomplete geometry cannot establish an empty intersection.
         if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height,
           width, height, left, top, right, bottom].every(Number.isFinite) ||
           rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0 ||
@@ -490,13 +485,20 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // The dialog clips its overflowing contents even where the window
         // still has visible pixels outside the dialog.
         const dialogRect = scrollDialog?.getBoundingClientRect();
-        const clip = dialogRect && dialogRect.width > 0 && dialogRect.height > 0 &&
-          [dialogRect.left, dialogRect.top, dialogRect.right, dialogRect.bottom].every(Number.isFinite)
-          ? dialogRect : rect;
-        const clippedLeft = Math.max(rect.left, clip.left, 0);
-        const clippedTop = Math.max(rect.top, clip.top, 0);
-        const clippedRight = Math.min(rect.right, clip.right, width);
-        const clippedBottom = Math.min(rect.bottom, clip.bottom, height);
+        let clippedLeft = Math.max(rect.left, 0);
+        let clippedTop = Math.max(rect.top, 0);
+        let clippedRight = Math.min(rect.right, width);
+        let clippedBottom = Math.min(rect.bottom, height);
+        if (scrollDialog && dialogRect && dialogRect.width > 0 && dialogRect.height > 0 &&
+            [dialogRect.left, dialogRect.top, dialogRect.right, dialogRect.bottom].every(Number.isFinite)) {
+          const { clientLeft, clientTop, clientWidth, clientHeight } = scrollDialog;
+          const contentLeft = dialogRect.left + clientLeft;
+          const contentTop = dialogRect.top + clientTop;
+          clippedLeft = Math.max(clippedLeft, contentLeft);
+          clippedTop = Math.max(clippedTop, contentTop);
+          clippedRight = Math.min(clippedRight, contentLeft + clientWidth);
+          clippedBottom = Math.min(clippedBottom, contentTop + clientHeight);
+        }
         if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) return false;
         if (clippedBottom <= top || clippedTop >= bottom || clippedRight <= left || clippedLeft >= right) {
           return false;
@@ -509,13 +511,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       }
     };
     const readVisibility = () => {
-      const hostVisibility = hostViewportVisibility() ?? observerVisible ?? previousVisibility ??
-        hostViewportVisibility(true) ?? (hasObserver ? null : true);
+      const geometry = hostViewportVisibility() ?? hostViewportVisibility(true);
+      // Keep the observer decision across rebuilds. A geometric pause is
+      // temporary and must not overwrite the signal used when clipping ends.
+      const hostVisibility = observerVisible ?? previousVisibility ??
+        (manuallyStarted || geometry === true || !hasObserver ? true : null);
       if (hostVisibility !== null) {
         previousVisibility = hostVisibility;
         lastHostVisibility.current = { host, visible: hostVisibility };
       }
-      visible = !isBackgrounded() && hostVisibility === true;
+      visible = !isBackgrounded() && hostVisibility === true && geometry !== false;
     };
     const onPageHide = () => {
       pageSuspended.current = true;
@@ -832,6 +837,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
   if (chosen && (!selectedPoint ||
       (chosen.inherited && (!selected || spatialDestinationIdentity(selected) !== chosen.identity)))) {
     setSelection('revoked');
+    setBuildingPlanOpen(false);
+    setOverview(true);
+    setCamera((previous) => ({ ...previous, zoom: 1 }));
   }
   const showOverview = overview || !selectedPoint;
   const place = selectedPoint?.location;
