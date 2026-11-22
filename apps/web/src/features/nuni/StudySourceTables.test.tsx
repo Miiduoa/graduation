@@ -646,7 +646,7 @@ it('offers an opt-in comparison with only exact, positive source table values', 
   expect(container.querySelector('meter')).toBeNull();
 });
 
-it('compares strict thousands-grouped lesson quantities while preserving exact source numerals', () => {
+it('keeps thousands-grouped quantities in the original table', () => {
   const markdown = [
     '| 項目 | 交易筆數 |',
     '| --- | --- |',
@@ -656,20 +656,10 @@ it('compares strict thousands-grouped lesson quantities while preserving exact s
   const { container } = render(<StudySourceTables text={markdown} />);
   expect(within(screen.getByRole('table')).getAllByRole('cell')
     .map((cell) => cell.textContent)).toEqual(['1,200', '2,450.50']);
-  expect(Array.from(container.querySelectorAll('meter')).map((bar) => ({
-    value: bar.getAttribute('value'),
-    max: bar.getAttribute('max'),
-    label: bar.getAttribute('aria-label'),
-    text: bar.getAttribute('aria-valuetext'),
-  }))).toEqual([
-    { value: '1200', max: '2450.5', label: '甲：1,200',
-      text: '1,200；本欄最大值 2,450.50' },
-    { value: '2450.5', max: '2450.5', label: '乙：2,450.50',
-      text: '2,450.50；本欄最大值 2,450.50' },
-  ]);
+  expectBaselineMeters(container, markdown);
 });
 
-it('compares large but safely representable grouped cents without altering the source numerals', () => {
+it('keeps large grouped cents in the original table', () => {
   const markdown = [
     '| 項目 | 金額 |', '| --- | --- |',
     '| 甲 | 1,234,567,890,123.45 |', '| 乙 | 1,234,567,890,123.46 |',
@@ -677,8 +667,7 @@ it('compares large but safely representable grouped cents without altering the s
   const { container } = render(<StudySourceTables text={markdown} />);
   expect(within(screen.getByRole('table')).getAllByRole('cell')
     .map((cell) => cell.textContent)).toEqual(['1,234,567,890,123.45', '1,234,567,890,123.46']);
-  expect(Array.from(container.querySelectorAll('meter')).map((meter) => meter.getAttribute('value')))
-    .toEqual(['1234567890123.45', '1234567890123.46']);
+  expectBaselineMeters(container, markdown);
 });
 
 it('never graphs grouped integers or fractional cents that JavaScript cannot represent exactly', () => {
@@ -1149,7 +1138,7 @@ it('uses merge-base eligibility for ports, channels and protocol layers', () => 
   }
 });
 
-it('continues to compare measured counts and throughput instead of hiding real network quantities', () => {
+it('uses merge-base eligibility for network counts and throughput', () => {
   for (const header of [
     '連接埠數', '開放埠數量', '埠號數量', '通道總數', '頻道數', '網路層數',
     'Port Count', 'Number of Ports', 'Open Port Count', 'Channel Count',
@@ -1161,9 +1150,7 @@ it('continues to compare measured counts and throughput instead of hiding real n
     const material = ['| 範圍 | ' + header + ' |', '| --- | --- |',
       '| 甲 | 2 |', '| 乙 | 4 |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
-    expect(Array.from(container.querySelectorAll('meter'))
-      .map((bar) => [bar.getAttribute('value'), bar.getAttribute('max')]))
-      .toEqual([['2', '4'], ['4', '4']]);
+    expectBaselineMeters(container, material);
     expect(within(screen.getByRole('table')).getAllByRole('cell')
       .map((cell) => cell.textContent)).toEqual(['2', '4']);
     unmount();
@@ -1191,15 +1178,12 @@ it('reads the exact source numeric spelling, rather than inferring a percentage'
 });
 
 it.each([
-  ['風險等級百分比', true], ['風險等級（%）', true],
-  ['排名前十佔比', true], ['班級名次前十名百分比', true],
-  ['排名前１０名比例', false], ['排名前十（%）', true], ['Top 10 Rank Share (%)', true],
-] as const)('charts %s against a fixed 100%% scale (merge base charted: %s)', (header, _mergeBaseCharted) => {
+  '風險等級百分比', '風險等級（%）', '排名前十佔比', '班級名次前十名百分比',
+  '排名前１０名比例', '排名前十（%）', 'Top 10 Rank Share (%)',
+])('uses merge-base percentage eligibility for %s', (header) => {
   const material = [`| 風險 | ${header} |`, '| --- | --- |', '| 低 | 25% |', '| 高 | 75% |'].join('\n');
   const { container } = render(<StudySourceTables text={material} />);
-  expect(screen.getByText(`展開第 2 欄「${header}」的原文百分比（100% 滿格）`)).toBeTruthy();
-  expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
-    .toEqual([[25, 100], [75, 100]]);
+  expectBaselineMeters(container, material);
 });
 
 it.each(['全校排名（%）', '班級名次 %', 'Rank Position (%)', 'Position in Class (%)'])(
@@ -1216,11 +1200,10 @@ it.each([
   '完成狀況（%）', '各題號完成狀況（%）', '各題號的完成狀況及正答率（%）', '各題號正答率', '各題次正確率（％）',
   'Completion status (%)', 'Accuracy by question number (%)', '依帳號完成狀況（%）', 'Coverage by student ID (%)',
 ])(
-  'charts the bounded measurement for %s', (header) => {
+  'uses merge-base percentage eligibility for %s', (header) => {
     const material = [`| 題目 | ${header} |`, '| --- | --- |', '| 甲 | 50% |', '| 乙 | 75% |'].join('\n');
     const { container } = render(<StudySourceTables text={material} />);
-    expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
-      .toEqual([[50, 100], [75, 100]]);
+    expectBaselineMeters(container, material);
   },
 );
 
@@ -1261,17 +1244,15 @@ it('visualizes exact source percentages on a fixed 100% scale without changing s
 });
 
 it.each([
-  { name: 'regular space', values: ['75 %', '25 %'], amounts: ['75', '25'] },
-  { name: 'no-break space and fullwidth digits', values: ['７５\u00a0％', '２５\u00a0％'], amounts: ['75', '25'] },
-  { name: 'narrow no-break space and fullwidth decimals', values: ['７５．５０\u202f％', '２４．５０\u202f％'], amounts: ['75.5', '24.5'] },
-  { name: 'mixed spaced and unspaced fullwidth percentage rows', values: ['７５ ％', '５０％'], amounts: ['75', '50'] },
-])('compares percent signs separated by a single source space ($name), without rewriting evidence', ({ values, amounts }) => {
+  { name: 'regular space', values: ['75 %', '25 %'] },
+  { name: 'no-break space and fullwidth digits', values: ['７５\u00a0％', '２５\u00a0％'] },
+  { name: 'narrow no-break space and fullwidth decimals', values: ['７５．５０\u202f％', '２４．５０\u202f％'] },
+  { name: 'mixed spaced and unspaced fullwidth percentage rows', values: ['７５ ％', '５０％'] },
+])('keeps spaced percentages ($name) in the original table', ({ values }) => {
   const material = ['| 課程 | 完成率 |', '| --- | --- |',
     '| 資料庫 | ' + values[0] + ' |', '| 網路 | ' + values[1] + ' |'].join('\n');
   const { container } = render(<StudySourceTables text={material} />);
-  expect(Array.from(container.querySelectorAll('meter')).map((bar) =>
-    [bar.getAttribute('value'), bar.getAttribute('max'), bar.getAttribute('aria-valuetext')]))
-    .toEqual(amounts.map((amount, index) => [amount, '100', values[index] + '；滿格 100%']));
+  expectBaselineMeters(container, material);
   expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
     .toEqual(values);
 });
@@ -1299,21 +1280,11 @@ it('does not infer percentage charts from ambiguous headers or out-of-range sour
   }
 });
 
-it('keeps repeated percentage labels independently traceable to each original source row', () => {
+it('keeps repeated percentage labels in the original table', () => {
   const repeated = ['| 項目 | 完成率 |', '| --- | --- |',
     '| 甲 | 20% |', '| 甲 | 30% |'].join('\n');
   const { container } = render(<StudySourceTables text={repeated} />);
-  expect(comparisonSummaries(container)).toEqual([
-    '展開第 2 欄「完成率」的原文百分比（100% 滿格）',
-  ]);
-  expect(Array.from(container.querySelectorAll('meter')).map((bar) => ({
-    value: bar.getAttribute('value'),
-    max: bar.getAttribute('max'),
-    label: bar.getAttribute('aria-label'),
-  }))).toEqual([
-    { value: '20', max: '100', label: '甲：20%；教材原文第 3 行' },
-    { value: '30', max: '100', label: '甲：30%；教材原文第 4 行' },
-  ]);
+  expectBaselineMeters(container, repeated);
   expect(within(screen.getByRole('table')).getAllByRole('cell')
     .map((cell) => cell.textContent)).toEqual(['20%', '30%']);
 });
@@ -2461,7 +2432,7 @@ it('never shows a stale return-to-chart control after the authorized source chan
 it.each([
   { header: '學分', values: ['3', '2'] },
   { header: '完成率', values: ['75%', '50%'] },
-])('keeps same-named source rows separately navigable in the $header chart', ({ header, values }) => {
+])('keeps same-named rows in the $header source table', ({ header, values }) => {
   const material = [
     '教材說明',
     '| 分類 | ' + header + ' |',
@@ -2470,30 +2441,14 @@ it.each([
     '| 必修 | ' + values[1] + ' |',
   ].join('\n');
   const view = render(<StudySourceTables text={material} />);
-  const meters = Array.from(view.container.querySelectorAll('meter'));
-  expect(meters).toHaveLength(2);
-  expect(meters.map((bar) => bar.getAttribute('aria-label'))).toEqual([
-    '必修：' + values[0] + '；教材原文第 4 行',
-    '必修：' + values[1] + '；教材原文第 5 行',
-  ]);
-  // Row identity is the exact source line, not the repeated text label.
-  expect(meters.map((bar) => bar.closest('li')?.textContent)).toEqual([
-    '必修' + values[0] + '原文第 4 行 · 回表格核對',
-    '必修' + values[1] + '原文第 5 行 · 回表格核對',
-  ]);
-  fireEvent.click(screen.getByText(/展開第 2 欄/));
-  const jump = screen.getByRole('button', { name: '原文第 5 行 · 回表格核對' });
-  fireEvent.click(jump);
-  expect(document.activeElement).toBe(view.container.querySelectorAll('tbody tr')[1]);
-  fireEvent.click(screen.getByRole('button', { name: '返回原文第 5 行的圖表' }));
-  expect(document.activeElement).toBe(jump);
+  expectBaselineMeters(view.container, material);
   // The two original source rows remain separate and unchanged.
   expect(Array.from(view.container.querySelectorAll('tbody tr')).map((row) => row.textContent))
     .toEqual(['必修' + values[0], '必修' + values[1]]);
   view.unmount();
 });
 
-it('compares English network transfer speeds without treating their rate unit as a percentage', () => {
+it('uses merge-base eligibility for English network transfer rates', () => {
   for (const header of [
     'Data Rate', 'Bit Rate', 'Transfer Rate', 'Transmission Rate',
     'Download Rate', 'Upload Rate', 'Network Rate', 'Link Rate',
@@ -2502,15 +2457,7 @@ it('compares English network transfer speeds without treating their rate unit as
     const original = ['| 連線 | ' + header + ' |', '| --- | --- |',
       '| 甲 | 2.50 |', '| 乙 | 4.00 |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={original} />);
-    expect(comparisonSummaries(container)).toEqual([
-      '展開第 2 欄「' + header + '」的原文數值比較',
-    ]);
-    expect(Array.from(container.querySelectorAll('meter')).map(bar => [
-      bar.getAttribute('value'), bar.getAttribute('max'), bar.getAttribute('aria-valuetext'),
-    ])).toEqual([
-      ['2.5', '4', '2.50；本欄最大值 4.00'],
-      ['4', '4', '4.00；本欄最大值 4.00'],
-    ]);
+    expectBaselineMeters(container, original);
     expect(within(screen.getByRole('table')).getAllByRole('cell').map(cell => cell.textContent))
       .toEqual(['2.50', '4.00']);
     unmount();
@@ -2848,24 +2795,18 @@ it('switches citation between full table, adjacent first row and exact single ro
 
 
 it.each([
-  { header: '完成率', values: ['７５％', '２５％'], expected: ['75', '25'] },
-  { header: '正確率', values: ['７５．５０％', '０％'], expected: ['75.5', '0'] },
-  { header: 'Completion Rate', values: ['１００．００%', '９９．５％'], expected: ['100', '99.5'] },
-])('keeps fullwidth percentage source bytes while comparing against a fixed 100% ($header)', ({ header, values, expected }) => {
+  { header: '完成率', values: ['７５％', '２５％'] },
+  { header: '正確率', values: ['７５．５０％', '０％'] },
+  { header: 'Completion Rate', values: ['１００．００%', '９９．５％'] },
+])('keeps fullwidth percentage digits in the selectable original source ($header)', ({ header, values }) => {
   const material = ['| 科目 | ' + header + ' |', '| --- | --- |',
     '| 資料庫 | ' + values[0] + ' |', '| 網路 | ' + values[1] + ' |'].join('\n');
   const view = render(<StudySourceTables text={material} />);
-  const meters = Array.from(view.container.querySelectorAll('meter'));
-  expect(meters.map((bar) => bar.getAttribute('value'))).toEqual(expected);
-  expect(meters.map((bar) => bar.getAttribute('max'))).toEqual(['100', '100']);
-  expect(meters.map((bar) => bar.getAttribute('aria-valuetext'))).toEqual(
-    values.map((source) => source + '；滿格 100%'),
-  );
+  expectBaselineMeters(view.container, material);
   expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent)).toEqual(values);
   fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
   expect((screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement).value)
     .toBe(material);
-  expect(meters[0].getAttribute('aria-describedby')).toBeTruthy();
   view.unmount();
 });
 
@@ -2876,7 +2817,7 @@ it.each([
   ['７5％', '５０％'], // Mixed digits within one value
   ['７５％', '25%'], // Mixed digit formats in one table
   ['７５％', '５０．１２３％'], // Unsupported precision
-  ['７５  ％', '５０％'], // Two inserted spaces remain ambiguous; one is intentionally supported
+  ['７５  ％', '５０％'], // Spaces before the percent sign
 ])('retains invalid or ambiguous fullwidth percentage source without derived meters (%s, %s)', (first, second) => {
   const material = ['| 科目 | 完成率 |', '| --- | --- |',
     '| 資料庫 | ' + first + ' |', '| 網路 | ' + second + ' |'].join('\n');

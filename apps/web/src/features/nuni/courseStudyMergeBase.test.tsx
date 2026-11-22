@@ -82,17 +82,16 @@ it.each([
   { header: 'Return Percentage by Region', values: ['25%', '75%'], baseline: [] },
   { header: 'Percentage by Temperature', values: ['25%', '101%'], baseline: [] },
   { header: '金額', values: ['123456.01', '123456.02'], baseline: [[123456.01, 123456.02], [123456.02, 123456.02]] },
-  { header: '金額', values: ['1,200.1', '1,200.10'], baseline: [], change: [[1200.1, 1200.1], [1200.1, 1200.1]] },
-  { header: '金額', values: ['90,000,000,000,000.02', '90,000,000,000,000.03'], baseline: [],
-    change: [[90000000000000.02, 90000000000000.03], [90000000000000.03, 90000000000000.03]] },
+  { header: '金額', values: ['1,200.1', '1,200.10'], baseline: [] },
+  { header: '金額', values: ['90,000,000,000,000.02', '90,000,000,000,000.03'], baseline: [] },
   { header: '金額', values: ['90,000,000,000,000.01', '90,000,000,000,000.02'], baseline: [] },
   { header: '金額', values: ['90,000,000,000,000.1', '90,000,000,000,000.09'], baseline: [] },
   { header: '金額', values: ['9,007,199,254,740,992', '9,007,199,254,740,994'], baseline: [] },
-])('compares chart scales and exact source cells for $header and $values', ({ header, values, baseline, change }) => {
+])('compares chart scales and exact source cells for $header and $values', ({ header, values, baseline }) => {
   const { container } = render(<StudySourceTables text={tableText(header, values[0], values[1])} />);
   expect(Array.from(container.querySelectorAll('td'), (cell) => cell.textContent)).toEqual(values);
   expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
-    .toEqual(change ?? baseline);
+    .toEqual(baseline);
 });
 
 const context = {
@@ -164,6 +163,22 @@ const marks = ['', '\ufff9', '\ufffa', '\ufffb', '\u{e0100}', '禰\u{e0100}', '�
 const headers = ['完成率', '出席率', 'Completion Rate', '版本更新次數', '版本', '版本總數',
   '編號', '識別碼', '學生識別碼總數', '題號', 'Version Count', 'Verification Code',
   '一次性驗證碼 (%)', 'ISBN', 'SKU', '貨號', '郵政編碼', '文件識別碼', '時間', '溫度', 'Percentage by Temperature', 'Percentage by which revenue will increase', 'Rate by Region'];
+const chartVocabulary = [
+  'Student Identifier by Attendance Rate', '百分位排名（%）', '百分位排名（％）',
+  'Identifier', 'Student ID', 'Number', 'Course Code', 'Rank', 'Percentile',
+  '排名', '百分位', '編號', 'Count by Student ID', 'Count per Course Code', 'Count each rank',
+  'Percent Increase', '增幅 (%)', '依編號分組統計出席率', '按地區計算完成率',
+  'Attendance Rate', 'Return Rate', '正答率', '速度', 'Transfer Rate',
+];
+const chartHeaders = chartVocabulary.flatMap((header) => [
+  header,
+  header + ' (%)',
+  header.replace(/[!-~]/gu, (character) => String.fromCharCode(character.charCodeAt(0) + 0xfee0)),
+]);
+const chartValuePairs = [
+  ['101', '202'], ['１０１', '２０２'], ['25%', '75%'], ['25％', '75％'],
+  ['２５%', '７５%'], ['２５％', '７５％'], ['1,200', '2,300'], ['１，２００', '２，３００'],
+];
 const valuePairs = [['25%', '75%'], ['2', '4'], ['２５％', '７５％'], ['1,200', '2,300']];
 
 describe('merge-base differential', () => {
@@ -195,10 +210,14 @@ describe('merge-base differential', () => {
     }
   });
 
-  it('renders every merge-base table comparison with its original values and scale', () => {
+  it('matches merge-base chart eligibility and scale for every header, number format and column position', () => {
     const makeTable = (header: string, firstLabel: string, [first, second]: string[]) =>
       tableText(header, first, second).replace('| 甲 |', () => `| ${firstLabel} |`);
     const tables = [
+      ...chartHeaders.flatMap((header) => chartValuePairs.flatMap(([first, second]) => [
+        tableText(header, first, second),
+        tableText('完成率', first, second).replace('| 組別 |', () => `| ${header} |`),
+      ])),
       ...marks.map((mark) => makeTable('完成率', mark + '甲', valuePairs[0])),
       ...headers.flatMap((header) => valuePairs.map((pair) => makeTable(header, '甲', pair))),
       ...headers.flatMap((header) => marks.flatMap((mark) => [
@@ -219,26 +238,29 @@ describe('merge-base differential', () => {
       const view = render(<StudySourceTables text={source} />);
       try {
         const liveTables = view.container.querySelectorAll('table');
+        expect(liveTables).toHaveLength(baseline.length);
         for (const [index, table] of baseline.entries()) {
           const valueRows = sourceValueRows(table);
           const percentRows = sourcePercentRows(table);
           const sourceTable = liveTables[index].closest('[role="region"]');
+          expect(sourceTable?.querySelectorAll('meter')).toHaveLength(
+            (valueRows?.length ?? 0) + (percentRows?.length ?? 0),
+          );
           for (const [rows, suffix, max] of [
             [valueRows, '原文數值比較', valueRows && Math.max(...valueRows.map((row) => row.amount))],
             [percentRows, '原文百分比', 100],
           ] as const) {
-            if (!rows) continue;
             const list = Array.from(sourceTable?.querySelectorAll('ul[aria-label]') ?? [])
               .find((element) => element.getAttribute('aria-label') === `${table.headers[1]} ${suffix}`);
             expect(Array.from(list?.querySelectorAll('meter') ?? [], (meter) => [meter.value, meter.max]),
-              JSON.stringify(table)).toEqual(rows.map((row) => [row.amount, max]));
+              JSON.stringify(table)).toEqual(rows?.map((row) => [row.amount, max]) ?? []);
           }
         }
       } finally {
         view.unmount();
       }
     }
-  });
+  }, 120_000);
 
   it('accepts every explanation and step with a merge-base quotation', () => {
     const graphemes = ['禰\u{e0100}', 'cafe\u0301', 'က္က', 'ကေ', 'ကါ', 'का', 'কি', '👩‍💻', '🇹🇼', '1️⃣'];
