@@ -1,12 +1,51 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 
 export const COMMUNITY_FORM_WAIT_MS = 15_000;
 export const COMMUNITY_FORM_PENDING_COPY =
   '仍在等待送出結果。你可以先關閉，再從本頁開啟查看進度。這次送出仍可能完成，請勿重複送出。';
 export type CommunityFormCloseReason = 'cancel' | 'retain';
 export type CommunityFormDisplay = 'closed' | 'open' | 'retained-hidden';
+
+export function preventCommunityFormEnter(event: KeyboardEvent) {
+  if (event.key !== 'Enter') return;
+  const target = event.target;
+  if (target instanceof HTMLTextAreaElement) return;
+  if (
+    (target instanceof HTMLInputElement && target.type === 'text') ||
+    event.nativeEvent.isComposing ||
+    event.keyCode === 229
+  ) {
+    event.preventDefault();
+  }
+}
+
+/** Run after the successful write's DOM update and the dialog's cleanup. */
+export function useCommunityCompletionFocus(targetRef: RefObject<HTMLElement | null>, enabled = true) {
+  const pending = useRef(false);
+
+  useEffect(() => {
+    if (!pending.current) return;
+    pending.current = false;
+    if (!enabled) return;
+    const target = targetRef.current;
+    if (!target?.isConnected || target.closest('[hidden], [inert], dialog:not([open]), :disabled')) return;
+
+    const doc = target.ownerDocument;
+    if (doc.visibilityState === 'hidden') return;
+    const active = doc.activeElement;
+    if (
+      !active?.isConnected ||
+      active === doc.body ||
+      active.closest('[hidden], [inert], dialog:not([open])')
+    ) {
+      target.focus({ preventScroll: true });
+    }
+  });
+
+  return () => { pending.current = true; };
+}
 
 /** A retained form owns its write, even while its dialog is temporarily hidden. */
 export function useCommunityFormSession(onClose: (reason: CommunityFormCloseReason) => void) {

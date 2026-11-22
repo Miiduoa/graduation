@@ -21,6 +21,8 @@ import { Button } from '@/components/ui/Button';
 import { Input, Textarea } from '@/components/ui/Input';
 import {
   COMMUNITY_FORM_PENDING_COPY,
+  preventCommunityFormEnter,
+  useCommunityCompletionFocus,
   useCommunityFormSession,
   type CommunityFormCloseReason,
 } from '../../_components/useCommunityFormSession';
@@ -97,6 +99,10 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const [replyParentId, setReplyParentId] = useState<string | null>(null);
   const [sendingReply, setSendingReply] = useState(false);
   const [likeBusy, setLikeBusy] = useState(false);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  const replyInputRef = useRef<HTMLTextAreaElement>(null);
+  const restoreEditFocus = useCommunityCompletionFocus(editButtonRef);
+  const restoreReplyFocus = useCommunityCompletionFocus(replyInputRef);
   const replyWritePending = useRef(false);
   const likeWritePending = useRef(false);
   const [editSession, setEditSession] = useState<{ scope: string; open: boolean } | null>(null);
@@ -280,6 +286,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         parentReplyId: replyParentId,
         depth,
       });
+      restoreReplyFocus();
       setReplyText('');
       setReplyParentId(null);
       void refreshThreadAfterWrite();
@@ -492,6 +499,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
               <>
                 <button
                   type="button"
+                  ref={editButtonRef}
                   onClick={() => setEditSession({ scope: bookmarkScope, open: true })}
                   style={btnGhost}
                 >
@@ -721,6 +729,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
             匿名留言
           </label>
           <textarea
+            ref={replyInputRef}
             className="input"
             value={replyText}
             onChange={(e) => setReplyText(e.target.value)}
@@ -738,6 +747,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
               type="button"
               className="btn primary"
               disabled={sendingReply || !replyText.trim()}
+              onKeyDown={preventCommunityFormEnter}
               onClick={() => void submitReply()}
             >
               {sendingReply ? '送出中…' : '送出留言'}
@@ -760,6 +770,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
           }
           onSubmit={(patch) => updateCampusPost(schoolId, postId, patch)}
           onSaved={(patch) => {
+            restoreEditFocus();
             postReads.current.confirmed = postReads.current.started;
             setEditSession(null);
             setPost((current) => (current?.id === postId ? { ...current, ...patch } : current));
@@ -831,7 +842,13 @@ function EditPostModal(props: {
           >
             取消
           </Button>
-          <Button type="submit" form={formId} variant="primary" loading={session.busy}>
+          <Button
+            type="submit"
+            form={formId}
+            variant="primary"
+            loading={session.busy}
+            onKeyDown={preventCommunityFormEnter}
+          >
             {session.busy ? '儲存中…' : '儲存'}
           </Button>
         </>
@@ -840,6 +857,7 @@ function EditPostModal(props: {
       <form
         id={formId}
         noValidate
+        onKeyDown={preventCommunityFormEnter}
         onSubmit={(event) => {
           event.preventDefault();
           submit();

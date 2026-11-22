@@ -17,6 +17,8 @@ import { Button } from '@/components/ui/Button';
 import { Input, Select, Textarea } from '@/components/ui/Input';
 import {
   COMMUNITY_FORM_PENDING_COPY,
+  preventCommunityFormEnter,
+  useCommunityCompletionFocus,
   useCommunityFormSession,
   type CommunityFormCloseReason,
   type CommunityFormDisplay,
@@ -162,14 +164,7 @@ export function CourseReviewSection(props: {
   const filterRef = useRef<HTMLInputElement>(null);
   const [formDisplay, setFormDisplay] = useState<CommunityFormDisplay>('closed');
   const writeReviewRef = useRef<HTMLButtonElement>(null);
-  const firstReviewRef = useRef<HTMLButtonElement>(null);
-  const restoreReviewFocus = useRef(false);
-
-  useEffect(() => {
-    if (formDisplay !== 'closed' || !restoreReviewFocus.current) return;
-    restoreReviewFocus.current = false;
-    if (props.active !== false) writeReviewRef.current?.focus();
-  }, [formDisplay, props.active]);
+  const restoreReviewFocus = useCommunityCompletionFocus(writeReviewRef, props.active !== false);
 
   const load = useCallback(async (isCurrent: () => boolean) => {
     if (!schoolId) {
@@ -258,7 +253,6 @@ export function CourseReviewSection(props: {
             </Button>
           ) : (
             <Button
-              ref={firstReviewRef}
               type="button"
               variant="primary"
               onClick={() => setFormDisplay('open')}
@@ -298,9 +292,7 @@ export function CourseReviewSection(props: {
           myUid={myUid}
           onClose={(reason) => setFormDisplay(reason === 'retain' ? 'retained-hidden' : 'closed')}
           onSubmitted={() => {
-            restoreReviewFocus.current =
-              formDisplay === 'open' ||
-              (firstReviewRef.current !== null && document.activeElement === firstReviewRef.current);
+            restoreReviewFocus();
             setFormDisplay('closed');
             void refresh();
           }}
@@ -571,7 +563,13 @@ export function ReviewModal(props: {
           >
             取消
           </Button>
-          <Button type="submit" form={formId} variant="primary" loading={session.busy}>
+          <Button
+            type="submit"
+            form={formId}
+            variant="primary"
+            loading={session.busy}
+            onKeyDown={preventCommunityFormEnter}
+          >
             {session.busy ? '送出中…' : '送出評價'}
           </Button>
         </>
@@ -580,6 +578,7 @@ export function ReviewModal(props: {
       <form
         id={formId}
         noValidate
+        onKeyDown={preventCommunityFormEnter}
         onSubmit={(event) => {
           event.preventDefault();
           submit();
@@ -720,6 +719,8 @@ export function StudyGroupSection(props: {
   const { schoolId, myUid, myName } = props;
   const [groups, setGroups] = useState<WebStudyGroup[]>([]);
   const [formDisplay, setFormDisplay] = useState<CommunityFormDisplay>('closed');
+  const createGroupRef = useRef<HTMLButtonElement>(null);
+  const restoreGroupFocus = useCommunityCompletionFocus(createGroupRef, props.active !== false);
 
   const load = useCallback(async (isCurrent: () => boolean) => {
     if (!schoolId) {
@@ -795,6 +796,7 @@ export function StudyGroupSection(props: {
           找同學一起準備課程，約好每週讀書的時間與地點。
         </div>
         <button
+          ref={createGroupRef}
           type="button"
           className="btn primary"
           onClick={() => setFormDisplay('open')}
@@ -909,6 +911,7 @@ export function StudyGroupSection(props: {
           myName={myName}
           onClose={(reason) => setFormDisplay(reason === 'retain' ? 'retained-hidden' : 'closed')}
           onCreated={() => {
+            restoreGroupFocus();
             setFormDisplay('closed');
             void refresh();
           }}
@@ -1003,7 +1006,13 @@ export function CreateGroupModal(props: {
           >
             取消
           </Button>
-          <Button type="submit" form={formId} variant="primary" loading={session.busy}>
+          <Button
+            type="submit"
+            form={formId}
+            variant="primary"
+            loading={session.busy}
+            onKeyDown={preventCommunityFormEnter}
+          >
             {session.busy ? '建立中…' : '建立讀書會'}
           </Button>
         </>
@@ -1012,6 +1021,7 @@ export function CreateGroupModal(props: {
       <form
         id={formId}
         noValidate
+        onKeyDown={preventCommunityFormEnter}
         onSubmit={(event) => {
           event.preventDefault();
           submit();

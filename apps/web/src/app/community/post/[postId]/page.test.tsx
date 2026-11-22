@@ -794,3 +794,55 @@ it('does not let a previous account edit completion close a new editing session'
   expect(screen.getByRole('dialog', { name: '編輯貼文' })).toBeTruthy();
   expect((screen.getByLabelText('標題') as HTMLInputElement).value).toBe('新一輪編輯');
 });
+
+it('saves the complete edit only after activating the save button', async () => {
+  ownPost();
+  render(<PostDetailPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '✏️ 編輯' }));
+  const title = screen.getByLabelText('標題');
+  const tags = screen.getByLabelText('標籤（逗號分隔）');
+  const body = screen.getByLabelText('內文');
+  const save = screen.getByRole('button', { name: '儲存' });
+  fireEvent.change(title, { target: { value: '新標題' } });
+  for (const field of [title, tags]) {
+    for (const options of [{}, { shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }, { isComposing: true }, { keyCode: 229 }]) {
+      expect(fireEvent.keyDown(field, { key: 'Enter', ...options })).toBe(false);
+    }
+  }
+  expect(fireEvent.keyDown(body, { key: 'Enter' })).toBe(true);
+  expect(fireEvent.keyDown(body, { key: 'Enter', shiftKey: true })).toBe(true);
+  expect(fireEvent.keyDown(save, { key: 'Enter', isComposing: true })).toBe(false);
+  expect(fireEvent.keyDown(save, { key: 'Enter' })).toBe(true);
+  expect(mocks.updatePost).not.toHaveBeenCalled();
+  fireEvent.change(body, { target: { value: '第一行\n第二行' } });
+  fireEvent.change(tags, { target: { value: '更新標籤' } });
+  await act(async () => fireEvent.click(save));
+  expect(mocks.updatePost).toHaveBeenCalledExactlyOnceWith('pu', 'p-1', {
+    title: '新標題',
+    content: '第一行\n第二行',
+    tags: ['更新標籤'],
+  });
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '✏️ 編輯' }));
+});
+
+it.each(['body', 'other control'])('keeps reply Enter multiline and handles %s focus on completion', async (position) => {
+  const write = Promise.withResolvers<void>();
+  mocks.addReply.mockReturnValueOnce(write.promise);
+  ownPost();
+  render(<PostDetailPage />);
+  const input = await screen.findByPlaceholderText('輸入留言⋯');
+  fireEvent.change(input, { target: { value: '第一行\n第二行' } });
+  const send = screen.getByRole('button', { name: '送出留言' });
+  for (const options of [{}, { shiftKey: true }, { ctrlKey: true }, { isComposing: true }]) {
+    expect(fireEvent.keyDown(input, { key: 'Enter', ...options })).toBe(true);
+  }
+  expect(fireEvent.keyDown(send, { key: 'Enter', isComposing: true })).toBe(false);
+  expect(mocks.addReply).not.toHaveBeenCalled();
+  fireEvent.click(send);
+  const other = screen.getByRole('button', { name: '✏️ 編輯' });
+  if (position === 'other control') other.focus();
+  else expect(document.activeElement).toBe(document.body);
+  await act(async () => write.resolve());
+  expect(mocks.addReply).toHaveBeenCalledOnce();
+  expect(document.activeElement).toBe(position === 'other control' ? other : input);
+});

@@ -703,3 +703,87 @@ it('keeps a slow group submission and a hidden failure in its real parent until 
   fireEvent.click(screen.getByRole('button', { name: '＋ 建立讀書會' }));
   expect((screen.getByLabelText('讀書會名稱') as HTMLInputElement).value).toBe('');
 });
+
+it.each(['review', 'group'])('only writes the %s when the submit button is activated', async (kind) => {
+  const isReview = kind === 'review';
+  const write = isReview ? mocks.submitReview : mocks.addDoc;
+  const saved = vi.fn();
+  render(isReview
+    ? <ReviewModal schoolId="pu" myUid="alice" onClose={vi.fn()} onSubmitted={saved} />
+    : <CreateGroupModal schoolId="pu" myUid="alice" myName="Alice" onClose={vi.fn()} onCreated={saved} />);
+  if (isReview) completeReview();
+  else {
+    fill('讀書會名稱', '資料庫讀書會');
+    fill('課程名稱', '資料庫');
+  }
+  const dialog = screen.getByRole('dialog');
+  const fields = dialog.querySelectorAll('input[type="text"]');
+  expect(fields).toHaveLength(isReview ? 3 : 4);
+  for (const field of fields) {
+    for (const options of [{}, { shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }, { isComposing: true }, { keyCode: 229 }]) {
+      expect(fireEvent.keyDown(field, { key: 'Enter', ...options })).toBe(false);
+    }
+  }
+  if (isReview) {
+    const comment = screen.getByLabelText('評論（選填）');
+    expect(fireEvent.keyDown(comment, { key: 'Enter' })).toBe(true);
+    expect(fireEvent.keyDown(comment, { key: 'Enter', shiftKey: true })).toBe(true);
+  }
+  const submit = within(dialog).getByRole('button', { name: isReview ? '送出評價' : '建立讀書會' });
+  expect(fireEvent.keyDown(submit, { key: 'Enter', isComposing: true })).toBe(false);
+  expect(fireEvent.keyDown(submit, { key: 'Enter' })).toBe(true);
+  expect(write).not.toHaveBeenCalled();
+  await act(async () => fireEvent.click(submit));
+  expect(write).toHaveBeenCalledOnce();
+  expect(saved).toHaveBeenCalledOnce();
+});
+
+it.each(
+  ['review', 'group'].flatMap((kind) =>
+    ['other control', 'body', 'closed dialog', 'other tab', 'open dialog'].map((position) => ({ kind, position })),
+  ),
+)('uses focus at $kind completion when it is on $position', async ({ kind, position }) => {
+  const isReview = kind === 'review';
+  const write = Promise.withResolvers<string>();
+  (isReview ? mocks.submitReview : mocks.addDoc).mockReturnValueOnce(write.promise);
+  render(<StudyBuddyTab schoolId="pu" />);
+  await screen.findByText('尚無評價');
+  if (!isReview) {
+    fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
+    await screen.findByText('暫無讀書會');
+  }
+  const opener = screen.getByRole('button', { name: isReview ? '＋ 寫評價' : '＋ 建立讀書會' });
+  opener.focus();
+  fireEvent.click(opener);
+  if (isReview) completeReview();
+  else {
+    fill('讀書會名稱', '資料庫讀書會');
+    fill('課程名稱', '資料庫');
+  }
+  const close = screen.getByRole('button', { name: '取消' });
+  close.focus();
+  fireEvent.click(screen.getByRole('button', { name: isReview ? '送出評價' : '建立讀書會' }));
+  if (position !== 'open dialog') fireEvent.click(close);
+
+  const otherTab = screen.getByRole('tab', { name: isReview ? '讀書會' : '課程評價' });
+  let target: HTMLElement = opener;
+  if (position === 'other control') {
+    target = isReview ? screen.getByRole('searchbox') : otherTab;
+    target.focus();
+  } else if (position === 'body' || position === 'closed dialog') {
+    opener.blur();
+  } else if (position === 'other tab') {
+    target = otherTab;
+    target.focus();
+    fireEvent.click(target);
+  }
+  // Exercise a stale activeElement left behind by dialog removal.
+  const staleFocus = position === 'closed dialog'
+    ? vi.spyOn(document, 'activeElement', 'get').mockReturnValue(close)
+    : undefined;
+  await act(async () => write.resolve('saved'));
+  staleFocus?.mockRestore();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(target);
+  expect(document.body.style.overflow).toBe('');
+});

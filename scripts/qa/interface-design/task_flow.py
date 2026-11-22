@@ -306,6 +306,22 @@ async def group_form(page, config, report, capture):
     report['checks'].append('Actual study-group form associates time labels, focuses invalid end time, keeps all draft values after failure, allows dismissal and keeps editing locked during pending writes, sends the preserved payload once on retry and restores focus after closing')
 
 
+async def assert_enter_keeps_draft(page, dialog):
+    before = await page.evaluate('window.__taskFlowQA.snapshot().writes')
+    fields = dialog.locator('input[type="text"]')
+    assert await fields.count() > 0
+    for field in await fields.all():
+        for key in ('Enter', 'Shift+Enter', 'Control+Enter', 'Alt+Enter', 'Meta+Enter'):
+            await field.press(key)
+    for field in await dialog.locator('textarea').all():
+        draft = await field.input_value()
+        await field.press('End')
+        await field.press('Enter')
+        await expect(field).to_have_value(draft + '\n')
+        await field.fill(draft)
+    assert await page.evaluate('window.__taskFlowQA.snapshot().writes') == before
+
+
 async def slow_pending_parent_forms(page, report, capture):
     for kind, region_name, opener_name, dialog_name, submit_name in (
         ('review', '課程評價父層驗收', '＋ 寫評價', '寫課程評價', '送出評價'),
@@ -339,7 +355,8 @@ async def slow_pending_parent_forms(page, report, capture):
             await name.fill('慢速連線讀書會')
             fields.append((name, '慢速連線讀書會'))
             completed_text = '慢速連線讀書會'
-        await dialog.get_by_role('button', name=submit_name, exact=True).click()
+        await assert_enter_keeps_draft(page, dialog)
+        await dialog.get_by_role('button', name=submit_name, exact=True).press('Enter')
         await page.wait_for_function(
             '({kind, count}) => window.__taskFlowQA.snapshot().writes.filter(row => row.kind === kind).length === count',
             arg={'kind': kind, 'count': len(before) + 1})
@@ -389,7 +406,25 @@ async def slow_pending_parent_forms(page, report, capture):
         await page.keyboard.press('Escape')
         await expect(dialog).to_have_count(0)
         await expect(opener).to_be_focused()
-        report['checks'].append(f'Actual {kind} parent allows dismissal throughout a pending write and explains draft retention. Reopening restores the locked draft without a duplicate write. Success refreshes the list, restores focus, releases the scroll lock and clears the draft.')
+        report['checks'].append(f'Actual {kind} fields keep their draft on Enter. Enter on the submit button starts a single write. Pending dismissal and reopening preserve the locked draft. Success refreshes the list, restores focus, releases the scroll lock and clears the draft.')
+
+        if kind == 'review':
+            await opener.click()
+            await course.fill('背景送出評價課程')
+            await dialog.get_by_role('textbox', name='課程代碼（選填）', exact=True).fill('BACKGROUND-REVIEW-001')
+            rating = dialog.get_by_role('radiogroup', name='整體評分（必填）', exact=True)
+            await rating.get_by_role('radio', name='1 顆星', exact=True).press('Space')
+            await dialog.get_by_role('button', name=submit_name, exact=True).click()
+            await assert_pending_controls(dialog)
+            await dialog.get_by_role('button', name='取消', exact=True).click()
+            await expect(dialog).to_have_count(0)
+            search = region.get_by_role('searchbox', name='篩選課程名稱或代碼')
+            await search.focus()
+            await page.evaluate('(kind) => window.__taskFlowQA.settle(kind, true)', kind)
+            await expect(retained_status).to_have_count(0)
+            await expect(region.get_by_text('背景送出評價課程', exact=True)).to_be_visible()
+            await expect(search).to_be_focused()
+            report['checks'].append('Background review completion preserves focus in the course search field.')
 
 
 async def scenario(browser, origin, config, reports):
