@@ -46,8 +46,10 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [timing, setTiming] = useState<StudyTutorTiming | null>(null);
-  // Session-only timing samples: never include source, account or prompt text.
-  const [timingLog, setTimingLog] = useState<StudyTutorTiming[]>([]);
+  // Keep a monotonic attempt number even when the ten-sample window rolls over.
+  // It is scoped to this mounted passage/mode, and never contains lesson text.
+  const timingSequence = useRef(0);
+  const [timingLog, setTimingLog] = useState<Array<{ run: number; timing: StudyTutorTiming }>>([]);
   const [stepSelection, setStepSelection] = useState<{ lessonId: number; index: number } | null>(null);
   // A citation position belongs to its mode, lesson and teaching step. Reusing
   // an index for another quote can incorrectly report that an exact quote is absent.
@@ -158,7 +160,8 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
         onTiming: (measurement) => {
           if (current.current === controller) {
             setTiming(measurement);
-            setTimingLog((previous) => [...previous, measurement].slice(-10));
+            const run = ++timingSequence.current;
+            setTimingLog((previous) => [...previous, { run, timing: measurement }].slice(-10));
           }
         },
       });
@@ -283,12 +286,12 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
               aria-label="本段裝置端 AI 耗時紀錄 JSON"
               value={JSON.stringify({
                 format: 'nuni-study-tutor-timing', version: 1,
-                measurements: timingLog.map((entry, index) => ({
-                  run: index + 1,
-                  outcome: entry.outcome,
-                  preparationMs: Math.round(entry.preparationMs),
-                  generationMs: entry.generationMs === null ? null : Math.round(entry.generationMs),
-                  totalMs: Math.round(entry.totalMs),
+                measurements: timingLog.map((entry) => ({
+                  run: entry.run,
+                  outcome: entry.timing.outcome,
+                  preparationMs: Math.round(entry.timing.preparationMs),
+                  generationMs: entry.timing.generationMs === null ? null : Math.round(entry.timing.generationMs),
+                  totalMs: Math.round(entry.timing.totalMs),
                 })),
               }, null, 2)} />
           </label>

@@ -2787,6 +2787,46 @@ it('keeps selectable local timing samples without exporting source text or answe
   expect(screen.getByText(/不代表已驗證回答正確或優於其他產品/)).toBeTruthy();
 });
 
+it('retains original run numbers after the ten-sample timing window rolls over', async () => {
+  let attempts = 0;
+  mocks.run.mockImplementation(async (request) => {
+    attempts += 1;
+    request.onTiming?.({
+      preparationMs: attempts,
+      generationMs: attempts === 4 ? null : attempts * 2,
+      totalMs: attempts * 3,
+      outcome: attempts === 4 ? 'failed' : 'success',
+    });
+    if (attempts === 4) throw new Error('模擬裝置端生成失敗');
+    return explanation;
+  });
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByRole('region', { name: '本段 AI 講解' });
+  fireEvent.click(screen.getByText('本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）'));
+  const output = screen.getByRole('textbox', { name: '本段裝置端 AI 耗時紀錄 JSON' }) as HTMLTextAreaElement;
+
+  for (let expectedRun = 2; expectedRun <= 12; expectedRun += 1) {
+    fireEvent.click(screen.getByRole('button', { name: '只依原文重新講解' }));
+    await waitFor(() => {
+      const measurements = JSON.parse(output.value).measurements as Array<{ run: number }>;
+      expect(measurements[measurements.length - 1]?.run).toBe(expectedRun);
+    });
+  }
+  const report = JSON.parse(output.value);
+  expect(report.measurements.map((entry: { run: number }) => entry.run))
+    .toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  expect(report.measurements[1]).toEqual({
+    run: 4, outcome: 'failed', preparationMs: 4, generationMs: null, totalMs: 12,
+  });
+  expect(report.measurements[9]).toEqual({
+    run: 12, outcome: 'success', preparationMs: 12, generationMs: 24, totalMs: 36,
+  });
+  expect(output.value).not.toContain(material.body);
+  expect(output.value).not.toContain(explanation.answer);
+  expect(output.value).not.toContain(scope.platformAccountId);
+});
+
 it('validates pasted and previewed progress UTF-8 limits without allocating a Blob on mobile', () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.click(screen.getByText('接著上次的進度'));
