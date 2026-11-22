@@ -206,7 +206,12 @@ describe('firestore security rules', () => {
     await seedFirestore(db => db.doc(root + '/members/teacher').update({ status: 'active' }));
     for (const [i, p] of paths.entries()) {
       await assertSucceeds(teacher.doc(p).update({ title: 'Reauthorized edit ' + i }));
-      await assertSucceeds(teacher.doc(p).delete());
+      // KnowledgeBase deletions are intentionally forbidden even for teachers.
+      if (p.includes('/knowledgeBase/')) {
+        await assertFails(teacher.doc(p).delete());
+      } else {
+        await assertSucceeds(teacher.doc(p).delete());
+      }
       await assertSucceeds(teacher.doc(p + '-restored-' + i).set({ title: 'Reauthorized create' }));
     }
   });
