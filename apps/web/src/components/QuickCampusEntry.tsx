@@ -3,7 +3,7 @@
 import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvider';
 
 import Link from 'next/link';
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import {
   forgetDirectorySearch,
@@ -34,6 +34,7 @@ import {
 } from '@campus/shared/src/assistantServices';
 import { AssistantServiceLinks } from './AssistantServiceLinks';
 import { useCampusFinderAccount, useCampusFinderDraftScope } from '@/lib/useCampusFinderAccount';
+import { AssistantLinkNavigation, useAssistantLinkNavigation } from './AssistantReplyLink';
 import styles from './QuickCampusEntry.module.css';
 
 type Analysis = {
@@ -47,9 +48,11 @@ type Analysis = {
 
 export function QuickCampusEntry({
   onAsk,
+  onNavigate,
   compact = false,
 }: {
   onAsk?: ((phrase: string) => void) | null;
+  onNavigate?: (href: string) => void;
   compact?: boolean;
 } = {}) {
   const id = useId();
@@ -188,6 +191,14 @@ export function QuickCampusEntry({
       open: true,
       scope: storageScope,
     });
+  }
+
+  const panelNavigation = useContext(AssistantLinkNavigation);
+  const navigate = onNavigate ?? panelNavigation;
+  const notifyNavigation = useAssistantLinkNavigation(navigate);
+  function navigateQuick(event: React.MouseEvent<HTMLAnchorElement>) {
+    rememberQuick(event.currentTarget.getAttribute('href') ?? '');
+    notifyNavigation(event);
   }
 
   async function analyze(input: string) {
@@ -334,7 +345,7 @@ export function QuickCampusEntry({
         <Link
           className={styles.allServices}
           href={searchHref}
-          onClick={() => rememberQuick(searchHref)}
+          onClick={navigateQuick}
         >
           所有服務 <CampusIcon name="arrow" size={16} />
         </Link>
@@ -407,7 +418,7 @@ export function QuickCampusEntry({
             <Link
               className={styles.analyzeButton}
               href={assistantHref}
-              onClick={() => rememberQuick(assistantHref)}
+              onClick={navigateQuick}
             >
               交給校園助理
             </Link>
@@ -440,11 +451,13 @@ export function QuickCampusEntry({
         >
           {publicIntent && analysisAction}
           {serviceIntent?.kind === 'catalog' && selectedSchoolId && (
-            <AssistantServiceLinks
-              serviceIds={ASSISTANT_SERVICES.map((service) => service.id)}
-              schoolId={selectedSchoolId}
-              audience={platformAudience ? 'platform' : 'school'}
-            />
+            <AssistantLinkNavigation.Provider value={navigate}>
+              <AssistantServiceLinks
+                serviceIds={ASSISTANT_SERVICES.map((service) => service.id)}
+                schoolId={selectedSchoolId}
+                audience={platformAudience ? 'platform' : 'school'}
+              />
+            </AssistantLinkNavigation.Provider>
           )}
           {serviceIntent?.kind === 'catalog' && !selectedSchoolId && (
             <p>先選擇學校，即可查看對應的服務入口。</p>
@@ -503,7 +516,7 @@ export function QuickCampusEntry({
                     key={action.href}
                     href={route(action.href, action.serviceId)}
                     className={styles.action}
-                    onClick={() => rememberQuick(route(action.href, action.serviceId))}
+                    onClick={navigateQuick}
                   >
                     <span>
                       <strong>{action.name}</strong>
@@ -534,7 +547,7 @@ export function QuickCampusEntry({
             <p className={styles.noMatch}>沒有找到明確入口，可以補充需求或詢問校園助理。</p>
           ) : null}
           <div className={styles.footerLinks}>
-            <Link href={searchHref} onClick={() => rememberQuick(searchHref)}>
+            <Link href={searchHref} onClick={navigateQuick}>
               搜尋更多服務
             </Link>
             {!primaryHandoff && onAsk && canUseAssistant ? (
@@ -545,7 +558,7 @@ export function QuickCampusEntry({
               onAsk === undefined &&
               campusReady &&
               (canUseAssistant || account.status === 'guest') ? (
-              <Link href={assistantHref} onClick={() => rememberQuick(assistantHref)}>
+              <Link href={assistantHref} onClick={navigateQuick}>
                 {account.status === 'guest' ? '登入後詢問助理' : '詢問校園助理'}
               </Link>
             ) : null}

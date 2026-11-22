@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import type { ReactNode } from 'react';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
@@ -307,9 +307,9 @@ export function AssistantThread({
             ? '直接查課程、時間、教室與未交作業，也可查個人行程；雲端查詢涵蓋已同步資料。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。'
             : '查詢自己的行程與公開校園資訊，或接續目前的工作。個人時間安排會先預覽，確認後才儲存。'}</p>
           <nav className={styles.services} aria-label="校園服務入口">
-            <Link href={'/map' + schoolQuery}>校園地圖</Link>
-            <Link href={'/bus' + schoolQuery}>公車資訊</Link>
-            <Link href={'/cafeteria' + schoolQuery}>餐廳資訊</Link>
+            <AssistantReplyLink href={'/map' + schoolQuery}>校園地圖</AssistantReplyLink>
+            <AssistantReplyLink href={'/bus' + schoolQuery}>公車資訊</AssistantReplyLink>
+            <AssistantReplyLink href={'/cafeteria' + schoolQuery}>餐廳資訊</AssistantReplyLink>
           </nav>
         </>
       )}
@@ -439,7 +439,7 @@ export function AssistantThread({
           <p className={styles.alert} role="alert">
             {error}
             {assistantPermissionSettingsHref(error) && <>
-              {' '}<Link href={assistantPermissionSettingsHref(error)!}>設定 AI 代辦權限</Link>
+              {' '}<AssistantReplyLink href={assistantPermissionSettingsHref(error)!}>設定 AI 代辦權限</AssistantReplyLink>
             </>}
           </p>
         ) : null}

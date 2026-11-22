@@ -90,6 +90,12 @@
   transition: transform var(--motion-fast) var(--ease-out);
 }
 
+.navLabel {
+  min-width: 0;
+  max-width: 100%;
+  text-align: center;
+}
+
 .nav > a[aria-current='page'] {
   color: var(--brand);
   background: var(--accent-soft);
@@ -496,7 +502,10 @@
     grid-template-columns: repeat(5, minmax(0, 1fr));
     align-items: stretch;
     gap: 4px;
-    height: var(--mobile-nav-offset, calc(72px + env(safe-area-inset-bottom, 0px)));
+    /* The measured offset is shared with content and floating panels. It must
+       not size this bar, or enlarged labels would create a resize loop. */
+    min-height: calc(var(--mobile-nav-height, 72px) + env(safe-area-inset-bottom, 0px));
+    height: auto;
     padding: 6px max(12px, env(safe-area-inset-right, 0px))
       calc(6px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
     border-top: 1px solid var(--border);
@@ -508,17 +517,23 @@
     gap: 4px;
     min-width: 0;
     min-height: 56px;
-    height: 100%;
+    height: auto;
     padding: 5px 2px 7px;
     border-radius: 13px;
     font-size: var(--font-label-size);
     line-height: 1.2;
+    white-space: normal;
+    overflow-wrap: anywhere;
     -webkit-tap-highlight-color: transparent;
   }
 
   .nav > a > svg {
     width: 22px;
     height: 22px;
+  }
+
+  .navLabel {
+    flex-shrink: 0;
   }
 
   .nav > a[aria-current='page']::after {

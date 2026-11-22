@@ -39,8 +39,9 @@
 }
 
 .toast {
+  --toast-icon-size: max(24px, calc(var(--font-body-size, 0.9375rem) * 1.6));
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 44px;
+  grid-template-columns: var(--toast-icon-size) minmax(0, 1fr) 44px;
   align-items: start;
   gap: 10px;
   min-width: 0;
@@ -77,13 +78,13 @@
 .icon {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: var(--toast-icon-size);
+  height: var(--toast-icon-size);
   margin-top: 10px;
   border-radius: 50%;
   background: var(--toast-accent-soft);
   color: var(--toast-accent);
-  font-size: 0.875rem;
+  font-size: var(--font-body-sm-size, 0.8125rem);
   font-weight: 700;
 }
 
@@ -98,14 +99,14 @@
 }
 
 .title {
-  font-size: 0.9375rem;
+  font-size: var(--font-body-size, 0.9375rem);
   font-weight: 600;
   line-height: 1.45;
 }
 
 .message {
   color: var(--muted);
-  font-size: 0.875rem;
+  font-size: var(--font-body-sm-size, 0.8125rem);
   line-height: 1.55;
 }
 
@@ -121,7 +122,7 @@
   border-radius: 8px;
   background: transparent;
   color: var(--muted);
-  font-size: 1rem;
+  font-size: var(--font-body-size, 0.9375rem);
   cursor: pointer;
   touch-action: manipulation;
   transition:
@@ -149,7 +150,9 @@
 @media (max-width: 760px) {
   .region {
     --toast-edge: 12px;
-    --toast-bottom: calc(var(--mobile-nav-offset, calc(72px + env(safe-area-inset-bottom, 0px))) + var(--toast-edge));
+    --toast-bottom: calc(
+      var(--mobile-nav-offset, calc(72px + env(safe-area-inset-bottom, 0px))) + var(--toast-edge)
+    );
   }
 }
 
