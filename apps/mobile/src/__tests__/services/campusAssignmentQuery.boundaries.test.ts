@@ -168,6 +168,6 @@ test('期限標籤用台灣時間顯示午夜，並明確區分逾期與此刻�
   assert.ok(label.startsWith('期限已過 · '));
   assert.ok(label.includes('10/28'));
   assert.ok(label.includes('00:00'));
-  assert.ok(assignmentDeadlineLabel(row('此刻', new Date(NOW).toISOString()), NOW).startsWith('截止 '));
+  assert.ok(assignmentDeadlineLabel(row('此刻', new Date(NOW).toISOString()), NOW).startsWith('正好到截止點 · '));
   assert.equal(assignmentDeadlineLabel(row('未知'), NOW), '截止日期未提供，請核對原始作業頁');
 });

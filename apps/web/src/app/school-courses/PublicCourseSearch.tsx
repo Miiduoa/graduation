@@ -15,6 +15,7 @@ import {
 } from '@campus/shared/src/publicCourseFilters';
 import { ncnuCourseMeetings, ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
 import { nthuCourseMeetings, nthuTimetableImportCsv } from '@campus/shared/src/nthuCourseSchedule';
+import { MAX_PUBLIC_COURSE_BULK_SELECTION, mergePublicCourseTimetableCsv } from '@campus/shared/src/mergePublicCourseTimetableCsv';
 import { formatSemester } from '@/lib/academicRecords';
 import { campusServiceHref } from '@/lib/campusNavigation';
 import styles from '@/components/academic/academic.module.css';
@@ -23,7 +24,7 @@ import courseStyles from './schoolCourses.module.css';
 type CourseSearch = { query: string; filters?: PublicCourseFilters };
 type SearchResult = CourseSearch & (
   | { status: 'loading' | 'error' }
-  | { status: 'ready'; courses: PublicCatalogCourse[]; truncated: boolean; fetchedAt?: string; unresolvedCount?: number }
+  | { status: 'ready'; courses: PublicCatalogCourse[]; truncated: boolean; sourceUrl: string; fetchedAt?: string; unresolvedCount?: number }
 );
 
 const QUERY_LENGTH_NOTICE = '搜尋文字最多 80 個字，請縮短後再查詢。';
@@ -121,11 +122,22 @@ function queuePublicCourseClipboardWrite(
 
 type ClipboardFeedback = { csv: string; cardId: string; status: 'copied' | 'manual' };
 
-function CatalogCourse({ course, schoolId, importHref, cardId, review, copyFeedback, onCopy }: {
+function courseCardId(course: PublicCatalogCourse, index: number): string {
+  return JSON.stringify([
+    course.semester, course.code, course.section, course.title,
+    course.department, course.teacher, course.time, course.room,
+    course.credits, course.meetings ?? [], index,
+  ]);
+}
+
+function CatalogCourse({ course, schoolId, importHref, cardId, rowNumber, selected, onSelect, review, copyFeedback, onCopy }: {
   course: PublicCatalogCourse;
   schoolId: PublicCourseCatalogResponse['schoolId'];
   importHref: string;
   cardId: string;
+  rowNumber: number;
+  selected: boolean;
+  onSelect: (selected: boolean) => void;
   review: (course: PublicCatalogCourse, csv: string) => string;
   copyFeedback: ClipboardFeedback | null;
   onCopy: (csv: string) => void;
@@ -165,6 +177,12 @@ function CatalogCourse({ course, schoolId, importHref, cardId, review, copyFeedb
       {!csv && <p role="status">校方課號或上課節次尚無法安全匯入（可能缺漏或重複），請先至校方課程目錄核對。</p>}
       {csv && (
         <div className={courseStyles.cardActions}>
+          <label className={styles.field}>
+            <input type="checkbox" checked={selected}
+              aria-label={`選入批次核對：第${rowNumber}筆，${course.title}，課號${course.code}，班別${course.section || '未提供'}`}
+              onChange={(event) => onSelect(event.target.checked)} />
+            選入批次核對
+          </label>
           <button type="button" className="btn primary" onClick={() => setNotice(review(course, csv))}>帶入課表核對</button>
           <button type="button" className="btn" onClick={() => onCopy(csv)}>複製課表匯入資料</button>
           {notice && <p role="status">{notice}</p>}
@@ -223,6 +241,8 @@ function PublicCourseSearchForm({
     : !isPublicCourseOperationQuery(linked.query) ? QUERY_LENGTH_NOTICE : null);
   const [result, setResult] = useState<SearchResult | null>(() => linked.search ? { status: 'loading', ...linked.search } : null);
   const [copyFeedback, setCopyFeedback] = useState<ClipboardFeedback | null>(null);
+  const [selectedCards, setSelectedCards] = useState<string[]>([]);
+  const [bulkNotice, setBulkNotice] = useState<string | null>(null);
   const copyAttempt = useRef(0);
   // A pending queued copy belongs to the visible search, never a departed page.
   useEffect(() => () => { copyAttempt.current += 1; }, []);
@@ -243,7 +263,11 @@ function PublicCourseSearchForm({
     }
   }, []);
 
-  function review(course: PublicCatalogCourse, csv: string): string {
+  function reviewCourses(courses: readonly PublicCatalogCourse[], csv: string): string {
+    const first = courses[0];
+    if (!first || courses.some((course) => course.semester !== first.semester)) {
+      return '所選課程包含不同學期，請分開核對與匯入。';
+    }
     const { scope } = context;
     if (!context.canPrepareSchoolDraft || scope.schoolId !== schoolId) {
       return `請先確認目前帳號和所選校園為${schoolName}，也可以先複製課表資料。`;
@@ -252,10 +276,22 @@ function PublicCourseSearchForm({
       if (readPersonalImportDraft(scope) || readPersonalImportPartialDraft(scope)) {
         return '匯入頁已有待核對的草稿。請先處理草稿，或複製本課程資料留用。';
       }
-      const year = course.semester.slice(0, -1);
-      const semester = course.semester.slice(-1);
-      const source = { type: 'paste' as const, name: `${schoolName}本學期開設課程` };
+      const year = first.semester.slice(0, -1);
+      const semester = first.semester.slice(-1);
+      // Keep provenance for both single-course and batch review drafts.
+      // A retrieval timestamp is not the university's last-updated time.
+      const fetchedAt = result?.status === 'ready' && result.fetchedAt
+        ? formatPublicCatalogFetchedAt(result.fetchedAt) : null;
+      const sourceUrl = result?.status === 'ready' ? result.sourceUrl : '未提供';
+      const source = {
+        type: 'paste' as const,
+        name: `${schoolName}｜${year}學年度第${semester}學期公開開課資料｜來源：${sourceUrl}｜` +
+          `資料擷取：${fetchedAt ? `${fetchedAt}（台灣時間；非校方更新時間）` : '時間未提供'}`,
+      };
       const { rows, issues } = parsePersonalImport(csv, { kind: 'timetable', schoolId, academicYear: year, semester, source });
+      if (courses.length > 1 && issues.some(issue => issue.code === 'duplicate-row')) {
+        return '所選課程包含重複的課表資料。請取消問題課程後重試。';
+      }
       if (!rows.length || issues.some(issue => issue.severity === 'error')) return '課表資料需要手動核對，請先複製再貼到匯入頁。';
       writePersonalImportDraft(scope, { kind: 'timetable', year, semester, text: csv, source, rows, parseIssues: issues, excluded: [], backup: null });
     } catch {
@@ -263,6 +299,22 @@ function PublicCourseSearchForm({
     }
     router.push(importHref + '#import-review');
     return '';
+  }
+
+  function review(course: PublicCatalogCourse, csv: string): string {
+    return reviewCourses([course], csv);
+  }
+
+  function selectCard(cardId: string, checked: boolean) {
+    setBulkNotice(null);
+    if (checked && !selectedCards.includes(cardId) &&
+        selectedCards.length >= MAX_PUBLIC_COURSE_BULK_SELECTION) {
+      setBulkNotice(`一次最多選取 ${MAX_PUBLIC_COURSE_BULK_SELECTION} 門課，請分批核對。`);
+      return;
+    }
+    setSelectedCards((previous) => checked
+      ? previous.includes(cardId) ? previous : [...previous, cardId]
+      : previous.filter((key) => key !== cardId));
   }
   const cancelSearch = useCallback(() => {
     if (!pending.current) return;
@@ -296,11 +348,19 @@ function PublicCourseSearchForm({
         void response.body?.cancel().catch(() => undefined);
         return;
       }
-      // Native already bounds this contract. Web must reject oversized public
-      // replies too, before parsing or offering course rows for personal import.
-      if (!response.ok || Number(response.headers?.get('content-length')) > MAX_PUBLIC_COURSE_RESPONSE_BYTES) {
-        // A rejected header/status must also stop the incoming body. Otherwise
-        // an oversized upstream response can keep downloading after we error.
+      // Align Web with native and assistant: reject malformed length metadata
+      // or a non-JSON response before reading any course payload.
+      const lengthHeader = response.headers?.get('content-length') ?? null;
+      const contentType = response.headers?.get('content-type') ?? null;
+      const declaredBytes = lengthHeader === null ? 0 : Number(lengthHeader);
+      if (!response.ok ||
+          (lengthHeader !== null &&
+            (!/^\d+$/.test(lengthHeader.trim()) ||
+              !Number.isSafeInteger(declaredBytes) ||
+              declaredBytes > MAX_PUBLIC_COURSE_RESPONSE_BYTES)) ||
+          (contentType !== null &&
+            !/^application\/json(?:\s*;|\s*$)/i.test(contentType.trim()))) {
+        // A rejected source must not keep downloading in the background.
         void response.body?.cancel().catch(() => undefined);
         throw new Error('Invalid public catalog response');
       }
@@ -312,7 +372,7 @@ function PublicCourseSearchForm({
       if (pending.current?.controller === controller && !controller.signal.aborted) {
         setResult({
           status: 'ready', ...search, courses: data.courses, truncated: data.truncated,
-          fetchedAt: data.fetchedAt, unresolvedCount: data.unresolvedCount,
+          sourceUrl: data.sourceUrl, fetchedAt: data.fetchedAt, unresolvedCount: data.unresolvedCount,
         });
       }
     } catch {
@@ -335,6 +395,8 @@ function PublicCourseSearchForm({
 
   function editSearch() {
     cancelSearch();
+    setSelectedCards([]);
+    setBulkNotice(null);
     copyAttempt.current += 1;
     setResult(null);
     setCopyFeedback(null);
@@ -356,6 +418,8 @@ function PublicCourseSearchForm({
     setQueryNotice(null);
     copyAttempt.current += 1;
     setCopyFeedback(null);
+    setSelectedCards([]);
+    setBulkNotice(null);
     const submitted = courseSearch(query, filters);
     setResult({ status: 'loading', ...submitted });
     void searchCourses(submitted);
@@ -374,6 +438,22 @@ function PublicCourseSearchForm({
     const submitted = courseSearch(query, {});
     setResult({ status: 'loading', ...submitted });
     void searchCourses(submitted);
+  }
+
+  const visibleCourses = result?.status === 'ready' ? result.courses : [];
+  const selectedCourses = visibleCourses
+    .map((course, index) => ({ course, cardId: courseCardId(course, index) }))
+    .filter(({ cardId }) => selectedCards.includes(cardId))
+    .map(({ course }) => course);
+
+  function reviewSelectedCourses() {
+    const csv = mergePublicCourseTimetableCsv(schoolId, selectedCourses);
+    if (!csv) {
+      setBulkNotice('所選課程可能有不同學期、重複課號班別或無法核對的節次／學分。請取消問題課程後重試。');
+      return;
+    }
+    const notice = reviewCourses(selectedCourses, csv);
+    if (notice) setBulkNotice(notice);
   }
 
   const term = result?.query ? '「' + result.query + '」' : '';
@@ -445,7 +525,7 @@ function PublicCourseSearchForm({
       )}
       {result?.status === 'ready' && (
         <>
-          <p role="status">
+          <p role="status" aria-label="查詢結果">
             {result.courses.length ? `顯示${term}${result.courses.length} 筆開課資料。` : `這次查詢沒有找到${term}課程。`}
             {result.truncated ? '符合條件的課程超過顯示上限，可改用課號或老師姓名縮小範圍。' : null}
           </p>
@@ -454,17 +534,25 @@ function PublicCourseSearchForm({
           </p>}
           {result.fetchedAt && <p>校方資料擷取：{formatPublicCatalogFetchedAt(result.fetchedAt)}（台灣時間；非校方更新時間）</p>}
           {result.courses.length > 0 && (
+            <div className={courseStyles.searchActions}>
+              <p role="status" aria-label="選取課程">已選 {selectedCourses.length} 門課（最多 {MAX_PUBLIC_COURSE_BULK_SELECTION} 門），可一次帶入同學期課表核對。</p>
+              <button type="button" className="btn primary" disabled={selectedCourses.length < 2}
+                onClick={reviewSelectedCourses}>將選取的課程一起帶入核對</button>
+              <button type="button" className="btn" disabled={selectedCourses.length === 0}
+                onClick={() => { setSelectedCards([]); setBulkNotice(null); }}>清除已選課程</button>
+              {bulkNotice && <p role="alert">{bulkNotice}</p>}
+            </div>
+          )}
+          {result.courses.length > 0 && (
             <ul className={courseStyles.courses}>
               {result.courses.map((course, index) => {
-                // Full row identity plus occurrence distinguishes same-code listings.
-                const cardId = JSON.stringify([
-                  course.semester, course.code, course.section, course.title,
-                  course.department, course.teacher, course.time, course.room,
-                  course.credits, course.meetings ?? [], index,
-                ]);
+                const cardId = courseCardId(course, index);
                 return <CatalogCourse
                   key={cardId}
                   cardId={cardId}
+                  rowNumber={index + 1}
+                  selected={selectedCards.includes(cardId)}
+                  onSelect={(checked) => selectCard(cardId, checked)}
                   course={course}
                   schoolId={schoolId}
                   importHref={importHref}
