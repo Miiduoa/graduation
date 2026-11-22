@@ -14,10 +14,18 @@ const latest = '(?:我(?:的)?)?(?:最近|最新)(?:的)?(?:一筆|一張)?(?:�
 const pickupTime = '(?:預定)?取餐時間';
 const latestPickupTime = latest + '的?' + pickupTime;
 const destination = '(?:' + placement + ')(?:我(?:的)?)?(?:個人)?(?:行事曆|日曆|行程)(?:中|裡|內)?';
+const readPrompt = '(?:' + polite + '(?:確認|查詢|查看|查|知道|詢問|問)(?:一下)?)';
+const order = '(?:(?!' + pickupVerb.source + ')[^,;、。.!?]){0,80}訂單';
+const readSeparator = '[,;、。.!?]+';
+const calendarEntry = '(?:' + destination + '|記在(?:我(?:的)?)?(?:個人)?(?:行事曆|日曆)(?:上|中|裡|內)?)';
 const calendarStatus = new RegExp(
-  '^(?:' + polite + '(?:查詢|查看|查)' + latest + '(?:的?' + pickupTime + ')?[,;、])?' +
-    polite + '(?:(?:確認|查詢|查看|查|知道|詢問|問)(?:一下)?)?(?:(?:' + latest + '的?)?' + pickupTime + ')?' +
-    '(?:有沒有|是否|是不是)(?:已經|已)?' + destination + '(?:了|嗎|呢)?[。.!?]?$',
+  '^(?:' + readPrompt + '?' + order + '(?:的?' + pickupTime + '(?:是?(?:幾點|什麼時候)(?:啊|呢|嗎)?)?)?' +
+    readSeparator + '(?:也|順便|另外)?)?' +
+    readPrompt + '?(?:(?:' + order + '的?)?' + pickupTime + ')?' +
+    '(?:(?:有沒有|有無|是否|是不是)(?:已經|已)?' + calendarEntry + '(?:了)?(?:嗎|呢)?|' +
+    '(?:已經|已|有)?' + calendarEntry + '(?:了嗎|嗎|了沒|沒有)|' +
+    '(?:已經|已)' + calendarEntry + '(?:了|呢)?(?=[?])|' +
+    calendarEntry + '(?:了|呢)(?=[?]))[。.!?]*$',
 );
 const hours: Readonly<Record<string, number>> = {
   半小時: 30,

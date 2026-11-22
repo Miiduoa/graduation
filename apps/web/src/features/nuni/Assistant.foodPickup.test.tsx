@@ -87,6 +87,29 @@ it('reaches the scoped server planner without model readiness or consent, preser
 });
 
 it.each([
+  '請問昨天訂單的取餐時間有沒有記到日曆？',
+  '請問最新訂單的取餐時間是幾點？我想知道有沒有記到日曆。',
+])('submits the existing read question with consent when pickup planning is disabled: %s', async question => {
+  capability = { enabled: true, ready: true, version: 2, planning: false };
+  const answer = '可以在個人日曆查看已記錄的取餐時間。';
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json(capability);
+    requests.push({ action: url.split('/').at(-1)!, body: JSON.parse(String(init?.body)) });
+    return json({ answer, steps: [], cards: [] });
+  }));
+  render(<Assistant />);
+  fireEvent.change(await screen.findByLabelText('問題'), { target: { value: question } });
+  const submit = screen.getByRole('button', { name: '送出' }) as HTMLButtonElement;
+  expect(submit.disabled).toBe(true);
+  fireEvent.click(screen.getByRole('checkbox'));
+  await waitFor(() => expect(submit.disabled).toBe(false));
+  fireEvent.click(submit);
+  await screen.findByText(answer);
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({ action: 'ask', body: { question, consent: true } });
+});
+
+it.each([
   { enabled: false, ready: false, version: 2, planning: true },
   { enabled: true, ready: false, version: 2, planning: false },
   { enabled: true, ready: true, version: 2 },
