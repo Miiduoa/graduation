@@ -1743,14 +1743,33 @@ it('drops cached contents for courses absent from the linked session course list
   for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
 });
 
-it('serves legacy cached homework and valid course extras alongside malformed course rows', async () => {
+it.each(['malformed', 'duplicate'] as const)('refetches legacy cached homework when its course list is %s', async (scenario) => {
   const { request, source, store } = setup();
   expect((await request({ courseId: 10001 })).status).toBe(200);
   const snapshot = store.docs.get(CACHE)!.snapshot as Record<string, unknown>;
   const courses = snapshot.courses as unknown[];
-  snapshot.courses = [null, 'broken', 42, { name: '沒有課程編號' }, { id: -1 }, ...courses];
+  snapshot.courses = scenario === 'malformed'
+    ? [null, 'broken', 42, { name: '沒有課程編號' }, { id: -1 }, ...courses]
+    : [...courses, ...courses];
+  (snapshot.homework as Array<{ title: string }>)[0].title = '未通過課程核對的舊快取作業';
   const extras = store.docs.get(CACHE)!.extras as Record<string, unknown>;
   extras['10002'] = structuredClone(extras['10001']);
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  // Course identity is part of the cache's trust boundary. A malformed list
+  // must be refetched, not reused just because another row has a valid ID.
+  const refreshedResponse = await request({ courseId: 10001 });
+  expect(refreshedResponse.status).toBe(200);
+  const refreshed = await refreshedResponse.json();
+  expect(refreshed.result.cache.hit).toBe(false);
+  expect(refreshed.result.courses).toEqual([{ id: 10001, name: '資料庫系統' }]);
+  expect(refreshed.result.homework).toHaveLength(2);
+  expect(refreshed.result.contentsLoadedFor).toEqual([10001]);
+  expect(refreshed.result.materials).toHaveLength(1);
+  expect(JSON.stringify(refreshed)).not.toContain('未通過課程核對的舊快取作業');
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
   for (const method of Object.values(source)) vi.mocked(method).mockClear();
 
   for (const data of [{}, { courseId: 10001 }]) {
@@ -1776,6 +1795,31 @@ it('serves legacy cached homework and valid course extras alongside malformed co
   expect(body.result.cache.hit).toBe(false);
   expect(body.result.materials).toHaveLength(1);
   expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+});
+
+it.each(['malformed', 'duplicate'] as const)('does not serve an invalid %s course cache when fresh course verification fails', async (scenario) => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const snapshot = store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot;
+  const originalCourses = structuredClone(snapshot.courses);
+  (snapshot as unknown as Record<string, unknown>).courses = scenario === 'malformed'
+    ? [null, ...originalCourses]
+    : [...originalCourses, ...originalCourses];
+  snapshot.homework[0].title = '不可當作備援回傳的舊快取作業';
+  const before = structuredClone(store.docs.get(CACHE));
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+  vi.mocked(source.fetchCourses).mockRejectedValueOnce(new Error('upstream unavailable'));
+
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(503);
+  const body = await response.json();
+  expect(body.result).toBeUndefined();
+  expect(body.error.status).toBe('UNAVAILABLE');
+  expect(JSON.stringify(body)).not.toContain('不可當作備援回傳的舊快取作業');
+  expect(source.fetchCourses).toHaveBeenCalledTimes(1);
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)).toEqual(before);
 });
 
 it('does not prune course contents refreshed after the initial cache read', async () => {
