@@ -412,9 +412,6 @@ function ImportWorkspace({
   }, [ledger.records]);
   const schoolSelection = useOptionalSelectedSchool();
   const suspended = useRef(paused);
-  useLayoutEffect(() => {
-    suspended.current = paused;
-  }, [paused]);
   const nuni = useOptionalNuniSession();
   const periodProfile = periodProfileForSchool(scope.schoolId);
   const [kind, setKind] = useState<PersonalImportKind>('timetable');
@@ -468,7 +465,8 @@ function ImportWorkspace({
   const [notice, setNotice] = useState('');
   const [progress, setProgress] = useState('');
   const [reading, setReading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [pendingWrite, setPendingWrite] = useState<'import' | 'undo' | 'edit' | null>(null);
+  const saving = pendingWrite !== null;
   const [preview, setPreviewState] = useState('');
   const [workspaces, setWorkspaces] = useState<NuniWorkspace[]>([]);
   const [linkRefreshVersion, setLinkRefreshVersion] = useState(0);
@@ -488,7 +486,11 @@ function ImportWorkspace({
   const documentFile = useRef<File | null>(null);
   const active = useRef(true);
   const previewUrl = useRef('');
-  const writing = useRef(false);
+  const writing = useRef<AbortController | null>(null);
+  useLayoutEffect(() => {
+    suspended.current = paused;
+    if (paused) writing.current?.abort(new Error('正在確認帳號與校園，這次等待已停止。'));
+  }, [paused]);
   const fileInput = useRef<HTMLInputElement>(null);
   const aiImageInput = useRef<HTMLInputElement>(null);
   const originalText = useRef<HTMLTextAreaElement>(null);
@@ -558,6 +560,7 @@ function ImportWorkspace({
     active.current = true;
     return () => {
       active.current = false;
+      writing.current?.abort();
       job.current?.abort();
       pendingOriginalTextFocus.current = null;
       documentFile.current = null;
@@ -1248,14 +1251,16 @@ function ImportWorkspace({
       (aiNeedsReview && !aiReviewed)
     )
       return;
-    writing.current = true;
-    setSaving(true);
+    const controller = new AbortController();
+    writing.current = controller;
+    setPendingWrite('import');
+    setNotice('');
     try {
       const result = await savePersonalImportBatch(
         scope,
         selected,
         () => active.current && !suspended.current,
-        { restoreBackup: !!backup },
+        { restoreBackup: !!backup, signal: controller.signal },
       );
       if (!active.current) return;
       // Finish the draft before announcing success; the next effect may not run
@@ -1286,32 +1291,34 @@ function ImportWorkspace({
       setReviewIssueIds(null);
       setAiReviewed(false);
     } catch (error) {
-      if (active.current) setNotice(errorMessage(error));
+      if (active.current)
+        setNotice(errorMessage(controller.signal.aborted ? controller.signal.reason : error));
     } finally {
-      writing.current = false;
-      if (active.current) setSaving(false);
+      writing.current = null;
+      if (active.current) setPendingWrite(null);
     }
   };
   const mutate = async (
-    action: () => Promise<unknown>,
-    message: string,
-    options: { propagateError?: boolean } = {},
+    operation: 'undo' | 'edit',
+    action: (signal: AbortSignal) => Promise<string>,
   ) => {
-    if (writing.current) return;
-    writing.current = true;
-    setSaving(true);
+    if (!active.current || suspended.current || writing.current) return;
+    const controller = new AbortController();
+    writing.current = controller;
+    setPendingWrite(operation);
+    setNotice('');
     try {
-      await action();
+      const message = await action(controller.signal);
       if (active.current) {
         setNotice(message);
         setEditing(null);
       }
     } catch (error) {
-      if (active.current) setNotice(errorMessage(error));
-      if (options.propagateError) throw error;
+      if (active.current)
+        setNotice(errorMessage(controller.signal.aborted ? controller.signal.reason : error));
     } finally {
-      writing.current = false;
-      if (active.current) setSaving(false);
+      writing.current = null;
+      if (active.current) setPendingWrite(null);
     }
   };
   const exportRecords = () => {
@@ -1387,6 +1394,20 @@ function ImportWorkspace({
         });
       }}
     />
+  );
+  const writeWait = (
+    <div className={styles.actions}>
+      <p role="status">正在等待儲存個人紀錄…</p>
+      <button
+        type="button"
+        className="btn"
+        onClick={() =>
+          writing.current?.abort(new Error('已取消等待，這次操作未變更個人紀錄。'))
+        }
+      >
+        取消等待
+      </button>
+    </div>
   );
   return (
     <div className={styles.root}>
@@ -2611,6 +2632,7 @@ function ImportWorkspace({
                 {saving ? '儲存中…' : `確認匯入 ${selected.length} 筆`}
               </button>
             </div>
+            {pendingWrite === 'import' && writeWait}
           </>
         )}
       </section>
@@ -2651,6 +2673,7 @@ function ImportWorkspace({
             )}
           </div>
         </div>
+        {pendingWrite === 'undo' && writeWait}
         <p className={styles.note}>
           完整備份包含目前帳號在{schoolName}的課表、成績、活動、所有學期與來源文字，可在 Web 或 App
           選檔還原。JSON 檔未加密，請存到自己信任的位置；下載後請確認檔案存在。
@@ -2718,23 +2741,17 @@ function ImportWorkspace({
             onClose={() => setUndoOpen(false)}
             onConfirm={() => {
               if (!active.current || suspended.current || !lastBatch) return;
-              return mutate(
-                async () => {
-                  await undoPersonalImports(
-                    scope,
-                    lastBatch,
-                    () => active.current && !suspended.current,
-                  );
-                  if (active.current) {
-                    setLastBatch('');
-                    setUndoOpen(false);
-                  }
-                },
-                personalImportUndoneNotice(
-                  ledger.records.filter((row) => row.batchId === lastBatch).length,
-                ),
-                { propagateError: true },
-              );
+              setUndoOpen(false);
+              void mutate('undo', async (signal) => {
+                const removed = await undoPersonalImports(
+                  scope,
+                  lastBatch,
+                  () => active.current && !suspended.current,
+                  signal,
+                );
+                if (active.current) setLastBatch('');
+                return personalImportUndoneNotice(removed);
+              });
             }}
           />
         )}
@@ -2765,16 +2782,16 @@ function ImportWorkspace({
                   )
                 }
                 onClick={() =>
-                  void mutate(
-                    () =>
-                      changePersonalImport(
-                        scope,
-                        editing.original,
-                        editing.row,
-                        () => active.current && !suspended.current,
-                      ),
-                    '個人紀錄已更新。',
-                  )
+                  void mutate('edit', async (signal) => {
+                    await changePersonalImport(
+                      scope,
+                      editing.original,
+                      editing.row,
+                      () => active.current && !suspended.current,
+                      signal,
+                    );
+                    return '個人紀錄已更新。';
+                  })
                 }
               >
                 儲存修改
@@ -2793,21 +2810,22 @@ function ImportWorkspace({
                 disabled={saving}
                 onClick={() => {
                   if (window.confirm(`確定移除「${editing.original.title}」這筆個人紀錄？`))
-                    void mutate(
-                      () =>
-                        changePersonalImport(
-                          scope,
-                          editing.original,
-                          null,
-                          () => active.current && !suspended.current,
-                        ),
-                      '已移除這筆個人紀錄。',
-                    );
+                    void mutate('edit', async (signal) => {
+                      await changePersonalImport(
+                        scope,
+                        editing.original,
+                        null,
+                        () => active.current && !suspended.current,
+                        signal,
+                      );
+                      return '已移除這筆個人紀錄。';
+                    });
                 }}
               >
                 移除這筆
               </button>
             </div>
+            {pendingWrite === 'edit' && writeWait}
           </section>
         )}
       </section>

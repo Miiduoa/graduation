@@ -88,7 +88,13 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/import?kind=grades');
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
-    value: { request: (_key: string, fn: () => unknown) => Promise.resolve().then(fn) },
+    value: {
+      request: (
+        _key: string,
+        options: LockOptions | (() => unknown),
+        callback?: () => unknown,
+      ) => Promise.resolve().then(typeof options === 'function' ? options : callback),
+    },
   });
   Element.prototype.scrollIntoView = vi.fn();
   // jsdom checks the application's undo lifecycle. Native modality and keyboard
@@ -480,48 +486,64 @@ it.each(['escape', 'backdrop'] as const)(
   },
 );
 
-it('keeps the pending undo visible and blocks duplicate confirmation or dismissal until the write finishes', async () => {
-  render(<PersonalImportCenter />);
-  await prepare();
-  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
-  await screen.findByText(personalImportSavedNotice(1));
+function holdPersonalImportLock() {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const request = vi.fn(async (_key: string, action: () => unknown) => {
-    await gate;
-    return action();
-  });
+  const request = vi.fn((_key: string, { signal }: LockOptions, action: () => unknown) =>
+    new Promise((resolve, reject) => {
+      const cancel = () => reject(signal?.reason);
+      signal?.addEventListener('abort', cancel, { once: true });
+      void gate.then(() => {
+        signal?.removeEventListener('abort', cancel);
+        if (!signal?.aborted) resolve(action());
+      }).catch(reject);
+    }),
+  );
   Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } });
-  fireEvent.click(screen.getByRole('button', { name: '撤銷上次匯入' }));
-  const dialog = screen.getByRole('dialog', { name: '撤銷上次匯入？' });
-  const confirm = within(dialog).getByRole('button', { name: '撤銷' });
-  fireEvent.click(confirm);
-  fireEvent.click(confirm);
-  fireEvent(dialog, new Event('cancel', { cancelable: true }));
-  fireEvent(dialog, new MouseEvent('pointerdown', { bubbles: true, clientX: -10, clientY: -10 }));
-  fireEvent.click(dialog, { clientX: -10, clientY: -10 });
-  expect(screen.getByRole('dialog', { name: '撤銷上次匯入？' })).toBe(dialog);
-  expect(within(dialog).getByRole('status').textContent).toContain('正在處理');
-  expect(
-    (within(dialog).getByRole('button', { name: '先不要' }) as HTMLButtonElement).disabled,
-  ).toBe(true);
-  expect(
-    (within(dialog).getByRole('button', { name: '處理中…' }) as HTMLButtonElement).disabled,
-  ).toBe(true);
-  expect(request).toHaveBeenCalledOnce();
-  expect(readPersonalImports(context)).toHaveLength(1);
-  await act(async () => {
-    release();
-  });
-  await screen.findByText(personalImportUndoneNotice(1));
-  expect(screen.queryByRole('dialog')).toBeNull();
-  expect(readPersonalImports(context)).toHaveLength(0);
-  expect(document.body.style.overflow).toBe('');
-});
+  return { release, request };
+}
 
-it('keeps an unsuccessful undo readable inside the dialog and preserves the batch for a later retry', async () => {
+it.each(['release', 'cancel'] as const)(
+  'closes the undo modal while waiting for the lock (%s)',
+  async (outcome) => {
+    render(<PersonalImportCenter />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+    await screen.findByText(personalImportSavedNotice(1));
+    const lock = holdPersonalImportLock();
+    await confirmUndo();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.body.style.overflow).toBe('');
+    expect(lock.request).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: '撤銷上次匯入' })).toHaveProperty('disabled', true);
+    expect(readPersonalImports(context)).toHaveLength(1);
+    expect(screen.queryByText(personalImportUndoneNotice(1))).toBeNull();
+    const search = screen.getByRole('searchbox', { name: '搜尋個人紀錄' });
+    fireEvent.change(search, { target: { value: '查無這門課' } });
+    expect(screen.getByText('還沒有符合的個人紀錄。')).toBeTruthy();
+    fireEvent.change(search, { target: { value: '資料庫' } });
+    expect(screen.getByRole('button', { name: '編輯 資料庫' })).toBeTruthy();
+
+    if (outcome === 'cancel') {
+      fireEvent.click(screen.getByRole('button', { name: '取消等待' }));
+      await screen.findByText('已取消等待，這次操作未變更個人紀錄。');
+      expect(lock.request.mock.calls[0][1].signal?.aborted).toBe(true);
+    }
+    await act(async () => lock.release());
+    if (outcome === 'release') {
+      await screen.findByText(personalImportUndoneNotice(1));
+      expect(readPersonalImports(context)).toHaveLength(0);
+    } else {
+      expect(readPersonalImports(context)).toHaveLength(1);
+      expect(screen.getByRole('button', { name: '撤銷上次匯入' })).toHaveProperty('disabled', false);
+    }
+    expect(screen.queryByRole('button', { name: '取消等待' })).toBeNull();
+  },
+);
+
+it('reports an unsuccessful undo on the page and preserves the batch for a later retry', async () => {
   render(<PersonalImportCenter />);
   await prepare();
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
@@ -536,17 +558,13 @@ it('keeps an unsuccessful undo readable inside the dialog and preserves the batc
       throw new DOMException('Full', 'QuotaExceededError');
     setItem.call(this, key, value);
   });
-  fireEvent.click(screen.getByRole('button', { name: '撤銷上次匯入' }));
-  const dialog = screen.getByRole('dialog', { name: '撤銷上次匯入？' });
-  fireEvent.click(within(dialog).getByRole('button', { name: '撤銷' }));
-  expect((await within(dialog).findByRole('alert')).textContent).toContain('無法確認操作結果');
+  await confirmUndo();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  await screen.findByText(/這次沒有存成/);
   expect(readPersonalImports(context)).toHaveLength(1);
   expect(screen.queryByText(personalImportUndoneNotice(1))).toBeNull();
-  expect(
-    (within(dialog).getByRole('button', { name: '先不要' }) as HTMLButtonElement).disabled,
-  ).toBe(false);
   write.mockRestore();
-  fireEvent.click(within(dialog).getByRole('button', { name: '撤銷' }));
+  await confirmUndo();
   await screen.findByText(personalImportUndoneNotice(1));
   expect(readPersonalImports(context)).toHaveLength(0);
   expect(screen.queryByRole('dialog')).toBeNull();
@@ -579,22 +597,13 @@ it.each(['owner', 'schoolId'] as const)(
     fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
     await screen.findByText(personalImportSavedNotice(1));
     const originalScope = { owner: context.owner, schoolId: context.schoolId };
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const request = vi.fn(async (_key: string, action: () => unknown) => {
-      await gate;
-      return action();
-    });
-    Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } });
+    const lock = holdPersonalImportLock();
     await confirmUndo();
     context[field] = field === 'owner' ? 'platform:another' : 'nthu';
     view.rerender(<PersonalImportCenter />);
     expect(screen.queryByRole('dialog')).toBeNull();
-    await act(async () => {
-      release();
-    });
+    expect(lock.request.mock.calls[0][1].signal?.aborted).toBe(true);
+    await act(async () => lock.release());
     expect(readPersonalImports(originalScope)).toHaveLength(1);
     expect(readPersonalImports(context)).toHaveLength(0);
     expect(screen.queryByText(personalImportUndoneNotice(1))).toBeNull();
@@ -822,6 +831,39 @@ it('restores all kinds and original terms only after review, without adopting a 
   await screen.findByText(personalImportSavedNotice(0));
   expect(readPersonalImports(context)).toHaveLength(3);
 });
+it('cancels a queued backup restore and keeps the reviewed draft for retry', async () => {
+  render(<PersonalImportCenter />);
+  uploadBackup();
+  const confirm = await screen.findByRole('button', { name: '確認匯入 3 筆' });
+  const lock = holdPersonalImportLock();
+  fireEvent.click(confirm);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '取消等待' }));
+  await screen.findByText('已取消等待，這次操作未變更個人紀錄。');
+  await act(async () => lock.release());
+  expect(readPersonalImports(context)).toEqual([]);
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 3 筆' }));
+  await screen.findByText(personalImportSavedNotice(3));
+  expect(readPersonalImports(context)).toHaveLength(3);
+});
+
+it('cancels a queued removal and keeps the record open for editing', async () => {
+  await savePersonalImportBatch(context, [backupRecords()[0]]);
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 備份成績' }));
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const lock = holdPersonalImportLock();
+  fireEvent.click(screen.getByRole('button', { name: '移除這筆' }));
+  fireEvent.click(screen.getByRole('button', { name: '取消等待' }));
+  await screen.findByText('已取消等待，這次操作未變更個人紀錄。');
+  await act(async () => lock.release());
+  expect(readPersonalImports(context)).toHaveLength(1);
+  expect(screen.getByRole('region', { name: '編輯個人紀錄' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '移除這筆' }));
+  await screen.findByText('已移除這筆個人紀錄。');
+  expect(readPersonalImports(context)).toEqual([]);
+});
+
 it('rejects a wrong-school or corrupt backup without replacing existing records', async () => {
   await savePersonalImportBatch(context, [backupRecords()[0]]);
   render(<PersonalImportCenter />);

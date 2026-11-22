@@ -71,8 +71,14 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
     value: {
-      request: (key: string, action: () => unknown) => {
-        const next = (queues.get(key) || Promise.resolve()).then(action);
+      request: (
+        key: string,
+        options: LockOptions | (() => unknown),
+        callback?: () => unknown,
+      ) => {
+        const next = (queues.get(key) || Promise.resolve()).then(
+          typeof options === 'function' ? options : callback,
+        );
         queues.set(
           key,
           next.catch(() => {}),
@@ -84,6 +90,40 @@ beforeEach(() => {
 });
 
 describe('browser personal import synchronization', () => {
+  it('times out queued sync settings and sync work without changing data', async () => {
+    await savePersonalImportBatch(scope, rows());
+    await setPersonalImportSyncEnabled(scope, true, () => true);
+    const original = readPersonalImports(scope);
+    const request = vi.fn((_key: string, { signal }: LockOptions) =>
+      new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }),
+    );
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } });
+    vi.useFakeTimers();
+    try {
+      const sync = syncPersonalImports(scope, identity, () => true);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await sync;
+      expect(getPersonalImportSyncStatus(scope)).toMatchObject({
+        phase: 'error',
+        message: expect.stringContaining('已逾時'),
+      });
+      const paused = expect(setPersonalImportSyncEnabled(scope, false, () => true)).rejects.toThrow(
+        '等待其他分頁完成個人紀錄操作已逾時',
+      );
+      await vi.advanceTimersByTimeAsync(15_000);
+      await paused;
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(request.mock.calls.every(([, options]) => options.signal?.aborted)).toBe(true);
+      expect(readPersonalImportSyncState(scope).enabled).toBe(true);
+      expect(readPersonalImports(scope)).toEqual(original);
+      expect(browserRequest).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('requires per-account and per-school consent before any network request', async () => {
     await savePersonalImportBatch(scope, rows());
     await syncPersonalImports(scope, identity, () => true);

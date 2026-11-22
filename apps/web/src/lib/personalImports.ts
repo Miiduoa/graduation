@@ -77,9 +77,14 @@ export async function withPersonalImportSyncLock<T>(
     checkpoint: (state: PersonalImportLocalState) => Promise<void>,
   ) => Promise<{ state: PersonalImportLocalState; result: T }>,
   active = () => true,
+  waitTimeoutMs?: number,
 ): Promise<T> {
   if (!navigator.locks) throw new Error('目前瀏覽器無法安全同步，請使用最新版瀏覽器。');
-  return navigator.locks.request(personalImportsStorageKey(scope), async () => {
+  const controller = waitTimeoutMs === undefined ? undefined : new AbortController();
+  const timeout = controller && setTimeout(() => controller.abort(), waitTimeoutMs);
+  const run = async () => {
+    clearTimeout(timeout);
+    controller?.signal.throwIfAborted();
     if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
     let persisted: PersonalImportLocalState = {
       records: readPersonalImports(scope),
@@ -102,18 +107,31 @@ export async function withPersonalImportSyncLock<T>(
     const { state, result } = await action(persisted, checkpoint);
     await checkpoint(state);
     return result;
-  });
+  };
+  const key = personalImportsStorageKey(scope);
+  if (!controller) return navigator.locks.request(key, run);
+  try {
+    return await navigator.locks.request(key, { signal: controller.signal }, run);
+  } catch (error) {
+    if (controller.signal.aborted)
+      throw new Error('等待其他分頁完成個人紀錄操作已逾時，請稍後再試。');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function mutate<T>(
   scope: PersonalImportScope,
   action: (rows: PersonalImportRecord[]) => { rows: PersonalImportRecord[]; result: T },
   active = () => true,
+  signal?: AbortSignal,
 ): Promise<T> {
   // A Web Lock covers the whole read/modify/write, including other open tabs.
   if (!navigator.locks)
     throw new Error('目前瀏覽器無法安全儲存。請用最新版瀏覽器開啟 HTTPS 網站後重試；草稿還在。');
-  return navigator.locks.request(personalImportsStorageKey(scope), () => {
+  const write = () => {
+    signal?.throwIfAborted();
     if (!active()) throw new Error('帳號或校園已切換，請重新開啟匯入。');
     const { rows, result } = action(readPersonalImports(scope));
     if (rows.length > PERSONAL_IMPORT_LIMIT)
@@ -128,14 +146,16 @@ async function mutate<T>(
     }
     window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
     return result;
-  });
+  };
+  const key = personalImportsStorageKey(scope);
+  return signal ? navigator.locks.request(key, { signal }, write) : navigator.locks.request(key, write);
 }
 
 export async function savePersonalImportBatch(
   scope: PersonalImportScope,
   rows: PersonalImportRow[],
   active = () => true,
-  options: { restoreBackup?: boolean } = {},
+  options: { restoreBackup?: boolean; signal?: AbortSignal } = {},
 ) {
   if (!rows.length || rows.some((row) => row.schoolId !== scope.schoolId))
     throw new Error('請確認校園與要匯入的資料。');
@@ -161,6 +181,7 @@ export async function savePersonalImportBatch(
       };
     },
     active,
+    options.signal,
   );
 }
 
@@ -168,6 +189,7 @@ export async function undoPersonalImports(
   scope: PersonalImportScope,
   batchId: string,
   active = () => true,
+  signal?: AbortSignal,
 ) {
   return mutate(
     scope,
@@ -176,6 +198,7 @@ export async function undoPersonalImports(
       return { rows: next, result: rows.length - next.length };
     },
     active,
+    signal,
   );
 }
 
@@ -184,6 +207,7 @@ export async function changePersonalImport(
   original: PersonalImportRecord,
   revised: PersonalImportRow | null,
   active = () => true,
+  signal?: AbortSignal,
 ) {
   return mutate(
     scope,
@@ -207,5 +231,6 @@ export async function changePersonalImport(
       return { rows: plan.records, result: undefined };
     },
     active,
+    signal,
   );
 }

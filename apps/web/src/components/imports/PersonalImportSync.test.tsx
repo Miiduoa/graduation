@@ -79,8 +79,14 @@ beforeEach(async () => {
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
     value: {
-      request: (key: string, action: () => unknown) => {
-        const next = (queues.get(key) || Promise.resolve()).then(action);
+      request: (
+        key: string,
+        options: LockOptions | (() => unknown),
+        callback?: () => unknown,
+      ) => {
+        const next = (queues.get(key) || Promise.resolve()).then(
+          typeof options === 'function' ? options : callback,
+        );
         queues.set(
           key,
           next.catch(() => {}),
