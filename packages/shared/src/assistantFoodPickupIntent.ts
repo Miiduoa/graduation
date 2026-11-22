@@ -15,10 +15,12 @@ const pickupTime = '(?:預定)?取餐時間';
 const latestPickupTime = latest + '的?' + pickupTime;
 const calendarLocation = '(?:我(?:的)?)?(?:個人)?(?:行事曆|日曆|行程)(?:上|中|裡|內)?';
 const destination = '(?:' + placement + ')' + calendarLocation;
-const readPrompt = '(?:' + polite + '(?:確認|核對|查詢|查看|看|查|知道|詢問|問)(?:一下)?)';
-const standaloneReadPrompt = new RegExp('^(?:' + readPrompt + '|' + polite + ')$');
+const readPrompt = '(?:(?:能不能|可不可以|能否|是否可以|可以|能)?' + polite + '(?:幫忙)?' +
+  '(?:確認|核對|查詢|查看|看|查|知道|詢問|問)(?:一下)?)';
+const questionEnding = '(?:啊|呢|嗎)?[?]*$';
+const standaloneReadPrompt = new RegExp('^(?:' + readPrompt + '|' + polite + ')' + questionEnding);
 const orderWriteVerb =
-  '取消|撤銷|撤回|作廢|刪|移除|移走|清除|清空|封存|改|變更|調整|更新|更換|' +
+  '鎖定|解鎖|凍結|取消|撤銷|撤回|作廢|刪|移除|移走|清除|清空|封存|編輯|改|變更|調整|更新|更換|' +
   '下單|訂購|重訂|付款|結帳|退款|退訂|退單|退費|送出|提交|延後|提前|延期|重排|標記|備註';
 // Order qualifiers are open-ended, so exclude action verbs and request prefixes
 // here. Calendar placement verbs are allowed only in the status question itself.
@@ -42,14 +44,18 @@ const calendarStatus = new RegExp(
     '(?:已經|已|有)' + calendarEntry + '(?:了|呢)?(?=[?])|' +
     calendarEntry + '(?:了|呢)(?=[?]))[?]*$',
 );
-const questionEnding = '(?:啊|呢|嗎)?[?]*$';
 const calendarSlot = '(?:哪(?:一)?(?:天|日|個時段|個時間(?:點)?|個日期)|幾號|星期幾|禮拜幾|幾點|什麼時候|什麼時段)';
 const calendarSlotLookup = new RegExp(
   '^' + calendarSubject + '(?:已經|已|有)?' + calendarEntry +
     '的?(?:是|在)?' + calendarSlot + questionEnding,
 );
-const calendarVisibility = '(?:在)?' + calendarLocation + '(?:還是|仍然|還|仍)?(?:找不到|看不到)';
+const calendarVisibility = '(?:我)?(?:在)?' + calendarLocation + '(?:還是|仍然|還|仍)?' +
+  '(?:找不到|看不到|(?:沒有|沒|未)(?:找到|看到|出現|顯示))';
 const calendarVisibilityPattern = new RegExp(calendarVisibility);
+const calendarVisibilityLookup = new RegExp(
+  '^' + readPrompt + '?(?:' + pickupSubject + calendarVisibility + '|' +
+    calendarVisibility + pickupSubject + ')' + questionEnding,
+);
 const missingCalendarEntry = '(?:(?:還沒(?:有)?|尚未|沒有|沒|未)(?:被)?' + calendarEntry +
   '|' + calendarVisibility + '|(?:找不到|看不到))';
 const reason = '(?:為什麼|為何|怎麼|怎會)';
@@ -63,15 +69,18 @@ const reasonFollowup = new RegExp('^' + readPrompt + '?' + reason + questionEndi
 
 function isReadOnlyPickupQuestion(text: string): boolean {
   const clauses = text.split(/[;,、。.!]+|(?<=\?)(?=[^?])/)
-    .map(clause => clause.replace(/^(?:也|順便|另外|再|然後|接著)+/, ''))
+    .map(clause => clause.replace(/^(?:也|順便|另外|再|然後|接著|並且|並)+/, ''))
     .filter(clause => clause && !standaloneReadPrompt.test(clause));
   return clauses.length > 0 &&
     clauses.every((clause, index) =>
       calendarStatus.test(clause) || calendarSlotLookup.test(clause) ||
-      calendarAbsenceQuestion.test(clause) || orderLookup.test(clause) || pickupTimeLookup.test(clause) ||
+      calendarAbsenceQuestion.test(clause) || calendarVisibilityLookup.test(clause) ||
+      orderLookup.test(clause) || pickupTimeLookup.test(clause) ||
       // A trailing reason question can refer to the immediately preceding absence statement.
       (missingCalendarStatus.test(clause) && reasonFollowup.test(clauses[index + 1] ?? '')) ||
-      (reasonFollowup.test(clause) && missingCalendarStatus.test(clauses[index - 1] ?? '')));
+      (reasonFollowup.test(clause) &&
+        (missingCalendarStatus.test(clauses[index - 1] ?? '') ||
+          calendarVisibilityLookup.test(clauses[index - 1] ?? ''))));
 }
 const hours: Readonly<Record<string, number>> = {
   半小時: 30,
