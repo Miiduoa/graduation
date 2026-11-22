@@ -97,6 +97,52 @@ after(async () => {
 });
 
 describe('firestore security rules', () => {
+
+  test('new group creation cannot replay stale school membership after transfer', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      // Keep both memberships active to model delayed source-school revocation.
+      await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'student' });
+      await db.doc('schools/other-school/members/alice').set({ status: 'active', role: 'student' });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const createGroup = (id, schoolId = 'pu') =>
+      alice.doc('groups/' + id).set({
+        schoolId, createdBy: 'alice', name: 'Course',
+        type: 'course', verification: { status: 'unverified' },
+      });
+    await assertSucceeds(createGroup('school-create-valid'));
+    await assertFails(createGroup('school-create-wrong-campus', 'other-school'));
+
+    // Same authenticated context and old-school membership: an already
+    // transferred user can create at the new campus, never at the old campus.
+    await seedFirestore(db => db.doc('users/alice').set(campusBoundProfile('other-school')));
+    await Promise.all([
+      assertFails(createGroup('school-create-old-replay-1')),
+      assertFails(createGroup('school-create-old-replay-2')),
+    ]);
+    await assertSucceeds(createGroup('school-create-new-valid', 'other-school'));
+
+    // Conflicting partial-transfer fields do not bind either campus.
+    await seedFirestore(db => db.doc('users/alice').set({
+      status: 'active', schoolId: 'other-school', primarySchoolId: 'pu',
+    }));
+    await assertFails(createGroup('school-create-conflict-pu'));
+    await assertFails(createGroup('school-create-conflict-other', 'other-school'));
+
+    // No canonical profile, even with old membership, cannot authorize creation.
+    await seedFirestore(db => db.doc('users/alice').delete());
+    await assertFails(createGroup('school-create-profile-deleted'));
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/alice').update({ status: 'removed' });
+    });
+    await assertFails(createGroup('school-create-membership-revoked'));
+    await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'active' }));
+    await assertSucceeds(createGroup('school-create-restored'));
+  });
+
   test('transferred group managers cannot replay membership and group administration writes', async () => {
     const groupPath = 'groups/campus-admin-replay';
     const memberPath = groupPath + '/members/alice';
