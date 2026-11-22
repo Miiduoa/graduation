@@ -287,6 +287,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const [deferredCause, setDeferredCause] = useState<'background' | 'offscreen' | 'data-saver'>('background');
   const pageSuspended = useRef(false);
   const observerBlockedStart = useRef<number | null>(null);
+  const previousScene = useRef<{
+    host: HTMLDivElement;
+    model: typeof model;
+    footprints: typeof footprints;
+    visible: boolean;
+  } | null>(null);
   const recoverableHost = useRef<HTMLDivElement | null>(null);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
@@ -308,21 +314,23 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   useEffect(() => {
     if (!host) return;
     let active = true;
-    // No observer result (or legacy geometry fallback) has confirmed the
-    // canvas yet. Starting with visible=true in an API-less WebView displayed
-    // the loading spinner even after fallback geometry proved the map offscreen.
     const manuallyStarted = manualStart > 0;
     // Avoid loading the optional Three.js bundle or allocating WebGL when the
     // browser requests reduced data use. Marker details and walking links
     // remain available; the visitor can explicitly opt into 3D at any time.
     const saveData = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true;
-    // A negative observation can pause rendering without revoking the user's choice.
-    let visible = manuallyStarted && observerBlockedStart.current !== manualStart;
+    // Rebuild an existing canvas without waiting for a new observer entry.
+    // Viewport signals still govern whether the replacement scene renders.
+    const previous = previousScene.current;
+    const rebuilding = previous?.host === host &&
+      (previous.model !== model || previous.footprints !== footprints);
+    let visible = rebuilding ? previous.visible :
+      manuallyStarted && observerBlockedStart.current !== manualStart;
     let scene: CampusSpatialScene | null = null;
     // Safari can fire pagehide before visibilitychange when entering bfcache.
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended.current || document.hidden;
-    const isDeferred = () => isBackgrounded() || !visible || (saveData && !manuallyStarted);
+    const isDeferred = () => isBackgrounded() || (!rebuilding && (!visible || (saveData && !manuallyStarted)));
     const defer = () => {
       setDeferredCause(isBackgrounded() ? 'background' :
         saveData && !manuallyStarted ? 'data-saver' : 'offscreen');
@@ -663,7 +671,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     }
     // A missing or broken observer uses the same geometry fallback. Preserve
     // eager startup for older WebViews with unmeasurable initial geometry.
-    if (observerFallback && !manuallyStarted) {
+    if (observerFallback && !manuallyStarted && !rebuilding) {
       const position = hostViewportVisibility();
       visible = position === 'onscreen' || (position === 'unknown' && recoverableHost.current !== host);
     }
@@ -679,12 +687,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // An embedded WebView may support only one VisualViewport event. Register
     // independently: a throwing resize listener must not suppress scroll,
     // which is the only signal sent after certain keyboard/pinch changes.
-    if (manuallyStarted || recoverableHost.current === host) syncViewport(false);
+    if (rebuilding || manuallyStarted || recoverableHost.current === host) syncViewport(false);
     else {
       refreshVisualViewportListeners();
       startWhenVisible();
     }
     return () => {
+      previousScene.current = active && (started || rebuilding) ?
+        { host, model, footprints, visible } : null;
       active = false;
       if (timeout !== null) window.clearTimeout(timeout);
       // A broken embedded WebView may throw even on disconnect(). Complete
@@ -1237,20 +1247,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
         const invalidContentLength = contentLength !== null &&
           (!/^\d+$/.test(contentLength) ||
             !Number.isSafeInteger(Number(contentLength)) ||
-            Number(contentLength) === 0 ||
             Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
-        // Captive portals and intermediaries may return HTML or mixed media
-        // with HTTP 200. Do not read or trust an explicitly non-JSON body.
-        // Keep text/plain and missing MIME compatible with legacy proxies,
-        // but always apply the existing JSON/source/geometry checks afterward.
-        const contentType = response.headers?.get('content-type') ?? null;
-        const mime = contentType?.split(';', 1)[0].trim().toLowerCase();
-        const invalidContentType = contentType !== null &&
-          !(mime === 'application/json' || mime === 'text/plain' ||
-            (typeof mime === 'string' &&
-              /^application\/[a-z0-9][a-z0-9!#$&^_.+-]*\+json$/.test(mime)));
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
-            contentRange !== null || invalidContentLength || invalidContentType) {
+            contentRange !== null || invalidContentLength) {
           // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
           // can still stream a large body; release it without awaiting an
           // uncooperative proxy, rather than waste mobile bandwidth/memory.
@@ -1278,7 +1277,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
             status < 300 && status !== 200;
           const rateLimitedOrIncomplete = invalidSuccessStatus || status === 304 || status === 408 ||
             status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
-            contentRange !== null || invalidContentLength || invalidContentType;
+            contentRange !== null || invalidContentLength;
           // A proxy can return an incomplete 206/Content-Range document or
           // a 408 without Retry-After. These responses cannot be trusted as
           // complete OSM geometry and should not trigger a manual retry loop.
@@ -1288,7 +1287,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
           const fallbackBackoff = invalidSuccessStatus || status === 304 ||
             status === 408 || status === 429 || status === 502 ||
             status === 503 || status === 504 || contentRange !== null ||
-            invalidContentLength || invalidContentType;
+            invalidContentLength;
           const seconds = rateLimitedOrIncomplete
             ? (footprintCooldownSeconds(response) ?? (fallbackBackoff ? 60 : null))
             : null;

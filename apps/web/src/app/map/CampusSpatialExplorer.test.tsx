@@ -1067,10 +1067,10 @@ it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'callback'] 
       expect(scene.setActive).toHaveBeenLastCalledWith(false);
       await act(async () => view.rerender(<CampusSpatialExplorer {...props} locations={places.slice(0, -1)} />));
       expect(scene.dispose).toHaveBeenCalledTimes(1);
-      expect(scene.create).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
       top = 120;
       fireEvent.scroll(dialog);
-      await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
       expect(scene.setActive).toHaveBeenLastCalledWith(true);
 
       top = 40;
@@ -1091,7 +1091,7 @@ it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'callback'] 
 );
 
 it.each(['location update', 'public outlines'] as const)(
-  'waits for confirmed visibility after manual startup, offscreen notification and %s',
+  'rebuilds paused 3D after manual startup, offscreen notification and %s',
   async (update) => {
     const observe = vi.fn();
     vi.stubGlobal('IntersectionObserver', class {
@@ -1130,54 +1130,105 @@ it.each(['location update', 'public outlines'] as const)(
     expect(scene.dispose).toHaveBeenCalledTimes(1);
     expect(observe).toHaveBeenCalledTimes(3);
     expect(intersection).not.toBe(previousObserver);
-    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
-    expect(scene.create).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
 
     vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 320, 180));
     await act(async () => previousObserver?.([observerEntry(graphics, true, undefined, 1)], {} as IntersectionObserver));
-    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
     fireEvent(window, new Event('resize'));
-    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(2);
     expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(update === 'public outlines' ? buildings : []);
   },
 );
 
-it.each(['location update', 'public outlines'] as const)(
-  'keeps manual startup across %s with a silent observer',
-  async (update) => {
+// Oracle: merge-base 52403426 starts the replacement scene in the foreground
+// without waiting for an observer entry. Manual startup is a PR-only path
+// into that same running state. Background suspension still gates allocation.
+it.each(
+  (['automatic', 'manual'] as const).flatMap((startup) =>
+    (['locations', 'outlines', 'both'] as const).flatMap((update) =>
+      [true, false].flatMap((initialEntry) =>
+        [true, false].map((hidden) => ({ startup, update, initialEntry, hidden })),
+      ),
+    ),
+  ),
+)(
+  'rebuilds $startup 3D for $update (initial observer entry: $initialEntry, hidden: $hidden)',
+  async ({ startup, update, initialEntry, hidden }) => {
+    let reportOnObserve = startup === 'automatic';
     vi.stubGlobal('IntersectionObserver', class {
-      observe() {}
+      constructor(private callback: IntersectionObserverCallback) {}
+      observe(target: Element) {
+        if (reportOnObserve) this.callback([observerEntry(target, true, new DOMRect(0, 0, 320, 180))],
+          this as unknown as IntersectionObserver);
+      }
       disconnect() {}
     });
+    const viewport = Object.assign(new EventTarget(), {
+      width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
+    });
+    vi.stubGlobal('visualViewport', viewport);
     const { library, body, buildings } = sourcedLibraryFootprintFixture();
-    let resolveFootprints!: (response: Response) => void;
-    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise<Response>((resolve) => {
-      resolveFootprints = resolve;
+    let publishFootprints!: (json: string) => void;
+    const footprintPayload = new Promise<string>((resolve) => { publishFootprints = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(await footprintPayload, {
+      headers: { 'Content-Type': 'application/json' },
     })));
-    const school = update === 'public outlines' ? 'pu' : 'other-school';
+    const school = update === 'locations' ? 'other-school' : 'pu';
     const onSelect = vi.fn();
-    const { rerender } = render(<CampusSpatialExplorer school={school} locations={[library]}
-      selected={library} onSelect={onSelect} />);
+    const originalLocations = [library];
+    const updatedLocations = [library, places[1]];
+    const explorer = (locations: MapLocation[]) => <CampusSpatialExplorer school={school}
+      locations={locations} selected={library} onSelect={onSelect} />;
+    const { rerender } = render(explorer(originalLocations));
     fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
     const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
-    expect(scene.create).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole('button', { name: '手動開啟立體畫面' }));
-    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
-
-    if (update === 'public outlines') {
-      await act(async () => resolveFootprints(new Response(body, {
-        headers: { 'Content-Type': 'application/json' },
-      })));
-    } else {
-      fireEvent(window, new Event('pagehide'));
-      await act(async () => rerender(<CampusSpatialExplorer school={school}
-        locations={[library, places[1]]} selected={library} onSelect={onSelect} />));
-      expect(scene.create).toHaveBeenCalledTimes(1);
-      fireEvent(window, new Event('pageshow'));
+    const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    if (startup === 'manual') {
+      fireEvent.click(within(dialog).getByRole('button', { name: '手動開啟立體畫面' }));
     }
-    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
-    expect(scene.dispose).toHaveBeenCalledTimes(1);
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(update === 'public outlines' ? buildings : []);
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    reportOnObserve = initialEntry;
+    if (hidden) {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+      fireEvent(document, new Event('visibilitychange'));
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    }
+    if (update !== 'outlines') await act(async () => rerender(explorer(updatedLocations)));
+    else await act(async () => publishFootprints(body));
+    if (hidden) {
+      expect(scene.create).toHaveBeenCalledTimes(1);
+      Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+      fireEvent(document, new Event('visibilitychange'));
+    }
+    if (update !== 'outlines') {
+      await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+    }
+    if (update === 'both') await act(async () => publishFootprints(body));
+    const sceneCount = update === 'both' ? 3 : 2;
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(sceneCount));
+    expect(scene.dispose).toHaveBeenCalledTimes(sceneCount - 1);
+    const [, model, options] = scene.create.mock.calls[sceneCount - 1];
+    expect(model).toEqual(expect.objectContaining({
+      points: expect.arrayContaining([expect.objectContaining({ id: library.id })]),
+    }));
+    expect(model.points).toHaveLength(update === 'outlines' ? 1 : 2);
+    expect(options.footprints).toEqual(update === 'locations' ? [] : buildings);
+    expect(host.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    vi.spyOn(host, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 100, 320, 180));
+    viewport.height = 50;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    viewport.height = window.innerHeight;
+    fireEvent.scroll(dialog);
+    fireEvent.resize(window);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(sceneCount);
   },
 );
 
@@ -3250,32 +3301,6 @@ it.each([
   expect(json).not.toHaveBeenCalled();
 });
 
-it.each([
-  { coding: 'identity', length: '0' },
-  { coding: 'identity', length: '000' },
-  { coding: 'gzip', length: '0' },
-  { coding: 'gzip', length: '000' },
-] as const)(
-  'rejects an announced empty $coding outline before reading length $length',
-  async ({ coding, length }) => {
-    const { library } = sourcedLibraryFootprintFixture();
-    const response = new Response('', {
-      headers: { 'Content-Length': length, 'Content-Encoding': coding },
-    });
-    const read = vi.spyOn(response.body!, 'getReader');
-    const cancel = vi.spyOn(response.body!, 'cancel');
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
-    render(<CampusSpatialExplorer school="pu" locations={[library]}
-      selected={library} onSelect={vi.fn()} />);
-    const dialog = await open();
-    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    expect(read).not.toHaveBeenCalled();
-    expect(cancel).toHaveBeenCalledOnce();
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
-  },
-);
-
 const footprintContentTypes = [
   'application/json', 'text/plain', null, 'text/html', 'application/octet-stream',
   'application/json; charset=UTF-8', 'text/plain; charset=UTF-8',
@@ -3302,52 +3327,41 @@ it.each(footprintContentTypes.flatMap((contentType) =>
   render(<CampusSpatialExplorer school="pu" locations={[library]}
     selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  const supportedType = contentType === null || [
-    'application/json', 'text/plain', 'application/json; charset=UTF-8',
-    'text/plain; charset=UTF-8', 'application/vnd.example_campus+json',
-    ' APPLICATION/JSON ',
-  ].includes(contentType);
-  const valid = payload === 'valid' && supportedType;
+  const valid = payload === 'valid';
   expect(await within(dialog).findByText(valid ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(read).toHaveBeenCalledTimes(supportedType ? 1 : 0);
-  expect(cancel).toHaveBeenCalledTimes(supportedType ? 0 : 1);
-  if (!supportedType) {
-    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled'))
-      .toBe(true);
-  }
+  expect(read).toHaveBeenCalledOnce();
+  expect(cancel).not.toHaveBeenCalled();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(valid ? buildings : []);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-it.each([
-  { label: 'HTML captive portal', headers: { 'Content-Type': 'text/html' } },
-  { label: 'mixed JSON and HTML MIME', headers: { 'Content-Type': 'application/json, text/html' } },
-  { label: 'zero-byte identity response', headers: { 'Content-Type': 'application/json', 'Content-Length': '000' } },
-  { label: 'zero-byte compressed response', headers: {
-    'Content-Type': 'application/json', 'Content-Length': '0', 'Content-Encoding': 'gzip',
-  } },
-])('rejects $label on HTTP 200 before reading a stalled map stream', async ({ headers }) => {
-  const { library } = sourcedLibraryFootprintFixture();
-  const cancel = vi.fn();
-  // The body never ends: a mistaken getReader() would hang until the 15s
-  // deadline. Header validation must reject and cancel it immediately.
-  const stream = new ReadableStream<Uint8Array>({ cancel });
-  const response = new Response(stream, { status: 200, headers });
-  const read = vi.spyOn(response.body!, 'getReader');
+// Merge-base validates the decoded response and the snapshot without MIME
+// filtering or a zero-length header check. Fetch can expose decoded bytes
+// independently of the wire headers, including in legacy WebViews.
+it.each([null, '', 'application/octet-stream', 'text/plain', 'text/html', 'application/json, text/html']
+  .flatMap((mime) => [null, 'identity', 'gzip'].flatMap((encoding) =>
+    ['complete', 'empty', 'html'].map((kind) => ({ mime, encoding, kind })),
+  )))('matches merge-base for WebView MIME $mime / encoding $encoding / $kind', async ({
+  mime, encoding, kind,
+}) => {
+  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  const headers = new Headers({ 'Content-Length': '000' });
+  if (mime !== null) headers.set('Content-Type', mime);
+  if (encoding !== null) headers.set('Content-Encoding', encoding);
+  const raw = kind === 'complete' ? body : kind === 'html' ? '<html>Login</html>' : '';
+  const response = new Response(new TextEncoder().encode(raw), { headers });
   const fetchMock = vi.fn().mockResolvedValue(response);
   vi.stubGlobal('fetch', fetchMock);
-  render(<CampusSpatialExplorer school="pu" locations={[library]}
-    selected={library} onSelect={vi.fn()} />);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(read).not.toHaveBeenCalled();
-  expect(cancel).toHaveBeenCalledOnce();
-  expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-  expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled'))
-    .toBe(true);
+  const accepted = kind === 'complete';
+  expect(await within(dialog).findByText(accepted ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
+  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(accepted ? buildings : []));
+  if (!accepted) {
+    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
+  }
+  expect(fetchMock).toHaveBeenCalledOnce();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-  expect(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' })).toBeTruthy();
 });
 
 it('reads the final successful outline response after a redirect', async () => {

@@ -126,67 +126,77 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
-  it.each([
-    'text/html; charset=utf-8',
-    'application/xhtml+xml',
-    'application/octet-stream',
-    'application/json, text/html',
-    '',
-  ])('rejects explicit non-JSON Overpass Content-Type %j without reading its stalled body', async (contentType) => {
-    // A captive portal or proxy can send HTTP 200 yet never finish streaming.
-    // Reject the incompatible MIME type from headers and cancel immediately.
-    let cancelled = 0;
+  // Oracle: merge-base 52403426 reads through EOF under the byte/deadline
+  // limits, then validates JSON and audited ways, irrespective of Content-Type.
+  const contentTypes = [
+    null, '', 'application/json; charset=utf-8', 'application/vnd.overpass+json',
+    'text/plain; charset=utf-8', 'text/html; charset=utf-8', 'application/xhtml+xml',
+    'application/octet-stream', 'application/json, text/html',
+  ];
+  const encodings = [null, 'identity', 'gzip', 'br', 'deflate', 'x-unknown', '', 'gzip, br'];
+  const bodies = ['complete', 'incomplete', 'oversized', 'empty', 'unclosed'] as const;
+  it.each(contentTypes.flatMap((contentType) => encodings.flatMap((encoding) =>
+    bodies.map((kind) => ({ contentType, encoding, kind })),
+  )))('matches merge-base for MIME $contentType / encoding $encoding / $kind', async ({
+    contentType, encoding, kind,
+  }) => {
+    vi.useFakeTimers();
+    const headers = new Headers();
+    if (contentType !== null) headers.set('Content-Type', contentType);
+    if (encoding !== null) headers.set('Content-Encoding', encoding);
+    const payload = {
+      complete: osmPayload,
+      incomplete: osmPayload.slice(0, -1),
+      oversized: osmPayload.padEnd(500_001, ' '),
+      empty: '',
+      unclosed: osmPayload,
+    }[kind];
+    // Fetch exposes decoded bytes for supported compressed responses.
+    if (kind === 'empty') headers.set('Content-Length', '0');
+    else if (['gzip', 'br', 'deflate'].includes(encoding ?? '')) headers.set('Content-Length', '42');
+    const cancel = vi.fn();
     const body = new ReadableStream<Uint8Array>({
-      start(controller) { controller.enqueue(new TextEncoder().encode(osmPayload)); },
-      cancel() { cancelled += 1; },
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(payload));
+        if (kind !== 'unclosed') controller.close();
+      },
+      cancel,
     });
-    const upstream = vi.fn().mockResolvedValue(new Response(body, {
-      status: 200, headers: { 'Content-Type': contentType },
-    }));
+    const upstream = vi.fn().mockResolvedValue(new Response(body, { headers }));
     vi.stubGlobal('fetch', upstream);
     const { GET } = await import('./route');
-    const first = await GET();
-    expect(first.status).toBe(503);
-    expect(first.headers.get('Cache-Control')).toBe('no-store');
-    expect(cancelled).toBe(1);
-    // No repeated requests to the shared public Overpass origin while cooling.
-    expect((await GET()).status).toBe(503);
-    expect(upstream).toHaveBeenCalledTimes(1);
+    const request = GET();
+    await vi.advanceTimersByTimeAsync(12_000);
+    const response = await request;
+
+    const baseAccepts = kind === 'complete' &&
+      [null, 'identity', 'gzip', 'br', 'deflate'].includes(encoding);
+    expect(response.status).toBe(baseAccepts ? 200 : 503);
+    if (baseAccepts) {
+      expect(await response.json()).toMatchObject({
+        stale: false, buildings: [{ poiId: 'pu-library', osmVersion: 7 }],
+      });
+    } else {
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      if (kind === 'unclosed') expect(cancel).toHaveBeenCalledOnce();
+    }
+    expect((await GET()).status).toBe(response.status);
+    expect(upstream).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    'application/json; charset=utf-8',
-    'application/vnd.overpass+json',
-    'text/plain; charset=utf-8',
-  ])('keeps compatible Overpass JSON Content-Type %j working', async (contentType) => {
-    // text/plain is retained for older Overpass proxies; the payload itself
-    // must still pass the full audited-way JSON/geometry validation.
-    const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
-      status: 200, headers: { 'Content-Type': contentType },
-    }));
-    vi.stubGlobal('fetch', upstream);
-    const { GET } = await import('./route');
-    const response = await GET();
-    expect(response.status).toBe(200);
-    expect((await response.json()).buildings).toHaveLength(1);
-    expect(upstream).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps dated stale outlines when a later gateway replies HTML 200', async () => {
+  it('keeps dated stale outlines after HTML 200 and refreshes them from a complete octet-stream', async () => {
     const start = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
-      let cancelled = 0;
-      const stalledHtml = new ReadableStream<Uint8Array>({
-        start(controller) { controller.enqueue(new TextEncoder().encode('<html>login required</html>')); },
-        cancel() { cancelled += 1; },
-      });
       const upstream = vi.fn()
         .mockImplementationOnce(async () => new Response(osmPayload, {
           status: 200, headers: { 'Content-Type': 'application/json' },
         }))
-        .mockImplementationOnce(async () => new Response(stalledHtml, {
+        .mockImplementationOnce(async () => new Response('<html>login required</html>', {
           status: 200, headers: { 'Content-Type': 'text/html', 'Retry-After': '1800' },
+        }))
+        .mockImplementationOnce(async () => new Response(osmPayload, {
+          status: 200, headers: { 'Content-Type': 'application/octet-stream' },
         }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
@@ -201,9 +211,16 @@ describe('public Providence building geometry route', () => {
       expect(await fallback.json()).toMatchObject({
         stale: true, fetchedAt: verified.fetchedAt, buildings: verified.buildings,
       });
-      expect(cancelled).toBe(1);
       expect((await GET()).status).toBe(200);
       expect(upstream).toHaveBeenCalledTimes(2);
+
+      clock.mockReturnValue(start + 26 * 60 * 60 * 1000);
+      const refreshed = await GET();
+      expect(refreshed.status).toBe(200);
+      expect(await refreshed.json()).toMatchObject({
+        stale: false, fetchedAt: new Date(Date.now()).toISOString(), buildings: verified.buildings,
+      });
+      expect(upstream).toHaveBeenCalledTimes(3);
     } finally {
       clock.mockRestore();
     }

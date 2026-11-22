@@ -329,24 +329,6 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
       response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));
   }
-  // Reject explicit captive-portal/HTML or binary media types at headers,
-  // before a stalled response body can monopolize the shared 12s deadline.
-  // Some legacy Overpass gateways label JSON as text/plain, so keep that
-  // compatibility path; the JSON and audited-way parsers still validate it.
-  const upstreamContentType = response.headers.get('content-type');
-  if (upstreamContentType !== null) {
-    const mime = upstreamContentType.split(';', 1)[0].trim().toLowerCase();
-    const jsonCompatible = mime === 'application/json' || mime === 'text/plain' ||
-      /^application\/[a-z0-9][a-z0-9!#$&^_.+-]*\+json$/.test(mime);
-    if (!jsonCompatible) {
-      if (response.body) void response.body.cancel().catch(() => {});
-      // A malformed 200 can include a Retry-After from a busy proxy. Respect
-      // that origin cooldown without promoting its payload into the cache.
-      throw new OverpassRateLimitError(overpassRetryAfterMs(
-        response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
-      ));
-    }
-  }
   let raw: string;
   try {
     raw = await readBoundedResponse(response, signal);
