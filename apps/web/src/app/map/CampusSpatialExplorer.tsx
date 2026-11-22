@@ -73,8 +73,8 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
   // a truncated but syntactically valid JSON document is not a complete map.
   const encoding = response.headers?.get('content-encoding')?.trim().toLowerCase() ?? null;
   const declared = response.headers?.get('content-length') ?? null;
-  const identityLength = (encoding === null || encoding === 'identity') &&
-    declared !== null && /^\d+$/.test(declared) ? Number(declared) : null;
+  const identity = encoding === null || encoding === 'identity';
+  const identityLength = identity && declared !== null ? Number(declared) : null;
   if (!response.body || typeof response.body.getReader !== 'function') {
     // Old embedded WebViews can expose a Response without a usable stream.
     // We cannot stop their text() buffering mid-flight, but reject decoded
@@ -96,16 +96,21 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       }
       return JSON.parse(raw) as unknown;
     }
-    // A JSON-only WebView bridge has already discarded the original bytes.
-    // An identity Content-Length cannot be verified from JSON.stringify():
-    // whitespace and escaped characters disappear during parsing. Fail
-    // closed before parsing rather than present an unverified OSM outline.
-    // Text-only bridges above can still compare their actual UTF-8 bytes;
-    // compressed bridges retain the existing decoded-payload size limit.
-    if (identityLength !== null) {
-      throw new Error('Cannot verify identity-framed building outline bytes');
+    if (identity) {
+      // Some WebViews hide body readers on the instance while retaining
+      // the native Response reader. Verify the original bytes, including
+      // whitespace and escapes that disappear after JSON parsing.
+      const readBytes = typeof response.arrayBuffer === 'function' ? response.arrayBuffer :
+        typeof Response !== 'undefined' && response instanceof Response ? Response.prototype.arrayBuffer : undefined;
+      if (identityLength === null || typeof readBytes !== 'function') {
+        throw new Error('Cannot verify identity-framed building outline bytes');
+      }
+      const bytes = await readBytes.call(response);
+      if (signal?.aborted) throw new Error('Building outline read aborted');
+      if (bytes.byteLength !== identityLength) throw new Error('Incomplete building outline response');
+      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
     }
-    // Without identity framing, keep the existing bounded legacy fallback.
+    // For a browser-decoded coding, the wire length cannot be compared.
     const payload: unknown = await response.json();
     if (signal?.aborted) throw new Error('Building outline read aborted');
     const normalized = JSON.stringify(payload);
@@ -327,7 +332,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // canvas yet. Starting with visible=true in an API-less WebView displayed
     // the loading spinner even after fallback geometry proved the map offscreen.
     // A manual request applies to this particular scene startup.
-    let visible = manualStart !== handledManualStart.current;
+    const manuallyStarted = manualStart !== handledManualStart.current;
+    let visible = manuallyStarted;
     handledManualStart.current = manualStart;
     let pageSuspended = false;
     let scene: CampusSpatialScene | null = null;
@@ -426,6 +432,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Geometry is only affirmative when both the host and the effective
     // viewport have valid, positive bounds. Unknown WebView measurements must
     // never be interpreted as proof that the map is back on screen.
+    const scrollDialog = manuallyStarted ? host.closest('dialog') : null;
     const hostViewportVisibility = (): 'onscreen' | 'offscreen' | 'visual-offscreen' | 'unknown' | 'invalid-visual-viewport' | 'invalid-layout-viewport' | 'invalid-host-rect' => {
       // Some embedded Safari/WebViews expose VisualViewport but throw when a
       // dimension is read during keyboard, zoom or bfcache transitions. Read
@@ -467,9 +474,19 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // A WebView can expose positive width/height while its DOMRect edges
         // are reversed or collapsed. These bounds never prove the host visible.
         if (rect.right <= rect.left || rect.bottom <= rect.top) return 'invalid-host-rect';
-        if (rect.bottom <= top || rect.top >= bottom || rect.right <= left || rect.left >= right) {
-          return visualBounds && rect.bottom > 0 && rect.top < height &&
-            rect.right > 0 && rect.left < width ? 'visual-offscreen' : 'offscreen';
+        // The dialog clips its overflowing contents even where the window
+        // still has visible pixels outside the dialog.
+        const dialogRect = scrollDialog?.getBoundingClientRect();
+        const clip = dialogRect && dialogRect.width > 0 && dialogRect.height > 0 &&
+          [dialogRect.left, dialogRect.top, dialogRect.right, dialogRect.bottom].every(Number.isFinite)
+          ? dialogRect : rect;
+        const clippedLeft = Math.max(rect.left, clip.left, 0);
+        const clippedTop = Math.max(rect.top, clip.top, 0);
+        const clippedRight = Math.min(rect.right, clip.right, width);
+        const clippedBottom = Math.min(rect.bottom, clip.bottom, height);
+        if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) return 'offscreen';
+        if (clippedBottom <= top || clippedTop >= bottom || clippedRight <= left || clippedLeft >= right) {
+          return 'visual-offscreen';
         }
         return 'onscreen';
       } catch {
@@ -568,14 +585,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     const onViewportResize = () => {
       if (!active) return;
       refreshVisualViewportListeners();
-      if (observerFallback) {
+      if (observerFallback && manualStart === 0) {
         const position = hostViewportVisibility();
         if (position !== 'unknown') visible = position === 'onscreen';
-      } else if (typeof IntersectionObserver !== 'undefined') {
+      } else {
         const position = hostViewportVisibility();
         if (hostMustStaySuspended(position)) {
           rememberViewportPause(position, visible || suspendedByViewport);
-          if (visible && !started && position !== 'offscreen') {
+          if (position === 'offscreen') {
+            pendingInitialViewportConfirmation = false;
+          } else if (visible && !started) {
             pendingInitialViewportConfirmation = true;
           }
           visible = false;
@@ -710,7 +729,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // A broken observer does not authorize starting a measurable offscreen
         // host (or one hidden by an invalid iOS VisualViewport). Older WebViews
         // whose host geometry is unknown still retain their eager fallback.
-        visible = visible || position === 'onscreen' || position === 'unknown';
+        visible = visible || (manualStart === 0 && (position === 'onscreen' || position === 'unknown'));
       }
     }
     // Legacy WebViews with no IntersectionObserver should share the same
@@ -719,24 +738,27 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     if (typeof IntersectionObserver === 'undefined') {
       observerFallback = true;
       const position = hostViewportVisibility();
-      visible = visible || position === 'onscreen' || position === 'unknown';
+      visible = visible || (manualStart === 0 && (position === 'onscreen' || position === 'unknown'));
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('resize', onViewportResize);
-    // With no functioning observer, capture nested container scrolling too:
-    // a mobile map below the fold may enter view without resizing the window.
-    // Scope the extra listener to the exceptional fallback path only.
-    if (observerFallback) window.addEventListener('scroll', onViewportResize, { capture: true, passive: true });
+    // Manual startup can run before the observer delivers a usable callback.
+    // Check nested scrolling for the lifetime of that manual scene.
+    const checkScroll = observerFallback || manuallyStarted;
+    if (checkScroll) window.addEventListener('scroll', onViewportResize, { capture: true, passive: true });
     // Safari's visual viewport can resize/scroll without a layout resize or
     // a timely IntersectionObserver callback. Listen to both dimensions;
     // older WebViews without this optional API keep the window fallback.
     // An embedded WebView may support only one VisualViewport event. Register
     // independently: a throwing resize listener must not suppress scroll,
     // which is the only signal sent after certain keyboard/pinch changes.
-    refreshVisualViewportListeners();
-    startWhenVisible();
+    if (manuallyStarted) onViewportResize();
+    else {
+      refreshVisualViewportListeners();
+      startWhenVisible();
+    }
     return () => {
       active = false;
       if (timeout !== null) window.clearTimeout(timeout);
@@ -747,7 +769,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('resize', onViewportResize);
-      if (observerFallback) window.removeEventListener('scroll', onViewportResize, true);
+      if (checkScroll) window.removeEventListener('scroll', onViewportResize, true);
       // Always attempt both removals even if the first WebView API throws.
       // Otherwise a retained scroll handler can touch a disposed GPU scene.
       for (const event of ['resize', 'scroll'] as const) {
@@ -1317,7 +1339,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // number or comma-separated value. Do not trust a 200 JSON body whose
         // advertised size is invalid or implausibly large for this API.
         const invalidContentLength = contentLength !== null &&
-          (!/^\d+$/.test(contentLength) ||
+          (response.headers?.get('transfer-encoding') != null || !/^\d+$/.test(contentLength) ||
             !Number.isSafeInteger(Number(contentLength)) ||
             // HTTP 200 with a declared empty representation cannot contain
             // verified OSM geometry, regardless of identity/gzip encoding.

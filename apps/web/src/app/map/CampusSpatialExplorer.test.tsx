@@ -1006,6 +1006,80 @@ it('lets a student manually start 3D if a WebView never reports canvas visibilit
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+it.each(['silent', 'missing', 'constructor', 'observe', 'negative'] as const)(
+  'checks dialog clipping after manual startup with a %s observer',
+  async (mode) => {
+    const viewport = Object.assign(new EventTarget(), {
+      width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
+    });
+    vi.stubGlobal('visualViewport', viewport);
+    vi.stubGlobal('IntersectionObserver', mode === 'missing' ? undefined : class {
+      constructor(callback: IntersectionObserverCallback) {
+        if (mode === 'constructor') throw new Error('observer unavailable');
+        intersection = callback;
+      }
+      observe() {
+        if (mode === 'observe') throw new Error('registration failed');
+      }
+      disconnect = disconnect;
+    });
+    const props = { school: 'other-school', locations: places, selected: places[0], onSelect: vi.fn() };
+    const view = render(<CampusSpatialExplorer {...props} />);
+    // Force an initially offscreen host so the manual entry is available
+    // even in WebViews whose automatic startup uses layout geometry.
+    let top = window.innerHeight + 20;
+    const originalRect = Element.prototype.getBoundingClientRect;
+    const layout = vi.spyOn(Element.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: Element) {
+        if (this.matches('dialog')) return new DOMRect(0, 100, 400, 300);
+        if (this.getAttribute('aria-label') === '校園地點空間圖') return new DOMRect(0, top, 320, 50);
+        return originalRect.call(this);
+      });
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog');
+    const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    top = 120;
+    fireEvent.click(within(dialog).getByRole('button', { name: '手動開啟立體畫面' }));
+    await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+    fireEvent.scroll(dialog);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    viewport.height = 110;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    viewport.height = window.innerHeight;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    if (mode === 'negative') {
+      act(() => intersection?.([observerEntry(host, false, undefined, 1)], {} as IntersectionObserver));
+      fireEvent.scroll(dialog);
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      act(() => intersection?.([observerEntry(host, true, undefined, 2)], {} as IntersectionObserver));
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    }
+    // The host is still inside the window, but has scrolled above the dialog.
+    top = 40;
+    fireEvent.scroll(dialog);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    top = 120;
+    fireEvent.scroll(dialog);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+
+    view.rerender(<CampusSpatialExplorer {...props} locations={places.slice(0, -1)} />);
+    expect(scene.dispose).toHaveBeenCalledTimes(1);
+    fireEvent.scroll(dialog);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    const updates = scene.setActive.mock.calls.length;
+    fireEvent.scroll(window);
+    expect(scene.setActive).toHaveBeenCalledTimes(updates);
+    expect(scene.dispose).toHaveBeenCalledTimes(1);
+    layout.mockRestore();
+  },
+);
+
 it.each(['location update', 'public outlines'] as const)(
   'waits for a fresh observer after manual startup, offscreen notification and %s',
   async (update) => {
@@ -2725,7 +2799,7 @@ it('adds source-checked Providence building shapes without changing navigation o
   const osmBaseAt = new Date(Math.floor(Date.now() / 1000) * 1000 - 60 * 60 * 1000)
     .toISOString().replace('.000Z', 'Z');
   await act(async () => {
-    resolveFetch?.({ ok: true, json: async () => ({
+    resolveFetch?.({ ok: true, text: async () => JSON.stringify({
       schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: false, osmBaseAt,
     }) });
   });
@@ -2815,7 +2889,7 @@ it('withdraws a visible OSM building when the map POI identity changes while the
   expect(buildings).toHaveLength(1);
   const fetchMock = vi.fn().mockResolvedValue({
     ok: true, status: 200, headers: { get: () => null },
-    json: async () => ({
+    text: async () => JSON.stringify({
       schoolId: 'pu', source: 'OpenStreetMap', buildings,
       fetchedAt: new Date().toISOString(), stale: false,
     }),
@@ -2885,7 +2959,7 @@ it('falls back after 15 seconds even if an OSM proxy ignores abort, and ignores 
     });
     expect(buildings).toHaveLength(1);
     await act(async () => {
-      resolveFetch?.({ ok: true, json: async () => ({
+      resolveFetch?.({ ok: true, text: async () => JSON.stringify({
         schoolId: 'pu', source: 'OpenStreetMap', buildings,
         fetchedAt: new Date().toISOString(), stale: false,
       }) });
@@ -3023,7 +3097,7 @@ it('rejects oversized JSON-only WebView bridge payloads even without text()', as
     extra: 'x'.repeat(2_000_001),
   });
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, status: 200, body: null, headers: { get: () => null }, json,
+    ok: true, status: 200, body: null, headers: new Headers({ 'Content-Encoding': 'gzip' }), json,
   }));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
@@ -3076,6 +3150,41 @@ it('keeps JSON-only WebView compressed responses usable without comparing wire a
   expect(fetchMock).toHaveBeenCalledTimes(1);
   await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it.each([
+  'exact', 'trailing whitespace', 'escaped text', 'understated', 'overstated',
+  'truncated', 'invalid JSON', 'invalid snapshot', 'missing length', 'invalid length',
+  'stacked coding', 'invalid coding', 'conflicting framing',
+])('verifies a legacy Response with hidden body readers and %s', async (variant) => {
+  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  let raw = body;
+  if (variant === 'trailing whitespace') raw += '\r\n \t';
+  if (variant === 'escaped text') raw = raw.replace('OpenStreetMap', '\\u004fpenStreetMap');
+  if (variant === 'truncated') raw = raw.slice(0, -1);
+  if (variant === 'invalid JSON') raw += '!';
+  if (variant === 'invalid snapshot') raw = raw.replace('OpenStreetMap', 'unknown');
+  const headers = new Headers({ 'Content-Type': 'application/json', 'Content-Encoding': 'identity' });
+  const length = new TextEncoder().encode(variant === 'truncated' ? body : raw).byteLength;
+  if (variant !== 'missing length') {
+    const declared = length + (variant === 'understated' ? -1 : variant === 'overstated' ? 1 : 0);
+    headers.set('Content-Length', variant === 'invalid length' ? '1, 2' : String(declared));
+  }
+  if (variant === 'stacked coding') headers.set('Content-Encoding', 'identity, gzip');
+  if (variant === 'invalid coding') headers.set('Content-Encoding', 'identity; bad');
+  if (variant === 'conflicting framing') headers.set('Transfer-Encoding', 'chunked');
+  const response = new Response(raw, { headers });
+  for (const member of ['body', 'text', 'arrayBuffer', 'blob', 'bytes']) {
+    Object.defineProperty(response, member, { value: undefined });
+  }
+  const json = vi.spyOn(response, 'json');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const valid = ['exact', 'trailing whitespace', 'escaped text'].includes(variant);
+  expect(await within(dialog).findByText(valid ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(valid ? buildings : []);
+  expect(json).not.toHaveBeenCalled();
 });
 
 // A proxy can reply HTTP 200 with an explicit zero-byte representation,
@@ -3190,8 +3299,8 @@ it.each([
   },
 );
 
-it('keeps the legacy JSON-only bridge usable when no body length was declared', async () => {
-  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+it('rejects a legacy JSON-only identity response without a declared length', async () => {
+  const { library, body } = sourcedLibraryFootprintFixture();
   const json = vi.fn().mockResolvedValue(JSON.parse(body));
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: true, status: 200, body: null,
@@ -3199,9 +3308,9 @@ it('keeps the legacy JSON-only bridge usable when no body length was declared', 
   }));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
-  expect(json).toHaveBeenCalledTimes(1);
-  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(json).not.toHaveBeenCalled();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
@@ -3537,7 +3646,7 @@ it('keeps real campus navigation when a tampered API snapshot repeats a verified
     elements: [{ type: 'way', id: 255784049, geometry: outline, tags: { building: 'yes' } }],
   });
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, json: async () => ({
+    ok: true, text: async () => JSON.stringify({
       schoolId: 'pu', source: 'OpenStreetMap',
       fetchedAt: new Date().toISOString(), stale: false,
       buildings: [buildings[0], { ...buildings[0], heightMeters: 90, heightBasis: 'osm-tag' }],
@@ -3664,14 +3773,12 @@ it.each([
   { label: 'truncated JSON with Retry-After', brokenJson: true, retryAfter: '600', minutes: 10 },
 ])('backs off an untrusted HTTP 200 footprint body ($label)', async ({ brokenJson, retryAfter, minutes }) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
-  const json = vi.fn().mockImplementation(async () => {
-    if (brokenJson) throw new SyntaxError('Unexpected end of JSON input');
-    return { schoolId: 'untrusted-campus', source: 'OpenStreetMap', buildings: [] };
-  });
+  const text = vi.fn().mockResolvedValue(brokenJson ? '{' :
+    JSON.stringify({ schoolId: 'untrusted-campus', source: 'OpenStreetMap', buildings: [] }));
   const fetchMock = vi.fn().mockResolvedValue({
     ok: true, status: 200,
     headers: { get: (name: string) => name === 'retry-after' ? retryAfter : null },
-    json,
+    text,
   });
   vi.stubGlobal('fetch', fetchMock);
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
@@ -3682,7 +3789,7 @@ it.each([
   fireEvent.click(retry);
   fireEvent(window, new Event('pageshow'));
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(json).toHaveBeenCalledTimes(1);
+  expect(text).toHaveBeenCalledTimes(1);
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
   expect(within(dialog).getByRole('heading', { name: '蓋夏圖書館' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
@@ -3705,11 +3812,11 @@ it('keeps a dated stale outline when a subsequent HTTP 200 refresh has invalid J
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({
       ok: true, status: 200, headers: { get: () => null },
-      json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: true }),
+      text: async () => JSON.stringify({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: true }),
     })
     .mockResolvedValueOnce({
       ok: true, status: 200, headers: { get: () => null },
-      json: async () => { throw new SyntaxError('Truncated body'); },
+      text: async () => '{',
     });
   vi.stubGlobal('fetch', fetchMock);
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
@@ -3746,7 +3853,7 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
       ok: false, status: 503,
       headers: { get: (name: string) => name === 'retry-after' ? '600' : null },
     })
-    .mockResolvedValueOnce({ ok: true, json: async () => ({
+    .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({
       schoolId: 'pu', source: 'OpenStreetMap', buildings,
       fetchedAt: new Date().toISOString(), stale: false,
     }) });
@@ -3992,11 +4099,11 @@ it.each([
 it('quarantines an in-flight OSM response on Safari pagehide even before document.hidden changes', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   let resolveFirst: ((response: {
-    ok: boolean; status: number; headers: { get: () => null }; json: () => Promise<unknown>;
+    ok: boolean; status: number; headers: { get: () => null }; text: () => Promise<string>;
   }) => void) | undefined;
   const fetchMock = vi.fn((_url: string, _init: { signal: AbortSignal }) =>
     new Promise<{
-      ok: boolean; status: number; headers: { get: () => null }; json: () => Promise<unknown>;
+      ok: boolean; status: number; headers: { get: () => null }; text: () => Promise<string>;
     }>((resolve) => { resolveFirst = resolve; }));
   vi.stubGlobal('fetch', fetchMock);
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
@@ -4026,7 +4133,7 @@ it('quarantines an in-flight OSM response on Safari pagehide even before documen
   await act(async () => {
     resolveFirst?.({
       ok: true, status: 200, headers: { get: () => null },
-      json: async () => ({
+      text: async () => JSON.stringify({
         schoolId: 'pu', source: 'OpenStreetMap', buildings,
         fetchedAt: new Date().toISOString(), stale: false,
       }),
@@ -4055,7 +4162,7 @@ it('quarantines an in-flight OSM response on Safari pagehide even before documen
 it('quarantines an in-flight OSM response when a mobile tab hides without pagehide', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   let resolveFirst: ((response: {
-    ok: boolean; status: number; headers: { get: () => null }; json: () => Promise<unknown>;
+    ok: boolean; status: number; headers: { get: () => null }; text: () => Promise<string>;
   }) => void) | undefined;
   const fetchMock = vi.fn()
     .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
@@ -4088,7 +4195,7 @@ it('quarantines an in-flight OSM response when a mobile tab hides without pagehi
   await act(async () => {
     resolveFirst?.({
       ok: true, status: 200, headers: { get: () => null },
-      json: async () => ({
+      text: async () => JSON.stringify({
         schoolId: 'pu', source: 'OpenStreetMap', buildings,
         fetchedAt: new Date().toISOString(), stale: false,
       }),
@@ -4271,7 +4378,7 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     .mockResolvedValueOnce({
       ok: true, status: 200,
       headers: { get: (name: string) => name === 'retry-after' ? '600' : null },
-      json: async () => ({
+      text: async () => JSON.stringify({
         schoolId: 'pu', source: 'OpenStreetMap', buildings,
         fetchedAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(), stale: true,
       }),
@@ -4279,7 +4386,7 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     .mockReturnValueOnce(stalledRefresh)
     .mockResolvedValueOnce({
       ok: true, status: 200, headers: { get: () => null },
-      json: async () => ({
+      text: async () => JSON.stringify({
         schoolId: 'pu', source: 'OpenStreetMap', buildings,
         fetchedAt: new Date().toISOString(), stale: false,
       }),
@@ -4358,14 +4465,14 @@ it('keeps the existing WebGL scene when an OSM refresh only updates the fetch da
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({
       ok: true, status: 200, headers: { get: () => null },
-      json: async () => ({
+      text: async () => JSON.stringify({
         schoolId: 'pu', source: 'OpenStreetMap', buildings,
         fetchedAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(), stale: true,
       }),
     })
     .mockResolvedValueOnce({
       ok: true, status: 200, headers: { get: () => null },
-      json: async () => ({
+      text: async () => JSON.stringify({
         schoolId: 'pu', source: 'OpenStreetMap',
         // Real JSON requests decode new objects, not the same in-memory array.
         buildings: JSON.parse(JSON.stringify(buildings)),
@@ -4524,7 +4631,7 @@ it('retries Providence building data after a temporary outage without closing th
   // A generic 500 without a rate-limit hint remains manually retryable.
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({ ok: false, status: 500 })
-    .mockResolvedValueOnce({ ok: true, json: async () => ({
+    .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({
       schoolId: 'pu', source: 'OpenStreetMap', buildings,
       fetchedAt: new Date().toISOString(), stale: false,
     }) });
@@ -4567,7 +4674,7 @@ it('does not retain an expired OSM volume when a paused clock timer misses the h
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({
       ok: true, status: 200, headers: { get: () => null },
-      json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: true }),
+      text: async () => JSON.stringify({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: true }),
     })
     .mockReturnValueOnce(pendingRefresh);
   vi.stubGlobal('fetch', fetchMock);
@@ -4616,7 +4723,7 @@ it('retains a newly stale outline throughout its first 24-hour refresh and an of
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({
       ok: true, status: 200, headers: { get: () => null },
-      json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: false }),
+      text: async () => JSON.stringify({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: false }),
     })
     .mockReturnValueOnce(pendingRefresh);
   vi.stubGlobal('fetch', fetchMock);
@@ -4670,7 +4777,7 @@ it('evicts an expired snapshot on tab resume, then installs only fresh source ge
   const pendingRefresh = new Promise((resolve) => { resolveRefresh = resolve; });
   const fetchMock = vi.fn().mockResolvedValueOnce({
     ok: true, status: 200, headers: { get: () => null },
-    json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: false }),
+    text: async () => JSON.stringify({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: false }),
   }).mockReturnValueOnce(pendingRefresh);
   vi.stubGlobal('fetch', fetchMock);
   const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
@@ -4719,7 +4826,7 @@ it('evicts an expired snapshot on tab resume, then installs only fresh source ge
     const updatedBuildings = buildings.map((building) => ({ ...building, heightMeters: building.heightMeters + 1, heightBasis: 'osm-tag' as const }));
     await act(async () => resolveRefresh({
       ok: true, status: 200, headers: { get: () => null },
-      json: async () => ({
+      text: async () => JSON.stringify({
         schoolId: 'pu', source: 'OpenStreetMap', buildings: updatedBuildings,
         fetchedAt: new Date(clock).toISOString(), stale: false,
       }),
@@ -4754,7 +4861,7 @@ it('bounds the first hard-expiry timer for an already-stale OSM snapshot', async
   const fetchedAt = new Date(now - 2 * day).toISOString();
   const fetchMock = vi.fn().mockResolvedValue({
     ok: true, status: 200, headers: { get: () => null },
-    json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: true }),
+    text: async () => JSON.stringify({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: true }),
   });
   vi.stubGlobal('fetch', fetchMock);
   const clockSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
@@ -4793,7 +4900,7 @@ it('keeps the hard-expiry eviction armed after a hidden soft-deadline timer', as
   const fetchedAt = new Date(clock - day + 60_000).toISOString();
   const fetchMock = vi.fn().mockResolvedValueOnce({
     ok: true, status: 200, headers: { get: () => null },
-    json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: false }),
+    text: async () => JSON.stringify({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: false }),
   }).mockReturnValueOnce(new Promise(() => {}));
   vi.stubGlobal('fetch', fetchMock);
   const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
@@ -4888,7 +4995,7 @@ it.each(['visibilitychange', 'timer'])('drops geometry at the earlier OSM replic
     .toISOString().replace('.000Z', 'Z');
   const fetchMock = vi.fn().mockResolvedValue({
     ok: true, status: 200, headers: { get: () => null },
-    json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, osmBaseAt, stale: true }),
+    text: async () => JSON.stringify({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, osmBaseAt, stale: true }),
   });
   vi.stubGlobal('fetch', fetchMock);
   const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
@@ -4937,7 +5044,7 @@ it.each(['failure', 'timeout'])('does not resurrect a seven-day-old outline afte
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({
       ok: true, status: 200, headers: { get: () => null },
-      json: async () => ({
+      text: async () => JSON.stringify({
         schoolId: 'pu', source: 'OpenStreetMap', buildings,
         fetchedAt: new Date(clock - 7 * day + 60_000).toISOString(), stale: true,
       }),
@@ -4991,7 +5098,7 @@ it('rejects an expired OSM API snapshot while keeping the known place and walkin
     elements: [{ type: 'way', id: 255784049, geometry: outline, tags: { building: 'yes' } }],
   });
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, json: async () => ({
+    ok: true, text: async () => JSON.stringify({
       schoolId: 'pu', source: 'OpenStreetMap', buildings,
       fetchedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
       stale: false,
@@ -5075,7 +5182,7 @@ it('withdraws filtered-out Providence volumes and counts only buildings in the c
     ],
   }] });
   expect(buildings).toHaveLength(1);
-  const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, text: async () => JSON.stringify({
     schoolId: 'pu', source: 'OpenStreetMap', buildings,
     fetchedAt: new Date().toISOString(), stale: false,
   }) });
@@ -5212,7 +5319,7 @@ it('discloses missing audited way outlines without treating a partial OSM reply 
   expect(buildings).toHaveLength(1);
   const fetchMock = vi.fn().mockResolvedValue({
     ok: true, status: 200, headers: { get: () => null },
-    json: async () => ({
+    text: async () => JSON.stringify({
       schoolId: 'pu', source: 'OpenStreetMap', buildings,
       fetchedAt: new Date().toISOString(), stale: false,
     }),
