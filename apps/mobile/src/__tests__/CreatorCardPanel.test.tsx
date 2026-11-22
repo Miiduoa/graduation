@@ -20,9 +20,10 @@ jest.mock('../services/creatorCard', () => ({
 }));
 
 beforeEach(() => {
-  // resetAllMocks on these two services prevents an unconsumed one-shot
-  // implementation in a failed test from leaking into the next student's flow.
+  // Discard one-shot implementations so a failed case cannot affect the next case.
   jest.clearAllMocks();
+  jest.mocked(getDocFromServer).mockReset();
+  jest.mocked(setDoc).mockReset();
   jest.mocked(readCreatorCard).mockReset();
   jest.mocked(saveCreatorCard).mockReset();
   jest.mocked(readCreatorCard).mockResolvedValue(null);
@@ -681,7 +682,7 @@ test.each([
   jest.mocked(saveCreatorCard).mockResolvedValueOnce({ ...card, [field]: value });
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice',
-    { ...card, [field]: value }, expect.any(Function), [field]);
+    { ...card, [field]: value }, expect.any(Function));
 });
 
 test('clearing a hidden link during confirmation preserves the explicit edit', async () => {
@@ -712,7 +713,7 @@ test('clearing a hidden link during confirmation preserves the explicit edit', a
   const next = { ...latest, linkUrl: '' };
   jest.mocked(saveCreatorCard).mockResolvedValueOnce(next);
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
-  expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice', next, expect.any(Function), ['linkUrl']);
+  expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice', next, expect.any(Function));
 });
 
 test('editing a pending draft keeps the save blocked and an invalid URL does not break confirmation', async () => {
@@ -858,7 +859,7 @@ test.each([
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice', {
     headline: '重新編輯的標題', bio: latest?.bio ?? '', linkUrl: latest?.linkUrl ?? '',
-  }, expect.any(Function), ...(latest ? [['headline']] : []));
+  }, expect.any(Function));
   fireEvent.press(view.getByLabelText('編輯社群簡介'));
   fireEvent.press(view.getByLabelText('還原未確認的草稿'));
   expect(view.getByLabelText('一句話介紹').props.value).toBe(saved.headline);
@@ -868,7 +869,7 @@ test.each([
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenNthCalledWith(3, 'pu', 'alice', {
     ...saved, bio: draft.bio, linkUrl: draft.linkUrl,
-  }, expect.any(Function), ['bio', 'linkUrl']);
+  }, expect.any(Function));
   fireEvent.press(view.getByLabelText('編輯社群簡介'));
   expect(view.queryByLabelText('還原未確認的草稿')).toBeNull();
 });
@@ -915,7 +916,7 @@ test.each([
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice',
     cancel ? { ...latest, headline: '重新編輯的標題' } : { ...latest, bio: draft.bio },
-    expect.any(Function), [cancel ? 'headline' : 'bio']);
+    expect.any(Function));
 });
 
 test('an offline confirmation can be retried without resending the save', async () => {
@@ -1009,7 +1010,7 @@ describe.each(['manual', 'automatic'] as const)('%s confirmation', (kind) => {
         const next = { ...newer, headline: '下一次修改的標題' };
         saves.mockResolvedValueOnce(next);
         await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
-        expect(saves).toHaveBeenNthCalledWith(2, 'pu', 'alice', next, expect.any(Function), ['headline']);
+        expect(saves).toHaveBeenNthCalledWith(2, 'pu', 'alice', next, expect.any(Function));
       } finally {
         jest.useRealTimers();
       }
@@ -1258,7 +1259,7 @@ test('a timed-out clear can be restored after a public check still reads a hidde
     expect(view.getByLabelText('個人簡介').props.value).toBe('取消前追加的簡介');
     await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
     expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice',
-      { ...latest, bio: '取消前追加的簡介' }, expect.any(Function), ['bio', 'linkUrl']);
+      { ...latest, bio: '取消前追加的簡介' }, expect.any(Function));
   } finally {
     jest.useRealTimers();
   }
@@ -1340,16 +1341,11 @@ describe('save and server confirmation parity with merge-base', () => {
         read.mockClear();
         write.mockClear();
         await pressSave();
-        if (scenario === 'retry after confirmation failure') {
-          // Following an ambiguous write, an unchanged save only reads the card.
-          expect(write).not.toHaveBeenCalled();
-        } else {
-          expect(write).toHaveBeenCalledTimes(1);
-          expect(write).toHaveBeenCalledWith(undefined, {
-            ...local, linkUrl: scenario === 'link clear only' ? '' : local.linkUrl, updatedAt: 'SERVER_TIME',
-          }, { merge: true });
-          expect(read.mock.invocationCallOrder[0]).toBeGreaterThan(write.mock.invocationCallOrder[0]);
-        }
+        expect(write).toHaveBeenCalledTimes(1);
+        expect(write).toHaveBeenCalledWith(undefined, {
+          ...local, linkUrl: scenario === 'link clear only' ? '' : local.linkUrl, updatedAt: 'SERVER_TIME',
+        }, { merge: true });
+        expect(read.mock.invocationCallOrder[0]).toBeGreaterThan(write.mock.invocationCallOrder[0]);
         expect(read).toHaveBeenCalledTimes(1);
         expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
         expect(view.queryByLabelText('儲存簡介')).toBeNull();
@@ -1389,6 +1385,82 @@ describe('saving merges creator card changes under the document rules', () => {
     fireEvent.press(await view.findByLabelText('編輯社群簡介'));
     return { view, currentDocument: () => server };
   }
+
+  // Expected content from merge-base's readCreatorCardFields and validateCreatorCard.
+  describe.each([
+    ['HTTP link', { linkUrl: 'http://example.org/' }, { linkUrl: '' }],
+    ['overlong bio', { bio: '字'.repeat(221) }, { bio: '字'.repeat(220) }],
+    ['surrounding spaces', { headline: '  標題  ', bio: '  簡介  ', linkUrl: '  https://example.org/  ' }, {}],
+    ['empty fields', { headline: '', bio: '', linkUrl: '' }, { headline: '', bio: '', linkUrl: '' }],
+  ])('merge-base write parity for %s', (legacyCase, legacy, normalized) => {
+    describe.each(['first write', 'network failure', 'timeout and check', 'confirmation mismatch'])(
+      '%s', (scenario) => {
+        test.each([
+          ['headline only', { headline: '新標題' }],
+          ['bio only', { bio: '新簡介' }],
+          ['link only', { linkUrl: 'https://example.net/' }],
+          ['all fields', { headline: '新標題', bio: '新簡介', linkUrl: 'https://example.net/' }],
+          ['no edits', {}],
+        ])('%s succeeds whenever the merge-base write succeeds', async (editCase, edits) => {
+          const raw = { ...original, ...legacy };
+          const { view, currentDocument } = await editCard(raw);
+          const labels = { headline: '一句話介紹', bio: '個人簡介', linkUrl: '作品連結' };
+          for (const field of Object.keys(labels) as (keyof typeof labels)[]) {
+            const value = edits[field];
+            if (value !== undefined) fireEvent.changeText(view.getByLabelText(labels[field]), value);
+          }
+
+          const write = jest.mocked(setDoc);
+          const save = () => act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+          const timeout = scenario === 'timeout and check';
+          let acknowledge!: () => void;
+          if (timeout) {
+            jest.useFakeTimers();
+            write.mockReturnValueOnce(new Promise<void>((resolve) => { acknowledge = resolve; }));
+          } else if (scenario === 'network failure') {
+            write.mockRejectedValueOnce(new Error('offline'));
+          } else if (scenario === 'confirmation mismatch') {
+            // Another device puts the original content back before the confirmation read.
+            write.mockResolvedValueOnce(undefined);
+          }
+
+          const { pinnedPostId, ...required } = original;
+          const mergeBaseWrite = { ...required, ...normalized, ...edits, updatedAt: 'SERVER_TIME' };
+          expect(creatorCardDocumentPassesRules({ ...raw, ...mergeBaseWrite }, 'pu', 'alice', 'SERVER_TIME'))
+            .toBe(true);
+          if (scenario !== 'first write' && legacyCase === 'empty fields' && editCase === 'no edits') {
+            // A missing field displays as empty but cannot confirm a complete write.
+            const incomplete: Record<string, unknown> = { ...raw };
+            delete incomplete.linkUrl;
+            jest.mocked(getDocFromServer).mockResolvedValueOnce({
+              exists: () => true, data: () => incomplete, metadata: { hasPendingWrites: false },
+            } as never);
+          }
+          try {
+            await save();
+            if (timeout) act(() => { jest.advanceTimersByTime(15_000); });
+            if (timeout || scenario === 'network failure') {
+              await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+            }
+            if (scenario !== 'first write') {
+              expect(view.queryByText('社群簡介已儲存。')).toBeNull();
+              expect(write).toHaveBeenCalledTimes(1);
+              await save();
+            }
+            expect(write).toHaveBeenCalledTimes(scenario === 'first write' ? 1 : 2);
+            expect(write).toHaveBeenLastCalledWith(undefined, mergeBaseWrite, { merge: true });
+            expect(currentDocument()).toEqual({ ...mergeBaseWrite, pinnedPostId });
+            expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+          } finally {
+            if (timeout) {
+              await act(async () => { acknowledge(); });
+              jest.useRealTimers();
+            }
+          }
+        });
+      },
+    );
+  });
 
   describe.each(['headline', 'bio', 'linkUrl'] as const)('legacy %s', (field) => {
     const isLink = field === 'linkUrl';
@@ -1466,7 +1538,7 @@ describe('saving merges creator card changes under the document rules', () => {
 });
 
 test.each([false, true])(
-  'reopening after an ambiguous save preserves concurrent content and pin (restore: %s)',
+  'reopening after an ambiguous save uses checked content and preserves the pin (restore: %s)',
   async (restore) => {
     const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
     jest.mocked(readCreatorCard).mockImplementation(service.readCreatorCard);
@@ -1502,15 +1574,16 @@ test.each([false, true])(
     if (restore) fireEvent.press(view.getByLabelText('還原未確認的草稿'));
     else fireEvent.changeText(view.getByLabelText('個人簡介'), '這次編輯的簡介');
     expect(view.getByLabelText('作品連結').props.value).toBe(server.linkUrl);
-    // A second remote change after reopening must survive the actual save payload.
+    // Merge-base writes the displayed link back. The independent pin still survives the merge.
     server = { ...server, linkUrl: 'https://example.com/', pinnedPostId: 'post-2' };
     const bio = restore ? '待確認的簡介' : '這次編輯的簡介';
     await save();
     expect(setDoc).toHaveBeenNthCalledWith(2, undefined, {
-      schoolId: 'pu', ownerUid: 'alice', bio, updatedAt: 'SERVER_TIME',
+      schoolId: 'pu', ownerUid: 'alice', headline: initial.headline, bio,
+      linkUrl: 'https://example.net/', updatedAt: 'SERVER_TIME',
     }, { merge: true });
     expect(server).toEqual({
-      ...initial, bio, linkUrl: 'https://example.com/', pinnedPostId: 'post-2', updatedAt: 'SERVER_TIME',
+      ...initial, bio, linkUrl: 'https://example.net/', pinnedPostId: 'post-2', updatedAt: 'SERVER_TIME',
     });
     expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
   },
@@ -1564,7 +1637,7 @@ test.each(['none', 'bio', 'all', 'reverted'] as const)(
     await save();
     expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice', {
       ...published, bio: '第二次送出', linkUrl: scenario === 'all' ? 'https://example.com/' : '',
-    }, expect.any(Function), ['bio', 'linkUrl']);
+    }, expect.any(Function));
     await check();
     fireEvent.press(view.getByLabelText('取消編輯'));
     fireEvent.press(view.getByLabelText('編輯社群簡介'));

@@ -46,22 +46,17 @@ export async function readCreatorCard(
   return card;
 }
 
-/** Save public fields and confirm the written values against the server. */
+/** Save a whole bounded public card and confirm the written values against the server. */
 export async function saveCreatorCard(
   schoolId: string, ownerUid: string, draft: CreatorCard,
   confirm = (read: () => Promise<CreatorCard | null>) => read(),
-  fields: readonly (keyof CreatorCard)[] = CARD_FIELDS,
 ): Promise<CreatorCard> {
   const normalized = validateCreatorCard(draft);
-  const patch: Partial<CreatorCard> = {};
-  for (const field of fields) patch[field] = normalized[field];
-  if (fields.length) {
-    await setDoc(cardRef(schoolId, ownerUid), {
-      schoolId, ownerUid, ...patch, updatedAt: serverTimestamp(),
-    }, { merge: true });
-  }
+  await setDoc(cardRef(schoolId, ownerUid), {
+    schoolId, ownerUid, ...normalized, updatedAt: serverTimestamp(),
+  }, { merge: true });
   const confirmed = await confirm(() => readCreatorCard(schoolId, ownerUid, { requireCommitted: true }));
-  if (!confirmed || fields.some((field) => !creatorCardFieldMatches(confirmed, field, normalized[field]))) {
+  if (!confirmed || CARD_FIELDS.some((field) => !creatorCardFieldMatches(confirmed, field, normalized[field]))) {
     throw new Error('Creator card update was not confirmed');
   }
   return confirmed;
