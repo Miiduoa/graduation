@@ -79,7 +79,7 @@ const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 function isSupportedFootprintMediaType(response: Response): boolean {
   const declared = response.headers?.get('content-type');
   if (declared === null || declared === undefined) return true;
-  return /^(?:application\/(?:json|[a-z0-9][a-z0-9!#// Response.json() buffers the entire document before our snapshot validator^_.+-]*\+json)|text\/plain)(?:\s*;\s*charset\s*=\s*(?:"utf-8"|utf-8))?$/i.test(declared.trim());
+  return /^(?:application\/(?:json|[a-z0-9][a-z0-9!#$&^_.+-]*\+json)|text\/plain)(?:\s*;\s*charset\s*=\s*(?:"utf-8"|utf-8))?$/i.test(declared.trim());
 }
 
 // Response.json() buffers the entire document before our snapshot validator
