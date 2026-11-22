@@ -95,32 +95,44 @@ describe('reject unreadable model citations before saving a lesson', () => {
   });
 
   it.each([
-    ['left-to-right mark', '\u200e'],
-    ['right-to-left mark', '\u200f'],
-    ['Arabic letter mark', '\u061c'],
+    ['embedding', '\u202b'],
+    ['override', '\u202e'],
     ['first strong isolate', '\u2068'],
-  ])('rejects a visually directed %s in generated main and step citations', (_name, mark) => {
+  ])('rejects %s in generated citations and retained follow-up context', (_name, mark) => {
     const quote = '主' + mark + '鍵';
     const original = { ...passage, text: passage.text + quote };
-    expect(original.text.includes(quote)).toBe(true);
-    expect(() => parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original))
+    const previous = { ...turn(), response: { ...explanation(), sourceQuote: quote } };
+    expect(() => parseTutorExplanation(JSON.stringify(previous.response), original))
       .toThrow('方向控制字元');
     const reply = steppedExplanation();
     reply.steps[0].sourceQuote = quote;
     expect(() => parseTutorExplanation(JSON.stringify(reply), original))
       .toThrow('AI 步驟引句無可讀的教材內容');
-  });
-
-  it('retains a legacy exact-match direction-mark citation in a backup but not as new follow-up evidence', () => {
-    const quote = '主\u200e鍵';
-    const original = { ...passage, text: passage.text + quote };
-    const previous = { ...turn(), response: { ...explanation(), sourceQuote: quote } };
-    expect(parseSavedTutorExplanation(JSON.stringify(previous.response), original).sourceQuote).toBe(quote);
     expect(() => prepareStudyTutorHistory(original, 'understand', [previous]))
       .toThrow('先前講解無法對照目前的原文');
-    expect(() => buildStudyTutorPrompt(original, 'understand', '說明一下', {
-      passageId: original.id, sourceText: original.text, mode: 'understand', turns: [previous],
-    })).toThrow('先前講解無法對照目前的原文');
+  });
+
+  it.each(['主\u200e鍵', 'א\u200fב', 'م\u061cن'])(
+    'preserves readable direction-mark citations in backups, follow-ups and new lessons (%#)', (quote) => {
+      const original = { ...passage, text: passage.text + quote };
+      const previous = { ...turn(), response: { ...explanation(), sourceQuote: quote } };
+      expect(parseSavedTutorExplanation(JSON.stringify(previous.response), original).sourceQuote).toBe(quote);
+      const prepared = prepareStudyTutorHistory(original, 'understand', [previous]);
+      expect(promptData(buildStudyTutorPrompt(original, 'understand', '繼續', prepared), 'HISTORY_DATA'))
+        .toEqual([previous]);
+
+      const reply = { ...steppedExplanation(), sourceQuote: quote };
+      reply.steps[0].sourceQuote = quote;
+      expect(parseTutorExplanation(JSON.stringify(reply), original)).toEqual(reply);
+    },
+  );
+
+  it.each(['\u200e', '，\u200f。', '\u061c\u200b'])('rejects direction marks without readable content (%#)', (quote) => {
+    const original = { ...passage, text: passage.text + quote };
+    const previous = { ...turn(), response: { ...explanation(), sourceQuote: quote } };
+    expect(() => parseTutorExplanation(JSON.stringify(previous.response), original)).toThrow('引句無可讀');
+    expect(() => prepareStudyTutorHistory(original, 'understand', [previous]))
+      .toThrow('先前講解無法對照目前的原文');
   });
 
   it('rejects an unreadable step citation even when the main quote is valid', () => {

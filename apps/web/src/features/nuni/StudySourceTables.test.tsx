@@ -1165,6 +1165,24 @@ it.each(['風險等級百分比', '風險等級（%）'])('charts %s against a f
     .toEqual([[25, 100], [75, 100]]);
 });
 
+it.each(['各題號正答率 (%)', '各題次正確率（％）', 'Accuracy by question number (%)'])(
+  'charts the measured rate by question for %s', (header) => {
+    const material = [`| 題目 | ${header} |`, '| --- | --- |', '| 甲 | 50% |', '| 乙 | 75% |'].join('\n');
+    const { container } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual([[50, 100], [75, 100]]);
+  },
+);
+
+it.each(['題號 (%)', 'Question Number (%)', '郵遞區號 (%)'])(
+  'keeps a percentage unit on the identifier %s from enabling a chart', (header) => {
+    const material = [`| 名稱 | ${header} |`, '| --- | --- |', '| 甲 | 50% |', '| 乙 | 75% |'].join('\n');
+    const { container } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('table')).toBeTruthy();
+    expect(comparisonSummaries(container)).toEqual([]);
+  },
+);
+
 it('visualizes exact source percentages on a fixed 100% scale without changing source cells', () => {
   const material = [
     '| 練習 | 完成率 |',

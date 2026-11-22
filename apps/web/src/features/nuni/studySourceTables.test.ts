@@ -1484,6 +1484,10 @@ describe('invalid CSS declarations cannot override hidden teacher-only source ta
 describe('context-dependent CSS-wide values must not publish derived teacher tables', () => {
   it.each([
     '<div style="display:none;display:inherit">',
+    '<div hidden style="display:unset">',
+    '<div style="display:unset; visibility:hidden">',
+    '<div style="display:none!important;display:unset">',
+    '<div style="display:unset;opacity:0">',
     '<section style="display:none!important;display:revert!important">',
     '<aside style="visibility:hidden;visibility:unset">',
     '<p style="opacity:0;opacity:inherit">',
@@ -1509,6 +1513,11 @@ describe('context-dependent CSS-wide values must not publish derived teacher tab
 
   it.each([
     '<div style="display:none;display:initial">',
+    '<div style="display:unset">',
+    '<div style="display:none;display:unset">',
+    '<div style="display:var(--mode);display:unset">',
+    '<aside style="opacity:0;opacity:unset">',
+    '<section style="content-visibility:hidden;content-visibility:unset">',
     '<section style="visibility:hidden;visibility:initial">',
     '<aside style="opacity:0;opacity:initial">',
     '<p style="content-visibility:hidden;content-visibility:initial">',

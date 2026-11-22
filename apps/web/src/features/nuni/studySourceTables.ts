@@ -167,11 +167,9 @@ function decodeCssEscapes(value: string): string {
 // "display:none;display:not-a-mode" must remain hidden in the derived table.
 // This covers literal values and simple display fallbacks. Other CSS functions
 // and combinations can depend on the browser's computed style.
-// 'initial' is a known literal for the four tracked properties. In contrast,
-// inherit/unset/revert/revert-layer can depend on an ancestor, user-agent rules
-// or cascade layers that this source-text scanner cannot inspect. A later
-// contextual declaration must never be treated as proof that a previously
-// hidden teacher-only table is now visible.
+// 'initial' is a known literal for all four properties. The scanner resolves
+// 'unset' to 'initial' for non-inherited properties. The remaining contextual
+// values can depend on an ancestor or cascade rules outside the source text.
 const CSS_CONTEXTUAL_WIDE_VALUES = new Set(['inherit', 'unset', 'revert', 'revert-layer']);
 const CSS_DISPLAY_KEYWORDS = new Set([
   'none', 'contents', 'block', 'inline', 'run-in', 'flow-root',
@@ -229,8 +227,10 @@ function hasExplicitHiddenInlineStyle(style: string): boolean {
     const displayFallback = name === 'display'
       ? /^var\(\s*--[^\s,()]+\s*,\s*([^(),]+?)\s*\)$/u.exec(declaredValue)?.[1]
       : undefined;
-    const value = displayFallback && isRecognizedInlineCssValue(name, displayFallback)
+    const resolvedValue = displayFallback && isRecognizedInlineCssValue(name, displayFallback)
       ? displayFallback : declaredValue;
+    // Unset resolves to the initial value for the three non-inherited properties.
+    const value = resolvedValue === 'unset' && name !== 'visibility' ? 'initial' : resolvedValue;
     const unresolved = UNRESOLVED_VISIBILITY_FUNCTION.test(value) || CSS_CONTEXTUAL_WIDE_VALUES.has(value);
     if (!unresolved && !isRecognizedInlineCssValue(name, value)) continue;
     const previous = effective.get(name);

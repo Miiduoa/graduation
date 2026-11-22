@@ -2,10 +2,10 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { StudyMode } from '@/lib/studyTutor';
-import { STUDY_SESSION_LIMITS, hasVisibleStudyContent } from './courseStudySession';
+import { STUDY_SESSION_LIMITS, hasRevealedStudyAnswer, hasVisibleStudyContent } from './courseStudySession';
 import {
   getStudyPracticeSummary,
-  hasVisibleStudyAttempt,
+  hasStudyPracticeAttempt,
   nextUnassessedDraftStudyPracticeIndex,
   nextUnreviewedStudyPracticeIndex,
   previousUnassessedDraftStudyPracticeIndex,
@@ -38,7 +38,7 @@ function outcomeLabel(response: StudyPracticeResponse | undefined): string {
   if (response?.outcome === 'again') return '還要加強';
   if (response?.outcome === 'skipped') return '略過';
   // A saved draft is still unassessed, but should be findable before the summary.
-  if (response?.outcome === null && hasVisibleStudyAttempt(response.attempt)) return '草稿待自評';
+  if (response?.outcome === null && hasStudyPracticeAttempt(response)) return '草稿待自評';
   return '未完成';
 }
 
@@ -108,14 +108,14 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
   // This is derived display state, never a saved self-rating or checkpoint.
   const unfinishedDraftIndices = round.cards.flatMap((item, index) => {
     const saved = round.responses[item.id];
-    return saved?.outcome === null && hasVisibleStudyAttempt(saved.attempt) ? [index] : [];
+    return saved?.outcome === null && hasStudyPracticeAttempt(saved) ? [index] : [];
   });
   const nextUnreviewedIndex = round.finished ? null : nextUnreviewedStudyPracticeIndex(round);
   const nextDraftIndex = round.finished ? null : nextUnassessedDraftStudyPracticeIndex(round);
   const previousDraftIndex = round.finished ? null : previousUnassessedDraftStudyPracticeIndex(round);
   const previousUnreviewedIndex = round.finished ? null : previousUnreviewedStudyPracticeIndex(round);
-  const canRevealAnswer = !!response && hasVisibleStudyAttempt(response.attempt);
-  const answerVisible = !!response?.answerVisible && canRevealAnswer;
+  const answerVisible = !!response && hasRevealedStudyAnswer(response);
+  const canRevealAnswer = !!response && hasStudyPracticeAttempt(response);
   // A position belongs to this exact question within this practice round, not
   // to another card that happens to quote the same text.
   const evidenceKey = `${round.revision}:${round.index}:${card?.id ?? ''}`;

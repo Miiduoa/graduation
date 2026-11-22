@@ -283,6 +283,43 @@ it('saves an independent practice checkpoint and restores the exact second-quest
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
+it.each(['\ufff9', '\ufffa\ufffb', '\u200b', '\u2800\u0301'])(
+  'restores a legacy expanded practice answer in the UI and TXT (%#)', async (attempt) => {
+    const downloads = downloadMock();
+    const view = mount();
+    await restore();
+    begin();
+    fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '甲' } });
+    fireEvent.click(screen.getByRole('button', { name: '對照參考回答' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存練習與閱讀進度' }));
+    const stored = JSON.parse(await readBlob(downloads.create.mock.calls[0][0] as Blob));
+    const firstId = stored.practice.cardIds[0];
+    stored.practice.responses[firstId].attempt = attempt;
+    const raw = JSON.stringify(stored);
+    view.unmount();
+
+    mount();
+    const file = new File([raw], '上次練習.campus-practice.json', { type: 'application/json' });
+    Object.defineProperty(file, 'text', { value: async () => raw });
+    fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+    await screen.findByRole('region', { name: '閱讀進度預覽' });
+    fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+
+    expect(value(practiceLabel)).toBe(attempt);
+    expect(screen.getByRole('button', { name: '收起參考回答', expanded: true })).toBeTruthy();
+    expect(screen.getByText(first.answer)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '下載本輪練習' }));
+    const notes = await readBlob(downloads.create.mock.calls[1][0] as Blob);
+    expect(notes).toContain('本輪試答：\n' + attempt);
+    expect(notes).toContain(first.answer);
+    expect(notes).not.toContain(second.answer);
+
+    fireEvent.click(screen.getByRole('button', { name: '收起參考回答' }));
+    expect(screen.queryByText(first.answer)).toBeNull();
+    expect((screen.getByRole('button', { name: '對照參考回答' }) as HTMLButtonElement).disabled).toBe(true);
+  },
+);
+
 it('rejects a corrupt practice checkpoint without replacing the existing lecture or round', async () => {
   mount();
   await restore();

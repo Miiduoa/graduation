@@ -232,9 +232,10 @@ function isNonRatioColumn(header: string): boolean {
   if (/(?:^|\s)(?:id|uuid|code|no\.?|#)$/iu.test(unqualifiedColumn) &&
       !/^(?:(?:number|count)\s+of\s+)?lines?\s+of\s+code$/iu.test(unqualifiedColumn)) return true;
   // A question number identifies an exercise; its magnitude is not a measured result.
-  // Keep the exact table, but never turn "第 2 題" vs "第 4 題" into a 2× bar.
-  if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|題號|題次|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
-      /\b(?:question|problem|exercise|item)\s+(?:id|number|no\.?)(?:\b|$)/iu.test(column) ||
+  // A bounded rate grouped by question still measures a rate.
+  if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
+      (!describesBoundedRate && (/(?:題號|題次)/u.test(column) ||
+        /\b(?:question|problem|exercise|item)\s+(?:id|number|no\.?)(?:\b|$)/iu.test(column))) ||
       /^(?:年度|year|number)$/iu.test(column) ||
       // A number identifying a term, page, floor or class is an ordinal or
       // category, not a comparable measure. Parenthetical source qualifiers

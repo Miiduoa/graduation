@@ -9,11 +9,16 @@ export const STUDY_SESSION_LIMITS = {
 /**
  * A response made only of whitespace, direction markers, joiners, variation
  * selectors, isolated combining marks or Braille blank is not an actual answer.
- * Reuse this gate for live review, reading/checkpoint restore and TXT export.
+ * Require visible content for a new attempt to unlock a reference answer.
  * Keep real letters, mathematics, full emoji and attached accents intact.
  */
 export function hasVisibleStudyAttempt(attempt: string): boolean {
   return hasVisibleStudyContent(attempt);
+}
+
+// Older backups can contain an expanded answer with a trim()-accepted attempt.
+export function hasRevealedStudyAnswer(response: { attempt: string; answerVisible: boolean }): boolean {
+  return response.answerVisible && !!response.attempt.trim();
 }
 
 export function hasVisibleStudyContent(text: string, { ignorePunctuation = false } = {}): boolean {
