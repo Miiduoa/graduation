@@ -71,8 +71,9 @@ const existingCard = {
 };
 
 describe.each(['open', 'closed', 'reopened'] as const)('confirmation with editor %s', (editor) => {
-  const submitted = { headline: '  送出的標題  ', bio: '\n\t送出的簡介\n', linkUrl: 'https://example.net' };
-  const confirmed = { headline: '送出的標題', bio: '送出的簡介', linkUrl: 'https://example.net/' };
+  const changes = { headline: '  送出的標題  ', bio: '\n\t送出的簡介\n', linkUrl: 'https://example.net' };
+  const normalized = { headline: '送出的標題', bio: '送出的簡介', linkUrl: 'https://example.net/' };
+  const original = { ...existingCard, linkUrl: 'https://example.org/' };
   const fields = [
     ['headline', '一句話介紹', '追加標題'],
     ['bio', '個人簡介', ''],
@@ -87,102 +88,114 @@ describe.each(['open', 'closed', 'reopened'] as const)('confirmation with editor
     ['all', Object.fromEntries(fields.map(([field, , value]) => [field, value]))],
   ] as const;
 
-  describe.each(additions)('post-submit edits: %s', (_scenario, patch: Partial<typeof submitted>) => {
-    test.each(['late acknowledgement', 'manual match', 'mismatch', 'failure', 'timeout'] as const)(
-      '%s', async (outcome) => {
-        jest.useFakeTimers();
-        try {
-          let acknowledge!: () => void;
-          let completeCheck!: (value: typeof confirmed) => void;
-          let failCheck!: (reason: Error) => void;
-          const check = new Promise<typeof confirmed>((resolve, reject) => {
-            completeCheck = resolve;
-            failCheck = reject;
-          });
-          const saves = jest.mocked(saveCreatorCard);
-          const reads = jest.mocked(readCreatorCard);
-          const getServerCard = jest.fn(() => check);
-          saves.mockImplementationOnce(async (_school, _owner, _draft, confirmWrite) => {
-            await new Promise<void>((resolve) => { acknowledge = resolve; });
-            return confirmWrite!(getServerCard) as Promise<typeof confirmed>;
-          });
-          reads.mockResolvedValueOnce(existingCard).mockReturnValueOnce(check);
-          const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
-          await act(async () => {});
-          const open = () => fireEvent.press(view.getByLabelText('編輯社群簡介'));
-          const expectDraft = (expected: typeof submitted) => {
-            for (const [field, label] of fields) {
-              expect(view.getByLabelText(label).props.value).toBe(expected[field]);
-            }
-          };
+  const submissions = [
+    ['all', changes, normalized],
+    ['unchanged', original, original],
+    ...fields.map(([field]) => [
+      field, { ...original, [field]: changes[field] }, { ...original, [field]: normalized[field] },
+    ] as const),
+  ] as const;
 
-          open();
-          for (const [field, label] of fields) {
-            fireEvent.changeText(view.getByLabelText(label), submitted[field]);
-          }
-          fireEvent.press(view.getByLabelText('儲存簡介'));
-          act(() => { jest.advanceTimersByTime(15_000); });
-          for (const [field, label] of fields) {
-            const value = patch[field];
-            if (value !== undefined) fireEvent.changeText(view.getByLabelText(label), value);
-          }
-          if (editor !== 'open') fireEvent.press(view.getByLabelText('取消編輯'));
-          if (editor === 'reopened') {
-            open();
-            expectDraft({ ...submitted, ...patch });
-          }
-
-          if (outcome === 'late acknowledgement') await act(async () => { acknowledge(); });
-          else fireEvent.press(view.getByLabelText('核對儲存結果'));
-
-          if (outcome === 'failure') {
-            await act(async () => { failCheck(new Error('offline')); });
-            if (editor === 'closed') open();
-            // A failed read leaves the pending submission and its full draft intact, as at merge-base.
-            expectDraft({ ...submitted, ...patch });
-            expect(view.getByLabelText('核對儲存結果')).toBeTruthy();
-            expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
-          } else if (outcome === 'mismatch') {
-            const latest = { ...confirmed, bio: '另一裝置的簡介' };
-            await act(async () => { completeCheck(latest); });
-            if (editor === 'closed') {
-              open();
-              expectDraft(latest);
-            }
-            // Once the check resolves, the merge-base permits saving again.
-            // The PR also loads current server fields and offers recovery for unconfirmed edits.
-            expect(view.queryByLabelText('核對儲存結果')).toBeNull();
-            expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(false);
-            fireEvent.press(view.getByLabelText('還原未確認的草稿'));
-            const retained = editor === 'closed' ? { ...latest, bio: submitted.bio } : submitted;
-            expectDraft({ ...retained, ...patch });
-          } else {
-            if (outcome === 'timeout') {
-              act(() => { jest.advanceTimersByTime(15_000); });
-              expect(view.getByText(/核對等待逾時/)).toBeTruthy();
-              if (editor !== 'closed') {
-                expectDraft({ ...submitted, ...patch });
-                expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+  describe.each(submissions)('submitted fields: %s', (_submission, submitted, confirmed) => {
+    describe.each(additions)('post-submit edits: %s', (_scenario, patch: Partial<typeof changes>) => {
+      test.each(['late acknowledgement', 'manual match', 'mismatch', 'missing', 'failure', 'timeout'] as const)(
+        '%s', async (outcome) => {
+          jest.useFakeTimers();
+          try {
+            let acknowledge!: () => void;
+            let completeCheck!: (value: typeof confirmed | null) => void;
+            let failCheck!: (reason: Error) => void;
+            const check = new Promise<typeof confirmed | null>((resolve, reject) => {
+              completeCheck = resolve;
+              failCheck = reject;
+            });
+            const saves = jest.mocked(saveCreatorCard);
+            const reads = jest.mocked(readCreatorCard);
+            const getServerCard = jest.fn(() => check);
+            saves.mockImplementationOnce(async (_school, _owner, _draft, confirmWrite) => {
+              await new Promise<void>((resolve) => { acknowledge = resolve; });
+              return confirmWrite!(getServerCard) as Promise<typeof confirmed>;
+            });
+            reads.mockResolvedValueOnce(original).mockReturnValueOnce(check);
+            const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+            await act(async () => {});
+            const open = (label = '編輯社群簡介') => fireEvent.press(view.getByLabelText(label));
+            const expectDraft = (expected: typeof submitted) => {
+              for (const [field, label] of fields) {
+                expect(view.getByLabelText(label).props.value).toBe(expected[field]);
               }
+            };
+
+            open();
+            for (const [field, label] of fields) {
+              fireEvent.changeText(view.getByLabelText(label), submitted[field]);
             }
-            await act(async () => { completeCheck(confirmed); });
-            const hasAdditions = Object.keys(patch).length > 0;
-            // Merge-base closes an unmodified editor on confirmation and keeps
-            // later edits visible in an open editor. Also cover reopening a
-            // draft hidden during the PR's timeout flow, with edits applied to confirmed values.
-            expect(Boolean(view.queryByLabelText('個人簡介'))).toBe(editor !== 'closed' && hasAdditions);
-            if (editor === 'closed' || !hasAdditions) open();
-            expectDraft({ ...confirmed, ...patch });
-            expect(view.queryByLabelText('核對儲存結果')).toBeNull();
-            expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(false);
+            fireEvent.press(view.getByLabelText('儲存簡介'));
+            act(() => { jest.advanceTimersByTime(15_000); });
+            for (const [field, label] of fields) {
+              const value = patch[field];
+              if (value !== undefined) fireEvent.changeText(view.getByLabelText(label), value);
+            }
+            if (editor !== 'open') fireEvent.press(view.getByLabelText('取消編輯'));
+            if (editor === 'reopened') {
+              open();
+              expectDraft({ ...submitted, ...patch });
+            }
+
+            if (outcome === 'late acknowledgement') await act(async () => { acknowledge(); });
+            else fireEvent.press(view.getByLabelText('核對儲存結果'));
+
+            if (outcome === 'failure') {
+              await act(async () => { failCheck(new Error('offline')); });
+              if (editor === 'closed') open();
+              // A failed read leaves the pending submission and its full draft intact, as at merge-base.
+              expectDraft({ ...submitted, ...patch });
+              expect(view.getByLabelText('核對儲存結果')).toBeTruthy();
+              expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+            } else if (outcome === 'missing' || outcome === 'mismatch') {
+              const latest = outcome === 'missing' ? null : {
+                headline: '另一裝置的標題', bio: '另一裝置的簡介', linkUrl: 'https://example.com/',
+              };
+              const editorLabel = latest ? '編輯社群簡介' : '建立社群簡介';
+              await act(async () => { completeCheck(latest); });
+              if (editor === 'closed') open(editorLabel);
+              // Both baseline revisions leave the full draft in the open editor.
+              // The PR can also resume a hidden draft or explicitly restore it.
+              expectDraft({ ...submitted, ...patch });
+              expect(view.queryByLabelText('核對儲存結果')).toBeNull();
+              expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(false);
+              fireEvent.press(view.getByLabelText('取消編輯'));
+              open(editorLabel);
+              fireEvent.press(view.getByLabelText('還原未確認的草稿'));
+              expectDraft({ ...submitted, ...patch });
+            } else {
+              if (outcome === 'timeout') {
+                act(() => { jest.advanceTimersByTime(15_000); });
+                expect(view.getByText(/核對等待逾時/)).toBeTruthy();
+                if (editor !== 'closed') {
+                  expectDraft({ ...submitted, ...patch });
+                  expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+                }
+              }
+              await act(async () => { completeCheck(confirmed); });
+              const hasAdditions = Object.keys(patch).length > 0;
+              // Merge-base closes an unmodified editor on confirmation and keeps
+              // later edits visible together with the full original draft.
+              // Reopening a clean editor after success loads the confirmed card.
+              expect(Boolean(view.queryByLabelText('個人簡介'))).toBe(editor !== 'closed' && hasAdditions);
+              if (editor === 'closed' || !hasAdditions) open();
+              expectDraft(hasAdditions ? { ...submitted, ...patch } : confirmed);
+              expect(view.queryByLabelText('核對儲存結果')).toBeNull();
+              expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(false);
+            }
+            expect(saves).toHaveBeenCalledTimes(1);
+            expect(getServerCard).toHaveBeenCalledTimes(outcome === 'late acknowledgement' ? 1 : 0);
+          } finally {
+            jest.useRealTimers();
           }
-          expect(saves).toHaveBeenCalledTimes(1);
-          expect(getServerCard).toHaveBeenCalledTimes(outcome === 'late acknowledgement' ? 1 : 0);
-        } finally {
-          jest.useRealTimers();
-        }
-      },
-    );
+        },
+      );
+    });
   });
 });
 
@@ -603,7 +616,7 @@ test('an ambiguous save is confirmed by a fresh read without sending a duplicate
   expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
 });
 
-test('confirmation requires every submitted field and displays the newer server fields on mismatch', async () => {
+test('confirmation requires every submitted field and retains the editor on mismatch', async () => {
   const published = { headline: '舊標題', bio: '舊簡介', linkUrl: '' };
   const latest = { headline: '我的標題', bio: '更新的簡介', linkUrl: 'https://example.org/new' };
   jest.mocked(readCreatorCard).mockResolvedValueOnce(published).mockResolvedValueOnce(latest);
@@ -615,11 +628,11 @@ test('confirmation requires every submitted field and displays the newer server 
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
 
-  expect(view.getByText('伺服器資料與上次送出的內容不同，已載入伺服器資料。')).toBeTruthy();
-  expect(view.getByLabelText('個人簡介').props.value).toBe(latest.bio);
-  expect(view.getByLabelText('作品連結').props.value).toBe(latest.linkUrl);
+  expect(view.getByText(/伺服器資料與上次送出的內容不同/)).toBeTruthy();
+  expect(view.getByLabelText('個人簡介').props.value).toBe(published.bio);
+  expect(view.getByLabelText('作品連結').props.value).toBe(published.linkUrl);
   expect(view.queryByLabelText('核對儲存結果')).toBeNull();
-  expect(view.queryByLabelText('還原未確認的草稿')).toBeNull();
+  expect(view.getByLabelText('還原未確認的草稿')).toBeTruthy();
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
 });
 
@@ -655,7 +668,7 @@ test.each([
   jest.mocked(saveCreatorCard).mockResolvedValueOnce({ ...card, [field]: value });
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice',
-    { ...card, [field]: value }, expect.any(Function));
+    { ...card, bio: ' 已送出的介紹 ', [field]: value }, expect.any(Function));
 });
 
 test('clearing a hidden link during confirmation preserves the explicit edit', async () => {
@@ -802,7 +815,7 @@ test.each([
 test.each([
   { headline: '其他裝置的標題', bio: '其他裝置的介紹', linkUrl: '' },
   null,
-])('a published-view mismatch reopens with server data when the server returns %j', async (latest) => {
+])('a published-view mismatch reopens the complete draft when the server returns %j', async (latest) => {
   const published = { headline: '舊標題', bio: '已發布的介紹', linkUrl: '' };
   const draft = { headline: published.headline, bio: '待核對的介紹', linkUrl: 'https://example.org/' };
   jest.mocked(readCreatorCard).mockResolvedValueOnce(published).mockResolvedValueOnce(latest);
@@ -819,12 +832,14 @@ test.each([
   expect(view.queryByText(published.bio)).toBeNull();
   if (latest) expect(view.getByText(latest.bio)).toBeTruthy();
   fireEvent.press(view.getByLabelText(latest ? '編輯社群簡介' : '建立社群簡介'));
-  expect(view.getByLabelText('一句話介紹').props.value).toBe(latest?.headline ?? '');
-  expect(view.getByLabelText('個人簡介').props.value).toBe(latest?.bio ?? '');
-  expect(view.getByLabelText('作品連結').props.value).toBe(latest?.linkUrl ?? '');
+  expect(view.getByLabelText('一句話介紹').props.value).toBe(draft.headline);
+  expect(view.getByLabelText('個人簡介').props.value).toBe(draft.bio);
+  expect(view.getByLabelText('作品連結').props.value).toBe(draft.linkUrl);
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
-  // A submitted draft survives cancellation and a mismatch. Reopening uses the
-  // server version, and saving other fields must leave the draft recoverable.
+  // Explicitly cancel after reopening to start from published values. Saving
+  // other fields from that editor must leave the earlier draft recoverable.
+  fireEvent.press(view.getByLabelText('取消編輯'));
+  fireEvent.press(view.getByLabelText(latest ? '編輯社群簡介' : '建立社群簡介'));
   expect(view.getByLabelText('還原未確認的草稿')).toBeTruthy();
   fireEvent.changeText(view.getByLabelText('一句話介紹'), '重新編輯的標題');
   const saved = {
@@ -872,8 +887,8 @@ test.each([
   expect(view.queryByLabelText('核對儲存結果')).toBeNull();
   expect(view.getByLabelText('儲存簡介').props.accessibilityState).toMatchObject({ disabled: false });
 
-  expect(view.getByLabelText('一句話介紹').props.value).toBe(latest.headline);
-  expect(view.getByLabelText('作品連結').props.value).toBe(latest.linkUrl);
+  expect(view.getByLabelText('一句話介紹').props.value).toBe(draft.headline);
+  expect(view.getByLabelText('作品連結').props.value).toBe(draft.linkUrl);
   if (cancel) {
     fireEvent.press(view.getByLabelText('取消編輯'));
     expect(view.getByText(latest.bio)).toBeTruthy();
@@ -890,7 +905,7 @@ test.each([
   }
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice',
-    cancel ? { ...latest, headline: '重新編輯的標題' } : { ...latest, bio: draft.bio }, expect.any(Function));
+    cancel ? { ...latest, headline: '重新編輯的標題' } : draft, expect.any(Function));
 });
 
 test('an offline confirmation can be retried without resending the save', async () => {
@@ -979,9 +994,9 @@ describe.each(['manual', 'automatic'] as const)('%s confirmation', (kind) => {
         fireEvent.press(view.getByLabelText('儲存簡介'));
         expect(saves).toHaveBeenCalledTimes(1);
         await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
-        expect(view.getByLabelText('個人簡介').props.value).toBe(newer.bio);
-        expect(view.getByLabelText('作品連結').props.value).toBe(newer.linkUrl);
-        const next = { ...newer, headline: '下一次修改的標題' };
+        expect(view.getByLabelText('個人簡介').props.value).toBe(submitted.bio);
+        expect(view.getByLabelText('作品連結').props.value).toBe(submitted.linkUrl);
+        const next = { ...submitted, headline: '下一次修改的標題' };
         saves.mockResolvedValueOnce(next);
         await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
         expect(saves).toHaveBeenNthCalledWith(2, 'pu', 'alice', next, expect.any(Function));
@@ -1464,6 +1479,11 @@ test.each(['none', 'bio', 'all', 'reverted'] as const)(
     if (scenario !== 'none') fireEvent.changeText(bio(), '重新編輯');
     if (scenario === 'reverted') fireEvent.changeText(bio(), newerBio);
     if (scenario === 'all') fireEvent.changeText(link(), 'https://example.com/');
+    if (scenario === 'all') {
+      const headline = view.getByLabelText('一句話介紹');
+      fireEvent.changeText(headline, '重新編輯的標題');
+      fireEvent.changeText(headline, published.headline);
+    }
     const restore = view.queryByLabelText('還原未確認的草稿');
     if (scenario === 'all') {
       expect(restore).toBeNull();

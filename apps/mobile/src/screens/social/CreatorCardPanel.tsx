@@ -76,6 +76,7 @@ function ScopedCreatorCardPanel({
   const published = useRef<CreatorCard | null>(null);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const currentDraft = useRef(draft);
+  const resumeDraft = useRef(false);
   // Keep clear operations even when the field originally displayed as empty.
   const editedFields = useRef(new Set<CardField>());
   // Reverting a value is still a user edit. With no pending write, cancelling
@@ -124,14 +125,7 @@ function ScopedCreatorCardPanel({
     return () => { mounted.current = false; };
   }, []);
 
-  const acceptCard = (value: CreatorCard | null, keepDraft = editingNow.current) => {
-    if (keepDraft) {
-      const next = { ...(value ?? EMPTY_CREATOR_CARD) };
-      for (const field of editedFields.current) {
-        next[field] = currentDraft.current[field];
-      }
-      replaceDraft(next);
-    }
+  const acceptCard = (value: CreatorCard | null) => {
     published.current = value;
     acceptSavedPortfolioLink(value?.linkUrl ?? '');
     setState({ status: 'ready', value });
@@ -149,7 +143,7 @@ function ScopedCreatorCardPanel({
 
   const beginEdit = () => {
     if (!own || editorLocked() || state.status !== 'ready') return;
-    if (!pendingWrite.current && editedFields.current.size === 0) {
+    if (!pendingWrite.current && !resumeDraft.current && editedFields.current.size === 0) {
       replaceDraft(published.current ?? EMPTY_CREATOR_CARD);
       setFeedback('');
     }
@@ -175,6 +169,7 @@ function ScopedCreatorCardPanel({
     if (editorLocked()) return;
     setEditorOpen(false);
     if (pendingWrite.current) return;
+    resumeDraft.current = false;
     revisions.current = { ...submittedRevisions.current };
     editedFields.current.clear();
     replaceDraft(published.current ?? EMPTY_CREATOR_CARD);
@@ -190,35 +185,22 @@ function ScopedCreatorCardPanel({
     if (matches) {
       finishSave(latest, submitted);
     } else {
+      // Whether the editor is visible or temporarily closed, keep the entire
+      // draft including input received after the write was sent.
       const unconfirmed: RecoverableDraft = {};
-      for (const field of submitted.edits) {
-        const expected = submitted.expected[field];
-        if (!latest || !creatorCardFieldMatches(latest, field, expected)) {
-          unconfirmed[field] = {
-            value: submitted.draft[field], expected, revision: submitted.revisions[field] ?? 0,
-          };
-        }
-      }
-      // Keep post-submit edits as well, including explicit clears. A newer
-      // edit to the same field takes precedence over the submitted value.
-      for (const field of editedFields.current) {
+      for (const field of CARD_FIELDS) {
         const value = currentDraft.current[field];
-        unconfirmed[field] = { value, expected: value, revision: revisions.current[field] ?? 0 };
+        unconfirmed[field] = {
+          value,
+          expected: value === submitted.draft[field] ? submitted.expected[field] : value,
+          revision: revisions.current[field] ?? 0,
+        };
       }
-      if (editingNow.current) {
-        for (const field of submitted.edits) editedFields.current.add(field);
-      } else {
-        editedFields.current.clear();
-      }
-      setRecoverable((previous) => {
-        const remaining = { ...previous };
-        for (const field of submitted.edits) delete remaining[field];
-        return { ...remaining, ...unconfirmed };
-      });
+      for (const field of submitted.edits) editedFields.current.add(field);
+      resumeDraft.current = true;
+      setRecoverable(unconfirmed);
       acceptCard(latest);
-      setFeedback(Object.keys(unconfirmed).length > 0
-        ? '伺服器資料與上次送出的內容不同。草稿已保留，可在編輯時還原。'
-        : '伺服器資料與上次送出的內容不同，已載入伺服器資料。');
+      setFeedback('伺服器資料與上次送出的內容不同。草稿已保留，可在編輯時還原。');
     }
   };
 
@@ -285,7 +267,8 @@ function ScopedCreatorCardPanel({
   const finishSave = (confirmed: CreatorCard, submitted: SubmittedWrite) => {
     const hasLaterEdits = editedFields.current.size > 0;
     if (!hasLaterEdits) setEditorOpen(false);
-    acceptCard(confirmed, hasLaterEdits);
+    resumeDraft.current = false;
+    acceptCard(confirmed);
     setRecoverable((previous) => {
       const remaining = { ...previous };
       for (const field of CARD_FIELDS) {
