@@ -22,6 +22,20 @@ const media = new Map<string, { matches: boolean; listeners: Set<() => void> }>(
 let intersection: IntersectionObserverCallback | null = null;
 const disconnect = vi.fn();
 
+// Browser-shaped observer entries keep synthetic viewport tests type-safe.
+function observerEntry(target: Element, isIntersecting: boolean, intersectionRect?: DOMRect): IntersectionObserverEntry {
+  const bounds = target.getBoundingClientRect();
+  return {
+    target,
+    isIntersecting,
+    boundingClientRect: bounds,
+    intersectionRect: intersectionRect ?? (isIntersecting ? bounds : new DOMRect(0, 0, 0, 0)),
+    intersectionRatio: isIntersecting ? 1 : 0,
+    rootBounds: null,
+    time: 0,
+  };
+}
+
 beforeEach(() => {
   window.sessionStorage.removeItem('nuni:pu:osm-footprint-cooldown-until');
   vi.clearAllMocks();
@@ -973,7 +987,7 @@ it('lets a student manually start 3D if a WebView never reports canvas visibilit
   expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).parentElement?.getAttribute('data-spatial-state')).toBe('ready');
   fireEvent(window, new Event('pageshow'));
   expect(scene.create).toHaveBeenCalledTimes(1);
-  act(() => intersection?.([{ target: graphics, isIntersecting: false }] as IntersectionObserverEntry[],
+  act(() => intersection?.([observerEntry(graphics, false)],
     {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
   expect(scene.create).toHaveBeenCalledTimes(1);
@@ -981,10 +995,10 @@ it('lets a student manually start 3D if a WebView never reports canvas visibilit
   fireEvent.click(within(dialog).getByRole('button', { name: '重新啟動立體畫面' }));
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  act(() => intersection?.([{ target: graphics, isIntersecting: false }] as IntersectionObserverEntry[],
+  act(() => intersection?.([observerEntry(graphics, false)],
     {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  act(() => intersection?.([{ target: graphics, isIntersecting: true }] as IntersectionObserverEntry[],
+  act(() => intersection?.([observerEntry(graphics, true)],
     {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(2);
@@ -1852,9 +1866,7 @@ it('starts first WebGL after the keyboard stops hiding a positively intersecting
   const host = screen.getByRole('group', { name: '校園地點空間圖' });
   vi.spyOn(host, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 400, 320, 180));
 
-  act(() => intersection?.([{
-    target: host, isIntersecting: true, intersectionRect: new DOMRect(0, 400, 320, 180),
-  }] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  act(() => intersection?.([observerEntry(host, true, new DOMRect(0, 400, 320, 180))], {} as IntersectionObserver));
   expect(scene.create).not.toHaveBeenCalled();
   expect(host.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
 
