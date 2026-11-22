@@ -3389,16 +3389,16 @@ it.each([
   { name: 'oversized declaration', encoding: null, length: '2000001', result: 'skip' },
   { name: 'gzip', encoding: 'gzip', length: '100', result: 'skip' },
   { name: 'gzip without length', encoding: 'gzip', length: null, result: 'skip' },
-  { name: 'oversized UTF-8 payload', encoding: null, length: null, result: 'reject' },
-  { name: 'oversized identity payload', encoding: 'identity', length: '100', result: 'reject' },
+  { name: 'oversized UTF-8 payload without length', encoding: null, length: null, oversized: true, result: 'reject' },
+  { name: 'oversized identity payload', encoding: 'identity', length: '100', oversized: true, result: 'skip' },
   { name: 'invalid snapshot', encoding: null, length: null, result: 'reject' },
-])('validates JSON-only WebView snapshots ($name)', async ({ name, encoding, length, result }) => {
+])('validates JSON-only WebView snapshots ($name)', async ({ name, encoding, length, oversized, result }) => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
   // Trailing whitespace contributes to wire length but disappears after parsing.
   const raw = body + '\n';
   const payload = JSON.parse(raw) as Record<string, unknown>;
   if (name === 'invalid snapshot') delete payload.buildings;
-  if (name.startsWith('oversized') && result === 'reject') payload.extra = '中'.repeat(700_000);
+  if (oversized) payload.extra = '中'.repeat(700_000);
   const json = vi.fn().mockResolvedValue(payload);
   const headers = new Headers();
   if (encoding !== null) headers.set('Content-Encoding', encoding);
@@ -3705,15 +3705,23 @@ it.each(['understated', 'overstated'] as const)(
   },
 );
 
-it('rejects a legacy non-streaming WebView text body shorter than identity Content-Length', async () => {
+it.each([
+  { description: 'shorter than identity Content-Length', oversized: false },
+  { description: 'over the UTF-8 byte limit without Content-Length', oversized: true },
+])('rejects a legacy non-streaming WebView text body $description', async ({ oversized }) => {
   const { library, body } = sourcedLibraryFootprintFixture();
-  const bytes = new TextEncoder().encode(body).byteLength;
+  const raw = oversized
+    ? JSON.stringify({ ...JSON.parse(body) as Record<string, unknown>, padding: '中'.repeat(700_000) })
+    : body;
+  const headers = new Headers();
+  if (!oversized) {
+    headers.set('Content-Length', String(new TextEncoder().encode(raw).byteLength + 1));
+  }
   const json = vi.fn();
-  const textBody = vi.fn().mockResolvedValue(body);
+  const textBody = vi.fn().mockResolvedValue(raw);
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: true, status: 200, body: null,
-    headers: { get: (name: string) => name === 'content-length' ? String(bytes + 1) : null },
-    text: textBody, json,
+    headers, text: textBody, json,
   }));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
