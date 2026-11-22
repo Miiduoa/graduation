@@ -96,7 +96,7 @@ test('a complete long title opens only its verified source, ignoring fabricated 
     .toEqual({ route: 'HomeworkSubmit', params: { groupId: 'course_1', assignmentId: 'work_1' } });
 });
 
-test('does not use a 130-character display prefix to open a different original assignment', () => {
+test.each([false, true])('does not use a 130-character display prefix to open a different original assignment (reverse: %s)', (reverse) => {
   const value = snapshot();
   const prefix = '長'.repeat(130);
   value.assignments.items[0].title = prefix + '期末報告';
@@ -111,9 +111,15 @@ test('does not use a 130-character display prefix to open a different original a
   });
   value.assignments.items.push({ ...assignment, title: prefix, source: { ...source, assignmentId: 'work_2' } });
   value.assignments.count = 2;
+  if (reverse) value.assignments.items.reverse();
   expect(target(prefix)).toBeNull();
   expect(target(prefix + ' ')).toBeNull();
   expect(target(prefix + '期末報告')?.params.assignmentId).toBe('work_1');
+  value.assignments.items.push({
+    ...assignment, title: prefix + '期末報告  ', source: { ...source, assignmentId: 'work_3' },
+  });
+  value.assignments.count = 3;
+  expect(target(prefix + '期末報告')).toBeNull();
 });
 
 test.each([false, true])('preserves a trailing display space when checking collisions (reverse: %s)', (reverse) => {
@@ -131,6 +137,9 @@ test.each([false, true])('preserves a trailing display space when checking colli
   expect(displayTitle).toBe(title + ' ');
   expect(target(title)?.params.assignmentId).toBe('work_1');
   expect(target(longerTitle)?.params.assignmentId).toBe('work_2');
+  expect(target(displayTitle)).toBeNull();
+  value.assignments.items = value.assignments.items.filter((item) => item.title === title);
+  value.assignments.count = 1;
   expect(target(displayTitle)).toBeNull();
 });
 

@@ -16,8 +16,14 @@ function normalizeCampusAssignmentTitle(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+const DISPLAY_TITLE_LIMIT = 130;
+
 export function campusAssignmentDisplayTitle(value: string): string {
-  return normalizeCampusAssignmentTitle(value).slice(0, 130);
+  return normalizeCampusAssignmentTitle(value).slice(0, DISPLAY_TITLE_LIMIT);
+}
+
+function hasCutoffSpace(rawTitle: string, title: string): boolean {
+  return rawTitle.length === DISPLAY_TITLE_LIMIT && rawTitle === title + ' ';
 }
 
 /** Reminder cards may carry the original 130-character display title, including its final space. */
@@ -27,11 +33,14 @@ export function matchingCampusReminderAssignments(
 ) {
   const title = normalizeCampusAssignmentTitle(assignment.title);
   if (snapshot.assignments.status !== 'available' || !title) return [];
-  return snapshot.assignments.items.filter((row) =>
-    row.groupName === (assignment.groupName ?? '') &&
-    row.dueAt === (assignment.dueAt ?? null) &&
-    (normalizeCampusAssignmentTitle(row.title) === title ||
-      campusAssignmentDisplayTitle(row.title) === assignment.title));
+  const displayTitle = hasCutoffSpace(assignment.title, title) ? assignment.title : title;
+  return snapshot.assignments.items.filter((row) => {
+    if (row.groupName !== (assignment.groupName ?? '') ||
+        row.dueAt !== (assignment.dueAt ?? null)) return false;
+    return displayTitle.length === DISPLAY_TITLE_LIMIT
+      ? campusAssignmentDisplayTitle(row.title) === displayTitle
+      : normalizeCampusAssignmentTitle(row.title) === title;
+  });
 }
 
 /**
@@ -51,16 +60,15 @@ export function resolveCampusAssignmentTarget(input: {
   if (!snapshot || snapshot.assignments.status !== 'available' ||
       typeof input.assignment.title !== 'string' || !input.assignment.title.trim()) return null;
   const title = normalizeCampusAssignmentTitle(input.assignment.title);
-  const matches = snapshot.assignments.items.filter((row) => {
-    if (row.groupName !== (input.assignment.groupName ?? '') ||
-        row.dueAt !== (input.assignment.dueAt ?? null)) return false;
-    // A display title can end in a space introduced by the 130-character cutoff.
-    const displayTitle = campusAssignmentDisplayTitle(row.title);
-    return normalizeCampusAssignmentTitle(row.title) === title ||
-      displayTitle === title || displayTitle === input.assignment.title;
-  });
-  // Count display-title collisions, but require a complete title to open.
-  if (matches.length !== 1 || normalizeCampusAssignmentTitle(matches[0].title) !== title) return null;
+  if (hasCutoffSpace(input.assignment.title, title)) return null;
+  const rows = snapshot.assignments.items.filter((row) =>
+    row.groupName === (input.assignment.groupName ?? '') &&
+    row.dueAt === (input.assignment.dueAt ?? null));
+  const matches = rows.filter((row) => normalizeCampusAssignmentTitle(row.title) === title);
+  if (matches.length !== 1) return null;
+  // At the cutoff, the same display title may also represent a longer assignment.
+  if (title.length === DISPLAY_TITLE_LIMIT && rows.some((row) =>
+    row !== matches[0] && campusAssignmentDisplayTitle(row.title) === title)) return null;
   const source = parseCampusAssignmentSource(matches[0].source);
   if (!source) return null;
   return {

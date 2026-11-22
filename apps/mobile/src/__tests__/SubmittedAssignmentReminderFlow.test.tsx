@@ -190,25 +190,38 @@ test('計畫卡可為唯一的 134 字作業設定本機提醒', async () => {
   expect(mockAlarms.size).toBe(1);
 });
 
-test.each(['計畫卡', '單筆回覆'])('%s：另一筆作業的截斷標題以空格結尾時，仍可查看和退訂原有提醒', async (entry) => {
+test.each([false, true].flatMap((reverse) => [
+  ...['計畫卡', '單筆回覆'].flatMap((entry) => [
+    { entry, length: 129, suffix: ' 後綴', longer: false, reverse },
+    { entry, length: 129, suffix: ' 後綴', longer: true, reverse },
+    { entry, length: 129, suffix: '後綴', longer: true, reverse },
+  ]),
+  { entry: '單筆回覆', length: 130, suffix: '後綴', longer: true, reverse },
+]))('$entry 可查看和退訂原有提醒（短標題=$length 字，後綴="$suffix"，長作業=$longer，反序=$reverse）', async ({
+  entry, length, suffix, longer, reverse,
+}) => {
   const snapshot = mockSnapshot();
-  const title = '長'.repeat(129);
-  snapshot.assignments.items[0].title = title;
+  const shortTitle = '長'.repeat(length);
+  const longTitle = shortTitle + suffix;
+  const title = longer ? longTitle : shortTitle;
+  const selected = snapshot.assignments.items[0];
+  selected.title = title;
   mockReader.getAssignment.mockResolvedValue({ id: 'work', groupId: 'course', title, dueAt });
   await scheduleCampusAssignmentReminder({
     scope, step: { ...step, title }, snapshot, leadMinutes: 60, isCurrent: current,
   });
   snapshot.assignments.items.push({
-    ...snapshot.assignments.items[0], title: title + ' 後綴', source: { ...source, assignmentId: 'other' },
+    ...selected, title: longer ? shortTitle : longTitle, source: { ...source, assignmentId: 'other' },
   });
   snapshot.assignments.count = 2;
+  if (reverse) snapshot.assignments.items.reverse();
   const navigation = { navigate: jest.fn() };
   const card = entry === '計畫卡' ? planCard(snapshot) : null;
   const view = card?.view ?? render(
     <AssignmentReplyActions
       read={{
         userId: 'alice', schoolId: 'pu', checkedAt: snapshot.checkedAt,
-        filterQuestion: title, items: [snapshot.assignments.items[0]],
+        filterQuestion: title, items: [selected],
       }}
       snapshot={snapshot}
       context={{ userId: 'alice', schoolId: 'pu', isCurrent: current, navigation }}
@@ -217,7 +230,8 @@ test.each(['計畫卡', '單筆回覆'])('%s：另一筆作業的截斷標題以
     />,
   );
   if (card) {
-    expect(card.plan.steps.map((item) => item.title)).toEqual([title, title + ' ']);
+    const displays = [title, longer ? shortTitle : longTitle].map((item) => item.slice(0, 130));
+    expect(card.plan.steps.map((item) => item.title)).toEqual(reverse ? displays.reverse() : displays);
   } else {
     fireEvent.press(view.getByText('查看這份作業'));
     expect(navigation.navigate).toHaveBeenCalledWith('學習', {
@@ -231,7 +245,7 @@ test.each(['計畫卡', '單筆回覆'])('%s：另一筆作業的截斷標題以
   expect(mockStorage.size).toBe(0);
 });
 
-test('截斷的計畫標題撞上另一筆完整標題時，拒絕建立提醒', async () => {
+test.each([false, true])('截斷的計畫標題撞上另一筆完整標題時，拒絕建立提醒（反序=%s）', async (reverse) => {
   const snapshot = mockSnapshot();
   const title = '長'.repeat(130);
   snapshot.assignments.items[0].title = title;
@@ -239,6 +253,7 @@ test('截斷的計畫標題撞上另一筆完整標題時，拒絕建立提醒',
     ...snapshot.assignments.items[0], title: title + '後綴', source: { ...source, assignmentId: 'other' },
   });
   snapshot.assignments.count = 2;
+  if (reverse) snapshot.assignments.items.reverse();
   const { plan, view } = planCard(snapshot);
   await expect(scheduleCampusAssignmentReminder({
     scope, step: plan.steps[1], snapshot, leadMinutes: 60, isCurrent: current,
