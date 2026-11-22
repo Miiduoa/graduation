@@ -71,20 +71,11 @@ jest.mock('../screens/AssistantClassNowHint', () => ({
   AssistantClassNowHint: ({ children }: { children: (upcoming: boolean) => React.ReactNode }) => children(mockUpcomingClass),
 }));
 jest.mock('../screens/LegacyAssignmentReminders', () => ({ LegacyAssignmentReminders: () => null }));
-jest.mock('../services/campusAssignmentReminders', () => {
-  const reminders = {
-    scheduleCampusAssignmentReminder: jest.fn(),
-    cancelCampusAssignmentReminder: jest.fn(),
-    getCampusAssignmentReminderStatus: jest.fn(async (_input?: unknown): Promise<number[]> => []),
-    // Mirrors the real batch cancel: look up every scheduled lead, then cancel each in turn.
-    cancelCampusAssignmentReminders: jest.fn(async (input: Record<string, unknown>) => {
-      for (const leadMinutes of await reminders.getCampusAssignmentReminderStatus(input))
-        await reminders.cancelCampusAssignmentReminder({ ...input, leadMinutes });
-      return true;
-    }),
-  };
-  return reminders;
-});
+jest.mock('../services/campusAssignmentReminders', () => ({
+  scheduleCampusAssignmentReminder: jest.fn(),
+  cancelCampusAssignmentReminder: jest.fn(),
+  getCampusAssignmentReminderStatus: jest.fn(async () => []),
+}));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 const request = askCampusAssistant as jest.Mock;
 function openCampusTools(view: ReturnType<typeof render>) {
@@ -841,7 +832,6 @@ test('source-verified assignment requires review and confirmation before a local
   };
   const step = {
     id: 'assignment-0', title: '可信任的期末報告',
-    fullAssignmentTitle: sense.assignments.items[0].title, expectedSource: sense.assignments.items[0].source,
     groupName: '資訊管理', dueAt, priority: 'normal',
     evidence: 'authorized-assignments', route: '/classroom',
     detail: '請核對作業頁面的截止與繳交狀態。',
@@ -907,7 +897,6 @@ test('an already scheduled local reminder is restored when reopening the assista
   };
   const step = {
     id: 'assignment-0', title: '可信任的期末報告',
-    fullAssignmentTitle: sense.assignments.items[0].title, expectedSource: sense.assignments.items[0].source,
     groupName: '資訊管理', dueAt, priority: 'normal',
     evidence: 'authorized-assignments', route: '/classroom',
     detail: '請核對作業頁面的截止與繳交狀態。',
@@ -952,7 +941,6 @@ test('unverified OS reminder status blocks scheduling until a successful recheck
   };
   const step = {
     id: 'assignment-0', title: '可信任的期末報告',
-    fullAssignmentTitle: sense.assignments.items[0].title, expectedSource: sense.assignments.items[0].source,
     groupName: '資訊管理', dueAt, priority: 'normal',
     evidence: 'authorized-assignments', route: '/classroom',
     detail: '請核對作業頁面的截止與繳交狀態。',

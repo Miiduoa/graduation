@@ -272,7 +272,7 @@ test('without the platform renderer the existing live Firebase action still rece
     assignment: expect.objectContaining({ title: '資料庫報告' }),
     context: { ...reminderContext, isCurrent: expect.any(Function) }, navigation, disabled: false,
   }), undefined);
-  const [{ isCurrent }] = jest.mocked(CampusAssignmentReminderAction).mock.calls[0];
+  const [{ context: { isCurrent } }] = jest.mocked(CampusAssignmentOpenButton).mock.calls[0];
   expect(isCurrent()).toBe(true);
   view.rerender(card({ ...reminderContext, schoolId: 'other' }));
   expect(isCurrent()).toBe(false);

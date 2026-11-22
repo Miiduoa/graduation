@@ -20,14 +20,18 @@ export function AssignmentReplyActions({ read, snapshot, context, disabled, onAs
   if (read.checkedAt !== snapshot.checkedAt || read.userId !== context.userId || read.schoolId !== context.schoolId ||
       !read.items.length) return null;
   const { items, page } = read;
+  const scope = { uid: context.userId, schoolId: context.schoolId };
+  const reminder = items.length === 1 && resolveCampusAssignmentTarget({
+    assignment: items[0], snapshot, scope,
+  }) ? items[0] : null;
   const candidate = items.length === 1 ? { ...items[0], ...campusAssignmentTitleIdentity(items[0]) } : null;
   const target = candidate && resolveCampusAssignmentTarget({
-    assignment: candidate, snapshot, scope: { uid: context.userId, schoolId: context.schoolId },
+    assignment: candidate, snapshot, scope,
   });
   const single = target && candidate && {
     ...candidate, expectedSource: { kind: 'group-assignment' as const, ...target.params },
   };
-  if (items.length === 1 && !single && !page) return null;
+  if (items.length === 1 && !single && !reminder && !page) return null;
   return (
     <View style={{ gap: 8, marginTop: 10 }}>
       {items.length > 1 && (
@@ -64,15 +68,13 @@ export function AssignmentReplyActions({ read, snapshot, context, disabled, onAs
         </View>
       )}
       {single && (
-        <>
-          <CampusAssignmentOpenButton assignment={single} context={{ ...context, snapshot }} navigation={context.navigation} disabled={disabled} />
-          {single.dueAt && Number.isFinite(confirmedTimestamp(single.dueAt)) && (
-            <CampusAssignmentReminderAction step={{ ...single, dueAt: single.dueAt,
-              evidence: 'authorized-assignments', route: '/classroom' }}
-              singleReply reviewOnOpen={read.reviewReminder} snapshot={snapshot} userId={context.userId} schoolId={context.schoolId}
-              isCurrent={context.isCurrent} disabled={disabled} />
-          )}
-        </>
+        <CampusAssignmentOpenButton assignment={single} context={{ ...context, snapshot }} navigation={context.navigation} disabled={disabled} />
+      )}
+      {reminder?.dueAt && Number.isFinite(confirmedTimestamp(reminder.dueAt)) && (
+        <CampusAssignmentReminderAction step={{ title: campusAssignmentDisplayTitle(reminder.title), groupName: reminder.groupName,
+          dueAt: reminder.dueAt, evidence: 'authorized-assignments', route: '/classroom' }}
+          reviewOnOpen={read.reviewReminder} snapshot={snapshot} userId={context.userId} schoolId={context.schoolId}
+          isCurrent={context.isCurrent} disabled={disabled} />
       )}
       {page && (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>

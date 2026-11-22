@@ -138,7 +138,10 @@ test.each([false, true])('preserves a trailing display space when checking colli
   expect(displayTitle).toBe(title + ' ');
   expect(target(title)?.params.assignmentId).toBe('work_1');
   expect(target(longerTitle)?.params.assignmentId).toBe('work_2');
-  expect(target(displayTitle)).toBeNull();
+  expect(target(displayTitle)?.params.assignmentId).toBe('work_1');
+  expect(resolveCampusAssignmentTarget({
+    assignment: { ...assignment, title: displayTitle, expectedSource: source }, snapshot: value, scope, now,
+  })).toBeNull();
   value.assignments.items = value.assignments.items.filter((item) => item.title === title);
   value.assignments.count = 1;
   expect(target(displayTitle)?.params.assignmentId).toBe('work_1');

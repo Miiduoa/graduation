@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Button, Text, View } from 'react-native';
 import {
   savedAssignmentReminderPreferences,
-  cancelSubmittedAssignmentReminders,
+  cancelSubmittedAssignmentReminder,
 } from '../services/submittedAssignmentReminders';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import {
@@ -64,13 +64,8 @@ export function LegacyAssignmentReminders({
     setBusy(true);
     setError('');
     try {
-      const scope = { uid, schoolId };
-      await clearUnlinkedLegacyReminders({ scope, isCurrent, getSnapshot: () => latest.current.snapshot });
-      const saved = await savedAssignmentReminderPreferences(scope, isCurrent);
-      if (isCurrent()) {
-        setCount(0);
-        setPreferences(saved);
-      }
+      await clearUnlinkedLegacyReminders({ scope: { uid, schoolId }, isCurrent });
+      if (isCurrent()) setCount(0);
     } catch {
       if (isCurrent()) setError('尚未確認取消成功，請重試。');
     } finally {
@@ -82,7 +77,16 @@ export function LegacyAssignmentReminders({
     setBusy(true);
     setError('');
     try {
-      await cancelSubmittedAssignmentReminders({ scope: { uid, schoolId }, source: row, isCurrent });
+      const matching = preferences.filter(
+        (other) => other.groupId === row.groupId && other.assignmentId === row.assignmentId,
+      );
+      for (const preference of matching)
+        await cancelSubmittedAssignmentReminder({
+          scope: { uid, schoolId },
+          source: preference,
+          leadMinutes: preference.leadMinutes,
+          isCurrent,
+        });
       if (isCurrent())
         setPreferences(await savedAssignmentReminderPreferences({ uid, schoolId }, isCurrent));
     } catch {

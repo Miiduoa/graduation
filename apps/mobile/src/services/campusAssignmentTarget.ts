@@ -41,7 +41,7 @@ function hasCutoffSpace(rawTitle: string, title: string): boolean {
   return rawTitle.length === DISPLAY_TITLE_LIMIT && rawTitle === title + ' ';
 }
 
-export function campusAssignmentLegacyMatches(snapshot: CampusSenseSnapshot, assignment: CampusAssignmentIdentity) {
+function campusAssignmentLegacyMatches(snapshot: CampusSenseSnapshot, assignment: CampusAssignmentIdentity) {
   const title = campusAssignmentDisplayTitle(assignment.title);
   return snapshot.assignments.items.filter((row) =>
     row.groupName === (assignment.groupName ?? '') &&
@@ -50,7 +50,7 @@ export function campusAssignmentLegacyMatches(snapshot: CampusSenseSnapshot, ass
 }
 
 /** Resolve identity across the whole course/deadline scope before checking the original ID. */
-export function matchCampusAssignment(
+function matchCampusAssignment(
   snapshot: CampusSenseSnapshot,
   assignment: CampusAssignmentIdentity,
 ) {
@@ -59,20 +59,17 @@ export function matchCampusAssignment(
   const title = normalizeCampusAssignmentTitle(rawTitle);
   if (!title) return null;
   const prefixMatches = campusAssignmentLegacyMatches(snapshot, { ...assignment, title: rawTitle });
-  if (!assignment.fullAssignmentTitle && !assignment.summaryAssignmentTitle) {
-    // Persisted cards contain the display title used by the original resolver.
+  // Cards saved before the identity fields use the original display-title lookup.
+  if (assignment.fullAssignmentTitle === undefined && assignment.summaryAssignmentTitle === undefined) {
     const [candidate] = prefixMatches;
     if (prefixMatches.length !== 1) return null;
-    // Whitespace at the display boundary can refer to a different visible row.
+    if (assignment.expectedSource === undefined) return candidate;
     if (hasCutoffSpace(rawTitle, title) && snapshot.assignments.items.some((row) =>
       row.groupName === candidate.groupName && row.dueAt === candidate.dueAt &&
       campusAssignmentDisplayTitle(row.title) === rawTitle)) return null;
-    if (assignment.expectedSource) {
-      const source = parseCampusAssignmentSource(candidate.source);
-      return source?.groupId === assignment.expectedSource.groupId &&
-        source?.assignmentId === assignment.expectedSource.assignmentId ? candidate : null;
-    }
-    return mayHaveTruncatedTitle(candidate) ? null : candidate;
+    const source = parseCampusAssignmentSource(candidate.source);
+    return source && source.groupId === assignment.expectedSource?.groupId &&
+      source.assignmentId === assignment.expectedSource?.assignmentId ? candidate : null;
   }
   const rows = snapshot.assignments.items.filter((row) =>
     row.groupName === (assignment.groupName ?? '') &&

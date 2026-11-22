@@ -9,7 +9,6 @@ import {
 import type { CampusSenseSnapshot } from '../../services/campusSenseSnapshot';
 import type { CampusPlanStep } from '../../services/offlineCampusPlanner';
 import * as Notifications from 'expo-notifications';
-import { serializeAssignmentReminderWork } from '../../services/submittedAssignmentReminders';
 
 let mockUid: string | null = 'A';
 let mockConfig = false;
@@ -359,18 +358,4 @@ test('does not report native success if the scheduled alarm is not found during 
     .rejects.toMatchObject({ code: 'native-failed' });
   expect(mockCancel).toHaveBeenCalledTimes(1);
   expect(mockReceipts.size).toBe(0);
-});
-
-test('a queued confirmation rechecks the latest summary before deciding to schedule', async () => {
-  const input = request();
-  let snapshot = input.snapshot;
-  let resume!: () => void;
-  const blocked = new Promise<void>((resolve) => { resume = resolve; });
-  const earlier = serializeAssignmentReminderWork(() => blocked);
-  const schedule = scheduleCampusAssignmentReminder({ ...input, getSnapshot: () => snapshot });
-  snapshot = { ...snapshot, assignments: { status: 'available', count: 0, items: [] } };
-  resume();
-  await earlier;
-  await expect(schedule).rejects.toMatchObject({ code: 'invalid-source' });
-  expect(mockSchedule).not.toHaveBeenCalled();
 });

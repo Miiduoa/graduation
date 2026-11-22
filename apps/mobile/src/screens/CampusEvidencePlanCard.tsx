@@ -183,16 +183,15 @@ export function CampusEvidencePlanCard({
                 onPress={() => onOpenRoute(step.route)}
               />
             ) : null}
-            {!historical && currentReminderContext && step.kind !== 'quiz' && (step.expectedSource || !step.nuniSource) &&
-              step.evidence === 'authorized-assignments' && step.dueAt ? (
+            {!historical && reminderContext && step.kind !== 'quiz' ? (
               <CampusAssignmentReminderAction
-                key={JSON.stringify([currentReminderContext.userId, currentReminderContext.schoolId,
-                  step.id, step.expectedSource, displayTitle, step.groupName, step.dueAt])}
-                step={step}
-                snapshot={currentReminderContext.snapshot}
-                userId={currentReminderContext.userId}
-                schoolId={currentReminderContext.schoolId}
-                isCurrent={currentReminderContext.isCurrent}
+                key={step.id + ':' + step.dueAt}
+                step={{ title: step.title, groupName: step.groupName, dueAt: step.dueAt,
+                  evidence: step.evidence, route: step.route }}
+                snapshot={reminderContext.snapshot}
+                userId={reminderContext.userId}
+                schoolId={reminderContext.schoolId}
+                isCurrent={reminderContext.isCurrent}
                 disabled={disabled}
               />
             ) : null}
