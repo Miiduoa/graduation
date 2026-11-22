@@ -357,19 +357,65 @@ it.each(['same', 'different'] as const)(
   },
 );
 
-it('keeps a return across document reloads during logout and waits for the owner', async () => {
-  const { originState } = await startJourney();
-  const storageKey = 'campus.menu.return.v1';
-  const stored = sessionStorage.getItem(storageKey);
-  const menu = await loadDocument();
-  menu.setMenuReturnScope(null, { campus: 'pu' });
-  backToOrigin(originState);
-  const pending = menu.getMenuReturn()!;
-  expect(pending).toMatchObject(draft);
-  expect(menu.consumeMenuReturn(pending, draft.scope)).toBe(false);
-  menu.setMenuReturnScope('guest', { campus: 'pu' }, true);
-  expect(menu.consumeMenuReturn(pending, 'guest')).toBe(false);
-  expect(sessionStorage.getItem(storageKey)).toBe(stored);
-  menu.setMenuReturnScope(draft.scope, { campus: 'pu' });
-  expect(menu.consumeMenuReturn(pending, draft.scope)).toBe(true);
-});
+it.each(['same account', 'guest'] as const)(
+  'keeps a return across a reload during logout until confirming %s',
+  async (outcome) => {
+    const { originState } = await startJourney();
+    const storageKey = 'campus.menu.return.v1';
+    const stored = sessionStorage.getItem(storageKey);
+    const menu = await loadDocument();
+    menu.setMenuReturnScope(null, { campus: 'pu' });
+    backToOrigin(originState);
+    const pending = menu.getMenuReturn()!;
+    expect(pending).toMatchObject(draft);
+    expect(menu.consumeMenuReturn(pending, draft.scope)).toBe(false);
+    expect(sessionStorage.getItem(storageKey)).toBe(stored);
+
+    if (outcome === 'same account') {
+      menu.setMenuReturnScope(draft.scope, { campus: 'pu' });
+      expect(menu.consumeMenuReturn(pending, draft.scope)).toBe(true);
+    } else {
+      menu.setMenuReturnScope('guest', { campus: 'pu' }, true);
+      expect(menu.getMenuReturn()).toBeNull();
+      expect(sessionStorage.getItem(storageKey)).toBeNull();
+
+      const guestDraft = { ...draft, scope: 'guest', expanded: [...draft.expanded] };
+      menu.rememberMenuReturn(destination, guestDraft);
+      const guestOrigin = window.history.state;
+      window.history.pushState({}, '', destination);
+      const reloaded = await loadDocument();
+      reloaded.setMenuReturnScope('guest', { campus: 'pu' }, true);
+      backToOrigin(guestOrigin);
+      const restored = reloaded.getMenuReturn()!;
+      expect(restored).toMatchObject(guestDraft);
+      expect(reloaded.consumeMenuReturn(restored, 'guest')).toBe(true);
+    }
+  },
+);
+
+it.each(['unconfirmed', 'known account'] as const)(
+  'checks a provisional draft from a %s when a reloaded document confirms a guest',
+  async (owner) => {
+    const menu = await loadDocument();
+    const campus = { campus: 'pu' };
+    if (owner === 'known account') {
+      menu.setMenuReturnScope(draft.scope, { ...campus, platformOwner: 'platform-a' });
+    }
+    menu.setMenuReturnScope(undefined, campus);
+    menu.rememberMenuReturn(destination, { ...draft, expanded: [...draft.expanded] });
+    const originState = window.history.state;
+    expect(originState).toHaveProperty(menu.MENU_RETURN_STATE_KEY);
+    window.history.pushState({}, '', destination);
+    const reloaded = await loadDocument();
+    backToOrigin(originState);
+    reloaded.setMenuReturnScope('guest', campus, true);
+    const pending = reloaded.getMenuReturn();
+    if (owner === 'unconfirmed') {
+      expect(pending).toMatchObject({ ...draft, scope: 'guest' });
+      expect(reloaded.consumeMenuReturn(pending!, 'guest')).toBe(true);
+    } else {
+      expect(pending).toBeNull();
+      expect(sessionStorage.getItem('campus.menu.return.v1')).toBeNull();
+    }
+  },
+);

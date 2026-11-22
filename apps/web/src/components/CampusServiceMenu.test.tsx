@@ -1794,22 +1794,17 @@ it.each([
   auth.loading = false;
   if (outcome === 'failed') {
     auth.error = '登出尚未完成';
-  } else {
-    auth.pendingLogout = false;
   }
   view.rerender(<CampusServiceMenu />);
   expect(open()).toBe(false);
   expect(storedDraft()).toEqual(before);
 
-  if (outcome === 'different campus') {
-    visitMenuDestination('/map?campus=nthu');
-  } else {
-    auth.pendingLogout = false;
-    auth.error = '';
-    auth.session = outcome === 'different account'
-      ? { ...account, platformAccountId: 'platform-b' }
-      : account;
-  }
+  auth.pendingLogout = false;
+  auth.error = '';
+  auth.session = outcome === 'different account'
+    ? { ...account, platformAccountId: 'platform-b' }
+    : account;
+  if (outcome === 'different campus') visitMenuDestination('/map?campus=nthu');
   view.rerender(<CampusServiceMenu />);
   if (outcome.startsWith('different')) {
     expect(open()).toBe(false);
@@ -1821,3 +1816,66 @@ it.each([
     expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
   }
 });
+
+it.each(['query', 'expanded family'] as const)(
+  'restores a guest %s on Back after same-page logout and clears it on account B',
+  (draft) => {
+    auth.session = { platformAccountId: 'platform-a', isPlatformOperator: false };
+    visitMenuDestination('/map?campus=pu');
+    const view = render(<CampusServiceMenu />);
+    const menu = () => screen.getByText('所有服務').closest('details')!;
+    const search = () => screen.getByRole<HTMLInputElement>('searchbox');
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.change(search(), { target: { value: '借書' } });
+    fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+    const accountOrigin = captureMenuOrigin();
+    const storageKey = 'campus.menu.return.v1';
+    const accountDraft = sessionStorage.getItem(storageKey);
+    expect(accountDraft).toBeTruthy();
+
+    auth.pendingLogout = true;
+    auth.loading = true;
+    auth.session = null;
+    view.rerender(<CampusServiceMenu />);
+    expect(sessionStorage.getItem(storageKey)).toBe(accountDraft);
+    auth.loading = false;
+    auth.pendingLogout = false;
+    view.rerender(<CampusServiceMenu />);
+    expect(sessionStorage.getItem(storageKey)).toBeNull();
+    returnToMenuOrigin(accountOrigin);
+    view.rerender(<CampusServiceMenu />);
+    expect(menu().open).toBe(false);
+    expect(search().value).toBe('');
+
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
+    if (draft === 'query') {
+      fireEvent.change(search(), { target: { value: '教材' } });
+    } else {
+      fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
+    }
+    const link = screen.getByRole<HTMLAnchorElement>('link', { name: '教材收藏' });
+    const destination = link.href;
+    fireEvent.click(link);
+    const guestOrigin = captureMenuOrigin();
+    expect(guestOrigin.state).toHaveProperty(MENU_RETURN_STATE_KEY);
+    expect(guestOrigin.state).not.toEqual(accountOrigin.state);
+
+    visitMenuDestination(destination);
+    view.rerender(<CampusServiceMenu />);
+    returnToMenuOrigin(guestOrigin);
+    view.rerender(<CampusServiceMenu />);
+    expect(menu().open).toBe(true);
+    expect(search().value).toBe(draft === 'query' ? '教材' : '');
+    expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe('true');
+    if (draft === 'expanded family') {
+      expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
+    }
+
+    auth.session = { platformAccountId: 'platform-b', isPlatformOperator: false };
+    view.rerender(<CampusServiceMenu />);
+    expect(menu().open).toBe(false);
+    expect(search().value).toBe('');
+    expect(sessionStorage.getItem(storageKey)).toBeNull();
+  },
+);

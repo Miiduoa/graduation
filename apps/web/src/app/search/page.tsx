@@ -44,8 +44,11 @@ function ServiceDirectory() {
   const { uid, platformAudience } = account;
   const campusReady = !selection || (!selection.loading && selection.catalogStatus === 'ready');
   const canInterpret = account.canInterpret && campusReady;
-  const canRemember = account.canRemember && campusReady;
-  const guest = account.status === 'guest';
+  const ownerConfirmed =
+    account.canRemember &&
+    account.schoolDraftOwner !== undefined &&
+    account.platformDraftOwner !== undefined;
+  const canRemember = ownerConfirmed && campusReady;
   const searchInput = useRef<HTMLInputElement>(null);
   const resultsHeading = useRef<HTMLHeadingElement>(null);
   const compositionScope = useRef<string | null>(null);
@@ -80,7 +83,7 @@ function ServiceDirectory() {
     owner: string;
     campus?: string;
   } | null>(() =>
-    account.canRemember
+    ownerConfirmed
       ? { owner: account.ownerScope, campus: campusReady ? campusId : undefined }
       : null,
   );
@@ -99,12 +102,11 @@ function ServiceDirectory() {
       ? filters
       : { query: '', category: 'all' as const };
   useLayoutEffect(() => {
-    if (!account.canRemember) return;
+    if (!ownerConfirmed) return;
     const previous = confirmedScope;
     const changedOwner = previous !== null && previous.owner !== account.ownerScope;
     const changedCampus =
       previous?.campus !== undefined && campusReady && previous.campus !== campusId;
-    if (guest && changedOwner) return;
     if (!previous) {
       // Bind edits made during initial account resolution without treating them as an account switch.
       if (editedFilters.current) editedFilters.current.scope = draftScope;
@@ -167,7 +169,6 @@ function ServiceDirectory() {
       'search',
       window.location.pathname || '/search',
       storageScope,
-      guest,
     );
     const next =
       !fromUrl.query && fromUrl.category === 'all' && snapshot
@@ -176,8 +177,8 @@ function ServiceDirectory() {
     setFilters({ scope: draftScope, ...next });
     setRestoredExpanded(snapshot?.expanded ?? []);
   }, [
-    account.canRemember, account.ownerScope, campusId, campusReady, confirmedScope,
-    draftScope, guest, queryString, storageScope,
+    account.ownerScope, campusId, campusReady, confirmedScope,
+    draftScope, ownerConfirmed, queryString, storageScope,
   ]);
   const term = query.trim();
   const semanticScope = JSON.stringify([
@@ -208,7 +209,7 @@ function ServiceDirectory() {
       const source = restored.toString();
       const next = readCampusServiceFilters(restored);
       const expanded = canRemember
-        ? (restoreDirectorySearch('search', '/search', storageScope, guest)?.expanded ?? [])
+        ? (restoreDirectorySearch('search', '/search', storageScope)?.expanded ?? [])
         : [];
       requestSequence.current += 1;
       compositionScope.current = null;
@@ -226,12 +227,12 @@ function ServiceDirectory() {
           open: false,
           scope: storageScope,
           expanded,
-        }, guest);
+        });
       }
     }
     window.addEventListener('popstate', restoreHistoryFilters);
     return () => window.removeEventListener('popstate', restoreHistoryFilters);
-  }, [canRemember, draftScope, guest, storageScope]);
+  }, [canRemember, draftScope, storageScope]);
   const active = analysis?.scope === semanticScope && analysis.term === term ? analysis : null;
   const semantic = active?.status === 'ready' ? active.result : undefined;
   const matches = searchCampusServices(query, category, schoolLmsEnabled);
@@ -308,9 +309,9 @@ function ServiceDirectory() {
         category: next.category,
         open: false,
         scope: storageScope,
-      }, guest);
+      });
     } else if (canRemember) {
-      forgetDirectorySearch('search', guest ? storageScope : undefined);
+      forgetDirectorySearch('search');
     }
   }
   function resetFilters() {
@@ -328,7 +329,7 @@ function ServiceDirectory() {
       open: false,
       scope: storageScope,
       expanded: expandedDirectorySections(directory.current),
-    }, guest);
+    });
   }
   function renderServiceLink(service: CampusService, secondary = false) {
     return (

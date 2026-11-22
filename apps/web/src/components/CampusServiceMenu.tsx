@@ -195,7 +195,7 @@ export function CampusServiceMenu() {
     if (!snapshot) return;
     if ('destination' in snapshot) {
       if (
-        account.status === 'guest' && draftScope !== undefined &&
+        account.status === 'guest' && draftScope === undefined &&
         snapshot.scope !== undefined && snapshot.scope !== returnScope
       ) {
         return;
@@ -215,7 +215,7 @@ export function CampusServiceMenu() {
           open: snapshot.open,
         },
         true,
-        account.status === 'guest' && snapshot.scope === returnScope ? undefined : snapshot.scope,
+        snapshot.scope,
       );
     }
     setQuery(snapshot.query.slice(0, 100));

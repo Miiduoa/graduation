@@ -1,5 +1,5 @@
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
 import { beforeEach, expect, it, vi } from 'vitest';
 import SearchPage from './page';
@@ -55,9 +55,11 @@ vi.mock('@/components/AuthGuard', () => ({
 }));
 vi.mock('@/features/nuni/Session', () => ({
   useOptionalNuniSession: () =>
-    userState.platform
+    userState.platform || userState.pendingLogout || userState.platformError || userState.platformLoading
       ? {
-          session: { platformAccountId: userState.accountId, context: userState.context },
+          session: userState.platform
+            ? { platformAccountId: userState.accountId, context: userState.context }
+            : null,
           loading: userState.platformLoading,
           error: userState.platformError,
           pendingLogout: userState.pendingLogout,
@@ -1045,4 +1047,108 @@ it('keeps the saved filters on a return during logout and restores them for the 
   userState.pendingLogout = false;
   view.rerender(<SearchPage />);
   expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+});
+
+it.each([
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true],
+])('clears the current URL only on confirmed logout (query: %s, category: %s)', (query, category) => {
+  userState.platform = true;
+  window.history.replaceState({}, '', '/search?campus=pu#results');
+  const view = render(<SearchPage />);
+  if (query) fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  if (category) fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
+  const before = window.location.href;
+  const params = new URL(before).searchParams;
+  expect(params.get('q')).toBe(query ? '借書' : null);
+  expect(params.get('category')).toBe(category ? 'campus' : null);
+  const stored = sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY);
+
+  userState.pendingLogout = true;
+  userState.platform = false;
+  view.rerender(<SearchPage />);
+  expect(window.location.href).toBe(before);
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
+
+  userState.platformError = '登出尚未完成';
+  view.rerender(<SearchPage />);
+  expect(window.location.href).toBe(before);
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
+
+  userState.platformError = '';
+  userState.pendingLogout = false;
+  view.rerender(<SearchPage />);
+  expect(window.location.search).toBe('?campus=pu');
+  expect(window.location.hash).toBe('#results');
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
+  expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe('false');
+
+  view.unmount();
+  render(<SearchPage />);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
+  expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe('false');
+});
+
+it.each(['query', 'expanded family'] as const)(
+  'restores the guest %s after Back from a service, then clears it on account B',
+  async (draft) => {
+    userState.platform = true;
+    const view = render(<SearchPage />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    userState.platform = false;
+    view.rerender(<SearchPage />);
+    expect(new URLSearchParams(window.location.search).has('q')).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: '學習與課務' }));
+    if (draft === 'query') {
+      fireEvent.change(screen.getByRole('searchbox'), { target: { value: '教材' } });
+    } else {
+      fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
+    }
+    const link = screen.getByRole('link', { name: /^教材收藏/ });
+    const destination = link.getAttribute('href')!;
+    fireEvent.click(link);
+    expect(JSON.parse(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)!).search.destination)
+      .toBe(destination);
+    const origin = window.location.href;
+    view.unmount();
+    window.history.pushState({}, '', destination);
+    window.history.back();
+    await waitFor(() => expect(window.location.href).toBe(origin));
+
+    const returned = render(<SearchPage />);
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(draft === 'query' ? '教材' : '');
+    expect(screen.getByRole('button', { name: '學習與課務' }).getAttribute('aria-pressed')).toBe('true');
+    if (draft === 'expanded family') {
+      expect(screen.getByRole('link', { name: /^教材收藏/ }).closest('details')!.open).toBe(true);
+    }
+    userState.platform = true;
+    userState.accountId = 'platform-b';
+    returned.rerender(<SearchPage />);
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
+    expect(window.location.search).toBe('');
+    expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
+  },
+);
+
+it('retains the URL and saved filters when the same account temporarily fails verification', () => {
+  userState.platform = true;
+  const view = render(<SearchPage />);
+  fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  const before = window.location.href;
+  const stored = sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY);
+  userState.platform = false;
+  userState.platformError = '驗證暫時失敗';
+  view.rerender(<SearchPage />);
+  expect(window.location.href).toBe(before);
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
+  userState.platform = true;
+  userState.platformError = '';
+  view.rerender(<SearchPage />);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+  expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe('true');
 });

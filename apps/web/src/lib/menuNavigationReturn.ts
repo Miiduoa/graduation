@@ -30,7 +30,8 @@ type MenuReturnBoundary = Partial<Record<'campus' | 'schoolOwner' | 'platformOwn
 const ownerFields = ['schoolOwner', 'platformOwner'] as const;
 const boundaryFields = ['campus', ...ownerFields] as const;
 
-function boundaryChanged(previous: MenuReturnBoundary, next: MenuReturnBoundary) {
+function boundaryChanged(previous: MenuReturnBoundary, next: MenuReturnBoundary, guest = false) {
+  if (guest && ownerFields.some((field) => previous[field] !== undefined)) return true;
   return boundaryFields.some(
     (field) =>
       previous[field] !== undefined && next[field] !== undefined && previous[field] !== next[field],
@@ -55,8 +56,8 @@ const listeners = new Set<() => void>();
 let pending: MenuNavigationReturn | null = null;
 let observedWindow: Window | undefined;
 let activeScope: string | null | undefined;
-let activeGuest = false;
 let lastConfirmedScope: string | undefined;
+let lastConfirmedGuest = false;
 let lastBoundary: MenuReturnBoundary | undefined;
 let storedSnapshots: string | null | undefined;
 let sequence = 0;
@@ -161,8 +162,8 @@ function observeWindow() {
     snapshots.clear();
     pending = null;
     activeScope = undefined;
-    activeGuest = false;
     lastConfirmedScope = undefined;
+    lastConfirmedGuest = false;
     lastBoundary = undefined;
     storedSnapshots = undefined;
     // A new document can mount on the origin after the browser has already returned.
@@ -203,9 +204,9 @@ export function setMenuReturnScope(
   // A null scope with no boundary resets the document's in-memory binding.
   if (scope === null && !boundary) {
     lastConfirmedScope = undefined;
+    lastConfirmedGuest = false;
     lastBoundary = undefined;
     activeScope = undefined;
-    activeGuest = false;
     publish(null);
     return false;
   }
@@ -221,21 +222,17 @@ export function setMenuReturnScope(
     !ownerFields.some(
       (field) => lastBoundary?.[field] === undefined && nextBoundary[field] !== undefined,
     );
-  // A sign-out or loss of an identity source can leave a guest or partial session.
-  if (
-    (guest && (lastConfirmedScope !== undefined || activeScope === null)) ||
-    (typeof scope === 'string' && missingOwner)
-  ) {
-    scope = null;
-  }
+  // A partial account can also mean that one identity source is unavailable.
+  if (!guest && typeof scope === 'string' && missingOwner) scope = null;
   const changed =
     changedBoundary ||
-    (!guest && typeof scope === 'string' && lastConfirmedScope !== undefined && lastConfirmedScope !== scope);
+    (lastConfirmedScope !== undefined &&
+      ((guest && !lastConfirmedGuest) || (typeof scope === 'string' && lastConfirmedScope !== scope)));
   const previousScope = activeScope;
   activeScope = scope;
-  activeGuest = guest && typeof scope === 'string';
-  if ((!guest && typeof scope === 'string') || changed) {
-    lastConfirmedScope = !guest && typeof scope === 'string' ? scope : undefined;
+  if (typeof scope === 'string' || changed) {
+    lastConfirmedScope = typeof scope === 'string' ? scope : undefined;
+    lastConfirmedGuest = guest;
   }
   if (nextBoundary) {
     const previousBoundary = changed ? undefined : lastBoundary;
@@ -251,13 +248,13 @@ export function setMenuReturnScope(
     snapshots.clear();
     saveSnapshots();
     forgetDirectorySearch('menu');
-  } else if (!guest && typeof scope === 'string' && previousScope !== scope) {
+  } else if (typeof scope === 'string' && previousScope !== scope) {
     for (const [token, snapshot] of snapshots) {
       const previous = snapshot.provisionalBoundary;
       if (
         previous &&
         (snapshot.legacyScope === undefined || snapshot.legacyScope === scope) &&
-        (!boundary || !boundaryChanged(previous, boundary))
+        !boundaryChanged(previous, boundary ?? {}, guest)
       ) {
         snapshot.scope = scope;
         delete snapshot.provisionalBoundary;
@@ -279,7 +276,7 @@ export function setMenuReturnScope(
     for (const [token, snapshot] of snapshots) {
       const previous = snapshot.provisionalBoundary;
       if (!previous) continue;
-      if (boundaryChanged(previous, lastBoundary)) {
+      if (boundaryChanged(previous, lastBoundary, guest)) {
         if (
           (snapshot.legacyScope !== undefined || snapshot.publicLegacy) &&
           window.history.state?.[ACKNOWLEDGED_STATE_KEY] === token
@@ -350,7 +347,7 @@ export function rememberMenuReturn(
   const state = window.history.state;
   const previousToken = marker(state);
   const previous = previousToken ? snapshots.get(previousToken) : undefined;
-  const provisional = activeScope === undefined || activeGuest;
+  const provisional = activeScope === undefined;
   const legacy = provisional && !alreadyRestored
     ? restoreDirectorySearch('menu', window.location.pathname)
     : null;
@@ -362,7 +359,7 @@ export function rememberMenuReturn(
   ) return;
   // A fresh draft can be claimed on first confirmation, as with the old per-tab draft.
   // Retain the known boundary when a previously confirmed identity is being rechecked.
-  const provisionalBoundary = alreadyRestored || activeGuest || lastConfirmedScope !== undefined
+  const provisionalBoundary = alreadyRestored || lastConfirmedScope !== undefined
     ? { ...lastBoundary }
     : {};
   const token = window.crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${++sequence}`;
@@ -407,18 +404,13 @@ export function rememberMenuReturn(
 /** Skip reopening on reload while keeping the draft available for future history returns. */
 export function consumeMenuReturn(snapshot: MenuNavigationReturn, scope: string): boolean {
   const previous = snapshot.provisionalBoundary;
-  const guestDraft = activeGuest && previous && snapshot.legacyScope === undefined &&
-    previous.schoolOwner === undefined && previous.platformOwner === undefined &&
-    (!lastBoundary || !boundaryChanged(previous, lastBoundary));
-  if (activeGuest && !guestDraft && snapshot.scope !== scope) return false;
   const unverifiedLegacy = activeScope === undefined &&
     (snapshot.publicLegacy ||
       (snapshot.legacyScope !== undefined && matchesKnownMenuReturnScope(snapshot.legacyScope)));
   if (typeof activeScope !== 'string' && !unverifiedLegacy) return false;
   loadSnapshots();
   const confirmedDraft =
-    activeScope === scope &&
-    (guestDraft || (snapshot.scope === scope && previous === undefined));
+    activeScope === scope && snapshot.scope === scope && previous === undefined;
   if (
     pending !== snapshot ||
     snapshots.get(snapshot.token) !== snapshot ||
