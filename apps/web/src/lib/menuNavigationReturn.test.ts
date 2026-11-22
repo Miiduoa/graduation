@@ -491,3 +491,21 @@ it.each(['unconfirmed', 'known account'] as const)(
     }
   },
 );
+
+it('replaces a legacy draft at a different origin when saving in a new confirmed scope', async () => {
+  const menu = await loadDocument();
+  const legacyKey = 'campus.directory.search.v1';
+  sessionStorage.setItem(legacyKey, JSON.stringify({
+    menu: { ...draft, path: '/events', destination, open: true },
+  }));
+  const next = { ...draft, scope: 'new-account-and-campus', query: '圖書館', expanded: [] };
+  menu.setMenuReturnScope(next.scope);
+  menu.rememberMenuReturn(destination, next);
+  expect(sessionStorage.getItem(legacyKey)).toBeNull();
+  const originState = window.history.state;
+  window.history.pushState({}, '', destination);
+  backToOrigin(originState);
+  const returned = menu.getMenuReturn()!;
+  expect(returned).toMatchObject(next);
+  expect(menu.consumeMenuReturn(returned, next.scope)).toBe(true);
+});

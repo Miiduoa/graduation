@@ -149,3 +149,30 @@ it('restores expanded groups with the same session and clears them after an acco
   expect(restoreDirectorySearch('search', '/search', 'account-b:session-two:pu')).toBeNull();
   expect(restoreDirectorySearch('search', '/search', 'account-a:session-one:pu')).toBeNull();
 });
+
+it.each(['quick', 'menu', 'search'] as const)('replaces the shared %s slot at every scope change', (source) => {
+  const scopes = ['account-a:pu', 'account-a:nthu', 'guest:nthu', 'guest:pu', 'account-b:pu'];
+  const draft = { path: '/map', destination: '/library', query: '借書' };
+  for (const [index, scope] of scopes.entries()) {
+    const query = `借書 ${index}`;
+    rememberDirectorySearch(source, { ...draft, query, scope });
+    expect(restoreDirectorySearch(source, draft.path, scope)).toMatchObject({ query, scope });
+  }
+  expect(restoreDirectorySearch(source, draft.path, scopes[0])).toBeNull();
+  expect(restoreDirectorySearch(source, draft.path, scopes.at(-1))).toBeNull();
+});
+
+it('skips a draft write when the existing shared slots cannot be read', () => {
+  const draft = { path: '/map', destination: '/library', query: '借書' };
+  rememberDirectorySearch('search', draft);
+  const stored = sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY);
+  const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('Storage unavailable');
+  });
+  try {
+    rememberDirectorySearch('quick', draft);
+  } finally {
+    read.mockRestore();
+  }
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
+});

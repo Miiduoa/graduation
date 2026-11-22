@@ -70,7 +70,7 @@ function ServiceMenuLink({
   id: string;
   filtering: boolean;
   secondary?: boolean;
-  onClose: (href: string) => boolean;
+  onClose: (href: string) => void;
 }) {
   return (
     <Link
@@ -83,9 +83,7 @@ function ServiceMenuLink({
       }
       aria-current={currentService === service.href ? 'page' : undefined}
       onClick={(event) => {
-        if (isCurrentTabNavigationClick(event, event.currentTarget) && !onClose(href)) {
-          event.preventDefault();
-        }
+        if (isCurrentTabNavigationClick(event, event.currentTarget)) onClose(href);
       }}
     >
       <span className={styles.serviceName}>
@@ -138,7 +136,6 @@ export function CampusServiceMenu() {
   const skipToggleSideEffects = useRef(false);
   const composing = useRef(false);
   const [query, setQuery] = useState('');
-  const [saveFailed, setSaveFailed] = useState(false);
   const [category, setCategory] = useState<ServiceCategory | 'all'>('all');
   const [restoredExpanded, setRestoredExpanded] = useState<string[]>([]);
   const id = useId();
@@ -177,7 +174,6 @@ export function CampusServiceMenu() {
       });
     }
     composing.current = false;
-    setSaveFailed(false);
     setQuery('');
     setCategory('all');
     setRestoredExpanded([]);
@@ -280,7 +276,6 @@ export function CampusServiceMenu() {
   function closeMenu() {
     if (!menu.current?.open) return;
     assignMenuOpen(false);
-    setSaveFailed(false);
     setQuery('');
     setCategory('all');
     setRestoredExpanded([]);
@@ -293,24 +288,18 @@ export function CampusServiceMenu() {
   function persistAndClose(destination: string) {
     if (destination === currentMenuReturnUrl()) {
       dismissMenu();
-      return true;
+      return;
     }
-    const saved = rememberMenuReturn(destination, {
+    rememberMenuReturn(destination, {
       scope: returnScope,
       query,
       category,
       expanded: expandedDirectorySections(results.current),
     });
-    if (saved === false) {
-      setSaveFailed(true);
-      return false;
-    }
     closeMenu();
-    return true;
   }
   function resetSearch() {
     discardMenuReturn();
-    setSaveFailed(false);
     setQuery('');
     setCategory('all');
     setRestoredExpanded([]);
@@ -369,7 +358,6 @@ export function CampusServiceMenu() {
         if (event.target !== event.currentTarget) return;
         if (skipToggleSideEffects.current) return;
         if (!event.currentTarget.open) {
-          setSaveFailed(false);
           setQuery('');
           setCategory('all');
           setRestoredExpanded([]);
@@ -540,7 +528,6 @@ export function CampusServiceMenu() {
             </div>
           )}
         </div>
-        {saveFailed && <p role="status">搜尋草稿暫時無法儲存，請稍後再試。</p>}
         <div
           ref={results}
           className={`${styles.menuContents}${filtering ? ` ${styles.filteredContents}` : ''}`}
@@ -552,11 +539,8 @@ export function CampusServiceMenu() {
             className={styles.menuOverview}
             aria-current={pathname === '/search' ? 'page' : undefined}
             onClick={(event) => {
-              if (
-                isCurrentTabNavigationClick(event, event.currentTarget) &&
-                !persistAndClose(directoryHref)
-              ) {
-                event.preventDefault();
+              if (isCurrentTabNavigationClick(event, event.currentTarget)) {
+                persistAndClose(directoryHref);
               }
             }}
           >

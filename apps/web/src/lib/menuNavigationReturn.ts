@@ -108,15 +108,20 @@ function captureReturn(event: PopStateEvent) {
   captureReturnState(event.state);
 }
 
-function loadSnapshots() {
+function loadSnapshots(): boolean {
+  let raw: string | null;
   try {
     // A cached document may resume after another document cleared this tab's drafts.
-    const raw = window.sessionStorage.getItem(STORAGE_KEY);
-    if (storedSnapshots === raw) return;
+    raw = window.sessionStorage.getItem(STORAGE_KEY);
+  } catch {
+    return false;
+  }
+  if (storedSnapshots === raw) return true;
+  try {
     storedSnapshots = raw;
     snapshots.clear();
     const stored: unknown = JSON.parse(raw ?? '[]');
-    if (!Array.isArray(stored)) return;
+    if (!Array.isArray(stored)) return true;
     const containsRawUrls = stored.some((snapshot) => snapshot && Object.hasOwn(snapshot, 'url'));
     for (const snapshot of stored.slice(-MAX_SNAPSHOTS)) {
       if (
@@ -147,8 +152,9 @@ function loadSnapshots() {
     // Scrub URLs written by earlier versions, including entries outside the retention limit.
     if (containsRawUrls) saveSnapshots();
   } catch {
-    // The in-memory drafts still work when storage is unavailable.
+    // Ignore malformed persisted data.
   }
+  return true;
 }
 
 function saveSnapshots(drafts = snapshots): boolean {
@@ -373,7 +379,7 @@ export function rememberMenuReturn(
     (activeScope !== undefined && draft.scope !== activeScope)
   )
     return;
-  loadSnapshots();
+  if (!loadSnapshots()) return;
   const state = window.history.state;
   const previousToken = marker(state);
   const previous = currentSnapshot(state);
@@ -411,7 +417,7 @@ export function rememberMenuReturn(
   if (staged.size > MAX_SNAPSHOTS) {
     staged.delete(staged.keys().next().value!);
   }
-  if (!saveSnapshots(staged)) return false;
+  if (!saveSnapshots(staged)) return;
   snapshots.clear();
   for (const [key, value] of staged) snapshots.set(key, value);
   try {
@@ -423,7 +429,10 @@ export function rememberMenuReturn(
     // The stored draft still matches its origin if the marker cannot be updated.
   }
   acknowledgedToken = alreadyRestored ? token : undefined;
-  if (alreadyRestored || legacy || restoreDirectorySearch('menu', window.location.pathname)) {
+  if (
+    alreadyRestored || legacy ||
+    (!provisional && restoreDirectorySearch('menu', window.location.pathname, activeScope))
+  ) {
     forgetDirectorySearch('menu');
   }
   publish(null);

@@ -1,6 +1,7 @@
+import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directoryStorageFailures';
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CampusServiceMenu } from './CampusServiceMenu';
 import { AppHeader } from './AppHeader';
 import { visibleCampusServices } from '@/lib/campusServices';
@@ -718,13 +719,40 @@ it('does not replay a restored draft after focus dismisses the menu', async () =
   expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
 });
 
-it.each([
-  ['success', false],
-  ['success', true],
-  ['storage blocked', false],
-  ['storage blocked', true],
-  ['storage quota', false],
-] as const)('restores the latest menu after %s (History rejected: %s)', (storage, historyRejected) => {
+describe.each(directoryStorageFailures)('menu navigation with storage %s', (failure) => {
+  it.each(['service link', 'directory link', 'submit'] as const)('follows the %s and skips the draft', (entry) => {
+    render(<CampusServiceMenu />);
+    const menu = screen.getByText('所有服務').closest('details')!;
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    const link = entry === 'service link'
+      ? screen.getByRole('link', { name: '圖書館' })
+      : screen.getByRole('link', { name: /尋找校園服務/ });
+    const expectedPath = entry === 'service link' ? '/library' : '/search';
+    const click = vi.fn();
+    document.addEventListener('click', click);
+    const previousState = window.history.state;
+    const storage = rejectDirectoryStorage(failure);
+    try {
+      fireEvent.click(entry === 'submit' ? screen.getByRole('button', { name: '查看結果' }) : link);
+      const linkClicks = click.mock.calls
+        .map(([event]) => event as MouseEvent)
+        .filter((event) => event.target === link);
+      expect(linkClicks).toHaveLength(1);
+      expect(linkClicks[0].defaultPrevented).toBe(false);
+      expect(new URL((link as HTMLAnchorElement).href).pathname).toBe(expectedPath);
+      expect(menu.open).toBe(false);
+      expect(screen.queryByText('搜尋草稿暫時無法儲存，請稍後再試。')).toBeNull();
+    } finally {
+      document.removeEventListener('click', click);
+      storage.mockRestore();
+    }
+    expect(window.history.state).toEqual(previousState);
+    expect(sessionStorage.getItem('campus.menu.return.v1')).toBeNull();
+  });
+});
+
+it.each([false, true])('restores the latest menu (History rejected: %s)', (historyRejected) => {
   for (const query of ['借書', '']) {
     const view = render(<CampusServiceMenu />);
     const menu = screen.getByText('所有服務').closest('details')!;
@@ -732,35 +760,16 @@ it.each([
     fireEvent.click(screen.getByText('所有服務'));
     fireEvent.change(search, { target: { value: query } });
     const link = screen.getByRole('link', { name: '圖書館' });
-    const previousState = window.history.state;
-    const write = vi.spyOn(Storage.prototype, 'setItem');
-    const replace = vi.spyOn(window.history, 'replaceState');
-    if (storage !== 'success') {
-      write.mockImplementationOnce(() => {
-        throw new DOMException('Storage unavailable', storage === 'storage quota' ? 'QuotaExceededError' : 'SecurityError');
-      });
-    }
-    if (historyRejected) {
-      replace.mockImplementation(() => {
-        throw new DOMException('History unavailable', 'SecurityError');
-      });
-    }
-
+    const replace = historyRejected
+      ? vi.spyOn(window.history, 'replaceState').mockImplementation(() => {
+          throw new DOMException('History unavailable', 'SecurityError');
+        })
+      : undefined;
     try {
-      if (storage !== 'success') {
-        expect(fireEvent.click(link)).toBe(false);
-        expect(menu.open).toBe(true);
-        expect(search.value).toBe(query);
-        expect(screen.getByText('搜尋草稿暫時無法儲存，請稍後再試。')).toBeTruthy();
-        expect(replace).not.toHaveBeenCalled();
-        expect(window.history.state).toEqual(previousState);
-        expect(sessionStorage.getItem('campus.menu.return.v1')).toBeNull();
-      }
       fireEvent.click(link);
       expect(menu.open).toBe(false);
     } finally {
-      write.mockRestore();
-      replace.mockRestore();
+      replace?.mockRestore();
     }
 
     const origin = captureMenuOrigin();
@@ -1901,7 +1910,7 @@ it.each([
 });
 
 it.each(['query', 'expanded family'] as const)(
-  'restores a guest %s on Back after same-page logout and clears it on account B',
+  'restores a guest %s after logout and then saves and restores account B’s draft',
   (draft) => {
     auth.session = { platformAccountId: 'platform-a', isPlatformOperator: false };
     visitMenuDestination('/map?campus=pu');
@@ -1960,5 +1969,53 @@ it.each(['query', 'expanded family'] as const)(
     expect(menu().open).toBe(false);
     expect(search().value).toBe('');
     expect(sessionStorage.getItem(storageKey)).toBeNull();
+
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.change(search(), { target: { value: '公車' } });
+    const bus = screen.getByRole<HTMLAnchorElement>('link', { name: '公車' });
+    const busDestination = bus.href;
+    fireEvent.click(bus);
+    const accountBOrigin = captureMenuOrigin();
+    visitMenuDestination(busDestination);
+    view.rerender(<CampusServiceMenu />);
+    returnToMenuOrigin(accountBOrigin);
+    view.rerender(<CampusServiceMenu />);
+    expect(menu().open).toBe(true);
+    expect(search().value).toBe('公車');
   },
 );
+
+it.each([['school-a'], [null]])('restores the latest menu draft after a campus switch for %s', (uid) => {
+  firebase.user = uid ? { uid } : null;
+  const selectCampus = (id: string) => {
+    selection.current = {
+      loading: false,
+      catalogStatus: 'ready',
+      selectedSchool: { id, name: id },
+    };
+  };
+  selectCampus('pu');
+  const view = render(<CampusServiceMenu />);
+  const historyKey = 'campus.menu.return.v1';
+  const input = screen.getByRole<HTMLInputElement>('searchbox');
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.change(input, { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+  expect(sessionStorage.getItem(historyKey)).toBeTruthy();
+
+  selectCampus('nthu');
+  view.rerender(<CampusServiceMenu />);
+  expect(sessionStorage.getItem(historyKey)).toBeNull();
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.change(input, { target: { value: '公車' } });
+  const bus = screen.getByRole('link', { name: '公車' });
+  const destination = bus.getAttribute('href')!;
+  fireEvent.click(bus);
+  const origin = captureMenuOrigin();
+  visitMenuDestination(destination);
+  view.rerender(<CampusServiceMenu />);
+  returnToMenuOrigin(origin);
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('公車');
+});

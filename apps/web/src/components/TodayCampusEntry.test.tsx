@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directoryStorageFailures';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { createRef } from 'react';
 import { callCampusAssistant } from '@/lib/campusAssistantClient';
@@ -651,6 +652,29 @@ it('closes the header panel for a same-page answer link opened in the current ta
   fireEvent.click(link);
   expect(panel.hidden).toBe(true);
   expect(document.activeElement).toBe(trigger);
+});
+
+it.each(directoryStorageFailures)('closes the header panel on a service click with storage %s', async (failure) => {
+  state.pathname = '/map';
+  state.search = 'campus=pu';
+  window.history.replaceState({}, '', '/map?campus=pu');
+  mockNuniAsk(() => reply(''));
+  render(<AssistantEnabledProvider enabled><AppHeader /></AssistantEnabledProvider>);
+  const trigger = screen.getByRole('button', { name: '開啟校園助理' });
+  fireEvent.click(trigger);
+  const panel = screen.getByRole('dialog', { name: '校園助理' });
+  fireEvent.click(await within(panel).findByRole('button', { name: '找校園服務' }));
+  fireEvent.change(within(panel).getByRole('searchbox'), { target: { value: '借書' } });
+  const link = within(panel).getByRole<HTMLAnchorElement>('link', { name: /圖書館/ });
+  const storage = rejectDirectoryStorage(failure);
+  try {
+    expect(fireEvent.click(link)).toBe(true);
+    expect(new URL(link.href).pathname).toBe('/library');
+    expect(panel.hidden).toBe(true);
+    expect(document.activeElement).toBe(trigger);
+  } finally {
+    storage.mockRestore();
+  }
 });
 
 it('keeps a guest Today assistant login in the selected campus and returns to the same disclosure', () => {

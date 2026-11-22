@@ -1,7 +1,8 @@
+import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directoryStorageFailures';
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SearchPage from './page';
 import { visibleCampusServices } from '@/lib/campusServices';
 import { DIRECTORY_SEARCH_STORAGE_KEY } from '@/lib/campusDirectorySearch';
@@ -1151,4 +1152,26 @@ it('retains the URL and saved filters when the same account temporarily fails ve
   view.rerender(<SearchPage />);
   expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
   expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe('true');
+});
+
+describe.each(directoryStorageFailures)('search navigation with storage %s', (failure) => {
+  it.each([
+    [/^圖書館/, '/library'],
+    ['交給校園助理', '/ai-assistant'],
+  ] as const)('follows %s and skips the draft', (name, path) => {
+    userState.uid = 'alice';
+    render(<SearchPage />);
+    const storage = rejectDirectoryStorage(failure);
+    try {
+      fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
+        target: { value: '借書' },
+      });
+      const link = screen.getByRole<HTMLAnchorElement>('link', { name });
+      expect(fireEvent.click(link)).toBe(true);
+      expect(new URL(link.href).pathname).toBe(path);
+    } finally {
+      storage.mockRestore();
+    }
+    expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
+  });
 });

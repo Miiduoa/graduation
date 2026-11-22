@@ -66,8 +66,9 @@ export function QuickCampusEntry({
   const campusReady = !selection || (!selection.loading && selection.catalogStatus === 'ready');
   const canInterpret = account.canInterpret && campusReady;
   const canUseAssistant = account.canUseAssistant && campusReady;
-  const canRemember = account.canRemember && campusReady;
-  const guest = account.status === 'guest';
+  const canRemember =
+    account.canRemember && campusReady &&
+    account.schoolDraftOwner !== undefined && account.platformDraftOwner !== undefined;
   const selected = selection?.selectedSchool;
   const selectedSchoolId = selected?.id || '';
   const scope = JSON.stringify([
@@ -116,13 +117,12 @@ export function QuickCampusEntry({
       'quick',
       window.location.pathname || '/',
       storageScope,
-      guest,
     );
     if (draft.edited || !snapshot) return;
     // Restore the typed request after history navigation back to this page.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft({ scope: draftScope, query: snapshot.query.slice(0, 160), edited: false });
-  }, [guest, canRemember, draftScope, storageScope, draft.edited]);
+  }, [canRemember, draftScope, storageScope, draft.edited]);
   useEffect(
     () => () => {
       sequence.current += 1;
@@ -187,18 +187,20 @@ export function QuickCampusEntry({
   }
 
   function startOver() {
-    if (canRemember) forgetDirectorySearch('quick', guest ? storageScope : undefined);
+    if (canRemember) forgetDirectorySearch('quick', storageScope);
     updateQuery('');
     input.current?.focus();
   }
 
   function rememberQuick(href: string) {
     if (!canRemember) return;
-    rememberDirectorySearch(
-      'quick',
-      { path: window.location.pathname || '/', destination: href, query, open: true, scope: storageScope },
-      guest,
-    );
+    rememberDirectorySearch('quick', {
+      path: window.location.pathname || '/',
+      destination: href,
+      query,
+      open: true,
+      scope: storageScope,
+    });
   }
 
   const panelNavigation = useContext(AssistantLinkNavigation);
