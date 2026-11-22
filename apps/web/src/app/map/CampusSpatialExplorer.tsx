@@ -96,9 +96,16 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       }
       return JSON.parse(raw) as unknown;
     }
-    // A JSON-only bridge exposes parsed data. Use the reserialized size for
-    // the payload cap because parsing discards whitespace and escape details
-    // counted by Content-Length. The bridge handles the initial allocation.
+    // A JSON-only WebView bridge has already discarded the original bytes.
+    // An identity Content-Length cannot be verified from JSON.stringify():
+    // whitespace and escaped characters disappear during parsing. Fail
+    // closed before parsing rather than present an unverified OSM outline.
+    // Text-only bridges above can still compare their actual UTF-8 bytes;
+    // compressed bridges retain the existing decoded-payload size limit.
+    if (identityLength !== null) {
+      throw new Error('Cannot verify identity-framed building outline bytes');
+    }
+    // Without identity framing, keep the existing bounded legacy fallback.
     const payload: unknown = await response.json();
     if (signal?.aborted) throw new Error('Building outline read aborted');
     const normalized = JSON.stringify(payload);
