@@ -23,7 +23,6 @@ type SubmittedWrite = {
   expected: CreatorCard;
   edits: readonly CardField[];
   manualCheckStarted: boolean;
-  editorSession: number;
   revisions: FieldRevisions;
 };
 
@@ -70,9 +69,7 @@ function ScopedCreatorCardPanel({
   const [attempt, setAttempt] = useState(0);
   const [editing, setEditing] = useState(false);
   const editingNow = useRef(false);
-  const editorSession = useRef(0);
   const setEditorOpen = (open: boolean) => {
-    if (open) editorSession.current += 1;
     editingNow.current = open;
     setEditing(open);
   };
@@ -81,8 +78,8 @@ function ScopedCreatorCardPanel({
   const currentDraft = useRef(draft);
   // Keep clear operations even when the field originally displayed as empty.
   const editedFields = useRef(new Set<CardField>());
-  // Reverting a value is still a user edit. Cancelling rolls back only
-  // revisions for edits that have never been submitted.
+  // Reverting a value is still a user edit. With no pending write, cancelling
+  // rolls field revisions back to the last submission.
   const nextRevision = useRef(0);
   const revisions = useRef<FieldRevisions>({});
   const submittedRevisions = useRef<FieldRevisions>({});
@@ -152,9 +149,11 @@ function ScopedCreatorCardPanel({
 
   const beginEdit = () => {
     if (!own || editorLocked() || state.status !== 'ready') return;
-    editedFields.current.clear();
-    replaceDraft(published.current ?? EMPTY_CREATOR_CARD);
-    if (!pendingWrite.current) setFeedback('');
+    if (!pendingWrite.current) {
+      editedFields.current.clear();
+      replaceDraft(published.current ?? EMPTY_CREATOR_CARD);
+      setFeedback('');
+    }
     setEditorOpen(true);
   };
 
@@ -176,10 +175,11 @@ function ScopedCreatorCardPanel({
   const cancelEdit = () => {
     if (editorLocked()) return;
     setEditorOpen(false);
+    if (pendingWrite.current) return;
     revisions.current = { ...submittedRevisions.current };
     editedFields.current.clear();
     replaceDraft(published.current ?? EMPTY_CREATOR_CARD);
-    if (!pendingWrite.current) setFeedback('');
+    setFeedback('');
   };
 
   const settleWrite = (submitted: SubmittedWrite, latest: CreatorCard | null) => {
@@ -200,7 +200,13 @@ function ScopedCreatorCardPanel({
           };
         }
       }
-      if (editingNow.current && editorSession.current === submitted.editorSession) {
+      // Keep post-submit edits as well, including explicit clears. A newer
+      // edit to the same field takes precedence over the submitted value.
+      for (const field of editedFields.current) {
+        const value = currentDraft.current[field];
+        unconfirmed[field] = { value, expected: value, revision: revisions.current[field] ?? 0 };
+      }
+      if (editingNow.current) {
         for (const field of submitted.edits) editedFields.current.add(field);
       }
       setRecoverable((previous) => {
@@ -314,7 +320,7 @@ function ScopedCreatorCardPanel({
     setFeedback('');
     const submitted: SubmittedWrite = {
       draft: submittedDraft, expected, edits, manualCheckStarted: false,
-      editorSession: editorSession.current, revisions: { ...revisions.current },
+      revisions: { ...revisions.current },
     };
     for (const field of edits) {
       submittedRevisions.current[field] = submitted.revisions[field];

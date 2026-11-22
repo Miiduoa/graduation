@@ -620,7 +620,7 @@ test('a cancelled uncertain edit can be confirmed from the published view withou
   expect(view.getByLabelText('核對儲存結果')).toBeTruthy();
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
   fireEvent.press(view.getByLabelText('編輯社群簡介'));
-  expect(view.getByLabelText('個人簡介').props.value).toBe(published.bio);
+  expect(view.getByLabelText('個人簡介').props.value).toBe(submitted.bio);
   fireEvent.press(view.getByLabelText('取消編輯'));
 
   await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
@@ -631,7 +631,7 @@ test('a cancelled uncertain edit can be confirmed from the published view withou
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
 });
 
-test('reopening shows server fields and still requires confirmation of the submitted draft', async () => {
+test('reopening preserves the full draft while confirmation is pending', async () => {
   jest.mocked(readCreatorCard).mockResolvedValueOnce({ headline: '', bio: '已發布的介紹', linkUrl: '' });
   jest.mocked(saveCreatorCard).mockRejectedValueOnce(new Error('offline after write'));
   const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
@@ -644,8 +644,8 @@ test('reopening shows server fields and still requires confirmation of the submi
   fireEvent.press(view.getByLabelText('取消編輯'));
   expect(view.getByText('已發布的介紹')).toBeTruthy();
   fireEvent.press(view.getByLabelText('編輯社群簡介'));
-  expect(view.getByLabelText('個人簡介').props.value).toBe('已發布的介紹');
-  expect(view.getByLabelText('作品連結').props.value).toBe('');
+  expect(view.getByLabelText('個人簡介').props.value).toBe('');
+  expect(view.getByLabelText('作品連結').props.value).toBe('https://example.net/');
   expect(view.getByLabelText('核對儲存結果')).toBeTruthy();
   expect(view.getByLabelText('儲存簡介').props.accessibilityState).toMatchObject({ disabled: true });
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
@@ -763,10 +763,9 @@ test.each([
     expect(view.getByText(latest.bio)).toBeTruthy();
     fireEvent.press(view.getByLabelText('編輯社群簡介'));
     expect(view.getByLabelText('個人簡介').props.value).toBe(latest.bio);
-    // Only the submitted draft can be restored. Edits made after submission
-    // were never sent, so cancelling discards them even after a mismatch.
+    // A mismatch makes both the submitted and subsequent edits recoverable.
     fireEvent.press(view.getByLabelText('還原未確認的草稿'));
-    expect(view.getByLabelText('個人簡介').props.value).toBe(submitted.bio);
+    expect(view.getByLabelText('個人簡介').props.value).toBe(draft.bio);
     fireEvent.press(view.getByLabelText('取消編輯'));
     fireEvent.press(view.getByLabelText('編輯社群簡介'));
     fireEvent.changeText(view.getByLabelText('一句話介紹'), '重新編輯的標題');
@@ -1104,20 +1103,21 @@ test('a timed-out clear can be restored after a public check still reads a hidde
     fireEvent.press(view.getByLabelText('清除舊作品連結'));
     fireEvent.press(view.getByLabelText('儲存簡介'));
     act(() => { jest.advanceTimersByTime(15_000); });
-    fireEvent.changeText(view.getByLabelText('個人簡介'), '取消的未送出編輯');
+    fireEvent.changeText(view.getByLabelText('個人簡介'), '取消前追加的簡介');
     fireEvent.press(view.getByLabelText('取消編輯'));
     await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
     expect(view.getByText(latest.bio)).toBeTruthy();
     expect(view.getByText(/伺服器資料與上次送出的內容不同/)).toBeTruthy();
 
-    // The cancelled edit stays discarded even if the original save resolves.
-    // The explicit clear was submitted, so a mismatch keeps it recoverable.
+    // The late response cannot replace either the submitted clear or the
+    // bio typed before closing the editor.
     await act(async () => { resolveSave(card); });
     fireEvent.press(view.getByLabelText('編輯社群簡介'));
     fireEvent.press(view.getByLabelText('還原未確認的草稿'));
-    expect(view.getByLabelText('個人簡介').props.value).toBe(latest.bio);
+    expect(view.getByLabelText('個人簡介').props.value).toBe('取消前追加的簡介');
     await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
-    expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice', latest, expect.any(Function));
+    expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice',
+      { ...latest, bio: '取消前追加的簡介' }, expect.any(Function));
   } finally {
     jest.useRealTimers();
   }

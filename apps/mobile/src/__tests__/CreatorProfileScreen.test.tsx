@@ -1,9 +1,11 @@
 import React from 'react';
+import { RefreshControl } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { CreatorProfileScreen } from '../screens/social/CreatorProfileScreen';
 import { listCreatorPosts, readCreatorIdentity } from '../services/creatorProfile';
 import { loadCampusPostBookmarks } from '../services/campusPostBookmarks';
 import { followUser, listFollowingIds, unfollowUser } from '../services/follows';
+import { readCreatorCard, saveCreatorCard } from '../services/creatorCard';
 import { readCreatorPin, saveCreatorPin } from '../services/creatorPin';
 
 const mockAuth = {
@@ -31,6 +33,7 @@ jest.mock('../services/creatorPin', () => ({
   saveCreatorPin: jest.fn(),
 }));
 jest.mock('../services/creatorCard', () => ({
+  ...jest.requireActual('../services/creatorCard'),
   readCreatorCard: jest.fn(async () => null),
   saveCreatorCard: jest.fn(),
 }));
@@ -55,6 +58,8 @@ const page = (posts: typeof myPost[], hasMore = false) => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(readCreatorCard).mockReset().mockResolvedValue(null);
+  jest.mocked(saveCreatorCard).mockReset();
   mockAuth.user = { uid: 'alice', displayName: 'Alice' };
   mockAuth.profile = null;
   mockAuth.loading = false;
@@ -210,3 +215,124 @@ test('a denied pin read is retried, never treated as an empty pin', async () => 
   expect(await view.findByLabelText('置頂到個人頁')).toBeTruthy();
   expect(readCreatorPin).toHaveBeenCalledTimes(2);
 });
+
+// The merge-base keeps the entire draft when an uncertain editor closes.
+// The timeout states and the explicit mismatch restore action extend that
+// expectation to the confirmation controls in this branch.
+describe.each(['pending', 'save timeout', 'checking', 'check failed'] as const)(
+  'merge-base draft behavior with write %s', (status) => {
+    describe.each(['cancel and reopen', 'switch tabs', 'refresh'] as const)('%s', (action) => {
+      const published = { headline: '原標題', bio: '原簡介', linkUrl: 'https://example.org/' };
+      const submitted = { ...published, headline: '送出的標題', bio: '送出的簡介' };
+      const latest = { ...published, headline: '其他裝置的標題', bio: '其他裝置的簡介' };
+      const labels = { headline: '一句話介紹', bio: '個人簡介', linkUrl: '作品連結' } as const;
+      const fields = ['headline', 'bio', 'linkUrl'] as const;
+
+      describe.each([
+        ['headline', { headline: '追加的標題' }],
+        ['bio', { bio: '追加的簡介' }],
+        ['link', { linkUrl: 'https://example.net/' }],
+        ['multiple fields and explicit clears', { headline: '', bio: '追加的簡介', linkUrl: '' }],
+      ] as const)('%s', (_field, later) => {
+        test.each(['success', 'mismatch', 'timeout', 'failure'] as const)('check outcome: %s', async (outcome) => {
+          jest.useFakeTimers();
+          try {
+            const reads = jest.mocked(readCreatorCard).mockResolvedValueOnce(published);
+            const saves = jest.mocked(saveCreatorCard);
+            if (status === 'save timeout') {
+              saves.mockReturnValueOnce(new Promise(() => {}));
+            } else {
+              saves.mockRejectedValueOnce(new Error('write result unknown'));
+            }
+
+            const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+            const press = (label: string) => fireEvent.press(view.getByLabelText(label));
+            const expectDraft = (draft: typeof published) => {
+              for (const field of fields) expect(view.getByLabelText(labels[field]).props.value).toBe(draft[field]);
+            };
+            await act(async () => {});
+            press('編輯社群簡介');
+            fireEvent.changeText(view.getByLabelText(labels.headline), submitted.headline);
+            fireEvent.changeText(view.getByLabelText(labels.bio), submitted.bio);
+            await act(async () => { press('儲存簡介'); });
+            if (status === 'save timeout') act(() => { jest.advanceTimersByTime(15_000); });
+            for (const field of fields) {
+              const value = (later as Partial<typeof published>)[field];
+              if (value !== undefined) fireEvent.changeText(view.getByLabelText(labels[field]), value);
+            }
+            const draft = { ...submitted, ...later };
+
+            if (status === 'check failed') {
+              reads.mockRejectedValueOnce(new Error('offline'));
+              await act(async () => { press('核對儲存結果'); });
+              expect(view.getByText(/仍無法核對伺服器資料/)).toBeTruthy();
+            }
+            let resolveCheck!: (value: typeof published) => void;
+            let rejectCheck!: (error: Error) => void;
+            reads.mockReturnValueOnce(new Promise((resolve, reject) => {
+              resolveCheck = resolve;
+              rejectCheck = reject;
+            }));
+            if (status === 'checking') press('核對儲存結果');
+
+            if (action === 'switch tabs') {
+              for (const tab of ['相片與影片', '我的收藏', '貼文']) {
+                await act(async () => { press(tab); });
+                expectDraft(draft);
+              }
+            } else if (action === 'refresh') {
+              await act(async () => {
+                fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
+              });
+              expect(listCreatorPosts).toHaveBeenCalledTimes(2);
+            } else {
+              press('取消編輯');
+              if (status === 'checking') {
+                expect(view.getByLabelText('取消編輯').props.accessibilityState.disabled).toBe(true);
+              } else {
+                expect(view.getByText(published.bio)).toBeTruthy();
+                press('編輯社群簡介');
+              }
+            }
+            expectDraft(draft);
+            if (status !== 'checking') {
+              // Use the published-view check after a real close in the mismatch
+              // cases, to exercise restoration when no editor is mounted.
+              if (action === 'cancel and reopen' && outcome === 'mismatch') press('取消編輯');
+              press('核對儲存結果');
+            }
+            expect(view.getByText('核對中')).toBeTruthy();
+
+            if (outcome === 'success') {
+              await act(async () => { resolveCheck(submitted); });
+              expect(view.getByText(/上一筆已確認儲存/)).toBeTruthy();
+              expectDraft(draft);
+            } else if (outcome === 'mismatch') {
+              await act(async () => { resolveCheck(latest); });
+              expect(view.getByText(/伺服器資料與上次送出的內容不同/)).toBeTruthy();
+              if (view.queryByLabelText('編輯社群簡介')) press('編輯社群簡介');
+              press('還原未確認的草稿');
+              expectDraft(draft);
+            } else {
+              if (outcome === 'timeout') {
+                act(() => { jest.advanceTimersByTime(15_000); });
+                expect(view.getByText(/核對等待逾時/)).toBeTruthy();
+                press('取消編輯');
+                expectDraft(draft);
+              }
+              await act(async () => { rejectCheck(new Error('offline')); });
+              expect(view.getByText(/仍無法核對伺服器資料/)).toBeTruthy();
+              press('取消編輯');
+              press('編輯社群簡介');
+              expectDraft(draft);
+              expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+            }
+            expect(saves).toHaveBeenCalledTimes(1);
+          } finally {
+            jest.useRealTimers();
+          }
+        });
+      });
+    });
+  },
+);
