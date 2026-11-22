@@ -17,7 +17,7 @@ const state = vi.hoisted(() => ({
     loaded: true,
     error: '',
     imported: { records: [] as PersonalImportRecord[] },
-    manual: [] as PersonalImportRecord[],
+    manual: [] as PersonalImportRecord[] | null,
     retry: vi.fn(),
   },
 }));
@@ -35,6 +35,22 @@ const klass: TodayClass = {
   courseId: 'teach-1',
 };
 const course = { id: 'teach-1', name: '教學實習', role: 'owner-teacher', unreadCount: 0 };
+
+const importedClass: PersonalImportRecord = {
+  id: 'imported-class',
+  kind: 'timetable',
+  title: '已匯入授課',
+  schoolId: 'ntu',
+  academicYear: '115',
+  semester: '1',
+  dayOfWeek: 1,
+  startTime: '10:10',
+  endTime: '12:00',
+  location: '教育館 101',
+  batchId: 'batch-a',
+  importedAt: now.toISOString(),
+  source: { type: 'paste', line: 1, rawText: '' },
+};
 
 function today(overrides: Partial<ComponentProps<typeof TeacherToday>> = {}) {
   return (
@@ -142,7 +158,6 @@ it('opens the teacher workspace with the existing school query and keeps nuni co
 
 it.each([
   ['loading', '正在確認今天的課表…'],
-  ['error', '暫時讀不到課表'],
   ['unsigned-scope', '先選擇校園'],
   ['empty', '還沒有課表'],
 ] as const)('does not claim there are no classes while the timetable is %s', (status, message) => {
@@ -231,24 +246,23 @@ it('maps real loading, failure, missing timetable and unselected campus into dis
   );
 });
 
+it('shows imported classes and retries when the manual timetable fails', () => {
+  state.records.imported.records = [importedClass];
+  state.records.manual = null;
+  state.records.error = '手動課表暫時讀不到。';
+
+  render(boundToday());
+
+  const timetable = within(screen.getByRole('region', { name: TODAY_FLOW_CLASS_TITLE }));
+  expect(timetable.getByText('已匯入授課')).toBeTruthy();
+  expect(timetable.getByRole('alert').textContent).toBe('暫時讀不到課表');
+  expect(timetable.queryByText(/今天沒有排課/)).toBeNull();
+  fireEvent.click(timetable.getByRole('button', { name: '重新讀取課表' }));
+  expect(state.records.retry).toHaveBeenCalledTimes(1);
+});
+
 it('keeps classroom navigation scoped to the actual timetable and hides it during a campus change', () => {
-  state.records.imported.records = [
-    {
-      id: 'imported-class',
-      kind: 'timetable',
-      title: '已匯入授課',
-      schoolId: 'ntu',
-      academicYear: '115',
-      semester: '1',
-      dayOfWeek: 1,
-      startTime: '10:10',
-      endTime: '12:00',
-      location: '教育館 101',
-      batchId: 'batch-a',
-      importedAt: now.toISOString(),
-      source: { type: 'paste', line: 1, rawText: '' },
-    },
-  ];
+  state.records.imported.records = [importedClass];
   const view = render(boundToday());
   const destination = new URL(
     screen.getByRole('link', { name: '找教室：教育館 101' }).getAttribute('href')!,

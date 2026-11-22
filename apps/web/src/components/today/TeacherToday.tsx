@@ -89,11 +89,7 @@ export function TeacherToday({
                 {TODAY_COPY.viewFullTimetable}
               </Link>
             </div>
-            {timetableStatus === 'loading' ? (
-              <p className={styles.empty} role="status">
-                正在確認今天的課表…
-              </p>
-            ) : timetableStatus === 'error' ? (
+            {timetableStatus === 'error' && (
               <>
                 <p className={styles.empty} role="alert">
                   {TODAY_COPY.timetableUnavailable}
@@ -102,6 +98,11 @@ export function TeacherToday({
                   重新讀取課表
                 </button>
               </>
+            )}
+            {timetableStatus === 'loading' ? (
+              <p className={styles.empty} role="status">
+                正在確認今天的課表…
+              </p>
             ) : timetableStatus === 'unsigned-scope' ? (
               <>
                 <p className={styles.empty}>先選擇校園，就能查看或建立這所學校的課表。</p>
@@ -116,13 +117,7 @@ export function TeacherToday({
                   匯入我的課表
                 </Link>
               </>
-            ) : sortedClasses.length === 0 ? (
-              <p className={styles.empty}>
-                今天沒有排課。 <Link href={timetableHref}>查看課表</Link>
-                {' · '}
-                <Link href={importHref}>整理課表</Link>
-              </p>
-            ) : (
+            ) : sortedClasses.length > 0 ? (
               <TodayClassRows
                 key={timetableScopeKey ?? timetableSchoolId}
                 classes={sortedClasses}
@@ -130,7 +125,13 @@ export function TeacherToday({
                 timetableHref={timetableHref}
                 timetableSchoolId={timetableSchoolId}
               />
-            )}
+            ) : timetableStatus === 'ready' ? (
+              <p className={styles.empty}>
+                今天沒有排課。 <Link href={timetableHref}>查看課表</Link>
+                {' · '}
+                <Link href={importHref}>整理課表</Link>
+              </p>
+            ) : null}
           </section>
 
           <section
