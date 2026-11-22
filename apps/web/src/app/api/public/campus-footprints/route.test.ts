@@ -1541,6 +1541,34 @@ describe('public Providence building geometry route', () => {
       }
     });
 
+  it('uses the HTTP RFC 850 year window rather than Date.parse for a 2050 Retry-After', async () => {
+    // In December 2049, year "50" is 2050 (one hour away), not 1950.
+    // Node Date.parse instead interprets 01-Jan-50 as 1950 and sees the
+    // wrong weekday, silently collapsing the provider backoff to 10 minutes.
+    const start = Date.parse('2049-12-31T23:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response('busy', {
+          status: 503, headers: { 'Retry-After': 'Saturday, 01-Jan-50 00:00:00 GMT' },
+        }))
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Retry-After')).toBe('3600');
+      clock.mockReturnValue(start + 59 * 60_000);
+      expect((await GET()).headers.get('Retry-After')).toBe('60');
+      expect(upstream).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(start + 60 * 60_000 + 1000);
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it.each([
     ['RFC 850', 'Sunday, 15-Nov-26 23:00:00 GMT'],
     ['asctime', 'Sun Nov 15 23:00:00 2026'],
