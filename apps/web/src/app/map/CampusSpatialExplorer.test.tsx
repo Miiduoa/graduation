@@ -1113,6 +1113,78 @@ it.each(['location update', 'public outlines'] as const)(
   },
 );
 
+// 52403426 starts on foreground mount/rebuild and resumes on pageshow,
+// defaulting to visible until an observer says otherwise.
+it.each(['valid', 'invalid', 'throws'].flatMap((viewportMode) =>
+  ['immediate', 'silent', 'missing'].flatMap((observerMode) =>
+    ['startup', 'location rebuild', 'outline rebuild', 'restore'].map((action) => ({ viewportMode, observerMode, action })),
+  ),
+))('matches merge-base 3D for $viewportMode viewport / $observerMode observer / $action', async ({
+  viewportMode, observerMode, action,
+}) => {
+  let transitioning = action === 'startup';
+  const rebuilding = action.endsWith('rebuild');
+  const { library, body, buildings } = sourcedLibraryFootprintFixture();
+  let publishFootprints!: (response: Response) => void;
+  const response = new Promise<Response>((resolve) => { publishFootprints = resolve; });
+  vi.stubGlobal('fetch', vi.fn().mockReturnValue(response));
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, offsetLeft: 0, offsetTop: 0,
+  });
+  Object.defineProperty(viewport, 'height', { get() {
+    if (transitioning && viewportMode === 'throws') throw new Error('viewport unavailable');
+    return transitioning && viewportMode === 'invalid' ? 0 : window.innerHeight;
+  } });
+  vi.stubGlobal('visualViewport', viewport);
+  vi.stubGlobal('IntersectionObserver', observerMode === 'missing' ? undefined : class {
+    constructor(private callback: IntersectionObserverCallback) { intersection = callback; }
+    observe(target: Element) {
+      if (observerMode === 'immediate') {
+        this.callback([observerEntry(target, true, new DOMRect(0, 40, 320, 180))], {} as IntersectionObserver);
+      }
+    }
+    disconnect() {}
+  });
+  const bounds = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const layoutUnavailable = transitioning && action !== 'startup' && viewportMode !== 'valid';
+    return !layoutUnavailable && this.getAttribute('aria-label') === '校園地點空間圖'
+      ? new DOMRect(0, 40, 320, 180) : new DOMRect();
+  });
+  const onSelect = vi.fn();
+  const explorer = (locations: MapLocation[]) =>
+    <CampusSpatialExplorer school={action === 'outline rebuild' ? 'pu' : 'other-school'}
+      locations={locations} selected={library} onSelect={onSelect} />;
+  const { rerender, unmount } = render(explorer([library, places[1]]));
+  try {
+    const dialog = await open();
+    const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    if (rebuilding) {
+      transitioning = true;
+      if (action === 'location rebuild') rerender(explorer([library]));
+      else await act(async () => publishFootprints(new Response(body)));
+    }
+    if (action === 'restore') {
+      fireEvent(window, new Event('pagehide'));
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      transitioning = true;
+      fireEvent(window, new Event('pageshow'));
+    }
+    await waitFor(() => {
+      expect(scene.create).toHaveBeenCalledTimes(rebuilding ? 2 : 1);
+      expect(host.parentElement?.dataset.spatialState).toBe('ready');
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    });
+    if (action === 'outline rebuild') expect(scene.create.mock.lastCall?.[2].footprints).toEqual(buildings);
+    if (observerMode !== 'missing' && viewportMode !== 'valid') {
+      act(() => intersection?.([observerEntry(host, false)], {} as IntersectionObserver));
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    }
+  } finally {
+    unmount();
+    bounds.mockRestore();
+  }
+});
+
 // Oracle: merge-base 52403426 starts the replacement scene in the foreground
 // without waiting for an observer entry. Manual startup is a PR-only path
 // into that same running state. Background suspension still gates allocation.
@@ -3338,17 +3410,59 @@ it.each(footprintContentTypes.flatMap((contentType) =>
   render(<CampusSpatialExplorer school="pu" locations={[library]}
     selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  const allowedMime = contentType === null || [
-    'application/json', 'text/plain', 'application/json; charset=UTF-8',
-    'text/plain; charset=UTF-8', 'application/vnd.example_campus+json',
-    ' APPLICATION/JSON ',
-  ].includes(contentType);
-  const valid = payload === 'valid' && allowedMime;
+  const valid = payload === 'valid';
   expect(await within(dialog).findByText(valid ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(read).toHaveBeenCalledTimes(allowedMime ? 1 : 0);
-  expect(cancel).toHaveBeenCalledTimes(allowedMime ? 0 : 1);
+  expect(read).toHaveBeenCalledOnce();
+  expect(cancel).not.toHaveBeenCalled();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(valid ? buildings : []);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+// 52403426 checks status and declared size before parsing, then checks the
+// actual streamed size and snapshot. Its 429 fallback is 60s; a plain 500
+// has no cooldown unless Retry-After or invalid framing supplies a reason.
+it.each([null, 'application/json', 'application/octet-stream', 'text/plain', 'text/html']
+  .flatMap((mime) => ['valid 200', 'invalid 200', '500', '500 with Retry-After', '429', '429 with Retry-After']
+    .flatMap((kind) => ['normal', 'empty', 'over cap declared', 'over cap actual']
+      .map((size) => ({ mime, kind, size }))),
+  ))('matches merge-base outlines and retry for $mime / $kind / $size', async ({ mime, kind, size }) => {
+  const { library, body, buildings } = sourcedLibraryFootprintFixture();
+  const status = kind.startsWith('500') ? 500 : kind.startsWith('429') ? 429 : 200;
+  const headers = new Headers();
+  if (mime !== null) headers.set('Content-Type', mime);
+  const explicitCooldown = kind.endsWith('with Retry-After');
+  if (explicitCooldown) headers.set('Retry-After', '600');
+  if (size === 'empty') headers.set('Content-Length', '0');
+  if (size === 'over cap declared') headers.set('Content-Length', '2000001');
+
+  let raw = kind === 'valid 200' ? body : '<html>Login</html>';
+  if (size === 'empty') raw = '';
+  if (size === 'over cap actual') raw += ' '.repeat(2_000_001);
+  const bytes = new TextEncoder().encode(raw);
+  const response = new Response(bytes, { status, headers });
+  const fetchMock = vi.fn().mockResolvedValue(response);
+  vi.stubGlobal('fetch', fetchMock);
+  const baselineSnapshot = status === 200 && size !== 'over cap declared' && bytes.byteLength <= 2_000_000
+    ? await response.clone().json().then(parseProvidenceFootprintSnapshot, () => null) : null;
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = within(await open());
+  if (baselineSnapshot) {
+    expect(await dialog.findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+  } else {
+    expect(await dialog.findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    const baselineCooldown = status !== 500 || explicitCooldown || size === 'over cap declared';
+    const retry = dialog.getByRole('button', { name: '重新讀取建築輪廓' });
+    expect(retry.hasAttribute('disabled')).toBe(baselineCooldown);
+    if (explicitCooldown) expect(dialog.getByText(/約 10 分鐘冷卻/)).toBeTruthy();
+    if (!baselineCooldown) {
+      fetchMock.mockResolvedValueOnce(new Response(body));
+      fireEvent.click(retry);
+      expect(await dialog.findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    }
+  }
 });
 
 // A 200 response that explicitly declares zero bytes can never be a complete
@@ -3378,11 +3492,8 @@ it.each([null, '', 'application/octet-stream', 'text/plain', 'text/html', 'appli
 });
 
 // A public Wi-Fi login page or broken proxy can provide headers but never
-// finish the body. Reject incompatible/empty framing before any stream read.
+// finish the body. Reject explicitly empty framing before any stream read.
 it.each([
-  { contentType: 'text/html', contentLength: null },
-  { contentType: 'application/json, text/html', contentLength: null },
-  { contentType: 'application/octet-stream', contentLength: null },
   { contentType: 'application/json', contentLength: '0' },
   { contentType: 'application/json', contentLength: '000' },
 ])('cancels an unread, stalled 200 response ($contentType / $contentLength)', async ({

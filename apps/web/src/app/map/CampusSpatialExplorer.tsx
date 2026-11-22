@@ -334,6 +334,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const [renderSuspended, setRenderSuspended] = useState(false);
   const [deferredCause, setDeferredCause] = useState<'background' | 'offscreen' | 'data-saver'>('background');
   const pageSuspended = useRef(false);
+  const lastHostVisibility = useRef<{ host: HTMLDivElement; visible: boolean } | null>(null);
+  const previousManualStart = useRef(manualStart);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
   const view = useMemo(() => ({
@@ -359,7 +361,15 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // browser requests reduced data use. Marker details and walking links
     // remain available; the visitor can explicitly opt into 3D at any time.
     const saveData = requestsReducedData();
-    let observerVisible = manuallyStarted;
+    const requestedManualStart = manualStart !== previousManualStart.current;
+    previousManualStart.current = manualStart;
+    // Retain the same host's last decision across scene rebuilds. A silent
+    // observer and an unavailable viewport provide no new visibility evidence.
+    let previousVisibility = lastHostVisibility.current?.host === host
+      ? lastHostVisibility.current.visible : null;
+    if (requestedManualStart || (previousVisibility === null && manuallyStarted)) previousVisibility = true;
+    let observerVisible: boolean | null = null;
+    let hasObserver = true;
     let visible = false;
     let scene: CampusSpatialScene | null = null;
     // Safari can fire pagehide before visibilitychange when entering bfcache.
@@ -448,10 +458,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     let scrollDialog: Element | null | undefined;
     try { scrollDialog = host.closest?.('dialog'); }
     catch { /* Dialog clipping is optional when this API is unavailable. */ }
-    const hostViewportVisibility = (): boolean | null => {
+    const hostViewportVisibility = (layoutOnly = false): boolean | null => {
       let visualBounds: { left: number; top: number; width: number; height: number } | null = null;
       try {
-        const viewport = window.visualViewport;
+        const viewport = layoutOnly ? null : window.visualViewport;
         if (viewport) {
           const { width, height, offsetLeft, offsetTop } = viewport;
           if (![width, height, offsetLeft, offsetTop, offsetLeft + width, offsetTop + height].every(Number.isFinite) ||
@@ -499,7 +509,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       }
     };
     const readVisibility = () => {
-      visible = !isBackgrounded() && (hostViewportVisibility() ?? observerVisible);
+      const hostVisibility = hostViewportVisibility() ?? observerVisible ?? previousVisibility ??
+        hostViewportVisibility(true) ?? (hasObserver ? null : true);
+      if (hostVisibility !== null) {
+        previousVisibility = hostVisibility;
+        lastHostVisibility.current = { host, visible: hostVisibility };
+      }
+      visible = !isBackgrounded() && hostVisibility === true;
     };
     const onPageHide = () => {
       pageSuspended.current = true;
@@ -575,9 +591,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           if (!latest) return;
           // Fall back to the original boolean when the optional rectangle
           // is unavailable. A valid zero-area intersection is an edge touch.
-          try { observerVisible = latest.isIntersecting === true; }
-          catch { return; }
-          if (observerVisible) {
+          let intersects: boolean;
+          try {
+            const intersecting = latest.isIntersecting;
+            if (typeof intersecting !== 'boolean') return;
+            intersects = intersecting;
+          } catch { return; }
+          if (intersects) {
             try {
               const rect = latest.intersectionRect;
               if (rect) {
@@ -587,13 +607,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
                     [x, y, left, top, right, bottom].every((value) => value === undefined || Number.isFinite(value)) &&
                     !(left !== undefined && right !== undefined && right < left) &&
                     !(top !== undefined && bottom !== undefined && bottom < top)) {
-                  observerVisible = width > 0 && height > 0 &&
+                  intersects = width > 0 && height > 0 &&
                     (left === undefined || right === undefined || right > left) &&
                     (top === undefined || bottom === undefined || bottom > top);
                 }
               }
             } catch { /* Legacy observer boolean still applies. */ }
           }
+          observerVisible = intersects;
           syncViewport();
         }, { threshold: VIEWPORT_THRESHOLDS });
         // An edge-touch (isIntersecting=true, zero area) and a sliver of
@@ -611,7 +632,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         intersection = null;
       }
     }
-    if (!intersection) observerVisible = true;
+    hasObserver = intersection !== null;
     document.addEventListener('visibilitychange', syncViewport);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
@@ -1164,21 +1185,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
         const invalidContentLength = contentLength !== null &&
           (!/^\d+$/.test(contentLength) ||
             !Number.isSafeInteger(Number(contentLength)) ||
-            Number(contentLength) === 0 ||
             Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
-        // A captive portal or intermediary may return a 200 HTML page or
-        // conflicting media declaration. Do not parse it as audited OSM data.
-        // Older proxies lacking Content-Type and text/plain replies remain
-        // supported, subject to the same JSON/source/geometry validation.
-        const contentType = response.headers?.get('content-type') ?? null;
-        const mime = contentType?.split(';', 1)[0].trim().toLowerCase();
-        const invalidContentType = contentType !== null &&
-          (contentType.includes(',') ||
-            !(mime === 'application/json' || mime === 'text/plain' ||
-              (typeof mime === 'string' &&
-                /^application\/[a-z0-9][a-z0-9!#$&^_.+-]*\+json$/.test(mime))));
+        const emptySuccess = response.ok && contentLength !== null && Number(contentLength) === 0;
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
-            contentRange !== null || invalidContentLength || invalidContentType) {
+            contentRange !== null || invalidContentLength || emptySuccess) {
           // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
           // can still stream a large body; release it without awaiting an
           // uncooperative proxy, rather than waste mobile bandwidth/memory.
@@ -1206,7 +1216,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
             status < 300 && status !== 200;
           const rateLimitedOrIncomplete = invalidSuccessStatus || status === 304 || status === 408 ||
             status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
-            contentRange !== null || invalidContentLength || invalidContentType;
+            contentRange !== null || invalidContentLength || emptySuccess;
           // A proxy can return an incomplete 206/Content-Range document or
           // a 408 without Retry-After. These responses cannot be trusted as
           // complete OSM geometry and should not trigger a manual retry loop.
@@ -1216,7 +1226,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
           const fallbackBackoff = invalidSuccessStatus || status === 304 ||
             status === 408 || status === 429 || status === 502 ||
             status === 503 || status === 504 || contentRange !== null ||
-            invalidContentLength || invalidContentType;
+            invalidContentLength || emptySuccess;
           const seconds = rateLimitedOrIncomplete
             ? (footprintCooldownSeconds(response) ?? (fallbackBackoff ? 60 : null))
             : null;
