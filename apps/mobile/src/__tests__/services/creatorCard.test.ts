@@ -57,3 +57,18 @@ test('a stale read or unsafe URL never reports success', async () => {
   await expect(saveCreatorCard('pu', 'alice', { ...card, linkUrl: 'javascript:alert(1)' })).rejects.toThrow();
   expect(setDoc).not.toHaveBeenCalled();
 });
+
+test('editing selected fields leaves concurrent server changes untouched', async () => {
+  const latest = { ...card, headline: '新的標題', bio: '其他裝置更新的簡介', linkUrl: 'https://example.net/' };
+  jest.mocked(setDoc).mockResolvedValue(undefined);
+  jest.mocked(getDocFromServer).mockResolvedValue(snap(latest) as never);
+
+  await expect(saveCreatorCard('pu', 'alice', {
+    headline: ' 新的標題 ', bio: card.bio, linkUrl: card.linkUrl,
+  }, ['headline'])).resolves.toEqual({
+    headline: latest.headline, bio: latest.bio, linkUrl: latest.linkUrl,
+  });
+  expect(setDoc).toHaveBeenCalledWith('schools/pu/creatorProfiles/alice', {
+    schoolId: 'pu', ownerUid: 'alice', headline: latest.headline, updatedAt: 'SERVER_TIME',
+  }, { merge: true });
+});

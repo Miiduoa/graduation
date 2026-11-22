@@ -12,6 +12,12 @@ const CREATOR_CARD_CONFIRM_TIMEOUT_MS = 15_000;
 const CREATOR_CARD_READ_TIMEOUT_MS = 15_000;
 const CREATOR_CARD_LINK_TIMEOUT_MS = 15_000;
 
+const CARD_FIELDS = ['headline', 'bio', 'linkUrl'] as const;
+
+function changedFields(draft: CreatorCard, base: CreatorCard) {
+  return CARD_FIELDS.filter((field) => draft[field] !== base[field]);
+}
+
 type CardState =
   | { status: 'loading' }
   | { status: 'error'; timedOut: boolean }
@@ -54,12 +60,17 @@ function ScopedCreatorCardPanel({
   const [state, setState] = useState<CardState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const profileReads = useRef({
-    pending: 0, latestWasEmpty: false, cardAttempt: -1, closed: false,
+    acceptedAttempt: -1, closed: false,
   });
   const [editing, setEditing] = useState(false);
+  const editingNow = useRef(false);
+  const setEditorOpen = (open: boolean) => {
+    editingNow.current = open;
+    setEditing(open);
+  };
+  const published = useRef<CreatorCard | null>(null);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const currentDraft = useRef(draft);
-  const preserveDraft = useRef(false);
   const replaceDraft = (value: CreatorCard) => {
     currentDraft.current = value;
     setDraft(value);
@@ -67,7 +78,7 @@ function ScopedCreatorCardPanel({
   const [saving, setSaving] = useState(false);
   // Keep the submitted draft and its normalized server fields until a read
   // resolves the uncertain write. The ref also guards stale button callbacks.
-  const pendingWrite = useRef<{ draft: CreatorCard; expected: CreatorCard; confirmationAttempt: number } | null>(null);
+  const pendingWrite = useRef<{ draft: CreatorCard; expected: CreatorCard; fields: readonly (keyof CreatorCard)[]; confirmationAttempt: number } | null>(null);
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const savingFlight = useRef(false);
   const [openingLink, setOpeningLink] = useState(false);
@@ -96,63 +107,56 @@ function ScopedCreatorCardPanel({
     return () => { mounted.current = false; };
   }, []);
 
+  const acceptCard = (value: CreatorCard | null, base = published.current ?? EMPTY_CREATOR_CARD) => {
+    if (editingNow.current) {
+      const next = { ...(value ?? EMPTY_CREATOR_CARD) };
+      for (const field of changedFields(currentDraft.current, base)) {
+        next[field] = currentDraft.current[field];
+      }
+      replaceDraft(next);
+    }
+    published.current = value;
+    acceptSavedPortfolioLink(value?.linkUrl ?? '');
+    setState({ status: 'ready', value });
+  };
+
   useEffect(() => {
     const reads = profileReads.current;
-    if (reads.closed || reads.cardAttempt >= 0) return;
+    if (reads.closed) return;
     let latestAttempt = true;
-    reads.pending++;
-    reads.latestWasEmpty = false;
-    // A server-only read can remain pending indefinitely on a bad connection.
-    // Give the student a retry instead of trapping the profile in loading.
-    const canApply = () => mounted.current && !reads.closed;
-    const canShowError = () => canApply() && latestAttempt && reads.cardAttempt < 0;
+    // A timed-out read can still supply a card until a newer result is accepted.
+    const canApply = () => mounted.current && !reads.closed && attempt > reads.acceptedAttempt;
+    const canShowError = () => canApply() && latestAttempt && reads.acceptedAttempt < 0;
     const timeout = setTimeout(() => {
       if (canShowError()) setState({ status: 'error', timedOut: true });
     }, CREATOR_CARD_READ_TIMEOUT_MS);
     void readCreatorCard(schoolId, ownerUid).then((value) => {
-      if (!canApply()) return;
-      if (value === null) {
-        if (latestAttempt) reads.latestWasEmpty = true;
-        return;
-      }
-      if (attempt <= reads.cardAttempt) return;
-      reads.cardAttempt = attempt;
-      setState({ status: 'ready', value });
+      if (!canApply() || (value === null && !latestAttempt)) return;
+      reads.acceptedAttempt = attempt;
+      acceptCard(value);
     }).catch(() => {
       if (canShowError()) setState({ status: 'error', timedOut: false });
-    }).finally(() => {
-      clearTimeout(timeout);
-      reads.pending--;
-      // Only an empty latest read can establish absence, once no outstanding
-      // read can still supply a published card.
-      if (canApply() && reads.pending === 0 && reads.latestWasEmpty && reads.cardAttempt < 0) {
-        setState({ status: 'ready', value: null });
-      }
-    });
+    }).finally(() => clearTimeout(timeout));
     return () => { latestAttempt = false; clearTimeout(timeout); };
   }, [schoolId, ownerUid, attempt]);
 
   const beginEdit = () => {
     if (!own || savingFlight.current || state.status !== 'ready') return;
-    if (!preserveDraft.current) {
-      replaceDraft(state.value ?? EMPTY_CREATOR_CARD);
-      setFeedback('');
-    }
-    setEditing(true);
+    replaceDraft(pendingWrite.current?.draft ?? published.current ?? EMPTY_CREATOR_CARD);
+    if (!pendingWrite.current) setFeedback('');
+    setEditorOpen(true);
   };
 
   const changeDraft = (field: keyof CreatorCard, value: string) => {
-    if (currentDraft.current[field] === value) return;
+    if (!editingNow.current || currentDraft.current[field] === value) return;
     replaceDraft({ ...currentDraft.current, [field]: value });
     if (!pendingWrite.current) setFeedback('');
   };
 
   const cancelEdit = () => {
     if (savingFlight.current) return;
-    setEditing(false);
-    if (!preserveDraft.current && state.status === 'ready') {
-      replaceDraft(state.value ?? EMPTY_CREATOR_CARD);
-    }
+    setEditorOpen(false);
+    replaceDraft(pendingWrite.current?.draft ?? published.current ?? EMPTY_CREATOR_CARD);
     if (!pendingWrite.current) setFeedback('');
   };
 
@@ -187,37 +191,34 @@ function ScopedCreatorCardPanel({
     }
 
     if (!isLatest()) return;
-    const { expected } = submitted;
-    const matches = latest && latest.headline === expected.headline &&
-      latest.bio === expected.bio && latest.linkUrl === expected.linkUrl;
+    const matches = latest && submitted.fields.every((field) => latest[field] === submitted.expected[field]);
 
     pendingWrite.current = null;
     savingFlight.current = false;
     setSaving(false);
     setNeedsConfirmation(false);
-    acceptSavedPortfolioLink(latest?.linkUrl ?? '');
-    setState({ status: 'ready', value: latest });
     if (matches) {
-      finishSave(submitted.draft);
+      finishSave(latest, submitted.draft);
     } else {
-      setFeedback('伺服器資料與上次送出的內容不同，草稿已保留。確認後可重新儲存。');
+      acceptCard(latest);
+      setFeedback(editingNow.current
+        ? '伺服器資料與上次送出的內容不同，草稿已保留。確認後可重新儲存。'
+        : '伺服器資料與上次送出的內容不同，已載入伺服器資料。');
     }
   };
 
-  const finishSave = (submittedDraft: CreatorCard) => {
-    // Only the submitted version was confirmed. Edits delivered during
-    // confirmation still belong to the draft that the editor must retain.
-    preserveDraft.current = currentDraft.current !== submittedDraft;
-    if (currentDraft.current === submittedDraft) {
-      setEditing(false);
-      setFeedback('社群簡介已儲存。');
-    } else {
-      setFeedback('上一筆已確認儲存，後續修改仍保留在草稿。');
-    }
+  const finishSave = (confirmed: CreatorCard, submittedDraft: CreatorCard) => {
+    // A confirmation establishes a new base for edits delivered after submission.
+    const hasLaterEdits = editingNow.current && changedFields(currentDraft.current, submittedDraft).length > 0;
+    if (!hasLaterEdits) setEditorOpen(false);
+    acceptCard(confirmed, submittedDraft);
+    setFeedback(hasLaterEdits
+      ? '上一筆已確認儲存，後續修改仍保留在草稿。'
+      : '社群簡介已儲存。');
   };
 
   const submit = async () => {
-    if (!mounted.current || !own || pendingWrite.current || savingFlight.current || state.status !== 'ready') return;
+    if (!mounted.current || !own || !editingNow.current || pendingWrite.current || savingFlight.current || state.status !== 'ready') return;
     const submittedDraft = currentDraft.current;
     let expected: CreatorCard;
     try {
@@ -227,13 +228,16 @@ function ScopedCreatorCardPanel({
       return;
     }
 
+    const base = published.current;
+    const fields = base
+      ? changedFields(submittedDraft, base).filter((field) => expected[field] !== base[field])
+      : CARD_FIELDS;
     profileReads.current.closed = true;
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
-    const submitted = { draft: submittedDraft, expected, confirmationAttempt: 0 };
+    const submitted = { draft: submittedDraft, expected, fields, confirmationAttempt: 0 };
     const markUnconfirmed = () => {
-      preserveDraft.current = true;
       pendingWrite.current = submitted;
       setNeedsConfirmation(true);
       setFeedback('無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
@@ -248,7 +252,7 @@ function ScopedCreatorCardPanel({
       setSaving(false);
     }, CREATOR_CARD_SAVE_TIMEOUT_MS);
     try {
-      const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft);
+      const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft, fields);
       if (!mounted.current || (timedOut && pendingWrite.current !== submitted)) return;
       if (timedOut) {
         pendingWrite.current = null;
@@ -256,9 +260,7 @@ function ScopedCreatorCardPanel({
         setSaving(false);
         setNeedsConfirmation(false);
       }
-      acceptSavedPortfolioLink(confirmed.linkUrl);
-      setState({ status: 'ready', value: confirmed });
-      finishSave(submittedDraft);
+      finishSave(confirmed, submittedDraft);
     } catch {
       if (mounted.current && !timedOut) markUnconfirmed();
     } finally {
