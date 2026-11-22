@@ -68,6 +68,57 @@ const documentFixture = (): PersonalImportDocument => ({
   ],
 });
 
+
+describe('reject unreadable model citations before saving a lesson', () => {
+  it.each([
+    ['zero-width only', '\u200b'],
+    ['braille blank', '\u2800'],
+    ['isolated combining mark', '\u0301'],
+    ['punctuation only', '，。'],
+    ['annotation marker', '\ufff9'],
+    ['isolated high surrogate', '\ud83d'],
+  ])('rejects a byte-matching but unreadable %s quotation', (_name, quote) => {
+    const original = { ...passage, text: '前' + quote + '後' };
+    expect(original.text.includes(quote)).toBe(true);
+    expect(() => parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original))
+      .toThrow('AI 引句無可讀的教材內容');
+  });
+
+  it('rejects a byte-identical direction override containing visible letters', () => {
+    const quote = '主鍵\u202e123';
+    const original = { ...passage, text: '前' + quote + '後' };
+    expect(() => parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original))
+      .toThrow('方向控制字元');
+  });
+
+  it('rejects an unreadable step citation even when the main quote is valid', () => {
+    const original = { ...passage, text: passage.text + '\u200b' };
+    const reply = steppedExplanation();
+    reply.steps![1].sourceQuote = '\u200b';
+    expect(() => parseTutorExplanation(JSON.stringify(reply), original))
+      .toThrow('AI 步驟引句無可讀的教材內容');
+  });
+
+  it.each(['x²+y²', '👩‍💻', '#️⃣', 'العربية', 'שלום', 'e\u0301', '主鍵\u200b唯一'])(
+    'preserves valid visible source quotes byte-for-byte (%s)', (quote) => {
+      const original = { ...passage, text: '前' + quote + '後' };
+      const reply = parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original);
+      expect(reply.sourceQuote).toBe(quote);
+      expect(original.text).toBe('前' + quote + '後');
+    },
+  );
+
+  it('revalidates older model replies before using them as follow-up context', () => {
+    const original = { ...passage, text: passage.text + '\u200b' };
+    const previous = { ...turn(), response: { ...explanation(), sourceQuote: '\u200b' } };
+    const envelope = { passageId: original.id, sourceText: original.text, mode: 'understand' as const, turns: [previous] };
+    expect(() => buildStudyTutorPrompt(original, 'understand', '繼續', envelope))
+      .toThrow('先前講解無法對照目前的原文');
+    expect(() => prepareStudyTutorHistory(original, 'understand', [previous]))
+      .toThrow('先前講解無法對照目前的原文');
+  });
+});
+
 describe('study source provenance', () => {
   it('keeps pasted source characters unchanged, including leading space and line endings', () => {
     const text = '  第一段\r\n第二段。\n';

@@ -51,6 +51,29 @@ function nonempty(value: unknown, max: number): value is string {
   return typeof value === 'string' && !!value.trim() && value.length <= max;
 }
 
+/**
+ * Even an exact substring of a lecture can be an unreadable or visually
+ * reordered model citation. Reject it before recording the generated lesson;
+ * the original licensed material is never edited.
+ */
+function hasReadableTutorCitation(quote: string): boolean {
+  if (/\p{Bidi_Control}/u.test(quote)) return false;
+  const hasContent = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\p{P}\u2800\ufff9-\ufffb]/u.test(quote) ||
+    /[0-9#*]\ufe0f?\u20e3/u.test(quote);
+  if (!hasContent) return false;
+  for (let index = 0; index < quote.length; index += 1) {
+    const unit = quote.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = quote.charCodeAt(index + 1);
+      if (next < 0xdc00 || next > 0xdfff) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function validateSourceText(text: string) {
   if (typeof text !== 'string' || !text.trim())
     throw new Error('還沒有可讀取的文字，請貼上教材內容或選擇 PDF 講義。');
@@ -339,6 +362,8 @@ function readTutorSteps(value: unknown, passage: StudyPassage): StudyTutorStep[]
     const parsed = data as StudyTutorStep;
     if (!passage.text.includes(parsed.sourceQuote))
       throw new Error('AI 步驟引用的句子不在這段原文中，這次講解未採用。請重試。');
+    if (!hasReadableTutorCitation(parsed.sourceQuote))
+      throw new Error('AI 步驟引句無可讀的教材內容或含方向控制字元，這次講解未採用。請重試。');
     if (hasFormula && !parsed.sourceQuote.includes(parsed.formula!))
       throw new Error('AI 步驟公式不是該步引句的原文，這次講解未採用。請重試。');
     return {
@@ -373,6 +398,8 @@ export function parseTutorExplanation(raw: string, passage: StudyPassage): Tutor
   const explanation = data as TutorExplanation;
   if (!passage.text.includes(explanation.sourceQuote))
     throw new Error('AI 引用的句子不在這段原文中，這次講解未採用。請重試。');
+  if (!hasReadableTutorCitation(explanation.sourceQuote))
+    throw new Error('AI 引句無可讀的教材內容或含方向控制字元，這次講解未採用。請重試。');
   return {
     title: explanation.title.trim(),
     explanation: explanation.explanation.trim(),
