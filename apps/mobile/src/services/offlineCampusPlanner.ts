@@ -156,7 +156,8 @@ export function buildOfflineCampusPlan(input: {
       steps.push({
         id: 'assignment-' + index,
         title: cleaned(assignment.title),
-        ...(expectedSource ? { fullAssignmentTitle: assignment.title, expectedSource } : {}),
+        fullAssignmentTitle: assignment.title,
+        ...(expectedSource ? { expectedSource } : {}),
         detail: (assignment.groupName ? cleaned(assignment.groupName) + '｜' : '') +
           due + '。請到課程頁確認繳交方式與最新狀態。',
         priority, evidence: 'authorized-assignments', route: '/classroom',

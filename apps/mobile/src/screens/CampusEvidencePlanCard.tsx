@@ -169,7 +169,8 @@ export function CampusEvidencePlanCard({
                 onPress={() => onOpenRoute(step.route)}
               />
             ) : null}
-            {!historical && reminderContext && step.kind !== 'quiz' && step.expectedSource ? (
+            {!historical && reminderContext && step.kind !== 'quiz' && (step.expectedSource || !step.nuniSource) &&
+              step.evidence === 'authorized-assignments' && step.dueAt ? (
               <CampusAssignmentReminderAction
                 key={JSON.stringify([step.id, step.expectedSource, step.fullAssignmentTitle, step.dueAt])}
                 step={step}
@@ -178,6 +179,7 @@ export function CampusEvidencePlanCard({
                 schoolId={reminderContext.schoolId}
                 isCurrent={reminderContext.isCurrent}
                 disabled={disabled}
+                existingOnly={!step.expectedSource}
               />
             ) : null}
             {progress ? (

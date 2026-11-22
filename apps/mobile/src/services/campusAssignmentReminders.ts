@@ -113,6 +113,22 @@ function knownReminderAssignment(input: {
   return matchCampusAssignment(snapshot, input.step);
 }
 
+function legacyReminderAssignment(input: {
+  step: ReminderAssignment; snapshot?: CampusSenseSnapshot | null;
+}, assignment: ReturnType<typeof matchCampusAssignment>) {
+  const { step, snapshot } = input;
+  if (step.expectedSource || !step.dueAt || !step.title ||
+      step.evidence !== 'authorized-assignments' || step.route !== '/classroom') return null;
+  if (!snapshot) return step;
+  if (!assignment || assignment.source != null) return null;
+  const title = normalizeTitle(assignment.title);
+  // Old OS identifiers used the display title, so multiple rows may share a key.
+  if (snapshot.assignments.items.some((row) => row !== assignment &&
+      row.groupName === assignment.groupName && row.dueAt === assignment.dueAt &&
+      normalizeTitle(row.title) === title)) return null;
+  return { ...step, title, groupName: assignment.groupName, dueAt: assignment.dueAt };
+}
+
 function supportsLocalNotification() {
   return Platform.OS === 'ios' || Platform.OS === 'android';
 }
@@ -300,18 +316,18 @@ export async function getCampusAssignmentReminderStatus(input: {
   }
   const epoch = reminderEpoch;
   checkAccount(input.scope, input.isCurrent, epoch);
-  if ((input.snapshot && !assignment) || input.step.expectedSource || !input.step.dueAt || !input.step.title ||
-      input.step.evidence !== 'authorized-assignments' || input.step.route !== '/classroom') {
-    return [];
-  }
+  const legacy = legacyReminderAssignment(input, assignment);
+  if (!legacy) return [];
   const keys = await Promise.all(([60, 1440] as const).map((lead) =>
-    reminderKey(input.scope, input.step, lead)));
+    reminderKey(input.scope, legacy, lead)));
   checkAccount(input.scope, input.isCurrent, epoch);
   const inventory = await scheduledInventory();
+  const linked = await linkedReminderIdentifiers();
   checkAccount(input.scope, input.isCurrent, epoch);
   const ids = new Set(inventory.map((item) => item.identifier));
   // Any legacy receipt with no corresponding OS alarm is obsolete.
-  return ([60, 1440] as const).filter((_, i) => ids.has(keys[i].identifier));
+  return ([60, 1440] as const).filter((_, i) =>
+    ids.has(keys[i].identifier) && !linked.has(keys[i].identifier));
 }
 
 /**
@@ -376,19 +392,19 @@ export async function cancelCampusAssignmentReminder(input: {
   }
   const epoch = reminderEpoch;
   checkAccount(input.scope, input.isCurrent, epoch);
-  if ((input.snapshot && !assignment) || input.step.expectedSource ||
-      input.step.evidence !== 'authorized-assignments' || !input.step.dueAt) {
-    throw new CampusReminderError('invalid-source');
-  }
-  const lock = busyKey(input);
+  const legacy = legacyReminderAssignment(input, assignment);
+  if (!legacy) throw new CampusReminderError('invalid-source');
+  const lock = busyKey({ ...input, step: legacy });
   if (pending.has(lock)) throw new CampusReminderError('busy');
   pending.add(lock);
   try {
-    const key = await reminderKey(input.scope, input.step, input.leadMinutes);
+    const key = await reminderKey(input.scope, legacy, input.leadMinutes);
     checkAccount(input.scope, input.isCurrent, epoch);
     const record = await readRecord(key.storageKey);
     const inventory = await scheduledInventory();
+    const linked = await linkedReminderIdentifiers();
     checkAccount(input.scope, input.isCurrent, epoch);
+    if (linked.has(key.identifier)) throw new CampusReminderError('invalid-source');
     if (record && record.identifier !== key.identifier) throw new CampusReminderError('native-failed');
     const exists = inventory.some((row) => row.identifier === key.identifier);
     if (exists) {

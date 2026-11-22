@@ -509,20 +509,93 @@ test('已繳暫停後可從畫面退訂兩種偏好，撤回、延期與重開�
 });
 
 
-test('舊版提醒升級後可直接從畫面取消，個人行事曆不受影響', async () => {
-  const { scheduleCampusAssignmentReminder } = require('../services/campusAssignmentReminders');
+test.each([
+  { withSource: true, title: step.title },
+  { withSource: false, title: step.title },
+  { withSource: false, title: '長'.repeat(129) + ' 期末報告' },
+])('計畫卡可逐筆取消舊提醒（有來源=$withSource，標題=$title）', async ({ withSource, title }) => {
   const previous = mockSnapshot();
+  previous.assignments.items[0].title = title;
   delete previous.assignments.items[0].source;
-  await scheduleCampusAssignmentReminder({ scope, step, snapshot: previous, leadMinutes: 60, isCurrent: current });
+  await scheduleCampusAssignmentReminder({
+    scope, step: { ...step, title }, snapshot: previous, leadMinutes: 60, isCurrent: current,
+  });
   mockAlarms.set('calendar', { identifier: 'calendar', content: {}, trigger: { date: new Date() } });
-  const view = render(<Reminder />);
+  const snapshot = withSource ? mockSnapshot() : previous;
+  const { card, view } = planCard(snapshot);
+  if (!withSource) {
+    await act(async () => view.rerender(card({ ...snapshot, checkedAt: new Date(0).toISOString() })));
+    expect(view.queryByText('查看這份作業')).toBeNull();
+  }
   expect(await view.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
   fireEvent.press(view.getByText('取消這項本機提醒'));
   await view.findByText('已退訂並清除提醒偏好，撤回或延期後也不會自動恢復。');
+  if (!withSource) {
+    expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
+    const refreshed = mockSnapshot();
+    refreshed.assignments.items[0].title = title;
+    await act(async () => view.rerender(card(refreshed)));
+    expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
+  }
   expect([...mockAlarms.keys()]).toEqual(['calendar']);
   await act(async () => reconcileSubmittedAssignmentReminders(scope, current));
   expect([...mockAlarms.keys()]).toEqual(['calendar']);
   view.unmount();
+});
+
+test.each([
+  ['截止不同', { dueAt: new Date(Date.parse(dueAt) + 86_400_000).toISOString() }, 'replace'],
+  ['課程不同', { groupName: '其他課程' }, 'replace'],
+  ['完整標題重複', {}, 'duplicate'],
+  ['來源格式無法解析', { source: { ...source, assignmentId: '' } }, 'replace'],
+] as const)('舊提醒遇到%s時仍可從舊版管理處理', async (_label, changes, mode) => {
+  const snapshot = mockSnapshot();
+  const row = snapshot.assignments.items[0];
+  delete row.source;
+  const { cancelCampusAssignmentReminder, getCampusAssignmentReminderStatus } =
+    require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+  const input = { scope, step, snapshot, leadMinutes: 60 as const, isCurrent: current };
+  await scheduleCampusAssignmentReminder(input);
+  snapshot.assignments.items = mode === 'duplicate' ? [row, { ...row }] : [{ ...row, ...changes }];
+  snapshot.assignments.count = snapshot.assignments.items.length;
+  const { view } = planCard(snapshot);
+  await expect(getCampusAssignmentReminderStatus(input)).resolves.toEqual([]);
+  await expect(cancelCampusAssignmentReminder(input)).rejects.toThrow('invalid-source');
+  expect(view.queryByText('取消這項本機提醒')).toBeNull();
+  expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
+  expect(mockAlarms.size).toBe(1);
+  const manager = render(<LegacyAssignmentReminders uid="alice" schoolId="pu" snapshot={snapshot} isCurrent={current} />);
+  fireEvent.press(await manager.findByText('取消所有未辨識的舊版作業提醒'));
+  await waitFor(() => expect(mockAlarms.size).toBe(0));
+});
+
+test('同名但截止不同時，步驟卡只顯示截止相符的舊提醒', async () => {
+  const snapshot = mockSnapshot();
+  const row = snapshot.assignments.items[0];
+  delete row.source;
+  await scheduleCampusAssignmentReminder({ scope, step, snapshot, leadMinutes: 60, isCurrent: current });
+  snapshot.assignments.items.push({
+    ...row, dueAt: new Date(Date.parse(dueAt) + 86_400_000).toISOString(),
+  });
+  snapshot.assignments.count = 2;
+  const { view } = planCard(snapshot);
+  await waitFor(() => expect(view.getAllByText('取消這項本機提醒')).toHaveLength(1));
+  fireEvent.press(view.getByText('取消這項本機提醒'));
+  await waitFor(() => expect(mockAlarms.size).toBe(0));
+});
+
+test('來源消失後，無來源摘要不能取消已綁定來源 ID 的舊提醒', async () => {
+  const snapshot = mockSnapshot();
+  delete snapshot.assignments.items[0].source;
+  const input = { scope, step, snapshot, leadMinutes: 60 as const, isCurrent: current };
+  await scheduleCampusAssignmentReminder(input);
+  const { adoptCampusReminderSnapshot, cancelCampusAssignmentReminder, getCampusAssignmentReminderStatus } =
+    require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+  await adoptCampusReminderSnapshot({ ...input, snapshot: mockSnapshot() });
+  await expect(getCampusAssignmentReminderStatus(input)).resolves.toEqual([]);
+  await expect(cancelCampusAssignmentReminder(input)).rejects.toThrow('invalid-source');
+  expect(mockAlarms.size).toBe(1);
+  await expect(getCampusAssignmentReminderStatus({ ...input, snapshot: mockSnapshot() })).resolves.toEqual([60]);
 });
 
 test('改名或改期而無法還原的舊提醒有明確管理入口，清理前阻止重複新增', async () => {

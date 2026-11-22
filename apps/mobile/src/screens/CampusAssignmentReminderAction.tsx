@@ -46,6 +46,7 @@ export function CampusAssignmentReminderAction({
   userId,
   schoolId,
   disabled,
+  existingOnly = false,
   reviewOnOpen = false,
   isCurrent,
 }: {
@@ -54,6 +55,7 @@ export function CampusAssignmentReminderAction({
   userId: string;
   schoolId: string;
   disabled: boolean;
+  existingOnly?: boolean;
   reviewOnOpen?: boolean;
   isCurrent: () => boolean;
 }) {
@@ -73,9 +75,10 @@ export function CampusAssignmentReminderAction({
   const match = snapshot?.userId === userId && snapshot.schoolId === schoolId
     ? matchCampusAssignment(snapshot, step) : null;
   const hasSource = Boolean(userId && schoolId && parseCampusAssignmentSource(match?.source));
+  const canCheck = Boolean(userId && schoolId && match && step.route === '/classroom' &&
+    step.evidence === 'authorized-assignments' && Number.isFinite(deadline));
   const canUse = Boolean(
-    verified && hasSource && step.evidence === 'authorized-assignments' &&
-    Number.isFinite(deadline) && deadline > Date.now() + 61 * 60_000,
+    canCheck && !existingOnly && verified && hasSource && deadline > Date.now() + 61 * 60_000,
   );
   const oneDayAvailable = Number.isFinite(deadline) && deadline > Date.now() + (1441 * 60_000);
   const leadChoice = lead === 1440 && !oneDayAvailable ? 60 : lead;
@@ -84,15 +87,13 @@ export function CampusAssignmentReminderAction({
   // the card remounts, preventing a second reminder after navigating away.
   useEffect(() => {
     let active = true;
-    if (!userId || !schoolId || !step.dueAt ||
-        step.evidence !== 'authorized-assignments' || !hasSource || !snapshot) {
-      setConfirmedLead(null);
-      setStatusError('');
+    setConfirmedLead(null);
+    setStatusError('');
+    if (!canCheck) {
       setStatusLoading(false);
       return () => { active = false; };
     }
     setStatusLoading(true);
-    setStatusError('');
     const { getCampusAssignmentReminderStatus } =
       require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
     void Promise.all([
@@ -111,7 +112,8 @@ export function CampusAssignmentReminderAction({
         if (active && isCurrent()) setStatusLoading(false);
       });
     return () => { active = false; };
-  }, [userId, schoolId, step.title, step.fullAssignmentTitle, step.groupName, step.dueAt, hasSource, snapshot, statusRefresh]);
+  }, [userId, schoolId, step.title, step.fullAssignmentTitle, step.groupName, step.dueAt,
+    step.expectedSource?.groupId, step.expectedSource?.assignmentId, canCheck, snapshot, statusRefresh]);
 
   const schedule = async () => {
     if (lock.current || statusLoading || statusError || disabled || !canUse ||
@@ -149,7 +151,7 @@ export function CampusAssignmentReminderAction({
   };
 
   const cancel = async () => {
-    if (lock.current || disabled || !hasSource || statusLoading || confirmedLead === null || !isCurrent()) return;
+    if (lock.current || disabled || !canCheck || statusLoading || confirmedLead === null || !isCurrent()) return;
     lock.current = true;
     setSaving(true);
     setMessage('');
@@ -171,9 +173,8 @@ export function CampusAssignmentReminderAction({
     }
   };
 
-  if (!hasSource || step.evidence !== 'authorized-assignments' || !step.dueAt ||
-      !Number.isFinite(deadline)) return null;
-  if (!canUse && confirmedLead === null) return null;
+  if (!canCheck || !step.dueAt) return null;
+  if (!canUse && confirmedLead === null && !statusError && !message) return null;
 
   return (
     <View style={{
@@ -207,7 +208,7 @@ export function CampusAssignmentReminderAction({
             onPress={() => void cancel()}
           />
         </>
-      ) : !expanded ? (
+      ) : !canUse ? null : !expanded ? (
         <AIButton
           label="設定手機本機截止提醒"
           size="sm"
