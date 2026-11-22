@@ -680,6 +680,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   }, [host, model, onSelect, onCameraChange, footprints, manualStart]);
 
   const startManually = () => {
+    // A recovery button may be visible while the canvas is below the modal
+    // scrollport. Focus alone does not scroll in some mobile WebViews.
+    // Bring the host into view first; viewport guards still decide whether
+    // WebGL is allowed to allocate a context.
+    try { host?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'auto' }); }
+    catch { /* Legacy WebViews may not implement scrolling. */ }
     // Keep focus inside the map when its start control disappears.
     try { host?.focus(); } catch { /* Focus is advisory. */ }
     onManualStart();
