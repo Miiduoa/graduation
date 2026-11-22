@@ -1157,13 +1157,26 @@ it('reads the exact source numeric spelling, rather than inferring a percentage'
     .toEqual(['3.00；本欄最大值 3.00', '2.50；本欄最大值 3.00']);
 });
 
-it.each(['風險等級百分比', '風險等級（%）'])('charts %s against a fixed 100% scale', (header) => {
+it.each([
+  ['風險等級百分比', true], ['風險等級（%）', true],
+  ['排名前十佔比', true], ['班級名次前十名百分比', true],
+  ['排名前１０名比例', false], ['排名前十（%）', true], ['Top 10 Rank Share (%)', true],
+] as const)('charts %s against a fixed 100%% scale (merge base charted: %s)', (header) => {
   const material = [`| 風險 | ${header} |`, '| --- | --- |', '| 低 | 25% |', '| 高 | 75% |'].join('\n');
   const { container } = render(<StudySourceTables text={material} />);
   expect(screen.getByText(`展開第 2 欄「${header}」的原文百分比（100% 滿格）`)).toBeTruthy();
   expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
     .toEqual([[25, 100], [75, 100]]);
 });
+
+it.each(['全校排名（%）', '班級名次 %', 'Rank Position (%)', 'Position in Class (%)'])(
+  'keeps %s as a table because the merge-base percentage meter misrepresents an ordinal', (header) => {
+    const material = [`| 分組 | ${header} |`, '| --- | --- |', '| 甲 | 25% |', '| 乙 | 75% |'].join('\n');
+    const { container } = render(<StudySourceTables text={material} />);
+    expect(screen.getByRole('columnheader', { name: header })).toBeTruthy();
+    expect(container.querySelector('meter')).toBeNull();
+  },
+);
 
 it.each([
   '完成狀況（%）', '各題號完成狀況（%）', '各題號的完成狀況及正答率（%）', '各題號正答率', '各題次正確率（％）',

@@ -343,7 +343,7 @@ function readTutorSteps(value: unknown, passage: StudyPassage, policy: TutorCita
     if (!passage.text.includes(parsed.sourceQuote))
       throw new Error('AI 步驟引用的句子不在這段原文中，這次講解未採用。請重試。');
     if (policy === 'generated' && !locateStudyEvidence(passage.text, parsed.sourceQuote))
-      throw new Error('AI 步驟引句無可讀的教材內容、含方向控制字元或未對齊完整原文字素，這次講解未採用。請重試。');
+      throw new Error('AI 步驟引句無可讀的教材內容或未對齊完整原文字素，這次講解未採用。請重試。');
     if (hasFormula && !parsed.sourceQuote.includes(parsed.formula!))
       throw new Error('AI 步驟公式不是該步引句的原文，這次講解未採用。請重試。');
     return {
@@ -388,7 +388,7 @@ function readTutorExplanation(raw: string, passage: StudyPassage, policy: TutorC
   if (!passage.text.includes(explanation.sourceQuote))
     throw new Error('AI 引用的句子不在這段原文中，這次講解未採用。請重試。');
   if (policy === 'generated' && !locateStudyEvidence(passage.text, explanation.sourceQuote))
-    throw new Error('AI 引句無可讀的教材內容、含方向控制字元或未對齊完整原文字素，這次講解未採用。請重試。');
+    throw new Error('AI 引句無可讀的教材內容或未對齊完整原文字素，這次講解未採用。請重試。');
   return {
     title: explanation.title.trim(),
     explanation: explanation.explanation.trim(),

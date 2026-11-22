@@ -19,14 +19,15 @@ export function hasVisibleStudyAttempt(attempt: string): boolean {
   return hasVisibleStudyContent(attempt);
 }
 
-// Older backups can contain an expanded answer with a trim()-accepted attempt.
-export function hasRevealedStudyAnswer(response: { attempt: string; answerVisible: boolean }): boolean {
-  return response.answerVisible && !!response.attempt.trim();
+type StudyAnswerState = Pick<StudyLesson, 'attempt' | 'answerVisible' | 'answerReviewAllowed'>;
+
+export function canReviewStudyAnswer({ attempt, answerReviewAllowed }: StudyAnswerState): boolean {
+  // Legacy backups used trim(), which accepts some invisible attempts.
+  return !!attempt.trim() && (answerReviewAllowed ?? true);
 }
 
-export function canReviewStudyAnswer(lesson: StudyLesson): boolean {
-  // Backups without an explicit gate used trim() to enable the reference answer.
-  return lesson.answerReviewAllowed ?? (lesson.answerVisible || !!lesson.attempt.trim());
+export function hasRevealedStudyAnswer(response: StudyAnswerState): boolean {
+  return response.answerVisible && canReviewStudyAnswer(response);
 }
 
 export type StudyLesson = StudyTutorTurn & {

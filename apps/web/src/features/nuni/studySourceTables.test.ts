@@ -1373,6 +1373,35 @@ describe('zero-opacity CSS exponent notation cannot expose unpublished source ta
 });
 
 describe('resolved and unresolved inline visibility declarations', () => {
+  // The merge-base scanner only resolves literal values. The new scanner
+  // additionally resolves valid math/variables and applies unset for a missing variable.
+  it.each([
+    ['opacity:0;opacity:round(foo)', 0, 0],
+    ['opacity:0!important;opacity:round(foo)!important', 0, 0],
+    ['opacity:0;opacity:calc(1em / 2em)', 1, 0],
+    ['opacity:0;opacity:calc(1px)', 1, 0],
+    ['opacity:0;opacity:unknown(1)', 0, 0],
+    ['opacity:0;opacity:calc(1', 1, 0],
+    ['opacity:0;opacity:var(--missing, round(foo))', 1, 0],
+    ['opacity:0;opacity:unknown(var(--missing))', 0, 0],
+    ['opacity:0;opacity:calc(var(--missing)', 1, 0],
+    ['opacity:0;opacity:calc(var(--missing) + 10%)', 1, 1],
+    ['opacity:0;--alpha:foo;opacity:var(--alpha)', 1, 0],
+    ['opacity:0;opacity:calc(1)', 1, 1],
+    ['opacity:1;opacity:calc(0)', 1, 0],
+    ['display:none;display:var(--missing invalid)', 1, 0],
+    ['display:none;display:var(--missing, not-a-mode)', 1, 0],
+    ['display:none;display:env(unknown-mode)', 1, 0],
+    ['display:none;display:var(--missing)', 1, 1],
+    ['visibility:hidden;visibility:var(--missing, invalid)', 1, 0],
+    ['visibility:hidden;visibility:unknown(visible)', 1, 0],
+    ['content-visibility:hidden;content-visibility:attr(data-state)', 1, 0],
+    ['content-visibility:hidden;content-visibility:not-a-mode', 0, 0],
+  ] as const)('compares table counts for %s (merge base %i, current %i)', (style, _baseCount, count) => {
+    const source = [`<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(count ? realTable(2) : []);
+  });
+
   it.each([
     '<p style="opacity:calc(0)">',
     '<div style="opacity:0;opacity:calc(1)%">',

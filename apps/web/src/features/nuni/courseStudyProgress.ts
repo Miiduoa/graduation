@@ -8,7 +8,7 @@ import {
   type StudySource,
   type TutorExplanation,
 } from '@/lib/studyTutor';
-import { canReviewStudyAnswer, STUDY_SESSION_LIMITS, type StudyLesson, type StudyModeMemory, type StudyPassageMemory } from './courseStudySession';
+import { canReviewStudyAnswer, hasRevealedStudyAnswer, STUDY_SESSION_LIMITS, type StudyLesson, type StudyModeMemory, type StudyPassageMemory } from './courseStudySession';
 
 const FORMAT = 'campus-one-study-progress';
 const VERSION = 2;
@@ -115,6 +115,8 @@ function readMode(value: unknown, passage: StudyPassage, version: ProgressVersio
     const answerVisible = boolean(lesson.answerVisible);
     const answerReviewAllowed = Object.hasOwn(lesson, 'answerReviewAllowed')
       ? boolean(lesson.answerReviewAllowed) : undefined;
+    if (answerVisible && !hasRevealedStudyAnswer({ attempt, answerVisible, answerReviewAllowed }))
+      invalid('進度檔的試答與參考回答狀態不一致，無法還原。');
     let response: TutorExplanation;
     try {
       // A matching quote confirms a relationship to this copy, not its authenticity or teaching quality.
@@ -228,8 +230,8 @@ export function serializeCourseStudyProgress(data: CourseStudyProgressData): str
   const passageLengths = canonical.source.sections.map((section) => splitStudySection(section).map((part) => part.text.length));
   // The v2 reader requires exact lesson keys and a nonblank attempt for reveals.
   const needsExtendedVersion = Object.values(canonical.passages).some(({ modes }) =>
-    Object.values(modes).some(({ lessons }) => lessons.some(({ answerReviewAllowed, answerVisible, attempt }) =>
-      answerReviewAllowed !== undefined || (answerVisible && !attempt.trim()))));
+    Object.values(modes).some(({ lessons }) => lessons.some(({ answerReviewAllowed }) =>
+      answerReviewAllowed !== undefined)));
   const version = needsExtendedVersion ? EXTENDED_VERSION : VERSION;
   const serialized = JSON.stringify({ format: FORMAT, version, ...canonical, passageLengths });
   checkBytes(serialized);

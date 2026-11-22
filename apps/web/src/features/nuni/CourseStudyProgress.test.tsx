@@ -287,7 +287,9 @@ it.each([1, 2])('opens a reference answer from an initially collapsed v%i backup
   expect(screen.getByText('第一輪的參考回答。')).toBeTruthy();
 });
 
-it.each(['\u200b', '\ufff9', '\u2060\ufe0f', '\ufeff'])('restores and reopens a legacy reveal after a collapsed backup round trip (%#)', async (attempt) => {
+it.each([
+  [1, '\u200b'], [2, '\u200b'], [1, '\ufff9'], [1, '\u2060\ufe0f'],
+] as const)('restores and reopens a legacy v%i reveal after a collapsed backup round trip (%#)', async (version, attempt) => {
   const create = vi.fn().mockReturnValue('blob:study-progress');
   const OriginalURL = URL;
   vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; static revokeObjectURL = vi.fn(); });
@@ -298,7 +300,7 @@ it.each(['\u200b', '\ufff9', '\u2060\ufe0f', '\ufeff'])('restores and reopens a 
   mode.selectedLessonId = 1;
   mode.lessons[0].attempt = attempt;
   const legacy = JSON.parse(serializeCourseStudyProgress(data));
-  legacy.version = 1;
+  legacy.version = version;
   legacy.passages['1:1'].modes.exam.lessons[0].attempt = attempt;
   selectFile(progressFile(JSON.stringify(legacy)));
   await screen.findByRole('region', { name: '閱讀進度預覽' });
@@ -327,9 +329,12 @@ it.each(['\u200b', '\ufff9', '\u2060\ufe0f', '\ufeff'])('restores and reopens a 
   fireEvent.click(screen.getByRole('button', { name: '對照參考回答' }));
   expect(screen.getByText('第一輪的參考回答。')).toBeTruthy();
 
+  fireEvent.click(screen.getByRole('button', { name: '下載本次筆記' }));
+  expect(await readBlob(create.mock.calls[1][0] as Blob)).toContain('第一輪的參考回答。');
+
   fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: '\u200d\u2800' } });
   fireEvent.click(screen.getByRole('button', { name: '儲存閱讀進度' }));
-  const draftBackup = await readBlob(create.mock.calls[1][0] as Blob);
+  const draftBackup = await readBlob(create.mock.calls[2][0] as Blob);
   selectFile(progressFile(draftBackup));
   await screen.findByRole('region', { name: '閱讀進度預覽' });
   fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { splitStudySection, studySourceFromDocument, studySourceFromText, type TutorExplanation } from '@/lib/studyTutor';
-import { appendStudyLesson, canReviewStudyAnswer, emptyStudyPassage, studyLessonHistory, type StudyModeMemory } from './courseStudySession';
+import { appendStudyLesson, canReviewStudyAnswer, emptyStudyPassage, hasRevealedStudyAnswer, studyLessonHistory, type StudyModeMemory } from './courseStudySession';
 import {
   COURSE_STUDY_PROGRESS_LIMITS,
   courseStudyProgressFilename,
@@ -339,8 +339,7 @@ describe('lesson and draft validation', () => {
     ['作\u200b答 e\u0301\u200f ', true, false, true, 2],
     ['\u200b', true, false, true, 2],
     ['\u2060', undefined, true, true, 2],
-    ['', true, false, true, 3],
-    ['', undefined, true, true, 3],
+    ['', true, false, false, 3],
   ])('preserves drafts and reveal eligibility verbatim (%#)',
     (attempt, answerReviewAllowed, answerVisible, canReview, version) => {
       const saved = data();
@@ -368,9 +367,41 @@ describe('lesson and draft validation', () => {
     },
   );
 
-  it('preserves legacy reveals in v1/v2 regardless of draft visibility', () => {
+  // The merge-base reader recognizes v1/v2 and rejects answerVisible && !attempt.trim().
+  // v3 uses the same reveal rule and adds support for explicit draft eligibility.
+  describe.each([1, 2, 3])('v%i reveal compatibility', (version) => {
+    it.each([
+      ['empty', '', false],
+      ['ASCII whitespace', ' \t\n', false],
+      ['zero width', '\u200b', true],
+      ['fullwidth space', '\u3000', false],
+      ['BOM', '\ufeff', false],
+      ['readable content', ' 試答 ', true],
+    ] as const)('%s agrees with the legacy attempt rule for collapsed and revealed answers', (_label, attempt, eligible) => {
+      for (const answerVisible of [false, true]) {
+        const raw = changed((backup) => {
+          backup.version = version;
+          Object.assign(mode(backup).lessons[0], { attempt, answerVisible });
+        });
+        const baseAccepts = version <= 2 && (!answerVisible || !!attempt.trim());
+        const accepts = !answerVisible || eligible;
+        expect(accepts).toBe(version === 3 ? !answerVisible || !!attempt.trim() : baseAccepts);
+        if (!accepts) {
+          expect(() => parseCourseStudyProgress(raw, scope)).toThrow('試答與參考回答狀態不一致');
+          continue;
+        }
+        const restored = parseCourseStudyProgress(raw, scope);
+        const lesson = restored.passages['0:0'].modes.understand.lessons[0];
+        expect(canReviewStudyAnswer(lesson)).toBe(eligible);
+        expect(hasRevealedStudyAnswer(lesson)).toBe(answerVisible);
+        expect(JSON.parse(serializeCourseStudyProgress(restored)).version).toBe(2);
+      }
+    });
+  });
+
+  it('preserves legacy reveals in v1/v2 when trim accepts an invisible draft', () => {
     for (const version of [1, 2]) {
-      for (const invisible of ['', '\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f', '\ufff9', '\ufffa', '\ufffb']) {
+      for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f', '\ufff9', '\ufffa', '\ufffb']) {
         const saved = envelope();
         saved.version = version;
         mode(saved).lessons[0].attempt = invisible;

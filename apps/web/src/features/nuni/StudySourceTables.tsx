@@ -196,6 +196,8 @@ const ORDINAL_COUNT_COLUMN =
 const NON_RATIO_RANK_POSITION_COLUMN = /(?:排名|名次|名列)/u;
 const ENGLISH_NON_RATIO_RANK_POSITION_COLUMN =
   /\b(?:rank(?:ing)?s?|(?:position|place)\s+in\s+(?:class|school|cohort|exam))\b/iu;
+const RANK_RANGE_COLUMN = /(?:排名|名次|名列|前[一二三四五六七八九十百千\d０-９]+名)/u;
+const RANK_LABEL_END = /(?:排名|名次|名列|\b(?:rank(?:ing)?s?(?:\s+position)?|(?:position|place)\s+in\s+(?:class|school|cohort|exam)))$/iu;
 const RANK_COUNT_COLUMN =
   /(?:人數|數量|總數|次數|筆數|件數|個數|數目|\b(?:count|total|number\s+of|quantity|entries)\b)/iu;
 
@@ -231,7 +233,8 @@ function isPercentageColumn(header: string): boolean {
 // Only columns with an established 0–100 interpretation receive a 100% meter.
 // A bare "Rate", ratio, growth or return stays as a source table, not a graph.
 function isBoundedPercentageColumn(header: string): boolean {
-  return (SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header)) &&
+  return (SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header) ||
+    (RANK_RANGE_COLUMN.test(header) && /比例$/u.test(header.trim()))) &&
     !SOURCE_UNBOUNDED_RATE_COLUMN.test(header) &&
     !ENGLISH_UNBOUNDED_RATE_COLUMN.test(header);
 }
@@ -248,6 +251,7 @@ function isNonRatioColumn(header: string, percentage = false): boolean {
   const hasBoundedPercentValues = percentage && isBoundedPercentageColumn(header);
   const describesBoundedRate = hasBoundedPercentValues &&
     (isBoundedPercentageColumn(measuredLabel) || /率|\brate\b/iu.test(measuredLabel));
+  const measuresRankShare = hasBoundedPercentValues && !RANK_LABEL_END.test(measuredLabel);
   const isIdentifier = percentage
     ? !describesBoundedRate && IDENTIFIER_LABEL_END.test(measuredLabel)
     : IDENTIFIER_WORDS.test(column);
@@ -283,7 +287,7 @@ function isNonRatioColumn(header: string, percentage = false): boolean {
        (NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column) ||
         ENGLISH_NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column)) &&
        !ORDINAL_COUNT_COLUMN.test(column)) ||
-      ((NON_RATIO_RANK_POSITION_COLUMN.test(column) ||
+      (!measuresRankShare && (NON_RATIO_RANK_POSITION_COLUMN.test(column) ||
          ENGLISH_NON_RATIO_RANK_POSITION_COLUMN.test(column)) &&
         !RANK_COUNT_COLUMN.test(column))) return true;
   if (/(?:^|[^0-9０-９])(?:[0０]\s*(?:[/／]|\bor\b)\s*[1１]|[1１]\s*(?:[/／]|\bor\b)\s*[0０])(?:$|[^0-9０-９])/iu.test(column)) return true;

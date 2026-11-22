@@ -116,13 +116,6 @@ describe('reject unreadable model citations before saving a lesson', () => {
       .toThrow('AI 引句無可讀的教材內容');
   });
 
-  it('rejects a byte-identical direction override containing visible letters', () => {
-    const quote = '主鍵\u202e123';
-    const original = { ...passage, text: '前' + quote + '後' };
-    expect(() => parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original))
-      .toThrow('方向控制字元');
-  });
-
   it.each([
     ['left-to-right embedding', '\u202a'],
     ['right-to-left embedding', '\u202b'],
@@ -133,16 +126,14 @@ describe('reject unreadable model citations before saving a lesson', () => {
     ['right-to-left isolate', '\u2067'],
     ['first strong isolate', '\u2068'],
     ['pop directional isolate', '\u2069'],
-  ])('rejects %s in newly generated main and step citations', (_name, mark) => {
+  ])('accepts exact readable %s in newly generated main and step citations', (_name, mark) => {
     const quote = '主' + mark + '鍵';
     const original = { ...passage, text: passage.text + quote };
     const previous = { ...turn(), response: { ...explanation(), sourceQuote: quote } };
-    expect(() => parseTutorExplanation(JSON.stringify(previous.response), original))
-      .toThrow('方向控制字元');
+    expect(parseTutorExplanation(JSON.stringify(previous.response), original).sourceQuote).toBe(quote);
     const reply = steppedExplanation();
     reply.steps[0].sourceQuote = quote;
-    expect(() => parseTutorExplanation(JSON.stringify(reply), original))
-      .toThrow('AI 步驟引句無可讀的教材內容');
+    expect(parseTutorExplanation(JSON.stringify(reply), original).steps?.[0].sourceQuote).toBe(quote);
   });
 
   it.each([
@@ -172,7 +163,7 @@ describe('reject unreadable model citations before saving a lesson', () => {
     })).toThrow('引句無可讀');
   });
 
-  it.each(['主\u202e鍵\u202c', '\u2067外鍵\u2069', '主\u202a鍵\u202c\u200b'])(
+  it.each(['مرحبا \u2067שלום\u2069', '主\u202e鍵\u202c', '\u2067外鍵\u2069', '主\u202a鍵\u202c\u200b'])(
     'keeps readable legacy directional controls in main and step follow-up citations (%#)', (quote) => {
       const original = { ...passage, text: passage.text + quote };
       const response = { ...steppedExplanation(), sourceQuote: quote };
@@ -182,7 +173,7 @@ describe('reject unreadable model citations before saving a lesson', () => {
       const prepared = prepareStudyTutorHistory(original, 'understand', [turn(), previous]);
       expect(promptData(buildStudyTutorPrompt(original, 'understand', '繼續', prepared), 'HISTORY_DATA'))
         .toEqual([turn(), previous]);
-      expect(() => parseTutorExplanation(JSON.stringify(response), original)).toThrow('方向控制字元');
+      expect(parseTutorExplanation(JSON.stringify(response), original)).toEqual(response);
     },
   );
 

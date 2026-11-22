@@ -12,6 +12,7 @@ import { getStudyTutorAvailability, runStudyTutor, type StudyTutorTiming } from 
 import {
   appendStudyLesson,
   canReviewStudyAnswer,
+  hasRevealedStudyAnswer,
   hasVisibleStudyAttempt,
   hasVisibleStudyContent,
   studyLessonHistory,
@@ -60,6 +61,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const modeMemory = memory.modes[mode];
   const selected = modeMemory.lessons.find((lesson) => lesson.id === modeMemory.selectedLessonId);
   const canReviewAnswer = !!selected && canReviewStudyAnswer(selected);
+  const answerRevealed = !!selected && hasRevealedStudyAnswer(selected);
   const result = selected?.response;
   // A model can return invisible-only text. Keep student attempts and disclosure
   // state intact, but never display an empty-looking prompt or reference answer.
@@ -322,10 +324,10 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
                 <button type="button" className={styles.button} disabled={!canReviewAnswer}
                   onClick={() => changeLesson((previous) => canReviewStudyAnswer(previous)
                     ? { ...previous, answerVisible: !previous.answerVisible, answerReviewAllowed: true } : previous)}
-                  aria-expanded={selected.answerVisible && canReviewAnswer}>
-                  {selected.answerVisible && canReviewAnswer ? '收起參考回答' : '對照參考回答'}
+                  aria-expanded={answerRevealed}>
+                  {answerRevealed ? '收起參考回答' : '對照參考回答'}
                 </button>
-                {selected.answerVisible && canReviewAnswer && <p className={styles.referenceAnswer}>
+                {answerRevealed && <p className={styles.referenceAnswer}>
                   {hasReadableReferenceAnswer ? result.answer : 'AI 未提供可讀的參考回答。請回到本段原文核對，不要把空白內容視為已驗證答案。'}
                 </p>}
                 <p className={styles.note}>這是自我檢查，不會自動評分，也不會影響課程成績或作業繳交狀態。</p>

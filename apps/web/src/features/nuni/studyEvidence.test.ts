@@ -58,11 +58,10 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
-  it('rejects bidi visual overrides and partial surrogate citations without rejecting RTL or emoji', () => {
+  it('locates exact bidi text and rejects partial surrogate citations', () => {
     const source = '甲A\u202e123乙、😀、العربية、שלום、甲\u200b乙、x²+y²';
-    // An override makes the displayed order differ from the literal source.
-    expect(locateStudyEvidence(source, 'A\u202e123')).toBeNull();
-    expect(locateStudyEvidence('甲\u202d乙', '甲\u202d乙')).toBeNull();
+    expect(locateStudyEvidence(source, 'A\u202e123')?.quote).toBe('A\u202e123');
+    expect(locateStudyEvidence('甲\u202d乙', '甲\u202d乙')?.quote).toBe('甲\u202d乙');
     // indexOf() alone would match an unreadable half of an existing emoji.
     expect(source.includes('\uD83D')).toBe(true);
     expect(source.includes('\uDE00')).toBe(true);
@@ -90,9 +89,7 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
-  it('rejects explicit bidi formatting and isolate controls without rejecting native RTL text', () => {
-    // Every quote is byte-identical to source; visually it may render in a
-    // different order or suppress/isolate part of the surrounding citation.
+  it('locates readable bidi citations byte for byte as in the merge base', () => {
     const controls = [
       '\u202a', '\u202b', '\u202c',
       '\u202d', '\u202e', '\u2066', '\u2067', '\u2068', '\u2069',
@@ -100,13 +97,18 @@ describe('exact source-to-lesson evidence', () => {
     for (const control of controls) {
       const quote = `甲${control}乙`;
       const source = `前${quote}後`;
-      expect(source.includes(quote)).toBe(true);
-      expect(locateStudyEvidence(source, quote)).toBeNull();
+      expect(locateStudyEvidence(source, quote)).toEqual({
+        before: '前', quote, after: '後', occurrences: 1,
+      });
+      expect(locateStudyEvidence(source, control)).toBeNull();
+      expect(locateStudyEvidence('前甲乙後', quote)).toBeNull();
     }
 
     // The source document remains untouched: only the quoted span is
     // validated, so real Hebrew/Arabic letters can still be cited exactly
     // even when the original document surrounds them with bidi controls.
+    const paired = 'مرحبا \u2067שלום\u2069';
+    expect(locateStudyEvidence(`前${paired}後`, paired)?.quote).toBe(paired);
     const rtlText = 'שלום العربية';
     const source = `前\u202b${rtlText}\u202c後`;
     expect(locateStudyEvidence(source, rtlText)).toEqual({

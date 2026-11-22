@@ -210,6 +210,7 @@ function isRecognizedInlineCssValue(name: string, value: string): boolean {
 
 function substituteCssVariables(
   value: string, lookup: (name: string) => string | null | undefined, stylesheetProperties: ReadonlySet<string>,
+  missingValue?: () => string,
 ): string | null | undefined {
   for (let substitutions = 0; substitutions < 32; substitutions += 1) {
     const variable = /\bvar\(\s*(--[\w\p{L}\p{N}-]+)\s*/iu.exec(value);
@@ -220,9 +221,8 @@ function substituteCssVariables(
     const isGuaranteedInvalid = definition?.toLowerCase() === 'initial';
     const localValue = isGuaranteedInvalid ? undefined : definition;
     const hasFallback = value[argumentEnd] === ',';
-    if (!hasFallback && value[argumentEnd] !== ')') return undefined;
+    if (!hasFallback && value[argumentEnd] !== ')') return null;
     if (localValue === undefined && !isGuaranteedInvalid && stylesheetProperties.has(variable[1])) return null;
-    if (localValue === undefined && !hasFallback) return undefined;
     let depth = 1;
     let end = argumentEnd;
     while (end < value.length && depth > 0) {
@@ -230,8 +230,9 @@ function substituteCssVariables(
       if (value[end] === ')') depth -= 1;
       end += 1;
     }
-    if (depth !== 0) return undefined;
-    const replacement = localValue ?? value.slice(argumentEnd + 1, end - 1).trim();
+    if (depth !== 0) return null;
+    const replacement = localValue ?? (hasFallback ? value.slice(argumentEnd + 1, end - 1).trim() : missingValue?.());
+    if (replacement === undefined) return undefined;
     if (localValue !== undefined &&
         CSS_CONTEXTUAL_WIDE_VALUES.has(localValue.toLowerCase())) {
       return null;
@@ -256,8 +257,8 @@ function resolveInlineVisibilityValue(name: string, value: string): string | und
   const computed = calc(value, { rawPercentages: true });
   if (/^calc\(\+?infinity%?\)$/iu.test(computed)) return '1';
   if (/^calc\((?:-infinity|nan)%?\)$/iu.test(computed)) return '0';
-  // A reduced dimension (such as a length) is invalid for opacity.
-  // An expression the evaluator cannot reduce remains ambiguous.
+  // A reduced dimension is rejected by the property validator. An
+  // expression the evaluator cannot reduce cannot replace a known value.
   return /[()]/u.test(computed) ? undefined : computed;
 }
 
@@ -318,18 +319,20 @@ function readInlineVisibility(
     const name = property[1].toLowerCase() as keyof InlineVisibility;
     const important = CSS_IMPORTANT_SUFFIX.test(property[2]);
     const declared = property[2].replace(CSS_IMPORTANT_SUFFIX, '').trim();
-    const substituted = substituteCssVariables(declared, (key) => properties.get(key), stylesheetProperties);
+    let missingVariable = false;
+    const substituted = substituteCssVariables(declared, (key) => properties.get(key), stylesheetProperties, () => {
+      // Check the surrounding property grammar before applying the missing-variable rule.
+      missingVariable = true;
+      if (name === 'opacity') return declared.includes('%') ? '1%' : '1';
+      return name === 'display' ? 'block' : 'visible';
+    });
     const resolved = typeof substituted === 'string' ? resolveInlineVisibilityValue(name, substituted) : undefined;
-    const wide = resolved !== undefined && CSS_CONTEXTUAL_WIDE_VALUES.has(resolved);
-    const deferred = CSS_SUBSTITUTION_FUNCTION.test(declared) ||
-      (resolved === undefined && CSS_MATH_FUNCTION.test(declared));
     const recognized = resolved !== undefined && isRecognizedInlineCssValue(name, resolved);
-    if (!recognized && !wide && !deferred) continue;
-    // Invalid substitutions fall back to unset. Of these properties, only
-    // visibility inherits by default, and a descendant can override it.
+    if (!recognized && resolved !== 'unset' && resolved !== 'inherit') continue;
+    // A missing custom property without a fallback computes to unset.
     const inherits = resolved === 'inherit' ||
-      (INLINE_VISIBILITY_INHERITS[name] && !recognized);
-    const value = inherits ? parent[name] : recognized ? resolved : undefined;
+      ((missingVariable || resolved === 'unset') && INLINE_VISIBILITY_INHERITS[name]);
+    const value = inherits ? parent[name] : missingVariable ? undefined : resolved;
     const previous = effective.get(name);
     if (!previous || important || !previous.important) {
       effective.set(name, { value, important });

@@ -184,9 +184,6 @@ function studyGraphemeBoundary(source: string): (index: number) => boolean {
 export function locateStudyEvidence(source: string, quote: string, occurrence = 0): StudyEvidenceLocation | null {
   // Visible punctuation can be located just like words or symbols.
   if (!source || !hasVisibleStudyContent(quote)) return null;
-  // Keep direction marks attached to readable text, while excluding controls
-  // that explicitly open or close embeddings, overrides or isolates.
-  if (/[\u202a-\u202e\u2066-\u2069]/u.test(quote)) return null;
   for (let index = 0; index < quote.length; index++) {
     const unit = quote.charCodeAt(index);
     if (unit >= 0xd800 && unit <= 0xdbff) {
