@@ -99,6 +99,7 @@ export function CampusEvidencePlanCard({
         </Text>
       </View>
       {plan.steps.map((step, index) => {
+        const displayTitle = step.fullAssignmentTitle ?? step.title;
         const priorityColor = historical ? aiTokens.muted : step.priority === 'overdue' || step.priority === 'urgent'
           ? aiTokens.danger : step.priority === 'soon' ? aiTokens.warning : aiTokens.muted;
         const done = progress?.completedStepIds.includes(step.id) ?? false;
@@ -145,7 +146,7 @@ export function CampusEvidencePlanCard({
               </Text>
               <View style={{ flex: 1, gap: 5 }}>
                 <Text style={{ color: aiTokens.text, fontSize: 15, fontWeight: '700' }}>
-                  {step.title}
+                  {displayTitle}
                 </Text>
                 <Text style={{ color: priorityColor, fontSize: 12, fontWeight: '600' }}>
                   {historical ? '規劃當時：' : ''}{PRIORITY[step.priority]}{step.kind === 'quiz' ? ' · 測驗參考期限' : ''}
@@ -182,7 +183,7 @@ export function CampusEvidencePlanCard({
             {progress ? (
               <Pressable
                 accessibilityRole="checkbox"
-                accessibilityLabel={'我已處理：' + step.title}
+                accessibilityLabel={'我已處理：' + displayTitle}
                 accessibilityState={{ checked: done, disabled }}
                 aria-checked={done}
                 disabled={disabled}

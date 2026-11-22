@@ -196,6 +196,43 @@ test('計畫卡可為唯一的 134 字作業設定本機提醒', async () => {
   expect(mockAlarms.size).toBe(1);
 });
 
+test.each([
+  ['長'.repeat(130), 0],
+  ['長'.repeat(130), 1_000],
+  ['資料庫作業：' + '正規化與索引實作'.repeat(4), 1_000],
+])('同名課程的同前綴作業各自顯示、開啟及設定提醒（前綴=%s，截止差=%i 毫秒）', async (prefix, dueOffset) => {
+  const snapshot = mockSnapshot();
+  const dueMinute = Math.floor(Date.parse(dueAt) / 60_000) * 60_000;
+  const rows = ['第 1 題', '第 2 題', '第 3 題'].map((suffix, index) => ({
+    title: prefix + '｜' + suffix,
+    groupName: '資料庫',
+    dueAt: new Date(dueMinute + index * dueOffset).toISOString(),
+    source: { ...source, groupId: dueOffset ? 'course-' + index : source.groupId, assignmentId: 'work-' + index },
+  }));
+  snapshot.assignments.items = rows;
+  snapshot.assignments.count = rows.length;
+  mockReader.getAssignment.mockImplementation(async (assignmentId, groupId) => {
+    const row = rows.find((item) => item.source.assignmentId === assignmentId && item.source.groupId === groupId);
+    return row && { id: assignmentId, groupId, title: row.title, dueAt: row.dueAt };
+  });
+  const { view, navigation } = planCard(snapshot);
+  for (const [index, row] of rows.entries()) {
+    expect(view.getAllByText(row.title).some((node) => node.props.numberOfLines == null)).toBe(true);
+    fireEvent.press(view.getAllByText('查看這份作業')[index]);
+    expect(navigation.navigate).toHaveBeenLastCalledWith('學習', {
+      initial: false,
+      screen: 'HomeworkSubmit',
+      params: { groupId: row.source.groupId, assignmentId: row.source.assignmentId },
+    });
+    await waitFor(() => expect(view.getAllByText('設定手機本機截止提醒')).toHaveLength(rows.length - index));
+    fireEvent.press(view.getAllByText('設定手機本機截止提醒')[0]);
+    fireEvent.press(view.getByText('確認設定本機提醒'));
+    await waitFor(() => expect(view.getAllByText('已設定截止前 1 小時提醒')).toHaveLength(index + 1));
+    expect(mockReader.getAssignment).toHaveBeenLastCalledWith(row.source.assignmentId, row.source.groupId);
+    expect(mockAlarms.size).toBe(index + 1);
+  }
+});
+
 test.each([false, true].flatMap((reverse) => [
   ...['計畫卡', '單筆回覆'].flatMap((entry) => [
     { entry, length: 129, suffix: ' 後綴', longer: false, reverse },

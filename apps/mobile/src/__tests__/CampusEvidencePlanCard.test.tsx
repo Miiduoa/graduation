@@ -40,6 +40,30 @@ const reminderContext = { userId: 'firebase-user', schoolId: 'pu', snapshot: nul
 beforeEach(() => jest.clearAllMocks());
 afterEach(() => jest.restoreAllMocks());
 
+test.each([12, 47, 130])('完整標題可以換行，進度標籤也能區分截斷或加省略號的步驟（%i 字）', (width) => {
+  const input = plan();
+  const prefix = '課堂實作'.repeat(40);
+  const fullTitles = ['原稿', '修訂稿'].map((suffix) => prefix + suffix);
+  input.agenda = undefined;
+  input.steps = fullTitles.map((fullAssignmentTitle, index) => ({
+    ...input.steps[0],
+    id: 'work-' + index,
+    title: prefix.slice(0, width) + (width === 47 ? '…' : ''),
+    fullAssignmentTitle,
+  }));
+  const onToggleStep = jest.fn();
+  const view = render(<CampusEvidencePlanCard plan={input} disabled={false}
+    progress={{ completedStepIds: [], onToggleStep }} />);
+  fullTitles.forEach((title, index) => {
+    const heading = view.getByText(title);
+    expect(heading.props.numberOfLines).toBeUndefined();
+    expect(heading.props.ellipsizeMode).toBeUndefined();
+    fireEvent.press(view.getByRole('checkbox', { name: '我已處理：' + title }));
+    expect(onToggleStep).toHaveBeenLastCalledWith(input.steps[index].id, true);
+  });
+  expect(view.queryByText(input.steps[0].title)).toBeNull();
+});
+
 function renderProgressCard(disabled = false) {
   const input = plan();
   const onToggle = jest.fn();
