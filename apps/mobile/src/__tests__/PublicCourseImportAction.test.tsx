@@ -502,7 +502,8 @@ test('switching the public campus cannot reuse a review opened for another schoo
   expect(view.queryByText('確認加入個人課表')).toBeNull();
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   review(view);
-  expect(view.getByText(/國立暨南國際大學/)).toBeTruthy();
+  // Source provenance is also rendered; assert the exact school/term heading, not an ambiguous name match.
+  expect(view.getByText('國立暨南國際大學 · 115 學年度第 1 學期')).toBeTruthy();
 });
 
 test('a refreshed offering that later returns to its prior details still requires a fresh tap', () => {
