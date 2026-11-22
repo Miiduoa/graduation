@@ -201,6 +201,8 @@ describe('public Providence building geometry route', () => {
     let cancelled = 0;
     let pulls = 0;
     const stream = new ReadableStream<Uint8Array>({
+      // Even a JSON-looking initial chunk is not a complete response until EOF.
+      start(controller) { controller.enqueue(new TextEncoder().encode(osmPayload)); },
       pull() { pulls += 1; return new Promise<void>(() => {}); },
       cancel() { cancelled += 1; return new Promise<void>(() => {}); },
     });
