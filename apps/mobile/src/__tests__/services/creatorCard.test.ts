@@ -72,3 +72,21 @@ test('editing selected fields leaves concurrent server changes untouched', async
     schoolId: 'pu', ownerUid: 'alice', headline: latest.headline, updatedAt: 'SERVER_TIME',
   }, { merge: true });
 });
+
+test.each([
+  ['headline', '  '],
+  ['bio', '  '],
+  ['linkUrl', 'https://localhost'],
+] as const)('clearing %s requires a committed raw empty string', async (field, hidden) => {
+  const draft = { headline: card.headline, bio: card.bio, linkUrl: card.linkUrl, [field]: '' };
+  jest.mocked(setDoc).mockResolvedValue(undefined);
+  jest.mocked(getDocFromServer)
+    .mockResolvedValueOnce(snap({ ...card, [field]: hidden }) as never)
+    .mockResolvedValueOnce(snap({ ...card, [field]: '' }) as never);
+
+  await expect(saveCreatorCard('pu', 'alice', draft, [field])).rejects.toThrow('not confirmed');
+  await expect(saveCreatorCard('pu', 'alice', draft, [field])).resolves.toEqual(draft);
+  expect(setDoc).toHaveBeenCalledWith('schools/pu/creatorProfiles/alice', {
+    schoolId: 'pu', ownerUid: 'alice', [field]: '', updatedAt: 'SERVER_TIME',
+  }, { merge: true });
+});
