@@ -78,7 +78,7 @@ function parseHttpDateMillis(value: string | null, now: number): number | null {
   // year (e.g. "50" becomes 1950 even when the request is made in 2049).
   // RFC 9110 requires resolving the year relative to the recipient's clock:
   // a date appearing more than 50 years in the future belongs to the past.
-  const legacy = /^([A-Za-z]+), (\\d{2})-([A-Za-z]{3})-(\\d{2}) (\\d{2}):(\\d{2}):(\\d{2}) GMT$/.exec(value);
+  const legacy = /^([A-Za-z]+), (\d{2})-([A-Za-z]{3})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) GMT$/.exec(value);
   if (legacy) {
     const monthIndex = HTTP_MONTHS.indexOf(legacy[3]);
     if (monthIndex < 0) return null;
