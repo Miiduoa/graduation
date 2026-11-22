@@ -3,6 +3,7 @@ import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../fi
 import { parseCampusAssignmentSource, type CampusAssignmentSource } from './campusAssignmentSource';
 import { parseCampusAnnouncementSource, type CampusAnnouncementSource } from './campusAnnouncementSource';
 import { abortableCampusRead } from './abortableCampusRead';
+import { isRealTimestamp } from './campusTimestamp';
 
 export type SenseSourceStatus = 'available' | 'unavailable';
 export type AssignmentCoverageReason = 'complete' | 'legacy-partial' | 'read-budget';
@@ -58,7 +59,7 @@ function count(value: unknown, source: SenseSourceStatus): number | null {
 }
 function dateString(value: unknown): string | null {
   if (value === null) return null;
-  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
+  if (!isRealTimestamp(value)) {
     throw new Error('invalid-sense-response');
   }
   return value;
@@ -155,6 +156,8 @@ export function validCampusSenseSnapshot(
 ): CampusSenseSnapshot | null {
   if (!scope.uid || !scope.schoolId || !snapshot ||
       snapshot.userId !== scope.uid || snapshot.schoolId !== scope.schoolId) return null;
+  // A rollover such as February 30 must not become a fresh, trusted snapshot.
+  if (!isRealTimestamp(snapshot.checkedAt)) return null;
   const savedAt = Date.parse(snapshot.checkedAt);
   if (!Number.isFinite(savedAt) || savedAt > now + 30_000 || now - savedAt > CAMPUS_SENSE_MAX_AGE_MS) return null;
   return snapshot;
