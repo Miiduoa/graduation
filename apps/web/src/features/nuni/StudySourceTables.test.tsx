@@ -3023,3 +3023,49 @@ it.each([
     expect(screen.getByRole('table').textContent).toContain(values[0]);
   }
 });
+
+
+it('preserves source tables but skips charts with corrupt Unicode or control-code labels', () => {
+  // Derived charts require stable labels. Original licensed text stays intact.
+  const unsafeLabels = [
+    '班級\uD800A', '班級\uDC00A', '\uD800班級',
+    '班級\u0000A', '班級\u001BA', '班級\u007FA',
+  ];
+  for (const label of unsafeLabels) {
+    for (const [metric, first, second] of [
+      ['學習時數', '3', '5'],
+      ['完成率', '30%', '50%'],
+    ]) {
+      for (const inHeader of [false, true]) {
+        const heading = inHeader ? metric + label : metric;
+        const row = inHeader ? '班級A' : label;
+        const text = [
+          '| 組別 | ' + heading + ' |', '| --- | --- |',
+          '| ' + row + ' | ' + first + ' |', '| 班級B | ' + second + ' |',
+        ].join('\n');
+        const view = render(<StudySourceTables text={text} />);
+        const table = screen.getByRole('table');
+        expect(table.textContent).toContain(heading);
+        expect(table.textContent).toContain(row);
+        expect(table.textContent).toContain(first);
+        expect(table.textContent).toContain(second);
+        expect(comparisonSummaries(view.container)).toEqual([]);
+        view.unmount();
+      }
+    }
+  }
+});
+
+it('keeps intact emoji, RTL text and combining accents in chart labels', () => {
+  for (const label of ['👩‍💻', '🇹🇼', 'עברית', 'e\u0301', '⠁']) {
+    const text = [
+      '| 組別 | 學習時數 |', '| --- | --- |',
+      '| ' + label + ' | 3 |', '| 對照 | 5 |',
+    ].join('\n');
+    const view = render(<StudySourceTables text={text} />);
+    expect(comparisonSummaries(view.container)).toHaveLength(1);
+    expect(Array.from(view.container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual([[3, 5], [5, 5]]);
+    view.unmount();
+  }
+});

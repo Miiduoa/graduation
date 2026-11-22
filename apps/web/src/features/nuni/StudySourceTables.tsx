@@ -52,8 +52,14 @@ const NETWORK_IDENTIFIER_COUNT_COLUMN =
 // Keep the authorized table byte-for-byte, but never derive a chart whose
 // labels a student or screen reader cannot reliably compare to that source.
 const STUDY_CHART_BIDI_CONTROL = /\p{Bidi_Control}/u;
+// Cc control bytes can disrupt assistive labels; unpaired UTF-16 surrogates
+// display as replacement glyphs, unlike their exact original source bytes.
+// Unicode-mode Cs testing does not reject intact emoji surrogate pairs.
+const STUDY_CHART_INVALID_CODE_UNIT = /[\p{Cc}\p{Cs}]/u;
 function hasUnambiguousChartLabel(label: string): boolean {
-  return hasVisibleStudyContent(label) && !STUDY_CHART_BIDI_CONTROL.test(label);
+  return hasVisibleStudyContent(label) &&
+    !STUDY_CHART_BIDI_CONTROL.test(label) &&
+    !STUDY_CHART_INVALID_CODE_UNIT.test(label);
 }
 
 type SourceValueRow = { label: string; original: string; amount: number; sourceLine: number };
