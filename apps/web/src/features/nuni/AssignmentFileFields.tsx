@@ -55,19 +55,9 @@ type AssignmentFileSelection = {
 };
 
 function localAssignmentFileType(file: File) {
-  if (file.name.trim().length > 200) throw new NuniError(422, 'ASSIGNMENT_FILE_NAME_INVALID');
-  const { kind, contentType } = classifyAssignmentFile(file.name, file.type);
-  if (kind === 'file' && !file.type.trim()) throw new NuniError(422, 'ASSIGNMENT_FILE_TYPE_REJECTED');
-  return { kind, contentType: file.type.trim() || contentType };
-}
-
-function validateSelectedAssignmentFile(file: File) {
-  const { kind } = classifyAssignmentFile(file.name, file.type);
-  // Match the original picker before compression. Its image quota used the declared MIME.
-  if (kind === 'image') return file.type.startsWith('image/') ? 'image' : 'file';
-  if (!file.type.trim()) throw new NuniError(422, 'ASSIGNMENT_FILE_TYPE_REJECTED');
-  assertAssignmentFileSize(kind, file.size);
-  return kind;
+  const contentType = file.type.trim() || 'application/octet-stream';
+  const { kind } = classifyAssignmentFile(file.name, contentType);
+  return { kind, contentType };
 }
 
 export function collectLocalFileSelection(
@@ -85,7 +75,8 @@ export function collectLocalFileSelection(
     }
     let kind: LocalAssignmentFile['kind'] = 'file';
     try {
-      kind = validateSelectedAssignmentFile(file);
+      ({ kind } = localAssignmentFileType(file));
+      if (kind === 'file') assertAssignmentFileSize(kind, file.size);
       assertAssignmentFileBudget(images + Number(kind === 'image'), documents + Number(kind === 'file'));
     } catch (cause) {
       const code = cause instanceof NuniError ? cause.code : undefined;
@@ -551,7 +542,7 @@ export async function uploadAndSubmitFiles(
       const { file } = item;
       // A BMP already queued by a previous picker may still submit as a smaller JPEG.
       const queuedBmp = file.type === 'image/bmp' && /\.bmp$/i.test(file.name);
-      if (!queuedBmp) validateSelectedAssignmentFile(file);
+      if (!queuedBmp) localAssignmentFileType(file);
       prepared.push({ ...item, file: await compressAssignmentImageFile(file) });
     }
     operation.prepared = prepared;

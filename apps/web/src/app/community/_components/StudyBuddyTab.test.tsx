@@ -326,24 +326,22 @@ it('discards a queued review on close and refreshes after its late success', asy
   expect((screen.getByLabelText('課程名稱') as HTMLInputElement).value).toBe('');
 });
 
-it('removes an inactive section portal while keeping its original pending review', async () => {
+it('unmounts the pending review form when leaving its tab', async () => {
   mocks.submitReview.mockImplementation(() => new Promise(() => {}));
   render(<StudyBuddyTab schoolId="pu" />);
   await screen.findByText('尚無評價');
   fireEvent.click(screen.getByRole('button', { name: '＋ 寫評價' }));
   completeReview();
   fireEvent.click(screen.getByRole('button', { name: '送出評價' }));
-  // jsdom permits a programmatic parent tab change behind the modal. The
-  // section's active prop must remove the portal, not just hide its ancestor.
   await act(async () => {
     fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
   });
   expect(document.querySelector('dialog')).toBeNull();
   expect(document.body.style.overflow).toBe('');
-  fireEvent.click(screen.getByRole('tab', { name: '課程評價' }));
-  const resumed = screen.getByRole('dialog', { name: '寫課程評價' });
-  expect(screen.getByLabelText('課程名稱').matches(':disabled')).toBe(true);
-  fireEvent.submit(resumed.querySelector('form')!);
+  await act(async () => fireEvent.click(screen.getByRole('tab', { name: '課程評價' })));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '＋ 寫評價' }));
+  expect(screen.getByLabelText<HTMLInputElement>('課程名稱').value).toBe('');
   expect(mocks.submitReview).toHaveBeenCalledOnce();
 });
 
@@ -450,9 +448,9 @@ it.each([
   if (switchTabs) {
     fireEvent.click(screen.getByRole('tab', { name: otherTab }));
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: tab }));
+    await act(async () => fireEvent.click(screen.getByRole('tab', { name: tab })));
   }
-  fireEvent.click(opener);
+  fireEvent.click(screen.getByRole('button', { name: openerName }));
   expect(screen.getByLabelText<HTMLInputElement>(field).value).toBe('');
   if (isReview) {
     expect(screen.getByLabelText<HTMLTextAreaElement>('評論（選填）').value).toBe('');
@@ -962,6 +960,7 @@ it.each(
 const readFailureCases = ['review', 'group'].flatMap((kind) =>
   ['initial', 'reload', 'tab', 'subtab', 'school', 'account'].flatMap((boundary) =>
     [
+      { code: 'success', temporary: false },
       { code: 'permission-denied', temporary: false },
       { code: 'firestore/unauthenticated', temporary: false },
       { code: 'unavailable', message: 'offline', temporary: true },
@@ -979,43 +978,71 @@ it.each(readFailureCases)('$kind at $boundary with $code shows only permitted ro
   const success = isReview ? [existingReview] : groupSnapshot(row, ['bob']);
   const empty = isReview ? [] : { docs: [] };
   const action = isReview ? '＋ 寫評價' : '＋ 建立讀書會';
-  const fail = () => read.mockRejectedValue(Object.assign(new Error(message ?? code), { code }));
-  if (boundary === 'initial') fail();
-  else read.mockResolvedValue(success);
+  const failure = Object.assign(new Error(message ?? code), { code });
+  const refreshed = isReview
+    ? [{ ...existingReview, courseName: '新課程' }]
+    : groupSnapshot('新讀書會', ['bob']);
+  let settleRead!: () => void;
+  const pendingRead = new Promise((resolve, reject) => {
+    settleRead = () => code === 'success' ? resolve(refreshed) : reject(failure);
+  });
+  const startPendingRead = () => {
+    read.mockImplementationOnce(() => pendingRead);
+    if (temporary) read.mockRejectedValue(failure);
+  };
+  const selectGroup = () => {
+    if (!isReview) fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
+  };
+  const learning = (schoolId: string, visible = true) =>
+    <div>{visible && <StudyBuddyTab schoolId={schoolId} />}</div>;
 
-  const view = render(<StudyBuddyTab schoolId="pu" />);
-  if (!isReview) fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
+  if (boundary === 'initial') startPendingRead();
+  else read.mockResolvedValue(success);
+  const view = render(learning('pu'));
+  selectGroup();
   if (boundary !== 'initial') {
     await screen.findByText(row);
     read.mockClear();
-    fail();
+    startPendingRead();
     if (boundary === 'reload') {
       fireEvent.click(screen.getByRole('button', { name: isReview ? /有幫助 · 0/ : '申請加入' }));
     } else if (boundary === 'tab') {
-      view.rerender(<StudyBuddyTab schoolId="pu" active={false} />);
-      view.rerender(<StudyBuddyTab schoolId="pu" active />);
+      view.rerender(learning('pu', false));
+      expect(screen.queryByText(row)).toBeNull();
+      view.rerender(learning('pu'));
+      selectGroup();
     } else if (boundary === 'subtab') {
       fireEvent.click(screen.getByRole('tab', { name: isReview ? '讀書會' : '課程評價' }));
       fireEvent.click(screen.getByRole('tab', { name: isReview ? '課程評價' : '讀書會' }));
     } else if (boundary === 'school') {
-      view.rerender(<StudyBuddyTab schoolId="nthu" />);
+      view.rerender(learning('nthu'));
     } else {
       mocks.auth.user = { uid: 'bob', displayName: 'Bob' };
-      view.rerender(<StudyBuddyTab schoolId="pu" />);
+      view.rerender(learning('pu'));
     }
   }
 
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+  // 1a1f36863 mounts an empty section on every tab entry and shows its loading state.
+  // A mounted refresh may keep its rows until a permission error clears them.
+  const retainsRowsOnRefresh = boundary === 'reload';
+  expect(Boolean(screen.queryByText(row))).toBe(retainsRowsOnRefresh);
+  expect(Boolean(screen.queryByText('載入中…'))).toBe(!retainsRowsOnRefresh);
+  await act(async () => settleRead());
+  if (code === 'success') {
+    expect(screen.getByText(isReview ? '新課程' : '新讀書會')).toBeTruthy();
+    expect(screen.queryByText(row)).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    return;
+  }
+
   const retry = await screen.findByRole('button', { name: '重新讀取' });
-  // At 1a1f36863 both sections return only CommunityLoadError on every failed read.
-  // This PR retains old rows only for a transient failure in the same mounted scope.
-  const mergeBaseShowsRows = false;
-  const retainsRows = temporary && ['reload', 'tab', 'subtab'].includes(boundary);
-  expect(Boolean(screen.queryByText(row))).toBe(mergeBaseShowsRows || retainsRows);
+  // Both base sections replace their rows on error. The mounted refresh is the retention exception.
+  expect(Boolean(screen.queryByText(row))).toBe(temporary && retainsRowsOnRefresh);
   expect(Boolean(screen.queryByRole('button', { name: action }))).toBe(temporary);
   expect(read).toHaveBeenCalledTimes(!isReview && temporary ? 2 : 1);
 
   if (!temporary) {
-    // A subsequent offline retry must not restore the data that was cleared.
     read.mockRejectedValue(new Error('offline'));
     await act(async () => fireEvent.click(retry));
     expect(screen.queryByText(row)).toBeNull();

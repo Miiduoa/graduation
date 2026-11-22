@@ -7,7 +7,6 @@ import styles from '../community.module.css';
 export function useCommunityLoad(
   load: (isCurrent: () => boolean) => Promise<void>,
   message: string,
-  active = true,
   clearDeniedData?: () => void,
 ) {
   const [loading, setLoading] = useState(true);
@@ -42,16 +41,14 @@ export function useCommunityLoad(
   }, [load, message, clearDeniedData]);
   useEffect(() => {
     let mounted = true;
-    if (active) {
-      void Promise.resolve().then(() => {
-        if (mounted) void refresh();
-      });
-    }
+    void Promise.resolve().then(() => {
+      if (mounted) void refresh();
+    });
     return () => {
       mounted = false;
       generation.current += 1;
     };
-  }, [active, refresh]);
+  }, [refresh]);
   return { loading, loaded, error: denied ? message : error, denied, refresh };
 }
 

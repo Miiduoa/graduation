@@ -149,6 +149,20 @@ async def attachments(page, config, report, capture):
     await expect(picker.get_by_role('status')).to_contain_text('已加入 8 個檔案。')
     await expect(picker.get_by_role('list', name='未加入的檔案')).to_contain_text('照片最多 8 張')
     await expect(picker.get_by_role('list', name='即將繳交的檔案').locator(':scope > li')).to_have_count(10)
+    await picker.locator('input[type="file"][accept="image/*"]').first.evaluate(
+        """input => {
+            const selection = new DataTransfer();
+            selection.items.add(new File(['synthetic'], '無類型照片.jpg'));
+            input.files = selection.files;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        }""")
+    await expect(picker.get_by_role('list', name='未加入的檔案')).to_contain_text(
+        '瀏覽器未提供檔案類型')
+    pending = picker.get_by_role('list', name='即將繳交的檔案')
+    await expect(pending.locator(':scope > li')).to_have_count(10)
+    await expect(pending).not_to_contain_text('無類型照片.jpg')
+    await confirm.click()
+    await expect(confirm).to_have_count(0)
     await assert_layout(page, report, 'attachment-limits')
     await capture('attachment-limits')
 

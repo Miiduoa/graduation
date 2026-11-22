@@ -64,7 +64,7 @@ describe('collectLocalFiles', () => {
     ]);
   });
 
-  it.each(['gif', 'bmp', 'svg', 'pdf', 'doc', 'docx', 'txt', 'zip', 'exe'])(
+  it.each(['jpg', 'png', 'gif', 'bmp', 'svg', 'pdf', 'doc', 'docx', 'txt', 'zip', 'exe'])(
     'rejects a MIME-less .%s before it reserves quota',
     (extension) => {
       const name = `attachment.${extension}`;
@@ -174,11 +174,11 @@ describe('compressAssignmentImageFile', () => {
 });
 
 describe('uploadAndSubmitFiles', () => {
-  // The picker at 1a1f36863 calls this unchanged classifier with the raw MIME,
-  // before checking quota. It never looks at bytes, pixels or canvas support.
+  // 1a1f36863 sends the original MIME or application/octet-stream for a MIME-less file.
+  // Its intent service calls this unchanged shared classifier.
   function mergeBaseAccepts(file: File) {
     try {
-      classifyAssignmentFile(file.name, file.type);
+      classifyAssignmentFile(file.name, file.type || 'application/octet-stream');
       return true;
     } catch {
       return false;
@@ -232,7 +232,7 @@ describe('uploadAndSubmitFiles', () => {
 
       const { files } = collectLocalFileSelection([], [original]);
       const selected = mergeBaseAccepts(original);
-      expect(files.map(({ kind }) => kind)).toEqual(selected ? [hasMime ? 'image' : 'file'] : []);
+      expect(files.map(({ kind }) => kind)).toEqual(selected ? ['image'] : []);
       expect(bitmap).not.toHaveBeenCalled();
 
       // An already queued BMP keeps its preparation path even though the base picker rejects it.
@@ -271,6 +271,96 @@ describe('uploadAndSubmitFiles', () => {
             idempotencyKey: 'key:file:0',
           }],
         });
+      }
+    },
+  );
+
+  const mimeCases = ['.jpg', '.png', '.pdf', '.docx', ''].flatMap((extension) =>
+    [
+      '',
+      'image/jpeg',
+      'image/png',
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/octet-stream',
+    ].map((mime) => ({ extension, mime })),
+  );
+
+  function mergeBaseSelection(existing: File[], incoming: File[]) {
+    // The base intent service checks declared type and applies independent 8/2 budgets.
+    let photos = existing.filter(({ type }) => type.startsWith('image/')).length;
+    let documents = existing.length - photos;
+    return incoming.filter((candidate) => {
+      if (!mergeBaseAccepts(candidate)) return false;
+      if (candidate.type.startsWith('image/')) {
+        if (photos === 8) return false;
+        photos += 1;
+      } else {
+        if (documents === 2) return false;
+        documents += 1;
+      }
+      return true;
+    });
+  }
+
+  it.each(mimeCases)(
+    'agrees with merge-base at every starting quota for $extension with MIME "$mime"',
+    async ({ extension, mime }) => {
+      vi.stubGlobal('createImageBitmap', undefined);
+      const candidate = file(`candidate${extension}`, mime);
+      const second = file('next.png', 'image/png');
+      const createAssignmentFileIntents = vi.fn(async (_workspace: string, _assignment: string, input: {
+        files: { originalName: string; contentType: string }[];
+      }) => input.files.map(({ originalName, contentType }) => ({
+        id: originalName, uploadPath: originalName, contentType,
+      })));
+      const uploadAssignmentFile = vi.fn(async () => {});
+      const submitFiles = vi.fn(async () => ({}));
+      const classes = { createAssignmentFileIntents, uploadAssignmentFile, submitFiles } as never;
+      for (let photos = 0; photos <= 8; photos += 1) {
+        for (let documents = 0; documents <= 2; documents += 1) {
+          const originals = [
+            ...Array.from({ length: photos }, (_, index) => file(`photo-${index}.jpg`, 'image/jpeg')),
+            ...Array.from({ length: documents }, (_, index) => file(`document-${index}.pdf`, 'application/pdf')),
+          ];
+          const existing = collectLocalFiles([], originals);
+          const incoming = [candidate, second];
+          const accepted = mergeBaseSelection(originals, incoming);
+          const selection = collectLocalFileSelection(existing, incoming);
+          const selected = selection.files.slice(existing.length);
+          expect(selected.map(({ file }) => file)).toEqual(accepted);
+          expect(selected.map(({ previewUrl }) => Boolean(previewUrl))).toEqual(
+            accepted.map(({ type }) => type.startsWith('image/')),
+          );
+          expect(selection.rejected.map(({ name }) => name)).toEqual(
+            incoming.filter((item) => !accepted.includes(item)).map(({ name }) => name),
+          );
+
+          // Validate each candidate at the quota it saw in the picker, including rejected files.
+          const preceding = [...existing];
+          for (const item of incoming) {
+            const fromPicker = selected.find(({ file }) => file === item);
+            const kind = item.type.startsWith('image/') ? 'image' : 'file';
+            const submission = uploadAndSubmitFiles(classes, 'workspace', 'assignment', '', [
+              ...preceding, { key: item.name, file: item, kind },
+            ], 'matrix');
+            if (fromPicker) {
+              await submission;
+              expect(uploadAssignmentFile).toHaveBeenLastCalledWith(
+                item.name, expect.any(Uint8Array), item.type,
+              );
+              preceding.push(fromPicker);
+            } else {
+              await expect(submission).rejects.toMatchObject({
+                code: mergeBaseAccepts(item) ? 'ASSIGNMENT_FILE_LIMIT' : 'ASSIGNMENT_FILE_TYPE_REJECTED',
+              });
+              expect(createAssignmentFileIntents).not.toHaveBeenCalled();
+            }
+            createAssignmentFileIntents.mockClear();
+            uploadAssignmentFile.mockClear();
+          }
+          revokeUnusedAssignmentPreviews(selection.files, []);
+        }
       }
     },
   );

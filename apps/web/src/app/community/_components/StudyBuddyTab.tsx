@@ -77,11 +77,10 @@ const STYLE_LABEL: Record<WebStudyGroup['style'], string> = {
   practice: '練習式',
 };
 
-export function StudyBuddyTab(props: { schoolId: string; active?: boolean }) {
+export function StudyBuddyTab(props: { schoolId: string }) {
   const { schoolId } = props;
   const { user } = useAuth();
   const [subTab, setSubTab] = useState<SubTab>('review');
-  const [visitedGroups, setVisitedGroups] = useState(false);
 
   return (
     <div>
@@ -102,10 +101,7 @@ export function StudyBuddyTab(props: { schoolId: string; active?: boolean }) {
               role="tab"
               aria-selected={on}
               type="button"
-              onClick={() => {
-                if (k === 'group') setVisitedGroups(true);
-                setSubTab(k);
-              }}
+              onClick={() => setSubTab(k)}
               style={{
                 padding: '10px 16px',
                 background: 'transparent',
@@ -123,24 +119,19 @@ export function StudyBuddyTab(props: { schoolId: string; active?: boolean }) {
         })}
       </div>
 
-      <div hidden={subTab !== 'review'}>
+      {subTab === 'review' ? (
         <CourseReviewSection
-          key={`${schoolId}:${user?.uid ?? ''}`}
+          key={JSON.stringify([schoolId, user?.uid])}
           schoolId={schoolId}
           myUid={user?.uid ?? null}
-          active={props.active !== false && subTab === 'review'}
         />
-      </div>
-      {visitedGroups && (
-        <div hidden={subTab !== 'group'}>
-          <StudyGroupSection
-            key={`${schoolId}:${user?.uid ?? ''}`}
-            schoolId={schoolId}
-            myUid={user?.uid ?? null}
-            myName={user?.displayName ?? null}
-            active={props.active !== false && subTab === 'group'}
-          />
-        </div>
+      ) : (
+        <StudyGroupSection
+          key={JSON.stringify([schoolId, user?.uid])}
+          schoolId={schoolId}
+          myUid={user?.uid ?? null}
+          myName={user?.displayName ?? null}
+        />
       )}
 
       <p style={{ marginTop: 24, color: 'var(--muted)', fontSize: 13 }}>
@@ -155,7 +146,6 @@ export function StudyBuddyTab(props: { schoolId: string; active?: boolean }) {
 export function CourseReviewSection(props: {
   schoolId: string;
   myUid: string | null;
-  active?: boolean;
 }) {
   const { schoolId, myUid } = props;
   const [reviews, setReviews] = useState<CourseReviewDoc[]>([]);
@@ -166,7 +156,7 @@ export function CourseReviewSection(props: {
   const [formOpen, setFormOpen] = useState(false);
   const writeReviewRef = useRef<HTMLButtonElement>(null);
   const firstReviewRef = useRef<HTMLButtonElement>(null);
-  const restoreReviewFocus = useCommunityCompletionFocus(writeReviewRef, props.active !== false);
+  const restoreReviewFocus = useCommunityCompletionFocus(writeReviewRef);
 
   const load = useCallback(async (isCurrent: () => boolean) => {
     if (!schoolId) {
@@ -186,7 +176,6 @@ export function CourseReviewSection(props: {
   const { loading, loaded, error, denied, refresh } = useCommunityLoad(
     load,
     '暫時無法讀取課程評價，請確認連線後重試。',
-    props.active,
     clearDeniedData,
   );
 
@@ -311,7 +300,6 @@ export function CourseReviewSection(props: {
 
       {formOpen && (
         <ReviewModal
-          open={props.active !== false}
           schoolId={schoolId}
           myUid={myUid}
           onClose={() => setFormOpen(false)}
@@ -741,7 +729,6 @@ export function StudyGroupSection(props: {
   schoolId: string;
   myUid: string | null;
   myName: string | null;
-  active?: boolean;
 }) {
   const { schoolId, myUid, myName } = props;
   const [groups, setGroups] = useState<WebStudyGroup[]>([]);
@@ -749,7 +736,7 @@ export function StudyGroupSection(props: {
   const joinPending = useRef(new Set<string>());
   const [joinBusy, setJoinBusy] = useState(new Set<string>());
   const createGroupRef = useRef<HTMLButtonElement>(null);
-  const restoreGroupFocus = useCommunityCompletionFocus(createGroupRef, props.active !== false);
+  const restoreGroupFocus = useCommunityCompletionFocus(createGroupRef);
 
   const load = useCallback(async (isCurrent: () => boolean) => {
     if (!schoolId) {
@@ -773,7 +760,6 @@ export function StudyGroupSection(props: {
   const { loading, loaded, error, denied, refresh } = useCommunityLoad(
     load,
     '暫時無法讀取讀書會，請確認連線後重試。',
-    props.active,
     clearDeniedData,
   );
 
@@ -934,7 +920,6 @@ export function StudyGroupSection(props: {
 
       {formOpen && (
         <CreateGroupModal
-          open={props.active !== false}
           schoolId={schoolId}
           myUid={myUid}
           myName={myName}

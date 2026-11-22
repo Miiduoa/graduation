@@ -14,11 +14,11 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('./_components/FeedTab', () => ({ FeedTab: () => null }));
 vi.mock('./_components/StudyBuddyTab', () => ({
-  StudyBuddyTab: ({ active }: { active: boolean }) => {
+  StudyBuddyTab: () => {
     const [draft, setDraft] = useState('');
     return (
       <button type="button" onClick={() => setDraft('保留的草稿')}>
-        {active ? '草稿' : '已隱藏'}{draft}
+        草稿{draft}
       </button>
     );
   },
@@ -48,16 +48,15 @@ it('offers cross-campus public exchange before choosing a school without opening
   expect(privateReader).not.toHaveBeenCalled();
 });
 
-it('keeps the learning tab mounted across community tab changes', () => {
+it('unmounts the learning tab across community tab changes', () => {
   route.ready = true;
   route.tab = 'buddy';
   const view = render(<CommunityPage />);
   fireEvent.click(screen.getByRole('button', { name: '草稿' }));
   route.tab = 'feed';
   view.rerender(<CommunityPage />);
-  expect(screen.queryByRole('button', { name: '已隱藏保留的草稿' })).toBeNull();
-  expect(screen.getByText('已隱藏保留的草稿')).toBeTruthy();
+  expect(screen.queryByText('草稿保留的草稿')).toBeNull();
   route.tab = 'buddy';
   view.rerender(<CommunityPage />);
-  expect(screen.getByRole('button', { name: '草稿保留的草稿' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '草稿' })).toBeTruthy();
 });
