@@ -44,7 +44,7 @@ test.each(['nthu', 'ncnu'] as const)('the actual %s card exposes review controls
     : 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall';
   globalThis.fetch = jest.fn().mockResolvedValue({
     ok: true, headers: { get: () => null },
-    text: async () => JSON.stringify({ schoolId, sourceUrl, truncated: false, courses: [course] }),
+    text: async () => JSON.stringify({ schoolId, sourceUrl, fetchedAt: '2026-11-06T08:00:00.000Z', truncated: false, courses: [course] }),
   });
   const view = render(<PublicCourseCatalogScreen schoolId={schoolId} initialQuery={course.code} />);
   // Render the real Card and Button; the action must remain an accessible button,
@@ -55,6 +55,10 @@ test.each(['nthu', 'ncnu'] as const)('the actual %s card exposes review controls
   const saved = await loadPersonalImports(mockScope);
   expect(saved.records).toHaveLength(schoolId === 'nthu' ? 2 : 1);
   expect(saved.records.every((row) => row.schoolId === schoolId && row.courseCode === course.code)).toBe(true);
+  const university = schoolId === 'nthu' ? '國立清華大學' : '國立暨南國際大學';
+  const expectedSource = `${university}｜115學年度第1學期公開開課資料｜來源：${sourceUrl}｜` +
+    '資料擷取：2026-11-06 16:00（台灣時間；非校方更新時間）';
+  expect(saved.records.every((row) => row.source.name === expectedSource)).toBe(true);
   expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
   expect(safeNavigate).not.toHaveBeenCalled();
 });
