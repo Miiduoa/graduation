@@ -207,9 +207,10 @@ function isNonRatioColumn(header: string): boolean {
       ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
         ENGLISH_NON_RATIO_SCORE_SCALE_COLUMN.test(column)) &&
        !SCORE_COUNT_COLUMN.test(column)) ||
-       ((NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column) ||
-         ENGLISH_NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column)) &&
-        !ORDINAL_COUNT_COLUMN.test(column)) ||
+      (!describesBoundedRate &&
+       (NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column) ||
+        ENGLISH_NON_RATIO_ORDINAL_LEVEL_COLUMN.test(column)) &&
+       !ORDINAL_COUNT_COLUMN.test(column)) ||
       ((NON_RATIO_RANK_POSITION_COLUMN.test(column) ||
          ENGLISH_NON_RATIO_RANK_POSITION_COLUMN.test(column)) &&
         !RANK_COUNT_COLUMN.test(column))) return true;

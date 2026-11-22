@@ -11,6 +11,8 @@ export type StudyEvidenceLocation = {
   occurrences: number;
 };
 
+// Myanmar tall and regular AA have grapheme break class Other.
+const myanmarIndependentSpacingMarks = /[\u102b\u102c]/u;
 const graphemeContinuation = /[\p{M}\p{Grapheme_Extend}\p{Emoji_Modifier}\u0e33\u0eb3\u200d]/u;
 const graphemeControl = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 const pictographic = /\p{Extended_Pictographic}/u;
@@ -49,7 +51,7 @@ function fallbackBoundaries(source: string): Uint8Array {
   let followsIndicLinker = false;
   for (const current of source) {
     const regional = regionalIndicator.test(current);
-    const continuesGrapheme = graphemeContinuation.test(current);
+    const continuesGrapheme = graphemeContinuation.test(current) && !myanmarIndependentSpacingMarks.test(current);
     const isControl = graphemeControl.test(current) &&
       !continuesGrapheme && !graphemePrepend.test(current);
     const isPictographic = pictographic.test(current);
@@ -169,11 +171,9 @@ export function locateStudyEvidence(source: string, quote: string, occurrence = 
   // when identical bytes occur in the PDF. Keep real words, maths and emoji
   // unchanged, including any format characters attached to them.
   if (!source || !hasVisibleStudyContent(quote, { ignorePunctuation: true })) return null;
-  // Explicit Unicode bidi marks, embeddings, overrides and isolates can make
-  // a quote render in a different reading order from its literal source bytes.
-  // Reject those controls only in the citation, not the original document.
-  // Ordinary RTL letters, full emoji and ZWJ sequences remain valid.
-  if (/\p{Bidi_Control}/u.test(quote)) return null;
+  // Keep direction marks attached to readable text, while excluding controls
+  // that explicitly open or close embeddings, overrides or isolates.
+  if (/[\u202a-\u202e\u2066-\u2069]/u.test(quote)) return null;
   for (let index = 0; index < quote.length; index++) {
     const unit = quote.charCodeAt(index);
     if (unit >= 0xd800 && unit <= 0xdbff) {

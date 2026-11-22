@@ -1157,6 +1157,14 @@ it('reads the exact source numeric spelling, rather than inferring a percentage'
     .toEqual(['3.00；本欄最大值 3.00', '2.50；本欄最大值 3.00']);
 });
 
+it('charts risk level percentages against a fixed 100% scale', () => {
+  const material = ['| 風險 | 風險等級百分比 |', '| --- | --- |', '| 低 | 25% |', '| 高 | 75% |'].join('\n');
+  const { container } = render(<StudySourceTables text={material} />);
+  expect(screen.getByText('展開第 2 欄「風險等級百分比」的原文百分比（100% 滿格）')).toBeTruthy();
+  expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+    .toEqual([[25, 100], [75, 100]]);
+});
+
 it('visualizes exact source percentages on a fixed 100% scale without changing source cells', () => {
   const material = [
     '| 練習 | 完成率 |',

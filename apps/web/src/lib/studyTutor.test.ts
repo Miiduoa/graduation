@@ -101,7 +101,7 @@ describe('reject unreadable model citations before saving a lesson', () => {
       .toThrow('AI 步驟引句無可讀的教材內容');
   });
 
-  it.each(['x²+y²', '👩‍💻', '#️⃣', 'العربية', 'שלום', 'e\u0301', '主鍵\u200b唯一'])(
+  it.each(['x²+y²', '👩‍💻', '#️⃣', 'العربية', 'שלום', 'e\u0301', '主鍵\u200b唯一', '主\u200e鍵'])(
     'preserves valid visible source quotes byte-for-byte (%s)', (quote) => {
       const original = { ...passage, text: '前' + quote + '後' };
       const reply = parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original);

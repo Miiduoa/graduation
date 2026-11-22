@@ -57,7 +57,7 @@ function nonempty(value: unknown, max: number): value is string {
  * the original licensed material is never edited.
  */
 function hasReadableTutorCitation(quote: string): boolean {
-  if (/\p{Bidi_Control}/u.test(quote)) return false;
+  if (/[\u202a-\u202e\u2066-\u2069]/u.test(quote)) return false;
   const hasContent = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\p{P}\u2800\ufff9-\ufffb]/u.test(quote) ||
     /[0-9#*]\ufe0f?\u20e3/u.test(quote);
   if (!hasContent) return false;
@@ -348,7 +348,7 @@ const stepLimits = {
   sourceQuote: 400,
 } as const;
 
-function readTutorSteps(value: unknown, passage: StudyPassage): StudyTutorStep[] {
+function readTutorSteps(value: unknown, passage: StudyPassage, saved: boolean): StudyTutorStep[] {
   const invalid = () => new Error('AI 分步講解不完整或無法對照本段原文，請重試。');
   if (!Array.isArray(value) || value.length < 2 || value.length > 4) throw invalid();
   const keys = Object.keys(stepLimits) as Array<keyof typeof stepLimits>;
@@ -362,7 +362,7 @@ function readTutorSteps(value: unknown, passage: StudyPassage): StudyTutorStep[]
     const parsed = data as StudyTutorStep;
     if (!passage.text.includes(parsed.sourceQuote))
       throw new Error('AI 步驟引用的句子不在這段原文中，這次講解未採用。請重試。');
-    if (!hasReadableTutorCitation(parsed.sourceQuote))
+    if (!saved && !hasReadableTutorCitation(parsed.sourceQuote))
       throw new Error('AI 步驟引句無可讀的教材內容或含方向控制字元，這次講解未採用。請重試。');
     if (hasFormula && !parsed.sourceQuote.includes(parsed.formula!))
       throw new Error('AI 步驟公式不是該步引句的原文，這次講解未採用。請重試。');
@@ -377,6 +377,15 @@ function readTutorSteps(value: unknown, passage: StudyPassage): StudyTutorStep[]
 
 /** A matching quotation establishes provenance, not the correctness of the explanation. */
 export function parseTutorExplanation(raw: string, passage: StudyPassage): TutorExplanation {
+  return readTutorExplanation(raw, passage, false);
+}
+
+/** Backups retain the original exact-match citation rules. */
+export function parseSavedTutorExplanation(raw: string, passage: StudyPassage): TutorExplanation {
+  return readTutorExplanation(raw, passage, true);
+}
+
+function readTutorExplanation(raw: string, passage: StudyPassage, saved: boolean): TutorExplanation {
   validatePassage(passage);
   const invalid = () => new Error('AI 回覆不完整或無法對照本段原文，請重試。');
   if (typeof raw !== 'string' || raw.length > 8_192) throw invalid();
@@ -398,7 +407,7 @@ export function parseTutorExplanation(raw: string, passage: StudyPassage): Tutor
   const explanation = data as TutorExplanation;
   if (!passage.text.includes(explanation.sourceQuote))
     throw new Error('AI 引用的句子不在這段原文中，這次講解未採用。請重試。');
-  if (!hasReadableTutorCitation(explanation.sourceQuote))
+  if (!saved && !hasReadableTutorCitation(explanation.sourceQuote))
     throw new Error('AI 引句無可讀的教材內容或含方向控制字元，這次講解未採用。請重試。');
   return {
     title: explanation.title.trim(),
@@ -406,6 +415,6 @@ export function parseTutorExplanation(raw: string, passage: StudyPassage): Tutor
     sourceQuote: explanation.sourceQuote,
     question: explanation.question.trim(),
     answer: explanation.answer.trim(),
-    ...(hasSteps ? { steps: readTutorSteps(data.steps, passage) } : {}),
+    ...(hasSteps ? { steps: readTutorSteps(data.steps, passage, saved) } : {}),
   };
 }

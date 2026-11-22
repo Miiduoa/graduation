@@ -100,7 +100,7 @@ describe('exact source-to-lesson evidence', () => {
     // Every quote is byte-identical to source; visually it may render in a
     // different order or suppress/isolate part of the surrounding citation.
     const controls = [
-      '\u061c', '\u200e', '\u200f', '\u202a', '\u202b', '\u202c',
+      '\u202a', '\u202b', '\u202c',
       '\u202d', '\u202e', '\u2066', '\u2067', '\u2068', '\u2069',
     ];
     for (const control of controls) {
@@ -183,6 +183,21 @@ describe('exact source-to-lesson evidence', () => {
     }
     for (const quote of ['#', '*', '# *']) {
       expect(locateStudyEvidence(source, quote)).toBeNull();
+    }
+  });
+
+  it.each([true, false])('locates readable Myanmar and direction-marked citations (Segmenter: %s)', (native) => {
+    if (!native) vi.stubGlobal('Intl', { Segmenter: undefined });
+    try {
+      expect(locateStudyEvidence('ကါ', 'က')).toEqual({
+        before: '', quote: 'က', after: 'ါ', occurrences: 1,
+      });
+      expect(locateStudyEvidence('前甲\u200e乙後', '甲\u200e乙')).toEqual({
+        before: '前', quote: '甲\u200e乙', after: '後', occurrences: 1,
+      });
+      expect(locateStudyEvidence('前甲\u200e乙後', '\u200e')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 

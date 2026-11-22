@@ -160,33 +160,40 @@ describe('versioned independent review checkpoint', () => {
     }), scope)).not.toThrow();
   });
 
-  it('restores a legacy reading reveal embedded in a v1 practice checkpoint', () => {
+  it.each(['主\u200e鍵', '\ud83d', '\u200b'])('round-trips a legacy citation and reveal embedded in a v1 practice checkpoint (%#)', (quote) => {
     const raw = serializeStudyPracticeCheckpoint(checkpoint());
     const restored = parseStudyPracticeCheckpoint(tamper(raw, (item) => {
-      const lesson = item.progress.passages['0:0'].modes.understand.lessons[0];
+      item.progress.source.sections[0].text += quote;
+      item.progress.passageLengths[0][0] += quote.length;
+      const memory = item.progress.passages['0:0'];
+      memory.modes.understand.question = '保留的追問草稿  ';
+      const lesson = memory.modes.understand.lessons[0];
+      lesson.response.sourceQuote = quote;
       lesson.attempt = '\u200b';
       lesson.answerVisible = true;
     }), scope);
     expect(restored.progress.passages['0:0'].modes.understand.lessons[0]).toMatchObject({
-      attempt: '\u200b', answerVisible: false,
+      attempt: '\u200b', answerVisible: true, response: { sourceQuote: quote },
     });
     expect(restored.progress.passages['0:0'].note).toBe('原本的閱讀筆記');
-    expect(restored.round).toEqual(parseStudyPracticeCheckpoint(raw, scope).round);
+    expect(restored.progress.passages['0:0'].modes.understand.question).toBe('保留的追問草稿  ');
+    expect(restored.round.responses).toEqual(parseStudyPracticeCheckpoint(raw, scope).round.responses);
     expect(parseStudyPracticeCheckpoint(serializeStudyPracticeCheckpoint(restored), scope)).toEqual(restored);
   });
 
-  it('preserves invisible drafts verbatim and relocks their reference answers', () => {
+  it('preserves invisible drafts and their saved reveal verbatim', () => {
     const raw = serializeStudyPracticeCheckpoint(checkpoint());
-    for (const invisible of ['', '\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f', '\ufff9', '\ufffa', '\ufffb']) {
+    for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f', '\ufff9', '\ufffa', '\ufffb']) {
       const resumed = parseStudyPracticeCheckpoint(tamper(raw, (item) => {
         const response = item.practice.responses[item.practice.cardIds[1]];
         response.attempt = invisible;
         response.answerVisible = true;
       }), scope);
       expect(resumed.round.responses[resumed.round.cards[1].id]).toMatchObject({
-        attempt: invisible, answerVisible: false, outcome: null,
+        attempt: invisible, answerVisible: true, outcome: null,
       });
       expect(resumed.round.responses[resumed.round.cards[0].id].outcome).toBe('again');
+      expect(parseStudyPracticeCheckpoint(serializeStudyPracticeCheckpoint(resumed), scope)).toEqual(resumed);
     }
   });
 
@@ -201,7 +208,7 @@ describe('versioned independent review checkpoint', () => {
           response.answerVisible = answerVisible;
         }), scope);
         expect(restored.round.responses[restored.round.cards[0].id]).toMatchObject({
-          attempt, answerVisible: false, outcome: 'again',
+          attempt, answerVisible, outcome: 'again',
         });
       }
     }

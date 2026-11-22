@@ -253,7 +253,7 @@ describe('explicit local study generation', () => {
     // The punctuation is literally in the source, so a substring-only check
     // would incorrectly treat it as meaningful evidence for the whole answer.
     worker.emit({ type: 'result', raw: JSON.stringify({ ...lesson(), sourceQuote: '。' }) });
-    await expect(pending).rejects.toThrow('引句只有標點或符號');
+    await expect(pending).rejects.toThrow('引句無可讀的教材內容');
     expect(worker.terminate).toHaveBeenCalledOnce();
     expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
 
@@ -279,7 +279,7 @@ describe('explicit local study generation', () => {
         ],
       }),
     });
-    await expect(pending).rejects.toThrow('引句只有標點或符號');
+    await expect(pending).rejects.toThrow('引句無可讀的教材內容');
     expect(lastWorker().terminate).toHaveBeenCalledOnce();
   });
 

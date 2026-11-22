@@ -51,6 +51,17 @@ describe('course study note downloads', () => {
     expect(JSON.stringify({ pdf, memories })).toBe(before);
   });
 
+  it.each([['ကါ', 'က'], ['前甲\u200e乙後', '甲\u200e乙']])(
+    'exports a readable citation at its exact source location (%#)', (text, quote) => {
+      const material = studySourceFromText({ id: 'notes', title: '教材', text });
+      const memory = withLesson();
+      memory.modes.understand.lessons[0].response.sourceQuote = quote;
+      const notes = buildCourseStudyNotes('課程', material, { '0:0': memory });
+      expect(notes).toContain('引用原文：\n' + quote);
+      expect(notes).not.toContain('無法在本段逐字定位');
+    },
+  );
+
   it('does not treat unsent questions or empty notes as completed learning', () => {
     const memory = emptyStudyPassage();
     memory.note = ' \n ';
