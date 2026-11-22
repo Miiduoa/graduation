@@ -13,20 +13,32 @@ const polite = '(?:(?:請|麻煩你?|幫我|替我|我想){0,3})';
 const latest = '(?:我(?:的)?)?(?:最近|最新)(?:的)?(?:一筆|一張)?(?:的)?訂單';
 const pickupTime = '(?:預定)?取餐時間';
 const latestPickupTime = latest + '的?' + pickupTime;
-const destination = '(?:' + placement + ')(?:我(?:的)?)?(?:個人)?(?:行事曆|日曆|行程)(?:中|裡|內)?';
+const calendarLocation = '(?:我(?:的)?)?(?:個人)?(?:行事曆|日曆|行程)(?:上|中|裡|內)?';
+const destination = '(?:' + placement + ')' + calendarLocation;
 const readPrompt = '(?:' + polite + '(?:確認|查詢|查看|查|知道|詢問|問)(?:一下)?)';
-const order = '(?:(?!' + pickupVerb.source + ')[^,;、。.!?]){0,80}訂單';
-const readSeparator = '[,;、。.!?]+';
-const calendarEntry = '(?:' + destination + '|記在(?:我(?:的)?)?(?:個人)?(?:行事曆|日曆)(?:上|中|裡|內)?)';
+const order = '(?:(?!' + pickupVerb.source +
+  '|取消|撤銷|改|變更|刪除|更新|下單|付款|退款|不要|不用|如果|假設|翻譯)[^,;、。.!?]){0,80}訂單';
+const orderLookup = new RegExp(
+  '^' + readPrompt + '?' + order + '(?:的?' + pickupTime +
+    '(?:是?(?:幾點|什麼時候)(?:啊|呢|嗎)?)?)?[?]*$',
+);
+const calendarEntry = '(?:' + placement + '|記在)' + calendarLocation;
+const calendarEntryPattern = new RegExp(calendarEntry);
 const calendarStatus = new RegExp(
-  '^(?:' + readPrompt + '?' + order + '(?:的?' + pickupTime + '(?:是?(?:幾點|什麼時候)(?:啊|呢|嗎)?)?)?' +
-    readSeparator + '(?:也|順便|另外)?)?' +
-    readPrompt + '?(?:(?:' + order + '的?)?' + pickupTime + ')?' +
+  '^' + readPrompt + '?(?:(?:' + order + '的?)?' + pickupTime + ')?' +
     '(?:(?:有沒有|有無|是否|是不是)(?:已經|已)?' + calendarEntry + '(?:了)?(?:嗎|呢)?|' +
     '(?:已經|已|有)?' + calendarEntry + '(?:了嗎|嗎|了沒|沒有)|' +
-    '(?:已經|已)' + calendarEntry + '(?:了|呢)?(?=[?])|' +
-    calendarEntry + '(?:了|呢)(?=[?]))[。.!?]*$',
+    '(?:已經|已|有)' + calendarEntry + '(?:了|呢)?(?=[?])|' +
+    calendarEntry + '(?:了|呢)(?=[?]))[?]*$',
 );
+
+function isReadOnlyPickupQuestion(text: string): boolean {
+  const clauses = text.split(/[;,、。.!]+|(?<=\?)(?=[^?])/).filter(Boolean);
+  if (clauses.length === 1) return calendarStatus.test(clauses[0]) || orderLookup.test(clauses[0]);
+  if (clauses.length !== 2) return false;
+  const [lookup, status] = clauses;
+  return orderLookup.test(lookup) && calendarStatus.test(status.replace(/^(?:也|順便|另外|再)/, ''));
+}
 const hours: Readonly<Record<string, number>> = {
   半小時: 30,
   半個小時: 30,
@@ -63,14 +75,14 @@ export function parseAssistantFoodPickupIntent(question: string): AssistantFoodP
   if (typeof question !== 'string') return null;
   const text = question.normalize('NFKC').trim();
   if (!/取餐/.test(text) || !/訂單|取餐時間/.test(text) || !/行事曆|日曆|行程/.test(text) ||
-      !pickupVerb.test(text)) return null;
+      !(pickupVerb.test(text) || calendarEntryPattern.test(text))) return null;
   // A user-specified appointment can mention order work in its title. Preserve
   // the complete existing appointment grammar, including its invalid-time help.
   if (parseAssistantCalendarIntent(text)) return null;
   const invalid = (): AssistantFoodPickupIntent => ({ kind: 'invalid', message: guidance });
   if (text.length > 1000 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}「」『』“”"'`]/u.test(text)) return invalid();
   const compact = text.replace(/\s+/g, '');
-  if (calendarStatus.test(compact)) return null;
+  if (isReadOnlyPickupQuestion(compact)) return null;
   if (/不要|不用|不必|無須|不需要|不想|先別|別幫|不是|翻譯|例句|範例|假設|如果/.test(text)) return invalid();
   const match = direct.exec(compact) || readThenPlan.exec(compact);
   if (!match) return invalid();
