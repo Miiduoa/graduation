@@ -225,44 +225,90 @@ it.each(['same', 'schoolOwner', 'platformOwner', 'campus'] as const)(
   },
 );
 
+// Merge-base kept a single unscoped menu draft in sessionStorage. In this tab,
+// the first complete identity (A or B) can take an unconfirmed draft. Once
+// bound, it survives rechecks of that identity and is cleared on a switch or logout.
 it.each([
-  ['campus', 'draft'],
-  ['schoolOwner', 'draft'],
-  ['platformOwner', 'draft'],
-  ['campus', 'confirmation'],
-  ['schoolOwner', 'confirmation'],
-  ['platformOwner', 'confirmation'],
-] as const)('does not bind a new draft with %s missing at %s', async (field, missingAt) => {
+  ['campus', 'a'],
+  ['schoolOwner', 'a'],
+  ['platformOwner', 'a'],
+  ['platformOwner', 'b'],
+] as const)('binds a draft missing %s to its first confirmed account %s', async (field, account) => {
   const menu = await loadDocument();
-  const complete = { campus: 'pu', schoolOwner: 'school-a', platformOwner: 'platform-a' };
-  const partial = { ...complete, [field]: undefined };
-  menu.setMenuReturnScope(undefined, missingAt === 'draft' ? partial : complete);
+  const partial = { campus: 'pu', schoolOwner: 'school-a', platformOwner: 'platform-a', [field]: undefined };
+  menu.setMenuReturnScope(undefined, partial);
   menu.rememberMenuReturn(destination, { ...draft, expanded: [...draft.expanded] });
   const originState = window.history.state;
   window.history.pushState({}, '', destination);
-  // Learning the field later during verification cannot change the original binding.
-  menu.setMenuReturnScope(undefined, complete);
-  menu.setMenuReturnScope(draft.scope, missingAt === 'confirmation' ? partial : complete);
+
+  const reloaded = await loadDocument();
+  reloaded.setMenuReturnScope(undefined, partial);
   backToOrigin(originState);
-  expect(menu.getMenuReturn()).toBeNull();
-  expect(sessionStorage.length).toBe(0);
+  const pending = reloaded.getMenuReturn()!;
+  expect(pending.provisionalBoundary).toEqual({});
+  expect(reloaded.consumeMenuReturn(pending, draft.scope)).toBe(false);
+
+  const scope = `confirmed-${account}`;
+  reloaded.setMenuReturnScope(scope, {
+    campus: 'pu',
+    schoolOwner: `school-${account}`,
+    platformOwner: `platform-${account}`,
+  });
+  expect(reloaded.consumeMenuReturn(pending, scope)).toBe(true);
+  expect(pending.scope).toBe(scope);
+  expect(pending.provisionalBoundary).toBeUndefined();
+  reloaded.setMenuReturnScope('next-account');
+  backToOrigin(originState);
+  expect(reloaded.getMenuReturn()).toBeNull();
 });
 
-it('does not carry the public legacy exception over to newly entered text', async () => {
+it.each(['campus', 'schoolOwner', 'platformOwner'] as const)(
+  'protects a bound draft against an overwrite with %s missing after reload',
+  async (field) => {
+    const { originState } = await startJourney();
+    const menu = await loadDocument();
+    const complete = { campus: 'pu', schoolOwner: 'school-a', platformOwner: 'platform-a' };
+    menu.setMenuReturnScope(undefined, { ...complete, [field]: undefined });
+    backToOrigin(originState);
+    menu.rememberMenuReturn(destination, { ...draft, query: 'new text', expanded: [] });
+    expect(window.history.state).toEqual(originState);
+    menu.setMenuReturnScope(draft.scope, complete);
+    const pending = menu.getMenuReturn()!;
+    expect(pending).toMatchObject(draft);
+    expect(menu.consumeMenuReturn(pending, draft.scope)).toBe(true);
+  },
+);
+
+it('protects a bound legacy draft before it has a history marker', async () => {
+  const menu = await loadDocument();
+  const key = 'campus.directory.search.v1';
+  const legacy = JSON.stringify({
+    menu: { ...draft, path: '/map', destination, open: true },
+  });
+  sessionStorage.setItem(key, legacy);
+  menu.setMenuReturnScope(undefined, { campus: 'pu' });
+  menu.rememberMenuReturn(destination, { ...draft, query: 'new text', expanded: [] });
+  expect(window.history.state).not.toHaveProperty(menu.MENU_RETURN_STATE_KEY);
+  expect(sessionStorage.getItem(key)).toBe(legacy);
+});
+
+it('waits for confirmation before restoring text entered after a public legacy restore', async () => {
   const menu = await loadDocument();
   menu.setMenuReturnScope(undefined, { campus: 'pu', schoolOwner: 'school-a' });
   menu.rememberMenuReturn(destination, { ...draft, expanded: [...draft.expanded] }, true);
   menu.rememberMenuReturn(destination, { ...draft, query: 'new text', expanded: [] });
   const originState = window.history.state;
   window.history.pushState({}, '', destination);
-  menu.setMenuReturnScope('different-account', {
+  backToOrigin(originState);
+  const pending = menu.getMenuReturn()!;
+  expect(menu.consumeMenuReturn(pending, draft.scope)).toBe(false);
+  menu.setMenuReturnScope('first-account', {
     campus: 'pu',
     schoolOwner: 'school-a',
     platformOwner: 'platform-b',
   });
-  backToOrigin(originState);
-  expect(menu.getMenuReturn()).toBeNull();
-  expect(sessionStorage.length).toBe(0);
+  expect(pending.query).toBe('new text');
+  expect(menu.consumeMenuReturn(pending, 'first-account')).toBe(true);
 });
 
 it.each(['same', 'different'] as const)(

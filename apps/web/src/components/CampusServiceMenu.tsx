@@ -281,7 +281,6 @@ export function CampusServiceMenu() {
       query,
       category,
       expanded: expandedDirectorySections(results.current),
-      sourceCampus: { id: sourceCampus, explicit: context !== '' },
     });
     closeMenu();
   }

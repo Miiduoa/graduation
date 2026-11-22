@@ -1191,12 +1191,15 @@ it.each([
   },
 );
 
-it.each(['first confirmation', 'same account', 'logout then different account'] as const)(
+// A fresh tab may hand an unconfirmed draft to either first account, as in
+// merge-base. A known account survives a temporary failure. Logout clears drafts
+// even when the next login is to the same account.
+it.each(['first A', 'first B', 'same account', 'logout then A', 'logout then B'] as const)(
   'checks a draft typed during failed platform verification on %s',
   (outcome) => {
     const accountA = { platformAccountId: 'platform-a', isPlatformOperator: false };
-    auth.session = outcome === 'first confirmation' ? null : accountA;
-    auth.error = outcome === 'first confirmation' ? 'Session unavailable' : '';
+    auth.session = outcome.startsWith('first') ? null : accountA;
+    auth.error = outcome.startsWith('first') ? 'Session unavailable' : '';
     const view = render(<CampusServiceMenu />);
     auth.session = null;
     auth.error = 'Session unavailable';
@@ -1208,18 +1211,19 @@ it.each(['first confirmation', 'same account', 'logout then different account'] 
     expect(origin.state).toHaveProperty(MENU_RETURN_STATE_KEY);
     visitMenuDestination('/library');
     view.rerender(<CampusServiceMenu />);
-    if (outcome === 'logout then different account') {
+    if (outcome.startsWith('logout')) {
       auth.pendingLogout = true;
       view.rerender(<CampusServiceMenu />);
       auth.pendingLogout = false;
     }
     auth.error = '';
-    auth.session = outcome === 'same account' ? accountA : { ...accountA, platformAccountId: 'platform-b' };
+    auth.session = outcome.endsWith('B') ? { ...accountA, platformAccountId: 'platform-b' } : accountA;
     view.rerender(<CampusServiceMenu />);
     returnToMenuOrigin(origin);
     view.rerender(<CampusServiceMenu />);
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(outcome === 'same account');
-    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(outcome === 'same account' ? '借書' : '');
+    const restored = !outcome.startsWith('logout');
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(restored);
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(restored ? '借書' : '');
   },
 );
 
@@ -1681,7 +1685,8 @@ it.each(['account', 'campus', 'temporary failure', 'different account', 'differe
 it.each([
   ['account', false],
   ['campus', false],
-  ['different campus', false],
+  ['first campus differs from fallback', false],
+  ['catalog error', false],
   ['account', true],
 ] as const)(
   'saves a return before %s confirmation (dismiss before confirmation: %s)',
@@ -1689,7 +1694,9 @@ it.each([
     const school = { id: 'pu', name: '靜宜大學' };
     auth.loading = pending === 'account';
     if (pending !== 'account') {
-      selection.current = { loading: true, catalogStatus: 'loading', selectedSchool: null };
+      selection.current = pending === 'catalog error'
+        ? { loading: false, catalogStatus: 'error', selectedSchool: null }
+        : { loading: true, catalogStatus: 'loading', selectedSchool: null };
     }
     const view = render(<CampusServiceMenu />);
     fireEvent.click(screen.getByText('所有服務'));
@@ -1719,24 +1726,21 @@ it.each([
     else selection.current = {
       loading: false,
       catalogStatus: 'ready',
-      selectedSchool: pending === 'campus' ? school : { id: 'nthu', name: '清華大學' },
+      selectedSchool: pending === 'first campus differs from fallback' ? { id: 'nthu', name: '清華大學' } : school,
     };
     view.rerender(<CampusServiceMenu />);
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(pending === 'campus');
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(!dismiss);
     if (dismiss) {
       expect(window.history.state).not.toHaveProperty(MENU_RETURN_STATE_KEY);
       expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
       return;
     }
-    if (pending !== 'campus') {
-      expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
-      expect(sessionStorage.getItem('campus.menu.return.v1')).toBeNull();
-      return;
-    }
     expect(
       screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed'),
     ).toBe('true');
-    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
-    expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(pending === 'account' ? '教材' : '');
+    if (pending !== 'account') {
+      expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
+    }
   },
 );

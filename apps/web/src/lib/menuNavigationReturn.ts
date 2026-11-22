@@ -1,6 +1,10 @@
 import { sha256 } from 'js-sha256';
 import { SERVICE_CATEGORIES, type ServiceCategory } from './campusServices';
-import { forgetDirectorySearch, internalSitePath } from './campusDirectorySearch';
+import {
+  forgetDirectorySearch,
+  internalSitePath,
+  restoreDirectorySearch,
+} from './campusDirectorySearch';
 
 export const MENU_RETURN_STATE_KEY = '__campusServiceMenuReturn';
 const ACKNOWLEDGED_STATE_KEY = '__campusServiceMenuReturnAcknowledged';
@@ -29,12 +33,6 @@ function boundaryChanged(previous: MenuReturnBoundary, next: MenuReturnBoundary)
   return boundaryFields.some(
     (field) =>
       previous[field] !== undefined && next[field] !== undefined && previous[field] !== next[field],
-  );
-}
-
-function sameBoundary(previous: MenuReturnBoundary, next: MenuReturnBoundary) {
-  return boundaryFields.every(
-    (field) => previous[field] !== undefined && previous[field] === next[field],
   );
 }
 
@@ -199,7 +197,8 @@ export function setMenuReturnScope(
   observeWindow();
   const changed =
     scope === null ||
-    (!!boundary && !!lastBoundary && boundaryChanged(lastBoundary, boundary)) ||
+    (lastConfirmedScope !== undefined &&
+      !!boundary && !!lastBoundary && boundaryChanged(lastBoundary, boundary)) ||
     (typeof scope === 'string' && lastConfirmedScope !== undefined && lastConfirmedScope !== scope);
   const previousScope = activeScope;
   activeScope = scope;
@@ -224,18 +223,8 @@ export function setMenuReturnScope(
       const previous = snapshot.provisionalBoundary;
       if (
         previous &&
-        boundary &&
-        snapshot.publicLegacy &&
-        !boundaryChanged(previous, boundary)
-      ) {
-        // Public legacy drafts remain public, with the confirmed boundary as a guard.
-        snapshot.provisionalBoundary = boundary;
-      } else if (
-        previous &&
-        boundary &&
-        (snapshot.legacyScope !== undefined
-          ? snapshot.legacyScope === scope && !boundaryChanged(previous, boundary)
-          : sameBoundary(previous, boundary))
+        (snapshot.legacyScope === undefined || snapshot.legacyScope === scope) &&
+        (!boundary || !boundaryChanged(previous, boundary))
       ) {
         snapshot.scope = scope;
         delete snapshot.provisionalBoundary;
@@ -258,6 +247,12 @@ export function setMenuReturnScope(
       const previous = snapshot.provisionalBoundary;
       if (!previous) continue;
       if (boundaryChanged(previous, lastBoundary)) {
+        if (
+          (snapshot.legacyScope !== undefined || snapshot.publicLegacy) &&
+          window.history.state?.[ACKNOWLEDGED_STATE_KEY] === token
+        ) {
+          invalidatedRestoredDraft = true;
+        }
         snapshots.delete(token);
         updated = true;
       } else if ((snapshot.publicLegacy || snapshot.legacyScope !== undefined) && boundaryFields.some(
@@ -304,12 +299,7 @@ export function discardMenuReturn() {
 
 export function rememberMenuReturn(
   destination: string,
-  {
-    sourceCampus,
-    ...draft
-  }: Pick<MenuNavigationReturn, 'scope' | 'query' | 'category' | 'expanded' | 'open'> & {
-    sourceCampus?: { id: string; explicit: boolean };
-  },
+  draft: Pick<MenuNavigationReturn, 'scope' | 'query' | 'category' | 'expanded' | 'open'>,
   alreadyRestored = false,
   legacyScope?: string,
 ) {
@@ -325,9 +315,19 @@ export function rememberMenuReturn(
   loadSnapshots();
   const state = window.history.state;
   const previousToken = marker(state);
-  const boundLegacyScope =
-    legacyScope ?? (previousToken ? snapshots.get(previousToken)?.legacyScope : undefined);
-  const campus = sourceCampus?.explicit ? sourceCampus.id : lastBoundary?.campus ?? sourceCampus?.id;
+  const previous = previousToken ? snapshots.get(previousToken) : undefined;
+  const legacy = activeScope === undefined && !alreadyRestored
+    ? restoreDirectorySearch('menu', window.location.pathname)
+    : null;
+  // Incomplete identity cannot replace a draft already bound to a confirmed scope.
+  if (
+    activeScope === undefined &&
+    ((previous && (previous.provisionalBoundary === undefined || previous.legacyScope !== undefined)) ||
+      legacy?.scope !== undefined)
+  ) return;
+  // A fresh draft can be claimed on first confirmation, as with the old per-tab draft.
+  // Retain the known boundary when a previously confirmed identity is being rechecked.
+  const provisionalBoundary = alreadyRestored || lastConfirmedScope !== undefined ? { ...lastBoundary } : {};
   const token = window.crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${++sequence}`;
   const snapshot: MenuNavigationReturn = {
     ...draft,
@@ -335,11 +335,9 @@ export function rememberMenuReturn(
     urlDigest: returnUrlDigest(token, url),
     query: draft.query.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, 100),
     expanded: [...draft.expanded],
-    ...(activeScope === undefined
-      ? { provisionalBoundary: { ...lastBoundary, campus } }
-      : {}),
-    ...(activeScope === undefined && boundLegacyScope !== undefined
-      ? { legacyScope: boundLegacyScope }
+    ...(activeScope === undefined ? { provisionalBoundary } : {}),
+    ...(activeScope === undefined && legacyScope !== undefined
+      ? { legacyScope }
       : activeScope === undefined && alreadyRestored ? { publicLegacy: true } : {}),
   };
   // Keep the old snapshot until both the storage write and the history update succeed.
@@ -363,7 +361,7 @@ export function rememberMenuReturn(
   snapshots.clear();
   for (const [key, value] of staged) snapshots.set(key, value);
   if (replacedPrevious) saveSnapshots();
-  forgetDirectorySearch('menu');
+  if (alreadyRestored || activeScope !== undefined || legacy) forgetDirectorySearch('menu');
   publish(null);
 }
 
@@ -374,12 +372,8 @@ export function consumeMenuReturn(snapshot: MenuNavigationReturn, scope: string)
       (snapshot.legacyScope !== undefined && matchesKnownMenuReturnScope(snapshot.legacyScope)));
   if (typeof activeScope !== 'string' && !unverifiedLegacy) return false;
   loadSnapshots();
-  const confirmedPublicLegacy =
-    snapshot.publicLegacy && snapshot.provisionalBoundary && lastBoundary &&
-    sameBoundary(snapshot.provisionalBoundary, lastBoundary);
   const confirmedDraft =
-    activeScope === scope &&
-    (confirmedPublicLegacy || (snapshot.provisionalBoundary === undefined && snapshot.scope === scope));
+    activeScope === scope && snapshot.provisionalBoundary === undefined && snapshot.scope === scope;
   if (
     pending !== snapshot ||
     snapshots.get(snapshot.token) !== snapshot ||
