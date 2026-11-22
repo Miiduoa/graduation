@@ -5692,6 +5692,7 @@ describe('protected attendance records', () => {
         ['alice', 'student'], ['bob', 'student'], ['teacher', 'instructor'],
         ['owner', 'owner'], ['admin', 'admin'], ['removed', 'instructor', 'inactive'],
       ]) {
+        await db.doc(`users/${uid}`).set(campusBoundProfile('tw-demo-uni'));
         await db.doc(`schools/tw-demo-uni/members/${uid}`).set({ role: 'student', status });
         await group.collection('members').doc(uid).set({ role, status });
       }
@@ -5750,6 +5751,69 @@ describe('protected attendance records', () => {
     }
     await assertFails(group('admin').collection('liveSessionSecrets').doc('current').get());
     await assertFails(group('removed').collection('liveSessionSecrets').doc('current').get());
+  });
+
+  test('transferred staff cannot replay attendance QR secrets, private roster or correction logs', async () => {
+    await seedAttendance();
+    await seedFirestore((db) => db.doc('groups/attendance-class/attendanceSessions/current/attendanceCorrections/rev-1').set({
+      studentUid: 'alice', teacherUid: 'teacher', reason: 'Synthetic correction',
+    }));
+    const teacher = group('teacher');
+    const owner = group('owner');
+    const admin = group('admin');
+    const alice = group('alice');
+    const secret = teacher.collection('liveSessionSecrets').doc('current');
+    const roster = teacher.collection('attendanceSessions').doc('current').collection('attendanceRecords');
+    const correction = teacher.collection('attendanceSessions').doc('current').collection('attendanceCorrections').doc('rev-1');
+    async function expectStaffAllowed() {
+      await assertSucceeds(secret.get({ source: 'server' }));
+      await assertSucceeds(roster.doc('alice').get({ source: 'server' }));
+      await assertSucceeds(roster.get());
+      await assertSucceeds(correction.get({ source: 'server' }));
+    }
+    async function expectStaffDenied() {
+      await assertFails(secret.get({ source: 'server' }));
+      await assertFails(teacher.collection('liveSessionSecrets').get());
+      await assertFails(roster.doc('alice').get({ source: 'server' }));
+      await assertFails(roster.get());
+      await assertFails(correction.get({ source: 'server' }));
+    }
+
+    await expectStaffAllowed();
+    await assertSucceeds(owner.collection('liveSessionSecrets').doc('current').get());
+    await assertSucceeds(admin.collection('attendanceSessions').doc('current').collection('attendanceRecords').get());
+    await assertFails(admin.collection('liveSessionSecrets').doc('current').get());
+    await assertFails(alice.collection('liveSessionSecrets').doc('current').get());
+    await assertFails(alice.collection('attendanceSessions').doc('current').collection('attendanceCorrections').doc('rev-1').get());
+    await assertSucceeds(alice.collection('attendanceSessions').doc('current').collection('attendanceRecords').doc('alice').get());
+    await assertFails(alice.collection('attendanceSessions').doc('current').collection('attendanceRecords').doc('bob').get());
+
+    // Canonical profile changes are server-side, without replacing the old auth token.
+    await seedFirestore((db) => db.doc('users/teacher').update({ primarySchoolId: 'other-campus' }));
+    await expectStaffDenied();
+    await expectStaffDenied(); // replay with the same authenticated context
+    await seedFirestore((db) => db.doc('users/teacher').update({ primarySchoolId: 'tw-demo-uni' }));
+    await expectStaffAllowed();
+
+    await seedFirestore((db) => db.doc('users/teacher').update({ schoolId: 'other-campus' }));
+    await expectStaffDenied();
+    await seedFirestore((db) => db.doc('users/teacher').update({ schoolId: 'tw-demo-uni' }));
+    await expectStaffAllowed();
+
+    await seedFirestore((db) => db.doc('schools/tw-demo-uni/members/teacher').update({ status: 'inactive' }));
+    await expectStaffDenied();
+    await seedFirestore((db) => db.doc('schools/tw-demo-uni/members/teacher').update({ status: 'active' }));
+    await expectStaffAllowed();
+
+    await seedFirestore((db) => db.doc('groups/attendance-class/members/teacher').update({ status: 'inactive' }));
+    await expectStaffDenied();
+    await seedFirestore((db) => db.doc('groups/attendance-class/members/teacher').update({ status: 'active' }));
+    await expectStaffAllowed();
+
+    await seedFirestore((db) => db.doc('users/teacher').delete());
+    await expectStaffDenied();
+    await seedFirestore((db) => db.doc('users/teacher').set(campusBoundProfile('tw-demo-uni')));
+    await expectStaffAllowed();
   });
 
   test('even instructors cannot create, rewrite or delete canonical attendance documents', async () => {

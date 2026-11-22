@@ -1680,7 +1680,8 @@ service cloud.firestore {
       }
 
       match /liveSessionSecrets/{sessionId} {
-        allow read: if isActiveGroupMember(groupId)
+        // A retained old-campus teacher membership must not expose QR secrets.
+        allow read: if isActiveCurrentGroupMember(groupId)
           && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role in ['owner', 'instructor'];
         allow write: if false;
       }
@@ -1697,14 +1698,14 @@ service cloud.firestore {
 
         match /attendanceRecords/{recordId} {
           allow read: if hasSafeAttendanceSessionParent()
-            && (canManageGroup(groupId)
+            && (canManageCurrentGroup(groupId)
               || (isActiveGroupMember(groupId) && recordId == request.auth.uid));
           allow write: if false;
         }
         // 僅伺服器可寫、寫入後不可改的教師更正紀錄。學生不能列舉稽核明細。
         match /attendanceCorrections/{correctionId} {
           allow read: if hasSafeAttendanceSessionParent()
-            && isActiveGroupMember(groupId)
+            && isActiveCurrentGroupMember(groupId)
             && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role in ['owner', 'instructor'];
           allow write: if false;
         }
