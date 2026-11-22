@@ -8,11 +8,12 @@ import {
   type StudySource,
   type TutorExplanation,
 } from '@/lib/studyTutor';
-import { STUDY_SESSION_LIMITS, type StudyLesson, type StudyModeMemory, type StudyPassageMemory } from './courseStudySession';
+import { canReviewStudyAnswer, STUDY_SESSION_LIMITS, type StudyLesson, type StudyModeMemory, type StudyPassageMemory } from './courseStudySession';
 
 const FORMAT = 'campus-one-study-progress';
 const VERSION = 2;
-type ProgressVersion = 1 | typeof VERSION;
+const EXTENDED_VERSION = 3;
+type ProgressVersion = 1 | typeof VERSION | typeof EXTENDED_VERSION;
 const MODES: StudyMode[] = ['understand', 'exam', 'practice'];
 
 export const COURSE_STUDY_PROGRESS_LIMITS = {
@@ -104,7 +105,7 @@ function readMode(value: unknown, passage: StudyPassage, version: ProgressVersio
   let previousId = 0;
   const lessons = Array.from(memory.lessons, (value): StudyLesson => {
     const fields = ['id', 'previousLessonId', 'question', 'response', 'attempt', 'answerVisible'];
-    if (version === 2 && Object.hasOwn(object(value), 'answerReviewAllowed')) fields.push('answerReviewAllowed');
+    if (version >= 2 && Object.hasOwn(object(value), 'answerReviewAllowed')) fields.push('answerReviewAllowed');
     const lesson = exactObject(value, fields);
     const id = integer(lesson.id, 1, COURSE_STUDY_PROGRESS_LIMITS.lessonId);
     if (id <= previousId) invalid('進度檔的講解編號重複或順序不正確，請重新選擇檔案。');
@@ -120,17 +121,16 @@ function readMode(value: unknown, passage: StudyPassage, version: ProgressVersio
       const savedResponse = object(lesson.response);
       const responseFields = ['title', 'explanation', 'sourceQuote', 'question', 'answer'];
       // Version 1 stays a five-field format even after the tutor learns new fields.
-      if (version === 2 && Object.hasOwn(savedResponse, 'steps')) responseFields.push('steps');
+      if (version >= 2 && Object.hasOwn(savedResponse, 'steps')) responseFields.push('steps');
       exactObject(savedResponse, responseFields);
       response = parseSavedTutorExplanation(JSON.stringify(savedResponse), passage);
     } catch {
       invalid('進度檔中的講解無法對照該段原文，請重新選擇完整的進度檔。');
     }
-    return { id, previousLessonId: parentId, question: text(lesson.question, STUDY_TUTOR_LIMITS.questionCharacters), response, attempt, answerVisible,
-      // Persist explicit eligibility only when the legacy rule would change it.
-      ...(answerReviewAllowed !== undefined && answerReviewAllowed !== (answerVisible || !!attempt.trim())
-        ? { answerReviewAllowed } : {}),
-    };
+    const restored = { id, previousLessonId: parentId, question: text(lesson.question, STUDY_TUTOR_LIMITS.questionCharacters),
+      response, attempt, answerVisible };
+    return answerReviewAllowed !== undefined && answerReviewAllowed !== canReviewStudyAnswer(restored)
+      ? { ...restored, answerReviewAllowed } : restored;
   });
   const ids = new Set(lessons.map((lesson) => lesson.id));
   for (const lesson of lessons) {
@@ -226,7 +226,12 @@ function checkBytes(value: string) {
 export function serializeCourseStudyProgress(data: CourseStudyProgressData): string {
   const canonical = readData(data, VERSION);
   const passageLengths = canonical.source.sections.map((section) => splitStudySection(section).map((part) => part.text.length));
-  const serialized = JSON.stringify({ format: FORMAT, version: VERSION, ...canonical, passageLengths });
+  // The v2 reader requires exact lesson keys and a nonblank attempt for reveals.
+  const needsExtendedVersion = Object.values(canonical.passages).some(({ modes }) =>
+    Object.values(modes).some(({ lessons }) => lessons.some(({ answerReviewAllowed, answerVisible, attempt }) =>
+      answerReviewAllowed !== undefined || (answerVisible && !attempt.trim()))));
+  const version = needsExtendedVersion ? EXTENDED_VERSION : VERSION;
+  const serialized = JSON.stringify({ format: FORMAT, version, ...canonical, passageLengths });
   checkBytes(serialized);
   return serialized;
 }
@@ -244,7 +249,7 @@ export function parseCourseStudyProgress(raw: string, expectedScope: CourseStudy
   }
   const envelope = object(decoded);
   if (envelope.format !== FORMAT) invalid('這不是讀書白板的閱讀進度檔，請選擇正確的檔案。');
-  if (envelope.version !== 1 && envelope.version !== VERSION)
+  if (envelope.version !== 1 && envelope.version !== VERSION && envelope.version !== EXTENDED_VERSION)
     invalid('目前不支援這個閱讀進度檔的版本，請使用相容版本的進度檔。');
   exactObject(envelope, ['format', 'version', 'scope', 'source', 'position', 'passages', 'passageLengths']);
   return readData({ scope: envelope.scope, source: envelope.source, position: envelope.position, passages: envelope.passages },

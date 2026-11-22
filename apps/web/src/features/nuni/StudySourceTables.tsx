@@ -142,9 +142,12 @@ const NON_RATIO_SOURCE_POSITION_COLUMN =
 // meaningful multiplicative zero. A "Due Date" of 20 is not twice a "Due Date"
 // of 10; elapsed days and explicit durations remain eligible.
 const NON_RATIO_CLOCK_POSITION_COLUMN =
-  /(?:時刻|當地時間|臺北時間|台北時間|標準時間|時間點|鐘點|開課時間|上課時間|下課時間|開始時間|結束時間|發車時間|抵達時間|到站時間|截止時間|時間戳(?:記)?|時區(?:偏移)?|日期|截止日|到期日|經度|緯度|經緯度|座標|坐標|海拔|標高)/u;
+  /(?:時刻|當地時間|臺北時間|台北時間|標準時間|時間點|鐘點|開課時間|上課時間|下課時間|開始時間|結束時間|發車時間|抵達時間|到站時間|截止時間|時間戳(?:記)?|時區(?:偏移)?|日期|截止日|到期日)/u;
 const ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN =
-  /\b(?:time\s+of\s+day|clock\s+time|(?:local|utc|gmt|standard)\s+time|time\s+of\s+(?:arrival|departure)|(?:start|end|departure|arrival|class|due)\s+time|day\s+of\s+month|dates?|datetime|timestamp|(?:unix|posix)\s+(?:time|timestamp|epoch)|epoch\s+(?:seconds?|milliseconds?|time)|(?:utc|gmt)\s+offset|time\s*zone|timezone|latitude|longitude|coordinates?|altitude|elevation)\b/iu;
+  /\b(?:time\s+of\s+day|clock\s+time|(?:local|utc|gmt|standard)\s+time|time\s+of\s+(?:arrival|departure)|(?:start|end|departure|arrival|class|due)\s+time|day\s+of\s+month|dates?|datetime|timestamp|(?:unix|posix)\s+(?:time|timestamp|epoch)|epoch\s+(?:seconds?|milliseconds?|time)|(?:utc|gmt)\s+offset|time\s*zone|timezone)\b/iu;
+
+const COORDINATE_COLUMN =
+  /(?:經度|緯度|經緯度|座標|坐標|海拔|標高)|\b(?:latitude|longitude|coordinates?|altitude|elevation)\b/iu;
 
 // An unqualified "時間" / "Time" column can mean a clock reading or elapsed
 // duration. A zero-based bar silently assumes duration, which the material
@@ -211,9 +214,8 @@ const IDENTIFIER_LABEL_END = new RegExp(`(?:${IDENTIFIER_WORDS.source})$`, 'iu')
 function isNonRatioColumn(header: string, percentage = false): boolean {
   const column = header.trim().replace(/\s*(?:[（(]\s*[%％]\s*[）)]|[%％])$/u, '').trim();
   const unqualifiedColumn = column.replace(/(?:\s*[（(][^）)]*[）)])+$/u, '').trim();
-  // The text after "by" identifies the grouping, while the leading phrase
-  // describes what the percentage measures.
-  const measuredLabel = percentage ? unqualifiedColumn.split(/\s+by\s+/iu, 1)[0] : column;
+  // A trailing English grouping phrase can follow the measured percentage.
+  const measuredLabel = percentage ? unqualifiedColumn.split(/\s+(?:by|per|each)\s+/iu, 1)[0] : column;
   const statusMatch = NON_RATIO_STATUS_COLUMN.exec(measuredLabel) ?? ENGLISH_NON_RATIO_STATUS_COLUMN.exec(measuredLabel);
   const hasBoundedPercentValues = percentage && isBoundedPercentageColumn(header);
   const describesBoundedRate = hasBoundedPercentValues &&
@@ -237,8 +239,11 @@ function isNonRatioColumn(header: string, percentage = false): boolean {
        (percentage || !PERCENTILE_COUNT_COLUMN.test(column))) ||
       NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
       DECIBEL_UNIT_COLUMN.test(column) ||
-      NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
-      ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
+      COORDINATE_COLUMN.test(column) ||
+      // Percentage rows verify literal percent values separately. A date or
+      // time in the header may describe how those values are grouped.
+      (!percentage && (NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
+        ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN.test(column))) ||
       (!describesBoundedRate &&
        statusMatch && (!percentage || statusMatch[0] === measuredLabel) &&
        !STATUS_COUNT_COLUMN.test(column) &&

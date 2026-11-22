@@ -139,7 +139,7 @@ describe('portable study progress', () => {
     expect(() => parseCourseStudyProgress(serializeCourseStudyProgress(data()), expected as CourseStudyProgressScope)).toThrow();
   });
 
-  it.each([0, 3, -1, 1.5, '1', '2', null])('rejects unsupported versions without inventing a migration (%s)', (version) => {
+  it.each([0, 4, -1, 1.5, '1', '2', null])('rejects unsupported versions without inventing a migration (%s)', (version) => {
     expect(() => parseCourseStudyProgress(changed((value) => Reflect.set(value, 'version', version)), scope)).toThrow(/版本/);
   });
 
@@ -330,19 +330,19 @@ describe('lesson and draft validation', () => {
   });
 
   it.each([
-    ['\u200b\u0301', false, false, false],
-    ['\u200b', false, false, false],
-    [' \u0301 ', false, false, false],
-    ['\u200e\u2060', false, false, false],
-    ['\u2800\ufff9', false, false, false],
-    [' \t', false, false, false],
-    ['作\u200b答 e\u0301\u200f ', true, false, true],
-    ['\u200b', true, false, true],
-    ['\u2060', undefined, true, true],
-    ['', true, false, true],
-    ['', undefined, true, true],
-  ])('preserves v2 drafts and reveal eligibility verbatim (%#)',
-    (attempt, answerReviewAllowed, answerVisible, canReview) => {
+    ['\u200b\u0301', false, false, false, 2],
+    ['\u200b', false, false, false, 2],
+    [' \u0301 ', false, false, false, 2],
+    ['\u200e\u2060', false, false, false, 2],
+    ['\u2800\ufff9', false, false, false, 2],
+    [' \t', false, false, false, 2],
+    ['作\u200b答 e\u0301\u200f ', true, false, true, 2],
+    ['\u200b', true, false, true, 3],
+    ['\u2060', undefined, true, true, 2],
+    ['', true, false, true, 3],
+    ['', undefined, true, true, 3],
+  ])('preserves drafts and reveal eligibility verbatim (%#)',
+    (attempt, answerReviewAllowed, answerVisible, canReview, version) => {
       const saved = data();
       const lesson = saved.passages['0:0'].modes.understand.lessons[0];
       Object.assign(lesson, { attempt, answerVisible });
@@ -350,7 +350,13 @@ describe('lesson and draft validation', () => {
       const before = JSON.stringify(saved);
       const raw = serializeCourseStudyProgress(saved);
       const exported = JSON.parse(raw) as Envelope;
-      expect(exported.version).toBe(2);
+      expect(exported.version).toBe(version);
+      if (version === 2) {
+        // The merge-base reader requires these exact v2 lesson keys.
+        expect(Object.keys(mode(exported).lessons[0]).sort()).toEqual(
+          ['answerVisible', 'attempt', 'id', 'previousLessonId', 'question', 'response'],
+        );
+      }
       expect(mode(exported).lessons[0]).toMatchObject({ attempt, answerVisible });
 
       const restored = parseCourseStudyProgress(raw, scope);

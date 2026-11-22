@@ -17,6 +17,7 @@ import {
 
 export const STUDY_PRACTICE_CHECKPOINT_FORMAT = 'campus-one-study-practice';
 const CHECKPOINT_VERSION = 1;
+const EXTENDED_CHECKPOINT_VERSION = 2;
 const MODES: StudyMode[] = ['understand', 'exam', 'practice'];
 
 export type StudyPracticeCheckpoint = {
@@ -106,13 +107,13 @@ function readRound(value: unknown, progress: CourseStudyProgressData): StudyPrac
   return { ...restored, allCards: full.allCards, index, finished: data.finished as boolean, responses };
 }
 
-/** Self-contained backup: an existing v2 reading snapshot plus a separately validated round. */
+/** Self-contained reading snapshot and separately validated practice round. */
 export function serializeStudyPracticeCheckpoint(checkpoint: StudyPracticeCheckpoint): string {
-  const progress = JSON.parse(serializeCourseStudyProgress(checkpoint.progress)) as unknown;
+  const progress = JSON.parse(serializeCourseStudyProgress(checkpoint.progress)) as { version: number };
   const round = checkpoint.round;
   const raw = JSON.stringify({
     format: STUDY_PRACTICE_CHECKPOINT_FORMAT,
-    version: CHECKPOINT_VERSION,
+    version: progress.version > 2 ? EXTENDED_CHECKPOINT_VERSION : CHECKPOINT_VERSION,
     progress,
     practice: {
       mode: round.mode,
@@ -140,10 +141,10 @@ export function parseStudyPracticeCheckpoint(
     invalid('無法讀取練習進度檔，請選擇讀書白板儲存的 JSON 檔。');
   }
   const envelope = exact(parsed, ['format', 'version', 'progress', 'practice']);
-  if (envelope.format !== STUDY_PRACTICE_CHECKPOINT_FORMAT || envelope.version !== CHECKPOINT_VERSION) {
+  if (envelope.format !== STUDY_PRACTICE_CHECKPOINT_FORMAT ||
+      (envelope.version !== CHECKPOINT_VERSION && envelope.version !== EXTENDED_CHECKPOINT_VERSION)) {
     invalid('這不是目前支援的逐題練習進度檔。');
   }
-  // Reuse the v1/v2 reader's source, quote, scope and passage-boundary checks.
   const progress = parseCourseStudyProgress(JSON.stringify(envelope.progress), expectedScope);
   return { progress, round: readRound(envelope.practice, progress) };
 }

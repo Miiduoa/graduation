@@ -194,6 +194,30 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
+  it.each([true, false])('matches merge-base exact mixed-script quotes (Segmenter: %s)', (native) => {
+    if (!native) vi.stubGlobal('Intl', { Segmenter: undefined });
+    try {
+      for (const [before, quote, after] of [
+        ['က္', 'ع', ''],
+        ['က္', 'ع\u0651', '\u200b'],
+        ['ع\u0651္', 'က', ''],
+        ['က္', 'ع\u0651\u200eက', '後'],
+        ['က္\u200b', '\u200eع', ''],
+        ['က္\u200d', 'ع', ''],
+        ['က္', 'अ', ''],
+        ['က္', 'α\u0301', ''],
+      ]) {
+        expect(locateStudyEvidence(before + quote + after, quote)).toEqual({
+          before, quote, after, occurrences: 1,
+        });
+      }
+      expect(locateStudyEvidence('က္ع\u0651', 'ع')).toBeNull();
+      expect(locateStudyEvidence('က္\u200b\u200eع', '\u200b\u200e')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each([true, false])('keeps orphaned Indic linkers outside the next letter (Segmenter: %s)', (native) => {
     if (!native) vi.stubGlobal('Intl', { Segmenter: undefined });
     try {

@@ -25,8 +25,8 @@ export function hasRevealedStudyAnswer(response: { attempt: string; answerVisibl
 }
 
 export function canReviewStudyAnswer(lesson: StudyLesson): boolean {
-  // Backups without explicit eligibility used trim() to unlock the answer.
-  return lesson.answerReviewAllowed ?? (lesson.answerVisible || !!lesson.attempt.trim());
+  // A saved reveal remains available even for an older, invisible attempt.
+  return lesson.answerReviewAllowed ?? (lesson.answerVisible || hasVisibleStudyAttempt(lesson.attempt));
 }
 
 export type StudyLesson = StudyTutorTurn & {

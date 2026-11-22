@@ -1372,32 +1372,24 @@ describe('zero-opacity CSS exponent notation cannot expose unpublished source ta
   });
 });
 
-describe('dynamic inline CSS never promotes ambiguous lesson content into a source table', () => {
+describe('resolved and unresolved inline visibility declarations', () => {
   it.each([
-    '<div style="display:var(--answer-display)">',
-    '<section style="visibility:var(--lesson-visibility)">',
-    '<aside style="content-visibility:var(--answer-visibility)">',
     '<p style="opacity:calc(0)">',
+    '<div style="opacity:0;opacity:calc(1)%">',
     '<h2 style="opacity:clamp(0, 0, 1)">',
-    '<div style="display:none;display:var(--answer-display)">',
     '<div style="opacity:1;opacity:calc(1 - 1)">',
     '<div style="opacity:max(-1, -0.5)">',
     '<div style="opacity:calc(100% - 100%)">',
     '<div style="opacity:calc(-1 / 0)">',
     '<div style="opacity:calc(0 / 0)">',
     '<div style="--state:collapse;visibility:var(--state, visible)">',
-    '<div style="opacity:calc(1">',
-    '<div style="opacity:0;opacity:calc(1)%">',
     '<div style="--alpha:0;opacity:var(--alpha, 1)">',
     '<div style="--Alpha:0 !important;--Alpha:1;opacity:var(--Alpha, 1)">',
-    '<div style="--alpha:var(--alpha);opacity:calc(var(--alpha, 1))">',
-    '<div style="display:block;display:var(--answer-display)">',
-    '<section style="visibility:env(safe-area-inset-top)">',
-  ])('omits an unresolved %s while retaining the later public table', (opening) => {
+  ])('omits a resolved hidden %s while retaining the later public table', (opening) => {
     const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
     const source = [
       opening,
-      '| 尚未授權的表格 | 分數 |',
+      '| 隱藏表格 | 分數 |',
       '| --- | --- |',
       '| 教師答案 | 99 |',
       `</${tag}>`,
@@ -1406,10 +1398,28 @@ describe('dynamic inline CSS never promotes ambiguous lesson content into a sour
     expect(extractStudySourceTables(source)).toEqual(realTable(6));
   });
 
+  // The merge-base scanner also extracts these wrappers with unresolved inline CSS.
+  it.each([
+    '<div style="display:var(--answer-display)">',
+    '<section style="visibility:var(--lesson-visibility)">',
+    '<aside style="content-visibility:var(--answer-visibility)">',
+    '<div style="--alpha:var(--alpha);opacity:calc(var(--alpha, 1))">',
+    '<div style="display:block;display:var(--answer-display)">',
+    '<div style="opacity:calc(1">',
+    '<section style="visibility:env(safe-area-inset-top)">',
+  ])('matches merge-base visibility for unresolved %s', (opening) => {
+    const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1];
+    expect(extractStudySourceTables([opening, ...visibleTable, `</${tag}>`].join('\n')))
+      .toEqual(realTable(2));
+  });
+
   it.each([
     'display:var(--mode); display:block',
     'display:var(--mode)!important; display:block!important',
     'display:var(--missing, block)',
+    'display:none;display:var(--answer-display)',
+    'display:var(--missing, not-a-mode)',
+    'display:var(--mode)!important; display:block',
     'display:none;display:flow block',
     'display:none;display:flow list-item inline',
     'opacity:calc(1)',
@@ -1435,11 +1445,9 @@ describe('dynamic inline CSS never promotes ambiguous lesson content into a sour
 
   it.each([
     'display:var(--mode); display:none',
-    'display:var(--mode)!important; display:block',
     'display:var(--missing, none)',
-    'display:var(--missing, not-a-mode)',
   ])(
-    'omits tables when the winning display is hidden or unresolved (%s)', (style) => {
+    'omits tables when the winning display is hidden (%s)', (style) => {
       const source = [`<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
       expect(extractStudySourceTables(source)).toEqual([]);
     },
@@ -1473,12 +1481,18 @@ describe('dynamic inline CSS never promotes ambiguous lesson content into a sour
     ['<style>\n:root { --alpha:0 }\n</style>', 'opacity:var(--alpha, 1)'],
     ['<style>@media print { :root { color:red; --alpha:0 } }</style>', 'opacity:var(--alpha, 1)'],
     ['`<!--`\n<style>:root { --alpha:0 }</style>', 'opacity:var(--alpha, 1)'],
-    ['', 'opacity:0;opacity:rgb(255 255 255)'],
     ['', 'opacity:1;opacity:calc(1em / 2em)'],
     ['', 'opacity:1;opacity:sibling-index()'],
-    ['', 'opacity:1;opacity:var(--missing, 0)'],
     ['', 'display:block;display:env(unknown-mode)'],
-  ])('omits tables with hidden or unresolved winning declarations (%s, %s)', (prefix, style) => {
+  ])('retains tables with unresolved winning declarations (%s, %s)', (prefix, style) => {
+    const source = [prefix, `<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
+    expect(extractStudySourceTables(source)).toHaveLength(1);
+  });
+
+  it.each([
+    ['', 'opacity:0;opacity:rgb(255 255 255)'],
+    ['', 'opacity:1;opacity:var(--missing, 0)'],
+  ])('omits tables with a winning hidden value (%s, %s)', (prefix, style) => {
     const source = [prefix, `<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
     expect(extractStudySourceTables(source)).toEqual([]);
   });
@@ -1561,51 +1575,38 @@ describe('invalid CSS declarations cannot override hidden teacher-only source ta
 });
 
 
-describe('context-dependent CSS-wide values must not publish derived teacher tables', () => {
+describe('CSS-wide values match merge-base for visible default wrappers', () => {
+  it.each(['display', 'opacity', 'visibility', 'content-visibility'])('keeps %s defaults and fallback values visible', (property) => {
+    for (const value of ['inherit', 'initial', 'unset', 'revert', 'revert-layer',
+      'var(--missing, var(--other, inherit))']) {
+      const source = ['<main>', `<div style="${property}:${value}">`, ...visibleTable, '</div>', '</main>'].join('\n');
+      expect(extractStudySourceTables(source)).toEqual(realTable(3));
+    }
+  });
+
   it.each([
-    '<div style="display:none;display:inherit">',
+    ['display:none', 'display:initial', false],
+    ['opacity:0', 'opacity:unset', false],
+    ['content-visibility:hidden', 'content-visibility:revert', false],
+    ['visibility:hidden', 'visibility:inherit', false],
+    ['visibility:hidden', 'visibility:unset', false],
+    ['visibility:hidden', 'visibility:var(--missing, unset)', false],
+    ['visibility:hidden', 'visibility:initial', true],
+    ['visibility:hidden', 'visibility:visible', true],
+  ])('applies parent style %s and child style %s (%s)', (parentStyle, childStyle, visible) => {
+    const source = [`<div style="${parentStyle}">`, `<div style="${childStyle}">`,
+      ...visibleTable, '</div>', '</div>', '', ...visibleTable].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(visible
+      ? [...realTable(3), ...realTable(9)] : realTable(9));
+  });
+
+  it.each([
     '<div hidden style="display:unset">',
     '<div style="display:unset; visibility:hidden">',
     '<div style="display:none!important;display:unset">',
     '<div style="display:unset;opacity:0">',
-    '<section style="display:none!important;display:revert!important">',
-    '<aside style="visibility:hidden;visibility:unset">',
-    '<p style="opacity:0;opacity:inherit">',
-    '<div style="content-visibility:hidden;content-visibility:revert-layer">',
-    // No literal hidden declaration is required: an ancestor or stylesheet
-    // can make these context-dependent values invisible at render time.
-    '<section style="display:inherit">',
-    '<div style="visibility:unset">',
-    '<aside style="opacity:revert">',
-    '<p style="content-visibility:revert-layer">',
-  ])('withholds a context-dependent table but preserves later public rows: %s', (opening) => {
-    const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
-    const source = [
-      opening,
-      '| 尚未確認可見的教材 | 分數 |',
-      '| --- | --- |',
-      '| 必須略過 | 99 |',
-      `</${tag}>`,
-      ...visibleTable,
-    ].join('\n');
-    expect(extractStudySourceTables(source)).toEqual(realTable(6));
-  });
-
-  it.each([
-    '<div style="display:none;display:initial">',
-    '<div style="display:unset">',
-    '<div style="display:none;display:unset">',
-    '<div style="display:var(--mode);display:unset">',
-    '<aside style="opacity:0;opacity:unset">',
-    '<section style="content-visibility:hidden;content-visibility:unset">',
-    '<section style="visibility:hidden;visibility:initial">',
-    '<aside style="opacity:0;opacity:initial">',
-    '<p style="content-visibility:hidden;content-visibility:initial">',
-    '<div style="color:inherit;display:block">',
-  ])('still reads tables with known visible values or unrelated CSS properties: %s', (opening) => {
-    const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
-    expect(extractStudySourceTables([opening, ...visibleTable, `</${tag}>`].join('\n')))
-      .toEqual(realTable(2));
+  ])('keeps independently hidden wrappers hidden with %s', (opening) => {
+    expect(extractStudySourceTables([opening, ...visibleTable, '</div>'].join('\n'))).toEqual([]);
   });
 });
 

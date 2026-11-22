@@ -255,7 +255,7 @@ function resolveInlineVisibilityValue(name: string, value: string): string | und
   if (depth !== 0) return undefined;
   const computed = calc(value, { rawPercentages: true });
   if (/^calc\(\+?infinity%?\)$/iu.test(computed)) return '1';
-  if (/^calc\(-infinity%?\)$/iu.test(computed)) return '0';
+  if (/^calc\((?:-infinity|nan)%?\)$/iu.test(computed)) return '0';
   // A reduced dimension (such as a length) is invalid for opacity.
   // An expression the evaluator cannot reduce remains ambiguous.
   return /[()]/u.test(computed) ? undefined : computed;
@@ -297,39 +297,57 @@ function inlineCustomProperties(
   return computed;
 }
 
-function hasExplicitHiddenInlineStyle(
-  declarations: string[], properties: ReadonlyMap<string, string | null>, stylesheetProperties: ReadonlySet<string>,
-): boolean {
+type InlineVisibility = {
+  display?: string;
+  visibility?: string;
+  'content-visibility'?: string;
+  opacity?: string;
+};
+
+function readInlineVisibility(
+  declarations: string[], properties: ReadonlyMap<string, string | null>,
+  stylesheetProperties: ReadonlySet<string>, parent: InlineVisibility,
+): InlineVisibility {
   // Apply order and !important independently for each visibility property.
-  const effective = new Map<string, { value: string | undefined; important: boolean }>();
+  const effective = new Map<keyof InlineVisibility, { value: string | undefined; important: boolean }>();
   for (const declaration of declarations) {
     const property = /^\s*(display|visibility|content-visibility|opacity)\s*:\s*([\s\S]*?)\s*$/iu.exec(declaration);
     if (!property) continue;
-    const name = property[1].toLowerCase();
+    const name = property[1].toLowerCase() as keyof InlineVisibility;
     const important = CSS_IMPORTANT_SUFFIX.test(property[2]);
     const declared = property[2].replace(CSS_IMPORTANT_SUFFIX, '').trim();
     const substituted = substituteCssVariables(declared, (key) => properties.get(key), stylesheetProperties);
     const resolved = typeof substituted === 'string' ? resolveInlineVisibilityValue(name, substituted) : undefined;
-    const value = resolved === 'unset' && name !== 'visibility' ? 'initial' : resolved;
-    const recognized = value !== undefined && isRecognizedInlineCssValue(name, value);
-    const unresolved = value === undefined || CSS_CONTEXTUAL_WIDE_VALUES.has(value) || /\bvar\(/iu.test(declared);
-    if (!recognized && !unresolved) continue;
+    const wide = resolved !== undefined && CSS_CONTEXTUAL_WIDE_VALUES.has(resolved);
+    const deferred = CSS_SUBSTITUTION_FUNCTION.test(declared) ||
+      (resolved === undefined && CSS_MATH_FUNCTION.test(declared));
+    const recognized = resolved !== undefined && isRecognizedInlineCssValue(name, resolved);
+    if (!recognized && !wide && !deferred) continue;
+    // Invalid substitutions fall back to unset. Of these properties, only
+    // visibility inherits by default, and a descendant can override it.
+    const defaultsToInherited = name === 'visibility' && substituted !== null &&
+      (wide || substituted === undefined || (resolved !== undefined && !recognized));
+    const inherits = resolved === 'inherit' || defaultsToInherited;
+    const value = inherits ? parent[name] : recognized ? resolved : undefined;
     const previous = effective.get(name);
     if (!previous || important || !previous.important) {
-      effective.set(name, { value: recognized ? value : undefined, important });
+      effective.set(name, { value, important });
     }
   }
-  const opacity = effective.get('opacity')?.value;
-  return [...effective.values()].some(({ value }) => value === undefined) ||
-    effective.get('display')?.value === 'none' ||
-    ['hidden', 'collapse'].includes(effective.get('visibility')?.value ?? '') ||
-    effective.get('content-visibility')?.value === 'hidden' ||
-    (opacity !== undefined && Number(opacity.replace(/%$/u, '')) <= 0);
+  return {
+    ...Object.fromEntries(Array.from(effective, ([name, { value }]) => [name, value])),
+    visibility: effective.has('visibility') ? effective.get('visibility')?.value : parent.visibility,
+  };
+}
+
+function hidesByVisibility(style: InlineVisibility): boolean {
+  return style.visibility === 'hidden' || style.visibility === 'collapse';
 }
 
 function readHtmlVisibility(
-  token: string, inherited: ReadonlyMap<string, string | null>, stylesheetProperties: ReadonlySet<string>,
-): { hidden: boolean; properties: ReadonlyMap<string, string | null> } {
+  token: string, parent: { properties: ReadonlyMap<string, string | null>; style: InlineVisibility },
+  stylesheetProperties: ReadonlySet<string>,
+): { hidden: boolean; properties: ReadonlyMap<string, string | null>; style: InlineVisibility } {
   const opening = /^<[A-Za-z][\w:-]*/u.exec(token);
   const attributes = token.slice(opening?.[0].length);
   let hidden = false;
@@ -340,9 +358,16 @@ function readHtmlVisibility(
     if (name === 'hidden' || (name === 'aria-hidden' && value.trim().toLowerCase() === 'true')) hidden = true;
     if (name === 'style' && !declarations) declarations = splitCssDeclarations(value).map(decodeCssEscapes);
   }
-  if (!declarations) return { hidden, properties: inherited };
-  const properties = inlineCustomProperties(declarations, inherited, stylesheetProperties);
-  return { hidden: hidden || hasExplicitHiddenInlineStyle(declarations, properties, stylesheetProperties), properties };
+  const properties = declarations
+    ? inlineCustomProperties(declarations, parent.properties, stylesheetProperties)
+    : parent.properties;
+  const style = declarations
+    ? readInlineVisibility(declarations, properties, stylesheetProperties, parent.style)
+    : { visibility: parent.style.visibility };
+  hidden ||= style.display === 'none' || style['content-visibility'] === 'hidden' ||
+    (style.opacity !== undefined && CSS_ALPHA_VALUE.test(style.opacity) &&
+      Number(style.opacity.replace(/%$/u, '')) <= 0);
+  return { hidden, properties, style };
 }
 
 // An odd number of backslashes escapes Markdown punctuation; an even
@@ -557,8 +582,8 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
   );
   const lines = scanSource.split(/\r\n|\r|\n/u);
   const stylesheetProperties = collectStylesheetProperties(lines);
-  const rootProperties = new Map<string, string | null>();
-  const ancestors: { tag: string; properties: ReadonlyMap<string, string | null> }[] = [];
+  const root = { properties: new Map<string, string | null>(), style: {} };
+  const ancestors: ({ tag: string } & Omit<ReturnType<typeof readHtmlVisibility>, 'hidden'>)[] = [];
   const tables: StudySourceTable[] = [];
   let fence: { character: string; length: number } | null = null;
   let inHtmlComment = false;
@@ -635,7 +660,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         // </plaintext> must not expose a teacher-only table below it.
         if (closing && current === tag && current !== 'plaintext') htmlCodeBlocks.pop();
         else if (!closing && !selfClosing && !RAW_HTML_TEXT_BLOCKS.has(current) &&
-            ((current === tag && isNestableHtmlTag(tag)) || RAW_HTML_TEXT_BLOCKS.has(tag)))
+            ((current === tag && (isNestableHtmlTag(tag) || !isTrackedHtmlTag(tag))) || RAW_HTML_TEXT_BLOCKS.has(tag)))
           htmlCodeBlocks.push(tag);
       } else if (closing) {
         for (let index = ancestors.length - 1; index >= 0; index -= 1) {
@@ -645,14 +670,14 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
           }
         }
       } else if (!selfClosing && !HTML_VOID_TAGS.has(tag)) {
-        const inherited = ancestors.at(-1)?.properties ?? rootProperties;
-        const { hidden, properties } = readHtmlVisibility(token, inherited, stylesheetProperties);
-        if (tracked && (!canCarryHiddenHtmlAttribute(tag) || hidden)) htmlCodeBlocks.push(tag);
-        else ancestors.push({ tag, properties });
+        const parent = ancestors.at(-1) ?? root;
+        const { hidden, properties, style } = readHtmlVisibility(token, parent, stylesheetProperties);
+        if (hidden || (tracked && !canCarryHiddenHtmlAttribute(tag))) htmlCodeBlocks.push(tag);
+        else ancestors.push({ tag, properties, style });
       }
       if (tracked) hiddenLine = true;
     }
-    if (hiddenLine) continue;
+    if (hiddenLine || hidesByVisibility((ancestors.at(-1) ?? root).style)) continue;
     const headers = parseSimplePipeRow(lines[index]);
     const separator = parseSimplePipeRow(lines[index + 1]);
     if (!headers || !separator || headers.some((header) => !header) ||

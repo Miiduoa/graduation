@@ -3002,3 +3002,24 @@ it.each(['百分位人數', '百分等級的總數', 'Percentile Count', 'Percen
     view.unmount();
   },
 );
+
+it.each([
+  '提交日期別完成率', '依截止日期統計完成率', '按繳交期間統計完成率',
+  '開課週別通過率', '到期日別達成率', '截止時間別完成率',
+  'Pass Rate by Due Date', 'Pass Rate per Reporting Period',
+  'Completion Rate each Week', 'Completion Rate by Day of Month',
+  'Pass Rate per Timestamp Window',
+])('matches merge-base 100%% meters for grouped percentages in %s', (header) => {
+  const table = (values: string[]) => [
+    '| 組別 | ' + header + ' |', '| --- | --- |',
+    '| 甲 | ' + values[0] + ' |', '| 乙 | ' + values[1] + ' |',
+  ].join('\n');
+  const { container, rerender } = render(<StudySourceTables text={table(['25%', '75%'])} />);
+  expect(Array.from(container.querySelectorAll('meter')).map((meter) => [meter.value, meter.max]))
+    .toEqual([[25, 100], [75, 100]]);
+  for (const values of [['2026-11-19', '2026-11-20'], ['11/19', '11/20'], ['第 2 週', '第 4 週']]) {
+    rerender(<StudySourceTables text={table(values)} />);
+    expect(container.querySelector('meter')).toBeNull();
+    expect(screen.getByRole('table').textContent).toContain(values[0]);
+  }
+});

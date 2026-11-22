@@ -16,16 +16,17 @@ export type StudyEvidenceLocation = {
   occurrences: number;
 };
 
-// Myanmar tall and regular AA have grapheme break class Other.
-const myanmarIndependentSpacingMarks = /[\u102b\u102c]/u;
-const graphemeContinuation = /[\p{M}\p{Grapheme_Extend}\p{Emoji_Modifier}\u0e33\u0eb3\u200d]/u;
+const graphemeContinuation = /[\p{Grapheme_Extend}\p{Emoji_Modifier}\u0e33\u0eb3\u200d]/u;
 const graphemeControl = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 const pictographic = /\p{Extended_Pictographic}/u;
 const emojiExtend = /[\p{Grapheme_Extend}\p{Emoji_Modifier}]/u;
 const regionalIndicator = /\p{Regional_Indicator}/u;
-// Prepend and Indic_Conjunct_Break=Linker from the Unicode character database.
-const indicLinker = /[\u094d\u09cd\u0acd\u0b4d\u0c4d\u0d4d\u1039\u17d2\u1a60\u1b44\u1bab\ua9c0\uaaf6\u{10a3f}\u{11133}\u{113d0}\u{1193e}\u{11a47}\u{11a99}\u{11f42}]/u;
-const indicLetter = /^(?!\p{Script=Han})\p{Lo}$/u;
+// Recognize established conjuncts in fallback mode when the base, linker and
+// following consonant are all known. Leave other script combinations separate.
+const indicConsonant =
+  /^[\u0915-\u0939\u0958-\u095f\u0978-\u097f\u0995-\u09a8\u09aa-\u09b0\u09b2\u09b6-\u09b9\u09dc-\u09dd\u09df\u09f0-\u09f1\u0a95-\u0aa8\u0aaa-\u0ab0\u0ab2-\u0ab3\u0ab5-\u0ab9\u0af9\u1000-\u102a\u103f\u1050-\u1055\u105a-\u105d\u1061\u1065-\u1066\u106e-\u1070\u1075-\u1081\u108e]$/u;
+const indicLinker = /^[\u094d\u09cd\u0acd\u1039]$/u;
+// Grapheme_Cluster_Break=Prepend.
 const graphemePrepend = /[\u0600-\u0605\u06dd\u070f\u0890-\u0891\u08e2\u0d4e\u{110bd}\u{110cd}\u{111c2}-\u{111c3}\u{113d1}\u{1193f}\u{11941}\u{11a3a}\u{11a84}-\u{11a89}\u{11d46}\u{11f02}]/u;
 const hangulLeading = /^[\u1100-\u115f\ua960-\ua97c]$/u;
 const hangulVowel = /^[\u1160-\u11a7\ud7b0-\ud7c6]$/u;
@@ -52,15 +53,12 @@ function fallbackBoundaries(source: string): Uint8Array {
   let followsEmojiZwj = false;
   let regionalRun = 0;
   let index = 0;
-  // On older WebViews, err on the side of keeping ambiguous sequences together.
-  // A conjunct needs a letter before the linker, with only extending marks
-  // between the letter, linker and next letter.
   let hasIndicBase = false;
   let followsIndicLinker = false;
   for (const current of source) {
     const regional = regionalIndicator.test(current);
-    const isIndicLetter = indicLetter.test(current);
-    const continuesGrapheme = graphemeContinuation.test(current) && !myanmarIndependentSpacingMarks.test(current);
+    const isIndicConsonant = indicConsonant.test(current);
+    const continuesGrapheme = graphemeContinuation.test(current);
     const isControl = graphemeControl.test(current) &&
       !continuesGrapheme && !graphemePrepend.test(current);
     const isPictographic = pictographic.test(current);
@@ -70,13 +68,12 @@ function fallbackBoundaries(source: string): Uint8Array {
           joinsHangul(previous, current) || (regional && regionalRun % 2 === 1) ||
           (followsEmojiZwj && isPictographic) ||
           (kiratRaiVowel.test(previous) && kiratRaiVowel.test(current)) ||
-          (followsIndicLinker && isIndicLetter)));
+          (followsIndicLinker && isIndicConsonant)));
     if (!joinsPrevious) boundaries[index] = 1;
     followsEmojiZwj = current === '\u200d' && followsPictographic;
     followsPictographic = isPictographic || (followsPictographic && emojiExtend.test(current));
-    followsIndicLinker = joinsPrevious && continuesGrapheme &&
-      (followsIndicLinker || (hasIndicBase && indicLinker.test(current)));
-    hasIndicBase = isIndicLetter || (joinsPrevious && continuesGrapheme && hasIndicBase);
+    followsIndicLinker = hasIndicBase && indicLinker.test(current);
+    hasIndicBase = isIndicConsonant;
     regionalRun = regional ? regionalRun + 1 : 0;
     previous = current;
     previousIsControl = isControl;

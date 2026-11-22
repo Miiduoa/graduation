@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { PersonalImportDocument } from '@campus/shared/src/imports/documents';
 import {
   STUDY_TUTOR_LIMITS,
@@ -209,6 +209,23 @@ describe('reject unreadable model citations before saving a lesson', () => {
       expect(original.text).toBe('前' + quote + '後');
     },
   );
+
+  it.each([true, false])('accepts original mixed-script citations in replies and steps (Segmenter: %s)', (native) => {
+    if (!native) vi.stubGlobal('Intl', { Segmenter: undefined });
+    try {
+      for (const quote of ['ع', 'ع\u0651\u200eက', 'ع\u200bع\u0651']) {
+        const original = { ...passage, text: passage.text + '\nက္' + quote };
+        const response = { ...steppedExplanation(), sourceQuote: quote };
+        response.steps[0].sourceQuote = quote;
+        response.steps[0].formula = undefined;
+        const parsed = parseTutorExplanation(JSON.stringify(response), original);
+        expect(parsed.sourceQuote).toBe(quote);
+        expect(parsed.steps?.[0].sourceQuote).toBe(quote);
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
   it.each(['。', '，\u200f。', '（\u200b）', '主\u200d鍵', '主\u2060鍵', '主\ufff9鍵'])(
     'uses exact visible legacy citations in the main reply and steps (%#)', (quote) => {

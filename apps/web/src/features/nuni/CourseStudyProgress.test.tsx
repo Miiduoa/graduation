@@ -375,8 +375,11 @@ it('copies and restores the exact self-check draft and follows up with an invisi
   fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
   const raw = (await screen.findByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement).value;
   expect(parseCourseStudyProgress(raw, scope).passages['1:1'].modes.exam.lessons[2]).toMatchObject({
-    attempt: draft, answerVisible: false, answerReviewAllowed: false,
+    attempt: draft, answerVisible: false,
   });
+
+  expect(JSON.parse(raw).version).toBe(2);
+  expect(raw).not.toContain('answerReviewAllowed');
 
   fireEvent.change(screen.getByLabelText(label), { target: { value: '備份以後的草稿' } });
   fireEvent.change(screen.getByLabelText(restoreLabel), { target: { files: [progressFile(raw)] } });
