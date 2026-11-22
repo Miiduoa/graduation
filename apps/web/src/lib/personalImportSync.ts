@@ -62,6 +62,7 @@ export const hasPersonalImportSyncPause = (scope: PersonalImportScope) =>
 export function cancelPersonalImportSyncPause(scope: PersonalImportScope, active: () => boolean) {
   if (!active()) return;
   localStorage.removeItem(pauseKey(scope));
+  cancelPersonalImportSync(scope);
   window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
 }
 
@@ -80,10 +81,25 @@ function persistPersonalImportSyncPause(scope: PersonalImportScope) {
     await checkpoint(disabled);
     if (localStorage.getItem(key) === intent) {
       localStorage.removeItem(key);
+      cancelPersonalImportSync(scope);
       window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
     }
     return { state: disabled, result: undefined };
-  }).finally(() => pauseWrites.delete(key));
+  })
+    .catch((error) => {
+      if (hasPersonalImportSyncPause(scope)) {
+        const reason =
+          error instanceof DOMException && ['SecurityError', 'NotAllowedError'].includes(error.name)
+            ? '目前環境拒絕跨分頁鎖請求。'
+            : personalImportSyncErrorMessage(error);
+        publish(scope, {
+          phase: 'error',
+          message: `無法寫入停用設定。暫停要求已保留。 ${reason}`,
+        });
+      }
+      throw error;
+    })
+    .finally(() => pauseWrites.delete(key));
   pauseWrites.set(key, write);
   return write;
 }

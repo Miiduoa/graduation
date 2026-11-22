@@ -70,6 +70,9 @@ export function readPersonalImportSyncState(scope: PersonalImportScope): Persona
   return parsePersonalImportSyncState(value, scope.schoolId);
 }
 
+export const PERSONAL_IMPORT_SYNC_LOCK_UNAVAILABLE = '目前瀏覽器無法安全同步，請使用最新版瀏覽器。';
+export const canLockPersonalImportSync = () => typeof navigator.locks?.request === 'function';
+
 export async function withPersonalImportSyncLock<T>(
   scope: PersonalImportScope,
   action: (
@@ -79,7 +82,7 @@ export async function withPersonalImportSyncLock<T>(
   active = () => true,
   waitTimeoutMs?: number,
 ): Promise<T> {
-  if (!navigator.locks) throw new Error('目前瀏覽器無法安全同步，請使用最新版瀏覽器。');
+  if (!canLockPersonalImportSync()) throw new Error(PERSONAL_IMPORT_SYNC_LOCK_UNAVAILABLE);
   const controller = waitTimeoutMs === undefined ? undefined : new AbortController();
   const timeout = controller && setTimeout(() => controller.abort(), waitTimeoutMs);
   const run = async () => {

@@ -357,6 +357,68 @@ describe('personal import background synchronization', () => {
     view.unmount();
   });
 
+  it.each([
+    ['missing', false],
+    ['denied', false],
+    ['missing', true],
+    ['denied', true],
+  ])(
+    'reports %s Web Locks after reopening and honors the retained pause (cancel=%s)',
+    async (failure, cancel) => {
+      await setPersonalImportSyncEnabled(initialScope, true, () => true);
+      const locks = navigator.locks;
+      Object.defineProperty(navigator, 'locks', {
+        configurable: true,
+        value:
+          failure === 'missing'
+            ? undefined
+            : {
+                request: vi
+                  .fn()
+                  .mockRejectedValue(new DOMException('Permission denied', 'SecurityError')),
+              },
+      });
+      const panel = <PersonalImportSyncPanel scope={initialScope} />;
+      const view = render(panel);
+      fireEvent.click(screen.getByRole('button', { name: '暫停這台裝置同步' }));
+      await waitFor(() =>
+        expect(screen.getByRole('alert').textContent).toContain('暫停要求已保留'),
+      );
+      expect(screen.getByRole('alert').textContent).toContain(
+        failure === 'missing' ? '目前瀏覽器無法安全同步' : '目前環境拒絕跨分頁鎖請求',
+      );
+      expect(screen.queryByText(/等待裝置寫入停用設定/)).toBeNull();
+      expect(readPersonalImportSyncState(initialScope).enabled).toBe(true);
+
+      view.unmount();
+      cancelPersonalImportSync(initialScope); // Reset in-memory status as on reload.
+      render(
+        <>
+          {panel}
+          <PersonalImportSyncBridge />
+        </>,
+      );
+      await waitFor(() =>
+        expect(screen.getByRole('alert').textContent).toContain('暫停要求已保留'),
+      );
+      expect(screen.getByRole('alert').textContent).toContain(
+        failure === 'missing' ? '目前瀏覽器無法安全同步' : '目前環境拒絕跨分頁鎖請求',
+      );
+      expect(screen.queryByText(/等待裝置寫入停用設定/)).toBeNull();
+      expect(browserRequest).not.toHaveBeenCalled();
+      if (cancel) fireEvent.click(screen.getByRole('button', { name: '取消暫停' }));
+
+      Object.defineProperty(navigator, 'locks', { configurable: true, value: locks });
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'));
+      });
+      expect(readPersonalImportSyncState(initialScope).enabled).toBe(cancel);
+      expect(screen.queryByRole('button', { name: '取消暫停' })).toBeNull();
+      if (cancel) expect(browserRequest).toHaveBeenCalled();
+      else expect(browserRequest).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([false, true])(
     'honors a queued pause on focus and interval triggers after timeout (cancel=%s)',
     async (cancel) => {

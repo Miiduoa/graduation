@@ -59,9 +59,8 @@ export function collectLocalFileSelection(
   const next = [...current];
   const rejected: AssignmentFileSelection['rejected'] = [];
   for (const file of Array.from(incoming)) {
-    let classified: ReturnType<typeof classifyAssignmentFile>;
     try {
-      classified = classifyAssignmentFile(file.name, file.type);
+      classifyAssignmentFile(file.name, file.type);
     } catch (cause) {
       rejected.push({
         name: file.name,
@@ -72,7 +71,8 @@ export function collectLocalFileSelection(
       });
       continue;
     }
-    const { kind, contentType } = classified;
+    // A missing browser MIME uses the document quota, even for an image extension.
+    const kind = file.type.startsWith('image/') ? 'image' : 'file';
     const used = next.filter((item) => item.kind === kind).length;
     const limit = kind === 'image' ? MAX_ASSIGNMENT_IMAGES : MAX_ASSIGNMENT_DOCUMENTS;
     if (used >= limit) {
@@ -85,20 +85,11 @@ export function collectLocalFileSelection(
       });
       continue;
     }
-    // Some file pickers omit MIME types. Fill only a missing type from the
-    // classifier, and keep photos in their own quota. The server still validates
-    // the type and uploaded bytes independently.
-    const selected = file.type
-      ? file
-      : new File([file], file.name, {
-          type: contentType,
-          lastModified: file.lastModified,
-        });
     next.push({
       key: `${file.name}:${file.size}:${file.lastModified}:${next.length}:${Math.random().toString(36).slice(2, 8)}`,
-      file: selected,
+      file,
       kind,
-      previewUrl: kind === 'image' ? URL.createObjectURL(selected) : undefined,
+      previewUrl: kind === 'image' ? URL.createObjectURL(file) : undefined,
     });
   }
   return { files: next, added: next.length - current.length, rejected };
@@ -532,8 +523,7 @@ export async function uploadAndSubmitFiles(
           idempotencyKey: `${key}:intents`,
           files: prepared.map((item, index) => ({
             originalName: item.file.name,
-            contentType:
-              item.file.type || (item.kind === 'image' ? 'image/jpeg' : 'application/octet-stream'),
+            contentType: item.file.type || classifyAssignmentFile(item.file.name, '').contentType,
             byteSize: item.file.size,
             idempotencyKey: `${key}:file:${index}`,
           })),

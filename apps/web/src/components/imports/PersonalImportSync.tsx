@@ -10,6 +10,8 @@ import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import {
   PERSONAL_IMPORT_CHANGE,
+  PERSONAL_IMPORT_SYNC_LOCK_UNAVAILABLE,
+  canLockPersonalImportSync,
   readPersonalImportSyncState,
   type PersonalImportScope,
 } from '@/lib/personalImports';
@@ -254,11 +256,20 @@ function ScopeSyncPanel({
     const run = generation.current;
     return () => activeRef.current && run === generation.current;
   };
-  if (pausePending)
+  if (pausePending) {
+    const pauseError = !canLockPersonalImportSync()
+      ? `暫停要求已保留。 ${PERSONAL_IMPORT_SYNC_LOCK_UNAVAILABLE}`
+      : status?.phase === 'error'
+        ? status.message
+        : '';
     return (
       <section className="card" aria-label="跨裝置同步">
         <h2>跨裝置同步</h2>
-        <p role="status">暫停要求已保留，等待裝置寫入停用設定。</p>
+        {pauseError ? (
+          <p role="alert">{pauseError}</p>
+        ) : (
+          <p role="status">暫停要求已保留，等待裝置寫入停用設定。</p>
+        )}
         <button
           type="button"
           disabled={!permitted}
@@ -272,9 +283,10 @@ function ScopeSyncPanel({
         >
           取消暫停
         </button>
-        {error && <p role="alert">{error}</p>}
+        {error && !pauseError && <p role="alert">{error}</p>}
       </section>
     );
+  }
   const busy = status?.phase === 'syncing';
   const conflicts = enabled ? status?.result?.conflicts || [] : [];
   return (
