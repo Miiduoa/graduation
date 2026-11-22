@@ -5,6 +5,7 @@ import {
   STUDY_TUTOR_LIMITS,
   buildStudyTutorPrompt,
   parseTutorExplanation,
+  parseSavedTutorExplanation,
   prepareStudyTutorHistory,
   splitStudySection,
   studySourceFromDocument,
@@ -93,6 +94,35 @@ describe('reject unreadable model citations before saving a lesson', () => {
       .toThrow('方向控制字元');
   });
 
+  it.each([
+    ['left-to-right mark', '\u200e'],
+    ['right-to-left mark', '\u200f'],
+    ['Arabic letter mark', '\u061c'],
+    ['first strong isolate', '\u2068'],
+  ])('rejects a visually directed %s in generated main and step citations', (_name, mark) => {
+    const quote = '主' + mark + '鍵';
+    const original = { ...passage, text: passage.text + quote };
+    expect(original.text.includes(quote)).toBe(true);
+    expect(() => parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original))
+      .toThrow('方向控制字元');
+    const reply = steppedExplanation();
+    reply.steps[0].sourceQuote = quote;
+    expect(() => parseTutorExplanation(JSON.stringify(reply), original))
+      .toThrow('AI 步驟引句無可讀的教材內容');
+  });
+
+  it('retains a legacy exact-match direction-mark citation in a backup but not as new follow-up evidence', () => {
+    const quote = '主\u200e鍵';
+    const original = { ...passage, text: passage.text + quote };
+    const previous = { ...turn(), response: { ...explanation(), sourceQuote: quote } };
+    expect(parseSavedTutorExplanation(JSON.stringify(previous.response), original).sourceQuote).toBe(quote);
+    expect(() => prepareStudyTutorHistory(original, 'understand', [previous]))
+      .toThrow('先前講解無法對照目前的原文');
+    expect(() => buildStudyTutorPrompt(original, 'understand', '說明一下', {
+      passageId: original.id, sourceText: original.text, mode: 'understand', turns: [previous],
+    })).toThrow('先前講解無法對照目前的原文');
+  });
+
   it('rejects an unreadable step citation even when the main quote is valid', () => {
     const original = { ...passage, text: passage.text + '\u200b' };
     const reply = steppedExplanation();
@@ -101,7 +131,7 @@ describe('reject unreadable model citations before saving a lesson', () => {
       .toThrow('AI 步驟引句無可讀的教材內容');
   });
 
-  it.each(['x²+y²', '👩‍💻', '#️⃣', 'العربية', 'שלום', 'e\u0301', '主鍵\u200b唯一', '主\u200e鍵'])(
+  it.each(['x²+y²', '👩‍💻', '#️⃣', 'العربية', 'שלום', 'e\u0301', '主鍵\u200b唯一'])(
     'preserves valid visible source quotes byte-for-byte (%s)', (quote) => {
       const original = { ...passage, text: '前' + quote + '後' };
       const reply = parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original);

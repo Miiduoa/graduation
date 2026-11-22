@@ -57,7 +57,9 @@ function nonempty(value: unknown, max: number): value is string {
  * the original licensed material is never edited.
  */
 function hasReadableTutorCitation(quote: string, allowPunctuation: boolean): boolean {
-  if (/[\u202a-\u202e\u2066-\u2069]/u.test(quote)) return false;
+  // Include LRM, RLM and Arabic Letter Mark as well as embedding/override/isolate controls.
+  // An exact source substring can still display in a misleading visual order.
+  if (/\p{Bidi_Control}/u.test(quote)) return false;
   const hasContent = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\p{P}\u2800\ufff9-\ufffb]/u.test(quote) ||
     /[0-9#*]\ufe0f?\u20e3/u.test(quote) || (allowPunctuation && /\p{P}/u.test(quote));
   if (!hasContent) return false;
