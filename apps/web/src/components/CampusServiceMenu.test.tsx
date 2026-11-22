@@ -1056,7 +1056,7 @@ it('submits the explicit search with the same filters and campus, without forwar
   const directory = screen.getByRole('link', { name: /尋找校園服務/ });
   const follow = vi.fn(() => directory.getAttribute('href'));
   directory.addEventListener('click', follow);
-  fireEvent.click(screen.getByRole('button', { name: '查看完整搜尋結果' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看結果' }));
   expect(follow).toHaveBeenCalledTimes(1);
   const destination = new URL(follow.mock.results[0].value!, window.location.origin);
   expect(destination.pathname).toBe('/search');

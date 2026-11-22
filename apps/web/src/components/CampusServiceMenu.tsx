@@ -423,7 +423,7 @@ export function CampusServiceMenu() {
                 <kbd className={styles.shortcut}>⌘ / Ctrl K</kbd>
               )}
             </div>
-            <button type="submit" className={styles.submitSearch} aria-label="查看完整搜尋結果">
+            <button type="submit" className={styles.submitSearch}>
               查看結果
             </button>
           </form>
