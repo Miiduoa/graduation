@@ -5740,8 +5740,15 @@ describe('course assignment submissions', () => {
     await Promise.all([assertFails(publish()), assertFails(provisional())]);
     await assertFails(revise());
     await assertFails(revise()); // lost-response replay
-    assert.equal((await initial.get()).data().gradePublished, undefined);
-    assert.equal((await legacy.get()).data().grade, undefined);
+    // A transferred teacher must also lose private-submission read access.
+    // Inspect the unchanged receipts only through the isolated admin fixture.
+    await assertFails(initial.get());
+    await assertFails(legacy.get());
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      assert.equal((await db.doc(initial.path).get()).data().gradePublished, undefined);
+      assert.equal((await db.doc(legacy.path).get()).data().grade, undefined);
+    });
 
     // Neither one-sided transfer direction may authorize an old-campus grade.
     await seedFirestore(db => db.doc('users/teacher').set({
