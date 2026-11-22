@@ -5708,6 +5708,64 @@ describe('course assignment submissions', () => {
     });
     return { batch, revision };
   }
+  test('transferred teachers cannot replay initial grading or audited corrections with old memberships', async () => {
+    await seedPublishedGrade();
+    const teacher = testEnv.authenticatedContext('teacher').firestore();
+    const student = testEnv.authenticatedContext('alice').firestore();
+    const root = 'groups/course-1/assignments';
+    const initial = teacher.doc(root + '/initial-after-transfer/submissions/bob');
+    const legacy = teacher.doc(root + '/legacy-after-transfer/submissions/bob');
+    await seedFirestore(async (db) => {
+      for (const assignmentId of ['initial-after-transfer', 'legacy-after-transfer']) {
+        await db.doc(root + '/' + assignmentId).set({ type: 'assignment', points: 100 });
+        await db.doc(root + '/' + assignmentId + '/submissions/bob').set({
+          userId: 'bob', groupId: 'course-1', assignmentId,
+          content: 'Synthetic answer', status: 'submitted',
+          submittedAt: Timestamp.fromDate(new Date('2026-11-01T00:00:00Z')),
+        });
+      }
+    });
+    const publish = () => initial.update({
+      gradeScore: 80, gradeFeedback: 'Graded with rubric',
+      gradePublished: true, gradePublishedBy: 'teacher',
+      gradePublishedAt: serverTimestamp(),
+    });
+    const provisional = () => legacy.update({ grade: 70, feedback: 'Initial review' });
+    const revise = () => correctionBatch(teacher).batch.commit();
+    await assertFails(pathTo(student).update({ gradeScore: 90 }));
+
+    // Server changes canonical campus only; the same authenticated teacher
+    // context and both old school/course memberships remain in place.
+    await seedFirestore(db => db.doc('users/teacher').update({ primarySchoolId: 'other-campus' }));
+    await Promise.all([assertFails(publish()), assertFails(provisional())]);
+    await assertFails(revise());
+    await assertFails(revise()); // lost-response replay
+    assert.equal((await initial.get()).data().gradePublished, undefined);
+    assert.equal((await legacy.get()).data().grade, undefined);
+
+    // Neither one-sided transfer direction may authorize an old-campus grade.
+    await seedFirestore(db => db.doc('users/teacher').set({
+      status: 'active', schoolId: 'other-campus', primarySchoolId: 'school-1',
+    }));
+    await assertFails(publish());
+    await assertFails(revise());
+    await seedFirestore(db => db.doc('users/teacher').set(campusBoundProfile('school-1')));
+    await seedFirestore(db => db.doc('schools/school-1/members/teacher').update({ status: 'removed' }));
+    await assertFails(provisional());
+    await assertFails(revise());
+    await seedFirestore(db => db.doc('schools/school-1/members/teacher').update({ status: 'active' }));
+    await seedFirestore(db => db.doc('groups/course-1/members/teacher').update({ status: 'removed' }));
+    await assertFails(publish());
+    await assertFails(revise());
+
+    // Original permissions return only after both school and course are valid.
+    await seedFirestore(db => db.doc('groups/course-1/members/teacher').update({ status: 'active' }));
+    await assertSucceeds(publish());
+    await assertSucceeds(provisional());
+    await assertSucceeds(revise());
+    assert.equal((await pathTo(teacher).get()).data().gradeRevisionCount, 1);
+  });
+
   test('teacher grade changes require an atomic immutable audit trail', async () => {
     await seedPublishedGrade();
     const teacher = testEnv.authenticatedContext('teacher').firestore();

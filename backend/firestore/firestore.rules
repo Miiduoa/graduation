@@ -1549,8 +1549,10 @@ service cloud.firestore {
             && request.resource.data.keys().hasOnly([
               'userId', 'groupId', 'assignmentId', 'content', 'attachments', 'answers', 'status', 'submittedAt', 'updatedAt'
             ]);
+          // A retained old-campus teaching role is not permission to publish
+          // grades or perform an audited correction after canonical transfer.
           allow update: if (
-            canManageGroup(groupId)
+            canManageCurrentGroup(groupId)
             && (
               validFirstPublishedGrade(groupId, assignmentId, submissionId)
               || validFirstLegacyGrade(groupId, assignmentId, submissionId)
@@ -1569,7 +1571,7 @@ service cloud.firestore {
 
           match /gradeRevisions/{revisionId} {
             allow read: if canManageCurrentGroup(groupId);
-            allow create: if canManageGroup(groupId)
+            allow create: if canManageCurrentGroup(groupId)
               && validGradeRevisionLog(groupId, assignmentId, submissionId, revisionId);
             allow update, delete: if false;
           }

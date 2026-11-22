@@ -1104,3 +1104,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - **合成回歸**：新增 `transferred campus members cannot replay private AI knowledge reads`，覆蓋正常 school/student/editor、公開片段、陌生帳號、連續舊會話重放、校籍遷移與雙欄位衝突、校籍／群組撤銷、刪除 canonical 帳號與恢復。本次測試不連學校、正式環境或外部 RAG 服務。
 - **精確來源**：前一版完整 CI/CodeQL 對應 `15e833793af4ff7d22d3c7595db454a91c278275`，兩者已 success；新測試-only RED commit `b9f3b34cb4cd81889d84c00d4531d86e73a21a74`；本次 GREEN Rules/文件提交須以 GitHub 新 SHA 自動回歸結果確認，不能提前宣稱通過。
 - **尚未發布**：CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、適用 Maestro、review threads 與指定 nuni-merge-gate App 5504170 必須依最終精確 head 再核對。正式 GCS/Storage token 清理與 staging 競態、歷史備註分離、成績原子更正仍未解決；本次沒有部署、migration、正式金鑰及 E 校園存取。直接 npm/pnpm audit 的外送限制持續維持。
+
+
+## 2026-11-23｜轉校教師不得沿用舊校資格寫入成績與原子修訂（隔離候選，待 CI）
+
+- 來源：沿用安全 PR #743 的 `1726012808ed101d8da81f3143656db68a41b312`，截至修改前新 SHA 的完整 CI、CodeQL、Firestore emulator 均成功，review／unresolved threads 為 0，但尚未取得指定 nuni-merge-gate App 5504170 的「審查通過」。此候選仍不具合併／發布資格。
+- 風險：巢狀 `submissions` 第一筆正式評分、舊版暫定評分，以及已發布成績的原子 `gradeRevisions` 雙寫，仍只使用 `canManageGroup`。同一舊登入 context 在教師已轉校而舊 membership 尚未撤銷時，可能寫入舊校成績與稽核軌跡。屬規則可達性缺口，非正式資料遭濫用的證據。
+- 最小修補：將上述三條教師寫入支線改為 `canManageCurrentGroup(groupId)`。學生首次作答分支、正式成績的欄位限制／必須同交易寫入稽核紀錄，以及唯新增且不可竄改 revision 的條件均保持原樣。
+- 新增 `transferred teachers cannot replay initial grading or audited corrections with old memberships` 真 Firebase emulator 測試，使用合成資料與同一登入 context，涵蓋正常第一筆正式／舊版評分、原子修訂、跨帳號拒絕、雙向校籍衝突、學校／課程撤權、連續重放與恢復。需核對精確新 SHA 的 emulator，尤其原子修訂 Firestore Rules 1,000-expression 上限；本紀錄尚不宣稱已驗證通過。
+- 保持 npm/pnpm audit 外送限制、E 校園暫停、正式資料／金鑰／token／migration／部署禁止條件。正式 GCS/Supabase 舊 URL 撤銷與真 Storage CAS、歷史 teacherNotes 移轉、minimatch 相容性及指定 App 5504170 核可仍未解決。
