@@ -102,6 +102,7 @@ function TaskFlowFixture() {
             : []
         }
         onRetryTimetable={() => setTimetableRetries((count) => count + 1)}
+        upcomingTodos={[]}
         teachingCourses={courseState === 'empty' ? [] : [course]}
         coursesLoading={courseState === 'loading'}
         coursesError={courseState === 'error' ? '部分課程資料尚未讀到，請重試。' : ''}

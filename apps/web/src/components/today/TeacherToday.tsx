@@ -57,7 +57,7 @@ export function TeacherToday({
   timetableScopeKey,
   onRetryTimetable,
   teachingCourses,
-  upcomingTodos,
+  upcomingTodos = [],
   coursesLoading,
   coursesError,
   onRetryCourses,
