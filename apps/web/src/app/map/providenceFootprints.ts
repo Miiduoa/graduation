@@ -352,11 +352,18 @@ function heightFromOsmTags(value: unknown):
   // Keep the required space for spelled-out aliases; never guess other units.
   const metric = /^(\d{1,3}(?:\.\d{1,6})?)(?:\s*m|\s+(?:metre|metres|meter|meters))?$/.exec(label);
   const feet = /^(\d{1,3}(?:\.\d{1,6})?)\s+(?:ft|feet)$/i.exec(label);
+  // OSM's unit specification also permits kilometre, mile and yard values
+  // for height. Convert only explicit, unambiguous units to metres: a tag
+  // such as "0.018 km" must not become a fictitious 12 m fallback or vanish.
+  // https://wiki.openstreetmap.org/wiki/Map_features/Units
+  const otherUnits = /^(\d{1,3}(?:\.\d{1,6})?)\s+(km|mi|yd)$/.exec(label);
+  const metresPerUnit: Record<string, number> = { km: 1000, mi: 1609.344, yd: 0.9144 };
   const feetInches = /^(\d{1,3})'(?:([0-9]{1,2})")?$/.exec(label);
   if (feetInches && Number(feetInches[2] ?? 0) >= 12) return null;
   const height = metric ? Number(metric[1]) :
     feet ? Number(feet[1]) * 0.3048 :
-      feetInches ? Number(feetInches[1]) * 0.3048 + Number(feetInches[2] ?? 0) * 0.0254 : NaN;
+      otherUnits ? Number(otherUnits[1]) * metresPerUnit[otherUnits[2]] :
+        feetInches ? Number(feetInches[1]) * 0.3048 + Number(feetInches[2] ?? 0) * 0.0254 : NaN;
   return Number.isFinite(height) && height >= 2.5 && height <= 100
     ? { heightMeters: height, heightBasis: 'osm-tag' } : null;
 }
