@@ -90,7 +90,7 @@ async def check_service_navigation(page, config, report, capture):
     await trigger.click()
     menu = page.locator('header details[name="campus-navigation-popover"][open]').filter(has=trigger)
     field = menu.get_by_role('searchbox', name='搜尋服務', exact=True)
-    submit = menu.get_by_role('button', name='查看完整搜尋結果', exact=True)
+    submit = menu.get_by_role('button', name='查看結果', exact=True)
     await expect(submit).to_be_visible()
     panel = await field.evaluate('''input => {
       const panel=input.closest('[id$="-services"]');
