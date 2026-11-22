@@ -174,7 +174,7 @@ async def check_service_navigation(page, config, report, capture):
     await field.focus()
     await page.keyboard.press('Escape')
     report['serviceNavigation'] = {'layout': panel, 'realBrowserHistory': True, 'realModifierTab': True}
-    report['checks'].append('Services adapt to panel width and text size; hover keeps words still; new-tab click preserves the task; real Back restores once; Enter retains query and campus without submitting during IME composition')
+    report['checks'].append('Services adapt to panel width and text size; hover keeps words still; new-tab click preserves the task; real Back restores the source menu and Escape clears its draft; Enter retains query and campus without submitting during IME composition')
 
     await page.get_by_role('navigation', name='主要導覽', exact=True).get_by_role('link', name='生活', exact=True).click()
     await expect(page.get_by_role('heading', name='生活', exact=True)).to_be_visible()

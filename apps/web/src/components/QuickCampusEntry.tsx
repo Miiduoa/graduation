@@ -33,7 +33,7 @@ import {
   type AssistantServiceId,
 } from '@campus/shared/src/assistantServices';
 import { AssistantServiceLinks } from './AssistantServiceLinks';
-import { useCampusFinderAccount, useCampusFinderDraftScope, useDirectoryDraftIdentity } from '@/lib/useCampusFinderAccount';
+import { useCampusFinderAccount, useCampusFinderDraftScope } from '@/lib/useCampusFinderAccount';
 import { AssistantLinkNavigation, useAssistantLinkNavigation } from './AssistantReplyLink';
 import styles from './QuickCampusEntry.module.css';
 
@@ -66,6 +66,7 @@ export function QuickCampusEntry({
   const campusReady = !selection || (!selection.loading && selection.catalogStatus === 'ready');
   const canInterpret = account.canInterpret && campusReady;
   const canUseAssistant = account.canUseAssistant && campusReady;
+  const canRemember = account.canRemember && campusReady;
   const selected = selection?.selectedSchool;
   const selectedSchoolId = selected?.id || '';
   const scope = JSON.stringify([
@@ -74,12 +75,9 @@ export function QuickCampusEntry({
     Boolean(selection?.loading),
     selection?.catalogStatus,
   ]);
-  const { binding, scope: draftOwner, canRestore, bindRestoredDraft } = useDirectoryDraftIdentity(
-    account, campusReady ? selectedSchoolId : undefined,
-  );
-  const storageScope = JSON.stringify([account.draftOwnerScope, selectedSchoolId]);
+  const storageScope = JSON.stringify([account.ownerScope, selectedSchoolId]);
   const draftScope = useCampusFinderDraftScope(
-    draftOwner,
+    account.ownerScope,
     campusReady ? selectedSchoolId : null,
   );
   const campusSearch = buildCampusNavigationSearch(
@@ -106,32 +104,15 @@ export function QuickCampusEntry({
     };
   }, [scope]);
   useLayoutEffect(() => {
-    if (!canRestore) {
-      restoredScope.current = null;
-      if (campusReady && account.status !== 'signing-out') {
-        restoreDirectorySearch('quick', window.location.pathname || '/', undefined, binding);
-      }
-      return;
-    }
-    if (restoredScope.current === storageScope) return;
+    if (!canRemember || restoredScope.current === storageScope) return;
     restoredScope.current = storageScope;
     // A deferred history restore must not replace text entered while campus resolution was pending.
-    const snapshot = restoreDirectorySearch(
-      'quick',
-      window.location.pathname || '/',
-      storageScope,
-      binding,
-      account.fullyVerified,
-    );
+    const snapshot = restoreDirectorySearch('quick', window.location.pathname || '/', storageScope);
     if (draft.edited || !snapshot) return;
-    bindRestoredDraft(snapshot.binding);
     // Restore the typed request after history navigation back to this page.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft({ scope: draftScope, query: snapshot.query.slice(0, 160), edited: false });
-  }, [
-    canRestore, campusReady, draftScope, storageScope, draft.edited, binding,
-    bindRestoredDraft, account.fullyVerified, account.status,
-  ]);
+  }, [canRemember, draftScope, storageScope, draft.edited]);
   useEffect(
     () => () => {
       sequence.current += 1;
@@ -196,29 +177,29 @@ export function QuickCampusEntry({
   }
 
   function startOver() {
-    if (canRestore) forgetDirectorySearch('quick');
+    forgetDirectorySearch('quick');
     updateQuery('');
     input.current?.focus();
   }
 
   function rememberQuick(href: string) {
-    if (!campusReady || account.status === 'signing-out') return;
+    if (!canRemember) return;
     rememberDirectorySearch('quick', {
       path: window.location.pathname || '/',
       destination: href,
       query,
       open: true,
-      scope: canRestore ? storageScope : undefined,
-      binding,
+      scope: storageScope,
     });
   }
 
   const panelNavigation = useContext(AssistantLinkNavigation);
   const navigate = onNavigate ?? panelNavigation;
-  const navigateQuick = useAssistantLinkNavigation((href) => {
-    rememberQuick(href);
-    navigate?.(href);
-  });
+  const notifyNavigation = useAssistantLinkNavigation(navigate);
+  function navigateQuick(event: React.MouseEvent<HTMLAnchorElement>) {
+    rememberQuick(event.currentTarget.getAttribute('href') ?? '');
+    notifyNavigation(event);
+  }
 
   async function analyze(input: string) {
     const text = input.trim();

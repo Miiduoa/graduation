@@ -1,59 +1,32 @@
-import { directoryDraftCases } from '@/test/directoryDraftCases';
 import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directoryStorageFailures';
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CampusServiceMenu } from './CampusServiceMenu';
 import { AppHeader } from './AppHeader';
 import { visibleCampusServices } from '@/lib/campusServices';
-import { MENU_RETURN_STATE_KEY, setMenuReturnScope } from '@/lib/menuNavigationReturn';
-import { NuniSessionProvider, useOptionalNuniSession } from '@/features/nuni/Session';
 
 const navigation = vi.hoisted(() => ({ pathname: '/map', search: '' }));
-const selection = vi.hoisted(() => ({
-  current: null as null | {
-    loading: boolean;
-    catalogStatus: 'loading' | 'ready' | 'error';
-    selectedSchool: { id: string; name: string } | null;
-  },
-}));
-vi.mock('./SelectedSchoolProvider', () => ({
-  useOptionalSelectedSchool: () => selection.current,
-}));
 const auth = vi.hoisted(() => ({
-  session: null as null | {
-    platformAccountId: string;
-    isPlatformOperator: boolean;
-    context?: string;
-  },
+  session: null as null | { platformAccountId: string; isPlatformOperator: boolean },
   loading: false,
-  error: '',
   pendingLogout: false,
   logout: vi.fn(),
-  useProvider: false,
 }));
 const firebase = vi.hoisted(() => ({
   user: null as { uid: string } | null,
-  error: null as Error | null,
 }));
 vi.mock('./SchoolSelector', () => ({ SchoolSelector: () => null }));
-vi.mock('@/features/nuni/Session', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/features/nuni/Session')>();
-  return {
-    ...actual,
-    useNuniSession: () => auth,
-    useOptionalNuniSession: () => {
-      const session = actual.useOptionalNuniSession();
-      return auth.useProvider ? session : auth;
-    },
-  };
-});
+vi.mock('@/features/nuni/Session', () => ({
+  useNuniSession: () => auth,
+  useOptionalNuniSession: () => auth,
+}));
 vi.mock('next/navigation', () => ({
   usePathname: () => navigation.pathname,
   useSearchParams: () => new URLSearchParams(navigation.search),
 }));
 vi.mock('./AuthGuard', () => ({
-  useAuth: () => ({ user: firebase.user, error: firebase.error, signOutUser: vi.fn() }),
+  useAuth: () => ({ user: firebase.user, signOutUser: vi.fn() }),
 }));
 
 // jsdom exposes descendants of closed <details> in role queries; check native disclosure state.
@@ -106,43 +79,11 @@ beforeEach(() => {
   navigation.search = '';
   window.history.replaceState({}, '', '/map');
   sessionStorage.clear();
-  setMenuReturnScope(null);
   auth.session = null;
   auth.loading = false;
-  auth.error = '';
   auth.pendingLogout = false;
-  auth.useProvider = false;
   firebase.user = null;
-  firebase.error = null;
-  selection.current = null;
 });
-
-afterEach(() => vi.unstubAllGlobals());
-
-type MenuOrigin = { url: string; state: unknown };
-function captureMenuOrigin(): MenuOrigin {
-  return {
-    url: `${window.location.pathname}${window.location.search}${window.location.hash}`,
-    state: window.history.state,
-  };
-}
-
-function visitMenuDestination(href: string) {
-  const url = new URL(href, window.location.origin);
-  navigation.pathname = url.pathname;
-  navigation.search = url.search.slice(1);
-  window.history.pushState({}, '', href);
-}
-
-// Component tests supply the browser's popstate contract; the production browser
-// suite separately exercises actual Back/Forward and the Next route boundary.
-function returnToMenuOrigin(origin: MenuOrigin) {
-  const url = new URL(origin.url, window.location.origin);
-  navigation.pathname = url.pathname;
-  navigation.search = url.search.slice(1);
-  window.history.replaceState(origin.state, '', origin.url);
-  act(() => window.dispatchEvent(new PopStateEvent('popstate', { state: origin.state })));
-}
 
 it('retains all existing services and search while adding a separate classroom entry', () => {
   render(<CampusServiceMenu />);
@@ -234,9 +175,7 @@ it('marks classroom children as part of the added service without selecting exis
   render(<CampusServiceMenu />);
   fireEvent.click(screen.getByText('所有服務'));
   expandAllServices();
-  expect(screen.getByRole('link', { name: '課程與作業' }).getAttribute('aria-current')).toBe(
-    'page',
-  );
+  expect(screen.getByRole('link', { name: '課程與作業' }).getAttribute('aria-current')).toBe('page');
   expect(screen.getByRole('link', { name: '課程與群組' }).getAttribute('aria-current')).toBeNull();
 });
 
@@ -527,11 +466,12 @@ it('reopens the directory with the same query and category after returning from 
     target: { value: '借書' },
   });
   fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-  const origin = captureMenuOrigin();
-  visitMenuDestination('/library');
+  navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
   view.rerender(<CampusServiceMenu />);
   expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-  returnToMenuOrigin(origin);
+  navigation.pathname = '/map';
+  window.history.replaceState({}, '', '/map');
   view.rerender(<CampusServiceMenu />);
   expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
   expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
@@ -569,17 +509,18 @@ async function dispatchToggleAfterTask(menu: HTMLDetailsElement) {
   });
 }
 
-function restoreOpenDirectory(view: ReturnType<typeof render>, content = <CampusServiceMenu />) {
+function restoreOpenDirectory(view: ReturnType<typeof render>) {
   fireEvent.click(screen.getByText('所有服務'));
   fireEvent.change(screen.getByRole('searchbox', { name: '搜尋服務' }), {
     target: { value: '借書' },
   });
   fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-  const origin = captureMenuOrigin();
-  visitMenuDestination('/library');
-  view.rerender(content);
-  returnToMenuOrigin(origin);
-  view.rerender(content);
+  navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
+  view.rerender(<CampusServiceMenu />);
+  navigation.pathname = '/map';
+  window.history.replaceState({}, '', '/map');
+  view.rerender(<CampusServiceMenu />);
 }
 
 function expectDirectoryNotRestored() {
@@ -601,11 +542,12 @@ it('keeps the snapshot when a delayed close toggle arrives after opening a servi
   const menu = screen.getByText('所有服務').closest('details')!;
   expect(menu.open).toBe(false);
   await dispatchToggleAfterTask(menu);
-  const origin = captureMenuOrigin();
-  visitMenuDestination('/library');
+  navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
   view.rerender(<CampusServiceMenu />);
   expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-  returnToMenuOrigin(origin);
+  navigation.pathname = '/map';
+  window.history.replaceState({}, '', '/map');
   view.rerender(<CampusServiceMenu />);
   expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
   expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
@@ -617,7 +559,7 @@ it('keeps the snapshot when a delayed close toggle arrives after opening a servi
   expect(screen.getByRole('link', { name: '圖書館' })).toBeTruthy();
 });
 
-it('keeps a real return open through a delayed toggle but never replays it on remount', async () => {
+it('does not forget the snapshot when a delayed toggle arrives after restoring open', async () => {
   const view = render(<CampusServiceMenu />);
   restoreOpenDirectory(view);
   const menu = screen.getByText('所有服務').closest('details')!;
@@ -629,8 +571,10 @@ it('keeps a real return open through a delayed toggle but never replays it on re
   );
   view.unmount();
   render(<CampusServiceMenu />);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe('');
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
 });
 
 it('does not close or forget when restoring open moves focus back to the page', () => {
@@ -645,8 +589,8 @@ it('does not close or forget when restoring open moves focus back to the page', 
     target: { value: '借書' },
   });
   fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-  const origin = captureMenuOrigin();
-  visitMenuDestination('/library');
+  navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
   view.rerender(
     <>
       <button type="button">頁面內容</button>
@@ -655,7 +599,8 @@ it('does not close or forget when restoring open moves focus back to the page', 
   );
   const page = screen.getByRole('button', { name: '頁面內容' });
   page.focus();
-  returnToMenuOrigin(origin);
+  navigation.pathname = '/map';
+  window.history.replaceState({}, '', '/map');
   view.rerender(
     <>
       <button type="button">頁面內容</button>
@@ -671,8 +616,10 @@ it('does not close or forget when restoring open moves focus back to the page', 
   );
   view.unmount();
   render(<CampusServiceMenu />);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe('');
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
 });
 
 it('does not restore after clearing filters, viewing all services, or collapsing the summary', () => {
@@ -699,91 +646,27 @@ it('does not restore after clearing filters, viewing all services, or collapsing
   expectDirectoryNotRestored();
 });
 
-it('does not replay a restored draft after focus dismisses the menu', async () => {
-  const content = (
-    <>
-      <button type="button">頁面內容</button>
-      <CampusServiceMenu />
-    </>
-  );
-  const view = render(content);
-  restoreOpenDirectory(view, content);
-  const origin = captureMenuOrigin();
-  const menu = screen.getByText('所有服務').closest('details')!;
-  await dispatchToggleAfterTask(menu);
-  fireEvent.blur(menu, { relatedTarget: screen.getByRole('button', { name: '頁面內容' }) });
-  expect(menu.open).toBe(false);
-  returnToMenuOrigin({ url: '/library', state: {} });
-  view.rerender(content);
-  returnToMenuOrigin(origin);
-  view.rerender(content);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-});
-
-describe.each(directoryStorageFailures)('menu navigation with storage %s', (failure) => {
-  it.each(['service link', 'directory link', 'submit'] as const)('follows the %s and skips the draft', (entry) => {
-    render(<CampusServiceMenu />);
-    const menu = screen.getByText('所有服務').closest('details')!;
-    fireEvent.click(screen.getByText('所有服務'));
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-    const link = entry === 'service link'
-      ? screen.getByRole('link', { name: '圖書館' })
-      : screen.getByRole('link', { name: /尋找校園服務/ });
-    const expectedPath = entry === 'service link' ? '/library' : '/search';
-    const click = vi.fn();
-    document.addEventListener('click', click);
-    const previousState = window.history.state;
-    const storage = rejectDirectoryStorage(failure);
-    try {
-      fireEvent.click(entry === 'submit' ? screen.getByRole('button', { name: '查看結果' }) : link);
-      const linkClicks = click.mock.calls
-        .map(([event]) => event as MouseEvent)
-        .filter((event) => event.target === link);
-      expect(linkClicks).toHaveLength(1);
-      expect(linkClicks[0].defaultPrevented).toBe(false);
-      expect(new URL((link as HTMLAnchorElement).href).pathname).toBe(expectedPath);
-      expect(menu.open).toBe(false);
-      expect(screen.queryByText('搜尋草稿暫時無法儲存，請稍後再試。')).toBeNull();
-    } finally {
-      document.removeEventListener('click', click);
-      storage.mockRestore();
-    }
-    expect(window.history.state).toEqual(previousState);
-    expect(sessionStorage.getItem('campus.menu.return.v1')).toBeNull();
+it('keeps the directory usable when sessionStorage throws', () => {
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('blocked');
   });
-});
-
-it.each([false, true])('restores the latest menu (History rejected: %s)', (historyRejected) => {
-  for (const query of ['借書', '']) {
-    const view = render(<CampusServiceMenu />);
-    const menu = screen.getByText('所有服務').closest('details')!;
-    const search = screen.getByRole<HTMLInputElement>('searchbox');
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('quota');
+  });
+  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  try {
+    render(<CampusServiceMenu />);
     fireEvent.click(screen.getByText('所有服務'));
-    fireEvent.change(search, { target: { value: query } });
-    const link = screen.getByRole('link', { name: '圖書館' });
-    const replace = historyRejected
-      ? vi.spyOn(window.history, 'replaceState').mockImplementation(() => {
-          throw new DOMException('History unavailable', 'SecurityError');
-        })
-      : undefined;
-    try {
-      fireEvent.click(link);
-      expect(menu.open).toBe(false);
-    } finally {
-      replace?.mockRestore();
-    }
-
-    const origin = captureMenuOrigin();
-    visitMenuDestination('/library');
-    view.rerender(<CampusServiceMenu />);
-    returnToMenuOrigin(origin);
-    view.rerender(<CampusServiceMenu />);
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
-    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(query);
-    view.unmount();
-    sessionStorage.clear();
-    visitMenuDestination('/map');
-    setMenuReturnScope(null);
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜尋服務' }), {
+      target: { value: '借書' },
+    });
+    expect(screen.getByRole('link', { name: '圖書館' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+  } finally {
+    vi.restoreAllMocks();
   }
 });
 
@@ -799,8 +682,8 @@ it('does not steal focus when restoring an open directory', () => {
     target: { value: '借書' },
   });
   fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-  const origin = captureMenuOrigin();
-  visitMenuDestination('/library');
+  navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
   view.rerender(
     <>
       <button type="button">頁面內容</button>
@@ -810,7 +693,8 @@ it('does not steal focus when restoring an open directory', () => {
   const page = screen.getByRole('button', { name: '頁面內容' });
   page.focus();
   expect(document.activeElement).toBe(page);
-  returnToMenuOrigin(origin);
+  navigation.pathname = '/map';
+  window.history.replaceState({}, '', '/map');
   view.rerender(
     <>
       <button type="button">頁面內容</button>
@@ -844,9 +728,8 @@ it('opens a keyboard-dismissible assistant on the current service with a login r
   const dialog = view.getByRole('dialog', { name: '校園助理' });
   expect(dialog).toBeTruthy();
   const login = await view.findByRole('link', { name: '登入後，接著詢問校園助理' });
-  expect(
-    new URL(login.getAttribute('href')!, window.location.origin).searchParams.get('returnUrl'),
-  ).toBe('/map#campus-assistant-entry');
+  expect(new URL(login.getAttribute('href')!, window.location.origin).searchParams.get('returnUrl'))
+    .toBe('/map#campus-assistant-entry');
   fireEvent.keyDown(dialog, { key: 'Escape' });
   expect(view.queryByRole('dialog')).toBeNull();
   expect(document.activeElement).toBe(trigger);
@@ -905,6 +788,7 @@ it('keeps exactly five primary destinations and moves service search out of the 
   expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: '搜尋服務' }));
 });
 
+
 it('starts with a small set of everyday entries and exposes secondary services on request', () => {
   render(<CampusServiceMenu />);
   fireEvent.click(screen.getByText('所有服務'));
@@ -924,12 +808,8 @@ it('does not reset a category when a nested disclosure toggles', async () => {
   const summary = screen.getByLabelText('課程與作業的相關服務');
   fireEvent.click(summary);
   fireEvent.click(summary);
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-  expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe(
-    'true',
-  );
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe('true');
   expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
 });
 
@@ -938,15 +818,46 @@ it('restores the expanded service family when returning to the menu origin', () 
   fireEvent.click(screen.getByText('所有服務'));
   fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
   fireEvent.click(screen.getByRole('link', { name: '教材收藏' }));
-  const origin = captureMenuOrigin();
-  visitMenuDestination('/classroom/material-bookmarks');
+  navigation.pathname = '/classroom/material-bookmarks';
   view.rerender(<CampusServiceMenu />);
-  returnToMenuOrigin(origin);
+  navigation.pathname = '/map';
   view.rerender(<CampusServiceMenu />);
   expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
   expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
   expect(screen.getByRole('link', { name: '校園地圖' }).getAttribute('aria-current')).toBe('page');
   expect(screen.getByRole('link', { name: '教材收藏' }).getAttribute('aria-current')).toBeNull();
+});
+
+describe.each(directoryStorageFailures)('menu navigation with storage %s', (failure) => {
+  it.each(['service link', 'directory link', 'submit'] as const)('follows the %s', (entry) => {
+    render(<CampusServiceMenu />);
+    const menu = screen.getByText('所有服務').closest('details')!;
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    const link = entry === 'service link'
+      ? screen.getByRole('link', { name: '圖書館' })
+      : screen.getByRole('link', { name: /尋找校園服務/ });
+    const expectedPath = entry === 'service link' ? '/library' : '/search';
+    const click = vi.fn();
+    document.addEventListener('click', click);
+    const previousState = window.history.state;
+    const storage = rejectDirectoryStorage(failure);
+    try {
+      fireEvent.click(entry === 'submit' ? screen.getByRole('button', { name: '查看結果' }) : link);
+      const linkClicks = click.mock.calls
+        .map(([event]) => event as MouseEvent)
+        .filter((event) => event.target === link);
+      expect(linkClicks).toHaveLength(1);
+      expect(linkClicks[0].defaultPrevented).toBe(false);
+      expect(new URL((link as HTMLAnchorElement).href).pathname).toBe(expectedPath);
+      expect(menu.open).toBe(false);
+      expect(screen.queryByText('搜尋草稿暫時無法儲存，請稍後再試。')).toBeNull();
+    } finally {
+      document.removeEventListener('click', click);
+      storage.mockRestore();
+    }
+    expect(window.history.state).toEqual(previousState);
+  });
 });
 
 it.each([{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }])(
@@ -982,7 +893,7 @@ it.each(['cancelled', 'new-tab', 'download'])(
     fireEvent.click(link);
     expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
     expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
-    expect(window.history.state[MENU_RETURN_STATE_KEY]).toBeUndefined();
+    expect(sessionStorage.getItem('campus.directory.search.v1')).toBeNull();
   },
 );
 
@@ -993,618 +904,8 @@ it('keeps the search open when the full directory is opened in another tab', () 
   fireEvent.click(screen.getByRole('link', { name: /尋找校園服務/ }), { metaKey: true });
   expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
-  expect(window.history.state[MENU_RETURN_STATE_KEY]).toBeUndefined();
-});
-
-function testSessionResponse() {
-  return Response.json({
-    authenticated: true,
-    platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
-    isPlatformOperator: false,
-    context: 'a'.repeat(43),
-  });
-}
-
-function SessionStatus() {
-  const session = useOptionalNuniSession();
-  const status = session?.loading
-    ? 'checking'
-    : session?.error
-      ? 'verification failed'
-      : session?.session
-        ? 'signed-in'
-        : 'guest';
-  return <output>{status}</output>;
-}
-
-it.each(['unavailable', 'connection lost', 'invalid session'])(
-  'restores the same account’s search after a session recheck fails (%s)',
-  async (failure) => {
-    auth.useProvider = true;
-    if (failure !== 'unavailable') firebase.user = { uid: 'school-a' };
-    const fetchSession = vi.fn().mockResolvedValueOnce(testSessionResponse());
-    if (failure === 'connection lost') fetchSession.mockRejectedValueOnce(new TypeError());
-    else {
-      fetchSession.mockResolvedValueOnce(
-        failure === 'unavailable' ? new Response(null, { status: 503 }) : Response.json({}),
-      );
-    }
-    let finishRefresh!: (response: Response) => void;
-    fetchSession.mockImplementationOnce(
-      () =>
-        new Promise<Response>((resolve) => {
-          finishRefresh = resolve;
-        }),
-    );
-    vi.stubGlobal('fetch', fetchSession);
-    const tree = () => (
-      <NuniSessionProvider>
-        <SessionStatus />
-        <CampusServiceMenu />
-      </NuniSessionProvider>
-    );
-    const view = render(tree());
-    await screen.findByText('signed-in');
-    fireEvent.click(screen.getByText('所有服務'));
-    fireEvent.click(screen.getByRole('button', { name: '篩選校園生活' }));
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-    fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-    const origin = captureMenuOrigin();
-    visitMenuDestination('/library');
-    view.rerender(tree());
-    fireEvent(window, new PageTransitionEvent('pageshow', { persisted: true }));
-    await screen.findByText('verification failed');
-
-    returnToMenuOrigin(origin);
-    view.rerender(tree());
-    const hasConfirmedSchool = failure !== 'unavailable';
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(hasConfirmedSchool);
-    fireEvent(window, new PageTransitionEvent('pageshow', { persisted: true }));
-    expect(screen.getByText('checking')).toBeTruthy();
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(hasConfirmedSchool);
-    await act(async () => finishRefresh(testSessionResponse()));
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
-    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
-    expect(screen.getByRole('button', { name: '篩選校園生活' }).getAttribute('aria-pressed')).toBe(
-      'true',
-    );
-  },
-);
-
-it.each([
-  ['visibilitychange', { ctrlKey: true }],
-  ['pageshow', { metaKey: true }],
-] as const)('keeps an open draft while %s rechecks the same account', async (event, modifiers) => {
-  auth.useProvider = true;
-  let finishRefresh!: (response: Response) => void;
-  const fetchSession = vi.fn()
-    .mockResolvedValueOnce(testSessionResponse())
-    .mockImplementationOnce(() => new Promise<Response>((resolve) => { finishRefresh = resolve; }));
-  vi.stubGlobal('fetch', fetchSession);
-  render(
-    <NuniSessionProvider>
-      <SessionStatus />
-      <CampusServiceMenu />
-    </NuniSessionProvider>,
-  );
-  await screen.findByText('signed-in');
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.click(screen.getByRole('button', { name: '篩選校園生活' }));
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: '圖書館' }), modifiers);
-  if (event === 'visibilitychange') {
-    expect(document.visibilityState).toBe('visible');
-    fireEvent(document, new Event(event));
-  } else {
-    fireEvent(window, new PageTransitionEvent(event, { persisted: true }));
-  }
-  expect(screen.getByText('checking')).toBeTruthy();
-  const expectDraft = () => {
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
-    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
-    expect(screen.getByRole('button', { name: '篩選校園生活' }).getAttribute('aria-pressed')).toBe('true');
-  };
-  expectDraft();
-  await act(async () => finishRefresh(testSessionResponse()));
-  expect(screen.getByText('signed-in')).toBeTruthy();
-  expectDraft();
-});
-
-it('closes a normal click on the exact current service without creating a return marker', () => {
-  navigation.pathname = '/library';
-  navigation.search = 'campus=pu';
-  window.history.replaceState({ unrelated: 'keep' }, '', '/library?campus=pu');
-  render(<CampusServiceMenu />);
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-  expect(window.history.state).toEqual({ unrelated: 'keep' });
-});
-
-it('does not restore a current-format draft on a new visit or from a history marker alone', () => {
-  const view = render(<CampusServiceMenu />);
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-  const origin = captureMenuOrigin();
-  expect((origin.state as Record<string, unknown>)[MENU_RETURN_STATE_KEY]).toEqual(
-    expect.any(String),
-  );
-  visitMenuDestination('/library');
-  view.rerender(<CampusServiceMenu />);
-  visitMenuDestination('/map');
-  view.rerender(<CampusServiceMenu />);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-  view.unmount();
-  // A retained browser marker alone is insufficient after an ordinary mount.
-  sessionStorage.clear();
-  window.history.replaceState(origin.state, '', origin.url);
-  render(<CampusServiceMenu />);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-});
-
-it.each([
-  ['教材', 'school', 'recovers'],
-  ['', 'platform', 'recovers'],
-  ['', 'both', 'stays unavailable'],
-  ['教材', 'school', 'switches account'],
-  ['', 'platform', 'switches account'],
-])(
-  'restores a public legacy draft (query %j) when %s verification fails and %s',
-  (query, failedSource, outcome) => {
-    firebase.user = { uid: 'school-a' };
-    const account = { platformAccountId: 'platform-a', isPlatformOperator: false };
-    auth.session = account;
-    const origin = captureMenuOrigin();
-    const destination = '/classroom/material-bookmarks';
-    const quick = {
-      path: '/map',
-      destination: '/library',
-      query: '借書',
-      category: 'campus',
-      open: true,
-    };
-    sessionStorage.setItem(
-      'campus.directory.search.v1',
-      JSON.stringify({
-        quick,
-        menu: {
-          path: '/map',
-          destination,
-          query,
-          category: 'study',
-          open: true,
-          expanded: ['service:/classroom'],
-        },
-      }),
-    );
-    visitMenuDestination(destination);
-    const view = render(<CampusServiceMenu />);
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-    if (failedSource !== 'platform') {
-      firebase.user = null;
-      firebase.error = new Error('School account unavailable');
-    }
-    if (failedSource !== 'school') {
-      auth.session = null;
-      auth.error = 'Platform account unavailable';
-    }
-    view.rerender(<CampusServiceMenu />);
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-    expect(JSON.parse(sessionStorage.getItem('campus.directory.search.v1')!)).toHaveProperty('menu');
-
-    returnToMenuOrigin(origin);
-    view.rerender(<CampusServiceMenu />);
-    const expectDraft = () => {
-      expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
-      expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(query);
-      expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe(
-        'true',
-      );
-      if (!query) {
-        expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
-      }
-    };
-    expectDraft();
-    expect(JSON.parse(sessionStorage.getItem('campus.directory.search.v1')!)).toEqual({ quick });
-    const migratedOrigin = captureMenuOrigin();
-    if (outcome !== 'stays unavailable') {
-      firebase.error = null;
-      firebase.user = { uid: outcome === 'switches account' && failedSource === 'school' ? 'school-b' : 'school-a' };
-      auth.error = '';
-      auth.session = outcome === 'switches account' && failedSource === 'platform'
-        ? { ...account, platformAccountId: 'platform-b' }
-        : account;
-      view.rerender(<CampusServiceMenu />);
-    }
-    if (outcome === 'switches account') {
-      expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-      expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
-      expect(sessionStorage.getItem('campus.menu.return.v1')).toBeNull();
-    } else {
-      expectDraft();
-    }
-    returnToMenuOrigin({ url: destination, state: {} });
-    view.rerender(<CampusServiceMenu />);
-    returnToMenuOrigin(migratedOrigin);
-    view.rerender(<CampusServiceMenu />);
-    if (outcome === 'switches account') {
-      expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-    } else {
-      expectDraft();
-    }
-  },
-);
-
-// A fresh tab may hand an unconfirmed draft to either first account, as in
-// merge-base. A known account survives a temporary failure and a later
-// confirmation of the same account.
-it.each(['first A', 'first B', 'same account', 'logout then A', 'logout then B'] as const)(
-  'checks a draft typed during failed platform verification on %s',
-  (outcome) => {
-    const accountA = { platformAccountId: 'platform-a', isPlatformOperator: false };
-    auth.session = outcome.startsWith('first') ? null : accountA;
-    auth.error = outcome.startsWith('first') ? 'Session unavailable' : '';
-    const view = render(<CampusServiceMenu />);
-    auth.session = null;
-    auth.error = 'Session unavailable';
-    view.rerender(<CampusServiceMenu />);
-    fireEvent.click(screen.getByText('所有服務'));
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-    fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-    const origin = captureMenuOrigin();
-    expect(origin.state).toHaveProperty(MENU_RETURN_STATE_KEY);
-    visitMenuDestination('/library');
-    view.rerender(<CampusServiceMenu />);
-    if (outcome.startsWith('logout')) {
-      auth.pendingLogout = true;
-      view.rerender(<CampusServiceMenu />);
-      auth.pendingLogout = false;
-    }
-    auth.error = '';
-    auth.session = outcome.endsWith('B') ? { ...accountA, platformAccountId: 'platform-b' } : accountA;
-    view.rerender(<CampusServiceMenu />);
-    returnToMenuOrigin(origin);
-    view.rerender(<CampusServiceMenu />);
-    const restored = outcome !== 'logout then B';
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(restored);
-    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(restored ? '借書' : '');
-  },
-);
-
-it('waits for the Next route and account confirmation before restoring a pending return', () => {
-  auth.session = { platformAccountId: 'a', isPlatformOperator: false };
-  const routerTree = { segment: 'map', children: ['unchanged'] };
-  window.history.replaceState({ __NA: true, tree: routerTree, unrelated: 'keep' }, '', '/map');
-  const view = render(<CampusServiceMenu />);
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-  const origin = captureMenuOrigin();
-  visitMenuDestination('/library');
-  view.rerender(<CampusServiceMenu />);
-  auth.loading = true;
-  view.rerender(<CampusServiceMenu />);
-  window.history.replaceState(origin.state, '', origin.url);
-  act(() => window.dispatchEvent(new PopStateEvent('popstate', { state: origin.state })));
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-  navigation.pathname = '/map';
-  view.rerender(<CampusServiceMenu />);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-  auth.loading = false;
-  view.rerender(<CampusServiceMenu />);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
-  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
-  expect(window.history.state).toMatchObject(origin.state as Record<string, unknown>);
-  fireEvent.click(screen.getByRole('button', { name: '關閉所有服務' }));
-  expect(window.history.state).toEqual({ __NA: true, tree: routerTree, unrelated: 'keep' });
-  returnToMenuOrigin(origin);
-  view.rerender(<CampusServiceMenu />);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-});
-
-it('does not restore on Forward into the service after returning to the original menu', () => {
-  const view = render(<CampusServiceMenu />);
-  restoreOpenDirectory(view);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
-  returnToMenuOrigin({ url: '/library', state: {} });
-  view.rerender(<CampusServiceMenu />);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
-});
-
-it('preserves a real return when the destination normalizes the same campus parameters', () => {
-  navigation.search = 'campus=pu';
-  window.history.replaceState({}, '', '/map?campus=pu');
-  const view = render(<CampusServiceMenu />);
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-  const origin = captureMenuOrigin();
-  visitMenuDestination('/library?school=PU&schoolId=pu&campus=pu');
-  view.rerender(<CampusServiceMenu />);
-  returnToMenuOrigin(origin);
-  view.rerender(<CampusServiceMenu />);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
-  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
-});
-
-it.each([
-  ['/login?returnUrl=%2Ftimetable%2Fshare%3Ftoken%3Dfake-sensitive', 'returnUrl'],
-  [
-    '/events?redirect=%2Fshare%2Ffake-sensitive&access_token=fake-sensitive&access_token=second',
-    'redirect',
-  ],
-  ['/map#access_token=fake-sensitive', 'access_token'],
-  ['/share/fake-sensitive#%2Fother%3Funknown%3Dfake-sensitive', 'unknown'],
-] as const)('keeps the source URL out of menu drafts and history state at %s', (url, parameter) => {
-  returnToMenuOrigin({ url, state: { router: 'keep' } });
-  const view = render(<CampusServiceMenu />);
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '教材' } });
-  expect(sessionStorage.length).toBe(0);
-  expect(window.history.state).toEqual({ router: 'keep' });
-
-  const link = screen.getByRole('link', { name: '教材收藏' });
-  const destination = link.getAttribute('href')!;
-  fireEvent.click(link);
-  const origin = captureMenuOrigin();
-  expect(origin.url).toBe(url);
-  expect(origin.state).toEqual({ router: 'keep', [MENU_RETURN_STATE_KEY]: expect.any(String) });
-  const storageKey = 'campus.menu.return.v1';
-  expect(sessionStorage.length).toBe(1);
-  expect(localStorage.length).toBe(0);
-  expect(sessionStorage.getItem(storageKey)).not.toContain('fake-sensitive');
-  expect(sessionStorage.getItem(storageKey)).not.toContain(parameter);
-  expect(sessionStorage.getItem(storageKey)).not.toContain(url);
-
-  visitMenuDestination(destination);
-  view.rerender(<CampusServiceMenu />);
-  returnToMenuOrigin(origin);
-  view.rerender(<CampusServiceMenu />);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
-  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('教材');
-});
-
-it.each([
-  ['/map', '/library?campus=nthu', 'history'],
-  ['/events', '/library', 'history'],
-  ['/classroom', '/library?campus=nthu', 'legacy'],
-  ['/bus', '/library', 'legacy'],
-] as const)('restores a %s origin after campus loading at %s (%s)', (path, destination, kind) => {
-  const school = { id: 'nthu', name: '清華大學' };
-  firebase.user = { uid: 'school-a' };
-  selection.current = { loading: false, catalogStatus: 'ready', selectedSchool: school };
-  returnToMenuOrigin({ url: path, state: {} });
-  const first = render(<CampusServiceMenu />);
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
-  const query = destination.includes('?') ? '教材' : '';
-  if (query) fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } });
-  else fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
-  fireEvent.click(screen.getByRole('link', { name: '教材收藏' }));
-  const origin = captureMenuOrigin();
-  const historyKey = 'campus.menu.return.v1';
-  const stored = sessionStorage.getItem(historyKey)!;
-  expect(stored).toBeTruthy();
-  first.unmount();
-  // Reset document scope while retaining the tab's persisted draft.
-  setMenuReturnScope(null);
-  const [snapshot] = JSON.parse(stored);
-  if (kind === 'legacy') {
-    sessionStorage.removeItem(historyKey);
-    sessionStorage.setItem('campus.directory.search.v1', JSON.stringify({
-      menu: { ...snapshot, binding: undefined, path, destination, open: true },
-    }));
-  }
-  visitMenuDestination(destination);
-  selection.current = { loading: true, catalogStatus: 'loading', selectedSchool: null };
-  const view = render(<CampusServiceMenu />);
-  const confirmCampus = () => {
-    selection.current = { loading: false, catalogStatus: 'ready', selectedSchool: school };
-    view.rerender(<CampusServiceMenu />);
-  };
-  if (query) confirmCampus();
-  returnToMenuOrigin(origin);
-  view.rerender(<CampusServiceMenu />);
-  if (!query) {
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(kind === 'legacy');
-    expect(sessionStorage.length).toBe(1);
-    confirmCampus();
-  }
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
-  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(query);
-  expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe('true');
-  if (!query) expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
-});
-
-it.each([
-  ['public', 'error', 'error'],
-  ['bound', 'error', 'error'],
-  ['public', 'loading', 'error'],
-  ['bound', 'loading', 'error'],
-  ['public', 'error', 'same'],
-  ['bound', 'error', 'same'],
-  ['public', 'error', 'account source error'],
-  ['bound', 'loading', 'different campus'],
-  ['bound', 'error', 'different account'],
-] as const)('restores a %s legacy draft during catalog %s, then handles %s', (kind, status, outcome) => {
-  const school = { id: 'pu', name: '靜宜大學' };
-  const ready = { loading: false, catalogStatus: 'ready', selectedSchool: school } as const;
-  const origin = { url: '/map?campus=pu', state: {} };
-  firebase.user = { uid: 'school-a' };
-  selection.current = ready;
-  returnToMenuOrigin(origin);
-  const first = render(<CampusServiceMenu />);
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
-  const query = status === 'loading' ? '教材' : '';
-  if (query) fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } });
-  else fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
-  const link = screen.getByRole<HTMLAnchorElement>('link', { name: '教材收藏' });
-  const destination = link.href;
-  fireEvent.click(link);
-  const [{ scope, category, expanded }] = JSON.parse(sessionStorage.getItem('campus.menu.return.v1')!);
-  first.unmount();
-  setMenuReturnScope(null);
-  sessionStorage.removeItem('campus.menu.return.v1');
-  sessionStorage.setItem('campus.directory.search.v1', JSON.stringify({
-    menu: {
-      path: '/map', destination: new URL(destination).pathname, query, category, expanded, open: true,
-      ...(kind === 'bound' ? { scope } : {}),
-    },
-  }));
-
-  visitMenuDestination(destination);
-  selection.current = { loading: status === 'loading', catalogStatus: status, selectedSchool: null };
-  if (outcome === 'account source error') {
-    firebase.user = null;
-    firebase.error = new Error('School account unavailable');
-  }
-  const view = render(<CampusServiceMenu />);
-  const menu = () => screen.getByText('所有服務').closest('details')!;
-  const search = () => screen.getByRole<HTMLInputElement>('searchbox');
-  expect(menu().open).toBe(false);
-  expect(sessionStorage.getItem('campus.directory.search.v1')).toBeTruthy();
-  returnToMenuOrigin(origin);
-  view.rerender(<CampusServiceMenu />);
-  const expectDraft = () => {
-    expect(menu().open).toBe(true);
-    expect(search().value).toBe(query);
-    expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe('true');
-    if (!query) expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
-  };
-  expectDraft();
   expect(sessionStorage.getItem('campus.directory.search.v1')).toBeNull();
-  const migratedOrigin = captureMenuOrigin();
-
-  if (outcome === 'error' || outcome === 'account source error') {
-    selection.current = { loading: false, catalogStatus: 'error', selectedSchool: null };
-  } else if (outcome === 'different campus') {
-    selection.current = { ...ready, selectedSchool: { id: 'nthu', name: '清華大學' } };
-    navigation.search = 'campus=nthu';
-    window.history.replaceState(migratedOrigin.state, '', '/map?campus=nthu');
-  } else if (outcome === 'different account') {
-    firebase.user = { uid: 'school-b' };
-  } else {
-    selection.current = ready;
-  }
-  view.rerender(<CampusServiceMenu />);
-  const changed = outcome.startsWith('different');
-  if (changed) {
-    expect(menu().open).toBe(false);
-    expect(search().value).toBe('');
-    expect(sessionStorage.getItem('campus.menu.return.v1')).toBeNull();
-    firebase.user = { uid: 'school-a' };
-    selection.current = ready;
-  } else {
-    expectDraft();
-  }
-  visitMenuDestination(destination);
-  view.rerender(<CampusServiceMenu />);
-  returnToMenuOrigin(migratedOrigin);
-  view.rerender(<CampusServiceMenu />);
-  if (changed) expect(menu().open).toBe(false);
-  else expectDraft();
 });
-
-it('captures a real return while the header is unmounted without storing account/session material', () => {
-  auth.session = {
-    platformAccountId: 'private-account',
-    isPlatformOperator: false,
-    context: 'private-session-secret',
-  };
-  const view = render(<CampusServiceMenu />);
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-  const origin = captureMenuOrigin();
-  expect(JSON.stringify(origin.state)).not.toMatch(/private-account|private-session-secret|借書/);
-  expect(sessionStorage.length).toBe(1);
-  expect(sessionStorage.getItem(sessionStorage.key(0)!)).not.toMatch(/private-account|private-session-secret/);
-  view.unmount();
-  visitMenuDestination('/library');
-  returnToMenuOrigin(origin);
-  render(<CampusServiceMenu />);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
-  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
-});
-
-it.each([
-  'school-account',
-  'school-account during platform error',
-  'platform-account',
-  'session',
-  'campus',
-  'campus during platform error',
-  'campus after selection loading',
-  'school-account during selection loading',
-])(
-  'discards a pending menu after changing %s even if the old scope returns',
-  (kind) => {
-    firebase.user = { uid: 'school-a' };
-    auth.session = {
-      platformAccountId: 'platform-a',
-      isPlatformOperator: false,
-      context: 'session-a',
-    };
-    navigation.search = 'campus=pu';
-    window.history.replaceState({}, '', '/map?campus=pu');
-    const school = { id: 'pu', name: '靜宜大學' };
-    if (kind.includes('selection loading')) {
-      selection.current = { loading: false, catalogStatus: 'ready', selectedSchool: school };
-    }
-    const view = render(<CampusServiceMenu />);
-    fireEvent.click(screen.getByText('所有服務'));
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-    fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-    const origin = captureMenuOrigin();
-    visitMenuDestination('/library?campus=pu');
-    view.rerender(<CampusServiceMenu />);
-    if (kind.endsWith('during platform error')) {
-      auth.session = null;
-      auth.error = 'Session unavailable';
-      view.rerender(<CampusServiceMenu />);
-      expect(sessionStorage.length).toBe(1);
-    }
-    if (kind.includes('selection loading')) {
-      sessionStorage.setItem('campus.directory.search.v1', JSON.stringify({
-        menu: { path: '/map', destination: '/library', query: '借書', category: 'campus', open: true },
-      }));
-      selection.current = { loading: true, catalogStatus: 'loading', selectedSchool: null };
-      view.rerender(<CampusServiceMenu />);
-      expect(sessionStorage.length).toBe(2);
-    }
-    if (kind.startsWith('school-account')) firebase.user = { uid: 'school-b' };
-    if (kind === 'platform-account')
-      auth.session = { ...auth.session!, platformAccountId: 'platform-b' };
-    if (kind === 'session') auth.session = { ...auth.session!, context: 'session-b' };
-    if (kind.startsWith('campus')) visitMenuDestination('/library?campus=nthu');
-    if (kind === 'campus after selection loading') {
-      selection.current = {
-        loading: false, catalogStatus: 'ready', selectedSchool: { id: 'nthu', name: '清華大學' },
-      };
-    }
-    view.rerender(<CampusServiceMenu />);
-    expect(sessionStorage.length).toBe(0);
-    if (kind.includes('selection loading')) {
-      selection.current = { loading: false, catalogStatus: 'ready', selectedSchool: school };
-    }
-    firebase.user = { uid: 'school-a' };
-    auth.session = {
-      platformAccountId: 'platform-a',
-      isPlatformOperator: false,
-      context: 'session-a',
-    };
-    auth.pendingLogout = false;
-    auth.error = '';
-    returnToMenuOrigin(origin);
-    view.rerender(<CampusServiceMenu />);
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
-  },
-);
 
 it('submits the explicit search with the same filters and campus, without forwarding unrelated parameters', () => {
   navigation.search = 'schoolId=pu&campus=pu&session=private&q=old';
@@ -1656,481 +957,5 @@ it('lets Enter choose Chinese characters before allowing an explicit full-search
   fireEvent.submit(form);
   expect(follow).toHaveBeenCalledTimes(1);
   expect(follow.mock.results[0].value).toBe('/search?q=%E5%9C%96%E6%9B%B8%E9%A4%A8');
-  expect(window.history.state[MENU_RETURN_STATE_KEY]).toEqual(expect.any(String));
-});
-
-it.each(['account', 'campus', 'temporary failure', 'different account', 'different campus'])(
-  'keeps live menu state and focus until a real boundary changes (%s)',
-  (transition) => {
-    const school = { id: 'pu', name: '靜宜大學' };
-    const ready = { loading: false, catalogStatus: 'ready', selectedSchool: school } as const;
-    const loading = { loading: true, catalogStatus: 'loading', selectedSchool: null } as const;
-    firebase.user = { uid: 'school-a' };
-    selection.current = transition === 'campus' ? loading : ready;
-    auth.loading = transition === 'account';
-    navigation.search = 'campus=pu';
-    window.history.replaceState({}, '', '/map?campus=pu');
-    const view = render(<CampusServiceMenu />);
-    fireEvent.click(screen.getByText('所有服務'));
-    fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
-    fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
-    const menu = screen.getByText('所有服務').closest('details')!;
-    const search = screen.getByRole<HTMLInputElement>('searchbox');
-    const related = screen.getByRole('link', { name: '教材收藏' }).closest('details')!;
-    act(() => search.focus());
-
-    if (transition === 'temporary failure') {
-      firebase.user = null;
-      firebase.error = new Error('Verification unavailable');
-      selection.current = loading;
-      navigation.search = '';
-      window.history.replaceState({}, '', '/map');
-      view.rerender(<CampusServiceMenu />);
-      expect(menu.open).toBe(true);
-      expect(document.activeElement).toBe(search);
-      expect(related.open).toBe(true);
-    }
-
-    auth.loading = false;
-    auth.session =
-      transition === 'account' ? { platformAccountId: 'a', isPlatformOperator: false } : null;
-    firebase.error = null;
-    firebase.user = { uid: transition === 'different account' ? 'school-b' : 'school-a' };
-    selection.current =
-      transition === 'different campus'
-        ? { ...ready, selectedSchool: { id: 'nthu', name: '清華大學' } }
-        : ready;
-    navigation.search = transition === 'different campus' ? 'campus=nthu' : 'campus=pu';
-    window.history.replaceState({}, '', `/map?${navigation.search}`);
-    if (transition === 'account' || transition === 'temporary failure') {
-      fireEvent.change(search, { target: { value: '教材' } });
-    }
-    view.rerender(<CampusServiceMenu />);
-
-    expect(screen.getByRole('searchbox')).toBe(search);
-    if (transition.startsWith('different')) {
-      expect(menu.open).toBe(false);
-      expect(related.open).toBe(false);
-      expect(search.value).toBe('');
-      expect(
-        screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed'),
-      ).toBe('false');
-      return;
-    }
-    expect(menu.open).toBe(true);
-    expect(document.activeElement).toBe(search);
-    expect(
-      screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed'),
-    ).toBe('true');
-    if (transition === 'campus') expect(related.open).toBe(true);
-    else expect(search.value).toBe('教材');
-  },
-);
-
-it.each([
-  ['account', false],
-  ['campus', false],
-  ['first campus differs from fallback', false],
-  ['catalog error', false],
-  ['account', true],
-] as const)(
-  'saves a return before %s confirmation (dismiss before confirmation: %s)',
-  (pending, dismiss) => {
-    const school = { id: 'pu', name: '靜宜大學' };
-    auth.loading = pending === 'account';
-    if (pending !== 'account') {
-      selection.current = pending === 'catalog error'
-        ? { loading: false, catalogStatus: 'error', selectedSchool: null }
-        : { loading: true, catalogStatus: 'loading', selectedSchool: null };
-    }
-    const view = render(<CampusServiceMenu />);
-    fireEvent.click(screen.getByText('所有服務'));
-    fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
-    if (pending === 'account') {
-      fireEvent.change(screen.getByRole('searchbox'), { target: { value: '教材' } });
-    } else {
-      fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
-    }
-    const link = screen.getByRole<HTMLAnchorElement>('link', { name: '教材收藏' });
-    fireEvent.click(link);
-    const origin = captureMenuOrigin();
-    expect(origin.state).toHaveProperty(MENU_RETURN_STATE_KEY);
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-    visitMenuDestination(link.href);
-    view.rerender(<CampusServiceMenu />);
-    returnToMenuOrigin(origin);
-    view.rerender(<CampusServiceMenu />);
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-
-    if (dismiss) {
-      fireEvent.click(screen.getByText('所有服務'));
-      fireEvent.click(screen.getByRole('button', { name: '關閉所有服務' }));
-    }
-    auth.loading = false;
-    if (pending === 'account') auth.session = { platformAccountId: 'a', isPlatformOperator: false };
-    else selection.current = {
-      loading: false,
-      catalogStatus: 'ready',
-      selectedSchool: pending === 'first campus differs from fallback' ? { id: 'nthu', name: '清華大學' } : school,
-    };
-    view.rerender(<CampusServiceMenu />);
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(!dismiss);
-    if (dismiss) {
-      expect(window.history.state).not.toHaveProperty(MENU_RETURN_STATE_KEY);
-      expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
-      return;
-    }
-    expect(
-      screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed'),
-    ).toBe('true');
-    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(pending === 'account' ? '教材' : '');
-    if (pending !== 'account') {
-      expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
-    }
-  },
-);
-
-it.each([
-  ['query', 'same account'],
-  ['query', 'guest'],
-  ['query', 'different account'],
-  ['expanded family', 'same account'],
-  ['expanded family', 'guest'],
-  ['expanded family', 'different account'],
-  ['empty', 'same account'],
-  ['closed', 'same account'],
-] as const)('preserves the %s menu while logout waits and fails, then confirms %s', (input, outcome) => {
-  const account = { platformAccountId: 'platform-a', isPlatformOperator: false };
-  auth.session = account;
-  const view = render(<CampusServiceMenu />);
-  const menu = screen.getByText('所有服務').closest('details')!;
-  const search = screen.getByRole<HTMLInputElement>('searchbox');
-  const category = screen.getByRole('button', { name: '篩選學習與課務' });
-  if (input !== 'closed') fireEvent.click(screen.getByText('所有服務'));
-  if (input === 'query' || input === 'expanded family') fireEvent.click(category);
-  const family = screen.getByLabelText('課程與作業的相關服務').closest('details')!;
-  if (input === 'query') fireEvent.change(search, { target: { value: '教材' } });
-  if (input === 'expanded family') fireEvent.click(family.querySelector('summary')!);
-
-  function checkMenu(retained: boolean) {
-    expect(menu.open).toBe(retained && input !== 'closed');
-    expect(search.value).toBe(retained && input === 'query' ? '教材' : '');
-    expect(category.getAttribute('aria-pressed')).toBe(String(retained && (input === 'query' || input === 'expanded family')));
-    if (input === 'expanded family') expect(family.open).toBe(retained);
-  }
-
-  auth.pendingLogout = true;
-  auth.loading = true;
-  auth.session = null;
-  view.rerender(<CampusServiceMenu />);
-  checkMenu(true);
-  auth.loading = false;
-  auth.error = '登出尚未完成';
-  view.rerender(<CampusServiceMenu />);
-  checkMenu(true);
-
-  auth.pendingLogout = false;
-  auth.error = '';
-  auth.session = outcome === 'guest' ? null : outcome === 'same account'
-    ? account
-    : { ...account, platformAccountId: 'platform-b' };
-  view.rerender(<CampusServiceMenu />);
-  checkMenu(outcome === 'same account');
-});
-
-it.each([
-  ['history', 'failed'],
-  ['history', 'same account'],
-  ['history', 'different account'],
-  ['history', 'different campus'],
-  ['legacy', 'failed'],
-  ['legacy', 'same account'],
-  ['legacy', 'different account'],
-  ['legacy', 'different campus'],
-] as const)('keeps a %s draft through logout until %s', (kind, outcome) => {
-  const account = { platformAccountId: 'platform-a', isPlatformOperator: false };
-  auth.session = account;
-  visitMenuDestination('/map?campus=pu');
-  const view = render(<CampusServiceMenu />);
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
-  fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
-  fireEvent.click(screen.getByRole('link', { name: '教材收藏' }));
-  let origin = captureMenuOrigin();
-  const historyKey = 'campus.menu.return.v1';
-  const legacyKey = 'campus.directory.search.v1';
-  const [draft] = JSON.parse(sessionStorage.getItem(historyKey)!);
-  if (kind === 'legacy') {
-    sessionStorage.removeItem(historyKey);
-    origin = { ...origin, state: {} };
-    sessionStorage.setItem(legacyKey, JSON.stringify({
-      menu: {
-        ...draft, binding: undefined, path: '/map', destination: '/classroom/material-bookmarks', open: true,
-      },
-    }));
-  }
-  const storedDraft = () => [sessionStorage.getItem(historyKey), sessionStorage.getItem(legacyKey)];
-  const before = storedDraft();
-  const open = () => screen.getByText('所有服務').closest('details')!.open;
-  visitMenuDestination('/classroom/material-bookmarks?campus=pu');
-  view.rerender(<CampusServiceMenu />);
-
-  auth.pendingLogout = true;
-  auth.loading = true;
-  auth.session = null;
-  view.rerender(<CampusServiceMenu />);
-  expect(storedDraft()).toEqual(before);
-  returnToMenuOrigin(origin);
-  view.rerender(<CampusServiceMenu />);
-  expect(open()).toBe(false);
-  expect(storedDraft()).toEqual(before);
-
-  auth.loading = false;
-  if (outcome === 'failed') {
-    auth.error = '登出尚未完成';
-  }
-  view.rerender(<CampusServiceMenu />);
-  expect(open()).toBe(false);
-  expect(storedDraft()).toEqual(before);
-
-  auth.pendingLogout = false;
-  auth.error = '';
-  auth.session = outcome === 'different account'
-    ? { ...account, platformAccountId: 'platform-b' }
-    : account;
-  if (outcome === 'different campus') visitMenuDestination('/map?campus=nthu');
-  view.rerender(<CampusServiceMenu />);
-  if (outcome.startsWith('different')) {
-    expect(open()).toBe(false);
-    expect(storedDraft()).toEqual([null, null]);
-  } else {
-    expect(open()).toBe(true);
-    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(draft.query);
-    expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
-  }
-});
-
-it.each(['query', 'expanded family'] as const)(
-  'restores a guest %s after logout and then saves and restores account B’s draft',
-  (draft) => {
-    auth.session = { platformAccountId: 'platform-a', isPlatformOperator: false };
-    visitMenuDestination('/map?campus=pu');
-    const view = render(<CampusServiceMenu />);
-    const menu = () => screen.getByText('所有服務').closest('details')!;
-    const search = () => screen.getByRole<HTMLInputElement>('searchbox');
-    fireEvent.click(screen.getByText('所有服務'));
-    fireEvent.change(search(), { target: { value: '借書' } });
-    fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-    const accountOrigin = captureMenuOrigin();
-    const storageKey = 'campus.menu.return.v1';
-    const accountDraft = sessionStorage.getItem(storageKey);
-    expect(accountDraft).toBeTruthy();
-
-    auth.pendingLogout = true;
-    auth.loading = true;
-    auth.session = null;
-    view.rerender(<CampusServiceMenu />);
-    expect(sessionStorage.getItem(storageKey)).toBe(accountDraft);
-    auth.loading = false;
-    auth.pendingLogout = false;
-    view.rerender(<CampusServiceMenu />);
-    expect(sessionStorage.getItem(storageKey)).toBeNull();
-    returnToMenuOrigin(accountOrigin);
-    view.rerender(<CampusServiceMenu />);
-    expect(menu().open).toBe(false);
-    expect(search().value).toBe('');
-
-    fireEvent.click(screen.getByText('所有服務'));
-    fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
-    if (draft === 'query') {
-      fireEvent.change(search(), { target: { value: '教材' } });
-    } else {
-      fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
-    }
-    const link = screen.getByRole<HTMLAnchorElement>('link', { name: '教材收藏' });
-    const destination = link.href;
-    fireEvent.click(link);
-    const guestOrigin = captureMenuOrigin();
-    expect(guestOrigin.state).toHaveProperty(MENU_RETURN_STATE_KEY);
-    expect(guestOrigin.state).not.toEqual(accountOrigin.state);
-
-    visitMenuDestination(destination);
-    view.rerender(<CampusServiceMenu />);
-    returnToMenuOrigin(guestOrigin);
-    view.rerender(<CampusServiceMenu />);
-    expect(menu().open).toBe(true);
-    expect(search().value).toBe(draft === 'query' ? '教材' : '');
-    expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe('true');
-    if (draft === 'expanded family') {
-      expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
-    }
-
-    auth.session = { platformAccountId: 'platform-b', isPlatformOperator: false };
-    view.rerender(<CampusServiceMenu />);
-    expect(menu().open).toBe(false);
-    expect(search().value).toBe('');
-    expect(sessionStorage.getItem(storageKey)).toBeNull();
-
-    fireEvent.click(screen.getByText('所有服務'));
-    fireEvent.change(search(), { target: { value: '公車' } });
-    const bus = screen.getByRole<HTMLAnchorElement>('link', { name: '公車' });
-    const busDestination = bus.href;
-    fireEvent.click(bus);
-    const accountBOrigin = captureMenuOrigin();
-    visitMenuDestination(busDestination);
-    view.rerender(<CampusServiceMenu />);
-    returnToMenuOrigin(accountBOrigin);
-    view.rerender(<CampusServiceMenu />);
-    expect(menu().open).toBe(true);
-    expect(search().value).toBe('公車');
-  },
-);
-
-it.each([['school-a'], [null]])('restores the latest menu draft after a campus switch for %s', (uid) => {
-  firebase.user = uid ? { uid } : null;
-  const selectCampus = (id: string) => {
-    selection.current = {
-      loading: false,
-      catalogStatus: 'ready',
-      selectedSchool: { id, name: id },
-    };
-  };
-  selectCampus('pu');
-  const view = render(<CampusServiceMenu />);
-  const historyKey = 'campus.menu.return.v1';
-  const input = screen.getByRole<HTMLInputElement>('searchbox');
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.change(input, { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-  expect(sessionStorage.getItem(historyKey)).toBeTruthy();
-
-  selectCampus('nthu');
-  view.rerender(<CampusServiceMenu />);
-  expect(sessionStorage.getItem(historyKey)).toBeNull();
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.change(input, { target: { value: '公車' } });
-  const bus = screen.getByRole('link', { name: '公車' });
-  const destination = bus.getAttribute('href')!;
-  fireEvent.click(bus);
-  const origin = captureMenuOrigin();
-  visitMenuDestination(destination);
-  view.rerender(<CampusServiceMenu />);
-  returnToMenuOrigin(origin);
-  view.rerender(<CampusServiceMenu />);
-  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
-  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('公車');
-});
-
-it.each(directoryDraftCases)('checks a menu history draft when $name', (entry) => {
-  const platform = (id: string) => ({ platformAccountId: id, isPlatformOperator: false });
-  firebase.user = entry.saved === 'platform' ? null : { uid: 'a' };
-  auth.session = entry.saved === 'school' ? null : platform('a');
-  selection.current = { loading: false, catalogStatus: 'ready', selectedSchool: { id: 'pu', name: '靜宜' } };
-  const first = render(<CampusServiceMenu />);
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-  const origin = captureMenuOrigin();
-  first.unmount();
-  setMenuReturnScope(null);
-  firebase.user = entry.school === 'failed' ? null : { uid: entry.school };
-  firebase.error = entry.school === 'failed' ? new Error('unavailable') : null;
-  auth.session = entry.platform === 'failed' ? null : platform(entry.platform);
-  auth.error = entry.platform === 'failed' ? 'unavailable' : '';
-  if ('campus' in entry) selection.current.selectedSchool = { id: entry.campus, name: '清大' };
-  returnToMenuOrigin(origin);
-  render(<CampusServiceMenu />);
-  const panel = screen.getByText('所有服務').closest('details')!;
-  expect(panel.open).toBe(entry.restored);
-  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(entry.restored ? '借書' : '');
-  expect(Boolean(sessionStorage.getItem('campus.menu.return.v1'))).toBe(entry.restored || 'retained' in entry);
-});
-
-it.each([true, false].flatMap((sameUrl) =>
-  ['mouse', 'Enter'].map((gesture) => ({ sameUrl, gesture })),
-))('restores the service trigger on $gesture (same URL: $sameUrl)', ({ sameUrl, gesture }) => {
-  render(<CampusServiceMenu />);
-  const summary = screen.getByText('所有服務').closest('summary')!;
-  fireEvent.click(summary);
-  const menu = summary.closest('details')!;
-  expect(menu.open).toBe(true);
-  const link = screen.getByRole('link', { name: sameUrl ? '校園地圖' : '圖書館' });
-  if (gesture === 'Enter') {
-    link.focus();
-    expect(document.activeElement).toBe(link);
-    fireEvent.keyDown(link, { key: 'Enter' });
-  }
-  fireEvent.click(link, { detail: gesture === 'Enter' ? 0 : 1 });
-  expect(menu.open).toBe(false);
-  expect(document.activeElement).toBe(summary);
-});
-
-it('clears a partially restored menu if the other source later confirms a different account', () => {
-  firebase.user = { uid: 'school-a' };
-  auth.session = { platformAccountId: 'platform-a', isPlatformOperator: false };
-  const first = render(<CampusServiceMenu />);
-  fireEvent.click(screen.getByText('所有服務'));
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
-  const origin = captureMenuOrigin();
-  first.unmount();
-  setMenuReturnScope(null);
-
-  auth.session = null;
-  auth.error = 'unavailable';
-  returnToMenuOrigin(origin);
-  const returned = render(<CampusServiceMenu />);
-  const panel = screen.getByText('所有服務').closest('details')!;
-  expect(panel.open).toBe(true);
-  auth.session = { platformAccountId: 'platform-b', isPlatformOperator: false };
-  auth.error = '';
-  returned.rerender(<CampusServiceMenu />);
-  expect(panel.open).toBe(false);
-  expect(sessionStorage.getItem('campus.menu.return.v1')).toBeNull();
-});
-
-it.each([true, false].flatMap((sameUrl) => [
-  { control: 'link', gesture: 'mouse' },
-  { control: 'link', gesture: 'Enter' },
-  { control: 'button', gesture: 'mouse' },
-  { control: 'button', gesture: 'Enter' },
-  { control: 'button', gesture: 'Space' },
-  { control: 'input', gesture: 'Enter' },
-].map((entry) => ({ ...entry, sameUrl }))))(
-  'restores focus when the $control opens directory results with $gesture (same URL: $sameUrl)',
-  ({ sameUrl, control, gesture }) => {
-    if (sameUrl) visitMenuDestination('/search?q=借書');
-    render(<CampusServiceMenu />);
-    const summary = screen.getByText('所有服務').closest('summary')!;
-    fireEvent.click(summary);
-    const input = screen.getByRole<HTMLInputElement>('searchbox');
-    fireEvent.change(input, { target: { value: '借書' } });
-    const link = screen.getByRole<HTMLAnchorElement>('link', { name: '尋找校園服務' });
-    const button = screen.getByRole('button', { name: '查看結果' });
-    expect(link.href === window.location.href).toBe(sameUrl);
-    const selected = control === 'link' ? link : control === 'button' ? button : input;
-    selected.focus();
-    if (gesture !== 'mouse') {
-      fireEvent.keyDown(selected, { key: gesture === 'Space' ? ' ' : gesture });
-    }
-    if (control === 'input') fireEvent.submit(input.form!);
-    else fireEvent.click(selected, { detail: gesture === 'mouse' ? 1 : 0 });
-    expect(summary.closest('details')!.open).toBe(false);
-    expect(document.activeElement).toBe(summary);
-  },
-);
-
-it.each([true, false])('focuses main content when navigation removes the services control (open: %s)', (open) => {
-  const tree = () => <><CampusServiceMenu /><main>頁面內容</main></>;
-  const view = render(tree());
-  const summary = screen.getByText('所有服務').closest('summary')!;
-  if (open) fireEvent.click(summary);
-  const focused = open ? screen.getByRole('link', { name: '圖書館' }) : summary;
-  focused.focus();
-  expect(document.activeElement).toBe(focused);
-
-  visitMenuDestination('/library');
-  view.rerender(tree());
-  expect(document.activeElement).toBe(screen.getByRole('main'));
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
 });

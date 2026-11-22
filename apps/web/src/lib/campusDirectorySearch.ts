@@ -6,54 +6,6 @@ export const DIRECTORY_SEARCH_MAX_QUERY = 160;
 
 export type DirectorySearchSource = 'menu' | 'quick' | 'search';
 
-export type DirectoryDraftBinding = {
-  campus?: string;
-  schoolOwner?: string;
-  platformOwner?: string;
-  guest?: true;
-};
-
-export const directoryDraftOwners = ['schoolOwner', 'platformOwner'] as const;
-
-export function matchDirectoryDraft(
-  saved: DirectoryDraftBinding,
-  current: DirectoryDraftBinding,
-): 'restore' | 'wait' | 'clear' {
-  if (saved.campus !== undefined && current.campus !== undefined && saved.campus !== current.campus)
-    return 'clear';
-  const hasOwner = directoryDraftOwners.some((field) => saved[field] !== undefined);
-  if (
-    (hasOwner && current.guest) ||
-    (saved.guest && directoryDraftOwners.some((field) => current[field] !== undefined)) ||
-    directoryDraftOwners.some((field) =>
-      saved[field] !== undefined && current[field] !== undefined && saved[field] !== current[field],
-    )
-  ) return 'clear';
-  if (current.campus === undefined) return 'wait';
-  if (!hasOwner || directoryDraftOwners.some((field) =>
-    saved[field] !== undefined && saved[field] === current[field],
-  )) return 'restore';
-  return 'wait';
-}
-
-export function mergeDraftBinding(saved: DirectoryDraftBinding, current: DirectoryDraftBinding): DirectoryDraftBinding {
-  return {
-    campus: current.campus ?? saved.campus,
-    schoolOwner: current.schoolOwner ?? saved.schoolOwner,
-    platformOwner: current.platformOwner ?? saved.platformOwner,
-    guest: current.guest,
-  };
-}
-
-export function validDirectoryDraftBinding(value: unknown): value is DirectoryDraftBinding {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const binding = value as Record<string, unknown>;
-  return (binding.guest === undefined || binding.guest === true) &&
-    (['campus', ...directoryDraftOwners] as const).every(
-      (field) => binding[field] === undefined || typeof binding[field] === 'string',
-    );
-}
-
 export type DirectorySearchSnapshot = {
   path: string;
   destination: string;
@@ -63,7 +15,6 @@ export type DirectorySearchSnapshot = {
   /** Optional opaque account/campus binding. Unscoped callers keep their existing behavior. */
   scope?: string;
   expanded?: string[];
-  binding?: DirectoryDraftBinding;
 };
 
 type DirectorySearchStore = Partial<Record<DirectorySearchSource, DirectorySearchSnapshot>>;
@@ -120,21 +71,15 @@ function isSnapshot(value: unknown): value is DirectorySearchSnapshot {
     typeof item.query === 'string' &&
     isCategory(item.category) &&
     typeof item.open === 'boolean' &&
-    (item.binding === undefined || validDirectoryDraftBinding(item.binding)) &&
     (item.scope === undefined || (typeof item.scope === 'string' && item.scope.length <= 1024))
   );
 }
 
-function readStore(): DirectorySearchStore | null {
+function readStore(): DirectorySearchStore {
   if (typeof window === 'undefined') return {};
-  let raw: string | null;
   try {
-    raw = sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-  if (!raw) return {};
-  try {
+    const raw = sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY);
+    if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     const store: DirectorySearchStore = {};
@@ -168,20 +113,12 @@ export function rememberDirectorySearch(
     open?: boolean;
     scope?: string;
     expanded?: string[];
-    binding?: DirectoryDraftBinding;
   },
 ): void {
   const path = internalPathname(snapshot.path);
   const destination = internalSitePath(snapshot.destination);
   if (!path || !destination) return;
   const store = readStore();
-  if (!store) return;
-  const previous = store[source];
-  if (snapshot.binding && !snapshot.binding.guest &&
-      !directoryDraftOwners.some((field) => snapshot.binding?.[field] !== undefined)) {
-    if (previous?.binding && matchDirectoryDraft(previous.binding, snapshot.binding) === 'wait') return;
-    if (previous?.scope !== undefined && !previous.binding) return;
-  }
   store[source] = {
     path,
     destination,
@@ -189,20 +126,14 @@ export function rememberDirectorySearch(
     category: isCategory(snapshot.category) ? snapshot.category : 'all',
     open: snapshot.open !== false,
     ...(snapshot.scope !== undefined ? { scope: snapshot.scope.slice(0, 1024) } : {}),
-    ...(snapshot.binding ? { binding:
-      previous?.binding && matchDirectoryDraft(previous.binding, snapshot.binding) === 'restore'
-        ? mergeDraftBinding(previous.binding, snapshot.binding)
-        : snapshot.binding,
-    } : {}),
     ...(safeExpanded(snapshot.expanded).length ? { expanded: safeExpanded(snapshot.expanded) } : {}),
   };
   writeStore(store);
 }
 
-export function forgetDirectorySearch(source: DirectorySearchSource, scope?: string): void {
+export function forgetDirectorySearch(source: DirectorySearchSource): void {
   const store = readStore();
-  if (!store || !(source in store)) return;
-  if (scope !== undefined && store[source]?.scope !== scope) return;
+  if (!(source in store)) return;
   delete store[source];
   writeStore(store);
 }
@@ -211,20 +142,15 @@ export function restoreDirectorySearch(
   source: DirectorySearchSource,
   currentPath: string,
   scope?: string,
-  binding?: DirectoryDraftBinding,
-  fullyVerified = true,
 ): DirectorySearchSnapshot | null {
   const current = internalPathname(currentPath);
   if (!current) return null;
-  const snapshot = readStore()?.[source];
+  const snapshot = readStore()[source];
   if (!snapshot) return null;
-  const decision = binding && snapshot.binding
-    ? matchDirectoryDraft(snapshot.binding, binding)
-    : scope === undefined || snapshot.scope === scope || (binding && snapshot.scope === undefined)
-      ? 'restore'
-      : fullyVerified ? 'clear' : 'wait';
-  if (decision === 'clear') forgetDirectorySearch(source);
-  if (decision !== 'restore') return null;
+  if (scope !== undefined && snapshot.scope !== scope) {
+    forgetDirectorySearch(source);
+    return null;
+  }
   const path = internalPathname(snapshot.path);
   const destination = internalSitePath(snapshot.destination);
   if (!path || !destination || path !== snapshot.path || destination !== snapshot.destination) {
@@ -232,7 +158,6 @@ export function restoreDirectorySearch(
     return null;
   }
   if (path !== current) return null;
-  if (binding && scope !== undefined) rememberDirectorySearch(source, { ...snapshot, scope, binding });
   return {
     path,
     destination,
@@ -241,6 +166,5 @@ export function restoreDirectorySearch(
     open: snapshot.open,
     ...(snapshot.scope !== undefined ? { scope: snapshot.scope } : {}),
     ...(safeExpanded(snapshot.expanded).length ? { expanded: safeExpanded(snapshot.expanded) } : {}),
-    ...(snapshot.binding ? { binding: snapshot.binding } : {}),
   };
 }

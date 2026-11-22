@@ -4,10 +4,8 @@ import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvi
 
 import Link from 'next/link';
 import { CampusIcon } from './CampusIcon';
-import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { sha256 } from 'js-sha256';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import {
   visibleCampusServices,
   SERVICE_CATEGORIES,
@@ -20,26 +18,12 @@ import {
   type ServiceCategory,
 } from '@/lib/campusServices';
 import {
-  expandedDirectorySections,
   forgetDirectorySearch,
+  rememberDirectorySearch,
+  restoreDirectorySearch,
+  expandedDirectorySections,
 } from '@/lib/campusDirectorySearch';
-import { restorePanelFocus } from '@/lib/restorePanelFocus';
 import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
-import { useCampusFinderAccount, useDirectoryDraftIdentity } from '@/lib/useCampusFinderAccount';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
-import {
-  consumeMenuReturn,
-  currentMenuReturnUrl,
-  discardMenuReturn,
-  getMenuReturn,
-  getServerMenuReturn,
-  isMenuReturnSuspended,
-  matchesKnownMenuReturnScope,
-  rememberMenuReturn,
-  restoreLegacyMenuReturn,
-  setMenuReturnScope,
-  subscribeMenuReturn,
-} from '@/lib/menuNavigationReturn';
 import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import styles from './CampusServiceMenu.module.css';
 import {
@@ -104,40 +88,11 @@ export function CampusServiceMenu() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const pathname = usePathname();
   const params = useSearchParams();
-  const queryString = params?.toString() || '';
   const context = useCampusNavigationSearch(params);
-  const selection = useOptionalSelectedSchool();
-  const account = useCampusFinderAccount();
-  const sourceCampus = resolveSchoolPageContext(
-    Object.fromEntries(new URLSearchParams(context)),
-  ).schoolId;
-  // When the provider is present, URL parameters are provisional until it resolves.
-  const campusId =
-    selection && (selection.loading || selection.catalogStatus !== 'ready')
-      ? undefined
-      : sourceCampus;
-  const { binding, canRestore } = useDirectoryDraftIdentity(account, campusId);
-  const returnScope = sha256(JSON.stringify([account.draftOwnerScope, campusId]));
-  const draftScope = account.status === 'signing-out'
-    ? null
-    : canRestore && account.fullyVerified ? returnScope : undefined;
-  const historyReturn = useSyncExternalStore(
-    subscribeMenuReturn,
-    getMenuReturn,
-    getServerMenuReturn,
-  );
   const currentService = visibleCampusServices(schoolLmsEnabled)
     .filter((service) => campusServiceMatches(service.href, pathname, params))
     .sort((first, second) => second.href.length - first.href.length)[0]?.href;
   const menu = useRef<HTMLDetailsElement>(null);
-  const attachMenu = useCallback((element: HTMLDetailsElement | null) => {
-    menu.current = element;
-    if (!element) return;
-    return () => {
-      if (element.contains(document.activeElement)) restorePanelFocus(element);
-      menu.current = null;
-    };
-  }, []);
   const search = useRef<HTMLInputElement>(null);
   const results = useRef<HTMLDivElement>(null);
   const directoryLink = useRef<HTMLAnchorElement>(null);
@@ -147,12 +102,10 @@ export function CampusServiceMenu() {
   const [category, setCategory] = useState<ServiceCategory | 'all'>('all');
   const [restoredExpanded, setRestoredExpanded] = useState<string[]>([]);
   const id = useId();
-  const previousPathname = useRef(pathname);
   function assignMenuOpen(open: boolean) {
     const element = menu.current;
     if (!element || element.open === open) return;
     skipToggleSideEffects.current = true;
-    if (!open) restorePanelFocus(element, element.querySelector('summary'));
     element.open = open;
     if (open) {
       // 還原打開後，瀏覽器可能延遲派發 toggle，並在把焦點移回頁面時觸發 blur。
@@ -164,67 +117,17 @@ export function CampusServiceMenu() {
     skipToggleSideEffects.current = false;
   }
   useLayoutEffect(() => {
-    const changed = setMenuReturnScope(
-      draftScope,
-      binding,
-      account.status === 'guest',
-      { scope: returnScope, binding, confirmed: canRestore },
-    );
-    const changedPage = previousPathname.current !== pathname;
-    previousPathname.current = pathname;
-    if (!changed && !changedPage) return;
-    assignMenuOpen(false);
-    if (changed && !changedPage) {
-      results.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach((section) => {
-        section.open = false;
-      });
-    }
-    composing.current = false;
-    setQuery('');
-    setCategory('all');
-    setRestoredExpanded([]);
-  }, [pathname, draftScope, account.status, returnScope, binding, canRestore]);
-  useLayoutEffect(() => {
-    if (isMenuReturnSuspended() || (account.status === 'checking' && !canRestore)) return;
-    // The browser URL can change before Next renders the matching route.
-    if (
-      pathname !== window.location.pathname ||
-      queryString !== new URLSearchParams(window.location.search).toString()
-    )
+    const snapshot = restoreDirectorySearch('menu', pathname || '/');
+    if (!snapshot) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRestoredExpanded([]);
       return;
-    if (historyReturn && !consumeMenuReturn(historyReturn, returnScope)) return;
-    if (menu.current?.open) return;
-    const snapshot = historyReturn ?? restoreLegacyMenuReturn(pathname);
-    if (!snapshot) return;
-    if ('destination' in snapshot) {
-      if (
-        account.status === 'guest' && draftScope === undefined &&
-        snapshot.scope !== undefined && snapshot.scope !== returnScope
-      ) {
-        return;
-      }
-      if (!snapshot.binding && snapshot.scope !== undefined && !matchesKnownMenuReturnScope(snapshot.scope)) {
-        forgetDirectorySearch('menu');
-        return;
-      }
-      // Retain the known boundary while any account source is unavailable.
-      rememberMenuReturn(
-        snapshot.destination,
-        {
-          scope: returnScope,
-          query: snapshot.query,
-          category: snapshot.category,
-          expanded: snapshot.expanded ?? [],
-          open: snapshot.open,
-        },
-        true,
-        snapshot.scope,
-      );
     }
+    // Restore filters after history navigation back to this page.
     setQuery(snapshot.query.slice(0, 100));
     setCategory(snapshot.category);
     setRestoredExpanded(snapshot.expanded ?? []);
-    if (snapshot.open === false) return;
+    if (!snapshot.open) return;
     const previouslyFocused = document.activeElement;
     assignMenuOpen(true);
     if (
@@ -234,13 +137,12 @@ export function CampusServiceMenu() {
     ) {
       previouslyFocused.focus({ preventScroll: true });
     }
-  }, [historyReturn, pathname, queryString, returnScope, draftScope, account.status, canRestore, binding]);
+  }, [pathname]);
   useEffect(() => {
     function dismiss(event: PointerEvent) {
       const element = menu.current;
       if (element?.open && event.target instanceof Node && !element.contains(event.target)) {
-        discardMenuReturn();
-        restorePanelFocus(element, element.querySelector('summary'));
+        forgetDirectorySearch('menu');
         element.open = false;
       }
     }
@@ -283,26 +185,25 @@ export function CampusServiceMenu() {
     setQuery('');
     setCategory('all');
     setRestoredExpanded([]);
+    menu.current.querySelector('summary')?.focus({ preventScroll: true });
   }
   function dismissMenu() {
-    discardMenuReturn();
+    forgetDirectorySearch('menu');
     closeMenu();
   }
   function persistAndClose(destination: string) {
-    if (destination === currentMenuReturnUrl()) {
-      dismissMenu();
-      return;
-    }
-    rememberMenuReturn(destination, {
-      scope: returnScope,
+    rememberDirectorySearch('menu', {
+      path: pathname || '/',
+      destination,
       query,
       category,
+      open: true,
       expanded: expandedDirectorySections(results.current),
     });
     closeMenu();
   }
   function resetSearch() {
-    discardMenuReturn();
+    forgetDirectorySearch('menu');
     setQuery('');
     setCategory('all');
     setRestoredExpanded([]);
@@ -352,7 +253,7 @@ export function CampusServiceMenu() {
   }
   return (
     <details
-      ref={attachMenu}
+      ref={menu}
       name="campus-navigation-popover"
       className={styles.menu}
       key={pathname}
@@ -380,12 +281,11 @@ export function CampusServiceMenu() {
         }
       }}
       onBlur={(event) => {
-        if (skipToggleSideEffects.current || !event.currentTarget.open) return;
+        if (skipToggleSideEffects.current) return;
         if (
           event.relatedTarget instanceof Node &&
           !event.currentTarget.contains(event.relatedTarget)
         ) {
-          discardMenuReturn();
           event.currentTarget.open = false;
         }
       }}
@@ -395,10 +295,8 @@ export function CampusServiceMenu() {
         aria-controls={`${id}-services`}
         aria-keyshortcuts="Control+k Meta+k"
         aria-current={primaryNavigationSection(pathname) === 'more' ? 'page' : undefined}
-        onClick={(event) => {
-          if (!menu.current?.open) return;
-          discardMenuReturn();
-          restorePanelFocus(menu.current, event.currentTarget);
+        onClick={() => {
+          if (menu.current?.open) forgetDirectorySearch('menu');
         }}
       >
         <CampusIcon name="services" size={17} />
@@ -441,7 +339,7 @@ export function CampusServiceMenu() {
             onSubmit={(event) => {
               event.preventDefault();
               if (composing.current) return;
-              // Use the same Next link and guarded history handoff as touch or
+              // Use the same Next link as touch or
               // pointer selection, rather than introducing a second route path.
               directoryLink.current?.click();
             }}

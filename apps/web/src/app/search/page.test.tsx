@@ -1,7 +1,6 @@
-import { directoryDraftCases } from '@/test/directoryDraftCases';
 import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directoryStorageFailures';
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SearchPage from './page';
@@ -57,11 +56,9 @@ vi.mock('@/components/AuthGuard', () => ({
 }));
 vi.mock('@/features/nuni/Session', () => ({
   useOptionalNuniSession: () =>
-    userState.platform || userState.pendingLogout || userState.platformError || userState.platformLoading
+    userState.platform
       ? {
-          session: userState.platform
-            ? { platformAccountId: userState.accountId, context: userState.context }
-            : null,
+          session: { platformAccountId: userState.accountId, context: userState.context },
           loading: userState.platformLoading,
           error: userState.platformError,
           pendingLogout: userState.pendingLogout,
@@ -1028,138 +1025,11 @@ it('clears only the search phrase and returns focus to the input while keeping i
   expect(new URL(window.location.href).searchParams.has('q')).toBe(false);
 });
 
-it('keeps the saved filters on a return during logout and restores them for the same account', () => {
-  userState.platform = true;
-  const view = render(<SearchPage />);
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  const stored = sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY);
-  expect(stored).toBeTruthy();
-
-  userState.pendingLogout = true;
-  view.rerender(<SearchPage />);
-  window.history.replaceState({}, '', '/search');
-  act(() => window.dispatchEvent(new PopStateEvent('popstate')));
-  view.rerender(<SearchPage />);
-  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
-
-  userState.platform = false;
-  view.rerender(<SearchPage />);
-  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
-  userState.platform = true;
-  userState.pendingLogout = false;
-  view.rerender(<SearchPage />);
-  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
-});
-
-it.each([
-  [false, false],
-  [true, false],
-  [false, true],
-  [true, true],
-])('clears the current URL only on confirmed logout (query: %s, category: %s)', (query, category) => {
-  userState.platform = true;
-  window.history.replaceState({}, '', '/search?campus=pu#results');
-  const view = render(<SearchPage />);
-  if (query) fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  if (category) fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
-  const before = window.location.href;
-  const params = new URL(before).searchParams;
-  expect(params.get('q')).toBe(query ? '借書' : null);
-  expect(params.get('category')).toBe(category ? 'campus' : null);
-  const stored = sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY);
-
-  userState.pendingLogout = true;
-  userState.platform = false;
-  view.rerender(<SearchPage />);
-  expect(window.location.href).toBe(before);
-  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
-
-  userState.platformError = '登出尚未完成';
-  view.rerender(<SearchPage />);
-  expect(window.location.href).toBe(before);
-  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
-
-  userState.platformError = '';
-  userState.pendingLogout = false;
-  view.rerender(<SearchPage />);
-  expect(window.location.search).toBe('?campus=pu');
-  expect(window.location.hash).toBe('#results');
-  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
-  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
-  expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe('false');
-
-  view.unmount();
-  render(<SearchPage />);
-  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
-  expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe('false');
-});
-
-it.each(['query', 'expanded family'] as const)(
-  'restores the guest %s after Back from a service, then clears it on account B',
-  async (draft) => {
-    userState.platform = true;
-    const view = render(<SearchPage />);
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-    userState.platform = false;
-    view.rerender(<SearchPage />);
-    expect(new URLSearchParams(window.location.search).has('q')).toBe(false);
-
-    fireEvent.click(screen.getByRole('button', { name: '學習與課務' }));
-    if (draft === 'query') {
-      fireEvent.change(screen.getByRole('searchbox'), { target: { value: '教材' } });
-    } else {
-      fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
-    }
-    const link = screen.getByRole('link', { name: /^教材收藏/ });
-    const destination = link.getAttribute('href')!;
-    fireEvent.click(link);
-    expect(JSON.parse(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)!).search.destination)
-      .toBe(destination);
-    const origin = window.location.href;
-    view.unmount();
-    window.history.pushState({}, '', destination);
-    window.history.back();
-    await waitFor(() => expect(window.location.href).toBe(origin));
-
-    const returned = render(<SearchPage />);
-    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(draft === 'query' ? '教材' : '');
-    expect(screen.getByRole('button', { name: '學習與課務' }).getAttribute('aria-pressed')).toBe('true');
-    if (draft === 'expanded family') {
-      expect(screen.getByRole('link', { name: /^教材收藏/ }).closest('details')!.open).toBe(true);
-    }
-    userState.platform = true;
-    userState.accountId = 'platform-b';
-    returned.rerender(<SearchPage />);
-    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
-    expect(window.location.search).toBe('');
-    expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
-  },
-);
-
-it('retains the URL and saved filters when the same account temporarily fails verification', () => {
-  userState.platform = true;
-  const view = render(<SearchPage />);
-  fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  const before = window.location.href;
-  const stored = sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY);
-  userState.platform = false;
-  userState.platformError = '驗證暫時失敗';
-  view.rerender(<SearchPage />);
-  expect(window.location.href).toBe(before);
-  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
-  userState.platform = true;
-  userState.platformError = '';
-  view.rerender(<SearchPage />);
-  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
-  expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe('true');
-});
-
 describe.each(directoryStorageFailures)('search navigation with storage %s', (failure) => {
   it.each([
     [/^圖書館/, '/library'],
     ['交給校園助理', '/ai-assistant'],
-  ] as const)('follows %s and skips the draft', (name, path) => {
+  ] as const)('follows %s', (name, path) => {
     userState.uid = 'alice';
     render(<SearchPage />);
     const storage = rejectDirectoryStorage(failure);
@@ -1173,68 +1043,5 @@ describe.each(directoryStorageFailures)('search navigation with storage %s', (fa
     } finally {
       storage.mockRestore();
     }
-    expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
   });
-});
-
-it.each(directoryDraftCases)('checks a saved search when $name', (entry) => {
-  userState.uid = entry.saved === 'platform' ? null : 'a';
-  userState.platform = entry.saved !== 'school';
-  userState.accountId = 'a';
-  selection.current = { loading: false, catalogStatus: 'ready', selectedSchool: { id: 'pu' } };
-  const first = render(<SearchPage />);
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
-  first.unmount();
-  window.history.replaceState({}, '', '/search');
-  userState.uid = entry.school === 'failed' ? null : entry.school;
-  userState.error = entry.school === 'failed' ? new Error('unavailable') : null;
-  userState.platform = entry.platform !== 'failed';
-  userState.accountId = entry.platform;
-  userState.platformError = entry.platform === 'failed' ? 'unavailable' : '';
-  if ('campus' in entry && selection.current) selection.current.selectedSchool = { id: entry.campus };
-  render(<SearchPage />);
-  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(entry.restored ? '借書' : '');
-  expect(Boolean(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY))).toBe(entry.restored || 'retained' in entry);
-});
-
-it('clears a restored draft if the other source later confirms a different account', () => {
-  userState.uid = 'alice';
-  userState.platform = true;
-  const first = render(<SearchPage />);
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
-  first.unmount();
-  window.history.replaceState({}, '', '/search');
-
-  userState.platform = false;
-  userState.platformError = 'unavailable';
-  const returned = render(<SearchPage />);
-  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
-  userState.platform = true;
-  userState.platformError = '';
-  userState.accountId = 'another-account';
-  returned.rerender(<SearchPage />);
-  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
-  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
-});
-
-it('claims a provisional draft on the first successful verification', () => {
-  userState.uid = null;
-  userState.error = new Error('unavailable');
-  userState.platformError = 'unavailable';
-  const first = render(<SearchPage />);
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
-  fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
-  first.unmount();
-  window.history.replaceState({}, '', '/search');
-
-  userState.uid = 'alice';
-  userState.error = null;
-  const returned = render(<SearchPage />);
-  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
-  returned.unmount();
-  userState.uid = 'another-account';
-  render(<SearchPage />);
-  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
 });

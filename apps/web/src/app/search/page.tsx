@@ -7,7 +7,7 @@ import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
-import { useCampusFinderAccount, useCampusFinderDraftScope, useDirectoryDraftIdentity } from '@/lib/useCampusFinderAccount';
+import { useCampusFinderAccount, useCampusFinderDraftScope } from '@/lib/useCampusFinderAccount';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { findSchoolsByCode } from '@campus/shared/src/schools';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
@@ -36,6 +36,14 @@ import {
   type CampusService,
 } from '@/lib/campusServices';
 
+function filtersFromUrlOrSession(params: URLSearchParams, pathname: string, scope: string) {
+  const fromUrl = readCampusServiceFilters(params);
+  if (fromUrl.query || fromUrl.category !== 'all') return fromUrl;
+  const snapshot = restoreDirectorySearch('search', pathname, scope);
+  if (!snapshot) return fromUrl;
+  return { query: snapshot.query.slice(0, 100), category: snapshot.category };
+}
+
 function ServiceDirectory() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const params = useSearchParams();
@@ -44,7 +52,7 @@ function ServiceDirectory() {
   const { uid, platformAudience } = account;
   const campusReady = !selection || (!selection.loading && selection.catalogStatus === 'ready');
   const canInterpret = account.canInterpret && campusReady;
-  const ownerConfirmed = account.draftOwnerConfirmed;
+  const canRemember = account.canRemember && campusReady;
   const searchInput = useRef<HTMLInputElement>(null);
   const resultsHeading = useRef<HTMLHeadingElement>(null);
   const compositionScope = useRef<string | null>(null);
@@ -73,21 +81,12 @@ function ServiceDirectory() {
       : legacyMatches.length === 1
         ? legacyMatches[0].id
         : legacySchool;
-  const { binding, scope: draftOwner, canRestore, bindRestoredDraft } = useDirectoryDraftIdentity(
-    account, campusReady ? campusId : undefined,
+  const storageScope = JSON.stringify([account.ownerScope, schoolSearch]);
+  const draftScope = useCampusFinderDraftScope(account.ownerScope, campusReady ? campusId : null);
+  const [confirmedScope, setConfirmedScope] = useState<string | null>(
+    account.canRemember ? draftScope : null,
   );
-  const canRemember = campusReady && account.status !== 'signing-out';
-  const storageScope = JSON.stringify([account.draftOwnerScope, schoolSearch]);
-  const draftScope = useCampusFinderDraftScope(draftOwner, campusReady ? campusId : null);
-  const [confirmedScope, setConfirmedScope] = useState<{
-    owner: string;
-    campus?: string;
-  } | null>(() =>
-    ownerConfirmed
-      ? { owner: draftOwner, campus: campusReady ? campusId : undefined }
-      : null,
-  );
-  const restoredFilters = useRef<{ scope: string; queryString: string; storageScope?: string } | null>(null);
+  const restoredFilters = useRef<{ scope: string; queryString: string } | null>(null);
   const editedFilters = useRef<{
     scope: string;
     queryString: string;
@@ -102,15 +101,9 @@ function ServiceDirectory() {
       ? filters
       : { query: '', category: 'all' as const };
   useLayoutEffect(() => {
-    if (!ownerConfirmed) {
-      if (canRemember) restoreDirectorySearch('search', '/search', undefined, binding);
-      return;
-    }
-    const previous = confirmedScope;
-    const changedOwner = previous !== null && previous.owner !== draftOwner;
-    const changedCampus =
-      previous?.campus !== undefined && campusReady && previous.campus !== campusId;
-    if (!previous) {
+    if (!account.canRemember) return;
+    const changedOwner = confirmedScope !== null && confirmedScope !== draftScope;
+    if (confirmedScope === null) {
       // Bind edits made during initial account resolution without treating them as an account switch.
       if (editedFilters.current) editedFilters.current.scope = draftScope;
       if (compositionScope.current !== null) compositionScope.current = draftScope;
@@ -119,14 +112,12 @@ function ServiceDirectory() {
         current.scope === draftScope ? current : { ...current, scope: draftScope },
       );
     }
-    if (!previous || changedOwner || changedCampus || (campusReady && previous.campus === undefined)) {
-      setConfirmedScope({ owner: draftOwner, campus: campusReady ? campusId : previous?.campus });
-    }
-    if (changedOwner || changedCampus) {
+    setConfirmedScope(draftScope);
+    if (changedOwner) {
       editedFilters.current = null;
       historyRestoration.current = null;
       compositionScope.current = null;
-      restoreDirectorySearch('search', '/search', storageScope, binding, account.fullyVerified);
+      forgetDirectorySearch('search');
       const url = new URL(window.location.href);
       writeCampusServiceFilters(url.searchParams, '', 'all');
       try {
@@ -134,7 +125,7 @@ function ServiceDirectory() {
       } catch {
         // The current input is still cleared when History access is unavailable.
       }
-      restoredFilters.current = { scope: draftScope, queryString, storageScope };
+      restoredFilters.current = { scope: draftScope, queryString };
       setFilters({ scope: draftScope, query: '', category: 'all' });
       setRestoredExpanded([]);
       return;
@@ -152,18 +143,10 @@ function ServiceDirectory() {
     }
     if (
       restoredFilters.current?.scope === draftScope &&
-      restoredFilters.current.queryString === queryString &&
-      restoredFilters.current.storageScope === storageScope
+      restoredFilters.current.queryString === queryString
     )
       return;
-    restoredFilters.current = { scope: draftScope, queryString, storageScope };
-    const snapshot = restoreDirectorySearch(
-      'search',
-      window.location.pathname || '/search',
-      storageScope,
-      binding,
-      account.fullyVerified,
-    );
+    restoredFilters.current = { scope: draftScope, queryString };
     const edited = editedFilters.current;
     // Router rendering can lag any number of keystrokes. While the browser is still at
     // our latest published URL, an older acknowledgement cannot replace the current draft.
@@ -175,18 +158,17 @@ function ServiceDirectory() {
       return;
     editedFilters.current = null;
     // First arrival keeps an explicitly shared URL; later returns require the same account/campus.
-    const fromUrl = readCampusServiceFilters(new URLSearchParams(queryString));
-    const next =
-      !fromUrl.query && fromUrl.category === 'all' && snapshot
-        ? { query: snapshot.query.slice(0, 100), category: snapshot.category }
-        : fromUrl;
-    bindRestoredDraft(snapshot?.binding);
+    const next = filtersFromUrlOrSession(
+      new URLSearchParams(queryString),
+      window.location.pathname || '/search',
+      storageScope,
+    );
     setFilters({ scope: draftScope, ...next });
-    setRestoredExpanded(snapshot?.expanded ?? []);
-  }, [
-    draftOwner, binding, bindRestoredDraft, account.fullyVerified, campusId, campusReady, confirmedScope,
-    canRemember, draftScope, ownerConfirmed, queryString, storageScope,
-  ]);
+    setRestoredExpanded(
+      restoreDirectorySearch('search', window.location.pathname || '/search', storageScope)
+        ?.expanded ?? [],
+    );
+  }, [account.canRemember, campusReady, confirmedScope, draftScope, queryString, storageScope]);
   const term = query.trim();
   const semanticScope = JSON.stringify([
     account.responseScope,
@@ -215,8 +197,8 @@ function ServiceDirectory() {
       const restored = new URLSearchParams(window.location.search);
       const source = restored.toString();
       const next = readCampusServiceFilters(restored);
-      const expanded = canRestore
-        ? (restoreDirectorySearch('search', '/search', storageScope, binding, account.fullyVerified)?.expanded ?? [])
+      const expanded = canRemember
+        ? (restoreDirectorySearch('search', '/search', storageScope)?.expanded ?? [])
         : [];
       requestSequence.current += 1;
       compositionScope.current = null;
@@ -232,15 +214,16 @@ function ServiceDirectory() {
           destination: '/search',
           ...next,
           open: false,
-          scope: canRestore ? storageScope : undefined,
-          binding,
+          scope: storageScope,
           expanded,
         });
+      } else {
+        forgetDirectorySearch('search');
       }
     }
     window.addEventListener('popstate', restoreHistoryFilters);
     return () => window.removeEventListener('popstate', restoreHistoryFilters);
-  }, [canRemember, canRestore, draftScope, storageScope, binding, account.fullyVerified]);
+  }, [canRemember, draftScope, storageScope]);
   const active = analysis?.scope === semanticScope && analysis.term === term ? analysis : null;
   const semantic = active?.status === 'ready' ? active.result : undefined;
   const matches = searchCampusServices(query, category, schoolLmsEnabled);
@@ -316,10 +299,9 @@ function ServiceDirectory() {
         query: next.query,
         category: next.category,
         open: false,
-        scope: canRestore ? storageScope : undefined,
-          binding,
+        scope: storageScope,
       });
-    } else if (canRestore) {
+    } else {
       forgetDirectorySearch('search');
     }
   }
@@ -336,8 +318,7 @@ function ServiceDirectory() {
       query,
       category,
       open: false,
-      scope: canRestore ? storageScope : undefined,
-      binding,
+      scope: storageScope,
       expanded: expandedDirectorySections(directory.current),
     });
   }

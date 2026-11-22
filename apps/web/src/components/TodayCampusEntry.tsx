@@ -18,7 +18,6 @@ import { areFunctionsConfigured } from '@/lib/functionsUrl';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { currentReturnPath } from '@/lib/navigation';
-import { restorePanelFocus } from '@/lib/restorePanelFocus';
 import { AssistantLinkNavigation, useAssistantLinkNavigation } from './AssistantReplyLink';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { useAssistantEnabled } from './AssistantEnabledProvider';
@@ -304,16 +303,6 @@ export function TodayAssistantDisclosure({
 }) {
   const disclosure = useRef<HTMLDetailsElement>(null);
   const openingTrigger = useRef<HTMLElement | null>(null);
-  const attachDisclosure = useCallback((element: HTMLDetailsElement | null) => {
-    disclosure.current = element;
-    if (!element) return;
-    return () => {
-      if (element.open && element.contains(document.activeElement)) {
-        restorePanelFocus(element, openingTrigger.current);
-      }
-      disclosure.current = null;
-    };
-  }, []);
   const hash = useLocationHash();
   const [opened, setOpened] = useState(false);
   const [hasOpened, setHasOpened] = useState(false);
@@ -322,11 +311,8 @@ export function TodayAssistantDisclosure({
   const openAssistant = useCallback(() => {
     const panel = disclosure.current;
     if (!panel) return;
-    const focused = document.activeElement;
     openingTrigger.current =
-      focused instanceof HTMLElement && focused !== document.body && !panel.contains(focused)
-        ? focused
-        : null;
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     panel.open = true;
     setOpened(true);
     setHasOpened(true);
@@ -352,10 +338,6 @@ export function TodayAssistantDisclosure({
   function closeAssistant() {
     const panel = disclosure.current;
     if (!panel?.open) return;
-    restorePanelFocus(panel, openingTrigger.current?.isConnected
-      ? openingTrigger.current
-      : panel.querySelector('summary'));
-    openingTrigger.current = null;
     panel.open = false;
     setOpened(false);
     onOpenChange(false);
@@ -365,7 +347,7 @@ export function TodayAssistantDisclosure({
 
   return (
     <details
-      ref={attachDisclosure}
+      ref={disclosure}
       id="today-voice-entry"
       className={styles.disclosure}
       onKeyDown={(event) => {
@@ -374,6 +356,8 @@ export function TodayAssistantDisclosure({
         event.preventDefault();
         event.stopPropagation();
         closeAssistant();
+        const trigger = openingTrigger.current;
+        (trigger?.isConnected ? trigger : event.currentTarget.querySelector('summary'))?.focus();
       }}
       onToggle={({ currentTarget: panel, target }) => {
         if (target !== panel) return;
@@ -383,19 +367,11 @@ export function TodayAssistantDisclosure({
           setHasOpened(true);
           return;
         }
-        openingTrigger.current = null;
         stopAssistantVoice(panel);
         clearAssistantAnchor('today-voice-entry');
       }}
     >
-      <summary
-        className={styles.trigger}
-        onClick={(event) => {
-          const panel = disclosure.current;
-          if (panel?.open) restorePanelFocus(panel, event.currentTarget);
-          else openingTrigger.current = null;
-        }}
-      >
+      <summary className={styles.trigger}>
         <CampusIcon name="social" size={20} />
         <strong>校園助理</strong>
         <span className={styles.triggerHint}>打字或語音詢問</span>

@@ -1058,7 +1058,7 @@ it('stops a Today map read, preserves both drafts and ignores its late result af
 
 it.each([true, false].flatMap((sameUrl) =>
   ['mouse', 'Enter', 'Escape'].map((gesture) => ({ sameUrl, gesture })),
-))('closes Today and restores focus ($gesture, same URL: $sameUrl)', async ({ sameUrl, gesture }) => {
+))('closes Today and stops playback ($gesture, same URL: $sameUrl)', async ({ sameUrl, gesture }) => {
   const synthesis = installSpeech();
   state.pathname = '/map';
   state.search = 'campus=pu';
@@ -1096,7 +1096,6 @@ it.each([true, false].flatMap((sameUrl) =>
     fireEvent.click(link, { detail: gesture === 'Enter' ? 0 : 1 });
   }
   expect(panel.open).toBe(false);
-  expect(document.activeElement).toBe(panel.querySelector('summary'));
   expect(onOpenChange).toHaveBeenLastCalledWith(false);
   expect(synthesis.cancel).toHaveBeenCalledOnce();
 });
