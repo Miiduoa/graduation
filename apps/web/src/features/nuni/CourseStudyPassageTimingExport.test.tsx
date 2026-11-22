@@ -107,3 +107,41 @@ it('keeps manual selection and failed attempts when a mobile download bridge ret
     vi.unstubAllGlobals();
   }
 });
+
+it('copies the exact JSON only after the standard Clipboard Promise<void> response, with a selectable fallback for broken mobile bridges', async () => {
+  mocks.run.mockImplementationOnce(async (request) => {
+    request.onTiming?.({ preparationMs: 15, generationMs: 18, totalMs: 33, outcome: 'success' });
+    return answer;
+  });
+  const previous = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  const writeText = vi.fn().mockResolvedValueOnce(undefined)
+    .mockResolvedValueOnce(true).mockRejectedValueOnce(new Error('permission denied'));
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<TimingPassage />);
+    fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+    fireEvent.click(await screen.findByText('本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）'));
+    const output = screen.getByRole('textbox', { name: '本段裝置端 AI 耗時紀錄 JSON' }) as HTMLTextAreaElement;
+    const copy = screen.getByRole('button', { name: '複製量測 JSON' });
+
+    fireEvent.click(copy);
+    await waitFor(() => expect(screen.getByText(/瀏覽器已接受複製指令/)).toBeTruthy());
+    expect(writeText).toHaveBeenLastCalledWith(output.value);
+    expect(output.value).not.toContain(passage.text);
+
+    fireEvent.click(copy);
+    await waitFor(() => expect(screen.getByText(/已全選這份量測 JSON/)).toBeTruthy());
+    expect(document.activeElement).toBe(output);
+    expect(output.selectionStart).toBe(0);
+    expect(output.selectionEnd).toBe(output.value.length);
+    expect(screen.getByText(/尚未確認寫入剪貼簿/)).toBeTruthy();
+
+    fireEvent.click(copy);
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.getByText(/尚未確認寫入剪貼簿/)).toBeTruthy());
+    expect(output.value).toContain('"format": "nuni-study-tutor-timing"');
+  } finally {
+    if (previous) Object.defineProperty(navigator, 'clipboard', previous);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});

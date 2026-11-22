@@ -55,6 +55,9 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
   const [timing, setTiming] = useState<StudyTutorTiming | null>(null);
   const [timingExportMessage, setTimingExportMessage] = useState('');
   const timingExportInput = useRef<HTMLTextAreaElement>(null);
+  // In-app WebViews may leave a clipboard Promise unresolved or settle it late.
+  const timingCopyRequest = useRef(0);
+  const timingCopyTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The downloadable file and manually selectable field must contain exactly
   // the same privacy-scoped measurements, never lesson or student text.
   const timingExportText = useMemo(() => JSON.stringify({
@@ -122,6 +125,9 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
     return () => {
       current.current?.abort();
       current.current = null;
+      timingCopyRequest.current += 1;
+      if (timingCopyTimeout.current !== null) clearTimeout(timingCopyTimeout.current);
+      timingCopyTimeout.current = null;
     };
   }, []);
 
@@ -156,7 +162,16 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
       : '重新檢查後仍無法使用裝置端 AI；原文、筆記與自行練習不受影響。');
   }
 
+  function invalidateTimingCopy() {
+    timingCopyRequest.current += 1;
+    if (timingCopyTimeout.current !== null) {
+      clearTimeout(timingCopyTimeout.current);
+      timingCopyTimeout.current = null;
+    }
+  }
+
   function selectTimingExport() {
+    invalidateTimingCopy();
     const field = timingExportInput.current;
     if (!field) return;
     try { field.focus(); } catch { /* Manual selection remains available. */ }
@@ -172,7 +187,39 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
       : '瀏覽器未確認全選；完整 JSON 仍在下方，可長按或用鍵盤自行選取。');
   }
 
+  function copyTimingExport() {
+    invalidateTimingCopy();
+    const request = timingCopyRequest.current;
+    const manual = () => {
+      if (timingCopyRequest.current === request) selectTimingExport();
+    };
+    try {
+      const clipboard = navigator.clipboard;
+      if (typeof clipboard?.writeText !== 'function') { manual(); return; }
+      const result: unknown = clipboard.writeText(timingExportText);
+      // Some WebView bridges return true despite never copying anything.
+      if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
+        manual();
+        return;
+      }
+      setTimingExportMessage('正在等待瀏覽器確認複製；仍可全選下方 JSON 手動保存。');
+      timingCopyTimeout.current = setTimeout(manual, 5000);
+      void Promise.resolve(result as PromiseLike<unknown>).then(
+        (acknowledged) => {
+          if (timingCopyRequest.current !== request) return;
+          if (acknowledged !== undefined) { manual(); return; }
+          invalidateTimingCopy();
+          setTimingExportMessage('瀏覽器已接受複製指令；請貼上確認內容。若無法貼上，可全選下方 JSON。');
+        },
+        manual,
+      );
+    } catch {
+      manual();
+    }
+  }
+
   function downloadTimingExport() {
+    invalidateTimingCopy();
     const anchor = document.createElement('a');
     let url: string | null = null;
     try {
@@ -227,6 +274,7 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
         onTiming: (measurement) => {
           if (current.current === controller) {
             setTiming(measurement);
+            invalidateTimingCopy();
             onTiming({ timing: measurement, downloadProgressObserved });
             setTimingExportMessage('');
           }
@@ -354,6 +402,7 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
               value={timingExportText} />
           </label>
           <div className={styles.actions}>
+            <button type="button" className={styles.button} onClick={copyTimingExport}>複製量測 JSON</button>
             <button type="button" className={styles.button} onClick={downloadTimingExport}>下載量測 JSON</button>
             <button type="button" className={styles.button} onClick={selectTimingExport}>全選量測 JSON</button>
           </div>
