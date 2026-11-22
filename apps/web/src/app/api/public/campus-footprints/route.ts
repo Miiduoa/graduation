@@ -72,8 +72,27 @@ const HTTP_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HTTP_LONG_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const HTTP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-function parseHttpDateMillis(value: string | null): number | null {
+function parseHttpDateMillis(value: string | null, now: number): number | null {
   if (value === null) return null;
+  // Date.parse uses an implementation-specific pivot for RFC 850's two-digit
+  // year (e.g. "50" becomes 1950 even when the request is made in 2049).
+  // RFC 9110 requires resolving the year relative to the recipient's clock:
+  // a date appearing more than 50 years in the future belongs to the past.
+  const legacy = /^([A-Za-z]+), (\\d{2})-([A-Za-z]{3})-(\\d{2}) (\\d{2}):(\\d{2}):(\\d{2}) GMT$/.exec(value);
+  if (legacy) {
+    const monthIndex = HTTP_MONTHS.indexOf(legacy[3]);
+    if (monthIndex < 0) return null;
+    const referenceYear = new Date(now).getUTCFullYear();
+    let year = Math.floor(referenceYear / 100) * 100 + Number(legacy[4]);
+    if (year > referenceYear + 50) year -= 100;
+    else if (year < referenceYear - 50) year += 100;
+    const parsed = Date.UTC(year, monthIndex, Number(legacy[2]),
+      Number(legacy[5]), Number(legacy[6]), Number(legacy[7]));
+    const date = new Date(parsed);
+    const canonical = `${HTTP_LONG_WEEKDAYS[date.getUTCDay()]}, ${String(date.getUTCDate()).padStart(2, '0')}-${HTTP_MONTHS[date.getUTCMonth()]}-${String(year % 100).padStart(2, '0')} ${date.toUTCString().slice(17, 25)} GMT`;
+    // Reject invalid weekday, impossible dates and normalized time components.
+    return value === canonical ? parsed : null;
+  }
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) return null;
   const date = new Date(parsed);
@@ -81,9 +100,8 @@ function parseHttpDateMillis(value: string | null): number | null {
   const day = String(date.getUTCDate());
   const month = HTTP_MONTHS[date.getUTCMonth()];
   const time = date.toUTCString().slice(17, 25);
-  const rfc850 = `${HTTP_LONG_WEEKDAYS[date.getUTCDay()]}, ${day.padStart(2, '0')}-${month}-${String(date.getUTCFullYear() % 100).padStart(2, '0')} ${time} GMT`;
   const asctime = `${HTTP_WEEKDAYS[date.getUTCDay()]} ${month} ${day.padStart(2, ' ')} ${time} ${date.getUTCFullYear()}`;
-  return value === rfc850 || value === asctime ? parsed : null;
+  return value === asctime ? parsed : null;
 }
 
 function overpassRetryAfterMs(header: string | null, now: number, serverDate: string | null = null): number {
@@ -99,11 +117,11 @@ function overpassRetryAfterMs(header: string | null, now: number, serverDate: st
     requestedMs = digits.length > 5 || (digits.length === 5 && digits >= '86400')
       ? MAX_RETRY_AFTER_MS : Number(digits) * 1000;
   } else {
-    const dateMs = parseHttpDateMillis(value);
+    const dateMs = parseHttpDateMillis(value, now);
     // Only a recognized HTTP-date is a trustworthy origin-clock reference.
     // Invalid intermediary dates must never amplify a ten-minute fallback
     // into a 24-hour cooldown or silently shorten a valid server pause.
-    const originMs = parseHttpDateMillis(serverDate);
+    const originMs = parseHttpDateMillis(serverDate, now);
     requestedMs = dateMs !== null
       ? Math.max(dateMs - now, originMs !== null ? dateMs - originMs : -Infinity)
       : NaN;
