@@ -2225,3 +2225,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 部分 iOS Safari、Android Chrome 或內嵌 WebView 會靜默忽略唯讀文字框的 `select()` 與 `setSelectionRange()`，不拋出錯誤。現在明確按「全選上方文字」時，檢查該文字框確實取得焦點，且瀏覽器回報從頭到尾全選；否則提示長按手動選取，不誤報成功。只有回報全選時才提示再使用裝置「複製」，**不**宣稱剪貼簿寫入或下載已完成。
 - 保留原始完整 TXT／JSON，支援手動選取任意子段，輸入框初次出現時的自動選取不被重複點按強制重置；新備份清除舊的全選提示。新增 React DOM 正反回歸，模擬兩種選取 API 靜默失效後復原，並驗證進度 JSON 可還原筆記，沒有修改 v1/v2 閱讀或 v1 練習 checkpoint 格式、套件及私人教材傳輸。
 - 此為模擬 DOM 的選取回報防護，不代表已通過 iOS Safari／Android Chrome／VoiceOver／TalkBack 真機或 Ahaboard 同條件比較；須以本提交精確 SHA 的 GitHub CI／CodeQL、App 5504170、Maestro 與實測另外取證。PR 保持 Draft，不合併、不部署。
+
+
+### 2026-11-22：觸控匯出失敗後回到真正的備份按鈕
+
+- iOS Safari／WebView 觸控點按通常不會把鍵盤焦點移到按鈕。以前筆記／練習 TXT 複製、閱讀／逐題 JSON 複製，或下載被拒絕時，若原本焦點還留在筆記文字框，關閉手動備份會錯誤跳回舊文字框，而非本次實際匯出按鈕。
+- 白板現在把 **實際 onClick 的 currentTarget** 沿傳到複製／下載／checkpoint 路徑；即使點按時按鈕未聚焦，手動備份仍能保持原始完整 TXT／JSON，關閉後返回真正的操作入口。也涵蓋逐題練習及暫停狀態的備份入口，不改資料格式、揭答界線或私人教材。
+- 新增四種筆記／閱讀匯出方式的 React DOM 模擬觸控回歸。這不是 iOS／Android／VoiceOver／TalkBack 實機驗收；CI、CodeQL、指定 App 5504170 APPROVED、Maestro 及 Ahaboard 同條件評測仍須按本次精確 SHA 獨立驗證。PR 保持 Draft，不合併、不部署。

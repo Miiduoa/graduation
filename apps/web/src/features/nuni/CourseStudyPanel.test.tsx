@@ -3226,3 +3226,48 @@ it('restores focus to the manual backup trigger even if a mobile pointer tap did
     vi.unstubAllGlobals();
   }
 });
+
+
+it.each([
+  ['複製本次筆記', '可選取的本次筆記文字'],
+  ['複製閱讀進度 JSON', '可選取的閱讀進度 JSON'],
+  ['下載本次筆記', '可選取的本次筆記文字'],
+  ['儲存閱讀進度', '可選取的閱讀進度 JSON'],
+] as const)('returns focus to the actual %s button after a mobile pointer export fails', (actionLabel, fieldLabel) => {
+  const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL {
+    static createObjectURL = vi.fn(() => 'blob:blocked-pointer-export');
+    static revokeObjectURL = vi.fn();
+  });
+  const anchor = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+    .mockImplementation(() => { throw new Error('WebView download blocked'); });
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  try {
+    const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+    fireEvent.change(note, { target: { value: '使用觸控備份的私人筆記' } });
+    note.focus();
+    const exportButton = screen.getByRole('button', { name: actionLabel });
+    expect(document.activeElement).toBe(note);
+    // A pointer click can dispatch without shifting focus from the textarea.
+    fireEvent.click(exportButton);
+    const fallback = screen.getByRole('textbox', { name: fieldLabel }) as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(fallback);
+    expect(fallback.value).toContain('使用觸控備份的私人筆記');
+    if (fieldLabel.includes('JSON')) {
+      expect(parseCourseStudyProgress(fallback.value, scope).passages['0:0'].note)
+        .toBe('使用觸控備份的私人筆記');
+    }
+    fireEvent.click(screen.getByRole('button', { name: '收起手動複製文字' }));
+    expect(screen.queryByRole('textbox', { name: fieldLabel })).toBeNull();
+    expect(document.activeElement).toBe(exportButton);
+    expect(note.value).toBe('使用觸控備份的私人筆記');
+  } finally {
+    view.unmount();
+    anchor.mockRestore();
+    vi.unstubAllGlobals();
+    if (originalClipboard) Object.defineProperty(window.navigator, 'clipboard', originalClipboard);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
