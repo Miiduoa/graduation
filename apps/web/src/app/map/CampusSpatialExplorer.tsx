@@ -286,14 +286,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const [renderSuspended, setRenderSuspended] = useState(false);
   const [deferredCause, setDeferredCause] = useState<'background' | 'offscreen' | 'data-saver'>('background');
   const pageSuspended = useRef(false);
-  const observerBlockedStart = useRef<number | null>(null);
-  const previousScene = useRef<{
-    host: HTMLDivElement;
-    model: typeof model;
-    footprints: typeof footprints;
-    visible: boolean;
-  } | null>(null);
-  const recoverableHost = useRef<HTMLDivElement | null>(null);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
   const view = useMemo(() => ({
@@ -319,28 +311,19 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // browser requests reduced data use. Marker details and walking links
     // remain available; the visitor can explicitly opt into 3D at any time.
     const saveData = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true;
-    // Rebuild an existing canvas without waiting for a new observer entry.
-    // Viewport signals still govern whether the replacement scene renders.
-    const previous = previousScene.current;
-    const rebuilding = previous?.host === host &&
-      (previous.model !== model || previous.footprints !== footprints);
-    let visible = rebuilding ? previous.visible :
-      manuallyStarted && observerBlockedStart.current !== manualStart;
+    let observerVisible = manuallyStarted;
+    let visible = false;
     let scene: CampusSpatialScene | null = null;
     // Safari can fire pagehide before visibilitychange when entering bfcache.
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended.current || document.hidden;
-    const isDeferred = () => isBackgrounded() || (!rebuilding && (!visible || (saveData && !manuallyStarted)));
+    const isDeferred = () => isBackgrounded() || !visible || (saveData && !manuallyStarted);
     const defer = () => {
       setDeferredCause(isBackgrounded() ? 'background' :
         saveData && !manuallyStarted ? 'data-saver' : 'offscreen');
       setStatus('deferred');
     };
-    if (isDeferred()) defer();
-    else setStatus('loading');
-
     const updateVisibility = () => {
-      if (visible && isBackgrounded()) recoverableHost.current = host;
       if (!scene) return;
       const shouldRender = visible && !isBackgrounded();
       scene.setActive(shouldRender);
@@ -348,8 +331,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
     const fail = () => {
       if (!active) return;
-      // Context loss disposes the scene. Preserve host recovery for a retry.
-      if (scene && visible) recoverableHost.current = host;
       active = false;
       scene?.dispose();
       scene = null;
@@ -387,7 +368,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       void import('./campusSpatialScene').then(({ createCampusSpatialScene }) => {
         if (!active) return;
         const finishStart = () => {
-          if (!active || isDeferred() || scene) return;
+          if (!active || scene) return;
+          readVisibility();
+          if (isDeferred()) {
+            syncPendingStartup();
+            return;
+          }
           pendingCreate = null;
           scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail, footprints });
           if (!active) {
@@ -409,28 +395,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // the next visibilitychange/pageshow. Never allocate while hidden.
       }).catch(fail);
     };
-    // Safari bfcache / WebView restore may retain a visible observer state
-    // even if scroll restoration has moved the canvas outside the viewport.
-    // Recheck current bounds before waking an existing GPU context.
-    // Delayed observer entries can still report a previously visible canvas
-    // after Safari restores its scroll position. The current DOM rectangle
-    // is authoritative only when it has measurable positive dimensions; on
-    // legacy WebViews without usable layout measurements, keep the observer
-    // signal and the accessible manual-recovery path.
-    // On iOS the soft keyboard and pinch-zoom often change only the visual
-    // viewport, leaving window.innerHeight unchanged. Its offset is relative
-    // to the layout viewport used by getBoundingClientRect().
-    // Read the current viewport on each check: WebViews can temporarily throw
-    // when accessing it, or replace its instance after page restoration.
-    // Geometry is only affirmative when both the host and the effective
-    // viewport have valid, positive bounds. Unknown WebView measurements must
-    // never be interpreted as proof that the map is back on screen.
-    // The dialog is a scroll/clipping ancestor regardless of whether the scene
-    // was manually started. A WebView can report a positive window-root
-    // intersection for a canvas clipped outside the open dialog; do not
-    // allocate or resume WebGL until it actually overlaps the dialog viewport.
+    // Use current host, dialog and visual viewport bounds. Older WebViews
+    // with unmeasurable layout can still use an observer or manual start.
     const scrollDialog = host.closest('dialog');
-    const hostViewportVisibility = (): 'onscreen' | 'offscreen' | 'visual-offscreen' | 'unknown' | 'invalid-visual-viewport' | 'invalid-layout-viewport' | 'invalid-host-rect' => {
+    const hostViewportVisibility = (): boolean | null => {
       // Some embedded Safari/WebViews expose VisualViewport but throw when a
       // dimension is read during keyboard, zoom or bfcache transitions. Read
       // each getter once; an exception is *not* permission to fall back to
@@ -438,15 +406,15 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       let visualBounds: { left: number; top: number; width: number; height: number } | null = null;
       let visualViewport: VisualViewport | null;
       try { visualViewport = window.visualViewport; }
-      catch { return 'invalid-visual-viewport'; }
+      catch { return false; }
       if (visualViewport) {
         try {
           const { width, height, offsetLeft, offsetTop } = visualViewport;
           if (![width, height, offsetLeft, offsetTop].every(Number.isFinite) ||
-            width <= 0 || height <= 0) return 'invalid-visual-viewport';
+            width <= 0 || height <= 0) return false;
           visualBounds = { left: offsetLeft, top: offsetTop, width, height };
         } catch {
-          return 'invalid-visual-viewport';
+          return false;
         }
       }
       try {
@@ -461,16 +429,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // measurement. In particular NaN/Infinity must never allow the
         // no-observer WebView fallback to start offscreen WebGL.
         if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height]
-          .every(Number.isFinite)) return 'invalid-host-rect';
+          .every(Number.isFinite)) return false;
         // Reported non-finite layout viewport values are not unknown legacy
         // measurements: never let the WebView fallback activate offscreen GPU.
         if (![width, height, left, top, right, bottom].every(Number.isFinite))
-          return 'invalid-layout-viewport';
+          return false;
         if (rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0 ||
-          right <= left || bottom <= top) return 'unknown';
+          right <= left || bottom <= top) return null;
         // A WebView can expose positive width/height while its DOMRect edges
         // are reversed or collapsed. These bounds never prove the host visible.
-        if (rect.right <= rect.left || rect.bottom <= rect.top) return 'invalid-host-rect';
+        if (rect.right <= rect.left || rect.bottom <= rect.top) return false;
         // The dialog clips its overflowing contents even where the window
         // still has visible pixels outside the dialog.
         const dialogRect = scrollDialog?.getBoundingClientRect();
@@ -481,65 +449,28 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         const clippedTop = Math.max(rect.top, clip.top, 0);
         const clippedRight = Math.min(rect.right, clip.right, width);
         const clippedBottom = Math.min(rect.bottom, clip.bottom, height);
-        if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) return 'offscreen';
+        if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) return false;
         if (clippedBottom <= top || clippedTop >= bottom || clippedRight <= left || clippedLeft >= right) {
-          return 'visual-offscreen';
+          return false;
         }
-        return 'onscreen';
+        return true;
       } catch {
         // A broken host/layout measurement is not evidence of an offscreen
         // canvas; keep the observer and keyboard recovery available.
-        return 'unknown';
+        return null;
       }
     };
-    // Both a confirmed offscreen rect and an invalid iOS VisualViewport must
-    // block stale observer/page-restoration records from waking the GPU.
-    // An unmeasurable legacy host rect remains 'unknown' so older WebViews
-    // can still use a real observer signal or the manual-start control.
-    const hostMustStaySuspended = (position = hostViewportVisibility()) => {
-      return position === 'offscreen' || position === 'visual-offscreen' ||
-        position === 'invalid-visual-viewport' ||
-        position === 'invalid-layout-viewport' || position === 'invalid-host-rect';
-    };
-    // Keep recovery eligibility for the same host across scene rebuilds.
-    const confirmHostVisible = () => {
-      recoverableHost.current = null;
-      observerBlockedStart.current = null;
-      visible = true;
-    };
-    // When a broken WebView cannot observe the host, use measurable DOM bounds
-    // instead of eagerly allocating offscreen WebGL. Unknown legacy layouts
-    // retain the prior fallback, and a visible scroll can wake a deferred map.
-    let observerFallback = false;
-    const onVisibilityChange = () => {
-      if (!document.hidden) {
-        // Ordinary iOS tab switches resume with visibilitychange, without
-        // pageshow or any VisualViewport resize/scroll event. Revalidate the
-        // current viewport and retry missing listeners on that foreground
-        // transition, including when first allocation was deferred.
-        onViewportResize();
-        return;
-      }
-      updateVisibility();
-      startWhenVisible();
-      syncPendingStartup();
+    const readVisibility = () => {
+      visible = !isBackgrounded() && (hostViewportVisibility() ?? observerVisible);
     };
     const onPageHide = () => {
       pageSuspended.current = true;
-      updateVisibility();
-      syncPendingStartup();
+      syncViewport();
     };
     const onPageShow = () => {
       pageSuspended.current = false;
-      // A restored Safari page can recover a valid VisualViewport without
-      // dispatching resize, scroll or a fresh IntersectionObserver callback.
-      // Recheck the current rect on pageshow: the same two gates apply to
-      // both a previously paused scene and a pending first render.
-      onViewportResize();
+      syncViewport();
     };
-    // iOS VisualViewport can expand/scroll back into view without firing a
-    // second IntersectionObserver callback. Resume a viewport-paused scene
-    // once current geometry confirms positive overlap.
     // Page restore can replace the VisualViewport object. Transfer the two
     // listeners to the current instance, without leaving callbacks on an old
     // viewport or interpreting a throwing getter as an absent API.
@@ -554,7 +485,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       catch { return; }
       if (current !== subscribedVisualViewport) {
         for (const event of ['resize', 'scroll'] as const) {
-          try { subscribedVisualViewport?.removeEventListener(event, onViewportResize); }
+          try { subscribedVisualViewport?.removeEventListener(event, syncViewport); }
           catch { /* partially implemented WebView API */ }
         }
         registeredViewportEvents.clear();
@@ -563,32 +494,20 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       for (const event of ['resize', 'scroll'] as const) {
         if (registeredViewportEvents.has(event)) continue;
         try {
-          subscribedVisualViewport?.addEventListener(event, onViewportResize);
+          subscribedVisualViewport?.addEventListener(event, syncViewport);
           if (subscribedVisualViewport) registeredViewportEvents.add(event);
         } catch { /* retry when the same instance becomes usable again */ }
       }
     };
-    const syncViewport = (allowRecovery: boolean) => {
+    const syncViewport = () => {
       if (!active) return;
       refreshVisualViewportListeners();
-      const position = hostViewportVisibility();
-      if (hostMustStaySuspended(position)) {
-        if (visible) recoverableHost.current = host;
-        visible = false;
-      } else if (position === 'onscreen') {
-        if (allowRecovery && recoverableHost.current === host) confirmHostVisible();
-        else if (observerFallback && !manuallyStarted) visible = true;
-      }
+      readVisibility();
       updateVisibility();
-      startWhenVisible();
-      syncPendingStartup();
+      if (!started && !isDeferred()) startWhenVisible();
+      else syncPendingStartup();
     };
 
-    const onViewportResize = () => syncViewport(true);
-
-    // A few embedded WebViews expose IntersectionObserver but fail during
-    // construction or observe(). Do not strand the tour in offscreen mode:
-    // the safe fallback is the existing eager startup path.
     let intersection: IntersectionObserver | null = null;
     let observerLive = true;
     if (typeof IntersectionObserver !== 'undefined') {
@@ -618,7 +537,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // legacy shims, but fail closed for any provided non-finite value.
           // A callback queued before bfcache scroll restoration can also
           // describe an old on-screen position.
-          const position = hostViewportVisibility();
           let confirmedIntersecting = false;
           try {
             const rect = latest.intersectionRect;
@@ -636,20 +554,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           } catch {
             // A partially implemented DOMRect getter cannot wake mobile GPU.
           }
-          if (confirmedIntersecting && !hostMustStaySuspended(position)) {
-            confirmHostVisible();
-          } else {
-            // A negative entry changes visibility without revoking recovery.
-            // An initial positive entry can also defer on transient geometry.
-            if (visible || (confirmedIntersecting && position !== 'offscreen')) {
-              recoverableHost.current = host;
-            }
-            if (manuallyStarted && !confirmedIntersecting) observerBlockedStart.current = manualStart;
-            visible = false;
-          }
-          updateVisibility();
-          startWhenVisible();
-          syncPendingStartup();
+          observerVisible = confirmedIntersecting;
+          syncViewport();
         }, { threshold: VIEWPORT_THRESHOLDS });
         // An edge-touch (isIntersecting=true, zero area) and a sliver of
         // visible area (for example 0.5%) are both intersecting. A tiny
@@ -664,51 +570,33 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // constructor/observe(). They must not deactivate the eager fallback.
         observerLive = false;
         intersection = null;
-        observerFallback = true;
       }
-    } else {
-      observerFallback = true;
     }
-    // A missing or broken observer uses the same geometry fallback. Preserve
-    // eager startup for older WebViews with unmeasurable initial geometry.
-    if (observerFallback && !manuallyStarted && !rebuilding) {
-      const position = hostViewportVisibility();
-      visible = position === 'onscreen' || (position === 'unknown' && recoverableHost.current !== host);
-    }
-    document.addEventListener('visibilitychange', onVisibilityChange);
+    if (!intersection) observerVisible = true;
+    document.addEventListener('visibilitychange', syncViewport);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
-    window.addEventListener('resize', onViewportResize);
+    window.addEventListener('resize', syncViewport);
     // Nested dialog scroll can move the canvas without an observer callback.
-    window.addEventListener('scroll', onViewportResize, { capture: true, passive: true });
-    // Safari's visual viewport can resize/scroll without a layout resize or
-    // a timely IntersectionObserver callback. Listen to both dimensions;
-    // older WebViews without this optional API keep the window fallback.
-    // An embedded WebView may support only one VisualViewport event. Register
-    // independently: a throwing resize listener must not suppress scroll,
-    // which is the only signal sent after certain keyboard/pinch changes.
-    if (rebuilding || manuallyStarted || recoverableHost.current === host) syncViewport(false);
-    else {
-      refreshVisualViewportListeners();
-      startWhenVisible();
-    }
+    window.addEventListener('scroll', syncViewport, { capture: true, passive: true });
+    window.addEventListener('focus', syncViewport);
+    syncViewport();
     return () => {
-      previousScene.current = active && (started || rebuilding) ?
-        { host, model, footprints, visible } : null;
       active = false;
       if (timeout !== null) window.clearTimeout(timeout);
       // A broken embedded WebView may throw even on disconnect(). Complete
       // scene and listener cleanup regardless; never leak a WebGL context.
       try { intersection?.disconnect(); } catch { /* broken WebView observer teardown */ }
-      document.removeEventListener('visibilitychange', onVisibilityChange);
+      document.removeEventListener('visibilitychange', syncViewport);
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
-      window.removeEventListener('resize', onViewportResize);
-      window.removeEventListener('scroll', onViewportResize, true);
+      window.removeEventListener('resize', syncViewport);
+      window.removeEventListener('scroll', syncViewport, true);
+      window.removeEventListener('focus', syncViewport);
       // Always attempt both removals even if the first WebView API throws.
       // Otherwise a retained scroll handler can touch a disposed GPU scene.
       for (const event of ['resize', 'scroll'] as const) {
-        try { subscribedVisualViewport?.removeEventListener(event, onViewportResize); }
+        try { subscribedVisualViewport?.removeEventListener(event, syncViewport); }
         catch { /* partially implemented WebView API */ }
       }
       pendingCreate = null;
