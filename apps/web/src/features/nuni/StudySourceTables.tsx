@@ -5,6 +5,17 @@ import { extractStudySourceTables, type StudySourceTable } from './studySourceTa
 import styles from './CourseStudyPanel.module.css';
 
 
+export type StudySourceLocation = {
+  lineOffset: number;
+  passageNumber: number;
+  startsOnLine: boolean;
+  endsOnLine: boolean;
+};
+
+const standaloneLocation: StudySourceLocation = {
+  lineOffset: 0, passageNumber: 1, startsOnLine: true, endsOnLine: true,
+};
+
 type SourceValueRow = { label: string; original: string; amount: number; sourceLine: number };
 
 // A mobile WebView can leave clipboard.writeText() unresolved indefinitely.
@@ -292,29 +303,34 @@ function selectOriginalTableText(field: HTMLTextAreaElement | null): boolean {
 }
 
 /** Keep per-table selection local and reset it when the authorized source changes. */
-function StudySourceSelection({ table, index, sourceLines }: {
+function StudySourceSelection({ table, index, sourceLines, sourceLocation }: {
   table: StudySourceTable;
   index: number;
   sourceLines: OriginalSourceLine[];
+  sourceLocation: StudySourceLocation | null;
 }) {
   const [rowIndex, setRowIndex] = useState(-1);
   const [includeHeader, setIncludeHeader] = useState(false);
   const [includeSourceCitation, setIncludeSourceCitation] = useState(false);
   // Keep original excerpt bytes separate from optional, visibly marked metadata.
   // Neither the Markdown source nor its cell order is ever rewritten.
-  const originalRowLine = table.startLine + rowIndex + 2;
+  const canCite = sourceLocation !== null &&
+    (sourceLocation.startsOnLine || table.startLine > 1) &&
+    (sourceLocation.endsOnLine || table.startLine + table.rows.length + 1 < sourceLines.length);
+  const headerLine = table.startLine + (sourceLocation?.lineOffset ?? 0);
+  const originalRowLine = headerLine + rowIndex + 2;
   const originalExcerpt = tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex, includeHeader);
   const citation = rowIndex < 0
-    ? `教材原文第 ${table.startLine} 至 ${table.startLine + table.rows.length + 1} 行`
+    ? `教材原文第 ${headerLine} 至 ${headerLine + table.rows.length + 1} 行`
     : !includeHeader
       ? `教材原文第 ${originalRowLine} 行`
       : rowIndex === 0
-        ? `教材原文第 ${table.startLine} 至 ${originalRowLine} 行`
-        : `教材原文第 ${table.startLine}、${table.startLine + 1}、${originalRowLine} 行（非連續）`;
+        ? `教材原文第 ${headerLine} 至 ${originalRowLine} 行`
+        : `教材原文第 ${headerLine}、${headerLine + 1}、${originalRowLine} 行（非連續）`;
   const citationNewline = sourceLines[table.startLine - 1]?.separator || '\n';
   // The selectable fallback, clipboard and TXT must use identical payloads.
-  const selectedSource = includeSourceCitation
-    ? `[${citation}]${citationNewline}${originalExcerpt}`
+  const selectedSource = canCite && includeSourceCitation
+    ? `[第 ${sourceLocation.passageNumber} 段 · ${citation}]${citationNewline}${originalExcerpt}`
     : originalExcerpt;
   const [copyFeedback, setCopyFeedback] = useState('');
   const originalText = useRef<HTMLTextAreaElement>(null);
@@ -485,14 +501,14 @@ function StudySourceSelection({ table, index, sourceLines }: {
           連同原文欄名與分隔列
         </label>
       )}
-      <label>
+      {canCite && <label>
         <input type="checkbox" checked={includeSourceCitation} onChange={(event) => {
           invalidateCopy();
           setCopyFeedback('');
           setIncludeSourceCitation(event.target.checked);
         }} />
         摘錄開頭加上教材原文行號（註記非原文）
-      </label>
+      </label>}
       <p className={styles.note} aria-live="polite" aria-atomic="true">
         {selectionAnnouncement}
       </p>
@@ -530,7 +546,10 @@ function StudySourceSelection({ table, index, sourceLines }: {
 }
 
 /** Optional accessible table layout derived solely from the exact source text. */
-export function StudySourceTables({ text }: { text: string }) {
+export function StudySourceTables({ text, sourceLocation = standaloneLocation }: {
+  text: string;
+  sourceLocation?: StudySourceLocation | null;
+}) {
   const tables = useMemo(() => extractStudySourceTables(text), [text]);
   const sourceLines = useMemo(() => splitOriginalSourceLines(text), [text]);
   const sourceRowRefs = useRef(new Map<string, HTMLTableRowElement>());
@@ -623,7 +642,8 @@ export function StudySourceTables({ text }: { text: string }) {
               返回原文第 {table.startLine + 2 + returnTarget.rowIndex} 行的圖表
             </button>
           )}
-          <StudySourceSelection table={table} index={index} sourceLines={sourceLines} />
+          <StudySourceSelection table={table} index={index} sourceLines={sourceLines}
+            sourceLocation={sourceLocation} />
           <StudySourceValueComparison table={table}
             onJumpToSource={(rowIndex, origin) => jumpToSource(table.startLine, rowIndex, origin)} />
           <StudySourcePercentComparison table={table}

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { splitStudySection, studySourceFromDocument, studySourceFromText, type TutorExplanation } from '@/lib/studyTutor';
-import { appendStudyLesson, canReviewStudyAnswer, emptyStudyPassage, hasRevealedStudyAnswer, studyLessonHistory, type StudyModeMemory } from './courseStudySession';
+import { appendStudyLesson, emptyStudyPassage, studyLessonHistory, type StudyModeMemory } from './courseStudySession';
 import {
   COURSE_STUDY_PROGRESS_LIMITS,
   courseStudyProgressFilename,
@@ -327,76 +327,6 @@ describe('lesson and draft validation', () => {
     });
     expect(restored).toEqual(expected);
     expect(parseCourseStudyProgress(serializeCourseStudyProgress(restored), scope)).toEqual(expected);
-  });
-
-  it.each([
-    ['\u200b\u0301', false, false, true, 2],
-    ['\u200b', false, false, true, 2],
-    [' \u0301 ', false, false, true, 2],
-    ['\u200e\u2060', false, false, true, 2],
-    ['\u2800\ufff9', false, false, true, 2],
-    [' \t', false, false, false, 2],
-    ['作\u200b答 e\u0301\u200f ', true, false, true, 2],
-    ['\u200b', true, false, true, 2],
-    ['\u2060', undefined, true, true, 2],
-    ['', true, false, false, 2],
-  ])('preserves drafts and reveal eligibility verbatim (%#)',
-    (attempt, answerReviewAllowed, answerVisible, canReview, version) => {
-      const saved = data();
-      const lesson = saved.passages['0:0'].modes.understand.lessons[0];
-      Object.assign(lesson, { attempt, answerVisible });
-      if (answerReviewAllowed !== undefined) Object.assign(lesson, { answerReviewAllowed });
-      const before = JSON.stringify(saved);
-      const raw = serializeCourseStudyProgress(saved);
-      const exported = JSON.parse(raw) as Envelope;
-      expect(exported.version).toBe(version);
-      if (version === 2) {
-        // The merge-base reader requires these exact v2 lesson keys.
-        expect(Object.keys(mode(exported).lessons[0]).sort()).toEqual(
-          ['answerVisible', 'attempt', 'id', 'previousLessonId', 'question', 'response'],
-        );
-      }
-      expect(mode(exported).lessons[0]).toMatchObject({ attempt, answerVisible });
-
-      const restored = parseCourseStudyProgress(raw, scope);
-      const restoredLesson = restored.passages['0:0'].modes.understand.lessons[0];
-      expect(restoredLesson).toMatchObject({ attempt, answerVisible });
-      expect(canReviewStudyAnswer(restoredLesson)).toBe(canReview);
-      expect(serializeCourseStudyProgress(restored)).toBe(raw);
-      expect(JSON.stringify(saved)).toBe(before);
-    },
-  );
-
-  // The merge-base reader recognizes v1/v2 and rejects answerVisible && !attempt.trim().
-  // v3 uses the same reveal rule and adds support for explicit draft eligibility.
-  describe.each([1, 2, 3])('v%i reveal compatibility', (version) => {
-    it.each([
-      ['empty', '', false],
-      ['ASCII whitespace', ' \t\n', false],
-      ['zero width', '\u200b', true],
-      ['fullwidth space', '\u3000', false],
-      ['BOM', '\ufeff', false],
-      ['readable content', ' 試答 ', true],
-    ] as const)('%s agrees with the legacy attempt rule for collapsed and revealed answers', (_label, attempt, eligible) => {
-      for (const answerVisible of [false, true]) {
-        const raw = changed((backup) => {
-          backup.version = version;
-          Object.assign(mode(backup).lessons[0], { attempt, answerVisible });
-        });
-        const baseAccepts = version <= 2 && (!answerVisible || !!attempt.trim());
-        const accepts = !answerVisible || eligible;
-        expect(accepts).toBe(version === 3 ? !answerVisible || !!attempt.trim() : baseAccepts);
-        if (!accepts) {
-          expect(() => parseCourseStudyProgress(raw, scope)).toThrow('試答與參考回答狀態不一致');
-          continue;
-        }
-        const restored = parseCourseStudyProgress(raw, scope);
-        const lesson = restored.passages['0:0'].modes.understand.lessons[0];
-        expect(canReviewStudyAnswer(lesson)).toBe(eligible);
-        expect(hasRevealedStudyAnswer(lesson)).toBe(answerVisible);
-        expect(JSON.parse(serializeCourseStudyProgress(restored)).version).toBe(2);
-      }
-    });
   });
 
   it('preserves legacy reveals in v1/v2 when trim accepts an invisible draft', () => {

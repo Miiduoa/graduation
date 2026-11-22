@@ -378,6 +378,22 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   const replaceHeadingId = useId();
   const practiceConfirmHeadingId = useId();
   const sectionPassages = useMemo(() => source?.sections.map(splitStudySection) ?? [], [source]);
+  const passageLocations = useMemo(() => {
+    let lineOffset = 0;
+    let passageNumber = 0;
+    return sectionPassages.map((parts) => parts.map((part, index) => {
+      // Number the stored text in order, with a line boundary between sections.
+      const location = {
+        lineOffset,
+        passageNumber: ++passageNumber,
+        startsOnLine: index === 0 || /[\r\n]$/u.test(parts[index - 1].text),
+        endsOnLine: index === parts.length - 1 || /^[\r\n]/u.test(parts[index + 1].text) || /[\r\n]$/u.test(part.text),
+      };
+      lineOffset += (part.text.match(/\r\n|\r|\n/gu) ?? []).length;
+      if (index === parts.length - 1) lineOffset += 1;
+      return location;
+    }));
+  }, [sectionPassages]);
   const section = source?.sections[sectionIndex];
   const passages = sectionPassages[sectionIndex] ?? [];
   const passage = passages[passageIndex];
@@ -1305,6 +1321,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
             <span>第 {passageIndex + 1} 段，共 {passages.length} 段</span><span>{section?.label}</span>
           </div>
           <CourseStudyPassage key={`${session.revision}:${passageKey}:${mode}`} passage={passage} mode={mode} memory={memory}
+            sourceLocation={passageLocations[sectionIndex][passageIndex]}
             onChange={(update) => {
               invalidateCopyFeedback();
               setSession((previous) => previous.revision !== session.revision ? previous : {

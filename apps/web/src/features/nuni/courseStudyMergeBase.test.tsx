@@ -1,4 +1,5 @@
-import { render, within } from '@testing-library/react';
+import { fireEvent, render, within } from '@testing-library/react';
+import { Blob as NodeBlob } from 'node:buffer';
 import { describe, expect, it, vi } from 'vitest';
 import { parseTutorExplanation, splitStudySection, studySourceFromText } from '@/lib/studyTutor';
 import { buildCourseStudyNotes } from './courseStudyNotes';
@@ -355,12 +356,6 @@ it('preserves merge-base reading and practice fields, checkpoints and reveal con
     expect(restored).toEqual(baseline);
     expect(JSON.parse(checkpoint.serializeStudyPracticeCheckpoint(restored))).toEqual(JSON.parse(saved));
 
-    const extended = JSON.parse(saved);
-    extended.version = 2;
-    extended.progress.version = 3;
-    extended.progress.passages['0:0'].modes.understand.lessons[0].answerReviewAllowed = false;
-    const previousPrBackup = checkpoint.parseStudyPracticeCheckpoint(JSON.stringify(extended), input.scope);
-    expect(previousPrBackup).toEqual(baseline);
     expect(practice.buildStudyPracticeDeck([[passage]], input.passages, 'understand')).toEqual(baselineDeck);
     expect(practice.hasVisibleStudyAttempt(attempt)).toBe(baselinePractice.hasVisibleStudyAttempt(attempt));
     expect(practice.getStudyPracticeSummary(restored.round)).toEqual(baselinePractice.getStudyPracticeSummary(baseline.round));
@@ -407,3 +402,141 @@ it('compares rendering and panel export controls with the baseline components', 
     .map((button) => [button.textContent, button.hasAttribute('disabled')]);
   expect(buttons(current.container)).toEqual(expect.arrayContaining(buttons(original.container)));
 }, 120_000);
+
+
+describe.each([1, 2, 3])('reading v%i import compatibility', (readingVersion) => {
+  it.each(['', ' \t\n', '\u200b', '\ufff9', '可見試答'])('matches the merge-base for attempt %j', (attempt) => {
+    const memory = baselineSession.appendStudyLesson(baselineSession.emptyStudyPassage(), 'understand',
+      { question: '', response: { ...reply, sourceQuote: '原文' } });
+    memory.needsReview = true;
+    const progress = { ...context, passages: { '0:0': memory } };
+    const [passage] = splitStudySection(progress.source.sections[0]);
+    const deck = baselinePractice.buildStudyPracticeDeck([[passage]], progress.passages, 'understand');
+    const round = baselinePractice.startStudyPracticeRound(0, 'understand', deck.cards);
+    if (!round) throw new Error('Missing baseline practice round');
+    const checkpointEnvelope = JSON.parse(baselineCheckpoint.serializeStudyPracticeCheckpoint({ progress, round }));
+    const reading = checkpointEnvelope.progress;
+    const lesson = reading.passages['0:0'].modes.understand.lessons[0];
+    reading.version = readingVersion;
+
+    for (const answerVisible of [false, true]) {
+      for (const answerReviewAllowed of [undefined, false, true]) {
+        Object.assign(lesson, { attempt, answerVisible });
+        round.responses[round.cards[0].id] = { attempt, answerVisible, hintVisible: true, outcome: null };
+        if (answerReviewAllowed === undefined) delete lesson.answerReviewAllowed;
+        else lesson.answerReviewAllowed = answerReviewAllowed;
+        const raw = JSON.stringify(reading);
+        let baseReading;
+        try {
+          baseReading = baselineProgress.parseCourseStudyProgress(raw, progress.scope);
+        } catch {
+          expect(() => parseCourseStudyProgress(raw, progress.scope)).toThrow();
+        }
+        if (baseReading) {
+          const restored = parseCourseStudyProgress(raw, progress.scope);
+          expect(restored).toEqual(baseReading);
+          expect(canReviewStudyAnswer(restored.passages['0:0'].modes.understand.lessons[0])).toBe(!!attempt.trim());
+          const exported = serializeCourseStudyProgress(restored);
+          expect(exported).toBe(baselineProgress.serializeCourseStudyProgress(baseReading));
+          expect(parseCourseStudyProgress(exported, progress.scope)).toEqual(baseReading);
+        }
+
+        for (const version of [1, 2]) {
+          for (const responseRestriction of [undefined, false, true]) {
+            const response = { ...round.responses[round.cards[0].id], answerReviewAllowed: responseRestriction };
+            const saved = JSON.stringify({ ...checkpointEnvelope, version, practice: {
+              ...checkpointEnvelope.practice, responses: { [round.cards[0].id]: response },
+            } });
+            let baseCheckpoint;
+            try {
+              baseCheckpoint = baselineCheckpoint.parseStudyPracticeCheckpoint(saved, progress.scope);
+            } catch {
+              expect(() => checkpoint.parseStudyPracticeCheckpoint(saved, progress.scope)).toThrow();
+              continue;
+            }
+            const restored = checkpoint.parseStudyPracticeCheckpoint(saved, progress.scope);
+            expect(restored).toEqual(baseCheckpoint);
+            expect(practice.hasVisibleStudyAttempt(restored.round.responses[round.cards[0].id].attempt))
+              .toBe(baselinePractice.hasVisibleStudyAttempt(attempt));
+            const exported = checkpoint.serializeStudyPracticeCheckpoint(restored);
+            expect(exported).toBe(baselineCheckpoint.serializeStudyPracticeCheckpoint(baseCheckpoint));
+            expect(checkpoint.parseStudyPracticeCheckpoint(exported, progress.scope)).toEqual(baseCheckpoint);
+          }
+        }
+      }
+    }
+  });
+});
+
+
+describe.each(['\n', '\r\n'])('table excerpts with %j line endings', (newline) => {
+  const flags = [false, true];
+  const cases = flags.flatMap((multi) => flags.flatMap((blank) =>
+    flags.map((atStart) => ({ multi, blank, atStart }))));
+  it.each(cases)('keeps whole-source citations for $multi/$blank/$atStart', async ({ multi, blank, atStart }) => {
+    const rowLabels = multi ? ['甲', '乙'] : ['甲'];
+    const paragraphs = rowLabels.map((label) => {
+      const rows = ['| 組別 | 學分 |', '| --- | --- |', `| ${label} | 2 |`];
+      const gap = blank ? [''] : [];
+      const otherLines = [...rows, ...gap, ''];
+      const prose = '文'.repeat(multi ? 1600 - otherLines.join(newline).length - newline.length : 10);
+      return atStart ? [...rows, ...gap, prose] : [prose, ...gap, ...rows];
+    });
+    const lines = paragraphs.flat();
+    const material = { id: 'table-material', title: '表格教材', body: lines.join(newline) };
+    const options = { scope: context.scope, courseTitle: '國文', material, onClose: vi.fn() };
+    const view = render(<main><section aria-label="基準"><BaselinePanel {...options} /></section>
+      <section aria-label="變更"><CourseStudyPanel {...options} /></section></main>);
+    const baseline = within(view.getByRole('region', { name: '基準' }));
+    const current = within(view.getByRole('region', { name: '變更' }));
+    const name = '摘錄開頭加上教材原文行號（註記非原文）';
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const create = vi.fn<(blob: NodeBlob) => string>(() => 'blob:table-excerpt');
+    const anchor = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const createDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const revokeDescriptor = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: create });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    vi.stubGlobal('Blob', NodeBlob);
+    try {
+      const citedLines = new Set<number>();
+      for (const [index, label] of rowLabels.entries()) {
+        for (const panel of [baseline, current]) {
+          fireEvent.click(panel.getByText('選取第 1 張表格的原文（可複製）'));
+          fireEvent.change(panel.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }),
+            { target: { value: '0' } });
+        }
+        expect(baseline.queryByRole('checkbox', { name })).toBeNull();
+        fireEvent.click(baseline.getByRole('button', { name: '複製第 1 張表格第 1 列原文' }));
+        const original = `| ${label} | 2 |`;
+        expect(writeText).toHaveBeenLastCalledWith(original);
+        fireEvent.click(baseline.getByRole('button', { name: '下載第 1 張表格第 1 列原文 TXT' }));
+        expect(await create.mock.lastCall?.[0].text()).toBe(original);
+        const line = lines.indexOf(original) + 1;
+        expect(citedLines.has(line)).toBe(false);
+        citedLines.add(line);
+        fireEvent.click(current.getByRole('checkbox', { name }));
+        fireEvent.click(current.getByRole('button', { name: '複製第 1 張表格第 1 列原文' }));
+        const expected = `[第 ${index + 1} 段 · 教材原文第 ${line} 行]${newline}${original}`;
+        expect(writeText).toHaveBeenLastCalledWith(expected);
+        fireEvent.click(current.getByRole('button', { name: '下載第 1 張表格第 1 列原文 TXT' }));
+        expect(await create.mock.lastCall?.[0].text()).toBe(expected);
+        if (index < rowLabels.length - 1) {
+          for (const panel of [baseline, current]) fireEvent.click(panel.getByRole('button', { name: '下一段' }));
+        }
+      }
+    } finally {
+      view.unmount();
+      anchor.mockRestore();
+      vi.unstubAllGlobals();
+      if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+      if (createDescriptor) Object.defineProperty(URL, 'createObjectURL', createDescriptor);
+      else Reflect.deleteProperty(URL, 'createObjectURL');
+      if (revokeDescriptor) Object.defineProperty(URL, 'revokeObjectURL', revokeDescriptor);
+      else Reflect.deleteProperty(URL, 'revokeObjectURL');
+    }
+  });
+});

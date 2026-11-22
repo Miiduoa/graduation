@@ -12,8 +12,7 @@ import { hasRevealedStudyAnswer, STUDY_SESSION_LIMITS, type StudyLesson, type St
 
 const FORMAT = 'campus-one-study-progress';
 const VERSION = 2;
-const EXTENDED_VERSION = 3;
-type ProgressVersion = 1 | typeof VERSION | typeof EXTENDED_VERSION;
+type ProgressVersion = 1 | typeof VERSION;
 const MODES: StudyMode[] = ['understand', 'exam', 'practice'];
 
 export const COURSE_STUDY_PROGRESS_LIMITS = {
@@ -104,17 +103,13 @@ function readMode(value: unknown, passage: StudyPassage, version: ProgressVersio
   if (!Array.isArray(memory.lessons) || memory.lessons.length > STUDY_SESSION_LIMITS.lessonsPerMode) invalid();
   let previousId = 0;
   const lessons = Array.from(memory.lessons, (value): StudyLesson => {
-    const fields = ['id', 'previousLessonId', 'question', 'response', 'attempt', 'answerVisible'];
-    if (version >= 2 && Object.hasOwn(object(value), 'answerReviewAllowed')) fields.push('answerReviewAllowed');
-    const lesson = exactObject(value, fields);
+    const lesson = exactObject(value, ['id', 'previousLessonId', 'question', 'response', 'attempt', 'answerVisible']);
     const id = integer(lesson.id, 1, COURSE_STUDY_PROGRESS_LIMITS.lessonId);
     if (id <= previousId) invalid('進度檔的講解編號重複或順序不正確，請重新選擇檔案。');
     previousId = id;
     const parentId = lesson.previousLessonId === null ? null : integer(lesson.previousLessonId, 1, id - 1);
     const attempt = text(lesson.attempt, STUDY_SESSION_LIMITS.attemptCharacters);
     const answerVisible = boolean(lesson.answerVisible);
-    // Read earlier PR backups, using the saved attempt and reveal state for display.
-    if (Object.hasOwn(lesson, 'answerReviewAllowed')) boolean(lesson.answerReviewAllowed);
     if (answerVisible && !hasRevealedStudyAnswer({ attempt, answerVisible }))
       invalid('進度檔的試答與參考回答狀態不一致，無法還原。');
     let response: TutorExplanation;
@@ -123,7 +118,7 @@ function readMode(value: unknown, passage: StudyPassage, version: ProgressVersio
       const savedResponse = object(lesson.response);
       const responseFields = ['title', 'explanation', 'sourceQuote', 'question', 'answer'];
       // Version 1 stays a five-field format even after the tutor learns new fields.
-      if (version >= 2 && Object.hasOwn(savedResponse, 'steps')) responseFields.push('steps');
+      if (version === 2 && Object.hasOwn(savedResponse, 'steps')) responseFields.push('steps');
       exactObject(savedResponse, responseFields);
       response = parseSavedTutorExplanation(JSON.stringify(savedResponse), passage);
     } catch {
@@ -244,7 +239,7 @@ export function parseCourseStudyProgress(raw: string, expectedScope: CourseStudy
   }
   const envelope = object(decoded);
   if (envelope.format !== FORMAT) invalid('這不是讀書白板的閱讀進度檔，請選擇正確的檔案。');
-  if (envelope.version !== 1 && envelope.version !== VERSION && envelope.version !== EXTENDED_VERSION)
+  if (envelope.version !== 1 && envelope.version !== VERSION)
     invalid('目前不支援這個閱讀進度檔的版本，請使用相容版本的進度檔。');
   exactObject(envelope, ['format', 'version', 'scope', 'source', 'position', 'passages', 'passageLengths']);
   return readData({ scope: envelope.scope, source: envelope.source, position: envelope.position, passages: envelope.passages },

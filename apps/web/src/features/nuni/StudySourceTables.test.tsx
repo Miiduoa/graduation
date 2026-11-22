@@ -2754,7 +2754,7 @@ it('adds optional non-contiguous source-line evidence to copied study excerpts w
     fireEvent.click(screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }));
     fireEvent.click(screen.getByRole('checkbox', { name: '摘錄開頭加上教材原文行號（註記非原文）' }));
     const expected = [
-      '[教材原文第 2、3、6 行（非連續）]',
+      '[第 1 段 · 教材原文第 2、3、6 行（非連續）]',
       '| 課程 | 學分 |',
       '| :--- | ---: |',
       '| 網路 | 1 |',
@@ -2778,13 +2778,13 @@ it('switches citation between full table, adjacent first row and exact single ro
   const range = screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' });
   expect(field.value).toBe(lesson);
   fireEvent.click(citation);
-  expect(field.value).toBe('[教材原文第 1 至 4 行]\n' + lesson);
+  expect(field.value).toBe('[第 1 段 · 教材原文第 1 至 4 行]\n' + lesson);
   fireEvent.change(range, { target: { value: '0' } });
-  expect(field.value).toBe('[教材原文第 3 行]\n| A | 3 |');
+  expect(field.value).toBe('[第 1 段 · 教材原文第 3 行]\n| A | 3 |');
   fireEvent.click(screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }));
-  expect(field.value).toBe('[教材原文第 1 至 3 行]\n| 科目 | 學分 |\n| --- | --- |\n| A | 3 |');
+  expect(field.value).toBe('[第 1 段 · 教材原文第 1 至 3 行]\n| 科目 | 學分 |\n| --- | --- |\n| A | 3 |');
   fireEvent.change(range, { target: { value: '1' } });
-  expect(field.value).toBe('[教材原文第 4 行]\n| B | 2 |');
+  expect(field.value).toBe('[第 1 段 · 教材原文第 4 行]\n| B | 2 |');
   fireEvent.click(citation);
   expect(field.value).toBe('| B | 2 |');
   view.rerender(<StudySourceTables text={lesson.replace('| A | 3 |', '| C | 4 |')} />);

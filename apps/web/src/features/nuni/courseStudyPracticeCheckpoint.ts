@@ -17,7 +17,6 @@ import {
 
 export const STUDY_PRACTICE_CHECKPOINT_FORMAT = 'campus-one-study-practice';
 const CHECKPOINT_VERSION = 1;
-const EXTENDED_CHECKPOINT_VERSION = 2;
 const MODES: StudyMode[] = ['understand', 'exam', 'practice'];
 
 export type StudyPracticeCheckpoint = {
@@ -141,8 +140,7 @@ export function parseStudyPracticeCheckpoint(
     invalid('無法讀取練習進度檔，請選擇讀書白板儲存的 JSON 檔。');
   }
   const envelope = exact(parsed, ['format', 'version', 'progress', 'practice']);
-  if (envelope.format !== STUDY_PRACTICE_CHECKPOINT_FORMAT ||
-      (envelope.version !== CHECKPOINT_VERSION && envelope.version !== EXTENDED_CHECKPOINT_VERSION)) {
+  if (envelope.format !== STUDY_PRACTICE_CHECKPOINT_FORMAT || envelope.version !== CHECKPOINT_VERSION) {
     invalid('這不是目前支援的逐題練習進度檔。');
   }
   const progress = parseCourseStudyProgress(JSON.stringify(envelope.progress), expectedScope);

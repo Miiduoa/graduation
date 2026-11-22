@@ -21,19 +21,20 @@ import {
   type StudyPassageMemory,
 } from './courseStudySession';
 import { StudyReadAloud } from './StudyReadAloud';
-import { StudySourceTables } from './StudySourceTables';
+import { StudySourceTables, type StudySourceLocation } from './StudySourceTables';
 import { CourseStudySteps } from './CourseStudySteps';
 import { locateStudyEvidence } from './studyEvidence';
 import styles from './CourseStudyPanel.module.css';
 
 type Props = {
   passage: StudyPassage;
+  sourceLocation?: StudySourceLocation;
   mode: StudyMode;
   memory: StudyPassageMemory;
   onChange: (update: (previous: StudyPassageMemory) => StudyPassageMemory) => void;
 };
 
-export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
+export function CourseStudyPassage({ passage, sourceLocation, mode, memory, onChange }: Props) {
   const [availability, setAvailability] = useState<ReturnType<typeof getStudyTutorAvailability> | null>(null);
   const [busy, setBusy] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -195,7 +196,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
         {evidence ? <>{evidence.before}<mark ref={evidenceMark} tabIndex={-1}
           className={styles.evidenceHighlight}>{evidence.quote}</mark>{evidence.after}</> : passage.text}
       </blockquote>
-      <StudySourceTables text={passage.text} />
+      <StudySourceTables text={passage.text} sourceLocation={sourceLocation ?? null} />
       {!passage.text.trim() && <p className={styles.note}>這一段只有空白，可直接前往下一段。</p>}
       {result && !busy && <label className={styles.field}>朗讀內容
         <select value={narrationTarget} onChange={(event) =>

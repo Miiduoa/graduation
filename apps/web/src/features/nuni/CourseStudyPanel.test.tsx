@@ -3391,3 +3391,24 @@ it('retains readable Chinese and combined emoji AI self-check content while keep
   fireEvent.click(within(lesson).getByRole('button', { name: '對照參考回答' }));
   expect(within(lesson).getByText(answer)).toBeTruthy();
 });
+
+
+it.each([
+  ['campus-one-study-progress', 3, '目前不支援這個閱讀進度檔的版本'],
+  ['campus-one-study-practice', 2, '這不是目前支援的逐題練習進度檔'],
+])('rejects an unsupported %s version without changing existing work', (format, version, message) => {
+  const source = studySourceFromText({ id: 'backup', title: '另一份教材', text: '備份裡的教材內容。' });
+  const progress = JSON.parse(serializeCourseStudyProgress({
+    scope, source, position: { sectionIndex: 0, passageIndex: 0, mode: 'understand' }, passages: {},
+  }));
+  const saved = version === 3 ? { ...progress, version } : { format, version, progress, practice: {} };
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '現有筆記' } });
+  fireEvent.change(screen.getByLabelText('貼上已備份的進度 JSON'), { target: { value: JSON.stringify(saved) } });
+  fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
+  expect(screen.getByRole('alert').textContent).toContain(message);
+  expect(screen.queryByRole('button', { name: '還原這份進度' })).toBeNull();
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(note.value).toBe('現有筆記');
+});
