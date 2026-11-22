@@ -1,9 +1,45 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { StudySourceTables } from './StudySourceTables';
 import { extractStudySourceTables } from './studySourceTables';
 import { extractStudySourceTables as extractBaselineTables } from './__fixtures__/courseStudyMergeBase/studySourceTables';
 import { sourcePercentRows, sourceValueRows } from './__fixtures__/courseStudyMergeBase/chartRows';
+import styles from './CourseStudyPanel.module.css';
+
+it.each([
+  ['.sourceLineJump', 'normal'],
+  ['.sourceTableSelection .sourceExcerptWithHeader', 'pre-wrap'],
+])('constrains and wraps %s at narrow widths', (selector, whiteSpace) => {
+  const css = readFileSync(join(__dirname, 'CourseStudyPanel.module.css'), 'utf8');
+  const rule = css.split(`${selector} {`)[1]?.split('}')[0];
+  expect(rule).toMatch(/min-width:\s*0\s*;/);
+  expect(rule).toMatch(/max-width:\s*100%\s*;/);
+  expect(rule).toMatch(/overflow-wrap:\s*anywhere\s*;/);
+  expect(rule).toMatch(new RegExp(`white-space:\\s*${whiteSpace}\\s*;`));
+});
+
+it.each([
+  ['學習時數', ['3', '5', '7']],
+  ['出席率', ['30%', '50%', '70%']],
+])('keeps complete source button names in the %s comparison', (heading, values) => {
+  const labels = ['CODE1234'.repeat(25), '長教材列名'.repeat(40), `CODE-${'مرحبا'.repeat(40)}`];
+  const { container } = render(<StudySourceTables text={[
+    `| 項目 | ${heading} |`, '| --- | --- |',
+    ...labels.map((label, index) => `| ${label} | ${values[index]} |`),
+  ].join('\n')} />);
+  const comparison = container.querySelector('meter')?.closest('details');
+  expect(comparison).toBeInstanceOf(HTMLDetailsElement);
+  comparison?.setAttribute('open', '');
+
+  for (const label of labels) {
+    const name = `${label} · 回表格核對`;
+    const button = screen.getByRole('button', { name });
+    expect(button.getAttribute('aria-label')).toBe(name);
+    expect(button.classList.contains(styles.sourceLineJump)).toBe(true);
+  }
+});
 
 function expectBaselineMeters(container: HTMLElement, text: string) {
   const expected = extractBaselineTables(text).flatMap((table) => {
@@ -2721,13 +2757,15 @@ it('copies an excerpt with headers and the selected row verbatim', async () => {
     fireEvent.click(screen.getByText('選取第 1 張表格的原文（可複製）'));
     fireEvent.change(screen.getByRole('combobox', { name: '第 1 張表格的原文選取範圍' }),
       { target: { value: '2' } });
+    const field = screen.getByRole<HTMLTextAreaElement>('textbox', { name: '原文表格 1 的可選取文字' });
+    expect(field.classList.contains(styles.sourceExcerptWithHeader)).toBe(false);
     fireEvent.click(screen.getByRole('checkbox', { name: '連同原文欄名與分隔列' }));
     const expected = [
       '| 課程 | 學分 |',
       '| :--- | ---: |',
       '| 網路 | 1 |',
     ].join('\r\n');
-    const field = screen.getByRole('textbox', { name: '原文表格 1 的可選取文字' }) as HTMLTextAreaElement;
+    expect(field.classList.contains(styles.sourceExcerptWithHeader)).toBe(true);
     expect(field.value).toBe(expected.replace(/\r\n/gu, '\n'));
     expect(field.value).not.toContain('| 統計 | 2 |');
     fireEvent.click(screen.getByRole('button', { name: '複製第 1 張表格第 3 列原文' }));

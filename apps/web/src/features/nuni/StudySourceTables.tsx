@@ -178,6 +178,7 @@ function StudySourcePercentComparison({ table, onJumpToSource }: {
             </div>
             <button type="button" className={styles.sourceLineJump}
               id={`${sourceDescriptionPrefix}-row-${row.rowIndex}`}
+              aria-label={`${row.label} · 回表格核對`}
               onClick={(event) => onJumpToSource(row.rowIndex, event.currentTarget)}>
               {row.label} · 回表格核對
             </button>
@@ -218,6 +219,7 @@ function StudySourceValueComparison({ table, onJumpToSource }: {
             </div>
             <button type="button" className={styles.sourceLineJump}
               id={`${sourceDescriptionPrefix}-row-${row.rowIndex}`}
+              aria-label={`${row.label} · 回表格核對`}
               onClick={(event) => onJumpToSource(row.rowIndex, event.currentTarget)}>
               {row.label} · 回表格核對
             </button>
@@ -491,6 +493,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
       <p className={styles.note} role="status">{copyFeedback}</p>
       <textarea
         ref={originalText}
+        className={includeHeader ? styles.sourceExcerptWithHeader : undefined}
         aria-label={`原文表格 ${index + 1} 的可選取文字`}
         readOnly
         spellCheck={false}
