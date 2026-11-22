@@ -1,6 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AppHeader } from './AppHeader';
+import {
+  ASSISTANT_ROLE_WORKFLOWS,
+  type AssistantWorkContext,
+} from '@campus/shared/src/assistantRoleWorkflows';
 
 const state = vi.hoisted(() => ({
   pathname: '/library',
@@ -11,6 +15,7 @@ const state = vi.hoisted(() => ({
   loading: false,
   pendingLogout: false,
   ask: vi.fn(),
+  workContext: null as AssistantWorkContext | null,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -47,6 +52,7 @@ vi.mock('@/lib/functionsUrl', async (original) => ({
 }));
 vi.mock('@/features/nuni/Assistant', async () => {
   const { AssistantReplyLink } = await import('./AssistantReplyLink');
+  const { AssistantRoleTasks } = await import('@/features/nuni/assistant/AssistantRoleTasks');
   const { SpokenReply } = await import('./SpokenReply');
   const { VoiceDictationButton } = await import('./VoiceDictationButton');
   return {
@@ -74,6 +80,9 @@ vi.mock('@/features/nuni/Assistant', async () => {
         <AssistantReplyLink href="/library?campus=pu" onClick={(event) => event.preventDefault()}>
           查看參考服務
         </AssistantReplyLink>
+        {state.workContext && (
+          <AssistantRoleTasks context={state.workContext} onContext={() => {}} schoolId="pu" />
+        )}
         <SpokenReply text="請查看開館時間">
           <AssistantReplyLink href="#hours">查看開館時間</AssistantReplyLink>
         </SpokenReply>
@@ -91,6 +100,7 @@ beforeEach(() => {
   state.loading = false;
   state.pendingLogout = false;
   state.ask.mockReset();
+  state.workContext = null;
   window.history.replaceState({}, '', '/library?campus=pu');
   Element.prototype.scrollIntoView = vi.fn();
   sessionStorage.clear();
@@ -229,25 +239,57 @@ it('closes and stops playback on a fragment link before the route or hash change
   expect(overflow()).toEqual(initialOverflow);
 });
 
-it.each([
-  ['快速搜尋', '開啟校園地圖', 'schoolId=pu&campus=pu&school=PU'],
-  ['服務總覽', '有哪些服務', 'schoolId=pu'],
-])('closes on a same-page map link from %s', async (_case, query, search) => {
-  state.pathname = '/map';
-  state.search = search;
-  window.history.replaceState({}, '', `/map?${search}`);
+const navigationEntries = [
+  { name: /校園地圖/, query: '開啟校園地圖' },
+  { name: /校園地圖/, query: '有哪些服務' },
+  { name: '查看開館時間' },
+  ...ASSISTANT_ROLE_WORKFLOWS.flatMap(({ id, services }) =>
+    services.map(({ label }) => ({ name: label, workContext: id })),
+  ),
+];
+
+it.each(
+  navigationEntries.flatMap((entry) =>
+    [true, false].map((sameUrl) => ({ ...entry, sameUrl })),
+  ),
+)('handles $name ($query, same URL: $sameUrl) while speaking', async (entry) => {
+  const cancel = vi.fn();
+  const speak = vi.fn();
+  vi.stubGlobal('speechSynthesis', {
+    cancel,
+    speak,
+    getVoices: () => [{ localService: true, lang: 'zh-TW' }],
+  });
+  vi.stubGlobal('SpeechSynthesisUtterance', class {});
+  if ('workContext' in entry) state.workContext = entry.workContext;
   render(<AppHeader />);
   const trigger = screen.getByRole('button', { name: '開啟校園助理' });
   fireEvent.click(trigger);
-  fireEvent.click(await screen.findByRole('button', { name: '找校園服務' }));
-  fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } });
-  const link = screen.getByRole<HTMLAnchorElement>('link', { name: /校園地圖/ });
-  expect(link.href).toBe(window.location.href);
+  fireEvent.click(await screen.findByRole('button', { name: '朗讀回覆' }));
+  expect(speak).toHaveBeenCalledOnce();
+  if ('query' in entry) {
+    fireEvent.click(screen.getByRole('button', { name: '找校園服務' }));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: entry.query } });
+  }
+  const link = screen.getByRole<HTMLAnchorElement>('link', { name: entry.name });
+  if (entry.sameUrl) window.history.replaceState({}, '', link.href);
+  else window.history.replaceState({}, '', '/bus');
+  const currentUrl = window.location.href;
+  expect(link.href === currentUrl).toBe(entry.sameUrl);
 
-  fireEvent.click(link, { metaKey: true });
-  expect(screen.getByRole('dialog')).toBeTruthy();
+  for (const gesture of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }]) {
+    fireEvent.click(link, gesture);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  }
+  link.target = '_blank';
   fireEvent.click(link);
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  expect(cancel).not.toHaveBeenCalled();
+  link.removeAttribute('target');
+  fireEvent.click(link);
+  expect(window.location.href).toBe(currentUrl);
   expect(screen.queryByRole('dialog')).toBeNull();
+  expect(cancel).toHaveBeenCalledOnce();
   expect(document.activeElement).toBe(trigger);
 });
 

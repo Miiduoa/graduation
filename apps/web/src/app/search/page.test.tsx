@@ -1023,3 +1023,26 @@ it('clears only the search phrase and returns focus to the input while keeping i
   expect(new URL(window.location.href).searchParams.get('category')).toBe('campus');
   expect(new URL(window.location.href).searchParams.has('q')).toBe(false);
 });
+
+it('keeps the saved filters on a return during logout and restores them for the same account', () => {
+  userState.platform = true;
+  const view = render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  const stored = sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY);
+  expect(stored).toBeTruthy();
+
+  userState.pendingLogout = true;
+  view.rerender(<SearchPage />);
+  window.history.replaceState({}, '', '/search');
+  act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+  view.rerender(<SearchPage />);
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
+
+  userState.platform = false;
+  view.rerender(<SearchPage />);
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
+  userState.platform = true;
+  userState.pendingLogout = false;
+  view.rerender(<SearchPage />);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+});

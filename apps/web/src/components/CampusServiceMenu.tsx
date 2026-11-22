@@ -33,6 +33,7 @@ import {
   discardMenuReturn,
   getMenuReturn,
   getServerMenuReturn,
+  isMenuReturnSuspended,
   matchesKnownMenuReturnScope,
   rememberMenuReturn,
   setMenuReturnScope,
@@ -154,11 +155,15 @@ export function CampusServiceMenu() {
     skipToggleSideEffects.current = false;
   }
   useLayoutEffect(() => {
-    const changed = setMenuReturnScope(draftScope, {
-      campus: campusId,
-      schoolOwner: schoolDraftOwner,
-      platformOwner: platformDraftOwner,
-    });
+    const changed = setMenuReturnScope(
+      draftScope,
+      {
+        campus: campusId,
+        schoolOwner: account.uid ? schoolDraftOwner : undefined,
+        platformOwner: account.platformAudience ? platformDraftOwner : undefined,
+      },
+      account.status === 'guest',
+    );
     const changedPage = previousPathname.current !== pathname;
     previousPathname.current = pathname;
     if (!changed && !changedPage) return;
@@ -172,9 +177,12 @@ export function CampusServiceMenu() {
     setQuery('');
     setCategory('all');
     setRestoredExpanded([]);
-  }, [pathname, draftScope, campusId, schoolDraftOwner, platformDraftOwner]);
+  }, [
+    pathname, draftScope, campusId, schoolDraftOwner, platformDraftOwner,
+    account.uid, account.platformAudience, account.status,
+  ]);
   useLayoutEffect(() => {
-    if (draftScope === null || account.status === 'checking') return;
+    if (isMenuReturnSuspended() || account.status === 'checking') return;
     // The browser URL can change before Next renders the matching route.
     if (
       pathname !== window.location.pathname ||
@@ -186,6 +194,12 @@ export function CampusServiceMenu() {
     const snapshot = historyReturn ?? restoreDirectorySearch('menu', pathname);
     if (!snapshot) return;
     if ('destination' in snapshot) {
+      if (
+        account.status === 'guest' && draftScope !== undefined &&
+        snapshot.scope !== undefined && snapshot.scope !== returnScope
+      ) {
+        return;
+      }
       if (snapshot.scope !== undefined && !matchesKnownMenuReturnScope(snapshot.scope)) {
         forgetDirectorySearch('menu');
         return;
@@ -201,7 +215,7 @@ export function CampusServiceMenu() {
           open: snapshot.open,
         },
         true,
-        snapshot.scope,
+        account.status === 'guest' && snapshot.scope === returnScope ? undefined : snapshot.scope,
       );
     }
     setQuery(snapshot.query.slice(0, 100));

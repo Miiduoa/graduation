@@ -1,6 +1,6 @@
 'use client';
 
-import { AssistantReplyLink } from '@/components/AssistantReplyLink';
+import { AssistantReplyAnchor, AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { useSearchParams } from 'next/navigation';
 import {
   Suspense,
@@ -349,9 +349,9 @@ export function AssistantConversation({
                   <ul className={styles.sources} aria-label="參考來源">
                     {assistantSources(message.response.citations).map((source) => (
                       <li key={source.url}>
-                        <a href={source.url} target="_blank" rel="noopener noreferrer">
+                        <AssistantReplyAnchor href={source.url} target="_blank" rel="noopener noreferrer">
                           {source.label}
-                        </a>
+                        </AssistantReplyAnchor>
                       </li>
                     ))}
                   </ul>

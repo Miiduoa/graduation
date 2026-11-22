@@ -18,7 +18,7 @@ import { areFunctionsConfigured } from '@/lib/functionsUrl';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { currentReturnPath } from '@/lib/navigation';
-import { AssistantLinkNavigation } from './AssistantReplyLink';
+import { AssistantLinkNavigation, useAssistantLinkNavigation } from './AssistantReplyLink';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { useAssistantEnabled } from './AssistantEnabledProvider';
 import { useAuth } from './AuthGuard';
@@ -199,6 +199,7 @@ function CampusEntryContent({
   onNavigate?: (href: string) => void;
 }) {
   const hydrated = useClientHydrated();
+  const navigateLink = useAssistantLinkNavigation();
   const auth = useAuth();
   const nuni = useNuniSession();
   const enabled = useAssistantEnabled();
@@ -231,7 +232,9 @@ function CampusEntryContent({
       <>
         {!uid && !session ? (
           <p className={styles.hint}>
-            <LoginLink returnPath={returnPath}>登入後，接著詢問校園助理</LoginLink>
+            <LoginLink returnPath={returnPath} onNavigateClick={navigateLink}>
+              登入後，接著詢問校園助理
+            </LoginLink>
           </p>
         ) : account && campus.status === 'unselected' ? (
           <p className={styles.hint}>請先從頁首選擇學校，就能在這裡詢問校園助理。</p>
@@ -373,6 +376,15 @@ export function TodayAssistantDisclosure({
             active={opened}
             focusRequest={focusRequest}
             preferredWorkContext={preferredWorkContext}
+            onNavigate={() => {
+              const panel = disclosure.current;
+              if (!panel?.open) return;
+              panel.open = false;
+              setOpened(false);
+              onOpenChange(false);
+              stopAssistantVoice(panel);
+              clearAssistantAnchor('today-voice-entry');
+            }}
           />
         )}
       </div>

@@ -114,11 +114,16 @@ export function rememberDirectorySearch(
     scope?: string;
     expanded?: string[];
   },
+  preserveScopeMismatch = false,
 ): void {
   const path = internalPathname(snapshot.path);
   const destination = internalSitePath(snapshot.destination);
   if (!path || !destination) return;
   const store = readStore();
+  const previousScope = store[source]?.scope;
+  if (preserveScopeMismatch && previousScope !== undefined && previousScope !== snapshot.scope) {
+    return;
+  }
   store[source] = {
     path,
     destination,
@@ -131,9 +136,10 @@ export function rememberDirectorySearch(
   writeStore(store);
 }
 
-export function forgetDirectorySearch(source: DirectorySearchSource): void {
+export function forgetDirectorySearch(source: DirectorySearchSource, scope?: string): void {
   const store = readStore();
   if (!(source in store)) return;
+  if (scope !== undefined && store[source]?.scope !== scope) return;
   delete store[source];
   writeStore(store);
 }
@@ -142,13 +148,14 @@ export function restoreDirectorySearch(
   source: DirectorySearchSource,
   currentPath: string,
   scope?: string,
+  preserveScopeMismatch = false,
 ): DirectorySearchSnapshot | null {
   const current = internalPathname(currentPath);
   if (!current) return null;
   const snapshot = readStore()[source];
   if (!snapshot) return null;
   if (scope !== undefined && snapshot.scope !== scope) {
-    forgetDirectorySearch(source);
+    if (!preserveScopeMismatch) forgetDirectorySearch(source);
     return null;
   }
   const path = internalPathname(snapshot.path);

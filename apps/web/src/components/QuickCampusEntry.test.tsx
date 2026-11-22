@@ -765,3 +765,26 @@ it('does not revive a saved quick draft after another account types while its ca
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
   expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
 });
+
+it('keeps the saved query through sign-out and restores it after the same account returns', () => {
+  state.uid = null;
+  state.platform = true;
+  const view = render(<QuickCampusEntry />);
+  const input = screen.getByRole<HTMLInputElement>('searchbox');
+  fireEvent.change(input, { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }));
+  const stored = sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY);
+  expect(stored).toBeTruthy();
+
+  state.pendingLogout = true;
+  view.rerender(<QuickCampusEntry />);
+  state.platform = false;
+  view.rerender(<QuickCampusEntry />);
+  expect(input.value).toBe('');
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
+
+  state.platform = true;
+  state.pendingLogout = false;
+  view.rerender(<QuickCampusEntry />);
+  expect(input.value).toBe('借書');
+});

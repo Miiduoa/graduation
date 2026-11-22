@@ -98,7 +98,7 @@ it.each(['same', 'different'] as const)(
   },
 );
 
-it.each(['other-account', 'other-campus', null])(
+it.each(['other-account', 'other-campus'])(
   'purges a stored draft on confirming a different scope (%s) after reload',
   async (scope) => {
     const { menu: previousDocument, originState } = await startJourney();
@@ -227,7 +227,7 @@ it.each(['same', 'schoolOwner', 'platformOwner', 'campus'] as const)(
 
 // Merge-base kept a single unscoped menu draft in sessionStorage. In this tab,
 // the first complete identity (A or B) can take an unconfirmed draft. Once
-// bound, it survives rechecks of that identity and is cleared on a switch or logout.
+// bound, it survives rechecks of that identity and is cleared on an account or campus switch.
 it.each([
   ['campus', 'a'],
   ['schoolOwner', 'a'],
@@ -356,3 +356,20 @@ it.each(['same', 'different'] as const)(
     else expect(reloaded.getMenuReturn()).toMatchObject(draft);
   },
 );
+
+it('keeps a return across document reloads during logout and waits for the owner', async () => {
+  const { originState } = await startJourney();
+  const storageKey = 'campus.menu.return.v1';
+  const stored = sessionStorage.getItem(storageKey);
+  const menu = await loadDocument();
+  menu.setMenuReturnScope(null, { campus: 'pu' });
+  backToOrigin(originState);
+  const pending = menu.getMenuReturn()!;
+  expect(pending).toMatchObject(draft);
+  expect(menu.consumeMenuReturn(pending, draft.scope)).toBe(false);
+  menu.setMenuReturnScope('guest', { campus: 'pu' }, true);
+  expect(menu.consumeMenuReturn(pending, 'guest')).toBe(false);
+  expect(sessionStorage.getItem(storageKey)).toBe(stored);
+  menu.setMenuReturnScope(draft.scope, { campus: 'pu' });
+  expect(menu.consumeMenuReturn(pending, draft.scope)).toBe(true);
+});

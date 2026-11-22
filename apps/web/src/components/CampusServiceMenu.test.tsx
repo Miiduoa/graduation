@@ -1192,8 +1192,8 @@ it.each([
 );
 
 // A fresh tab may hand an unconfirmed draft to either first account, as in
-// merge-base. A known account survives a temporary failure. Logout clears drafts
-// even when the next login is to the same account.
+// merge-base. A known account survives a temporary failure and a later
+// confirmation of the same account.
 it.each(['first A', 'first B', 'same account', 'logout then A', 'logout then B'] as const)(
   'checks a draft typed during failed platform verification on %s',
   (outcome) => {
@@ -1221,7 +1221,7 @@ it.each(['first A', 'first B', 'same account', 'logout then A', 'logout then B']
     view.rerender(<CampusServiceMenu />);
     returnToMenuOrigin(origin);
     view.rerender(<CampusServiceMenu />);
-    const restored = !outcome.startsWith('logout');
+    const restored = outcome !== 'logout then B';
     expect(screen.getByText('所有服務').closest('details')!.open).toBe(restored);
     expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(restored ? '借書' : '');
   },
@@ -1346,8 +1346,8 @@ it.each([
   // Reset document scope while retaining the tab's persisted draft.
   setMenuReturnScope(null);
   const [snapshot] = JSON.parse(stored);
-  if (kind === 'history') sessionStorage.setItem(historyKey, stored);
-  else {
+  if (kind === 'legacy') {
+    sessionStorage.removeItem(historyKey);
     sessionStorage.setItem('campus.directory.search.v1', JSON.stringify({
       menu: { ...snapshot, path, destination, open: true },
     }));
@@ -1402,6 +1402,7 @@ it.each([
   const [{ scope, category, expanded }] = JSON.parse(sessionStorage.getItem('campus.menu.return.v1')!);
   first.unmount();
   setMenuReturnScope(null);
+  sessionStorage.removeItem('campus.menu.return.v1');
   sessionStorage.setItem('campus.directory.search.v1', JSON.stringify({
     menu: {
       path: '/map', destination: new URL(destination).pathname, query, category, expanded, open: true,
@@ -1493,7 +1494,6 @@ it.each([
   'campus during platform error',
   'campus after selection loading',
   'school-account during selection loading',
-  'logout',
 ])(
   'discards a pending menu after changing %s even if the old scope returns',
   (kind) => {
@@ -1540,7 +1540,6 @@ it.each([
         loading: false, catalogStatus: 'ready', selectedSchool: { id: 'nthu', name: '清華大學' },
       };
     }
-    if (kind === 'logout') auth.pendingLogout = true;
     view.rerender(<CampusServiceMenu />);
     expect(sessionStorage.length).toBe(0);
     if (kind.includes('selection loading')) {
@@ -1744,3 +1743,81 @@ it.each([
     }
   },
 );
+
+it.each([
+  ['history', 'failed'],
+  ['history', 'same account'],
+  ['history', 'different account'],
+  ['history', 'different campus'],
+  ['legacy', 'failed'],
+  ['legacy', 'same account'],
+  ['legacy', 'different account'],
+  ['legacy', 'different campus'],
+] as const)('keeps a %s draft through logout until %s', (kind, outcome) => {
+  const account = { platformAccountId: 'platform-a', isPlatformOperator: false };
+  auth.session = account;
+  visitMenuDestination('/map?campus=pu');
+  const view = render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.click(screen.getByRole('button', { name: '篩選學習與課務' }));
+  fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
+  fireEvent.click(screen.getByRole('link', { name: '教材收藏' }));
+  let origin = captureMenuOrigin();
+  const historyKey = 'campus.menu.return.v1';
+  const legacyKey = 'campus.directory.search.v1';
+  const [draft] = JSON.parse(sessionStorage.getItem(historyKey)!);
+  if (kind === 'legacy') {
+    sessionStorage.removeItem(historyKey);
+    origin = { ...origin, state: {} };
+    sessionStorage.setItem(legacyKey, JSON.stringify({
+      menu: {
+        ...draft, path: '/map', destination: '/classroom/material-bookmarks', open: true,
+      },
+    }));
+  }
+  const storedDraft = () => [sessionStorage.getItem(historyKey), sessionStorage.getItem(legacyKey)];
+  const before = storedDraft();
+  const open = () => screen.getByText('所有服務').closest('details')!.open;
+  visitMenuDestination('/classroom/material-bookmarks?campus=pu');
+  view.rerender(<CampusServiceMenu />);
+
+  auth.pendingLogout = true;
+  auth.loading = true;
+  auth.session = null;
+  view.rerender(<CampusServiceMenu />);
+  expect(storedDraft()).toEqual(before);
+  returnToMenuOrigin(origin);
+  view.rerender(<CampusServiceMenu />);
+  expect(open()).toBe(false);
+  expect(storedDraft()).toEqual(before);
+
+  auth.loading = false;
+  if (outcome === 'failed') {
+    auth.error = '登出尚未完成';
+  } else {
+    auth.pendingLogout = false;
+  }
+  view.rerender(<CampusServiceMenu />);
+  expect(open()).toBe(false);
+  expect(storedDraft()).toEqual(before);
+
+  if (outcome === 'different campus') {
+    visitMenuDestination('/map?campus=nthu');
+  } else {
+    auth.pendingLogout = false;
+    auth.error = '';
+    auth.session = outcome === 'different account'
+      ? { ...account, platformAccountId: 'platform-b' }
+      : account;
+  }
+  view.rerender(<CampusServiceMenu />);
+  if (outcome.startsWith('different')) {
+    expect(open()).toBe(false);
+    expect(storedDraft()).toEqual([null, null]);
+  } else {
+    expect(open()).toBe(true);
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(draft.query);
+    expect(screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
+  }
+});

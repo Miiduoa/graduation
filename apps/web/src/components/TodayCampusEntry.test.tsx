@@ -1031,3 +1031,36 @@ it('stops a Today map read, preserves both drafts and ignores its late result af
   expect(ask).toHaveBeenCalledOnce();
   expect(ask.mock.calls[0][0]).toMatchObject({ question: followup, history: [] });
 });
+
+it('closes the Today disclosure and stops speech when its reply links to the current URL', async () => {
+  const synthesis = installSpeech();
+  state.pathname = '/map';
+  state.search = 'campus=pu';
+  window.history.replaceState({}, '', '/map?campus=pu');
+  mockNuniAsk(() => reply('[目前校園](/map?campus=pu)'));
+  const handle = createRef<TodayAssistantHandle>();
+  const onOpenChange = vi.fn();
+  render(
+    <AssistantEnabledProvider enabled>
+      <TodayAssistantDisclosure ref={handle} onOpenChange={onOpenChange} />
+    </AssistantEnabledProvider>,
+  );
+  act(() => handle.current?.openAssistant());
+  const field = await screen.findByRole('textbox', { name: '問題' });
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '目前校園' } });
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  const link = await screen.findByRole<HTMLAnchorElement>('link', { name: '目前校園' });
+  expect(link.href).toBe(window.location.href);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀回覆' }));
+  expect(synthesis.speak).toHaveBeenCalledOnce();
+
+  fireEvent.click(link, { metaKey: true });
+  const panel = link.closest('details')!;
+  expect(panel.open).toBe(true);
+  expect(synthesis.cancel).not.toHaveBeenCalled();
+  fireEvent.click(link);
+  expect(panel.open).toBe(false);
+  expect(onOpenChange).toHaveBeenLastCalledWith(false);
+  expect(synthesis.cancel).toHaveBeenCalledOnce();
+});

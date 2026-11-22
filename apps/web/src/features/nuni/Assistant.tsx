@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { AssistantReplyLink } from '@/components/AssistantReplyLink';
+import { AssistantReplyAnchor, AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { Suspense, useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
@@ -245,9 +245,9 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
           )}
           {href && <AssistantReplyLink href={href}>開啟服務頁面</AssistantReplyLink>}
           {source && (
-            <a href={source} target="_blank" rel="noopener noreferrer">
+            <AssistantReplyAnchor href={source} target="_blank" rel="noopener noreferrer">
               學校官方公開導覽
-            </a>
+            </AssistantReplyAnchor>
           )}
           {error && <p role="alert">{error}</p>}
           {pending && <p role="status">查詢中…</p>}

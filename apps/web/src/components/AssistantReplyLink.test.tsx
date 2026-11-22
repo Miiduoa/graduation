@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
-import { AssistantLinkNavigation, AssistantReplyLink } from './AssistantReplyLink';
+import { AssistantLinkNavigation, AssistantReplyAnchor, AssistantReplyLink } from './AssistantReplyLink';
 
 beforeEach(() => {
   window.history.replaceState({}, '', '/library?campus=pu#intro');
@@ -57,5 +57,27 @@ it.each([
     const { link, onNavigate } = renderLink({ href: '/library?campus=pu#intro', ...props });
     fireEvent.click(link);
     expect(onNavigate).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['/library?campus=pu#intro', '/map'])(
+  'applies the same navigation rules to native anchors targeting %s',
+  (href) => {
+    const onNavigate = vi.fn();
+    render(
+      <AssistantLinkNavigation.Provider value={onNavigate}>
+        <div onClick={(event) => event.preventDefault()}>
+          <AssistantReplyAnchor href={href}>查看來源</AssistantReplyAnchor>
+        </div>
+      </AssistantLinkNavigation.Provider>,
+    );
+    const link = screen.getByRole<HTMLAnchorElement>('link', { name: '查看來源' });
+    fireEvent.click(link, { ctrlKey: true });
+    link.target = '_blank';
+    fireEvent.click(link);
+    expect(onNavigate).not.toHaveBeenCalled();
+    link.removeAttribute('target');
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledExactlyOnceWith(href);
   },
 );
