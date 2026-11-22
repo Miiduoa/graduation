@@ -504,6 +504,8 @@ test('confirmation preserves a text event delivered during the server read', asy
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
   fireEvent.press(view.getByLabelText('取消編輯'));
   expect(view.getByText(card.bio)).toBeTruthy();
+  fireEvent.press(view.getByLabelText('編輯社群簡介'));
+  expect(view.getByLabelText('個人簡介').props.value).toBe('讀取途中送達的新介紹');
 });
 
 test('editing a pending draft keeps the save blocked and an invalid URL does not break confirmation', async () => {
@@ -578,32 +580,74 @@ test('canceling and reopening retains the pending draft and requires confirmatio
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
 });
 
-test('a server mismatch keeps the edit and requires an explicit new save', async () => {
-  jest.mocked(readCreatorCard).mockResolvedValueOnce(null).mockResolvedValueOnce({
-    headline: '舊資料', bio: '', linkUrl: '',
-  });
+test('canceling and reopening retains changes before the first submission', async () => {
+  const published = { headline: '舊標題', bio: '已發布的介紹', linkUrl: '' };
+  jest.mocked(readCreatorCard).mockResolvedValueOnce(published);
+  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+  fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), '');
+  fireEvent.press(view.getByLabelText('取消編輯'));
+  expect(view.getByText(published.bio)).toBeTruthy();
+  fireEvent.press(view.getByLabelText('編輯社群簡介'));
+  expect(view.getByLabelText('個人簡介').props.value).toBe('');
+  expect(saveCreatorCard).not.toHaveBeenCalled();
+});
+
+test.each([
+  { headline: '其他裝置的標題', bio: '其他裝置的介紹', linkUrl: '' },
+  null,
+])('a published-view mismatch preserves the draft when the server returns %j', async (latest) => {
+  const published = { headline: '舊標題', bio: '已發布的介紹', linkUrl: '' };
+  const draft = { headline: published.headline, bio: '待核對的介紹', linkUrl: 'https://example.org' };
+  jest.mocked(readCreatorCard).mockResolvedValueOnce(published).mockResolvedValueOnce(latest);
+  jest.mocked(saveCreatorCard).mockRejectedValueOnce(new Error('offline after write'));
+  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+  fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), draft.bio);
+  fireEvent.changeText(view.getByLabelText('作品連結'), draft.linkUrl);
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  fireEvent.press(view.getByLabelText('取消編輯'));
+
+  await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+  expect(view.getByText(/伺服器資料與上次送出的內容不同/)).toBeTruthy();
+  expect(view.queryByText(published.bio)).toBeNull();
+  if (latest) expect(view.getByText(latest.bio)).toBeTruthy();
+  fireEvent.press(view.getByLabelText(latest ? '編輯社群簡介' : '建立社群簡介'));
+  expect(view.getByLabelText('一句話介紹').props.value).toBe(draft.headline);
+  expect(view.getByLabelText('個人簡介').props.value).toBe(draft.bio);
+  expect(view.getByLabelText('作品連結').props.value).toBe(draft.linkUrl);
+  expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(false);
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+});
+
+test.each([false, true])('an editor mismatch permits an explicit resend (edited after submit: %s)', async (editAfterSubmit) => {
+  const latest = { headline: '其他裝置的標題', bio: '其他裝置的介紹', linkUrl: '' };
+  const submitted = { headline: '', bio: '新的待儲存草稿', linkUrl: '' };
+  const draft = { ...submitted, bio: editAfterSubmit ? '送出後繼續修改的草稿' : submitted.bio };
+  jest.mocked(readCreatorCard).mockResolvedValueOnce(null).mockResolvedValueOnce(latest);
   jest.mocked(saveCreatorCard).mockRejectedValueOnce(new Error('unavailable'));
   const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
   fireEvent.press(await view.findByLabelText('建立社群簡介'));
-  fireEvent.changeText(view.getByLabelText('個人簡介'), '新的待儲存草稿');
+  fireEvent.changeText(view.getByLabelText('個人簡介'), submitted.bio);
 
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
-  fireEvent.changeText(view.getByLabelText('一句話介紹'), '舊資料');
-  fireEvent.changeText(view.getByLabelText('個人簡介'), '');
+  if (editAfterSubmit) fireEvent.changeText(view.getByLabelText('個人簡介'), draft.bio);
   await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
-  expect(view.getByLabelText('一句話介紹').props.value).toBe('舊資料');
-  expect(view.getByLabelText('個人簡介').props.value).toBe('');
+  expect(view.getByLabelText('個人簡介').props.value).toBe(draft.bio);
   expect(view.getByText(/伺服器資料與上次送出的內容不同/)).toBeTruthy();
   expect(view.queryByLabelText('核對儲存結果')).toBeNull();
   expect(view.getByLabelText('儲存簡介').props.accessibilityState).toMatchObject({ disabled: false });
 
-  fireEvent.press(view.getByLabelText('取消編輯'));
-  expect(view.getByText('舊資料')).toBeTruthy();
-  fireEvent.press(view.getByLabelText('編輯社群簡介'));
-  expect(view.getByLabelText('一句話介紹').props.value).toBe('舊資料');
+  if (editAfterSubmit) {
+    fireEvent.press(view.getByLabelText('取消編輯'));
+    expect(view.getByText(latest.bio)).toBeTruthy();
+    fireEvent.press(view.getByLabelText('編輯社群簡介'));
+    expect(view.getByLabelText('個人簡介').props.value).toBe(draft.bio);
+  }
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenCalledTimes(2);
+  expect(saveCreatorCard).toHaveBeenNthCalledWith(2, 'pu', 'alice', draft);
 });
 
 test('an offline confirmation can be retried without resending the save', async () => {
@@ -674,10 +718,77 @@ test.each(['late success', 'successful retry', 'failed retry'])(
       resolveStalled(outcome === 'successful retry' ? { ...card, bio: '過時的舊讀取結果' } : card);
     });
     expect(readCreatorCard).toHaveBeenLastCalledWith('pu', 'alice', { requireCommitted: true });
+    if (outcome === 'failed retry') {
+      expect(view.queryByText('社群簡介已儲存。')).toBeNull();
+      expect(view.getByText(/仍無法核對伺服器資料/)).toBeTruthy();
+      expect(view.getByLabelText('個人簡介').props.value).toBe(card.bio);
+      expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+      expect(view.getByLabelText('核對儲存結果')).toBeTruthy();
+      return;
+    }
     expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
     expect(view.queryByLabelText('核對儲存結果')).toBeNull();
     expect(view.getByText('這次儲存的校園介紹')).toBeTruthy();
     expect(view.queryByText('過時的舊讀取結果')).toBeNull();
+    expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test.each([2, 3])('only the latest of %i published-view checks can update the card', async (checkCount) => {
+  jest.useFakeTimers();
+  try {
+    const published = { headline: '', bio: '原本已發布的介紹', linkUrl: '' };
+    const submitted = { ...published, bio: '這次送出的草稿' };
+    const updated = { ...published, bio: '其他裝置已更新的介紹' };
+    const reads = jest.mocked(readCreatorCard).mockResolvedValueOnce(published);
+    jest.mocked(saveCreatorCard).mockRejectedValueOnce(new Error('confirmation lost'));
+    const checks = Array.from({ length: checkCount }, () => {
+      let resolve!: (card: typeof published) => void;
+      let reject!: (error: Error) => void;
+      reads.mockReturnValueOnce(new Promise((resolveRead, rejectRead) => {
+        resolve = resolveRead;
+        reject = rejectRead;
+      }));
+      return { resolve, reject };
+    });
+
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.press(view.getByLabelText('編輯社群簡介'));
+    fireEvent.changeText(view.getByLabelText('個人簡介'), submitted.bio);
+    await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+    fireEvent.press(view.getByLabelText('取消編輯'));
+
+    for (let i = 0; i < checkCount; i++) {
+      fireEvent.press(view.getByLabelText('核對儲存結果'));
+      if (i < checkCount - 1) {
+        act(() => { jest.advanceTimersByTime(15_000); });
+        expect(view.getByText(/核對等待逾時/)).toBeTruthy();
+      }
+    }
+    expect(readCreatorCard).toHaveBeenCalledTimes(checkCount + 1);
+
+    await act(async () => { checks[0].resolve(submitted); });
+    expect(view.getByLabelText('正在核對伺服器…').props.accessibilityState.busy).toBe(true);
+    expect(view.getByText(published.bio)).toBeTruthy();
+    expect(view.queryByText(submitted.bio)).toBeNull();
+    expect(view.queryByText('社群簡介已儲存。')).toBeNull();
+
+    if (checkCount === 3) {
+      await act(async () => { checks[1].reject(new Error('stale check failed')); });
+      expect(view.getByLabelText('正在核對伺服器…').props.accessibilityState.busy).toBe(true);
+      expect(view.queryByText(/仍無法核對伺服器資料/)).toBeNull();
+    }
+
+    await act(async () => { checks[checkCount - 1].resolve(updated); });
+    expect(view.getByText(updated.bio)).toBeTruthy();
+    expect(view.queryByText(submitted.bio)).toBeNull();
+    expect(view.queryByLabelText('核對儲存結果')).toBeNull();
+    expect(view.getByText(/伺服器資料與上次送出的內容不同/)).toBeTruthy();
+    fireEvent.press(view.getByLabelText('編輯社群簡介'));
+    expect(view.getByLabelText('個人簡介').props.value).toBe(submitted.bio);
     expect(saveCreatorCard).toHaveBeenCalledTimes(1);
   } finally {
     jest.useRealTimers();

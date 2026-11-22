@@ -57,6 +57,7 @@ function ScopedCreatorCardPanel({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const currentDraft = useRef(draft);
+  const hasUnsavedDraft = useRef(false);
   const replaceDraft = (value: CreatorCard) => {
     currentDraft.current = value;
     setDraft(value);
@@ -117,7 +118,7 @@ function ScopedCreatorCardPanel({
 
   const beginEdit = () => {
     if (!own || savingFlight.current || state.status !== 'ready') return;
-    if (!pendingWrite.current) {
+    if (!pendingWrite.current && !hasUnsavedDraft.current) {
       replaceDraft(state.value ?? EMPTY_CREATOR_CARD);
       setFeedback('');
     }
@@ -125,6 +126,8 @@ function ScopedCreatorCardPanel({
   };
 
   const changeDraft = (field: keyof CreatorCard, value: string) => {
+    if (currentDraft.current[field] === value) return;
+    hasUnsavedDraft.current = true;
     replaceDraft({ ...currentDraft.current, [field]: value });
     if (!pendingWrite.current) setFeedback('');
   };
@@ -139,13 +142,12 @@ function ScopedCreatorCardPanel({
     const submitted = pendingWrite.current;
     if (!mounted.current || !own || !submitted || savingFlight.current || state.status !== 'ready') return;
     const attempt = ++submitted.confirmationAttempt;
-    const isPending = () => mounted.current && pendingWrite.current === submitted;
-    const isLatest = () => isPending() && submitted.confirmationAttempt === attempt;
+    const isLatest = () => mounted.current && pendingWrite.current === submitted &&
+      submitted.confirmationAttempt === attempt;
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
-    // Keep listening after the UI timeout. An older check can still confirm
-    // the submitted fields, while only the latest check can report a mismatch.
+    // Keep listening after the UI timeout until a retry supersedes this check.
     const timeout = setTimeout(() => {
       if (!isLatest()) return;
       savingFlight.current = false;
@@ -166,10 +168,10 @@ function ScopedCreatorCardPanel({
       clearTimeout(timeout);
     }
 
+    if (!isLatest()) return;
     const { expected } = submitted;
     const matches = latest && latest.headline === expected.headline &&
       latest.bio === expected.bio && latest.linkUrl === expected.linkUrl;
-    if (!isPending() || (!matches && !isLatest())) return;
 
     pendingWrite.current = null;
     savingFlight.current = false;
@@ -186,6 +188,7 @@ function ScopedCreatorCardPanel({
 
   const finishSave = (submittedDraft: CreatorCard) => {
     if (currentDraft.current === submittedDraft) {
+      hasUnsavedDraft.current = false;
       setEditing(false);
       setFeedback('社群簡介已儲存。');
     } else {
@@ -204,6 +207,7 @@ function ScopedCreatorCardPanel({
       return;
     }
 
+    hasUnsavedDraft.current = true;
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
