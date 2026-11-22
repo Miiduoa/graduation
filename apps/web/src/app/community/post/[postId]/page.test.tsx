@@ -266,14 +266,15 @@ it.each(['cancel', 'close', 'escape', 'backdrop'])(
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.body.style.overflow).toBe('');
     fireEvent.click(screen.getByRole('button', { name: '✏️ 編輯' }));
-    expect(screen.getByLabelText<HTMLInputElement>('標題').value).toBe(' 新標題 ');
-    expect(screen.getByRole('button', { name: '儲存中…' }).matches(':disabled')).toBe(true);
+    expect(screen.getByLabelText<HTMLInputElement>('標題').value).toBe('原標題');
+    expect(screen.getByRole('button', { name: '儲存' }).matches(':disabled')).toBe(false);
     const original = await mocks.getPost.mock.results[0].value;
     mocks.getPost.mockResolvedValue({ ...original, title: '另一分頁的標題', content: '另一分頁的內文' });
     await act(async () => {
       resolve();
     });
-    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect(screen.getByText('另一分頁的標題')).toBeTruthy();
     expect(screen.getByText('另一分頁的內文')).toBeTruthy();
     expect(mocks.getPost).toHaveBeenCalledTimes(2);
@@ -838,9 +839,6 @@ it('lets the author save an untitled legacy post and retains the draft after a l
   fireEvent.change(screen.getByLabelText('標籤（逗號分隔）'), { target: { value: '更新標籤' } });
   fireEvent.click(screen.getByRole('button', { name: '儲存' }));
   await screen.findByText('暫時無法確認儲存結果，修改內容已保留。請先查看貼文，再決定是否重試。');
-  fireEvent.click(screen.getByRole('button', { name: '取消' }));
-  expect(screen.queryByRole('dialog')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '✏️ 編輯' }));
   expect((screen.getByLabelText('標題') as HTMLInputElement).value).toBe('');
   expect((screen.getByLabelText('內文') as HTMLTextAreaElement).value).toBe('保留的修改內容');
   expect(screen.getByLabelText('標題').matches(':disabled')).toBe(false);
@@ -855,7 +853,7 @@ it('lets the author save an untitled legacy post and retains the draft after a l
   expect(screen.getByText('保留的修改內容')).toBeTruthy();
 });
 
-it('reopens the same slow edit without resubmitting and applies a hidden success without moving focus', async () => {
+it('reopens a slow edit with saved values and applies a late success without moving focus', async () => {
   ownPost();
   let resolve!: () => void;
   mocks.updatePost.mockImplementation(
@@ -880,10 +878,8 @@ it('reopens the same slow edit without resubmitting and applies a hidden success
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(document.activeElement).toBe(opener);
   fireEvent.click(opener);
-  expect((screen.getByLabelText('標題') as HTMLInputElement).value).toBe('等待確認的修改');
-  expect((screen.getByLabelText('內文') as HTMLTextAreaElement).value).toBe('仍保留的內文');
-  expect(screen.getByLabelText('標題').matches(':disabled')).toBe(true);
-  fireEvent.submit(screen.getByRole('dialog').querySelector('form')!);
+  expect(screen.getByLabelText<HTMLInputElement>('標題').value).toBe('原標題');
+  expect(screen.getByLabelText('標題').matches(':disabled')).toBe(false);
   expect(mocks.updatePost).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   const focused = screen.getByPlaceholderText('輸入留言⋯');
@@ -984,3 +980,31 @@ it.each(['body', 'other control'])('keeps reply Enter multiline and handles %s f
   expect(mocks.addReply).toHaveBeenCalledOnce();
   expect(document.activeElement).toBe(position === 'other control' ? other : input);
 });
+
+it.each(['取消', '關閉視窗', 'escape', 'backdrop'])(
+  'discards the failed edit on %s and reopens with the saved post',
+  async (dismissal) => {
+    ownPost();
+    mocks.updatePost.mockRejectedValueOnce(new Error('offline'));
+    render(<PostDetailPage />);
+    const opener = await screen.findByRole('button', { name: '✏️ 編輯' });
+    fireEvent.click(opener);
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(screen.getByLabelText('標題'), { target: { value: '失敗草稿' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存' }));
+    await screen.findByText(/修改內容已保留/);
+    expect(screen.getByLabelText<HTMLInputElement>('標題').value).toBe('失敗草稿');
+    if (dismissal === 'escape') {
+      fireEvent(dialog, new Event('cancel', { bubbles: true, cancelable: true }));
+    } else if (dismissal === 'backdrop') {
+      fireEvent.pointerDown(dialog, { clientX: -1, clientY: -1 });
+      fireEvent.click(dialog, { clientX: -1, clientY: -1 });
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: dismissal }));
+    }
+    expect(dialog.isConnected).toBe(false);
+    fireEvent.click(opener);
+    expect(screen.getByLabelText<HTMLInputElement>('標題').value).toBe('原標題');
+    expect(screen.queryByText(/修改內容已保留/)).toBeNull();
+  },
+);

@@ -176,30 +176,12 @@ async def assert_pending_controls(dialog):
     await expect(dialog.get_by_role('button', name='關閉視窗', exact=True)).to_be_enabled()
 
 
-async def assert_pending_dismissals(page, dialog, opener, retained_status=None):
-    for method in ('取消', '關閉視窗', 'Escape', 'backdrop'):
-        if method == 'Escape':
-            await page.keyboard.press('Escape')
-        elif method == 'backdrop':
-            await page.mouse.click(1, 1)
-        else:
-            await dialog.get_by_role('button', name=method, exact=True).click()
-        await expect(dialog).to_have_count(0)
-        await expect(opener).to_be_focused()
-        if retained_status is not None:
-            await expect(retained_status).to_be_visible()
-        await opener.click()
-        await expect(dialog).to_be_visible()
-        await assert_pending_controls(dialog)
-
-
-async def assert_pending(page, dialog, opener, kind, report, capture):
+async def assert_pending(page, dialog, kind, report, capture):
     await page.wait_for_function(
         '(kind) => window.__taskFlowQA.snapshot().writes.some(row => row.kind === kind && row.status === "pending")', arg=kind)
     await assert_pending_controls(dialog)
     await assert_layout(page, report, kind + '-pending', dialog)
     await capture(kind + '-pending', full_page=False)
-    await assert_pending_dismissals(page, dialog, opener)
     snapshot = await page.evaluate('window.__taskFlowQA.snapshot()')
     assert len([row for row in snapshot['writes'] if row['kind'] == kind]) == 1, snapshot
 
@@ -232,7 +214,7 @@ async def review_form(page, config, report, capture):
     await assert_native_focus(page, dialog, report, 'review')
     await capture('review-form', full_page=False)
     await submit.click()
-    await assert_pending(page, dialog, opener, 'review', report, capture)
+    await assert_pending(page, dialog, 'review', report, capture)
     await page.evaluate("window.__taskFlowQA.settle('review', false)")
     await expect(dialog.get_by_role('alert').filter(has_text='內容已保留')).to_be_visible()
     await expect(course).to_have_value('資訊系統設計與實作')
@@ -282,7 +264,7 @@ async def group_form(page, config, report, capture):
     await assert_native_focus(page, dialog, report, 'study-group')
     await capture('group-form', full_page=False)
     await dialog.get_by_role('button', name='建立讀書會', exact=True).click()
-    await assert_pending(page, dialog, opener, 'group', report, capture)
+    await assert_pending(page, dialog, 'group', report, capture)
     await page.evaluate("window.__taskFlowQA.settle('group', false)")
     await expect(dialog.get_by_role('alert').filter(has_text='內容已保留')).to_be_visible()
     await expect(name).to_have_value('週末課程複習')
@@ -364,19 +346,6 @@ async def slow_pending_parent_forms(page, report, capture):
         pending = await page.evaluate(
             '(kind) => window.__taskFlowQA.snapshot().writes.filter(row => row.kind === kind)', kind)
         assert len(pending) == len(before) + 1 and pending[-1]['status'] == 'pending', pending
-        retained_status = region.get_by_role('status').filter(has_text='表單草稿仍保留在本頁')
-        await assert_pending_dismissals(page, dialog, opener, retained_status)
-        for field, value in fields:
-            await expect(field).to_have_value(value)
-        if kind == 'review':
-            await expect(dialog.get_by_role('radiogroup', name='整體評分（必填）', exact=True).get_by_role('radio', name='2 顆星', exact=True)).to_be_checked()
-        # Native form submission must also respect the original in-flight write.
-        await dialog.locator('form').evaluate('(form) => form.requestSubmit()')
-        reopened = await page.evaluate(
-            '(kind) => window.__taskFlowQA.snapshot().writes.filter(row => row.kind === kind)', kind)
-        assert reopened == pending, (pending, reopened)
-        await assert_layout(page, report, kind + '-pending-restored', dialog)
-        await capture(kind + '-pending-restored', full_page=False)
         # The timer changes the status message while the original write is still pending.
         await page.clock.fast_forward(15_001)
         await expect(dialog.get_by_role('status')).to_contain_text('這次送出仍可能完成')
@@ -385,12 +354,19 @@ async def slow_pending_parent_forms(page, report, capture):
         form_id = await dialog.locator('form').get_attribute('id')
         assert form_id
         await expect(page.locator('body')).to_have_css('overflow', 'hidden')
-        await page.evaluate('(kind) => window.__taskFlowQA.settle(kind, true)', kind)
+        await dialog.get_by_role('button', name='取消', exact=True).click()
         await expect(dialog).to_have_count(0)
         await expect(page.locator(f'form[id="{form_id}"]')).to_have_count(0)
         await expect(opener).to_be_focused()
         assert await page.locator('body').evaluate('body => body.style.overflow') == scroll_lock
-        await expect(retained_status).to_have_count(0)
+        await opener.click()
+        for field, _ in fields:
+            await expect(field).to_have_value('')
+            await expect(field).to_be_enabled()
+        await page.evaluate('(kind) => window.__taskFlowQA.settle(kind, true)', kind)
+        await expect(dialog).to_be_visible()
+        await page.keyboard.press('Escape')
+        await expect(dialog).to_have_count(0)
         await expect(region.get_by_text(completed_text, exact=True)).to_be_visible()
         completed = await page.evaluate(
             '(kind) => window.__taskFlowQA.snapshot().writes.filter(row => row.kind === kind)', kind)
@@ -406,7 +382,7 @@ async def slow_pending_parent_forms(page, report, capture):
         await page.keyboard.press('Escape')
         await expect(dialog).to_have_count(0)
         await expect(opener).to_be_focused()
-        report['checks'].append(f'Actual {kind} fields keep their draft on Enter. Enter on the submit button starts a single write. Pending dismissal and reopening preserve the locked draft. Success refreshes the list, restores focus, releases the scroll lock and clears the draft.')
+        report['checks'].append(f'Actual {kind} fields keep their draft on Enter. Enter on the submit button starts a single write. Cancelling a pending write clears the draft and releases the scroll lock. Its late success refreshes the list while the new dialog stays open.')
 
         if kind == 'review':
             await opener.click()
@@ -421,7 +397,6 @@ async def slow_pending_parent_forms(page, report, capture):
             search = region.get_by_role('searchbox', name='篩選課程名稱或代碼')
             await search.focus()
             await page.evaluate('(kind) => window.__taskFlowQA.settle(kind, true)', kind)
-            await expect(retained_status).to_have_count(0)
             await expect(region.get_by_text('背景送出評價課程', exact=True)).to_be_visible()
             await expect(search).to_be_focused()
             report['checks'].append('Background review completion preserves focus in the course search field.')

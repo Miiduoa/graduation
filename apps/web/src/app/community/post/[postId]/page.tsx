@@ -24,7 +24,6 @@ import {
   preventCommunityFormEnter,
   useCommunityCompletionFocus,
   useCommunityFormSession,
-  type CommunityFormCloseReason,
 } from '../../_components/useCommunityFormSession';
 import formStyles from '../../_components/CommunityForm.module.css';
 import modalStyles from '@/components/ui/Modal.module.css';
@@ -105,7 +104,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const restoreReplyFocus = useCommunityCompletionFocus(replyInputRef);
   const replyWritePending = useRef(false);
   const likeWritePending = useRef(false);
-  const [editSession, setEditSession] = useState<{ scope: string; open: boolean } | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [bookmarkState, setBookmarkState] = useState<{ scope: string; saved: boolean } | null>(
     null,
@@ -510,7 +509,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
                 <button
                   type="button"
                   ref={editButtonRef}
-                  onClick={() => setEditSession({ scope: bookmarkScope, open: true })}
+                  onClick={() => setEditOpen(true)}
                   style={btnGhost}
                 >
                   ✏️ 編輯
@@ -766,23 +765,23 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         </div>
       </div>
 
-      {editSession?.scope === bookmarkScope && isMine && post.id === postId && (
+      {editOpen && isMine && post.id === postId && (
         <EditPostModal
           key={bookmarkScope}
-          open={editSession.open}
+          open
           initial={{
             title: post.title,
             content: post.content,
             tagsRaw: (post.tags ?? []).join(', '),
           }}
-          onClose={(reason) =>
-            setEditSession(reason === 'retain' ? { scope: bookmarkScope, open: false } : null)
-          }
+          onClose={() => setEditOpen(false)}
           onSubmit={(patch) => updateCampusPost(schoolId, postId, patch)}
-          onSaved={(patch) => {
-            restoreEditFocus();
+          onSaved={(patch, dismissed) => {
+            if (!dismissed) {
+              restoreEditFocus();
+              setEditOpen(false);
+            }
             postReads.current.confirmed = postReads.current.started;
-            setEditSession(null);
             setPost((current) => (current?.id === postId ? { ...current, ...patch } : current));
             void loadPost('server');
           }}
@@ -807,9 +806,9 @@ type EditPostPatch = { title: string; content: string; tags: string[] };
 function EditPostModal(props: {
   open: boolean;
   initial: { title: string; content: string; tagsRaw: string };
-  onClose: (reason: CommunityFormCloseReason) => void;
+  onClose: () => void;
   onSubmit: (patch: EditPostPatch) => Promise<void>;
-  onSaved: (patch: EditPostPatch) => void;
+  onSaved: (patch: EditPostPatch, dismissed: boolean) => void;
 }) {
   const [title, setTitle] = useState(props.initial.title);
   const [content, setContent] = useState(props.initial.content);
@@ -831,7 +830,7 @@ function EditPostModal(props: {
     };
     void session.submit(
       () => props.onSubmit(patch),
-      () => props.onSaved(patch),
+      (dismissed) => props.onSaved(patch, dismissed),
       '暫時無法確認儲存結果，修改內容已保留。請先查看貼文，再決定是否重試。',
     );
   }

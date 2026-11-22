@@ -15,7 +15,6 @@ import {
   CourseReviewSection,
   StudyGroupSection,
 } from '../../../apps/web/src/app/community/_components/StudyBuddyTab';
-import type { CommunityFormDisplay } from '../../../apps/web/src/app/community/_components/useCommunityFormSession';
 import { taskFlowWrites } from './task-flow-boundaries';
 import home from '../../../apps/web/src/app/home.module.css';
 import '../../../apps/web/src/app/globals.css';
@@ -58,8 +57,8 @@ function TaskFlowFixture() {
   const [courseState, setCourseState] = useState<CourseState>('ready');
   const [reviewRequired, setReviewRequired] = useState(false);
   const [files, setFiles] = useState<LocalAssignmentFile[]>([]);
-  const [reviewDisplay, setReviewDisplay] = useState<CommunityFormDisplay>('closed');
-  const [groupDisplay, setGroupDisplay] = useState<CommunityFormDisplay>('closed');
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [groupOpen, setGroupOpen] = useState(false);
   const [completed, setCompleted] = useState('');
   const [timetableRetries, setTimetableRetries] = useState(0);
   const [courseRetries, setCourseRetries] = useState(0);
@@ -129,8 +128,8 @@ function TaskFlowFixture() {
       <section className={home.section} aria-label="社群表單驗收">
         <h2>課程交流</h2>
         <div className="fixture-buttons">
-          <Button onClick={() => setReviewDisplay('open')}>寫課程評價</Button>
-          <Button onClick={() => setGroupDisplay('open')}>建立讀書會</Button>
+          <Button onClick={() => setReviewOpen(true)}>寫課程評價</Button>
+          <Button onClick={() => setGroupOpen(true)}>建立讀書會</Button>
         </div>
         {completed && <p role="status">{completed}</p>}
       </section>
@@ -152,28 +151,26 @@ function TaskFlowFixture() {
           ))}
         </div>
       </section>
-      {reviewDisplay !== 'closed' && (
+      {reviewOpen && (
         <ReviewModal
-          open={reviewDisplay === 'open'}
           schoolId="pu"
           myUid="synthetic-teacher"
-          onClose={(reason) => setReviewDisplay(reason === 'retain' ? 'retained-hidden' : 'closed')}
-          onSubmitted={() => {
+          onClose={() => setReviewOpen(false)}
+          onSubmitted={(dismissed) => {
             setCompleted('合成評價已完成');
-            setReviewDisplay('closed');
+            if (!dismissed) setReviewOpen(false);
           }}
         />
       )}
-      {groupDisplay !== 'closed' && (
+      {groupOpen && (
         <CreateGroupModal
-          open={groupDisplay === 'open'}
           schoolId="pu"
           myUid="synthetic-teacher"
           myName="合成老師"
-          onClose={(reason) => setGroupDisplay(reason === 'retain' ? 'retained-hidden' : 'closed')}
-          onCreated={() => {
+          onClose={() => setGroupOpen(false)}
+          onCreated={(dismissed) => {
             setCompleted('合成讀書會已完成');
-            setGroupDisplay('closed');
+            if (!dismissed) setGroupOpen(false);
           }}
         />
       )}

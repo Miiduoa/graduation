@@ -20,8 +20,6 @@ import {
   preventCommunityFormEnter,
   useCommunityCompletionFocus,
   useCommunityFormSession,
-  type CommunityFormCloseReason,
-  type CommunityFormDisplay,
 } from './useCommunityFormSession';
 import formStyles from './CommunityForm.module.css';
 import modalStyles from '@/components/ui/Modal.module.css';
@@ -161,10 +159,10 @@ export function CourseReviewSection(props: {
   const { schoolId, myUid } = props;
   const [reviews, setReviews] = useState<CourseReviewDoc[]>([]);
   const [filter, setFilter] = useState('');
-  const helpfulPending = useRef(false);
-  const [helpfulBusy, setHelpfulBusy] = useState(false);
+  const helpfulPending = useRef(new Set<string>());
+  const [helpfulBusy, setHelpfulBusy] = useState(new Set<string>());
   const filterRef = useRef<HTMLInputElement>(null);
-  const [formDisplay, setFormDisplay] = useState<CommunityFormDisplay>('closed');
+  const [formOpen, setFormOpen] = useState(false);
   const writeReviewRef = useRef<HTMLButtonElement>(null);
   const firstReviewRef = useRef<HTMLButtonElement>(null);
   const restoreReviewFocus = useCommunityCompletionFocus(writeReviewRef, props.active !== false);
@@ -221,17 +219,12 @@ export function CourseReviewSection(props: {
           ref={writeReviewRef}
           type="button"
           className="btn primary"
-          onClick={() => setFormDisplay('open')}
+          onClick={() => setFormOpen(true)}
           style={{ fontSize: 13, padding: '8px 16px' }}
         >
           ＋ 寫評價
         </button>
       </div>
-      {formDisplay === 'retained-hidden' && (
-        <p role="status" className={formStyles.hint}>
-          評價表單草稿仍保留在本頁，可再按「寫評價」查看結果。
-        </p>
-      )}
 
       {error && <CommunityLoadError message={error} retry={refresh} />}
       {agg.totalCount > 0 && <ReviewSummary agg={agg} />}
@@ -264,7 +257,7 @@ export function CourseReviewSection(props: {
               type="button"
               ref={firstReviewRef}
               variant="primary"
-              onClick={() => setFormDisplay('open')}
+              onClick={() => setFormOpen(true)}
             >
               寫第一則評價
             </Button>
@@ -277,15 +270,15 @@ export function CourseReviewSection(props: {
               key={r.id}
               review={r}
               myUid={myUid}
-              helpfulBusy={helpfulBusy}
+              helpfulBusy={helpfulBusy.has(r.id)}
               onHelpful={async () => {
                 if (!myUid) {
                   alert('請先登入');
                   return;
                 }
-                if (helpfulPending.current) return;
-                helpfulPending.current = true;
-                setHelpfulBusy(true);
+                if (helpfulPending.current.has(r.id)) return;
+                helpfulPending.current.add(r.id);
+                setHelpfulBusy(new Set(helpfulPending.current));
                 try {
                   const helped = await toggleReviewHelpful(schoolId, r.id, myUid);
                   setReviews((current) => current.map((review) => {
@@ -298,12 +291,12 @@ export function CourseReviewSection(props: {
                       helpful: Math.max(0, (review.helpful ?? helpfulBy.length) + (helped ? 1 : -1)),
                     };
                   }));
-                  await refresh();
+                  void refresh();
                 } catch {
                   alert('這次未能操作，請稍後再試。');
                 } finally {
-                  helpfulPending.current = false;
-                  setHelpfulBusy(false);
+                  helpfulPending.current.delete(r.id);
+                  setHelpfulBusy(new Set(helpfulPending.current));
                 }
               }}
             />
@@ -311,15 +304,15 @@ export function CourseReviewSection(props: {
         </div>
       )}
 
-      {formDisplay !== 'closed' && (
+      {formOpen && (
         <ReviewModal
-          open={props.active !== false && formDisplay === 'open'}
+          open={props.active !== false}
           schoolId={schoolId}
           myUid={myUid}
-          onClose={(reason) => setFormDisplay(reason === 'retain' ? 'retained-hidden' : 'closed')}
-          onSubmitted={() => {
+          onClose={() => setFormOpen(false)}
+          onSubmitted={(dismissed) => {
             restoreReviewFocus();
-            setFormDisplay('closed');
+            if (!dismissed) setFormOpen(false);
             void refresh();
           }}
         />
@@ -518,8 +511,8 @@ export function ReviewModal(props: {
   open?: boolean;
   schoolId: string;
   myUid: string | null;
-  onClose: (reason: CommunityFormCloseReason) => void;
-  onSubmitted: () => void;
+  onClose: () => void;
+  onSubmitted: (dismissed: boolean) => void;
 }) {
   const [courseName, setCourseName] = useState('');
   const [courseCode, setCourseCode] = useState('');
@@ -747,9 +740,9 @@ export function StudyGroupSection(props: {
 }) {
   const { schoolId, myUid, myName } = props;
   const [groups, setGroups] = useState<WebStudyGroup[]>([]);
-  const [formDisplay, setFormDisplay] = useState<CommunityFormDisplay>('closed');
-  const joinPending = useRef(false);
-  const [joinBusy, setJoinBusy] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const joinPending = useRef(new Set<string>());
+  const [joinBusy, setJoinBusy] = useState(new Set<string>());
   const createGroupRef = useRef<HTMLButtonElement>(null);
   const restoreGroupFocus = useCommunityCompletionFocus(createGroupRef, props.active !== false);
 
@@ -778,7 +771,7 @@ export function StudyGroupSection(props: {
   );
 
   const onJoin = async (g: WebStudyGroup) => {
-    if (joinPending.current) return;
+    if (joinPending.current.has(g.id)) return;
     if (!myUid) {
       alert('請先登入');
       return;
@@ -791,8 +784,8 @@ export function StudyGroupSection(props: {
       alert('讀書會已滿員');
       return;
     }
-    joinPending.current = true;
-    setJoinBusy(true);
+    joinPending.current.add(g.id);
+    setJoinBusy(new Set(joinPending.current));
     try {
       const db: Firestore = getDb();
       await updateDoc(doc(db, 'schools', schoolId, 'studyGroups', g.id), {
@@ -804,12 +797,12 @@ export function StudyGroupSection(props: {
           ? { ...group, members: [...group.members, myUid] }
           : group,
       ));
-      await refresh();
+      void refresh();
     } catch {
       alert('這次未能加入，請稍後再試。');
     } finally {
-      joinPending.current = false;
-      setJoinBusy(false);
+      joinPending.current.delete(g.id);
+      setJoinBusy(new Set(joinPending.current));
     }
   };
 
@@ -831,17 +824,12 @@ export function StudyGroupSection(props: {
           ref={createGroupRef}
           type="button"
           className="btn primary"
-          onClick={() => setFormDisplay('open')}
+          onClick={() => setFormOpen(true)}
           style={{ fontSize: 13, padding: '8px 16px' }}
         >
           ＋ 建立讀書會
         </button>
       </div>
-      {formDisplay === 'retained-hidden' && (
-        <p role="status" className={formStyles.hint}>
-          讀書會表單草稿仍保留在本頁，可再按「建立讀書會」查看結果。
-        </p>
-      )}
 
       {error && <CommunityLoadError message={error} retry={refresh} />}
       {!loaded && loading ? (
@@ -914,7 +902,7 @@ export function StudyGroupSection(props: {
                 <button
                   type="button"
                   className="btn primary"
-                  disabled={joinBusy || isMember || isFull}
+                  disabled={joinBusy.has(g.id) || isMember || isFull}
                   onClick={() => onJoin(g)}
                   style={{
                     marginTop: 10,
@@ -935,16 +923,16 @@ export function StudyGroupSection(props: {
         </div>
       )}
 
-      {formDisplay !== 'closed' && (
+      {formOpen && (
         <CreateGroupModal
-          open={props.active !== false && formDisplay === 'open'}
+          open={props.active !== false}
           schoolId={schoolId}
           myUid={myUid}
           myName={myName}
-          onClose={(reason) => setFormDisplay(reason === 'retain' ? 'retained-hidden' : 'closed')}
-          onCreated={() => {
+          onClose={() => setFormOpen(false)}
+          onCreated={(dismissed) => {
             restoreGroupFocus();
-            setFormDisplay('closed');
+            if (!dismissed) setFormOpen(false);
             void refresh();
           }}
         />
@@ -958,8 +946,8 @@ export function CreateGroupModal(props: {
   schoolId: string;
   myUid: string | null;
   myName: string | null;
-  onClose: (reason: CommunityFormCloseReason) => void;
-  onCreated: () => void;
+  onClose: () => void;
+  onCreated: (dismissed: boolean) => void;
 }) {
   const [name, setName] = useState('');
   const [courseName, setCourseName] = useState('');

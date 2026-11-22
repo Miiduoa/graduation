@@ -149,7 +149,7 @@ it('owns one pending review, allows immediate dismissal and locks fields, and pr
   fireEvent(dialog, new Event('cancel', { bubbles: true, cancelable: true }));
   fireEvent.pointerDown(dialog, { clientX: -1, clientY: -1 });
   fireEvent.click(dialog, { clientX: -1, clientY: -1 });
-  expect(close.mock.calls).toEqual(Array.from({ length: 4 }, () => ['retain']));
+  expect(close.mock.calls).toEqual(Array.from({ length: 4 }, () => []));
   await act(async () => {
     resolve('review-1');
   });
@@ -168,11 +168,6 @@ it('keeps review fields, rating and privacy choice after failure and allows a de
   await screen.findByText(
     '暫時無法確認送出結果，內容已保留。請先查看列表是否已出現，再決定是否重試。',
   );
-  fireEvent.click(screen.getByRole('button', { name: '關閉視窗' }));
-  expect(screen.queryByRole('dialog')).toBeNull();
-  expect(document.body.style.overflow).toBe('');
-  expect(document.activeElement).toBe(opener);
-  fireEvent.click(opener);
   expect((screen.getByLabelText('課程名稱') as HTMLInputElement).value).toBe(' 程式設計 ');
   expect((screen.getByLabelText('評論（選填）') as HTMLTextAreaElement).value).toBe('保留的心得');
   expect((screen.getByLabelText('匿名評價') as HTMLInputElement).checked).toBe(true);
@@ -269,7 +264,7 @@ it('does not let an old review completion close a new account or school form', a
   expect(mocks.listReviews).toHaveBeenCalledTimes(reads);
 });
 
-it('retains a slow review across closing and tab changes without another write or stealing focus on hidden success', async () => {
+it('discards a queued review on close and refreshes after its late success', async () => {
   let resolve!: (value: string) => void;
   mocks.submitReview.mockImplementation(
     () =>
@@ -305,16 +300,9 @@ it('retains a slow review across closing and tab changes without another write o
   fireEvent.click(screen.getByRole('tab', { name: '課程評價' }));
   fireEvent.click(screen.getByRole('button', { name: '＋ 寫評價' }));
   const resumed = screen.getByRole('dialog', { name: '寫課程評價' });
-  expect((screen.getByLabelText('課程名稱') as HTMLInputElement).value).toBe(' 程式設計 ');
-  expect((screen.getByLabelText('評論（選填）') as HTMLTextAreaElement).value).toBe(
-    '等待送達的心得',
-  );
-  expect(screen.getByLabelText('課程名稱').matches(':disabled')).toBe(true);
-  expect(
-    within(screen.getByRole('radiogroup', { name: '整體評分（必填）' }))
-      .getByRole('radio', { name: '4 顆星' })
-      .matches(':checked'),
-  ).toBe(true);
+  expect(screen.getByLabelText<HTMLInputElement>('課程名稱').value).toBe('');
+  expect(screen.getByLabelText('課程名稱').matches(':disabled')).toBe(false);
+  expect(screen.queryByRole('radio', { checked: true })).toBeNull();
   fireEvent.submit(resumed.querySelector('form')!);
   expect(mocks.submitReview).toHaveBeenCalledOnce();
   fireEvent(resumed, new Event('cancel', { bubbles: true, cancelable: true }));
@@ -633,7 +621,7 @@ it('validates group time, locks pending writes, and keeps the Firestore schema u
   expect(screen.getByLabelText('讀書會名稱').matches(':disabled')).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   fireEvent(dialog, new Event('cancel', { bubbles: true, cancelable: true }));
-  expect(close.mock.calls).toEqual([['retain'], ['retain']]);
+  expect(close.mock.calls).toEqual([[], []]);
   await act(async () => {
     resolve({ id: 'group-1' });
   });
@@ -675,7 +663,7 @@ it('preserves the group draft after a failed write and ignores a completion afte
   expect(saved).not.toHaveBeenCalled();
 });
 
-it('keeps a slow group submission and a hidden failure in its real parent until a deliberate retry', async () => {
+it('discards a queued group draft and leaves a new form open after late failure', async () => {
   let reject!: (error: Error) => void;
   mocks.addDoc.mockImplementationOnce(
     () =>
@@ -700,36 +688,13 @@ it('keeps a slow group submission and a hidden failure in its real parent until 
   fireEvent.click(screen.getByRole('tab', { name: '課程評價' }));
   fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
   fireEvent.click(screen.getByRole('button', { name: '＋ 建立讀書會' }));
-  expect((screen.getByLabelText('讀書會名稱') as HTMLInputElement).value).toBe('等待確認的讀書會');
-  expect(screen.getByLabelText('讀書會名稱').matches(':disabled')).toBe(true);
-  fireEvent.submit(screen.getByRole('dialog').querySelector('form')!);
-  expect(mocks.addDoc).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole('button', { name: '取消' }));
-  await act(async () => {
-    reject(new Error('permission-denied'));
-  });
-  expect(screen.queryByRole('dialog')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '＋ 建立讀書會' }));
-  expect((screen.getByLabelText('讀書會名稱') as HTMLInputElement).value).toBe('等待確認的讀書會');
+  expect(screen.getByLabelText<HTMLInputElement>('讀書會名稱').value).toBe('');
   expect(screen.getByLabelText('讀書會名稱').matches(':disabled')).toBe(false);
-  expect(screen.getByText(/暫時無法確認建立結果，內容已保留/)).toBeTruthy();
-
-  let resolve!: (value: { id: string }) => void;
-  mocks.addDoc.mockImplementationOnce(
-    () =>
-      new Promise<{ id: string }>((done) => {
-        resolve = done;
-      }),
-  );
-  fireEvent.click(screen.getByRole('button', { name: '建立讀書會' }));
-  expect(mocks.addDoc).toHaveBeenCalledTimes(2);
-  expect((screen.getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(false);
-  await act(async () => {
-    resolve({ id: 'group-1' });
-  });
-  expect(screen.queryByRole('dialog')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '＋ 建立讀書會' }));
-  expect((screen.getByLabelText('讀書會名稱') as HTMLInputElement).value).toBe('');
+  fill('讀書會名稱', '新草稿');
+  await act(async () => reject(new Error('permission-denied')));
+  expect(screen.getByLabelText<HTMLInputElement>('讀書會名稱').value).toBe('新草稿');
+  expect(screen.queryByText(/暫時無法確認建立結果/)).toBeNull();
+  expect(mocks.addDoc).toHaveBeenCalledOnce();
 });
 
 it.each(['review', 'group'])('only writes the %s when the submit button is activated', async (kind) => {
@@ -820,7 +785,7 @@ it.each(
 it.each([
   ['review', 'success'], ['review', 'failure'],
   ['group', 'success'], ['group', 'failure'],
-])('keeps the %s list visible and locks its toggle through a slow %s refresh', async (kind, outcome) => {
+])('keeps the %s list visible and releases its write lock during a slow %s refresh', async (kind, outcome) => {
   const isReview = kind === 'review';
   const read = isReview ? mocks.listReviews : mocks.getDocs;
   const write = isReview ? mocks.toggleHelpful : mocks.joinGroup;
@@ -846,11 +811,10 @@ it.each([
     fireEvent.click(button);
     fireEvent.click(button);
   });
-  expect(button.disabled).toBe(true);
+  expect(button.disabled).toBe(!isReview);
   expect(button.textContent).toContain(isReview ? '有幫助 · 1' : '已加入');
   expect(screen.getByText(originalName)).toBeTruthy();
   if (isReview) expect(screen.getByText('/ 5 · 1 則')).toBeTruthy();
-  fireEvent.click(button);
   expect(write).toHaveBeenCalledOnce();
 
   await act(async () => {
@@ -912,4 +876,85 @@ it.each(['review', 'group'])('displays the first %s load when it succeeds after 
   await act(async () => resolve(result));
   expect(screen.getByText(name)).toBeTruthy();
   expect(screen.queryByText(/暫時無法讀取(課程評價|讀書會)/)).toBeNull();
+});
+
+// Merge-base keeps other rows actionable during both the write and its reread.
+it.each(['review', 'group'])('isolates queued, failed and refreshing %s actions by row', async (kind) => {
+  const isReview = kind === 'review';
+  const read = isReview ? mocks.listReviews : mocks.getDocs;
+  const write = isReview ? mocks.toggleHelpful : mocks.joinGroup;
+  const rows = isReview ? [
+    existingReview,
+    { ...existingReview, id: 'review-2', courseName: '另一堂課' },
+  ] : {
+    docs: [
+      ...groupSnapshot('第一讀書會', ['bob']).docs,
+      { ...groupSnapshot('第二讀書會', ['bob']).docs[0], id: 'group-2' },
+    ],
+  };
+  read.mockResolvedValue(rows);
+  const queued = Promise.withResolvers<boolean>();
+  const reread = Promise.withResolvers<typeof rows>();
+  write.mockReturnValueOnce(queued.promise);
+  read.mockResolvedValueOnce(rows);
+  vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+  render(<StudyBuddyTab schoolId="pu" />);
+  await screen.findByText(isReview ? '原課程' : '尚無評價');
+  if (!isReview) fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
+  const name = isReview ? /有幫助 · 0/ : '申請加入';
+  const [first, second] = await screen.findAllByRole<HTMLButtonElement>('button', { name });
+  await act(async () => {
+    fireEvent.click(first);
+    fireEvent.click(first);
+  });
+  expect(first.disabled).toBe(true);
+  expect(second.disabled).toBe(false);
+  expect(write).toHaveBeenCalledOnce();
+
+  read.mockReturnValueOnce(reread.promise);
+  await act(async () => fireEvent.click(second));
+  expect(write).toHaveBeenCalledTimes(2);
+  expect(first.disabled).toBe(true);
+  await act(async () => queued.reject(new Error('offline')));
+  expect(first.disabled).toBe(false);
+  await act(async () => fireEvent.click(first));
+  expect(write).toHaveBeenCalledTimes(3);
+  await act(async () => reread.resolve(rows));
+});
+
+it.each(
+  ['review', 'group'].flatMap((kind) =>
+    ['取消', '關閉視窗', 'escape', 'backdrop'].map((dismissal) => ({ kind, dismissal })),
+  ),
+)('discards the failed $kind draft on $dismissal', async ({ kind, dismissal }) => {
+  const isReview = kind === 'review';
+  (isReview ? mocks.submitReview : mocks.addDoc).mockRejectedValueOnce(new Error('offline'));
+  render(<StudyBuddyTab schoolId="pu" />);
+  await screen.findByText('尚無評價');
+  if (!isReview) fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
+  const opener = screen.getByRole('button', { name: isReview ? '＋ 寫評價' : '＋ 建立讀書會' });
+  const field = isReview ? '課程名稱' : '讀書會名稱';
+  fireEvent.click(opener);
+  if (isReview) completeReview();
+  else {
+    fill(field, '失敗草稿');
+    fill('課程名稱', '資料庫');
+  }
+  const dialog = screen.getByRole('dialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: isReview ? '送出評價' : '建立讀書會' }));
+  await screen.findByText(/內容已保留/);
+  expect(screen.getByLabelText<HTMLInputElement>(field).value).not.toBe('');
+  if (dismissal === 'escape') {
+    fireEvent(dialog, new Event('cancel', { bubbles: true, cancelable: true }));
+  } else if (dismissal === 'backdrop') {
+    fireEvent.pointerDown(dialog, { clientX: -1, clientY: -1 });
+    fireEvent.click(dialog, { clientX: -1, clientY: -1 });
+  } else {
+    fireEvent.click(within(dialog).getByRole('button', { name: dismissal }));
+  }
+  expect(dialog.isConnected).toBe(false);
+  fireEvent.click(opener);
+  expect(screen.getByLabelText<HTMLInputElement>(field).value).toBe('');
+  expect(screen.queryByText(/內容已保留/)).toBeNull();
 });

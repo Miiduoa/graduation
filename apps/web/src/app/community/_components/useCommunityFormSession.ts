@@ -4,9 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 
 
 export const COMMUNITY_FORM_WAIT_MS = 15_000;
 export const COMMUNITY_FORM_PENDING_COPY =
-  '仍在等待送出結果。你可以先關閉，再從本頁開啟查看進度。這次送出仍可能完成，請勿重複送出。';
-export type CommunityFormCloseReason = 'cancel' | 'retain';
-export type CommunityFormDisplay = 'closed' | 'open' | 'retained-hidden';
+  '仍在等待送出結果。關閉會捨棄表單草稿。這次送出仍可能完成，請勿重複送出。';
 
 export function preventCommunityFormEnter(event: KeyboardEvent) {
   if (event.key !== 'Enter') return;
@@ -47,13 +45,12 @@ export function useCommunityCompletionFocus(targetRef: RefObject<HTMLElement | n
   return () => { pending.current = true; };
 }
 
-/** A retained form owns its write, even while its dialog is temporarily hidden. */
-export function useCommunityFormSession(onClose: (reason: CommunityFormCloseReason) => void) {
+export function useCommunityFormSession(onClose: () => void) {
   const [busy, setBusy] = useState(false);
   const [slow, setSlow] = useState(false);
   const [error, setError] = useState('');
   const inFlight = useRef(false);
-  const writeFailed = useRef(false);
+  const dismissed = useRef(false);
   const waitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(false);
 
@@ -67,12 +64,13 @@ export function useCommunityFormSession(onClose: (reason: CommunityFormCloseReas
 
   function requestClose() {
     if (!mounted.current) return;
-    onClose(inFlight.current || writeFailed.current ? 'retain' : 'cancel');
+    dismissed.current = true;
+    onClose();
   }
 
   async function submit(
     write: () => Promise<unknown>,
-    onSaved: () => void,
+    onSaved: (dismissed: boolean) => void,
     failureMessage: string,
   ) {
     if (inFlight.current || !mounted.current) return;
@@ -91,10 +89,8 @@ export function useCommunityFormSession(onClose: (reason: CommunityFormCloseReas
     let saved = false;
     try {
       await write();
-      writeFailed.current = false;
       saved = true;
     } catch {
-      writeFailed.current = true;
       if (mounted.current) setError(failureMessage);
     } finally {
       if (waitTimer.current !== null) clearTimeout(waitTimer.current);
@@ -107,7 +103,7 @@ export function useCommunityFormSession(onClose: (reason: CommunityFormCloseReas
     }
     // List refreshes belong to the parent. They must not turn a successful write
     // into a retry prompt, or let an old opening close a newly opened form.
-    if (saved && mounted.current) onSaved();
+    if (saved && (mounted.current || dismissed.current)) onSaved(dismissed.current);
   }
 
   return { busy, slow, error, setError, requestClose, submit };
