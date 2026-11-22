@@ -220,58 +220,70 @@ it('uses a named native edit dialog and restores focus after cancelling', async 
   expect(mocks.updatePost).not.toHaveBeenCalled();
 });
 
-it('holds one edit write, prevents dismissal while pending, and updates the confirmed post', async () => {
-  ownPost();
-  let resolve!: () => void;
-  mocks.updatePost.mockImplementation(
-    () =>
-      new Promise<void>((done) => {
-        resolve = done;
-      }),
-  );
-  render(<PostDetailPage />);
-  fireEvent.click(await screen.findByRole('button', { name: '✏️ 編輯' }));
-  fireEvent.change(screen.getByLabelText('標題'), { target: { value: ' 新標題 ' } });
-  fireEvent.change(screen.getByLabelText('內文'), { target: { value: ' 新內文 ' } });
-  fireEvent.change(screen.getByLabelText('標籤（逗號分隔）'), {
-    target: { value: '#課程,新生,三,四,五,六' },
-  });
-  const dialog = screen.getByRole('dialog', { name: '編輯貼文' });
-  const form = dialog.querySelector('form')!;
-  act(() => {
-    fireEvent.submit(form);
-    fireEvent.submit(form);
-  });
-  expect(mocks.updatePost).toHaveBeenCalledOnce();
-  expect(mocks.updatePost).toHaveBeenCalledWith('pu', 'p-1', {
-    title: '新標題',
-    content: '新內文',
-    tags: ['課程', '新生', '三', '四', '五'],
-  });
-  expect(screen.getByLabelText('標題').matches(':disabled')).toBe(true);
-  fireEvent.click(screen.getByRole('button', { name: '取消' }));
-  fireEvent(dialog, new Event('cancel', { bubbles: true, cancelable: true }));
-  fireEvent.pointerDown(dialog, { clientX: -1, clientY: -1 });
-  fireEvent.click(dialog, { clientX: -1, clientY: -1 });
-  expect(screen.getByRole('dialog', { name: '編輯貼文' })).toBeTruthy();
-  const original = await mocks.getPost.mock.results[0].value;
-  mocks.getPost.mockResolvedValue({ ...original, title: '另一分頁的標題', content: '另一分頁的內文' });
-  await act(async () => {
-    resolve();
-  });
-  expect(screen.queryByRole('dialog')).toBeNull();
-  expect(screen.getByText('另一分頁的標題')).toBeTruthy();
-  expect(screen.getByText('另一分頁的內文')).toBeTruthy();
-  expect(mocks.getPost).toHaveBeenCalledTimes(2);
-  expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'server');
-  fireEvent.click(screen.getByRole('button', { name: '✏️ 編輯' }));
-  expect(screen.getByLabelText<HTMLTextAreaElement>('內文').value).toBe('另一分頁的內文');
-});
+it.each(['cancel', 'close', 'escape', 'backdrop'])(
+  'holds one edit write across immediate %s dismissal and updates the confirmed post',
+  async (dismissal) => {
+    ownPost();
+    let resolve!: () => void;
+    mocks.updatePost.mockImplementation(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+    );
+    render(<PostDetailPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '✏️ 編輯' }));
+    fireEvent.change(screen.getByLabelText('標題'), { target: { value: ' 新標題 ' } });
+    fireEvent.change(screen.getByLabelText('內文'), { target: { value: ' 新內文 ' } });
+    fireEvent.change(screen.getByLabelText('標籤（逗號分隔）'), {
+      target: { value: '#課程,新生,三,四,五,六' },
+    });
+    const dialog = screen.getByRole('dialog', { name: '編輯貼文' });
+    const form = dialog.querySelector('form')!;
+    act(() => {
+      fireEvent.submit(form);
+      fireEvent.submit(form);
+    });
+    expect(mocks.updatePost).toHaveBeenCalledOnce();
+    expect(mocks.updatePost).toHaveBeenCalledWith('pu', 'p-1', {
+      title: '新標題',
+      content: '新內文',
+      tags: ['課程', '新生', '三', '四', '五'],
+    });
+    expect(screen.getByLabelText('標題').matches(':disabled')).toBe(true);
+    if (dismissal === 'escape') {
+      fireEvent(dialog, new Event('cancel', { bubbles: true, cancelable: true }));
+    } else if (dismissal === 'backdrop') {
+      fireEvent.pointerDown(dialog, { clientX: -1, clientY: -1 });
+      fireEvent.click(dialog, { clientX: -1, clientY: -1 });
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: dismissal === 'cancel' ? '取消' : '關閉視窗' }));
+    }
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.body.style.overflow).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: '✏️ 編輯' }));
+    expect(screen.getByLabelText<HTMLInputElement>('標題').value).toBe(' 新標題 ');
+    expect(screen.getByRole('button', { name: '儲存中…' }).matches(':disabled')).toBe(true);
+    const original = await mocks.getPost.mock.results[0].value;
+    mocks.getPost.mockResolvedValue({ ...original, title: '另一分頁的標題', content: '另一分頁的內文' });
+    await act(async () => {
+      resolve();
+    });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByText('另一分頁的標題')).toBeTruthy();
+    expect(screen.getByText('另一分頁的內文')).toBeTruthy();
+    expect(mocks.getPost).toHaveBeenCalledTimes(2);
+    expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'server');
+    fireEvent.click(screen.getByRole('button', { name: '✏️ 編輯' }));
+    expect(screen.getByLabelText<HTMLTextAreaElement>('內文').value).toBe('另一分頁的內文');
+  },
+);
 
 it.each(['post', 'replies', 'both'])(
   'keeps a successful reply committed when refreshing %s fails',
   async (failedRead) => {
     const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    ownPost();
     render(<PostDetailPage />);
     const input = await screen.findByPlaceholderText('輸入留言⋯');
     if (failedRead !== 'replies') mocks.getPost.mockRejectedValueOnce(new Error('offline'));
@@ -284,12 +296,15 @@ it.each(['post', 'replies', 'both'])(
     expect((input as HTMLTextAreaElement).value).toBe('');
     fireEvent.click(screen.getByRole('button', { name: '送出留言' }));
     expect(mocks.addReply).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: '✏️ 編輯' }).matches(':disabled')).toBe(false);
+    expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
+    expect(mocks.listReplies).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
     expect(screen.getByRole('status').textContent).toContain('操作已完成，但部分資料無法更新。');
     expect(alert).not.toHaveBeenCalled();
   },
 );
 
-it.each([false, true])('reads the server thread after adding a reply (nested: %s)', async (nested) => {
+it.each([false, true])('uses default reads after adding a reply (nested: %s)', async (nested) => {
   const original = await mocks.getPost();
   const parent = { id: 'r-1', authorUid: 'bob', content: '原留言', threadDepth: 0 };
   mocks.listReplies.mockResolvedValue([parent]);
@@ -306,8 +321,8 @@ it.each([false, true])('reads the server thread after adding a reply (nested: %s
   expect(mocks.addReply).toHaveBeenCalledExactlyOnceWith('pu', 'p-1', expect.objectContaining({
     parentReplyId: nested ? parent.id : null,
   }));
-  expect(mocks.listReplies).toHaveBeenLastCalledWith('pu', 'p-1', 'server');
-  expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'server');
+  expect(mocks.listReplies).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
+  expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
   expect(screen.getByText('伺服器確認的留言')).toBeTruthy();
   expect(screen.getByText('伺服器更新的標題')).toBeTruthy();
 });
@@ -352,6 +367,9 @@ it.each(['post', 'replies', 'both'])(
     expect(screen.getByText('正在回覆⋯')).toBeTruthy();
     expect(input.value).toBe('仍在回覆');
     expect(screen.getByText('（此留言已被作者刪除）')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '✏️ 編輯' }).matches(':disabled')).toBe(false);
+    expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
+    expect(mocks.listReplies).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
     expect(screen.getByRole('status').textContent).toContain('操作已完成，但部分資料無法更新。');
 
     // Even a successful retry can return a stale snapshot.
@@ -467,16 +485,18 @@ it('retains reply actions when the deletion write fails', async () => {
   expect(screen.queryByRole('button', { name: /^刪除$/ })).toBeNull();
 });
 
-it.each([false, true])('blocks a repeated like toggle after a failed read (initially liked: %s)', async (liked) => {
+it.each([false, true])('keeps like and editing available after a failed read (initially liked: %s)', async (liked) => {
   const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+  ownPost();
   const original = await mocks.getPost();
   mocks.getPost.mockResolvedValue({ ...original, likedBy: liked ? ['alice'] : [], likes: Number(liked) });
   render(<PostDetailPage />);
   const toggle = await screen.findByRole<HTMLButtonElement>('button', { name: liked ? /❤️/ : /🤍/ });
   mocks.getPost.mockRejectedValueOnce(new Error('offline'));
   await act(async () => fireEvent.click(toggle));
-  expect(toggle.disabled).toBe(true);
-  fireEvent.click(toggle);
+  expect(toggle.disabled).toBe(false);
+  expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
+  expect(screen.getByRole('button', { name: '✏️ 編輯' }).matches(':disabled')).toBe(false);
   expect(mocks.toggleLike).toHaveBeenCalledOnce();
   expect(alert).not.toHaveBeenCalled();
 
@@ -486,6 +506,41 @@ it.each([false, true])('blocks a repeated like toggle after a failed read (initi
   expect(refreshed.disabled).toBe(false);
   expect(mocks.toggleLike).toHaveBeenCalledOnce();
 });
+
+it.each(['like', 'reply', 'delete'] as const)(
+  'deduplicates a queued %s write and enables retry after its deadline',
+  async (action) => {
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    ownPost();
+    mocks.listReplies.mockResolvedValue([
+      { id: 'r-1', authorUid: 'alice', content: '我的留言', threadDepth: 0 },
+    ]);
+    const write = { like: mocks.toggleLike, reply: mocks.addReply, delete: mocks.deleteReply }[action];
+    let reject!: (error: Error) => void;
+    write.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+    render(<PostDetailPage />);
+    const input = await screen.findByPlaceholderText<HTMLTextAreaElement>('輸入留言⋯');
+    const button = screen.getByRole('button', {
+      name: { like: /🤍/, reply: '送出留言', delete: /^刪除$/ }[action],
+    });
+    fireEvent.change(input, { target: { value: '保留的留言' } });
+    await act(async () => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+    });
+    expect(write).toHaveBeenCalledOnce();
+    expect(mocks.getPost).toHaveBeenCalledOnce();
+
+    await act(async () => reject(new Error('deadline-exceeded')));
+    expect(alert).toHaveBeenCalledOnce();
+    expect(input.value).toBe('保留的留言');
+    expect(mocks.getPost).toHaveBeenCalledOnce();
+    await act(async () => fireEvent.click(button));
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(mocks.getPost).toHaveBeenLastCalledWith('pu', 'p-1', 'default');
+  },
+);
 
 it('removes post actions after deletion even while navigation has not changed the page', async () => {
   const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
@@ -541,13 +596,12 @@ it.each(['like', 'reply', 'both'])(
     expect(screen.getByText('已儲存內文')).toBeTruthy();
     expect(screen.queryByText('原內文')).toBeNull();
     expect(screen.getByRole('status').textContent).toContain('操作已完成，但部分資料無法更新。');
-    expect((edit as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(edit);
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.getByText(/請重新讀取貼文後再編輯/)).toBeTruthy();
+    expect(screen.getByLabelText<HTMLTextAreaElement>('內文').value).toBe('已儲存內文');
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
     mocks.getPost.mockRejectedValueOnce(new Error('still offline'));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新讀取' })));
-    expect((edit as HTMLButtonElement).disabled).toBe(true);
+    expect((edit as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByText('已儲存內文')).toBeTruthy();
     mocks.getPost.mockResolvedValue({ ...original, content: '伺服器最新內文' });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新讀取' })));
@@ -595,7 +649,7 @@ it.each(['like', 'reply', 'both'])(
     });
     fireEvent.click(screen.getByRole('button', { name: '儲存' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect((edit as HTMLButtonElement).disabled).toBe(true);
+    expect((edit as HTMLButtonElement).disabled).toBe(false);
 
     // The stale response may even report a missing post.
     for (const resolve of resolveReads.reverse()) {
@@ -646,6 +700,9 @@ it('lets the author save an untitled legacy post and retains the draft after a l
   fireEvent.change(screen.getByLabelText('標籤（逗號分隔）'), { target: { value: '更新標籤' } });
   fireEvent.click(screen.getByRole('button', { name: '儲存' }));
   await screen.findByText('暫時無法確認儲存結果，修改內容已保留。請先查看貼文，再決定是否重試。');
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '✏️ 編輯' }));
   expect((screen.getByLabelText('標題') as HTMLInputElement).value).toBe('');
   expect((screen.getByLabelText('內文') as HTMLTextAreaElement).value).toBe('保留的修改內容');
   expect(screen.getByLabelText('標題').matches(':disabled')).toBe(false);
@@ -681,7 +738,7 @@ it('reopens the same slow edit without resubmitting and applies a hidden success
     await vi.advanceTimersByTimeAsync(15_000);
   });
   expect(screen.getByText(/這次送出仍可能完成，請勿重複送出/)).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '先關閉' }));
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(document.activeElement).toBe(opener);
   fireEvent.click(opener);
@@ -690,7 +747,7 @@ it('reopens the same slow edit without resubmitting and applies a hidden success
   expect(screen.getByLabelText('標題').matches(':disabled')).toBe(true);
   fireEvent.submit(screen.getByRole('dialog').querySelector('form')!);
   expect(mocks.updatePost).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole('button', { name: '先關閉' }));
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
   const focused = screen.getByPlaceholderText('輸入留言⋯');
   focused.focus();
   const original = await mocks.getPost.mock.results[0].value;

@@ -76,7 +76,7 @@ const STYLE_LABEL: Record<WebStudyGroup['style'], string> = {
   practice: '練習式',
 };
 
-export function StudyBuddyTab(props: { schoolId: string }) {
+export function StudyBuddyTab(props: { schoolId: string; active?: boolean }) {
   const { schoolId } = props;
   const { user } = useAuth();
   const [subTab, setSubTab] = useState<SubTab>('review');
@@ -127,7 +127,7 @@ export function StudyBuddyTab(props: { schoolId: string }) {
           key={`${schoolId}:${user?.uid ?? ''}`}
           schoolId={schoolId}
           myUid={user?.uid ?? null}
-          active={subTab === 'review'}
+          active={props.active !== false && subTab === 'review'}
         />
       </div>
       {visitedGroups && (
@@ -137,7 +137,7 @@ export function StudyBuddyTab(props: { schoolId: string }) {
             schoolId={schoolId}
             myUid={user?.uid ?? null}
             myName={user?.displayName ?? null}
-            active={subTab === 'group'}
+            active={props.active !== false && subTab === 'group'}
           />
         </div>
       )}
@@ -224,9 +224,9 @@ export function CourseReviewSection(props: {
           ＋ 寫評價
         </button>
       </div>
-      {formDisplay === 'pending-hidden' && (
+      {formDisplay === 'retained-hidden' && (
         <p role="status" className={formStyles.hint}>
-          評價表單與這次送出仍保留在本頁，可再按「寫評價」查看結果。
+          評價表單草稿仍保留在本頁，可再按「寫評價」查看結果。
         </p>
       )}
 
@@ -296,7 +296,7 @@ export function CourseReviewSection(props: {
           open={props.active !== false && formDisplay === 'open'}
           schoolId={schoolId}
           myUid={myUid}
-          onClose={(reason) => setFormDisplay(reason === 'pending' ? 'pending-hidden' : 'closed')}
+          onClose={(reason) => setFormDisplay(reason === 'retain' ? 'retained-hidden' : 'closed')}
           onSubmitted={() => {
             restoreReviewFocus.current =
               formDisplay === 'open' ||
@@ -562,18 +562,14 @@ export function ReviewModal(props: {
       size="lg"
       description="分享修課經驗。課程名稱與整體評分為必填，其餘可略過。"
       initialFocusRef={courseRef}
-      showCloseButton={!session.busy}
-      closeOnEsc={session.canClose}
-      closeOnOverlayClick={session.canClose}
       footer={
         <>
           <Button
             type="button"
             variant="ghost"
             onClick={session.requestClose}
-            disabled={!session.canClose}
           >
-            {session.busy && session.slow ? '先關閉' : '取消'}
+            取消
           </Button>
           <Button type="submit" form={formId} variant="primary" loading={session.busy}>
             {session.busy ? '送出中…' : '送出評價'}
@@ -807,9 +803,9 @@ export function StudyGroupSection(props: {
           ＋ 建立讀書會
         </button>
       </div>
-      {formDisplay === 'pending-hidden' && (
+      {formDisplay === 'retained-hidden' && (
         <p role="status" className={formStyles.hint}>
-          讀書會表單與這次送出仍保留在本頁，可再按「建立讀書會」查看結果。
+          讀書會表單草稿仍保留在本頁，可再按「建立讀書會」查看結果。
         </p>
       )}
 
@@ -911,7 +907,7 @@ export function StudyGroupSection(props: {
           schoolId={schoolId}
           myUid={myUid}
           myName={myName}
-          onClose={(reason) => setFormDisplay(reason === 'pending' ? 'pending-hidden' : 'closed')}
+          onClose={(reason) => setFormDisplay(reason === 'retain' ? 'retained-hidden' : 'closed')}
           onCreated={() => {
             setFormDisplay('closed');
             void refresh();
@@ -998,18 +994,14 @@ export function CreateGroupModal(props: {
       size="lg"
       description="先決定課程與時間，最多 6 位同學一起參加。"
       initialFocusRef={nameRef}
-      showCloseButton={!session.busy}
-      closeOnEsc={session.canClose}
-      closeOnOverlayClick={session.canClose}
       footer={
         <>
           <Button
             type="button"
             variant="ghost"
             onClick={session.requestClose}
-            disabled={!session.canClose}
           >
-            {session.busy && session.slow ? '先關閉' : '取消'}
+            取消
           </Button>
           <Button type="submit" form={formId} variant="primary" loading={session.busy}>
             {session.busy ? '建立中…' : '建立讀書會'}

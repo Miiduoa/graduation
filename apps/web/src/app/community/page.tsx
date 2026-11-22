@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CommunityAccess } from './_components/CommunityAccess';
 import { FeedTab } from './_components/FeedTab';
@@ -57,6 +58,8 @@ function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; scho
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeTab = activeTabFor(searchParams?.get('tab'));
+  const [visitedBuddy, setVisitedBuddy] = useState(activeTab === 'buddy');
+  if (activeTab === 'buddy' && !visitedBuddy) setVisitedBuddy(true);
   const selected = TABS.find((tab) => tab.key === activeTab)!;
   const newPostHref = `/community/post/new?schoolId=${encodeURIComponent(schoolId)}`;
   const boardsParams = new URLSearchParams(schoolSearch.startsWith('?') ? schoolSearch.slice(1) : schoolSearch);
@@ -136,7 +139,11 @@ function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; scho
           {activeTab === 'feed' && <FeedTab schoolId={schoolId} schoolSearch={schoolSearch} />}
           {activeTab === 'boards' && <BoardsTab schoolId={schoolId} schoolSearch={schoolSearch} />}
           {activeTab === 'realtime' && <RealtimeTab schoolId={schoolId} />}
-          {activeTab === 'buddy' && <StudyBuddyTab schoolId={schoolId} />}
+          {visitedBuddy && (
+            <div hidden={activeTab !== 'buddy'}>
+              <StudyBuddyTab schoolId={schoolId} active={activeTab === 'buddy'} />
+            </div>
+          )}
         </div>
       </section>
     </div>

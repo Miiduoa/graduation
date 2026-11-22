@@ -84,12 +84,9 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const postDeletion = useRef<'pending' | 'confirmed' | null>(null);
   const replyDeletions = useRef(new Map<string, 'pending' | 'confirmed'>());
   const replyReads = useRef({ started: 0, settled: 0, confirmed: 0 });
-  const [editNeedsRefresh, setEditNeedsRefresh] = useState(false);
   const [postRefreshError, setPostRefreshError] = useState(false);
   const [repliesRefreshError, setRepliesRefreshError] = useState(false);
   const refreshError = postRefreshError || repliesRefreshError;
-  const editBlocked = editNeedsRefresh || postRefreshError;
-  const [likeNeedsRefresh, setLikeNeedsRefresh] = useState(false);
   const [replies, setReplies] = useState<CampusReply[]>([]);
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
@@ -100,6 +97,8 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const [replyParentId, setReplyParentId] = useState<string | null>(null);
   const [sendingReply, setSendingReply] = useState(false);
   const [likeBusy, setLikeBusy] = useState(false);
+  const replyWritePending = useRef(false);
+  const likeWritePending = useRef(false);
   const [editSession, setEditSession] = useState<{ scope: string; open: boolean } | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [bookmarkState, setBookmarkState] = useState<{ scope: string; saved: boolean } | null>(
@@ -161,7 +160,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     }
   };
 
-  const loadPost = useCallback(async (source: 'default' | 'server' = 'server') => {
+  const loadPost = useCallback(async (source: 'default' | 'server' = 'default', initial = false) => {
     if (!postId || !schoolId) return;
     const reads = postReads.current;
     const request = ++reads.started;
@@ -174,17 +173,15 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
       reads.settled = request;
       setPost(row ? { ...row, title: row.title ?? '' } : null);
       setPostRefreshError(false);
-      setEditNeedsRefresh(false);
-      setLikeNeedsRefresh(false);
     } catch (error) {
-      if (source === 'default') throw error;
+      if (initial) throw error;
       if (!isCurrent()) return;
       reads.settled = request;
       setPostRefreshError(true);
     }
   }, [postId, schoolId]);
 
-  const loadReplies = useCallback(async (source: 'default' | 'server' = 'server') => {
+  const loadReplies = useCallback(async (source: 'default' | 'server' = 'default', initial = false) => {
     if (!postId || !schoolId) return;
     const reads = replyReads.current;
     const request = ++reads.started;
@@ -198,7 +195,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
       ));
       setRepliesRefreshError(false);
     } catch (error) {
-      if (source === 'default') throw error;
+      if (initial) throw error;
       if (!isCurrent()) return;
       reads.settled = request;
       setRepliesRefreshError(true);
@@ -238,7 +235,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     (async () => {
       setLoading(true);
       try {
-        await Promise.all([loadPost('default'), loadReplies('default')]);
+        await Promise.all([loadPost('default', true), loadReplies('default', true)]);
       } catch {
         setLoadError('無法讀取貼文，請確認連線與學校資格後重試。');
       } finally {
@@ -258,7 +255,8 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const isMine = !!(post && !post.anonymous && post.authorUid && post.authorUid === user?.uid);
 
   const submitReply = async () => {
-    if (!user?.uid || !schoolId || !postId || sendingReply || !replyText.trim()) return;
+    if (!user?.uid || !schoolId || !postId || replyWritePending.current || !replyText.trim()) return;
+    replyWritePending.current = true;
     setSendingReply(true);
     const boardForAlias = post?.boardId ?? 'general';
     let aliasSnap: string | undefined;
@@ -284,25 +282,27 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
       });
       setReplyText('');
       setReplyParentId(null);
-      await refreshThreadAfterWrite();
+      void refreshThreadAfterWrite();
     } catch {
       alert('這次未能送出，請稍後再試。');
     } finally {
+      replyWritePending.current = false;
       setSendingReply(false);
     }
   };
 
   const onToggleLike = async () => {
-    if (!user?.uid || !schoolId || !postId || likeBusy || likeNeedsRefresh || postDeletion.current) return;
+    if (!user?.uid || !schoolId || !postId || likeWritePending.current || postDeletion.current) return;
+    likeWritePending.current = true;
     setLikeBusy(true);
     try {
       await toggleCampusPostLike(schoolId, postId, user.uid);
       postReads.current.confirmed = postReads.current.started;
-      setLikeNeedsRefresh(true);
-      await loadPost();
+      void loadPost();
     } catch {
       alert('這次未能按讚，請稍後再試。');
     } finally {
+      likeWritePending.current = false;
       setLikeBusy(false);
     }
   };
@@ -389,7 +389,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
           onClick={() => {
             setLoadError('');
             setLoading(true);
-            void Promise.all([loadPost('default'), loadReplies('default')])
+            void Promise.all([loadPost('default', true), loadReplies('default', true)])
               .catch(() => setLoadError('無法讀取貼文，請稍後重試。'))
               .finally(() => setLoading(false));
           }}
@@ -437,11 +437,9 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
 
   return (
     <div style={{ maxWidth: 720 }}>
-      {editNeedsRefresh && !refreshError && <p role="status">正在重新讀取貼文，更新後即可編輯。</p>}
       {refreshError && (
         <p role="status">
           操作已完成，但部分資料無法更新。{' '}
-          {editBlocked && '請重新讀取貼文後再編輯。 '}
           <button
             type="button"
             onClick={() => {
@@ -494,7 +492,6 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
               <>
                 <button
                   type="button"
-                  disabled={editBlocked}
                   onClick={() => setEditSession({ scope: bookmarkScope, open: true })}
                   style={btnGhost}
                 >
@@ -585,7 +582,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
         )}
 
         <PostActionsRow>
-          <button type="button" onClick={onToggleLike} disabled={likeBusy || likeNeedsRefresh} style={statChip}>
+          <button type="button" onClick={onToggleLike} disabled={likeBusy} style={statChip}>
             <span style={{ color: liked ? 'var(--danger, var(--danger))' : 'var(--muted)' }}>
               {liked ? '❤️' : '🤍'}
             </span>
@@ -759,15 +756,14 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
             tagsRaw: (post.tags ?? []).join(', '),
           }}
           onClose={(reason) =>
-            setEditSession(reason === 'pending' ? { scope: bookmarkScope, open: false } : null)
+            setEditSession(reason === 'retain' ? { scope: bookmarkScope, open: false } : null)
           }
           onSubmit={(patch) => updateCampusPost(schoolId, postId, patch)}
           onSaved={(patch) => {
             postReads.current.confirmed = postReads.current.started;
-            setEditNeedsRefresh(true);
             setEditSession(null);
             setPost((current) => (current?.id === postId ? { ...current, ...patch } : current));
-            void loadPost();
+            void loadPost('server');
           }}
         />
       )}
@@ -826,18 +822,14 @@ function EditPostModal(props: {
       title="編輯貼文"
       size="lg"
       initialFocusRef={titleRef}
-      showCloseButton={!session.busy}
-      closeOnEsc={session.canClose}
-      closeOnOverlayClick={session.canClose}
       footer={
         <>
           <Button
             type="button"
             variant="ghost"
             onClick={session.requestClose}
-            disabled={!session.canClose}
           >
-            {session.busy && session.slow ? '先關閉' : '取消'}
+            取消
           </Button>
           <Button type="submit" form={formId} variant="primary" loading={session.busy}>
             {session.busy ? '儲存中…' : '儲存'}

@@ -95,7 +95,7 @@ function completeReview() {
   rate('整體評分（必填）', 4);
 }
 
-it('owns one pending review, locks all exits and fields, and preserves the existing payload', async () => {
+it('owns one pending review, allows immediate dismissal and locks fields, and preserves the existing payload', async () => {
   let resolve!: (value: string) => void;
   mocks.submitReview.mockImplementation(
     () =>
@@ -141,11 +141,11 @@ it('owns one pending review, locks all exits and fields, and preserves the exist
       .matches(':checked'),
   ).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  fireEvent.click(screen.getByRole('button', { name: '關閉視窗' }));
   fireEvent(dialog, new Event('cancel', { bubbles: true, cancelable: true }));
   fireEvent.pointerDown(dialog, { clientX: -1, clientY: -1 });
   fireEvent.click(dialog, { clientX: -1, clientY: -1 });
-  expect(close).not.toHaveBeenCalled();
-  expect(screen.queryByRole('button', { name: '關閉視窗' })).toBeNull();
+  expect(close.mock.calls).toEqual(Array.from({ length: 4 }, () => ['retain']));
   await act(async () => {
     resolve('review-1');
   });
@@ -154,21 +154,31 @@ it('owns one pending review, locks all exits and fields, and preserves the exist
 
 it('keeps review fields, rating and privacy choice after failure and allows a deliberate retry', async () => {
   mocks.submitReview.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce('review-1');
-  const saved = vi.fn();
-  render(<ReviewModal schoolId="pu" myUid="alice" onClose={vi.fn()} onSubmitted={saved} />);
+  render(<StudyBuddyTab schoolId="pu" />);
+  const opener = await screen.findByRole('button', { name: '＋ 寫評價' });
+  opener.focus();
+  fireEvent.click(opener);
   completeReview();
   fill('評論（選填）', '保留的心得');
   fireEvent.click(screen.getByRole('button', { name: '送出評價' }));
   await screen.findByText(
     '暫時無法確認送出結果，內容已保留。請先查看列表是否已出現，再決定是否重試。',
   );
+  fireEvent.click(screen.getByRole('button', { name: '關閉視窗' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.body.style.overflow).toBe('');
+  expect(document.activeElement).toBe(opener);
+  fireEvent.click(opener);
   expect((screen.getByLabelText('課程名稱') as HTMLInputElement).value).toBe(' 程式設計 ');
   expect((screen.getByLabelText('評論（選填）') as HTMLTextAreaElement).value).toBe('保留的心得');
   expect((screen.getByLabelText('匿名評價') as HTMLInputElement).checked).toBe(true);
   expect(screen.getByLabelText('課程名稱').matches(':disabled')).toBe(false);
-  expect(saved).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '送出評價' }));
-  await waitFor(() => expect(saved).toHaveBeenCalledOnce());
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(document.activeElement).toBe(opener);
+  expect(document.body.style.overflow).toBe('');
+  fireEvent.click(opener);
+  expect(screen.getByLabelText<HTMLInputElement>('課程名稱').value).toBe('');
   expect(mocks.submitReview).toHaveBeenCalledTimes(2);
   expect(mocks.submitReview.mock.calls[1][0]).toMatchObject({
     anonymous: true,
@@ -275,13 +285,12 @@ it('retains a slow review across closing and tab changes without another write o
   await act(async () => {
     await vi.advanceTimersByTimeAsync(14_999);
   });
-  expect((screen.getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.queryByRole('button', { name: '先關閉' })).toBeNull();
+  expect((screen.getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(false);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1);
   });
   expect(screen.getByText(/這次送出仍可能完成，請勿重複送出/)).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '先關閉' }));
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(document.body.style.overflow).toBe('');
   expect(document.activeElement).toBe(opener);
@@ -596,7 +605,7 @@ it('validates group time, locks pending writes, and keeps the Firestore schema u
   expect(screen.getByLabelText('讀書會名稱').matches(':disabled')).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   fireEvent(dialog, new Event('cancel', { bubbles: true, cancelable: true }));
-  expect(close).not.toHaveBeenCalled();
+  expect(close.mock.calls).toEqual([['retain'], ['retain']]);
   await act(async () => {
     resolve({ id: 'group-1' });
   });
@@ -658,7 +667,7 @@ it('keeps a slow group submission and a hidden failure in its real parent until 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(15_000);
   });
-  fireEvent.click(screen.getByRole('button', { name: '先關閉' }));
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(screen.queryByRole('dialog')).toBeNull();
   fireEvent.click(screen.getByRole('tab', { name: '課程評價' }));
   fireEvent.click(screen.getByRole('tab', { name: '讀書會' }));
@@ -667,7 +676,7 @@ it('keeps a slow group submission and a hidden failure in its real parent until 
   expect(screen.getByLabelText('讀書會名稱').matches(':disabled')).toBe(true);
   fireEvent.submit(screen.getByRole('dialog').querySelector('form')!);
   expect(mocks.addDoc).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole('button', { name: '先關閉' }));
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
   await act(async () => {
     reject(new Error('permission-denied'));
   });
@@ -686,8 +695,7 @@ it('keeps a slow group submission and a hidden failure in its real parent until 
   );
   fireEvent.click(screen.getByRole('button', { name: '建立讀書會' }));
   expect(mocks.addDoc).toHaveBeenCalledTimes(2);
-  expect((screen.getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.queryByRole('button', { name: '先關閉' })).toBeNull();
+  expect((screen.getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled).toBe(false);
   await act(async () => {
     resolve({ id: 'group-1' });
   });
