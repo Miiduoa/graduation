@@ -15,12 +15,21 @@ const pickupTime = '(?:預定)?取餐時間';
 const latestPickupTime = latest + '的?' + pickupTime;
 const calendarLocation = '(?:我(?:的)?)?(?:個人)?(?:行事曆|日曆|行程)(?:上|中|裡|內)?';
 const destination = '(?:' + placement + ')' + calendarLocation;
-const readPrompt = '(?:' + polite + '(?:確認|查詢|查看|查|知道|詢問|問)(?:一下)?)';
+const readPrompt = '(?:' + polite + '(?:確認|核對|查詢|查看|看|查|知道|詢問|問)(?:一下)?)';
+const standaloneReadPrompt = new RegExp('^(?:' + readPrompt + '|' + polite + ')$');
+const orderWriteVerb =
+  '取消|撤銷|撤回|作廢|刪|移除|移走|清除|清空|封存|改|變更|調整|更新|更換|' +
+  '下單|訂購|重訂|付款|結帳|退款|退訂|退單|退費|送出|提交|延後|提前|延期|重排|標記|備註';
+// Order qualifiers are open-ended, so exclude action verbs and request prefixes
+// here. Calendar placement verbs are allowed only in the status question itself.
 const order = '(?:(?!' + pickupVerb.source +
-  '|取消|撤銷|改|變更|刪除|更新|下單|付款|退款|不要|不用|如果|假設|翻譯)[^,;、。.!?]){0,80}訂單';
+  '|' + orderWriteVerb + '|請|麻煩|幫我|替我|我想|不要|不用|如果|假設|翻譯)[^,;、。.!?]){0,80}訂單';
 const orderLookup = new RegExp(
   '^' + readPrompt + '?' + order + '(?:的?' + pickupTime +
     '(?:是?(?:幾點|什麼時候)(?:啊|呢|嗎)?)?)?[?]*$',
+);
+const pickupTimeLookup = new RegExp(
+  '^' + readPrompt + '?' + pickupTime + '是?(?:幾點|什麼時候)(?:啊|呢|嗎)?[?]*$',
 );
 const calendarEntry = '(?:' + placement + '|記在)' + calendarLocation;
 const calendarEntryPattern = new RegExp(calendarEntry);
@@ -33,11 +42,12 @@ const calendarStatus = new RegExp(
 );
 
 function isReadOnlyPickupQuestion(text: string): boolean {
-  const clauses = text.split(/[;,、。.!]+|(?<=\?)(?=[^?])/).filter(Boolean);
-  if (clauses.length === 1) return calendarStatus.test(clauses[0]) || orderLookup.test(clauses[0]);
-  if (clauses.length !== 2) return false;
-  const [lookup, status] = clauses;
-  return orderLookup.test(lookup) && calendarStatus.test(status.replace(/^(?:也|順便|另外|再)/, ''));
+  const clauses = text.split(/[;,、。.!]+|(?<=\?)(?=[^?])/)
+    .map(clause => clause.replace(/^(?:也|順便|另外|再|然後|接著)+/, ''))
+    .filter(clause => clause && !standaloneReadPrompt.test(clause));
+  return clauses.length > 0 &&
+    clauses.every(clause =>
+      calendarStatus.test(clause) || orderLookup.test(clause) || pickupTimeLookup.test(clause));
 }
 const hours: Readonly<Record<string, number>> = {
   半小時: 30,
