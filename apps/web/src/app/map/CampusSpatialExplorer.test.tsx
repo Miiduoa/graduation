@@ -3442,7 +3442,17 @@ const footprintContentTypes = [
   'application/json', 'text/plain', null, 'text/html', 'application/octet-stream',
   'application/json; charset=UTF-8', 'text/plain; charset=UTF-8',
   'application/vnd.example_campus+json', ' APPLICATION/JSON ', 'application/json, text/html', '',
+  'application/json; charset="UTF-8"', 'application/json; charset=iso-8859-1',
+  'application/+json', 'application/json; charset=UTF-8, text/html',
 ];
+// Independent, explicit acceptance matrix: MIME validation must occur before
+// streaming even when a bad media body contains structurally valid JSON.
+const compatibleFootprintContentTypes = new Set<string | null>([
+  null, 'application/json', 'text/plain',
+  'application/json; charset=UTF-8', 'text/plain; charset=UTF-8',
+  'application/vnd.example_campus+json', ' APPLICATION/JSON ',
+  'application/json; charset="UTF-8"',
+]);
 
 it.each(footprintContentTypes.flatMap((contentType) =>
   (['valid', 'invalid JSON', 'unverified source', 'invalid structure'] as const)
@@ -3464,17 +3474,24 @@ it.each(footprintContentTypes.flatMap((contentType) =>
   render(<CampusSpatialExplorer school="pu" locations={[library]}
     selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  const valid = payload === 'valid';
+  const compatible = compatibleFootprintContentTypes.has(contentType);
+  const valid = payload === 'valid' && compatible;
   expect(await within(dialog).findByText(valid ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(read).toHaveBeenCalledOnce();
-  expect(cancel).not.toHaveBeenCalled();
+  if (compatible) {
+    expect(read).toHaveBeenCalledOnce();
+    expect(cancel).not.toHaveBeenCalled();
+  } else {
+    expect(read).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
+  }
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(valid ? buildings : []);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-// 52403426 checks status and declared size before parsing, then checks the
-// actual streamed size and snapshot. Its 429 fallback is 60s; a plain 500
-// has no cooldown unless Retry-After or invalid framing supplies a reason.
+// Preserve baseline HTTP status/size backoff; an incompatible 200 MIME is
+// additionally rejected before reading the body. A plain 500 still keeps
+// its existing manual retry without a fallback cooldown.
 it.each([null, 'application/json', 'application/octet-stream', 'text/plain', 'text/html']
   .flatMap((mime) => ['valid 200', 'invalid 200', '500', '500 with Retry-After', '429', '429 with Retry-After']
     .flatMap((kind) => ['normal', 'empty', 'over cap declared', 'over cap actual']
@@ -3496,7 +3513,8 @@ it.each([null, 'application/json', 'application/octet-stream', 'text/plain', 'te
   const response = new Response(bytes, { status, headers });
   const fetchMock = vi.fn().mockResolvedValue(response);
   vi.stubGlobal('fetch', fetchMock);
-  const baselineSnapshot = status === 200 && size !== 'over cap declared' && bytes.byteLength <= 2_000_000
+  const baselineSnapshot = status === 200 && compatibleFootprintContentTypes.has(mime) &&
+    size !== 'over cap declared' && bytes.byteLength <= 2_000_000
     ? await response.clone().json().then(parseProvidenceFootprintSnapshot, () => null) : null;
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = within(await open());
@@ -3517,6 +3535,36 @@ it.each([null, 'application/json', 'application/octet-stream', 'text/plain', 'te
       expect(fetchMock).toHaveBeenCalledTimes(2);
     }
   }
+});
+
+// When a captive portal / intermediary returns status 200 with an invalid
+// media declaration, its body may never finish. Reject on headers, not 15s
+// later after getReader() has allocated a stream on a mobile WebView.
+it.each([
+  'text/html', 'application/octet-stream', 'application/json, text/html',
+  '', 'application/json; charset=iso-8859-1',
+])('cancels a stalled 200 OSM response with incompatible MIME %s', async (contentType) => {
+  const { library } = sourcedLibraryFootprintFixture();
+  const cancel = vi.fn().mockResolvedValue(undefined);
+  const getReader = vi.fn(() => { throw new Error('Invalid MIME must not be read'); });
+  const json = vi.fn();
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200,
+    headers: new Headers({ 'Content-Type': contentType }),
+    body: { cancel, getReader }, json,
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]}
+    selected={library} onSelect={vi.fn()} />);
+  const dialog = within(await open());
+  expect(await dialog.findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(getReader).not.toHaveBeenCalled();
+  expect(json).not.toHaveBeenCalled();
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(dialog.getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
+  expect(dialog.getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledOnce();
 });
 
 // A 200 response that explicitly declares zero bytes can never be a complete
