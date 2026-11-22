@@ -1147,10 +1147,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
           (contentType.includes(',') ||
             !(mime === 'application/json' || mime === 'text/plain' ||
               (typeof mime === 'string' &&
-                /^application\/[a-z0-9][a-z0-9!#          (!/^\d+$/.test(contentLength) ||
-            !Number.isSafeInteger(Number(contentLength)) ||
-            Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
-        if (!response.ok^_.+-]*\+json$/.test(mime))));
+                /^application\/[a-z0-9][a-z0-9!#$&^_.+-]*\+json$/.test(mime))));
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
             contentRange !== null || invalidContentLength || invalidContentType) {
           // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
