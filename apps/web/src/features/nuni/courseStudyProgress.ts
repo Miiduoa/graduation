@@ -103,13 +103,17 @@ function readMode(value: unknown, passage: StudyPassage, version: ProgressVersio
   if (!Array.isArray(memory.lessons) || memory.lessons.length > STUDY_SESSION_LIMITS.lessonsPerMode) invalid();
   let previousId = 0;
   const lessons = Array.from(memory.lessons, (value): StudyLesson => {
-    const lesson = exactObject(value, ['id', 'previousLessonId', 'question', 'response', 'attempt', 'answerVisible']);
+    const fields = ['id', 'previousLessonId', 'question', 'response', 'attempt', 'answerVisible'];
+    if (version === 2 && Object.hasOwn(object(value), 'answerReviewAllowed')) fields.push('answerReviewAllowed');
+    const lesson = exactObject(value, fields);
     const id = integer(lesson.id, 1, COURSE_STUDY_PROGRESS_LIMITS.lessonId);
     if (id <= previousId) invalid('進度檔的講解編號重複或順序不正確，請重新選擇檔案。');
     previousId = id;
     const parentId = lesson.previousLessonId === null ? null : integer(lesson.previousLessonId, 1, id - 1);
     const attempt = text(lesson.attempt, STUDY_SESSION_LIMITS.attemptCharacters);
     const answerVisible = boolean(lesson.answerVisible);
+    const answerReviewAllowed = Object.hasOwn(lesson, 'answerReviewAllowed')
+      ? boolean(lesson.answerReviewAllowed) : undefined;
     let response: TutorExplanation;
     try {
       // A matching quote confirms a relationship to this copy, not its authenticity or teaching quality.
@@ -122,7 +126,11 @@ function readMode(value: unknown, passage: StudyPassage, version: ProgressVersio
     } catch {
       invalid('進度檔中的講解無法對照該段原文，請重新選擇完整的進度檔。');
     }
-    return { id, previousLessonId: parentId, question: text(lesson.question, STUDY_TUTOR_LIMITS.questionCharacters), response, attempt, answerVisible };
+    return { id, previousLessonId: parentId, question: text(lesson.question, STUDY_TUTOR_LIMITS.questionCharacters), response, attempt, answerVisible,
+      // Persist explicit eligibility only when the legacy rule would change it.
+      ...(answerReviewAllowed !== undefined && answerReviewAllowed !== (answerVisible || !!attempt.trim())
+        ? { answerReviewAllowed } : {}),
+    };
   });
   const ids = new Set(lessons.map((lesson) => lesson.id));
   for (const lesson of lessons) {

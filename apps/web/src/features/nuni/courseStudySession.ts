@@ -28,11 +28,17 @@ export function hasVisibleStudyContent(text: string, { ignorePunctuation = false
   return /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800\ufff9-\ufffb]/u.test(content);
 }
 
+export function canReviewStudyAnswer(lesson: StudyLesson): boolean {
+  // Backups without explicit eligibility used trim() to unlock the answer.
+  return lesson.answerReviewAllowed ?? (lesson.answerVisible || !!lesson.attempt.trim());
+}
+
 export type StudyLesson = StudyTutorTurn & {
   id: number;
   previousLessonId: number | null;
   attempt: string;
   answerVisible: boolean;
+  answerReviewAllowed?: boolean;
 };
 
 export type StudyModeMemory = {

@@ -20,6 +20,7 @@ const emojiExtend = /[\p{Grapheme_Extend}\p{Emoji_Modifier}]/u;
 const regionalIndicator = /\p{Regional_Indicator}/u;
 // Prepend and Indic_Conjunct_Break=Linker from the Unicode character database.
 const indicLinker = /[\u094d\u09cd\u0acd\u0b4d\u0c4d\u0d4d\u1039\u17d2\u1a60\u1b44\u1bab\ua9c0\uaaf6\u{10a3f}\u{11133}\u{113d0}\u{1193e}\u{11a47}\u{11a99}\u{11f42}]/u;
+const indicLetter = /^(?!\p{Script=Han})\p{Lo}$/u;
 const graphemePrepend = /[\u0600-\u0605\u06dd\u070f\u0890-\u0891\u08e2\u0d4e\u{110bd}\u{110cd}\u{111c2}-\u{111c3}\u{113d1}\u{1193f}\u{11941}\u{11a3a}\u{11a84}-\u{11a89}\u{11d46}\u{11f02}]/u;
 const hangulLeading = /^[\u1100-\u115f\ua960-\ua97c]$/u;
 const hangulVowel = /^[\u1160-\u11a7\ud7b0-\ud7c6]$/u;
@@ -47,25 +48,30 @@ function fallbackBoundaries(source: string): Uint8Array {
   let regionalRun = 0;
   let index = 0;
   // On older WebViews, err on the side of keeping ambiguous sequences together.
-  // Keep an Indic linker and its following consonant together through intervening marks.
+  // A conjunct needs a letter before the linker, with only extending marks
+  // between the letter, linker and next letter.
+  let hasIndicBase = false;
   let followsIndicLinker = false;
   for (const current of source) {
     const regional = regionalIndicator.test(current);
+    const isIndicLetter = indicLetter.test(current);
     const continuesGrapheme = graphemeContinuation.test(current) && !myanmarIndependentSpacingMarks.test(current);
     const isControl = graphemeControl.test(current) &&
       !continuesGrapheme && !graphemePrepend.test(current);
     const isPictographic = pictographic.test(current);
-    const joinsPrevious = (previous === '\r' && current === '\n') ||
+    const joinsPrevious: boolean = (previous === '\r' && current === '\n') ||
       (!previousIsControl && !isControl &&
         (continuesGrapheme || graphemePrepend.test(previous) ||
           joinsHangul(previous, current) || (regional && regionalRun % 2 === 1) ||
           (followsEmojiZwj && isPictographic) ||
           (kiratRaiVowel.test(previous) && kiratRaiVowel.test(current)) ||
-          (followsIndicLinker && /\p{Lo}/u.test(current) && !/\p{Script=Han}/u.test(current))));
+          (followsIndicLinker && isIndicLetter)));
     if (!joinsPrevious) boundaries[index] = 1;
     followsEmojiZwj = current === '\u200d' && followsPictographic;
     followsPictographic = isPictographic || (followsPictographic && emojiExtend.test(current));
-    followsIndicLinker = indicLinker.test(current) || (followsIndicLinker && continuesGrapheme);
+    followsIndicLinker = joinsPrevious && continuesGrapheme &&
+      (followsIndicLinker || (hasIndicBase && indicLinker.test(current)));
+    hasIndicBase = isIndicLetter || (joinsPrevious && continuesGrapheme && hasIndicBase);
     regionalRun = regional ? regionalRun + 1 : 0;
     previous = current;
     previousIsControl = isControl;
@@ -76,34 +82,27 @@ function fallbackBoundaries(source: string): Uint8Array {
 }
 
 
-/**
- * A broken WebView Segmenter may return contiguous, byte-correct code-point
- * segments that split a *visible* grapheme. Check ambiguous boundaries with
- * our conservative Unicode fallback even if native containing()/iteration
- * claims they are valid. Ordinary Han/Latin boundaries retain the fast path.
- */
-function potentiallySplitGrapheme(source: string, index: number): boolean {
-  if (index <= 0 || index >= source.length) return false;
-  const previousUnit = source.charCodeAt(index - 1);
-  const currentUnit = source.charCodeAt(index);
-  if (previousUnit >= 0xd800 && previousUnit <= 0xdbff &&
-      currentUnit >= 0xdc00 && currentUnit <= 0xdfff) return true;
+// Verify the implementation can keep complete clusters before using its
+// boundaries. A code-point splitter can otherwise return valid source slices.
+const probeClusters = ['e\u0301', '👩‍💻', '🇹🇼', '한'];
+const segmentationProbe = probeClusters.join('');
+const probeStarts = probeClusters.map((_, index) => probeClusters.slice(0, index).join('').length);
 
-  const previousStart = previousUnit >= 0xdc00 && previousUnit <= 0xdfff &&
-      index >= 2 && source.charCodeAt(index - 2) >= 0xd800 &&
-      source.charCodeAt(index - 2) <= 0xdbff ? index - 2 : index - 1;
-  const currentEnd = currentUnit >= 0xd800 && currentUnit <= 0xdbff &&
-      index + 1 < source.length && source.charCodeAt(index + 1) >= 0xdc00 &&
-      source.charCodeAt(index + 1) <= 0xdfff ? index + 2 : index + 1;
-  const previous = source.slice(previousStart, index);
-  const current = source.slice(index, currentEnd);
-  return (previous === '\r' && current === '\n') ||
-    graphemeContinuation.test(previous) || graphemeContinuation.test(current) ||
-    graphemePrepend.test(previous) || joinsHangul(previous, current) ||
-    (regionalIndicator.test(previous) && regionalIndicator.test(current)) ||
-    (previous === '\u200d' && pictographic.test(current)) ||
-    (indicLinker.test(previous) && /\p{Lo}/u.test(current)) ||
-    (kiratRaiVowel.test(previous) && kiratRaiVowel.test(current));
+function hasWorkingSegmenter(segmenter: Intl.Segmenter): boolean {
+  const probe = segmenter.segment(segmentationProbe);
+  if (typeof probe.containing === 'function') {
+    return probeStarts.every((start, index) => {
+      const end = probeStarts[index + 1] ?? segmentationProbe.length;
+      const segment = probe.containing(end - 1);
+      return segment?.index === start && segment.segment === segmentationProbe.slice(start, end);
+    });
+  }
+  const segments = Array.from(probe);
+  return segments.length === probeStarts.length && segments.every((segment, index) => {
+    const start = probeStarts[index];
+    const end = probeStarts[index + 1] ?? segmentationProbe.length;
+    return segment.index === start && segment.segment === segmentationProbe.slice(start, end);
+  });
 }
 
 function studyGraphemeBoundary(source: string): (index: number) => boolean {
@@ -117,7 +116,9 @@ function studyGraphemeBoundary(source: string): (index: number) => boolean {
   };
   try {
     if (typeof Intl.Segmenter === 'function') {
-      const segments = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(source);
+      const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+      if (!hasWorkingSegmenter(segmenter)) return fallbackBoundary;
+      const segments = segmenter.segment(source);
       if (typeof segments.containing === 'function') {
         return (index) => {
           if (index === 0 || index === source.length) return true;
@@ -132,8 +133,7 @@ function studyGraphemeBoundary(source: string): (index: number) => boolean {
                 source.slice(found.index, found.index + found.segment.length) !== found.segment) {
               return fallbackBoundary(index);
             }
-            return found.index === index &&
-              (!potentiallySplitGrapheme(source, index) || fallbackBoundary(index));
+            return found.index === index;
           } catch {
             return fallbackBoundary(index);
           }
@@ -155,8 +155,7 @@ function studyGraphemeBoundary(source: string): (index: number) => boolean {
         }
         if (next !== source.length) return fallbackBoundary;
         boundaries[source.length] = 1;
-        return (index) => boundaries[index] === 1 &&
-          (!potentiallySplitGrapheme(source, index) || fallbackBoundary(index));
+        return (index) => boundaries[index] === 1;
       }
     }
   } catch {

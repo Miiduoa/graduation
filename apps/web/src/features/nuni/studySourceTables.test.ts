@@ -1380,7 +1380,18 @@ describe('dynamic inline CSS never promotes ambiguous lesson content into a sour
     '<p style="opacity:calc(0)">',
     '<h2 style="opacity:clamp(0, 0, 1)">',
     '<div style="display:none;display:var(--answer-display)">',
-    '<span style="opacity:0;opacity:calc(1)">',
+    '<div style="opacity:1;opacity:calc(1 - 1)">',
+    '<div style="opacity:max(-1, -0.5)">',
+    '<div style="opacity:calc(100% - 100%)">',
+    '<div style="opacity:calc(-1 / 0)">',
+    '<div style="opacity:calc(0 / 0)">',
+    '<div style="opacity:calc(1px)">',
+    '<div style="--state:collapse;visibility:var(--state, visible)">',
+    '<div style="opacity:calc(1">',
+    '<div style="opacity:0;opacity:calc(1)%">',
+    '<div style="--alpha:0;opacity:var(--alpha, 1)">',
+    '<div style="--Alpha:0 !important;--Alpha:1;opacity:var(--Alpha, 1)">',
+    '<div style="--alpha:var(--alpha);opacity:calc(var(--alpha, 1))">',
     '<div style="display:block;display:var(--answer-display)">',
     '<section style="visibility:env(safe-area-inset-top)">',
     '<div style="display:future-display(block)">',
@@ -1403,6 +1414,21 @@ describe('dynamic inline CSS never promotes ambiguous lesson content into a sour
     'display:var(--mode)!important; display:block!important',
     'display:var(--missing, block)',
     'display:none;display:flow block',
+    'display:none;display:flow list-item inline',
+    'opacity:calc(1)',
+    'opacity:calc(100%)',
+    'opacity:calc(80% / 2 + 10%)',
+    'opacity:calc(1 / 0)',
+    'display:none; --layout:inline grid; display:var(--layout)',
+    'visibility:hidden; --state:visible; visibility:var(--state)',
+    'opacity:0; opacity:calc(1)',
+    'opacity:calc(max(0.1, 1 / 2))',
+    'opacity:clamp(0%, 75%, 100%)',
+    'opacity:0; opacity:var(--missing, max(0, 0.5))',
+    '--Alpha:.5; opacity:calc(var(--Alpha) * 2)',
+    'visibility:hidden; visibility:var(--missing, visible)',
+    'content-visibility:hidden; content-visibility:var(--missing, unset)',
+    'display:none; display:var(--outer, var(--inner, flow block))',
   ])(
     'extracts tables when a later visible declaration wins (%s)', (style) => {
       const source = [`<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
@@ -1421,6 +1447,12 @@ describe('dynamic inline CSS never promotes ambiguous lesson content into a sour
       expect(extractStudySourceTables(source)).toEqual([]);
     },
   );
+
+  it('does not let a var fallback override a potentially inherited hidden value', () => {
+    const source = ['<div style="--mode:none">', '<section style="display:var(--mode, block)">',
+      ...visibleTable, '</section>', '</div>'].join('\n');
+    expect(extractStudySourceTables(source)).toEqual([]);
+  });
 
   it('keeps normal static visible declarations and unrelated CSS functions readable', () => {
     const source = [

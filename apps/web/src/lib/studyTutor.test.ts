@@ -98,7 +98,7 @@ describe('reject unreadable model citations before saving a lesson', () => {
     ['embedding', '\u202b'],
     ['override', '\u202e'],
     ['first strong isolate', '\u2068'],
-  ])('rejects %s in generated citations and retained follow-up context', (_name, mark) => {
+  ])('rejects %s in newly generated main and step citations', (_name, mark) => {
     const quote = '主' + mark + '鍵';
     const original = { ...passage, text: passage.text + quote };
     const previous = { ...turn(), response: { ...explanation(), sourceQuote: quote } };
@@ -108,8 +108,6 @@ describe('reject unreadable model citations before saving a lesson', () => {
     reply.steps[0].sourceQuote = quote;
     expect(() => parseTutorExplanation(JSON.stringify(reply), original))
       .toThrow('AI 步驟引句無可讀的教材內容');
-    expect(() => prepareStudyTutorHistory(original, 'understand', [previous]))
-      .toThrow('先前講解無法對照目前的原文');
   });
 
   it.each(['主\u200e鍵', 'א\u200fב', 'م\u061cن'])(
@@ -124,6 +122,20 @@ describe('reject unreadable model citations before saving a lesson', () => {
       const reply = { ...steppedExplanation(), sourceQuote: quote };
       reply.steps[0].sourceQuote = quote;
       expect(parseTutorExplanation(JSON.stringify(reply), original)).toEqual(reply);
+    },
+  );
+
+  it.each(['主\u202e鍵\u202c', '\u2067外鍵\u2069', '主\u202a鍵\u202c\u200b'])(
+    'keeps readable legacy directional controls in main and step follow-up citations (%#)', (quote) => {
+      const original = { ...passage, text: passage.text + quote };
+      const response = { ...steppedExplanation(), sourceQuote: quote };
+      response.steps[0].sourceQuote = quote;
+      const saved = parseSavedTutorExplanation(JSON.stringify(response), original);
+      const previous = { ...turn(), response: saved };
+      const prepared = prepareStudyTutorHistory(original, 'understand', [turn(), previous]);
+      expect(promptData(buildStudyTutorPrompt(original, 'understand', '繼續', prepared), 'HISTORY_DATA'))
+        .toEqual([turn(), previous]);
+      expect(() => parseTutorExplanation(JSON.stringify(response), original)).toThrow('方向控制字元');
     },
   );
 

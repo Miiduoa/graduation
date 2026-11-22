@@ -1165,8 +1165,11 @@ it.each(['風險等級百分比', '風險等級（%）'])('charts %s against a f
     .toEqual([[25, 100], [75, 100]]);
 });
 
-it.each(['各題號正答率 (%)', '各題次正確率（％）', 'Accuracy by question number (%)'])(
-  'charts the measured rate by question for %s', (header) => {
+it.each([
+  '完成狀況（%）', '各題號完成狀況（%）', '各題號的完成狀況及正答率（%）', '各題號正答率', '各題次正確率（％）',
+  'Completion status (%)', 'Accuracy by question number (%)', '依帳號完成狀況（%）', 'Coverage by student ID (%)',
+])(
+  'charts the bounded measurement for %s', (header) => {
     const material = [`| 題目 | ${header} |`, '| --- | --- |', '| 甲 | 50% |', '| 乙 | 75% |'].join('\n');
     const { container } = render(<StudySourceTables text={material} />);
     expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
@@ -1174,7 +1177,7 @@ it.each(['各題號正答率 (%)', '各題次正確率（％）', 'Accuracy by q
   },
 );
 
-it.each(['題號 (%)', 'Question Number (%)', '郵遞區號 (%)'])(
+it.each(['題號 (%)', '各題號 (%)', '作業題號 (%)', 'Question Number (%)', '郵遞區號 (%)', '狀態 (%)'])(
   'keeps a percentage unit on the identifier %s from enabling a chart', (header) => {
     const material = [`| 名稱 | ${header} |`, '| --- | --- |', '| 甲 | 50% |', '| 乙 | 75% |'].join('\n');
     const { container } = render(<StudySourceTables text={material} />);
@@ -2919,6 +2922,8 @@ it.each([
   ['Percentile Score', ['25', '75']],
   ['百分位 (%)', ['25%', '75%']],
   ['Percentile (%)', ['25%', '75%']],
+  ['百分等級完成率', ['25%', '75%']],
+  ['Percentile Count (%)', ['25%', '75%']],
 ])('retains source %s without a misleading ratio-scale percentile chart', (header, values) => {
   const material = ['| 學生 | ' + header + ' |', '| --- | --- |',
     '| 甲 | ' + values[0] + ' |', '| 乙 | ' + values[1] + ' |'].join('\n');
@@ -2930,7 +2935,7 @@ it.each([
   view.unmount();
 });
 
-it.each(['百分位人數', 'Percentile Count', 'Number of Percentiles'])(
+it.each(['百分位人數', '百分等級的總數', 'Percentile Count', 'Percentile Rank Count', 'Number of Percentiles'])(
   'keeps explicit counts comparable even when the header mentions percentiles (%s)', (header) => {
     const material = ['| 組別 | ' + header + ' |', '| --- | --- |',
       '| 甲 | 20 |', '| 乙 | 40 |'].join('\n');

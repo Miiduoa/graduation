@@ -56,13 +56,12 @@ function nonempty(value: unknown, max: number): value is string {
  * reordered model citation. Reject it before recording the generated lesson;
  * the original licensed material is never edited.
  */
-function hasReadableTutorCitation(quote: string, allowPunctuation: boolean): boolean {
-  // Direction marks can accompany readable source words. Embeddings,
-  // overrides and isolates can reorder the citation and are rejected.
-  const hasDirectionMark = /[\u061c\u200e\u200f]/u.test(quote);
-  if (/\p{Bidi_Control}/u.test(quote.replace(/[\u061c\u200e\u200f]/gu, ''))) return false;
+function hasReadableTutorCitation(quote: string, isHistory: boolean): boolean {
+  // Readable exact history citations can retain legacy directional controls.
+  // New citations permit direction marks alongside readable words.
+  if (!isHistory && /\p{Bidi_Control}/u.test(quote.replace(/[\u061c\u200e\u200f]/gu, ''))) return false;
   const hasContent = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\p{P}\u2800\ufff9-\ufffb]/u.test(quote) ||
-    /[0-9#*]\ufe0f?\u20e3/u.test(quote) || (allowPunctuation && !hasDirectionMark && /\p{P}/u.test(quote));
+    /[0-9#*]\ufe0f?\u20e3/u.test(quote) || (isHistory && !/\p{Bidi_Control}/u.test(quote) && /\p{P}/u.test(quote));
   if (!hasContent) return false;
   for (let index = 0; index < quote.length; index += 1) {
     const unit = quote.charCodeAt(index);

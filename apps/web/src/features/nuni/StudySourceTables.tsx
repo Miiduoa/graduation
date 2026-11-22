@@ -62,7 +62,7 @@ type SourceValueRow = { label: string; original: string; amount: number; sourceL
 // After this limit, restore a clear manual-copy route without changing the source.
 const SOURCE_CLIPBOARD_CONFIRM_MS = 5000;
 
-const SOURCE_PERCENT_COLUMN = /(?:百分比|百分率|佔比|占比|完成率|正確率|出席率|通過率|達成率|合格率|參與率|缺席率|進度|完成度|[%％])/u;
+const SOURCE_PERCENT_COLUMN = /(?:百分比|百分率|佔比|占比|完成率|正答率|正確率|出席率|通過率|達成率|合格率|參與率|缺席率|進度|完成度|[%％])/u;
 const ENGLISH_PERCENT_COLUMN =
   /\b(?:percent(?:age)?|progress(?:\s+rate)?|completion\s+rate|accuracy(?:\s+rate)?|attendance\s+rate|participation\s+rate|retention\s+rate|conversion\s+rate|error\s+rate|dropout\s+rate|pass(?:ing)?\s+rate|success\s+rate)\b/iu;
 
@@ -154,7 +154,7 @@ const AMBIGUOUS_TIME_COLUMN =
 const NON_RATIO_PERCENTILE_COLUMN =
   /(?:百分位(?:數|階|等級|排名|序|次)?|百分等級|百分排名|百分秩|百分順位|\bpercentiles?\b)/iu;
 const PERCENTILE_COUNT_COLUMN =
-  /(?:百分位(?:人數|數量|總數|筆數|個數)|百分等級(?:人數|數量|總數)|\b(?:count|total|number\s+of)\s+percentiles?\b|\bpercentile\s+(?:count|total)\b)/iu;
+  /(?:百分(?:位(?:數|階|等級|排名|序|次)?|等級|排名|秩|順位)(?:的)?(?:人數|數量|總數|筆數|個數)|\b(?:count|total|number\s+of)\s+percentiles?\b|\bpercentile(?:\s+rank)?\s+(?:count|total)\b)/iu;
 
 // GPA, exam scores, Likert ratings, IQ and index numbers are scale readings,
 // not quantities with a meaningful ratio to zero. A 4.0 GPA does not indicate
@@ -198,11 +198,22 @@ function isBoundedPercentageColumn(header: string): boolean {
     !ENGLISH_UNBOUNDED_RATE_COLUMN.test(header);
 }
 
-function isNonRatioColumn(header: string): boolean {
+const IDENTIFIER_WORDS =
+  /(?:日期|年份|學年度|學號|學籍號|課號|座號|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號|題號|題次)|\b(?:academic\s+(?:year|term|semester)|student\s+(?:id|number)|course\s+(?:id|code|number)|postal\s+code|zip\s+code|phone\s+number|account\s+(?:id|number)|page\s+(?:no\.?|number)|sequence\s+number|floor\s+number|(?:question|problem|exercise|item)\s+(?:id|number|no\.?))(?!\w)/iu;
+const IDENTIFIER_LABEL_END = new RegExp(`(?:${IDENTIFIER_WORDS.source})$`, 'iu');
+
+function isNonRatioColumn(header: string, percentage = false): boolean {
   const column = header.trim().replace(/\s*(?:[（(]\s*[%％]\s*[）)]|[%％])$/u, '').trim();
-  // A percent unit alone does not turn a status or release label into a rate.
+  const unqualifiedColumn = column.replace(/(?:\s*[（(][^）)]*[）)])+$/u, '').trim();
+  // The text after "by" identifies the grouping, while the leading phrase
+  // describes what the percentage measures.
+  const measuredLabel = percentage ? unqualifiedColumn.split(/\s+by\s+/iu, 1)[0] : column;
+  const statusMatch = NON_RATIO_STATUS_COLUMN.exec(measuredLabel) ?? ENGLISH_NON_RATIO_STATUS_COLUMN.exec(measuredLabel);
   const describesBoundedRate = isBoundedPercentageColumn(header) &&
-    (isBoundedPercentageColumn(column) || /率|\brate\b/iu.test(column));
+    (isBoundedPercentageColumn(measuredLabel) || /率|\brate\b/iu.test(measuredLabel));
+  const isIdentifier = percentage
+    ? !describesBoundedRate && IDENTIFIER_LABEL_END.test(measuredLabel)
+    : IDENTIFIER_WORDS.test(column);
   if (((NON_RATIO_NETWORK_IDENTIFIER_COLUMN.test(column) ||
          ENGLISH_NON_RATIO_NETWORK_IDENTIFIER_COLUMN.test(column)) &&
         !NETWORK_IDENTIFIER_COUNT_COLUMN.test(column)) ||
@@ -215,14 +226,13 @@ function isNonRatioColumn(header: string): boolean {
       NON_RATIO_QUARTER_POSITION_COLUMN.test(column) ||
       NON_RATIO_SOURCE_POSITION_COLUMN.test(column) ||
       (NON_RATIO_PERCENTILE_COLUMN.test(column) &&
-       !PERCENTILE_COUNT_COLUMN.test(column)) ||
+       (percentage || !PERCENTILE_COUNT_COLUMN.test(column))) ||
       NON_RATIO_SCIENCE_COLUMN.test(column) || ENGLISH_NON_RATIO_SCIENCE_COLUMN.test(column) ||
       DECIBEL_UNIT_COLUMN.test(column) ||
       NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
       ENGLISH_NON_RATIO_CLOCK_POSITION_COLUMN.test(column) ||
       (!describesBoundedRate &&
-       (NON_RATIO_STATUS_COLUMN.test(column) ||
-        ENGLISH_NON_RATIO_STATUS_COLUMN.test(column)) &&
+       statusMatch && (!percentage || statusMatch[0] === measuredLabel) &&
        !STATUS_COUNT_COLUMN.test(column) &&
        !ENGLISH_STATUS_COUNT_COLUMN.test(column)) ||
       ((NON_RATIO_SCORE_SCALE_COLUMN.test(column) ||
@@ -236,24 +246,15 @@ function isNonRatioColumn(header: string): boolean {
          ENGLISH_NON_RATIO_RANK_POSITION_COLUMN.test(column)) &&
         !RANK_COUNT_COLUMN.test(column))) return true;
   if (/(?:^|[^0-9０-９])(?:[0０]\s*(?:[/／]|\bor\b)\s*[1１]|[1１]\s*(?:[/／]|\bor\b)\s*[0０])(?:$|[^0-9０-９])/iu.test(column)) return true;
-  const unqualifiedColumn = column.replace(/(?:\s*[（(][^）)]*[）)])+$/u, '').trim();
   // "Lines of Code" is a count, not an identifying code. Keep
   // "Course Code", "Verification Code", and standalone "Code" excluded.
   // Recognize only explicit count phrases, never arbitrary headers ending in Code.
-  if (/(?:^|\s)(?:id|uuid|code|no\.?|#)$/iu.test(unqualifiedColumn) &&
+  if (!describesBoundedRate && /(?:^|\s)(?:id|uuid|code|no\.?|#)$/iu.test(measuredLabel) &&
       !/^(?:(?:number|count)\s+of\s+)?lines?\s+of\s+code$/iu.test(unqualifiedColumn)) return true;
-  // A question number identifies an exercise; its magnitude is not a measured result.
-  // A bounded rate grouped by question still measures a rate.
-  if (/(?:日期|年份|學年度|學號|學籍號|課號|座號|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號)/u.test(column) ||
-      (!describesBoundedRate && (/(?:題號|題次)/u.test(column) ||
-        /\b(?:question|problem|exercise|item)\s+(?:id|number|no\.?)(?:\b|$)/iu.test(column))) ||
+  if (isIdentifier ||
       /^(?:年度|year|number)$/iu.test(column) ||
-      // A number identifying a term, page, floor or class is an ordinal or
-      // category, not a comparable measure. Parenthetical source qualifiers
-      // (e.g. 學年（民國）) must not turn it into a bar.
       /^(?:學年|學期|年級|班級|頁碼|頁次|週次|樓層|排名|名次|月份|民國年|西元年)(?:\s*[（(][^）)]*[）)])?$/u.test(column) ||
-      /^(?:semester|term|month|rank|ranking|floor|grade|page)$/iu.test(column) ||
-      /\b(?:academic\s+(?:year|term|semester)|student\s+(?:id|number)|course\s+(?:id|code|number)|postal\s+code|zip\s+code|phone\s+number|account\s+(?:id|number)|page\s+(?:no\.?|number)|sequence\s+number|floor\s+number)\b/iu.test(column)) return true;
+      /^(?:semester|term|month|rank|ranking|floor|grade|page)$/iu.test(column)) return true;
   // A textbook's week, chapter or lesson ordinal is a position, not a
   // measurement. "Chapter 4" must not appear twice as large as "Chapter 2".
   // Count headers (e.g. Number of Chapters / 章節數量) remain eligible.
@@ -323,7 +324,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
 function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
   const column = table.headers[1];
-  if (!hasUnambiguousChartLabel(column) || !isBoundedPercentageColumn(column) || isNonRatioColumn(column)) return null;
+  if (!hasUnambiguousChartLabel(column) || !isBoundedPercentageColumn(column) || isNonRatioColumn(column, true)) return null;
   const rows: SourceValueRow[] = [];
   // Taiwanese lesson materials sometimes use fullwidth digits and decimal
   // punctuation throughout an explicitly bounded percentage column.

@@ -201,6 +201,23 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
+  it.each([true, false])('keeps orphaned Indic linkers outside the next letter (Segmenter: %s)', (native) => {
+    if (!native) vi.stubGlobal('Intl', { Segmenter: undefined });
+    try {
+      for (const [linker, letter] of [['\u094d', 'क'], ['\u09cd', 'ক'], ['\u0acd', 'ક']]) {
+        for (const prefix of ['', ' ', '。', '👩']) {
+          const before = prefix + linker;
+          expect(locateStudyEvidence(before + letter, letter)).toEqual({
+            before, quote: letter, after: '', occurrences: 1,
+          });
+        }
+        expect(locateStudyEvidence(letter + linker + letter, letter)).toBeNull();
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each(['Segmenter', 'containing'] as const)('locates whole graphemes without %s', (missing) => {
     const NativeSegmenter = Intl.Segmenter;
     const mockIntl = Object.create(Intl);
