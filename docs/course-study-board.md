@@ -1,3 +1,9 @@
+## 2026-11-23：修復 PR #719 白板行號計算的 React Lint 阻擋
+
+- 最新 `756a3fb58846` 的 CI #45060606737，Lint & Type Check job #137325445412 **失敗**。實際日誌指出 `CourseStudyPanel.tsx:392` 於 React `useMemo` 內的巢狀 `map` 修改 `lineOffset`，觸發 `react-hooks/immutability` 的唯一 error（其餘是 warnings）；本修補不把前版 CI 綠燈視為新版結果。
+- 將原有 O(n) 絕對教材行號、跨段序號與 CRLF／CR／LF 計算搬至獨立、純粹接收段落陣列的模組層函式，React 僅在 `useMemo` 呼叫該函式。保持每段末尾加一行、跨 PDF 來源行號、表格摘錄、閱讀 v1/v2 與練習 v1 checkpoint 的既有語義，且不變更使用者教材或新增套件。
+- 這是對實際 CI 阻擋的修補；正式 Lint、Web/Mobile、Build、Security 與 CodeQL 須重新以新的完整 head SHA 驗收。指定 App 5504170 APPROVED、Maestro、iOS／Android 真機與 Ahaboard 同題同教材同裝置對照未有證據前，PR 保持 Draft，不合併、不部署。
+
 ## 2026-11-23　PR #719 學習模組的合併基準與驗證範圍
 
 ### 2026-11-23：耗時 JSON 補充觀察到的模型下載訊號（非冷／暖啟判定）
