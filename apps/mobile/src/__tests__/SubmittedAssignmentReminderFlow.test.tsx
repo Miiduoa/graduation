@@ -190,7 +190,7 @@ test('計畫卡可為唯一的 134 字作業設定本機提醒', async () => {
   expect(mockAlarms.size).toBe(1);
 });
 
-test('另一筆作業的截斷標題以空格結尾時，仍可查看和退訂原有提醒', async () => {
+test.each(['計畫卡', '單筆回覆'])('%s：另一筆作業的截斷標題以空格結尾時，仍可查看和退訂原有提醒', async (entry) => {
   const snapshot = mockSnapshot();
   const title = '長'.repeat(129);
   snapshot.assignments.items[0].title = title;
@@ -202,8 +202,28 @@ test('另一筆作業的截斷標題以空格結尾時，仍可查看和退訂�
     ...snapshot.assignments.items[0], title: title + ' 後綴', source: { ...source, assignmentId: 'other' },
   });
   snapshot.assignments.count = 2;
-  const { plan, view } = planCard(snapshot);
-  expect(plan.steps.map((item) => item.title)).toEqual([title, title + ' ']);
+  const navigation = { navigate: jest.fn() };
+  const card = entry === '計畫卡' ? planCard(snapshot) : null;
+  const view = card?.view ?? render(
+    <AssignmentReplyActions
+      read={{
+        userId: 'alice', schoolId: 'pu', checkedAt: snapshot.checkedAt,
+        filterQuestion: title, items: [snapshot.assignments.items[0]],
+      }}
+      snapshot={snapshot}
+      context={{ userId: 'alice', schoolId: 'pu', isCurrent: current, navigation }}
+      disabled={false}
+      onAsk={jest.fn()}
+    />,
+  );
+  if (card) {
+    expect(card.plan.steps.map((item) => item.title)).toEqual([title, title + ' ']);
+  } else {
+    fireEvent.press(view.getByText('查看這份作業'));
+    expect(navigation.navigate).toHaveBeenCalledWith('學習', {
+      initial: false, screen: 'HomeworkSubmit', params: { groupId: 'course', assignmentId: 'work' },
+    });
+  }
   expect(await view.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
   fireEvent.press(view.getByText('取消這項本機提醒'));
   await view.findByText('已退訂並清除提醒偏好，撤回或延期後也不會自動恢復。');

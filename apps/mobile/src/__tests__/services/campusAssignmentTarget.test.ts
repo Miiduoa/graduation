@@ -1,5 +1,5 @@
 import { parseCampusAssignmentSource } from '../../services/campusAssignmentSource';
-import { resolveCampusAssignmentTarget } from '../../services/campusAssignmentTarget';
+import { campusAssignmentDisplayTitle, resolveCampusAssignmentTarget } from '../../services/campusAssignmentTarget';
 import { refreshCampusSenseSnapshot, type CampusSenseSnapshot } from '../../services/campusSenseSnapshot';
 
 const mockCallable = jest.fn();
@@ -112,7 +112,26 @@ test('does not use a 130-character display prefix to open a different original a
   value.assignments.items.push({ ...assignment, title: prefix, source: { ...source, assignmentId: 'work_2' } });
   value.assignments.count = 2;
   expect(target(prefix)).toBeNull();
+  expect(target(prefix + ' ')).toBeNull();
   expect(target(prefix + '期末報告')?.params.assignmentId).toBe('work_1');
+});
+
+test.each([false, true])('preserves a trailing display space when checking collisions (reverse: %s)', (reverse) => {
+  const value = snapshot();
+  const title = '長'.repeat(129);
+  const longerTitle = title + ' 後綴';
+  const displayTitle = campusAssignmentDisplayTitle(longerTitle);
+  value.assignments.items[0].title = title;
+  value.assignments.items.push({ ...assignment, title: longerTitle, source: { ...source, assignmentId: 'work_2' } });
+  value.assignments.count = 2;
+  if (reverse) value.assignments.items.reverse();
+  const target = (candidate: string) => resolveCampusAssignmentTarget({
+    assignment: { ...assignment, title: candidate }, snapshot: value, scope, now,
+  });
+  expect(displayTitle).toBe(title + ' ');
+  expect(target(title)?.params.assignmentId).toBe('work_1');
+  expect(target(longerTitle)?.params.assignmentId).toBe('work_2');
+  expect(target(displayTitle)).toBeNull();
 });
 
 test('the live snapshot parser retains only valid handoff references', async () => {

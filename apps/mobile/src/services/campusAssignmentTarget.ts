@@ -20,12 +20,6 @@ export function campusAssignmentDisplayTitle(value: string): string {
   return normalizeCampusAssignmentTitle(value).slice(0, 130);
 }
 
-function matchesCampusAssignmentTitle(fullTitle: string, candidate: string): boolean {
-  const title = normalizeCampusAssignmentTitle(candidate);
-  return normalizeCampusAssignmentTitle(fullTitle) === title ||
-    campusAssignmentDisplayTitle(fullTitle).trimEnd() === title;
-}
-
 /** Reminder cards may carry the original 130-character display title, including its final space. */
 export function matchingCampusReminderAssignments(
   snapshot: CampusSenseSnapshot,
@@ -57,10 +51,14 @@ export function resolveCampusAssignmentTarget(input: {
   if (!snapshot || snapshot.assignments.status !== 'available' ||
       typeof input.assignment.title !== 'string' || !input.assignment.title.trim()) return null;
   const title = normalizeCampusAssignmentTitle(input.assignment.title);
-  const matches = snapshot.assignments.items.filter((row) =>
-    row.groupName === (input.assignment.groupName ?? '') &&
-    row.dueAt === (input.assignment.dueAt ?? null) &&
-    matchesCampusAssignmentTitle(row.title, title));
+  const matches = snapshot.assignments.items.filter((row) => {
+    if (row.groupName !== (input.assignment.groupName ?? '') ||
+        row.dueAt !== (input.assignment.dueAt ?? null)) return false;
+    // A display title can end in a space introduced by the 130-character cutoff.
+    const displayTitle = campusAssignmentDisplayTitle(row.title);
+    return normalizeCampusAssignmentTitle(row.title) === title ||
+      displayTitle === title || displayTitle === input.assignment.title;
+  });
   // Count display-title collisions, but require a complete title to open.
   if (matches.length !== 1 || normalizeCampusAssignmentTitle(matches[0].title) !== title) return null;
   const source = parseCampusAssignmentSource(matches[0].source);
