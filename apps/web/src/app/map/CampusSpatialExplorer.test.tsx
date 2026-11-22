@@ -3278,22 +3278,41 @@ it.each([
   expect(json).not.toHaveBeenCalled();
 });
 
-it.each(['identity', 'gzip'] as const)(
-  'reads and rejects an empty JSON body with %s encoding',
-  async (coding) => {
-    const { library } = sourcedLibraryFootprintFixture();
-    const response = new Response('', {
-      headers: { 'Content-Length': '000', 'Content-Encoding': coding },
+// An HTTP 200 with Content-Length: 0 cannot hold any JSON, whether identity
+// or compressed. The body may even be a valid-looking JSON prefix followed by
+// a stalled stream; reject at headers and cancel without ever getting a reader.
+it.each([
+  { coding: 'identity', length: '0' },
+  { coding: 'identity', length: '000' },
+  { coding: 'gzip', length: '0' },
+  { coding: 'gzip', length: '000' },
+] as const)(
+  'rejects zero-length $coding / $length outline before reading a stalled body',
+  async ({ coding, length }) => {
+    const { library, body } = sourcedLibraryFootprintFixture();
+    let cancelled = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode(body)); },
+      cancel() { cancelled += 1; },
+    });
+    const response = new Response(stream, {
+      headers: { 'Content-Length': length, 'Content-Encoding': coding },
     });
     const read = vi.spyOn(response.body!, 'getReader');
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal('fetch', fetchMock);
     render(<CampusSpatialExplorer school="pu" locations={[library]}
       selected={library} onSelect={vi.fn()} />);
     const dialog = await open();
     expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    expect(read).toHaveBeenCalledOnce();
+    await waitFor(() => expect(cancelled).toBe(1));
+    expect(read).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
     expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
+    expect(within(dialog).getByText(/約 1 分鐘冷卻，到期後可再試/)).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' })).toBeTruthy();
   },
 );
 

@@ -1310,11 +1310,14 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
         const invalidContentCoding =
           !['identity', 'gzip', 'x-gzip', 'br', 'deflate', 'zstd', 'dcb', 'dcz'].includes(coding);
         // RFC Content-Length is a decimal byte count, not a fraction, hex
-        // number or comma-separated value. Do not trust a 200 JSON body whose
-        // advertised size is invalid or implausibly large for this API.
+        // number or comma-separated value. A declared zero-byte HTTP 200 cannot
+        // contain a JSON map, even when Fetch has not delivered the body yet.
+        // Reject it before reading: a stalled proxy must not hold mobile UI for
+        // the 15-second timeout. This also applies to compressed wire bodies.
         const invalidContentLength = contentLength !== null &&
           (!/^\d+$/.test(contentLength) ||
             !Number.isSafeInteger(Number(contentLength)) ||
+            Number(contentLength) === 0 ||
             Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
             contentRange !== null || invalidContentLength || invalidContentCoding || invalidContentType) {
