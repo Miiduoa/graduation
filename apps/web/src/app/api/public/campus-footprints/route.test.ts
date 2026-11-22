@@ -127,6 +127,89 @@ describe('public Providence building geometry route', () => {
   });
 
   it.each([
+    'text/html; charset=utf-8',
+    'application/xhtml+xml',
+    'application/octet-stream',
+    'application/json, text/html',
+    '',
+  ])('rejects explicit non-JSON Overpass Content-Type %j without reading its stalled body', async (contentType) => {
+    // A captive portal or proxy can send HTTP 200 yet never finish streaming.
+    // Reject the incompatible MIME type from headers and cancel immediately.
+    let cancelled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode(osmPayload)); },
+      cancel() { cancelled += 1; },
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(body, {
+      status: 200, headers: { 'Content-Type': contentType },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const first = await GET();
+    expect(first.status).toBe(503);
+    expect(first.headers.get('Cache-Control')).toBe('no-store');
+    expect(cancelled).toBe(1);
+    // No repeated requests to the shared public Overpass origin while cooling.
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    'application/json; charset=utf-8',
+    'application/vnd.overpass+json',
+    'text/plain; charset=utf-8',
+  ])('keeps compatible Overpass JSON Content-Type %j working', async (contentType) => {
+    // text/plain is retained for older Overpass proxies; the payload itself
+    // must still pass the full audited-way JSON/geometry validation.
+    const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+      status: 200, headers: { 'Content-Type': contentType },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect((await response.json()).buildings).toHaveLength(1);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps dated stale outlines when a later gateway replies HTML 200', async () => {
+    const start = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      let cancelled = 0;
+      const stalledHtml = new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new TextEncoder().encode('<html>login required</html>')); },
+        cancel() { cancelled += 1; },
+      });
+      const upstream = vi.fn()
+        .mockImplementationOnce(async () => new Response(osmPayload, {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }))
+        .mockImplementationOnce(async () => new Response(stalledHtml, {
+          status: 200, headers: { 'Content-Type': 'text/html', 'Retry-After': '1800' },
+        }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const first = await GET();
+      expect(first.status).toBe(200);
+      const verified = await first.json();
+      clock.mockReturnValue(start + 25 * 60 * 60 * 1000);
+      const fallback = await GET();
+      expect(fallback.status).toBe(200);
+      expect(fallback.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(Number(fallback.headers.get('Retry-After'))).toBeGreaterThanOrEqual(1800);
+      expect(await fallback.json()).toMatchObject({
+        stale: true, fetchedAt: verified.fetchedAt, buildings: verified.buildings,
+      });
+      expect(cancelled).toBe(1);
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([
     { declared: 0, description: 'zero bytes' },
     { declared: new TextEncoder().encode(osmPayload).byteLength - 1, description: 'too few bytes' },
     { declared: new TextEncoder().encode(osmPayload).byteLength + 1, description: 'too many bytes' },
