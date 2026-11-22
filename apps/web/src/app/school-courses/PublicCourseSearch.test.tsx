@@ -801,13 +801,14 @@ it.each([
 });
 
 it.each([
-  { schoolId: 'ncnu' as const, schoolName: '國立暨南國際大學',
+  { schoolId: 'ncnu' as const, schoolName: '國立暨南國際大學', selected: course, expectedDays: [5],
     url: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall' },
-  { schoolId: 'nthu' as const, schoolName: '國立清華大學',
+  { schoolId: 'ncnu' as const, schoolName: '國立暨南國際大學', selected: { ...course, time: '3cd4i' }, expectedDays: [3, 4],
+    url: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall' },
+  { schoolId: 'nthu' as const, schoolName: '國立清華大學', selected: nthuCourse, expectedDays: [1, 5],
     url: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json' },
-])('does not invent retrieval time for a single $schoolId course review draft', async ({ schoolId, schoolName, url }) => {
+])('does not invent retrieval time for a single $schoolId course review draft ($selected.time)', async ({ schoolId, schoolName, selected, expectedDays, url }) => {
   importContext.scope.schoolId = schoolId;
-  const selected = schoolId === 'nthu' ? nthuCourse : course;
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([selected], { schoolId, fetchedAt: undefined })));
   render(<PublicCourseSearch {...(schoolId === 'nthu' ? nthuProps : props)} />);
   submit(selected.code);
@@ -816,7 +817,7 @@ it.each([
   expect(draft?.source.name).toBe(
     `${schoolName}｜115學年度第1學期公開開課資料｜來源：${url}｜資料擷取：時間未提供`,
   );
-  expect(draft?.rows).toHaveLength(2);
+  expect(draft?.rows.map(row => row.dayOfWeek)).toEqual(expectedDays);
   expect(draft?.rows.every(row => row.source.name === draft.source.name)).toBe(true);
   expect(readPersonalImports(importContext.scope)).toEqual([]);
 });
