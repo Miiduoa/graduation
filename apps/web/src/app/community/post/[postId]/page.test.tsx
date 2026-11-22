@@ -293,7 +293,7 @@ it('keeps a confirmed reply deletion when both reads fail', async () => {
     { id: 'r-1', authorUid: 'alice', content: '我的留言', threadDepth: 0 },
   ]);
   render(<PostDetailPage />);
-  const remove = await screen.findByRole('button', { name: '刪除', exact: true });
+  const remove = await screen.findByRole('button', { name: /^刪除$/ });
   mocks.getPost.mockRejectedValueOnce(new Error('offline'));
   mocks.listReplies.mockRejectedValueOnce(new Error('offline'));
   await act(async () => fireEvent.click(remove));

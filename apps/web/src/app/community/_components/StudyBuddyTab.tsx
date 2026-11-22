@@ -161,16 +161,23 @@ export function CourseReviewSection(props: {
   const [filter, setFilter] = useState('');
   const filterRef = useRef<HTMLInputElement>(null);
   const [formDisplay, setFormDisplay] = useState<CommunityFormDisplay>('closed');
+  const [reviewDialogClosing, setReviewDialogClosing] = useState(false);
   const writeReviewRef = useRef<HTMLButtonElement>(null);
   const firstReviewRef = useRef<HTMLButtonElement>(null);
   const restoreReviewFocus = useRef(false);
 
   useEffect(() => {
     if (formDisplay !== 'closed' || !restoreReviewFocus.current) return;
+    if (props.active === false) {
+      restoreReviewFocus.current = false;
+      return;
+    }
+    // Modal close first restores focus to「寫第一則評價」; wait until that
+    // button is gone so a later list refresh does not drop focus on body.
+    if (firstReviewRef.current) return;
     restoreReviewFocus.current = false;
-    if (props.active !== false && document.activeElement === document.body)
-      writeReviewRef.current?.focus();
-  }, [formDisplay, props.active]);
+    writeReviewRef.current?.focus();
+  }, [formDisplay, props.active, reviews]);
 
   const load = useCallback(async (isCurrent: () => boolean) => {
     if (!schoolId) {
@@ -292,18 +299,29 @@ export function CourseReviewSection(props: {
         </div>
       )}
 
-      {formDisplay !== 'closed' && (
+      {(formDisplay !== 'closed' || reviewDialogClosing) && (
         <ReviewModal
-          open={props.active !== false && formDisplay === 'open'}
+          open={props.active !== false && formDisplay === 'open' && !reviewDialogClosing}
           schoolId={schoolId}
           myUid={myUid}
-          onClose={(reason) => setFormDisplay(reason === 'pending' ? 'pending-hidden' : 'closed')}
+          onClose={(reason) => {
+            setReviewDialogClosing(false);
+            setFormDisplay(reason === 'pending' ? 'pending-hidden' : 'closed');
+          }}
           onSubmitted={async () => {
             restoreReviewFocus.current =
               formDisplay === 'open' ||
               (firstReviewRef.current !== null && document.activeElement === firstReviewRef.current);
+            // Keep the dialog mounted with isOpen=false so the session can
+            // release the scroll lock, then unmount after the list refresh.
+            setReviewDialogClosing(true);
             setFormDisplay('closed');
             await refresh();
+            setReviewDialogClosing(false);
+            if (restoreReviewFocus.current && props.active !== false && !firstReviewRef.current) {
+              restoreReviewFocus.current = false;
+              writeReviewRef.current?.focus();
+            }
           }}
         />
       )}
