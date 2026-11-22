@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import {
   prepareStudyTutorHistory,
@@ -58,6 +58,16 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
   // In-app WebViews may leave a clipboard Promise unresolved or settle it late.
   const timingCopyRequest = useRef(0);
   const timingCopyTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopWatchingTimingCopyFocus = useRef<(() => void) | null>(null);
+  const invalidateTimingCopy = useCallback(() => {
+    timingCopyRequest.current += 1;
+    stopWatchingTimingCopyFocus.current?.();
+    stopWatchingTimingCopyFocus.current = null;
+    if (timingCopyTimeout.current !== null) {
+      clearTimeout(timingCopyTimeout.current);
+      timingCopyTimeout.current = null;
+    }
+  }, []);
   // The downloadable file and manually selectable field must contain exactly
   // the same privacy-scoped measurements, never lesson or student text.
   const timingExportText = useMemo(() => JSON.stringify({
@@ -125,11 +135,9 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
     return () => {
       current.current?.abort();
       current.current = null;
-      timingCopyRequest.current += 1;
-      if (timingCopyTimeout.current !== null) clearTimeout(timingCopyTimeout.current);
-      timingCopyTimeout.current = null;
+      invalidateTimingCopy();
     };
-  }, []);
+  }, [invalidateTimingCopy]);
 
   function changeQuestion(value: string) {
     onChange((previous) => updateStudyMode(previous, mode, (state) => ({ ...state, question: value })));
@@ -162,14 +170,6 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
       : '重新檢查後仍無法使用裝置端 AI；原文、筆記與自行練習不受影響。');
   }
 
-  function invalidateTimingCopy() {
-    timingCopyRequest.current += 1;
-    if (timingCopyTimeout.current !== null) {
-      clearTimeout(timingCopyTimeout.current);
-      timingCopyTimeout.current = null;
-    }
-  }
-
   function selectTimingExport() {
     invalidateTimingCopy();
     const field = timingExportInput.current;
@@ -187,11 +187,22 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
       : '瀏覽器未確認全選；完整 JSON 仍在下方，可長按或用鍵盤自行選取。');
   }
 
-  function copyTimingExport() {
+  function copyTimingExport(button: HTMLButtonElement) {
     invalidateTimingCopy();
     const request = timingCopyRequest.current;
+    const focusIsUnclaimed = () => document.activeElement === document.body || document.activeElement === null;
+    let focusedElsewhere = document.activeElement !== button && !focusIsUnclaimed();
+    const trackFocus = (event: FocusEvent) => {
+      if (event.target !== button && event.target !== document.body) focusedElsewhere = true;
+    };
     const manual = () => {
-      if (timingCopyRequest.current === request) selectTimingExport();
+      if (timingCopyRequest.current !== request) return;
+      if (document.activeElement === button || (focusIsUnclaimed() && !focusedElsewhere)) {
+        selectTimingExport();
+      } else {
+        invalidateTimingCopy();
+        setTimingExportMessage('瀏覽器未確認複製；完整 JSON 仍在下方，可按「全選量測 JSON」手動保存。');
+      }
     };
     try {
       const clipboard = navigator.clipboard;
@@ -203,6 +214,8 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
         return;
       }
       setTimingExportMessage('正在等待瀏覽器確認複製；仍可全選下方 JSON 手動保存。');
+      document.addEventListener('focusin', trackFocus);
+      stopWatchingTimingCopyFocus.current = () => document.removeEventListener('focusin', trackFocus);
       timingCopyTimeout.current = setTimeout(manual, 5000);
       void Promise.resolve(result as PromiseLike<unknown>).then(
         (acknowledged) => {
@@ -402,11 +415,11 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
               value={timingExportText} />
           </label>
           <div className={styles.actions}>
-            <button type="button" className={styles.button} onClick={copyTimingExport}>複製量測 JSON</button>
+            <button type="button" className={styles.button} onClick={(event) => copyTimingExport(event.currentTarget)}>複製量測 JSON</button>
             <button type="button" className={styles.button} onClick={downloadTimingExport}>下載量測 JSON</button>
             <button type="button" className={styles.button} onClick={selectTimingExport}>全選量測 JSON</button>
           </div>
-          {timingExportMessage && <p className={styles.note} role="status">{timingExportMessage}</p>}
+          <p className={styles.note} role="status" aria-live="polite">{timingExportMessage}</p>
         </details>}
         {error && <p className={styles.error} role="alert">{error}</p>}
         {selected && result && <section className={styles.explanation} aria-label="本段 AI 講解">
