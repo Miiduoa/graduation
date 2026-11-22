@@ -4,7 +4,7 @@ import {
   CREATOR_CARD_LIMITS, EMPTY_CREATOR_CARD, validateCreatorCard, type CreatorCard,
 } from '@campus/shared/src/creatorCard';
 import {
-  creatorCardFieldMatches, hasHiddenCreatorCardValue, readCreatorCard, saveCreatorCard,
+  creatorCardFieldMatches, creatorCardWriteFields, hasHiddenCreatorCardValue, readCreatorCard, saveCreatorCard,
 } from '../../services/creatorCard';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
@@ -17,13 +17,16 @@ const CREATOR_CARD_LINK_TIMEOUT_MS = 15_000;
 const CARD_FIELDS = ['headline', 'bio', 'linkUrl'] as const;
 
 type CardField = keyof CreatorCard;
-type RecoverableDraft = Partial<Record<CardField, { value: string; expected: string }>>;
+type FieldRevisions = Partial<Record<CardField, number>>;
+type RecoverableDraft = Partial<Record<CardField, { value: string; expected: string; revision: number }>>;
 type SubmittedWrite = {
   draft: CreatorCard;
   expected: CreatorCard;
   fields: readonly CardField[];
   edits: readonly CardField[];
   confirmationAttempt: number;
+  editorSession: number;
+  revisions: FieldRevisions;
 };
 
 type CardState =
@@ -72,7 +75,9 @@ function ScopedCreatorCardPanel({
   });
   const [editing, setEditing] = useState(false);
   const editingNow = useRef(false);
+  const editorSession = useRef(0);
   const setEditorOpen = (open: boolean) => {
+    if (open) editorSession.current += 1;
     editingNow.current = open;
     setEditing(open);
   };
@@ -81,6 +86,11 @@ function ScopedCreatorCardPanel({
   const currentDraft = useRef(draft);
   // Keep clear operations even when the field originally displayed as empty.
   const editedFields = useRef(new Set<CardField>());
+  // Reverting a value is still a user edit. Cancelling rolls back only
+  // revisions for edits that have never been submitted.
+  const nextRevision = useRef(0);
+  const revisions = useRef<FieldRevisions>({});
+  const submittedRevisions = useRef<FieldRevisions>({});
   const [recoverable, setRecoverable] = useState<RecoverableDraft>({});
   const replaceDraft = (value: CreatorCard) => {
     currentDraft.current = value;
@@ -161,7 +171,9 @@ function ScopedCreatorCardPanel({
 
   const changeDraft = (field: keyof CreatorCard, value: string) => {
     if (!editingNow.current) return;
-    if (currentDraft.current[field] === value && value !== '') return;
+    if (currentDraft.current[field] === value &&
+      (value !== '' || !published.current || !hasHiddenCreatorCardValue(published.current, field))) return;
+    revisions.current[field] = ++nextRevision.current;
     if (value && value === published.current?.[field] && !savingFlight.current && !pendingWrite.current) {
       editedFields.current.delete(field);
     } else {
@@ -174,6 +186,7 @@ function ScopedCreatorCardPanel({
   const cancelEdit = () => {
     if (savingFlight.current) return;
     setEditorOpen(false);
+    revisions.current = { ...submittedRevisions.current };
     editedFields.current.clear();
     replaceDraft(published.current ?? EMPTY_CREATOR_CARD);
     if (!pendingWrite.current) setFeedback('');
@@ -218,16 +231,25 @@ function ScopedCreatorCardPanel({
     setSaving(false);
     setNeedsConfirmation(false);
     if (matches) {
-      finishSave(latest);
+      finishSave(latest, submitted);
     } else {
       const unconfirmed: RecoverableDraft = {};
       for (const field of submitted.edits) {
         const expected = submitted.expected[field];
         if (!latest || !creatorCardFieldMatches(latest, field, expected)) {
-          unconfirmed[field] = { value: submitted.draft[field], expected };
+          unconfirmed[field] = {
+            value: submitted.draft[field], expected, revision: submitted.revisions[field] ?? 0,
+          };
         }
       }
-      setRecoverable((previous) => ({ ...previous, ...unconfirmed }));
+      if (editingNow.current && editorSession.current === submitted.editorSession) {
+        for (const field of submitted.edits) editedFields.current.add(field);
+      }
+      setRecoverable((previous) => {
+        const remaining = { ...previous };
+        for (const field of submitted.edits) delete remaining[field];
+        return { ...remaining, ...unconfirmed };
+      });
       acceptCard(latest);
       setFeedback(Object.keys(unconfirmed).length > 0
         ? '伺服器資料與上次送出的內容不同。草稿已保留，可在編輯時還原。'
@@ -235,20 +257,28 @@ function ScopedCreatorCardPanel({
     }
   };
 
+  const restorableEntry = (field: CardField) => {
+    const entry = recoverable[field];
+    return entry && (revisions.current[field] ?? 0) <= entry.revision ? entry : undefined;
+  };
+
   const restoreDraft = () => {
     if (!editingNow.current || savingFlight.current || pendingWrite.current) return;
     const next = { ...currentDraft.current };
+    let restored = false;
     for (const field of CARD_FIELDS) {
-      const entry = recoverable[field];
+      const entry = restorableEntry(field);
       if (!entry) continue;
+      restored = true;
       next[field] = entry.value;
       editedFields.current.add(field);
     }
+    if (!restored) return;
     replaceDraft(next);
     setFeedback('已還原未確認的草稿，請核對內容後再儲存。');
   };
 
-  const finishSave = (confirmed: CreatorCard) => {
+  const finishSave = (confirmed: CreatorCard, submitted: SubmittedWrite) => {
     const hasLaterEdits = editingNow.current && editedFields.current.size > 0;
     if (!hasLaterEdits) setEditorOpen(false);
     acceptCard(confirmed);
@@ -256,7 +286,8 @@ function ScopedCreatorCardPanel({
       const remaining = { ...previous };
       for (const field of CARD_FIELDS) {
         const entry = remaining[field];
-        if (entry && creatorCardFieldMatches(confirmed, field, entry.expected)) delete remaining[field];
+        if (entry && (submitted.edits.includes(field) ||
+          creatorCardFieldMatches(confirmed, field, entry.expected))) delete remaining[field];
       }
       return remaining;
     });
@@ -278,11 +309,12 @@ function ScopedCreatorCardPanel({
 
     const base = published.current;
     const edits = CARD_FIELDS.filter((field) => editedFields.current.has(field) &&
-      (expected[field] === '' || expected[field] !== base?.[field]));
-    // New documents need all three fields. Existing documents only merge edits.
-    const fields = base ? edits : CARD_FIELDS;
+      (!base || !creatorCardFieldMatches(base, field, expected[field])));
+    // A loaded missing field displays as the rule-compatible empty default.
+    const fields = creatorCardWriteFields(base, edits);
     if (base && fields.length === 0) {
       setEditorOpen(false);
+      revisions.current = { ...submittedRevisions.current };
       setFeedback('');
       return;
     }
@@ -291,7 +323,13 @@ function ScopedCreatorCardPanel({
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
-    const submitted = { draft: submittedDraft, expected, fields, edits, confirmationAttempt: 0 };
+    const submitted: SubmittedWrite = {
+      draft: submittedDraft, expected, fields, edits, confirmationAttempt: 0,
+      editorSession: editorSession.current, revisions: { ...revisions.current },
+    };
+    for (const field of edits) {
+      submittedRevisions.current[field] = submitted.revisions[field];
+    }
     const markUnconfirmed = () => {
       pendingWrite.current = submitted;
       setNeedsConfirmation(true);
@@ -315,7 +353,7 @@ function ScopedCreatorCardPanel({
         setSaving(false);
         setNeedsConfirmation(false);
       }
-      finishSave(confirmed);
+      finishSave(confirmed, submitted);
     } catch {
       if (mounted.current && !timedOut) markUnconfirmed();
     } finally {
@@ -437,7 +475,7 @@ function ScopedCreatorCardPanel({
               onPress={() => changeDraft('linkUrl', '')} />
           )}
           <Text style={styles.note}>這些內容只會顯示給所屬校園成員，不會帶入學號、電話或校務資料。</Text>
-          {!needsConfirmation && Object.keys(recoverable).length > 0 && (
+          {!needsConfirmation && CARD_FIELDS.some(restorableEntry) && (
             <CardButton label="還原未確認的草稿" disabled={saving} onPress={restoreDraft} />
           )}
           {!!feedback && <Text accessibilityRole="alert" style={styles.error}>{feedback}</Text>}

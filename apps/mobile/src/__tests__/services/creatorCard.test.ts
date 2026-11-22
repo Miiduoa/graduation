@@ -1,5 +1,5 @@
 import { getDocFromServer, setDoc } from 'firebase/firestore';
-import { readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
+import { creatorCardWriteFields, readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 
 jest.mock('../../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('firebase/firestore', () => ({
@@ -117,4 +117,21 @@ test.each([
   }, { merge: true });
   expect(getDocFromServer).toHaveBeenCalledTimes(1);
   expect(getDocFromServer).toHaveBeenCalledWith('schools/pu/creatorProfiles/alice');
+});
+
+test('missing required content fields are selected and must exist in the confirmation', async () => {
+  const legacy = { schoolId: 'pu', ownerUid: 'alice' };
+  const draft = { headline: '新標題', bio: '新簡介', linkUrl: '' };
+  jest.mocked(getDocFromServer)
+    .mockResolvedValueOnce(snap(legacy) as never)
+    .mockResolvedValueOnce(snap({ ...legacy, headline: draft.headline, bio: draft.bio }) as never)
+    .mockResolvedValueOnce(snap({ ...legacy, ...draft }) as never);
+  const loaded = await readCreatorCard('pu', 'alice');
+  const fields = creatorCardWriteFields(loaded, ['headline', 'bio']);
+  expect(fields).toEqual(['headline', 'bio', 'linkUrl']);
+  await expect(saveCreatorCard('pu', 'alice', draft, fields)).rejects.toThrow('not confirmed');
+  await expect(saveCreatorCard('pu', 'alice', draft, fields)).resolves.toEqual(draft);
+  expect(setDoc).toHaveBeenLastCalledWith('schools/pu/creatorProfiles/alice', {
+    ...legacy, ...draft, updatedAt: 'SERVER_TIME',
+  }, { merge: true });
 });

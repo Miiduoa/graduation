@@ -5,13 +5,23 @@ import { EMPTY_CREATOR_CARD, readCreatorCardFields, validateCreatorCard, type Cr
 const CARD_FIELDS = ['headline', 'bio', 'linkUrl'] as const;
 // Retain which empty display fields still have a value to clear on the server.
 const hiddenFields = new WeakMap<CreatorCard, ReadonlySet<keyof CreatorCard>>();
+const missingFields = new WeakMap<CreatorCard, ReadonlySet<keyof CreatorCard>>();
+
+export function creatorCardWriteFields(
+  base: CreatorCard | null, edits: readonly (keyof CreatorCard)[],
+): readonly (keyof CreatorCard)[] {
+  if (!base) return CARD_FIELDS;
+  const missing = missingFields.get(base);
+  return CARD_FIELDS.filter((field) => edits.includes(field) || missing?.has(field));
+}
 
 export function hasHiddenCreatorCardValue(card: CreatorCard, field: keyof CreatorCard): boolean {
   return hiddenFields.get(card)?.has(field) ?? false;
 }
 
 export function creatorCardFieldMatches(card: CreatorCard, field: keyof CreatorCard, expected: string): boolean {
-  return card[field] === expected && (expected !== '' || !hasHiddenCreatorCardValue(card, field));
+  return card[field] === expected && (expected !== '' ||
+    (!hasHiddenCreatorCardValue(card, field) && !missingFields.get(card)?.has(field)));
 }
 
 function cardRef(schoolId: string, ownerUid: string) {
@@ -36,7 +46,10 @@ export async function readCreatorCard(
     throw new Error('Creator card scope mismatch');
   }
   const card = readCreatorCardFields(data);
-  hiddenFields.set(card, new Set(CARD_FIELDS.filter((field) => card[field] === '' && data[field] !== '')));
+  const missing = new Set(CARD_FIELDS.filter((field) => !Object.prototype.hasOwnProperty.call(data, field)));
+  missingFields.set(card, missing);
+  hiddenFields.set(card, new Set(CARD_FIELDS.filter((field) =>
+    !missing.has(field) && card[field] === '' && data[field] !== '')));
   return card;
 }
 
