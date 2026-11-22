@@ -1161,7 +1161,7 @@ it.each([
   ['風險等級百分比', true], ['風險等級（%）', true],
   ['排名前十佔比', true], ['班級名次前十名百分比', true],
   ['排名前１０名比例', false], ['排名前十（%）', true], ['Top 10 Rank Share (%)', true],
-] as const)('charts %s against a fixed 100%% scale (merge base charted: %s)', (header) => {
+] as const)('charts %s against a fixed 100%% scale (merge base charted: %s)', (header, _mergeBaseCharted) => {
   const material = [`| 風險 | ${header} |`, '| --- | --- |', '| 低 | 25% |', '| 高 | 75% |'].join('\n');
   const { container } = render(<StudySourceTables text={material} />);
   expect(screen.getByText(`展開第 2 欄「${header}」的原文百分比（100% 滿格）`)).toBeTruthy();

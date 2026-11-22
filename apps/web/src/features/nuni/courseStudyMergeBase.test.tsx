@@ -110,7 +110,8 @@ it.each([
   { quote: '\u2800', text: '校對\u2800標點', baseline: true, change: false },
   { quote: ' ', text: '校對 標點', baseline: false },
   { quote: '。', text: '校對，標點', baseline: false },
-  { quote: '甲\u202e乙', text: '校對甲\u202e乙標點', baseline: true, change: false },
+  // An unpaired direction override within readable text still matches the source verbatim.
+  { quote: '甲\u202e乙', text: '校對甲\u202e乙標點', baseline: true },
 ])('compares generated citation parsing and evidence location for $quote', ({ quote, text, baseline, change }) => {
   const passage = { id: 'lesson:1', label: '原文', text };
   const response = { ...reply, sourceQuote: quote };
