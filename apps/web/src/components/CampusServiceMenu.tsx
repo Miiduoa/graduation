@@ -170,7 +170,7 @@ export function CampusServiceMenu() {
     setRestoredExpanded([]);
   }, [pathname, draftScope, campusId, schoolDraftOwner, platformDraftOwner]);
   useLayoutEffect(() => {
-    if (!canRemember) return;
+    if (draftScope === null || campusId === undefined || account.status === 'checking') return;
     // The browser URL can change before Next renders the matching route.
     if (
       pathname !== window.location.pathname ||
@@ -182,18 +182,25 @@ export function CampusServiceMenu() {
     const snapshot = historyReturn ?? restoreDirectorySearch('menu', pathname);
     if (!snapshot) return;
     if ('destination' in snapshot) {
+      // Unbound legacy drafts belong to the public menu at their source path.
+      // A bound draft still needs its original account and campus confirmed.
+      if (snapshot.scope !== undefined && !canRemember) return;
       if (snapshot.scope !== undefined && snapshot.scope !== returnScope) {
         forgetDirectorySearch('menu');
         return;
       }
-      // Bind the legacy draft to this entry and scope after its first restore.
-      rememberMenuReturn(snapshot.destination, {
-        scope: returnScope,
-        query: snapshot.query,
-        category: snapshot.category,
-        expanded: snapshot.expanded ?? [],
-        open: snapshot.open,
-      });
+      // Retain the known boundary while any account source is unavailable.
+      rememberMenuReturn(
+        snapshot.destination,
+        {
+          scope: returnScope,
+          query: snapshot.query,
+          category: snapshot.category,
+          expanded: snapshot.expanded ?? [],
+          open: snapshot.open,
+        },
+        true,
+      );
     }
     setQuery(snapshot.query.slice(0, 100));
     setCategory(snapshot.category);
@@ -208,7 +215,9 @@ export function CampusServiceMenu() {
     ) {
       previouslyFocused.focus({ preventScroll: true });
     }
-  }, [historyReturn, pathname, queryString, returnScope, canRemember]);
+  }, [
+    historyReturn, pathname, queryString, returnScope, canRemember, draftScope, campusId, account.status,
+  ]);
   useEffect(() => {
     function dismiss(event: PointerEvent) {
       const element = menu.current;

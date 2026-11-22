@@ -1098,9 +1098,18 @@ it('does not restore a current-format draft on a new visit or from a history mar
   expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
 });
 
-it.each(['教材', ''])(
-  'restores and retains a legacy sessionStorage menu draft for a second return (query %j)',
-  (query) => {
+it.each([
+  ['教材', 'school', 'recovers'],
+  ['', 'platform', 'recovers'],
+  ['', 'both', 'stays unavailable'],
+  ['教材', 'school', 'switches account'],
+  ['', 'platform', 'switches account'],
+])(
+  'restores a public legacy draft (query %j) when %s verification fails and %s',
+  (query, failedSource, outcome) => {
+    firebase.user = { uid: 'school-a' };
+    const account = { platformAccountId: 'platform-a', isPlatformOperator: false };
+    auth.session = account;
     const origin = captureMenuOrigin();
     const destination = '/classroom/material-bookmarks';
     const quick = {
@@ -1125,14 +1134,21 @@ it.each(['教材', ''])(
       }),
     );
     visitMenuDestination(destination);
-    firebase.error = new Error('School account unavailable');
     const view = render(<CampusServiceMenu />);
     expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-
-    returnToMenuOrigin(origin);
+    if (failedSource !== 'platform') {
+      firebase.user = null;
+      firebase.error = new Error('School account unavailable');
+    }
+    if (failedSource !== 'school') {
+      auth.session = null;
+      auth.error = 'Platform account unavailable';
+    }
     view.rerender(<CampusServiceMenu />);
     expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
-    firebase.error = null;
+    expect(JSON.parse(sessionStorage.getItem('campus.directory.search.v1')!)).toHaveProperty('menu');
+
+    returnToMenuOrigin(origin);
     view.rerender(<CampusServiceMenu />);
     const expectDraft = () => {
       expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
@@ -1147,11 +1163,31 @@ it.each(['教材', ''])(
     expectDraft();
     expect(JSON.parse(sessionStorage.getItem('campus.directory.search.v1')!)).toEqual({ quick });
     const migratedOrigin = captureMenuOrigin();
+    if (outcome !== 'stays unavailable') {
+      firebase.error = null;
+      firebase.user = { uid: outcome === 'switches account' && failedSource === 'school' ? 'school-b' : 'school-a' };
+      auth.error = '';
+      auth.session = outcome === 'switches account' && failedSource === 'platform'
+        ? { ...account, platformAccountId: 'platform-b' }
+        : account;
+      view.rerender(<CampusServiceMenu />);
+    }
+    if (outcome === 'switches account') {
+      expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+      expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
+      expect(sessionStorage.getItem('campus.menu.return.v1')).toBeNull();
+    } else {
+      expectDraft();
+    }
     returnToMenuOrigin({ url: destination, state: {} });
     view.rerender(<CampusServiceMenu />);
     returnToMenuOrigin(migratedOrigin);
     view.rerender(<CampusServiceMenu />);
-    expectDraft();
+    if (outcome === 'switches account') {
+      expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+    } else {
+      expectDraft();
+    }
   },
 );
 
@@ -1178,7 +1214,7 @@ it('waits for the Next route and account confirmation before restoring a pending
   view.rerender(<CampusServiceMenu />);
   expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
-  expect(window.history.state).toEqual(origin.state);
+  expect(window.history.state).toMatchObject(origin.state as Record<string, unknown>);
   fireEvent.click(screen.getByRole('button', { name: '關閉所有服務' }));
   expect(window.history.state).toEqual({ __NA: true, tree: routerTree, unrelated: 'keep' });
   returnToMenuOrigin(origin);

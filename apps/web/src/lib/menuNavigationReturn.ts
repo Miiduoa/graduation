@@ -2,6 +2,7 @@ import { SERVICE_CATEGORIES, type ServiceCategory } from './campusServices';
 import { forgetDirectorySearch, internalSitePath } from './campusDirectorySearch';
 
 export const MENU_RETURN_STATE_KEY = '__campusServiceMenuReturn';
+const ACKNOWLEDGED_STATE_KEY = '__campusServiceMenuReturnAcknowledged';
 const STORAGE_KEY = 'campus.menu.return.v1';
 const MAX_SNAPSHOTS = 20;
 
@@ -14,6 +15,7 @@ export type MenuNavigationReturn = {
   expanded: string[];
   open?: boolean;
   provisionalBoundary?: MenuReturnBoundary;
+  publicLegacy?: true;
 };
 
 type MenuReturnBoundary = Partial<Record<'campus' | 'schoolOwner' | 'platformOwner', string>>;
@@ -98,7 +100,9 @@ function loadSnapshots() {
         Array.isArray(snapshot.expanded) &&
         snapshot.expanded.every((id: unknown) => typeof id === 'string') &&
         (snapshot.open === undefined || typeof snapshot.open === 'boolean') &&
-        (snapshot.provisionalBoundary === undefined || validBoundary(snapshot.provisionalBoundary))
+        (snapshot.provisionalBoundary === undefined || validBoundary(snapshot.provisionalBoundary)) &&
+        (snapshot.publicLegacy === undefined ||
+          (snapshot.publicLegacy === true && snapshot.provisionalBoundary !== undefined))
       ) {
         snapshots.set(snapshot.token, snapshot);
       }
@@ -135,7 +139,13 @@ function observeWindow() {
     lastBoundary = undefined;
     storedSnapshots = undefined;
     // A new document can mount on the origin after the browser has already returned.
-    captureReturnState(window.history.state);
+    const state = window.history.state;
+    const navigation = window.performance.getEntriesByType?.('navigation')[0] as
+      | PerformanceNavigationTiming
+      | undefined;
+    if (navigation?.type === 'back_forward' || state?.[ACKNOWLEDGED_STATE_KEY] !== marker(state)) {
+      captureReturnState(state);
+    }
     // Keep observing while a destination without this header is mounted. Only
     // the returning menu can restore UI; this listener never changes focus.
     window.addEventListener('popstate', captureReturn);
@@ -172,14 +182,12 @@ export function setMenuReturnScope(
       platformOwner: boundary.platformOwner ?? lastBoundary?.platformOwner,
     };
   }
-  if (!changed && (scope === undefined || previousScope === scope)) return false;
-
   loadSnapshots();
   if (changed) {
     snapshots.clear();
     saveSnapshots();
     forgetDirectorySearch('menu');
-  } else if (typeof scope === 'string') {
+  } else if (typeof scope === 'string' && previousScope !== scope) {
     for (const [token, snapshot] of snapshots) {
       if (
         snapshot.provisionalBoundary &&
@@ -188,11 +196,32 @@ export function setMenuReturnScope(
       ) {
         snapshot.scope = scope;
         delete snapshot.provisionalBoundary;
+        delete snapshot.publicLegacy;
       } else if (snapshot.provisionalBoundary || snapshot.scope !== scope) {
         snapshots.delete(token);
       }
     }
     saveSnapshots();
+  } else if (scope === undefined && lastBoundary) {
+    let updated = false;
+    for (const [token, snapshot] of snapshots) {
+      const previous = snapshot.provisionalBoundary;
+      if (!previous) continue;
+      if (boundaryChanged(previous, lastBoundary)) {
+        snapshots.delete(token);
+        updated = true;
+      } else if (snapshot.publicLegacy && boundaryFields.some(
+        (field) => previous[field] === undefined && lastBoundary?.[field] !== undefined,
+      )) {
+        snapshot.provisionalBoundary = {
+          campus: previous.campus ?? lastBoundary.campus,
+          schoolOwner: previous.schoolOwner ?? lastBoundary.schoolOwner,
+          platformOwner: previous.platformOwner ?? lastBoundary.platformOwner,
+        };
+        updated = true;
+      }
+    }
+    if (updated) saveSnapshots();
   }
   if (pending && !snapshots.has(pending.token)) publish(null);
   return changed;
@@ -203,6 +232,7 @@ function removeCurrentMarker(token: string) {
   try {
     const state = { ...window.history.state };
     delete state[MENU_RETURN_STATE_KEY];
+    delete state[ACKNOWLEDGED_STATE_KEY];
     // No URL change: retain the router's own fields exactly as they are.
     window.history.replaceState(state, '');
   } catch {
@@ -225,6 +255,7 @@ export function discardMenuReturn() {
 export function rememberMenuReturn(
   destination: string,
   draft: Pick<MenuNavigationReturn, 'scope' | 'query' | 'category' | 'expanded' | 'open'>,
+  alreadyRestored = false,
 ) {
   const safeDestination = internalSitePath(destination);
   const url = currentMenuReturnUrl();
@@ -246,6 +277,7 @@ export function rememberMenuReturn(
     query: draft.query.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, 100),
     expanded: [...draft.expanded],
     ...(activeScope === undefined ? { provisionalBoundary: lastBoundary ?? {} } : {}),
+    ...(activeScope === undefined && alreadyRestored ? { publicLegacy: true } : {}),
   };
   // Keep the old snapshot until both the storage write and the history update succeed.
   const staged = new Map(snapshots);
@@ -256,7 +288,10 @@ export function rememberMenuReturn(
   }
   if (!saveSnapshots(staged)) return;
   try {
-    window.history.replaceState({ ...state, [MENU_RETURN_STATE_KEY]: token }, '');
+    const nextState: Record<string, unknown> = { ...state, [MENU_RETURN_STATE_KEY]: token };
+    delete nextState[ACKNOWLEDGED_STATE_KEY];
+    if (alreadyRestored) nextState[ACKNOWLEDGED_STATE_KEY] = token;
+    window.history.replaceState(nextState, '');
   } catch {
     saveSnapshots();
     return;
@@ -269,21 +304,29 @@ export function rememberMenuReturn(
   publish(null);
 }
 
-/** Acknowledge this return after the route catches up, keeping the entry for future returns. */
+/** Skip reopening on reload while keeping the draft available for future history returns. */
 export function consumeMenuReturn(snapshot: MenuNavigationReturn, scope: string): boolean {
-  if (typeof activeScope !== 'string') return false;
+  const unverifiedLegacy = activeScope === undefined && snapshot.publicLegacy;
+  if (typeof activeScope !== 'string' && !unverifiedLegacy) return false;
   loadSnapshots();
   if (
     pending !== snapshot ||
     snapshots.get(snapshot.token) !== snapshot ||
-    activeScope !== scope ||
-    snapshot.provisionalBoundary !== undefined ||
-    snapshot.scope !== scope ||
+    (!unverifiedLegacy &&
+      (activeScope !== scope || snapshot.provisionalBoundary !== undefined || snapshot.scope !== scope)) ||
     snapshot.url !== currentMenuReturnUrl() ||
     marker(window.history.state) !== snapshot.token
   ) {
     if (pending === snapshot) publish(null);
     return false;
+  }
+  try {
+    const state = window.history.state;
+    if (state[ACKNOWLEDGED_STATE_KEY] !== snapshot.token) {
+      window.history.replaceState({ ...state, [ACKNOWLEDGED_STATE_KEY]: snapshot.token }, '');
+    }
+  } catch {
+    // The active document can still acknowledge the return in memory.
   }
   publish(null);
   return true;

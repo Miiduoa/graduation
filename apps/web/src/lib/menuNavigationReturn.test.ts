@@ -50,15 +50,53 @@ it('restores all draft fields after reloading the service and waits for scope co
   reloaded.setMenuReturnScope(draft.scope, confirmed);
   expect(reloaded.consumeMenuReturn(pending, draft.scope)).toBe(true);
   expect(reloaded.getMenuReturn()).toBeNull();
-  expect(window.history.state).toEqual(originState);
+  expect(window.history.state).toMatchObject(originState);
+  const acknowledged = window.history.state;
+  const originReload = await loadDocument();
+  originReload.setMenuReturnScope(draft.scope);
+  expect(originReload.getMenuReturn()).toBeNull();
 
   window.history.pushState({}, '', destination);
   const nextReload = await loadDocument();
-  backToOrigin(originState);
-  // The first header can mount after Back has already reached the origin.
   nextReload.setMenuReturnScope(draft.scope);
+  backToOrigin(acknowledged);
   expect(nextReload.getMenuReturn()).toMatchObject(draft);
+
+  // A cross-document Back can reach the origin before its first listener mounts.
+  vi.spyOn(window.performance, 'getEntriesByType').mockReturnValue([
+    { type: 'back_forward' } as PerformanceNavigationTiming,
+  ]);
+  const historyDocument = await loadDocument();
+  historyDocument.setMenuReturnScope(draft.scope);
+  expect(historyDocument.getMenuReturn()).toMatchObject(draft);
 });
+
+it.each(['same', 'different'] as const)(
+  'keeps a migrated public draft through a reload and checks its known boundary (%s)',
+  async (account) => {
+    const menu = await loadDocument();
+    menu.setMenuReturnScope(undefined, { campus: 'pu' });
+    menu.rememberMenuReturn(destination, { ...draft, expanded: [...draft.expanded] }, true);
+    menu.setMenuReturnScope(undefined, { campus: 'pu', schoolOwner: 'school-a' });
+    const originState = window.history.state;
+    const reloaded = await loadDocument();
+    reloaded.setMenuReturnScope(undefined, {
+      campus: 'pu',
+      schoolOwner: account === 'same' ? 'school-a' : 'school-b',
+    });
+    expect(reloaded.getMenuReturn()).toBeNull();
+    window.history.pushState({}, '', destination);
+    backToOrigin(originState);
+    if (account === 'same') {
+      const pending = reloaded.getMenuReturn()!;
+      expect(pending).toMatchObject(draft);
+      expect(reloaded.consumeMenuReturn(pending, draft.scope)).toBe(true);
+    } else {
+      expect(reloaded.getMenuReturn()).toBeNull();
+      expect(sessionStorage.length).toBe(0);
+    }
+  },
+);
 
 it.each(['other-account', 'other-campus', null])(
   'purges a stored draft on confirming a different scope (%s) after reload',
