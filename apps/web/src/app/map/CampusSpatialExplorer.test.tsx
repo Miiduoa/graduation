@@ -3256,19 +3256,21 @@ it.each([
   { coding: 'gzip', length: '0' },
   { coding: 'gzip', length: '000' },
 ] as const)(
-  'reads and rejects a genuinely empty $coding outline with length $length',
+  'rejects an announced empty $coding outline before reading length $length',
   async ({ coding, length }) => {
     const { library } = sourcedLibraryFootprintFixture();
     const response = new Response('', {
       headers: { 'Content-Length': length, 'Content-Encoding': coding },
     });
     const read = vi.spyOn(response.body!, 'getReader');
+    const cancel = vi.spyOn(response.body!, 'cancel');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
     render(<CampusSpatialExplorer school="pu" locations={[library]}
       selected={library} onSelect={vi.fn()} />);
     const dialog = await open();
     expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    expect(read).toHaveBeenCalledOnce();
+    expect(read).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
     expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
     expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
   },
@@ -3295,15 +3297,57 @@ it.each(footprintContentTypes.flatMap((contentType) =>
   if (contentType !== null) headers.set('Content-Type', contentType);
   const response = new Response(new TextEncoder().encode(raw), { headers });
   const read = vi.spyOn(response.body!, 'getReader');
+  const cancel = vi.spyOn(response.body!, 'cancel');
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
   render(<CampusSpatialExplorer school="pu" locations={[library]}
     selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  const valid = payload === 'valid';
+  const supportedType = contentType === null || [
+    'application/json', 'text/plain', 'application/json; charset=UTF-8',
+    'text/plain; charset=UTF-8', 'application/vnd.example_campus+json',
+    ' APPLICATION/JSON ',
+  ].includes(contentType);
+  const valid = payload === 'valid' && supportedType;
   expect(await within(dialog).findByText(valid ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(read).toHaveBeenCalledOnce();
+  expect(read).toHaveBeenCalledTimes(supportedType ? 1 : 0);
+  expect(cancel).toHaveBeenCalledTimes(supportedType ? 0 : 1);
+  if (!supportedType) {
+    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled'))
+      .toBe(true);
+  }
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(valid ? buildings : []);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it.each([
+  { label: 'HTML captive portal', headers: { 'Content-Type': 'text/html' } },
+  { label: 'mixed JSON and HTML MIME', headers: { 'Content-Type': 'application/json, text/html' } },
+  { label: 'zero-byte identity response', headers: { 'Content-Type': 'application/json', 'Content-Length': '000' } },
+  { label: 'zero-byte compressed response', headers: {
+    'Content-Type': 'application/json', 'Content-Length': '0', 'Content-Encoding': 'gzip',
+  } },
+])('rejects $label on HTTP 200 before reading a stalled map stream', async ({ headers }) => {
+  const { library } = sourcedLibraryFootprintFixture();
+  const cancel = vi.fn();
+  // The body never ends: a mistaken getReader() would hang until the 15s
+  // deadline. Header validation must reject and cancel it immediately.
+  const stream = new ReadableStream<Uint8Array>({ cancel });
+  const response = new Response(stream, { status: 200, headers });
+  const read = vi.spyOn(response.body!, 'getReader');
+  const fetchMock = vi.fn().mockResolvedValue(response);
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]}
+    selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(read).not.toHaveBeenCalled();
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled'))
+    .toBe(true);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟 Apple 地圖步行導航' })).toBeTruthy();
 });
 
 it('reads the final successful outline response after a redirect', async () => {
