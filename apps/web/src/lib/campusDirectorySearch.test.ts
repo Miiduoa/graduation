@@ -176,3 +176,25 @@ it('skips a draft write when the existing shared slots cannot be read', () => {
   }
   expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
 });
+
+it.each(['quick', 'search', 'menu'] as const)('binds a provisional %s draft on its first confirmed account', (source) => {
+  const snapshot = { path: '/', destination: '/library', query: '借書' };
+  rememberDirectorySearch(source, { ...snapshot, binding: { campus: 'pu' } });
+  expect(restoreDirectorySearch(source, '/', 'first', { campus: 'pu', schoolOwner: 'a' }, false)?.query)
+    .toBe(snapshot.query);
+
+  const stored = sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY);
+  expect(restoreDirectorySearch(source, '/', 'unknown', { campus: 'pu' }, false)).toBeNull();
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBe(stored);
+  expect(restoreDirectorySearch(source, '/', 'second', { campus: 'pu', schoolOwner: 'b' }, false)).toBeNull();
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
+});
+
+it('allows a confirmed source to save a new draft when the old draft has no matching source', () => {
+  const snapshot = { path: '/', destination: '/library', query: '借書' };
+  rememberDirectorySearch('quick', { ...snapshot, binding: { campus: 'pu', schoolOwner: 'a' } });
+  const platform = { campus: 'pu', platformOwner: 'b' };
+  expect(restoreDirectorySearch('quick', '/', 'platform', platform, false)).toBeNull();
+  rememberDirectorySearch('quick', { ...snapshot, binding: platform, query: '公車' });
+  expect(restoreDirectorySearch('quick', '/', 'platform', platform, false)?.query).toBe('公車');
+});

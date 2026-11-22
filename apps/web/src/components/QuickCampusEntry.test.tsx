@@ -1,3 +1,4 @@
+import { directoryDraftCases } from '@/test/directoryDraftCases';
 import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directoryStorageFailures';
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -40,7 +41,7 @@ vi.mock('./SelectedSchoolProvider', () => ({
 }));
 vi.mock('@/features/nuni/Session', () => ({
   useOptionalNuniSession: () =>
-    state.platform || state.pendingLogout
+    state.platform || state.pendingLogout || state.platformError || state.platformLoading
       ? {
           session: state.platform ? { platformAccountId: state.accountId, context: state.context } : null,
           loading: state.platformLoading,
@@ -865,4 +866,66 @@ it('keeps a saved quick draft while the same campus account is temporarily unver
   state.error = null;
   view.rerender(<QuickCampusEntry />);
   expect(input.value).toBe('借書');
+});
+
+it.each(directoryDraftCases)('checks a saved search when $name', (entry) => {
+  state.uid = entry.saved === 'platform' ? null : 'a';
+  state.platform = entry.saved !== 'school';
+  state.accountId = 'a';
+  state.school = { id: 'pu', code: 'PU' };
+  const first = render(<QuickCampusEntry />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }));
+  first.unmount();
+  window.history.replaceState({}, '', '/');
+  state.uid = entry.school === 'failed' ? null : entry.school;
+  state.error = entry.school === 'failed' ? new Error('unavailable') : null;
+  state.platform = entry.platform !== 'failed';
+  state.accountId = entry.platform;
+  state.platformError = entry.platform === 'failed' ? 'unavailable' : '';
+  if ('campus' in entry) state.school = { id: entry.campus, code: 'NTHU' };
+  render(<QuickCampusEntry />);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(entry.restored ? '借書' : '');
+  expect(Boolean(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY))).toBe(entry.restored || 'retained' in entry);
+});
+
+it('clears a restored draft if the other source later confirms a different account', () => {
+  state.uid = 'alice';
+  state.platform = true;
+  const first = render(<QuickCampusEntry />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }));
+  first.unmount();
+  window.history.replaceState({}, '', '/');
+
+  state.platform = false;
+  state.platformError = 'unavailable';
+  const returned = render(<QuickCampusEntry />);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+  state.platform = true;
+  state.platformError = '';
+  state.accountId = 'another-account';
+  returned.rerender(<QuickCampusEntry />);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
+});
+
+it('claims a provisional draft on the first successful verification', () => {
+  state.uid = null;
+  state.error = new Error('unavailable');
+  state.platformError = 'unavailable';
+  const first = render(<QuickCampusEntry />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }));
+  first.unmount();
+  window.history.replaceState({}, '', '/');
+
+  state.uid = 'alice';
+  state.error = null;
+  const returned = render(<QuickCampusEntry />);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+  returned.unmount();
+  state.uid = 'another-account';
+  render(<QuickCampusEntry />);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
 });

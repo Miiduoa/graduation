@@ -1,5 +1,7 @@
 'use client';
 
+import { restorePanelFocus } from '@/lib/restorePanelFocus';
+
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import {
@@ -36,7 +38,9 @@ function closeNavigationPopovers(header: HTMLElement | null, except?: HTMLDetail
   header
     ?.querySelectorAll<HTMLDetailsElement>('details[name="campus-navigation-popover"][open]')
     .forEach((element) => {
-      if (element !== except) element.open = false;
+      if (element === except) return;
+      restorePanelFocus(element, element.querySelector('summary'));
+      element.open = false;
     });
 }
 
@@ -67,6 +71,14 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
   const [assistant, setAssistant] = useState<AssistantPanelState | null>(null);
   const quickTrigger = useRef<HTMLButtonElement>(null);
   const quickPanel = useRef<HTMLElement>(null);
+  const attachQuickPanel = useCallback((element: HTMLElement | null) => {
+    quickPanel.current = element;
+    if (!element) return;
+    return () => {
+      if (element.contains(document.activeElement)) restorePanelFocus(element, quickTrigger.current);
+      quickPanel.current = null;
+    };
+  }, []);
   const context = useCampusNavigationSearch(params);
   const campus = useCampusBrowseContext();
   const campusId = campus.status === 'loading' ? undefined : campus.schoolId;
@@ -97,8 +109,8 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
   if (accountScope !== null && accountScope !== navigationScope) setAccountScope(null);
   const closeAccount = () => {
     if (!accountMenu.current?.open) return;
+    restorePanelFocus(accountMenu.current, accountTrigger.current);
     accountMenu.current.open = false;
-    accountTrigger.current?.focus({ preventScroll: true });
   };
   useLayoutEffect(() => {
     if (assistantOpen) quickPanel.current?.focus({ preventScroll: true });
@@ -108,6 +120,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
     if (navigation) return observeMobileNavigationInset(navigation);
   }, []);
   const hideAssistant = useCallback(() => {
+    if (quickPanel.current) restorePanelFocus(quickPanel.current, quickTrigger.current);
     quickPanel.current
       ?.querySelectorAll<HTMLButtonElement>(
         '[data-voice-input][aria-pressed="true"], [data-voice-playback][aria-pressed="true"]',
@@ -129,7 +142,6 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
         // Closing is still available when the browser disallows History access.
       }
     }
-    quickTrigger.current?.focus({ preventScroll: true });
   };
   const openAssistant = () => {
     setAssistant((current) => ({
@@ -163,6 +175,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
     function dismissOutside(event: PointerEvent | FocusEvent) {
       if (!(event.target instanceof Node)) return;
       if (accountMenu.current?.open && !accountMenu.current.contains(event.target)) {
+        restorePanelFocus(accountMenu.current, accountTrigger.current);
         accountMenu.current.open = false;
       }
       if (
@@ -335,10 +348,8 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
                     href="/profile"
                     onClick={(event) => {
                       if (
-                        isCurrentTabNavigationClick(event, event.currentTarget) &&
-                        accountMenu.current
-                      )
-                        accountMenu.current.open = false;
+                        isCurrentTabNavigationClick(event, event.currentTarget)
+                      ) closeAccount();
                     }}
                   >
                     <CampusIcon name="profile" size={18} />
@@ -351,10 +362,8 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
                     href="/admin"
                     onClick={(event) => {
                       if (
-                        isCurrentTabNavigationClick(event, event.currentTarget) &&
-                        accountMenu.current
-                      )
-                        accountMenu.current.open = false;
+                        isCurrentTabNavigationClick(event, event.currentTarget)
+                      ) closeAccount();
                     }}
                   >
                     <CampusIcon name="services" size={18} />
@@ -428,7 +437,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
         <section
           key={scope}
           id="campus-assistant-entry"
-          ref={quickPanel}
+          ref={attachQuickPanel}
           role="dialog"
           aria-label="校園助理"
           tabIndex={-1}

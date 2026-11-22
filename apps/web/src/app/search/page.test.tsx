@@ -1,3 +1,4 @@
+import { directoryDraftCases } from '@/test/directoryDraftCases';
 import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directoryStorageFailures';
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -1174,4 +1175,66 @@ describe.each(directoryStorageFailures)('search navigation with storage %s', (fa
     }
     expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
   });
+});
+
+it.each(directoryDraftCases)('checks a saved search when $name', (entry) => {
+  userState.uid = entry.saved === 'platform' ? null : 'a';
+  userState.platform = entry.saved !== 'school';
+  userState.accountId = 'a';
+  selection.current = { loading: false, catalogStatus: 'ready', selectedSchool: { id: 'pu' } };
+  const first = render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+  first.unmount();
+  window.history.replaceState({}, '', '/search');
+  userState.uid = entry.school === 'failed' ? null : entry.school;
+  userState.error = entry.school === 'failed' ? new Error('unavailable') : null;
+  userState.platform = entry.platform !== 'failed';
+  userState.accountId = entry.platform;
+  userState.platformError = entry.platform === 'failed' ? 'unavailable' : '';
+  if ('campus' in entry && selection.current) selection.current.selectedSchool = { id: entry.campus };
+  render(<SearchPage />);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(entry.restored ? '借書' : '');
+  expect(Boolean(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY))).toBe(entry.restored || 'retained' in entry);
+});
+
+it('clears a restored draft if the other source later confirms a different account', () => {
+  userState.uid = 'alice';
+  userState.platform = true;
+  const first = render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+  first.unmount();
+  window.history.replaceState({}, '', '/search');
+
+  userState.platform = false;
+  userState.platformError = 'unavailable';
+  const returned = render(<SearchPage />);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+  userState.platform = true;
+  userState.platformError = '';
+  userState.accountId = 'another-account';
+  returned.rerender(<SearchPage />);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
+  expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toBeNull();
+});
+
+it('claims a provisional draft on the first successful verification', () => {
+  userState.uid = null;
+  userState.error = new Error('unavailable');
+  userState.platformError = 'unavailable';
+  const first = render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+  first.unmount();
+  window.history.replaceState({}, '', '/search');
+
+  userState.uid = 'alice';
+  userState.error = null;
+  const returned = render(<SearchPage />);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+  returned.unmount();
+  userState.uid = 'another-account';
+  render(<SearchPage />);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
 });

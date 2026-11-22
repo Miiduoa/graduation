@@ -250,9 +250,11 @@ const navigationEntries = [
 
 it.each(
   navigationEntries.flatMap((entry) =>
-    [true, false].map((sameUrl) => ({ ...entry, sameUrl })),
+    [true, false].flatMap((sameUrl) =>
+      ['mouse', 'Enter'].map((gesture) => ({ ...entry, sameUrl, gesture })),
+    ),
   ),
-)('handles $name ($query, same URL: $sameUrl) while speaking', async (entry) => {
+)('handles $name ($query, same URL: $sameUrl, $gesture) while speaking', async (entry) => {
   const cancel = vi.fn();
   const speak = vi.fn();
   vi.stubGlobal('speechSynthesis', {
@@ -286,11 +288,18 @@ it.each(
   expect(screen.getByRole('dialog')).toBeTruthy();
   expect(cancel).not.toHaveBeenCalled();
   link.removeAttribute('target');
-  fireEvent.click(link);
+  if (entry.gesture === 'Enter') {
+    link.focus();
+    expect(document.activeElement).toBe(link);
+    fireEvent.keyDown(link, { key: 'Enter' });
+  }
+  // jsdom does not dispatch the browser's activation click for Enter on a link.
+  fireEvent.click(link, { detail: entry.gesture === 'Enter' ? 0 : 1 });
   expect(window.location.href).toBe(currentUrl);
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(cancel).toHaveBeenCalledOnce();
   expect(document.activeElement).toBe(trigger);
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
 });
 
 it('opens the actual account conversation without a search detour, recording, or automatic submission', async () => {

@@ -33,7 +33,7 @@ import {
   type AssistantServiceId,
 } from '@campus/shared/src/assistantServices';
 import { AssistantServiceLinks } from './AssistantServiceLinks';
-import { useCampusFinderAccount, useCampusFinderDraftScope } from '@/lib/useCampusFinderAccount';
+import { useCampusFinderAccount, useCampusFinderDraftScope, useDirectoryDraftIdentity } from '@/lib/useCampusFinderAccount';
 import { AssistantLinkNavigation, useAssistantLinkNavigation } from './AssistantReplyLink';
 import styles from './QuickCampusEntry.module.css';
 
@@ -66,9 +66,6 @@ export function QuickCampusEntry({
   const campusReady = !selection || (!selection.loading && selection.catalogStatus === 'ready');
   const canInterpret = account.canInterpret && campusReady;
   const canUseAssistant = account.canUseAssistant && campusReady;
-  const canRemember =
-    account.canRemember && campusReady &&
-    account.schoolDraftOwner !== undefined && account.platformDraftOwner !== undefined;
   const selected = selection?.selectedSchool;
   const selectedSchoolId = selected?.id || '';
   const scope = JSON.stringify([
@@ -77,9 +74,12 @@ export function QuickCampusEntry({
     Boolean(selection?.loading),
     selection?.catalogStatus,
   ]);
-  const storageScope = JSON.stringify([account.ownerScope, selectedSchoolId]);
+  const { binding, scope: draftOwner, canRestore, bindRestoredDraft } = useDirectoryDraftIdentity(
+    account, campusReady ? selectedSchoolId : undefined,
+  );
+  const storageScope = JSON.stringify([account.draftOwnerScope, selectedSchoolId]);
   const draftScope = useCampusFinderDraftScope(
-    account.ownerScope,
+    draftOwner,
     campusReady ? selectedSchoolId : null,
   );
   const campusSearch = buildCampusNavigationSearch(
@@ -106,8 +106,11 @@ export function QuickCampusEntry({
     };
   }, [scope]);
   useLayoutEffect(() => {
-    if (!canRemember) {
+    if (!canRestore) {
       restoredScope.current = null;
+      if (campusReady && account.status !== 'signing-out') {
+        restoreDirectorySearch('quick', window.location.pathname || '/', undefined, binding);
+      }
       return;
     }
     if (restoredScope.current === storageScope) return;
@@ -117,12 +120,18 @@ export function QuickCampusEntry({
       'quick',
       window.location.pathname || '/',
       storageScope,
+      binding,
+      account.fullyVerified,
     );
     if (draft.edited || !snapshot) return;
+    bindRestoredDraft(snapshot.binding);
     // Restore the typed request after history navigation back to this page.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft({ scope: draftScope, query: snapshot.query.slice(0, 160), edited: false });
-  }, [canRemember, draftScope, storageScope, draft.edited]);
+  }, [
+    canRestore, campusReady, draftScope, storageScope, draft.edited, binding,
+    bindRestoredDraft, account.fullyVerified, account.status,
+  ]);
   useEffect(
     () => () => {
       sequence.current += 1;
@@ -187,19 +196,20 @@ export function QuickCampusEntry({
   }
 
   function startOver() {
-    if (canRemember) forgetDirectorySearch('quick', storageScope);
+    if (canRestore) forgetDirectorySearch('quick');
     updateQuery('');
     input.current?.focus();
   }
 
   function rememberQuick(href: string) {
-    if (!canRemember) return;
+    if (!campusReady || account.status === 'signing-out') return;
     rememberDirectorySearch('quick', {
       path: window.location.pathname || '/',
       destination: href,
       query,
       open: true,
-      scope: storageScope,
+      scope: canRestore ? storageScope : undefined,
+      binding,
     });
   }
 

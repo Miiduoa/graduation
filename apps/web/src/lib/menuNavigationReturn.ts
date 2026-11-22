@@ -1,9 +1,14 @@
 import { sha256 } from 'js-sha256';
 import { SERVICE_CATEGORIES, type ServiceCategory } from './campusServices';
 import {
+  directoryDraftOwners as ownerFields,
   forgetDirectorySearch,
   internalSitePath,
+  matchDirectoryDraft,
+  mergeDraftBinding,
   restoreDirectorySearch,
+  validDirectoryDraftBinding,
+  type DirectoryDraftBinding,
 } from './campusDirectorySearch';
 
 export const MENU_RETURN_STATE_KEY = '__campusServiceMenuReturn';
@@ -21,34 +26,17 @@ export type MenuNavigationReturn = {
   open?: boolean;
   previousMarker?: string | null;
   provisionalBoundary?: MenuReturnBoundary;
+  binding?: DirectoryDraftBinding;
   publicLegacy?: true;
   // Keep the original binding when a legacy draft is restored before confirmation.
   legacyScope?: string;
 };
 
-type MenuReturnBoundary = Partial<Record<'campus' | 'schoolOwner' | 'platformOwner', string>>;
-
-const ownerFields = ['schoolOwner', 'platformOwner'] as const;
+type MenuReturnBoundary = Omit<DirectoryDraftBinding, 'guest'>;
 const boundaryFields = ['campus', ...ownerFields] as const;
 
 function boundaryChanged(previous: MenuReturnBoundary, next: MenuReturnBoundary, guest = false) {
-  if (guest && ownerFields.some((field) => previous[field] !== undefined)) return true;
-  return boundaryFields.some(
-    (field) =>
-      previous[field] !== undefined && next[field] !== undefined && previous[field] !== next[field],
-  );
-}
-
-function validBoundary(value: unknown): value is MenuReturnBoundary {
-  return (
-    !!value &&
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    boundaryFields.every((field) => {
-      const entry = (value as Record<string, unknown>)[field];
-      return entry === undefined || typeof entry === 'string';
-    })
-  );
+  return matchDirectoryDraft(previous, { ...next, guest: guest || undefined }) === 'clear';
 }
 
 // History carries only an opaque marker. The tab stores drafts with a hashed scope.
@@ -61,6 +49,8 @@ let activeScope: string | null | undefined;
 let lastConfirmedScope: string | undefined;
 let lastConfirmedGuest = false;
 let lastBoundary: MenuReturnBoundary | undefined;
+let restoredBinding: DirectoryDraftBinding | undefined;
+let draftIdentity: { scope: string; binding: DirectoryDraftBinding; confirmed: boolean } | undefined;
 let storedSnapshots: string | null | undefined;
 let sequence = 0;
 
@@ -138,7 +128,8 @@ function loadSnapshots(): boolean {
         (snapshot.open === undefined || typeof snapshot.open === 'boolean') &&
         (snapshot.previousMarker === undefined || snapshot.previousMarker === null ||
           typeof snapshot.previousMarker === 'string') &&
-        (snapshot.provisionalBoundary === undefined || validBoundary(snapshot.provisionalBoundary)) &&
+        (snapshot.binding === undefined || validDirectoryDraftBinding(snapshot.binding)) &&
+        (snapshot.provisionalBoundary === undefined || validDirectoryDraftBinding(snapshot.provisionalBoundary)) &&
         (snapshot.publicLegacy === undefined ||
           (snapshot.publicLegacy === true && snapshot.provisionalBoundary !== undefined)) &&
         (snapshot.legacyScope === undefined ||
@@ -184,6 +175,8 @@ function observeWindow() {
     lastConfirmedScope = undefined;
     lastConfirmedGuest = false;
     lastBoundary = undefined;
+    draftIdentity = undefined;
+    restoredBinding = undefined;
     storedSnapshots = undefined;
     // A new document can mount on the origin after the browser has already returned.
     const state = window.history.state;
@@ -215,7 +208,14 @@ export const isMenuReturnSuspended = () => activeScope === null;
 export function restoreLegacyMenuReturn(pathname: string) {
   loadSnapshots();
   if (currentSnapshot(window.history.state)) return null;
-  return restoreDirectorySearch('menu', pathname);
+  const snapshot = restoreDirectorySearch('menu', pathname, undefined, draftIdentity?.binding);
+  if (!snapshot?.binding && snapshot?.scope !== undefined &&
+      activeScope === undefined && draftIdentity?.binding.campus !== undefined &&
+      (!draftIdentity.confirmed ||
+        (snapshot.scope !== draftIdentity.scope && snapshot.scope !== lastConfirmedScope))) {
+    return null;
+  }
+  return snapshot;
 }
 
 export function matchesKnownMenuReturnScope(scope: string) {
@@ -227,13 +227,17 @@ export function setMenuReturnScope(
   scope: string | null | undefined,
   boundary?: MenuReturnBoundary,
   guest = false,
+  identity?: typeof draftIdentity,
 ) {
   observeWindow();
+  draftIdentity = identity;
   // A null scope with no boundary resets the document's in-memory binding.
   if (scope === null && !boundary) {
     lastConfirmedScope = undefined;
     lastConfirmedGuest = false;
     lastBoundary = undefined;
+    draftIdentity = undefined;
+    restoredBinding = undefined;
     activeScope = undefined;
     acknowledgedToken = undefined;
     publish(null);
@@ -252,11 +256,16 @@ export function setMenuReturnScope(
       (field) => lastBoundary?.[field] === undefined && nextBoundary[field] !== undefined,
     );
   // A partial account can also mean that one identity source is unavailable.
-  if (!guest && typeof scope === 'string' && missingOwner) scope = null;
+  if (!guest && typeof scope === 'string' && missingOwner && !identity?.confirmed) scope = null;
+  const changedRestoredBinding = identity && restoredBinding && scope !== null &&
+    matchDirectoryDraft(restoredBinding, identity.binding) === 'clear';
+  const compatibleBinding = identity && lastBoundary && typeof scope === 'string' &&
+    matchDirectoryDraft(lastBoundary, identity.binding) === 'restore' && lastConfirmedGuest === guest;
   const changed =
-    changedBoundary ||
+    Boolean(changedRestoredBinding) || changedBoundary ||
     (lastConfirmedScope !== undefined &&
-      ((guest && !lastConfirmedGuest) || (typeof scope === 'string' && lastConfirmedScope !== scope)));
+      ((guest && !lastConfirmedGuest) ||
+        (typeof scope === 'string' && lastConfirmedScope !== scope && !compatibleBinding)));
   const previousScope = activeScope;
   activeScope = scope;
   if (typeof scope === 'string' || changed) {
@@ -274,6 +283,7 @@ export function setMenuReturnScope(
   loadSnapshots();
   let invalidatedRestoredDraft = false;
   if (changed) {
+    restoredBinding = undefined;
     snapshots.clear();
     saveSnapshots();
     forgetDirectorySearch('menu');
@@ -281,12 +291,20 @@ export function setMenuReturnScope(
     let updated = false;
     for (const [token, snapshot] of snapshots) {
       const previous = snapshot.provisionalBoundary;
-      if (
+      if (snapshot.binding && identity && !previous) {
+        if (matchDirectoryDraft(snapshot.binding, identity.binding) === 'clear') {
+          snapshots.delete(token);
+          updated = true;
+        }
+      } else if (
         previous &&
         (snapshot.legacyScope === undefined || snapshot.legacyScope === scope) &&
         !boundaryChanged(previous, boundary ?? {}, guest)
       ) {
         snapshot.scope = scope;
+        if (identity && snapshot.legacyScope === undefined && !snapshot.publicLegacy) {
+          snapshot.binding = mergeDraftBinding(previous, identity.binding);
+        }
         delete snapshot.provisionalBoundary;
         delete snapshot.publicLegacy;
         delete snapshot.legacyScope;
@@ -307,6 +325,22 @@ export function setMenuReturnScope(
     let updated = false;
     for (const [token, snapshot] of snapshots) {
       const previous = snapshot.provisionalBoundary;
+      if (identity && !snapshot.publicLegacy && snapshot.legacyScope === undefined) {
+        const saved = snapshot.binding ?? previous;
+        if (saved) {
+          const decision = matchDirectoryDraft(saved, identity.binding);
+          if (decision === 'clear') {
+            snapshots.delete(token);
+            updated = true;
+          } else if (decision === 'restore' && identity.confirmed && previous) {
+            snapshot.binding = mergeDraftBinding(saved, identity.binding);
+            snapshot.scope = identity.scope;
+            delete snapshot.provisionalBoundary;
+            updated = true;
+          }
+        }
+        continue;
+      }
       if (!previous) continue;
       if (boundaryChanged(previous, lastBoundary, guest)) {
         if (
@@ -387,17 +421,25 @@ export function rememberMenuReturn(
   const legacy = provisional && !alreadyRestored
     ? restoreDirectorySearch('menu', window.location.pathname)
     : null;
-  // Incomplete identity cannot replace a draft already bound to a confirmed scope.
+  // Preserve a bound draft while its owner cannot be checked.
+  const savedBinding = previous?.binding ?? legacy?.binding;
+  const decision = savedBinding && draftIdentity
+    ? matchDirectoryDraft(savedBinding, draftIdentity.binding)
+    : undefined;
   if (
     provisional &&
-    ((previous && (previous.provisionalBoundary === undefined || previous.legacyScope !== undefined)) ||
-      legacy?.scope !== undefined)
+    ((decision === 'wait' && !draftIdentity?.confirmed) || (decision === undefined &&
+      ((previous && (previous.provisionalBoundary === undefined || previous.legacyScope !== undefined)) ||
+        legacy?.scope !== undefined)))
   ) return;
   // A fresh draft can be claimed on first confirmation, as with the old per-tab draft.
-  // Retain the known boundary when a previously confirmed identity is being rechecked.
   const provisionalBoundary = alreadyRestored || lastConfirmedScope !== undefined
     ? { ...lastBoundary }
     : {};
+  const binding = draftIdentity && (!provisional || (draftIdentity.confirmed && !alreadyRestored))
+    ? mergeDraftBinding(decision === 'restore' && savedBinding ? savedBinding : provisionalBoundary,
+      draftIdentity.binding)
+    : undefined;
   const token = window.crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${++sequence}`;
   const snapshot: MenuNavigationReturn = {
     ...draft,
@@ -407,6 +449,7 @@ export function rememberMenuReturn(
     query: draft.query.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, 100),
     expanded: [...draft.expanded],
     ...(provisional ? { provisionalBoundary } : {}),
+    ...(binding ? { binding } : {}),
     ...(provisional && legacyScope !== undefined
       ? { legacyScope }
       : provisional && alreadyRestored ? { publicLegacy: true } : {}),
@@ -444,10 +487,23 @@ export function consumeMenuReturn(snapshot: MenuNavigationReturn, scope: string)
   const unverifiedLegacy = activeScope === undefined &&
     (snapshot.publicLegacy ||
       (snapshot.legacyScope !== undefined && matchesKnownMenuReturnScope(snapshot.legacyScope)));
-  if (typeof activeScope !== 'string' && !unverifiedLegacy) return false;
+  if (activeScope === null) return false;
+  const savedBinding = snapshot.binding ??
+    (snapshot.legacyScope === undefined && !snapshot.publicLegacy ? previous : undefined);
+  const decision = savedBinding && draftIdentity
+    ? matchDirectoryDraft(savedBinding, draftIdentity.binding)
+    : undefined;
+  if (decision === 'clear') {
+    discardMenuReturn();
+    return false;
+  }
+  const matchingDraft = draftIdentity?.confirmed &&
+    (decision === 'restore' || (decision === undefined && !previous && snapshot.scope === draftIdentity.scope));
+  if (typeof activeScope !== 'string' && !unverifiedLegacy && !matchingDraft) return false;
   loadSnapshots();
   const confirmedDraft =
-    activeScope === scope && snapshot.scope === scope && previous === undefined;
+    matchingDraft || (decision === undefined && activeScope === scope && snapshot.scope === scope && previous === undefined);
+  if (decision === 'wait' && !unverifiedLegacy) return false;
   if (
     pending !== snapshot ||
     snapshots.get(snapshot.token) !== snapshot ||
@@ -471,6 +527,13 @@ export function consumeMenuReturn(snapshot: MenuNavigationReturn, scope: string)
     // The active document can still acknowledge the return in memory.
   }
   acknowledgedToken = snapshot.token;
+  if (draftIdentity?.confirmed && savedBinding && decision === 'restore') {
+    restoredBinding = mergeDraftBinding(savedBinding, draftIdentity.binding);
+    snapshot.binding = restoredBinding;
+    snapshot.scope = draftIdentity.scope;
+    delete snapshot.provisionalBoundary;
+    saveSnapshots();
+  }
   publish(null);
   return true;
 }

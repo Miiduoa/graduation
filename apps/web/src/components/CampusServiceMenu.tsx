@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { CampusIcon } from './CampusIcon';
 import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { sha256 } from 'js-sha256';
 import {
   visibleCampusServices,
@@ -23,8 +23,9 @@ import {
   expandedDirectorySections,
   forgetDirectorySearch,
 } from '@/lib/campusDirectorySearch';
+import { restorePanelFocus } from '@/lib/restorePanelFocus';
 import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
-import { useCampusFinderAccount } from '@/lib/useCampusFinderAccount';
+import { useCampusFinderAccount, useDirectoryDraftIdentity } from '@/lib/useCampusFinderAccount';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import {
   consumeMenuReturn,
@@ -107,7 +108,6 @@ export function CampusServiceMenu() {
   const context = useCampusNavigationSearch(params);
   const selection = useOptionalSelectedSchool();
   const account = useCampusFinderAccount();
-  const { schoolDraftOwner, platformDraftOwner } = account;
   const sourceCampus = resolveSchoolPageContext(
     Object.fromEntries(new URLSearchParams(context)),
   ).schoolId;
@@ -116,11 +116,11 @@ export function CampusServiceMenu() {
     selection && (selection.loading || selection.catalogStatus !== 'ready')
       ? undefined
       : sourceCampus;
-  const returnScope = sha256(JSON.stringify([account.ownerScope, campusId]));
-  const canRemember =
-    campusId !== undefined &&
-    account.canRemember && schoolDraftOwner !== undefined && platformDraftOwner !== undefined;
-  const draftScope = account.status === 'signing-out' ? null : canRemember ? returnScope : undefined;
+  const { binding, canRestore } = useDirectoryDraftIdentity(account, campusId);
+  const returnScope = sha256(JSON.stringify([account.draftOwnerScope, campusId]));
+  const draftScope = account.status === 'signing-out'
+    ? null
+    : canRestore && account.fullyVerified ? returnScope : undefined;
   const historyReturn = useSyncExternalStore(
     subscribeMenuReturn,
     getMenuReturn,
@@ -130,6 +130,14 @@ export function CampusServiceMenu() {
     .filter((service) => campusServiceMatches(service.href, pathname, params))
     .sort((first, second) => second.href.length - first.href.length)[0]?.href;
   const menu = useRef<HTMLDetailsElement>(null);
+  const attachMenu = useCallback((element: HTMLDetailsElement | null) => {
+    menu.current = element;
+    if (!element) return;
+    return () => {
+      if (element.contains(document.activeElement)) restorePanelFocus(element);
+      menu.current = null;
+    };
+  }, []);
   const search = useRef<HTMLInputElement>(null);
   const results = useRef<HTMLDivElement>(null);
   const directoryLink = useRef<HTMLAnchorElement>(null);
@@ -144,6 +152,7 @@ export function CampusServiceMenu() {
     const element = menu.current;
     if (!element || element.open === open) return;
     skipToggleSideEffects.current = true;
+    if (!open) restorePanelFocus(element, element.querySelector('summary'));
     element.open = open;
     if (open) {
       // 還原打開後，瀏覽器可能延遲派發 toggle，並在把焦點移回頁面時觸發 blur。
@@ -157,12 +166,9 @@ export function CampusServiceMenu() {
   useLayoutEffect(() => {
     const changed = setMenuReturnScope(
       draftScope,
-      {
-        campus: campusId,
-        schoolOwner: account.uid ? schoolDraftOwner : undefined,
-        platformOwner: account.platformAudience ? platformDraftOwner : undefined,
-      },
+      binding,
       account.status === 'guest',
+      { scope: returnScope, binding, confirmed: canRestore },
     );
     const changedPage = previousPathname.current !== pathname;
     previousPathname.current = pathname;
@@ -177,12 +183,9 @@ export function CampusServiceMenu() {
     setQuery('');
     setCategory('all');
     setRestoredExpanded([]);
-  }, [
-    pathname, draftScope, campusId, schoolDraftOwner, platformDraftOwner,
-    account.uid, account.platformAudience, account.status,
-  ]);
+  }, [pathname, draftScope, account.status, returnScope, binding, canRestore]);
   useLayoutEffect(() => {
-    if (isMenuReturnSuspended() || account.status === 'checking') return;
+    if (isMenuReturnSuspended() || (account.status === 'checking' && !canRestore)) return;
     // The browser URL can change before Next renders the matching route.
     if (
       pathname !== window.location.pathname ||
@@ -200,7 +203,7 @@ export function CampusServiceMenu() {
       ) {
         return;
       }
-      if (snapshot.scope !== undefined && !matchesKnownMenuReturnScope(snapshot.scope)) {
+      if (!snapshot.binding && snapshot.scope !== undefined && !matchesKnownMenuReturnScope(snapshot.scope)) {
         forgetDirectorySearch('menu');
         return;
       }
@@ -231,12 +234,13 @@ export function CampusServiceMenu() {
     ) {
       previouslyFocused.focus({ preventScroll: true });
     }
-  }, [historyReturn, pathname, queryString, returnScope, draftScope, account.status]);
+  }, [historyReturn, pathname, queryString, returnScope, draftScope, account.status, canRestore, binding]);
   useEffect(() => {
     function dismiss(event: PointerEvent) {
       const element = menu.current;
       if (element?.open && event.target instanceof Node && !element.contains(event.target)) {
         discardMenuReturn();
+        restorePanelFocus(element, element.querySelector('summary'));
         element.open = false;
       }
     }
@@ -279,7 +283,6 @@ export function CampusServiceMenu() {
     setQuery('');
     setCategory('all');
     setRestoredExpanded([]);
-    menu.current.querySelector('summary')?.focus({ preventScroll: true });
   }
   function dismissMenu() {
     discardMenuReturn();
@@ -349,7 +352,7 @@ export function CampusServiceMenu() {
   }
   return (
     <details
-      ref={menu}
+      ref={attachMenu}
       name="campus-navigation-popover"
       className={styles.menu}
       key={pathname}
@@ -392,8 +395,10 @@ export function CampusServiceMenu() {
         aria-controls={`${id}-services`}
         aria-keyshortcuts="Control+k Meta+k"
         aria-current={primaryNavigationSection(pathname) === 'more' ? 'page' : undefined}
-        onClick={() => {
-          if (menu.current?.open) discardMenuReturn();
+        onClick={(event) => {
+          if (!menu.current?.open) return;
+          discardMenuReturn();
+          restorePanelFocus(menu.current, event.currentTarget);
         }}
       >
         <CampusIcon name="services" size={17} />
