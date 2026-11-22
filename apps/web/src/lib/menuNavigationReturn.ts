@@ -1,7 +1,9 @@
-import type { ServiceCategory } from './campusServices';
-import { internalSitePath } from './campusDirectorySearch';
+import { SERVICE_CATEGORIES, type ServiceCategory } from './campusServices';
+import { forgetDirectorySearch, internalSitePath } from './campusDirectorySearch';
 
 export const MENU_RETURN_STATE_KEY = '__campusServiceMenuReturn';
+const STORAGE_KEY = 'campus.menu.return.v1';
+const MAX_SNAPSHOTS = 20;
 
 export type MenuNavigationReturn = {
   token: string;
@@ -10,15 +12,16 @@ export type MenuNavigationReturn = {
   query: string;
   category: ServiceCategory | 'all';
   expanded: string[];
+  open?: boolean;
 };
 
-// Menu drafts belong to this document, never to storage or a future reload.
-// History carries only an opaque marker; the account binding is already hashed.
+// History carries only an opaque marker. The tab stores drafts with a hashed scope.
 const snapshots = new Map<string, MenuNavigationReturn>();
 const listeners = new Set<() => void>();
 let pending: MenuNavigationReturn | null = null;
 let observedWindow: Window | undefined;
-let activeScope: string | null = null;
+let activeScope: string | null | undefined;
+let storedSnapshots: string | null | undefined;
 let sequence = 0;
 
 export function currentMenuReturnUrl() {
@@ -37,14 +40,60 @@ function publish(value: MenuNavigationReturn | null) {
   listeners.forEach((listener) => listener());
 }
 
-function captureReturn(event: PopStateEvent) {
-  const token = marker(event.state);
+function captureReturnState(state: unknown) {
+  loadSnapshots();
+  const token = marker(state);
   const snapshot = token ? snapshots.get(token) : null;
-  publish(
-    snapshot && snapshot.url === currentMenuReturnUrl() && snapshot.scope === activeScope
-      ? snapshot
-      : null,
-  );
+  publish(snapshot && snapshot.url === currentMenuReturnUrl() ? snapshot : null);
+}
+
+function captureReturn(event: PopStateEvent) {
+  captureReturnState(event.state);
+}
+
+function loadSnapshots() {
+  try {
+    // A cached document may resume after another document cleared this tab's drafts.
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    if (storedSnapshots === raw) return;
+    storedSnapshots = raw;
+    snapshots.clear();
+    const stored: unknown = JSON.parse(raw ?? '[]');
+    if (!Array.isArray(stored)) return;
+    for (const snapshot of stored.slice(-MAX_SNAPSHOTS)) {
+      if (
+        snapshot &&
+        typeof snapshot.token === 'string' &&
+        typeof snapshot.url === 'string' &&
+        typeof snapshot.scope === 'string' &&
+        typeof snapshot.query === 'string' &&
+        (snapshot.category === 'all' ||
+          SERVICE_CATEGORIES.some(({ id }) => id === snapshot.category)) &&
+        Array.isArray(snapshot.expanded) &&
+        snapshot.expanded.every((id: unknown) => typeof id === 'string') &&
+        (snapshot.open === undefined || typeof snapshot.open === 'boolean')
+      ) {
+        snapshots.set(snapshot.token, snapshot);
+      }
+    }
+  } catch {
+    // The in-memory drafts still work when storage is unavailable.
+  }
+}
+
+function saveSnapshots() {
+  try {
+    if (snapshots.size) {
+      const raw = JSON.stringify([...snapshots.values()]);
+      window.sessionStorage.setItem(STORAGE_KEY, raw);
+      storedSnapshots = raw;
+    } else {
+      window.sessionStorage.removeItem(STORAGE_KEY);
+      storedSnapshots = null;
+    }
+  } catch {
+    // The in-memory drafts still work when storage is unavailable.
+  }
 }
 
 function observeWindow() {
@@ -53,7 +102,10 @@ function observeWindow() {
     observedWindow = window;
     snapshots.clear();
     pending = null;
-    activeScope = null;
+    activeScope = undefined;
+    storedSnapshots = undefined;
+    // A new document can mount on the origin after the browser has already returned.
+    captureReturnState(window.history.state);
     // Keep observing while a destination without this header is mounted. Only
     // the returning menu can restore UI; this listener never changes focus.
     window.addEventListener('popstate', captureReturn);
@@ -69,12 +121,28 @@ export function subscribeMenuReturn(listener: () => void) {
 export const getMenuReturn = () => pending;
 export const getServerMenuReturn = () => null;
 
-export function setMenuReturnScope(scope: string | null) {
+export function setMenuReturnScope(scope: string | null, checking = false) {
   observeWindow();
+  if (checking) {
+    // A recheck can retain the previous identity while requests are in flight.
+    if (activeScope == null || activeScope === scope) return;
+    scope = null;
+  }
   if (activeScope === scope) return;
+  loadSnapshots();
+  const previousScope = activeScope;
   activeScope = scope;
-  snapshots.clear();
-  publish(null);
+  if (previousScope != null || scope === null) {
+    snapshots.clear();
+    saveSnapshots();
+    forgetDirectorySearch('menu');
+  } else {
+    for (const [token, snapshot] of snapshots) {
+      if (snapshot.scope !== scope) snapshots.delete(token);
+    }
+    saveSnapshots();
+  }
+  if (pending && !snapshots.has(pending.token)) publish(null);
 }
 
 function removeCurrentMarker(token: string) {
@@ -85,28 +153,31 @@ function removeCurrentMarker(token: string) {
     // No URL change: retain the router's own fields exactly as they are.
     window.history.replaceState(state, '');
   } catch {
-    // A stale marker cannot restore anything after its memory snapshot is gone.
+    // A stale marker cannot restore anything after its snapshot is gone.
   }
 }
 
 export function discardMenuReturn() {
+  loadSnapshots();
   const token = marker(window.history.state);
   if (token) {
     snapshots.delete(token);
+    saveSnapshots();
     removeCurrentMarker(token);
   }
+  forgetDirectorySearch('menu');
   publish(null);
 }
 
 export function rememberMenuReturn(
   destination: string,
-  draft: Pick<MenuNavigationReturn, 'scope' | 'query' | 'category' | 'expanded'>,
+  draft: Pick<MenuNavigationReturn, 'scope' | 'query' | 'category' | 'expanded' | 'open'>,
 ) {
   discardMenuReturn();
   const safeDestination = internalSitePath(destination);
   const url = currentMenuReturnUrl();
   if (!safeDestination || safeDestination === url || draft.scope !== activeScope) return;
-  const token = `${Date.now().toString(36)}-${++sequence}`;
+  const token = window.crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${++sequence}`;
   const snapshot: MenuNavigationReturn = {
     ...draft,
     token,
@@ -118,17 +189,20 @@ export function rememberMenuReturn(
     window.history.replaceState({ ...window.history.state, [MENU_RETURN_STATE_KEY]: token }, '');
     snapshots.set(token, snapshot);
     // A tab only needs a small number of pending menu journeys.
-    while (snapshots.size > 20) snapshots.delete(snapshots.keys().next().value!);
+    while (snapshots.size > MAX_SNAPSHOTS) snapshots.delete(snapshots.keys().next().value!);
+    saveSnapshots();
   } catch {
     // History can be unavailable; opening the destination must still work.
   }
 }
 
-/** Consume only after the route and rendered menu have caught up with popstate. */
+/** Acknowledge this return after the route catches up, keeping the entry for future returns. */
 export function consumeMenuReturn(snapshot: MenuNavigationReturn, scope: string): boolean {
+  loadSnapshots();
   if (
     pending !== snapshot ||
     snapshots.get(snapshot.token) !== snapshot ||
+    activeScope !== scope ||
     snapshot.scope !== scope ||
     snapshot.url !== currentMenuReturnUrl() ||
     marker(window.history.state) !== snapshot.token
@@ -136,8 +210,6 @@ export function consumeMenuReturn(snapshot: MenuNavigationReturn, scope: string)
     if (pending === snapshot) publish(null);
     return false;
   }
-  snapshots.delete(snapshot.token);
-  removeCurrentMarker(snapshot.token);
   publish(null);
   return true;
 }

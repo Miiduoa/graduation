@@ -106,6 +106,8 @@ export function CampusServiceMenu() {
     Object.fromEntries(new URLSearchParams(context)),
   ).schoolId;
   const returnScope = sha256(JSON.stringify([account.ownerScope, campusId]));
+  const checkingAccount = account.status === 'checking';
+  const scopeUnavailable = !account.canRemember && !checkingAccount;
   const historyReturn = useSyncExternalStore(
     subscribeMenuReturn,
     getMenuReturn,
@@ -139,13 +141,15 @@ export function CampusServiceMenu() {
     skipToggleSideEffects.current = false;
   }
   useLayoutEffect(() => {
-    setMenuReturnScope(account.canRemember ? returnScope : null);
+    setMenuReturnScope(scopeUnavailable ? null : returnScope, checkingAccount);
+  }, [returnScope, scopeUnavailable, checkingAccount]);
+  useLayoutEffect(() => {
     assignMenuOpen(false);
     composing.current = false;
     setQuery('');
     setCategory('all');
     setRestoredExpanded([]);
-  }, [pathname, queryString, returnScope, account.canRemember]);
+  }, [pathname, queryString, returnScope, scopeUnavailable]);
   useLayoutEffect(() => {
     if (!account.canRemember) return;
     // The browser URL can change before Next renders the matching route.
@@ -157,15 +161,24 @@ export function CampusServiceMenu() {
     if (historyReturn && !consumeMenuReturn(historyReturn, returnScope)) return;
     const snapshot = historyReturn ?? restoreDirectorySearch('menu', pathname);
     if (!snapshot) return;
-    if ('open' in snapshot) {
-      // Older entries only recorded the origin pathname in sessionStorage.
-      forgetDirectorySearch('menu');
-      if (snapshot.scope !== undefined && snapshot.scope !== returnScope) return;
+    if ('destination' in snapshot) {
+      if (snapshot.scope !== undefined && snapshot.scope !== returnScope) {
+        forgetDirectorySearch('menu');
+        return;
+      }
+      // Bind the legacy draft to this entry and scope after its first restore.
+      rememberMenuReturn(snapshot.destination, {
+        scope: returnScope,
+        query: snapshot.query,
+        category: snapshot.category,
+        expanded: snapshot.expanded ?? [],
+        open: snapshot.open,
+      });
     }
     setQuery(snapshot.query.slice(0, 100));
     setCategory(snapshot.category);
     setRestoredExpanded(snapshot.expanded ?? []);
-    if ('open' in snapshot && !snapshot.open) return;
+    if (snapshot.open === false) return;
     const previouslyFocused = document.activeElement;
     assignMenuOpen(true);
     if (
@@ -319,11 +332,12 @@ export function CampusServiceMenu() {
         }
       }}
       onBlur={(event) => {
-        if (skipToggleSideEffects.current) return;
+        if (skipToggleSideEffects.current || !event.currentTarget.open) return;
         if (
           event.relatedTarget instanceof Node &&
           !event.currentTarget.contains(event.relatedTarget)
         ) {
+          discardMenuReturn();
           event.currentTarget.open = false;
         }
       }}
