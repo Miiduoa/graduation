@@ -370,6 +370,19 @@ function ScopedCreatorCardPanel({
             </Pressable>
           )}
           {!!linkError && <Text accessibilityRole="alert" style={styles.error}>{linkError}</Text>}
+          {own && needsConfirmation && (
+            <View style={styles.pendingReview}>
+              <Text accessibilityRole="alert" style={styles.error}>
+                儲存結果尚未確認。{feedback || '草稿已保留，請先核對伺服器資料。'}
+              </Text>
+              <CardButton
+                label={saving ? '正在核對伺服器…' : '核對儲存結果'}
+                disabled={saving}
+                busy={saving}
+                onPress={() => void confirmPreviousSave()}
+              />
+            </View>
+          )}
           {own && (
             <View style={styles.actions}>
               {!state.value?.headline && !state.value?.bio && !state.value?.linkUrl &&
@@ -397,6 +410,7 @@ const createStyles = () => StyleSheet.create({
     borderRadius: 10, minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14,
   },
   bioInput: { height: 108 },
+  pendingReview: { marginTop: 12, gap: 10, alignItems: 'flex-start', minWidth: 0 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 9, marginTop: 12 },
   button: {
     minHeight: 44, paddingHorizontal: 16, justifyContent: 'center', alignItems: 'center',
