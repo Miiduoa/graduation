@@ -2754,6 +2754,39 @@ it('shows observed local AI phase timings without suggesting a verified benchmar
   expect(screen.getByText(/不能據此認定冷啟、暖啟或回答正確/)).toBeTruthy();
 });
 
+it('keeps selectable local timing samples without exporting source text or answer content', async () => {
+  let run = 0;
+  mocks.run.mockImplementation(async (request) => {
+    run += 1;
+    request.onTiming?.({
+      preparationMs: 800 + run, generationMs: run === 2 ? null : 1300 + run,
+      totalMs: 2100 + run, outcome: run === 2 ? 'failed' : 'success',
+    });
+    if (run === 2) throw new Error('模擬 GPU 生成失敗');
+    return explanation;
+  });
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByRole('region', { name: '本段 AI 講解' });
+  fireEvent.click(screen.getByText('本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）'));
+  const output = screen.getByRole('textbox', { name: '本段裝置端 AI 耗時紀錄 JSON' }) as HTMLTextAreaElement;
+  expect(output.readOnly).toBe(true);
+  expect(JSON.parse(output.value)).toEqual({
+    format: 'nuni-study-tutor-timing', version: 1,
+    measurements: [{ run: 1, outcome: 'success', preparationMs: 801, generationMs: 1301, totalMs: 2101 }],
+  });
+  fireEvent.click(screen.getByRole('button', { name: '只依原文重新講解' }));
+  await waitFor(() => expect(JSON.parse(output.value).measurements).toHaveLength(2));
+  expect(JSON.parse(output.value).measurements[1]).toEqual({
+    run: 2, outcome: 'failed', preparationMs: 802, generationMs: null, totalMs: 2102,
+  });
+  expect(output.value).not.toContain(material.body);
+  expect(output.value).not.toContain(material.title);
+  expect(output.value).not.toContain(explanation.answer);
+  expect(output.value).not.toContain(scope.platformAccountId);
+  expect(screen.getByText(/不代表已驗證回答正確或優於其他產品/)).toBeTruthy();
+});
+
 it('validates pasted and previewed progress UTF-8 limits without allocating a Blob on mobile', () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.click(screen.getByText('接著上次的進度'));

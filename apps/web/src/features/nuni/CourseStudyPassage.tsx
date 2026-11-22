@@ -46,6 +46,8 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [timing, setTiming] = useState<StudyTutorTiming | null>(null);
+  // Session-only timing samples: never include source, account or prompt text.
+  const [timingLog, setTimingLog] = useState<StudyTutorTiming[]>([]);
   const [stepSelection, setStepSelection] = useState<{ lessonId: number; index: number } | null>(null);
   // A citation position belongs to its mode, lesson and teaching step. Reusing
   // an index for another quote can incorrectly report that an exact quote is absent.
@@ -154,7 +156,10 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
           if (current.current === controller && !controller.signal.aborted) setProgress(message);
         },
         onTiming: (measurement) => {
-          if (current.current === controller) setTiming(measurement);
+          if (current.current === controller) {
+            setTiming(measurement);
+            setTimingLog((previous) => [...previous, measurement].slice(-10));
+          }
         },
       });
       if (current.current !== controller || controller.signal.aborted) return;
@@ -268,6 +273,26 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
           {timing.generationMs === null ? '尚未收到生成階段訊號' : `生成 ${Math.round(timing.generationMs)} 毫秒`}，
           合計 {Math.round(timing.totalMs)} 毫秒。僅為本次瀏覽器量測，不能據此認定冷啟、暖啟或回答正確。
         </p>}
+        {timingLog.length > 0 && <details>
+          <summary>本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）</summary>
+          <p className={styles.note}>可長按或鍵盤選取下方 JSON，逐次保存成功、失敗與取消的瀏覽器量測。
+            不包含教材、問題或個人筆記，也不是可還原的閱讀進度。冷啟／暖啟、實際裝置與網路條件仍需另外註記；
+            不代表已驗證回答正確或優於其他產品。</p>
+          <label className={styles.field}>本段裝置端 AI 耗時紀錄 JSON
+            <textarea readOnly spellCheck={false} rows={8}
+              aria-label="本段裝置端 AI 耗時紀錄 JSON"
+              value={JSON.stringify({
+                format: 'nuni-study-tutor-timing', version: 1,
+                measurements: timingLog.map((entry, index) => ({
+                  run: index + 1,
+                  outcome: entry.outcome,
+                  preparationMs: Math.round(entry.preparationMs),
+                  generationMs: entry.generationMs === null ? null : Math.round(entry.generationMs),
+                  totalMs: Math.round(entry.totalMs),
+                })),
+              }, null, 2)} />
+          </label>
+        </details>}
         {error && <p className={styles.error} role="alert">{error}</p>}
         {selected && result && <section className={styles.explanation} aria-label="本段 AI 講解">
           <h4>{result.title}</h4>
