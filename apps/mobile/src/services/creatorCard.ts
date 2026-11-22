@@ -34,7 +34,7 @@ export async function saveCreatorCard(
   await setDoc(cardRef(schoolId, ownerUid), {
     schoolId, ownerUid, ...normalized, updatedAt: serverTimestamp(),
   }, { merge: true });
-  const confirmed = await readCreatorCard(schoolId, ownerUid);
+  const confirmed = await readCreatorCard(schoolId, ownerUid, { requireCommitted: true });
   if (!confirmed ||
     confirmed.headline !== normalized.headline ||
     confirmed.bio !== normalized.bio ||

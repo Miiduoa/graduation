@@ -1,7 +1,7 @@
 import React from 'react';
 import { Linking } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
-import { getDocFromServer } from 'firebase/firestore';
+import { getDocFromServer, setDoc } from 'firebase/firestore';
 import { CreatorCardPanel } from '../screens/social/CreatorCardPanel';
 import { readCreatorCard, saveCreatorCard } from '../services/creatorCard';
 
@@ -9,6 +9,8 @@ jest.mock('../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('firebase/firestore', () => ({
   doc: jest.fn(),
   getDocFromServer: jest.fn(),
+  setDoc: jest.fn(),
+  serverTimestamp: () => 'SERVER_TIME',
 }));
 jest.mock('../services/creatorCard', () => ({
   readCreatorCard: jest.fn(),
@@ -602,6 +604,54 @@ test('a stalled server confirmation times out, permits a read-only retry, and ig
     expect(view.getByText('這次儲存的校園介紹')).toBeTruthy();
     expect(view.queryByText('過時的舊讀取結果')).toBeNull();
     expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test.each([false, true])('a late save before manual confirmation respects pending writes (%s)', async (hasPendingWrites) => {
+  jest.useFakeTimers();
+  try {
+    const card = { headline: '', bio: '我的校園作品', linkUrl: '' };
+    let resolveWrite!: () => void;
+    jest.mocked(setDoc).mockReturnValueOnce(new Promise<void>((resolve) => {
+      resolveWrite = resolve;
+    }));
+    jest.mocked(getDocFromServer).mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({ schoolId: 'pu', ownerUid: 'alice', ...card }),
+      metadata: { hasPendingWrites },
+    } as never);
+    jest.mocked(saveCreatorCard).mockImplementationOnce(
+      jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard').saveCreatorCard,
+    );
+
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.press(view.getByLabelText('建立社群簡介'));
+    fireEvent.changeText(view.getByLabelText('個人簡介'), card.bio);
+    fireEvent.press(view.getByLabelText('儲存簡介'));
+    act(() => { jest.advanceTimersByTime(15_000); });
+    expect(view.getByText(/無法確認簡介是否已儲存/)).toBeTruthy();
+    expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+
+    await act(async () => {
+      jest.advanceTimersByTime(1_000);
+      resolveWrite();
+    });
+    expect(setDoc).toHaveBeenCalledTimes(1);
+    expect(getDocFromServer).toHaveBeenCalledTimes(1);
+    expect(readCreatorCard).toHaveBeenCalledTimes(1);
+    if (hasPendingWrites) {
+      expect(view.queryByText('社群簡介已儲存。')).toBeNull();
+      expect(view.getByLabelText('個人簡介').props.value).toBe(card.bio);
+      expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+    } else {
+      expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+      expect(view.getByText(card.bio)).toBeTruthy();
+      expect(view.queryByLabelText('核對儲存結果')).toBeNull();
+      expect(view.queryByLabelText('個人簡介')).toBeNull();
+    }
   } finally {
     jest.useRealTimers();
   }

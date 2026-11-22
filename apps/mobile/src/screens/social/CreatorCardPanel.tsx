@@ -63,7 +63,7 @@ function ScopedCreatorCardPanel({
   const [saving, setSaving] = useState(false);
   // Keep the submitted draft and its normalized server fields until a read
   // resolves the uncertain write. The ref also guards stale button callbacks.
-  const pendingWrite = useRef<{ draft: CreatorCard; expected: CreatorCard } | null>(null);
+  const pendingWrite = useRef<{ draft: CreatorCard; expected: CreatorCard; allowLateSave: boolean } | null>(null);
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const savingFlight = useRef(false);
   const [openingLink, setOpeningLink] = useState(false);
@@ -139,6 +139,7 @@ function ScopedCreatorCardPanel({
   const confirmPreviousSave = async () => {
     const submitted = pendingWrite.current;
     if (!mounted.current || !own || !submitted || savingFlight.current || state.status !== 'ready') return;
+    submitted.allowLateSave = false;
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
@@ -210,32 +211,37 @@ function ScopedCreatorCardPanel({
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
-    let saveTimeout: ReturnType<typeof setTimeout> | undefined;
-    try {
-      // Firestore may leave a write pending when the connection is lost.
-      // Release the UI after a bounded wait, but treat the write as uncertain:
-      // never resubmit it without an explicit server-only confirmation.
-      // This timeout does not cancel the underlying SDK write.
-      const confirmed = await Promise.race([
-        saveCreatorCard(schoolId, ownerUid, submittedDraft),
-        new Promise<never>((_, reject) => {
-          saveTimeout = setTimeout(() => {
-            reject(new Error('Creator card save timed out'));
-          }, CREATOR_CARD_SAVE_TIMEOUT_MS);
-        }),
-      ]);
+    const submitted = { draft: submittedDraft, expected, allowLateSave: true };
+    const markUnconfirmed = () => {
+      pendingWrite.current = submitted;
+      setNeedsConfirmation(true);
+      setFeedback('無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
+    };
+    let timedOut = false;
+    // Release the UI while keeping the original confirmation eligible until
+    // the user starts a manual check.
+    const saveTimeout = setTimeout(() => {
+      timedOut = true;
       if (!mounted.current) return;
+      markUnconfirmed();
+      savingFlight.current = false;
+      setSaving(false);
+    }, CREATOR_CARD_SAVE_TIMEOUT_MS);
+    try {
+      const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft);
+      if (!mounted.current || !submitted.allowLateSave) return;
+      if (timedOut) {
+        pendingWrite.current = null;
+        setNeedsConfirmation(false);
+      }
       acceptSavedPortfolioLink(confirmed.linkUrl);
       setState({ status: 'ready', value: confirmed });
       finishSave(submittedDraft);
     } catch {
-      if (!mounted.current) return;
-      pendingWrite.current = { draft: submittedDraft, expected };
-      setNeedsConfirmation(true);
-      setFeedback('無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
+      if (mounted.current && !timedOut) markUnconfirmed();
     } finally {
-      if (saveTimeout !== undefined) clearTimeout(saveTimeout);
-      if (mounted.current) {
+      clearTimeout(saveTimeout);
+      if (mounted.current && !timedOut) {
         savingFlight.current = false;
         setSaving(false);
       }

@@ -14,6 +14,7 @@ const card = {
   linkUrl: 'https://example.org/me',
 };
 const snap = (value: Record<string, unknown>) => ({
+  metadata: { hasPendingWrites: false },
   exists: () => true,
   data: () => value,
 });
