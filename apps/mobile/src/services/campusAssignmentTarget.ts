@@ -1,4 +1,4 @@
-import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
+import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshotValidation';
 import { parseCampusAssignmentSource, type CampusAssignmentSource } from './campusAssignmentSource';
 
 /** Display identity is not authority; it must match exactly one current source row. */

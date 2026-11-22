@@ -1,35 +1,13 @@
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
-import { parseCampusAssignmentSource, type CampusAssignmentSource } from './campusAssignmentSource';
-import { parseCampusAnnouncementSource, type CampusAnnouncementSource } from './campusAnnouncementSource';
+import { parseCampusAssignmentSource } from './campusAssignmentSource';
+import { parseCampusAnnouncementSource } from './campusAnnouncementSource';
 import { abortableCampusRead } from './abortableCampusRead';
+import { validCampusSenseSnapshot, type AssignmentCoverageReason, type CampusSenseSnapshot, type SenseSourceStatus } from './campusSenseSnapshotValidation';
 
-export type SenseSourceStatus = 'available' | 'unavailable';
-export type AssignmentCoverageReason = 'complete' | 'legacy-partial' | 'read-budget';
-export interface CampusSenseSnapshot {
-  userId: string;
-  schoolId: string;
-  checkedAt: string;
-  schedule: { status: SenseSourceStatus; count: number | null };
-  assignments: {
-    status: SenseSourceStatus;
-    count: number | null;
-    items: Array<{
-      title: string;
-      titleMayBeTruncated?: true;
-      groupName: string;
-      dueAt: string | null;
-      source?: CampusAssignmentSource;
-    }>;
-    coverage?: { complete: boolean; reason: AssignmentCoverageReason; pages: number };
-  };
-  announcements: {
-    status: SenseSourceStatus;
-    items: Array<{ title: string; publishedAt: string | null; source?: CampusAnnouncementSource }>;
-  };
-}
+export { CAMPUS_SENSE_MAX_AGE_MS, validCampusSenseSnapshot } from './campusSenseSnapshotValidation';
+export type { AssignmentCoverageReason, CampusSenseSnapshot, SenseSourceStatus } from './campusSenseSnapshotValidation';
 
-export const CAMPUS_SENSE_MAX_AGE_MS = 15 * 60 * 1000;
 // Kept in sync with serializeAssignmentRow by the assignment target tests.
 export const ASSIGNMENT_SUMMARY_TITLE_LIMIT = 140;
 export const CAMPUS_ASSIGNMENT_PAGE_SIZE = 50;
@@ -156,19 +134,6 @@ function parseSnapshot(payload: unknown, userId: string, schoolId: string): Pars
   const page = assignmentStatus === 'available' && total !== null
     ? parsePage(assignments.paging, total, snapshot.assignments.items.length) : null;
   return { snapshot, page };
-}
-
-/** A verified, short-lived, in-memory read. An old cache cannot be described as live. */
-export function validCampusSenseSnapshot(
-  snapshot: CampusSenseSnapshot | null | undefined,
-  scope: { uid: string; schoolId: string },
-  now = Date.now(),
-): CampusSenseSnapshot | null {
-  if (!scope.uid || !scope.schoolId || !snapshot ||
-      snapshot.userId !== scope.uid || snapshot.schoolId !== scope.schoolId) return null;
-  const savedAt = Date.parse(snapshot.checkedAt);
-  if (!Number.isFinite(savedAt) || savedAt > now + 30_000 || now - savedAt > CAMPUS_SENSE_MAX_AGE_MS) return null;
-  return snapshot;
 }
 
 /**
