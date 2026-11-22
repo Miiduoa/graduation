@@ -40,9 +40,9 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
     setItem: jest.fn(async (key: string, value: string) => {
       mockStorage.set(key, value);
     }),
-    removeItem: async (key: string) => {
+    removeItem: jest.fn(async (key: string) => {
       mockStorage.delete(key);
-    },
+    }),
   },
 }));
 jest.mock('expo-crypto', () => ({
@@ -59,10 +59,10 @@ jest.mock('expo-notifications', () => ({
     mockAlarms.set(alarm.identifier, alarm);
     return alarm.identifier;
   },
-  cancelScheduledNotificationAsync: async (id: string) => {
+  cancelScheduledNotificationAsync: jest.fn(async (id: string) => {
     if (mockCancelFailure) return;
     mockAlarms.delete(id);
-  },
+  }),
 }));
 const current = () => true;
 const scope = { uid: 'alice', schoolId: 'pu' };
@@ -859,4 +859,175 @@ test('舊提醒配對儲存失敗只警告且保留排程，恢復後可重試�
   const { reconcileSubmittedAssignmentReceipt } = require('../services/submittedAssignmentReminders');
   await reconcileSubmittedAssignmentReceipt({ id: 'alice', userId: 'alice', groupId: 'course', assignmentId: 'work', status: 'submitted', submittedAt: new Date().toISOString() });
   expect(mockAlarms.size).toBe(0);
+});
+
+test.each([
+  { scenario: 'B 碰撞', includeA: true, otherTitles: ['長'.repeat(130) + '乙'], selectA: false, canCancel: false },
+  { scenario: 'A 與 B 共用 v1 識別碼', includeA: true, otherTitles: ['長'.repeat(130) + '乙'], selectA: true, canCancel: false },
+  { scenario: 'B 不碰撞', includeA: true, otherTitles: ['其他作業'], selectA: false, canCancel: false },
+  { scenario: 'A 唯一對應 v1', includeA: true, otherTitles: ['其他作業'], selectA: true, canCancel: true },
+  { scenario: 'A 不在摘要', includeA: false, otherTitles: ['長'.repeat(130) + '乙'], selectA: false, canCancel: false },
+  { scenario: '多筆碰撞', includeA: true, otherTitles: ['長'.repeat(130) + '乙', '長'.repeat(130) + '丙'], selectA: false, canCancel: false },
+])('單筆回覆的 v1 提醒歸屬依目前摘要與紀錄核對（$scenario）', async ({
+  includeA, otherTitles, selectA, canCancel,
+}) => {
+  const { adoptCampusReminderSnapshot, cancelCampusAssignmentReminder } = require('../services/campusAssignmentReminders');
+  const original = mockSnapshot();
+  const title = '長'.repeat(130) + '甲';
+  const row = { ...original.assignments.items[0], title };
+  original.assignments.items = [{ ...row, source: undefined }];
+  await scheduleCampusAssignmentReminder({
+    scope, step: { ...step, title }, snapshot: original, leadMinutes: 60, isCurrent: current,
+  });
+  const originalAlarms = [...mockAlarms.keys()];
+  const originalRecords = [...mockStorage.entries()];
+  const others = otherTitles.map((title, index) => ({
+    ...row, title, source: { ...source, assignmentId: 'other_' + index },
+  }));
+  const snapshot = mockSnapshot();
+  snapshot.assignments.items = [...(includeA ? [row] : []), ...others];
+  snapshot.assignments.count = snapshot.assignments.items.length;
+  const selected = selectA ? row : others[0];
+  const view = render(
+    <AssignmentReplyActions
+      read={{ userId: scope.uid, schoolId: scope.schoolId, checkedAt: snapshot.checkedAt,
+        filterQuestion: selected.title, items: [selected] }}
+      snapshot={snapshot}
+      context={{ userId: scope.uid, schoolId: scope.schoolId, isCurrent: current, navigation: { navigate: jest.fn() } }}
+      disabled={false}
+      onAsk={jest.fn()}
+    />,
+  );
+
+  expect(view.getByText('查看這份作業')).toBeTruthy();
+  if (canCancel) {
+    fireEvent.press(await view.findByText('取消這項本機提醒'));
+    await view.findByText('已退訂並清除提醒偏好，撤回或延期後也不會自動恢復。');
+    expect(mockAlarms.size).toBe(0);
+    expect(mockStorage.size).toBe(0);
+  } else {
+    await view.findByText('設定手機本機截止提醒');
+    expect(view.queryByText('取消這項本機提醒')).toBeNull();
+    const cancel = cancelCampusAssignmentReminder({
+      scope, step: { ...step, title: selected.title, fullAssignmentTitle: selected.title, expectedSource: selected.source },
+      leadMinutes: 60, isCurrent: current, getLegacySnapshot: () => snapshot,
+    });
+    if (selected.title === '其他作業') await expect(cancel).resolves.toBe(false);
+    else await expect(cancel).rejects.toMatchObject({ code: 'invalid-source' });
+    await adoptCampusReminderSnapshot({ scope, snapshot, isCurrent: current });
+    expect([...mockAlarms.keys()]).toEqual(originalAlarms);
+    // Non-colliding rows may convert A, but must never create a preference for B.
+    if (includeA && otherTitles[0] === '其他作業') {
+      const convertedRows = [...mockStorage.values()].map((raw) => JSON.parse(raw)).filter((value) => value.assignmentId);
+      expect(convertedRows.map((value) => value.assignmentId)).toEqual(['work']);
+    } else {
+      expect([...mockStorage.entries()]).toEqual(originalRecords);
+    }
+  }
+});
+
+test.each(['轉換先開始', '退訂先開始', '轉換寫入失敗'] as const)(
+  '舊版提醒的轉換、退訂及同步共用序列（%s）', async (order) => {
+    const {
+      adoptCampusReminderSnapshot, cancelCampusAssignmentReminder,
+    } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+    const snapshot = mockSnapshot();
+    const previous = mockSnapshot();
+    delete previous.assignments.items[0].source;
+    const input = { scope, step, leadMinutes: 60 as const, isCurrent: current };
+    await scheduleCampusAssignmentReminder({ ...input, snapshot: previous });
+    const notifications = jest.requireMock('expo-notifications');
+    const storage = jest.requireMock('@react-native-async-storage/async-storage').default;
+    let resume!: () => void;
+    let didPause!: () => void;
+    const paused = new Promise<void>((resolve) => { didPause = resolve; });
+    const waitForResume = () => new Promise<void>((resolve) => {
+      resume = resolve;
+      didPause();
+    });
+    const adopt = () => adoptCampusReminderSnapshot({ ...input, snapshot });
+    const cancel = () => cancelCampusAssignmentReminder(input);
+    const cancelFirst = order === '退訂先開始';
+    if (cancelFirst) {
+      notifications.cancelScheduledNotificationAsync.mockImplementationOnce(async (id: string) => {
+        await waitForResume();
+        mockAlarms.delete(id);
+      });
+    } else {
+      storage.setItem.mockImplementationOnce(async (key: string, value: string) => {
+        await waitForResume();
+        if (order === '轉換寫入失敗') throw new Error('storage-failed');
+        mockStorage.set(key, value);
+      });
+    }
+    const first = cancelFirst ? cancel() : adopt();
+    const firstCheck = order === '轉換寫入失敗'
+      ? expect(first).rejects.toThrow('storage-failed')
+      : expect(first).resolves.toBe(cancelFirst ? true : undefined);
+    await paused;
+    const second = cancelFirst ? adopt() : cancel();
+    const sync = reconcileSubmittedAssignmentReminders(scope, current);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockAlarms.size).toBe(1);
+      expect(mockStorage.size).toBe(1);
+    } finally {
+      resume();
+    }
+    await firstCheck;
+    await expect(second).resolves.toBe(cancelFirst ? undefined : true);
+    await sync;
+    expect(mockAlarms.size).toBe(0);
+    expect(mockStorage.size).toBe(0);
+  },
+);
+
+test('原有 v1 長標題紀錄缺少歸屬時，可用原卡退訂但不能綁到目前單筆回覆', async () => {
+  const {
+    adoptCampusReminderSnapshot, cancelCampusAssignmentReminder, getCampusAssignmentReminderStatus,
+  } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+  const title = '長'.repeat(130) + '甲';
+  const snapshot = mockSnapshot();
+  snapshot.assignments.items[0].title = title;
+  const previous = mockSnapshot();
+  previous.assignments.items[0] = { ...snapshot.assignments.items[0], source: undefined };
+  const input = {
+    scope, step: { ...step, title, fullAssignmentTitle: title }, leadMinutes: 60 as const, isCurrent: current,
+  };
+  await scheduleCampusAssignmentReminder({ ...input, snapshot: previous });
+  const [key, raw] = [...mockStorage.entries()][0];
+  const record = JSON.parse(raw);
+  delete record.cardDigest;
+  mockStorage.set(key, JSON.stringify(record));
+
+  await adoptCampusReminderSnapshot({ ...input, snapshot });
+  await expect(getCampusAssignmentReminderStatus({
+    ...input, step: { ...input.step, expectedSource: source }, getLegacySnapshot: () => snapshot,
+  })).resolves.toEqual([]);
+  await expect(getCampusAssignmentReminderStatus(input)).resolves.toEqual([60]);
+  await expect(cancelCampusAssignmentReminder(input)).resolves.toBe(true);
+  expect(mockAlarms.size).toBe(0);
+  expect(mockStorage.size).toBe(0);
+});
+
+test('來源偏好刪除失敗時退訂回報失敗，重試後同步不會恢復排程', async () => {
+  const {
+    adoptCampusReminderSnapshot, cancelCampusAssignmentReminder,
+  } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+  const input = { scope, step, leadMinutes: 60 as const, isCurrent: current };
+  const previous = mockSnapshot();
+  delete previous.assignments.items[0].source;
+  await scheduleCampusAssignmentReminder({ ...input, snapshot: previous });
+  await adoptCampusReminderSnapshot({ ...input, snapshot: mockSnapshot() });
+  const storage = jest.requireMock('@react-native-async-storage/async-storage').default;
+  storage.removeItem.mockImplementationOnce(async (key: string) => { mockStorage.delete(key); });
+  storage.removeItem.mockRejectedValueOnce(new Error('storage-failed'));
+
+  await expect(cancelCampusAssignmentReminder(input)).rejects.toThrow('storage-failed');
+  expect(mockAlarms.size).toBe(0);
+  expect(mockStorage.size).toBe(1);
+  await expect(cancelCampusAssignmentReminder(input)).resolves.toBe(true);
+  await reconcileSubmittedAssignmentReminders(scope, current);
+  expect(mockAlarms.size).toBe(0);
+  expect(mockStorage.size).toBe(0);
 });

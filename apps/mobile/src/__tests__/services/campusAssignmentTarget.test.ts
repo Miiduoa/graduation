@@ -1,6 +1,9 @@
 import { parseCampusAssignmentSource } from '../../services/campusAssignmentSource';
-import { campusAssignmentDisplayTitle, resolveCampusAssignmentTarget } from '../../services/campusAssignmentTarget';
-import { refreshCampusSenseSnapshot, type CampusSenseSnapshot } from '../../services/campusSenseSnapshot';
+import {
+  campusAssignmentDisplayTitle, campusAssignmentTitleIdentity,
+  resolveCampusAssignmentTarget,
+} from '../../services/campusAssignmentTarget';
+import { ASSIGNMENT_SUMMARY_TITLE_LIMIT, refreshCampusSenseSnapshot, type CampusSenseSnapshot } from '../../services/campusSenseSnapshot';
 
 const mockCallable = jest.fn();
 jest.mock('firebase/functions', () => ({ httpsCallable: () => mockCallable }));
@@ -163,4 +166,68 @@ test('the parser fails closed on malformed supplied identifiers but accepts old 
   } });
   const old = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
   expect(old.assignments.items[0].source).toBeUndefined();
+});
+
+test.each([
+  { lengths: [139], samePrefix: true, opens: true },
+  { lengths: [140], samePrefix: true, opens: true },
+  { lengths: [141], samePrefix: true, opens: true },
+  { lengths: [141, 141], samePrefix: true, opens: false },
+  { lengths: [141, 141], samePrefix: false, opens: true },
+  { lengths: [141, 139], samePrefix: true, opens: false },
+  { lengths: [141, 139], samePrefix: false, opens: true },
+  { lengths: [139, 139], samePrefix: true, opens: true },
+])('checks summary titles $lengths with same prefix=$samePrefix', ({ lengths, samePrefix, opens }) => {
+  const { serializeAssignmentRow } = require('../../../../../backend/functions/agent/assignmentSummary');
+  const value = snapshot();
+  const rawTitles = lengths.map((length, index) => {
+    const character = index === 0 ? '甲' : '乙';
+    const prefix = (samePrefix ? '長' : character).repeat(130);
+    return prefix + character.repeat(length - 130);
+  });
+  value.assignments.items = rawTitles.map((title, index) => serializeAssignmentRow({
+    ...assignment, title, id: 'work_' + index, groupId: source.groupId,
+  }));
+  value.assignments.count = lengths.length;
+  value.assignments.items.forEach((row, index) => {
+    const title = rawTitles[index];
+    expect(row.title).toHaveLength(Math.min(ASSIGNMENT_SUMMARY_TITLE_LIMIT, title.length));
+    const identity = campusAssignmentTitleIdentity(row);
+    expect(identity.fullAssignmentTitle).toBe(title.length < ASSIGNMENT_SUMMARY_TITLE_LIMIT ? title : undefined);
+    const target = resolveCampusAssignmentTarget({
+      assignment: { ...row, ...identity }, snapshot: value, scope, now,
+    });
+    expect(target?.params.assignmentId).toBe(opens ? 'work_' + index : undefined);
+    // Cards created before the summary limit was recognized follow the same collision rule.
+    const previousCard = { ...row, fullAssignmentTitle: row.title, expectedSource: row.source };
+    expect(resolveCampusAssignmentTarget({ assignment: previousCard, snapshot: value, scope, now }))
+      .toEqual(target);
+  });
+});
+
+test('summary parsing preserves the cutoff when trimming trailing whitespace', async () => {
+  jest.spyOn(Date, 'now').mockReturnValue(now);
+  const { serializeAssignmentRow } = require('../../../../../backend/functions/agent/assignmentSummary');
+  const prefix = '長'.repeat(130);
+  const items = [prefix + '甲'.repeat(9) + ' 後綴', prefix + '乙'.repeat(9)].map(
+    (title, index) => serializeAssignmentRow({ ...assignment, title, id: 'work_' + index, groupId: source.groupId }),
+  );
+  const value = snapshot();
+  mockCallable.mockResolvedValueOnce({ data: {
+    ...value, assignments: { ...value.assignments, items, count: items.length },
+  } });
+  const refreshed = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
+  const [capped, complete] = refreshed.assignments.items;
+  expect(capped.title).toHaveLength(139);
+  expect(capped.titleMayBeTruncated).toBe(true);
+  expect(complete.titleMayBeTruncated).toBeUndefined();
+  for (const row of [capped, complete]) {
+    expect(resolveCampusAssignmentTarget({
+      assignment: { ...row, ...campusAssignmentTitleIdentity(row) }, snapshot: refreshed, scope, now,
+    })).toBeNull();
+  }
+  expect(resolveCampusAssignmentTarget({
+    assignment: { ...capped, ...campusAssignmentTitleIdentity(capped) },
+    snapshot: { ...refreshed, assignments: { ...refreshed.assignments, count: 1, items: [capped] } }, scope, now,
+  })?.params.assignmentId).toBe('work_0');
 });

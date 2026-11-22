@@ -227,3 +227,15 @@ test('comparison does not turn date-only deadlines or a missing identity into co
   } })!;
   expect(result.comparisonBasis!.assignments.items).toEqual([{ identity: null, title: '尚待核對', groupName: '', dueAt: null }]);
 });
+
+test.each([139, 140, 141])('a %i-character assignment keeps the appropriate title identity', (length) => {
+  const title = '長'.repeat(length);
+  const current = { ...snapshot, assignments: {
+    ...snapshot.assignments, count: 1, items: [{ ...snapshot.assignments.items[1], title }],
+  } };
+  const assignment = plan('今天要先處理什麼？', { snapshot: current })?.steps
+    .find((step) => step.evidence === 'authorized-assignments');
+  expect(assignment?.title).toHaveLength(130);
+  expect(assignment?.fullAssignmentTitle).toBe(length < 140 ? title : undefined);
+  expect(assignment?.summaryAssignmentTitle).toBe(length >= 140 ? title : undefined);
+});

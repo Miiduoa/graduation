@@ -1,4 +1,4 @@
-import type { CampusAssignmentIdentity } from './campusAssignmentTarget';
+import { campusAssignmentTitleIdentity, type CampusAssignmentIdentity } from './campusAssignmentTarget';
 import type { OnDeviceSchoolContext } from './onDeviceSchoolContext';
 import type { CampusSenseSnapshot } from './campusSenseSnapshot';
 import { CAMPUS_SENSE_MAX_AGE_MS } from './campusSenseSnapshot';
@@ -19,7 +19,7 @@ export type CampusPlanRoute = '/classroom' | '/timetable' | '/announcements';
 export type CampusPlanPriority = 'overdue' | 'urgent' | 'soon' | 'normal' | 'verify';
 export type CampusPlanEvidence = 'authorized-assignments' | 'authorized-quizzes' | 'saved-timetable' | 'authorized-announcements' | 'verification';
 
-export interface CampusPlanStep extends Pick<CampusAssignmentIdentity, 'fullAssignmentTitle' | 'expectedSource'> {
+export interface CampusPlanStep extends Pick<CampusAssignmentIdentity, 'fullAssignmentTitle' | 'summaryAssignmentTitle' | 'expectedSource'> {
   /** Absent on older plans, whose course tasks are assignments. */
   kind?: 'assignment' | 'quiz';
   id: string;
@@ -156,7 +156,7 @@ export function buildOfflineCampusPlan(input: {
       steps.push({
         id: 'assignment-' + index,
         title: cleaned(assignment.title),
-        fullAssignmentTitle: assignment.title,
+        ...campusAssignmentTitleIdentity(assignment),
         ...(expectedSource ? { expectedSource } : {}),
         detail: (assignment.groupName ? cleaned(assignment.groupName) + '｜' : '') +
           due + '。請到課程頁確認繳交方式與最新狀態。',

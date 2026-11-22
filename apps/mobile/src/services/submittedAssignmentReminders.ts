@@ -49,7 +49,8 @@ class ReminderSyncError extends Error {
   }
 }
 
-function serial<T>(run: () => Promise<T>): Promise<T> {
+/** Serialize each reminder decision with its native and storage writes. */
+export function serializeAssignmentReminderWork<T>(run: () => Promise<T>): Promise<T> {
   const next = work.then(run, run);
   work = next.catch(() => undefined);
   return next;
@@ -301,30 +302,32 @@ async function reconcile(row: Preference, guard: () => boolean, version: number,
 
 export function scheduleSubmittedAssignmentReminder(input: Request, ds?: Reader) {
   const version = epoch;
-  return serial(async () => {
-    current(input.scope, input.isCurrent, version);
-    if (!['ios', 'android'].includes(Platform.OS)) throw new ReminderSyncError('unsupported');
-    const row = await identity(input);
-    current(input.scope, input.isCurrent, version);
-    let permission = await Notifications.getPermissionsAsync();
-    if (!permission.granted && permission.canAskAgain)
-      permission = await Notifications.requestPermissionsAsync();
-    if (!permission.granted) throw new ReminderSyncError('permission-required');
-    if (Platform.OS === 'android')
-      await Notifications.setNotificationChannelAsync('assignment-reminders', {
-        name: '作業截止提醒',
-        importance: Notifications.AndroidImportance.DEFAULT,
-      });
-    const raw = await AsyncStorage.getItem(key(row));
-    const saved = raw ? (JSON.parse(raw) as Preference) : row;
-    const keys = (await AsyncStorage.getAllKeys()).filter((value) => value.startsWith(storagePrefix));
-    if (!raw && keys.length >= preferenceLimit) throw new ReminderSyncError('device-capacity');
-    const result = await reconcile({
-      ...saved, ...row, cardIdentity: input.cardIdentity ?? saved.cardIdentity,
-    }, input.isCurrent, version, ds ?? reader());
-    current(row, input.isCurrent, version);
-    return result;
-  });
+  return serializeAssignmentReminderWork(() => scheduleSubmittedAssignmentReminderInSequence(input, ds, version));
+}
+
+export async function scheduleSubmittedAssignmentReminderInSequence(input: Request, ds?: Reader, version = epoch) {
+  current(input.scope, input.isCurrent, version);
+  if (!['ios', 'android'].includes(Platform.OS)) throw new ReminderSyncError('unsupported');
+  const row = await identity(input);
+  current(input.scope, input.isCurrent, version);
+  let permission = await Notifications.getPermissionsAsync();
+  if (!permission.granted && permission.canAskAgain)
+    permission = await Notifications.requestPermissionsAsync();
+  if (!permission.granted) throw new ReminderSyncError('permission-required');
+  if (Platform.OS === 'android')
+    await Notifications.setNotificationChannelAsync('assignment-reminders', {
+      name: '作業截止提醒',
+      importance: Notifications.AndroidImportance.DEFAULT,
+    });
+  const raw = await AsyncStorage.getItem(key(row));
+  const saved = raw ? (JSON.parse(raw) as Preference) : row;
+  const keys = (await AsyncStorage.getAllKeys()).filter((value) => value.startsWith(storagePrefix));
+  if (!raw && keys.length >= preferenceLimit) throw new ReminderSyncError('device-capacity');
+  const result = await reconcile({
+    ...saved, ...row, cardIdentity: input.cardIdentity ?? saved.cardIdentity,
+  }, input.isCurrent, version, ds ?? reader());
+  current(row, input.isCurrent, version);
+  return result;
 }
 
 export function reconcileSubmittedAssignmentReminders(
@@ -333,7 +336,7 @@ export function reconcileSubmittedAssignmentReminders(
   ds?: Reader,
 ) {
   const version = epoch;
-  return serial(async () => {
+  return serializeAssignmentReminderWork(async () => {
     current(scope, guard, version);
     const keys = (await AsyncStorage.getAllKeys()).filter((value) =>
       value.startsWith(storagePrefix),
@@ -420,27 +423,38 @@ export async function submittedAssignmentReminderStatus(input: Omit<Request, 'le
 }
 export function cancelSubmittedAssignmentReminder(input: Request) {
   const version = epoch;
-  return serial(async () => {
-    const row = await identity(input);
-    current(row, input.isCurrent, version);
-    const saved = await readPreference(key(row));
-    current(row, input.isCurrent, version);
-    await cancel(row.identifier);
-    for (const id of saved?.legacyIds ?? []) {
-      current(row, input.isCurrent, version);
-      await cancel(id);
-    }
-    current(row, input.isCurrent, version);
-    for (const oldKey of saved?.legacyKeys ?? []) await AsyncStorage.removeItem(oldKey);
-    current(row, input.isCurrent, version);
-    await AsyncStorage.removeItem(key(row));
-    return true;
+  return serializeAssignmentReminderWork(() => cancelSubmittedAssignmentReminderInSequence(input, version));
+}
+
+export function cancelSubmittedAssignmentReminders(input: Omit<Request, 'leadMinutes'>) {
+  const version = epoch;
+  return serializeAssignmentReminderWork(async () => {
+    const leads = await submittedAssignmentReminderStatus(input);
+    for (const leadMinutes of leads)
+      await cancelSubmittedAssignmentReminderInSequence({ ...input, leadMinutes }, version);
   });
+}
+
+export async function cancelSubmittedAssignmentReminderInSequence(input: Request, version = epoch) {
+  const row = await identity(input);
+  current(row, input.isCurrent, version);
+  const saved = await readPreference(key(row));
+  current(row, input.isCurrent, version);
+  await cancel(row.identifier);
+  for (const id of saved?.legacyIds ?? []) {
+    current(row, input.isCurrent, version);
+    await cancel(id);
+  }
+  current(row, input.isCurrent, version);
+  for (const oldKey of saved?.legacyKeys ?? []) await AsyncStorage.removeItem(oldKey);
+  current(row, input.isCurrent, version);
+  await AsyncStorage.removeItem(key(row));
+  return true;
 }
 export function clearSubmittedAssignmentReminders(hold = false) {
   stopping = hold;
   epoch += 1;
-  return serial(async () => {
+  return serializeAssignmentReminderWork(async () => {
     const inventory = ['ios', 'android'].includes(Platform.OS)
       ? await Notifications.getAllScheduledNotificationsAsync()
       : [];
@@ -461,7 +475,7 @@ export function resumeSubmittedAssignmentReminders() {
 /** The write path calls this only after its receipt has passed server verification. */
 export function reconcileSubmittedAssignmentReceipt(receipt: Submission) {
   const version = epoch;
-  return serial(async () => {
+  return serializeAssignmentReminderWork(async () => {
     if (
       !receipt.id ||
       !receipt.groupId ||
@@ -509,22 +523,24 @@ export function reconcileSubmittedAssignmentReceipt(receipt: Submission) {
 
 export function adoptSubmittedAssignmentReminder(input: Request, old: { identifier: string; triggerAt: string; storageKey: string; title: string }) {
   const version = epoch;
-  return serial(async () => {
-    current(input.scope, input.isCurrent, version);
-    const row = await identity(input);
-    const inventory = await Notifications.getAllScheduledNotificationsAsync();
-    current(row, input.isCurrent, version);
-    if (!inventory.some((alarm) => alarm.identifier === old.identifier)) return;
-    const saved = await readPreference(key(row));
-    const legacyIds = [...new Set([...(saved?.legacyIds ?? []), old.identifier])];
-    const legacyKeys = [...new Set([...(saved?.legacyKeys ?? []), old.storageKey])];
-    current(row, input.isCurrent, version);
-    await AsyncStorage.setItem(key(row), JSON.stringify({
-      ...row, title: old.title, lastDueAt: Date.parse(old.triggerAt) + row.leadMinutes * 60_000,
-      triggerAt: old.triggerAt, expiresAt: Date.now() + inactiveRetentionMs,
-      ...saved, cardIdentity: saved?.cardIdentity ?? input.cardIdentity, legacyIds, legacyKeys,
-    }));
-  });
+  return serializeAssignmentReminderWork(() => adoptSubmittedAssignmentReminderInSequence(input, old, version));
+}
+
+export async function adoptSubmittedAssignmentReminderInSequence(input: Request, old: { identifier: string; triggerAt: string; storageKey: string; title: string }, version = epoch) {
+  current(input.scope, input.isCurrent, version);
+  const row = await identity(input);
+  const inventory = await Notifications.getAllScheduledNotificationsAsync();
+  current(row, input.isCurrent, version);
+  if (!inventory.some((alarm) => alarm.identifier === old.identifier)) return;
+  const saved = await readPreference(key(row));
+  const legacyIds = [...new Set([...(saved?.legacyIds ?? []), old.identifier])];
+  const legacyKeys = [...new Set([...(saved?.legacyKeys ?? []), old.storageKey])];
+  current(row, input.isCurrent, version);
+  await AsyncStorage.setItem(key(row), JSON.stringify({
+    ...row, title: old.title, lastDueAt: Date.parse(old.triggerAt) + row.leadMinutes * 60_000,
+    triggerAt: old.triggerAt, expiresAt: Date.now() + inactiveRetentionMs,
+    ...saved, cardIdentity: saved?.cardIdentity ?? input.cardIdentity, legacyIds, legacyKeys,
+  }));
 }
 
 export async function linkedReminderIdentifiers() {

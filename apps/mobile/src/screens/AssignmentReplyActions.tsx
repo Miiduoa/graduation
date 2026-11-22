@@ -5,7 +5,7 @@ import { confirmedTimestamp } from '../services/campusStudyAgenda';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { AssignmentRead } from '../services/offlineCampusTools';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
-import { campusAssignmentDisplayTitle, resolveCampusAssignmentTarget } from '../services/campusAssignmentTarget';
+import { campusAssignmentDisplayTitle, campusAssignmentTitleIdentity, resolveCampusAssignmentTarget } from '../services/campusAssignmentTarget';
 import { CampusAssignmentOpenButton } from './CampusAssignmentOpenButton';
 import { CampusAssignmentReminderAction } from './CampusAssignmentReminderAction';
 import type { CampusAssignmentWorkbenchContext } from './CampusAssignmentWorkbench';
@@ -20,7 +20,7 @@ export function AssignmentReplyActions({ read, snapshot, context, disabled, onAs
   if (read.checkedAt !== snapshot.checkedAt || read.userId !== context.userId || read.schoolId !== context.schoolId ||
       !read.items.length) return null;
   const { items, page } = read;
-  const candidate = items.length === 1 ? { ...items[0], fullAssignmentTitle: items[0].title } : null;
+  const candidate = items.length === 1 ? { ...items[0], ...campusAssignmentTitleIdentity(items[0]) } : null;
   const target = candidate && resolveCampusAssignmentTarget({
     assignment: candidate, snapshot, scope: { uid: context.userId, schoolId: context.schoolId },
   });
@@ -69,7 +69,7 @@ export function AssignmentReplyActions({ read, snapshot, context, disabled, onAs
           {single.dueAt && Number.isFinite(confirmedTimestamp(single.dueAt)) && (
             <CampusAssignmentReminderAction step={{ ...single, dueAt: single.dueAt,
               evidence: 'authorized-assignments', route: '/classroom' }}
-              reviewOnOpen={read.reviewReminder} snapshot={snapshot} userId={context.userId} schoolId={context.schoolId}
+              singleReply reviewOnOpen={read.reviewReminder} snapshot={snapshot} userId={context.userId} schoolId={context.schoolId}
               isCurrent={context.isCurrent} disabled={disabled} />
           )}
         </>

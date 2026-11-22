@@ -14,7 +14,13 @@ export interface CampusSenseSnapshot {
   assignments: {
     status: SenseSourceStatus;
     count: number | null;
-    items: Array<{ title: string; groupName: string; dueAt: string | null; source?: CampusAssignmentSource }>;
+    items: Array<{
+      title: string;
+      titleMayBeTruncated?: true;
+      groupName: string;
+      dueAt: string | null;
+      source?: CampusAssignmentSource;
+    }>;
     coverage?: { complete: boolean; reason: AssignmentCoverageReason; pages: number };
   };
   announcements: {
@@ -24,6 +30,8 @@ export interface CampusSenseSnapshot {
 }
 
 export const CAMPUS_SENSE_MAX_AGE_MS = 15 * 60 * 1000;
+// Kept in sync with serializeAssignmentRow by the assignment target tests.
+export const ASSIGNMENT_SUMMARY_TITLE_LIMIT = 140;
 export const CAMPUS_ASSIGNMENT_PAGE_SIZE = 50;
 // Bound a user-triggered read, respecting the existing 12 requests/5 min limit.
 // Larger lists remain explicitly partial; never silently label a capped read complete.
@@ -118,8 +126,12 @@ function parseSnapshot(payload: unknown, userId: string, schoolId: string): Pars
             if (!row) throw new Error('invalid-sense-response');
             const source = row.source === undefined ? null : parseCampusAssignmentSource(row.source);
             if (row.source !== undefined && !source) throw new Error('invalid-sense-response');
+            const title = requiredText(row.title, ASSIGNMENT_SUMMARY_TITLE_LIMIT);
+            // Trimming can hide that the raw summary reached the server's cutoff.
+            const titleMayBeTruncated = typeof row.title === 'string' && row.title.length >= ASSIGNMENT_SUMMARY_TITLE_LIMIT;
             return {
-              title: requiredText(row.title, 140),
+              title,
+              ...(titleMayBeTruncated ? { titleMayBeTruncated: true as const } : {}),
               groupName: typeof row.groupName === 'string' ? row.groupName.trim().slice(0, 100) : '',
               dueAt: dateString(row.dueAt),
               ...(source ? { source } : {}),

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Button, Text, View } from 'react-native';
 import {
   savedAssignmentReminderPreferences,
-  cancelSubmittedAssignmentReminder,
+  cancelSubmittedAssignmentReminders,
 } from '../services/submittedAssignmentReminders';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import {
@@ -77,16 +77,7 @@ export function LegacyAssignmentReminders({
     setBusy(true);
     setError('');
     try {
-      const matching = preferences.filter(
-        (other) => other.groupId === row.groupId && other.assignmentId === row.assignmentId,
-      );
-      for (const preference of matching)
-        await cancelSubmittedAssignmentReminder({
-          scope: { uid, schoolId },
-          source: preference,
-          leadMinutes: preference.leadMinutes,
-          isCurrent,
-        });
+      await cancelSubmittedAssignmentReminders({ scope: { uid, schoolId }, source: row, isCurrent });
       if (isCurrent())
         setPreferences(await savedAssignmentReminderPreferences({ uid, schoolId }, isCurrent));
     } catch {

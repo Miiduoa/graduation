@@ -46,6 +46,7 @@ export function CampusAssignmentReminderAction({
   schoolId,
   disabled,
   reviewOnOpen = false,
+  singleReply = false,
   isCurrent,
 }: {
   step: ReminderAssignment;
@@ -54,6 +55,7 @@ export function CampusAssignmentReminderAction({
   schoolId: string;
   disabled: boolean;
   reviewOnOpen?: boolean;
+  singleReply?: boolean;
   isCurrent: () => boolean;
 }) {
   const [expanded, setExpanded] = useState(reviewOnOpen);
@@ -70,6 +72,7 @@ export function CampusAssignmentReminderAction({
   latestSnapshot.current = snapshot;
   const scope = { uid: userId, schoolId };
   const verified = validCampusSenseSnapshot(snapshot, scope);
+  const legacySnapshot = singleReply ? snapshot : undefined;
   const deadline = step.dueAt ? Date.parse(step.dueAt) : NaN;
   const canCheck = Boolean(userId && schoolId && isCurrent() && step.route === '/classroom' &&
     step.evidence === 'authorized-assignments' && Number.isFinite(deadline));
@@ -91,9 +94,10 @@ export function CampusAssignmentReminderAction({
     setStatusLoading(true);
     const { getCampusAssignmentReminderStatus } =
       require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+    const getLegacySnapshot = singleReply ? () => latestSnapshot.current : undefined;
     void Promise.all([
-      getCampusAssignmentReminderStatus({ scope, step, isCurrent }),
-      getCampusAssignmentReminderStatus({ scope, step, isCurrent, scheduledOnly: true }),
+      getCampusAssignmentReminderStatus({ scope, step, isCurrent, getLegacySnapshot }),
+      getCampusAssignmentReminderStatus({ scope, step, isCurrent, getLegacySnapshot, scheduledOnly: true }),
     ]).then(([leads, scheduled]) => {
         if (active && isCurrent()) {
           setConfirmedLead(leads[0] ?? null);
@@ -107,8 +111,8 @@ export function CampusAssignmentReminderAction({
         if (active && isCurrent()) setStatusLoading(false);
       });
     return () => { active = false; };
-  }, [userId, schoolId, step.title, step.fullAssignmentTitle, step.groupName, step.dueAt,
-    step.expectedSource?.groupId, step.expectedSource?.assignmentId, canCheck, statusRefresh]);
+  }, [userId, schoolId, step.title, step.fullAssignmentTitle, step.summaryAssignmentTitle, step.groupName, step.dueAt,
+    step.expectedSource?.groupId, step.expectedSource?.assignmentId, canCheck, statusRefresh, singleReply, legacySnapshot]);
 
   const schedule = async () => {
     const currentSnapshot = validCampusSenseSnapshot(latestSnapshot.current, scope);
@@ -123,6 +127,7 @@ export function CampusAssignmentReminderAction({
         scope,
         step,
         snapshot: currentSnapshot,
+        getSnapshot: () => latestSnapshot.current,
         leadMinutes: leadChoice,
         isCurrent,
       });
@@ -152,10 +157,14 @@ export function CampusAssignmentReminderAction({
     setSaving(true);
     setMessage('');
     try {
-      const { cancelCampusAssignmentReminder, getCampusAssignmentReminderStatus } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
-      const leads = await getCampusAssignmentReminderStatus({ scope, step, isCurrent });
-      for (const leadMinutes of leads)
-        await cancelCampusAssignmentReminder({ scope, step, leadMinutes, isCurrent });
+      const { cancelCampusAssignmentReminders } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+      const cancelled = await cancelCampusAssignmentReminders({
+        scope, step, isCurrent, getLegacySnapshot: singleReply ? () => latestSnapshot.current : undefined,
+      });
+      if (!cancelled) {
+        setStatusRefresh((value) => value + 1);
+        return;
+      }
       if (!isCurrent()) return;
       setConfirmedLead(null);
       setMessage('已退訂並清除提醒偏好，撤回或延期後也不會自動恢復。');
