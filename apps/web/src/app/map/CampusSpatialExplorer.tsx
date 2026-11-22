@@ -76,6 +76,20 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
   const identity = encoding === null || encoding === 'identity';
   const identityLength = identity && declared !== null ? Number(declared) : null;
   if (!response.body || typeof response.body.getReader !== 'function') {
+    // A native reader may still be available when a WebView hides it on the instance.
+    const readBytes = typeof response.arrayBuffer === 'function' ? response.arrayBuffer :
+      typeof Response !== 'undefined' && response instanceof Response ? Response.prototype.arrayBuffer : undefined;
+    if (typeof readBytes === 'function') {
+      const bytes = await readBytes.call(response);
+      if (signal?.aborted) throw new Error('Building outline read aborted');
+      if (bytes.byteLength > MAX_DECLARED_FOOTPRINT_BYTES) {
+        throw new Error('Building outline response exceeded byte limit');
+      }
+      if (identityLength !== null && bytes.byteLength !== identityLength) {
+        throw new Error('Incomplete building outline response');
+      }
+      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
+    }
     // Old embedded WebViews can expose a Response without a usable stream.
     // We cannot stop their text() buffering mid-flight, but reject decoded
     // content before JSON.parse() allocates a potentially huge object tree.
@@ -96,35 +110,8 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       }
       return JSON.parse(raw) as unknown;
     }
-    if (identity) {
-      // Some WebViews hide body readers on the instance while retaining
-      // the native Response reader. Verify the original bytes, including
-      // whitespace and escapes that disappear after JSON parsing.
-      const readBytes = typeof response.arrayBuffer === 'function' ? response.arrayBuffer :
-        typeof Response !== 'undefined' && response instanceof Response ? Response.prototype.arrayBuffer : undefined;
-      if (identityLength === null || typeof readBytes !== 'function') {
-        throw new Error('Cannot verify identity-framed building outline bytes');
-      }
-      const bytes = await readBytes.call(response);
-      if (signal?.aborted) throw new Error('Building outline read aborted');
-      if (bytes.byteLength !== identityLength) throw new Error('Incomplete building outline response');
-      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
-    }
-    // A compressed HTTP response is already decoded by Fetch before it
-    // reaches arrayBuffer(). Check those bytes before JSON.parse: a legacy
-    // WebView without text()/streams can otherwise allocate an unbounded
-    // object graph through json() even when it exposes raw decoded bytes.
-    // Do not compare compressed *wire* Content-Length to decoded bytes.
-    if (typeof response.arrayBuffer === 'function') {
-      const decoded = await response.arrayBuffer();
-      if (signal?.aborted) throw new Error('Building outline read aborted');
-      if (decoded.byteLength > MAX_DECLARED_FOOTPRINT_BYTES) {
-        throw new Error('Building outline response exceeded byte limit');
-      }
-      return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(decoded)) as unknown;
-    }
-    // JSON-only legacy bridges have neither decoded bytes nor text(). The
-    // post-parse size limit below is a weaker, last-resort compatibility path.
+    if (!identity) throw new Error('Cannot verify decoded building outline bytes');
+    // JSON-only legacy bridges can only be size-checked after parsing.
     const payload: unknown = await response.json();
     if (signal?.aborted) throw new Error('Building outline read aborted');
     const normalized = JSON.stringify(payload);
@@ -301,7 +288,7 @@ function subscribeAppearance(notify: () => void) {
   };
 }
 
-function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, onSelect, footprints }: {
+function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, onSelect, footprints, manualStart, onManualStart }: {
   model: ReturnType<typeof buildCampusSpatialModel>;
   selectedId: string | null;
   overhead: boolean;
@@ -309,6 +296,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   onCameraChange: (camera: CampusSpatialCamera) => void;
   onSelect: (id: string) => void;
   footprints: readonly ProvidenceFootprint[];
+  manualStart: number;
+  onManualStart: () => void;
 }) {
   const appearance = useSyncExternalStore(subscribeAppearance, readAppearance, () => 'reduced:light');
   const [host, setHost] = useState<HTMLDivElement | null>(null);
@@ -317,14 +306,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   // running scene. Keep a visible recovery control instead of a frozen canvas.
   const [renderSuspended, setRenderSuspended] = useState(false);
   const [deferredCause, setDeferredCause] = useState<'background' | 'offscreen' | 'data-saver'>('background');
-  const [attempt, setAttempt] = useState(0);
-  // An embedded WebView may construct an observer but never deliver entries.
-  // An explicit user choice can start the scene before the first entry.
-  const [manualStart, setManualStart] = useState(0);
-  const handledManualStart = useRef(0);
-  // Explicit opt-in persists through camera/footprint effect rebuilds, but not
-  // when the dialog is closed and later reopened with Save-Data enabled.
-  const dataSaverConsent = useRef(false);
+  const pageSuspended = useRef(false);
+  const observerBlockedStart = useRef<number | null>(null);
   const viewportPausedHost = useRef<HTMLDivElement | null>(null);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
@@ -349,24 +332,21 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // No observer result (or legacy geometry fallback) has confirmed the
     // canvas yet. Starting with visible=true in an API-less WebView displayed
     // the loading spinner even after fallback geometry proved the map offscreen.
-    // A manual request applies to this particular scene startup.
-    const manuallyStarted = manualStart !== handledManualStart.current;
-    if (manuallyStarted) dataSaverConsent.current = true;
+    const manuallyStarted = manualStart > 0;
     // Avoid loading the optional Three.js bundle or allocating WebGL when the
     // browser requests reduced data use. Marker details and walking links
     // remain available; the visitor can explicitly opt into 3D at any time.
     const saveData = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true;
-    let visible = manuallyStarted;
-    handledManualStart.current = manualStart;
-    let pageSuspended = false;
+    // A negative observation can pause rendering without revoking the user's choice.
+    let visible = manuallyStarted && observerBlockedStart.current !== manualStart;
     let scene: CampusSpatialScene | null = null;
     // Safari can fire pagehide before visibilitychange when entering bfcache.
     // Treat that window as suspended even if document.hidden stays false.
-    const isBackgrounded = () => pageSuspended || document.hidden;
-    const isDeferred = () => isBackgrounded() || !visible || (saveData && !dataSaverConsent.current);
+    const isBackgrounded = () => pageSuspended.current || document.hidden;
+    const isDeferred = () => isBackgrounded() || !visible || (saveData && !manuallyStarted);
     const defer = () => {
       setDeferredCause(isBackgrounded() ? 'background' :
-        saveData && !dataSaverConsent.current ? 'data-saver' : 'offscreen');
+        saveData && !manuallyStarted ? 'data-saver' : 'offscreen');
       setStatus('deferred');
     };
     if (isDeferred()) defer();
@@ -572,12 +552,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       syncPendingStartup();
     };
     const onPageHide = () => {
-      pageSuspended = true;
+      pageSuspended.current = true;
       updateVisibility();
       syncPendingStartup();
     };
     const onPageShow = () => {
-      pageSuspended = false;
+      pageSuspended.current = false;
       // A restored Safari page can recover a valid VisualViewport without
       // dispatching resize, scroll or a fresh IntersectionObserver callback.
       // Recheck the current rect on pageshow: the same two gates apply to
@@ -742,6 +722,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
               (position === 'visual-offscreen' || position === 'invalid-visual-viewport' ||
                 position === 'invalid-layout-viewport' || position === 'invalid-host-rect') && confirmedIntersecting;
           }
+          if (manuallyStarted) {
+            observerBlockedStart.current = confirmedIntersecting ? null : manualStart;
+          }
           rememberViewportPause(position, confirmedIntersecting);
           visible = confirmedIntersecting && !hostMustStaySuspended(position) &&
             (position === 'onscreen' || viewportPausedHost.current !== host);
@@ -811,7 +794,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       scene?.dispose();
       runtime.current = null;
     };
-  }, [host, model, onSelect, onCameraChange, attempt, footprints, manualStart]);
+  }, [host, model, onSelect, onCameraChange, footprints, manualStart]);
 
   return (
     <>
@@ -837,7 +820,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
                   // The launch button disappears as loading begins. Preserve
                   // keyboard/screen-reader focus on the map instead of body.
                   host?.focus();
-                  setManualStart((value) => value + 1);
+                  onManualStart();
                 }}>{deferredCause === 'data-saver' ? '仍要開啟立體畫面' : '手動開啟立體畫面'}</button>
               </>
           ) : <>
@@ -847,7 +830,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
               // Keep keyboard and screen-reader focus inside the map instead
               // of losing focus when the button is removed from the dialog.
               host?.focus();
-              setAttempt((value) => value + 1);
+              onManualStart();
             }}>
               重試立體畫面
             </button>
@@ -861,7 +844,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
             // The recovery button disappears while the scene restarts; keep
             // keyboard focus within the tour instead of losing it to body.
             host?.focus();
-            setManualStart((value) => value + 1);
+            onManualStart();
           }}>重新啟動立體畫面</button>
         </div>
       )}
@@ -922,9 +905,11 @@ function createClipboardWriteQueue() {
 }
 type ClipboardWriteQueue = ReturnType<typeof createClipboardWriteQueue>;
 
-function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboardWrite }: Props & {
+function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboardWrite, manualStart, onManualStart }: Props & {
   onClose: () => void;
   clipboardWrite: ClipboardWriteQueue;
+  manualStart: number;
+  onManualStart: () => void;
 }) {
   const model = useMemo(() => buildCampusSpatialModel(locations), [locations]);
   // Two map records can have the same public-facing name (including two
@@ -1555,6 +1540,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
               onCameraChange={changeCamera}
               onSelect={selectPlace}
               footprints={visibleFootprints}
+              manualStart={manualStart}
+              onManualStart={onManualStart}
             />
             <div className={styles.viewTools} role="group" aria-label="導覽視角">
               <button className="btn" type="button" aria-pressed={showOverview} onClick={() => {
@@ -1754,15 +1741,22 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
 function AvailableSpatialExplorer(props: Props) {
   const [open, setOpen] = useState(false);
   const [clipboardWrite] = useState(createClipboardWriteQueue);
-  const close = useCallback(() => setOpen(false), []);
+  // Keep manual startup intent across canvas and school changes within the open tour.
+  const [manualStart, setManualStart] = useState(0);
+  const startManually = () => setManualStart((value) => value + 1);
+  const close = useCallback(() => {
+    setOpen(false);
+    setManualStart(0);
+  }, []);
   return <>
     <button className="btn" type="button" aria-haspopup="dialog" onClick={() => setOpen(true)}>
       空間導覽
     </button>
-    {open && <SpatialDialog {...props} key={props.school} onClose={close} clipboardWrite={clipboardWrite} />}
+    {open && <SpatialDialog {...props} key={props.school} onClose={close} clipboardWrite={clipboardWrite}
+      manualStart={manualStart} onManualStart={startManually} />}
   </>;
 }
 
 export default function CampusSpatialExplorer(props: Props) {
-  return props.locations.length ? <AvailableSpatialExplorer key={props.school} {...props} /> : null;
+  return props.locations.length ? <AvailableSpatialExplorer {...props} /> : null;
 }

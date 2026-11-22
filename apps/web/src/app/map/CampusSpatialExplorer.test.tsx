@@ -1268,6 +1268,76 @@ it.each(['location update', 'public outlines'] as const)(
   },
 );
 
+it.each(['location update', 'public outlines'] as const)(
+  'keeps manual startup across %s with a silent observer',
+  async (update) => {
+    vi.stubGlobal('IntersectionObserver', class {
+      observe() {}
+      disconnect() {}
+    });
+    const { library, body, buildings } = sourcedLibraryFootprintFixture();
+    let resolveFootprints!: (response: Response) => void;
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise<Response>((resolve) => {
+      resolveFootprints = resolve;
+    })));
+    const school = update === 'public outlines' ? 'pu' : 'other-school';
+    const onSelect = vi.fn();
+    const { rerender } = render(<CampusSpatialExplorer school={school} locations={[library]}
+      selected={library} onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    expect(scene.create).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: '手動開啟立體畫面' }));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+
+    if (update === 'public outlines') {
+      await act(async () => resolveFootprints(new Response(body, {
+        headers: { 'Content-Type': 'application/json' },
+      })));
+    } else {
+      fireEvent(window, new Event('pagehide'));
+      await act(async () => rerender(<CampusSpatialExplorer school={school}
+        locations={[library, places[1]]} selected={library} onSelect={onSelect} />));
+      expect(scene.create).toHaveBeenCalledTimes(1);
+      fireEvent(window, new Event('pageshow'));
+    }
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+    expect(scene.dispose).toHaveBeenCalledTimes(1);
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(update === 'public outlines' ? buildings : []);
+  },
+);
+
+it('keeps manual 3D across school changes, view updates and context retry until the tour closes', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    observe() {}
+    disconnect() {}
+  });
+  const props = { locations: places, selected: places[0], onSelect: vi.fn() };
+  const { rerender } = render(<CampusSpatialExplorer school="school-a" {...props} />);
+  const tour = () => within(screen.getByRole('dialog', { name: '校園空間導覽' }));
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  fireEvent.click(tour().getByRole('button', { name: '手動開啟立體畫面' }));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+
+  rerender(<CampusSpatialExplorer school="school-b" {...props} />);
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+  fireEvent.click(tour().getByRole('button', { name: '下一個地點' }));
+  fireEvent(window, new Event('resize'));
+  await act(async () => { document.documentElement.dataset.reducedMotion = 'true'; });
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'dorm', motion: false }));
+  expect(scene.create).toHaveBeenCalledTimes(2);
+
+  act(() => scene.create.mock.calls.at(-1)?.[2].onError());
+  fireEvent.click(tour().getByRole('button', { name: '重試立體畫面' }));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(3));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'dorm', motion: false }));
+
+  fireEvent.click(tour().getByRole('button', { name: '關閉視窗' }));
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  expect(tour().getByRole('button', { name: '手動開啟立體畫面' })).toBeTruthy();
+  expect(scene.create).toHaveBeenCalledTimes(3);
+});
+
 it('restores manual 3D startup after a background open with no WebView visibility reports', async () => {
   vi.stubGlobal('IntersectionObserver', class {
     observe() {}
@@ -3222,104 +3292,77 @@ it.each(['ASCII', 'UTF-8'] as const)(
   },
 );
 
-it('rejects oversized JSON-only WebView bridge payloads even without text()', async () => {
-  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
-  const json = vi.fn().mockResolvedValue({
-    schoolId: 'pu', source: 'OpenStreetMap', buildings: [],
-    fetchedAt: new Date().toISOString(), stale: false,
-    extra: 'x'.repeat(2_000_001),
-  });
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, status: 200, body: null, headers: new Headers({ 'Content-Encoding': 'gzip' }), json,
-  }));
+it.each([
+  { name: 'no headers', encoding: null, length: null, result: 'accept' },
+  { name: 'identity without length', encoding: 'identity', length: null, result: 'accept' },
+  { name: 'identity with length', encoding: 'identity', length: 'actual', result: 'accept' },
+  { name: 'oversized declaration', encoding: null, length: '2000001', result: 'skip' },
+  { name: 'gzip', encoding: 'gzip', length: '100', result: 'skip' },
+  { name: 'gzip without length', encoding: 'gzip', length: null, result: 'skip' },
+  { name: 'oversized UTF-8 payload', encoding: null, length: null, result: 'reject' },
+  { name: 'oversized identity payload', encoding: 'identity', length: '100', result: 'reject' },
+  { name: 'invalid snapshot', encoding: null, length: null, result: 'reject' },
+])('validates JSON-only WebView snapshots ($name)', async ({ name, encoding, length, result }) => {
+  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  // Trailing whitespace contributes to wire length but disappears after parsing.
+  const raw = body + '\n';
+  const payload = JSON.parse(raw) as Record<string, unknown>;
+  if (name === 'invalid snapshot') delete payload.buildings;
+  if (name.startsWith('oversized') && result === 'reject') payload.extra = '中'.repeat(700_000);
+  const json = vi.fn().mockResolvedValue(payload);
+  const headers = new Headers();
+  if (encoding !== null) headers.set('Content-Encoding', encoding);
+  if (length !== null) {
+    headers.set('Content-Length', length === 'actual' ? String(new TextEncoder().encode(raw).byteLength) : length);
+  }
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers, json }));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(json).toHaveBeenCalledTimes(1);
-  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  const accepted = result === 'accept';
+  expect(await within(dialog).findByText(accepted ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
+  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(accepted ? buildings : []));
+  expect(json).toHaveBeenCalledTimes(result === 'skip' ? 0 : 1);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
-
-// Parsed JSON cannot attest to the HTTP identity wire length, even if the
-// reserialized byte count happens to match or the body has extra whitespace.
-// A legacy JSON-only bridge must fail closed instead of showing sourced 3D.
-it.each(['', '\n'])(
-  'rejects an unverifiable identity-framed JSON-only WebView snapshot with suffix %j', async (suffix) => {
-    const { library, body } = sourcedLibraryFootprintFixture();
-    const responseBody = body + suffix;
-    const json = vi.fn().mockResolvedValue(JSON.parse(responseBody));
-    const length = new TextEncoder().encode(responseBody).byteLength;
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true, status: 200, body: null,
-      headers: { get: (name: string) => name === 'content-length' ? String(length) : name === 'content-encoding' ? 'identity' : null },
-      json,
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-    const dialog = await open();
-    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    expect(json).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
-    expect(retry.hasAttribute('disabled')).toBe(true);
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-  },
-);
 
 // Fetch decodes Content-Encoding before exposing arrayBuffer(). Some embedded
 // WebViews supply those decoded bytes but neither a ReadableStream nor text().
 // Never use eager json() when bytes can be size-checked before parsing.
-it.each(['valid', 'oversized'] as const)(
-  'bounds a %s compressed OSM snapshot from a byte-only WebView before JSON.parse',
-  async (caseName) => {
-    const { library, buildings, body } = sourcedLibraryFootprintFixture();
-    const raw = caseName === 'oversized'
-      ? JSON.stringify({ ...JSON.parse(body) as Record<string, unknown>, padding: 'x'.repeat(2_000_001) })
-      : body;
-    const bytes = new TextEncoder().encode(raw);
-    const arrayBuffer = vi.fn().mockResolvedValue(bytes.buffer);
-    const json = vi.fn();
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true, status: 200, body: null,
-      headers: new Headers({ 'Content-Encoding': 'gzip', 'Content-Length': '100' }),
-      arrayBuffer, json,
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-    const dialog = await open();
-    if (caseName === 'valid') {
-      expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
-      await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
-    } else {
-      expect(bytes.byteLength).toBeGreaterThan(2_000_000);
-      expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-      expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-      const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
-      await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
-    }
-    expect(arrayBuffer).toHaveBeenCalledTimes(1);
-    expect(json).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-  },
-);
-
-it('keeps JSON-only WebView compressed responses usable without comparing wire and decoded lengths', async () => {
+it.each([
+  { encoding: 'gzip', length: '100', oversized: false },
+  { encoding: 'gzip', length: '100', oversized: true },
+  { encoding: 'identity', length: 'actual', oversized: false },
+  { encoding: 'identity', length: null, oversized: true },
+  { encoding: null, length: null, oversized: false },
+  { encoding: null, length: '2000001', oversized: false },
+])('bounds byte-only WebView snapshots (%j)', async ({ encoding, length, oversized }) => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
-  const json = vi.fn().mockResolvedValue(JSON.parse(body));
+  const raw = oversized
+    ? JSON.stringify({ ...JSON.parse(body) as Record<string, unknown>, padding: 'x'.repeat(2_000_001) })
+    : body;
+  const bytes = new TextEncoder().encode(raw);
+  const arrayBuffer = vi.fn().mockResolvedValue(bytes.buffer);
+  const headers = new Headers();
+  if (encoding !== null) headers.set('Content-Encoding', encoding);
+  if (length !== null) headers.set('Content-Length', length === 'actual' ? String(bytes.byteLength) : length);
   const fetchMock = vi.fn().mockResolvedValue({
     ok: true, status: 200, body: null,
-    headers: { get: (name: string) => name === 'content-length' ? '100' : name === 'content-encoding' ? 'gzip' : null },
-    json,
+    headers, arrayBuffer,
   });
   vi.stubGlobal('fetch', fetchMock);
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
-  expect(json).toHaveBeenCalledTimes(1);
+  if (!oversized && length !== '2000001') {
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
+  } else {
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  }
+  expect(arrayBuffer).toHaveBeenCalledTimes(length === '2000001' ? 0 : 1);
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
@@ -3352,7 +3395,7 @@ it.each([
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  const valid = ['exact', 'trailing whitespace', 'escaped text'].includes(variant);
+  const valid = ['exact', 'trailing whitespace', 'escaped text', 'missing length'].includes(variant);
   expect(await within(dialog).findByText(valid ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(valid ? buildings : []);
   expect(json).not.toHaveBeenCalled();
@@ -3470,21 +3513,6 @@ it.each([
   },
 );
 
-it('rejects a legacy JSON-only identity response without a declared length', async () => {
-  const { library, body } = sourcedLibraryFootprintFixture();
-  const json = vi.fn().mockResolvedValue(JSON.parse(body));
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, status: 200, body: null,
-    headers: { get: () => null }, json,
-  }));
-  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-  const dialog = await open();
-  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(json).not.toHaveBeenCalled();
-  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-});
-
 it('accepts a small, valid non-streaming text response for legacy WebViews', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
@@ -3502,16 +3530,14 @@ it('accepts a small, valid non-streaming text response for legacy WebViews', asy
     schoolId: 'pu', source: 'OpenStreetMap', buildings,
     fetchedAt: new Date().toISOString(), stale: false,
   }));
-  const json = vi.fn();
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: true, status: 200, body: null, headers: { get: () => null },
-    text: textBody, json,
+    text: textBody,
   }));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
   expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
   expect(textBody).toHaveBeenCalledTimes(1);
-  expect(json).not.toHaveBeenCalled();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
@@ -4928,7 +4954,8 @@ it('retains a newly stale outline throughout its first 24-hour refresh and an of
   }
 });
 
-it('evicts an expired snapshot on tab resume, then installs only fresh source geometry', async () => {
+it.each(['automatic', 'manual'] as const)(
+  'evicts an expired snapshot on tab resume, then installs fresh geometry after %s startup', async (startup) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
     type: 'way', id: 255784049, tags: { building: 'yes' },
@@ -4954,7 +4981,17 @@ it('evicts an expired snapshot on tab resume, then installs only fresh source ge
   const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
   try {
     render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-    const dialog = await open();
+    if (startup === 'manual') {
+      vi.stubGlobal('IntersectionObserver', class {
+        observe() {}
+        disconnect() {}
+      });
+    }
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    if (startup === 'manual') {
+      fireEvent.click(within(dialog).getByRole('button', { name: '手動開啟立體畫面' }));
+    }
     expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull();
 
