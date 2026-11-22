@@ -346,6 +346,24 @@ it('removes an inactive section portal while keeping its original pending review
   expect(mocks.submitReview).toHaveBeenCalledOnce();
 });
 
+it('focuses the persistent review button when the first review is submitted', async () => {
+  render(<StudyBuddyTab schoolId="pu" />);
+  const first = await screen.findByRole('button', { name: '寫第一則評價' });
+  first.focus();
+  fireEvent.click(first);
+  completeReview();
+  mocks.listReviews.mockResolvedValueOnce([
+    {
+      id: 'r1', courseCode: 'CS101', courseName: '程式設計', rating: 4,
+      sentiment: 'positive', comment: '第一則評價', tags: [], anonymous: true,
+    },
+  ]);
+  fireEvent.click(screen.getByRole('button', { name: '送出評價' }));
+  await screen.findByText('第一則評價');
+  expect(screen.queryByRole('button', { name: '寫第一則評價' })).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '＋ 寫評價' }));
+});
+
 it('distinguishes a filtered empty result and restores both the list and search focus', async () => {
   mocks.listReviews.mockResolvedValue([
     {

@@ -168,53 +168,93 @@ describe('compressAssignmentImageFile', () => {
 });
 
 describe('uploadAndSubmitFiles', () => {
-  it('uses the validated MIME only at upload time and skips image compression for MIME-less files', async () => {
+  it.each([
+    [false, 7, 7],
+    [true, 7, 7],
+    [false, 8, 8],
+    [true, 8, 8],
+    [false, 9, 8],
+    [true, 9, 8],
+  ])('preflights the whole batch (photos first: %s, incoming photos: %i)', async (
+    photosFirst, incomingPhotos, acceptedPhotos,
+  ) => {
     const decode = vi.fn();
     vi.stubGlobal('createImageBitmap', decode);
-    const photo = file('photo.webp', '');
-    const document = file('document.pdf', '');
-    const operation: import('./AssignmentFileFields').AssignmentFileOperation = {};
-    const createAssignmentFileIntents = vi.fn(async () => [
-      { id: 'photo', uploadPath: 'photo', contentType: 'image/webp' },
-      { id: 'document', uploadPath: 'document', contentType: 'application/pdf' },
+    const photos = Array.from({ length: incomingPhotos }, (_, index) =>
+      file(`shot-${index}.jpg`, 'image/jpeg'),
+    );
+    const documents = [file('unknown.webp', ''), file('notes.pdf', ''), file('extra.txt', 'text/plain')];
+    const [first, second] = photosFirst ? [photos, documents] : [documents, photos];
+    const initial = collectLocalFileSelection([], first);
+    const selection = collectLocalFileSelection(initial.files, second);
+    expect(selection.files.filter(({ kind }) => kind === 'image')).toHaveLength(acceptedPhotos);
+    expect(selection.files.filter(({ kind }) => kind === 'file')).toHaveLength(2);
+    expect(initial.rejected.length + selection.rejected.length).toBe(1 + incomingPhotos - acceptedPhotos);
+    const createAssignmentFileIntents = vi.fn();
+    const uploadAssignmentFile = vi.fn();
+    const submitFiles = vi.fn();
+    await expect(uploadAndSubmitFiles(
+      { createAssignmentFileIntents, uploadAssignmentFile, submitFiles } as never,
+      'workspace', 'assignment', '', selection.files, 'key',
+    )).rejects.toMatchObject({ code: 'ASSIGNMENT_FILE_TYPE_REJECTED' });
+    expect(decode).not.toHaveBeenCalled();
+    expect(createAssignmentFileIntents).not.toHaveBeenCalled();
+    expect(uploadAssignmentFile).not.toHaveBeenCalled();
+    expect(submitFiles).not.toHaveBeenCalled();
+  });
+
+  it('uploads exactly eight declared photos and two documents using the server MIME types', async () => {
+    const files = collectLocalFiles([], [
+      ...Array.from({ length: 8 }, (_, index) => file(`shot-${index}.jpg`, 'image/jpeg')),
+      file('notes.pdf', ''),
+      file('extra.txt', 'text/plain'),
     ]);
+    const createAssignmentFileIntents = vi.fn(async (_workspace: string, _assignment: string, input: {
+      files: { originalName: string; contentType: string }[];
+    }) => input.files.map(({ originalName, contentType }) => ({
+      id: originalName, uploadPath: originalName, contentType,
+    })));
     const uploadAssignmentFile = vi.fn(async () => {});
     const submitFiles = vi.fn(async () => ({}));
     await uploadAndSubmitFiles(
       { createAssignmentFileIntents, uploadAssignmentFile, submitFiles } as never,
-      'workspace',
-      'assignment',
-      '',
-      collectLocalFiles([], [photo, document]),
-      'key',
-      undefined,
-      operation,
+      'workspace', 'assignment', '', files, 'key',
     );
-    expect(decode).not.toHaveBeenCalled();
-    expect(operation.prepared?.[0]?.file).toBe(photo);
-    expect(operation.prepared?.[1]?.file).toBe(document);
-    expect(createAssignmentFileIntents).toHaveBeenCalledWith('workspace', 'assignment', {
-      idempotencyKey: 'key:intents',
-      files: [
-        {
-          originalName: 'photo.webp',
-          contentType: 'image/webp',
-          byteSize: 4,
-          idempotencyKey: 'key:file:0',
-        },
-        {
-          originalName: 'document.pdf',
-          contentType: 'application/pdf',
-          byteSize: 4,
-          idempotencyKey: 'key:file:1',
-        },
-      ],
-    });
-    expect(uploadAssignmentFile).toHaveBeenCalledWith(
-      'photo',
-      new Uint8Array(await photo.arrayBuffer()),
-      'image/webp',
-    );
+    expect(createAssignmentFileIntents.mock.calls[0]?.[2].files.map(({ contentType }) => contentType))
+      .toEqual([...Array(8).fill('image/jpeg'), 'application/pdf', 'text/plain']);
+    expect(uploadAssignmentFile).toHaveBeenCalledTimes(10);
+    expect(submitFiles).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      files: Array.from({ length: 9 }, (_, index) => file(`shot-${index}.jpg`, 'image/jpeg')),
+      kind: 'image' as const,
+      code: 'ASSIGNMENT_FILE_LIMIT',
+    },
+    {
+      files: Array.from({ length: 3 }, (_, index) => file(`notes-${index}.pdf`, 'application/pdf')),
+      kind: 'file' as const,
+      code: 'ASSIGNMENT_FILE_LIMIT',
+    },
+    {
+      files: [file('valid.pdf', 'application/pdf'), file('empty.pdf', 'application/pdf', 0)],
+      kind: 'file' as const,
+      code: 'ASSIGNMENT_FILE_SIZE_REJECTED',
+    },
+  ])('creates no intents for a batch rejected with $code', async ({ files, kind, code }) => {
+    const createAssignmentFileIntents = vi.fn();
+    await expect(
+      uploadAndSubmitFiles(
+        { createAssignmentFileIntents } as never,
+        'workspace',
+        'assignment',
+        '',
+        files.map((file) => ({ key: file.name, kind, file })),
+        'key',
+      ),
+    ).rejects.toMatchObject({ code });
+    expect(createAssignmentFileIntents).not.toHaveBeenCalled();
   });
 
   it('creates intents once, uploads in parallel, then submits without a list reload', async () => {

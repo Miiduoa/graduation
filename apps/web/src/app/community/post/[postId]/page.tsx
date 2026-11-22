@@ -246,7 +246,8 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
       });
       setReplyText('');
       setReplyParentId(null);
-      await Promise.all([loadReplies(), loadPost()]);
+      // A confirmed write stays successful even when refreshing the page fails.
+      await Promise.allSettled([loadReplies(), loadPost()]);
     } catch {
       alert('這次未能送出，請稍後再試。');
     } finally {
@@ -259,7 +260,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     setLikeBusy(true);
     try {
       await toggleCampusPostLike(schoolId, postId, user.uid);
-      await loadPost();
+      await Promise.allSettled([loadPost()]);
     } catch {
       alert('這次未能按讚，請稍後再試。');
     } finally {
@@ -304,7 +305,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     void (async () => {
       try {
         await softDeleteCampusReply(schoolId, postId, r.id);
-        await Promise.all([loadReplies(), loadPost()]);
+        await Promise.allSettled([loadReplies(), loadPost()]);
       } catch {
         alert('這次未能刪除，請稍後再試。');
       }

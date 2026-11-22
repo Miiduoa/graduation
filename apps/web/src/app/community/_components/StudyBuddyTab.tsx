@@ -11,7 +11,7 @@
  *  - 配對 (buddy match)：web 端不做，導向到 mobile 設定課表後再啟用。
  */
 
-import { useCallback, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input, Select, Textarea } from '@/components/ui/Input';
@@ -161,6 +161,16 @@ export function CourseReviewSection(props: {
   const [filter, setFilter] = useState('');
   const filterRef = useRef<HTMLInputElement>(null);
   const [formDisplay, setFormDisplay] = useState<CommunityFormDisplay>('closed');
+  const writeReviewRef = useRef<HTMLButtonElement>(null);
+  const firstReviewRef = useRef<HTMLButtonElement>(null);
+  const restoreReviewFocus = useRef(false);
+
+  useEffect(() => {
+    if (formDisplay !== 'closed' || !restoreReviewFocus.current) return;
+    restoreReviewFocus.current = false;
+    if (props.active !== false && document.activeElement === document.body)
+      writeReviewRef.current?.focus();
+  }, [formDisplay, props.active]);
 
   const load = useCallback(async (isCurrent: () => boolean) => {
     if (!schoolId) {
@@ -206,6 +216,7 @@ export function CourseReviewSection(props: {
           style={{ flex: '1 1 160px', minWidth: 0, maxWidth: 420 }}
         />
         <button
+          ref={writeReviewRef}
           type="button"
           className="btn primary"
           onClick={() => setFormDisplay('open')}
@@ -247,7 +258,12 @@ export function CourseReviewSection(props: {
               清除搜尋
             </Button>
           ) : (
-            <Button type="button" variant="primary" onClick={() => setFormDisplay('open')}>
+            <Button
+              ref={firstReviewRef}
+              type="button"
+              variant="primary"
+              onClick={() => setFormDisplay('open')}
+            >
               寫第一則評價
             </Button>
           )}
@@ -283,6 +299,9 @@ export function CourseReviewSection(props: {
           myUid={myUid}
           onClose={(reason) => setFormDisplay(reason === 'pending' ? 'pending-hidden' : 'closed')}
           onSubmitted={async () => {
+            restoreReviewFocus.current =
+              formDisplay === 'open' ||
+              (firstReviewRef.current !== null && document.activeElement === firstReviewRef.current);
             setFormDisplay('closed');
             await refresh();
           }}

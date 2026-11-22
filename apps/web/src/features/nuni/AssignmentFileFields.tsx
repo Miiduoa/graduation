@@ -9,6 +9,8 @@ import {
   assignmentLateOpenLabel,
   assignmentReceiptStatusLabel,
   assignmentSubmissionLate,
+  assertAssignmentFileBudget,
+  assertAssignmentFileSize,
   classifyAssignmentFile,
   formatAssignmentFileSize,
   moveAssignmentFile,
@@ -52,6 +54,13 @@ type AssignmentFileSelection = {
   rejected: { name: string; reason: string }[];
 };
 
+function localAssignmentFileType(file: File) {
+  const classified = classifyAssignmentFile(file.name, file.type);
+  // Preserve the picker quota when the browser supplies no MIME.
+  const kind = file.type ? classified.kind : 'file';
+  return { kind, contentType: kind === classified.kind ? classified.contentType : null };
+}
+
 export function collectLocalFileSelection(
   current: LocalAssignmentFile[],
   incoming: FileList | File[],
@@ -59,8 +68,9 @@ export function collectLocalFileSelection(
   const next = [...current];
   const rejected: AssignmentFileSelection['rejected'] = [];
   for (const file of Array.from(incoming)) {
+    let kind: LocalAssignmentFile['kind'];
     try {
-      classifyAssignmentFile(file.name, file.type);
+      ({ kind } = localAssignmentFileType(file));
     } catch (cause) {
       rejected.push({
         name: file.name,
@@ -71,8 +81,6 @@ export function collectLocalFileSelection(
       });
       continue;
     }
-    // A missing browser MIME uses the document quota, even for an image extension.
-    const kind = file.type.startsWith('image/') ? 'image' : 'file';
     const used = next.filter((item) => item.kind === kind).length;
     const limit = kind === 'image' ? MAX_ASSIGNMENT_IMAGES : MAX_ASSIGNMENT_DOCUMENTS;
     if (used >= limit) {
@@ -470,6 +478,11 @@ export function AssignmentFilePicker({
       <p className={styles.note}>
         網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。
       </p>
+      {files.some(({ file }) => !localAssignmentFileType(file).contentType) ? (
+        <p role="status" className={styles.note}>
+          有照片缺少檔案類型，無法繳交。請刪除該檔案，再選擇有檔案類型的照片。
+        </p>
+      ) : null}
       <AssignmentFilePreview files={files} onChange={onChange} disabled={disabled} />
     </div>
   );
@@ -505,6 +518,9 @@ export async function uploadAndSubmitFiles(
   if (!files.length && !body.trim()) throw new NuniError(422, 'ASSIGNMENT_FILE_REQUIRED');
   const prepared: LocalAssignmentFile[] = operation.prepared ?? [];
   if (!operation.prepared) {
+    if (files.some(({ file }) => !localAssignmentFileType(file).contentType)) {
+      throw new NuniError(422, 'ASSIGNMENT_FILE_TYPE_REJECTED');
+    }
     for (const item of files) {
       if (item.kind !== 'image') {
         prepared.push(item);
@@ -516,20 +532,32 @@ export async function uploadAndSubmitFiles(
     operation.prepared = prepared;
   }
   onProgress?.({ completed: operation.uploaded?.length ?? 0, total: prepared.length });
-  const intents =
-    operation.intents ??
-    (prepared.length
+  if (!operation.intents) {
+    let images = 0;
+    let documents = 0;
+    // Validate the entire batch before the server reserves any staged quota.
+    const requests = prepared.map(({ file }, index) => {
+      const { kind, contentType } = localAssignmentFileType(file);
+      if (!contentType) throw new NuniError(422, 'ASSIGNMENT_FILE_TYPE_REJECTED');
+      assertAssignmentFileSize(kind, file.size);
+      if (kind === 'image') images += 1;
+      else documents += 1;
+      return {
+        originalName: file.name,
+        contentType,
+        byteSize: file.size,
+        idempotencyKey: `${key}:file:${index}`,
+      };
+    });
+    assertAssignmentFileBudget(images, documents);
+    operation.intents = requests.length
       ? await classes.createAssignmentFileIntents(workspaceId, assignmentId, {
           idempotencyKey: `${key}:intents`,
-          files: prepared.map((item, index) => ({
-            originalName: item.file.name,
-            contentType: item.file.type || classifyAssignmentFile(item.file.name, '').contentType,
-            byteSize: item.file.size,
-            idempotencyKey: `${key}:file:${index}`,
-          })),
+          files: requests,
         })
-      : []);
-  operation.intents = intents;
+      : [];
+  }
+  const intents = operation.intents;
   let completed = operation.uploaded?.length ?? 0;
   const uploads = await Promise.allSettled(
     intents.map(async (intent, index) => {

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   updatePost: vi.fn(),
   toggleLike: vi.fn(),
   addReply: vi.fn(),
+  deleteReply: vi.fn(),
 }));
 
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
@@ -44,7 +45,7 @@ vi.mock('@/lib/community/firestore', () => ({
   addCampusReply: mocks.addReply,
   deleteCampusPost: vi.fn(),
   getOrCreateBoardAlias: vi.fn(),
-  softDeleteCampusReply: vi.fn(),
+  softDeleteCampusReply: mocks.deleteReply,
   submitCampusReport: vi.fn(),
   toggleCampusPostLike: mocks.toggleLike,
   updateCampusPost: mocks.updatePost,
@@ -96,6 +97,7 @@ beforeEach(() => {
   mocks.removeBookmark.mockReset().mockResolvedValue(undefined);
   mocks.toggleLike.mockReset().mockResolvedValue(undefined);
   mocks.addReply.mockReset().mockResolvedValue(undefined);
+  mocks.deleteReply.mockReset().mockResolvedValue(undefined);
   mocks.updatePost.mockReset().mockResolvedValue(undefined);
 });
 
@@ -252,6 +254,93 @@ it('holds one edit write, prevents dismissal while pending, and updates the conf
   expect(screen.getByText('新內文')).toBeTruthy();
   expect(mocks.getPost).toHaveBeenCalledOnce();
 });
+
+it.each(['post', 'replies', 'both'])(
+  'keeps a successful reply committed when refreshing %s fails',
+  async (failedRead) => {
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    render(<PostDetailPage />);
+    const input = await screen.findByPlaceholderText('輸入留言⋯');
+    if (failedRead !== 'replies') mocks.getPost.mockRejectedValueOnce(new Error('offline'));
+    if (failedRead !== 'post') mocks.listReplies.mockRejectedValueOnce(new Error('offline'));
+    fireEvent.change(input, { target: { value: '新留言' } });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '送出留言' })));
+    expect(mocks.addReply).toHaveBeenCalledOnce();
+    expect(mocks.getPost).toHaveBeenCalledTimes(2);
+    expect(mocks.listReplies).toHaveBeenCalledTimes(2);
+    expect((input as HTMLTextAreaElement).value).toBe('');
+    expect(alert).not.toHaveBeenCalled();
+  },
+);
+
+it('preserves the reply draft and reports an actual write failure', async () => {
+  const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+  mocks.addReply.mockRejectedValueOnce(new Error('offline'));
+  render(<PostDetailPage />);
+  const input = await screen.findByPlaceholderText<HTMLTextAreaElement>('輸入留言⋯');
+  fireEvent.change(input, { target: { value: '尚未送出的留言' } });
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '送出留言' })));
+  expect(input.value).toBe('尚未送出的留言');
+  expect(alert).toHaveBeenCalledWith('這次未能送出，請稍後再試。');
+  expect(mocks.getPost).toHaveBeenCalledOnce();
+  expect(mocks.listReplies).toHaveBeenCalledOnce();
+});
+
+it('keeps a confirmed reply deletion when both reads fail', async () => {
+  const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  mocks.listReplies.mockResolvedValueOnce([
+    { id: 'r-1', authorUid: 'alice', content: '我的留言', threadDepth: 0 },
+  ]);
+  render(<PostDetailPage />);
+  const remove = await screen.findByRole('button', { name: '刪除', exact: true });
+  mocks.getPost.mockRejectedValueOnce(new Error('offline'));
+  mocks.listReplies.mockRejectedValueOnce(new Error('offline'));
+  await act(async () => fireEvent.click(remove));
+  expect(mocks.deleteReply).toHaveBeenCalledExactlyOnceWith('pu', 'p-1', 'r-1');
+  expect(alert).not.toHaveBeenCalled();
+});
+
+it.each(['like', 'reply', 'both'])(
+  'keeps the confirmed edit and %s writes when successful stale reads need a refresh that fails',
+  async (source) => {
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    ownPost();
+    render(<PostDetailPage />);
+    const edit = await screen.findByRole('button', { name: '✏️ 編輯' });
+    const original = await mocks.getPost.mock.results[0].value;
+    const resolveReads: ((value: unknown) => void)[] = [];
+    const deferRead = () => mocks.getPost.mockImplementationOnce(
+      () => new Promise((resolve) => resolveReads.push(resolve)),
+    );
+    if (source !== 'reply') {
+      deferRead();
+      fireEvent.click(screen.getByRole('button', { name: /🤍/ }));
+    }
+    if (source !== 'like') {
+      deferRead();
+      fireEvent.change(screen.getByPlaceholderText('輸入留言⋯'), { target: { value: '新留言' } });
+      fireEvent.click(screen.getByRole('button', { name: '送出留言' }));
+    }
+    await waitFor(() => expect(resolveReads).toHaveLength(source === 'both' ? 2 : 1));
+
+    fireEvent.click(edit);
+    fireEvent.change(screen.getByLabelText('內文'), { target: { value: '已儲存內文' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    mocks.getPost.mockRejectedValue(new Error('offline'));
+    await act(async () => resolveReads.forEach((resolve) => resolve(original)));
+    expect(mocks.getPost).toHaveBeenCalledTimes(1 + 2 * resolveReads.length);
+    expect(mocks.updatePost).toHaveBeenCalledOnce();
+    expect(mocks.addReply).toHaveBeenCalledTimes(source === 'like' ? 0 : 1);
+    expect(mocks.toggleLike).toHaveBeenCalledTimes(source === 'reply' ? 0 : 1);
+    expect(screen.getByText('已儲存內文')).toBeTruthy();
+    expect(screen.queryByText('原內文')).toBeNull();
+    expect(screen.getByPlaceholderText<HTMLTextAreaElement>('輸入留言⋯').value).toBe('');
+    expect(alert).not.toHaveBeenCalled();
+  },
+);
 
 it.each(['like', 'reply', 'both'])(
   'keeps the saved fields when earlier %s reads finish after saving',
