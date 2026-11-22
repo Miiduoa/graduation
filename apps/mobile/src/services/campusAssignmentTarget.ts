@@ -57,14 +57,27 @@ export function matchCampusAssignment(
   const rawTitle = assignment.summaryAssignmentTitle ?? assignment.fullAssignmentTitle ?? assignment.title;
   if (snapshot.assignments.status !== 'available' || typeof rawTitle !== 'string') return null;
   const title = normalizeCampusAssignmentTitle(rawTitle);
-  if (!title || hasCutoffSpace(rawTitle, title)) return null;
-  // A display-only identity at the cutoff may have lost the rest of its title.
-  if (!assignment.fullAssignmentTitle && !assignment.summaryAssignmentTitle && !assignment.expectedSource &&
-      title.length === DISPLAY_TITLE_LIMIT) return null;
+  if (!title) return null;
+  const prefixMatches = campusAssignmentLegacyMatches(snapshot, { ...assignment, title: rawTitle });
+  if (!assignment.fullAssignmentTitle && !assignment.summaryAssignmentTitle) {
+    // Persisted cards contain the display title used by the original resolver.
+    const [candidate] = prefixMatches;
+    if (prefixMatches.length !== 1) return null;
+    // Whitespace at the display boundary can refer to a different visible row.
+    if (hasCutoffSpace(rawTitle, title) && snapshot.assignments.items.some((row) =>
+      row.groupName === candidate.groupName && row.dueAt === candidate.dueAt &&
+      campusAssignmentDisplayTitle(row.title) === rawTitle)) return null;
+    if (assignment.expectedSource) {
+      const source = parseCampusAssignmentSource(candidate.source);
+      return source?.groupId === assignment.expectedSource.groupId &&
+        source?.assignmentId === assignment.expectedSource.assignmentId ? candidate : null;
+    }
+    return mayHaveTruncatedTitle(candidate) ? null : candidate;
+  }
   const rows = snapshot.assignments.items.filter((row) =>
     row.groupName === (assignment.groupName ?? '') &&
     row.dueAt === (assignment.dueAt ?? null));
-  const prefixMatches = campusAssignmentLegacyMatches(snapshot, { ...assignment, title: rawTitle });
+  if (hasCutoffSpace(rawTitle, title)) return null;
   const mayBeTruncated = assignment.summaryAssignmentTitle !== undefined || rawTitle.length >= ASSIGNMENT_SUMMARY_TITLE_LIMIT;
   if ((mayBeTruncated || prefixMatches.some(mayHaveTruncatedTitle)) &&
       prefixMatches.length !== 1) return null;

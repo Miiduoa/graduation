@@ -359,7 +359,7 @@ test.each([
 });
 
 test.each(['長'.repeat(129) + ' ', '長'.repeat(130)])(
-  '只有顯示標題的舊計畫，即使同步後只剩一筆候選也不能操作',
+  '只有顯示標題的舊計畫可開啟唯一候選並新增提醒',
   async (displayTitle) => {
     const snapshot = mockSnapshot();
     snapshot.assignments.items[0].title = displayTitle + '原稿';
@@ -370,8 +370,8 @@ test.each(['長'.repeat(129) + ' ', '長'.repeat(130)])(
     const replacement = mockSnapshot();
     replacement.assignments.items[0].title = displayTitle.trimEnd();
     await act(async () => view.rerender(card(replacement)));
-    expect(view.queryByText('查看這份作業')).toBeNull();
-    expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
+    expect(view.getByText('查看這份作業')).toBeTruthy();
+    expect(await view.findByText('設定手機本機截止提醒')).toBeTruthy();
     expect(view.queryByText('取消這項本機提醒')).toBeNull();
   },
 );
@@ -1020,9 +1020,9 @@ describe.each([4, 129, 130, 134, 139, 140, 141])('無 digest 的 v1 提醒（%i 
     };
     const unique = count === 1;
     await expect(getCampusAssignmentReminderStatus(card)).resolves.toEqual([60]);
-    await expect(getCampusAssignmentReminderStatus(reply)).resolves.toEqual(unique ? [60] : []);
-    await expect(cancelCampusAssignmentReminders(reply)).resolves.toBe(unique);
-    expect(mockAlarms.has(alarmId)).toBe(!unique);
+    await expect(getCampusAssignmentReminderStatus(reply)).resolves.toEqual(count < 2 ? [60] : []);
+    await expect(cancelCampusAssignmentReminders(reply)).resolves.toBe(count < 2);
+    expect(mockAlarms.has(alarmId)).toBe(count === 2);
     restoreLegacy();
     await expect(cancelCampusAssignmentReminders(card)).resolves.toBe(true);
     expect(mockAlarms.has(alarmId)).toBe(false);
@@ -1112,3 +1112,102 @@ test('來源偏好刪除失敗時退訂回報失敗，重試後同步不會恢�
   expect(mockAlarms.size).toBe(0);
   expect(mockStorage.size).toBe(0);
 });
+
+test('舊計畫卡可退訂只有作業 ID 的來源型提醒', async () => {
+  const { scheduleSubmittedAssignmentReminder } = require('../services/submittedAssignmentReminders');
+  await scheduleSubmittedAssignmentReminder({ scope, source, leadMinutes: 60, isCurrent: current });
+  const snapshot = mockSnapshot();
+  const { plan, card, view } = planCard(snapshot);
+  delete plan.steps[0].expectedSource;
+  delete plan.steps[0].fullAssignmentTitle;
+  delete plan.agenda;
+  await act(async () => view.rerender(card(snapshot)));
+  fireEvent.press(await view.findByText('取消這項本機提醒'));
+  await view.findByText('已退訂並清除提醒偏好，撤回或延期後也不會自動恢復。');
+  expect(mockAlarms.size).toBe(0);
+});
+
+const reminderMatrix = (['來源型', 'v1 有 digest', 'v1 無 digest'] as const).flatMap((kind) =>
+  [false, true].flatMap((expectedSource) =>
+    [false, true].flatMap((identity) =>
+      [4, 129, 130, 131, 134, 139, 140, 141].flatMap((length) =>
+        [0, 1, 2].map((count) => ({ kind, expectedSource, identity, length, count }))))));
+
+test.each(reminderMatrix)('作業提醒差異矩陣 $kind 來源=$expectedSource 身分=$identity $length 字 $count 筆',
+  async ({ kind, expectedSource, identity, length, count }) => {
+    const base = require('./fixtures/campusAssignmentMergeBase') as typeof import('./fixtures/campusAssignmentMergeBase');
+    const { resolveCampusAssignmentTarget } =
+      require('../services/campusAssignmentTarget') as typeof import('../services/campusAssignmentTarget');
+    const {
+      cancelCampusAssignmentReminders, clearUnlinkedLegacyReminders, getCampusAssignmentReminderStatus,
+    } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+    const { scheduleSubmittedAssignmentReminder } =
+      require('../services/submittedAssignmentReminders') as typeof import('../services/submittedAssignmentReminders');
+
+    const fullTitle = '長'.repeat(Math.min(130, length)) + '甲'.repeat(Math.max(0, length - 130));
+    const summaryTitle = fullTitle.slice(0, 140);
+    const displayTitle = base.campusAssignmentDisplayTitle(fullTitle);
+    const snapshot = mockSnapshot();
+    const row = { ...snapshot.assignments.items[0], title: summaryTitle };
+    const rows = [row, { ...row, source: { ...source, assignmentId: 'other' } }].slice(0, count);
+    snapshot.assignments = { status: 'available', items: rows, count };
+    const card = {
+      ...step, title: displayTitle,
+      ...(expectedSource ? { expectedSource: source } : {}),
+      ...(identity ? length >= 140 ? { summaryAssignmentTitle: summaryTitle } :
+        { fullAssignmentTitle: fullTitle } : {}),
+    };
+    const input = { scope, step: card, snapshot, leadMinutes: 60 as const, isCurrent: current };
+    const baseTarget = base.resolveCampusAssignmentTarget({ ...input, assignment: card });
+    const incomplete = length >= 140 && !identity && !expectedSource;
+    expect(resolveCampusAssignmentTarget({ ...input, assignment: card })).toEqual(incomplete ? null : baseTarget);
+
+    mockReader.getAssignment.mockResolvedValue({ ...source, id: source.assignmentId, title: fullTitle, dueAt });
+    const baseCanAdd = Boolean(base.reminderCandidate(snapshot, input));
+    if (baseCanAdd && count === 1 && !incomplete) {
+      await expect(scheduleCampusAssignmentReminder(input)).resolves.toMatchObject({ outcome: 'scheduled' });
+    } else {
+      await expect(scheduleCampusAssignmentReminder(input)).rejects.toMatchObject({ code: 'invalid-source' });
+    }
+    mockStorage.clear();
+    mockAlarms.clear();
+
+    if (kind === '來源型') {
+      await scheduleSubmittedAssignmentReminder({ ...input, source });
+    } else {
+      await scheduleCampusAssignmentReminder({
+        ...input,
+        step: { ...card, expectedSource: undefined, summaryAssignmentTitle: undefined, fullAssignmentTitle: summaryTitle },
+        snapshot: { ...snapshot, assignments: { status: 'available', count: 1, items: [{ ...row, source: undefined }] } },
+      });
+      if (kind === 'v1 無 digest') {
+        const [key, raw] = [...mockStorage.entries()][0];
+        const receipt = JSON.parse(raw);
+        delete receipt.cardDigest;
+        mockStorage.set(key, JSON.stringify(receipt));
+      }
+    }
+
+    const baseSource = base.knownReminderSource(input);
+    // Merge-base reads source alarms by ID, and v1 alarms by the scoped OS slot.
+    const baseHasReminder = kind === '來源型' ? Boolean(baseSource) : true;
+    const collision = count === 2 && kind !== '來源型' && !(kind === 'v1 有 digest' && identity);
+    // A prefix alone must not stand in for the digest of a different full title.
+    const ambiguousDigest = kind === 'v1 有 digest' && !identity && length > 130 &&
+      (!expectedSource || count === 0);
+    const stored = [...mockStorage];
+    const alarms = [...mockAlarms];
+    const leads = await getCampusAssignmentReminderStatus(input);
+    if (baseHasReminder && !collision && !ambiguousDigest) expect(leads).toEqual([60]);
+    if (collision || ambiguousDigest) expect(leads).toEqual([]);
+    if (kind === '來源型') expect(leads).toEqual(expectedSource || baseSource ? [60] : []);
+    const cancelled = await cancelCampusAssignmentReminders(input);
+    expect(cancelled).toBe(leads.length > 0);
+    expect(mockAlarms.size).toBe(cancelled ? 0 : 1);
+
+    for (const [key, value] of stored) mockStorage.set(key, value);
+    for (const [key, value] of alarms) mockAlarms.set(key, value);
+    // Merge-base adopts a uniquely matched v1 slot before clearing unlinked alarms.
+    await clearUnlinkedLegacyReminders({ scope, isCurrent: current, getSnapshot: () => snapshot });
+    expect(mockAlarms.size).toBe(kind === '來源型' || count === 1 ? 1 : 0);
+  });

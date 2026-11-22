@@ -99,30 +99,28 @@ test('a complete long title opens only its verified source, ignoring fabricated 
     .toEqual({ route: 'HomeworkSubmit', params: { groupId: 'course_1', assignmentId: 'work_1' } });
 });
 
-test.each([false, true])('does not use a 130-character display prefix to open a different original assignment (reverse: %s)', (reverse) => {
+test.each([false, true])('uses a unique display prefix for old cards and exact titles for new cards (reverse: %s)', (reverse) => {
   const value = snapshot();
   const prefix = '長'.repeat(130);
-  value.assignments.items[0].title = prefix + '期末報告';
-  const target = (title: string) => resolveCampusAssignmentTarget({
-    assignment: { ...assignment, title }, snapshot: value, scope, now,
+  const fullTitle = prefix + '期末報告';
+  value.assignments.items[0].title = fullTitle;
+  const target = (title: string, fullAssignmentTitle?: string) => resolveCampusAssignmentTarget({
+    assignment: { ...assignment, title, fullAssignmentTitle }, snapshot: value, scope, now,
   });
-  // Previously both a truncated plan title and a different full title opened work_1.
-  expect(target(prefix)).toBeNull();
-  expect(target(prefix + '另一份作業')).toBeNull();
-  expect(target(prefix + '期末報告')).toEqual({
-    route: 'HomeworkSubmit', params: { groupId: 'course_1', assignmentId: 'work_1' },
-  });
+  expect(target(prefix)?.params.assignmentId).toBe('work_1');
+  expect(target(prefix, prefix + '另一份作業')).toBeNull();
+  expect(target(prefix, fullTitle)?.params.assignmentId).toBe('work_1');
   value.assignments.items.push({ ...assignment, title: prefix, source: { ...source, assignmentId: 'work_2' } });
   value.assignments.count = 2;
   if (reverse) value.assignments.items.reverse();
   expect(target(prefix)).toBeNull();
   expect(target(prefix + ' ')).toBeNull();
-  expect(target(prefix + '期末報告')?.params.assignmentId).toBe('work_1');
+  expect(target(prefix, fullTitle)?.params.assignmentId).toBe('work_1');
   value.assignments.items.push({
-    ...assignment, title: prefix + '期末報告  ', source: { ...source, assignmentId: 'work_3' },
+    ...assignment, title: fullTitle + '  ', source: { ...source, assignmentId: 'work_3' },
   });
   value.assignments.count = 3;
-  expect(target(prefix + '期末報告')).toBeNull();
+  expect(target(prefix, fullTitle)).toBeNull();
 });
 
 test.each([false, true])('preserves a trailing display space when checking collisions (reverse: %s)', (reverse) => {
@@ -143,7 +141,7 @@ test.each([false, true])('preserves a trailing display space when checking colli
   expect(target(displayTitle)).toBeNull();
   value.assignments.items = value.assignments.items.filter((item) => item.title === title);
   value.assignments.count = 1;
-  expect(target(displayTitle)).toBeNull();
+  expect(target(displayTitle)?.params.assignmentId).toBe('work_1');
 });
 
 test('the live snapshot parser retains only valid handoff references', async () => {

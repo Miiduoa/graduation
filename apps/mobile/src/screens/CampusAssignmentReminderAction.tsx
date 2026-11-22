@@ -72,7 +72,6 @@ export function CampusAssignmentReminderAction({
   latestSnapshot.current = snapshot;
   const scope = { uid: userId, schoolId };
   const verified = validCampusSenseSnapshot(snapshot, scope);
-  const legacySnapshot = singleReply ? snapshot : undefined;
   const deadline = step.dueAt ? Date.parse(step.dueAt) : NaN;
   const canCheck = Boolean(userId && schoolId && isCurrent() && step.route === '/classroom' &&
     step.evidence === 'authorized-assignments' && Number.isFinite(deadline));
@@ -94,10 +93,11 @@ export function CampusAssignmentReminderAction({
     setStatusLoading(true);
     const { getCampusAssignmentReminderStatus } =
       require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
-    const getLegacySnapshot = singleReply ? () => latestSnapshot.current : undefined;
+    const getSnapshot = () => latestSnapshot.current;
+    const lookup = { scope, step, isCurrent, getSnapshot, getLegacySnapshot: singleReply ? getSnapshot : undefined };
     void Promise.all([
-      getCampusAssignmentReminderStatus({ scope, step, isCurrent, getLegacySnapshot }),
-      getCampusAssignmentReminderStatus({ scope, step, isCurrent, getLegacySnapshot, scheduledOnly: true }),
+      getCampusAssignmentReminderStatus(lookup),
+      getCampusAssignmentReminderStatus({ ...lookup, scheduledOnly: true }),
     ]).then(([leads, scheduled]) => {
         if (active && isCurrent()) {
           setConfirmedLead(leads[0] ?? null);
@@ -112,7 +112,7 @@ export function CampusAssignmentReminderAction({
       });
     return () => { active = false; };
   }, [userId, schoolId, step.title, step.fullAssignmentTitle, step.summaryAssignmentTitle, step.groupName, step.dueAt,
-    step.expectedSource?.groupId, step.expectedSource?.assignmentId, canCheck, statusRefresh, singleReply, legacySnapshot]);
+    step.expectedSource?.groupId, step.expectedSource?.assignmentId, canCheck, statusRefresh, singleReply, snapshot]);
 
   const schedule = async () => {
     const currentSnapshot = validCampusSenseSnapshot(latestSnapshot.current, scope);
@@ -158,8 +158,9 @@ export function CampusAssignmentReminderAction({
     setMessage('');
     try {
       const { cancelCampusAssignmentReminders } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+      const getSnapshot = () => latestSnapshot.current;
       const cancelled = await cancelCampusAssignmentReminders({
-        scope, step, isCurrent, getLegacySnapshot: singleReply ? () => latestSnapshot.current : undefined,
+        scope, step, isCurrent, getSnapshot, getLegacySnapshot: singleReply ? getSnapshot : undefined,
       });
       if (!cancelled) {
         setStatusRefresh((value) => value + 1);
