@@ -12,8 +12,6 @@ import {
 } from '@/lib/personalImports';
 import {
   cancelPersonalImportSync,
-  cancelPersonalImportSyncPause,
-  getPersonalImportSyncPause,
   getPersonalImportSyncStatus,
   setPersonalImportSyncEnabled,
   syncPersonalImports,
@@ -189,109 +187,54 @@ describe('personal import synchronization panel', () => {
     expect(vi.mocked(browserRequest).mock.calls.at(-1)?.[1]).toBe('context-replaced');
   });
 
-  const interruptionCases = ['read', 'write', 'retry'].flatMap((stage) =>
-    ['pause', 'marker quota', 'ledger quota', 'clear failure', 'other tab', 'logout', 'account'].map(
-      (action) => ({ stage, action }),
-    ),
-  );
+  it('lets the user pause while reading and then stops the upload', async () => {
+    const reading = deferred<unknown>();
+    vi.mocked(browserRequest).mockImplementationOnce(() => reading.promise);
+    render(<PersonalImportSyncPanel scope={context.scope} />);
+    enable();
+    await waitFor(() => expect(browserRequest).toHaveBeenCalledTimes(1));
+    expect(isDisabled('暫停這台裝置同步')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '暫停這台裝置同步' }));
+    expect(isDisabled('正在暫停…')).toBe(true);
+    await act(async () => {
+      reading.resolve(structuredClone(remote));
+    });
+    await waitFor(() => expect(readPersonalImportSyncState(initialScope).enabled).toBe(false));
+    expect(browserRequest).toHaveBeenCalledTimes(1);
+    expect(remote.records).toEqual([]);
+    expect(readPersonalImports(initialScope)).toHaveLength(1);
+  });
 
-  it.each(interruptionCases)('invalidates $stage on $action before saving settings', async ({
-    stage, action,
-  }) => {
-    const request = vi.mocked(browserRequest);
-    const read = deferred<unknown>();
-    const write = deferred<unknown>();
-    const key = personalImportsStorageKey(initialScope);
-    const marker = `${key}:pause`;
-    const quota = new DOMException('暫停標記儲存空間不足', 'QuotaExceededError');
-    const clearError = new Error('無法清除暫停標記');
+  it('pauses when storage can update the ledger but cannot add another key', async () => {
     await setPersonalImportSyncEnabled(initialScope, true, () => true);
-    const view = render(<PersonalImportSyncPanel scope={context.scope} />);
-    const syncNow = () => fireEvent.click(screen.getByRole('button', { name: '立即同步' }));
-    if (stage === 'retry') {
-      request.mockRejectedValueOnce(new Error('offline'));
-      syncNow();
-      await screen.findByRole('alert');
-    }
-    if (stage === 'write') {
-      request.mockResolvedValueOnce(structuredClone(remote)).mockImplementationOnce(() => write.promise);
-    } else {
-      request.mockImplementationOnce(() => read.promise);
-    }
-    syncNow();
-    const paths = stage === 'write'
-      ? ['personal-imports/read', 'personal-imports/write']
-      : Array(stage === 'retry' ? 2 : 1).fill('personal-imports/read');
-    await waitFor(() => expect(request).toHaveBeenCalledTimes(paths.length));
-    expect(getPersonalImportSyncStatus(initialScope)?.phase).toBe('syncing');
-    const before = readPersonalImportSyncState(initialScope);
-
+    const key = personalImportsStorageKey(initialScope);
+    const before = localStorage.getItem(key)!;
     const setItem = Storage.prototype.setItem;
-    const removeItem = Storage.prototype.removeItem;
-    const save = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
-      this: Storage, name, value,
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      name,
+      value,
     ) {
-      if (name === marker || name === key) {
-        // The base invalidates the running generation before attempting to save.
-        expect(getPersonalImportSyncStatus(initialScope)).toBeNull();
+      if (this.getItem(name) === null || value.length > before.length + 1) {
+        throw new DOMException('quota', 'QuotaExceededError');
       }
-      if (action === 'marker quota' && name === marker) throw quota;
-      if (action === 'ledger quota' && name === key) throw quota;
       setItem.call(this, name, value);
     });
-    const clear = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
-      this: Storage, name,
-    ) {
-      if (name === marker) {
-        expect(getPersonalImportSyncStatus(initialScope)).toBeNull();
-        if (action === 'clear failure') throw clearError;
-      }
-      removeItem.call(this, name);
-    });
-    try {
-      if (action === 'logout') {
-        context.sessionState.pendingLogout = true;
-        view.rerender(<PersonalImportSyncPanel scope={context.scope} />);
-      } else if (action === 'account') {
-        context.scope = { ...initialScope, owner: 'platform:two' };
-        context.sessionState.session = { platformAccountId: 'two', context: 'context-two' };
-        view.rerender(<PersonalImportSyncPanel scope={context.scope} />);
-      } else if (action === 'other tab') {
-        // A separate tab writes the shared marker without changing this tab's generation.
-        setItem.call(localStorage, marker, 'other-tab-pause');
-      } else {
-        fireEvent.click(screen.getByRole('button', { name: '暫停這台裝置同步' }));
-      }
-      await act(async () => {
-        read.resolve(structuredClone(remote));
-        write.resolve({
-          ...remote, revision: 1, records: readPersonalImports(initialScope), updatedAt: now,
-        });
-        await navigator.locks.request(key, () => {});
-      });
 
-      expect(request.mock.calls.map(([path]) => path)).toEqual(paths);
-      expect(readPersonalImports(initialScope)).toHaveLength(1);
-      const persisted = readPersonalImportSyncState(initialScope);
-      // A write already sent can complete, but the stale response cannot update the ledger.
-      expect(persisted.base).toEqual(before.base);
-      expect(persisted.pending).toEqual(before.pending);
-      expect(persisted.enabled).toBe(action !== 'pause' && action !== 'clear failure');
-      expect(localStorage.getItem(marker) !== null).toBe(
-        ['ledger quota', 'clear failure', 'other tab'].includes(action),
-      );
-      if (action === 'marker quota' || action === 'ledger quota' || action === 'clear failure') {
-        const message = action === 'clear failure' ? clearError.message : '空間不足';
-        expect((await screen.findByRole('alert')).textContent).toContain(message);
-      }
+    try {
+      render(<PersonalImportSyncPanel scope={initialScope} />);
+      fireEvent.click(screen.getByRole('button', { name: '暫停這台裝置同步' }));
+      await screen.findByRole('button', { name: '開啟帳號同步' });
+      expect(readPersonalImportSyncState(initialScope).enabled).toBe(false);
+      expect(write.mock.calls.map(([name]) => name)).toEqual([key]);
+      expect(browserRequest).not.toHaveBeenCalled();
     } finally {
-      save.mockRestore();
-      clear.mockRestore();
+      write.mockRestore();
     }
   });
 
-  it.each(['account', 'school', 'logout'] as const)(
-    'discards a queued pause after changing %s before the lock is granted',
+  it.each(['account', 'school'] as const)(
+    'discards the queued pause when the %s changes before acquiring the lock',
     async (change) => {
       await setPersonalImportSyncEnabled(initialScope, true, () => true);
       const key = personalImportsStorageKey(initialScope);
@@ -300,15 +243,13 @@ describe('personal import synchronization panel', () => {
       const lock = navigator.locks.request(key, () => held.promise);
       const view = render(<PersonalImportSyncPanel scope={context.scope} />);
       fireEvent.click(screen.getByRole('button', { name: '暫停這台裝置同步' }));
-      expect(getPersonalImportSyncPause(initialScope)).not.toBeNull();
+      expect(isDisabled('正在暫停…')).toBe(true);
 
       if (change === 'account') {
         context.scope = { ...initialScope, owner: 'platform:two' };
         context.sessionState.session = { platformAccountId: 'two', context: 'context-two' };
-      } else if (change === 'school') {
-        context.scope = { ...initialScope, schoolId: 'ntu' };
       } else {
-        context.sessionState.pendingLogout = true;
+        context.scope = { ...initialScope, schoolId: 'ntu' };
       }
       view.rerender(<PersonalImportSyncPanel scope={context.scope} />);
       await act(async () => {
@@ -318,76 +259,9 @@ describe('personal import synchronization panel', () => {
       });
 
       expect(localStorage.getItem(key)).toBe(before);
-      expect(getPersonalImportSyncPause(initialScope)).toBeNull();
       expect(browserRequest).not.toHaveBeenCalled();
     },
   );
-
-  it('keeps the newer tab pause when the old tab cancels before its storage event', async () => {
-    await setPersonalImportSyncEnabled(initialScope, true, () => true);
-    const key = personalImportsStorageKey(initialScope);
-    const marker = `${key}:pause`;
-    const held = deferred<void>();
-    const lock = navigator.locks.request(key, () => held.promise);
-    localStorage.setItem(marker, 'tab-a');
-    render(<PersonalImportSyncPanel scope={initialScope} />);
-    const oldCancel = screen.getByRole('button', { name: '取消暫停' });
-
-    // Simulate tab B replacing the marker before tab A receives the storage event.
-    localStorage.removeItem(marker);
-    localStorage.setItem(marker, 'tab-b');
-    const newer = syncPersonalImports(initialScope, context.sessionState.session, () => true);
-    fireEvent.click(oldCancel);
-    expect(getPersonalImportSyncPause(initialScope)).toBe('tab-b');
-    expect(readPersonalImportSyncState(initialScope).enabled).toBe(true);
-    expect(browserRequest).not.toHaveBeenCalled();
-
-    act(() => window.dispatchEvent(new StorageEvent('storage', { key: marker, newValue: 'tab-b' })));
-    await act(async () => {
-      held.resolve();
-      await lock;
-      await newer;
-    });
-    cancelPersonalImportSyncPause(initialScope, 'tab-b', () => true);
-    expect(getPersonalImportSyncPause(initialScope)).toBeNull();
-    expect(readPersonalImportSyncState(initialScope).enabled).toBe(false);
-    expect(screen.queryByRole('button', { name: '取消暫停' })).toBeNull();
-    expect(browserRequest).not.toHaveBeenCalled();
-  });
-
-  it('reports a failed cancellation without removing the queued pause', async () => {
-    await setPersonalImportSyncEnabled(initialScope, true, () => true);
-    const key = personalImportsStorageKey(initialScope);
-    const marker = `${key}:pause`;
-    const held = deferred<void>();
-    const lock = navigator.locks.request(key, () => held.promise);
-    render(<PersonalImportSyncPanel scope={context.scope} />);
-    fireEvent.click(screen.getByRole('button', { name: '暫停這台裝置同步' }));
-    const intent = localStorage.getItem(marker);
-    expect(intent).not.toBeNull();
-    const removeItem = Storage.prototype.removeItem;
-    const clear = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
-      this: Storage, name,
-    ) {
-      if (name === marker) throw new Error('無法取消暫停');
-      removeItem.call(this, name);
-    });
-    try {
-      fireEvent.click(screen.getByRole('button', { name: '取消暫停' }));
-      expect((await screen.findByRole('alert')).textContent).toContain('無法取消暫停');
-      expect(localStorage.getItem(marker)).toBe(intent);
-      expect(browserRequest).not.toHaveBeenCalled();
-    } finally {
-      clear.mockRestore();
-      await act(async () => {
-        held.resolve();
-        await lock;
-        await navigator.locks.request(key, () => {});
-      });
-    }
-    expect(readPersonalImportSyncState(initialScope).enabled).toBe(false);
-    expect(localStorage.getItem(marker)).toBeNull();
-  });
 
   it('shows the request error and supports retry without discarding local changes', async () => {
     vi.mocked(browserRequest).mockRejectedValueOnce(new Error('連線中斷'));
@@ -540,113 +414,6 @@ describe('personal import background synchronization', () => {
     expect(browserRequest).toHaveBeenCalledTimes(calls);
     view.unmount();
   });
-
-  it.each([
-    ['missing', false],
-    ['denied', false],
-    ['missing', true],
-    ['denied', true],
-  ])(
-    'reports %s Web Locks after reopening and honors the retained pause (cancel=%s)',
-    async (failure, cancel) => {
-      await setPersonalImportSyncEnabled(initialScope, true, () => true);
-      const locks = navigator.locks;
-      Object.defineProperty(navigator, 'locks', {
-        configurable: true,
-        value:
-          failure === 'missing'
-            ? undefined
-            : {
-                request: vi
-                  .fn()
-                  .mockRejectedValue(new DOMException('Permission denied', 'SecurityError')),
-              },
-      });
-      const panel = <PersonalImportSyncPanel scope={initialScope} />;
-      const view = render(panel);
-      fireEvent.click(screen.getByRole('button', { name: '暫停這台裝置同步' }));
-      await waitFor(() =>
-        expect(screen.getByRole('alert').textContent).toContain('暫停要求已保留'),
-      );
-      expect(screen.getByRole('alert').textContent).toContain(
-        failure === 'missing' ? '目前瀏覽器無法安全同步' : '目前環境拒絕跨分頁鎖請求',
-      );
-      expect(screen.queryByText(/等待裝置寫入停用設定/)).toBeNull();
-      expect(readPersonalImportSyncState(initialScope).enabled).toBe(true);
-
-      view.unmount();
-      cancelPersonalImportSync(initialScope); // Reset in-memory status as on reload.
-      render(
-        <>
-          {panel}
-          <PersonalImportSyncBridge />
-        </>,
-      );
-      await waitFor(() =>
-        expect(screen.getByRole('alert').textContent).toContain('暫停要求已保留'),
-      );
-      expect(screen.getByRole('alert').textContent).toContain(
-        failure === 'missing' ? '目前瀏覽器無法安全同步' : '目前環境拒絕跨分頁鎖請求',
-      );
-      expect(screen.queryByText(/等待裝置寫入停用設定/)).toBeNull();
-      expect(browserRequest).not.toHaveBeenCalled();
-      if (cancel) fireEvent.click(screen.getByRole('button', { name: '取消暫停' }));
-
-      Object.defineProperty(navigator, 'locks', { configurable: true, value: locks });
-      await act(async () => {
-        window.dispatchEvent(new Event('focus'));
-      });
-      expect(readPersonalImportSyncState(initialScope).enabled).toBe(cancel);
-      expect(screen.queryByRole('button', { name: '取消暫停' })).toBeNull();
-      if (cancel) expect(browserRequest).toHaveBeenCalled();
-      else expect(browserRequest).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each([false, true])(
-    'honors a queued pause on focus and interval triggers after timeout (cancel=%s)',
-    async (cancel) => {
-      await setPersonalImportSyncEnabled(initialScope, true, () => true);
-      const held = deferred<void>();
-      const lock = navigator.locks.request(
-        personalImportsStorageKey(initialScope),
-        () => held.promise,
-      );
-      vi.useFakeTimers();
-      const view = render(
-        <>
-          <PersonalImportSyncPanel scope={initialScope} />
-          <PersonalImportSyncBridge />
-        </>,
-      );
-      try {
-        fireEvent.click(screen.getByRole('button', { name: '暫停這台裝置同步' }));
-        await act(async () => vi.advanceTimersByTimeAsync(30_000));
-        expect(screen.getByRole('alert').textContent).toContain('已逾時');
-        expect(isDisabled('取消暫停')).toBe(false);
-        act(() => window.dispatchEvent(new Event('focus')));
-        expect(browserRequest).not.toHaveBeenCalled();
-
-        if (cancel) fireEvent.click(screen.getByRole('button', { name: '取消暫停' }));
-        await act(async () => {
-          held.resolve();
-          await lock;
-        });
-        expect(readPersonalImportSyncState(initialScope).enabled).toBe(cancel);
-        expect(screen.queryByRole('button', { name: '取消暫停' })).toBeNull();
-
-        await act(async () => {
-          window.dispatchEvent(new Event('focus'));
-        });
-        if (cancel) expect(remote.records).toHaveLength(1);
-        else expect(browserRequest).not.toHaveBeenCalled();
-      } finally {
-        view.unmount();
-        held.resolve();
-        vi.useRealTimers();
-      }
-    },
-  );
 
   it('does not retry over a pending conflict and invalidates requests when session is unavailable', async () => {
     await setPersonalImportSyncEnabled(initialScope, true, () => true);

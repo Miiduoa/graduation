@@ -8,7 +8,6 @@ import { personalImportSyncErrorMessage } from '@campus/shared/src/imports/sync'
 import { PERSONAL_IMPORT_SYNCED, PERSONAL_IMPORT_SYNCING } from '@campus/shared';
 import { browserRequest } from '@/features/nuni/Session';
 import {
-  PERSONAL_IMPORT_CHANGE,
   personalImportsStorageKey,
   withPersonalImportSyncLock,
   type PersonalImportScope,
@@ -54,73 +53,6 @@ export function cancelPersonalImportSync(scope: PersonalImportScope) {
 
 const SYNC_LOCK_WAIT_MS = 15_000;
 
-const pauseWrites = new Map<string, { intent: string; write: Promise<void> }>();
-const pauseKey = (scope: PersonalImportScope) => `${personalImportsStorageKey(scope)}:pause`;
-// The storage key binds the token to exactly one account and school.
-export const getPersonalImportSyncPause = (scope: PersonalImportScope) =>
-  localStorage.getItem(pauseKey(scope));
-
-function clearPersonalImportSyncPause(scope: PersonalImportScope, intent: string) {
-  const key = pauseKey(scope);
-  if (localStorage.getItem(key) !== intent) return;
-  localStorage.removeItem(key);
-  cancelPersonalImportSync(scope);
-  window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
-}
-
-export function cancelPersonalImportSyncPause(
-  scope: PersonalImportScope,
-  intent: string,
-  active: () => boolean,
-) {
-  if (active()) clearPersonalImportSyncPause(scope, intent);
-}
-
-function persistPersonalImportSyncPause(
-  scope: PersonalImportScope,
-  intent: string,
-  active: () => boolean,
-) {
-  const key = pauseKey(scope);
-  const pending = pauseWrites.get(key);
-  if (pending?.intent === intent) return pending.write;
-  const isCurrent = () => getPersonalImportSyncPause(scope) === intent;
-  // The UI can stop waiting while the scoped opt-out stays in the lock queue.
-  const write = withPersonalImportSyncLock(
-    scope,
-    async (state, checkpoint) => {
-      if (!isCurrent()) return { state, result: undefined };
-      const disabled = {
-        ...state,
-        sync: { ...state.sync, enabled: false, base: state.sync?.base || null },
-      };
-      if (!(await checkpoint(disabled, isCurrent))) return { state, result: undefined };
-      clearPersonalImportSyncPause(scope, intent);
-      return { state: disabled, result: undefined };
-    },
-    active,
-  )
-    .catch((error) => {
-      if (!active()) clearPersonalImportSyncPause(scope, intent);
-      else if (isCurrent()) {
-        const reason =
-          error instanceof DOMException && ['SecurityError', 'NotAllowedError'].includes(error.name)
-            ? '目前環境拒絕跨分頁鎖請求。'
-            : personalImportSyncErrorMessage(error);
-        publish(scope, {
-          phase: 'error',
-          message: `無法寫入停用設定。暫停要求已保留。 ${reason}`,
-        });
-      }
-      throw error;
-    })
-    .finally(() => {
-      if (pauseWrites.get(key)?.write === write) pauseWrites.delete(key);
-    });
-  pauseWrites.set(key, { intent, write });
-  return write;
-}
-
 export async function setPersonalImportSyncEnabled(
   scope: PersonalImportScope,
   enabled: boolean,
@@ -128,53 +60,18 @@ export async function setPersonalImportSyncEnabled(
 ) {
   if (!scope.owner.startsWith('platform:') || scope.schoolId === 'personal')
     throw new Error('請登入平台帳號並選擇校園後再同步。');
-  const assertActive = () => {
-    if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
-  };
-  assertActive();
+  if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
   // Invalidate a request still reading before it can upload. A write already sent may
   // finish on the server; the next opt-in reconciles that acknowledgement safely.
-  if (!enabled) {
-    cancelPersonalImportSync(scope);
-    const intent = crypto.randomUUID();
-    assertActive();
-    try {
-      localStorage.setItem(pauseKey(scope), intent);
-    } catch (error) {
-      throw new Error(
-        error instanceof DOMException && error.name === 'QuotaExceededError'
-          ? '裝置空間不足，無法保存暫停設定。'
-          : '無法保存暫停設定。',
-        { cause: error },
-      );
-    }
-    window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const timedOut = await Promise.race([
-        persistPersonalImportSyncPause(scope, intent, active),
-        new Promise<true>((resolve) => {
-          timer = setTimeout(() => resolve(true), SYNC_LOCK_WAIT_MS);
-        }),
-      ]);
-      if (timedOut) {
-        if (!active()) clearPersonalImportSyncPause(scope, intent);
-        else if (getPersonalImportSyncPause(scope) === intent)
-          throw new Error('等待其他分頁已逾時，暫停要求會在可寫入時完成。');
-      }
-    } finally {
-      clearTimeout(timer);
-    }
-    return;
-  }
+  if (!enabled) cancelPersonalImportSync(scope);
   await withPersonalImportSyncLock(
     scope,
     async (state) => ({
       state: { ...state, sync: { ...state.sync, enabled, base: state.sync?.base || null } },
       result: undefined,
     }),
-    () => active() && getPersonalImportSyncPause(scope) === null,
-    SYNC_LOCK_WAIT_MS,
+    active,
+    enabled ? SYNC_LOCK_WAIT_MS : undefined,
   );
 }
 
@@ -190,17 +87,9 @@ export function syncPersonalImports(
     !active()
   )
     return Promise.resolve();
-  const intent = getPersonalImportSyncPause(scope);
-  if (intent !== null)
-    return persistPersonalImportSyncPause(scope, intent, active).catch(() => {
-      // Retain the intent for the next sync trigger if the local write fails.
-    });
   const storageKey = personalImportsStorageKey(scope);
   const generation = generations.get(storageKey) || 0;
-  const current = () =>
-    active() &&
-    generation === (generations.get(storageKey) || 0) &&
-    getPersonalImportSyncPause(scope) === null;
+  const current = () => active() && generation === (generations.get(storageKey) || 0);
   const key = `${storageKey}:${identity.context}:${generation}`;
   const pending = running.get(key);
   if (pending) return pending;
@@ -217,9 +106,7 @@ export function syncPersonalImports(
             (path, input) => browserRequest(path, identity.context, input),
             current,
             resolution,
-            async (next) => {
-              await checkpoint(next);
-            },
+            checkpoint,
           );
           return { state: result.state, result };
         },

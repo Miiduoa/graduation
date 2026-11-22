@@ -10,16 +10,12 @@ import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import {
   PERSONAL_IMPORT_CHANGE,
-  PERSONAL_IMPORT_SYNC_LOCK_UNAVAILABLE,
-  canLockPersonalImportSync,
   readPersonalImportSyncState,
   type PersonalImportScope,
 } from '@/lib/personalImports';
 import {
   cancelPersonalImportSync,
-  cancelPersonalImportSyncPause,
   getPersonalImportSyncStatus,
-  getPersonalImportSyncPause,
   setPersonalImportSyncEnabled,
   subscribePersonalImportSync,
   syncPersonalImports,
@@ -48,9 +44,8 @@ export function PersonalImportSyncBridge() {
       if (!alive || document.visibilityState === 'hidden') return;
       try {
         if (
-          getPersonalImportSyncPause(scope) !== null ||
-          (readPersonalImportSyncState(scope).enabled &&
-            getPersonalImportSyncStatus(scope)?.phase !== 'conflict')
+          readPersonalImportSyncState(scope).enabled &&
+          getPersonalImportSyncStatus(scope)?.phase !== 'conflict'
         )
           void syncPersonalImports(scope, identity, () => alive);
       } catch {
@@ -205,7 +200,6 @@ function ScopeSyncPanel({
     };
   }, [permitted, scope.owner, scope.schoolId, identity?.context]);
   const [enabled, setEnabled] = useState(false);
-  const [pauseToken, setPauseToken] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [consent, setConsent] = useState(false);
   const [changing, setChanging] = useState(false);
@@ -224,7 +218,6 @@ function ScopeSyncPanel({
     const scope = { owner, schoolId };
     const refresh = () => {
       try {
-        setPauseToken(getPersonalImportSyncPause(scope));
         setEnabled(readPersonalImportSyncState(scope).enabled);
         setError('');
       } catch (e) {
@@ -256,37 +249,6 @@ function ScopeSyncPanel({
     const run = generation.current;
     return () => activeRef.current && run === generation.current;
   };
-  if (pauseToken !== null) {
-    const pauseError = !canLockPersonalImportSync()
-      ? `暫停要求已保留。 ${PERSONAL_IMPORT_SYNC_LOCK_UNAVAILABLE}`
-      : status?.phase === 'error'
-        ? status.message
-        : '';
-    return (
-      <section className="card" aria-label="跨裝置同步">
-        <h2>跨裝置同步</h2>
-        {pauseError ? (
-          <p role="alert">{pauseError}</p>
-        ) : (
-          <p role="status">暫停要求已保留，等待裝置寫入停用設定。</p>
-        )}
-        <button
-          type="button"
-          disabled={!permitted}
-          onClick={() => {
-            try {
-              cancelPersonalImportSyncPause(scope, pauseToken, active());
-            } catch (e) {
-              setError(e instanceof Error ? e.message : '無法取消暫停。');
-            }
-          }}
-        >
-          取消暫停
-        </button>
-        {error && !pauseError && <p role="alert">{error}</p>}
-      </section>
-    );
-  }
   const busy = status?.phase === 'syncing';
   const conflicts = enabled ? status?.result?.conflicts || [] : [];
   return (
@@ -315,22 +277,28 @@ function ScopeSyncPanel({
           onClick={async () => {
             const check = active();
             setError('');
-            if (!enabled) setChanging(true);
+            setChanging(true);
             try {
               await setPersonalImportSyncEnabled(scope, !enabled, check);
-              if (!enabled && check()) {
+              if (check()) {
                 setConsent(false);
                 setChanging(false);
-                await syncPersonalImports(scope, identity, check);
               }
+              if (!enabled && check()) await syncPersonalImports(scope, identity, check);
             } catch (e) {
               if (check()) setError(e instanceof Error ? e.message : '同步設定未完成。');
             } finally {
-              if (!enabled && check()) setChanging(false);
+              if (check()) setChanging(false);
             }
           }}
         >
-          {changing ? '正在開啟…' : enabled ? '暫停這台裝置同步' : '開啟帳號同步'}
+          {changing
+            ? enabled
+              ? '正在暫停…'
+              : '正在開啟…'
+            : enabled
+              ? '暫停這台裝置同步'
+              : '開啟帳號同步'}
         </button>
         {enabled && (
           <button

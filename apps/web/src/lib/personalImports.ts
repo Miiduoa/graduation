@@ -70,14 +70,14 @@ export function readPersonalImportSyncState(scope: PersonalImportScope): Persona
   return parsePersonalImportSyncState(value, scope.schoolId);
 }
 
-export const PERSONAL_IMPORT_SYNC_LOCK_UNAVAILABLE = '目前瀏覽器無法安全同步，請使用最新版瀏覽器。';
-export const canLockPersonalImportSync = () => typeof navigator.locks?.request === 'function';
+const PERSONAL_IMPORT_SYNC_LOCK_UNAVAILABLE = '目前瀏覽器無法安全同步，請使用最新版瀏覽器。';
+const canLockPersonalImportSync = () => typeof navigator.locks?.request === 'function';
 
 export async function withPersonalImportSyncLock<T>(
   scope: PersonalImportScope,
   action: (
     state: PersonalImportLocalState,
-    checkpoint: (state: PersonalImportLocalState, shouldWrite?: () => boolean) => Promise<boolean>,
+    checkpoint: (state: PersonalImportLocalState) => Promise<void>,
   ) => Promise<{ state: PersonalImportLocalState; result: T }>,
   active = () => true,
   waitTimeoutMs?: number,
@@ -94,12 +94,11 @@ export async function withPersonalImportSyncLock<T>(
       records: readPersonalImports(scope),
       sync: readPersonalImportSyncState(scope),
     };
-    const checkpoint = async (state: PersonalImportLocalState, shouldWrite = () => true) => {
+    const checkpoint = async (state: PersonalImportLocalState) => {
       const changed = JSON.stringify(persisted) !== JSON.stringify(state);
       const value = changed ? JSON.stringify({ version: 1, ...state }) : '';
       if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
-      if (!shouldWrite()) return false;
-      if (!changed) return true;
+      if (!changed) return;
       try {
         localStorage.setItem(key, value);
       } catch {
@@ -107,7 +106,6 @@ export async function withPersonalImportSyncLock<T>(
       }
       persisted = state;
       window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
-      return true;
     };
     const { state, result } = await action(persisted, checkpoint);
     await checkpoint(state);
