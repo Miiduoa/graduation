@@ -137,3 +137,36 @@ test.each([
   } } });
   await expect(refreshCampusSenseSnapshot({ scope, isCurrent: () => true })).rejects.toThrow('invalid-sense-response');
 });
+
+
+test.each([
+  ['February 30', '2026-02-30T08:00:00Z', 'assignment'],
+  ['February 29 in a non-leap year', '2026-02-29T08:00:00Z', 'assignment'],
+  ['out-of-range timezone offset', '2026-10-28T00:30:00+15:00', 'assignment'],
+  ['April 31', '2026-04-31T09:00:00Z', 'announcement'],
+] as const)('rejects %s in an authorized %s source rather than shifting its deadline', async (_, timestamp, kind) => {
+  const payload = envelope();
+  if (kind === 'assignment') payload.assignments.items[0].dueAt = timestamp;
+  else payload.announcements.items[0].publishedAt = timestamp;
+  mockCallable.mockResolvedValueOnce({ data: payload });
+  await expect(refreshCampusSenseSnapshot({ scope, isCurrent: () => true }))
+    .rejects.toThrow('invalid-sense-response');
+  expect(mockCallable).toHaveBeenCalledTimes(1);
+});
+
+test('preserves genuine leap-day and timezone-offset dates in the authorized source', async () => {
+  const payload = envelope();
+  payload.assignments.items[0].dueAt = '2028-02-29T08:15:00Z';
+  payload.announcements.items[0].publishedAt = '2026-10-28T00:30:00+08:00';
+  mockCallable.mockResolvedValueOnce({ data: payload });
+  const result = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
+  expect(result.assignments.items[0].dueAt).toBe('2028-02-29T08:15:00Z');
+  expect(result.announcements.items[0].publishedAt).toBe('2026-10-28T00:30:00+08:00');
+});
+
+test('rejects a restored impossible checkedAt even when Date.parse would roll it into the current minute', async () => {
+  const snapshot = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
+  const rollover = '2026-02-30T08:00:00Z';
+  const pretendNow = Date.parse('2026-03-02T08:00:00Z');
+  expect(validCampusSenseSnapshot({ ...snapshot, checkedAt: rollover }, scope, pretendNow)).toBeNull();
+});
