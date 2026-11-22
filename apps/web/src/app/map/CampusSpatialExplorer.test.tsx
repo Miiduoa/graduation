@@ -3389,21 +3389,26 @@ it.each(footprintContentTypes.flatMap((contentType) =>
   render(<CampusSpatialExplorer school="pu" locations={[library]}
     selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  const valid = payload === 'valid';
+  const allowedMime = contentType === null || [
+    'application/json', 'text/plain', 'application/json; charset=UTF-8',
+    'text/plain; charset=UTF-8', 'application/vnd.example_campus+json',
+    ' APPLICATION/JSON ',
+  ].includes(contentType);
+  const valid = payload === 'valid' && allowedMime;
   expect(await within(dialog).findByText(valid ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(read).toHaveBeenCalledOnce();
-  expect(cancel).not.toHaveBeenCalled();
+  expect(read).toHaveBeenCalledTimes(allowedMime ? 1 : 0);
+  expect(cancel).toHaveBeenCalledTimes(allowedMime ? 0 : 1);
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(valid ? buildings : []);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-// Merge-base validates the decoded response and the snapshot without MIME
-// filtering or a zero-length header check. Fetch can expose decoded bytes
-// independently of the wire headers, including in legacy WebViews.
+// A 200 response that explicitly declares zero bytes can never be a complete
+// footprint snapshot, regardless of MIME, Content-Encoding or fake JSON body.
+// Prevent old WebView fallbacks from accidentally accepting this framing.
 it.each([null, '', 'application/octet-stream', 'text/plain', 'text/html', 'application/json, text/html']
   .flatMap((mime) => [null, 'identity', 'gzip'].flatMap((encoding) =>
     ['complete', 'empty', 'html'].map((kind) => ({ mime, encoding, kind })),
-  )))('matches merge-base for WebView MIME $mime / encoding $encoding / $kind', async ({
+  )))('rejects zero-length WebView MIME $mime / encoding $encoding / $kind', async ({
   mime, encoding, kind,
 }) => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
@@ -3416,14 +3421,46 @@ it.each([null, '', 'application/octet-stream', 'text/plain', 'text/html', 'appli
   vi.stubGlobal('fetch', fetchMock);
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  const accepted = kind === 'complete';
-  expect(await within(dialog).findByText(accepted ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
-  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(accepted ? buildings : []));
-  if (!accepted) {
-    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
-  }
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
   expect(fetchMock).toHaveBeenCalledOnce();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+// A public Wi-Fi login page or broken proxy can provide headers but never
+// finish the body. Reject incompatible/empty framing before any stream read.
+it.each([
+  { contentType: 'text/html', contentLength: null },
+  { contentType: 'application/json, text/html', contentLength: null },
+  { contentType: 'application/octet-stream', contentLength: null },
+  { contentType: 'application/json', contentLength: '0' },
+  { contentType: 'application/json', contentLength: '000' },
+])('cancels an unread, stalled 200 response ($contentType / $contentLength)', async ({
+  contentType, contentLength,
+}) => {
+  const { library } = sourcedLibraryFootprintFixture();
+  const cancel = vi.fn().mockResolvedValue(undefined);
+  const getReader = vi.fn(() => { throw new Error('Body must not be read'); });
+  const json = vi.fn();
+  const headers = new Headers({ 'Content-Type': contentType });
+  if (contentLength !== null) headers.set('Content-Length', contentLength);
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200, headers,
+    body: { cancel, getReader },
+    json,
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(getReader).not.toHaveBeenCalled();
+  expect(json).not.toHaveBeenCalled();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledOnce();
 });
 
 it('reads the final successful outline response after a redirect', async () => {
@@ -3531,15 +3568,15 @@ function sourcedLibraryFootprintFixture() {
 }
 
 it.each([
-  { length: '0', accepted: true },
-  { length: '000', accepted: true },
+  { length: '0', accepted: false },
+  { length: '000', accepted: false },
   { length: '1', accepted: true },
   { length: '2000000', accepted: true },
-  { length: ' 0040 ', accepted: true },
+  { length: ' 0040 ', accepted: false },
   { length: '', accepted: false },
   { length: '40, 40', accepted: false },
   { length: '2000001', accepted: false },
-])('matches merge-base for Content-Length $length', async ({ length, accepted }) => {
+])('rejects impossible Content-Length $length before reading', async ({ length, accepted }) => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
   const response = new Response(body, { headers: { 'Content-Length': length } });
   const read = vi.spyOn(response.body!, 'getReader');
