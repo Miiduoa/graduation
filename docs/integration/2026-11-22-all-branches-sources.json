@@ -1,8 +1,8 @@
 {
   "repository": "Miiduoa/graduation",
-  "captured_at": "2026-11-22T10:08:34+08:00",
+  "captured_at": "2026-11-22T02:41:26.424Z",
   "base_main": "d31a3faa5a36dd12ce559be49aac75a92fca1bfc",
-  "previous_integration": "000fd11ca9736878e86dacc0a3727f547d25736e",
+  "previous_integration": "62e454667d68c7a58383eba3bc378faa2a911723",
   "branches": [
     {
       "branch": "feat/agent-washing-cancellation-cloud-20261117",
@@ -90,7 +90,7 @@
     },
     {
       "branch": "fix/course-study-invisible-source-evidence-20261119",
-      "sha": "c39fa413ae55ab27005afdb392e85c799a20e7be",
+      "sha": "d98a200becec70514316eb702a73875bc9fea5bd",
       "pull_request": 719,
       "included_as_ancestor": true
     },
@@ -114,7 +114,7 @@
     },
     {
       "branch": "fix/mobile-creator-card-confirm-timeout-20261121",
-      "sha": "591a64d3a8010bc401204004dc1a882eeafe432d",
+      "sha": "9cd33edbcc56757c6521c1b3b4ad3854300d2839",
       "pull_request": 740,
       "included_as_ancestor": true
     },
@@ -132,7 +132,7 @@
     },
     {
       "branch": "integration/all-branches-20261121",
-      "sha": "000fd11ca9736878e86dacc0a3727f547d25736e",
+      "sha": "62e454667d68c7a58383eba3bc378faa2a911723",
       "pull_request": 738,
       "included_as_ancestor": true
     },

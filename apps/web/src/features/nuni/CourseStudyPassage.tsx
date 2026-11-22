@@ -12,6 +12,7 @@ import { getStudyTutorAvailability, runStudyTutor, type StudyTutorTiming } from 
 import {
   appendStudyLesson,
   hasVisibleStudyAttempt,
+  hasVisibleStudyContent,
   studyLessonHistory,
   STUDY_SESSION_LIMITS,
   updateStudyMode,
@@ -60,6 +61,10 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   // A restored/edited invisible-only draft must never unlock or display an answer.
   const canReviewAnswer = selected ? hasVisibleStudyAttempt(selected.attempt) : false;
   const result = selected?.response;
+  // A model can return invisible-only text. Keep student attempts and disclosure
+  // state intact, but never display an empty-looking prompt or reference answer.
+  const hasReadableCheckQuestion = !!result && hasVisibleStudyContent(result.question);
+  const hasReadableReferenceAnswer = !!result && hasVisibleStudyContent(result.answer);
   const activeStepIndex = stepSelection?.lessonId === selected?.id ? stepSelection?.index ?? 0 : 0;
   const activeStep = result?.steps?.[activeStepIndex];
   // The student can listen to the entire cited teaching sequence in one gesture.
@@ -303,7 +308,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
               <p className={styles.evidenceStepHeading}>03 · 自己試答</p>
               <div className={styles.exercise}>
                 <h4>換你試試</h4>
-                <p>{result.question}</p>
+                <p>{hasReadableCheckQuestion ? result.question : 'AI 未提供可讀的自我檢查題。請依本段教材自行整理一個問題，再寫下你的想法。'}</p>
                 <label className={styles.field} htmlFor={attemptId}>先寫下你的想法
                   <textarea id={attemptId} rows={3} maxLength={STUDY_SESSION_LIMITS.attemptCharacters} value={selected.attempt}
                     onChange={(event) => { const attempt = event.target.value; changeLesson((previous) => ({ ...previous, attempt, answerVisible: false })); }} />
@@ -314,7 +319,9 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
                   aria-expanded={selected.answerVisible && canReviewAnswer}>
                   {selected.answerVisible && canReviewAnswer ? '收起參考回答' : '對照參考回答'}
                 </button>
-                {selected.answerVisible && canReviewAnswer && <p className={styles.referenceAnswer}>{result.answer}</p>}
+                {selected.answerVisible && canReviewAnswer && <p className={styles.referenceAnswer}>
+                  {hasReadableReferenceAnswer ? result.answer : 'AI 未提供可讀的參考回答。請回到本段原文核對，不要把空白內容視為已驗證答案。'}
+                </p>}
                 <p className={styles.note}>這是自我檢查，不會自動評分，也不會影響課程成績或作業繳交狀態。</p>
               </div>
             </section>

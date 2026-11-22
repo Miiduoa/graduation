@@ -10,6 +10,7 @@ import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 const CREATOR_CARD_SAVE_TIMEOUT_MS = 15_000;
 const CREATOR_CARD_CONFIRM_TIMEOUT_MS = 15_000;
 const CREATOR_CARD_READ_TIMEOUT_MS = 15_000;
+const CREATOR_CARD_LINK_TIMEOUT_MS = 15_000;
 
 type CardState =
   | { status: 'loading' }
@@ -250,14 +251,30 @@ function ScopedCreatorCardPanel({
     openingLinkFlight.current = handoff;
     setOpeningLink(true);
     setLinkError('');
+    let openTimeout: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     try {
-      await Linking.openURL(url);
+      // The OS may never settle this handoff. Bound only the visible busy
+      // state: timeout does not cancel openURL or prove the browser stayed
+      // closed. The student must explicitly decide whether to try again.
+      await Promise.race([
+        Linking.openURL(url),
+        new Promise<never>((_, reject) => {
+          openTimeout = setTimeout(() => {
+            timedOut = true;
+            reject(new Error('Creator portfolio link handoff timed out'));
+          }, CREATOR_CARD_LINK_TIMEOUT_MS);
+        }),
+      ]);
     } catch {
       if (mounted.current && openingLinkFlight.current === handoff &&
         currentPortfolioLink.current === url) {
-        setLinkError('無法開啟作品連結，請稍後再試。');
+        setLinkError(timedOut
+          ? '開啟作品連結等待逾時，請先確認瀏覽器是否已開啟，再決定是否重試。'
+          : '無法開啟作品連結，請稍後再試。');
       }
     } finally {
+      if (openTimeout !== undefined) clearTimeout(openTimeout);
       if (mounted.current && openingLinkFlight.current === handoff) {
         openingLinkFlight.current = null;
         setOpeningLink(false);
