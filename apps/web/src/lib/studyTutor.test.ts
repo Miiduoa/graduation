@@ -72,6 +72,36 @@ const documentFixture = (): PersonalImportDocument => ({
 
 describe('reject unreadable model citations before saving a lesson', () => {
   it.each([
+    ['combining accent', 'e\\u0301', 'e'],
+    ['joined emoji', '👩‍💻', '👩'],
+    ['regional flag', '🇹🇼', '🇹'],
+    ['keycap', '2️⃣', '2'],
+  ])('requires complete grapheme boundaries for %s in new main and step citations', (_name, complete, partial) => {
+    const original = { ...passage, text: passage.text + '前' + complete + '後' };
+    expect(original.text.includes(partial)).toBe(true);
+
+    const brokenMain = { ...explanation(), sourceQuote: partial };
+    expect(() => parseTutorExplanation(JSON.stringify(brokenMain), original))
+      .toThrow('未對齊完整原文字素');
+    // Old reading backups are not reinterpreted or altered by new generation rules.
+    expect(parseSavedTutorExplanation(JSON.stringify(brokenMain), original).sourceQuote).toBe(partial);
+
+    const brokenSteps = steppedExplanation();
+    brokenSteps.steps[0].sourceQuote = partial;
+    expect(() => parseTutorExplanation(JSON.stringify(brokenSteps), original))
+      .toThrow('未對齊完整原文字素');
+    expect(parseSavedTutorExplanation(JSON.stringify(brokenSteps), original).steps?.[0].sourceQuote).toBe(partial);
+
+    const validSteps = steppedExplanation();
+    validSteps.sourceQuote = complete;
+    validSteps.steps[0].sourceQuote = complete;
+    const accepted = parseTutorExplanation(JSON.stringify(validSteps), original);
+    expect(accepted.sourceQuote).toBe(complete);
+    expect(accepted.steps?.[0].sourceQuote).toBe(complete);
+    expect(original.text).toContain(complete);
+  });
+
+  it.each([
     ['zero-width only', '\u200b'],
     ['braille blank', '\u2800'],
     ['isolated combining mark', '\u0301'],

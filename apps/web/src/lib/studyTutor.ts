@@ -71,7 +71,12 @@ function hasReadableTutorCitation(quote: string, source: string): boolean {
       return false;
     }
   }
-  return true;
+  // A UTF-16 substring match is not enough: a model can cite only the "e"
+  // from "é", one person from a joined emoji, or half of a flag. The source
+  // locator verifies BOTH grapheme boundaries without normalizing the quote.
+  // Apply this to new model output only; old saved replies still use the
+  // original byte-exact substring contract when restored.
+  return locateStudyEvidence(source, quote) !== null;
 }
 
 function validateSourceText(text: string) {
@@ -365,7 +370,7 @@ function readTutorSteps(value: unknown, passage: StudyPassage, policy: TutorCita
     if (!passage.text.includes(parsed.sourceQuote))
       throw new Error('AI 步驟引用的句子不在這段原文中，這次講解未採用。請重試。');
     if (policy === 'generated' && !hasReadableTutorCitation(parsed.sourceQuote, passage.text))
-      throw new Error('AI 步驟引句無可讀的教材內容或含方向控制字元，這次講解未採用。請重試。');
+      throw new Error('AI 步驟引句無可讀的教材內容、含方向控制字元或未對齊完整原文字素，這次講解未採用。請重試。');
     if (hasFormula && !parsed.sourceQuote.includes(parsed.formula!))
       throw new Error('AI 步驟公式不是該步引句的原文，這次講解未採用。請重試。');
     return {
@@ -410,7 +415,7 @@ function readTutorExplanation(raw: string, passage: StudyPassage, policy: TutorC
   if (!passage.text.includes(explanation.sourceQuote))
     throw new Error('AI 引用的句子不在這段原文中，這次講解未採用。請重試。');
   if (policy === 'generated' && !hasReadableTutorCitation(explanation.sourceQuote, passage.text))
-    throw new Error('AI 引句無可讀的教材內容或含方向控制字元，這次講解未採用。請重試。');
+    throw new Error('AI 引句無可讀的教材內容、含方向控制字元或未對齊完整原文字素，這次講解未採用。請重試。');
   return {
     title: explanation.title.trim(),
     explanation: explanation.explanation.trim(),
