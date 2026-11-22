@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   saveBookmark: vi.fn(),
   removeBookmark: vi.fn(),
   updatePost: vi.fn(),
+  toggleLike: vi.fn(),
+  addReply: vi.fn(),
 }));
 
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
@@ -39,12 +41,12 @@ vi.mock('@/lib/community/firestore', () => ({
   listCampusReplies: mocks.listReplies,
   fetchSchoolDirectoryProfiles: mocks.profiles,
   flattenCampusRepliesThread: (rows: unknown[]) => rows,
-  addCampusReply: vi.fn(),
+  addCampusReply: mocks.addReply,
   deleteCampusPost: vi.fn(),
   getOrCreateBoardAlias: vi.fn(),
   softDeleteCampusReply: vi.fn(),
   submitCampusReport: vi.fn(),
-  toggleCampusPostLike: vi.fn(),
+  toggleCampusPostLike: mocks.toggleLike,
   updateCampusPost: mocks.updatePost,
 }));
 vi.mock('@/lib/community/bookmarks', () => ({
@@ -92,6 +94,8 @@ beforeEach(() => {
   mocks.isBookmarked.mockReset().mockResolvedValue(false);
   mocks.saveBookmark.mockReset().mockResolvedValue(undefined);
   mocks.removeBookmark.mockReset().mockResolvedValue(undefined);
+  mocks.toggleLike.mockReset().mockResolvedValue(undefined);
+  mocks.addReply.mockReset().mockResolvedValue(undefined);
   mocks.updatePost.mockReset().mockResolvedValue(undefined);
 });
 
@@ -248,6 +252,62 @@ it('holds one edit write, prevents dismissal while pending, and updates the conf
   expect(screen.getByText('新內文')).toBeTruthy();
   expect(mocks.getPost).toHaveBeenCalledOnce();
 });
+
+it.each(['like', 'reply', 'both'])(
+  'keeps the saved fields when earlier %s reads finish after saving',
+  async (source) => {
+    ownPost();
+    render(<PostDetailPage />);
+    const edit = await screen.findByRole('button', { name: '✏️ 編輯' });
+    const original = await mocks.getPost.mock.results[0].value;
+    const resolveReads: ((value: unknown) => void)[] = [];
+    const startRead = () => {
+      mocks.getPost.mockImplementationOnce(
+        () => new Promise((resolve) => resolveReads.push(resolve)),
+      );
+    };
+    if (source !== 'reply') {
+      startRead();
+      fireEvent.click(screen.getByRole('button', { name: /🤍/ }));
+    }
+    if (source !== 'like') {
+      startRead();
+      fireEvent.change(screen.getByPlaceholderText('輸入留言⋯'), { target: { value: '新留言' } });
+      fireEvent.click(screen.getByRole('button', { name: '送出留言' }));
+    }
+    await waitFor(() => expect(resolveReads).toHaveLength(source === 'both' ? 2 : 1));
+
+    const saved = { title: '', content: '新內文', tags: ['新標籤'] };
+    fireEvent.click(edit);
+    fireEvent.change(screen.getByLabelText('標題'), { target: { value: saved.title } });
+    fireEvent.change(screen.getByLabelText('內文'), { target: { value: saved.content } });
+    fireEvent.change(screen.getByLabelText('標籤（逗號分隔）'), {
+      target: { value: saved.tags.join(', ') },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '儲存' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    // The stale response may even report a missing post.
+    let resolveFresh!: (value: unknown) => void;
+    mocks.getPost.mockImplementationOnce(() => new Promise((resolve) => (resolveFresh = resolve)));
+    const fresh = { ...original, ...saved, likes: 1, likedBy: ['alice'] };
+    mocks.getPost.mockResolvedValue(fresh);
+    for (const resolve of resolveReads.reverse()) {
+      await act(async () => resolve(source === 'reply' ? null : { ...original, likes: 1 }));
+      expect(screen.queryByText('原標題')).toBeNull();
+      expect(screen.getByText('新內文')).toBeTruthy();
+      expect(screen.getByText('#新標籤')).toBeTruthy();
+    }
+
+    fireEvent.click(edit);
+    expect(screen.getByLabelText<HTMLInputElement>('標題').value).toBe(saved.title);
+    expect(screen.getByLabelText<HTMLTextAreaElement>('內文').value).toBe(saved.content);
+    expect(screen.getByLabelText<HTMLInputElement>('標籤（逗號分隔）').value).toBe('新標籤');
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    await act(async () => resolveFresh(fresh));
+    expect(screen.getByRole('button', { name: /❤️.*1/ })).toBeTruthy();
+  },
+);
 
 it.each([
   { name: 'a nonempty title cleared by the author', title: '原標題', entered: '' },

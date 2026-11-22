@@ -80,6 +80,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const { user } = useAuth();
 
   const [post, setPost] = useState<CampusPostDoc | null>(null);
+  const postReads = useRef({ started: 0, applied: 0, saved: 0 });
   const [replies, setReplies] = useState<CampusReply[]>([]);
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
@@ -153,8 +154,17 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
 
   const loadPost = useCallback(async () => {
     if (!postId || !schoolId) return;
-    const row = await getCampusPostById(schoolId, postId);
-    setPost(row ? { ...row, title: row.title ?? '' } : null);
+    const reads = postReads.current;
+    for (;;) {
+      const request = ++reads.started;
+      const row = await getCampusPostById(schoolId, postId);
+      if (request < reads.applied) return;
+      // Refresh counts and other fields from a snapshot after the confirmed edit.
+      if (request < reads.saved) continue;
+      reads.applied = request;
+      setPost(row ? { ...row, title: row.title ?? '' } : null);
+      return;
+    }
   }, [postId, schoolId]);
 
   const loadReplies = useCallback(async () => {
@@ -687,6 +697,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
           }
           onSubmit={(patch) => updateCampusPost(schoolId, postId, patch)}
           onSaved={(patch) => {
+            postReads.current.saved = ++postReads.current.started;
             setEditSession(null);
             setPost((current) => (current?.id === postId ? { ...current, ...patch } : current));
           }}

@@ -17,7 +17,9 @@ import {
 } from './personalImports';
 import {
   cancelPersonalImportSync,
+  cancelPersonalImportSyncPause,
   getPersonalImportSyncStatus,
+  hasPersonalImportSyncPause,
   setPersonalImportSyncEnabled,
   subscribePersonalImportSync,
   syncPersonalImports,
@@ -109,11 +111,11 @@ describe('browser personal import synchronization', () => {
         phase: 'error',
         message: expect.stringContaining('已逾時'),
       });
-      const paused = expect(setPersonalImportSyncEnabled(scope, false, () => true)).rejects.toThrow(
+      const enable = expect(setPersonalImportSyncEnabled(scope, true, () => true)).rejects.toThrow(
         '等待其他分頁完成個人紀錄操作已逾時',
       );
       await vi.advanceTimersByTimeAsync(15_000);
-      await paused;
+      await enable;
       expect(request).toHaveBeenCalledTimes(2);
       expect(request.mock.calls.every(([, options]) => options.signal?.aborted)).toBe(true);
       expect(readPersonalImportSyncState(scope).enabled).toBe(true);
@@ -123,6 +125,49 @@ describe('browser personal import synchronization', () => {
       vi.useRealTimers();
     }
   });
+
+  it.each([false, true])(
+    'keeps a timed-out pause through lock release unless explicitly cancelled (cancel=%s)',
+    async (cancel) => {
+      await savePersonalImportBatch(scope, rows());
+      await setPersonalImportSyncEnabled(scope, true, () => true);
+      const original = readPersonalImports(scope);
+      const held = deferred<void>();
+      const lock = navigator.locks.request(personalImportsStorageKey(scope), () => held.promise);
+      let active = true;
+      vi.useFakeTimers();
+      try {
+        const pause = expect(
+          setPersonalImportSyncEnabled(scope, false, () => active),
+        ).rejects.toThrow('暫停要求會在可寫入時完成');
+        await vi.advanceTimersByTimeAsync(45_000);
+        await pause;
+        expect(hasPersonalImportSyncPause(scope)).toBe(true);
+        expect(readPersonalImportSyncState(scope).enabled).toBe(true);
+
+        // A new session or automatic trigger must honor the same device intent.
+        active = false;
+        const automaticSync = syncPersonalImports(scope, identity, () => true);
+        expect(browserRequest).not.toHaveBeenCalled();
+        if (cancel) cancelPersonalImportSyncPause(scope, () => true);
+
+        held.resolve();
+        await lock;
+        await automaticSync;
+        expect(hasPersonalImportSyncPause(scope)).toBe(false);
+        expect(readPersonalImportSyncState(scope).enabled).toBe(cancel);
+        expect(readPersonalImports(scope)).toEqual(original);
+        expect(browserRequest).not.toHaveBeenCalled();
+
+        await syncPersonalImports(scope, identity, () => true);
+        if (cancel) expect(remote.records).toEqual(original);
+        else expect(browserRequest).not.toHaveBeenCalled();
+      } finally {
+        held.resolve();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('requires per-account and per-school consent before any network request', async () => {
     await savePersonalImportBatch(scope, rows());

@@ -195,7 +195,7 @@ describe('personal import synchronization panel', () => {
     await waitFor(() => expect(browserRequest).toHaveBeenCalledTimes(1));
     expect(isDisabled('暫停這台裝置同步')).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: '暫停這台裝置同步' }));
-    expect(isDisabled('正在暫停…')).toBe(true);
+    expect(isDisabled('取消暫停')).toBe(false);
     await act(async () => {
       reading.resolve(structuredClone(remote));
     });
@@ -356,6 +356,51 @@ describe('personal import background synchronization', () => {
     expect(browserRequest).toHaveBeenCalledTimes(calls);
     view.unmount();
   });
+
+  it.each([false, true])(
+    'honors a queued pause on focus and interval triggers after timeout (cancel=%s)',
+    async (cancel) => {
+      await setPersonalImportSyncEnabled(initialScope, true, () => true);
+      const held = deferred<void>();
+      const lock = navigator.locks.request(
+        personalImportsStorageKey(initialScope),
+        () => held.promise,
+      );
+      vi.useFakeTimers();
+      const view = render(
+        <>
+          <PersonalImportSyncPanel scope={initialScope} />
+          <PersonalImportSyncBridge />
+        </>,
+      );
+      try {
+        fireEvent.click(screen.getByRole('button', { name: '暫停這台裝置同步' }));
+        await act(async () => vi.advanceTimersByTimeAsync(30_000));
+        expect(screen.getByRole('alert').textContent).toContain('已逾時');
+        expect(isDisabled('取消暫停')).toBe(false);
+        act(() => window.dispatchEvent(new Event('focus')));
+        expect(browserRequest).not.toHaveBeenCalled();
+
+        if (cancel) fireEvent.click(screen.getByRole('button', { name: '取消暫停' }));
+        await act(async () => {
+          held.resolve();
+          await lock;
+        });
+        expect(readPersonalImportSyncState(initialScope).enabled).toBe(cancel);
+        expect(screen.queryByRole('button', { name: '取消暫停' })).toBeNull();
+
+        await act(async () => {
+          window.dispatchEvent(new Event('focus'));
+        });
+        if (cancel) expect(remote.records).toHaveLength(1);
+        else expect(browserRequest).not.toHaveBeenCalled();
+      } finally {
+        view.unmount();
+        held.resolve();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('does not retry over a pending conflict and invalidates requests when session is unavailable', async () => {
     await setPersonalImportSyncEnabled(initialScope, true, () => true);

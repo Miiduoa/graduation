@@ -8,6 +8,7 @@ import { personalImportSyncErrorMessage } from '@campus/shared/src/imports/sync'
 import { PERSONAL_IMPORT_SYNCED, PERSONAL_IMPORT_SYNCING } from '@campus/shared';
 import { browserRequest } from '@/features/nuni/Session';
 import {
+  PERSONAL_IMPORT_CHANGE,
   personalImportsStorageKey,
   withPersonalImportSyncLock,
   type PersonalImportScope,
@@ -53,6 +54,40 @@ export function cancelPersonalImportSync(scope: PersonalImportScope) {
 
 const SYNC_LOCK_WAIT_MS = 15_000;
 
+const pauseWrites = new Map<string, Promise<void>>();
+const pauseKey = (scope: PersonalImportScope) => `${personalImportsStorageKey(scope)}:pause`;
+export const hasPersonalImportSyncPause = (scope: PersonalImportScope) =>
+  localStorage.getItem(pauseKey(scope)) !== null;
+
+export function cancelPersonalImportSyncPause(scope: PersonalImportScope, active: () => boolean) {
+  if (!active()) return;
+  localStorage.removeItem(pauseKey(scope));
+  window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
+}
+
+function persistPersonalImportSyncPause(scope: PersonalImportScope) {
+  const key = pauseKey(scope);
+  const pending = pauseWrites.get(key);
+  if (pending) return pending;
+  // The UI can stop waiting while the scoped opt-out stays in the lock queue.
+  const write = withPersonalImportSyncLock(scope, async (state, checkpoint) => {
+    const intent = localStorage.getItem(key);
+    if (intent === null) return { state, result: undefined };
+    const disabled = {
+      ...state,
+      sync: { ...state.sync, enabled: false, base: state.sync?.base || null },
+    };
+    await checkpoint(disabled);
+    if (localStorage.getItem(key) === intent) {
+      localStorage.removeItem(key);
+      window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
+    }
+    return { state: disabled, result: undefined };
+  }).finally(() => pauseWrites.delete(key));
+  pauseWrites.set(key, write);
+  return write;
+}
+
 export async function setPersonalImportSyncEnabled(
   scope: PersonalImportScope,
   enabled: boolean,
@@ -63,14 +98,34 @@ export async function setPersonalImportSyncEnabled(
   if (!active()) throw new Error('帳號或校園已切換，這次同步已停止。');
   // Invalidate a request still reading before it can upload. A write already sent may
   // finish on the server; the next opt-in reconciles that acknowledgement safely.
-  if (!enabled) cancelPersonalImportSync(scope);
+  if (!enabled) {
+    localStorage.setItem(pauseKey(scope), crypto.randomUUID());
+    cancelPersonalImportSync(scope);
+    window.dispatchEvent(new Event(PERSONAL_IMPORT_CHANGE));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        persistPersonalImportSyncPause(scope),
+        new Promise<void>((resolve, reject) => {
+          timer = setTimeout(() => {
+            if (hasPersonalImportSyncPause(scope))
+              reject(new Error('等待其他分頁已逾時，暫停要求會在可寫入時完成。'));
+            else resolve();
+          }, SYNC_LOCK_WAIT_MS);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+    return;
+  }
   await withPersonalImportSyncLock(
     scope,
     async (state) => ({
       state: { ...state, sync: { ...state.sync, enabled, base: state.sync?.base || null } },
       result: undefined,
     }),
-    active,
+    () => active() && !hasPersonalImportSyncPause(scope),
     SYNC_LOCK_WAIT_MS,
   );
 }
@@ -87,9 +142,16 @@ export function syncPersonalImports(
     !active()
   )
     return Promise.resolve();
+  if (hasPersonalImportSyncPause(scope))
+    return persistPersonalImportSyncPause(scope).catch(() => {
+      // Retain the intent for the next sync trigger if the local write fails.
+    });
   const storageKey = personalImportsStorageKey(scope);
   const generation = generations.get(storageKey) || 0;
-  const current = () => active() && generation === (generations.get(storageKey) || 0);
+  const current = () =>
+    active() &&
+    generation === (generations.get(storageKey) || 0) &&
+    !hasPersonalImportSyncPause(scope);
   const key = `${storageKey}:${identity.context}:${generation}`;
   const pending = running.get(key);
   if (pending) return pending;
