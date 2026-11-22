@@ -63,6 +63,9 @@ function noRemoteRead() {
   expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
 }
 beforeEach(() => {
+  // PU timetable imports only support weekdays.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-12T08:00:00+08:00'));
   localStorage.clear(); sessionStorage.clear();
   vi.mocked(browserRequest).mockReset().mockRejectedValue(new Error('Unexpected private source'));
   vi.mocked(answerAssistantLocally).mockClear();
@@ -71,7 +74,10 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async () => json({ enabled: true, ready: false, version: 2 })));
   saveRecords();
 });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 it.each(profiles)('%s can submit and answer its own timetable without model consent', async profile => {
   await open(profile);
