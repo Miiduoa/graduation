@@ -244,32 +244,55 @@ describe('explicit local study generation', () => {
     expect(FakeWorker.instances).toHaveLength(0);
   });
 
-  it('returns a generated lesson with a literal punctuation citation', async () => {
+  it.each(['ကါ', '主\u200e鍵'])('accepts a readable Unicode citation in the main reply and a step (%#)', async (quote) => {
+    const original = passage();
+    const pending = runStudyTutor({
+      passage: { ...original, text: original.text + '\n' + quote },
+      mode: 'exam', signal: new AbortController().signal,
+    });
+    const response = lesson();
+    response.sourceQuote = quote;
+    response.steps![0].sourceQuote = quote;
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(response) });
+    await expect(pending).resolves.toEqual(response);
+  });
+
+  it('rejects punctuation-only citations in newly generated lessons and still allows retry', async () => {
     const onTiming = vi.fn();
     const pending = runStudyTutor({
       passage: passage(), mode: 'understand', signal: new AbortController().signal, onTiming,
     });
     const worker = lastWorker();
-    const response = { ...lesson(), sourceQuote: '。' };
-    worker.emit({ type: 'result', raw: JSON.stringify(response) });
-    await expect(pending).resolves.toEqual(response);
+    // The punctuation is literally in the source, so a substring-only check
+    // would incorrectly treat it as meaningful evidence for the whole answer.
+    worker.emit({ type: 'result', raw: JSON.stringify({ ...lesson(), sourceQuote: '。' }) });
+    await expect(pending).rejects.toThrow('引句只有標點或符號');
     expect(worker.terminate).toHaveBeenCalledOnce();
-    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'success' }));
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
   });
 
-  it('returns a generated step with a literal punctuation citation', async () => {
+  it('rejects a punctuation-only individual step even if the main citation is meaningful', async () => {
     const pending = runStudyTutor({
       passage: passage(), mode: 'exam', signal: new AbortController().signal,
     });
-    const response = {
-      ...lesson(),
-      steps: [
-        { title: '核對主鍵', explanation: '先核對主鍵的用途。', sourceQuote: '主鍵用來唯一識別一筆紀錄。' },
-        { title: '核對句號', explanation: '確認原文句子的結尾。', sourceQuote: '。' },
-      ],
-    };
-    lastWorker().emit({ type: 'result', raw: JSON.stringify(response) });
-    await expect(pending).resolves.toEqual(response);
+    lastWorker().emit({
+      type: 'result',
+      raw: JSON.stringify({
+        ...lesson(),
+        steps: [
+          { title: '核對主鍵', explanation: '先核對主鍵的用途。', sourceQuote: '主鍵用來唯一識別一筆紀錄。' },
+          { title: '核對關聯', explanation: '檢查來源是否足以支援此步。', sourceQuote: '。' },
+        ],
+      }),
+    });
+    await expect(pending).rejects.toThrow('引句只有標點或符號');
     expect(lastWorker().terminate).toHaveBeenCalledOnce();
   });
 

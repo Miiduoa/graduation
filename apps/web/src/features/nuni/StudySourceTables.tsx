@@ -68,7 +68,8 @@ type SourceValueRow = { label: string; original: string; amount: number; sourceL
 // After this limit, restore a clear manual-copy route without changing the source.
 const SOURCE_CLIPBOARD_CONFIRM_MS = 5000;
 
-const SOURCE_PERCENT_COLUMN = /(?:百分比|百分率|佔比|占比|完成率|正答率|正確率|出席率|通過率|達成率|合格率|參與率|缺席率|進度|完成度|[%％])/u;
+const ORIGINAL_SOURCE_PERCENT_COLUMN = /(?:百分比|百分率|佔比|占比|完成率|正確率|出席率|通過率|達成率|合格率|參與率|缺席率|進度|完成度|[%％])/u;
+const SOURCE_PERCENT_COLUMN = new RegExp(ORIGINAL_SOURCE_PERCENT_COLUMN.source + '|正答率', 'u');
 const ENGLISH_PERCENT_COLUMN =
   /\b(?:percent(?:age)?|progress(?:\s+rate)?|completion\s+rate|accuracy(?:\s+rate)?|attendance\s+rate|participation\s+rate|retention\s+rate|conversion\s+rate|error\s+rate|dropout\s+rate|pass(?:ing)?\s+rate|success\s+rate)\b/iu;
 
@@ -242,19 +243,25 @@ function isPercentageColumn(header: string): boolean {
 
 // Only columns with an established 0–100 interpretation receive a 100% meter.
 // A bare "Rate", ratio, growth or return stays as a source table, not a graph.
+function hasUnboundedRateLabel(header: string): boolean {
+  return SOURCE_UNBOUNDED_RATE_COLUMN.test(header) || ENGLISH_UNBOUNDED_RATE_COLUMN.test(header);
+}
+
 function isBoundedPercentageColumn(header: string): boolean {
   return (SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header) ||
-    (RANK_RANGE_COLUMN.test(header) && /比例$/u.test(header.trim()))) &&
-    !SOURCE_UNBOUNDED_RATE_COLUMN.test(header) &&
-    !ENGLISH_UNBOUNDED_RATE_COLUMN.test(header);
+    (RANK_RANGE_COLUMN.test(header) && /比例$/u.test(header.trim()))) && !hasUnboundedRateLabel(header);
 }
 
 const IDENTIFIER_WORDS =
   /(?:日期|年份|學年度|學號|學籍號|課號|座號|編號|序號|識別碼|身分證|護照號|郵遞區號|電話|手機|帳號|代碼|代號|題號|題次)|\b(?:academic\s+(?:year|term|semester)|student\s+(?:id|number)|course\s+(?:id|code|number)|postal\s+code|zip\s+code|phone\s+number|account\s+(?:id|number)|page\s+(?:no\.?|number)|sequence\s+number|floor\s+number|(?:question|problem|exercise|item)\s+(?:id|number|no\.?))(?!\w)/iu;
 const IDENTIFIER_LABEL_END = new RegExp(`(?:${IDENTIFIER_WORDS.source})$`, 'iu');
 
+function withoutPercentUnit(header: string): string {
+  return header.trim().replace(PERCENT_UNIT_END, '').trim();
+}
+
 function isNonRatioColumn(header: string, percentage = false): boolean {
-  const column = header.trim().replace(/\s*(?:[（(]\s*[%％]\s*[）)]|[%％])$/u, '').trim();
+  const column = withoutPercentUnit(header);
   const unqualifiedColumn = column.replace(/(?:\s*[（(][^）)]*[）)])+$/u, '').trim();
   const measuredLabel = percentage ? unqualifiedColumn : column;
   const statusMatch = NON_RATIO_STATUS_COLUMN.exec(measuredLabel) ?? ENGLISH_NON_RATIO_STATUS_COLUMN.exec(measuredLabel);
@@ -385,8 +392,16 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
  */
 function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
-  const column = measuredColumnLabel(table.headers[1]);
-  if (!hasUnambiguousChartLabel(table.headers[1]) || !isBoundedPercentageColumn(column) || isNonRatioColumn(column, true)) return null;
+  const header = table.headers[1];
+  const column = measuredColumnLabel(header);
+  if (!hasUnambiguousChartLabel(header) || NON_RATIO_AUTH_TOKEN_COLUMN.test(withoutPercentUnit(header)) ||
+      NON_RATIO_AUTH_TOKEN_COLUMN.test(withoutPercentUnit(column))) return null;
+  // Preserve fixed-scale eligibility for the original header. Apply the
+  // additional label checks only to formats recognized by the newer rules.
+  const originallyBounded = (ORIGINAL_SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header)) &&
+    !hasUnboundedRateLabel(header);
+  if (!originallyBounded &&
+      (!isBoundedPercentageColumn(column) || isNonRatioColumn(column, true))) return null;
   const rows: SourceValueRow[] = [];
   // Taiwanese lesson materials sometimes use fullwidth digits and decimal
   // punctuation throughout an explicitly bounded percentage column.

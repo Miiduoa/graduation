@@ -1,5 +1,5 @@
 import type { StudyMode, StudyPassage } from '@/lib/studyTutor';
-import { STUDY_SESSION_LIMITS, hasRevealedStudyAnswer, hasVisibleStudyAttempt, hasVisibleStudyContent, type StudyPassageMemory } from './courseStudySession';
+import { STUDY_SESSION_LIMITS, hasVisibleStudyAttempt, hasVisibleStudyContent, type StudyPassageMemory } from './courseStudySession';
 import { locateStudyEvidence } from './studyEvidence';
 import { courseStudyNotesFilename } from './courseStudyNotes';
 
@@ -73,10 +73,6 @@ function emptyResponse(): StudyPracticeResponse {
 
 // Preserve the public import path used by practice/checkpoint consumers.
 export { hasVisibleStudyAttempt } from './courseStudySession';
-
-export function hasStudyPracticeAttempt(response: StudyPracticeResponse): boolean {
-  return hasRevealedStudyAnswer(response) || hasVisibleStudyAttempt(response.attempt);
-}
 
 /** Read actual source order and only the selected lesson of the requested mode. */
 export function buildStudyPracticeDeck(
@@ -181,7 +177,7 @@ export function updateStudyPracticeRound(
         action.value === response.attempt) return round;
       return withResponse(round, { ...response, attempt: action.value, answerVisible: false, outcome: null });
     case 'toggle_answer':
-      if (!hasStudyPracticeAttempt(response)) return round;
+      if (!hasVisibleStudyAttempt(response.attempt)) return round;
       // Hiding a reference answer is a disclosure choice, not a new self-rating.
       // Only changing the attempt or explicitly reassessing should clear/replace it.
       return withResponse(round, { ...response, answerVisible: !response.answerVisible });
@@ -189,7 +185,7 @@ export function updateStudyPracticeRound(
       return withResponse(round, { ...response, hintVisible: !response.hintVisible });
     case 'decide':
       if ((action.outcome !== 'again' && action.outcome !== 'understood') ||
-        !hasRevealedStudyAnswer(response)) return round;
+        !hasVisibleStudyAttempt(response.attempt) || !response.answerVisible) return round;
       return advance(withResponse(round, { ...response, outcome: action.outcome }));
     case 'undo_skip':
       // A deliberate undo restores an unanswered card without erasing its draft
@@ -215,7 +211,7 @@ function adjacentUnreviewedStudyPracticeIndex(round: StudyPracticeRound, directi
   for (let offset = 1; offset < round.cards.length; offset += 1) {
     const index = (round.index + direction * offset + round.cards.length) % round.cards.length;
     const response = round.responses[round.cards[index].id];
-    if ((!response || response.outcome === null) && (!draftsOnly || (!!response && hasStudyPracticeAttempt(response)))) return index;
+    if ((!response || response.outcome === null) && (!draftsOnly || (!!response && hasVisibleStudyAttempt(response.attempt)))) return index;
   }
   return null;
 }
@@ -246,7 +242,7 @@ export function getStudyPracticeSummary(round: StudyPracticeRound): StudyPractic
   };
   for (const card of round.cards) {
     const response = round.responses[card.id];
-    if (response && hasStudyPracticeAttempt(response)) summary.answered += 1;
+    if (response && hasVisibleStudyAttempt(response.attempt)) summary.answered += 1;
     if (response?.outcome === 'understood') summary.understood += 1;
     else {
       summary.pending += 1;
@@ -278,7 +274,7 @@ export function buildCourseStudyPracticeNotes(
   ];
   round.cards.forEach((card, index) => {
     const response = round.responses[card.id] ?? emptyResponse();
-    const canRevealAnswer = hasRevealedStudyAnswer(response);
+    const canRevealAnswer = response.answerVisible && hasVisibleStudyAttempt(response.attempt);
     lines.push(
       '', '────────────────────',
       `第 ${index + 1} 題／共 ${round.cards.length} 題`,
@@ -286,7 +282,7 @@ export function buildCourseStudyPracticeNotes(
       `讀法：${modeLabels[card.mode]}・第 ${card.lessonId} 次講解`,
       '自我檢查題：', hasVisibleStudyContent(card.question)
         ? card.question : 'AI 未提供可讀題目，請對照本段原文自行練習',
-      '', '本輪試答：', hasStudyPracticeAttempt(response) ? response.attempt : '（尚未作答）',
+      '', '本輪試答：', hasVisibleStudyAttempt(response.attempt) ? response.attempt : '（尚未作答）',
       `本人自評：${response.outcome ? outcomeLabels[response.outcome] : '尚未自評'}`,
       `原文提示：${response.hintVisible ? '已展開' : '未展開'}`,
     );

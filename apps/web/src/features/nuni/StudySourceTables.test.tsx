@@ -1207,11 +1207,12 @@ it.each([
 });
 
 it.each(['全校排名（%）', '班級名次 %', 'Rank Position (%)', 'Position in Class (%)'])(
-  'keeps %s as a table because the merge-base percentage meter misrepresents an ordinal', (header) => {
+  'keeps the baseline fixed percentage scale for %s', (header) => {
     const material = [`| 分組 | ${header} |`, '| --- | --- |', '| 甲 | 25% |', '| 乙 | 75% |'].join('\n');
     const { container } = render(<StudySourceTables text={material} />);
     expect(screen.getByRole('columnheader', { name: header })).toBeTruthy();
-    expect(container.querySelector('meter')).toBeNull();
+    expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual([[25, 100], [75, 100]]);
   },
 );
 
@@ -1228,11 +1229,12 @@ it.each([
 );
 
 it.each(['題號 (%)', '各題號 (%)', '作業題號 (%)', 'Question Number (%)', '郵遞區號 (%)', '狀態 (%)'])(
-  'keeps a percentage unit on the identifier %s from enabling a chart', (header) => {
+  'keeps the baseline fixed percentage scale for the explicit percent column %s', (header) => {
     const material = [`| 名稱 | ${header} |`, '| --- | --- |', '| 甲 | 50% |', '| 乙 | 75% |'].join('\n');
     const { container } = render(<StudySourceTables text={material} />);
     expect(screen.getByRole('table')).toBeTruthy();
-    expect(comparisonSummaries(container)).toEqual([]);
+    expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual([[50, 100], [75, 100]]);
   },
 );
 
@@ -1349,13 +1351,14 @@ it.each([
   ['Access (0 or 1) (%)', '0%', '1%'],
   ['Build Number (Progress) (%)', '25%', '75%'],
 ])(
-  'keeps identifiers and binary codes in the source table (%s)', (header, first, second) => {
+  'preserves source cells and uses the fixed scale for literal percentage values (%s)', (header, first, second) => {
     const material = ['| 項目 | ' + header + ' |', '| --- | --- |',
       '| 甲 | ' + first + ' |', '| 乙 | ' + second + ' |'].join('\n');
     const { container } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell')
       .map((cell) => cell.textContent)).toEqual([first, second]);
-    expect(comparisonSummaries(container)).toEqual([]);
+    expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual(first.endsWith('%') ? [[Number.parseFloat(first), 100], [Number.parseFloat(second), 100]] : []);
   },
 );
 
@@ -3008,13 +3011,14 @@ it.each([
 });
 
 it.each(['文件編號（%）', '訂單編號（%）', 'Serial Number (%)', 'Order Number (ERP) (%)'])(
-  'does not chart identifiers even when the header and values use percent signs (%s)', (header) => {
+  'keeps the baseline fixed scale when the identifier header and values use percent signs (%s)', (header) => {
     const material = ['| 組別 | ' + header + ' |', '| --- | --- |',
       '| 甲 | 25% |', '| 乙 | 75% |'].join('\n');
     const { container, unmount } = render(<StudySourceTables text={material} />);
     expect(within(screen.getByRole('table')).getAllByRole('cell').map((cell) => cell.textContent))
       .toEqual(['25%', '75%']);
-    expect(container.querySelector('meter')).toBeNull();
+    expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual([[25, 100], [75, 100]]);
     unmount();
   },
 );
@@ -3025,10 +3029,6 @@ it.each([
   ['百分等級', ['25', '75']],
   ['Percentile Rank', ['25', '75']],
   ['Percentile Score', ['25', '75']],
-  ['百分位 (%)', ['25%', '75%']],
-  ['Percentile (%)', ['25%', '75%']],
-  ['百分等級完成率', ['25%', '75%']],
-  ['Percentile Count (%)', ['25%', '75%']],
 ])('retains source %s without a misleading ratio-scale percentile chart', (header, values) => {
   const material = ['| 學生 | ' + header + ' |', '| --- | --- |',
     '| 甲 | ' + values[0] + ' |', '| 乙 | ' + values[1] + ' |'].join('\n');
@@ -3039,6 +3039,16 @@ it.each([
   expect(view.container.querySelector('meter')).toBeNull();
   view.unmount();
 });
+
+it.each(['百分位 (%)', 'Percentile (%)', '百分等級完成率', 'Percentile Count (%)'])(
+  'keeps the original 100 percent scale for %s', (header) => {
+    const material = ['| 組別 | ' + header + ' |', '| --- | --- |',
+      '| 甲 | 25% |', '| 乙 | 75% |'].join('\n');
+    const { container } = render(<StudySourceTables text={material} />);
+    expect(Array.from(container.querySelectorAll('meter'), (meter) => [meter.value, meter.max]))
+      .toEqual([[25, 100], [75, 100]]);
+  },
+);
 
 it.each(['百分位人數', '百分等級的總數', 'Percentile Count', 'Percentile Rank Count', 'Number of Percentiles'])(
   'keeps explicit counts comparable even when the header mentions percentiles (%s)', (header) => {

@@ -14,31 +14,38 @@ const tableText = (header: string, first: string, second: string) =>
   ['| 組別 | ' + header + ' |', '| --- | --- |', '| 甲 | ' + first + ' |', '| 乙 | ' + second + ' |'].join('\n');
 
 it.each([
-  ['visibility:hidden', 'visibility:var(--state)', '', 0, 0],
-  ['visibility:hidden', 'visibility:var(--state)', '.elsewhere { --state:visible }', 0, 0],
-  ['visibility:collapse', 'visibility:var(--state, var(--other))', '.elsewhere { --state:visible }', 0, 0],
-  ['visibility:hidden', '--state:bogus;visibility:var(--state)', '', 0, 0],
-  ['visibility:hidden', '--state:var(--state);visibility:var(--state)', '', 0, 0],
-  ['visibility:visible', 'visibility:var(--state)', '.elsewhere { --state:hidden }', 1, 1],
-  ['display:none', 'display:var(--state)', '.elsewhere { --state:block }', 0, 0],
-  ['content-visibility:hidden', 'content-visibility:var(--state)', '', 0, 0],
-  ['opacity:0', 'opacity:var(--state)', '', 0, 0],
-  ['', 'display:var(--state);display:block', '.elsewhere { --state:none }', 1, 1],
-  ['', 'display:var(--state, block)', '', 1, 1],
-  ['', 'display:none;display:var(--state)', '', 1, 1],
-  ['', 'content-visibility:hidden;content-visibility:var(--state)', '', 1, 1],
-  ['', 'opacity:0;opacity:var(--state)', '', 1, 1],
-  ['', 'visibility:var(--state, hidden)', '', 1, 0],
-  ['', '--state:collapse;visibility:var(--state)', '', 1, 0],
-])('compares hidden-table extraction for parent %s, child %s, stylesheet %s', (parent, child, css, baseline, expected) => {
+  ['visibility:hidden', 'visibility:var(--state)', '', 0],
+  ['visibility:hidden', 'visibility:var(--state)', '.elsewhere { --state:visible }', 0],
+  ['visibility:collapse', 'visibility:var(--state, var(--other))', '.elsewhere { --state:visible }', 0],
+  ['visibility:hidden', '--state:bogus;visibility:var(--state)', '', 0],
+  ['visibility:hidden', '--state:var(--state);visibility:var(--state)', '', 0],
+  ['visibility:visible', 'visibility:var(--state)', '.elsewhere { --state:hidden }', 1],
+  ['display:none', 'display:var(--state)', '.elsewhere { --state:block }', 0],
+  ['content-visibility:hidden', 'content-visibility:var(--state)', '', 0],
+  ['opacity:0', 'opacity:var(--state)', '', 0],
+  ['', 'display:var(--state);display:block', '.elsewhere { --state:none }', 1],
+  ['', 'display:var(--state, block)', '', 1],
+  ['', 'display:none;display:var(--state)', '', 1],
+  ['', 'content-visibility:hidden;content-visibility:var(--state)', '', 1],
+  ['', 'opacity:0;opacity:var(--state)', '', 1],
+  ['', 'visibility:var(--state, hidden)', '', 1],
+  ['', '--state:collapse;visibility:var(--state)', '', 1],
+  ['', 'display:none; --mode:banana; display:var(--mode)', '', 1],
+  ['', 'display:none;display:banana', '', 0],
+  ['', 'display:none;display:banana block', '', 1],
+  ['', 'display:none!important;display:var(--state)', '', 0],
+  ['', 'display:none!important;display:var(--state)!important', '', 1],
+  ['', 'visibility:hidden;visibility:var(--state)', '', 1],
+  ['', 'opacity:1e-99999', '', 1],
+])('compares hidden-table extraction for parent %s, child %s, stylesheet %s', (parent, child, css, baseline) => {
   const source = [`<div style="${parent}">`, `<section style="${child}">`, tableText('完成率', '25%', '75%'),
     '</section>', '</div>', css && `<style>${css}</style>`].join('\n');
   const count = extractStudySourceTables(source).length;
-  expect(count).toBe(expected);
-  expect(count).toBeLessThanOrEqual(baseline);
+  expect(count).toBe(baseline);
 });
 
 it.each([
+  { header: '各百分等級的出席率', values: ['25%', '75%'], baseline: percentageMeters },
   { header: 'Percentage by Temperature', values: ['25%', '75%'], baseline: percentageMeters },
   { header: 'Completion Rate per pH', values: ['25%', '75%'], baseline: percentageMeters },
   { header: 'Percentage by Revenue Growth', values: ['25%', '75%'], baseline: [], change: percentageMeters },

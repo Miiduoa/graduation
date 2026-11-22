@@ -340,9 +340,6 @@ importers:
       '@campus/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@csstools/css-calc':
-        specifier: 3.1.1
-        version: 3.1.1(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
       '@huggingface/transformers':
         specifier: 4.3.1
         version: 4.3.1(@types/node@20.19.30)

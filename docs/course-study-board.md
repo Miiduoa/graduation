@@ -1,3 +1,10 @@
+## 2026-11-22：PR #719 四項行為回到合併基準
+
+- **行內 CSS。** 以合併基準 `2232ee5c9` 的字面宣告掃描判斷 `display`、`visibility`、`content-visibility` 與 `opacity`，沿用同屬性宣告順序和 `!important`。移除本分支新增的變數代入、繼承與數學函式求值。新增 HTML 容器仍辨識 `hidden`／`aria-hidden`，行內 CSS 則只在基準支援的容器判斷。差異測試涵蓋變數、無效宣告、優先權及巢狀可見性。
+- **固定百分比刻度。** 「各百分等級的出席率」等符合基準的欄名搭配 25%／75% 時使用 100% 滿格。排名或其他識別欄即使含明示百分比，也依基準決定固定尺度資格。一次性驗證 token、損壞 Unicode 標籤、純數值圖與全形百分比支援沿用各自的檢查。
+- **逐題練習。** 畫面揭答、自評和 TXT 參考回答均恢復可見試答門檻，並沿用共用的不可見 Unicode 字元檢查。v1 練習備份仍可還原並保留原始試答與揭答旗標。只有零寬空白或孤立組合記號等字元的試答不會揭答。
+- **新講解引句。** 接收模型結果時，主引句與每個分步引句都須至少含一個 Unicode 字母或數字。緬文 `ကါ` 與含 U+200E 的可讀逐字引句可通過，純標點仍可按既有格式讀取歷史備份。
+
 ## 2026-11-22：商品貨號、SKU 與圖書條碼不再誤畫成數量比例
 
 - 經重新核對來源表格推導規則，SKU、ASIN、ISBN-10/13、ISSN、EAN、UPC、GTIN 及商品貨號／料號／條碼的數字屬於識別碼，無法代表倍數。即使教材表格把 SKU 100 與 200 並列，也只保留逐字來源、原文行號與複製／TXT 出口，不產生誤導長條；在標示 (%) 的識別碼欄亦不產生百分比 meter。
@@ -36,8 +43,8 @@
 
 ## 2026-11-22：百分位排名不再被誤當倍數長條圖
 
-- 修補衍生圖表的量尺判斷：教材的「百分位／百分位數／百分等級／Percentile Rank／Percentile Score」是分布中的**序位**，第 80 百分位不能解讀成第 40 百分位的兩倍。即使欄名附「(%)」且原表寫出 25%／75%，也不另外生成 100% 滿格的比較圖。
-- 明確的「百分位人數／Percentile Count／Number of Percentiles」仍是計數，可在數值符合原有精度限制時比較。教材原文、表格、逐筆核對行號、選取／複製／匯出與 JSON checkpoint 一律不改。加入七種不可衍生序位圖與三種真實計數的 React DOM 回歸。
+- 修補衍生圖表的量尺判斷：教材的「百分位／百分位數／百分等級／Percentile Rank／Percentile Score」是分布中的**序位**，第 80 百分位不能解讀成第 40 百分位的兩倍。此處的序位排除適用於以欄內最大值為滿格的純數值圖。符合合併基準的明示百分比沿用固定 100% 刻度。
+- 明確的「百分位人數／Percentile Count／Number of Percentiles」仍是計數，可在數值符合原有精度限制時比較。教材原文、表格、逐筆核對行號、選取／複製／匯出與 JSON checkpoint 一律不改。測試涵蓋純數值序位、明示百分比與實際計數。
 - 這僅是來源表格的保守呈現修補，並非對統計意義或 AI 圖表理解的自動認證；新 SHA 需重跑 CI／CodeQL。App 5504170 審查、Maestro／手機讀屏、WebGPU 中文教學及 Ahaboard 同條件實測未齊前，PR 保持 Draft，不合併、不部署。
 
 ## 2026-11-22：AI 原文引句拒絕完整 Unicode 方向控制集合
@@ -2209,7 +2216,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - React DOM 模擬回歸涵蓋多行註記、非連續列、CRLF、原文不變及來源替換。這不是 iOS／Android 真機、VoiceOver／TalkBack、GitHub App 5504170、WebGPU 或 Ahaboard 實測，不新增套件／付費 API／私人教材傳輸、不改閱讀與練習 checkpoint；保持 Draft、不合併、不部署。
 
 
-### 2026-11-21：動態 CSS 隱藏狀態不再暴露未授權來源表格
+### 2026-11-21：動態 CSS 隱藏狀態不再暴露未授權來源表格（歷史紀錄）
+
+此段記錄已退回的行為，目前以本文開頭的合併基準規則為準。
 
 - 來源 Markdown 含 HTML 包裝時，原本只檢查明確的 `display:none`／`visibility:hidden`／`opacity:0`。若樣式使用 `display:var(--answer-display)`、`opacity:calc(0)` 等動態 CSS，純文字掃描器不能確認瀏覽器實際顯示／隱藏狀態，卻可能把包裝內教師未公開表格衍生為可見表格。
 - 現在對影響 display／visibility／content-visibility／opacity 的 `var`、`env`、`calc`、`min`、`max`、`clamp` 選擇保守不衍生表格，即使前後有靜態宣告也不猜測計算結果；離開包裝後的正常教材表格仍可解析。一般 `display:block`、`opacity:1` 與不影響可見性的 `transform` 維持原行為。新增 Node/Vitest 來源邊界正反測試。
@@ -2223,7 +2232,9 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 此為程式與 DOM 測試案例，正式 CI／CodeQL、App 5504170 APPROVED、Maestro／iOS／Android 真機、WebGPU 繁中與 Ahaboard 同教材同題同機對照須依本輪精確新 SHA 另行驗證；PR 維持 Draft，不合併、不部署。
 
 
-### 2026-11-21：修補多詞 CSS 覆寫造成的隱藏教材誤列風險
+### 2026-11-21：修補多詞 CSS 覆寫造成的隱藏教材誤列風險（歷史紀錄）
+
+此段記錄已退回的行為，目前以本文開頭的合併基準規則為準。
 
 - 來源 Markdown 若寫 `display:none;display:banana block`、`visibility:hidden;visibility:visible hidden` 等不合法的多詞 CSS，原掃描器會將後者當成可用覆寫，可能把教師尚未公開的表格當成公開內容衍生顯示。現在不能確認有效的多詞宣告不再覆蓋前方明確隱藏值；常見有效 `inline flex`、`block grid` 仍維持可見性判斷。
 - 不只 `var()`／`calc()`，未知或未來 CSS 函數（如 `future-display()`）也不再被當成已確定可見，而是保守不建立衍生表格；原始教材文字保持不動。新增正反來源解析測試，涵蓋 invalid multi-token、unknown function、合法 multi-keyword override 與隱藏內容之後的公開表格。

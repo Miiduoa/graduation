@@ -1372,189 +1372,6 @@ describe('zero-opacity CSS exponent notation cannot expose unpublished source ta
   });
 });
 
-describe('resolved and unresolved inline visibility declarations', () => {
-  // The merge-base scanner only resolves literal values. The new scanner
-  // additionally resolves valid math/variables and applies unset for a missing variable.
-  it.each([
-    ['opacity:0;opacity:round(foo)', 0, 0],
-    ['opacity:0!important;opacity:round(foo)!important', 0, 0],
-    ['opacity:0;opacity:calc(1em / 2em)', 1, 0],
-    ['opacity:0;opacity:calc(1px)', 1, 0],
-    ['opacity:0;opacity:unknown(1)', 0, 0],
-    ['opacity:0;opacity:calc(1', 1, 0],
-    ['opacity:0;opacity:var(--missing, round(foo))', 1, 0],
-    ['opacity:0;opacity:unknown(var(--missing))', 0, 0],
-    ['opacity:0;opacity:calc(var(--missing)', 1, 0],
-    ['opacity:0;opacity:calc(var(--missing) + 10%)', 1, 1],
-    ['opacity:0;--alpha:foo;opacity:var(--alpha)', 1, 0],
-    ['opacity:0;opacity:calc(1)', 1, 1],
-    ['opacity:1;opacity:calc(0)', 1, 0],
-    ['display:none;display:var(--missing invalid)', 1, 0],
-    ['display:none;display:var(--missing, not-a-mode)', 1, 0],
-    ['display:none;display:env(unknown-mode)', 1, 0],
-    ['display:none;display:var(--missing)', 1, 1],
-    ['visibility:hidden;visibility:var(--missing, invalid)', 1, 0],
-    ['visibility:hidden;visibility:unknown(visible)', 1, 0],
-    ['content-visibility:hidden;content-visibility:attr(data-state)', 1, 0],
-    ['content-visibility:hidden;content-visibility:not-a-mode', 0, 0],
-  ] as const)('compares table counts for %s (merge base %i, current %i)', (style, _baseCount, count) => {
-    const source = [`<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
-    expect(extractStudySourceTables(source)).toEqual(count ? realTable(2) : []);
-  });
-
-  it.each([
-    '<p style="opacity:calc(0)">',
-    '<div style="opacity:0;opacity:calc(1)%">',
-    '<h2 style="opacity:clamp(0, 0, 1)">',
-    '<div style="opacity:1;opacity:calc(1 - 1)">',
-    '<div style="opacity:max(-1, -0.5)">',
-    '<div style="opacity:calc(100% - 100%)">',
-    '<div style="opacity:calc(-1 / 0)">',
-    '<div style="opacity:calc(0 / 0)">',
-    '<div style="--state:collapse;visibility:var(--state, visible)">',
-    '<div style="--alpha:0;opacity:var(--alpha, 1)">',
-    '<div style="--Alpha:0 !important;--Alpha:1;opacity:var(--Alpha, 1)">',
-  ])('omits a resolved hidden %s while retaining the later public table', (opening) => {
-    const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
-    const source = [
-      opening,
-      '| 隱藏表格 | 分數 |',
-      '| --- | --- |',
-      '| 教師答案 | 99 |',
-      `</${tag}>`,
-      ...visibleTable,
-    ].join('\n');
-    expect(extractStudySourceTables(source)).toEqual(realTable(6));
-  });
-
-  // The merge-base scanner also extracts these wrappers with unresolved inline CSS.
-  it.each([
-    '<div style="display:var(--answer-display)">',
-    '<section style="visibility:var(--lesson-visibility)">',
-    '<aside style="content-visibility:var(--answer-visibility)">',
-    '<div style="--alpha:var(--alpha);opacity:calc(var(--alpha, 1))">',
-    '<div style="display:block;display:var(--answer-display)">',
-    '<div style="opacity:calc(1">',
-    '<section style="visibility:env(safe-area-inset-top)">',
-  ])('matches merge-base visibility for unresolved %s', (opening) => {
-    const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1];
-    expect(extractStudySourceTables([opening, ...visibleTable, `</${tag}>`].join('\n')))
-      .toEqual(realTable(2));
-  });
-
-  it.each([
-    'display:var(--mode); display:block',
-    'display:var(--mode)!important; display:block!important',
-    'display:var(--missing, block)',
-    'display:none;display:var(--answer-display)',
-    'display:var(--missing, not-a-mode)',
-    'display:var(--mode)!important; display:block',
-    'display:none;display:flow block',
-    'display:none;display:flow list-item inline',
-    'opacity:calc(1)',
-    'opacity:calc(100%)',
-    'opacity:calc(80% / 2 + 10%)',
-    'opacity:calc(1 / 0)',
-    'display:none; --layout:inline grid; display:var(--layout)',
-    'visibility:hidden; --state:visible; visibility:var(--state)',
-    'opacity:0; opacity:calc(1)',
-    'opacity:calc(max(0.1, 1 / 2))',
-    'opacity:clamp(0%, 75%, 100%)',
-    'opacity:0; opacity:var(--missing, max(0, 0.5))',
-    '--Alpha:.5; opacity:calc(var(--Alpha) * 2)',
-    'visibility:hidden; visibility:var(--missing, visible)',
-    'content-visibility:hidden; content-visibility:var(--missing, unset)',
-    'display:none; display:var(--outer, var(--inner, flow block))',
-  ])(
-    'extracts tables when a later visible declaration wins (%s)', (style) => {
-      const source = [`<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
-      expect(extractStudySourceTables(source)).toEqual(realTable(2));
-    },
-  );
-
-  it.each([
-    'display:var(--mode); display:none',
-    'display:var(--missing, none)',
-  ])(
-    'omits tables when the winning display is hidden (%s)', (style) => {
-      const source = [`<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
-      expect(extractStudySourceTables(source)).toEqual([]);
-    },
-  );
-
-  it.each([
-    ['<!-- --alpha:0 -->', 'opacity:var(--alpha, 1)'],
-    ['<!-- <div style="--mode:none"> -->', 'display:var(--mode, block)'],
-    ['<!--\n<style>:root { --alpha:0 }</style>\n--!>', 'opacity:var(--alpha, calc(1))'],
-    ['<style>/* :root { --alpha:0 } */</style>', 'opacity:var(--alpha, 1)'],
-    ['<style>p::before { content: "{ --alpha:0"; }</style>', 'opacity:var(--alpha, 1)'],
-    ['<div style="/* --alpha:0; */ color:red"></div>', 'opacity:var(--alpha, 1)'],
-    ['`<!-- <div style="--alpha:0">`', 'opacity:var(--alpha, 1)'],
-    ['```html\n<div style="--alpha:0">\n```', 'opacity:var(--alpha, 1)'],
-    ['<div title="--alpha:0"></div>', 'opacity:var(--alpha, 1)'],
-    ['', '--alpha:initial;opacity:var(--alpha, 1)'],
-    ['', 'opacity:1;opacity:rgb(0 0 0)'],
-    ['', 'opacity:1;opacity:calc(1px)'],
-    ['', 'opacity:1;opacity:calc(0)%'],
-    ['<div style="font-family:\'--alpha:0\'"></div>', 'opacity:var(--alpha, 1)'],
-    ['', 'opacity:calc(1);opacity:hsl(0 0% 0%) !important'],
-    ['', 'display:block;display:translateX(0)'],
-    ['', 'visibility:visible;visibility:calc(0)'],
-    ['', 'content-visibility:visible;content-visibility:future-mode(hidden)'],
-  ])('keeps tables visible when inactive declarations cannot override a visible value (%s, %s)', (prefix, style) => {
-    const source = [prefix, `<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
-    expect(extractStudySourceTables(source)).toHaveLength(1);
-  });
-
-  it.each([
-    ['<style>\n:root { --alpha:0 }\n</style>', 'opacity:var(--alpha, 1)'],
-    ['<style>@media print { :root { color:red; --alpha:0 } }</style>', 'opacity:var(--alpha, 1)'],
-    ['`<!--`\n<style>:root { --alpha:0 }</style>', 'opacity:var(--alpha, 1)'],
-    ['', 'opacity:1;opacity:calc(1em / 2em)'],
-    ['', 'opacity:1;opacity:sibling-index()'],
-    ['', 'display:block;display:env(unknown-mode)'],
-  ])('retains tables with unresolved winning declarations (%s, %s)', (prefix, style) => {
-    const source = [prefix, `<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
-    expect(extractStudySourceTables(source)).toHaveLength(1);
-  });
-
-  it.each([
-    ['', 'opacity:0;opacity:rgb(255 255 255)'],
-    ['', 'opacity:1;opacity:var(--missing, 0)'],
-  ])('omits tables with a winning hidden value (%s, %s)', (prefix, style) => {
-    const source = [prefix, `<div style="${style}">`, ...visibleTable, '</div>'].join('\n');
-    expect(extractStudySourceTables(source)).toEqual([]);
-  });
-
-  it.each([
-    ['<!-- unrelated --><div style="--mode:none"></div><section style="display:var(--mode, block)">', '</section>', true],
-    ['<main><div style="--mode:none"></div><section style="display:var(--mode, block)">', '</section></main>', true],
-    ['<section style="display:var(--mode, block)">', '</section><div style="--mode:none"></div>', true],
-    ['<img style="--mode:none"><section style="display:var(--mode, block)">', '</section>', true],
-    ['<div style="--mode:none"><main><section style="display:var(--mode, block)">', '</section></main></div>', false],
-    ['<div style="--mode:block"><main><section style="display:var(--mode, none)">', '</section></main></div>', true],
-    ['<div style="--mode:none !important"><section style="--mode:block;display:var(--mode, none)">', '</section></div>', true],
-    ['<div style="--mode:block"><section style="--mode:none;display:var(--mode, block)">', '</section></div>', false],
-    ['<div style="--mode:none"><section style="--mode:initial;display:var(--mode, var(--other, block))">', '</section></div>', true],
-    ['<div style="--mode:none"><section style="--mode:unset;display:var(--mode, block)">', '</section></div>', false],
-    ['<div style="--mode:none;--alias:var(--mode)"><section style="--mode:block;display:var(--alias, block)">', '</section></div>', false],
-    ['<div style="--mode:block;--alias:var(--mode)"><section style="--mode:none;display:var(--alias, none)">', '</section></div>', true],
-    ['<div style="--alias:var(--missing)"><section style="--missing:none;display:var(--alias, block)">', '</section></div>', true],
-  ])('resolves inline visibility variables in their own inheritance chain (%#)', (open, close, visible) => {
-    const source = [open, ...visibleTable, close].join('\n');
-    expect(extractStudySourceTables(source)).toEqual(visible ? realTable(2) : []);
-  });
-
-  it('keeps normal static visible declarations and unrelated CSS functions readable', () => {
-    const source = [
-      '<div style="display:block; opacity:1; transform:translateX(0)">',
-      ...visibleTable,
-      '</div>',
-    ].join('\n');
-    expect(extractStudySourceTables(source)).toEqual(realTable(2));
-  });
-});
-
 describe('invalid CSS declarations cannot override hidden teacher-only source tables', () => {
   it.each([
     '<div style="display:none;display:banana">',
@@ -1564,15 +1381,7 @@ describe('invalid CSS declarations cannot override hidden teacher-only source ta
     '<aside style="opacity:0;opacity:transparent">',
     '<aside style="opacity:0!important;opacity:broken!important">',
     '<p style="opacity:0e0;opacity:not-a-number">',
-    '<div style="display:none;display:banana block">',
-    '<div style="display:none!important;display:banana block!important">',
-    '<section style="visibility:hidden;visibility:visible hidden">',
-    '<aside style="content-visibility:hidden;content-visibility:auto unknown">',
     '<p style="opacity:0;opacity:0 1">',
-    '<div style="display:none;display:future-display(block)">',
-    '<div style="opacity&colon;0&period;0">',
-    '<section style="opacity&colon;0&percnt;">',
-    '<p style="opacity&colon;&plus;0">',
   ])('does not disclose explicitly invisible source rows when style contains %s', (opening) => {
     const tag = /^<([a-z0-9]+)/u.exec(opening)?.[1] ?? 'div';
     const source = [
@@ -1620,8 +1429,8 @@ describe('CSS-wide values match merge-base for visible default wrappers', () => 
     ['visibility:hidden', 'visibility:inherit', false],
     ['visibility:hidden', 'visibility:unset', false],
     ['visibility:hidden', 'visibility:var(--missing, unset)', false],
-    ['visibility:hidden', 'visibility:initial', true],
-    ['visibility:hidden', 'visibility:visible', true],
+    ['visibility:hidden', 'visibility:initial', false],
+    ['visibility:hidden', 'visibility:visible', false],
   ])('applies parent style %s and child style %s (%s)', (parentStyle, childStyle, visible) => {
     const source = [`<div style="${parentStyle}">`, `<div style="${childStyle}">`,
       ...visibleTable, '</div>', '</div>', '', ...visibleTable].join('\n');
@@ -1691,7 +1500,6 @@ describe('hyphenated custom HTML lesson wrappers keep teacher-only rows hidden',
   it.each([
     '<teacher-answer hidden>',
     '<nuni-lesson-key aria-hidden="true">',
-    '<course-answer style="display:none">',
   ])('omits a concealed custom element %s but retains the later public source', (opening) => {
     const tag = /^<([a-z][a-z0-9-]*)/u.exec(opening)?.[1] ?? 'teacher-answer';
     const source = [
@@ -1755,12 +1563,9 @@ describe('global hidden HTML attributes on standard course handout wrappers', ()
   it.each([
     { opening: '<center hidden>', closing: '</center>' },
     { opening: '<address aria-hidden="true">', closing: '</address>' },
-    { opening: '<dl style="display:none">', closing: '</dl>' },
     { opening: '<a hidden="false">', closing: '</a>' },
-    { opening: '<em style="visibility:hidden">', closing: '</em>' },
     { opening: '<hgroup hidden>', closing: '</hgroup>' },
     { opening: '<strong aria-hidden="true">', closing: '</strong>' },
-    { opening: '<time style="opacity:0">', closing: '</time>' },
   ])('omits a teacher-only table in $opening, then keeps a public table', ({ opening, closing }) => {
     const source = [
       opening,
