@@ -13,7 +13,7 @@ import {
 } from '@/lib/studyTutor';
 import { CourseStudyPassage } from './CourseStudyPassage';
 import { CourseStudyPractice } from './CourseStudyPractice';
-import { emptyStudyPassage, hasVisibleStudyContent, type StudySessionMemory } from './courseStudySession';
+import { emptyStudyPassage, type StudySessionMemory } from './courseStudySession';
 import { adjacentStudyReview } from './courseStudyReview';
 import { adjacentStudyPassage } from './courseStudyNavigation';
 import {
@@ -387,7 +387,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   const nextPassage = adjacentStudyPassage(sectionPassages, currentLocation, 'next');
   const memory = session.passages[passageKey] ?? emptyStudyPassage();
   const hasNotes = Object.values(session.passages).some((item) =>
-    hasVisibleStudyContent(item.note) || item.needsReview || Object.values(item.modes).some((value) => value.lessons.length));
+    item.note.trim() || item.needsReview || Object.values(item.modes).some((value) => value.lessons.length));
   // Include unsent questions and active practice: importing a new source would otherwise erase them.
   // Even a changed reading position, mode, or whitespace-only draft is unsaved work.
   const hasStudyChanges = !!practiceRound || !!pausedRound ||
@@ -1146,7 +1146,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
         <dl className={styles.progressFacts}>
           <div><dt>閱讀位置</dt><dd>{restorePreview.progress.source.sections[restorePreview.progress.position.sectionIndex].label} · 第 {restorePreview.progress.position.passageIndex + 1} 段</dd></div>
           <div><dt>閱讀方式</dt><dd>{{ understand: '理解概念', exam: '考前複習', practice: '練習思路' }[restorePreview.progress.position.mode]}</dd></div>
-          <div><dt>個人筆記</dt><dd>{Object.values(restorePreview.progress.passages).filter((item) => hasVisibleStudyContent(item.note)).length} 段</dd></div>
+          <div><dt>個人筆記</dt><dd>{Object.values(restorePreview.progress.passages).filter((item) => item.note.trim()).length} 段</dd></div>
           <div><dt>待複習</dt><dd>{Object.values(restorePreview.progress.passages).filter((item) => item.needsReview).length} 段</dd></div>
           {restorePreview.round && <div><dt>逐題練習</dt><dd>{restorePreview.round.finished ? '已完成' : '第 ' + (restorePreview.round.index + 1) + ' 題'}，共 {restorePreview.round.cards.length} 題</dd></div>}
         </dl>

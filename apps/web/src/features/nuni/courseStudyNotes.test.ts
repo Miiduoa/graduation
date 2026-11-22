@@ -74,20 +74,19 @@ describe('course study note downloads', () => {
     expect(text).toContain('非正式評分');
   });
 
-  it('keeps invisible-only note drafts out of TXT without losing review flags or source data', () => {
+  it('exports legacy nonblank notes verbatim with or without review flags', () => {
     for (const invisible of ['\u200b', '\u200d\u0301', '\u2800', ' \u2060\u2800 \n']) {
       const memory = { ...emptyStudyPassage(), note: invisible };
       const original = JSON.stringify(memory);
       const text = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
-      expect(text).toContain('本次尚未留下筆記、待複習標記或 AI 講解。');
-      expect(text).not.toContain('我的筆記：');
-      expect(text).not.toContain('教材原文 · 第 1 段');
+      expect(text).toContain(`我的筆記：\n${invisible}\n`);
+      expect(text).toContain('教材原文 · 第 1 段');
       expect(JSON.stringify(memory)).toBe(original);
 
       const flagged = { ...memory, needsReview: true };
       const flaggedText = buildCourseStudyNotes('資料庫', source, { '0:0': flagged });
       expect(flaggedText).toContain('複習標記：待複習');
-      expect(flaggedText).not.toContain('我的筆記：');
+      expect(flaggedText).toContain(`我的筆記：\n${invisible}\n`);
       expect(flagged.note).toBe(invisible);
     }
     // Punctuation, accented words, mathematics and joined emoji are real notes.
@@ -142,7 +141,7 @@ describe('course study note downloads', () => {
     }
   });
 
-  it('keeps unrevealed invisible attempts out of TXT exports', () => {
+  it('exports legacy nonblank attempts while keeping unrevealed answers private', () => {
     for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f']) {
       const memory = withLesson();
       memory.modes.understand.lessons[0].attempt = invisible;
@@ -150,7 +149,7 @@ describe('course study note downloads', () => {
       const exportText = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
       expect(exportText).not.toContain('參考解答秘密：不可以。');
       expect(exportText).not.toContain('參考回答（已展開）');
-      expect(exportText).not.toContain('我的試答：');
+      expect(exportText).toContain(`我的試答：\n${invisible}\n`);
       expect(memory.modes.understand.lessons[0].attempt).toBe(invisible);
     }
     for (const visible of ['主鍵', 'x²+y²', '👩‍💻', 'e\u0301', '⠃']) {

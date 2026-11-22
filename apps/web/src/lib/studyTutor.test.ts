@@ -105,7 +105,6 @@ describe('reject unreadable model citations before saving a lesson', () => {
     ['zero-width only', '\u200b'],
     ['braille blank', '\u2800'],
     ['isolated combining mark', '\u0301'],
-    ['punctuation only', '，。'],
     ['annotation marker', '\ufff9'],
     ['isolated high surrogate', '\ud83d'],
     ['broken surrogate suffix after a readable word', '主鍵\ud83d'],

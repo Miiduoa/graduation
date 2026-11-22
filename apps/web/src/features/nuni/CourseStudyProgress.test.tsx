@@ -269,6 +269,24 @@ it('can save just the reading position before any note or model use', async () =
   } finally { view.unmount(); }
 });
 
+it.each([1, 2])('opens a reference answer from an initially collapsed v%i backup', async (version) => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const data = progress();
+  const exam = data.passages['1:1'].modes.exam;
+  exam.selectedLessonId = 1;
+  Object.assign(exam.lessons[0], { attempt: '\u200b', answerVisible: false });
+  const backup = JSON.parse(serializeCourseStudyProgress(data));
+  selectFile(progressFile(JSON.stringify({ ...backup, version })));
+  fireEvent.click(await screen.findByRole('button', { name: '還原這份進度' }));
+
+  expect(inputValue('先寫下你的想法')).toBe('\u200b');
+  expect(screen.queryByText('第一輪的參考回答。')).toBeNull();
+  const compare = screen.getByRole('button', { name: '對照參考回答' });
+  expect(compare.hasAttribute('disabled')).toBe(false);
+  fireEvent.click(compare);
+  expect(screen.getByText('第一輪的參考回答。')).toBeTruthy();
+});
+
 it.each(['\u200b', '\ufff9', '\u2060\ufe0f', '\ufeff'])('restores and reopens a legacy reveal after a collapsed backup round trip (%#)', async (attempt) => {
   const create = vi.fn().mockReturnValue('blob:study-progress');
   const OriginalURL = URL;
@@ -378,8 +396,8 @@ it('copies and restores the exact self-check draft and follows up with an invisi
     attempt: draft, answerVisible: false,
   });
 
-  expect(JSON.parse(raw).version).toBe(2);
-  expect(raw).not.toContain('answerReviewAllowed');
+  expect(JSON.parse(raw).version).toBe(3);
+  expect(raw).toContain('"answerReviewAllowed":false');
 
   fireEvent.change(screen.getByLabelText(label), { target: { value: '備份以後的草稿' } });
   fireEvent.change(screen.getByLabelText(restoreLabel), { target: { files: [progressFile(raw)] } });

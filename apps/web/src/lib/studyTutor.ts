@@ -1,4 +1,4 @@
-import { hasVisibleStudyContent, locateStudyEvidence } from '@/features/nuni/studyEvidence';
+import { locateStudyEvidence } from '@/features/nuni/studyEvidence';
 import {
   PERSONAL_IMPORT_DOCUMENT_LIMITS,
   validatePersonalImportDocument,
@@ -50,33 +50,6 @@ export type StudyTutorHistory = {
 
 function nonempty(value: unknown, max: number): value is string {
   return typeof value === 'string' && !!value.trim() && value.length <= max;
-}
-
-/** Generated citations must be readable, even when they match the source. */
-function hasReadableTutorCitation(quote: string, source: string): boolean {
-  if (/\p{Bidi_Control}/u.test(quote)) {
-    // Direction marks can occur in readable source text. Explicit embeddings,
-    // overrides and isolates can reorder a cited span and remain disallowed.
-    if (/\p{Bidi_Control}/u.test(quote.replace(/[\u061c\u200e\u200f]/gu, '')) ||
-        !locateStudyEvidence(source, quote)) return false;
-  }
-  if (!hasVisibleStudyContent(quote, { ignorePunctuation: true })) return false;
-  for (let index = 0; index < quote.length; index += 1) {
-    const unit = quote.charCodeAt(index);
-    if (unit >= 0xd800 && unit <= 0xdbff) {
-      const next = quote.charCodeAt(index + 1);
-      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
-      index += 1;
-    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
-      return false;
-    }
-  }
-  // A UTF-16 substring match is not enough: a model can cite only the "e"
-  // from "é", one person from a joined emoji, or half of a flag. The source
-  // locator verifies BOTH grapheme boundaries without normalizing the quote.
-  // Apply this to new model output only; old saved replies still use the
-  // original byte-exact substring contract when restored.
-  return locateStudyEvidence(source, quote) !== null;
 }
 
 function validateSourceText(text: string) {
@@ -369,7 +342,7 @@ function readTutorSteps(value: unknown, passage: StudyPassage, policy: TutorCita
     const parsed = data as StudyTutorStep;
     if (!passage.text.includes(parsed.sourceQuote))
       throw new Error('AI 步驟引用的句子不在這段原文中，這次講解未採用。請重試。');
-    if (policy === 'generated' && !hasReadableTutorCitation(parsed.sourceQuote, passage.text))
+    if (policy === 'generated' && !locateStudyEvidence(passage.text, parsed.sourceQuote))
       throw new Error('AI 步驟引句無可讀的教材內容、含方向控制字元或未對齊完整原文字素，這次講解未採用。請重試。');
     if (hasFormula && !parsed.sourceQuote.includes(parsed.formula!))
       throw new Error('AI 步驟公式不是該步引句的原文，這次講解未採用。請重試。');
@@ -414,7 +387,7 @@ function readTutorExplanation(raw: string, passage: StudyPassage, policy: TutorC
   const explanation = data as TutorExplanation;
   if (!passage.text.includes(explanation.sourceQuote))
     throw new Error('AI 引用的句子不在這段原文中，這次講解未採用。請重試。');
-  if (policy === 'generated' && !hasReadableTutorCitation(explanation.sourceQuote, passage.text))
+  if (policy === 'generated' && !locateStudyEvidence(passage.text, explanation.sourceQuote))
     throw new Error('AI 引句無可讀的教材內容、含方向控制字元或未對齊完整原文字素，這次講解未採用。請重試。');
   return {
     title: explanation.title.trim(),

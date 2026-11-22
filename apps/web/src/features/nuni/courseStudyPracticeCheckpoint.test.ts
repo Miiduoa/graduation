@@ -190,8 +190,8 @@ describe('versioned independent review checkpoint', () => {
       const raw = serializeStudyPracticeCheckpoint(saved);
       const exported = JSON.parse(raw);
       // The merge-base v1 checkpoint embeds the exact v2 reading schema.
-      expect(exported.version).toBe(attempt.includes('原') ? 2 : 1);
-      expect(exported.progress.version).toBe(attempt.includes('原') ? 3 : 2);
+      expect(exported.version).toBe(attempt.trim() ? 2 : 1);
+      expect(exported.progress.version).toBe(attempt.trim() ? 3 : 2);
       if (exported.version === 1) expect(raw).not.toContain('answerReviewAllowed');
       const restored = parseStudyPracticeCheckpoint(raw, scope);
       expect(restored.progress.passages['0:0'].modes.understand.lessons[0]).toMatchObject({

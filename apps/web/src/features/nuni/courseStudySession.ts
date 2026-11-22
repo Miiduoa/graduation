@@ -25,8 +25,8 @@ export function hasRevealedStudyAnswer(response: { attempt: string; answerVisibl
 }
 
 export function canReviewStudyAnswer(lesson: StudyLesson): boolean {
-  // A saved reveal remains available even for an older, invisible attempt.
-  return lesson.answerReviewAllowed ?? (lesson.answerVisible || hasVisibleStudyAttempt(lesson.attempt));
+  // Backups without an explicit gate used trim() to enable the reference answer.
+  return lesson.answerReviewAllowed ?? (lesson.answerVisible || !!lesson.attempt.trim());
 }
 
 export type StudyLesson = StudyTutorTurn & {

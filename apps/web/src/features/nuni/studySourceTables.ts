@@ -297,12 +297,14 @@ function inlineCustomProperties(
   return computed;
 }
 
-type InlineVisibility = {
-  display?: string;
-  visibility?: string;
-  'content-visibility'?: string;
-  opacity?: string;
-};
+const INLINE_VISIBILITY_INHERITS = {
+  display: false,
+  visibility: true,
+  'content-visibility': false,
+  opacity: false,
+} as const;
+
+type InlineVisibility = Partial<Record<keyof typeof INLINE_VISIBILITY_INHERITS, string>>;
 
 function readInlineVisibility(
   declarations: string[], properties: ReadonlyMap<string, string | null>,
@@ -325,9 +327,8 @@ function readInlineVisibility(
     if (!recognized && !wide && !deferred) continue;
     // Invalid substitutions fall back to unset. Of these properties, only
     // visibility inherits by default, and a descendant can override it.
-    const defaultsToInherited = name === 'visibility' && substituted !== null &&
-      (wide || substituted === undefined || (resolved !== undefined && !recognized));
-    const inherits = resolved === 'inherit' || defaultsToInherited;
+    const inherits = resolved === 'inherit' ||
+      (INLINE_VISIBILITY_INHERITS[name] && !recognized);
     const value = inherits ? parent[name] : recognized ? resolved : undefined;
     const previous = effective.get(name);
     if (!previous || important || !previous.important) {

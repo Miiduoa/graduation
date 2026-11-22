@@ -330,14 +330,14 @@ describe('lesson and draft validation', () => {
   });
 
   it.each([
-    ['\u200b\u0301', false, false, false, 2],
-    ['\u200b', false, false, false, 2],
-    [' \u0301 ', false, false, false, 2],
-    ['\u200e\u2060', false, false, false, 2],
-    ['\u2800\ufff9', false, false, false, 2],
+    ['\u200b\u0301', false, false, false, 3],
+    ['\u200b', false, false, false, 3],
+    [' \u0301 ', false, false, false, 3],
+    ['\u200e\u2060', false, false, false, 3],
+    ['\u2800\ufff9', false, false, false, 3],
     [' \t', false, false, false, 2],
     ['作\u200b答 e\u0301\u200f ', true, false, true, 2],
-    ['\u200b', true, false, true, 3],
+    ['\u200b', true, false, true, 2],
     ['\u2060', undefined, true, true, 2],
     ['', true, false, true, 3],
     ['', undefined, true, true, 3],

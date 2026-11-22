@@ -193,6 +193,29 @@ const ENGLISH_NON_RATIO_RANK_POSITION_COLUMN =
 const RANK_COUNT_COLUMN =
   /(?:人數|數量|總數|次數|筆數|件數|個數|數目|\b(?:count|total|number\s+of|quantity|entries)\b)/iu;
 
+const SOURCE_PERCENT_LABEL_END = new RegExp(
+  `(?:${SOURCE_PERCENT_COLUMN.source})(?:\\s*[（(]\\s*[%％]\\s*[）)])?$`, 'u',
+);
+const SOURCE_PERCENT_GROUP_SUFFIX = new RegExp(
+  `^(.*?(?:${SOURCE_PERCENT_COLUMN.source}))(?:依|按).+$`, 'u',
+);
+const PERCENT_UNIT_END = /(?:[（(]\s*[%％]\s*[）)]|[%％])$/u;
+
+function measuredColumnLabel(header: string): string {
+  const label = header.trim();
+  // Keep an explicit trailing percent unit even when it follows a group name.
+  const unit = PERCENT_UNIT_END.exec(label)?.[0];
+  const [measure] = label.split(/\s+(?:by|per|each)\s+|\s*[（(]\s*(?:依|按)|\s+(?:依|按)/iu, 1);
+  if (measure !== label) return unit && !PERCENT_UNIT_END.test(measure) ? measure + ' ' + unit : measure;
+  if (!/^(?:依|按)/u.test(label)) return SOURCE_PERCENT_GROUP_SUFFIX.exec(label)?.[1] ?? label;
+  const groupedPrefix = /^(?:依|按).+?(?:分組(?:統計)?|統計|計算|[：:])[\s，、：:]*/u;
+  if (groupedPrefix.test(label)) return label.replace(groupedPrefix, '') || label;
+  // Without a separator, keep any return or growth qualifier attached.
+  if (SOURCE_UNBOUNDED_RATE_COLUMN.test(label)) return label;
+  const percent = SOURCE_PERCENT_LABEL_END.exec(label)?.[0];
+  return percent && percent !== '%' && percent !== '％' ? percent : label;
+}
+
 function isPercentageColumn(header: string): boolean {
   return SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header) ||
     SOURCE_RATE_OR_RATIO_COLUMN.test(header) ||
@@ -214,8 +237,7 @@ const IDENTIFIER_LABEL_END = new RegExp(`(?:${IDENTIFIER_WORDS.source})$`, 'iu')
 function isNonRatioColumn(header: string, percentage = false): boolean {
   const column = header.trim().replace(/\s*(?:[（(]\s*[%％]\s*[）)]|[%％])$/u, '').trim();
   const unqualifiedColumn = column.replace(/(?:\s*[（(][^）)]*[）)])+$/u, '').trim();
-  // A trailing English grouping phrase can follow the measured percentage.
-  const measuredLabel = percentage ? unqualifiedColumn.split(/\s+(?:by|per|each)\s+/iu, 1)[0] : column;
+  const measuredLabel = percentage ? unqualifiedColumn : column;
   const statusMatch = NON_RATIO_STATUS_COLUMN.exec(measuredLabel) ?? ENGLISH_NON_RATIO_STATUS_COLUMN.exec(measuredLabel);
   const hasBoundedPercentValues = percentage && isBoundedPercentageColumn(header);
   const describesBoundedRate = hasBoundedPercentValues &&
@@ -292,9 +314,9 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
   // Numeric-looking years and identifiers are not scalar measures; comparing
   // them as bars would imply a magnitude that the source does not support.
-  const column = table.headers[1].trim();
+  const column = measuredColumnLabel(table.headers[1]);
   // An unlabeled number in a percentage column is ambiguous: do not scale it to the largest row.
-  if (!hasUnambiguousChartLabel(column) || isPercentageColumn(column) || isNonRatioColumn(column)) return null;
+  if (!hasUnambiguousChartLabel(table.headers[1]) || isPercentageColumn(column) || isNonRatioColumn(column)) return null;
   // Repeated "學分" is an explicit source unit, not a value to infer.
   // Accept it only in a credit column and when ALL rows use the same format.
   const plainNumber = /^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/u;
@@ -305,6 +327,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   const creditNumber = /^((?:0|[1-9]\d{0,5})(?:\.\d{1,2})?) ?學分$/u;
   const creditsColumn = /(?:學分|credits?)/iu.test(column);
   let rowFormat: 'plain' | 'grouped' | 'credits' | null = null;
+  const exactAmounts = new Map<number, bigint>();
   const rows: SourceValueRow[] = [];
   // Invisible row labels cannot identify a derived bar to students or screen readers.
   // Keep the exact original table, but skip optional graphs without readable keys.
@@ -320,10 +343,14 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
     // whose integer minor units are exactly representable; keep every other
     // source row verbatim in the original table without a derived bar.
     const [whole, fraction = ''] = (creditMatch?.[1] ?? original).replace(/,/gu, '').split('.');
-    const scale = 10 ** fraction.length;
-    const minorUnits = Number(whole) * scale + Number(fraction || '0');
-    if (!Number.isSafeInteger(minorUnits)) return null;
-    const amount = minorUnits / scale;
+    const minorUnits = BigInt(whole + fraction);
+    if (minorUnits > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+    const amount = Number(minorUnits) / 10 ** fraction.length;
+    // Distinct exact decimals can collapse to one Number after division.
+    const exactCents = BigInt(whole + fraction.padEnd(2, '0'));
+    const previous = exactAmounts.get(amount);
+    if (previous !== undefined && previous !== exactCents) return null;
+    exactAmounts.set(amount, exactCents);
     rows.push({ label, original, amount, sourceLine: table.startLine + 2 + rowIndex });
   }
   return rows.some((row) => row.amount > 0) ? rows : null;
@@ -336,8 +363,8 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
  */
 function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
-  const column = table.headers[1];
-  if (!hasUnambiguousChartLabel(column) || !isBoundedPercentageColumn(column) || isNonRatioColumn(column, true)) return null;
+  const column = measuredColumnLabel(table.headers[1]);
+  if (!hasUnambiguousChartLabel(table.headers[1]) || !isBoundedPercentageColumn(column) || isNonRatioColumn(column, true)) return null;
   const rows: SourceValueRow[] = [];
   // Taiwanese lesson materials sometimes use fullwidth digits and decimal
   // punctuation throughout an explicitly bounded percentage column.

@@ -66,17 +66,9 @@ function workerError(code: unknown): Error {
     ? messages[code] : messages.invalid_response);
 }
 
-// An exact substring can be just a period or operator: matching the source is
-// necessary, but punctuation alone does not identify what the lesson explains.
 function generatedEvidenceQuotes(explanation: TutorExplanation): string[] {
   return [explanation.sourceQuote, ...(explanation.steps?.map((step) => step.sourceQuote) ?? [])];
 }
-// Enforce this only for NEW worker results. Saved v1/v2 explanations continue
-// to use their original schema so old offline study backups remain readable.
-function hasSubstantiveGeneratedEvidence(explanation: TutorExplanation): boolean {
-  return generatedEvidenceQuotes(explanation).every((quote) => /[\p{L}\p{N}]/u.test(quote));
-}
-
 // The prompt asks for at most 60 Unicode characters per quote; the generic
 // parser keeps its older 400-code-unit allowance for saved v1/v2 backups.
 // Enforce the tighter bound only when accepting new worker-generated lessons.
@@ -527,8 +519,6 @@ export async function runStudyTutor({
               throw new Error('這次講解的複習題和參考回答內容相同，無法進行自我檢查。請重新講解。');
             if (!hasUnrevealedGeneratedReview(explanation))
               throw new Error('這次複習題直接寫出參考答案，無法練習回想。請重新講解。');
-            if (!hasSubstantiveGeneratedEvidence(explanation))
-              throw new Error('這次講解的原文引句只有標點或符號，無法核對教材依據。請重新講解。');
             if (!hasBoundedGeneratedEvidence(explanation))
               throw new Error('這次講解的原文引句超過 60 字，無法精準核對教材重點。請重新講解。');
             finish(undefined, explanation);

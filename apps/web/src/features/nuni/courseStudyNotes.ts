@@ -1,7 +1,7 @@
 import { courseStudyBackupFilenameStem } from './courseStudyBackupFilename';
 import { locateStudyEvidence } from './studyEvidence';
 import { splitStudySection, type StudyMode, type StudySource } from '@/lib/studyTutor';
-import { hasVisibleStudyAttempt, hasVisibleStudyContent, type StudyPassageMemory } from './courseStudySession';
+import { hasRevealedStudyAnswer, hasVisibleStudyContent, type StudyPassageMemory } from './courseStudySession';
 
 const modes: { value: StudyMode; label: string }[] = [
   { value: 'understand', label: '理解概念' },
@@ -64,9 +64,7 @@ export function buildCourseStudyNotes(
     splitStudySection(section).forEach((passage, passageIndex) => {
       const memory = passages[`${sectionIndex}:${passageIndex}`];
       if (!memory) return;
-      // Invisible-only drafts stay editable in the study session, but must not
-      // count as completed notes or create a misleading TXT export entry.
-      const hasNote = hasVisibleStudyContent(memory.note);
+      const hasNote = !!memory.note.trim();
       if (!hasNote && !memory.needsReview &&
         !modes.some((mode) => memory.modes[mode.value].lessons.length)) return;
       included += 1;
@@ -102,8 +100,8 @@ export function buildCourseStudyNotes(
             lines.push('', '自我檢查題：', lesson.response.question);
           else
             lines.push('', '自我檢查題：AI 未提供可讀題目，請對照原文自行練習');
-          const hasRevealedAnswer = lesson.answerVisible && !!lesson.attempt.trim();
-          if (hasVisibleStudyAttempt(lesson.attempt) || hasRevealedAnswer)
+          const hasRevealedAnswer = hasRevealedStudyAnswer(lesson);
+          if (lesson.attempt.trim())
             lines.push('', '我的試答：', lesson.attempt);
           if (hasRevealedAnswer) {
             if (hasVisibleStudyContent(lesson.response.answer))
