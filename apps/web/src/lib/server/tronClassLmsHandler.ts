@@ -492,7 +492,9 @@ function publicSnapshot(value: unknown, uid: string, nowMs: number): LmsReadonly
   }
   if (row.homework.some(item => !courseIds.has(positiveId(record(item).courseId) ?? 0)) ||
     row.contentsLoadedFor.some(id => !courseIds.has(positiveId(id) ?? 0)) ||
-    (row.courseErrors as LmsCourseError[]).some(error => !courseIds.has(error.courseId))) return null;
+    // Older snapshots could persist a source-level 401 as a partial success.
+    // A matching session version must not turn rejected authentication into a cache hit.
+    (row.courseErrors as LmsCourseError[]).some(error => !courseIds.has(error.courseId) || error.status === 401)) return null;
   // Legacy partial snapshots can still have an outer ten-minute TTL. Clamp
   // them by fetchedAt as well, without trusting the stored expiry alone.
   if (Date.parse(row.fetchedAt as string) + baseSnapshotRetryMs(
