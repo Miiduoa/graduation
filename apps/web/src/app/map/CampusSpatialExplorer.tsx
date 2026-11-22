@@ -68,8 +68,8 @@ const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 // cannot exhaust mobile memory even without a reliable Content-Length.
 // Fallback is only for non-streaming WebViews / synthetic fetch stubs.
 async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
-  // Content-Length describes transport bytes for gzip/br, but the browser
-  // delivers decoded bytes. Enforce exact framing ONLY for identity responses;
+  // Content-Length counts transport bytes. The browser delivers decoded
+  // bytes, so enforce exact framing only for identity responses:
   // a truncated but syntactically valid JSON document is not a complete map.
   const encoding = response.headers?.get('content-encoding')?.trim().toLowerCase() ?? null;
   const declared = response.headers?.get('content-length') ?? null;
@@ -295,6 +295,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   // An embedded WebView may construct an observer but never deliver entries.
   // An explicit user choice can start the scene before the first entry.
   const [manualStart, setManualStart] = useState(0);
+  const handledManualStart = useRef(0);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
   const view = useMemo(() => ({
@@ -318,8 +319,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // No observer result (or legacy geometry fallback) has confirmed the
     // canvas yet. Starting with visible=true in an API-less WebView displayed
     // the loading spinner even after fallback geometry proved the map offscreen.
-    // Wait for that measured decision; manual start remains user-authorized.
-    let visible = manualStart > 0;
+    // A manual request applies to this particular scene startup.
+    let visible = manualStart !== handledManualStart.current;
+    handledManualStart.current = manualStart;
     let pageSuspended = false;
     let scene: CampusSpatialScene | null = null;
     // Safari can fire pagehide before visibilitychange when entering bfcache.
@@ -491,12 +493,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // but do not allocate WebGL until a later viewport event proves the host
     // is actually on screen. A negative observer entry cancels this permit.
     let pendingInitialViewportConfirmation = false;
-    const invalidateRestoredOffscreenVisibility = () => {
-      if (visible && typeof IntersectionObserver !== 'undefined' && hostMustStaySuspended()) {
-        if (started) suspendedByViewport = true;
-        visible = false;
-      }
-    };
     const onVisibilityChange = () => {
       if (!document.hidden) {
         // Ordinary iOS tab switches resume with visibilitychange, without
@@ -504,7 +500,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // current viewport and retry missing listeners on that foreground
         // transition, so a previously paused (or deferred first) scene
         // recovers only when its original observer permit is still valid.
-        invalidateRestoredOffscreenVisibility();
         onViewportResize();
         return;
       }
@@ -519,7 +514,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
     const onPageShow = () => {
       pageSuspended = false;
-      invalidateRestoredOffscreenVisibility();
       // A restored Safari page can recover a valid VisualViewport without
       // dispatching resize, scroll or a fresh IntersectionObserver callback.
       // Recheck the current rect on pageshow: the same two gates apply to
@@ -569,10 +563,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         const position = hostViewportVisibility();
         if (hostMustStaySuspended(position)) {
           if (visible && started) suspendedByViewport = true;
+          if (visible && !started && position !== 'offscreen') {
+            pendingInitialViewportConfirmation = true;
+          }
           visible = false;
         } else if (position === 'onscreen' && pendingInitialViewportConfirmation && !started) {
-          // The observer already confirmed positive intersection. This is
-          // not an eager start: current valid geometry is the second gate.
+          // Startup already had a permit. Valid geometry is the second gate.
           visible = true;
           pendingInitialViewportConfirmation = false;
         } else if (position === 'onscreen' && suspendedByViewport && started) {
@@ -1306,12 +1302,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // Missing Content-Type remains compatible with legacy WebView bridges.
         const contentType = response.headers?.get('content-type')?.trim().toLowerCase() ?? '';
         const mediaType = contentType.split(';', 1)[0]?.trim() ?? '';
-        // The public API emits identity JSON. Browsers can also expose a
-        // transparently decoded single gzip/br/deflate response. A proxy's
+        // The public API emits identity JSON. Fetch can also expose responses
+        // transparently decoded by the browser with a single coding. A proxy's
         // unknown or stacked coding prevents trustworthy response framing:
         // never promote its geometry into a sourced campus building.
         const coding = response.headers?.get('content-encoding')?.trim().toLowerCase() ?? 'identity';
-        const invalidContentCoding = !['identity', 'gzip', 'br', 'deflate'].includes(coding);
+        const invalidContentCoding =
+          !['identity', 'gzip', 'x-gzip', 'br', 'deflate', 'zstd', 'dcb', 'dcz'].includes(coding);
         const invalidMediaType = mediaType !== '' && mediaType !== 'application/json' &&
           !/^application\/[a-z0-9][a-z0-9!#$&^_.+-]*\+json$/.test(mediaType);
         // RFC Content-Length is a decimal byte count, not a fraction, hex

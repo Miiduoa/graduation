@@ -1006,6 +1006,61 @@ it('lets a student manually start 3D if a WebView never reports canvas visibilit
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+it.each(['location update', 'public outlines'] as const)(
+  'waits for a fresh observer after manual startup, offscreen notification and %s',
+  async (update) => {
+    const observe = vi.fn();
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+      observe = observe;
+      disconnect() {}
+    });
+    const { library, body, buildings } = sourcedLibraryFootprintFixture();
+    let resolveFootprints!: (response: Response) => void;
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise<Response>((resolve) => {
+      resolveFootprints = resolve;
+    })));
+    const school = update === 'public outlines' ? 'pu' : 'other-school';
+    const locations = [library];
+    const onSelect = vi.fn();
+    const { rerender } = render(<CampusSpatialExplorer school={school} locations={locations}
+      selected={library} onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    fireEvent.click(within(dialog).getByRole('button', { name: '手動開啟立體畫面' }));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    const previousObserver = intersection;
+    act(() => previousObserver?.([observerEntry(graphics, false)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    if (update === 'public outlines') {
+      await act(async () => resolveFootprints(new Response(body, {
+        headers: { 'Content-Type': 'application/json' },
+      })));
+      expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    } else {
+      await act(async () => rerender(<CampusSpatialExplorer school={school}
+        locations={[library, places[1]]} selected={library} onSelect={onSelect} />));
+    }
+    expect(scene.dispose).toHaveBeenCalledTimes(1);
+    expect(observe).toHaveBeenCalledTimes(3);
+    expect(intersection).not.toBe(previousObserver);
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    expect(scene.create).toHaveBeenCalledTimes(1);
+
+    vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 320, 180));
+    await act(async () => {
+      previousObserver?.([observerEntry(graphics, true, undefined, 1)], {} as IntersectionObserver);
+      fireEvent(window, new Event('resize'));
+    });
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(update === 'public outlines' ? buildings : []);
+  },
+);
+
 it('restores manual 3D startup after a background open with no WebView visibility reports', async () => {
   vi.stubGlobal('IntersectionObserver', class {
     observe() {}
@@ -1636,6 +1691,48 @@ it('starts deferred Safari 3D on foreground visibilitychange without pageshow or
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
   }
 });
+
+it.each(['pageshow', 'visibilitychange'] as const)(
+  'starts Safari 3D on resize after a temporarily invalid viewport on %s',
+  async (foregroundEvent) => {
+    const viewport = Object.assign(new EventTarget(), {
+      width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
+    });
+    vi.stubGlobal('visualViewport', viewport);
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 40, 320, 180));
+    const target = foregroundEvent === 'pageshow' ? window : document;
+    const backgroundEvent = foregroundEvent === 'pageshow' ? 'pagehide' : 'visibilitychange';
+    try {
+      if (target === document) Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+      fireEvent(target, new Event(backgroundEvent));
+      act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+      expect(scene.create).not.toHaveBeenCalled();
+
+      viewport.height = 0;
+      Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+      await act(async () => fireEvent(target, new Event(foregroundEvent)));
+      expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+      expect(scene.create).not.toHaveBeenCalled();
+
+      viewport.height = window.innerHeight;
+      act(() => viewport.dispatchEvent(new Event('resize')));
+      await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    } finally {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    }
+  },
+);
 
 it('resumes existing Safari 3D on foreground visibilitychange without pageshow or viewport events', async () => {
   const viewport = Object.assign(new EventTarget(), {
@@ -2997,7 +3094,7 @@ it.each(['identity', 'gzip'] as const)(
 // trusted API. An unknown or stacked coding makes identity framing ambiguous;
 // never accept its OSM buildings even when the proxy advertises HTTP 200.
 // Reject at headers time without waiting for a stalled body in a mobile WebView.
-it.each(['zstd', 'gzip, br', 'gzip;q=1', ''] as const)(
+it.each(['unknown', 'gzip, br', 'zstd, identity', 'zstd;q=1', 'gzip;q=1', ''] as const)(
   'rejects ambiguous Content-Encoding %j without loading an OSM building',
   async (coding) => {
     const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
@@ -3236,31 +3333,34 @@ it('rejects a legacy non-streaming WebView text body shorter than identity Conte
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-it('accepts an already-decoded compressed map body with a different wire Content-Length', async () => {
-  const { library, buildings, body } = sourcedLibraryFootprintFixture();
-  // Browser fetch has already decoded gzip before exposing the ReadableStream.
-  const bytes = new TextEncoder().encode(body);
-  const response = new Response(new ReadableStream<Uint8Array>({
-    start(controller) { controller.enqueue(bytes); controller.close(); },
-  }), {
-    status: 200,
-    headers: { 'Content-Encoding': 'gzip', 'Content-Length': '40' },
-  });
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
-  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-  const dialog = await open();
-  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
-  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
-  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-});
+it.each(['gzip', 'x-gzip', 'br', 'deflate', 'zstd', 'dcb', 'dcz'] as const)(
+  'accepts an already-decoded %s map body with a different wire Content-Length', async (coding) => {
+    const { library, buildings, body } = sourcedLibraryFootprintFixture();
+    // Browser fetch has already decoded the body before exposing the ReadableStream.
+    const bytes = new TextEncoder().encode(body);
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(bytes); controller.close(); },
+    }), {
+      status: 200,
+      headers: { 'Content-Encoding': coding, 'Content-Length': '40' },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  },
+);
 
 // Content-Length is optional and can be incorrect. A decoded-byte cap must
 // reject a too-large streaming 200 response before JSON parsing and keep
 // campus POIs/navigation usable without hammering the public API.
 it.each([
-  { description: 'no Content-Length', contentLength: null },
-  { description: 'an understated Content-Length', contentLength: '20' },
-])('rejects more than 2 MB of decoded OSM JSON with $description', async ({ contentLength }) => {
+  { description: 'no Content-Length', headers: new Headers() },
+  { description: 'an understated Content-Length', headers: new Headers({ 'Content-Length': '20' }) },
+  { description: 'zstd wire framing', headers: new Headers({ 'Content-Length': '40', 'Content-Encoding': 'zstd' }) },
+])('rejects more than 2 MB of decoded OSM JSON with $description', async ({ headers }) => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const cancel = vi.fn();
   const stream = new ReadableStream<Uint8Array>({
@@ -3272,7 +3372,7 @@ it.each([
   });
   const response = new Response(stream, {
     status: 200,
-    headers: contentLength === null ? undefined : { 'Content-Length': contentLength },
+    headers,
   });
   const json = vi.spyOn(response, 'json');
   const fetchMock = vi.fn().mockResolvedValue(response);

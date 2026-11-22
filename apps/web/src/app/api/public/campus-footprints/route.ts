@@ -100,7 +100,9 @@ function parseHttpDateMillis(value: string | null, now: number): number | null {
     // Reject invalid weekday, impossible dates and normalized time components.
     return value === canonical ? parsed : null;
   }
-  const parsed = Date.parse(value);
+  const isAsctime = /^[A-Za-z]{3} [A-Za-z]{3} (?: \d|\d{2}) \d{2}:\d{2}:\d{2} \d{4}$/.test(value);
+  // asctime omits the zone on the wire, but HTTP dates are always UTC.
+  const parsed = Date.parse(isAsctime ? `${value} GMT` : value);
   if (!Number.isFinite(parsed)) return null;
   const date = new Date(parsed);
   if (date.toUTCString() === value) return parsed;

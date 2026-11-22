@@ -1607,14 +1607,16 @@ describe('public Providence building geometry route', () => {
   });
 
   it.each([
-    ['RFC 850', 'Sunday, 15-Nov-26 23:00:00 GMT'],
-    ['asctime', 'Sun Nov 15 23:00:00 2026'],
-  ])('honours a valid legacy %s HTTP-date Retry-After (RFC 9110)', async (_format, retryAfter) => {
-    // Both obsolete HTTP-date wire formats remain valid for recipients.
-    // A hard IMF-only check would prematurely hammer a busy OSM instance.
-    const start = Date.parse('2026-11-15T01:30:00Z');
+    ['IMF-fixdate', 'Sun, 15 Nov 2026 23:00:00 GMT', 15],
+    ['RFC 850', 'Sunday, 15-Nov-26 23:00:00 GMT', 15],
+    ['asctime', 'Sun Nov 15 23:00:00 2026', 15],
+    ['asctime with a space-padded day', 'Sun Nov  8 23:00:00 2026', 8],
+  ])('honours %s HTTP-date Retry-After in Asia/Taipei', async (_format, retryAfter, day) => {
+    vi.stubEnv('TZ', 'Asia/Taipei');
+    const start = Date.UTC(2026, 10, day, 1, 30);
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
+      expect(new Date(start).getTimezoneOffset()).toBe(-480);
       const upstream = vi.fn()
         .mockResolvedValueOnce(new Response('busy', {
           status: 503, headers: { 'Retry-After': retryAfter },
@@ -1633,6 +1635,7 @@ describe('public Providence building geometry route', () => {
       expect(upstream).toHaveBeenCalledTimes(2);
     } finally {
       clock.mockRestore();
+      vi.unstubAllEnvs();
     }
   });
 
