@@ -1472,7 +1472,7 @@ it('keeps WebGL suspended if scroll restoration moves the canvas offscreen befor
   }
 });
 
-it('pauses offscreen WebGL on iOS visual viewport resize and scroll without window resize', async () => {
+it.each(['observer', 'viewport'])('recovers iOS WebGL when %s detects visual offscreen first', async (firstEvent) => {
   // On Safari the keyboard or pinch zoom can shrink/offset visualViewport
   // while innerHeight stays unchanged and the observer is delayed.
   const viewport = Object.assign(new EventTarget(), {
@@ -1493,9 +1493,13 @@ it('pauses offscreen WebGL on iOS visual viewport resize and scroll without wind
   } as DOMRect);
   try {
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
-    // A visualViewport resize alone must stop rendering: no window.resize.
     viewport.height = top - 10;
-    act(() => viewport.dispatchEvent(new Event('resize')));
+    if (firstEvent === 'observer') {
+      act(() => intersection?.([observerEntry(graphics, true, new DOMRect(0, top, 320, 40), 99)],
+        {} as IntersectionObserver));
+    } else {
+      act(() => viewport.dispatchEvent(new Event('resize')));
+    }
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
     expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
@@ -1528,8 +1532,13 @@ it('pauses offscreen WebGL on iOS visual viewport resize and scroll without wind
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     expect(scene.create).toHaveBeenCalledTimes(1);
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    viewport.height = top - 10;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
     fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
+    expect(scene.dispose).toHaveBeenCalledTimes(1);
     scene.setActive.mockClear();
+    viewport.height = window.innerHeight;
     viewport.dispatchEvent(new Event('resize'));
     viewport.dispatchEvent(new Event('scroll'));
     expect(scene.setActive).not.toHaveBeenCalled();
@@ -2246,6 +2255,9 @@ it('ignores a late positive viewport notification when Safari restored the host 
       right: 320, bottom: 180, width: 320, height: 180,
       toJSON: () => ({}),
     } as DOMRect);
+    fireEvent(window, new Event('resize'));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
     act(() => intersection?.([{
       isIntersecting: true, target: graphics, time: 101,
       intersectionRect: { width: 320, height: 180 },

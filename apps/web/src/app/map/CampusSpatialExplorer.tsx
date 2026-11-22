@@ -487,10 +487,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         position === 'invalid-visual-viewport' ||
         position === 'invalid-layout-viewport' || position === 'invalid-host-rect';
     };
-    // Keep a way back when pageshow/visibilitychange (not a resize event)
-    // invalidates an already-running scene. Safari may not issue another
-    // IntersectionObserver entry after its visual viewport becomes valid.
+    // Safari may keep reporting a layout intersection while the visual
+    // viewport temporarily hides the host. Either event can detect the pause.
     let suspendedByViewport = false;
+    const rememberViewportPause = (
+      position: ReturnType<typeof hostViewportVisibility>,
+      canRender: boolean,
+    ) => {
+      suspendedByViewport = started && canRender && position !== 'offscreen' &&
+        hostMustStaySuspended(position);
+    };
     // When a broken WebView cannot observe the host, use measurable DOM bounds
     // instead of eagerly allocating offscreen WebGL. Unknown legacy layouts
     // retain the prior fallback, and a visible scroll can wake a deferred map.
@@ -528,10 +534,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       onViewportResize();
     };
     // iOS VisualViewport can expand/scroll back into view without firing a
-    // second IntersectionObserver callback. Only undo a pause that *this*
-    // viewport listener initiated, on positive and measurable overlap, after
-    // a real observer previously permitted startup. Never bypass the initial
-    // offscreen-import gate or restart an unconfirmed/legacy WebView scene.
+    // second IntersectionObserver callback. Resume a viewport-paused scene
+    // once current geometry confirms positive overlap. Layout offscreen
+    // measurements and negative observer records revoke that recovery.
     // Page restore can replace the VisualViewport object. Transfer the two
     // listeners to the current instance, without leaving callbacks on an old
     // viewport or interpreting a throwing getter as an absent API.
@@ -569,7 +574,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       } else if (typeof IntersectionObserver !== 'undefined') {
         const position = hostViewportVisibility();
         if (hostMustStaySuspended(position)) {
-          if (visible && started) suspendedByViewport = true;
+          rememberViewportPause(position, visible || suspendedByViewport);
           if (visible && !started && position !== 'offscreen') {
             pendingInitialViewportConfirmation = true;
           }
@@ -681,18 +686,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
               (position === 'visual-offscreen' || position === 'invalid-visual-viewport' ||
                 position === 'invalid-layout-viewport' || position === 'invalid-host-rect') && confirmedIntersecting;
           }
-          if (!confirmedIntersecting) {
-            // A newer negative observer record revokes the viewport-only
-            // recovery permit. Otherwise a subsequent valid resize can
-            // resurrect a scene the observer has explicitly marked hidden.
-            // Wait for the next genuine positive intersection instead.
-            suspendedByViewport = false;
-          } else if ((position === 'invalid-visual-viewport' || position === 'invalid-layout-viewport' ||
-            position === 'invalid-host-rect') && visible && started) {
-            suspendedByViewport = true;
-          }
+          rememberViewportPause(position, confirmedIntersecting);
           visible = confirmedIntersecting && !hostMustStaySuspended(position);
-          if (visible) suspendedByViewport = false;
           updateVisibility();
           startWhenVisible();
           syncPendingStartup();
