@@ -893,9 +893,24 @@ function spatialDestinationIdentity(place: MapLocation): string {
   ]);
 }
 
+/** Serializes clipboard writes; an in-flight browser write cannot be canceled. */
+function createClipboardWriteQueue() {
+  let tail: Promise<void> | null = null;
+  return {
+    enqueue(task: (previous: Promise<void> | null) => Promise<void>) {
+      const write = task(tail);
+      tail = write;
+      void write.then(() => {
+        if (tail === write) tail = null;
+      });
+    },
+  };
+}
+type ClipboardWriteQueue = ReturnType<typeof createClipboardWriteQueue>;
+
 function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboardWrite }: Props & {
   onClose: () => void;
-  clipboardWrite: { current: Promise<void> | null };
+  clipboardWrite: ClipboardWriteQueue;
 }) {
   const model = useMemo(() => buildCampusSpatialModel(locations), [locations]);
   // Two map records can have the same public-facing name (including two
@@ -987,11 +1002,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
     if (!place) return;
     const requestGeneration = ++copyRequestGenerationRef.current;
     const isCurrent = () => copyRequestGenerationRef.current === requestGeneration;
-    const previousWrite = clipboardWrite.current;
     setCoordinateCopyState('idle');
-    const write = (async () => {
-      // An in-flight browser write cannot be canceled. Let it settle before
-      // submitting the newest request, and skip superseded queued requests.
+    clipboardWrite.enqueue(async (previousWrite) => {
+      // Let any in-flight browser write settle before submitting the newest
+      // request, and skip superseded queued requests.
       if (previousWrite) await previousWrite;
       if (!isCurrent()) return;
       try {
@@ -1001,10 +1015,6 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
       } catch {
         if (isCurrent()) setCoordinateCopyState('unavailable');
       }
-    })();
-    clipboardWrite.current = write;
-    void write.then(() => {
-      if (clipboardWrite.current === write) clipboardWrite.current = null;
     });
   };
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);
@@ -1729,7 +1739,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, clipboa
 
 function AvailableSpatialExplorer(props: Props) {
   const [open, setOpen] = useState(false);
-  const clipboardWrite = useRef<Promise<void> | null>(null);
+  const [clipboardWrite] = useState(createClipboardWriteQueue);
   const close = useCallback(() => setOpen(false), []);
   return <>
     <button className="btn" type="button" aria-haspopup="dialog" onClick={() => setOpen(true)}>
