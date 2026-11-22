@@ -23,7 +23,7 @@ let intersection: IntersectionObserverCallback | null = null;
 const disconnect = vi.fn();
 
 // Browser-shaped observer entries keep synthetic viewport tests type-safe.
-function observerEntry(target: Element, isIntersecting: boolean, intersectionRect?: DOMRect): IntersectionObserverEntry {
+function observerEntry(target: Element, isIntersecting: boolean, intersectionRect?: DOMRect, time = 0): IntersectionObserverEntry {
   const bounds = target.getBoundingClientRect();
   return {
     target,
@@ -32,7 +32,7 @@ function observerEntry(target: Element, isIntersecting: boolean, intersectionRec
     intersectionRect: intersectionRect ?? (isIntersecting ? bounds : new DOMRect(0, 0, 0, 0)),
     intersectionRatio: isIntersecting ? 1 : 0,
     rootBounds: null,
-    time: 0,
+    time,
   };
 }
 
@@ -998,7 +998,8 @@ it('lets a student manually start 3D if a WebView never reports canvas visibilit
   act(() => intersection?.([observerEntry(graphics, false)],
     {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  act(() => intersection?.([observerEntry(graphics, true)],
+  vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 320, 180));
+  act(() => intersection?.([observerEntry(graphics, true, undefined, 1)],
     {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(2);
@@ -2923,15 +2924,13 @@ it('rejects oversized JSON-only WebView bridge payloads even without text()', as
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-// A JSON-only WebView cannot prove identity-framed transport length:
-// JSON parsing discards the whitespace and escapes that Content-Length counts.
-// Neither a coincidentally matching reserialization nor a valid-but-shorter
-// document is trustworthy evidence of complete OSM building outlines.
-it.each(['same', 'extra-newline'] as const)(
-  'rejects unverifiable %s identity-framed JSON-only WebView geometry', async (suffix) => {
-    const { library, body } = sourcedLibraryFootprintFixture();
-    const json = vi.fn().mockResolvedValue(JSON.parse(body));
-    const length = new TextEncoder().encode(body + (suffix === 'extra-newline' ? '\n' : '')).byteLength;
+// The bridge parses away trailing whitespace that Content-Length counts.
+it.each(['', '\n'])(
+  'accepts a complete identity-framed JSON-only WebView snapshot with trailing whitespace %j', async (suffix) => {
+    const { library, buildings, body } = sourcedLibraryFootprintFixture();
+    const responseBody = body + suffix;
+    const json = vi.fn().mockResolvedValue(JSON.parse(responseBody));
+    const length = new TextEncoder().encode(responseBody).byteLength;
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true, status: 200, body: null,
       headers: { get: (name: string) => name === 'content-length' ? String(length) : name === 'content-encoding' ? 'identity' : null },
@@ -2940,11 +2939,10 @@ it.each(['same', 'extra-newline'] as const)(
     vi.stubGlobal('fetch', fetchMock);
     render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
     const dialog = await open();
-    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    expect(json).not.toHaveBeenCalled();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(json).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   },
 );
