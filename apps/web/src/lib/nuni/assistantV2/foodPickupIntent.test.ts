@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { parseAssistantFoodPickupIntent as parse } from '@campus/shared/src/assistantFoodPickupIntent';
+import { parseAssistantFoodPickupIntent as parseMergeBase } from './fixtures/foodPickupIntent.mergeBase';
 
 it.each([
   ['把我最近一筆訂單的取餐時間加入行事曆，預留15分鐘', 15],
@@ -52,11 +53,6 @@ it.each([
   '順便解鎖前一筆訂單；請確認最新訂單的取餐時間有沒有加入行事曆',
   '確認鎖定該筆訂單的取餐時間是否已加入行事曆？',
   '確認昨天訂單的取餐時間已加入行事曆嗎？順便凍結這張訂單',
-  '我在日曆上看不到昨天訂單的取餐時間，能幫我查一下嗎？順便刪掉那筆訂單',
-  '在行事曆上找不到昨天訂單的取餐時間，取消該筆訂單',
-  '昨天訂單的取餐時間在日曆上沒出現，能幫我確認一下嗎？順便建立取餐行程',
-  '昨天訂單的取餐時間在行事曆上沒有顯示，並編輯該筆訂單',
-  '在我的日曆上沒看到昨天訂單的取餐時間；請幫忙查一下，順便付款',
   '幫我確認，昨天訂單的取餐時間記到日曆',
   '取消最新訂單的取餐時間是否已加入行事曆',
   '最新訂單的取餐時間有沒有加入行事曆？順便取消訂單',
@@ -64,7 +60,6 @@ it.each([
   '取消最新訂單，取餐時間怎麼還沒記入行事曆？',
   '幫我建立取餐行程，請確認昨天訂單的取餐時間記在日曆的哪個時段',
   '最新訂單的取餐時間沒有放到日曆，為什麼？順便改成明天',
-  '為何在日曆上看不到昨天訂單的取餐時間？請取消那筆訂單',
   '取餐時間怎麼還沒記入行事曆？幫我記進去',
   '請確認刪掉昨天訂單的取餐時間記在日曆的哪一天？',
   '請把最新訂單的取餐時間放到日曆，哪一天都可以',
@@ -126,21 +121,6 @@ it.each([
   '請問為什麼昨天訂單的取餐時間沒有放到日曆？',
   '昨天訂單的取餐時間怎麼還沒記入行事曆',
   '幫我看一下；為何最新訂單的取餐時間尚未被記入行事曆？',
-  '為何在日曆上看不到昨天訂單的取餐時間？',
-  '昨天訂單的取餐時間在行事曆上還找不到，請問為什麼？',
-  '我在日曆上看不到昨天訂單的取餐時間，能幫我查一下嗎？',
-  '為什麼我的日曆上看不到昨天的取餐時間',
-  '我在日曆上看不到昨天訂單的取餐時間，可以告訴我原因嗎？',
-  '我在日曆上看不到昨天訂單的取餐時間，請幫我查一下昨天的訂單編號。',
-  '我在日曆上看不到昨天訂單的取餐時間，請幫我確認昨天的訂單狀態。',
-  '我在日曆上看不到昨天訂單的取餐時間，確認是否已加入行事曆',
-  '在行事曆裡找不到上週訂單的預定取餐時間；可以幫我看一下嗎？',
-  '昨天訂單的取餐時間在我的日曆上沒出現，麻煩你，能否幫忙確認一下？',
-  '請幫忙查一下，在行事曆上沒有顯示那筆訂單的取餐時間',
-  '我在日曆上沒看到前一筆訂單的取餐時間，為什麼呢？',
-  '為什麼我在行事曆上仍找不到昨天訂單的取餐時間？',
-  '在日曆上找不到那筆訂單的取餐時間，另外確認一下，是否已記到日曆？',
-  '在日曆上看不到昨天訂單的取餐時間；請問記在行事曆上的是哪個時段？',
   '昨天訂單的取餐時間還沒有記入行事曆嗎？',
   '昨天訂單的取餐時間記在日曆的哪一天？取餐時間是幾點？',
 ])('keeps calendar status questions on the existing read route: %s', question => {
@@ -164,10 +144,6 @@ const diagnosticQuestions = [
 ];
 
 it.each([
-  '我在日曆上看不到昨天訂單的取餐時間',
-  '在行事曆裡找不到上週訂單的預定取餐時間，請幫忙查一下',
-  '昨天訂單的取餐時間在日曆上沒出現；請幫忙看一下',
-  '請幫忙確認一下，昨天訂單的取餐時間在行事曆上沒有顯示',
   '昨天訂單的取餐時間尚未被記入行事曆',
   '查一下昨天訂單的取餐時間，確認是否已記入日曆？',
   '昨天訂單的取餐時間記在日曆的哪個時段？',
@@ -175,6 +151,61 @@ it.each([
   for (const followup of diagnosticQuestions) {
     const separator = lookup.endsWith('？') ? '' : '，';
     expect(parse(lookup + separator + followup), followup).toBeNull();
+  }
+});
+
+it.each([
+  // 舊版對下列刪除、取消、編輯及付款混合句回 null，先前的測試預期 invalid。
+  '我在日曆上看不到昨天訂單的取餐時間，能幫我查一下嗎？順便刪掉那筆訂單',
+  '在行事曆上找不到昨天訂單的取餐時間，取消該筆訂單',
+  '昨天訂單的取餐時間在行事曆上沒有顯示，並編輯該筆訂單',
+  '在我的日曆上沒看到昨天訂單的取餐時間；請幫忙查一下，順便付款',
+  '為何在日曆上看不到昨天訂單的取餐時間？請取消那筆訂單',
+  // 「建立取餐行程」仍會觸發舊版的 invalid。
+  '昨天訂單的取餐時間在日曆上沒出現，能幫我確認一下嗎？順便建立取餐行程',
+  '為何在日曆上看不到昨天訂單的取餐時間？',
+  '昨天訂單的取餐時間在行事曆上還找不到，請問為什麼？',
+  '我在日曆上看不到昨天訂單的取餐時間，能幫我查一下嗎？',
+  '為什麼我的日曆上看不到昨天的取餐時間',
+  '我在日曆上看不到昨天訂單的取餐時間，可以告訴我原因嗎？',
+  '我在日曆上看不到昨天訂單的取餐時間，請幫我查一下昨天的訂單編號。',
+  '我在日曆上看不到昨天訂單的取餐時間，請幫我確認昨天的訂單狀態。',
+  // 「已加入」觸發舊版的 invalid，先前的測試預期 null。
+  '我在日曆上看不到昨天訂單的取餐時間，確認是否已加入行事曆',
+  '在行事曆裡找不到上週訂單的預定取餐時間；可以幫我看一下嗎？',
+  '昨天訂單的取餐時間在我的日曆上沒出現，麻煩你，能否幫忙確認一下？',
+  '請幫忙查一下，在行事曆上沒有顯示那筆訂單的取餐時間',
+  '我在日曆上沒看到前一筆訂單的取餐時間，為什麼呢？',
+  '為什麼我在行事曆上仍找不到昨天訂單的取餐時間？',
+  '在日曆上找不到那筆訂單的取餐時間，另外確認一下，是否已記到日曆？',
+  '在日曆上看不到昨天訂單的取餐時間；請問記在行事曆上的是哪個時段？',
+  // 舊版對下列同步及取消混合句回 null，先前的測試預期 invalid。
+  '在日曆上找不到昨天訂單的取餐時間，是不是還沒同步就幫我同步？',
+  '在日曆上找不到昨天訂單的取餐時間，為什麼還沒出現並幫我取消那筆訂單？',
+  '請幫我同步到日曆，昨天訂單的取餐時間在日曆上沒出現，是不是還沒同步？',
+  '同步昨天訂單的取餐時間在日曆上沒出現，是不是系統錯誤？',
+])('preserves the merge-base result for %s', question => {
+  expect(parse(question)).toEqual(parseMergeBase(question));
+});
+
+it.each([
+  ['我在日曆上看不到昨天訂單的取餐時間，請問是不是商家改了時間？', null],
+  ['在日曆上看不到昨天訂單的取餐時間，確認是否已加入行事曆，再把那個行程挪到明天', 'invalid'],
+])('preserves the reviewed result for %s', (question, expected) => {
+  const baseline = parseMergeBase(question);
+  expect(baseline?.kind ?? null).toBe(expected);
+  expect(parse(question)).toEqual(baseline);
+});
+
+it.each([
+  '我在日曆上看不到昨天訂單的取餐時間',
+  '在行事曆裡找不到上週訂單的預定取餐時間，請幫忙查一下',
+  '昨天訂單的取餐時間在日曆上沒出現；請幫忙看一下',
+  '請幫忙確認一下，昨天訂單的取餐時間在行事曆上沒有顯示',
+])('preserves the merge-base result for diagnostics after %s', lookup => {
+  for (const followup of diagnosticQuestions) {
+    const question = lookup + '，' + followup;
+    expect(parse(question), question).toEqual(parseMergeBase(question));
   }
 });
 
@@ -194,18 +225,14 @@ it.each([
   '把那筆訂單鎖定',
   '如果還沒同步就幫我同步',
   '幫我同步到日曆',
-])('rejects a diagnostic query mixed with a write: %s', action => {
-  expect(parse('在日曆上找不到昨天訂單的取餐時間，是不是還沒同步？' + action)?.kind).toBe('invalid');
+])('preserves the merge-base result for a diagnostic query followed by %s', action => {
+  // 舊版僅在這組尾句含「加入」或「建立」時回 invalid，其餘回 null。
+  const question = '在日曆上找不到昨天訂單的取餐時間，是不是還沒同步？' + action;
+  expect(parse(question)).toEqual(parseMergeBase(question));
 });
 
-it.each([
-  '在日曆上找不到昨天訂單的取餐時間，是不是還沒同步就幫我同步？',
-  '在日曆上找不到昨天訂單的取餐時間，為什麼還沒出現並幫我取消那筆訂單？',
-  '請幫我同步到日曆，昨天訂單的取餐時間在日曆上沒出現，是不是還沒同步？',
-  '同步昨天訂單的取餐時間在日曆上沒出現，是不是系統錯誤？',
-  '是不是還沒同步？幫我把最近一筆訂單的取餐時間加入日曆',
-])('rejects writes before or within a diagnostic query: %s', question => {
-  expect(parse(question)?.kind).toBe('invalid');
+it('rejects a sync question mixed with a pickup calendar write', () => {
+  expect(parse('是不是還沒同步？幫我把最近一筆訂單的取餐時間加入日曆')?.kind).toBe('invalid');
 });
 
 it.each([
@@ -237,7 +264,9 @@ it.each([
   const lookup = '我在日曆上看不到昨天訂單的取餐時間';
   expect(parse(lookup + '，' + followup)).toBeNull();
   expect(parse('在行事曆上找不到昨天訂單的取餐時間，' + followup)).toBeNull();
-  expect(parse(lookup + '，' + followup + '再訂昨天的訂單')?.kind).toBe('invalid');
+  // 舊版遇到這組「再訂」尾句會回 null。
+  const question = lookup + '，' + followup + '再訂昨天的訂單';
+  expect(parse(question)).toEqual(parseMergeBase(question));
 });
 
 it('allows order descriptions that mention a time or meal item', () => {
@@ -245,7 +274,8 @@ it('allows order descriptions that mention a time or meal item', () => {
   expect(parse('昨天有加購餐點的訂單的取餐時間記在日曆上的哪一天？')).toBeNull();
 });
 
-const pickupSubjects = ['', '昨天', '今天', '上次', '最新', '前天', '上週'].flatMap(date => [
+const pickupDates = ['', '昨天', '今天', '上次', '最新', '前天', '上週'];
+const pickupSubjects = pickupDates.flatMap(date => [
   date ? date + '的取餐時間' : '取餐時間',
   (date ? date + '的訂單' : '我的訂單') + '的取餐時間',
 ]);
@@ -258,28 +288,55 @@ const calendarLookups = [
   { name: '是否已加入', question: (subject: string) => subject + '是否已加入行事曆', placement: true },
 ];
 const lookupFollowups = [
-  { text: '', placement: false },
-  { text: '為什麼', placement: false },
-  { text: '請問原因', placement: false, visibilityOnly: true },
-  { text: '可以告訴我原因嗎', placement: false, visibilityOnly: true },
-  { text: '請幫我查一下昨天的訂單編號', placement: false, visibilityOnly: true },
-  { text: '請幫我查一下訂單金額', placement: false, visibilityOnly: true },
-  { text: '請問我該去哪裡查', placement: false },
-  { text: '是不是同步有問題', placement: false },
-  { text: '確認取餐時間是否已加入行事曆', placement: true },
+  { text: '' },
+  { text: '為什麼' },
+  { text: '請問原因', visibilityOnly: true },
+  { text: '可以告訴我原因嗎', visibilityOnly: true },
+  { text: '請幫我查一下昨天的訂單編號', visibilityOnly: true },
+  { text: '請幫我查一下訂單金額', visibilityOnly: true },
+  { text: '請問我該去哪裡查' },
+  { text: '是不是同步有問題' },
+  { text: '確認取餐時間是否已加入行事曆' },
 ];
 const orderActions = [
   '', '再點一次', '再訂', '重訂', '幫忙買', '幫忙點', '幫我點', '幫我訂', '幫忙訂', '代買', '代訂',
   '下單', '取消', '鎖定', '買', '點', '訂', '請幫忙購買', '幫我新增取餐行程',
 ];
 
+const visibilityTails = [
+  ...lookupFollowups.map(followup => followup.text),
+  ...diagnosticQuestions,
+  '請問是不是商家改了時間？',
+  '請幫我查昨天的訂單編號',
+  '確認是否已加入行事曆，再把那個行程挪到明天',
+  '把取餐行程改到明天',
+  '把那個行程挪到明天',
+  '幫我改期',
+  '幫我換時間',
+  '取消那筆訂單',
+  '再點一次昨天的訂單',
+  '幫忙買昨天的訂單',
+  '代買昨天的訂單',
+];
+
+const visibilitySubjects = [...pickupSubjects, ...pickupDates.map(date => (date || '我') + '的訂單')];
+const visibilityMatrix = calendarLookups.filter(lookup => !lookup.placement).flatMap(lookup =>
+  visibilitySubjects.flatMap(subject => visibilityTails.map(tail => {
+    const question = lookup.question(subject) + (tail ? '，' + tail : '？');
+    return { question };
+  })),
+);
+
+it.each(visibilityMatrix)('matches the merge-base parser for $question', ({ question }) => {
+  expect(parse(question)).toEqual(parseMergeBase(question));
+});
+
 const pickupMatrix = calendarLookups.flatMap(lookup => lookupFollowups
   .filter(followup => !lookup.placement || !followup.visibilityOnly)
   .map(followup => {
-    // 以 cea4084ff 的解析器逐格核對。查詢中的「加入」仍會觸發舊版的入曆判斷。
-    const baseDetectsPickup = lookup.placement || followup.placement;
     return {
       lookup: lookup.name,
+      visibility: !lookup.placement,
       followup: followup.text || '無追問',
       cells: pickupSubjects.flatMap(subject => orderActions.flatMap(action => {
         const suffix = (followup.text ? '，' + followup.text : '') + '？';
@@ -292,16 +349,17 @@ const pickupMatrix = calendarLookups.flatMap(lookup => lookupFollowups
         if (action && !createsPickup && subject.includes('訂單')) {
           questions.push(lookup.question(action + subject) + suffix);
         }
-        // 舊版把詢問「是否已加入」視為入曆要求，因此唯讀格從 invalid 改為 null。
-        // 沒有舊版入曆動詞的混合請求從 null 改為 invalid，避免寫入轉入一般問答。
-        const baseExpected = baseDetectsPickup || createsPickup ? 'invalid' : null;
-        return questions.map(question => ({ question, expected, baseExpected }));
+        return questions.map(question => ({ question, expected }));
       })),
     };
   }));
 
-it.each(pickupMatrix)('$lookup × $followup compared with the merge base', ({ cells }) => {
-  for (const { question, expected, baseExpected } of cells) {
-    expect.soft(parse(question)?.kind ?? null, question + '（舊版 ' + baseExpected + '）').toBe(expected);
+it.each(pickupMatrix)('$lookup × $followup with order action variations', ({ cells, visibility }) => {
+  for (const { question, expected } of cells) {
+    if (visibility) {
+      expect.soft(parse(question), question).toEqual(parseMergeBase(question));
+    } else {
+      expect.soft(parse(question)?.kind ?? null, question).toBe(expected);
+    }
   }
 });
