@@ -1006,6 +1006,50 @@ it('lets a student manually start 3D if a WebView never reports canvas visibilit
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+// Some embedded WebViews report a window-root intersection for pixels that
+// are fully clipped by the scrollable modal. The automatic observer path must
+// enforce the same dialog clipping check as manual startup before allocating
+// mobile WebGL, without disabling external walking navigation.
+it('keeps automatic WebGL deferred when an intersecting canvas is clipped by the dialog', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  let top = 40;
+  const originalRect = Element.prototype.getBoundingClientRect;
+  const layout = vi.spyOn(Element.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: Element) {
+      if (this.matches('dialog')) return new DOMRect(0, 100, 400, 300);
+      if (this.getAttribute('aria-label') === '校園地點空間圖') return new DOMRect(0, top, 320, 50);
+      return originalRect.call(this);
+    });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    // A broken observer says "visible" even though host y=40..90 lies
+    // above the dialog's clipped content y=100..400.
+    act(() => intersection?.([observerEntry(graphics, true, undefined, 1)],
+      {} as IntersectionObserver));
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+    // Scrolling the host into the actual dialog bounds plus a fresh positive
+    // observation is sufficient; do not require manual start or a second GPU.
+    top = 120;
+    act(() => intersection?.([observerEntry(graphics, true, undefined, 2)],
+      {} as IntersectionObserver));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  } finally {
+    layout.mockRestore();
+  }
+});
+
 it.each(['silent', 'missing', 'constructor', 'observe', 'negative'] as const)(
   'checks dialog clipping after manual startup with a %s observer',
   async (mode) => {
