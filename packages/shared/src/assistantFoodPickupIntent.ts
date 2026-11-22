@@ -31,23 +31,47 @@ const orderLookup = new RegExp(
 const pickupTimeLookup = new RegExp(
   '^' + readPrompt + '?' + pickupTime + '是?(?:幾點|什麼時候)(?:啊|呢|嗎)?[?]*$',
 );
-const calendarEntry = '(?:' + placement + '|記在)' + calendarLocation;
+const calendarEntry = '(?:' + placement + '|放進|記在)' + calendarLocation;
 const calendarEntryPattern = new RegExp(calendarEntry);
+const pickupSubject = '(?:(?:' + order + '的?)?' + pickupTime + ')?';
+const calendarSubject = readPrompt + '?' + pickupSubject;
 const calendarStatus = new RegExp(
-  '^' + readPrompt + '?(?:(?:' + order + '的?)?' + pickupTime + ')?' +
+  '^' + calendarSubject +
     '(?:(?:有沒有|有無|是否|是不是)(?:已經|已)?' + calendarEntry + '(?:了)?(?:嗎|呢)?|' +
     '(?:已經|已|有)?' + calendarEntry + '(?:了嗎|嗎|了沒|沒有)|' +
     '(?:已經|已|有)' + calendarEntry + '(?:了|呢)?(?=[?])|' +
     calendarEntry + '(?:了|呢)(?=[?]))[?]*$',
 );
+const questionEnding = '(?:啊|呢|嗎)?[?]*$';
+const calendarSlot = '(?:哪(?:一)?(?:天|日|個時段|個時間(?:點)?|個日期)|幾號|星期幾|禮拜幾|幾點|什麼時候|什麼時段)';
+const calendarSlotLookup = new RegExp(
+  '^' + calendarSubject + '(?:已經|已|有)?' + calendarEntry +
+    '的?(?:是|在)?' + calendarSlot + questionEnding,
+);
+const calendarVisibility = '(?:在)?' + calendarLocation + '(?:還是|仍然|還|仍)?(?:找不到|看不到)';
+const calendarVisibilityPattern = new RegExp(calendarVisibility);
+const missingCalendarEntry = '(?:(?:還沒(?:有)?|尚未|沒有|沒|未)(?:被)?' + calendarEntry +
+  '|' + calendarVisibility + '|(?:找不到|看不到))';
+const reason = '(?:為什麼|為何|怎麼|怎會)';
+const missingCalendarStatus = new RegExp('^' + calendarSubject + missingCalendarEntry + '$');
+const calendarAbsenceQuestion = new RegExp(
+  '^' + readPrompt + '?(?:(?:' + reason + pickupSubject + '|' + pickupSubject + reason + ')' +
+    missingCalendarEntry + '|' + reason + calendarVisibility + pickupSubject + '|' +
+    pickupSubject + missingCalendarEntry + '(?=嗎|[?]))' + questionEnding,
+);
+const reasonFollowup = new RegExp('^' + readPrompt + '?' + reason + questionEnding);
 
 function isReadOnlyPickupQuestion(text: string): boolean {
   const clauses = text.split(/[;,、。.!]+|(?<=\?)(?=[^?])/)
     .map(clause => clause.replace(/^(?:也|順便|另外|再|然後|接著)+/, ''))
     .filter(clause => clause && !standaloneReadPrompt.test(clause));
   return clauses.length > 0 &&
-    clauses.every(clause =>
-      calendarStatus.test(clause) || orderLookup.test(clause) || pickupTimeLookup.test(clause));
+    clauses.every((clause, index) =>
+      calendarStatus.test(clause) || calendarSlotLookup.test(clause) ||
+      calendarAbsenceQuestion.test(clause) || orderLookup.test(clause) || pickupTimeLookup.test(clause) ||
+      // A trailing reason question can refer to the immediately preceding absence statement.
+      (missingCalendarStatus.test(clause) && reasonFollowup.test(clauses[index + 1] ?? '')) ||
+      (reasonFollowup.test(clause) && missingCalendarStatus.test(clauses[index - 1] ?? '')));
 }
 const hours: Readonly<Record<string, number>> = {
   半小時: 30,
@@ -84,14 +108,14 @@ const readThenPlan = new RegExp(
 export function parseAssistantFoodPickupIntent(question: string): AssistantFoodPickupIntent | null {
   if (typeof question !== 'string') return null;
   const text = question.normalize('NFKC').trim();
+  const compact = text.replace(/\s+/g, '');
   if (!/取餐/.test(text) || !/訂單|取餐時間/.test(text) || !/行事曆|日曆|行程/.test(text) ||
-      !(pickupVerb.test(text) || calendarEntryPattern.test(text))) return null;
+      !(pickupVerb.test(text) || calendarEntryPattern.test(text) || calendarVisibilityPattern.test(compact))) return null;
   // A user-specified appointment can mention order work in its title. Preserve
   // the complete existing appointment grammar, including its invalid-time help.
   if (parseAssistantCalendarIntent(text)) return null;
   const invalid = (): AssistantFoodPickupIntent => ({ kind: 'invalid', message: guidance });
   if (text.length > 1000 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}「」『』“”"'`]/u.test(text)) return invalid();
-  const compact = text.replace(/\s+/g, '');
   if (isReadOnlyPickupQuestion(compact)) return null;
   if (/不要|不用|不必|無須|不需要|不想|先別|別幫|不是|翻譯|例句|範例|假設|如果/.test(text)) return invalid();
   const match = direct.exec(compact) || readThenPlan.exec(compact);
