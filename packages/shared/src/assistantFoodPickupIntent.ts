@@ -21,11 +21,13 @@ const questionEnding = '(?:啊|呢|嗎)?[?]*$';
 const standaloneReadPrompt = new RegExp('^(?:' + readPrompt + '|' + polite + ')' + questionEnding);
 const orderWriteVerb =
   '鎖定|解鎖|凍結|取消|撤銷|撤回|作廢|刪|移除|移走|清除|清空|封存|編輯|改|變更|調整|更新|更換|' +
-  '下單|訂購|重訂|付款|結帳|退款|退訂|退單|退費|送出|提交|延後|提前|延期|重排|標記|備註|同步';
+  '下單|下訂|訂購|加點|補訂|重(?:新)?(?:點|訂|買|購)|再(?:點|訂|買|購)|付款|結帳|退款|退訂|退單|退費|送出|提交|延後|提前|延期|重排|標記|備註|同步';
 // Order qualifiers are open-ended, so exclude action verbs and request prefixes
 // here. Calendar placement verbs are allowed only in the status question itself.
-const order = '(?:(?!' + pickupVerb.source +
-  '|' + orderWriteVerb + '|請|麻煩|幫我|替我|我想|不要|不用|如果|假設|翻譯)[^,;、。.!?]){0,80}訂單';
+// Bare order verbs can begin a request, while words such as 餐點 can describe an order.
+const orderRequest = '(?:點|訂(?!單)|買|購買)';
+const order = '(?!' + readPrompt + '?' + orderRequest + ')(?:(?!' + pickupVerb.source +
+  '|' + orderWriteVerb + '|(?:並且?|接著|然後|順便)' + orderRequest + '|請|麻煩|幫我|替我|我想|不要|不用|如果|假設|翻譯)[^,;、。.!?]){0,80}訂單';
 const orderLookup = new RegExp(
   '^' + readPrompt + '?' + order + '(?:的?' + pickupTime +
     '(?:是?(?:幾點|什麼時候)(?:啊|呢|嗎)?)?)?[?]*$',
@@ -79,9 +81,16 @@ const reasonFollowup = new RegExp(
     sync + '(?:了嗎|了沒|沒有|沒)|' + diagnosticState + '(?=嗎|[?]))' + questionEnding,
 );
 
+const lookupFollowup = new RegExp(
+  '^' + readPrompt + '?(?:我)?(?:應該|該)?(?:要|可以|能|得)?' +
+    '(?:(?:(?:去|到|從|在)?(?:哪(?:裡|兒|邊)?|何處)(?:去)?|(?:怎麼|怎樣|如何)(?:才(?:能|可以))?)' +
+    '(?:查(?:詢|看|找|到|得到)?|看(?:到|得到)?|找(?:到|得到)?)(?:一下)?|(?:找|問)誰)' +
+    questionEnding,
+);
+
 function isReadOnlyPickupQuestion(text: string): boolean {
   const clauses = text.split(/[;,、。.!]+|(?<=\?)(?=[^?])/)
-    .map(clause => clause.replace(/^(?:也|順便|另外|再|然後|接著|並且|並)+/, ''))
+    .map(clause => clause.replace(/^(?:也|順便|另外|再(?!點|訂|買|購)|然後|接著|並且|並)+/, ''))
     .filter(clause => clause && !standaloneReadPrompt.test(clause));
   return clauses.length > 0 &&
     clauses.every((clause, index) =>
@@ -89,8 +98,9 @@ function isReadOnlyPickupQuestion(text: string): boolean {
       calendarAbsenceQuestion.test(clause) || calendarVisibilityLookup.test(clause) ||
       orderLookup.test(clause) || pickupTimeLookup.test(clause) ||
       // Follow-ups borrow their subject from a preceding read clause.
-      (missingCalendarStatus.test(clause) && reasonFollowup.test(clauses[index + 1] ?? '')) ||
-      (index > 0 && reasonFollowup.test(clause)));
+      (missingCalendarStatus.test(clause) &&
+        (reasonFollowup.test(clauses[index + 1] ?? '') || lookupFollowup.test(clauses[index + 1] ?? ''))) ||
+      (index > 0 && (reasonFollowup.test(clause) || lookupFollowup.test(clause))));
 }
 const hours: Readonly<Record<string, number>> = {
   半小時: 30,

@@ -195,3 +195,40 @@ it.each([
 ])('rejects writes before or within a diagnostic query: %s', question => {
   expect(parse(question)?.kind).toBe('invalid');
 });
+
+it.each([
+  '再點一次昨天的訂單',
+  '再訂昨天的訂單',
+  '再買昨天的訂單',
+  '再購昨天的訂單',
+  '重點昨天的訂單',
+  '重新下訂昨天的訂單',
+  '點一次昨天的訂單',
+  '訂昨天的訂單',
+  '買昨天的訂單',
+  '購買昨天的訂單',
+  '查看昨天訂單並點一次昨天的訂單',
+])('rejects a calendar query mixed with an order request: %s', action => {
+  const lookup = '確認最新訂單的取餐時間是否已加入行事曆';
+  expect(parse(action + '，' + lookup)?.kind).toBe('invalid');
+  expect(parse(lookup + '？順便' + action)?.kind).toBe('invalid');
+});
+
+it.each([
+  '請問我該去哪裡查？',
+  '要去哪看？',
+  '該怎麼查？',
+  '請問要從哪裡看？',
+  '請問我該問誰？',
+  '要如何查到？',
+])('allows a lookup follow-up about a missing calendar entry: %s', followup => {
+  const lookup = '我在日曆上看不到昨天訂單的取餐時間';
+  expect(parse(lookup + '，' + followup)).toBeNull();
+  expect(parse('在行事曆上找不到昨天訂單的取餐時間，' + followup)).toBeNull();
+  expect(parse(lookup + '，' + followup + '再訂昨天的訂單')?.kind).toBe('invalid');
+});
+
+it('allows order descriptions that mention a time or meal item', () => {
+  expect(parse('昨天十二點訂單的取餐時間是否已加入行事曆？')).toBeNull();
+  expect(parse('昨天有加購餐點的訂單的取餐時間記在日曆上的哪一天？')).toBeNull();
+});
