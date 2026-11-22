@@ -1123,6 +1123,99 @@ test('a timed-out clear can be restored after a public check still reads a hidde
   }
 });
 
+describe('save and server confirmation parity with merge-base', () => {
+  const local = {
+    schoolId: 'pu', ownerUid: 'alice', headline: '標題', bio: '原簡介',
+    linkUrl: 'https://example.org/',
+  };
+  const snapshot = (data: typeof local | null) => ({
+    exists: () => data !== null, data: () => data, metadata: { hasPendingWrites: false },
+  } as never);
+
+  describe.each([
+    'unchanged', 'whitespace only', 'link clear only', 'initial read failure',
+    'initial read stalled', 'remote withdrawal', 'remote update', 'retry after confirmation failure',
+  ] as const)('%s', (scenario) => {
+    test.each(['matches', 'differs'] as const)('writes and confirms when the server %s', async (relation) => {
+      const read = jest.mocked(getDocFromServer);
+      const write = jest.mocked(setDoc);
+      read.mockReset();
+      write.mockReset();
+      const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
+      jest.mocked(readCreatorCard).mockImplementation(service.readCreatorCard);
+      jest.mocked(saveCreatorCard).mockImplementation(service.saveCreatorCard);
+      let server: typeof local | null = local;
+      read.mockImplementation(async () => snapshot(server));
+      write.mockImplementation(async (_ref, data) => {
+        server = { ...server, ...data } as typeof local;
+      });
+      const stalled = scenario === 'initial read stalled';
+      let resolveInitialRead!: (value: ReturnType<typeof snapshot>) => void;
+      if (stalled) {
+        jest.useFakeTimers();
+        read.mockReturnValueOnce(new Promise((resolve) => { resolveInitialRead = resolve; }));
+      }
+      if (scenario === 'initial read failure') read.mockRejectedValueOnce(new Error('read failed'));
+
+      try {
+        const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+        if (stalled) {
+          act(() => { jest.advanceTimersByTime(30_000); });
+          jest.useRealTimers();
+          expect(view.queryByLabelText('儲存簡介')).toBeNull();
+          expect(write).toHaveBeenCalledTimes(0);
+          await act(async () => { resolveInitialRead(snapshot(local)); });
+        }
+        if (scenario === 'initial read failure') {
+          expect(view.queryByLabelText('儲存簡介')).toBeNull();
+          fireEvent.press(await view.findByLabelText('重新讀取社群簡介'));
+        }
+        fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+        const pressSave = async () => {
+          await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+        };
+        const changeBio = (value: string) => fireEvent.changeText(view.getByLabelText('個人簡介'), value);
+        if (scenario === 'retry after confirmation failure') {
+          changeBio('第一次送出的簡介');
+          read.mockRejectedValueOnce(new Error('automatic confirmation failed'));
+          await pressSave();
+          expect(write).toHaveBeenCalledTimes(1);
+          read.mockRejectedValueOnce(new Error('manual confirmation failed'));
+          const check = async () => {
+            await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+          };
+          await check();
+          expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+          server = local;
+          await check();
+          changeBio(local.bio);
+        }
+        if (scenario === 'whitespace only') changeBio(`  ${local.bio}  `);
+        if (scenario === 'link clear only') fireEvent.changeText(view.getByLabelText('作品連結'), '');
+        if (relation === 'differs') {
+          server = scenario === 'remote withdrawal' ? null : { ...local, headline: '另一裝置的標題' };
+        }
+
+        read.mockClear();
+        write.mockClear();
+        await pressSave();
+        expect(write).toHaveBeenCalledTimes(1);
+        expect(write).toHaveBeenCalledWith(undefined, {
+          ...local, linkUrl: scenario === 'link clear only' ? '' : local.linkUrl, updatedAt: 'SERVER_TIME',
+        }, { merge: true });
+        expect(read).toHaveBeenCalledTimes(1);
+        expect(read.mock.invocationCallOrder[0]).toBeGreaterThan(write.mock.invocationCallOrder[0]);
+        expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+        expect(view.queryByLabelText('儲存簡介')).toBeNull();
+      } finally {
+        read.mockReset();
+        write.mockReset();
+        if (stalled) jest.useRealTimers();
+      }
+    });
+  });
+});
+
 describe('saving merges creator card changes under the document rules', () => {
   const original = {
     schoolId: 'pu', ownerUid: 'alice', headline: '標題', bio: '簡介',

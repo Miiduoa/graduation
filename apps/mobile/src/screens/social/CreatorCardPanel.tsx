@@ -308,13 +308,6 @@ function ScopedCreatorCardPanel({
     const edits = CARD_FIELDS.filter((field) => editedFields.current.has(field) &&
       (!base || base[field] !== expected[field] ||
         (expected[field] === '' && !creatorCardFieldMatches(base, field, ''))));
-    if (base && edits.length === 0 && CARD_FIELDS.every((field) =>
-      creatorCardFieldMatches(base, field, base[field]))) {
-      setEditorOpen(false);
-      revisions.current = { ...submittedRevisions.current };
-      setFeedback('');
-      return;
-    }
     editedFields.current.clear();
     savingFlight.current = true;
     setSaving(true);
