@@ -72,14 +72,28 @@ export function CampusEvidencePlanCard({
   useEffect(() => {
     spacePressedStep.current = null;
   }, [disabled, plan]);
+  const reminderOwner = useRef<{ plan: CampusEvidencePlan; userId: string; schoolId: string } | null>(null);
+  if (reminderContext && reminderOwner.current?.plan !== plan) {
+    reminderOwner.current = { plan, userId: reminderContext.userId, schoolId: reminderContext.schoolId };
+  }
+  const activeReminderContext = useRef(reminderContext);
+  activeReminderContext.current = reminderContext;
+  const isReminderCurrent = () => {
+    const active = activeReminderContext.current;
+    return Boolean(active && reminderOwner.current?.plan === plan &&
+      reminderOwner.current.userId === active.userId &&
+      reminderOwner.current.schoolId === active.schoolId && active.isCurrent());
+  };
+  const currentReminderContext = reminderContext && isReminderCurrent()
+    ? { ...reminderContext, isCurrent: isReminderCurrent } : undefined;
   const assignmentAction = (assignment: CampusAssignmentIdentity & NuniPlanActivityIdentity) => {
     if (historical) return null;
     if (renderAssignmentAction) return renderAssignmentAction(assignment);
-    if (assignment.kind === 'quiz' || !assignment.expectedSource) return null;
-    return reminderContext && navigation ? (
+    if (assignment.kind === 'quiz' || (assignment.nuniSource && !assignment.expectedSource)) return null;
+    return currentReminderContext && navigation ? (
       <CampusAssignmentOpenButton
         assignment={assignment}
-        context={reminderContext}
+        context={currentReminderContext}
         navigation={navigation}
         disabled={disabled}
       />
@@ -169,17 +183,17 @@ export function CampusEvidencePlanCard({
                 onPress={() => onOpenRoute(step.route)}
               />
             ) : null}
-            {!historical && reminderContext && step.kind !== 'quiz' && (step.expectedSource || !step.nuniSource) &&
+            {!historical && currentReminderContext && step.kind !== 'quiz' && (step.expectedSource || !step.nuniSource) &&
               step.evidence === 'authorized-assignments' && step.dueAt ? (
               <CampusAssignmentReminderAction
-                key={JSON.stringify([step.id, step.expectedSource, step.fullAssignmentTitle, step.dueAt])}
+                key={JSON.stringify([currentReminderContext.userId, currentReminderContext.schoolId,
+                  step.id, step.expectedSource, displayTitle, step.groupName, step.dueAt])}
                 step={step}
-                snapshot={reminderContext.snapshot}
-                userId={reminderContext.userId}
-                schoolId={reminderContext.schoolId}
-                isCurrent={reminderContext.isCurrent}
+                snapshot={currentReminderContext.snapshot}
+                userId={currentReminderContext.userId}
+                schoolId={currentReminderContext.schoolId}
+                isCurrent={currentReminderContext.isCurrent}
                 disabled={disabled}
-                existingOnly={!step.expectedSource}
               />
             ) : null}
             {progress ? (

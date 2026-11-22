@@ -27,6 +27,7 @@ type Preference = Scope &
     failures?: number;
     checkedAt?: number;
     title?: string;
+    cardIdentity?: string;
     lastDueAt?: number | null;
     triggerAt?: string | null;
   };
@@ -34,6 +35,7 @@ type Reader = Pick<DataSource, 'getAssignment' | 'getSubmission'>;
 type Request = {
   scope: Scope;
   source: CampusAssignmentSource;
+  cardIdentity?: string;
   leadMinutes: 60 | 1440;
   isCurrent: () => boolean;
 };
@@ -317,7 +319,9 @@ export function scheduleSubmittedAssignmentReminder(input: Request, ds?: Reader)
     const saved = raw ? (JSON.parse(raw) as Preference) : row;
     const keys = (await AsyncStorage.getAllKeys()).filter((value) => value.startsWith(storagePrefix));
     if (!raw && keys.length >= preferenceLimit) throw new ReminderSyncError('device-capacity');
-    const result = await reconcile({ ...saved, ...row }, input.isCurrent, version, ds ?? reader());
+    const result = await reconcile({
+      ...saved, ...row, cardIdentity: input.cardIdentity ?? saved.cardIdentity,
+    }, input.isCurrent, version, ds ?? reader());
     current(row, input.isCurrent, version);
     return result;
   });
@@ -420,8 +424,13 @@ export function cancelSubmittedAssignmentReminder(input: Request) {
     const row = await identity(input);
     current(row, input.isCurrent, version);
     const saved = await readPreference(key(row));
+    current(row, input.isCurrent, version);
     await cancel(row.identifier);
-    for (const id of saved?.legacyIds ?? []) await cancel(id);
+    for (const id of saved?.legacyIds ?? []) {
+      current(row, input.isCurrent, version);
+      await cancel(id);
+    }
+    current(row, input.isCurrent, version);
     for (const oldKey of saved?.legacyKeys ?? []) await AsyncStorage.removeItem(oldKey);
     current(row, input.isCurrent, version);
     await AsyncStorage.removeItem(key(row));
@@ -513,7 +522,7 @@ export function adoptSubmittedAssignmentReminder(input: Request, old: { identifi
     await AsyncStorage.setItem(key(row), JSON.stringify({
       ...row, title: old.title, lastDueAt: Date.parse(old.triggerAt) + row.leadMinutes * 60_000,
       triggerAt: old.triggerAt, expiresAt: Date.now() + inactiveRetentionMs,
-      ...saved, legacyIds, legacyKeys,
+      ...saved, cardIdentity: saved?.cardIdentity ?? input.cardIdentity, legacyIds, legacyKeys,
     }));
   });
 }

@@ -38,6 +38,8 @@ export function matchCampusAssignment(
   if (snapshot.assignments.status !== 'available' || typeof rawTitle !== 'string') return null;
   const title = normalizeCampusAssignmentTitle(rawTitle);
   if (!title || hasCutoffSpace(rawTitle, title)) return null;
+  // A display-only identity at the cutoff may have lost the rest of its title.
+  if (!assignment.fullAssignmentTitle && !assignment.expectedSource && title.length === DISPLAY_TITLE_LIMIT) return null;
   const rows = snapshot.assignments.items.filter((row) =>
     row.groupName === (assignment.groupName ?? '') &&
     row.dueAt === (assignment.dueAt ?? null));

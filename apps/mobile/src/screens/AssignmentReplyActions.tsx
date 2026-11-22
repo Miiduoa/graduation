@@ -20,9 +20,13 @@ export function AssignmentReplyActions({ read, snapshot, context, disabled, onAs
   if (read.checkedAt !== snapshot.checkedAt || read.userId !== context.userId || read.schoolId !== context.schoolId ||
       !read.items.length) return null;
   const { items, page } = read;
-  const single = items.length === 1 && resolveCampusAssignmentTarget({
-    assignment: items[0], snapshot, scope: { uid: context.userId, schoolId: context.schoolId },
-  }) ? items[0] : null;
+  const candidate = items.length === 1 ? { ...items[0], fullAssignmentTitle: items[0].title } : null;
+  const target = candidate && resolveCampusAssignmentTarget({
+    assignment: candidate, snapshot, scope: { uid: context.userId, schoolId: context.schoolId },
+  });
+  const single = target && candidate && {
+    ...candidate, expectedSource: { kind: 'group-assignment' as const, ...target.params },
+  };
   if (items.length === 1 && !single && !page) return null;
   return (
     <View style={{ gap: 8, marginTop: 10 }}>
@@ -63,8 +67,8 @@ export function AssignmentReplyActions({ read, snapshot, context, disabled, onAs
         <>
           <CampusAssignmentOpenButton assignment={single} context={{ ...context, snapshot }} navigation={context.navigation} disabled={disabled} />
           {single.dueAt && Number.isFinite(confirmedTimestamp(single.dueAt)) && (
-            <CampusAssignmentReminderAction step={{ title: single.title, groupName: single.groupName,
-              dueAt: single.dueAt, evidence: 'authorized-assignments', route: '/classroom' }}
+            <CampusAssignmentReminderAction step={{ ...single, dueAt: single.dueAt,
+              evidence: 'authorized-assignments', route: '/classroom' }}
               reviewOnOpen={read.reviewReminder} snapshot={snapshot} userId={context.userId} schoolId={context.schoolId}
               isCurrent={context.isCurrent} disabled={disabled} />
           )}
