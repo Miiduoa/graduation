@@ -55,10 +55,17 @@ type AssignmentFileSelection = {
 };
 
 function localAssignmentFileType(file: File) {
-  const classified = classifyAssignmentFile(file.name, file.type);
-  // Preserve the picker quota when the browser supplies no MIME.
-  const kind = file.type ? classified.kind : 'file';
-  return { kind, contentType: kind === classified.kind ? classified.contentType : null };
+  if (file.name.trim().length > 200) throw new NuniError(422, 'ASSIGNMENT_FILE_NAME_INVALID');
+  const contentType = file.type.trim() ? file.type : 'application/octet-stream';
+  const { kind } = classifyAssignmentFile(file.name, contentType);
+  return { kind, contentType };
+}
+
+function validateSelectedAssignmentFile(file: File) {
+  const { kind } = localAssignmentFileType(file);
+  // A photo's size limit applies to the prepared file after compression.
+  if (kind === 'file' || file.size === 0) assertAssignmentFileSize(kind, file.size);
+  return kind;
 }
 
 export function collectLocalFileSelection(
@@ -67,32 +74,37 @@ export function collectLocalFileSelection(
 ): AssignmentFileSelection {
   const next = [...current];
   const rejected: AssignmentFileSelection['rejected'] = [];
+  let images = next.filter(({ kind }) => kind === 'image').length;
+  let documents = next.length - images;
   for (const file of Array.from(incoming)) {
-    let kind: LocalAssignmentFile['kind'];
+    if (next.some(({ file: selected }) =>
+      selected.name === file.name && selected.type === file.type &&
+      selected.size === file.size && selected.lastModified === file.lastModified
+    )) {
+      rejected.push({ name: file.name, reason: '這個檔案已在待送出清單中。' });
+      continue;
+    }
+    let kind: LocalAssignmentFile['kind'] = 'file';
     try {
-      ({ kind } = localAssignmentFileType(file));
+      kind = validateSelectedAssignmentFile(file);
+      assertAssignmentFileBudget(images + Number(kind === 'image'), documents + Number(kind === 'file'));
     } catch (cause) {
-      rejected.push({
-        name: file.name,
-        reason:
-          cause instanceof NuniError && cause.code === 'ASSIGNMENT_FILE_NAME_INVALID'
-            ? '檔名無法使用，請重新命名後再選。'
-            : '格式不支援，或副檔名與檔案格式不一致。',
-      });
+      const code = cause instanceof NuniError ? cause.code : undefined;
+      let reason = '格式不支援，或副檔名與檔案格式不一致。';
+      if (code === 'ASSIGNMENT_FILE_NAME_INVALID') reason = '檔名無法使用，請重新命名後再選。';
+      if (code === 'ASSIGNMENT_FILE_TYPE_REJECTED' && !file.type.trim())
+        reason = '瀏覽器未提供檔案類型，請另存後重新選取。';
+      if (code === 'ASSIGNMENT_FILE_SIZE_REJECTED') reason = '檔案是空的，請重新選取。';
+      if (code === 'ASSIGNMENT_FILE_TOO_LARGE') reason = '檔案大小超過上限。';
+      if (code === 'ASSIGNMENT_FILE_LIMIT')
+        reason = kind === 'image'
+          ? `照片最多 ${MAX_ASSIGNMENT_IMAGES} 張，請先刪除不需要的照片。`
+          : `文件最多 ${MAX_ASSIGNMENT_DOCUMENTS} 個，請先刪除不需要的文件。`;
+      rejected.push({ name: file.name, reason });
       continue;
     }
-    const used = next.filter((item) => item.kind === kind).length;
-    const limit = kind === 'image' ? MAX_ASSIGNMENT_IMAGES : MAX_ASSIGNMENT_DOCUMENTS;
-    if (used >= limit) {
-      rejected.push({
-        name: file.name,
-        reason:
-          kind === 'image'
-            ? `照片最多 ${limit} 張，請先刪除不需要的照片。`
-            : `文件最多 ${limit} 個，請先刪除不需要的文件。`,
-      });
-      continue;
-    }
+    if (kind === 'image') images += 1;
+    else documents += 1;
     next.push({
       key: `${file.name}:${file.size}:${file.lastModified}:${next.length}:${Math.random().toString(36).slice(2, 8)}`,
       file,
@@ -354,10 +366,14 @@ export function AssignmentFilePicker({
   files,
   onChange,
   disabled,
+  reviewRequired,
+  onReviewRequiredChange,
 }: {
   files: LocalAssignmentFile[];
   onChange: (files: LocalAssignmentFile[]) => void;
   disabled?: boolean;
+  reviewRequired: boolean;
+  onReviewRequiredChange: (required: boolean) => void;
 }) {
   const [pdfOpen, setPdfOpen] = useState(false);
   const [selection, setSelection] = useState<Omit<AssignmentFileSelection, 'files'> | null>(null);
@@ -367,7 +383,11 @@ export function AssignmentFilePicker({
   function add(list: FileList | File[] | null) {
     if (!list?.length) return;
     const result = collectLocalFileSelection(files, list);
-    setSelection({ added: result.added, rejected: result.rejected });
+    setSelection((previous) => ({
+      added: result.added,
+      rejected: result.rejected.length || !reviewRequired ? result.rejected : previous?.rejected ?? [],
+    }));
+    if (result.rejected.length) onReviewRequiredChange(true);
     if (result.added) onChange(result.files);
   }
   return (
@@ -478,12 +498,15 @@ export function AssignmentFilePicker({
       <p className={styles.note}>
         網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。
       </p>
-      {files.some(({ file }) => !localAssignmentFileType(file).contentType) ? (
-        <p role="status" className={styles.note}>
-          有照片缺少檔案類型，無法繳交。請刪除該檔案，再選擇有檔案類型的照片。
-        </p>
-      ) : null}
       <AssignmentFilePreview files={files} onChange={onChange} disabled={disabled} />
+      {reviewRequired && (
+        <div>
+          <p>{files.length ? '請確認上方即將繳交的檔案。' : '目前沒有待送出的附件。'}</p>
+          <button type="button" disabled={disabled} onClick={() => onReviewRequiredChange(false)}>
+            確認附件清單
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -518,12 +541,10 @@ export async function uploadAndSubmitFiles(
   if (!files.length && !body.trim()) throw new NuniError(422, 'ASSIGNMENT_FILE_REQUIRED');
   const prepared: LocalAssignmentFile[] = operation.prepared ?? [];
   if (!operation.prepared) {
-    if (files.some(({ file }) => !localAssignmentFileType(file).contentType)) {
-      throw new NuniError(422, 'ASSIGNMENT_FILE_TYPE_REJECTED');
-    }
     for (const item of files) {
-      if (item.kind !== 'image') {
-        prepared.push(item);
+      const kind = validateSelectedAssignmentFile(item.file);
+      if (kind !== 'image') {
+        prepared.push({ ...item, kind });
         continue;
       }
       const compressed = await compressAssignmentImageFile(item.file);
@@ -538,7 +559,6 @@ export async function uploadAndSubmitFiles(
     // Validate the entire batch before the server reserves any staged quota.
     const requests = prepared.map(({ file }, index) => {
       const { kind, contentType } = localAssignmentFileType(file);
-      if (!contentType) throw new NuniError(422, 'ASSIGNMENT_FILE_TYPE_REJECTED');
       assertAssignmentFileSize(kind, file.size);
       if (kind === 'image') images += 1;
       else documents += 1;

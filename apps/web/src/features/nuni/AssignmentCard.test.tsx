@@ -726,6 +726,73 @@ it('previews a photo and shows a late receipt after a confirmed file submit', as
   expect(screen.getByRole('link', { name: '下載' }).getAttribute('href')).toContain('download=1');
 });
 
+it.each(['all rejected', 'partially rejected', 'duplicate'])(
+  'requires confirmation of the actual attachment list before form submission (%s)',
+  async (scenario) => {
+    state.fileSubmit = true;
+    const file = {
+      id: 'cwf_11111111-1111-4111-8111-111111111111',
+      originalName: 'accepted.pdf',
+      contentType: 'application/pdf',
+      byteSize: 3,
+      kind: 'file' as const,
+      uploadPath: 'upload',
+      downloadPath: 'download',
+      downloadExp: '1',
+      downloadSig: 'sig',
+    };
+    const files = scenario === 'all rejected' ? [] : [file];
+    if (scenario !== 'all rejected') {
+      state.request.mockResolvedValueOnce({ intents: [file] });
+      state.upload.mockResolvedValueOnce(file);
+    }
+    state.request.mockResolvedValueOnce({ ...assignment, mySubmission: { ...submission, body: '作業說明', files } });
+    const { container } = render(
+      <AssignmentCard item={assignment} workspace={{ ...workspace, memberRole: 'student' }} reload={reload} />,
+    );
+    const body = screen.getByLabelText('作業內容');
+    fireEvent.change(body, { target: { value: '作業說明' } });
+    const docs = container.querySelector<HTMLInputElement>('input[accept^=".pdf"]')!;
+    const valid = new File(['pdf'], 'accepted.pdf', { type: 'application/pdf' });
+    const missingType = new File(['pdf'], 'missing.pdf');
+    if (scenario === 'duplicate') {
+      fireEvent.change(docs, { target: { files: [valid] } });
+      fireEvent.change(docs, { target: { files: [valid] } });
+    } else {
+      fireEvent.change(docs, {
+        target: { files: scenario === 'all rejected' ? [missingType] : [missingType, valid] },
+      });
+    }
+    const submit = screen.getByRole<HTMLButtonElement>('button', { name: '繳交作業' });
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(submit);
+    fireEvent.submit(body.closest('form')!);
+    expect(state.request).not.toHaveBeenCalled();
+    const list = screen.queryByRole('list', { name: '即將繳交的檔案' });
+    if (scenario === 'all rejected') {
+      expect(list).toBeNull();
+      expect(screen.getByText('目前沒有待送出的附件。')).toBeTruthy();
+    } else {
+      expect(within(list!).getAllByRole('listitem')).toHaveLength(1);
+      expect(list!.textContent).toContain('accepted.pdf');
+    }
+    fireEvent.click(screen.getByRole('button', { name: '確認附件清單' }));
+    expect(submit.disabled).toBe(false);
+    await act(async () => fireEvent.click(submit));
+    if (scenario === 'all rejected') {
+      expect(state.request).toHaveBeenCalledTimes(1);
+      expect(state.request.mock.calls[0][0]).toContain('/submit-files');
+    } else {
+      expect(state.request).toHaveBeenCalledTimes(2);
+      expect(state.request.mock.calls[0][0]).toContain('/files/intents');
+      expect(state.request.mock.calls[1][0]).toContain('/submit-files');
+      expect(state.request.mock.calls[0][2].files).toEqual([
+        expect.objectContaining({ originalName: 'accepted.pdf', contentType: 'application/pdf' }),
+      ]);
+    }
+  },
+);
+
 it('keeps selected files and does not claim success when the network fails', async () => {
   state.fileSubmit = true;
   state.request.mockRejectedValueOnce(new TypeError('Failed to fetch'));

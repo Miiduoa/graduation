@@ -80,11 +80,15 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
   const { user } = useAuth();
 
   const [post, setPost] = useState<CampusPostDoc | null>(null);
-  const postReads = useRef({ started: 0, applied: 0, saved: 0 });
+  const postReads = useRef({ started: 0, settled: 0, confirmed: 0 });
   const postDeletion = useRef<'pending' | 'confirmed' | null>(null);
   const replyDeletions = useRef(new Map<string, 'pending' | 'confirmed'>());
-  const likeRefreshAfter = useRef(0);
-  const [refreshError, setRefreshError] = useState(false);
+  const replyReads = useRef({ started: 0, settled: 0, confirmed: 0 });
+  const [editNeedsRefresh, setEditNeedsRefresh] = useState(false);
+  const [postRefreshError, setPostRefreshError] = useState(false);
+  const [repliesRefreshError, setRepliesRefreshError] = useState(false);
+  const refreshError = postRefreshError || repliesRefreshError;
+  const editBlocked = editNeedsRefresh || postRefreshError;
   const [likeNeedsRefresh, setLikeNeedsRefresh] = useState(false);
   const [replies, setReplies] = useState<CampusReply[]>([]);
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
@@ -157,36 +161,54 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     }
   };
 
-  const loadPost = useCallback(async () => {
+  const loadPost = useCallback(async (source: 'default' | 'server' = 'server') => {
     if (!postId || !schoolId) return;
     const reads = postReads.current;
-    for (;;) {
-      const request = ++reads.started;
-      const row = await getCampusPostById(schoolId, postId);
-      if (postDeletion.current === 'confirmed' || request < reads.applied) return;
-      // Refresh counts and other fields from a snapshot after the confirmed edit.
-      if (request < reads.saved) continue;
-      reads.applied = request;
+    const request = ++reads.started;
+    // A read started before the latest confirmed write cannot replace its result.
+    const isCurrent = () =>
+      postDeletion.current !== 'confirmed' && request > Math.max(reads.settled, reads.confirmed);
+    try {
+      const row = await getCampusPostById(schoolId, postId, source);
+      if (!isCurrent()) return;
+      reads.settled = request;
       setPost(row ? { ...row, title: row.title ?? '' } : null);
-      if (request > likeRefreshAfter.current) {
-        likeRefreshAfter.current = 0;
-        setLikeNeedsRefresh(false);
-      }
-      return;
+      setPostRefreshError(false);
+      setEditNeedsRefresh(false);
+      setLikeNeedsRefresh(false);
+    } catch (error) {
+      if (source === 'default') throw error;
+      if (!isCurrent()) return;
+      reads.settled = request;
+      setPostRefreshError(true);
     }
   }, [postId, schoolId]);
 
-  const loadReplies = useCallback(async () => {
+  const loadReplies = useCallback(async (source: 'default' | 'server' = 'server') => {
     if (!postId || !schoolId) return;
-    const rows = await listCampusReplies(schoolId, postId);
-    setReplies(rows.map((reply) =>
-      replyDeletions.current.get(reply.id) === 'confirmed' ? deletedReply(reply) : reply,
-    ));
+    const reads = replyReads.current;
+    const request = ++reads.started;
+    const isCurrent = () => request > Math.max(reads.settled, reads.confirmed);
+    try {
+      const rows = await listCampusReplies(schoolId, postId, source);
+      if (!isCurrent()) return;
+      reads.settled = request;
+      setReplies(rows.map((reply) =>
+        replyDeletions.current.get(reply.id) === 'confirmed' ? deletedReply(reply) : reply,
+      ));
+      setRepliesRefreshError(false);
+    } catch (error) {
+      if (source === 'default') throw error;
+      if (!isCurrent()) return;
+      reads.settled = request;
+      setRepliesRefreshError(true);
+    }
   }, [postId, schoolId]);
 
-  const refreshAfterWrite = async (...reads: (() => Promise<void>)[]) => {
-    const results = await Promise.allSettled(reads.map((read) => read()));
-    if (results.some((result) => result.status === 'rejected')) setRefreshError(true);
+  const refreshThreadAfterWrite = async () => {
+    postReads.current.confirmed = postReads.current.started;
+    replyReads.current.confirmed = replyReads.current.started;
+    await Promise.all([loadPost(), loadReplies()]);
   };
 
   const hydrateProfiles = useCallback(async () => {
@@ -216,7 +238,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     (async () => {
       setLoading(true);
       try {
-        await Promise.all([loadPost(), loadReplies()]);
+        await Promise.all([loadPost('default'), loadReplies('default')]);
       } catch {
         setLoadError('無法讀取貼文，請確認連線與學校資格後重試。');
       } finally {
@@ -263,7 +285,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
       });
       setReplyText('');
       setReplyParentId(null);
-      await refreshAfterWrite(loadReplies, loadPost);
+      await refreshThreadAfterWrite();
     } catch {
       alert('這次未能送出，請稍後再試。');
     } finally {
@@ -276,9 +298,9 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
     setLikeBusy(true);
     try {
       await toggleCampusPostLike(schoolId, postId, user.uid);
-      likeRefreshAfter.current = postReads.current.started;
+      postReads.current.confirmed = postReads.current.started;
       setLikeNeedsRefresh(true);
-      await refreshAfterWrite(loadPost);
+      await loadPost();
     } catch {
       alert('這次未能按讚，請稍後再試。');
     } finally {
@@ -337,7 +359,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
       replyDeletions.current.set(r.id, 'confirmed');
       setReplies((current) => current.map((reply) => reply.id === r.id ? deletedReply(reply) : reply));
       setReplyParentId((current) => current === r.id ? null : current);
-      await refreshAfterWrite(loadReplies, loadPost);
+      await refreshThreadAfterWrite();
     })();
   };
 
@@ -369,7 +391,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
           onClick={() => {
             setLoadError('');
             setLoading(true);
-            void Promise.all([loadPost(), loadReplies()])
+            void Promise.all([loadPost('default'), loadReplies('default')])
               .catch(() => setLoadError('無法讀取貼文，請稍後重試。'))
               .finally(() => setLoading(false));
           }}
@@ -417,14 +439,15 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
 
   return (
     <div style={{ maxWidth: 720 }}>
+      {editNeedsRefresh && !refreshError && <p role="status">正在重新讀取貼文，更新後即可編輯。</p>}
       {refreshError && (
         <p role="status">
           操作已完成，但部分資料無法更新。{' '}
+          {editBlocked && '請重新讀取貼文後再編輯。 '}
           <button
             type="button"
             onClick={() => {
-              setRefreshError(false);
-              void refreshAfterWrite(loadPost, loadReplies);
+              void Promise.all([loadPost(), loadReplies()]);
             }}
           >
             重新讀取
@@ -473,6 +496,7 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
               <>
                 <button
                   type="button"
+                  disabled={editBlocked}
                   onClick={() => setEditSession({ scope: bookmarkScope, open: true })}
                   style={btnGhost}
                 >
@@ -741,9 +765,11 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
           }
           onSubmit={(patch) => updateCampusPost(schoolId, postId, patch)}
           onSaved={(patch) => {
-            postReads.current.saved = ++postReads.current.started;
+            postReads.current.confirmed = postReads.current.started;
+            setEditNeedsRefresh(true);
             setEditSession(null);
             setPost((current) => (current?.id === postId ? { ...current, ...patch } : current));
+            void loadPost();
           }}
         />
       )}

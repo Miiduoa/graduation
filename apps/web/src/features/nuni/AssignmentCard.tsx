@@ -127,6 +127,7 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
   const saved = savedSnapshot?.version === syncVersion ? savedSnapshot?.value ?? null : null;
   const setSaved = (value: NuniAssignment) => setSavedSnapshot({ value, version: syncVersion });
   const [localFiles, setLocalFiles] = useState<LocalAssignmentFile[]>([]);
+  const [fileReviewRequired, setFileReviewRequired] = useState(false);
   useAssignmentFilePreviews(localFiles);
   const fileOperation = useRef<AssignmentFileOperation>({});
   const [recovering, setRecovering] = useState(false);
@@ -367,6 +368,7 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
           <MutationForm
             label={assignment.mySubmission ? '更新繳交內容' : '繳交作業'}
             success={submissionNotice}
+            submitDisabled={fileSubmit && fileReviewRequired}
             submit={async (data, key) => {
               if (bodyChanged && bodyDispatched.current !== key)
                 throw new NuniError(409, 'ASSIGNMENT_SUBMISSION_CHANGED');
@@ -500,6 +502,8 @@ function Assignment({ item, workspace, onConfirmed, syncVersion, receiptActive =
             {fileSubmit ? (
               <AssignmentFilePicker
                 files={localFiles}
+                reviewRequired={fileReviewRequired}
+                onReviewRequiredChange={setFileReviewRequired}
                 onChange={(files) => {
                   if (bodyPristine)
                     setBodyEditor({ version: bodyVersion, original: currentBody, text: currentBody });

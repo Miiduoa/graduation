@@ -14,11 +14,19 @@ const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototyp
 
 function Picker({ initial = [] }: { initial?: LocalAssignmentFile[] }) {
   const [files, setFiles] = useState(initial);
+  const [reviewRequired, setReviewRequired] = useState(false);
   const [visible, setVisible] = useState(true);
   useAssignmentFilePreviews(files);
   return (
     <>
-      {visible && <AssignmentFilePicker files={files} onChange={setFiles} />}
+      {visible && (
+        <AssignmentFilePicker
+          files={files}
+          onChange={setFiles}
+          reviewRequired={reviewRequired}
+          onReviewRequiredChange={setReviewRequired}
+        />
+      )}
       <button type="button" onClick={() => setFiles([])}>
         清空附件
       </button>
@@ -221,6 +229,7 @@ it('lists every file that could not be added while keeping existing and accepted
   expect(accepted.textContent).toContain('新文件.pdf');
   expect(accepted.textContent).not.toContain('超額文件.pdf');
   expect(docs.value).toBe('');
+  expect(screen.getByRole('button', { name: '確認附件清單' })).toBeTruthy();
 });
 
 it('explains a full photo allowance and lets the same rejected photo be added after space is freed', () => {
@@ -237,6 +246,7 @@ it('explains a full photo allowance and lets the same rejected photo be added af
 
   const accepted = screen.getByRole('list', { name: '即將繳交的檔案' });
   fireEvent.click(within(accepted).getAllByRole('button', { name: '刪除' })[0]!);
+  fireEvent.click(screen.getByRole('button', { name: '確認附件清單' }));
   addPhotos(view.container, ['第9頁.jpg']);
   expect(screen.getByRole('status').textContent).toBe('已加入 1 個檔案。');
   expect(screen.queryByRole('list', { name: '未加入的檔案' })).toBeNull();
@@ -248,7 +258,7 @@ it('explains a full photo allowance and lets the same rejected photo be added af
 it('keeps selected attachments when a file chooser is cancelled or only unsupported files are chosen', () => {
   const initial = collectLocalFiles([], [photo('保留.jpg')]);
   const change = vi.fn();
-  const view = render(<AssignmentFilePicker files={initial} onChange={change} />);
+  const view = render(<AssignmentFilePicker files={initial} onChange={change} reviewRequired={false} onReviewRequiredChange={vi.fn()} />);
   const docs = view.container.querySelector<HTMLInputElement>(
     'input[type="file"][accept^=".pdf"]',
   )!;
@@ -259,4 +269,23 @@ it('keeps selected attachments when a file chooser is cancelled or only unsuppor
   expect(change).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: '放大預覽 保留.jpg' })).toBeTruthy();
   expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+});
+
+it('requires review when every file is rejected or a selected file is chosen again', () => {
+  const view = render(<Picker />);
+  const docs = view.container.querySelector<HTMLInputElement>('input[accept^=".pdf"]')!;
+  fireEvent.change(docs, { target: { files: [new File(['pdf'], 'report.pdf')] } });
+  expect(screen.getByText('目前沒有待送出的附件。')).toBeTruthy();
+  expect(screen.queryByRole('list', { name: '即將繳交的檔案' })).toBeNull();
+
+  const valid = photo('same.jpg');
+  const album = view.container.querySelector<HTMLInputElement>('input[type="file"][multiple][accept="image/*"]')!;
+  fireEvent.change(album, { target: { files: [valid, valid] } });
+  const accepted = screen.getByRole('list', { name: '即將繳交的檔案' });
+  expect(within(accepted).getAllByRole('listitem')).toHaveLength(1);
+  fireEvent.change(album, { target: { files: [valid] } });
+  expect(screen.getByRole('status').textContent).toContain('這個檔案已在待送出清單中');
+  expect(within(accepted).getAllByRole('listitem')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: '確認附件清單' }));
+  expect(screen.queryByRole('button', { name: '確認附件清單' })).toBeNull();
 });

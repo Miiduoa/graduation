@@ -34,78 +34,54 @@ describe('collectLocalFiles', () => {
     expect(next.some((item) => item.file.name.endsWith('.exe'))).toBe(false);
   });
 
-  it.each([
-    'jpg',
-    'jpeg',
-    'png',
-    'webp',
-    'heic',
-    'heif',
-    'JPG',
-    'pdf',
-    'doc',
-    'docx',
-    'txt',
-    'zip',
-  ])('keeps a MIME-less .%s in the document quota without a preview', (extension) => {
-    const original = file(`attachment.${extension}`, '');
-    const selection = collectLocalFileSelection([], [original]);
-    expect(selection.added).toBe(1);
-    expect(selection.rejected).toEqual([]);
-    expect(selection.files[0]).toMatchObject({ kind: 'file', previewUrl: undefined });
-    expect(selection.files[0]?.file).toBe(original);
-  });
-
-  it.each(['photo.gif', 'photo.bmp', 'photo.tiff', 'photo.svg', 'photo.avif', 'photo'])(
-    'rejects unsupported MIME-less attachment %s',
-    (name) => {
+  it.each(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'JPG', 'pdf', 'doc', 'docx', 'txt', 'zip', 'exe'])(
+    'rejects a MIME-less .%s before it reserves quota',
+    (extension) => {
+      const name = `attachment.${extension}`;
       const selection = collectLocalFileSelection([], [file(name, '')]);
-      expect(selection.added).toBe(0);
+      expect(selection.files).toEqual([]);
       expect(selection.rejected).toEqual([
-        { name, reason: '格式不支援，或副檔名與檔案格式不一致。' },
+        { name, reason: '瀏覽器未提供檔案類型，請另存後重新選取。' },
       ]);
     },
   );
 
-  it.each([
-    [0, 0, 4],
-    [8, 0, 2],
-    [0, 2, 2],
-    [8, 2, 0],
-  ])(
+  it.each([[0, 0], [8, 0], [0, 2], [8, 2]])(
     'uses independent quotas with %i photos and %i documents already selected',
-    (images, docs, added) => {
-      const existing = collectLocalFiles(
-        [],
-        [
-          ...Array.from({ length: images }, (_, index) =>
-            file(`existing-${index}.jpg`, 'image/jpeg'),
-          ),
-          ...Array.from({ length: docs }, (_, index) =>
-            file(`existing-${index}.pdf`, 'application/pdf'),
-          ),
-        ],
-      );
+    (images, docs) => {
+      const existing = collectLocalFiles([], [
+        ...Array.from({ length: images }, (_, index) => file(`existing-${index}.jpg`, 'image/jpeg')),
+        ...Array.from({ length: docs }, (_, index) => file(`existing-${index}.pdf`, 'application/pdf')),
+      ]);
       const selection = collectLocalFileSelection(existing, [
         file('unknown.jpg', ''),
         file('unknown.docx', ''),
-        file('extra.webp', ''),
         file('declared.pdf', 'application/pdf'),
         file('declared.png', 'image/png'),
-        file('declared.jpg', 'image/jpeg'),
       ]);
-      expect(selection.added).toBe(added);
       expect(selection.files.slice(0, existing.length)).toEqual(existing);
-      expect(selection.files.slice(existing.length).map((item) => item.file.name)).toEqual([
-        ...(docs === 0 ? ['unknown.jpg', 'unknown.docx'] : []),
-        ...(images === 0 ? ['declared.png', 'declared.jpg'] : []),
+      expect(selection.files.slice(existing.length).map(({ file }) => file.name)).toEqual([
+        ...(docs === 0 ? ['declared.pdf'] : []),
+        ...(images === 0 ? ['declared.png'] : []),
       ]);
-      expect(selection.rejected.map((item) => item.reason)).toEqual([
-        ...Array(docs === 0 ? 2 : 4).fill('文件最多 2 個，請先刪除不需要的文件。'),
-        ...Array(images === 0 ? 0 : 2).fill('照片最多 8 張，請先刪除不需要的照片。'),
+      expect(selection.rejected.map(({ name }) => name)).toEqual([
+        'unknown.jpg', 'unknown.docx', ...(docs ? ['declared.pdf'] : []), ...(images ? ['declared.png'] : []),
       ]);
     },
   );
+
+  it('leaves the quota available when empty or oversized files are rejected', () => {
+    const oversized = file('large.pdf', 'application/pdf');
+    Object.defineProperty(oversized, 'size', { value: 20 * 1024 * 1024 + 1 });
+    const selection = collectLocalFileSelection([], [
+      file('empty.jpg', 'image/jpeg', 0),
+      file('blank.pdf', '   '),
+      oversized,
+      file('valid.pdf', 'application/pdf'),
+    ]);
+    expect(selection.files.map(({ file }) => file.name)).toEqual(['valid.pdf']);
+    expect(selection.rejected.map(({ name }) => name)).toEqual(['empty.jpg', 'blank.pdf', 'large.pdf']);
+  });
 
   it('does not override an explicitly mismatched MIME to accept a file', () => {
     const selection = collectLocalFileSelection([], [file('wrong.png', 'application/pdf')]);
@@ -168,45 +144,12 @@ describe('compressAssignmentImageFile', () => {
 });
 
 describe('uploadAndSubmitFiles', () => {
-  it.each([
-    [false, 7, 7],
-    [true, 7, 7],
-    [false, 8, 8],
-    [true, 8, 8],
-    [false, 9, 8],
-    [true, 9, 8],
-  ])('preflights the whole batch (photos first: %s, incoming photos: %i)', async (
-    photosFirst, incomingPhotos, acceptedPhotos,
-  ) => {
-    const decode = vi.fn();
-    vi.stubGlobal('createImageBitmap', decode);
-    const photos = Array.from({ length: incomingPhotos }, (_, index) =>
-      file(`shot-${index}.jpg`, 'image/jpeg'),
-    );
-    const documents = [file('unknown.webp', ''), file('notes.pdf', ''), file('extra.txt', 'text/plain')];
-    const [first, second] = photosFirst ? [photos, documents] : [documents, photos];
-    const initial = collectLocalFileSelection([], first);
-    const selection = collectLocalFileSelection(initial.files, second);
-    expect(selection.files.filter(({ kind }) => kind === 'image')).toHaveLength(acceptedPhotos);
-    expect(selection.files.filter(({ kind }) => kind === 'file')).toHaveLength(2);
-    expect(initial.rejected.length + selection.rejected.length).toBe(1 + incomingPhotos - acceptedPhotos);
-    const createAssignmentFileIntents = vi.fn();
-    const uploadAssignmentFile = vi.fn();
-    const submitFiles = vi.fn();
-    await expect(uploadAndSubmitFiles(
-      { createAssignmentFileIntents, uploadAssignmentFile, submitFiles } as never,
-      'workspace', 'assignment', '', selection.files, 'key',
-    )).rejects.toMatchObject({ code: 'ASSIGNMENT_FILE_TYPE_REJECTED' });
-    expect(decode).not.toHaveBeenCalled();
-    expect(createAssignmentFileIntents).not.toHaveBeenCalled();
-    expect(uploadAssignmentFile).not.toHaveBeenCalled();
-    expect(submitFiles).not.toHaveBeenCalled();
-  });
-
-  it('uploads exactly eight declared photos and two documents using the server MIME types', async () => {
+  it('uploads the accepted batch with the original MIME declarations', async () => {
     const files = collectLocalFiles([], [
-      ...Array.from({ length: 8 }, (_, index) => file(`shot-${index}.jpg`, 'image/jpeg')),
-      file('notes.pdf', ''),
+      ...Array.from({ length: 8 }, (_, index) => file(`shot-${index}.jpg`, index === 0 ? 'image/jpg' : 'image/jpeg')),
+      file('missing.webp', ''),
+      file('missing.pdf', ''),
+      file('notes.pdf', 'application/pdf'),
       file('extra.txt', 'text/plain'),
     ]);
     const createAssignmentFileIntents = vi.fn(async (_workspace: string, _assignment: string, input: {
@@ -221,7 +164,7 @@ describe('uploadAndSubmitFiles', () => {
       'workspace', 'assignment', '', files, 'key',
     );
     expect(createAssignmentFileIntents.mock.calls[0]?.[2].files.map(({ contentType }) => contentType))
-      .toEqual([...Array(8).fill('image/jpeg'), 'application/pdf', 'text/plain']);
+      .toEqual(['image/jpg', ...Array(7).fill('image/jpeg'), 'application/pdf', 'text/plain']);
     expect(uploadAssignmentFile).toHaveBeenCalledTimes(10);
     expect(submitFiles).toHaveBeenCalledOnce();
   });
@@ -242,6 +185,18 @@ describe('uploadAndSubmitFiles', () => {
       kind: 'file' as const,
       code: 'ASSIGNMENT_FILE_SIZE_REJECTED',
     },
+    ...[
+      file('report.pdf', ''),
+      file('blank.pdf', '   '),
+      file('missing.jpg', ''),
+      file('binary.pdf', 'application/octet-stream'),
+      file('mismatch.png', 'application/pdf'),
+      file('unsupported.exe', 'application/pdf'),
+    ].map((invalid) => ({
+      files: [file('valid.pdf', 'application/pdf'), invalid],
+      kind: 'file' as const,
+      code: 'ASSIGNMENT_FILE_TYPE_REJECTED',
+    })),
   ])('creates no intents for a batch rejected with $code', async ({ files, kind, code }) => {
     const createAssignmentFileIntents = vi.fn();
     await expect(

@@ -28,6 +28,7 @@ import {
   getDoc,
   getDocFromServer,
   getDocs,
+  getDocsFromServer,
   increment,
   limit,
   orderBy,
@@ -208,9 +209,11 @@ export async function deleteCampusPost(schoolId: string, postId: string) {
 export async function getCampusPostById(
   schoolId: string,
   postId: string,
+  source: 'default' | 'server' = 'default',
 ): Promise<CampusPostDoc | null> {
   const db = getDb();
-  const snap = await getDoc(doc(db, 'schools', schoolId, 'campusPosts', postId));
+  const read = source === 'server' ? getDocFromServer : getDoc;
+  const snap = await read(doc(db, 'schools', schoolId, 'campusPosts', postId));
   if (!snap.exists()) return null;
   return { id: snap.id, ...(snap.data() as Omit<CampusPostDoc, 'id'>) };
 }
@@ -266,14 +269,16 @@ export async function addCampusReply(
 export async function listCampusReplies(
   schoolId: string,
   postId: string,
+  source: 'default' | 'server' = 'default',
 ): Promise<CampusReply[]> {
   const db = getDb();
   const replies = collection(db, 'schools', schoolId, 'campusPosts', postId, 'replies');
+  const read = source === 'server' ? getDocsFromServer : getDocs;
   try {
-    const snap = await getDocs(query(replies, orderBy('createdAt', 'asc'), limit(120)));
+    const snap = await read(query(replies, orderBy('createdAt', 'asc'), limit(120)));
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CampusReply, 'id'>) }));
   } catch {
-    const snap = await getDocs(query(replies, limit(120)));
+    const snap = await read(query(replies, limit(120)));
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CampusReply, 'id'>) }));
   }
 }
