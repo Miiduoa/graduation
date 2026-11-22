@@ -1293,6 +1293,15 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
         // or partial representation into a trusted 3D building snapshot.
         const contentRange = response.headers?.get('content-range') ?? null;
         const contentLength = response.headers?.get('content-length') ?? null;
+        // This endpoint emits JSON. Reject an explicit captive portal / HTML
+        // login or binary body *before* reading a stalled mobile response.
+        // text/plain and application/*+json remain compatible with older
+        // proxies; their payloads still require complete OSM validation.
+        const declaredContentType = response.headers?.get('content-type') ?? null;
+        const mime = declaredContentType?.split(';', 1)[0].trim().toLowerCase();
+        const invalidContentType = mime !== undefined &&
+          mime !== 'application/json' && mime !== 'text/plain' &&
+          !/^application\/[a-z0-9][a-z0-9!#$&^_.+-]*\+json$/.test(mime);
         // The public API emits identity JSON. Fetch can also expose responses
         // transparently decoded by the browser with a single coding. A proxy's
         // unknown or stacked coding prevents trustworthy response framing:
@@ -1308,7 +1317,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
             !Number.isSafeInteger(Number(contentLength)) ||
             Number(contentLength) > MAX_DECLARED_FOOTPRINT_BYTES);
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
-            contentRange !== null || invalidContentLength || invalidContentCoding) {
+            contentRange !== null || invalidContentLength || invalidContentCoding || invalidContentType) {
           // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
           // can still stream a large body; release it without awaiting an
           // uncooperative proxy, rather than waste mobile bandwidth/memory.
@@ -1336,7 +1345,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
             status < 300 && status !== 200;
           const rateLimitedOrIncomplete = invalidSuccessStatus || status === 304 || status === 408 ||
             status === 429 || (typeof status === 'number' && status >= 500 && status <= 599) ||
-            contentRange !== null || invalidContentLength || invalidContentCoding;
+            contentRange !== null || invalidContentLength || invalidContentCoding || invalidContentType;
           // A proxy can return an incomplete 206/Content-Range document or
           // a 408 without Retry-After. These responses cannot be trusted as
           // complete OSM geometry and should not trigger a manual retry loop.
@@ -1346,7 +1355,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
           const fallbackBackoff = invalidSuccessStatus || status === 304 ||
             status === 408 || status === 429 || status === 502 ||
             status === 503 || status === 504 || contentRange !== null || invalidContentLength ||
-            invalidContentCoding;
+            invalidContentCoding || invalidContentType;
           const seconds = rateLimitedOrIncomplete
             ? (footprintCooldownSeconds(response) ?? (fallbackBackoff ? 60 : null))
             : null;

@@ -3350,12 +3350,39 @@ it.each(footprintContentTypes.flatMap((contentType) =>
   render(<CampusSpatialExplorer school="pu" locations={[library]}
     selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  const valid = payload === 'valid';
+  const incompatible = contentType === 'text/html' || contentType === 'application/octet-stream';
+  const valid = payload === 'valid' && !incompatible;
   expect(await within(dialog).findByText(valid ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(read).toHaveBeenCalledOnce();
+  expect(read).toHaveBeenCalledTimes(incompatible ? 0 : 1);
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(valid ? buildings : []);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
+
+it.each(['text/html', 'application/octet-stream', 'application/json, text/html', ''])(
+  'rejects a stalled 200 footprint response with Content-Type %j before reading its body',
+  async (contentType) => {
+    const { library, body } = sourcedLibraryFootprintFixture();
+    let cancelled = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode(body)); },
+      cancel() { cancelled += 1; },
+    });
+    const response = new Response(stream, { status: 200, headers: { 'Content-Type': contentType } });
+    const read = vi.spyOn(response.body!, 'getReader');
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]}
+      selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    await waitFor(() => expect(cancelled).toBe(1));
+    expect(read).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  },
+);
 
 it('reads the final successful outline response after a redirect', async () => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
