@@ -90,3 +90,31 @@ test.each([
     schoolId: 'pu', ownerUid: 'alice', [field]: '', updatedAt: 'SERVER_TIME',
   }, { merge: true });
 });
+
+test.each([
+  [
+    'uncommitted local server snapshot',
+    { ...snap({ ...card, linkUrl: '' }), metadata: { hasPendingWrites: true } },
+    'pending writes',
+  ],
+  [
+    'wrong-school server snapshot',
+    snap({ ...card, schoolId: 'other-school', linkUrl: '' }),
+    'scope mismatch',
+  ],
+] as const)('clearing a legacy link never confirms from an %s', async (_scenario, snapshot, message) => {
+  jest.mocked(setDoc).mockResolvedValue(undefined);
+  jest.mocked(getDocFromServer).mockResolvedValue(snapshot as never);
+
+  await expect(saveCreatorCard('pu', 'alice', { ...card, linkUrl: '' }, ['linkUrl']))
+    .rejects.toThrow(message);
+
+  // The service must not retry an ambiguous write internally. Its caller
+  // decides when to re-read the committed server state before another save.
+  expect(setDoc).toHaveBeenCalledTimes(1);
+  expect(setDoc).toHaveBeenCalledWith('schools/pu/creatorProfiles/alice', {
+    schoolId: 'pu', ownerUid: 'alice', linkUrl: '', updatedAt: 'SERVER_TIME',
+  }, { merge: true });
+  expect(getDocFromServer).toHaveBeenCalledTimes(1);
+  expect(getDocFromServer).toHaveBeenCalledWith('schools/pu/creatorProfiles/alice');
+});
