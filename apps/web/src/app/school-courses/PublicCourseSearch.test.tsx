@@ -992,7 +992,8 @@ it.each([
   { title: '另一學期', code: '130021', section: 'b', semester: '1152' },
   { title: '缺少學分', code: '130021', credits: '' },
   { title: '全形班別', section: 'ａ' },
-  { title: '大寫班別', section: 'A' },
+  { title: '大寫班別、教師不同', section: 'A', teacher: '另一位老師' },
+  { title: '大寫班別、時段不同', section: 'A', time: '3cd' },
 ])('does not create a batch draft containing $title', async (second) => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([
     course,

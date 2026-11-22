@@ -28,10 +28,10 @@ export function mergePublicCourseTimetableCsv(
         typeof course.section !== 'string' ||
         typeof course.credits !== 'string' || !course.credits.trim()) return null;
 
-    // Compare identifiers as the import parser reads them from the CSV.
+    // Match the personal import deduplication rules for class names.
     const identity = JSON.stringify([
       normalizePersonalImportText(course.code),
-      normalizePersonalImportText(course.section),
+      normalizePersonalImportText(course.section).replace(/\s+/g, ' ').toLowerCase(),
     ]);
     if (seen.has(identity)) return null;
     seen.add(identity);

@@ -87,6 +87,15 @@ describe('multi-course public timetable review', () => {
     ])).not.toBeNull();
   });
 
+  it.each([{ teacher: '另一位老師' }, { time: '3cd' }])(
+    'rejects a case-only NCNU section duplicate with different listing details %j',
+    (details) => {
+      expect(mergePublicCourseTimetableCsv('ncnu', [
+        ncnu, { ...ncnu, ...details, section: 'A' },
+      ])).toBeNull();
+    },
+  );
+
   it('requires two through ten selected courses and never truncates the eleventh', () => {
     expect(mergePublicCourseTimetableCsv('ncnu', [])).toBeNull();
     expect(mergePublicCourseTimetableCsv('ncnu', [ncnu])).toBeNull();
