@@ -1191,6 +1191,38 @@ it.each([
   },
 );
 
+it.each(['first confirmation', 'same account', 'logout then different account'] as const)(
+  'checks a draft typed during failed platform verification on %s',
+  (outcome) => {
+    const accountA = { platformAccountId: 'platform-a', isPlatformOperator: false };
+    auth.session = outcome === 'first confirmation' ? null : accountA;
+    auth.error = outcome === 'first confirmation' ? 'Session unavailable' : '';
+    const view = render(<CampusServiceMenu />);
+    auth.session = null;
+    auth.error = 'Session unavailable';
+    view.rerender(<CampusServiceMenu />);
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+    const origin = captureMenuOrigin();
+    expect(origin.state).toHaveProperty(MENU_RETURN_STATE_KEY);
+    visitMenuDestination('/library');
+    view.rerender(<CampusServiceMenu />);
+    if (outcome === 'logout then different account') {
+      auth.pendingLogout = true;
+      view.rerender(<CampusServiceMenu />);
+      auth.pendingLogout = false;
+    }
+    auth.error = '';
+    auth.session = outcome === 'same account' ? accountA : { ...accountA, platformAccountId: 'platform-b' };
+    view.rerender(<CampusServiceMenu />);
+    returnToMenuOrigin(origin);
+    view.rerender(<CampusServiceMenu />);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(outcome === 'same account');
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(outcome === 'same account' ? '借書' : '');
+  },
+);
+
 it('waits for the Next route and account confirmation before restoring a pending return', () => {
   auth.session = { platformAccountId: 'a', isPlatformOperator: false };
   const routerTree = { segment: 'map', children: ['unchanged'] };
@@ -1649,13 +1681,14 @@ it.each(['account', 'campus', 'temporary failure', 'different account', 'differe
 it.each([
   ['account', false],
   ['campus', false],
+  ['different campus', false],
   ['account', true],
 ] as const)(
   'saves a return before %s confirmation (dismiss before confirmation: %s)',
   (pending, dismiss) => {
     const school = { id: 'pu', name: '靜宜大學' };
     auth.loading = pending === 'account';
-    if (pending === 'campus') {
+    if (pending !== 'account') {
       selection.current = { loading: true, catalogStatus: 'loading', selectedSchool: null };
     }
     const view = render(<CampusServiceMenu />);
@@ -1683,22 +1716,27 @@ it.each([
     }
     auth.loading = false;
     if (pending === 'account') auth.session = { platformAccountId: 'a', isPlatformOperator: false };
-    else selection.current = { loading: false, catalogStatus: 'ready', selectedSchool: school };
+    else selection.current = {
+      loading: false,
+      catalogStatus: 'ready',
+      selectedSchool: pending === 'campus' ? school : { id: 'nthu', name: '清華大學' },
+    };
     view.rerender(<CampusServiceMenu />);
-    expect(screen.getByText('所有服務').closest('details')!.open).toBe(!dismiss);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(pending === 'campus');
     if (dismiss) {
       expect(window.history.state).not.toHaveProperty(MENU_RETURN_STATE_KEY);
       expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
       return;
     }
+    if (pending !== 'campus') {
+      expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
+      expect(sessionStorage.getItem('campus.menu.return.v1')).toBeNull();
+      return;
+    }
     expect(
       screen.getByRole('button', { name: '篩選學習與課務' }).getAttribute('aria-pressed'),
     ).toBe('true');
-    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe(
-      pending === 'account' ? '教材' : '',
-    );
-    if (pending === 'campus') {
-      expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
-    }
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
+    expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
   },
 );

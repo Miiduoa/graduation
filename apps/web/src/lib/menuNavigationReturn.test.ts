@@ -225,6 +225,46 @@ it.each(['same', 'schoolOwner', 'platformOwner', 'campus'] as const)(
   },
 );
 
+it.each([
+  ['campus', 'draft'],
+  ['schoolOwner', 'draft'],
+  ['platformOwner', 'draft'],
+  ['campus', 'confirmation'],
+  ['schoolOwner', 'confirmation'],
+  ['platformOwner', 'confirmation'],
+] as const)('does not bind a new draft with %s missing at %s', async (field, missingAt) => {
+  const menu = await loadDocument();
+  const complete = { campus: 'pu', schoolOwner: 'school-a', platformOwner: 'platform-a' };
+  const partial = { ...complete, [field]: undefined };
+  menu.setMenuReturnScope(undefined, missingAt === 'draft' ? partial : complete);
+  menu.rememberMenuReturn(destination, { ...draft, expanded: [...draft.expanded] });
+  const originState = window.history.state;
+  window.history.pushState({}, '', destination);
+  // Learning the field later during verification cannot change the original binding.
+  menu.setMenuReturnScope(undefined, complete);
+  menu.setMenuReturnScope(draft.scope, missingAt === 'confirmation' ? partial : complete);
+  backToOrigin(originState);
+  expect(menu.getMenuReturn()).toBeNull();
+  expect(sessionStorage.length).toBe(0);
+});
+
+it('does not carry the public legacy exception over to newly entered text', async () => {
+  const menu = await loadDocument();
+  menu.setMenuReturnScope(undefined, { campus: 'pu', schoolOwner: 'school-a' });
+  menu.rememberMenuReturn(destination, { ...draft, expanded: [...draft.expanded] }, true);
+  menu.rememberMenuReturn(destination, { ...draft, query: 'new text', expanded: [] });
+  const originState = window.history.state;
+  window.history.pushState({}, '', destination);
+  menu.setMenuReturnScope('different-account', {
+    campus: 'pu',
+    schoolOwner: 'school-a',
+    platformOwner: 'platform-b',
+  });
+  backToOrigin(originState);
+  expect(menu.getMenuReturn()).toBeNull();
+  expect(sessionStorage.length).toBe(0);
+});
+
 it.each(['same', 'different'] as const)(
   'acknowledges a bound legacy draft before campus confirmation and checks its original scope (%s)',
   async (outcome) => {

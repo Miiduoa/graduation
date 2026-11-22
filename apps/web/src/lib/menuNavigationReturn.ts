@@ -32,6 +32,12 @@ function boundaryChanged(previous: MenuReturnBoundary, next: MenuReturnBoundary)
   );
 }
 
+function sameBoundary(previous: MenuReturnBoundary, next: MenuReturnBoundary) {
+  return boundaryFields.every(
+    (field) => previous[field] !== undefined && previous[field] === next[field],
+  );
+}
+
 function validBoundary(value: unknown): value is MenuReturnBoundary {
   return (
     !!value &&
@@ -200,10 +206,11 @@ export function setMenuReturnScope(
   if (typeof scope === 'string' || changed) lastConfirmedScope = scope ?? undefined;
   if (scope === null) lastBoundary = undefined;
   else if (boundary) {
+    const previousBoundary = changed ? undefined : lastBoundary;
     lastBoundary = {
-      campus: boundary.campus ?? lastBoundary?.campus,
-      schoolOwner: boundary.schoolOwner ?? lastBoundary?.schoolOwner,
-      platformOwner: boundary.platformOwner ?? lastBoundary?.platformOwner,
+      campus: boundary.campus ?? previousBoundary?.campus,
+      schoolOwner: boundary.schoolOwner ?? previousBoundary?.schoolOwner,
+      platformOwner: boundary.platformOwner ?? previousBoundary?.platformOwner,
     };
   }
   loadSnapshots();
@@ -214,11 +221,21 @@ export function setMenuReturnScope(
     forgetDirectorySearch('menu');
   } else if (typeof scope === 'string' && previousScope !== scope) {
     for (const [token, snapshot] of snapshots) {
+      const previous = snapshot.provisionalBoundary;
       if (
-        snapshot.provisionalBoundary &&
+        previous &&
         boundary &&
-        (snapshot.legacyScope === undefined || snapshot.legacyScope === scope) &&
-        !boundaryChanged(snapshot.provisionalBoundary, boundary)
+        snapshot.publicLegacy &&
+        !boundaryChanged(previous, boundary)
+      ) {
+        // Public legacy drafts remain public, with the confirmed boundary as a guard.
+        snapshot.provisionalBoundary = boundary;
+      } else if (
+        previous &&
+        boundary &&
+        (snapshot.legacyScope !== undefined
+          ? snapshot.legacyScope === scope && !boundaryChanged(previous, boundary)
+          : sameBoundary(previous, boundary))
       ) {
         snapshot.scope = scope;
         delete snapshot.provisionalBoundary;
@@ -226,7 +243,7 @@ export function setMenuReturnScope(
         delete snapshot.legacyScope;
       } else if (snapshot.provisionalBoundary || snapshot.scope !== scope) {
         if (
-          snapshot.legacyScope !== undefined &&
+          (snapshot.legacyScope !== undefined || snapshot.publicLegacy) &&
           window.history.state?.[ACKNOWLEDGED_STATE_KEY] === token
         ) {
           invalidatedRestoredDraft = true;
@@ -287,7 +304,12 @@ export function discardMenuReturn() {
 
 export function rememberMenuReturn(
   destination: string,
-  draft: Pick<MenuNavigationReturn, 'scope' | 'query' | 'category' | 'expanded' | 'open'>,
+  {
+    sourceCampus,
+    ...draft
+  }: Pick<MenuNavigationReturn, 'scope' | 'query' | 'category' | 'expanded' | 'open'> & {
+    sourceCampus?: { id: string; explicit: boolean };
+  },
   alreadyRestored = false,
   legacyScope?: string,
 ) {
@@ -305,6 +327,7 @@ export function rememberMenuReturn(
   const previousToken = marker(state);
   const boundLegacyScope =
     legacyScope ?? (previousToken ? snapshots.get(previousToken)?.legacyScope : undefined);
+  const campus = sourceCampus?.explicit ? sourceCampus.id : lastBoundary?.campus ?? sourceCampus?.id;
   const token = window.crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${++sequence}`;
   const snapshot: MenuNavigationReturn = {
     ...draft,
@@ -312,7 +335,9 @@ export function rememberMenuReturn(
     urlDigest: returnUrlDigest(token, url),
     query: draft.query.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, 100),
     expanded: [...draft.expanded],
-    ...(activeScope === undefined ? { provisionalBoundary: lastBoundary ?? {} } : {}),
+    ...(activeScope === undefined
+      ? { provisionalBoundary: { ...lastBoundary, campus } }
+      : {}),
     ...(activeScope === undefined && boundLegacyScope !== undefined
       ? { legacyScope: boundLegacyScope }
       : activeScope === undefined && alreadyRestored ? { publicLegacy: true } : {}),
@@ -349,11 +374,16 @@ export function consumeMenuReturn(snapshot: MenuNavigationReturn, scope: string)
       (snapshot.legacyScope !== undefined && matchesKnownMenuReturnScope(snapshot.legacyScope)));
   if (typeof activeScope !== 'string' && !unverifiedLegacy) return false;
   loadSnapshots();
+  const confirmedPublicLegacy =
+    snapshot.publicLegacy && snapshot.provisionalBoundary && lastBoundary &&
+    sameBoundary(snapshot.provisionalBoundary, lastBoundary);
+  const confirmedDraft =
+    activeScope === scope &&
+    (confirmedPublicLegacy || (snapshot.provisionalBoundary === undefined && snapshot.scope === scope));
   if (
     pending !== snapshot ||
     snapshots.get(snapshot.token) !== snapshot ||
-    (!unverifiedLegacy &&
-      (activeScope !== scope || snapshot.provisionalBoundary !== undefined || snapshot.scope !== scope)) ||
+    (!unverifiedLegacy && !confirmedDraft) ||
     !matchesReturnUrl(snapshot) ||
     marker(window.history.state) !== snapshot.token
   ) {

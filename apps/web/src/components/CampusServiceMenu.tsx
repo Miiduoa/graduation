@@ -107,11 +107,14 @@ export function CampusServiceMenu() {
   const selection = useOptionalSelectedSchool();
   const account = useCampusFinderAccount();
   const { schoolDraftOwner, platformDraftOwner } = account;
+  const sourceCampus = resolveSchoolPageContext(
+    Object.fromEntries(new URLSearchParams(context)),
+  ).schoolId;
   // When the provider is present, URL parameters are provisional until it resolves.
   const campusId =
     selection && (selection.loading || selection.catalogStatus !== 'ready')
       ? undefined
-      : resolveSchoolPageContext(Object.fromEntries(new URLSearchParams(context))).schoolId;
+      : sourceCampus;
   const returnScope = sha256(JSON.stringify([account.ownerScope, campusId]));
   const canRemember =
     campusId !== undefined &&
@@ -278,6 +281,7 @@ export function CampusServiceMenu() {
       query,
       category,
       expanded: expandedDirectorySections(results.current),
+      sourceCampus: { id: sourceCampus, explicit: context !== '' },
     });
     closeMenu();
   }
