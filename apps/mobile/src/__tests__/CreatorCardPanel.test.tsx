@@ -302,6 +302,63 @@ test('changing a portfolio URL releases the obsolete OS handoff without unlockin
   }
 });
 
+test('a stalled portfolio link unlocks with guidance and ignores its late failure during manual retry', async () => {
+  jest.useFakeTimers();
+  let rejectStalled!: (error: Error) => void;
+  let finishRetry!: () => void;
+  const stalled = new Promise<void>((_, reject) => { rejectStalled = reject; });
+  const retried = new Promise<void>((resolve) => { finishRetry = resolve; });
+  const openURL = jest.spyOn(Linking, 'openURL')
+    .mockImplementationOnce(() => stalled)
+    .mockImplementationOnce(() => retried);
+  jest.mocked(readCreatorCard).mockResolvedValue({
+    headline: '社團', bio: '我的作品', linkUrl: 'https://portfolio.example.org/',
+  });
+  try {
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+    await act(async () => { await Promise.resolve(); });
+    act(() => { fireEvent.press(view.getByLabelText('查看作品連結')); });
+    expect(openURL).toHaveBeenCalledTimes(1);
+    expect(view.getByLabelText('查看作品連結').props.accessibilityState)
+      .toMatchObject({ disabled: true, busy: true });
+
+    await act(async () => {
+      jest.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(view.getByText(/開啟作品連結等待逾時/).props.accessibilityRole).toBe('alert');
+    expect(view.getByLabelText('查看作品連結').props.accessibilityState)
+      .toMatchObject({ disabled: false, busy: false });
+
+    // A new handoff is only attempted when the student explicitly presses.
+    act(() => { fireEvent.press(view.getByLabelText('查看作品連結')); });
+    expect(openURL).toHaveBeenCalledTimes(2);
+    expect(openURL).toHaveBeenNthCalledWith(2, 'https://portfolio.example.org/');
+    expect(view.queryByText(/開啟作品連結等待逾時/)).toBeNull();
+    expect(view.getByLabelText('查看作品連結').props.accessibilityState)
+      .toMatchObject({ disabled: true, busy: true });
+
+    await act(async () => {
+      rejectStalled(new Error('late failure of first OS handoff'));
+      await Promise.resolve();
+    });
+    expect(view.queryByText('無法開啟作品連結，請稍後再試。')).toBeNull();
+    expect(view.getByLabelText('查看作品連結').props.accessibilityState)
+      .toMatchObject({ disabled: true, busy: true });
+
+    await act(async () => {
+      finishRetry();
+      await Promise.resolve();
+    });
+    expect(view.getByLabelText('查看作品連結').props.accessibilityState)
+      .toMatchObject({ disabled: false, busy: false });
+    expect(view.queryByText(/開啟作品連結等待逾時/)).toBeNull();
+  } finally {
+    openURL.mockRestore();
+    jest.useRealTimers();
+  }
+});
+
 test('a late failure from the old portfolio URL does not mark a newly saved link as broken', async () => {
   let rejectOld: (reason: Error) => void = () => undefined;
   const openURL = jest.spyOn(Linking, 'openURL')
