@@ -134,13 +134,12 @@ const ENGLISH_NON_RATIO_POSTAL_IDENTIFIER_COLUMN =
 const NON_RATIO_DOCUMENT_IDENTIFIER_COLUMN =
   /^(?:(?:serial|invoice|order|transaction|receipt|ticket|tracking|reference)\s+(?:number|no\.?|id|#)|(?:發票|訂單|交易|收據|票券|物流單|追蹤|序列|流水)\s*(?:號碼|編號|序號|識別碼|代碼|號))(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 
+// Identify catalogue fields when applying the newer chart formats.
+const NON_RATIO_CATALOG_IDENTIFIER_COLUMN = /^(?:(?:商品|產品|貨品|物料|零件|品項)?(?:貨號|料號|品號|條碼)|(?:商品|產品|貨品|物料|零件)(?:編號|識別碼)|(?:SKU|ASIN|ISBN(?:-1[03])?|ISSN|(?:EAN|UPC|GTIN)(?:-?(?:8|12|13|14|A|E))?)(?:\s+(?:number|no\.?|id|code|編號|條碼))?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
+
 // One-time sign-in, card verification and pickup codes are opaque tokens.
 // A PIN of 2468 is not twice a PIN of 1234. Match complete field names so
 // actual numbers of failed logins / OTP attempts can still be compared.
-// SKU, ISBN and retail barcodes are identifiers, not additive measurements.
-// A product code of 200 is not twice a product code of 100. Real SKU
-// counts stay eligible for an explicit quantity comparison.
-const NON_RATIO_CATALOG_IDENTIFIER_COLUMN = /^(?:(?:商品|產品|貨品|物料|零件|品項)?(?:貨號|料號|品號|條碼)|(?:商品|產品|貨品|物料|零件)(?:編號|識別碼)|(?:SKU|ASIN|ISBN(?:-1[03])?|ISSN|(?:EAN|UPC|GTIN)(?:-?(?:8|12|13|14|A|E))?)(?:\s+(?:number|no\.?|id|code|編號|條碼))?)(?:\s*[（(][^）)]{1,40}[）)])?$/iu;
 const NON_RATIO_AUTH_TOKEN_COLUMN =
   /^(?:(?:驗證碼|認證碼|安全碼|動態密碼|一次性密碼|登入碼|交易密碼|取件碼|核銷碼|信用卡安全碼|卡片驗證碼|卡片安全碼)(?:\s*(?:編號|號碼|數值|值))?|(?:(?:(?:credit[\s-]*card|bank|card|sms|email)\s+)?(?:otp|totp|hotp|pin|cvv2?|cvc2?|one[\s-]*time\s+(?:password|passcode)|(?:(?:verification|authentication|security|recovery|access|login|transaction|pickup|redemption|2fa|mfa)\s+(?:code|pin|passcode|otp)))(?:\s*(?:number|value|digits?))?))(?:(?:\s*[（(][^）)]{1,40}[）)])?)$/iu;
 
@@ -260,7 +259,10 @@ function withoutPercentUnit(header: string): string {
   return header.trim().replace(PERCENT_UNIT_END, '').trim();
 }
 
-function isNonRatioColumn(header: string, percentage = false): boolean {
+function isNonRatioColumn(
+  header: string,
+  { percentage = false, allowPlainCatalogValues = false } = {},
+): boolean {
   const column = withoutPercentUnit(header);
   const unqualifiedColumn = column.replace(/(?:\s*[（(][^）)]*[）)])+$/u, '').trim();
   const measuredLabel = percentage ? unqualifiedColumn : column;
@@ -281,7 +283,7 @@ function isNonRatioColumn(header: string, percentage = false): boolean {
       ENGLISH_NON_RATIO_POSTAL_IDENTIFIER_COLUMN.test(column) ||
       NON_RATIO_DOCUMENT_IDENTIFIER_COLUMN.test(column) ||
       NON_RATIO_AUTH_TOKEN_COLUMN.test(column) ||
-      NON_RATIO_CATALOG_IDENTIFIER_COLUMN.test(column) ||
+      (!allowPlainCatalogValues && NON_RATIO_CATALOG_IDENTIFIER_COLUMN.test(column)) ||
       AMBIGUOUS_TIME_COLUMN.test(column) ||
       NON_RATIO_WEEKDAY_COLUMN.test(column) ||
       NON_RATIO_QUARTER_POSITION_COLUMN.test(column) ||
@@ -313,7 +315,8 @@ function isNonRatioColumn(header: string, percentage = false): boolean {
   // "Lines of Code" is a count, not an identifying code. Keep
   // "Course Code", "Verification Code", and standalone "Code" excluded.
   // Recognize only explicit count phrases, never arbitrary headers ending in Code.
-  if (!describesBoundedRate && /(?:^|\s)(?:id|uuid|code|no\.?|#)$/iu.test(measuredLabel) &&
+  if (!allowPlainCatalogValues && !describesBoundedRate &&
+      /(?:^|\s)(?:id|uuid|code|no\.?|#)$/iu.test(measuredLabel) &&
       !/^(?:(?:number|count)\s+of\s+)?lines?\s+of\s+code$/iu.test(unqualifiedColumn)) return true;
   if (isIdentifier ||
       /^(?:年度|year|number)$/iu.test(column) ||
@@ -341,18 +344,20 @@ function isNonRatioColumn(header: string, percentage = false): boolean {
  */
 function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   if (table.headers.length !== 2 || table.rows.length < 2 || table.rows.length > 10) return null;
-  // Numeric-looking years and identifiers are not scalar measures; comparing
-  // them as bars would imply a magnitude that the source does not support.
   const column = measuredColumnLabel(table.headers[1]);
-  // An unlabeled number in a percentage column is ambiguous: do not scale it to the largest row.
-  if (!hasUnambiguousChartLabel(table.headers[1]) || isPercentageColumn(column) || isNonRatioColumn(column)) return null;
-  // Repeated "學分" is an explicit source unit, not a value to infer.
-  // Accept it only in a credit column and when ALL rows use the same format.
   const plainNumber = /^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/u;
+  // Keep merge-base scaling for catalogue headers with legacy plain values.
+  // The identifier-word guard still applies to headers such as 物料編號.
+  const allowPlainCatalogValues = NON_RATIO_CATALOG_IDENTIFIER_COLUMN.test(column) &&
+    table.rows.every(([, value]) => plainNumber.test(value));
+  // An unlabeled number in a percentage column is ambiguous: do not scale it to the largest row.
+  if (!hasUnambiguousChartLabel(table.headers[1]) || isPercentageColumn(column) ||
+      isNonRatioColumn(column, { allowPlainCatalogValues })) return null;
   // Course finance tables often use commas for thousands. Require every
   // source row to use strict three-digit grouping before comparing any bar;
   // mixing 1,000 with 200, or malformed 1,20, remains unverified source text.
   const groupedNumber = /^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d{1,2})?$/u;
+  // Accept the explicit credit unit only in a credit column with a uniform format.
   const creditNumber = /^((?:0|[1-9]\d{0,5})(?:\.\d{1,2})?) ?學分$/u;
   const creditsColumn = /(?:學分|credits?)/iu.test(column);
   let rowFormat: 'plain' | 'grouped' | 'credits' | null = null;
@@ -401,7 +406,7 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   const originallyBounded = (ORIGINAL_SOURCE_PERCENT_COLUMN.test(header) || ENGLISH_PERCENT_COLUMN.test(header)) &&
     !hasUnboundedRateLabel(header);
   if (!originallyBounded &&
-      (!isBoundedPercentageColumn(column) || isNonRatioColumn(column, true))) return null;
+      (!isBoundedPercentageColumn(column) || isNonRatioColumn(column, { percentage: true }))) return null;
   const rows: SourceValueRow[] = [];
   // Taiwanese lesson materials sometimes use fullwidth digits and decimal
   // punctuation throughout an explicitly bounded percentage column.

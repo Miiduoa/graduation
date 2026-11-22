@@ -3131,19 +3131,59 @@ it('keeps intact emoji, RTL text and combining accents in chart labels', () => {
 });
 
 
-it.each([
-  '貨號', '品號', '料號', '商品貨號', '產品條碼', '物料編號',
-  '商品貨號（ERP）', '零件料號', 'SKU', 'SKU ID',
-  'ASIN', 'ISBN', 'ISBN-13', 'ISSN', 'EAN-13', 'UPC-A', 'GTIN-14',
-])('shows catalogue identifiers without false proportional source charts (%s)', (header) => {
-  const source = ['| 品項 | ' + header + ' |', '| --- | --- |',
-    '| 第一件 | 100 |', '| 第二件 | 200 |'].join('\n');
-  const { container, unmount } = render(<StudySourceTables text={source} />);
+// Expected meter values and maxima were checked against merge-base 2232ee5c9.
+const catalogMetersByScale: Record<string, number[][]> = {
+  quantity: [[100, 200], [200, 200]],
+  percent: [[25, 100], [75, 100]],
+  none: [],
+};
+const catalogChartFormats = [
+  { format: 'literal percent', values: ['25%', '75%'], scale: 'percent' },
+  { format: 'plain number', values: ['100', '200'], scale: 'quantity' },
+  { format: 'grouped number', values: ['1,000', '2,000'], scale: 'none' },
+  { format: 'leading zeros', values: ['0100', '0200'], scale: 'none' },
+  { format: 'written multiple', values: ['1倍', '2倍'], scale: 'none' },
+  { format: 'multiplication sign', values: ['1×', '2×'], scale: 'none' },
+];
+
+const catalogHeaderCases = [
+  ...[
+    '貨號', '品號', '料號', '商品貨號', '產品條碼', '商品條碼', '商品貨號（ERP）', '零件料號',
+    'SKU', 'SKU ID', 'ASIN', 'ISBN', 'ISBN-13', 'ISSN', 'EAN-13', 'UPC-A', 'GTIN-14',
+  ].map((header) => ({ header, baselineScale: 'quantity' })),
+  { header: '物料編號', baselineScale: 'none' },
+  ...['SKU (%)', 'ISBN-13 (%)', '商品條碼（%）']
+    .map((header) => ({ header, baselineScale: 'percent' })),
+];
+
+it.each(catalogHeaderCases.flatMap((headerCase) =>
+  catalogChartFormats.map((formatCase) => ({ ...headerCase, ...formatCase })),
+))('matches merge-base for catalogue header $header with $format', ({ header, baselineScale, values, scale }) => {
+  const source = [`| 品項 | ${header} |`, '| --- | --- |',
+    `| 甲 | ${values[0]} |`, `| 乙 | ${values[1]} |`].join('\n');
+  const { container } = render(<StudySourceTables text={source} />);
   expect(within(screen.getByRole('table')).getAllByRole('cell')
-    .map((cell) => cell.textContent)).toEqual(['100', '200']);
-  expect(comparisonSummaries(container)).toEqual([]);
-  expect(container.querySelectorAll('meter')).toHaveLength(0);
-  unmount();
+    .map((cell) => cell.textContent)).toEqual(values);
+  const expected = scale === baselineScale ? catalogMetersByScale[scale] : [];
+  expect(Array.from(container.querySelectorAll('meter'), ({ value, max }) => [value, max]))
+    .toEqual(expected);
+  if (expected.length === 0) expect(comparisonSummaries(container)).toEqual([]);
+});
+
+it.each(['數值', '數值 (%)'].flatMap((header) =>
+  catalogChartFormats.filter(({ format }) => format !== 'grouped number').map((formatCase) => ({ header, ...formatCase })),
+))('matches merge-base for catalogue row labels with $header and $format', ({ header, values, scale }) => {
+  const rowLabels = ['SKU (%)', 'ISBN-13', '商品條碼（%）'];
+  const source = [`| 品項 | ${header} |`, '| --- | --- |', ...rowLabels.map(
+    (label, index) => `| ${label} | ${values[index % values.length]} |`,
+  )].join('\n');
+  const { container } = render(<StudySourceTables text={source} />);
+  expect(within(screen.getByRole('table')).getAllByRole('rowheader')
+    .map((cell) => cell.textContent)).toEqual(rowLabels);
+  const baselineScale = header === '數值' ? 'quantity' : 'percent';
+  const meters = scale === baselineScale ? catalogMetersByScale[scale] : [];
+  expect(Array.from(container.querySelectorAll('meter'), ({ value, max }) => [value, max]))
+    .toEqual(meters.length ? [...meters, meters[0]] : []);
 });
 
 it.each(['SKU Count', 'Number of SKUs', '商品貨號數量', '商品總數', '產品數量', 'Book Count', '零件數量'])(
@@ -3154,18 +3194,6 @@ it.each(['SKU Count', 'Number of SKUs', '商品貨號數量', '商品總數', '�
     expect(Array.from(container.querySelectorAll('meter'))
       .map((bar) => [bar.getAttribute('value'), bar.getAttribute('max')]))
       .toEqual([['100', '200'], ['200', '200']]);
-    unmount();
-  },
-);
-
-it.each(['SKU (%)', 'ISBN-13 (%)', '商品條碼（%）'])(
-  'does not transform catalog identifiers into 100 percent meters (%s)', (header) => {
-    const source = ['| 品項 | ' + header + ' |', '| --- | --- |',
-      '| 甲 | 25% |', '| 乙 | 75% |'].join('\n');
-    const { container, unmount } = render(<StudySourceTables text={source} />);
-    expect(within(screen.getByRole('table')).getAllByRole('cell')
-      .map((cell) => cell.textContent)).toEqual(['25%', '75%']);
-    expect(container.querySelector('meter')).toBeNull();
     unmount();
   },
 );
