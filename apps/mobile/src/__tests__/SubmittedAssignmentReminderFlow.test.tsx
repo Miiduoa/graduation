@@ -982,32 +982,113 @@ test.each(['轉換先開始', '退訂先開始', '轉換寫入失敗'] as const)
   },
 );
 
-test('原有 v1 長標題紀錄缺少歸屬時，可用原卡退訂但不能綁到目前單筆回覆', async () => {
-  const {
-    adoptCampusReminderSnapshot, cancelCampusAssignmentReminder, getCampusAssignmentReminderStatus,
-  } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
-  const title = '長'.repeat(130) + '甲';
-  const snapshot = mockSnapshot();
-  snapshot.assignments.items[0].title = title;
-  const previous = mockSnapshot();
-  previous.assignments.items[0] = { ...snapshot.assignments.items[0], source: undefined };
-  const input = {
-    scope, step: { ...step, title, fullAssignmentTitle: title }, leadMinutes: 60 as const, isCurrent: current,
-  };
-  await scheduleCampusAssignmentReminder({ ...input, snapshot: previous });
-  const [key, raw] = [...mockStorage.entries()][0];
-  const record = JSON.parse(raw);
-  delete record.cardDigest;
-  mockStorage.set(key, JSON.stringify(record));
+describe.each([4, 129, 130, 134, 139, 140, 141])('無 digest 的 v1 提醒（%i 字）', (length) => {
+  test.each([0, 1, 2])('摘要有 %i 筆相同 v1 識別的作業', async (count) => {
+    const {
+      adoptCampusReminderSnapshot, cancelCampusAssignmentReminders, clearUnlinkedLegacyReminders,
+      getCampusAssignmentReminderStatus, unlinkedLegacyReminders,
+    } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+    const { savedAssignmentReminderPreferences } =
+      require('../services/submittedAssignmentReminders') as typeof import('../services/submittedAssignmentReminders');
+    const title = '長'.repeat(Math.min(length, 130)) + '甲'.repeat(Math.max(0, length - 130));
+    const previous = mockSnapshot();
+    const row = { ...previous.assignments.items[0], title };
+    previous.assignments.items = [{ ...row, source: undefined }];
+    const card = { scope, step: { ...step, title, fullAssignmentTitle: title }, leadMinutes: 60 as const, isCurrent: current };
+    await scheduleCampusAssignmentReminder({ ...card, snapshot: previous });
+    const [key, raw] = [...mockStorage.entries()][0];
+    const { cardDigest, ...receipt } = JSON.parse(raw);
+    expect(cardDigest).toBeDefined();
+    const [alarmId, alarm] = [...mockAlarms.entries()][0];
+    const restoreLegacy = () => {
+      mockStorage.set(key, JSON.stringify(receipt));
+      mockAlarms.set(alarmId, alarm);
+    };
+    restoreLegacy();
 
-  await adoptCampusReminderSnapshot({ ...input, snapshot });
-  await expect(getCampusAssignmentReminderStatus({
-    ...input, step: { ...input.step, expectedSource: source }, getLegacySnapshot: () => snapshot,
-  })).resolves.toEqual([]);
-  await expect(getCampusAssignmentReminderStatus(input)).resolves.toEqual([60]);
-  await expect(cancelCampusAssignmentReminder(input)).resolves.toBe(true);
-  expect(mockAlarms.size).toBe(0);
-  expect(mockStorage.size).toBe(0);
+    const snapshot = mockSnapshot();
+    const otherSource = { ...source, assignmentId: 'other' };
+    const other = { ...row, title: '另一份作業', source: otherSource };
+    const collision = {
+      ...row, title: length > 130 ? title.slice(0, 130) + '乙' : title,
+      source: { ...source, assignmentId: 'collision' },
+    };
+    snapshot.assignments.items = [other, ...[row, collision].slice(0, count)];
+    snapshot.assignments.count = snapshot.assignments.items.length;
+    const reply = {
+      ...card, step: { ...card.step, expectedSource: source }, getLegacySnapshot: () => snapshot,
+    };
+    const unique = count === 1;
+    await expect(getCampusAssignmentReminderStatus(card)).resolves.toEqual([60]);
+    await expect(getCampusAssignmentReminderStatus(reply)).resolves.toEqual(unique ? [60] : []);
+    await expect(cancelCampusAssignmentReminders(reply)).resolves.toBe(unique);
+    expect(mockAlarms.has(alarmId)).toBe(!unique);
+    restoreLegacy();
+    await expect(cancelCampusAssignmentReminders(card)).resolves.toBe(true);
+    expect(mockAlarms.has(alarmId)).toBe(false);
+    restoreLegacy();
+
+    mockReader.getAssignment.mockResolvedValue({ ...otherSource, id: otherSource.assignmentId, title: other.title, dueAt });
+    const addOther = scheduleCampusAssignmentReminder({
+      ...card, step: { ...step, title: other.title, expectedSource: otherSource }, snapshot,
+    });
+    if (unique) await expect(addOther).resolves.toMatchObject({ outcome: 'scheduled' });
+    else await expect(addOther).rejects.toMatchObject({ code: 'legacy-cleanup-required' });
+    await adoptCampusReminderSnapshot({ ...card, snapshot });
+    const saved = await savedAssignmentReminderPreferences(scope, current);
+    expect(saved.map((item) => item.assignmentId).sort()).toEqual(unique ? ['other', 'work'] : []);
+    expect((await unlinkedLegacyReminders()).map((item) => item.identifier)).toEqual(unique ? [] : [alarmId]);
+
+    await clearUnlinkedLegacyReminders({ scope, isCurrent: current, getSnapshot: () => snapshot });
+    expect(mockAlarms.has(alarmId)).toBe(unique);
+    expect(mockStorage.has(key)).toBe(unique);
+    if (unique) {
+      await expect(getCampusAssignmentReminderStatus(reply)).resolves.toEqual([60]);
+      await expect(getCampusAssignmentReminderStatus(card)).resolves.toEqual([60]);
+      await expect(cancelCampusAssignmentReminders(reply)).resolves.toBe(true);
+      expect(mockAlarms.size).toBe(1);
+    } else {
+      expect(mockAlarms.size).toBe(0);
+    }
+  });
+});
+
+test('批次清理保留最新摘要能配對的舊提醒及已配對的新提醒，其他帳號或學校的舊提醒不能歸屬', async () => {
+  const {
+    adoptCampusReminderSnapshot, clearUnlinkedLegacyReminders, getCampusAssignmentReminderStatus,
+    unlinkedLegacyReminders,
+  } = require('../services/campusAssignmentReminders') as typeof import('../services/campusAssignmentReminders');
+  const snapshot = mockSnapshot();
+  const title = '長'.repeat(130) + '期末報告';
+  snapshot.assignments.items[0].title = title;
+  const previous = { ...snapshot, assignments: { ...snapshot.assignments,
+    items: [{ ...snapshot.assignments.items[0], source: undefined }] } };
+  const input = { scope, step: { ...step, fullAssignmentTitle: title }, leadMinutes: 60 as const, isCurrent: current };
+  const own = new Set<string>();
+  for (const owner of [scope, { ...scope, uid: 'bob' }, { ...scope, schoolId: 'other-school' }]) {
+    mockUid = owner.uid;
+    await scheduleCampusAssignmentReminder({
+      ...input, scope: owner, snapshot: { ...previous, userId: owner.uid, schoolId: owner.schoolId },
+    });
+    const [key, raw] = [...mockStorage.entries()].at(-1)!;
+    const receipt = JSON.parse(raw);
+    delete receipt.cardDigest;
+    mockStorage.set(key, JSON.stringify(receipt));
+    if (owner === scope) own.add(receipt.identifier);
+  }
+  mockUid = scope.uid;
+  await scheduleCampusAssignmentReminder({ ...input, leadMinutes: 1440, snapshot: previous });
+  own.add([...mockAlarms.keys()].at(-1)!);
+  for (const foreign of [{ ...snapshot, userId: 'bob' }, { ...snapshot, schoolId: 'other-school' }]) {
+    await adoptCampusReminderSnapshot({ ...input, snapshot: foreign });
+    await expect(getCampusAssignmentReminderStatus({
+      ...input, step: { ...input.step, expectedSource: source }, getLegacySnapshot: () => foreign,
+    })).resolves.toEqual([]);
+  }
+  expect(await unlinkedLegacyReminders()).toHaveLength(4);
+  await clearUnlinkedLegacyReminders({ scope, isCurrent: current, getSnapshot: () => snapshot });
+  expect(new Set(mockAlarms.keys())).toEqual(own);
+  expect(await unlinkedLegacyReminders()).toEqual([]);
 });
 
 test('來源偏好刪除失敗時退訂回報失敗，重試後同步不會恢復排程', async () => {

@@ -13,7 +13,7 @@ import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSens
 import type { CampusPlanStep } from './offlineCampusPlanner';
 
 import {
-  campusAssignmentDisplayTitle as normalizeTitle, campusAssignmentLegacyMatches, isCampusAssignmentDisplayTitleAtLimit, matchCampusAssignment,
+  campusAssignmentDisplayTitle as normalizeTitle, campusAssignmentLegacyMatches, matchCampusAssignment,
 } from './campusAssignmentTarget';
 import { parseCampusAssignmentSource } from './campusAssignmentSource';
 import {
@@ -127,20 +127,24 @@ function reminderCardDigest(step: Parameters<typeof cardIdentity>[0]) {
 
 async function matchesLegacyReceipt(
   record: ReminderRecord | null, step: Parameters<typeof cardIdentity>[0],
-  requireOwnership = true,
 ) {
-  // Receipts predating the digest cannot distinguish titles at the v1 cutoff.
-  return record?.cardDigest
-    ? record.cardDigest === await reminderCardDigest(step)
-    : !requireOwnership || !isCampusAssignmentDisplayTitleAtLimit(step.summaryAssignmentTitle ?? step.fullAssignmentTitle ?? step.title);
+  // The caller has already selected the v1 slot using the scoped reminder key.
+  // Older receipts have only that identity, so ownership comes from prefix uniqueness
+  // in the authorized summary when assigning the slot to a source.
+  return !record?.cardDigest || record.cardDigest === await reminderCardDigest(step);
 }
 
 function uniqueLegacyReply(input: {
   scope: CampusReminderScope; step: ReminderAssignment; getLegacySnapshot?: () => CampusSenseSnapshot | null;
 }) {
   const snapshot = validCampusSenseSnapshot(input.getLegacySnapshot?.(), input.scope);
-  const row = snapshot && matchCampusAssignment(snapshot, input.step);
-  return Boolean(snapshot && row && campusAssignmentLegacyMatches(snapshot, row).length === 1);
+  if (snapshot?.assignments.status !== 'available') return false;
+  const title = input.step.summaryAssignmentTitle ?? input.step.fullAssignmentTitle ?? input.step.title;
+  const rows = campusAssignmentLegacyMatches(snapshot, { ...input.step, title });
+  if (rows.length !== 1) return false;
+  const expected = input.step.expectedSource;
+  const actual = parseCampusAssignmentSource(rows[0].source);
+  return !expected || (actual?.groupId === expected.groupId && actual.assignmentId === expected.assignmentId);
 }
 
 async function matchingReminderPreferences(input: {
@@ -389,8 +393,7 @@ async function getCampusAssignmentReminderStatusInSequence(input: ReminderLookup
   const leads = [60, 1440] as const;
   const eligible = await Promise.all(keys.map(async (key, index) => {
     if (sourced.includes(leads[index]) || !ids.has(key.identifier) || linked.has(key.identifier)) return false;
-    if (!input.getLegacySnapshot && !input.step.fullAssignmentTitle && !input.step.summaryAssignmentTitle) return true;
-    return matchesLegacyReceipt(await readRecord(key.storageKey), input.step, Boolean(input.getLegacySnapshot));
+    return matchesLegacyReceipt(await readRecord(key.storageKey), input.step);
   }));
   checkAccount(input.scope, input.isCurrent, epoch);
   if (input.getLegacySnapshot && !uniqueLegacyReply(input)) return sourced;
@@ -476,8 +479,7 @@ async function cancelCampusAssignmentReminderInSequence(
     const key = await reminderKey(input.scope, legacy, input.leadMinutes);
     checkAccount(input.scope, input.isCurrent, epoch);
     const record = await readRecord(key.storageKey);
-    if ((input.getLegacySnapshot || input.step.fullAssignmentTitle || input.step.summaryAssignmentTitle) &&
-        !await matchesLegacyReceipt(record, input.step, Boolean(input.getLegacySnapshot)))
+    if (!await matchesLegacyReceipt(record, input.step))
       throw new CampusReminderError('invalid-source');
     const inventory = await scheduledInventory();
     const linked = await linkedReminderIdentifiers();
@@ -515,9 +517,8 @@ async function adoptCampusReminderSnapshotInSequence(input: {
   scope: CampusReminderScope; snapshot?: CampusSenseSnapshot | null; isCurrent: () => boolean;
 }, version: number) {
   checkAccount(input.scope, input.isCurrent, version);
-  const snapshot = input.snapshot;
-  if (!snapshot || snapshot.userId !== input.scope.uid || snapshot.schoolId !== input.scope.schoolId ||
-      snapshot.assignments.status !== 'available') return;
+  const snapshot = validCampusSenseSnapshot(input.snapshot, input.scope);
+  if (!snapshot || snapshot.assignments.status !== 'available') return;
   const inventory = await scheduledInventory();
   const sample = await reminderKey(input.scope, { title: '', dueAt: '' }, 60);
   const linked = await linkedReminderIdentifiers();
@@ -555,11 +556,14 @@ export async function unlinkedLegacyReminders() {
 }
 
 export async function clearUnlinkedLegacyReminders(input: {
-  scope: CampusReminderScope; isCurrent: () => boolean;
+  scope: CampusReminderScope; isCurrent: () => boolean; getSnapshot?: () => CampusSenseSnapshot | null;
 }) {
   const version = reminderEpoch;
   return serializeAssignmentReminderWork(async () => {
     checkAccount(input.scope, input.isCurrent, version);
+    if (input.getSnapshot) {
+      await adoptCampusReminderSnapshotInSequence({ ...input, snapshot: input.getSnapshot() }, version);
+    }
     const rows = await unlinkedLegacyReminders();
     for (const row of rows) {
       checkAccount(input.scope, input.isCurrent, version);

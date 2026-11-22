@@ -64,8 +64,13 @@ export function LegacyAssignmentReminders({
     setBusy(true);
     setError('');
     try {
-      await clearUnlinkedLegacyReminders({ scope: { uid, schoolId }, isCurrent });
-      if (isCurrent()) setCount(0);
+      const scope = { uid, schoolId };
+      await clearUnlinkedLegacyReminders({ scope, isCurrent, getSnapshot: () => latest.current.snapshot });
+      const saved = await savedAssignmentReminderPreferences(scope, isCurrent);
+      if (isCurrent()) {
+        setCount(0);
+        setPreferences(saved);
+      }
     } catch {
       if (isCurrent()) setError('尚未確認取消成功，請重試。');
     } finally {

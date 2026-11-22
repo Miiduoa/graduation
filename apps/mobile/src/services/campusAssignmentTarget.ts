@@ -33,10 +33,6 @@ export function campusAssignmentTitleIdentity(row: { title: string; titleMayBeTr
     : { fullAssignmentTitle: row.title };
 }
 
-export function isCampusAssignmentDisplayTitleAtLimit(value: string): boolean {
-  return campusAssignmentDisplayTitle(value).length === DISPLAY_TITLE_LIMIT;
-}
-
 export function campusAssignmentDisplayTitle(value: string): string {
   return normalizeCampusAssignmentTitle(value).slice(0, DISPLAY_TITLE_LIMIT);
 }
