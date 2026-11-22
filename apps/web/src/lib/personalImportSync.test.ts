@@ -14,12 +14,13 @@ import {
   readPersonalImports,
   readPersonalImportSyncState,
   savePersonalImportBatch,
+  withPersonalImportSyncLock,
 } from './personalImports';
 import {
   cancelPersonalImportSync,
   cancelPersonalImportSyncPause,
   getPersonalImportSyncStatus,
-  hasPersonalImportSyncPause,
+  getPersonalImportSyncPause,
   setPersonalImportSyncEnabled,
   subscribePersonalImportSync,
   syncPersonalImports,
@@ -134,27 +135,25 @@ describe('browser personal import synchronization', () => {
       const original = readPersonalImports(scope);
       const held = deferred<void>();
       const lock = navigator.locks.request(personalImportsStorageKey(scope), () => held.promise);
-      let active = true;
       vi.useFakeTimers();
       try {
         const pause = expect(
-          setPersonalImportSyncEnabled(scope, false, () => active),
+          setPersonalImportSyncEnabled(scope, false, () => true),
         ).rejects.toThrow('暫停要求會在可寫入時完成');
         await vi.advanceTimersByTimeAsync(45_000);
         await pause;
-        expect(hasPersonalImportSyncPause(scope)).toBe(true);
+        expect(getPersonalImportSyncPause(scope)).not.toBeNull();
         expect(readPersonalImportSyncState(scope).enabled).toBe(true);
 
-        // A new session or automatic trigger must honor the same device intent.
-        active = false;
+        // An automatic trigger in the same scope must honor the pending intent.
         const automaticSync = syncPersonalImports(scope, identity, () => true);
         expect(browserRequest).not.toHaveBeenCalled();
-        if (cancel) cancelPersonalImportSyncPause(scope, () => true);
+        if (cancel) cancelPersonalImportSyncPause(scope, getPersonalImportSyncPause(scope)!, () => true);
 
         held.resolve();
         await lock;
         await automaticSync;
-        expect(hasPersonalImportSyncPause(scope)).toBe(false);
+        expect(getPersonalImportSyncPause(scope)).toBeNull();
         expect(readPersonalImportSyncState(scope).enabled).toBe(cancel);
         expect(readPersonalImports(scope)).toEqual(original);
         expect(browserRequest).not.toHaveBeenCalled();
@@ -168,6 +167,77 @@ describe('browser personal import synchronization', () => {
       }
     },
   );
+
+  it.each(['lock acquisition', 'checkpoint'] as const)(
+    'matches merge-base active() behavior when scope becomes inactive at %s',
+    async (boundary) => {
+      for (const usePauseMarker of [false, true]) {
+        await setPersonalImportSyncEnabled(scope, true, () => true);
+        const key = personalImportsStorageKey(scope);
+        const before = localStorage.getItem(key);
+        const held = deferred<void>();
+        const lock = navigator.locks.request(key, () => held.promise);
+        let waiting = true;
+        let checks = 0;
+        // The checkpoint is the second active check made under the ledger lock.
+        const check = () => waiting || (boundary === 'checkpoint' && ++checks === 1);
+        const pause = usePauseMarker
+          ? setPersonalImportSyncEnabled(scope, false, check)
+          : withPersonalImportSyncLock(
+              scope,
+              async (state) => ({
+                state: {
+                  ...state,
+                  sync: { ...state.sync, enabled: false, base: state.sync?.base || null },
+                },
+                result: undefined,
+              }),
+              check,
+            );
+        const stopped = expect(pause).rejects.toThrow('帳號或校園已切換');
+        waiting = false;
+        held.resolve();
+        await lock;
+        await stopped;
+        expect(localStorage.getItem(key)).toBe(before);
+        expect(getPersonalImportSyncPause(scope)).toBeNull();
+      }
+      expect(browserRequest).not.toHaveBeenCalled();
+    },
+  );
+
+  it('clears only its own inactive pause on timeout while another tab holds the lock', async () => {
+    await setPersonalImportSyncEnabled(scope, true, () => true);
+    const key = personalImportsStorageKey(scope);
+    const held = deferred<void>();
+    const lock = navigator.locks.request(key, () => held.promise);
+    let active = true;
+    vi.useFakeTimers();
+    try {
+      const pause = setPersonalImportSyncEnabled(scope, false, () => active);
+      active = false;
+      await vi.advanceTimersByTimeAsync(15_000);
+      await pause;
+      expect(getPersonalImportSyncPause(scope)).toBeNull();
+      const afterStale = navigator.locks.request(key, () => {
+        expect(readPersonalImportSyncState(scope).enabled).toBe(true);
+        expect(getPersonalImportSyncPause(scope)).toBe(token);
+      });
+      const replacement = setPersonalImportSyncEnabled(scope, false, () => true);
+      const token = getPersonalImportSyncPause(scope);
+      expect(token).not.toBeNull();
+      held.resolve();
+      await lock;
+      await afterStale;
+      await replacement;
+      expect(readPersonalImportSyncState(scope).enabled).toBe(false);
+      expect(getPersonalImportSyncPause(scope)).toBeNull();
+      expect(browserRequest).not.toHaveBeenCalled();
+    } finally {
+      held.resolve();
+      vi.useRealTimers();
+    }
+  });
 
   it.each(['cancelled', 'replaced'] as const)(
     'does not write a pause whose marker was %s after the decision inside the lock',
@@ -186,7 +256,7 @@ describe('browser personal import synchronization', () => {
         if (name === marker && value !== null) {
           read.mockRestore();
           // The other tab changes the marker after this tab reads its value.
-          if (change === 'cancelled') cancelPersonalImportSyncPause(scope, () => true);
+          if (change === 'cancelled') cancelPersonalImportSyncPause(scope, getPersonalImportSyncPause(scope)!, () => true);
           else localStorage.setItem(marker, 'new-pause');
         }
         return value;
@@ -202,7 +272,7 @@ describe('browser personal import synchronization', () => {
       if (change === 'replaced') {
         await syncPersonalImports(scope, identity, () => true);
         expect(readPersonalImportSyncState(scope).enabled).toBe(false);
-        expect(hasPersonalImportSyncPause(scope)).toBe(false);
+        expect(getPersonalImportSyncPause(scope)).toBeNull();
       }
     },
   );
@@ -231,7 +301,7 @@ describe('browser personal import synchronization', () => {
       const value = getItem.call(this, name);
       if (name === marker && value !== null) {
         read.mockRestore();
-        cancelPersonalImportSyncPause(scope, () => true);
+        cancelPersonalImportSyncPause(scope, getPersonalImportSyncPause(scope)!, () => true);
         newer = setPersonalImportSyncEnabled(scope, false, () => true);
         replacement = getItem.call(this, marker);
         expect(replacement).not.toBe(value);
@@ -244,7 +314,7 @@ describe('browser personal import synchronization', () => {
       expect(replacement).not.toBeNull();
       expect(markersAtWrite).toEqual([replacement]);
       expect(readPersonalImportSyncState(scope).enabled).toBe(false);
-      expect(hasPersonalImportSyncPause(scope)).toBe(false);
+      expect(getPersonalImportSyncPause(scope)).toBeNull();
     } finally {
       read.mockRestore();
       write.mockRestore();
@@ -271,9 +341,9 @@ describe('browser personal import synchronization', () => {
       write.mockRestore();
     }
     expect(localStorage.getItem(key)).toBe(before);
-    expect(hasPersonalImportSyncPause(scope)).toBe(true);
-    cancelPersonalImportSyncPause(scope, () => true);
-    expect(hasPersonalImportSyncPause(scope)).toBe(false);
+    expect(getPersonalImportSyncPause(scope)).not.toBeNull();
+    cancelPersonalImportSyncPause(scope, getPersonalImportSyncPause(scope)!, () => true);
+    expect(getPersonalImportSyncPause(scope)).toBeNull();
     expect(localStorage.getItem(key)).toBe(before);
   });
 

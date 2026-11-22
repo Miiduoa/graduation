@@ -19,7 +19,7 @@ import {
   cancelPersonalImportSync,
   cancelPersonalImportSyncPause,
   getPersonalImportSyncStatus,
-  hasPersonalImportSyncPause,
+  getPersonalImportSyncPause,
   setPersonalImportSyncEnabled,
   subscribePersonalImportSync,
   syncPersonalImports,
@@ -30,7 +30,7 @@ export function PersonalImportSyncBridge() {
   const { owner, schoolId } = scope;
   const nuni = useOptionalNuniSession();
   const identity = nuni?.session;
-  useEffect(() => {
+  useLayoutEffect(() => {
     const scope = { owner, schoolId };
     if (
       loading ||
@@ -48,7 +48,7 @@ export function PersonalImportSyncBridge() {
       if (!alive || document.visibilityState === 'hidden') return;
       try {
         if (
-          hasPersonalImportSyncPause(scope) ||
+          getPersonalImportSyncPause(scope) !== null ||
           (readPersonalImportSyncState(scope).enabled &&
             getPersonalImportSyncStatus(scope)?.phase !== 'conflict')
         )
@@ -205,7 +205,7 @@ function ScopeSyncPanel({
     };
   }, [permitted, scope.owner, scope.schoolId, identity?.context]);
   const [enabled, setEnabled] = useState(false);
-  const [pausePending, setPausePending] = useState(false);
+  const [pauseToken, setPauseToken] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [consent, setConsent] = useState(false);
   const [changing, setChanging] = useState(false);
@@ -224,7 +224,7 @@ function ScopeSyncPanel({
     const scope = { owner, schoolId };
     const refresh = () => {
       try {
-        setPausePending(hasPersonalImportSyncPause(scope));
+        setPauseToken(getPersonalImportSyncPause(scope));
         setEnabled(readPersonalImportSyncState(scope).enabled);
         setError('');
       } catch (e) {
@@ -256,7 +256,7 @@ function ScopeSyncPanel({
     const run = generation.current;
     return () => activeRef.current && run === generation.current;
   };
-  if (pausePending) {
+  if (pauseToken !== null) {
     const pauseError = !canLockPersonalImportSync()
       ? `暫停要求已保留。 ${PERSONAL_IMPORT_SYNC_LOCK_UNAVAILABLE}`
       : status?.phase === 'error'
@@ -275,7 +275,7 @@ function ScopeSyncPanel({
           disabled={!permitted}
           onClick={() => {
             try {
-              cancelPersonalImportSyncPause(scope, active());
+              cancelPersonalImportSyncPause(scope, pauseToken, active());
             } catch (e) {
               setError(e instanceof Error ? e.message : '無法取消暫停。');
             }

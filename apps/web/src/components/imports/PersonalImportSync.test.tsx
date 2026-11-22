@@ -12,6 +12,8 @@ import {
 } from '@/lib/personalImports';
 import {
   cancelPersonalImportSync,
+  cancelPersonalImportSyncPause,
+  getPersonalImportSyncPause,
   getPersonalImportSyncStatus,
   setPersonalImportSyncEnabled,
   syncPersonalImports,
@@ -286,6 +288,71 @@ describe('personal import synchronization panel', () => {
       save.mockRestore();
       clear.mockRestore();
     }
+  });
+
+  it.each(['account', 'school', 'logout'] as const)(
+    'discards a queued pause after changing %s before the lock is granted',
+    async (change) => {
+      await setPersonalImportSyncEnabled(initialScope, true, () => true);
+      const key = personalImportsStorageKey(initialScope);
+      const before = localStorage.getItem(key);
+      const held = deferred<void>();
+      const lock = navigator.locks.request(key, () => held.promise);
+      const view = render(<PersonalImportSyncPanel scope={context.scope} />);
+      fireEvent.click(screen.getByRole('button', { name: '暫停這台裝置同步' }));
+      expect(getPersonalImportSyncPause(initialScope)).not.toBeNull();
+
+      if (change === 'account') {
+        context.scope = { ...initialScope, owner: 'platform:two' };
+        context.sessionState.session = { platformAccountId: 'two', context: 'context-two' };
+      } else if (change === 'school') {
+        context.scope = { ...initialScope, schoolId: 'ntu' };
+      } else {
+        context.sessionState.pendingLogout = true;
+      }
+      view.rerender(<PersonalImportSyncPanel scope={context.scope} />);
+      await act(async () => {
+        held.resolve();
+        await lock;
+        await navigator.locks.request(key, () => {});
+      });
+
+      expect(localStorage.getItem(key)).toBe(before);
+      expect(getPersonalImportSyncPause(initialScope)).toBeNull();
+      expect(browserRequest).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps the newer tab pause when the old tab cancels before its storage event', async () => {
+    await setPersonalImportSyncEnabled(initialScope, true, () => true);
+    const key = personalImportsStorageKey(initialScope);
+    const marker = `${key}:pause`;
+    const held = deferred<void>();
+    const lock = navigator.locks.request(key, () => held.promise);
+    localStorage.setItem(marker, 'tab-a');
+    render(<PersonalImportSyncPanel scope={initialScope} />);
+    const oldCancel = screen.getByRole('button', { name: '取消暫停' });
+
+    // Simulate tab B replacing the marker before tab A receives the storage event.
+    localStorage.removeItem(marker);
+    localStorage.setItem(marker, 'tab-b');
+    const newer = syncPersonalImports(initialScope, context.sessionState.session, () => true);
+    fireEvent.click(oldCancel);
+    expect(getPersonalImportSyncPause(initialScope)).toBe('tab-b');
+    expect(readPersonalImportSyncState(initialScope).enabled).toBe(true);
+    expect(browserRequest).not.toHaveBeenCalled();
+
+    act(() => window.dispatchEvent(new StorageEvent('storage', { key: marker, newValue: 'tab-b' })));
+    await act(async () => {
+      held.resolve();
+      await lock;
+      await newer;
+    });
+    cancelPersonalImportSyncPause(initialScope, 'tab-b', () => true);
+    expect(getPersonalImportSyncPause(initialScope)).toBeNull();
+    expect(readPersonalImportSyncState(initialScope).enabled).toBe(false);
+    expect(screen.queryByRole('button', { name: '取消暫停' })).toBeNull();
+    expect(browserRequest).not.toHaveBeenCalled();
   });
 
   it('reports a failed cancellation without removing the queued pause', async () => {
