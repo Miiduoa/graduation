@@ -1,3 +1,4 @@
+import { sha256 } from 'js-sha256';
 import { SERVICE_CATEGORIES, type ServiceCategory } from './campusServices';
 import { forgetDirectorySearch, internalSitePath } from './campusDirectorySearch';
 
@@ -8,7 +9,7 @@ const MAX_SNAPSHOTS = 20;
 
 export type MenuNavigationReturn = {
   token: string;
-  url: string;
+  urlDigest: string;
   scope: string;
   query: string;
   category: ServiceCategory | 'all';
@@ -58,6 +59,15 @@ export function currentMenuReturnUrl() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
 
+function returnUrlDigest(token: string, url: string) {
+  // Bind the exact location to this entry without retaining its path, query or fragment.
+  return sha256(JSON.stringify([token, url]));
+}
+
+function matchesReturnUrl(snapshot: MenuNavigationReturn) {
+  return snapshot.urlDigest === returnUrlDigest(snapshot.token, currentMenuReturnUrl());
+}
+
 function marker(state: unknown): string | null {
   if (!state || typeof state !== 'object') return null;
   const token = (state as Record<string, unknown>)[MENU_RETURN_STATE_KEY];
@@ -74,7 +84,7 @@ function captureReturnState(state: unknown) {
   loadSnapshots();
   const token = marker(state);
   const snapshot = token ? snapshots.get(token) : null;
-  publish(snapshot && snapshot.url === currentMenuReturnUrl() ? snapshot : null);
+  publish(snapshot && matchesReturnUrl(snapshot) ? snapshot : null);
 }
 
 function captureReturn(event: PopStateEvent) {
@@ -90,11 +100,13 @@ function loadSnapshots() {
     snapshots.clear();
     const stored: unknown = JSON.parse(raw ?? '[]');
     if (!Array.isArray(stored)) return;
+    const containsRawUrls = stored.some((snapshot) => snapshot && Object.hasOwn(snapshot, 'url'));
     for (const snapshot of stored.slice(-MAX_SNAPSHOTS)) {
       if (
         snapshot &&
         typeof snapshot.token === 'string' &&
-        typeof snapshot.url === 'string' &&
+        (typeof snapshot.url === 'string' ||
+          (typeof snapshot.urlDigest === 'string' && /^[a-f0-9]{64}$/u.test(snapshot.urlDigest))) &&
         typeof snapshot.scope === 'string' &&
         typeof snapshot.query === 'string' &&
         (snapshot.category === 'all' ||
@@ -108,9 +120,13 @@ function loadSnapshots() {
         (snapshot.legacyScope === undefined ||
           (typeof snapshot.legacyScope === 'string' && snapshot.provisionalBoundary !== undefined))
       ) {
-        snapshots.set(snapshot.token, snapshot);
+        const { url, ...draft } = snapshot;
+        if (typeof url === 'string') draft.urlDigest = returnUrlDigest(draft.token, url);
+        snapshots.set(draft.token, draft);
       }
     }
+    // Scrub URLs written by earlier versions, including entries outside the retention limit.
+    if (containsRawUrls) saveSnapshots();
   } catch {
     // The in-memory drafts still work when storage is unavailable.
   }
@@ -293,7 +309,7 @@ export function rememberMenuReturn(
   const snapshot: MenuNavigationReturn = {
     ...draft,
     token,
-    url,
+    urlDigest: returnUrlDigest(token, url),
     query: draft.query.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, 100),
     expanded: [...draft.expanded],
     ...(activeScope === undefined ? { provisionalBoundary: lastBoundary ?? {} } : {}),
@@ -338,7 +354,7 @@ export function consumeMenuReturn(snapshot: MenuNavigationReturn, scope: string)
     snapshots.get(snapshot.token) !== snapshot ||
     (!unverifiedLegacy &&
       (activeScope !== scope || snapshot.provisionalBoundary !== undefined || snapshot.scope !== scope)) ||
-    snapshot.url !== currentMenuReturnUrl() ||
+    !matchesReturnUrl(snapshot) ||
     marker(window.history.state) !== snapshot.token
   ) {
     if (pending === snapshot) publish(null);

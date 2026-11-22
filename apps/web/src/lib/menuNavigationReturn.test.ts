@@ -44,7 +44,7 @@ it('restores all draft fields after reloading the service and waits for scope co
   expect(reloaded.getMenuReturn()).toBeNull();
   backToOrigin(originState);
   const pending = reloaded.getMenuReturn()!;
-  expect(pending).toMatchObject({ ...draft, url: originUrl });
+  expect(pending).toMatchObject(draft);
   expect(reloaded.consumeMenuReturn(pending, draft.scope)).toBe(false);
   reloaded.setMenuReturnScope(undefined, unconfirmed);
   reloaded.setMenuReturnScope(draft.scope, confirmed);
@@ -115,16 +115,50 @@ it.each(['other-account', 'other-campus', null])(
   },
 );
 
-it('requires both the original URL and the history marker', async () => {
+it('matches each history marker to its own path, query and fragment', async () => {
   const { originState } = await startJourney();
+  const otherUrl = '/map?campus=ntnu#services';
+  window.history.pushState({}, '', otherUrl);
   const reloaded = await loadDocument();
   reloaded.setMenuReturnScope(draft.scope);
+  const expanded = [...draft.expanded];
+  reloaded.rememberMenuReturn(destination, { ...draft, expanded, query: '公車' });
+  const otherState = window.history.state;
+  expect(otherState).not.toEqual(originState);
+
   backToOrigin({}, originUrl);
   expect(reloaded.getMenuReturn()).toBeNull();
-  backToOrigin(originState, '/map?campus=pu#other');
-  expect(reloaded.getMenuReturn()).toBeNull();
+  for (const mismatchedUrl of [otherUrl, '/map?campus=pu#other', '/bus?campus=pu#services']) {
+    backToOrigin(originState, mismatchedUrl);
+    expect(reloaded.getMenuReturn()).toBeNull();
+  }
   backToOrigin(originState);
   expect(reloaded.getMenuReturn()).toMatchObject(draft);
+  backToOrigin(otherState, originUrl);
+  expect(reloaded.getMenuReturn()).toBeNull();
+  backToOrigin(otherState, otherUrl);
+  expect(reloaded.getMenuReturn()).toMatchObject({ query: '公車' });
+});
+
+it('scrubs raw URLs from existing drafts and still restores the matching entry', async () => {
+  const historyKey = 'campus.menu.return.v1';
+  const legacyUrl = '/login?returnUrl=%2Ftimetable%2Fshare%3Ftoken%3Dfake-legacy#fake-fragment';
+  const token = 'existing-marker';
+  sessionStorage.setItem(
+    historyKey,
+    JSON.stringify([{ url: '/map?token=fake-invalid' }, { ...draft, token, url: legacyUrl }]),
+  );
+  const menu = await loadDocument();
+  menu.setMenuReturnScope(draft.scope);
+  const stored = sessionStorage.getItem(historyKey)!;
+  expect(stored).not.toMatch(/fake-|\/login|returnUrl/u);
+  expect(JSON.parse(stored)).toEqual([
+    { ...draft, token, urlDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) },
+  ]);
+  backToOrigin({ [menu.MENU_RETURN_STATE_KEY]: token }, legacyUrl);
+  const pending = menu.getMenuReturn()!;
+  expect(pending).toMatchObject(draft);
+  expect(menu.consumeMenuReturn(pending, draft.scope)).toBe(true);
 });
 
 it.each(['current URL', 'history failure', 'storage quota'])(

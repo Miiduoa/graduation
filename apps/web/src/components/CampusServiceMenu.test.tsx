@@ -1249,6 +1249,43 @@ it('preserves a real return when the destination normalizes the same campus para
 });
 
 it.each([
+  ['/login?returnUrl=%2Ftimetable%2Fshare%3Ftoken%3Dfake-sensitive', 'returnUrl'],
+  [
+    '/events?redirect=%2Fshare%2Ffake-sensitive&access_token=fake-sensitive&access_token=second',
+    'redirect',
+  ],
+  ['/map#access_token=fake-sensitive', 'access_token'],
+  ['/share/fake-sensitive#%2Fother%3Funknown%3Dfake-sensitive', 'unknown'],
+] as const)('keeps the source URL out of menu drafts and history state at %s', (url, parameter) => {
+  returnToMenuOrigin({ url, state: { router: 'keep' } });
+  const view = render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '教材' } });
+  expect(sessionStorage.length).toBe(0);
+  expect(window.history.state).toEqual({ router: 'keep' });
+
+  const link = screen.getByRole('link', { name: '教材收藏' });
+  const destination = link.getAttribute('href')!;
+  fireEvent.click(link);
+  const origin = captureMenuOrigin();
+  expect(origin.url).toBe(url);
+  expect(origin.state).toEqual({ router: 'keep', [MENU_RETURN_STATE_KEY]: expect.any(String) });
+  const storageKey = 'campus.menu.return.v1';
+  expect(sessionStorage.length).toBe(1);
+  expect(localStorage.length).toBe(0);
+  expect(sessionStorage.getItem(storageKey)).not.toContain('fake-sensitive');
+  expect(sessionStorage.getItem(storageKey)).not.toContain(parameter);
+  expect(sessionStorage.getItem(storageKey)).not.toContain(url);
+
+  visitMenuDestination(destination);
+  view.rerender(<CampusServiceMenu />);
+  returnToMenuOrigin(origin);
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('教材');
+});
+
+it.each([
   ['/map', '/library?campus=nthu', 'history'],
   ['/events', '/library', 'history'],
   ['/classroom', '/library?campus=nthu', 'legacy'],
