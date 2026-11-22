@@ -17,12 +17,16 @@ const CARD_FIELDS = ['headline', 'bio', 'linkUrl'] as const;
 
 type CardField = keyof CreatorCard;
 type FieldRevisions = Partial<Record<CardField, number>>;
-type RecoverableDraft = Partial<Record<CardField, { value: string; expected: string; revision: number }>>;
+type RecoverableDraft = Partial<Record<CardField, {
+  value: string; expected: string; revision: number; onlyWhenMissing: boolean;
+}>>;
 type SubmittedWrite = {
   draft: CreatorCard;
   expected: CreatorCard;
   edits: readonly CardField[];
+  writeFields?: readonly CardField[];
   manualCheckStarted: boolean;
+  uncertain: boolean;
   revisions: FieldRevisions;
 };
 
@@ -76,7 +80,7 @@ function ScopedCreatorCardPanel({
   const published = useRef<CreatorCard | null>(null);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const currentDraft = useRef(draft);
-  const resumeDraft = useRef(false);
+  const useFieldPatch = useRef(false);
   // Keep clear operations even when the field originally displayed as empty.
   const editedFields = useRef(new Set<CardField>());
   // Reverting a value is still a user edit. With no pending write, cancelling
@@ -143,7 +147,8 @@ function ScopedCreatorCardPanel({
 
   const beginEdit = () => {
     if (!own || editorLocked() || state.status !== 'ready') return;
-    if (!pendingWrite.current && !resumeDraft.current && editedFields.current.size === 0) {
+    if (!pendingWrite.current) {
+      editedFields.current.clear();
       replaceDraft(published.current ?? EMPTY_CREATOR_CARD);
       setFeedback('');
     }
@@ -169,7 +174,6 @@ function ScopedCreatorCardPanel({
     if (editorLocked()) return;
     setEditorOpen(false);
     if (pendingWrite.current) return;
-    resumeDraft.current = false;
     revisions.current = { ...submittedRevisions.current };
     editedFields.current.clear();
     replaceDraft(published.current ?? EMPTY_CREATOR_CARD);
@@ -177,31 +181,52 @@ function ScopedCreatorCardPanel({
   };
 
   const settleWrite = (submitted: SubmittedWrite, latest: CreatorCard | null) => {
-    const matches = latest && CARD_FIELDS.every((field) =>
+    const matches = latest && (submitted.writeFields ?? CARD_FIELDS).every((field) =>
       creatorCardFieldMatches(latest, field, submitted.expected[field]));
+    const snapshot = currentDraft.current;
+    const activeEdits = editedFields.current;
+    if (!matches) {
+      for (const field of submitted.edits) activeEdits.add(field);
+    }
 
+    const unconfirmed: RecoverableDraft = {};
+    const next = { ...(latest ?? EMPTY_CREATOR_CARD) };
+    for (const field of CARD_FIELDS) {
+      const edited = activeEdits.has(field);
+      if (latest && !edited) continue;
+      const value = snapshot[field];
+      unconfirmed[field] = {
+        value,
+        expected: value === submitted.draft[field] ? submitted.expected[field] : value,
+        revision: revisions.current[field] ?? 0,
+        onlyWhenMissing: !edited,
+      };
+      if (edited) next[field] = value;
+    }
+
+    // After an uncertain write, subsequent edits to an existing card must
+    // merge only the edited fields, even if another device writes after this read.
+    if (submitted.uncertain || !matches) useFieldPatch.current = true;
     pendingWrite.current = null;
     setNeedsConfirmation(false);
     if (matches) {
       finishSave(latest, submitted);
     } else {
-      // Whether the editor is visible or temporarily closed, keep the entire
-      // draft including input received after the write was sent.
-      const unconfirmed: RecoverableDraft = {};
-      for (const field of CARD_FIELDS) {
-        const value = currentDraft.current[field];
-        unconfirmed[field] = {
-          value,
-          expected: value === submitted.draft[field] ? submitted.expected[field] : value,
-          revision: revisions.current[field] ?? 0,
-        };
-      }
-      for (const field of submitted.edits) editedFields.current.add(field);
-      resumeDraft.current = true;
-      setRecoverable(unconfirmed);
       acceptCard(latest);
-      setFeedback('伺服器資料與上次送出的內容不同。草稿已保留，可在編輯時還原。');
+      setFeedback(Object.keys(unconfirmed).length
+        ? '伺服器資料與上次送出的內容不同。草稿已保留，可在編輯時還原。'
+        : '伺服器資料與上次送出的內容不同，已載入最新資料。');
     }
+    setRecoverable((previous) => {
+      const nextRecoverable = { ...previous };
+      for (const field of CARD_FIELDS) {
+        const entry = unconfirmed[field];
+        if (entry && (!entry.onlyWhenMissing || !previous[field])) nextRecoverable[field] = entry;
+      }
+      return nextRecoverable;
+    });
+    if (editingNow.current) replaceDraft(next);
+    else activeEdits.clear();
   };
 
   const checkServer = async (
@@ -245,7 +270,8 @@ function ScopedCreatorCardPanel({
 
   const restorableEntry = (field: CardField) => {
     const entry = recoverable[field];
-    return entry && (revisions.current[field] ?? 0) <= entry.revision ? entry : undefined;
+    return entry && (!entry.onlyWhenMissing || published.current === null) &&
+      (revisions.current[field] ?? 0) <= entry.revision ? entry : undefined;
   };
 
   const restoreDraft = () => {
@@ -267,7 +293,6 @@ function ScopedCreatorCardPanel({
   const finishSave = (confirmed: CreatorCard, submitted: SubmittedWrite) => {
     const hasLaterEdits = editedFields.current.size > 0;
     if (!hasLaterEdits) setEditorOpen(false);
-    resumeDraft.current = false;
     acceptCard(confirmed);
     setRecoverable((previous) => {
       const remaining = { ...previous };
@@ -298,12 +323,14 @@ function ScopedCreatorCardPanel({
     const edits = CARD_FIELDS.filter((field) => editedFields.current.has(field) &&
       (!base || base[field] !== expected[field] ||
         (expected[field] === '' && !creatorCardFieldMatches(base, field, ''))));
+    // A newly created document needs all three public fields.
+    const writeFields = useFieldPatch.current && base ? edits : undefined;
     editedFields.current.clear();
     savingFlight.current = true;
     setSaving(true);
     setFeedback('');
     const submitted: SubmittedWrite = {
-      draft: submittedDraft, expected, edits, manualCheckStarted: false,
+      draft: submittedDraft, expected, edits, writeFields, manualCheckStarted: false, uncertain: false,
       revisions: { ...revisions.current },
     };
     for (const field of edits) {
@@ -311,6 +338,7 @@ function ScopedCreatorCardPanel({
     }
     pendingWrite.current = submitted;
     const markUnconfirmed = () => {
+      submitted.uncertain = true;
       setNeedsConfirmation(true);
       setFeedback('無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
     };
@@ -330,7 +358,7 @@ function ScopedCreatorCardPanel({
             throw new Error('Creator card save superseded');
           }
           return checkServer(submitted, read);
-        });
+        }, ...(writeFields ? [writeFields] : []));
       if (mounted.current && pendingWrite.current === submitted && !submitted.manualCheckStarted) {
         pendingWrite.current = null;
         setNeedsConfirmation(false);
