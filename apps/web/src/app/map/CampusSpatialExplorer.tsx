@@ -74,30 +74,38 @@ const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 // Response.json() buffers the entire document before our snapshot validator
 // runs. Bound the *actual decoded bytes* so untrusted downstream responses
 // cannot exhaust mobile memory even without a reliable Content-Length.
-// Fall back to supported response readers and check size after parsing if needed.
+// Prefer supported byte/text readers; only JSON-only WebViews check after parsing.
 async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
   let decoder: TextDecoder | undefined;
-  let encoder: TextEncoder | undefined;
   try {
     const candidate = new TextDecoder('utf-8', { fatal: true });
     if (candidate.decode(new Uint8Array([0xe4, 0xb8, 0xad])) === '中') decoder = candidate;
   } catch { /* WebView may only support Response.json() */ }
-  try {
-    const candidate = new TextEncoder();
-    if (candidate.encode('中').byteLength === 3) encoder = candidate;
-  } catch { /* Use the string length when byte measurement is unavailable. */ }
 
   const checkSize = (length: number) => {
     if (length > MAX_DECLARED_FOOTPRINT_BYTES) {
       throw new Error('Building outline response exceeded byte limit');
     }
   };
+  // A missing/partial TextEncoder must not turn 2 MB of UTF-8 into an
+  // unchecked UTF-16 character count. Count code points without allocating
+  // another large byte array; lone surrogates encode as U+FFFD (3 bytes).
   const checkTextSize = (raw: string) => {
     checkSize(raw.length);
-    let length: number | undefined;
-    try { length = encoder?.encode(raw).byteLength; }
-    catch { /* Fall back to the string length already checked. */ }
-    if (length !== undefined) checkSize(length);
+    let bytes = 0;
+    for (let i = 0; i < raw.length; i += 1) {
+      const code = raw.charCodeAt(i);
+      if (code <= 0x7f) bytes += 1;
+      else if (code <= 0x7ff) bytes += 2;
+      else if (code >= 0xd800 && code <= 0xdbff && i + 1 < raw.length) {
+        const next = raw.charCodeAt(i + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          bytes += 4;
+          i += 1;
+        } else bytes += 3;
+      } else bytes += 3;
+      checkSize(bytes);
+    }
   };
 
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -127,7 +135,9 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
         return JSON.parse(decoder.decode(bytes)) as unknown;
       }
     }
-    if (encoder) {
+    // text() can expose an unparsed body even if TextEncoder is missing.
+    // Prefer it to eager json(), so the UTF-8 size limit is checked first.
+    if (typeof response.text === 'function') {
       let raw: string | undefined;
       try { raw = await response.text?.(); }
       catch (error) {

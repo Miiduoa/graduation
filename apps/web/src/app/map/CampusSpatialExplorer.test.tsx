@@ -3708,6 +3708,51 @@ it('rejects a legacy WebView text body over the decoded UTF-8 byte limit', async
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
 });
 
+// A legacy WebView can expose text() while lacking TextEncoder. Counting only
+// UTF-16 units would silently accept a >2 MB CJK/emoji UTF-8 response.
+it.each([
+  { kind: 'CJK over limit', padding: '中'.repeat(700_000), accepted: false },
+  { kind: 'emoji over limit', padding: '😀'.repeat(525_000), accepted: false },
+  { kind: 'small CJK body', padding: '中'.repeat(10), accepted: true },
+])('enforces decoded UTF-8 bytes before json() without TextEncoder ($kind)', async ({
+  padding, accepted,
+}) => {
+  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  const raw = JSON.stringify({ ...JSON.parse(body) as Record<string, unknown>, padding });
+  const actualBytes = new TextEncoder().encode(raw).byteLength;
+  expect(raw.length).toBeLessThan(2_000_000);
+  expect(actualBytes > 2_000_000).toBe(!accepted);
+  vi.stubGlobal('TextEncoder', undefined);
+  const text = vi.fn().mockResolvedValue(raw);
+  const json = vi.fn();
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200, body: null, headers: new Headers(), text, json,
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(accepted ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(text).toHaveBeenCalledOnce();
+  expect(json).not.toHaveBeenCalled();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(accepted ? buildings : []);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('rejects oversized multibyte JSON-only WebView data without TextEncoder', async () => {
+  const { library, body } = sourcedLibraryFootprintFixture();
+  const payload = { ...JSON.parse(body) as Record<string, unknown>, padding: '中'.repeat(700_000) };
+  const json = vi.fn().mockResolvedValue(payload);
+  vi.stubGlobal('TextEncoder', undefined);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, status: 200, headers: new Headers(), json,
+  }));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(json).toHaveBeenCalledOnce();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+});
+
 // Merge-base reads Fetch's decoded body independently of Content-Encoding.
 it.each([
   'gzip', 'GZIP', 'x-gzip', ' br ', 'deflate', 'zstd', 'dcb', 'dcz',
