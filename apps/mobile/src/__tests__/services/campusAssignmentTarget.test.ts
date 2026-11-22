@@ -109,6 +109,10 @@ test('does not use a 130-character display prefix to open a different original a
   expect(target(prefix + '期末報告')).toEqual({
     route: 'HomeworkSubmit', params: { groupId: 'course_1', assignmentId: 'work_1' },
   });
+  value.assignments.items.push({ ...assignment, title: prefix, source: { ...source, assignmentId: 'work_2' } });
+  value.assignments.count = 2;
+  expect(target(prefix)).toBeNull();
+  expect(target(prefix + '期末報告')?.params.assignmentId).toBe('work_1');
 });
 
 test('the live snapshot parser retains only valid handoff references', async () => {

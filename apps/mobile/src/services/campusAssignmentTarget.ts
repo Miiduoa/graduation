@@ -12,8 +12,18 @@ export interface CampusAssignmentTarget {
   params: { groupId: string; assignmentId: string };
 }
 
+function normalizeCampusAssignmentTitle(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
 export function campusAssignmentDisplayTitle(value: string): string {
-  return value.replace(/\s+/g, ' ').trim().slice(0, 130);
+  return normalizeCampusAssignmentTitle(value).slice(0, 130);
+}
+
+export function matchesCampusAssignmentTitle(fullTitle: string, candidate: string): boolean {
+  const title = normalizeCampusAssignmentTitle(candidate);
+  return normalizeCampusAssignmentTitle(fullTitle) === title ||
+    campusAssignmentDisplayTitle(fullTitle).trimEnd() === title;
 }
 
 /**
@@ -32,16 +42,13 @@ export function resolveCampusAssignmentTarget(input: {
   const snapshot = validCampusSenseSnapshot(input.snapshot, input.scope, now);
   if (!snapshot || snapshot.assignments.status !== 'available' ||
       typeof input.assignment.title !== 'string' || !input.assignment.title.trim()) return null;
-  // Truncated labels are for display only. Using their first 130 characters
-  // as a navigation key can open a different task with the same long prefix.
-  // If the planner has only a shortened title, fail closed to the course list.
-  const title = input.assignment.title.replace(/\s+/g, ' ').trim();
+  const title = normalizeCampusAssignmentTitle(input.assignment.title);
   const matches = snapshot.assignments.items.filter((row) =>
-    row.title.replace(/\s+/g, ' ').trim() === title &&
     row.groupName === (input.assignment.groupName ?? '') &&
-    row.dueAt === (input.assignment.dueAt ?? null));
-  // Same-title tasks must never pick whichever happens to appear first.
-  if (matches.length !== 1) return null;
+    row.dueAt === (input.assignment.dueAt ?? null) &&
+    matchesCampusAssignmentTitle(row.title, title));
+  // Count display-title collisions, but require a complete title to open.
+  if (matches.length !== 1 || normalizeCampusAssignmentTitle(matches[0].title) !== title) return null;
   const source = parseCampusAssignmentSource(matches[0].source);
   if (!source) return null;
   return {

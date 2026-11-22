@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { LegacyAssignmentReminders } from '../screens/LegacyAssignmentReminders';
 import { CampusAssignmentReminderAction } from '../screens/CampusAssignmentReminderAction';
+import { AssignmentReplyActions } from '../screens/AssignmentReplyActions';
 import { reconcileSubmittedAssignmentReminders } from '../services/submittedAssignmentReminders';
 import { useSubmittedAssignmentReminders } from '../app/useSubmittedAssignmentReminders';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
@@ -126,6 +127,33 @@ async function optIn() {
   expect(await view.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
   return view;
 }
+
+test('單筆回覆保留完整長標題，可新增並重新讀取本機提醒', async () => {
+  const snapshot = mockSnapshot();
+  const title = '長'.repeat(130) + '期末報告';
+  snapshot.assignments.items[0].title = title;
+  mockReader.getAssignment.mockResolvedValue({ id: 'work', groupId: 'course', title, dueAt });
+  const reply = (
+    <AssignmentReplyActions
+      read={{
+        userId: 'alice', schoolId: 'pu', checkedAt: snapshot.checkedAt,
+        filterQuestion: '期末報告', items: snapshot.assignments.items,
+      }}
+      snapshot={snapshot}
+      context={{ userId: 'alice', schoolId: 'pu', isCurrent: current }}
+      disabled={false}
+      onAsk={jest.fn()}
+    />
+  );
+  const view = render(reply);
+  fireEvent.press(await view.findByText('設定手機本機截止提醒'));
+  fireEvent.press(view.getByText('確認設定本機提醒'));
+  expect(await view.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
+  view.unmount();
+  const reopened = render(reply);
+  expect(await reopened.findByText('已設定截止前 1 小時提醒')).toBeTruthy();
+});
+
 test('使用者設定提醒，伺服器確認已繳後取消；撤回後恢復原提醒', async () => {
   let view = await optIn();
   expect(mockAlarms.size).toBe(1);
