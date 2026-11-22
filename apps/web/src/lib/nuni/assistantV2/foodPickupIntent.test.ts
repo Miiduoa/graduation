@@ -374,6 +374,7 @@ it.each([
 it.each([
   ['幫我查一下昨天訂單的取餐時間記在日曆上的日期', null],
   ['退掉昨天訂單，確認取餐時間是否已加入行事曆', 'invalid'],
+  ['昨天訂單的取餐時間是否已加入行事曆', 'invalid'],
   ['昨天訂單的取餐時間放到哪個日曆了？', null],
   ['有沒有把昨天訂單的取餐時間記到日曆', null],
 ])('preserves the reviewed baseline for %s', (question, kind) => {
@@ -383,14 +384,55 @@ it.each([
 });
 
 it.each([
-  '幫我把最新訂單的取餐時間放到我的日曆上',
-  '幫我把取餐時間放到日曆',
-])('intercepts an explicit colloquial write request: %s', question => {
-  expect(parseMergeBase(question)).toBeNull();
+  ['幫我把最新訂單的取餐時間放到我的日曆上', null],
+  ['幫我把取餐時間放到日曆', null],
+  ['請把昨天訂單的取餐時間記到行事曆', null],
+  ['我想把昨天訂單的取餐時間排到行程', null],
+  ['我想把昨天訂單的取餐時間加到行程', 'invalid'],
+])('intercepts an explicit colloquial write request: %s', (question, baselineKind) => {
+  expect(parseMergeBase(question)?.kind ?? null).toBe(baselineKind);
   expect(parse(question)?.kind).toBe('invalid');
 });
 
-const requestPrefixes = ['幫我', '請', '麻煩', '想要', '可以'];
+const requestPrefixes = ['幫我', '請', '請你', '麻煩', '麻煩你', '我要', '我想要', '我想', '給我', '替我'];
+const placements = placementVerbs.flatMap(verb =>
+  calendarDestinations.map(calendar => ({ verb, calendar })),
+);
+const feasibilityPhrases = [
+  '可以', '可不可以', '是否可以', '能不能', '能否', '能夠', '可否', '可不可行',
+  '行不行', '好不好', '要不要', '會不會', '方不方便', '方便不方便',
+];
+const questionEndings = ['', '?', '？', '嗎', '呢', '吧', '嗎？', '呢？', '吧？'];
+
+it.each(feasibilityPhrases)('preserves the merge-base result for feasibility questions using %s', phrase => {
+  for (const { verb, calendar } of placements) {
+    const entry = yesterdayPickup + verb + calendar;
+    for (const prefix of ['', ...requestPrefixes]) {
+      const forms = [
+        phrase + prefix + '把' + entry,
+        prefix + phrase + '把' + entry,
+        prefix + '把' + phrase + entry,
+        prefix + '把' + entry + '，' + phrase,
+      ];
+      for (const form of forms) {
+        for (const ending of questionEndings) {
+          const question = form + ending;
+          expect(parse(question), question).toEqual(parseMergeBase(question));
+        }
+      }
+    }
+  }
+});
+
+it.each(questionEndings.slice(1))('preserves the merge-base result for a request ending in %s', ending => {
+  for (const { verb, calendar } of placements) {
+    for (const prefix of requestPrefixes) {
+      const question = prefix + '把' + yesterdayPickup + verb + calendar + ending;
+      expect(parse(question), question).toEqual(parseMergeBase(question));
+    }
+  }
+});
+
 const requestModifiers = [
   '', '查', '查一下', '查詢', '看', '看看', '確認', '檢查',
   '退掉', '退訂', '取消', '刪除', '改', '付款', '同步',
@@ -408,9 +450,6 @@ const statusForms = [
 ];
 
 it.each(requestPrefixes)('compares narrow write requests with the merge base for %s', prefix => {
-  const placements = placementVerbs.flatMap(verb =>
-    calendarDestinations.map(calendar => ({ verb, calendar })),
-  );
   for (const { verb, calendar } of placements) {
     for (const modifier of requestModifiers) {
       for (const action of orderDescriptions) {

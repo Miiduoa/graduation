@@ -33,9 +33,10 @@ const writeSubject = '((?:[^,;、。.!?]{0,80}訂單的?)?(?:預定)?取餐時�
 const writeDestination = '(?:放到|記到|加到|寫到|排到|新增到|同步到)' +
   '(?:我(?:的)?)?(?:個人)?(?:日曆|行事曆|行程)(?:上|中|裡|內)?';
 const requestWrite = new RegExp(
-  '^(?:幫我|請|麻煩你?|想要|可以){1,3}把' + writeSubject + writeDestination + '[。.!]?$',
+  '^(?:幫我|請你?|麻煩你?|我要|我想要?|給我|替我){1,3}把' + writeSubject + writeDestination + '[。.!]?$',
 );
-const queryOrStatus = /查|看|確認|核對|檢查|問|知道|哪|幾|什麼|何時|為何|如何|怎|日期|時間是|是否|有沒有|有無|是不是|已|嗎|呢|了|尚未|還沒|沒|[?]/;
+const feasibilityQuestion = /可以|可否|能否|能不能|能夠|可不可行|行不行|好不好|要不要|會不會|方不方便|方便不方便/;
+const queryOrStatus = /查|看|確認|核對|檢查|問|知道|哪|幾|什麼|何時|為何|如何|怎|日期|時間是|是否|有沒有|有無|是不是|已|嗎|呢|吧|了|尚未|還沒|沒|[?]/;
 const otherAction = new RegExp(
   '取消|撤銷|撤回|作廢|退|刪|移除|移走|挪|清除|清空|改|編輯|調整|變更|更新|更換|換|付款|結帳|同步|' +
   '下單|下訂|訂購|重(?:新)?(?:點|訂|買|購)|再(?:點|訂|買|購)|補訂|加點|買|點餐|^(?:點|訂(?!單))|' +
@@ -52,7 +53,7 @@ export function parseAssistantFoodPickupIntent(question: string): AssistantFoodP
   if (baseline) return baseline;
 
   if (text.length > 1000 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}「」『』“”"'\x60]/u.test(text) ||
-      queryOrStatus.test(compact)) return null;
+      feasibilityQuestion.test(compact) || queryOrStatus.test(compact)) return null;
   const match = requestWrite.exec(compact);
   // Check for other actions in the subject so placement verbs such as 同步到 are allowed.
   if (!match || otherAction.test(match[1]) || parseAssistantCalendarIntent(text)) return null;
