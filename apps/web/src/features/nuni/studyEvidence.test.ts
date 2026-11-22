@@ -194,6 +194,40 @@ describe('exact source-to-lesson evidence', () => {
     }
   });
 
+  it.each([true, false])('keeps spacing vowels inside whole source glyphs (Segmenter: %s)', (native) => {
+    if (!native) vi.stubGlobal('Intl', { Segmenter: undefined });
+    try {
+      // GB9a is needed in older mobile browsers: these vowel signs are Mc,
+      // not necessarily Grapheme_Extend. A partial consonant is not evidence.
+      for (const [syllable, consonant] of [
+        ['का', 'क'], // Devanagari
+        ['কি', 'ক'], // Bengali
+        ['ਕਾ', 'ਕ'], // Gurmukhi
+        ['કા', 'ક'], // Gujarati
+        ['கா', 'க'], // Tamil
+        ['ಕಾ', 'ಕ'], // Kannada
+        ['കാ', 'ക'], // Malayalam
+        ['කා', 'ක'], // Sinhala
+        ['ကေ', 'က'], // Myanmar pre-base vowel
+        ['កា', 'ក'], // Khmer
+      ]) {
+        expect(locateStudyEvidence(syllable, consonant)).toBeNull();
+        expect(locateStudyEvidence(syllable, syllable)?.quote).toBe(syllable);
+        expect(locateStudyEvidence(syllable + ' ' + consonant, consonant)).toEqual({
+          before: syllable + ' ', quote: consonant, after: '', occurrences: 1,
+        });
+      }
+      // Unicode GCB exceptions are real breaks despite being Spacing_Mark.
+      for (const syllable of ['ကါ', 'ကာ', 'ကး']) {
+        expect(locateStudyEvidence(syllable, 'က')).toEqual({
+          before: '', quote: 'က', after: syllable.slice(1), occurrences: 1,
+        });
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each([true, false])('matches merge-base exact mixed-script quotes (Segmenter: %s)', (native) => {
     if (!native) vi.stubGlobal('Intl', { Segmenter: undefined });
     try {

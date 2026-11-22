@@ -17,6 +17,12 @@ export type StudyEvidenceLocation = {
 };
 
 const graphemeContinuation = /[\p{Grapheme_Extend}\p{Emoji_Modifier}\u0e33\u0eb3\u200d]/u;
+// GB9a: many South/Southeast Asian vowel signs are SpacingMark rather than
+// Grapheme_Extend. Older WebViews without Intl.Segmenter must not permit a
+// model citation to cut the visible syllable in half. Unicode 16's exceptions
+// to GCB=SpacingMark (notably Myanmar/Tai Tham) remain separate clusters.
+const graphemeSpacingMark = /\p{Spacing_Mark}/u;
+const spacingMarkBreaks = /[\u102b-\u102c\u1038\u1062-\u1064\u1067-\u106d\u1083\u1087-\u108c\u108f\u109a-\u109c\u1a61\u1a63-\u1a64\uaa7b\uaa7d\u{11720}-\u{11721}]/u;
 const graphemeControl = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 const pictographic = /\p{Extended_Pictographic}/u;
 const emojiExtend = /[\p{Grapheme_Extend}\p{Emoji_Modifier}]/u;
@@ -58,7 +64,8 @@ function fallbackBoundaries(source: string): Uint8Array {
   for (const current of source) {
     const regional = regionalIndicator.test(current);
     const isIndicConsonant = indicConsonant.test(current);
-    const continuesGrapheme = graphemeContinuation.test(current);
+    const continuesGrapheme = graphemeContinuation.test(current) ||
+      (graphemeSpacingMark.test(current) && !spacingMarkBreaks.test(current));
     const isControl = graphemeControl.test(current) &&
       !continuesGrapheme && !graphemePrepend.test(current);
     const isPictographic = pictographic.test(current);
