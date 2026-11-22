@@ -1,5 +1,5 @@
 import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directoryStorageFailures';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { createRef } from 'react';
 import { callCampusAssistant } from '@/lib/campusAssistantClient';
@@ -183,6 +183,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 afterEach(() => {
+  cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -1056,46 +1057,96 @@ it('stops a Today map read, preserves both drafts and ignores its late result af
   expect(ask.mock.calls[0][0]).toMatchObject({ question: followup, history: [] });
 });
 
-it.each([true, false].flatMap((sameUrl) =>
-  ['mouse', 'Enter', 'Escape'].map((gesture) => ({ sameUrl, gesture })),
-))('closes Today and stops playback ($gesture, same URL: $sameUrl)', async ({ sameUrl, gesture }) => {
+const todayLinkCases = [
+  { destination: 'same URL', href: '/map?campus=pu' },
+  { destination: 'different URL', href: '/map?campus=nthu' },
+  { destination: 'external link', href: 'https://example.org/campus' },
+  { destination: 'same-page anchor', href: '/map?campus=pu#map-result' },
+];
+
+// The merge-base keeps the disclosure open on link activation. Escape closes
+// it and returns focus to the opening control for every kind of link.
+it.each(todayLinkCases.flatMap((linkCase) =>
+  ['click', 'Enter', 'Escape'].map((gesture) => ({ ...linkCase, gesture })),
+).concat(['new tab', 'outside click', 'switch tab', 'same-page history'].map((gesture) => ({
+  ...todayLinkCases[0],
+  gesture,
+}))))('matches the Today focus baseline ($destination, $gesture)', async ({ href, gesture }) => {
   const synthesis = installSpeech();
   state.pathname = '/map';
   state.search = 'campus=pu';
   window.history.replaceState({}, '', '/map?campus=pu');
-  const destination = sameUrl ? '/map?campus=pu' : '/map?campus=nthu';
-  mockNuniAsk(() => reply(`[回覆連結](${destination})`));
+  const external = href.startsWith('https://');
+  if (external) {
+    state.context = null;
+    state.uid = 'alice';
+    vi.mocked(callCampusAssistant).mockResolvedValue({
+      content: '校園資訊請參閱來源。',
+      citations: [{ url: href, label: '回覆連結' }],
+    });
+  } else {
+    mockNuniAsk(() => reply(`[回覆連結](${href})`));
+  }
+
   const handle = createRef<TodayAssistantHandle>();
   const onOpenChange = vi.fn();
   render(
-    <AssistantEnabledProvider enabled>
+    <AssistantEnabledProvider enabled={!external}>
+      <button type="button" onClick={() => handle.current?.openAssistant()}>開啟助理</button>
+      <div id="map-result">地圖結果</div>
       <TodayAssistantDisclosure ref={handle} onOpenChange={onOpenChange} />
     </AssistantEnabledProvider>,
   );
-  act(() => handle.current?.openAssistant());
-  const field = await screen.findByRole('textbox', { name: '問題' });
-  fireEvent.click(screen.getByRole('checkbox'));
+  const trigger = screen.getByRole('button', { name: '開啟助理' });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const field = await screen.findByRole('textbox', { name: external ? '你的問題' : '問題' });
+  if (!external) fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.change(field, { target: { value: '目前校園' } });
   fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
   const link = await screen.findByRole<HTMLAnchorElement>('link', { name: '回覆連結' });
-  expect(link.href === window.location.href).toBe(sameUrl);
+  expect(link.getAttribute('href')).toBe(href);
+  if (external) expect(link.target).toBe('_blank');
   fireEvent.click(screen.getByRole('button', { name: '朗讀回覆' }));
   expect(synthesis.speak).toHaveBeenCalledOnce();
 
-  fireEvent.click(link, { metaKey: true });
   const panel = link.closest('details')!;
   expect(panel.open).toBe(true);
-  expect(synthesis.cancel).not.toHaveBeenCalled();
-  if (gesture !== 'mouse') {
-    link.focus();
-    expect(document.activeElement).toBe(link);
+  link.focus();
+  expect(document.activeElement).toBe(link);
+
+  if (gesture === 'Escape' || gesture === 'Enter') {
     fireEvent.keyDown(link, { key: gesture });
   }
-  if (gesture !== 'Escape') {
-    // Emulate the native click that follows Enter in a real browser.
-    fireEvent.click(link, { detail: gesture === 'Enter' ? 0 : 1 });
+  if (gesture === 'click' || gesture === 'Enter' || gesture === 'new tab') {
+    // jsdom does not synthesize the anchor click on Enter or load a destination.
+    window.addEventListener('click', (event) => event.preventDefault(), { once: true });
+    fireEvent.click(link, { detail: gesture === 'Enter' ? 0 : 1, metaKey: gesture === 'new tab' });
   }
-  expect(panel.open).toBe(false);
-  expect(onOpenChange).toHaveBeenLastCalledWith(false);
-  expect(synthesis.cancel).toHaveBeenCalledOnce();
+  if (gesture === 'outside click') {
+    const outside = screen.getByText('地圖結果');
+    fireEvent.pointerDown(outside);
+    fireEvent.click(outside);
+  }
+  if (gesture === 'switch tab') {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    for (const state of ['hidden', 'visible'] as const) {
+      visibility.mockReturnValue(state);
+      fireEvent(document, new Event('visibilitychange'));
+    }
+    visibility.mockRestore();
+  }
+  if (gesture === 'same-page history') {
+    act(() => {
+      window.history.replaceState({}, '', '/map?campus=pu#map-result');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+  }
+
+  const closes = gesture === 'Escape';
+  expect(panel.open).toBe(!closes);
+  expect(document.activeElement).toBe(closes ? trigger : link);
+  expect(onOpenChange).toHaveBeenLastCalledWith(!closes);
+  expect(synthesis.cancel).toHaveBeenCalledTimes(closes ? 1 : 0);
 });

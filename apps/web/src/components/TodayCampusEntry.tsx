@@ -335,16 +335,6 @@ export function TodayAssistantDisclosure({
     [openAssistant],
   );
 
-  function closeAssistant() {
-    const panel = disclosure.current;
-    if (!panel?.open) return;
-    panel.open = false;
-    setOpened(false);
-    onOpenChange(false);
-    stopAssistantVoice(panel);
-    clearAssistantAnchor('today-voice-entry');
-  }
-
   return (
     <details
       ref={disclosure}
@@ -355,7 +345,11 @@ export function TodayAssistantDisclosure({
           return;
         event.preventDefault();
         event.stopPropagation();
-        closeAssistant();
+        event.currentTarget.open = false;
+        setOpened(false);
+        onOpenChange(false);
+        stopAssistantVoice(event.currentTarget);
+        clearAssistantAnchor('today-voice-entry');
         const trigger = openingTrigger.current;
         (trigger?.isConnected ? trigger : event.currentTarget.querySelector('summary'))?.focus();
       }}
@@ -377,14 +371,7 @@ export function TodayAssistantDisclosure({
         <span className={styles.triggerHint}>打字或語音詢問</span>
       </summary>
       <div className={styles.body}>
-        {hasOpened && (
-          <TodayCampusEntry
-            active={opened}
-            focusRequest={focusRequest}
-            preferredWorkContext={preferredWorkContext}
-            onNavigate={closeAssistant}
-          />
-        )}
+        {hasOpened && <TodayCampusEntry active={opened} focusRequest={focusRequest} preferredWorkContext={preferredWorkContext} />}
       </div>
     </details>
   );
