@@ -764,6 +764,7 @@ it('prepares both meetings for the current owner and opens the review section wi
   await chooseCourse();
   expect(push).toHaveBeenCalledWith('/import?kind=timetable&campus=ncnu#import-review');
   const draft = readPersonalImportDraft(importContext.scope);
+  expect(draft?.source.name).toBe('國立暨南國際大學本學期開設課程');
   expect(draft?.rows.map(row => [row.schoolId, row.dayOfWeek, row.periodLabel])).toEqual([['ncnu', 3, 'cd'], ['ncnu', 4, 'i']]);
   expect(draft).toMatchObject({ kind: 'timetable', year: '115', semester: '1', rows: [{ courseCode: course.code }, { courseCode: course.code }] });
   expect(readPersonalImportDraft({ owner: 'guest', schoolId: 'ncnu' })).toBeNull();
@@ -775,27 +776,25 @@ it.each([
     url: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall' },
   { schoolId: 'nthu' as const, schoolName: '國立清華大學',
     url: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json' },
-])('preserves the verified $schoolId catalog source, actual term and fetch time in the draft', async ({ schoolId, schoolName, url }) => {
+])('preserves the $schoolId catalog source and actual term in the batch draft when retrieval time is missing', async ({ schoolId, schoolName, url }) => {
   importContext.scope.schoolId = schoolId;
-  await chooseCourse(schoolId);
+  const first = schoolId === 'nthu' ? nthuCourse : course;
+  const second = schoolId === 'nthu'
+    ? { ...first, code: '11510AES 520301', section: '01', title: '另一班' }
+    : { ...first, section: 'b', title: '另一班' };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([first, second], { schoolId, fetchedAt: undefined })));
+  render(<PublicCourseSearch {...(schoolId === 'nthu' ? nthuProps : props)} />);
+  submit(first.code);
+  await screen.findByRole('heading', { name: second.title });
+  screen.getAllByRole('checkbox', { name: /選入批次核對/ }).forEach(check => fireEvent.click(check));
+  fireEvent.click(screen.getByRole('button', { name: '將選取的課程一起帶入核對' }));
   const draft = readPersonalImportDraft(importContext.scope);
   expect(draft?.source.name).toBe(
-    `${schoolName}｜115學年度第1學期公開開課資料｜來源：${url}｜資料擷取：2026-11-06 16:00（台灣時間；非校方更新時間）`,
+    `${schoolName}｜115學年度第1學期公開開課資料｜來源：${url}｜資料擷取：時間未提供`,
   );
-  expect(draft?.rows.length).toBe(2);
+  expect(draft?.rows).toHaveLength(schoolId === 'nthu' ? 4 : 2);
   expect(draft?.rows.every(row => row.source.name === draft.source.name)).toBe(true);
   expect(readPersonalImports(importContext.scope)).toEqual([]);
-});
-
-it('marks a missing public catalog retrieval time as unknown, never as a school update', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt: undefined })));
-  render(<PublicCourseSearch {...props} />);
-  submit('005076');
-  fireEvent.click(await screen.findByRole('button', { name: '帶入課表核對' }));
-  const draft = readPersonalImportDraft(importContext.scope);
-  expect(draft?.source.name).toContain('115學年度第1學期公開開課資料');
-  expect(draft?.source.name).toContain('資料擷取：時間未提供');
-  expect(draft?.source.name).not.toContain('本學期');
 });
 
 it.each((['ncnu', 'nthu'] as const).flatMap((schoolId) =>
@@ -954,24 +953,29 @@ it('selects two public courses and creates one scoped review draft with every me
   expect(draft?.year).toBe('115');
   expect(draft?.semester).toBe('1');
   expect(draft?.source.name).toContain('來源：https://ccweb6.ncnu.edu.tw/');
-  expect(draft?.source.name).toContain('資料擷取：2026-11-06 16:00');
+  expect(draft?.source.name).toContain('資料擷取：2026-11-06 16:00（台灣時間；非校方更新時間）');
   expect(draft?.rows.map(row => row.dayOfWeek)).toEqual([5, 3, 4]);
   expect(draft?.rows.map(row => row.courseCode)).toEqual(['005076', '130021', '130021']);
   expect(readPersonalImports(importContext.scope)).toEqual([]);
   expect(push).toHaveBeenCalledTimes(1);
 });
 
-it('does not partially import mixed-semester or duplicate public listings', async () => {
+it.each([
+  { title: '另一學期', code: '130021', section: 'b', semester: '1152' },
+  { title: '缺少學分', code: '130021', credits: '' },
+  { title: '全形班別', section: 'ａ' },
+  { title: '大寫班別', section: 'A' },
+])('does not create a batch draft containing $title', async (second) => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([
     course,
-    { ...course, code: '130021', section: 'b', semester: '1152', title: '另一學期' },
+    { ...course, ...second },
   ])));
   render(<PublicCourseSearch {...props} />);
   submit('實習');
-  await screen.findByRole('heading', { name: '另一學期' });
+  await screen.findByRole('heading', { name: second.title });
   screen.getAllByRole('checkbox', { name: /選入批次核對/ }).forEach(check => fireEvent.click(check));
   fireEvent.click(screen.getByRole('button', { name: '將選取的課程一起帶入核對' }));
-  expect(screen.getByRole('alert').textContent).toContain('不同學期');
+  expect(screen.getByRole('alert').textContent).toContain('請取消問題課程後重試');
   expect(readPersonalImportDraft(importContext.scope)).toBeNull();
   expect(push).not.toHaveBeenCalled();
 });

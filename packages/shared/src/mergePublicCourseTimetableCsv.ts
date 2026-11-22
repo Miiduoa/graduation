@@ -1,13 +1,13 @@
 import type { PublicCatalogCourse, PublicCourseCatalogResponse } from './publicCourseCatalog';
+import { normalizePersonalImportText } from './imports/validation';
 import { ncnuTimetableImportCsv } from './ncnuCourseSchedule';
 import { nthuTimetableImportCsv } from './nthuCourseSchedule';
 
 export const MAX_PUBLIC_COURSE_BULK_SELECTION = 10;
 
 /**
- * Join several verified public course cards into ONE personal-import review.
- * Each converter owns its school's time, credits, class and room validation.
- * Never skip a bad card or silently combine a different semester.
+ * Join public course cards from the same semester into one personal-import review.
+ * Require credits for every card and let the school converter validate the CSV fields.
  */
 export function mergePublicCourseTimetableCsv(
   schoolId: PublicCourseCatalogResponse['schoolId'],
@@ -25,14 +25,14 @@ export function mergePublicCourseTimetableCsv(
   for (const course of courses) {
     if (!course || course.semester !== semester ||
         typeof course.code !== 'string' || !course.code.trim() ||
-        typeof course.section !== 'string') return null;
+        typeof course.section !== 'string' ||
+        typeof course.credits !== 'string' || !course.credits.trim()) return null;
 
-    // Duplicate listings of the same course/section must not create duplicate
-    // review rows. Preserve different sections of one course.
-    // Feed rows may differ only in surrounding whitespace. Do not let that
-    // produce duplicate sessions in one personal-import draft; do not alter
-    // the original official identifiers written by the school converter.
-    const identity = JSON.stringify([course.code.trim(), course.section.trim()]);
+    // Compare identifiers as the import parser reads them from the CSV.
+    const identity = JSON.stringify([
+      normalizePersonalImportText(course.code),
+      normalizePersonalImportText(course.section),
+    ]);
     if (seen.has(identity)) return null;
     seen.add(identity);
 
