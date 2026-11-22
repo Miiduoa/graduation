@@ -278,12 +278,16 @@ function PublicCourseSearchForm({
       }
       const year = first.semester.slice(0, -1);
       const semester = first.semester.slice(-1);
-      const source = { type: 'paste' as const, name: `${schoolName}本學期開設課程` };
-      if (courses.length > 1 && result?.status === 'ready') {
-        const fetchedAt = result.fetchedAt ? formatPublicCatalogFetchedAt(result.fetchedAt) : null;
-        source.name = `${schoolName}｜${year}學年度第${semester}學期公開開課資料｜來源：${result.sourceUrl}｜` +
-          `資料擷取：${fetchedAt ? `${fetchedAt}（台灣時間；非校方更新時間）` : '時間未提供'}`;
-      }
+      // Keep provenance for both single-course and batch review drafts.
+      // A retrieval timestamp is not the university's last-updated time.
+      const fetchedAt = result?.status === 'ready' && result.fetchedAt
+        ? formatPublicCatalogFetchedAt(result.fetchedAt) : null;
+      const sourceUrl = result?.status === 'ready' ? result.sourceUrl : '未提供';
+      const source = {
+        type: 'paste' as const,
+        name: `${schoolName}｜${year}學年度第${semester}學期公開開課資料｜來源：${sourceUrl}｜` +
+          `資料擷取：${fetchedAt ? `${fetchedAt}（台灣時間；非校方更新時間）` : '時間未提供'}`,
+      };
       const { rows, issues } = parsePersonalImport(csv, { kind: 'timetable', schoolId, academicYear: year, semester, source });
       if (courses.length > 1 && issues.some(issue => issue.code === 'duplicate-row')) {
         return '所選課程包含重複的課表資料。請取消問題課程後重試。';
