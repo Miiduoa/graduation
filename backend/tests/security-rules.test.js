@@ -2410,6 +2410,7 @@ describe('firestore security rules', () => {
     await seedFirestore(async (db) => {
       const group = db.collection('groups').doc('group-1');
       await group.set({ schoolId: 'tw-demo-uni', type: 'course' });
+      await db.doc('users/teacher').set(campusBoundProfile('tw-demo-uni'));
       await db.collection('schools').doc('tw-demo-uni').collection('members').doc('teacher').set({
         role: 'faculty', status: 'active',
       });
