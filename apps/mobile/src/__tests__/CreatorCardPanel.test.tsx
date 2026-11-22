@@ -2,6 +2,7 @@ import React from 'react';
 import { Linking } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { getDocFromServer, setDoc } from 'firebase/firestore';
+import { creatorCardDocumentPassesRules, CREATOR_CARD_LIMITS } from '@campus/shared/src/creatorCard';
 import { CreatorCardPanel } from '../screens/social/CreatorCardPanel';
 import { readCreatorCard, saveCreatorCard } from '../services/creatorCard';
 
@@ -1201,8 +1202,7 @@ describe.each([
       const input = view.getByLabelText(label);
       expect(input.props.value).toBe(operation === 'clear visible' ? visible : '');
 
-      // A field that displays as empty is omitted until the user explicitly
-      // clears it. Returning to the same empty display value still sends ''.
+      // An explicit clear still works when the old value displays as empty.
       if (operation === 'untouched') {
         fireEvent.changeText(view.getByLabelText(otherLabel), '另一欄的新內容');
       } else if (operation === 'clear hidden') {
@@ -1216,7 +1216,9 @@ describe.each([
       const expected = { ...card, [field]: '' };
       if (operation === 'untouched') expected[otherField] = '另一欄的新內容';
       expect(saveCreatorCard).toHaveBeenCalledWith('pu', 'alice', expected,
-        operation === 'untouched' ? [otherField] : [field]);
+        operation === 'untouched' ? ['headline', 'bio', 'linkUrl'].filter(
+          (key) => key === field || key === otherField,
+        ) : [field]);
     },
   );
 });
@@ -1266,30 +1268,103 @@ test('a timed-out clear can be restored after a public check still reads a hidde
   }
 });
 
-test.each(['headline', 'bio', 'linkUrl'] as const)('saving an older card fills missing %s in the same write', async (missing) => {
-  const old = { schoolId: 'pu', ownerUid: 'alice', headline: '標題', bio: '簡介', linkUrl: 'https://example.org/' };
-  const raw: Partial<typeof old> = { ...old };
-  delete raw[missing];
-  const edits = missing === 'headline' ? { bio: '新簡介' } : { headline: '新標題' };
-  const patch = { [missing]: '', ...edits };
-  const actualService = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
-  jest.mocked(readCreatorCard).mockImplementation(actualService.readCreatorCard);
-  jest.mocked(saveCreatorCard).mockImplementation(actualService.saveCreatorCard);
-  for (const value of [raw, { ...raw, ...patch }]) {
-    jest.mocked(getDocFromServer).mockResolvedValueOnce({
-      exists: () => true, data: () => value, metadata: { hasPendingWrites: false },
+describe('saving merges creator card changes under the document rules', () => {
+  const original = {
+    schoolId: 'pu', ownerUid: 'alice', headline: '標題', bio: '簡介',
+    linkUrl: 'https://example.org/', pinnedPostId: 'post-1', updatedAt: 'OLD_TIME',
+  };
+
+  async function editCard(raw: Record<string, unknown>, serverDocument = raw) {
+    const actualService = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
+    jest.mocked(readCreatorCard).mockImplementation(actualService.readCreatorCard);
+    jest.mocked(saveCreatorCard).mockImplementation(actualService.saveCreatorCard);
+    let server = serverDocument;
+    const snapshot = (data: Record<string, unknown>) => ({
+      exists: () => true, data: () => data, metadata: { hasPendingWrites: false },
     } as never);
+    jest.mocked(getDocFromServer).mockResolvedValueOnce(snapshot(raw))
+      .mockImplementation(async () => snapshot(server));
+    jest.mocked(setDoc).mockImplementation(async (_ref, changes) => {
+      const merged = { ...server, ...changes };
+      if (!creatorCardDocumentPassesRules(merged, 'pu', 'alice', 'SERVER_TIME')) {
+        throw new Error('permission-denied');
+      }
+      server = merged;
+    });
+    const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+    fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+    return { view, currentDocument: () => server };
   }
-  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
-  fireEvent.press(await view.findByLabelText('編輯社群簡介'));
-  fireEvent.changeText(view.getByLabelText(missing === 'headline' ? '個人簡介' : '一句話介紹'),
-    missing === 'headline' ? '新簡介' : '新標題');
-  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
-  expect(setDoc).toHaveBeenCalledTimes(1);
-  expect(setDoc).toHaveBeenCalledWith(undefined, {
-    schoolId: 'pu', ownerUid: 'alice', ...patch, updatedAt: 'SERVER_TIME',
-  }, { merge: true });
-  expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+
+  describe.each(['headline', 'bio', 'linkUrl'] as const)('legacy %s', (field) => {
+    const isLink = field === 'linkUrl';
+    const longValue = isLink
+      ? original.linkUrl + 'a'.repeat(CREATOR_CARD_LIMITS.linkUrl)
+      : '字'.repeat(CREATOR_CARD_LIMITS[field] + 1);
+    test.each([
+      ['number', 12, ''],
+      ['null', null, ''],
+      ['object', { text: '內容' }, ''],
+      ['array', ['內容'], ''],
+      ['too long', longValue, isLink ? '' : longValue.slice(0, CREATOR_CARD_LIMITS[field])],
+      ['surrounding spaces', `  ${original[field]}  `, original[field]],
+      ['invalid URL', 'http://example.org/', isLink ? '' : 'http://example.org/'],
+      ['missing', undefined, ''],
+    ])('%s is repaired only when required by the rules or normalization', async (_scenario, value, expected) => {
+      const raw: Record<string, unknown> = { ...original, [field]: value };
+      if (value === undefined) delete raw[field];
+      const edit = field === 'headline' ? { bio: '新簡介' } : { headline: '新標題' };
+      const repair = value === expected ? {} : { [field]: expected };
+      const { view, currentDocument } = await editCard(raw);
+      fireEvent.changeText(view.getByLabelText(field === 'headline' ? '個人簡介' : '一句話介紹'),
+        field === 'headline' ? '新簡介' : '新標題');
+      await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+      expect(setDoc).toHaveBeenCalledTimes(1);
+      expect(setDoc).toHaveBeenCalledWith(undefined, {
+        schoolId: 'pu', ownerUid: 'alice', ...repair, ...edit, updatedAt: 'SERVER_TIME',
+      }, { merge: true });
+      expect(currentDocument()).toEqual({ ...raw, ...repair, ...edit, updatedAt: 'SERVER_TIME' });
+      expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+    });
+  });
+
+  test('repairs multiple legacy fields together, then saves two edits including a clear', async () => {
+    const raw = { ...original, headline: null, bio: 12, linkUrl: ' https://example.org/ ' };
+    const { view, currentDocument } = await editCard(raw);
+    fireEvent.changeText(view.getByLabelText('一句話介紹'), '新標題');
+    await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+    expect(currentDocument()).toEqual({ ...original, headline: '新標題', bio: '', updatedAt: 'SERVER_TIME' });
+
+    fireEvent.press(view.getByLabelText('編輯社群簡介'));
+    fireEvent.changeText(view.getByLabelText('個人簡介'), '新簡介');
+    fireEvent.changeText(view.getByLabelText('作品連結'), '');
+    await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+    expect(setDoc).toHaveBeenNthCalledWith(2, undefined, {
+      schoolId: 'pu', ownerUid: 'alice', bio: '新簡介', linkUrl: '', updatedAt: 'SERVER_TIME',
+    }, { merge: true });
+    expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+  });
+
+  test('preserves newer values for legal fields that were left untouched', async () => {
+    const latest = { ...original, linkUrl: 'https://example.net/new', bio: '其他裝置更新的簡介' };
+    const { view, currentDocument } = await editCard(original, latest);
+    fireEvent.changeText(view.getByLabelText('一句話介紹'), '新標題');
+    await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+    expect(currentDocument()).toEqual({ ...latest, headline: '新標題', updatedAt: 'SERVER_TIME' });
+    expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+  });
+
+  test('an extra key still blocks the merge even when all content fields are supplied', async () => {
+    const raw = { ...original, extra: 'legacy' };
+    expect(creatorCardDocumentPassesRules({ ...raw, updatedAt: 'SERVER_TIME' }, 'pu', 'alice', 'SERVER_TIME'))
+      .toBe(false);
+    const { view, currentDocument } = await editCard(raw);
+    fireEvent.changeText(view.getByLabelText('一句話介紹'), '新標題');
+    await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+    expect(setDoc).toHaveBeenCalledTimes(1);
+    expect(currentDocument()).toEqual(raw);
+    expect(view.queryByText('社群簡介已儲存。')).toBeNull();
+  });
 });
 
 test.each(['none', 'bio', 'all', 'reverted'] as const)(

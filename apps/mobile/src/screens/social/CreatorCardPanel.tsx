@@ -309,8 +309,8 @@ function ScopedCreatorCardPanel({
 
     const base = published.current;
     const edits = CARD_FIELDS.filter((field) => editedFields.current.has(field) &&
-      (!base || !creatorCardFieldMatches(base, field, expected[field])));
-    // A loaded missing field displays as the rule-compatible empty default.
+      (!base || base[field] !== expected[field] ||
+        (expected[field] === '' && !creatorCardFieldMatches(base, field, ''))));
     const fields = creatorCardWriteFields(base, edits);
     if (base && fields.length === 0) {
       setEditorOpen(false);
