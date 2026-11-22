@@ -1473,7 +1473,6 @@ describe('dynamic inline CSS never promotes ambiguous lesson content into a sour
     ['<style>\n:root { --alpha:0 }\n</style>', 'opacity:var(--alpha, 1)'],
     ['<style>@media print { :root { color:red; --alpha:0 } }</style>', 'opacity:var(--alpha, 1)'],
     ['`<!--`\n<style>:root { --alpha:0 }</style>', 'opacity:var(--alpha, 1)'],
-    ['<!-- unrelated --><div style="--alpha:0"></div>', 'opacity:var(--alpha, 1)'],
     ['', 'opacity:0;opacity:rgb(255 255 255)'],
     ['', 'opacity:1;opacity:calc(1em / 2em)'],
     ['', 'opacity:1;opacity:sibling-index()'],
@@ -1484,10 +1483,23 @@ describe('dynamic inline CSS never promotes ambiguous lesson content into a sour
     expect(extractStudySourceTables(source)).toEqual([]);
   });
 
-  it('does not let a var fallback override a potentially inherited hidden value', () => {
-    const source = ['<div style="--mode:none">', '<section style="display:var(--mode, block)">',
-      ...visibleTable, '</section>', '</div>'].join('\n');
-    expect(extractStudySourceTables(source)).toEqual([]);
+  it.each([
+    ['<!-- unrelated --><div style="--mode:none"></div><section style="display:var(--mode, block)">', '</section>', true],
+    ['<main><div style="--mode:none"></div><section style="display:var(--mode, block)">', '</section></main>', true],
+    ['<section style="display:var(--mode, block)">', '</section><div style="--mode:none"></div>', true],
+    ['<img style="--mode:none"><section style="display:var(--mode, block)">', '</section>', true],
+    ['<div style="--mode:none"><main><section style="display:var(--mode, block)">', '</section></main></div>', false],
+    ['<div style="--mode:block"><main><section style="display:var(--mode, none)">', '</section></main></div>', true],
+    ['<div style="--mode:none !important"><section style="--mode:block;display:var(--mode, none)">', '</section></div>', true],
+    ['<div style="--mode:block"><section style="--mode:none;display:var(--mode, block)">', '</section></div>', false],
+    ['<div style="--mode:none"><section style="--mode:initial;display:var(--mode, var(--other, block))">', '</section></div>', true],
+    ['<div style="--mode:none"><section style="--mode:unset;display:var(--mode, block)">', '</section></div>', false],
+    ['<div style="--mode:none;--alias:var(--mode)"><section style="--mode:block;display:var(--alias, block)">', '</section></div>', false],
+    ['<div style="--mode:block;--alias:var(--mode)"><section style="--mode:none;display:var(--alias, none)">', '</section></div>', true],
+    ['<div style="--alias:var(--missing)"><section style="--missing:none;display:var(--alias, block)">', '</section></div>', true],
+  ])('resolves inline visibility variables in their own inheritance chain (%#)', (open, close, visible) => {
+    const source = [open, ...visibleTable, close].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(visible ? realTable(2) : []);
   });
 
   it('keeps normal static visible declarations and unrelated CSS functions readable', () => {

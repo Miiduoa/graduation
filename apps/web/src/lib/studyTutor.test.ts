@@ -95,9 +95,15 @@ describe('reject unreadable model citations before saving a lesson', () => {
   });
 
   it.each([
-    ['embedding', '\u202b'],
+    ['left-to-right embedding', '\u202a'],
+    ['right-to-left embedding', '\u202b'],
+    ['pop directional formatting', '\u202c'],
+    ['left-to-right override', '\u202d'],
     ['override', '\u202e'],
+    ['left-to-right isolate', '\u2066'],
+    ['right-to-left isolate', '\u2067'],
     ['first strong isolate', '\u2068'],
+    ['pop directional isolate', '\u2069'],
   ])('rejects %s in newly generated main and step citations', (_name, mark) => {
     const quote = '主' + mark + '鍵';
     const original = { ...passage, text: passage.text + quote };
@@ -114,7 +120,7 @@ describe('reject unreadable model citations before saving a lesson', () => {
     ['left-to-right mark', '\u200e'],
     ['right-to-left mark', '\u200f'],
     ['Arabic letter mark', '\u061c'],
-  ])('rejects %s in new citations but retains exact legacy backups and follow-ups (%#)', (_name, mark) => {
+  ])('accepts exact, locatable %s in new citations and retains legacy follow-ups (%#)', (_name, mark) => {
     const quote = '主' + mark + '鍵';
     const original = { ...passage, text: passage.text + quote };
     const response = { ...steppedExplanation(), sourceQuote: quote };
@@ -125,12 +131,16 @@ describe('reject unreadable model citations before saving a lesson', () => {
     expect(promptData(buildStudyTutorPrompt(original, 'understand', '繼續', prepared), 'HISTORY_DATA'))
       .toEqual([previous]);
 
-    expect(() => parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original))
-      .toThrow('方向控制字元');
+    expect(parseTutorExplanation(JSON.stringify(response), original)).toEqual(response);
+    expect(() => parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), passage))
+      .toThrow('引用的句子不在這段原文');
     const stepOnly = steppedExplanation();
     stepOnly.steps[0].sourceQuote = quote;
-    expect(() => parseTutorExplanation(JSON.stringify(stepOnly), original))
-      .toThrow('AI 步驟引句無可讀的教材內容');
+    expect(() => parseTutorExplanation(JSON.stringify(stepOnly), passage))
+      .toThrow('步驟引用的句子不在這段原文');
+    expect(() => parseTutorExplanation(JSON.stringify(response), {
+      ...passage, text: passage.text + quote + '\u0301',
+    })).toThrow('引句無可讀');
   });
 
   it.each(['主\u202e鍵\u202c', '\u2067外鍵\u2069', '主\u202a鍵\u202c\u200b'])(
@@ -151,8 +161,6 @@ describe('reject unreadable model citations before saving a lesson', () => {
     const original = { ...passage, text: passage.text + quote };
     const previous = { ...turn(), response: { ...explanation(), sourceQuote: quote } };
     expect(() => parseTutorExplanation(JSON.stringify(previous.response), original)).toThrow('引句無可讀');
-    expect(() => prepareStudyTutorHistory(original, 'understand', [previous]))
-      .toThrow('先前講解無法對照目前的原文');
   });
 
   it('rejects an unreadable step citation even when the main quote is valid', () => {
@@ -187,15 +195,20 @@ describe('reject unreadable model citations before saving a lesson', () => {
     },
   );
 
-  it('revalidates older model replies before using them as follow-up context', () => {
-    const original = { ...passage, text: passage.text + '\u200b' };
-    const previous = { ...turn(), response: { ...explanation(), sourceQuote: '\u200b' } };
-    const envelope = { passageId: original.id, sourceText: original.text, mode: 'understand' as const, turns: [previous] };
-    expect(() => buildStudyTutorPrompt(original, 'understand', '繼續', envelope))
-      .toThrow('先前講解無法對照目前的原文');
-    expect(() => prepareStudyTutorHistory(original, 'understand', [previous]))
-      .toThrow('先前講解無法對照目前的原文');
-  });
+  it.each(['\u200b', '\u200b\u0301', '\u0301', '\u2060\u200f', '\u2800', '主\u200b鍵'])(
+    'keeps exact legacy main and step citations in follow-up prompts (%#)', (quote) => {
+      const original = { ...passage, text: passage.text + quote };
+      const response = { ...steppedExplanation(), sourceQuote: quote };
+      response.steps[0].sourceQuote = quote;
+      const previous = { ...turn(), response: parseSavedTutorExplanation(JSON.stringify(response), original) };
+      const prepared = prepareStudyTutorHistory(original, 'understand', [previous]);
+      expect(promptData(buildStudyTutorPrompt(original, 'understand', '繼續', prepared), 'HISTORY_DATA'))
+        .toEqual([previous]);
+      expect(() => prepareStudyTutorHistory(passage, 'understand', [previous]))
+        .toThrow('先前講解無法對照目前的原文');
+    },
+  );
+
 });
 
 describe('study source provenance', () => {

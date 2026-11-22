@@ -1,3 +1,4 @@
+import { hasVisibleStudyContent, locateStudyEvidence } from '@/features/nuni/studyEvidence';
 import {
   PERSONAL_IMPORT_DOCUMENT_LIMITS,
   validatePersonalImportDocument,
@@ -51,20 +52,15 @@ function nonempty(value: unknown, max: number): value is string {
   return typeof value === 'string' && !!value.trim() && value.length <= max;
 }
 
-/**
- * Even an exact substring of a lecture can be an unreadable or visually
- * reordered model citation. Reject it before recording the generated lesson;
- * the original licensed material is never edited.
- */
-function hasReadableTutorCitation(quote: string, isHistory: boolean): boolean {
-  // Preserve historical exact-match citations when reopening existing notes.
-  // New generated evidence must reject *all* Unicode direction controls:
-  // even LRM/RLM/ALM can reorder a byte-identical bilingual excerpt.
-  if (!isHistory && /\p{Bidi_Control}/u.test(quote)) return false;
-  const content = isHistory ? quote : quote.replace(/\p{P}/gu, '');
-  const hasContent = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800\ufff9-\ufffb]/u.test(content) ||
-    /[0-9#*]\ufe0f?\u20e3/u.test(quote);
-  if (!hasContent) return false;
+/** Generated citations must be readable, even when they match the source. */
+function hasReadableTutorCitation(quote: string, source: string): boolean {
+  if (/\p{Bidi_Control}/u.test(quote)) {
+    // Direction marks can occur in readable source text. Explicit embeddings,
+    // overrides and isolates can reorder a cited span and remain disallowed.
+    if (/\p{Bidi_Control}/u.test(quote.replace(/[\u061c\u200e\u200f]/gu, '')) ||
+        !locateStudyEvidence(source, quote)) return false;
+  }
+  if (!hasVisibleStudyContent(quote, { ignorePunctuation: true })) return false;
   for (let index = 0; index < quote.length; index += 1) {
     const unit = quote.charCodeAt(index);
     if (unit >= 0xd800 && unit <= 0xdbff) {
@@ -252,7 +248,7 @@ function readStudyTurns(turns: readonly StudyTutorTurn[], passage: StudyPassage)
     try {
       return {
         question: turn.question,
-        response: readTutorExplanation(JSON.stringify(turn.response), passage, 'history'),
+        response: parseSavedTutorExplanation(JSON.stringify(turn.response), passage),
       };
     } catch {
       throw new Error('先前講解無法對照目前的原文，請不帶追問紀錄重新講解。');
@@ -352,7 +348,7 @@ const stepLimits = {
   sourceQuote: 400,
 } as const;
 
-type TutorCitationPolicy = 'generated' | 'history' | 'backup';
+type TutorCitationPolicy = 'generated' | 'backup';
 
 function readTutorSteps(value: unknown, passage: StudyPassage, policy: TutorCitationPolicy): StudyTutorStep[] {
   const invalid = () => new Error('AI 分步講解不完整或無法對照本段原文，請重試。');
@@ -368,7 +364,7 @@ function readTutorSteps(value: unknown, passage: StudyPassage, policy: TutorCita
     const parsed = data as StudyTutorStep;
     if (!passage.text.includes(parsed.sourceQuote))
       throw new Error('AI 步驟引用的句子不在這段原文中，這次講解未採用。請重試。');
-    if (policy !== 'backup' && !hasReadableTutorCitation(parsed.sourceQuote, policy === 'history'))
+    if (policy === 'generated' && !hasReadableTutorCitation(parsed.sourceQuote, passage.text))
       throw new Error('AI 步驟引句無可讀的教材內容或含方向控制字元，這次講解未採用。請重試。');
     if (hasFormula && !parsed.sourceQuote.includes(parsed.formula!))
       throw new Error('AI 步驟公式不是該步引句的原文，這次講解未採用。請重試。');
@@ -413,7 +409,7 @@ function readTutorExplanation(raw: string, passage: StudyPassage, policy: TutorC
   const explanation = data as TutorExplanation;
   if (!passage.text.includes(explanation.sourceQuote))
     throw new Error('AI 引用的句子不在這段原文中，這次講解未採用。請重試。');
-  if (policy !== 'backup' && !hasReadableTutorCitation(explanation.sourceQuote, policy === 'history'))
+  if (policy === 'generated' && !hasReadableTutorCitation(explanation.sourceQuote, passage.text))
     throw new Error('AI 引句無可讀的教材內容或含方向控制字元，這次講解未採用。請重試。');
   return {
     title: explanation.title.trim(),

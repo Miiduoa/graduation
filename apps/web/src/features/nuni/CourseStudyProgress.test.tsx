@@ -301,7 +301,7 @@ it.each(['\u200b', '\ufff9', '\u2060\ufe0f', '\ufeff'])('restores and reopens a 
   fireEvent.click(screen.getByRole('button', { name: '儲存閱讀進度' }));
   const backup = await readBlob(create.mock.calls[0][0] as Blob);
   const saved = parseCourseStudyProgress(backup, scope).passages['1:1'].modes.exam.lessons[0];
-  expect(saved).toMatchObject({ attempt: attempt.trim() ? attempt : attempt + '\u200b', answerVisible: false });
+  expect(saved).toMatchObject({ attempt, answerVisible: false });
   selectFile(progressFile(backup));
   await screen.findByRole('region', { name: '閱讀進度預覽' });
   fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
@@ -315,6 +315,7 @@ it.each(['\u200b', '\ufff9', '\u2060\ufe0f', '\ufeff'])('restores and reopens a 
   selectFile(progressFile(draftBackup));
   await screen.findByRole('region', { name: '閱讀進度預覽' });
   fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+  expect(inputValue('先寫下你的想法')).toBe('\u200d\u2800');
   expect(screen.getByRole('button', { name: '對照參考回答' }).hasAttribute('disabled')).toBe(true);
 });
 
@@ -354,6 +355,37 @@ it('restores the selected PDF page, mode, notes and lesson branch without automa
   expect(request.question).toBe(data.passages['1:1'].modes.exam.question);
   expect(request.passage.text).toBe(savedText);
   expect(request.history.turns.map((turn: { response: TutorExplanation }) => turn.response.title)).toEqual(['第一輪講解', '第三輪講解']);
+});
+
+it('copies and restores the exact self-check draft and follows up with an invisible legacy quote', async () => {
+  const data = progress();
+  const quote = '\u200b\u0301';
+  const draft = '\u200b\u0301\u200f';
+  data.source.sections[1].text += quote;
+  const lesson = data.passages['1:1'].modes.exam.lessons[2];
+  lesson.response.sourceQuote = quote;
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  await preview(data);
+  fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+  await screen.findByRole('heading', { name: '第三輪講解' });
+
+  const label = '先寫下你的想法';
+  fireEvent.change(screen.getByLabelText(label), { target: { value: draft } });
+  expect(inputValue(label)).toBe(draft);
+  fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+  const raw = (await screen.findByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement).value;
+  expect(parseCourseStudyProgress(raw, scope).passages['1:1'].modes.exam.lessons[2]).toMatchObject({
+    attempt: draft, answerVisible: false, answerReviewAllowed: false,
+  });
+
+  fireEvent.change(screen.getByLabelText(label), { target: { value: '備份以後的草稿' } });
+  fireEvent.change(screen.getByLabelText(restoreLabel), { target: { files: [progressFile(raw)] } });
+  fireEvent.click(await screen.findByRole('button', { name: '還原這份進度' }));
+  expect(inputValue(label)).toBe(draft);
+  expect(screen.getByRole('button', { name: '對照參考回答' }).hasAttribute('disabled')).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '接著追問' }));
+  await waitFor(() => expect(mocks.run).toHaveBeenCalledTimes(1));
+  expect(mocks.run.mock.calls[0][0].history.turns.at(-1).response.sourceQuote).toBe(quote);
 });
 
 it('labels restored material as a saved copy even when its ID matches the current course material', async () => {

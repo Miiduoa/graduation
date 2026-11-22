@@ -181,6 +181,21 @@ describe('versioned independent review checkpoint', () => {
     expect(parseStudyPracticeCheckpoint(serializeStudyPracticeCheckpoint(restored), scope)).toEqual(restored);
   });
 
+  it.each(['\u200b\u0301', '\u200b', '\u0301', '\u200e\u2060', ' 原\u200b文 e\u0301\u200f ', ' \t', ''])(
+    'retains the reading draft and its reveal eligibility inside a practice backup (%#)', (attempt) => {
+      const saved = checkpoint();
+      Object.assign(saved.progress.passages['0:0'].modes.understand.lessons[0], {
+        attempt, answerVisible: false, answerReviewAllowed: false,
+      });
+      const raw = serializeStudyPracticeCheckpoint(saved);
+      const restored = parseStudyPracticeCheckpoint(raw, scope);
+      expect(restored.progress.passages['0:0'].modes.understand.lessons[0]).toMatchObject({
+        attempt, answerVisible: false,
+      });
+      expect(serializeStudyPracticeCheckpoint(restored)).toBe(raw);
+    },
+  );
+
   it('preserves invisible drafts and their saved reveal verbatim', () => {
     const raw = serializeStudyPracticeCheckpoint(checkpoint());
     for (const invisible of ['\u200b', '\u2060', '\u2800', '\u0301', ' \u2800\u200b ', '\u200d\ufe0f', '\ufff9', '\ufffa', '\ufffb']) {

@@ -1,4 +1,7 @@
 import { STUDY_TUTOR_LIMITS, type StudyMode, type StudyTutorTurn } from '@/lib/studyTutor';
+import { hasVisibleStudyContent } from './studyEvidence';
+
+export { hasVisibleStudyContent } from './studyEvidence';
 
 export const STUDY_SESSION_LIMITS = {
   lessonsPerMode: 6,
@@ -19,13 +22,6 @@ export function hasVisibleStudyAttempt(attempt: string): boolean {
 // Older backups can contain an expanded answer with a trim()-accepted attempt.
 export function hasRevealedStudyAnswer(response: { attempt: string; answerVisible: boolean }): boolean {
   return response.answerVisible && !!response.attempt.trim();
-}
-
-export function hasVisibleStudyContent(text: string, { ignorePunctuation = false } = {}): boolean {
-  // A punctuation base with a keycap mark is itself a visible emoji.
-  if (ignorePunctuation && /[0-9#*]\ufe0f?\u20e3/u.test(text)) return true;
-  const content = ignorePunctuation ? text.replace(/\p{P}/gu, '') : text;
-  return /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\p{M}\u2800\ufff9-\ufffb]/u.test(content);
 }
 
 export function canReviewStudyAnswer(lesson: StudyLesson): boolean {
