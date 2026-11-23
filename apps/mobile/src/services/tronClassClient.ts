@@ -2794,6 +2794,13 @@ export type TCWriteResult = {
   error?: string;
 };
 
+export const TRONCLASS_WRITE_LOCKED_MESSAGE = '目前僅提供閱讀，送出功能尚未開放';
+
+/** Keep the legacy write UI locked until verified writers are available. */
+export function isTronClassWriteLocked(): boolean {
+  return true;
+}
+
 function legacyTronClassWriteUnavailable(): TCWriteResult {
   if (!isTronClassDataFetchEnabled()) {
     return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };

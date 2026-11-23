@@ -15,6 +15,7 @@ jest.mock('../../services/tronClassDataEnabled', () => ({
 }));
 
 import {
+  isTronClassWriteLocked,
   tcPostDiscussion,
   tcPostDiscussionReply,
   tcSubmitHomework,
@@ -33,6 +34,10 @@ beforeEach(() => {
   mockFetch.mockReset();
   globalThis.fetch = mockFetch;
   (isTronClassDataFetchEnabled as jest.Mock).mockReturnValue(true);
+});
+
+test('the screen write lock remains active even when reads are enabled', () => {
+  expect(isTronClassWriteLocked()).toBe(true);
 });
 
 const unavailableWrites: Array<[string, () => Promise<TCWriteResult>]> = [

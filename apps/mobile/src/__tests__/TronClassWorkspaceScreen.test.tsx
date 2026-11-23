@@ -1,9 +1,10 @@
 import React from 'react';
-import { AppState } from 'react-native';
+import { AppState, Linking } from 'react-native';
 import { NavigationContext } from '@react-navigation/native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NuniError } from '@campus/shared/src/nuni';
+import { isTronClassDataFetchEnabled } from '../services/tronClassDataEnabled';
 import { TronClassWorkspaceScreen } from '../screens/TronClassWorkspaceScreen';
 import {
   saveNativeTronClassPending,
@@ -49,6 +50,10 @@ let mockConnection = connection;
 let mockSnapshot = snapshot;
 let mockId = 0;
 let mockSubmissionDownloadEnabled = true;
+
+jest.mock('../services/tronClassDataEnabled', () => ({
+  isTronClassDataFetchEnabled: jest.fn(),
+}));
 
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
@@ -170,6 +175,7 @@ async function defaultRequest(_path: string, _context: string, input: Record<str
 beforeEach(async () => {
   await AsyncStorage.clear();
   jest.clearAllMocks();
+  jest.mocked(isTronClassDataFetchEnabled).mockReturnValue(true);
   mockAuth = {
     session: { platformAccountId: accountA, context: 'context-a' },
     loading: false,
@@ -230,6 +236,30 @@ async function confirmAndSend(view: ReturnType<typeof render>) {
   fireEvent(view.getByLabelText('我已確認要把這份作業送至校方'), 'valueChange', true);
   fireEvent.press(view.getByRole('button', { name: '確認並繳交至 TronClass' }));
 }
+
+it('blocks the workspace before contacting the BFF and returns to the previous screen', async () => {
+  jest.mocked(isTronClassDataFetchEnabled).mockReturnValue(false);
+  const goBack = jest.fn();
+  const navigation = { canGoBack: () => true, goBack } as unknown as React.ContextType<typeof NavigationContext>;
+  const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  try {
+    const view = render(
+      <NavigationContext.Provider value={navigation}>
+        <TronClassWorkspaceScreen />
+      </NavigationContext.Provider>,
+    );
+    expect(view.getByRole('alert')).toHaveTextContent('此功能目前未開放');
+    expect(view.getAllByRole('button')).toHaveLength(1);
+    await act(async () => {
+      fireEvent.press(view.getByRole('button', { name: '返回' }));
+    });
+    expect(goBack).toHaveBeenCalledTimes(1);
+    expect(mockBffRequest).not.toHaveBeenCalled();
+    expect(openURL).not.toHaveBeenCalled();
+  } finally {
+    openURL.mockRestore();
+  }
+});
 
 it('shows personal school windows and drafts without enabling the native writer', async () => {
   mockPreparation = { ...preparation, availability };
