@@ -1007,6 +1007,10 @@ it('remeasures on manual restart and resumes despite unchanged stale VisualViewp
     height = 200;
     act(() => { viewport.dispatchEvent(new Event('resize')); });
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    // r16: focus cannot distinguish a dismissed keyboard with stale bounds
+    // from an open keyboard. Explicit restart remeasures either way.
+    fireEvent.focus(window);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
     bounds.mockClear();
     readHeight.mockClear();
     await act(async () => restart());
@@ -1908,7 +1912,7 @@ it.each(['foreground', 'save-data', 'pagehide', 'visibilitychange'] as const)(
 );
 
 const keyboardRecoveryEvents = ['focus', 'visual resize', 'visual scroll', 'window resize', 'window scroll'];
-it.each([...keyboardRecoveryEvents, 'observer', 'viewport'])('recovers paused iOS WebGL through %s', async (recovery) => {
+it.each([...keyboardRecoveryEvents, 'observer', 'viewport'])('checks paused iOS WebGL on %s', async (recovery) => {
   // On Safari the keyboard or pinch zoom can shrink/offset visualViewport
   // while innerHeight stays unchanged and the observer is delayed.
   const viewport = Object.assign(new EventTarget(), {
@@ -1936,8 +1940,11 @@ it.each([...keyboardRecoveryEvents, 'observer', 'viewport'])('recovers paused iO
     expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
+    // r16/r17: changed offscreen bounds pause, and repeated bounds keep the
+    // scene paused. Changed visible geometry or an observer hidden → visible
+    // transition resumes it. Manual restart remeasures and can use layout
+    // visibility when the keyboard leaves stale VisualViewport bounds.
     if (recovery !== 'observer' && recovery !== 'viewport') {
-      // No fresh observer entry or corrected height arrives after the keyboard closes.
       if (recovery === 'focus') fireEvent.focus(window);
       else {
         const target = recovery.startsWith('visual') ? viewport : window;
@@ -1945,34 +1952,19 @@ it.each([...keyboardRecoveryEvents, 'observer', 'viewport'])('recovers paused iO
         act(() => target.dispatchEvent(new Event(type)));
       }
       expect(viewport.height).toBe(top - 10);
-      expect(scene.setActive).toHaveBeenLastCalledWith(true);
-      expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
-
-      viewport.height = top - 20;
-      act(() => viewport.dispatchEvent(new Event('resize')));
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+    } else if (recovery === 'observer') {
+      act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
       expect(scene.setActive).toHaveBeenLastCalledWith(false);
       act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
       fireEvent.focus(window);
       expect(scene.setActive).toHaveBeenLastCalledWith(false);
       act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
-      expect(scene.setActive).toHaveBeenLastCalledWith(true);
-    } else if (recovery === 'observer') {
-      // The keyboard closes but the viewport continues to report its old height.
-      act(() => intersection?.([observerEntry(graphics, true, new DOMRect(0, top, 320, 40), 99)],
-        {} as IntersectionObserver));
       expect(viewport.height).toBe(top - 10);
       expect(scene.setActive).toHaveBeenLastCalledWith(true);
       fireEvent.focus(window);
       expect(scene.setActive).toHaveBeenLastCalledWith(true);
-
-      viewport.height = top - 20;
-      act(() => viewport.dispatchEvent(new Event('resize')));
-      expect(scene.setActive).toHaveBeenLastCalledWith(false);
-      act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
-      expect(scene.setActive).toHaveBeenLastCalledWith(true);
-      act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
-      expect(scene.setActive).toHaveBeenLastCalledWith(false);
-      act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
     }
     // A positive measurement also recovers when no observer entry arrives.
     viewport.height = window.innerHeight;
@@ -2003,7 +1995,9 @@ it.each([...keyboardRecoveryEvents, 'observer', 'viewport'])('recovers paused iO
     viewport.height = top - 10;
     act(() => viewport.dispatchEvent(new Event('resize')));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
-    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    // The observer can deliver both transitions together.
+    act(() => intersection?.([observerEntry(graphics, false), observerEntry(graphics, true)],
+      {} as IntersectionObserver));
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     fireEvent(window, new Event('orientationchange'));
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
@@ -2474,6 +2468,7 @@ it.each(
         await act(async () => viewport.dispatchEvent(new Event('resize')));
         expect(scene.create).toHaveBeenCalledTimes(1);
         expect(scene.setActive).toHaveBeenLastCalledWith(true);
+        if (phase === 'paused' && initial === 'positive') notify(initial);
         viewport.height = 300;
         act(() => viewport.dispatchEvent(new Event('resize')));
         expect(scene.setActive).toHaveBeenLastCalledWith(false);
@@ -2482,7 +2477,7 @@ it.each(
           expect(scene.dispose).toHaveBeenCalledTimes(1);
         }
       }
-      if (initial !== 'none') notify(initial);
+      if (initial === 'negative' || (initial === 'positive' && phase !== 'paused')) notify(initial);
       const existingAllocations = phase === 'first' ? 0 : 1;
       expect(scene.create).toHaveBeenCalledTimes(existingAllocations);
 
@@ -2507,8 +2502,8 @@ it.each(
       // A manual open can override unchanged VisualViewport bounds when the
       // host still overlaps the layout viewport.
       const manualOverride = startup === 'manual' && phase === 'first';
-      const visibleObservation = event === 'positive' ||
-        (initial === 'positive' && (event === 'focus' || event === 'resize' || event === 'scroll'));
+      const visibleObservation = (event === 'positive' && (phase !== 'paused' || initial === 'negative')) ||
+        (initial === 'positive' && phase !== 'paused' && (event === 'focus' || event === 'resize' || event === 'scroll'));
       const shouldRender = (inView || manualOverride || visibleObservation) && observerAllowsRendering;
       expect(scene.create).toHaveBeenCalledTimes(shouldRender ? mergeBaseAllocations : existingAllocations);
       if (shouldRender || phase === 'paused') expect(scene.setActive).toHaveBeenLastCalledWith(shouldRender);

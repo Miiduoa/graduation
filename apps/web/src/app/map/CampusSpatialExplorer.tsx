@@ -374,7 +374,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       if (override?.bounds !== undefined && !matchesManualBounds) manualGeometry.current = null;
       // A fresh positive observer entry can outlive stale keyboard bounds.
       return visibility === 'hidden' ||
-        ((visibility !== 'visible' || geometrySuspended) && geometry?.visible === false && !matchesManualBounds);
+        (!matchesManualBounds && (geometrySuspended || (visibility !== 'visible' && geometry?.visible === false)));
     };
     const isDeferred = () => isOffscreen() || isBackgrounded() || (saveData && !hasDataConsent);
     const defer = () => {
@@ -551,10 +551,15 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     const syncViewport = (event?: Event) => {
       if (!active) return;
       const geometry = measureHostViewport();
-      // A changed boundary can temporarily clip a layout-visible canvas.
-      // A repeated boundary can be stale after the keyboard closes.
-      geometrySuspended = Boolean(event && geometry?.visible === false && geometry.bounds !== lastViewportBounds);
-      lastViewportBounds = geometry?.bounds;
+      // r16/r17: A changed, offscreen boundary pauses rendering. Repeated
+      // bounds keep it paused. Resume on changed, visible geometry or a new
+      // hidden-to-visible observer transition. Manual restart remeasures and
+      // can override stale keyboard bounds when the canvas overlaps the layout.
+      if (geometry && geometry.bounds !== lastViewportBounds) {
+        if (geometry.visible) geometrySuspended = false;
+        else if (event) geometrySuspended = true;
+        lastViewportBounds = geometry.bounds;
+      }
       refreshVisualViewportListeners();
       updateVisibility(geometry);
       if (!started && !isDeferred()) startWhenVisible();
@@ -594,28 +599,37 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           if (!latest) return;
           // Fall back to the original boolean when the optional rectangle
           // is unavailable. A valid zero-area intersection is an edge touch.
-          let intersects: boolean;
-          try {
-            const intersecting = latest.isIntersecting;
-            if (typeof intersecting !== 'boolean') return;
-            intersects = intersecting;
-          } catch { return; }
-          if (intersects) {
+          const readIntersection = (entry: IntersectionObserverEntry) => {
+            let intersects: boolean;
             try {
-              const rect = latest.intersectionRect;
-              if (rect) {
-                const { width, height, x, y, left, top, right, bottom } = rect;
-                if (Number.isFinite(width) && Number.isFinite(height) &&
-                    width >= 0 && height >= 0 &&
-                    [x, y, left, top, right, bottom].every((value) => value === undefined || Number.isFinite(value)) &&
-                    !(left !== undefined && right !== undefined && right < left) &&
-                    !(top !== undefined && bottom !== undefined && bottom < top)) {
-                  intersects = width > 0 && height > 0 &&
-                    (left === undefined || right === undefined || right > left) &&
-                    (top === undefined || bottom === undefined || bottom > top);
+              const intersecting = entry.isIntersecting;
+              if (typeof intersecting !== 'boolean') return undefined;
+              intersects = intersecting;
+            } catch { return undefined; }
+            if (intersects) {
+              try {
+                const rect = entry.intersectionRect;
+                if (rect) {
+                  const { width, height, x, y, left, top, right, bottom } = rect;
+                  if (Number.isFinite(width) && Number.isFinite(height) &&
+                      width >= 0 && height >= 0 &&
+                      [x, y, left, top, right, bottom].every((value) => value === undefined || Number.isFinite(value)) &&
+                      !(left !== undefined && right !== undefined && right < left) &&
+                      !(top !== undefined && bottom !== undefined && bottom < top)) {
+                    intersects = width > 0 && height > 0 &&
+                      (left === undefined || right === undefined || right > left) &&
+                      (top === undefined || bottom === undefined || bottom > top);
+                  }
                 }
-              }
-            } catch { /* Legacy observer boolean still applies. */ }
+              } catch { /* Legacy observer boolean still applies. */ }
+            }
+            return intersects;
+          };
+          const intersects = readIntersection(latest);
+          if (intersects === undefined) return;
+          if (geometrySuspended && intersects && (visibility === 'hidden' ||
+              hostEntries.slice(0, -1).some((entry) => readIntersection(entry) === false))) {
+            geometrySuspended = false;
           }
           visibility = intersects ? 'visible' : 'hidden';
           if (observing) syncViewport();
