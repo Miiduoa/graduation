@@ -26,6 +26,8 @@ import { locateStudyEvidence } from './studyEvidence';
 import styles from './CourseStudyPanel.module.css';
 
 export type StudyTimingSample = {
+  // A measured attempt retains the mode in effect when the worker ran.
+  mode: StudyMode;
   timing: StudyTutorTiming;
   downloadProgressObserved: boolean;
 };
@@ -74,6 +76,7 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
     format: 'nuni-study-tutor-timing', version: 1,
     measurements: timingLog.map((entry) => ({
       run: entry.run,
+      mode: entry.mode,
       outcome: entry.timing.outcome,
       downloadProgressObserved: entry.downloadProgressObserved,
       preparationMs: Math.round(entry.timing.preparationMs),
@@ -302,7 +305,7 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
           if (current.current === controller) {
             setTiming(measurement);
             invalidateTimingCopy();
-            onTiming({ timing: measurement, downloadProgressObserved });
+            onTiming({ mode, timing: measurement, downloadProgressObserved });
             setTimingExportMessage('');
           }
         },
@@ -420,7 +423,7 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
         </p>}
         {timingLog.length > 0 && <details>
           <summary>本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）</summary>
-          <p className={styles.note}>可長按或鍵盤選取下方 JSON，逐次保存成功、失敗與取消的瀏覽器量測。
+          <p className={styles.note}>可長按或鍵盤選取下方 JSON，逐次保存當次閱讀方式、成功、失敗與取消的瀏覽器量測。
             不包含教材、問題或個人筆記，也不是可還原的閱讀進度。downloadProgressObserved 僅表示本次收到模型下載進度；false 不代表快取命中或暖啟。冷啟／暖啟、實際裝置與網路條件仍需另外註記；
             不代表已驗證回答正確或優於其他產品。</p>
           <label className={styles.field}>本段裝置端 AI 耗時紀錄 JSON

@@ -57,7 +57,7 @@ it('downloads the selectable JSON and gives each URL its own lifetime across unm
     expect(await bytes.text()).toBe(output.value);
     expect(screen.getByText(/無法確認檔案是否已儲存/)).toBeTruthy();
     expect(JSON.parse(output.value).measurements[0]).toEqual({
-      run: 1, outcome: 'success', downloadProgressObserved: false,
+      run: 1, mode: 'understand', outcome: 'success', downloadProgressObserved: false,
       preparationMs: 21, generationMs: 32, totalMs: 53,
     });
     expect(output.value).not.toContain(passage.text);

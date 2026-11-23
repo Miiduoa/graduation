@@ -1,3 +1,9 @@
+## 2026-11-23：AI 量測 JSON 記住每次執行時的閱讀方式
+
+- 修正同一段跨「理解概念／考前複習／練習思路」切換後的效能紀錄：原本一份連續 run JSON 混合多種讀法，卻缺少模式標籤，可能讓學生誤以為各次模型耗時屬同一題型。現在每次 Worker 回報時計錄當次 `mode`（`understand`／`exam`／`practice`），切換讀法不會重新標記既有紀錄；試次序號、成功／失敗／取消、最近十筆及耗時保留。
+- 這是 **`nuni-study-tutor-timing` v1 的附加欄位**，不是閱讀 v1/v2 或練習 v1 checkpoint；不增加教材、問題、答案或個資，不上傳、不增套件。新增原頁實際 React DOM 讀法切換與回切測試，及 JSON 下載格式斷言。
+- 此修補使同段不同讀法的耗時有最低限度可核對的條件，**不代表**裝置、模型版本、快取、網路相同，亦未驗證 WebGPU 真機性能、繁中教學品質或 Ahaboard 對照。新 SHA 完整 CI／CodeQL、指定 App 5504170 APPROVED、Maestro／iOS／Android 真機與競品同題同機驗收之前，PR 仍為 Draft，不合併、不部署。
+
 ## 2026-11-23：備份檔名截斷不能留下全不可見的字元
 
 - 修補 `courseStudyBackupFilenameStem`：部分課名在前 48 個 Unicode code points 都是 Hangul Filler（U+3164）等 Default-Ignorable 字元，唯一可辨識的「課程」出現在截斷後方。舊版只檢查**整個課名**是否可見，下載 TXT、閱讀進度及逐題練習 JSON 可能留下看似空白的檔名前綴；現在**截斷後再檢查**，若前綴不可見就使用「讀書白板」。

@@ -2774,13 +2774,13 @@ it('keeps selectable local timing samples without exporting source text or answe
   expect(output.readOnly).toBe(true);
   expect(JSON.parse(output.value)).toEqual({
     format: 'nuni-study-tutor-timing', version: 1,
-    measurements: [{ run: 1, outcome: 'success', downloadProgressObserved: true,
+    measurements: [{ run: 1, mode: 'understand', outcome: 'success', downloadProgressObserved: true,
       preparationMs: 801, generationMs: 1301, totalMs: 2101 }],
   });
   fireEvent.click(screen.getByRole('button', { name: '只依原文重新講解' }));
   await waitFor(() => expect(JSON.parse(output.value).measurements).toHaveLength(2));
   expect(JSON.parse(output.value).measurements[1]).toEqual({
-    run: 2, outcome: 'failed', downloadProgressObserved: false,
+    run: 2, mode: 'understand', outcome: 'failed', downloadProgressObserved: false,
     preparationMs: 802, generationMs: null, totalMs: 2102,
   });
   expect(output.value).not.toContain(material.body);
@@ -2819,6 +2819,37 @@ it('recovers the same manually selectable timing JSON after switching mode and p
   expect(recovered.selectionEnd).toBe(original.length);
 });
 
+it('records the mode used for each AI timing sample, even after switching reading modes', async () => {
+  let attempts = 0;
+  mocks.run.mockImplementation(async (request) => {
+    attempts += 1;
+    request.onTiming?.({
+      preparationMs: attempts * 10, generationMs: 20, totalMs: attempts * 10 + 20,
+      outcome: 'success',
+    });
+    return explanation;
+  });
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByRole('region', { name: '本段 AI 講解' });
+  fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'exam' } });
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await waitFor(() => expect(mocks.run).toHaveBeenCalledTimes(2));
+  const summary = '本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）';
+  fireEvent.click(await screen.findByText(summary));
+  const readEntries = () => JSON.parse(
+    (screen.getByRole('textbox', { name: '本段裝置端 AI 耗時紀錄 JSON' }) as HTMLTextAreaElement).value,
+  ).measurements as Array<{ run: number; mode: string; preparationMs: number }>;
+  await waitFor(() => expect(readEntries()).toEqual([
+    expect.objectContaining({ run: 1, mode: 'understand', preparationMs: 10 }),
+    expect.objectContaining({ run: 2, mode: 'exam', preparationMs: 20 }),
+  ]));
+  // A mode switch must not retrospectively relabel previously recorded runs.
+  fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'understand' } });
+  fireEvent.click(screen.getByText(summary));
+  expect(readEntries().map(({ mode }) => mode)).toEqual(['understand', 'exam']);
+});
+
 it('retains original run numbers after the ten-sample timing window rolls over', async () => {
   let attempts = 0;
   mocks.run.mockImplementation(async (request) => {
@@ -2849,11 +2880,11 @@ it('retains original run numbers after the ten-sample timing window rolls over',
   expect(report.measurements.map((entry: { run: number }) => entry.run))
     .toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   expect(report.measurements[1]).toEqual({
-    run: 4, outcome: 'failed', downloadProgressObserved: false,
+    run: 4, mode: 'understand', outcome: 'failed', downloadProgressObserved: false,
     preparationMs: 4, generationMs: null, totalMs: 12,
   });
   expect(report.measurements[9]).toEqual({
-    run: 12, outcome: 'success', downloadProgressObserved: false,
+    run: 12, mode: 'understand', outcome: 'success', downloadProgressObserved: false,
     preparationMs: 12, generationMs: 24, totalMs: 36,
   });
   expect(output.value).not.toContain(material.body);
