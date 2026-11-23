@@ -59,6 +59,9 @@ describe('explicit TronClass command routing', () => {
     '翻譯「下載 TronClass 教材」',
     '教我如何使用 TronClass',
     '不要讀取我的 TronClass 作業',
+    '不要看玩課雲作業',
+    '不要顯示玩課雲作業',
+    '不要確認玩課雲作業',
     '不用幫我下載 TronClass 講義',
     'TronClass 怎麼登入',
     '如何下載 TronClass 教材',
@@ -572,7 +575,14 @@ describe('write occurrences in TronClass requests', () => {
     '查玩課雲標題含『作業』的公告',
     '查玩課雲標題含“作業”的公告',
     '查玩課雲標題含`作業`的公告',
-  ])('classifies on unquoted text so a quoted homework word does not beat a notice in %s', question => {
+    '查玩課雲關於作業的公告',
+    '查玩課雲公告「作業繳交提醒」',
+  ])('classifies a notice by its head word even when homework is mentioned in %s', question => {
     expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'announcements', pendingOnly: false });
+  });
+
+  it('does not treat 查 inside 檢查 as a new read after a negated write', () => {
+    expect(parseTronClassAgentIntent('不要繳交檢查玩課雲作業用的附件，只查校園公告')).toBeNull();
+    expect(tronClassCompoundClauses('不要繳交檢查玩課雲作業用的附件，只查校園公告，查創課教材')).toEqual(['查創課教材']);
   });
 });

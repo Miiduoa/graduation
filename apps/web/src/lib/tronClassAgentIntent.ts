@@ -83,6 +83,8 @@ const NOUN_COMPOUNDS = [
 ];
 const QUERY_COMPOUNDS = ['告訴我', '查詢', '查看', '顯示', '列出', '確認', '查一下', '看一下'];
 const QUERY_START = new Set(['查', '看', ...QUERY_COMPOUNDS]);
+const NEGATED_QUERY_VERBS = [...QUERY_COMPOUNDS, '讀取', '下載', '準備', '代理', '查', '看', 'read', 'fetch', 'download']
+  .sort((a, b) => b.length - a.length);
 const ACTION_CUES = ['只要', '只', '改成', '改查', '而是'];
 const CLAUSE_CUES = ['然後', '接著', '順便', '並且', '另外', '同時', '也幫我', '再幫我', '並幫我'];
 const FUNCTION_CUES = [
@@ -336,7 +338,7 @@ function authorizesPrivateRead(original: string): boolean {
   for (const match of original.matchAll(NEGATIONS)) {
     const rest = original.slice(match.index);
     if (!STARTS_NEGATED_WRITE.test(rest) &&
-      /^.{0,80}(?:讀取|查詢|查看|查|列出|下載|準備|代理|read|fetch|download)/i.test(rest)) return false;
+      new RegExp(`^.{0,80}(?:${NEGATED_QUERY_VERBS.map(escapeRegex).join('|')})`, 'i').test(rest)) return false;
   }
   // Terminal status questions ask for the current state.
   const explanationText = original.replace(STATUS_EXPLANATION, '$1');
@@ -401,6 +403,23 @@ export function tronClassCompoundClauses(question: string): string[] {
   return result;
 }
 
+function lastDataTypeIntent(text: string): TronClassAgentIntent | null {
+  const types: { intent: TronClassAgentIntent; pattern: RegExp }[] = [
+    { intent: 'homework', pattern: /作業|homework|assignments?/giu },
+    { intent: 'announcements', pattern: /公告|通知|announcements?|notices?/giu },
+    { intent: 'materials', pattern: /教材|講義|檔案|附件|materials?|handouts?|files?/giu },
+    { intent: 'courses', pattern: /課程|修課|課表|courses?|classes/giu },
+  ];
+  let found: { intent: TronClassAgentIntent; index: number } | null = null;
+  for (const type of types) {
+    for (const match of text.matchAll(type.pattern)) {
+      if (match.index == null) continue;
+      if (!found || match.index >= found.index) found = { intent: type.intent, index: match.index };
+    }
+  }
+  return found?.intent ?? null;
+}
+
 export type TronClassAgentQueryIntent = {
   intent: TronClassAgentIntent;
   pendingOnly: boolean;
@@ -416,7 +435,8 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
     !TRONCLASS_KEYWORD.test(question)) return null;
   const original = question.normalize('NFKC').trim();
   if (isExistingTronClassNavigation(original)) return null;
-  const writeRoute = writeCommandRoute(original);
+  const unquoted = textWithoutQuotedSpans(original);
+  const writeRoute = writeCommandRoute(unquoted);
   if (!authorizesPrivateRead(original)) return null;
   if (writeRoute === 'planner' || isMultiClauseRequest(original)) return null;
   if (writeRoute) return { intent: 'unsupported', pendingOnly: false };
@@ -432,11 +452,12 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
   if (preparation) return { intent: 'prepare', pendingOnly };
   if (/(?:測驗|考試|問卷)/.test(text)) return { intent: 'unsupported', pendingOnly: false };
   if (/(?:下載|download)/i.test(text)) return { intent: 'download', pendingOnly: false };
-  if (pendingOnly) return { intent: 'homework', pendingOnly: true };
-  if (/(?:作業|homework|assignments?)/i.test(text) || SUBMISSION_DEADLINE_QUERY.test(text)) return { intent: 'homework', pendingOnly: false };
-  if (/(?:公告|通知|announcements?|notices?)/i.test(text)) return { intent: 'announcements', pendingOnly: false };
-  if (/(?:教材|講義|檔案|附件|materials?|handouts?|files?)/i.test(text)) return { intent: 'materials', pendingOnly: false };
-  if (/(?:課程|修課|課表|courses?|classes)/i.test(text)) return { intent: 'courses', pendingOnly: false };
+  if (pendingOnly && !/(?:公告|通知|announcements?|notices?)/i.test(text)) return { intent: 'homework', pendingOnly: true };
+  if (SUBMISSION_DEADLINE_QUERY.test(text) && !/(?:公告|通知|announcements?|notices?)/i.test(text)) {
+    return { intent: 'homework', pendingOnly: false };
+  }
+  const dataIntent = lastDataTypeIntent(text);
+  if (dataIntent) return { intent: dataIntent, pendingOnly: dataIntent === 'homework' && pendingOnly };
   return { intent: 'capabilities', pendingOnly: false };
 }
 
