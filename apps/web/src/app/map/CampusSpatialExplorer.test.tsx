@@ -3308,45 +3308,57 @@ it.each(['ASCII', 'UTF-8'] as const)(
   },
 );
 
-// JSON-only bridges keep the merge-base json() path; an oversized declared
-// length is still rejected by the outer header gate before parsing.
-it.each([
-  { length: null, accepted: true },
-  { length: '100', accepted: true },
-  { length: '2000001', accepted: false },
-])('handles JSON-only responses with Content-Length $length like the original reader', async ({ length, accepted }) => {
-  const { library, body } = sourcedLibraryFootprintFixture();
-  const json = vi.fn(async () => JSON.parse(body));
-  const headers = new Headers();
-  if (length !== null) headers.set('Content-Length', length);
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers, json }));
-  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-  const dialog = await open();
-  expect(await within(dialog).findByText(accepted ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
-  if (accepted) {
-    expect(json).toHaveBeenCalledTimes(1);
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toHaveLength(1);
-  } else {
+// An OSM snapshot is optional. A JSON-only fetch bridge cannot prove the
+// decoded size or the declared Content-Length, so it must not parse and install
+// geometry even when it advertises a plausible small response.
+it.each([null, '100', '2000001'])(
+  'rejects uninspectable JSON-only OSM bodies (Content-Length %s)',
+  async (length) => {
+    const { library, body } = sourcedLibraryFootprintFixture();
+    const json = vi.fn(async () => JSON.parse(body));
+    const headers = new Headers();
+    if (length !== null) headers.set('Content-Length', length);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers, json }));
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
     expect(json).not.toHaveBeenCalled();
-    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-  }
-  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-});
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  },
+);
 
-// text() strips a UTF-8 BOM, so a text-only bridge with an identity
-// Content-Length uses json() instead of a re-counted byte comparison.
-it('accepts a BOM-prefixed text-only snapshot with an identity Content-Length', async () => {
-  const { library, body } = sourcedLibraryFootprintFixture();
-  const declared = new TextEncoder().encode(`\uFEFF${body}`).byteLength;
+// text() is still a supported legacy path, but identity framing must agree
+// with the actual re-encoded bytes before the OSM polygon can be trusted.
+// A 3-byte mismatch also covers WebViews stripping a UTF-8 BOM in text().
+it.each([
+  { offset: 0, accepted: true },
+  { offset: 1, accepted: false },
+  { offset: -1, accepted: false },
+  { offset: 3, accepted: false },
+])('checks identity Content-Length on text-only OSM bodies (offset $offset)', async ({ offset, accepted }) => {
+  const { library, body, buildings } = sourcedLibraryFootprintFixture();
+  const declared = new TextEncoder().encode(body).byteLength + offset;
   const text = vi.fn(async () => body);
   const json = vi.fn(async () => JSON.parse(body));
   const headers = new Headers({ 'Content-Length': String(declared) });
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers, text, json }));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
-  expect(text).not.toHaveBeenCalled();
-  expect(json).toHaveBeenCalledTimes(1);
+  expect(await within(dialog).findByText(accepted
+    ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(text).toHaveBeenCalledTimes(1);
+  expect(json).not.toHaveBeenCalled();
+  if (accepted) {
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
+  } else {
+    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  }
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
 // Fetch decodes Content-Encoding before exposing arrayBuffer(). Some embedded
