@@ -24,6 +24,31 @@ import {
 } from './fixtures/tronClassIntegration';
 
 const scope = { courseId: homework.courseId, homeworkId: homework.id, operationId };
+it('does not dispatch an already cancelled native connection', async () => {
+  const request = jest.fn();
+  const client = createNativeTronClassClient({ owner: 'platform:a', isCurrent: () => true, request, upload: jest.fn() });
+  const controller = new AbortController();
+  controller.abort();
+  await expect(client.connect('student', 'synthetic-password', null, controller.signal))
+    .rejects.toMatchObject({ code: 'REQUEST_CANCELLED' });
+  expect(request).not.toHaveBeenCalled();
+});
+
+it('passes native connection cancellation to transport and rejects a late success', async () => {
+  let finish!: (value: unknown) => void;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const request = jest.fn(() => pending);
+  const client = createNativeTronClassClient({ owner: 'platform:a', isCurrent: () => true, request, upload: jest.fn() });
+  const controller = new AbortController();
+  const result = client.connect('student', 'synthetic-password', null, controller.signal);
+  const rejected = expect(result).rejects.toMatchObject({ code: 'REQUEST_CANCELLED' });
+  expect(request).toHaveBeenCalledWith({ action: 'connect', schoolId: 'pu', account: 'student',
+    password: 'synthetic-password', expectedRevision: null }, controller.signal);
+  controller.abort();
+  finish(connection);
+  await rejected;
+});
+
 it('keeps availability separate from nuni write permission and accepts older preparations without it', () => {
   expect(parseNativeTronClassPreparation({ ...preparation, availability }, scope))
     .toMatchObject({ availability, canSubmit: false });

@@ -3,7 +3,7 @@
 import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvider';
 
 import Link from 'next/link';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import {
   forgetDirectorySearch,
@@ -34,6 +34,7 @@ import {
 } from '@campus/shared/src/assistantServices';
 import { AssistantServiceLinks } from './AssistantServiceLinks';
 import { useCampusFinderAccount, useCampusFinderDraftScope } from '@/lib/useCampusFinderAccount';
+import { AssistantLinkNavigation, useAssistantLinkNavigation } from './AssistantReplyLink';
 import styles from './QuickCampusEntry.module.css';
 
 type Analysis = {
@@ -47,11 +48,17 @@ type Analysis = {
 
 export function QuickCampusEntry({
   onAsk,
+  onNavigate,
   compact = false,
 }: {
   onAsk?: ((phrase: string) => void) | null;
+  onNavigate?: (href: string) => void;
   compact?: boolean;
 } = {}) {
+  const id = useId();
+  const input = useRef<HTMLInputElement>(null);
+  const results = useRef<HTMLDivElement>(null);
+  const composing = useRef(false);
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const selection = useOptionalSelectedSchool();
   const account = useCampusFinderAccount();
@@ -126,6 +133,20 @@ export function QuickCampusEntry({
   const actions =
     semanticActions ||
     getQuickCampusActions(phrase, schoolLmsEnabled, platformAudience ? 'platform' : 'school');
+  const analysisNotice =
+    active?.state === 'loading' || !phrase
+      ? ''
+      : publicAnswer
+        ? '公開課程查詢已回覆。'
+        : aiResult?.status === 'clarify'
+          ? `需要補充需求。${aiResult.clarifyingQuestion || ''}`
+          : publicIntent || serviceIntent?.kind === 'catalog'
+            ? ''
+            : aiResult?.status === 'understood'
+              ? `服務建議已更新，共 ${actions.length} 個入口。`
+              : actions.length
+                ? `找到 ${actions.length} 個服務入口。`
+                : '尚未找到對應服務，可以換個說法。';
   const route = (href: string, serviceId?: AssistantServiceId) =>
     campusServiceHref(
       serviceId
@@ -155,6 +176,12 @@ export function QuickCampusEntry({
     setDraft({ scope: draftScope, query: value.slice(0, 320), edited: true });
   }
 
+  function startOver() {
+    forgetDirectorySearch('quick');
+    updateQuery('');
+    input.current?.focus();
+  }
+
   function rememberQuick(href: string) {
     if (!canRemember) return;
     rememberDirectorySearch('quick', {
@@ -164,6 +191,14 @@ export function QuickCampusEntry({
       open: true,
       scope: storageScope,
     });
+  }
+
+  const panelNavigation = useContext(AssistantLinkNavigation);
+  const navigate = onNavigate ?? panelNavigation;
+  const notifyNavigation = useAssistantLinkNavigation(navigate);
+  function navigateQuick(event: React.MouseEvent<HTMLAnchorElement>) {
+    rememberQuick(event.currentTarget.getAttribute('href') ?? '');
+    notifyNavigation(event);
   }
 
   async function analyze(input: string) {
@@ -262,70 +297,117 @@ export function QuickCampusEntry({
       void analyze(transcript);
   }
 
+  const analysisAction =
+    phrase && (publicIntent || (canInterpret && !serviceIntent)) ? (
+      <div className={styles.aiRow}>
+        <button
+          type="button"
+          className={styles.analyzeButton}
+          disabled={active?.state === 'loading'}
+          onClick={() => void analyze(phrase)}
+        >
+          {active?.state === 'loading'
+            ? publicIntent
+              ? '正在查詢課程…'
+              : 'AI 正在理解…'
+            : publicIntent
+              ? '查詢公開課程'
+              : '用 AI 理解這句話'}
+        </button>
+        <span className={styles.hint}>
+          {publicIntent
+            ? '從校方公開資料找課，可接著查看完整課程。'
+            : '語音完成後會自動分析轉寫文字；打字則由你決定是否送出。'}
+        </span>
+      </div>
+    ) : null;
+
   return (
     <section
       className={compact ? styles.compactEntry : styles.entry}
-      aria-labelledby="quick-entry-title"
+      aria-labelledby={`${id}-title`}
     >
+      <p role="status" aria-atomic="true" className={styles.srOnly}>
+        {analysisNotice}
+      </p>
       <div className={styles.heading}>
         {compact ? (
-          <h2 id="quick-entry-title" className={styles.compactHeading}>
+          <h2 id={`${id}-title`} className={styles.compactHeading}>
             搜尋服務
           </h2>
         ) : (
           <div>
             <p className={styles.eyebrow}>快速開始</p>
-            <h2 id="quick-entry-title">說出想做的事，直接找到入口。</h2>
+            <h2 id={`${id}-title`}>想做什麼？從這裡開始。</h2>
             <p className={styles.subtitle}>先找到服務，也可以把需求交給校園助理接著處理。</p>
           </div>
         )}
         <Link
           className={styles.allServices}
           href={searchHref}
-          onClick={() => rememberQuick(searchHref)}
+          onClick={navigateQuick}
         >
           所有服務 <CampusIcon name="arrow" size={16} />
         </Link>
       </div>
-      <div className={styles.inputRow}>
-        <label className={styles.srOnly} htmlFor="quick-campus-input">
-          想做什麼？
-        </label>
-        <CampusIcon name="search" size={20} />
-        <input
-          id="quick-campus-input"
-          type="search"
-          autoComplete="off"
-          maxLength={320}
-          value={query}
-          onChange={(event) => updateQuery(event.target.value)}
-          placeholder="例如：明天沒課，想讀書再吃飯"
-        />
-        <VoiceDictationButton onTranscript={onVoiceTranscript} />
-      </div>
-      {phrase && (publicIntent || (canInterpret && !serviceIntent)) ? (
-        <div className={styles.aiRow}>
-          <button
-            type="button"
-            className={styles.analyzeButton}
-            disabled={active?.state === 'loading'}
-            onClick={() => void analyze(phrase)}
-          >
-            {active?.state === 'loading'
-              ? publicIntent
-                ? '正在查詢課程…'
-                : 'AI 正在理解…'
-              : publicIntent
-                ? '查詢公開課程'
-                : '用 AI 理解這句話'}
+      <form
+        className={styles.searchForm}
+        role="search"
+        aria-label="快速尋找服務"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (composing.current) return;
+          // Enter confirms the local search. AI and assistant handoffs stay explicit actions.
+          if (phrase) results.current?.focus();
+          else input.current?.focus();
+        }}
+      >
+        <div className={styles.inputRow}>
+          <label className={styles.srOnly} htmlFor={`${id}-input`}>
+            想做什麼？
+          </label>
+          <CampusIcon name="search" size={20} />
+          <input
+            ref={input}
+            id={`${id}-input`}
+            type="search"
+            autoComplete="off"
+            enterKeyHint="search"
+            maxLength={320}
+            value={query}
+            onChange={(event) => updateQuery(event.target.value)}
+            onCompositionStart={() => {
+              composing.current = true;
+            }}
+            onCompositionEnd={() => {
+              composing.current = false;
+            }}
+            onKeyDown={(event) => {
+              const isComposing =
+                composing.current || event.nativeEvent.isComposing || event.keyCode === 229;
+              if (event.key === 'Enter' && isComposing) event.preventDefault();
+              if (event.key === 'Escape' && isComposing) event.stopPropagation();
+              // Leave ordinary Escape to the surrounding assistant panel so it
+              // can close without clearing the person's draft.
+            }}
+            placeholder="例如：明天沒課，想讀書再吃飯"
+          />
+          <button type="submit" className={styles.searchButton}>
+            查看結果
           </button>
-          <span className={styles.hint}>
-            {publicIntent
-              ? '從校方公開資料找課，可接著查看完整課程。'
-              : '語音完成後會自動分析轉寫文字；打字則由你決定是否送出。'}
-          </span>
         </div>
-      ) : null}
+        <div className={styles.inputTools}>
+          <VoiceDictationButton onTranscript={onVoiceTranscript} />
+          <details className={styles.privacy}>
+            <summary>語音與資料使用</summary>
+            <p>
+              轉寫結果可修改。語音辨識可能由瀏覽器供應商處理；公開查課只傳送校別與搜尋條件，其他 AI
+              分析會將轉寫文字傳給雲端模型，不會上傳本功能的錄音檔。此入口不會自行繳交、付款或更改資料。
+            </p>
+          </details>
+        </div>
+      </form>
+      {!publicIntent && analysisAction}
       {primaryHandoff ? (
         <div className={styles.aiRow}>
           {onAsk ? (
@@ -336,7 +418,7 @@ export function QuickCampusEntry({
             <Link
               className={styles.analyzeButton}
               href={assistantHref}
-              onClick={() => rememberQuick(assistantHref)}
+              onClick={navigateQuick}
             >
               交給校園助理
             </Link>
@@ -347,19 +429,35 @@ export function QuickCampusEntry({
       {!phrase ? (
         <div className={styles.examples} aria-label="常用需求">
           {[...QUICK_CAMPUS_EXAMPLES, '查清大資料庫課程'].map((example) => (
-            <button key={example} type="button" onClick={() => updateQuery(example)}>
+            <button
+              key={example}
+              type="button"
+              onClick={() => {
+                updateQuery(example);
+                input.current?.focus();
+              }}
+            >
               {example}
             </button>
           ))}
         </div>
       ) : (
-        <div className={styles.results} aria-live="polite">
+        <div
+          ref={results}
+          className={styles.results}
+          role="region"
+          aria-label="服務搜尋結果"
+          tabIndex={-1}
+        >
+          {publicIntent && analysisAction}
           {serviceIntent?.kind === 'catalog' && selectedSchoolId && (
-            <AssistantServiceLinks
-              serviceIds={ASSISTANT_SERVICES.map((service) => service.id)}
-              schoolId={selectedSchoolId}
-              audience={platformAudience ? 'platform' : 'school'}
-            />
+            <AssistantLinkNavigation.Provider value={navigate}>
+              <AssistantServiceLinks
+                serviceIds={ASSISTANT_SERVICES.map((service) => service.id)}
+                schoolId={selectedSchoolId}
+                audience={platformAudience ? 'platform' : 'school'}
+              />
+            </AssistantLinkNavigation.Provider>
           )}
           {serviceIntent?.kind === 'catalog' && !selectedSchoolId && (
             <p>先選擇學校，即可查看對應的服務入口。</p>
@@ -418,7 +516,7 @@ export function QuickCampusEntry({
                     key={action.href}
                     href={route(action.href, action.serviceId)}
                     className={styles.action}
-                    onClick={() => rememberQuick(route(action.href, action.serviceId))}
+                    onClick={navigateQuick}
                   >
                     <span>
                       <strong>{action.name}</strong>
@@ -449,7 +547,7 @@ export function QuickCampusEntry({
             <p className={styles.noMatch}>沒有找到明確入口，可以補充需求或詢問校園助理。</p>
           ) : null}
           <div className={styles.footerLinks}>
-            <Link href={searchHref} onClick={() => rememberQuick(searchHref)}>
+            <Link href={searchHref} onClick={navigateQuick}>
               搜尋更多服務
             </Link>
             {!primaryHandoff && onAsk && canUseAssistant ? (
@@ -460,26 +558,16 @@ export function QuickCampusEntry({
               onAsk === undefined &&
               campusReady &&
               (canUseAssistant || account.status === 'guest') ? (
-              <Link href={assistantHref} onClick={() => rememberQuick(assistantHref)}>
+              <Link href={assistantHref} onClick={navigateQuick}>
                 {account.status === 'guest' ? '登入後詢問助理' : '詢問校園助理'}
               </Link>
             ) : null}
-            <button
-              type="button"
-              onClick={() => {
-                forgetDirectorySearch('quick');
-                updateQuery('');
-              }}
-            >
+            <button type="button" onClick={startOver}>
               重新輸入
             </button>
           </div>
         </div>
       )}
-      <p className={styles.privacy}>
-        轉寫結果可修改。語音辨識可能由瀏覽器供應商處理；公開查課只傳送校別與搜尋條件，其他 AI
-        分析會將轉寫文字傳給雲端模型，不會上傳本功能的錄音檔。此入口不會自行繳交、付款或更改資料。
-      </p>
     </section>
   );
 }

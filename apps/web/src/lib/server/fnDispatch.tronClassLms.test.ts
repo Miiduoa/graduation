@@ -461,33 +461,77 @@ it.each([
   expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
 });
 
-it('does not return partial data when supplementary courseware throws a session error', async () => {
-  const { request, source, store } = setup();
-  vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => {
-    if (query === 'type=courseware_activity') throw new Error('TronClass session 已失效，請重新登入');
-    return { ok: true, value: [LMS_FIXTURE_MATERIAL] };
-  });
-  const response = await request({ courseId: 10001 });
-  const body = await response.json();
-  expect(body.result).toBeUndefined();
-  expect(body.error.status).toBe('FAILED_PRECONDITION');
-  expect(store.docs.has(CACHE)).toBe(false);
-});
-
-it.each([false, true])('does not cache partial materials when the filtered courseware feed rejects the session (thrown=%s)', async thrown => {
+it.each([
+  { caseName: 'returned 401', mode: 'result' },
+  { caseName: 'thrown HTTP 401', mode: 'http-error' },
+  { caseName: 'thrown session-expired error', mode: 'expired' },
+])('requires reconnect without caching when supplementary courseware has $caseName', async ({ mode }) => {
   const { request, source, store } = setup();
   vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => {
     if (query !== 'type=courseware_activity') return { ok: true, value: [LMS_FIXTURE_MATERIAL] };
-    if (thrown) throw Object.assign(new Error('upstream failure'), { status: 401 });
-    return { ok: false, status: 401 };
+    if (mode === 'result') return { ok: false, status: 401 };
+    if (mode === 'http-error') throw Object.assign(new Error('HTTP 401'), { status: 401 });
+    throw new Error('TronClass session 已失效，請重新登入');
   });
+
   const response = await request({ courseId: 10001 });
   const body = await response.json();
-  expect(body.result).toBeUndefined();
   expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.result).toBeUndefined();
   expect(store.docs.has(CACHE)).toBe(false);
+  expect(store.docs.has(RETRY)).toBe(false);
   expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
 });
+
+it.each(['returned', 'thrown', 'recovered'] as const)(
+  'refetches a fresh legacy 401 courseware extra when the school has %s',
+  async (outcome) => {
+    const { request, source, store } = setup();
+    expect((await request({ courseId: 10001 })).status).toBe(200);
+    const extras = store.docs.get(CACHE)!.extras as Record<string, {
+      fetchedAt: string; expiresAt: string; errors: LmsReadonlySnapshot['courseErrors'];
+    }>;
+    Object.assign(extras['10001'], {
+      fetchedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      errors: [{ courseId: 10001, courseName: LMS_FIXTURE_COURSE.name, area: 'materials', status: 401 }],
+    });
+    const cacheBefore = structuredClone(store.docs.get(CACHE));
+    for (const method of Object.values(source)) vi.mocked(method).mockClear();
+    vi.mocked(source.fetchActivities).mockImplementation(async (_cookies, _courseId, query) => {
+      if (query !== 'type=courseware_activity') return { ok: true, value: [LMS_FIXTURE_MATERIAL] };
+      if (outcome === 'returned') return { ok: false, status: 401 };
+      if (outcome === 'thrown') throw Object.assign(new Error('HTTP 401'), { status: 401 });
+      return { ok: true, value: [] };
+    });
+
+    const response = await request({ courseId: 10001 });
+    const body = await response.json();
+    expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchCourses).not.toHaveBeenCalled();
+    expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
+    if (outcome !== 'recovered') {
+      expect(body.error.status).toBe('FAILED_PRECONDITION');
+      expect(body.result).toBeUndefined();
+      expect(store.docs.get(CACHE)).toEqual(cacheBefore);
+      expect(store.docs.has(RETRY)).toBe(false);
+      return;
+    }
+    expect(response.status).toBe(200);
+    expect(body.result.cache.hit).toBe(false);
+    expect(body.result.materials).toHaveLength(1);
+    expect(body.result.courseErrors).toEqual([]);
+    expect((store.docs.get(CACHE)!.extras as typeof extras)['10001'].errors).toEqual([]);
+
+    vi.mocked(source.fetchActivities).mockClear();
+    const next = await (await request({ courseId: 10001 })).json();
+    expect(next.result.cache.hit).toBe(true);
+    expect(next.result.materials).toEqual(body.result.materials);
+    expect(next.result.courseErrors).toEqual([]);
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+  },
+);
 
 it.each(['homework', 'activities', 'announcements'] as const)(
   'requires reconnect instead of caching partial course data after a 401 from %s',
@@ -1620,6 +1664,123 @@ it('preserves course contents cached by a faster request for the same session', 
   expect(body.result.cache.hit).toBe(true);
   expect(body.result.materials).toHaveLength(1);
   expect(source.fetchActivities).not.toHaveBeenCalled();
+});
+
+it('drops cached contents for courses absent from the linked session course list', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const extras = store.docs.get(CACHE)!.extras as Record<string, {
+    materials: LmsReadonlySnapshot['materials'];
+    announcements: LmsReadonlySnapshot['announcements'];
+    errors: LmsReadonlySnapshot['courseErrors'];
+    fetchedAt: string;
+    expiresAt: string;
+  }>;
+  extras['10002'] = {
+    ...structuredClone(extras['10001']),
+    materials: [{
+      ...extras['10001'].materials[0],
+      courseId: 10002,
+      title: '不屬於目前課程的教材',
+    }],
+    announcements: [],
+  };
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request();
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.cache.hit).toBe(true);
+  expect(body.result.contentsLoadedFor).toEqual([10001]);
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.materials).not.toEqual(expect.arrayContaining([
+    expect.objectContaining({ title: '不屬於目前課程的教材' }),
+  ]));
+  expect(store.docs.get(CACHE)!.extras).toHaveProperty('10001');
+  expect(store.docs.get(CACHE)!.extras).not.toHaveProperty('10002');
+  for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+});
+
+it('serves legacy cached homework and valid course extras alongside malformed course rows', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const snapshot = store.docs.get(CACHE)!.snapshot as Record<string, unknown>;
+  const courses = snapshot.courses as unknown[];
+  snapshot.courses = [null, 'broken', 42, { name: '沒有課程編號' }, { id: -1 }, { id: 10002, name: ' ' }, ...courses];
+  const extras = store.docs.get(CACHE)!.extras as Record<string, {
+    announcements: LmsReadonlySnapshot['announcements'];
+    materials: LmsReadonlySnapshot['materials'];
+  }>;
+  extras['10002'] = structuredClone(extras['10001']);
+  extras['10002'].announcements[0].courseId = 10002;
+  extras['10002'].materials[0].courseId = 10002;
+  extras['10002'].materials[0].title = '缺少有效課程資料的教材';
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  for (const data of [{}, { courseId: 10001 }]) {
+    const response = await request(data);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.error).toBeUndefined();
+    expect(body.result.cache.hit).toBe(true);
+    expect(body.result.courses).toEqual(courses);
+    expect(body.result.homework).toHaveLength(2);
+    expect(body.result.contentsLoadedFor).toEqual([10001]);
+    expect(body.result.materials).toHaveLength(1);
+    expect(JSON.stringify(body)).not.toMatch(/broken|沒有課程編號|缺少有效課程資料的教材/);
+    for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+  }
+  expect(store.docs.get(CACHE)!.extras).not.toHaveProperty('10002');
+
+  // Exercise the course lookup after its extra expires as well as the cache-hit path.
+  Object.assign((store.docs.get(CACHE)!.extras as Record<string, object>)['10001'], {
+    expiresAt: new Date(0).toISOString(),
+  });
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.materials).toHaveLength(1);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  'foreign homework', 'foreign contents', 'foreign error', 'duplicate course',
+  'unnamed duplicate before valid course', 'legacy authentication failure', 'expired partial snapshot',
+])('refetches rather than sanitizing away %s in a cache containing malformed course rows', async scenario => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const snapshot = store.docs.get(CACHE)!.snapshot as LmsReadonlySnapshot;
+  const courses = snapshot.courses;
+  (snapshot as unknown as Record<string, unknown>).courses = [null, { id: 10002 }, ...courses];
+  snapshot.homework[0].title = '不應沿用的快取作業';
+  if (scenario === 'foreign homework') snapshot.homework[0].courseId = 10002;
+  else if (scenario === 'foreign contents') snapshot.contentsLoadedFor = [10002];
+  else if (scenario === 'foreign error') snapshot.courseErrors = [{
+    courseId: 10002, courseName: '缺少有效課程資料', area: 'homework', status: 503,
+  }];
+  else if (scenario === 'duplicate course') snapshot.courses.push({ ...courses[0], name: '相同編號的其他課程' });
+  else if (scenario === 'unnamed duplicate before valid course')
+    (snapshot.courses as unknown[]).unshift({ id: courses[0].id });
+  else if (scenario === 'legacy authentication failure') snapshot.courseErrors = [{
+    courseId: 10001, courseName: courses[0].name, area: 'homework', status: 401,
+  }];
+  else {
+    snapshot.fetchedAt = new Date(Date.now() - 61_000).toISOString();
+    snapshot.courseErrors = [{ courseId: 10001, courseName: courses[0].name, area: 'homework', status: 503 }];
+  }
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request();
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.courses).toEqual(courses);
+  expect(body.result.courseErrors).toEqual([]);
+  expect(body.result.homework).toHaveLength(2);
+  expect(JSON.stringify(body)).not.toContain('不應沿用的快取作業');
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
 });
 
 it('does not prune course contents refreshed after the initial cache read', async () => {

@@ -63,6 +63,15 @@ function dateString(value: unknown): string | null {
   }
   return value;
 }
+
+function readSourceRows<T>(items: readonly unknown[], limit: number, parse: (item: unknown) => T): T[] {
+  const size = Math.min(items.length, limit);
+  const rows = new Array<T>(size);
+  for (let index = 0; index < size; index += 1) {
+    if (index in items) rows[index] = parse(items[index]);
+  }
+  return rows;
+}
 function requiredText(value: unknown, max: number): string {
   if (typeof value !== 'string' || !value.trim()) throw new Error('invalid-sense-response');
   return Array.from(value.trim().slice(0, max), (character) => {
@@ -113,7 +122,7 @@ function parseSnapshot(payload: unknown, userId: string, schoolId: string): Pars
     assignments: {
       status: assignmentStatus, count: total,
       items: assignmentStatus === 'available'
-        ? assignments.items.map((item: unknown) => {
+        ? readSourceRows(assignments.items, CAMPUS_ASSIGNMENT_PAGE_SIZE, (item) => {
             const row = record(item);
             if (!row) throw new Error('invalid-sense-response');
             const source = row.source === undefined ? null : parseCampusAssignmentSource(row.source);
@@ -129,7 +138,7 @@ function parseSnapshot(payload: unknown, userId: string, schoolId: string): Pars
     announcements: {
       status: announcementStatus,
       items: announcementStatus === 'available'
-        ? announcements.items.slice(0, 12).map((item: unknown) => {
+        ? readSourceRows(announcements.items, 12, (item) => {
             const row = record(item);
             if (!row) throw new Error('invalid-sense-response');
             const source = row.source === undefined ? null : parseCampusAnnouncementSource(row.source);
@@ -199,7 +208,8 @@ export async function refreshCampusSenseSnapshot(input: {
   const items: CampusSenseSnapshot['assignments']['items'] = [];
   const identities = new Set<string>();
   const append = (rows: CampusSenseSnapshot['assignments']['items']) => {
-    for (const row of rows) {
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
       if (row.source) {
         const identity = JSON.stringify([row.source.groupId, row.source.assignmentId]);
         if (identities.has(identity)) throw new Error('duplicate-assignment-page');

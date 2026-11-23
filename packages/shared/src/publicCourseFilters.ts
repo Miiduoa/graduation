@@ -74,11 +74,29 @@ export function publicCourseWeekdays(
   return [...new Set(meetings.map((meeting) => meeting.dayOfWeek))].sort((a, b) => a - b);
 }
 
-function courseCredits(course: PublicCatalogCourse): number | null {
+/** Compare the published decimal exactly; Number() would round e.g.
+ * "40.0000000000000001" to 40, falsely satisfying a credit filter.
+ * This is only a public catalog search hint, not proof of earned credits. */
+function compareCourseCredits(course: PublicCatalogCourse, expected: number): PublicCourseFilterMatch {
+  if (typeof course.credits !== 'string') return 'unresolved';
   const text = course.credits.normalize('NFKC').trim();
-  if (!/^\d+(?:\.\d+)?$/.test(text)) return null;
-  const value = Number(text);
-  return Number.isFinite(value) && value >= 0 ? value : null;
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return 'unresolved';
+  // Overflowing published values used to be unresolved because Number()
+  // yielded Infinity. Keep that, instead of treating them as a known mismatch.
+  if (!Number.isFinite(Number(text))) return 'unresolved';
+  // Queries are already validated as 0–40 with <=2 decimals, so String(expected)
+  // is a plain decimal. Strip only mathematically insignificant source zeros;
+  // never let floating-point rounding manufacture an exact match.
+  // Walk backward so a long zero run followed by a nonzero digit stays linear.
+  const [whole, fraction = ''] = text.split('.');
+  const integer = whole.replace(/^0+/, '') || '0';
+  let decimalEnd = fraction.length;
+  while (decimalEnd > 0 && fraction.charCodeAt(decimalEnd - 1) === 48) {
+    decimalEnd -= 1;
+  }
+  const decimal = fraction.slice(0, decimalEnd);
+  const actual = decimal ? `${integer}.${decimal}` : integer;
+  return actual === String(expected) ? 'match' : 'exclude';
 }
 
 /** A known mismatch excludes a course even when another requested field is unknown. */
@@ -89,9 +107,9 @@ export function evaluatePublicCourseFilters(
 ): PublicCourseFilterMatch {
   let unresolved = false;
   if (filters.credits !== undefined) {
-    const credits = courseCredits(course);
-    if (credits === null) unresolved = true;
-    else if (credits !== filters.credits) return 'exclude';
+    const match = compareCourseCredits(course, filters.credits);
+    if (match === 'unresolved') unresolved = true;
+    else if (match === 'exclude') return 'exclude';
   }
   if (filters.weekday !== undefined) {
     const weekdays = publicCourseWeekdays(course, schoolId);

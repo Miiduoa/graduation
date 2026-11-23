@@ -87,6 +87,44 @@ it('reaches the scoped server planner without model readiness or consent, preser
 });
 
 it.each([
+  [false, '最新訂單的取餐時間有放到我的日曆上嗎？'],
+  [true, '昨天訂單的取餐時間有放到我的行事曆上嗎？'],
+  [false, '請問昨天訂單的取餐時間有沒有記到日曆？'],
+  [false, '請問最新訂單的取餐時間是幾點？我想知道有沒有記到日曆。'],
+])('submits the existing read question with planning=%s: %s', async (planning, question) => {
+  capability = { enabled: true, ready: true, version: 2, planning };
+  const answer = '可以在個人日曆查看已記錄的取餐時間。';
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json(capability);
+    requests.push({ action: url.split('/').at(-1)!, body: JSON.parse(String(init?.body)) });
+    return json({ answer, steps: [], cards: [] });
+  }));
+  render(<Assistant />);
+  fireEvent.change(await screen.findByLabelText('問題'), { target: { value: question } });
+  const submit = screen.getByRole('button', { name: '送出' }) as HTMLButtonElement;
+  expect(submit.disabled).toBe(true);
+  fireEvent.click(screen.getByRole('checkbox'));
+  await waitFor(() => expect(submit.disabled).toBe(false));
+  fireEvent.click(submit);
+  await screen.findByText(answer);
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({ action: 'ask', body: { question, consent: true } });
+});
+
+it.each([
+  '取消最新訂單，確認取餐時間是否已加入行事曆',
+  '幫我建立取餐行程，確認最新訂單的取餐時間有沒有放到我的日曆上？',
+])('keeps a mixed request behind the planning gate even with consent: %s', async question => {
+  capability = { enabled: true, ready: true, version: 2, planning: false };
+  render(<Assistant />);
+  fireEvent.click(await screen.findByRole('checkbox'));
+  fireEvent.change(await screen.findByLabelText('問題'), { target: { value: question } });
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  expect(requests).toHaveLength(0);
+});
+
+it.each([
   { enabled: false, ready: false, version: 2, planning: true },
   { enabled: true, ready: false, version: 2, planning: false },
   { enabled: true, ready: true, version: 2 },

@@ -67,6 +67,28 @@ it('passes request cancellation to the sync reader separately from caller-suppli
   expect(read.mock.calls[0][2].aborted).toBe(true);
 });
 
+it('passes the actual connection request signal to school binding', async () => {
+  const { dependencies, bindings } = setup();
+  const controller = new AbortController();
+  const input = { schoolId: 'pu', account: '410000001', password: 'private-test-password', expectedRevision: null };
+  const request = new NextRequest('https://nuni.tw/api/tronclass', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://nuni.tw' },
+    body: JSON.stringify({ action: 'connect', ...input }), signal: controller.signal,
+  });
+  expect((await handleTronClassIntegration(request, dependencies)).status).toBe(200);
+  expect(bindings.connect).toHaveBeenCalledExactlyOnceWith(ownerKey, input, request.signal);
+  controller.abort();
+  expect(bindings.connect.mock.calls[0][2].aborted).toBe(true);
+});
+
+it('reports canceled binding separately from incorrect school credentials', async () => {
+  const { request, bindings } = setup();
+  bindings.connect.mockRejectedValue(new NuniError(499, 'TRONCLASS_LOGIN_CANCELLED'));
+  const response = await request({ action: 'connect', schoolId: 'pu', account: '410000001', password: 'private-test-password', expectedRevision: null });
+  expect(response.status).toBe(499);
+  expect(await response.json()).toEqual({ error: 'TRONCLASS_LOGIN_CANCELLED', message: '已取消這次 TronClass 連接。' });
+});
+
 it('passes prepare cancellation to the submission reader without adding a client-controlled field', async () => {
   const { dependencies, submissions } = setup();
   submissions.prepare.mockResolvedValue({ canSubmit: false });
@@ -135,7 +157,7 @@ it('keeps course-picker reads separate from the six-sync budget while limiting b
 it('preserves passwords exactly for the login adapter and omits them from its response', async () => {
   const { request, bindings } = setup();
   const response = await request({ action: 'connect', schoolId: 'pu', account: '410000001', password: ' password with spaces ', expectedRevision: null });
-  expect(bindings.connect).toHaveBeenCalledWith(ownerKey, { schoolId: 'pu', account: '410000001', password: ' password with spaces ', expectedRevision: null });
+  expect(bindings.connect).toHaveBeenCalledWith(ownerKey, { schoolId: 'pu', account: '410000001', password: ' password with spaces ', expectedRevision: null }, expect.any(AbortSignal));
   expect(JSON.stringify(await response.json())).not.toMatch(/password|cookie/);
 });
 

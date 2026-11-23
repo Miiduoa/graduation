@@ -33,9 +33,26 @@ const STORY_DURATION = 7000;
 /** Refresh at the next expiry, also when returning from a suspended app. */
 export function useCampusStories(rows: CampusStoryDoc[], schoolId?: string, uid?: string) {
   const [clock, setClock] = useState(Date.now);
-  const [seen, setSeen] = useState<ReadonlySet<string>>(new Set());
+  // An open story and its read markers belong to one student at one campus.
+  // Different schools can have documents with the same ID.
+  const viewerScope = JSON.stringify([uid ?? null, schoolId ?? null]);
+  const [seenState, setSeenState] = useState<{ scope: string; ids: ReadonlySet<string> }>(
+    () => ({ scope: viewerScope, ids: new Set() }),
+  );
+  const seen = seenState.scope === viewerScope ? seenState.ids : new Set<string>();
+  // Replace the receipt set on scope changes so older requests cannot mutate a new visit.
   const recorded = React.useRef(new Set<string>());
-  const [selectedId, selectStory] = useState<string | null>(null);
+  const [selected, setSelected] = useState<{ scope: string; id: string } | null>(null);
+  const selectedId = selected?.scope === viewerScope ? selected.id : null;
+  const selectStory = useCallback(
+    (id: string | null) => setSelected(id ? { scope: viewerScope, id } : null),
+    [viewerScope],
+  );
+  useEffect(() => {
+    setSelected(null);
+    setSeenState({ scope: viewerScope, ids: new Set() });
+    recorded.current = new Set<string>();
+  }, [viewerScope]);
   const groups = useMemo(() => {
     const now = Math.max(clock, Date.now());
     return groupStoriesByAuthor(
@@ -84,21 +101,29 @@ export function useCampusStories(rows: CampusStoryDoc[], schoolId?: string, uid?
       return;
     }
     if (!uid || !schoolId || !authorUid || !expiresAt || expiresAt <= Date.now()) return;
-    setSeen((previous) => (previous.has(storyId) ? previous : new Set(previous).add(storyId)));
-    if (authorUid === uid || isFirebaseMockMode() || recorded.current.has(storyId)) return;
-    recorded.current.add(storyId);
-    void markStoryViewed({ id: storyId, schoolId, authorUid }, uid).catch(() => {
-      // Reopen to retry. A network failure should not reset the local reading position.
-      recorded.current.delete(storyId);
+    setSeenState((previous) => {
+      const ids = previous.scope === viewerScope ? previous.ids : new Set<string>();
+      return previous.scope === viewerScope && ids.has(storyId)
+        ? previous
+        : { scope: viewerScope, ids: new Set(ids).add(storyId) };
     });
-  }, [selectedId, storyId, authorUid, expiresAt, uid, schoolId]);
+    const receiptKey = JSON.stringify([viewerScope, storyId]);
+    if (authorUid === uid || isFirebaseMockMode() || recorded.current.has(receiptKey)) return;
+    const receiptSet = recorded.current;
+    receiptSet.add(receiptKey);
+    void markStoryViewed({ id: storyId, schoolId, authorUid }, uid).catch(() => {
+      // An earlier visit may reject after switching away and back to the same scope.
+      // Only release its own receipt set, never a newer pending request's dedupe key.
+      receiptSet.delete(receiptKey);
+    });
+  }, [selectedId, storyId, authorUid, expiresAt, uid, schoolId, viewerScope]);
 
   const openGroup = useCallback(
     (g: StoryAuthorGroup) => {
       const active = g.stories.filter((s) => s.schoolId === schoolId && s.expiresAt! > Date.now());
       selectStory((active.find((s) => !seen.has(s.id)) ?? active[0])?.id ?? null);
     },
-    [schoolId, seen],
+    [schoolId, seen, selectStory],
   );
   return { groups, groupIndex, index, openGroup, selectStory, seen, viewerUid: uid };
 }
@@ -174,19 +199,36 @@ function StorySlide({
   if (panelFor !== null && panelFor !== scope) setPanelFor(null);
   const insets = useSafeAreaInsets();
   const [playing, setPlaying] = useState(false);
-  const playbackActive = playing && !inspecting && !replying;
-  const [loadedImage, setLoadedImage] = useState('');
-  const [failedImage, setFailedImage] = useState('');
+  // Reading a long caption is deliberate: do not replace the content underneath it.
+  // Scope the pause to the current story so the next story never inherits it.
+  const [readingCaptionFor, setReadingCaptionFor] = useState<string | null>(null);
+  const readingCaption = readingCaptionFor === story.id;
+  const playbackActive = playing && !inspecting && !replying && !readingCaption;
+  const [loadedImage, setLoadedImage] = useState<object | null>(null);
+  const [failedImage, setFailedImage] = useState<object | null>(null);
+  const [imageRetry, setImageRetry] = useState(0);
   const mediaUrl = usePrivateMedia(story.mediaUrl);
+  // Revisiting a story must wait for the newly mounted Image, even if this ID loaded before.
+  // A fresh request identity also invalidates old native onLoad/onError callbacks.
+  const imageRequest = useMemo(
+    () => ({ storyId: story.id, mediaUrl, retry: imageRetry }),
+    [story.id, mediaUrl, imageRetry],
+  );
+  const activeImageRequest = React.useRef(imageRequest);
+  React.useLayoutEffect(() => {
+    activeImageRequest.current = imageRequest;
+  }, [imageRequest]);
   const hasVideo = story.kind === 'video';
   const hasImage = story.kind === 'image' && !!story.mediaUrl;
-  const imageFailed = hasImage && (!mediaUrl || failedImage === story.id);
-  const ready = !hasImage || loadedImage === story.id || imageFailed;
+  const imageFailed = hasImage && (!mediaUrl || failedImage === imageRequest);
+  // An image error or an earlier visit's onLoad cannot start the next-story timer.
+  const ready = !hasImage || (loadedImage === imageRequest && !imageFailed);
   const close = () => selectStory(null);
   const remaining = React.useRef(STORY_DURATION);
   const fill = useMemo(() => new Animated.Value(0), [story.id]);
   useEffect(() => {
     remaining.current = STORY_DURATION;
+    setReadingCaptionFor(null);
   }, [story.id]);
 
   useEffect(() => {
@@ -305,19 +347,39 @@ function StorySlide({
             />
           ) : hasImage && !imageFailed ? (
             <Image
-              key={story.id}
+              key={JSON.stringify([story.id, mediaUrl, imageRetry])}
               source={{ uri: mediaUrl! }}
               style={styles.photo}
               resizeMode="contain"
               accessibilityLabel="限時動態照片"
-              onLoad={() => setLoadedImage(story.id)}
-              onError={() => setFailedImage(story.id)}
+              onLoad={() => {
+                if (activeImageRequest.current === imageRequest) setLoadedImage(imageRequest);
+              }}
+              onError={() => {
+                if (activeImageRequest.current !== imageRequest) return;
+                setLoadedImage(null);
+                setFailedImage(imageRequest);
+              }}
             />
           ) : (
             <ScrollView key={story.id} contentContainerStyle={styles.centerText}>
               <Text style={styles.storyText}>
                 {imageFailed ? '照片暫時無法顯示' : story.text || '（無內容）'}
               </Text>
+              {hasImage && failedImage === imageRequest && !!mediaUrl && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="重新載入照片"
+                  style={[styles.step, styles.photoRetry]}
+                  onPress={() => {
+                    setLoadedImage(null);
+                    setFailedImage(null);
+                    setImageRetry((count) => count + 1);
+                  }}
+                >
+                  <Text style={styles.stepText}>重新載入照片</Text>
+                </Pressable>
+              )}
             </ScrollView>
           )}
           <Pressable
@@ -341,7 +403,19 @@ function StorySlide({
             contentContainerStyle={styles.detailContent}
           >
             {(hasImage || hasVideo) && !!story.text && (
-              <Text style={styles.caption}>{story.text}</Text>
+              <>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={readingCaption ? '結束閱讀說明' : '閱讀說明並暫停播放'}
+                  accessibilityHint="閱讀期間暫停自動切換；結束後依原本的播放狀態接續"
+                  accessibilityState={{ selected: readingCaption }}
+                  style={[styles.step, styles.captionRead]}
+                  onPress={() => setReadingCaptionFor(readingCaption ? null : story.id)}
+                >
+                  <Text style={styles.stepText}>{readingCaption ? '完成閱讀' : '閱讀說明'}</Text>
+                </Pressable>
+                <Text style={styles.caption}>{story.text}</Text>
+              </>
             )}
             {!!story.poiName && <Text style={styles.counter}>{story.poiName}</Text>}
           </ScrollView>
@@ -456,8 +530,10 @@ function StoryClip({
   const [failed, setFailed] = useState(false);
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [positionSeconds, setPositionSeconds] = useState(0);
-  // Native callbacks may arrive after a swipe, close or pause.
-  const session = useMemo(() => ({ playing }), [playing]);
+  const [retryGeneration, setRetryGeneration] = useState(0);
+  // Both pause/resume and an explicit retry replace the native player's attempt.
+  // A late callback from the previous attempt cannot fail the newly loaded clip.
+  const session = useMemo(() => ({ playing, uri, retryGeneration }), [playing, uri, retryGeneration]);
   const current = React.useRef<typeof session | null>(null);
   React.useLayoutEffect(() => {
     current.current = session;
@@ -473,7 +549,14 @@ function StoryClip({
           <Pressable
             accessibilityRole="button"
             style={styles.step}
-            onPress={() => setFailed(false)}
+            onPress={() => {
+              setMuted(true);
+              setDurationSeconds(0);
+              setPositionSeconds(0);
+              fill.setValue(0);
+              setRetryGeneration((generation) => generation + 1);
+              setFailed(false);
+            }}
           >
             <Text style={styles.stepText}>重新載入影片</Text>
           </Pressable>
@@ -484,6 +567,7 @@ function StoryClip({
   return (
     <View style={styles.photo}>
       <StoryVideoPlayer
+        key={JSON.stringify([uri, retryGeneration])}
         source={{ uri, overrideFileExtensionAndroid: 'mp4' }}
         style={styles.photo}
         accessibilityLabel="限時動態影片"
@@ -491,7 +575,8 @@ function StoryClip({
         isMuted={muted}
         isLooping={false}
         onError={() => {
-          if (!current.current) return;
+          // Ignore decoder errors queued before the student paused or restarted this clip.
+          if (current.current !== session) return;
           setMuted(true);
           setPositionSeconds(0);
           setDurationSeconds(0);
@@ -499,7 +584,7 @@ function StoryClip({
           onPause();
         }}
         onReadyForDisplay={({ status }) => {
-          if (current.current && status?.isLoaded && status.durationMillis)
+          if (current.current === session && status?.isLoaded && status.durationMillis)
             setDurationSeconds(Math.ceil(status.durationMillis / 1000));
         }}
         onPlaybackStatusUpdate={(status) => {
@@ -566,6 +651,8 @@ const styles = StyleSheet.create({
   sound: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   clipStatus: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
   photo: { width: '100%', height: '100%' },
+  photoRetry: { alignSelf: 'center', marginTop: 16 },
+  captionRead: { alignSelf: 'flex-start', marginBottom: 4 },
   centerText: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   storyText: {
     color: 'white',

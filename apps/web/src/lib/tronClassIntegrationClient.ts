@@ -376,6 +376,7 @@ export function createTronClassClient(identity: TronClassIdentity) {
   }
 
   async function request<T>(action: string, input: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted();
     const authHeaders = await headers();
     signal?.throwIfAborted();
     const deadline = AbortSignal.timeout(action === 'connect' || action === 'disconnect' ? 90000 : 60000);
@@ -419,13 +420,13 @@ export function createTronClassClient(identity: TronClassIdentity) {
 
   return {
     status: () => request<TronClassConnection>('status'),
-    connect: (account: string, password: string, expectedRevision: string | null) =>
+    connect: (account: string, password: string, expectedRevision: string | null, signal?: AbortSignal) =>
       request<TronClassConnection>('connect', {
         schoolId: 'pu',
         account,
         password,
         expectedRevision,
-      }),
+      }, signal),
     disconnect: (expectedRevision: string | null) =>
       request<TronClassConnection>('disconnect', { expectedRevision }),
     courses: (signal?: AbortSignal) => request<TronClassCourseIndex>('courses', {}, signal),

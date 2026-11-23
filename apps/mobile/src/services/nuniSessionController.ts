@@ -560,7 +560,9 @@ export class NuniSessionController {
     input?: Record<string, unknown>,
     _method?: 'PUT',
     _query?: Record<string, string>,
+    signal?: AbortSignal,
   ): Promise<unknown> => {
+    if (signal?.aborted) throw new NuniError(499, 'REQUEST_CANCELLED');
     const session = this.state.session;
     if (
       !session ||
@@ -578,6 +580,8 @@ export class NuniSessionController {
     const run = this.generation;
     try {
       const controller = new AbortController();
+      const abort = () => controller.abort();
+      signal?.addEventListener('abort', abort, { once: true });
       this.controllers.add(controller);
       try {
         const result = await nuniBffRequest(
@@ -588,12 +592,15 @@ export class NuniSessionController {
         );
         if (!this.current(run) || this.state.session?.context !== expectedContext)
           throw new NuniError(409, 'SESSION_CHANGED');
+        if (controller.signal.aborted) throw new NuniError(499, 'REQUEST_CANCELLED');
         return result;
       } finally {
+        signal?.removeEventListener('abort', abort);
         this.controllers.delete(controller);
       }
     } catch (error) {
       if (!this.current(run)) throw new NuniError(409, 'SESSION_CHANGED');
+      if (signal?.aborted) throw new NuniError(499, 'REQUEST_CANCELLED');
       if (error instanceof NuniError && error.status === 401) await this.refresh();
       throw error;
     }

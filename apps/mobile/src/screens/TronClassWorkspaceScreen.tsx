@@ -116,7 +116,9 @@ export function TronClassWorkspaceScreen() {
         client: createNativeTronClassClient({
           owner: `platform:${platformAccountId}`,
           isCurrent,
-          request: (input) => latest.current.platform.bffRequest('tronclass', context, input),
+          request: (input, signal) => latest.current.platform.bffRequest(
+            'tronclass', context, input, undefined, undefined, signal ?? controller.signal,
+          ),
           download: (input) => latest.current.platform.tronClassDownload(input, context),
           downloadSubmissionAttachment: typeof platform.tronClassSubmissionDownload === 'function'
             ? (input, signal) => latest.current.platform.tronClassSubmissionDownload(input, context, signal)
@@ -152,8 +154,8 @@ export function TronClassWorkspaceScreen() {
       client: createNativeTronClassClient({
         owner: `firebase:${uid}`,
         isCurrent,
-        request: (input) =>
-          nativeTronClassFirebaseRequest(uid, isCurrent, input, controller.signal),
+        request: (input, signal) =>
+          nativeTronClassFirebaseRequest(uid, isCurrent, input, signal ?? controller.signal),
         download: (input) =>
           nativeTronClassFirebaseDownload(uid, isCurrent, input, controller.signal),
         downloadSubmissionAttachment: (input, signal) =>
@@ -211,6 +213,7 @@ export function TronClassWorkspaceScreen() {
 }
 
 function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient }) {
+  const navigation = React.useContext(NavigationContext);
   const [connection, setConnection] = useState<TronClassConnection | null>(null);
   const [snapshot, setSnapshot] = useState<TronClassSnapshot | null>(null);
   const [courseIndex, setCourseIndex] = useState<TronClassCourseIndex | null>(null);
@@ -242,6 +245,7 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
   const rememberedKey = useRef<string | null>(null);
   const mounted = useRef(false);
   const lock = useRef(false);
+  const connectController = useRef<AbortController | null>(null);
   const current = () => mounted.current && client.isCurrent();
   const clearDrafts = () => {
     retainedDrafts.current = [];
@@ -389,18 +393,25 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     purgeAbandonedNativeTronClassFiles();
     void load();
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') setPassword('');
+      if (state !== 'active') {
+        setPassword('');
+        cancelConnect(false);
+      }
     });
+    const unsubscribeBlur = navigation?.addListener('blur', () => cancelConnect(false));
     return () => {
       mounted.current = false;
+      connectController.current?.abort();
+      connectController.current = null;
       rememberedKey.current = null;
       draftIdentity.current = null;
       fileCache.dispose();
       subscription.remove();
+      unsubscribeBlur?.();
     };
     // The enclosing route remounts this workspace synchronously on owner/context changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client]);
+  }, [client, navigation]);
   async function connect() {
     if (
       lock.current ||
@@ -414,6 +425,9 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     const secret = password;
     setPassword('');
     lock.current = true;
+    const controller = new AbortController();
+    connectController.current = controller;
+    const matches = () => current() && connectController.current === controller && !controller.signal.aborted;
     ++courseRequest.current;
     ++indexRequest.current;
     setCourseIndex(null);
@@ -426,13 +440,13 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     setSnapshot(null);
     setCourseId(null);
     try {
-      const value = await client.connect(account, secret, connection?.revision ?? null);
-      if (!current()) return;
+      const value = await client.connect(account, secret, connection?.revision ?? null, controller.signal);
+      if (!matches()) return;
       acceptConnection(value);
       setReconnecting(false);
       synchronize(value);
     } catch (failure) {
-      if (!current()) return;
+      if (!matches()) return;
       // A lost reply may have changed the binding. A status read must precede another attempt.
       setConnection(null);
       rememberedKey.current = null;
@@ -440,9 +454,30 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
       setReconnecting(true);
       setError(nativeTronClassError(failure));
     } finally {
-      lock.current = false;
-      if (current()) setBusy('');
+      if (connectController.current === controller) {
+        connectController.current = null;
+        lock.current = false;
+        if (current()) setBusy('');
+      }
     }
+  }
+  function cancelConnect(refreshStatus = true) {
+    const controller = connectController.current;
+    if (!controller) return;
+    connectController.current = null;
+    controller.abort();
+    lock.current = false;
+    if (!current()) return;
+    setBusy('');
+    setPassword('');
+    setConnection(null);
+    latestConnection.current = null;
+    rememberedKey.current = null;
+    setStatusKnown(false);
+    setReconnecting(true);
+    // The request may have committed before cancellation. Do not reuse its old
+    // revision or automatically retry the login; first fetch the current state.
+    if (refreshStatus) void load();
   }
   async function disconnect() {
     if (lock.current || assignmentBusy || !current() || !statusKnown || !connection) return;
@@ -666,6 +701,9 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
           <Text accessibilityLiveRegion="polite" style={copy}>
             {busy}
           </Text>
+          {connectController.current && (
+            <AIButton label="取消連接" variant="ghost" onPress={() => cancelConnect()} />
+          )}
         </AICard>
       ) : null}
       {error ? (

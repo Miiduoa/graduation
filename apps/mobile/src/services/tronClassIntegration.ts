@@ -31,7 +31,7 @@ import type {
 export type TronClassAccess = {
   owner: string;
   isCurrent(): boolean;
-  request(input: Record<string, unknown>): Promise<unknown>;
+  request(input: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;
   download?(input: NativeTronClassDownloadInput): Promise<NativeTronClassDownloadedFile>;
   downloadSubmissionAttachment?(input: NativeTronClassSubmissionDownloadInput, signal?: AbortSignal): Promise<NativeTronClassDownloadedFile>;
   upload(scope: TronClassUploadScope, bytes: Uint8Array, contentType: string): Promise<unknown>;
@@ -322,14 +322,20 @@ export function createNativeTronClassClient(access: TronClassAccess) {
   const assertCurrent = () => {
     if (!access.isCurrent()) throw new NuniError(409, 'SESSION_CHANGED');
   };
-  async function request(action: string, input: Record<string, unknown> = {}): Promise<unknown> {
-    assertCurrent();
-    try {
-      const result = await access.request({ ...input, action });
+  async function request(action: string, input: Record<string, unknown> = {}, signal?: AbortSignal): Promise<unknown> {
+    const check = () => {
       assertCurrent();
+      if (signal?.aborted) throw new NuniError(499, 'REQUEST_CANCELLED');
+    };
+    check();
+    try {
+      const result = await (signal
+        ? access.request({ ...input, action }, signal)
+        : access.request({ ...input, action }));
+      check();
       return result;
     } catch (error) {
-      assertCurrent();
+      check();
       throw error;
     }
   }
@@ -367,7 +373,7 @@ export function createNativeTronClassClient(access: TronClassAccess) {
     async status() {
       return parseNativeTronClassConnection(await request('status'));
     },
-    async connect(account: string, password: string, expectedRevision: string | null) {
+    async connect(account: string, password: string, expectedRevision: string | null, signal?: AbortSignal) {
       if (
         !account.trim() ||
         account.length > 200 ||
@@ -382,7 +388,7 @@ export function createNativeTronClassClient(access: TronClassAccess) {
           account: account.trim(),
           password,
           expectedRevision,
-        }),
+        }, signal),
       );
       if (!result.connected) return invalid();
       return result;
@@ -564,6 +570,8 @@ export function nativeTronClassError(error: unknown): string {
     TRONCLASS_RECONNECT_REQUIRED: 'TronClass 登入已到期，請重新連接。',
     TRONCLASS_NOT_CONNECTED: '請先連接 TronClass 帳號。',
     TRONCLASS_LOGIN_FAILED: '無法登入 TronClass，請確認學校帳號與密碼。',
+    TRONCLASS_LOGIN_CANCELLED: '連接已中止，請重新確認目前的連接狀態。',
+    REQUEST_CANCELLED: '已停止等待，請重新確認目前的連接狀態。',
     TRONCLASS_INVALID_CREDENTIALS: '無法登入 TronClass，請確認學校帳號與密碼。',
     TRONCLASS_LOGIN_RATE_LIMITED: '登入嘗試過於頻繁，請於 15 分鐘後再試。',
     TRONCLASS_RATE_LIMITED: '操作較頻繁，請稍候再試。',

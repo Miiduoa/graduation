@@ -1,4 +1,6 @@
 import React from 'react';
+import { AppState } from 'react-native';
+import { NavigationContext } from '@react-navigation/native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NuniError } from '@campus/shared/src/nuni';
@@ -714,6 +716,108 @@ it('drops a delayed previous-owner response after account switching', async () =
   });
   expect(view.queryByText('已連接 同學 A')).toBeNull();
   expect(actions('sync')).toHaveLength(0);
+});
+it('aborts native login, verifies the binding before retry, and ignores the old attempt while a new login is pending', async () => {
+  mockConnection = { ...disconnected };
+  let finishFirst!: (value: unknown) => void;
+  let finishSecond!: (value: unknown) => void;
+  let finishStatus!: (value: unknown) => void;
+  const first = new Promise(resolve => { finishFirst = resolve; });
+  const second = new Promise(resolve => { finishSecond = resolve; });
+  const status = new Promise(resolve => { finishStatus = resolve; });
+  let statusCount = 0;
+  let connectCount = 0;
+  mockBffRequest.mockImplementation((path, context, input) => {
+    if (input.action === 'status') return ++statusCount === 1 ? Promise.resolve(disconnected) : status;
+    if (input.action === 'connect') return ++connectCount === 1 ? first : second;
+    return defaultRequest(path, context, input);
+  });
+  const view = render(<TronClassWorkspaceScreen />);
+  fireEvent.changeText(await view.findByLabelText('TronClass 帳號'), 'student-a');
+  fireEvent.changeText(view.getByLabelText('TronClass 密碼'), 'synthetic-password');
+  fireEvent.press(view.getByRole('button', { name: '驗證並連接 TronClass' }));
+  await waitFor(() => expect(actions('connect')).toHaveLength(1));
+  const firstSignal = mockBffRequest.mock.calls.find(call => call[2].action === 'connect')![5] as AbortSignal;
+  expect(firstSignal.aborted).toBe(false);
+  fireEvent.press(view.getByRole('button', { name: '取消連接' }));
+  expect(firstSignal.aborted).toBe(true);
+  await waitFor(() => expect(actions('status')).toHaveLength(2));
+  expect(view.queryByLabelText('TronClass 密碼')).toBeNull();
+  const fresh = { ...disconnected, revision: nextRevision, account: 'student-a' };
+  await act(async () => finishStatus(fresh));
+  fireEvent.changeText(await view.findByLabelText('TronClass 密碼'), 'new-password');
+  fireEvent.press(view.getByRole('button', { name: '驗證並連接 TronClass' }));
+  await waitFor(() => expect(actions('connect')).toHaveLength(2));
+  expect(actions('connect')[1].expectedRevision).toBe(nextRevision);
+  await act(async () => finishFirst(connection));
+  expect(view.getByRole('button', { name: '驗證並連接 TronClass' })).toBeDisabled();
+  expect(view.queryByText('已連接 同學 A')).toBeNull();
+  expect(actions('sync')).toHaveLength(0);
+  mockConnection = { ...connection };
+  await act(async () => finishSecond(connection));
+  expect(await view.findByText('已連接 同學 A')).toBeTruthy();
+});
+
+it.each(['unmount', 'owner', 'context', 'background'] as const)(
+  'aborts a pending native login on %s and discards a late connection response', async change => {
+    mockConnection = { ...disconnected };
+    let finish!: (value: unknown) => void;
+    const pending = new Promise(resolve => { finish = resolve; });
+    mockBffRequest.mockImplementation((path, context, input) => input.action === 'connect'
+      ? pending : defaultRequest(path, context, input));
+    const appState = jest.spyOn(AppState, 'addEventListener');
+    const view = render(<TronClassWorkspaceScreen />);
+    fireEvent.changeText(await view.findByLabelText('TronClass 帳號'), 'student-a');
+    fireEvent.changeText(view.getByLabelText('TronClass 密碼'), 'synthetic-password');
+    fireEvent.press(view.getByRole('button', { name: '驗證並連接 TronClass' }));
+    await waitFor(() => expect(actions('connect')).toHaveLength(1));
+    const signal = mockBffRequest.mock.calls.find(call => call[2].action === 'connect')![5] as AbortSignal;
+    if (change === 'unmount') view.unmount();
+    else if (change === 'background') {
+      act(() => appState.mock.calls.find(([event]) => event === 'change')![1]('background'));
+      expect(view.queryByLabelText('TronClass 密碼')).toBeNull();
+      expect(view.getByRole('button', { name: '重新讀取連接狀態' })).not.toBeDisabled();
+    } else {
+      mockAuth = { ...mockAuth, session: { platformAccountId: change === 'owner' ? accountB : accountA, context: 'context-next' } };
+      view.rerender(<TronClassWorkspaceScreen />);
+      await view.findByLabelText('TronClass 帳號');
+    }
+    expect(signal.aborted).toBe(true);
+    await act(async () => finish(connection));
+    expect(actions('sync')).toHaveLength(0);
+    expect(actions('courses')).toHaveLength(0);
+    if (change !== 'unmount') expect(view.queryByText('已連接 同學 A')).toBeNull();
+  },
+);
+it('cancels login when the native route loses focus even if the screen stays mounted', async () => {
+  mockConnection = { ...disconnected };
+  let finish!: (value: unknown) => void;
+  const pending = new Promise(resolve => { finish = resolve; });
+  mockBffRequest.mockImplementation((path, context, input) => input.action === 'connect'
+    ? pending : defaultRequest(path, context, input));
+  let blur!: () => void;
+  const removeBlur = jest.fn();
+  const navigation = { addListener: jest.fn((_event: string, listener: () => void) => {
+    blur = listener;
+    return removeBlur;
+  }) } as unknown as React.ContextType<typeof NavigationContext>;
+  const view = render(<NavigationContext.Provider value={navigation}>
+    <TronClassWorkspaceScreen />
+  </NavigationContext.Provider>);
+  fireEvent.changeText(await view.findByLabelText('TronClass 帳號'), 'student-a');
+  fireEvent.changeText(view.getByLabelText('TronClass 密碼'), 'synthetic-password');
+  fireEvent.press(view.getByRole('button', { name: '驗證並連接 TronClass' }));
+  await waitFor(() => expect(actions('connect')).toHaveLength(1));
+  const signal = mockBffRequest.mock.calls.find(call => call[2].action === 'connect')![5] as AbortSignal;
+  act(() => blur());
+  expect(signal.aborted).toBe(true);
+  expect(view.getByRole('button', { name: '重新讀取連接狀態' })).not.toBeDisabled();
+  expect(view.queryByLabelText('TronClass 密碼')).toBeNull();
+  await act(async () => finish(connection));
+  expect(actions('sync')).toHaveLength(0);
+  expect(view.queryByText('已連接 同學 A')).toBeNull();
+  view.unmount();
+  expect(removeBlur).toHaveBeenCalledTimes(1);
 });
 it('requires confirmed rules even if an older prepare response says canSubmit', async () => {
   mockPreparation = { ...preparation, canSubmit: true, rules: undefined };

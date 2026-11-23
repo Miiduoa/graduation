@@ -205,7 +205,25 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
     .update(JSON.stringify(['tronclass-draft-student:v1', row.ownerKey, row.schoolId, row.userId]))
     .digest('hex');
 
-  const connect = async (ownerKey: string, input: TronClassConnectInput): Promise<TronClassBindingStatus> => {
+  const connect = async (ownerKey: string, input: TronClassConnectInput, signal?: AbortSignal): Promise<TronClassBindingStatus> => {
+    const cancelled = () => new NuniError(499, 'TRONCLASS_LOGIN_CANCELLED');
+    const check = () => { if (signal?.aborted) throw cancelled(); };
+    const wait = async <T>(work: () => Promise<T>): Promise<T> => {
+      check();
+      if (!signal) return work();
+      let rejectCancellation!: (reason: NuniError) => void;
+      const cancellation = new Promise<never>((_, reject) => { rejectCancellation = reject; });
+      const abort = () => rejectCancellation(cancelled());
+      signal.addEventListener('abort', abort, { once: true });
+      try {
+        // A custom provider may ignore the signal. Its eventual result must
+        // never continue into the binding transaction after caller departure.
+        return await Promise.race([Promise.resolve().then(() => { check(); return work(); }), cancellation]);
+      } finally {
+        signal.removeEventListener('abort', abort);
+      }
+    };
+    check();
     checkedOwner(ownerKey);
     if (!input || input.schoolId !== 'pu' || Object.keys(input).some((field) =>
       !['schoolId', 'account', 'password', 'expectedRevision'].includes(field)) ||
@@ -216,16 +234,19 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
     const expectedRevision = input.expectedRevision;
     const account = checkedAccount(input.account);
     const encryptionKey = key();
-    const db = await getStore();
+    const db = await wait(getStore);
+    check();
     const ref = bindingRef(db, ownerKey);
     const rateId = (kind: string, value: string) => createHmac('sha256', encryptionKey)
       .update(JSON.stringify(['tronclass-login:v1', kind, value])).digest('hex');
     const ownerRate = db.doc(`_tronClassLoginAttempts/${rateId('owner', ownerKey)}`);
     const accountRate = db.doc(`_tronClassLoginAttempts/${rateId('account', canonicalizePuStudentId(account) ?? account.replace(/@pu\.edu\.tw$/, ''))}`);
     await db.runTransaction(async (transaction) => {
+      check();
       const [binding, owner, accountAttempts] = await Promise.all([
         transaction.get(ref), transaction.get(ownerRate), transaction.get(accountRate),
       ]);
+      check();
       if ((stored(binding, ownerKey)?.revision ?? null) !== expectedRevision) changed();
       const timestamp = now();
       const own = recentAttempts(owner, timestamp, TRONCLASS_OWNER_LOGIN_LIMIT);
@@ -236,19 +257,22 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
       transaction.set(ownerRate, { ownerKey, scope: 'owner', timestamps: [...own, timestamp], purgeAt: new Date(timestamp + TRONCLASS_LOGIN_WINDOW_MS) });
       transaction.set(accountRate, { scope: 'account', timestamps: [...remote, timestamp], purgeAt: new Date(timestamp + TRONCLASS_LOGIN_WINDOW_MS) });
     });
+    check();
     let session: TronClassSession;
     try {
       const login = dependencies.login ?? createPuCampusGateway().loginTronClass;
-      session = await login(account, input.password, {
+      session = await wait(() => login(account, input.password, {
         route: canonicalizePuStudentId(account) ? 'student' : 'teacher',
-        timeoutMs: 25_000, hopTimeoutMs: 10_000,
-      });
+        timeoutMs: 25_000, hopTimeoutMs: 10_000, signal,
+      }));
     } catch (error) {
+      check();
       if (error instanceof PuCampusError && error.kind === 'credentials') {
         throw new NuniError(401, 'TRONCLASS_INVALID_CREDENTIALS');
       }
       throw new NuniError(502, 'TRONCLASS_LOGIN_UNAVAILABLE');
     }
+    check();
     const verifiedCookies = cookies(session?.cookies);
     if (!verifiedCookies || !Number.isSafeInteger(session?.userId) || session.userId! <= 0) {
       throw new NuniError(502, 'TRONCLASS_IDENTITY_UNVERIFIED');
@@ -264,11 +288,17 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
       sealedCookies: seal(ownerKey, revision, verifiedCookies),
     };
     await db.runTransaction(async (transaction) => {
+      check();
       const current = stored(await transaction.get(ref), ownerKey);
+      // Re-check inside every Firestore transaction attempt after its read;
+      // abort before this write must not replace or establish a connection.
+      check();
       if ((current?.revision ?? null) !== expectedRevision) changed();
       transaction.set(ref, row);
     });
+    check();
     await assertCurrent(ownerKey, revision);
+    check();
     const status = publicStatus(row, now());
     return { ...status, studentKey: status.connected ? studentKey(row) : null };
   };

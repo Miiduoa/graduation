@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
@@ -66,11 +66,22 @@ export function TronClassWorkspace() {
   const platform = useOptionalNuniSession();
   const firebase = useAuth();
   const platformSession = platform?.session;
+  const platformAccountId = platformSession?.platformAccountId ?? null;
+  const platformContext = platformSession?.context ?? null;
+  const firebaseOwner = platformSession ? null : firebase.user?.uid ?? null;
+  const latestFirebaseUser = useRef(firebase.user);
+  useLayoutEffect(() => { latestFirebaseUser.current = firebase.user; }, [firebase.user]);
   const identity = useMemo<TronClassIdentity | null>(() => {
-    if (platformSession) return { kind: 'platform', context: platformSession.context };
-    if (firebase.user) return { kind: 'firebase', getIdToken: () => firebase.user!.getIdToken() };
+    if (platformAccountId !== null && platformContext !== null)
+      return { kind: 'platform', context: platformContext };
+    if (firebaseOwner) return { kind: 'firebase', getIdToken: async () => {
+      const user = latestFirebaseUser.current;
+      if (!user || user.uid !== firebaseOwner)
+        throw new TronClassRequestError('SESSION_CHANGED', '登入帳號已變更，請重新開啟此頁面。', 409);
+      return user.getIdToken();
+    } };
     return null;
-  }, [platformSession, firebase.user]);
+  }, [platformAccountId, platformContext, firebaseOwner]);
   const platformBlocked =
     !!platform && (platform.loading || !!platform.error || platform.pendingLogout);
   const loading = platform?.loading || (!platformSession && firebase.loading);
@@ -81,7 +92,8 @@ export function TronClassWorkspace() {
       : null;
   const workspaceKey = platformSession ? `${owner}:${platformSession.context}` : owner;
   const ready =
-    !!identity && !!owner && !platformBlocked && !loading && (platformSession || !firebase.error);
+    (platformContext !== null || !!firebaseOwner) && !!owner && !platformBlocked && !loading &&
+    (platformSession || !firebase.error);
   // A platform refresh retains its previously verified account/context while
   // loading. Keep only that identity's page-memory drafts, not the private UI or
   // its active requests. Error, logout or a different key destroys the boundary.
@@ -170,6 +182,7 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
   const alive = useRef(true);
   const lock = useRef(false);
   const connectionRequest = useRef(0);
+  const connectController = useRef<AbortController | null>(null);
   const acceptConnection = useCallback((value: TronClassConnection) => {
     const studentKey = verifiedStudentKey(value);
     draftScope.current = studentKey && value.revision ? { studentKey, revision: value.revision } : null;
@@ -182,15 +195,19 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
     alive.current = true;
     return () => {
       alive.current = false;
+      connectController.current?.abort();
+      connectController.current = null;
+      lock.current = false;
       draftScope.current = null;
     };
-  }, []);
+  }, [client]);
   useEffect(() => {
     let current = true;
     const request = ++connectionRequest.current;
     void client.status().then(
       (value) => {
         if (!current || request !== connectionRequest.current) return;
+        setBusy(false);
         acceptConnection(value);
         setEditing(!value.connected);
         setAccount(value.account ?? '');
@@ -199,6 +216,7 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
       },
       (reason) => {
         if (!current || request !== connectionRequest.current) return;
+        setBusy(false);
         setError(tronClassErrorMessage(reason));
         setLoading(false);
       },
@@ -253,6 +271,8 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
     if (lock.current || submissionBusy || !account.trim() || !password || !connection) return;
     lock.current = true;
     const request = ++connectionRequest.current;
+    const controller = new AbortController();
+    connectController.current = controller;
     const expectedRevision = connection.revision;
     setBusy(true);
     setError('');
@@ -262,21 +282,38 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
     // Retire old reads, downloads and grants before starting a replacement login.
     setConnection({ ...connection, connected: false });
     try {
-      const value = await client.connect(account.trim(), suppliedPassword, expectedRevision);
-      if (!alive.current || request !== connectionRequest.current) return;
+      const value = await client.connect(account.trim(), suppliedPassword, expectedRevision, controller.signal);
+      if (!alive.current || controller.signal.aborted || request !== connectionRequest.current) return;
       acceptConnection(value);
       setAccount(value.account ?? '');
       setEditing(!value.connected);
       setDisconnecting(false);
     } catch (reason) {
-      if (!alive.current || request !== connectionRequest.current) return;
+      if (!alive.current || controller.signal.aborted || request !== connectionRequest.current) return;
       if (reason instanceof TronClassRequestError && reason.code.includes('BINDING_CHANGED'))
         reloadStatus();
       else setError(tronClassErrorMessage(reason));
     } finally {
-      lock.current = false;
-      if (alive.current) setBusy(false);
+      // A late response from a canceled attempt must not unlock a newer one.
+      if (connectController.current === controller) {
+        connectController.current = null;
+        lock.current = false;
+        if (alive.current) setBusy(false);
+      }
     }
+  }
+
+  function cancelConnect() {
+    const controller = connectController.current;
+    if (!controller) return;
+    connectController.current = null;
+    ++connectionRequest.current;
+    controller.abort();
+    lock.current = false;
+    setBusy(false);
+    // Cancellation cannot reverse a binding committed just before the abort.
+    // Read its current revision before allowing another login or showing data.
+    reloadStatus();
   }
 
   async function disconnect() {
@@ -391,9 +428,14 @@ function AccountWorkspace({ identity, owner, recoveryDrafts, setRecoveryDrafts }
               </div>
             </fieldset>
             {busy && (
-              <p role="status" className={styles.muted}>
-                正在登入學校平台，這可能需要一點時間。
-              </p>
+              <div className={styles.actions}>
+                <p role="status" className={styles.muted}>
+                  正在登入學校平台，這可能需要一點時間。
+                </p>
+                <button className="btn" type="button" onClick={cancelConnect}>
+                  取消連接
+                </button>
+              </div>
             )}
           </form>
         )}

@@ -154,6 +154,8 @@ async def account_scenario(browser, origin, width, theme, reports, empty=False):
 
     async def api(path):
         nonlocal lookup_count
+        if path == 'account-demo':
+            return 200, {'demo': None}
         if path == 'class-workspaces':
             lookup_count += 1
             if lookup_count == 1:
@@ -219,7 +221,15 @@ async def merchant_scenario(browser, origin, width, theme, reports):
     page = await browser.new_page(viewport={'width': width, 'height': 920}, color_scheme=theme)
     scenario = Scenario(page, origin, width, theme, 'merchant', reports)
 
+    account_demo_calls = 0
+
     async def api(path):
+        nonlocal account_demo_calls
+        if path == 'account-demo':
+            account_demo_calls += 1
+            if account_demo_calls == 1:
+                return 503, {'error': 'FIXTURE_UNAVAILABLE'}
+            return 200, {'demo': None}
         if path == 'merchant-workspaces':
             return 200, {'workspaces': [PREPARING, OPERATING]}
         if path == 'merchant-applications':
@@ -241,6 +251,11 @@ async def merchant_scenario(browser, origin, width, theme, reports):
         await scenario.install_api(api)
         await page.goto(origin + '/merchant?theme=' + theme)
         await expect(page.get_by_role('heading', name='1 筆申請需要補件')).to_be_visible()
+        await expect(page.get_by_text('暫時無法確認帳號資料，請重新讀取後再操作。', exact=True)).to_be_visible()
+        await page.get_by_role('button', name='重新讀取帳號資料', exact=True).click()
+        await expect(page.get_by_text('暫時無法確認帳號資料，請重新讀取後再操作。', exact=True)).to_have_count(0)
+        await expect(page.get_by_role('heading', name='1 筆申請需要補件')).to_be_visible()
+        scenario.checked('account-demo is expected; a failed showcase read keeps official merchant work')
         await expect(page.get_by_role('button', name='重新載入', exact=True)).to_be_enabled()
         await expect(page.get_by_label('申請場域', exact=True)).to_have_count(0)
         await expect(page.get_by_role('heading', name='店家如何進駐')).to_have_count(0)

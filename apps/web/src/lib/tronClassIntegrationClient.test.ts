@@ -10,6 +10,32 @@ import type { TronClassAcknowledgedReadbackResult } from '@campus/shared/src/tro
 afterEach(() => vi.unstubAllGlobals());
 
 describe('TronClass client response boundary', () => {
+  it('does not acquire a token or dispatch a login after connection cancellation', async () => {
+    const getIdToken = vi.fn(async () => 'synthetic-token');
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(createTronClassClient({ kind: 'firebase', getIdToken })
+      .connect('student', 'synthetic-password', null, controller.signal)).rejects.toThrow();
+    expect(getIdToken).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not start an abandoned login after its Firebase token resolves', async () => {
+    let finish!: (value: string) => void;
+    const token = new Promise<string>(resolve => { finish = resolve; });
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const controller = new AbortController();
+    const pending = createTronClassClient({ kind: 'firebase', getIdToken: () => token })
+      .connect('student', 'synthetic-password', null, controller.signal);
+    controller.abort();
+    finish('synthetic-token');
+    await expect(pending).rejects.toThrow();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   const courseIndex = { kind: 'course-index', revision: 'a'.repeat(32), fetchedAt: '2026-11-18T00:00:00.000Z',
     courses: [{ id: 101, name: '程式設計', code: 'CS01', teachers: ['王老師'], semester: '115-1',
       status: 'ongoing', href: 'https://tronclass.pu.edu.tw/course/101/content' }], errors: [], partial: false };

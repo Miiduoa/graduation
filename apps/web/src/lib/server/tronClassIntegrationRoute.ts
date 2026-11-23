@@ -53,6 +53,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   TRONCLASS_RATE_LIMITED: '連線嘗試過於頻繁，請稍後再試。',
   TRONCLASS_LOGIN_RATE_LIMITED: '連線嘗試過於頻繁，請於 15 分鐘後再試。',
   TRONCLASS_LOGIN_FAILED: '無法登入 TronClass，請確認學校帳號與密碼。',
+  TRONCLASS_LOGIN_CANCELLED: '已取消這次 TronClass 連接。',
   TRONCLASS_INVALID_CREDENTIALS: '無法登入 TronClass，請確認學校帳號與密碼。',
   TRONCLASS_LOGIN_UNAVAILABLE: 'TronClass 登入服務暫時無法回應，請稍後再試。',
   TRONCLASS_IDENTITY_UNVERIFIED: '這次登入尚未確認學校帳號身分，請重新連線。',
@@ -159,7 +160,7 @@ export async function handleTronClassIntegration(
           result = await bindings.connect(actor.ownerKey, {
             schoolId: 'pu', account: input.account, password: input.password,
             expectedRevision: expectedRevision(input.expectedRevision),
-          });
+          }, request.signal);
           break;
         case 'disconnect':
           only(input, ['action', 'expectedRevision']);

@@ -63,6 +63,11 @@ function noRemoteRead() {
   expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
 }
 beforeEach(() => {
+  // PU timetable rows accept weekdays only. A moving CI clock must not make
+  // the shared personal-import fixture invalid when the runner reaches Saturday.
+  // Mock Date only; keep network deadlines and React timers real.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-18T10:30:00+08:00'));
   localStorage.clear(); sessionStorage.clear();
   vi.mocked(browserRequest).mockReset().mockRejectedValue(new Error('Unexpected private source'));
   vi.mocked(answerAssistantLocally).mockClear();
@@ -71,7 +76,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async () => json({ enabled: true, ready: false, version: 2 })));
   saveRecords();
 });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 it.each(profiles)('%s can submit and answer its own timetable without model consent', async profile => {
   await open(profile);

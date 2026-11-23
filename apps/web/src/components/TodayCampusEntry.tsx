@@ -18,6 +18,7 @@ import { areFunctionsConfigured } from '@/lib/functionsUrl';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { currentReturnPath } from '@/lib/navigation';
+import { AssistantLinkNavigation, useAssistantLinkNavigation } from './AssistantReplyLink';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { useAssistantEnabled } from './AssistantEnabledProvider';
 import { useAuth } from './AuthGuard';
@@ -25,6 +26,7 @@ import { LoginLink } from './LoginLink';
 import { CampusIcon } from './CampusIcon';
 import { QuickCampusEntry } from './QuickCampusEntry';
 import styles from './TodayCampusEntry.module.css';
+import type { AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
 
 const NuniConversation = lazy(async () => ({
   default: (await import('@/features/nuni/Assistant')).Conversation,
@@ -41,10 +43,14 @@ function TodayConversation({
   account,
   schoolId,
   cloudEnabled,
+  preferredWorkContext,
+  onNavigate,
 }: {
   account: Account;
   schoolId: string;
   cloudEnabled: boolean;
+  preferredWorkContext?: AssistantWorkContext;
+  onNavigate?: (href: string) => void;
 }) {
   const [text, setText] = useState('');
   const [nuniFreeform, setNuniFreeform] = useState(false);
@@ -74,6 +80,7 @@ function TodayConversation({
         {searchOpen && (
           <QuickCampusEntry
             compact
+            onNavigate={onNavigate}
             onAsk={
               canAsk
                 ? (phrase) => {
@@ -90,6 +97,7 @@ function TodayConversation({
         <Suspense fallback={<p role="status">正在開啟校園助理…</p>}>
           {account.kind === 'nuni' ? (
             <NuniConversation
+              preferredWorkContext={preferredWorkContext}
               context={account.context}
               accountId={account.accountId}
               schoolId={schoolId}
@@ -118,7 +126,11 @@ export function TodayCampusEntry({
   active = true,
   focusRequest = 0,
   returnAnchor = 'today-voice-entry',
+  preferredWorkContext,
+  onNavigate,
 }: {
+  preferredWorkContext?: AssistantWorkContext;
+  onNavigate?: (href: string) => void;
   active?: boolean;
   focusRequest?: number;
   returnAnchor?: 'today-voice-entry' | 'campus-assistant-entry';
@@ -166,13 +178,28 @@ export function TodayCampusEntry({
   }, [active, focusRequest]);
   return (
     <div ref={entry}>
-      <CampusEntryContent returnPath={returnPath} />
+      <AssistantLinkNavigation.Provider value={onNavigate}>
+        <CampusEntryContent
+          returnPath={returnPath}
+          preferredWorkContext={preferredWorkContext}
+          onNavigate={onNavigate}
+        />
+      </AssistantLinkNavigation.Provider>
     </div>
   );
 }
 
-function CampusEntryContent({ returnPath }: { returnPath: string }) {
+function CampusEntryContent({
+  returnPath,
+  preferredWorkContext,
+  onNavigate,
+}: {
+  returnPath: string;
+  preferredWorkContext?: AssistantWorkContext;
+  onNavigate?: (href: string) => void;
+}) {
   const hydrated = useClientHydrated();
+  const navigateLink = useAssistantLinkNavigation();
   const auth = useAuth();
   const nuni = useNuniSession();
   const enabled = useAssistantEnabled();
@@ -205,7 +232,9 @@ function CampusEntryContent({ returnPath }: { returnPath: string }) {
       <>
         {!uid && !session ? (
           <p className={styles.hint}>
-            <LoginLink returnPath={returnPath}>登入後，接著詢問校園助理</LoginLink>
+            <LoginLink returnPath={returnPath} onNavigateClick={navigateLink}>
+              登入後，接著詢問校園助理
+            </LoginLink>
           </p>
         ) : account && campus.status === 'unselected' ? (
           <p className={styles.hint}>請先從頁首選擇學校，就能在這裡詢問校園助理。</p>
@@ -214,12 +243,15 @@ function CampusEntryContent({ returnPath }: { returnPath: string }) {
           compact
           key={JSON.stringify([uid, session?.context, campus.schoolId])}
           onAsk={null}
+          onNavigate={onNavigate}
         />
       </>
     );
   }
   return (
     <TodayConversation
+      preferredWorkContext={preferredWorkContext}
+      onNavigate={onNavigate}
       key={JSON.stringify([
         uid,
         session?.context,
@@ -263,7 +295,9 @@ function clearAssistantAnchor(anchor: string) {
 export function TodayAssistantDisclosure({
   ref,
   onOpenChange,
+  preferredWorkContext,
 }: {
+  preferredWorkContext?: AssistantWorkContext;
   ref: Ref<TodayAssistantHandle>;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -337,7 +371,7 @@ export function TodayAssistantDisclosure({
         <span className={styles.triggerHint}>打字或語音詢問</span>
       </summary>
       <div className={styles.body}>
-        {hasOpened && <TodayCampusEntry active={opened} focusRequest={focusRequest} />}
+        {hasOpened && <TodayCampusEntry active={opened} focusRequest={focusRequest} preferredWorkContext={preferredWorkContext} />}
       </div>
     </details>
   );

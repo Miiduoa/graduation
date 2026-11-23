@@ -485,10 +485,21 @@ function publicSnapshot(value: unknown, uid: string, nowMs: number): LmsReadonly
   // snapshot belongs to one of the courses in that snapshot. Never display
   // cached homework or course errors for a foreign course.
   const courseIds = new Set<number>();
+  const seenCourseIds = new Set<number>();
+  const courses: LmsCourseSummary[] = [];
   for (const item of row.courses) {
-    const id = positiveId(record(item).id);
-    if (!id || courseIds.has(id)) return null;
+    const course = record(item);
+    const id = positiveId(course.id);
+    // A malformed standalone row does not invalidate the other cached courses.
+    // It also cannot authorize homework or extras. Conflicting IDs still make
+    // the entire snapshot ambiguous, including an unnamed duplicate.
+    if (!id) continue;
+    if (seenCourseIds.has(id)) return null;
+    seenCourseIds.add(id);
+    const name = shortText(course.name);
+    if (!name) continue;
     courseIds.add(id);
+    courses.push({ id, name });
   }
   if (row.homework.some(item => !courseIds.has(positiveId(record(item).courseId) ?? 0)) ||
     row.contentsLoadedFor.some(id => !courseIds.has(positiveId(id) ?? 0)) ||
@@ -501,7 +512,7 @@ function publicSnapshot(value: unknown, uid: string, nowMs: number): LmsReadonly
     row.courseErrors as LmsCourseError[],
     row.upcomingCoursesError as LmsReadonlySnapshot['upcomingCoursesError'],
   ) <= nowMs) return null;
-  return row as LmsReadonlySnapshot;
+  return { ...row, courses } as LmsReadonlySnapshot;
 }
 
 // A 401 can be returned as a per-feed failure rather than a thrown session error.
@@ -677,20 +688,19 @@ export function createTronClassLmsHandler({
       };
 
       // Versionless caches cannot prove which identity populated their contents.
-      if (sessionVersion && cacheData &&
+      const verifiedCache = sessionVersion && cacheData &&
         cacheData.ownerUid === uid && cacheData.sessionId === linkedId &&
         cacheData.projectionVersion === LMS_CACHE_PROJECTION_VERSION &&
         cacheData.sessionVersion === sessionVersion &&
-        cacheStillFresh(cacheData.expiresAt, now()) && publicSnapshot(cacheData.snapshot, uid, now())) {
+        cacheStillFresh(cacheData.expiresAt, now())
+        ? publicSnapshot(cacheData.snapshot, uid, now()) : null;
+      if (verifiedCache && cacheData) {
         // Cached extras must belong to a course in this verified snapshot;
         // the cache key alone is not evidence that the owner is enrolled.
-        const allowedCourseIds = new Set((cacheData.snapshot as LmsReadonlySnapshot).courses.flatMap((course) => {
-          const id = positiveId(record(course).id);
-          return id ? [id] : [];
-        }));
+        const allowedCourseIds = new Set(verifiedCache.courses.map(course => course.id));
         const pruned = readCachedExtras(cacheData.extras, now(), allowedCourseIds);
         extras = refresh ? {} : pruned.extras;
-        cachedHomework = refresh ? null : homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid, now())!);
+        cachedHomework = refresh ? null : homeworkOnlySnapshot(verifiedCache);
         shouldPruneExtras = !refresh && pruned.pruned;
       }
 
@@ -765,7 +775,7 @@ export function createTronClassLmsHandler({
       }
 
       if (courseId) {
-        const course = snapshot.courses.find((item) => item.id === courseId);
+        const course = snapshot.courses.find((item) => positiveId(record(item).id) === courseId);
         if (course && (refresh || !extras[String(courseId)])) {
           const contents = await loadCourseContents(source, cookies, course);
           fetchedFromSchool = true;

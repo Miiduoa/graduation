@@ -1142,6 +1142,94 @@ function delayedCampusResponse(response: Response, delay: number, signal?: Abort
   });
 }
 
+it('does not send school credentials when the TronClass caller is already canceled', async () => {
+  const controller = new AbortController();
+  controller.abort(new Error(SECRET));
+  const fetchMock = vi.fn();
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginTronClass(STUDENT, SECRET, { route: 'student', signal: controller.signal }))
+    .rejects.toMatchObject({ kind: 'unavailable', code: 'CANCELLED', message: '學校登入已取消' });
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it.each([
+  [1, 'submit'], [2, 'redirect'], [3, 'redirect'], [4, 'submit'],
+  [5, 'submit'], [6, 'submit'], [7, 'verify'],
+])('cancels TronClass hop %s and ignores a late relay result without continuing the CAS flow', async (hop, stage) => {
+  const controller = new AbortController();
+  const add = vi.spyOn(controller.signal, 'addEventListener');
+  const remove = vi.spyOn(controller.signal, 'removeEventListener');
+  const responses = [
+    jsonResponse(400, { error: 'native login disabled' }),
+    new Response('', { status: 302, headers: { Location: 'https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login' } }),
+    htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML),
+    new Response('', { status: 307, headers: { Location: 'https://identity.pu.edu.tw/auth/realms/pu/login-actions/authenticate?step=2' } }),
+    new Response('', { status: 302, headers: { Location: 'https://tronclass.pu.edu.tw/user/index?ticket=ST-fixture' } }),
+    htmlResponse(200, '<html><body><input id="userId" value="57"></body></html>', { 'set-cookie': 'session=fixture; Path=/' }),
+    jsonResponse(200, { id: 57, login_name: STUDENT, role: 'student' }),
+  ];
+  let finish!: () => void;
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit): Promise<Response> => {
+    void _url;
+    void _init;
+    const current = fetchMock.mock.calls.length;
+    const response = responses[current - 1]!;
+    if (current !== hop) return response;
+    // Deliberately ignore RequestInit.signal to exercise the boundary rather
+    // than assuming every school relay respects fetch cancellation.
+    return new Promise(resolve => { finish = () => resolve(response); });
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  const pending = gateway.loginTronClass(STUDENT, SECRET, {
+    timeoutMs: 25_000, hopTimeoutMs: 10_000, route: 'student', signal: controller.signal,
+  });
+  const rejected = expect(pending).rejects.toMatchObject({ kind: 'unavailable', code: 'CANCELLED', route: 'student', stage });
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  controller.abort(new Error(SECRET));
+  await rejected;
+  expect(fetchMock.mock.calls.at(-1)?.[1]?.signal?.aborted).toBe(true);
+  finish();
+  await Promise.resolve();
+  expect(fetchMock).toHaveBeenCalledTimes(Number(hop));
+  expect(remove.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(add.mock.calls.length);
+});
+
+it('cancels an authenticated profile body that ignores abort and cannot accept its late session', async () => {
+  const controller = new AbortController();
+  let finish!: (value: string) => void;
+  const profile = jsonResponse(200, {});
+  const read = vi.spyOn(profile, 'text').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+    ? jsonResponse(200, { id: 57 }, { 'set-cookie': 'session=fixture; Path=/' }) : profile);
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  const pending = gateway.loginTronClass(STUDENT, SECRET, { route: 'student', signal: controller.signal });
+  const rejected = expect(pending).rejects.toMatchObject({ code: 'CANCELLED', stage: 'verify' });
+  await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+  controller.abort();
+  await rejected;
+  finish(JSON.stringify({ id: 57, login_name: STUDENT }));
+  await Promise.resolve();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('cleans up caller cancellation after a successful TronClass profile verification', async () => {
+  const controller = new AbortController();
+  const add = vi.spyOn(controller.signal, 'addEventListener');
+  const remove = vi.spyOn(controller.signal, 'removeEventListener');
+  const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+    void _init;
+    return url.endsWith('/api/login')
+      ? jsonResponse(200, { id: 57 }, { 'set-cookie': 'session=fixture; Path=/' })
+      : jsonResponse(200, { id: 57, login_name: STUDENT }, { 'set-cookie': 'session=rotated-fixture; Path=/' });
+  });
+  const gateway = createPuCampusGateway({ fetch: fetchMock });
+  await expect(gateway.loginTronClass(STUDENT, SECRET, { route: 'student', signal: controller.signal }))
+    .resolves.toMatchObject({ userId: 57, cookies: { session: 'rotated-fixture' } });
+  expect(remove.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(add.mock.calls.length);
+  controller.abort();
+  expect(fetchMock.mock.calls.every(([, init]) => init?.signal?.aborted === false)).toBe(true);
+});
+
 it('shares the TronClass deadline across slow CAS login redirects before sending credentials', async () => {
   vi.useFakeTimers();
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {

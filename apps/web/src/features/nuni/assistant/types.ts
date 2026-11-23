@@ -26,13 +26,30 @@ export type V2Reply = {
   roleGuide?: import('@campus/shared/src/assistantRoleProfiles').AssistantRoleProfileId;
   serviceIds?: readonly import('@campus/shared/src/assistantServices').AssistantServiceId[];
   local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
+  demo?: import('@/lib/accountDemoAssistant').AccountDemoAssistantAnswer;
   courseworkTargets?: import('@/lib/assistantCoursework').AssistantCourseworkTarget[];
   courseworkDate?: string;
+  /** Exact public records offered for an explicit, independently re-read selection. */
+  eventTargets?: import('@/lib/assistantCampusEvent').AssistantCampusEventTarget[];
+  /** True for a source-bound preview; false for a discovery that still needs
+   * an explicit source choice. A preview's single source is not a new list. */
+  campusEventPreview?: boolean;
+  /** Server-prepared task results; validate before rendering or linking. */
+  taskPlan?: import('@campus/shared/src/assistantTaskPlan').AssistantTaskPlan;
+  /** Scoped read continuation; never an action-card confirmation. */
+  taskRetry?: import('@campus/shared/src/assistantTaskRetry').AssistantTaskRetry;
+  /** Reviewed public catalogs; validate their envelope before rendering cards. */
+  publicCourseResults?: import('@campus/shared/src/assistantPublicCourseResults').AssistantPublicCourseResult[];
 };
 
 export type V2Turn = {
   question: string;
   reply: V2Reply;
+  /** Local request provenance, never copied from a server reply. A fresh
+   * discovery preview cannot expose an older activity list to later ordinals. */
+  campusEventDiscovery?: true;
+  /** Preserve the original conversation when retrying this turn's scoped reads. */
+  conversationId?: string;
   taskProfile?: import('@campus/shared/src/assistantRoleProfiles').AssistantRoleProfileId;
   /** Local public lookup, outside the model conversation and signed action cards. */
   publicCourse?: { read?: PublicCourseAssistantRead };

@@ -5,6 +5,7 @@ import {
 } from '../services/nuniSessionController';
 import { NuniDraftScopeStore } from '../state/nuniDrafts';
 import { requestNativeTronClassSubmissionDownload } from '../services/tronClassNativeDownload';
+import * as nuniClient from '../services/nuniClient';
 
 jest.mock('../services/tronClassNativeDownload', () => ({
   ...jest.requireActual('../services/tronClassNativeDownload'),
@@ -832,6 +833,61 @@ it('cannot read or refill expired input before the next refresh or after control
   controller.dispose();
   expect(controller.canRetainLocalDrafts(account)).toBe(false);
   expect(invalidateLocalDrafts).toHaveBeenCalled();
+});
+
+describe('cancelable platform BFF requests', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('rejects a canceled connection before dispatching the private platform handle', async () => {
+    const { controller } = setup(stored());
+    await controller.refresh();
+    const bff = jest.spyOn(nuniClient, 'nuniBffRequest').mockResolvedValue({ connected: true });
+    const cancellation = new AbortController();
+    cancellation.abort();
+    await expect(controller.bffRequest('tronclass', controller.state.session!.context,
+      { action: 'connect' }, undefined, undefined, cancellation.signal))
+      .rejects.toMatchObject({ code: 'REQUEST_CANCELLED' });
+    expect(bff).not.toHaveBeenCalled();
+  });
+
+  it.each(['cancel', 'logout', 'dispose'] as const)('propagates %s to transport and rejects a late connection result', async cause => {
+    const { controller } = setup(stored());
+    await controller.refresh();
+    const context = controller.state.session!.context;
+    const pending = deferred<unknown>();
+    const bff = jest.spyOn(nuniClient, 'nuniBffRequest').mockReturnValue(pending.promise);
+    const cancellation = new AbortController();
+    const work = controller.bffRequest('tronclass', context, { action: 'connect' },
+      undefined, undefined, cancellation.signal);
+    const rejected = expect(work).rejects.toMatchObject({ code: cause === 'cancel' ? 'REQUEST_CANCELLED' : 'SESSION_CHANGED' });
+    const signal = bff.mock.calls[0][3]!;
+    expect(signal.aborted).toBe(false);
+    if (cause === 'cancel') cancellation.abort();
+    else if (cause === 'logout') await controller.logout();
+    else controller.dispose();
+    expect(signal.aborted).toBe(true);
+    pending.resolve({ connected: true });
+    await rejected;
+    expect(bff).toHaveBeenCalledTimes(1);
+  });
+
+  it('detaches caller cancellation after a completed read without canceling a later request', async () => {
+    const { controller } = setup(stored());
+    await controller.refresh();
+    const context = controller.state.session!.context;
+    const bff = jest.spyOn(nuniClient, 'nuniBffRequest').mockResolvedValue({ connected: true });
+    const cancellation = new AbortController();
+    const remove = jest.spyOn(cancellation.signal, 'removeEventListener');
+    await controller.bffRequest('tronclass', context, { action: 'status' },
+      undefined, undefined, cancellation.signal);
+    const completedSignal = bff.mock.calls[0][3]!;
+    cancellation.abort();
+    expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+    expect(completedSignal.aborted).toBe(false);
+    await expect(controller.bffRequest('tronclass', context, { action: 'status' }))
+      .resolves.toEqual({ connected: true });
+    expect(bff.mock.calls[1][3]!.aborted).toBe(false);
+  });
 });
 
 describe('private TronClass submission attachment capability', () => {

@@ -1,6 +1,8 @@
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import type { ReactNode } from 'react';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
+import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
+import { parseAssistantPublicCourseResults } from '@campus/shared/src/assistantPublicCourseResults';
 import { parseAssistantFoodPickupIntent } from '@campus/shared/src/assistantFoodPickupIntent';
 import { getAssistantRoleProfile, type AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
 import { assistantRoleTaskGuide } from '@campus/shared/src/assistantRoleTasks';
@@ -12,14 +14,24 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { SpokenReply } from '@/components/SpokenReply';
 import { AssistantCardStack } from './AssistantCards';
+import { AssistantTaskPlan } from './AssistantTaskPlan';
+import { AssistantCampusEvents } from './AssistantCampusEvents';
+import { parseCampusEventCommand, type AssistantCampusEventTarget } from '@/lib/assistantCampusEvent';
+import { parseCampusMapCommand } from '@/lib/nuni/assistantV2/campusMapRequest';
+import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
+import { isAssistantTaskRetryQuestion, type AssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
 import { AssistantMarkdown } from './AssistantMarkdown';
+import { accountDemoAssistantIntent, type AccountDemoAssistantScope } from '@/lib/accountDemoAssistant';
+import { AccountDemoAssistantCard } from './AccountDemoAssistantCard';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { parseLocalScheduleIntent } from '@/lib/assistantLocalSchedule';
 import { personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
 import { canAnswerTronClassQuestion } from '@/lib/tronClassAgentIntent';
 import { courseworkStudyFollowup, parseAssistantCourseworkTargets, type AssistantCourseworkTarget } from '@/lib/assistantCoursework';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
-import { assistantPermissionSettingsHref, SUGGESTIONS, stepFamily, stepStatus } from './copy';
+import { assistantPermissionSettingsHref, stepFamily, stepStatus } from './copy';
+import { assistantTaskProfileForWorkContext, assistantWorkContextForTaskProfile, assistantWorkContextFromQuestion, getAssistantRoleWorkflow, type AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
+import { AssistantRoleTasks } from './AssistantRoleTasks';
 import styles from './AssistantReply.module.css';
 import draftStyles from './AssistantDraft.module.css';
 import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, restoreComposerDraft, sendComposerDraft } from './composerDraft';
@@ -48,9 +60,18 @@ export function assistantQuestionReadRoute(taskProfile: AssistantRoleProfileId, 
 }
 
 function ReplyBody({ reply }: { reply: V2Turn['reply'] }) {
-  if (reply.local || reply.dataRead)
+  if (parseAssistantTaskPlan(reply.taskPlan))
+    return <p>已逐項整理這次任務，結果與尚待處理的項目如下。</p>;
+  if (reply.local || reply.dataRead || reply.publicCourseResults !== undefined || reply.eventTargets !== undefined || reply.campusEventPreview)
     return <div className={styles.prose}><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{reply.answer}</p></div>;
   return <AssistantMarkdown text={reply.answer} />;
+}
+
+function PublicCourseResults({ results }: { results: unknown }) {
+  if (results === undefined) return null;
+  const reads = parseAssistantPublicCourseResults(results);
+  if (!reads) return <p className={styles.muted}>公開課程結果尚未通過核對，請重新查詢。</p>;
+  return reads.map((read, index) => <PublicCourseAssistantResult key={read.schoolId + ':' + index} read={read} />);
 }
 
 export function AssistantThread({
@@ -77,14 +98,20 @@ export function AssistantThread({
   onRecoverQuestion,
   onAsk,
   onStudyTarget,
+  onEventTarget,
+  eventBlockedReason,
+  onTaskRetry,
+  taskRetryForTurn,
   onStop,
   onConfirm,
   onCancel,
   onReconcile,
+  demoScope,
   renderPlanRevision,
   renderPlanComparison,
   renderTronClass,
   allowBatchConfirmation,
+  preferredWorkContext,
 }: {
   inline?: boolean;
   schoolId: string;
@@ -109,14 +136,21 @@ export function AssistantThread({
   onRecoverQuestion: () => void;
   onAsk: () => void;
   onStudyTarget?: (target: AssistantCourseworkTarget, date?: string) => void;
+  onEventTarget?: (turn: V2Turn, target: AssistantCampusEventTarget) => void;
+  eventBlockedReason?: string;
+  onTaskRetry?: (turn: V2Turn, stepIds: string[]) => void;
+  taskRetryForTurn?: (turn: V2Turn) => AssistantTaskRetry | null;
   onStop?: () => void;
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
   onReconcile?: (card: V2Card) => void;
+  demoScope?: AccountDemoAssistantScope;
   renderPlanRevision?: (turn: V2Turn) => ReactNode;
   renderPlanComparison?: (turn: V2Turn) => ReactNode;
   renderTronClass?: (turn: V2Turn) => ReactNode;
   allowBatchConfirmation?: (turn: V2Turn) => boolean;
+  /** Display preference from an already-loaded workspace, never authorization. */
+  preferredWorkContext?: AssistantWorkContext;
 }) {
   const fieldId = useId();
   const log = useRef<HTMLDivElement>(null);
@@ -125,8 +159,34 @@ export function AssistantThread({
   const end = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const followLatest = useRef(true);
+  const revisionFocus = useRef(false);
   const [showJump, setShowJump] = useState(false);
   const [draft, setDraft] = useState(EMPTY_COMPOSER_DRAFT);
+  const [chosenWorkContext, setWorkContext] = useState<AssistantWorkContext | null>(null);
+  const [initialWorkContext] = useState(() => assistantWorkContextFromQuestion(question));
+  const manuallySelectedContext = useRef(false);
+  const workContext = chosenWorkContext ?? (onTaskProfile && taskProfile !== 'student'
+    ? assistantWorkContextForTaskProfile(taskProfile)
+    : preferredWorkContext ?? initialWorkContext);
+  // Only an explicit entry question initializes the task profile. Loaded workspace
+  // preferences affect examples only; a later manual selection takes priority.
+  useEffect(() => {
+    if (!onTaskProfile || taskProfileLocked || manuallySelectedContext.current || taskProfile !== 'student') return;
+    const next = assistantTaskProfileForWorkContext(initialWorkContext);
+    if (next !== taskProfile) onTaskProfile(next);
+  }, [onTaskProfile, taskProfileLocked, taskProfile, initialWorkContext]);
+  function chooseTaskProfile(next: AssistantRoleProfileId) {
+    if (taskProfileLocked) return;
+    manuallySelectedContext.current = true;
+    setWorkContext(assistantWorkContextForTaskProfile(next));
+    onTaskProfile?.(next);
+  }
+  function chooseWorkContext(next: AssistantWorkContext) {
+    manuallySelectedContext.current = true;
+    setWorkContext(next);
+    if (!taskProfileLocked) onTaskProfile?.(assistantTaskProfileForWorkContext(next));
+  }
+  const workflow = getAssistantRoleWorkflow(workContext);
   useEffect(() => {
     const root = shell.current;
     const node = dock.current;
@@ -159,12 +219,26 @@ export function AssistantThread({
   }, [inline, turns.length]);
   useEffect(() => {
     if (!followLatest.current || (!turns.length && !pending && !error)) return;
+    const active = document.activeElement;
+    // After a disabled-control blur, a later external focus does not bubble
+    // through this thread. Treat a real destination differently from body/html.
+    if (revisionFocus.current && active instanceof Element && active !== document.body &&
+      active !== document.documentElement && !shell.current?.contains(active)) revisionFocus.current = false;
+    if (revisionFocus.current) {
+      // Reply updates must not move the form while someone is editing a plan.
+      // The existing jump action or a new question explicitly resumes following.
+      followLatest.current = false;
+      setShowJump(true);
+      return;
+    }
     if (inline) {
       if (log.current) log.current.scrollTop = log.current.scrollHeight;
       return;
     }
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
+    // Automatic updates must finish before the next keyboard interaction. An
+    // in-flight smooth scroll can outlive a later focus({ preventScroll: true }).
+    // Only the explicit jump action below requests animated scrolling.
+    end.current?.scrollIntoView({ behavior: 'instant', block: 'end' });
   }, [inline, turns, pending, error]);
   useEffect(() => {
     const node = field.current;
@@ -173,20 +247,25 @@ export function AssistantThread({
     node.style.height = Math.min(node.scrollHeight, 132) + 'px';
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
-  const profile = getAssistantRoleProfile(taskProfile)!;
-  const publicCourseIntent = resolvePublicCourseAssistantIntent(question, schoolId);
   const tronClass = taskProfile === 'student' && canAnswerTronClassQuestion(question);
+  const publicCompound = !tronClass && publicCourseCompoundRequest(question, schoolId);
+  const publicCourseIntent = !tronClass && !publicCompound && resolvePublicCourseAssistantIntent(question, schoolId);
+  const profile = getAssistantRoleProfile(taskProfile)!;
   const foodPickup = !tronClass && taskProfile === 'student' && parseAssistantFoodPickupIntent(question) !== null;
   const readRoute = assistantQuestionReadRoute(taskProfile, question);
-  const suggestions = taskProfile !== 'student' ? profile.examples.map(example => example.prompt)
-    : foodPickupEnabled ? [...SUGGESTIONS, PICKUP_SUGGESTION] : SUGGESTIONS;
+  const useProfileExamples = taskProfile !== 'student' && workContext === assistantWorkContextForTaskProfile(taskProfile);
+  const suggestions = useProfileExamples ? profile.examples.map(example => example.prompt)
+    : foodPickupEnabled && taskProfile === 'student' ? [...workflow.suggestions, PICKUP_SUGGESTION] : workflow.suggestions;
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    (readRoute.roleGuide || (foodPickup ? foodPickupEnabled
-      : tronClass || !!publicCourseIntent || readRoute.local || readRoute.personal ||
-        (onStudyTarget && taskProfile === 'student' && courseworkStudyFollowup(question) !== null) || (consent && ready)));
+    ((!!demoScope && !!accountDemoAssistantIntent(question)) || readRoute.roleGuide || (foodPickup ? foodPickupEnabled
+      : tronClass || parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) ||
+        (onTaskRetry && isAssistantTaskRetryQuestion(question)) ||
+        (!publicCompound && (!!publicCourseIntent || readRoute.local || readRoute.personal ||
+          (onStudyTarget && taskProfile === 'student' && courseworkStudyFollowup(question) !== null))) || (consent && ready)));
   function submitQuestion() {
     // Rejected keyboard/form submits must not resume automatic scrolling.
     if (!canSubmit) return;
+    revisionFocus.current = false;
     followLatest.current = true;
     setShowJump(false);
     setDraft(sendComposerDraft(draft, question));
@@ -213,24 +292,38 @@ export function AssistantThread({
     </label>
   );
   return (
-    <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2">
-      {onTaskProfile && <AssistantRoleContext value={taskProfile} disabled={taskProfileLocked} onChange={onTaskProfile} />}
+    <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2"
+      onFocusCapture={event => {
+        const target = event.target;
+        // Keep this intent if pending disables the editor and the browser blurs it.
+        // A deliberate focus elsewhere in this thread replaces the intent.
+        revisionFocus.current = target instanceof HTMLElement && !!log.current?.contains(target) &&
+          !!target.closest('[data-assistant-plan-revision="true"]');
+      }}
+      onBlurCapture={event => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && !event.currentTarget.contains(next)) revisionFocus.current = false;
+      }}>
+      {onTaskProfile && <AssistantRoleContext value={taskProfile} disabled={taskProfileLocked} onChange={chooseTaskProfile} />}
       {!inline && (
         <>
           <p className={styles.intro}>{taskProfile === 'student'
             ? '直接查課程、時間、教室與未交作業，也可查個人行程。連接並授權後，可請助理查詢 TronClass、下載教材與準備作業。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。'
             : '查詢自己的行程與公開校園資訊，或接續目前的工作。個人時間安排會先預覽，確認後才儲存。'}</p>
           <nav className={styles.services} aria-label="校園服務入口">
-            <Link href={'/map' + schoolQuery}>校園地圖</Link>
-            <Link href={'/bus' + schoolQuery}>公車資訊</Link>
-            <Link href={'/cafeteria' + schoolQuery}>餐廳資訊</Link>
+            <AssistantReplyLink href={'/map' + schoolQuery}>校園地圖</AssistantReplyLink>
+            <AssistantReplyLink href={'/bus' + schoolQuery}>公車資訊</AssistantReplyLink>
+            <AssistantReplyLink href={'/cafeteria' + schoolQuery}>餐廳資訊</AssistantReplyLink>
           </nav>
         </>
       )}
+      <AssistantRoleTasks context={workContext} onContext={chooseWorkContext} schoolId={schoolId}
+        linkedServiceIds={turns.flatMap(turn => turn.reply.roleGuide ? turn.reply.serviceIds ?? [] : [])}
+        compact={inline || turns.length > 0} />
       {!ready ? (
         <p className={styles.notice} role="status">
           {taskProfile === 'student'
-            ? '雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也能使用已授權的 TronClass、從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。'
+            ? '雲端回答暫時無法使用，仍可直接查詢保存的課表、個人行程、匯入成績與已接通的 nuni 作業，也能使用已授權的 TronClass、查校園地點、核對下一堂課教室，從作業清單安排準備時間，或查詢清大、暨大的公開開課資料。'
             : '雲端回答暫時無法使用，仍可核對保存的個人行程，或從下方建議接續目前的工作。'}
           {foodPickupEnabled && taskProfile === 'student' ? '也能把最近訂單的取餐時間排入個人行事曆，確認後才會儲存。' : ''}
         </p>
@@ -246,7 +339,7 @@ export function AssistantThread({
         {!inline && turns.length === 0 && !pending ? (
           <div className={styles.empty}>
             <h2>{taskProfile === 'student' ? '今天想問什麼？' : profile.title}</h2>
-            <p>{taskProfile === 'student' ? '可以問作業截止、下一堂課、校園餐廳或幫你排一段讀書時間。回覆會整理成卡片，需你確認後才會寫入。' : profile.description}</p>
+            <p>{taskProfile === 'student' ? '選一個問題後，可以在下方修改再送出。安排個人行程時，會先提供確認卡。' : profile.description}</p>
             <div className={styles.chips}>
               {suggestions.map((phrase) => (
                 <button key={phrase} type="button" className={styles.chip} onClick={() => applyChip(phrase)}>
@@ -288,8 +381,18 @@ export function AssistantThread({
                     ))}
                   </div>
                 ) : null}
+                <AssistantCampusEvents targets={turn.reply.eventTargets} schoolId={schoolId}
+                  pending={pending || !!onStop} blockedReason={eventBlockedReason}
+                  sourceOnly={turn.reply.campusEventPreview === true}
+                  onSelect={onEventTarget ? target => onEventTarget(turn, target) : undefined} />
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
+                {turn.reply.demo ? <p className={styles.sim}>本人帳號展示資料</p> : null}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
+                <AssistantTaskPlan plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states}
+                  retry={taskRetryForTurn ? taskRetryForTurn(turn) : turn.reply.taskRetry}
+                  pending={pending || !!onStop}
+                  onRetry={onTaskRetry ? stepIds => onTaskRetry(turn, stepIds) : undefined} />
+                <PublicCourseResults results={turn.reply.publicCourseResults} />
                 {turn.reply.steps.length ? (
                   <details className={styles.sources}>
                     <summary>查了哪些資料</summary>
@@ -314,7 +417,12 @@ export function AssistantThread({
               onCancel={(index) => onCancel(turn, index)}
               onReconcile={onReconcile}
             />
-            {renderPlanRevision?.(turn)}
+            {demoScope && turn.reply.demo?.proposal && <AccountDemoAssistantCard
+              key={JSON.stringify([demoScope.context, demoScope.accountId, demoScope.schoolId, turn.reply.demo.proposal.id])}
+              proposal={turn.reply.demo.proposal}
+              scope={demoScope}
+            />}
+            {!turn.reply.campusEventPreview && renderPlanRevision?.(turn)}
           </article>
         ))}
         {pending ? (
@@ -336,7 +444,7 @@ export function AssistantThread({
           <p className={styles.alert} role="alert">
             {error}
             {assistantPermissionSettingsHref(error) && <>
-              {' '}<Link href={assistantPermissionSettingsHref(error)!}>設定 AI 代辦權限</Link>
+              {' '}<AssistantReplyLink href={assistantPermissionSettingsHref(error)!}>設定 AI 代辦權限</AssistantReplyLink>
             </>}
           </p>
         ) : null}
@@ -357,6 +465,7 @@ export function AssistantThread({
             type="button"
             className={styles.jumpLatest}
             onClick={() => {
+              revisionFocus.current = false;
               followLatest.current = true;
               setShowJump(false);
               if (inline) {
@@ -407,7 +516,7 @@ export function AssistantThread({
             value={question}
             maxLength={1000}
             rows={1}
-            placeholder={inline && turns.length ? '接著問…' : taskProfile === 'student' ? '輸入問題' : profile.placeholder}
+            placeholder={inline && turns.length ? '接著問…' : useProfileExamples ? profile.placeholder : workflow.placeholder}
             onChange={(e) => {
               setDraft(editComposerDraft(draft));
               onQuestion(e.target.value);
@@ -454,7 +563,7 @@ export function AssistantThread({
         </p>
         {inline && (ready || foodPickupEnabled) && !turns.length && !question && !pending && (
           <div className={styles.chips} aria-label="試著問">
-            {(taskProfile === 'student' ? ['下一堂課在哪裡？', '這週有哪些作業要交？', ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
+            {(taskProfile === 'student' && workContext === 'student' ? ['下一堂課在哪裡？', '這週有哪些作業要交？', ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
               <button type="button" key={phrase} className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>

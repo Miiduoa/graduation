@@ -10,7 +10,7 @@
 
 .panel h2 {
   margin: 0 0 16px;
-  font-size: 18px;
+  font-size: var(--font-h3-size, 1.0625rem);
   font-weight: 600;
 }
 
@@ -23,7 +23,7 @@
 .state {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--font-body-sm-size, 0.8125rem);
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
@@ -51,8 +51,8 @@
   border: 1px solid transparent;
   border-radius: 7px;
   color: var(--text);
-  font-size: 13px;
-  line-height: 20px;
+  font-size: var(--font-body-sm-size, 0.8125rem);
+  line-height: 1.5;
   font-weight: 500;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -71,12 +71,12 @@
   content: '';
   position: absolute;
   right: 12px;
-  top: 17px;
+  top: 50%;
   width: 5px;
   height: 5px;
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
-  transform: rotate(45deg);
+  transform: translateY(-75%) rotate(45deg);
   transition: transform 160ms ease;
 }
 
@@ -86,8 +86,7 @@
 }
 
 .compact[open] > summary::after {
-  top: 20px;
-  transform: rotate(225deg);
+  transform: translateY(-25%) rotate(225deg);
 }
 
 .compact summary:focus-visible {
@@ -101,15 +100,20 @@
 
 .popover {
   position: absolute;
-  display: flex;
-  flex-direction: column;
+  display: block;
   padding: 0;
   z-index: 210;
   right: 0;
   top: calc(100% + 10px);
   width: min(360px, calc(100vw - 40px));
   max-height: 70dvh;
-  overflow: hidden;
+  /* One scroll area keeps the title, search, choice and close action reachable
+     when text grows or a landscape window leaves little vertical room. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: 12px;
+  scrollbar-width: thin;
   box-shadow: var(--shadow-lg);
   animation: reveal 180ms ease-out both;
 }
@@ -151,11 +155,7 @@
 }
 
 .popover > .content {
-  min-height: 0;
   padding: 20px 24px 24px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
 }
 
 .content :is(input, select) {
@@ -227,7 +227,6 @@
 @media (max-width: 360px) {
   .compact summary {
     padding-left: 5px;
-    font-size: 12px;
   }
 }
 
@@ -247,9 +246,58 @@
   transition: none !important;
 }
 
+:global([data-reduced-motion='true']) .compact *::after {
+  transition: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .compact * {
     animation: none !important;
     transition: none !important;
+  }
+
+  .compact *::after {
+    transition: none !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .popover,
+  .compact[open] > summary:not(:focus-visible) {
+    outline: 1px solid currentColor;
+    outline-offset: -1px;
+  }
+}
+
+@media (forced-colors: active) {
+  .panel,
+  .popover {
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+
+  .description,
+  .state,
+  .compact summary.compactName {
+    color: CanvasText;
+  }
+
+  .popoverHead,
+  .description {
+    border-color: CanvasText;
+  }
+
+  .compact[open] > summary,
+  .popover .closeButton {
+    color: ButtonText;
+    background: ButtonFace;
+    border-color: ButtonText;
+  }
+
+  .compact summary:focus-visible,
+  .popover .closeButton:focus-visible {
+    outline-color: Highlight;
   }
 }

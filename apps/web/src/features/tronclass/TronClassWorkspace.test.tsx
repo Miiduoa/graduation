@@ -297,6 +297,134 @@ describe('TronClass account isolation and course reads', () => {
     expect(screen.queryByText('期中報告')).toBeNull();
   });
 
+  it('cancels login, rereads the binding before retry, and keeps a newer login locked after an old response arrives', async () => {
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    const status = deferred<Response>();
+    let statusCount = 0;
+    let connectCount = 0;
+    fetchMock.mockImplementation((url, init) => {
+      const action = body(init).action;
+      if (action === 'status') return ++statusCount === 1 ? Promise.resolve(json(unconnected)) : status.promise;
+      if (action === 'connect') return ++connectCount === 1 ? first.promise : second.promise;
+      return defaultResponse(url, init);
+    });
+    render(<TronClassWorkspace />);
+    fireEvent.change(await screen.findByLabelText('學校帳號'), { target: { value: 'student-a' } });
+    fireEvent.change(screen.getByLabelText('學校密碼'), { target: { value: 'synthetic-password' } });
+    fireEvent.click(screen.getByRole('button', { name: '連接 TronClass' }));
+    await waitFor(() => expect(calls('connect')).toHaveLength(1));
+    const firstSignal = calls('connect')[0][1]?.signal;
+    expect(firstSignal?.aborted).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '取消連接' }));
+    expect(firstSignal?.aborted).toBe(true);
+    await waitFor(() => expect(calls('status')).toHaveLength(2));
+    expect(screen.queryByLabelText('學校密碼')).toBeNull();
+    expect(calls('connect')).toHaveLength(1);
+    const currentBinding = { ...unconnected, revision: 'c'.repeat(32), account: 'student-a' };
+    await act(async () => status.resolve(json(currentBinding)));
+    fireEvent.change(await screen.findByLabelText('學校密碼'), { target: { value: 'second-password' } });
+    fireEvent.click(screen.getByRole('button', { name: '連接 TronClass' }));
+    await waitFor(() => expect(calls('connect')).toHaveLength(2));
+    expect(body(calls('connect')[1][1]).expectedRevision).toBe(currentBinding.revision);
+    await act(async () => first.resolve(json(connection)));
+    expect(screen.queryByText('已連接')).toBeNull();
+    expect(screen.getByRole('button', { name: '連接中…' }).closest('fieldset')?.disabled).toBe(true);
+    expect(calls('sync')).toHaveLength(0);
+    await act(async () => second.resolve(json(connection)));
+    expect(await screen.findByText('已連接')).toBeTruthy();
+  });
+
+  it('uses the fresh binding status if login committed before cancellation reached the server', async () => {
+    const pending = deferred<Response>();
+    let statusCount = 0;
+    fetchMock.mockImplementation((url, init) => {
+      if (body(init).action === 'status') return Promise.resolve(json(++statusCount === 1 ? unconnected : connection));
+      if (body(init).action === 'connect') return pending.promise;
+      return defaultResponse(url, init);
+    });
+    render(<TronClassWorkspace />);
+    fireEvent.change(await screen.findByLabelText('學校帳號'), { target: { value: 'student-a' } });
+    fireEvent.change(screen.getByLabelText('學校密碼'), { target: { value: 'synthetic-password' } });
+    fireEvent.click(screen.getByRole('button', { name: '連接 TronClass' }));
+    await waitFor(() => expect(calls('connect')).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: '取消連接' }));
+    expect(await screen.findByText('已連接')).toBeTruthy();
+    expect(calls('connect')).toHaveLength(1);
+    await act(async () => pending.resolve(json({ ...connection, userName: '過時的帳號' })));
+    expect(screen.queryByText(/過時的帳號/)).toBeNull();
+  });
+
+  it.each(['equivalent-platform-session', 'irrelevant-firebase-user'] as const)(
+    'keeps an active login when %s changes without changing the active owner or context', async change => {
+      const pending = deferred<Response>();
+      fetchMock.mockImplementation((url, init) => body(init).action === 'status'
+        ? Promise.resolve(json(unconnected)) : body(init).action === 'connect'
+          ? pending.promise : defaultResponse(url, init));
+      const view = render(<TronClassWorkspace />);
+      fireEvent.change(await screen.findByLabelText('學校帳號'), { target: { value: 'student-a' } });
+      fireEvent.change(screen.getByLabelText('學校密碼'), { target: { value: 'synthetic-password' } });
+      fireEvent.click(screen.getByRole('button', { name: '連接 TronClass' }));
+      await waitFor(() => expect(calls('connect')).toHaveLength(1));
+      const signal = calls('connect')[0][1]?.signal;
+      state.platform.session = { platformAccountId: 'account-a', context: 'context-a' };
+      const getIdToken = vi.fn(async () => 'unused-firebase-token');
+      if (change === 'irrelevant-firebase-user') state.firebase.user = { uid: 'other-provider', getIdToken };
+      view.rerender(<TronClassWorkspace />);
+      expect(signal?.aborted).toBe(false);
+      expect(calls('status')).toHaveLength(1);
+      expect(screen.getByRole('button', { name: '連接中…' }).closest('fieldset')?.disabled).toBe(true);
+      await act(async () => pending.resolve(json(connection)));
+      expect(await screen.findByText('已連接')).toBeTruthy();
+      expect(getIdToken).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps the same Firebase owner while using its latest token getter for a subsequent connection', async () => {
+    state.platform.session = null;
+    const firstToken = vi.fn(async () => 'first-synthetic-token');
+    state.firebase.user = { uid: 'student-owner', getIdToken: firstToken };
+    fetchMock.mockImplementation((url, init) => body(init).action === 'status'
+      ? Promise.resolve(json(unconnected)) : defaultResponse(url, init));
+    const view = render(<TronClassWorkspace />);
+    await screen.findByLabelText('學校帳號');
+    const freshToken = vi.fn(async () => 'fresh-synthetic-token');
+    state.firebase.user = { uid: 'student-owner', getIdToken: freshToken };
+    view.rerender(<TronClassWorkspace />);
+    expect(calls('status')).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText('學校帳號'), { target: { value: 'student-a' } });
+    fireEvent.change(screen.getByLabelText('學校密碼'), { target: { value: 'synthetic-password' } });
+    fireEvent.click(screen.getByRole('button', { name: '連接 TronClass' }));
+    await waitFor(() => expect(calls('connect')).toHaveLength(1));
+    expect(new Headers(calls('connect')[0][1]?.headers).get('Authorization')).toBe('Bearer fresh-synthetic-token');
+    expect(firstToken).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('已連接')).toBeTruthy();
+  });
+
+  it.each(['unmount', 'owner', 'context'] as const)('aborts login on %s and never starts school reads from its late response', async change => {
+    const pending = deferred<Response>();
+    fetchMock.mockImplementation((url, init) => body(init).action === 'status'
+      ? Promise.resolve(json(unconnected)) : body(init).action === 'connect'
+        ? pending.promise : defaultResponse(url, init));
+    const view = render(<TronClassWorkspace />);
+    fireEvent.change(await screen.findByLabelText('學校帳號'), { target: { value: 'student-a' } });
+    fireEvent.change(screen.getByLabelText('學校密碼'), { target: { value: 'synthetic-password' } });
+    fireEvent.click(screen.getByRole('button', { name: '連接 TronClass' }));
+    await waitFor(() => expect(calls('connect')).toHaveLength(1));
+    const signal = calls('connect')[0][1]?.signal;
+    if (change === 'unmount') view.unmount();
+    else {
+      state.platform.session = { platformAccountId: change === 'owner' ? 'account-b' : 'account-a', context: 'context-b' };
+      view.rerender(<TronClassWorkspace />);
+      await screen.findByLabelText('學校帳號');
+    }
+    expect(signal?.aborted).toBe(true);
+    await act(async () => pending.resolve(json(connection)));
+    expect(calls('sync')).toHaveLength(0);
+    expect(calls('courses')).toHaveLength(0);
+    expect(screen.queryByText('已連接')).toBeNull();
+  });
+
   it('fetches selected-course announcements and ignores a late response from a previous course', async () => {
     const older = deferred<Response>();
     fetchMock.mockImplementation((url, init) => {

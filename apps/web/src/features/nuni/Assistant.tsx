@@ -1,10 +1,15 @@
 'use client';
 import Link from 'next/link';
+import { AssistantReplyAnchor, AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { answerPublicCourseQuestion } from '@campus/shared/src/publicCourseAssistantClient';
+import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
+import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
+import { isAssistantTaskRetryQuestion, parseAssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
+import { parseCampusMapCommand, type CampusMapCommand } from '@/lib/nuni/assistantV2/campusMapRequest';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
@@ -31,18 +36,23 @@ import { buildPlanRevisionQuestion, getPlanRevisionEvents, hasUnresolvedAssistan
 import type { V2ActionState, V2ActionStates, V2Card, V2Turn } from './assistant/types';
 import { assistantAnswerWithExecution, calendarExpectation, canConfirmAction, priorCalendarActionsVerified, withAssistantRequestDeadline } from './assistant/execution';
 import { assistantPermissionMessage, inAppHref } from './assistant/copy';
-import { parseAssistantCalendarExecutionResult } from '@campus/shared/src/assistantExecution';
+import { parseAssistantCalendarEvent, parseAssistantCalendarExecutionResult } from '@campus/shared/src/assistantExecution';
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal, removeAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
+import { accountDemoAssistantIntent, prepareAccountDemoAssistant } from '@/lib/accountDemoAssistant';
 import { answerAssistantLocally } from '@/lib/assistantLocalActions';
 import { answerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
 import { courseworkStudyFollowup, courseworkStudyTarget, parseAssistantCourseworkTargets, type AssistantCourseworkSelection } from '@/lib/assistantCoursework';
+import { campusEventIdentity, campusEventPreviewIssue, campusEventTargetKey, parseAssistantCampusEventTargets,
+  parseCampusEventCommand, selectCampusEventTarget,
+  type AssistantCampusEventTarget } from '@/lib/assistantCampusEvent';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
 import { canAnswerTronClassQuestion } from '@/lib/tronClassAgentIntent';
 import { createTronClassAgentClient, isTronClassAuthorityError, type TronClassAgentQuestion } from '@/lib/tronClassAgentClient';
 import { TronClassRequestError } from '@/lib/tronClassIntegrationClient';
 import { AssistantTronClassResult } from './assistant/AssistantTronClassResult';
+import type { AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
 import { parseAssistantFoodPickupIntent } from '@campus/shared/src/assistantFoodPickupIntent';
 import { getAssistantRoleProfile, type AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
 type Step = {
@@ -54,7 +64,7 @@ type Step = {
 };
 type InlineDraft = { text: string; setText: Dispatch<SetStateAction<string>> };
 class AssistantPermissionFailure extends Error {}
-export function Conversation({ context, schoolId, accountId, cloudEnabled = true, inlineDraft, onFreeformReady, initialDraft = '', initialTaskProfile = 'student' }: {
+export function Conversation({ context, schoolId, accountId, cloudEnabled = true, inlineDraft, onFreeformReady, initialDraft = '', preferredWorkContext, initialTaskProfile = 'student' }: {
   initialDraft?: string;
   initialTaskProfile?: AssistantRoleProfileId;
   context: string;
@@ -63,6 +73,7 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
   cloudEnabled?: boolean;
   inlineDraft?: InlineDraft;
   onFreeformReady?: (ready: boolean) => void;
+  preferredWorkContext?: AssistantWorkContext;
 }) {
   const [v2, setV2] = useState(false);
   const [ready, setReady] = useState(false);
@@ -166,13 +177,13 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
   if (v2 || capabilityUnavailable) return <>
     {capabilityUnavailable && <p role="status">{error || '雲端助理尚未啟用。'}</p>}
     <V2Conversation context={context} schoolId={schoolId} initialDraft={initialDraft} accountId={accountId} inlineDraft={inlineDraft} ready={ready && providerReady} fallback={fallback}
-      initialTaskProfile={initialTaskProfile}
+      preferredWorkContext={preferredWorkContext} initialTaskProfile={initialTaskProfile}
       foodPickupEnabled={planning && !!accountId && !!context} />
   </>;
   return (
     <section aria-label="公開校園助理">
       <V2Conversation context={context} schoolId={schoolId} initialDraft={initialDraft} accountId={accountId}
-        initialTaskProfile={initialTaskProfile}
+        preferredWorkContext={preferredWorkContext} initialTaskProfile={initialTaskProfile}
         inlineDraft={inlineDraft} ready={false} fallback={false} />
       <details>
       <summary>公開校園資訊查詢</summary>
@@ -181,11 +192,11 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
       {ready && (
         <>
           <nav aria-label="公開服務入口">
-            <Link href={'/map?schoolId=' + encodeURIComponent(schoolId)}>直接開啟校園地圖</Link> ·{' '}
-            <Link href={'/bus?schoolId=' + encodeURIComponent(schoolId)}>直接開啟公車資訊</Link> ·{' '}
-            <Link href={'/cafeteria?schoolId=' + encodeURIComponent(schoolId)}>
+            <AssistantReplyLink href={'/map?schoolId=' + encodeURIComponent(schoolId)}>直接開啟校園地圖</AssistantReplyLink> ·{' '}
+            <AssistantReplyLink href={'/bus?schoolId=' + encodeURIComponent(schoolId)}>直接開啟公車資訊</AssistantReplyLink> ·{' '}
+            <AssistantReplyLink href={'/cafeteria?schoolId=' + encodeURIComponent(schoolId)}>
               直接開啟餐廳資訊
-            </Link>
+            </AssistantReplyLink>
           </nav>
           {!providerReady && <p role="status">模型目前無法使用，可直接開啟公開服務入口。</p>}
           <p>請選擇公開服務。確認摘要後才會將公開服務資料傳送給模型。</p>
@@ -236,11 +247,11 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
               )}
             </div>
           )}
-          {href && <Link href={href}>開啟服務頁面</Link>}
+          {href && <AssistantReplyLink href={href}>開啟服務頁面</AssistantReplyLink>}
           {source && (
-            <a href={source} target="_blank" rel="noopener noreferrer">
+            <AssistantReplyAnchor href={source} target="_blank" rel="noopener noreferrer">
               學校官方公開導覽
-            </a>
+            </AssistantReplyAnchor>
           )}
           {error && <p role="alert">{error}</p>}
           {pending && <p role="status">查詢中…</p>}
@@ -252,10 +263,22 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
 }
 const ASSISTANT_PENDING_STATUS = {
   ask: '正在整理回覆',
+  retry: '正在重查未完成的資料',
+  event: '正在重新核對活動並準備行程預覽',
+  map: '正在核對教室與校園地點',
   confirm: '正在確認操作結果',
   reconcile: '正在核對執行結果',
   cancel: '正在確認撤銷結果',
 } as const;
+
+function eventPreparationBlockReason(turns: V2Turn[], states: V2ActionStates, journalReady: boolean): string {
+  if (!journalReady) return '正在核對先前操作，完成後才能準備活動行程。';
+  if (hasUnresolvedAssistantAction(states) || turns.some(turn => turn.reply.cards.some(card => {
+    const state = states[card.mutationId];
+    return !state || !['verified', 'cancelled', 'superseded', 'handoff'].includes(state.status);
+  }))) return '請先確認或取消原本的待確認項目；尚未核對完成的操作請先重新核對。原確認卡會保留，不會被活動預覽取代。';
+  return '';
+}
 
 function V2Conversation({
   context,
@@ -265,6 +288,7 @@ function V2Conversation({
   fallback,
   inlineDraft,
   accountId,
+  preferredWorkContext,
   foodPickupEnabled = false,
   initialTaskProfile = 'student',
 }: {
@@ -275,6 +299,7 @@ function V2Conversation({
   fallback: boolean;
   inlineDraft?: InlineDraft;
   accountId: string;
+  preferredWorkContext?: AssistantWorkContext;
   foodPickupEnabled?: boolean;
   initialTaskProfile?: AssistantRoleProfileId;
 }) {
@@ -300,6 +325,7 @@ function V2Conversation({
   const [error, setError] = useState('');
   const [recoverableQuestion, setRecoverableQuestion] = useState('');
   const routeToken = useRef<string | undefined>(undefined);
+  const retriedTaskSteps = useRef(new WeakMap<V2Turn, Set<string>>());
   const revisionConsent = useRef(false);
   const revisionTurns = useRef(new Set<V2Turn>());
   const preciseRevisionTurns = useRef(new Set<V2Turn>());
@@ -374,6 +400,7 @@ function V2Conversation({
   const timeDrafts = usePrecisePlanDraft({ accountId, schoolId, context }, active);
   const shiftDrafts = useShiftPlanDraft({ accountId, schoolId, context }, active);
   function sourceForTurn(turn: V2Turn) {
+    if (turn.reply.campusEventPreview) return null;
     if (turn.reply.cards.some(card => card.schoolId !== schoolId)) return null;
     try { return revisionDraftSource(turn.reply.cards); } catch { return null; }
   }
@@ -389,7 +416,7 @@ function V2Conversation({
     return shiftDrafts.clearSource(source.key, true);
   }
   function canEditPlanDraft(turn: V2Turn) {
-    return active() && !busy.current && journalReadyRef.current &&
+    return !turn.reply.campusEventPreview && active() && !busy.current && journalReadyRef.current &&
       turns.includes(turn) && !hasUnresolvedAssistantAction(actionStates.current) &&
       isUnattemptedCalendarPlan(turn, actionStates.current) &&
       !revisionTurns.current.has(turn) && !preciseRevisionTurns.current.has(turn) && !selectionRevisionTurns.current.has(turn) && !shiftRevisionTurns.current.has(turn);
@@ -411,7 +438,7 @@ function V2Conversation({
   async function send(action: string, input: object, askSignal?: AbortSignal) {
     const scopeSignal = controller.current!.signal;
     const signal = askSignal ?? scopeSignal;
-    return withAssistantRequestDeadline(signal, action === 'ask' ? 65000 : 15000, async (requestSignal) => {
+    return withAssistantRequestDeadline(signal, action === 'ask' || action === 'retry' ? 65000 : action === 'event-preview' ? 25000 : action === 'map-read' ? 20000 : 15000, async (requestSignal) => {
     const response = await fetch('/api/nuni/assistant/' + action, {
       method: 'POST',
       credentials: 'same-origin',
@@ -461,6 +488,212 @@ function V2Conversation({
     setTurns(previous => previous.map(item => item.tronClass
       ? { ...item, tronClass: { ...item.tronClass, inactive: true } } : item));
   }
+  function taskRetryForTurn(turn: V2Turn) {
+    const retry = parseAssistantTaskRetry(turn.reply.taskRetry, turn.reply.taskPlan);
+    if (!retry) return null;
+    const retired = retriedTaskSteps.current.get(turn);
+    const stepIds = retry.stepIds.filter(stepId => !retired?.has(stepId));
+    return stepIds.length ? { ...retry, stepIds } : null;
+  }
+  async function retryTasks(turn: V2Turn, stepIds: string[], prompt?: string) {
+    if (!active() || busy.current || !journalReadyRef.current || !turns.includes(turn)) return;
+    const retry = taskRetryForTurn(turn);
+    const now = Date.now();
+    if (!retry || !Number.isFinite(now) || retry.expiresAt <= now || !stepIds.length ||
+        new Set(stepIds).size !== stepIds.length || stepIds.some(stepId => !retry.stepIds.includes(stepId))) {
+      setError('這份查詢已無法接續，請重新描述要查的資料。');
+      return;
+    }
+    const sourceConversation = turn.conversationId || conversation.current;
+    const current = prompt || (stepIds.length === 1
+      ? '重新查詢' + (parseAssistantTaskPlan(turn.reply.taskPlan)?.steps.find(step => step.id === stepIds[0])?.label || '未完成項目')
+      : '重查未完成項目');
+    busy.current = true;
+    const pendingAsk = new AbortController();
+    askRequest.current = pendingAsk;
+    const scopeSignal = controller.current!.signal;
+    const abortForScope = () => pendingAsk.abort();
+    if (scopeSignal.aborted) pendingAsk.abort();
+    else scopeSignal.addEventListener('abort', abortForScope, { once: true });
+    setAsking(true);
+    setPendingAction('retry');
+    setPending(true);
+    setError('');
+    if (prompt) setQuestion('');
+    try {
+      const reply = await send('retry', { token: retry.token, stepIds,
+        conversationId: sourceConversation }, pendingAsk.signal);
+      if (pendingAsk.signal.aborted || scopeSignal.aborted) return;
+      const taskPlan = parseAssistantTaskPlan(reply?.taskPlan);
+      if (reply?.version !== 2 || typeof reply.answer !== 'string' || !Array.isArray(reply.steps) ||
+          !Array.isArray(reply.cards) || reply.cards.length || !taskPlan ||
+          stepIds.some(stepId => !taskPlan.steps.some(step => step.id === stepId)) ||
+          (reply.taskRetry !== undefined && !parseAssistantTaskRetry(reply.taskRetry, taskPlan)))
+        throw new Error('重查結果尚未通過核對，請稍後再試。');
+      // This response is read-only. It cannot replace, retire or reissue any
+      // signed calendar/food card from the original turn.
+      const retired = new Set(retriedTaskSteps.current.get(turn));
+      for (const step of taskPlan.steps)
+        if (retry.stepIds.includes(step.id)) retired.add(step.id);
+      retriedTaskSteps.current.set(turn, retired);
+      setTurns(previous => [...previous, { question: current, conversationId: sourceConversation,
+        reply: { ...reply, taskPlan, cards: [], dataRead: true,
+          eventTargets: parseAssistantCampusEventTargets(reply.eventTargets, schoolId),
+          courseworkTargets: parseAssistantCourseworkTargets(reply.courseworkTargets) } }]);
+      setRecoverableQuestion(previous => previous === current ? '' : previous);
+    } catch (e) {
+      if (!scopeSignal.aborted)
+        setError(pendingAsk.signal.aborted ? '已停止這次重查，原本的結果與確認內容仍保留。'
+          : e instanceof Error ? e.message : '重查未完成，請稍後再試。');
+    } finally {
+      scopeSignal.removeEventListener('abort', abortForScope);
+      if (askRequest.current === pendingAsk) askRequest.current = null;
+      busy.current = false;
+      if (!scopeSignal.aborted) {
+        setAsking(false);
+        setPending(false);
+      }
+    }
+  }
+  async function previewCampusEvent(turn: V2Turn, selected: AssistantCampusEventTarget, prompt?: string) {
+    if (!active() || busy.current || !turns.includes(turn) || turn.reply.campusEventPreview) return;
+    const target = parseAssistantCampusEventTargets(turn.reply.eventTargets, schoolId)
+      .find(item => campusEventTargetKey(item) === campusEventTargetKey(selected));
+    if (!target) { setError('這筆活動來源尚未通過核對，請重新查詢活動。'); return; }
+    await requestCampusEventPreview({ target }, prompt);
+  }
+  async function requestCampusMap(task: CampusMapCommand, current: string) {
+    if (!active() || busy.current || !journalReadyRef.current) return;
+    busy.current = true;
+    const pendingAsk = new AbortController();
+    askRequest.current = pendingAsk;
+    const scopeSignal = controller.current!.signal;
+    const abortForScope = () => pendingAsk.abort();
+    if (scopeSignal.aborted) pendingAsk.abort();
+    else scopeSignal.addEventListener('abort', abortForScope, { once: true });
+    setAsking(true);
+    setPendingAction('map');
+    setPending(true);
+    setError('');
+    setQuestion('');
+    const sourceConversation = crypto.randomUUID();
+    try {
+      // This independent read does not bootstrap or replace the chat route and
+      // cannot retire any pending or unresolved calendar/food confirmation.
+      const reply = await send('map-read', { task, conversationId: sourceConversation }, pendingAsk.signal);
+      if (pendingAsk.signal.aborted || scopeSignal.aborted) return;
+      const taskPlan = parseAssistantTaskPlan(reply?.taskPlan);
+      const taskRetry = reply?.taskRetry === undefined ? undefined : parseAssistantTaskRetry(reply.taskRetry, taskPlan);
+      if (reply?.version !== 2 || reply.modelCalls !== 0 || reply.dataRead !== true ||
+          typeof reply.answer !== 'string' || reply.answer.length > 18000 ||
+          !Array.isArray(reply.cards) || reply.cards.length || !taskPlan || taskPlan.steps.length > 2 ||
+          taskPlan.steps.some(step => !['map', 'timetable'].includes(step.serviceId) || step.cardIds?.length ||
+            !['completed', 'partial', 'blocked'].includes(step.status)) ||
+          !Array.isArray(reply.steps) || reply.steps.length > 2 || reply.steps.some((step: unknown) =>
+            !step || typeof step !== 'object' || !['get_schedule', 'get_campus_map'].includes((step as Record<string, unknown>).name as string) ||
+            !['ok', 'cached', 'error'].includes((step as Record<string, unknown>).status as string) ||
+            typeof (step as Record<string, unknown>).summary !== 'string') ||
+          (reply.taskRetry !== undefined && !taskRetry))
+        throw new Error('地點查詢結果尚未通過核對，請重新查詢。');
+      setTurns(previous => [...previous, { question: current, conversationId: sourceConversation,
+        reply: { answer: reply.answer, steps: reply.steps, cards: [], dataRead: true, taskPlan,
+          ...(taskRetry ? { taskRetry } : {}), ...(reply.simulation === true ? { simulation: true } : {}) } }]);
+      setRecoverableQuestion(previous => previous === current ? '' : previous);
+    } catch (cause) {
+      if (!scopeSignal.aborted) {
+        setError(pendingAsk.signal.aborted ? '已停止這次地點查詢，原本的結果與確認內容仍保留。'
+          : cause instanceof Error ? cause.message : '地點查詢未完成，請稍後再試。');
+        setRecoverableQuestion(current);
+      }
+    } finally {
+      scopeSignal.removeEventListener('abort', abortForScope);
+      if (askRequest.current === pendingAsk) askRequest.current = null;
+      busy.current = false;
+      if (!scopeSignal.aborted) { setAsking(false); setPending(false); }
+    }
+  }
+  async function requestCampusEventPreview(input: { target: AssistantCampusEventTarget } | { discovery: { index: number } }, prompt?: string) {
+    if (!active() || busy.current) return;
+    const target = 'target' in input ? input.target : undefined;
+    const problem = eventPreparationBlockReason(turns, actionStates.current, journalReadyRef.current) ||
+      (target ? campusEventPreviewIssue(target, Date.now()) : null);
+    if (problem) { setError(problem); return; }
+    const current = prompt || (target ? `將「${target.title}」加入個人行事曆` : '查近期活動並準備個人行程');
+    const sourceInput = 'discovery' in input ? { discovery: input.discovery } : { event: campusEventIdentity(input.target) };
+    busy.current = true;
+    const pendingAsk = new AbortController();
+    askRequest.current = pendingAsk;
+    const scopeSignal = controller.current!.signal;
+    const abortForScope = () => pendingAsk.abort();
+    if (scopeSignal.aborted) pendingAsk.abort();
+    else scopeSignal.addEventListener('abort', abortForScope, { once: true });
+    setAsking(true);
+    setPendingAction('event');
+    setPending(true);
+    setError('');
+    if (prompt) setQuestion('');
+    try {
+      // Event previews have an independent issuance route. Never replace the
+      // ordinary conversation or invalidate one of its existing confirmations.
+      const bootstrap = await send('event-preview', { conversationId: crypto.randomUUID(), ...sourceInput }, pendingAsk.signal);
+      if (pendingAsk.signal.aborted || scopeSignal.aborted) return;
+      if (bootstrap?.bootstrap !== true || typeof bootstrap.conversationId !== 'string' ||
+        !/^[A-Za-z0-9_-]{1,100}$/.test(bootstrap.conversationId) || bootstrap.conversationId === conversation.current ||
+        typeof bootstrap.routeToken !== 'string' || !bootstrap.routeToken || bootstrap.routeToken.length > 2048)
+        throw new Error('活動預覽尚未取得有效的確認路徑，請重新查詢後再試。');
+      const eventConversation = bootstrap.conversationId;
+      const reply = await send('event-preview', { conversationId: eventConversation,
+        routeToken: bootstrap.routeToken, ...sourceInput }, pendingAsk.signal);
+      if (pendingAsk.signal.aborted || scopeSignal.aborted) return;
+      const freshTargets = parseAssistantCampusEventTargets(reply?.eventTargets, schoolId);
+      const selectionRequired = 'discovery' in input && reply?.campusEventPreview === false;
+      if (reply?.version !== 2 || (!selectionRequired && reply.campusEventPreview !== true) || typeof reply.answer !== 'string' ||
+        !Array.isArray(reply.steps) || reply.steps.length > 16 || reply.steps.some((step: unknown) =>
+          !step || typeof step !== 'object' || !['name', 'status', 'summary'].every(key => typeof (step as Record<string, unknown>)[key] === 'string')) ||
+        !Array.isArray(reply.cards) || reply.cards.length > (selectionRequired ? 0 : 1) ||
+        freshTargets.length > (selectionRequired ? 5 : 1) ||
+        (target && freshTargets.some(item => campusEventTargetKey(item) !== campusEventTargetKey(target))) ||
+        (reply.eventTargets !== undefined && (!Array.isArray(reply.eventTargets) || reply.eventTargets.length !== freshTargets.length)))
+        throw new Error('活動預覽尚未通過核對，原本的確認內容仍保留。');
+      const cards: V2Card[] = reply.cards.map((raw: V2Card) => {
+        if (!raw || raw.tool !== 'propose_personal_event' || raw.schoolId !== schoolId ||
+          typeof raw.token !== 'string' || !raw.token || raw.token.length > 4096 ||
+          typeof raw.mutationId !== 'string' || !/^av2_[a-f0-9]{32}$/.test(raw.mutationId) ||
+          turns.some(previous => previous.reply.cards.some(card => card.mutationId === raw.mutationId)) ||
+          typeof raw.destination !== 'string' || !raw.destination || raw.destination.length > 300 || freshTargets.length !== 1)
+          throw new Error('活動確認卡尚未通過核對，請重新查詢後再試。');
+        const args = parseAssistantCalendarEvent(raw.args), fresh = freshTargets[0];
+        if (campusEventPreviewIssue(fresh, Date.now()))
+          throw new Error('活動確認內容尚無法由目前來源完整核對，請重新查詢後再試。');
+        const start = new Date(Date.parse(fresh.startsAt) + 28_800_000).toISOString();
+        const end = new Date(Date.parse(fresh.endsAt ?? '') + 28_800_000).toISOString();
+        if (args.allDay || args.title !== fresh.title || args.location !== undefined ||
+          args.date !== start.slice(0, 10) || args.startTime !== start.slice(11, 16) || args.endTime !== end.slice(11, 16) ||
+          (args.endDate || args.date) !== end.slice(0, 10))
+          throw new Error('活動確認內容與重新核對的來源不一致，尚未建立行程。');
+        return { tool: raw.tool, args: { ...args }, token: raw.token, mutationId: raw.mutationId,
+          schoolId, destination: raw.destination, conversationId: eventConversation };
+      });
+      setTurns(previous => [...previous, { question: current,
+        ...('discovery' in input ? { campusEventDiscovery: true as const } : {}),
+        conversationId: eventConversation, reply: { answer: reply.answer, steps: reply.steps, cards,
+          campusEventPreview: !selectionRequired, dataRead: true, eventTargets: freshTargets,
+          ...(reply.simulation === true ? { simulation: true } : {}) } }]);
+      setRecoverableQuestion(previous => previous === current ? '' : previous);
+    } catch (e) {
+      if (!scopeSignal.aborted) {
+        setError(pendingAsk.signal.aborted
+          ? '已停止這次活動預覽，原本的結果與確認內容仍保留。'
+          : e instanceof Error ? e.message : '活動預覽未完成，請稍後再試。');
+        if (prompt) setRecoverableQuestion(current);
+      }
+    } finally {
+      scopeSignal.removeEventListener('abort', abortForScope);
+      if (askRequest.current === pendingAsk) askRequest.current = null;
+      busy.current = false;
+      if (!scopeSignal.aborted) { setAsking(false); setPending(false); }
+    }
+  }
   async function ask(selection?: AssistantCourseworkSelection, tronClassSelection?: TronClassAgentQuestion) {
     const current = tronClassSelection?.question ?? (selection
       ? `幫「${selection.target.title}」${selection.date ? '在 ' + selection.date + ' ' : ''}找 30 分鐘準備時間`
@@ -468,8 +701,89 @@ function V2Conversation({
     if (!current || busy.current || ((selection || tronClassSelection) && taskProfile !== 'student')) return;
     const tronClass = taskProfile === 'student' && !selection && (!!tronClassSelection || canAnswerTronClassQuestion(current));
     const tronClassEpoch = tronClassAuthorityEpoch.current;
-    const publicCourseIntent = !tronClass && !selection && resolvePublicCourseAssistantIntent(current, schoolId);
-    const followup = taskProfile === 'student' && !tronClass && !publicCourseIntent && !selection ? courseworkStudyFollowup(current) : null;
+    if (!tronClass && !selection && accountDemoAssistantIntent(current)) {
+      busy.current = true;
+      setPending(true);
+      setPendingAction('ask');
+      setError('');
+      setQuestion('');
+      try {
+        const demo = await prepareAccountDemoAssistant(current, { context, accountId, schoolId }, undefined, active);
+        if (!active() || !demo) return;
+        setTurns((previous) => [...previous, { question: current, taskProfile,
+          reply: { answer: demo.answer, steps: [], cards: [], demo } }]);
+        setRecoverableQuestion((previous) => previous === current ? '' : previous);
+      } catch (failure) {
+        if (active()) {
+          setError(failure instanceof Error && !/^[A-Z_]+$/.test(failure.message)
+            ? failure.message : '展示資料目前讀不到，請稍後再試。');
+          setRecoverableQuestion(current);
+        }
+      } finally {
+        busy.current = false;
+        if (active()) setPending(false);
+      }
+      return;
+    }
+    const mapCommand = !tronClass && !selection ? parseCampusMapCommand(current) : null;
+    if (mapCommand && (taskProfile === 'student' || mapCommand.kind === 'place')) {
+      await requestCampusMap(mapCommand, current);
+      return;
+    }
+    const eventCommand = !tronClass && !selection ? parseCampusEventCommand(current) : null;
+    if (eventCommand) {
+      if (eventCommand.kind === 'discover') {
+        await requestCampusEventPreview({ discovery: { index: eventCommand.index } }, current);
+        return;
+      }
+      const problem = eventPreparationBlockReason(turns, actionStates.current, journalReadyRef.current);
+      if (problem) { setError(problem); return; }
+      // An unqualified "second one" belongs to the latest displayed context.
+      // Explicit activity references can find the last activity list, but an
+      // empty/invalid newer list never falls back to a previous successful one.
+      // A fresh discovery preview also ends the previous query context: its
+      // selected source is not a full list and cannot reveal an older list.
+      const eligible: V2Turn[] = [];
+      for (const turn of [...turns].reverse()) {
+        if (turn.reply.campusEventPreview) {
+          if (turn.campusEventDiscovery) break;
+          continue;
+        }
+        eligible.push(turn);
+      }
+      const source = eventCommand.explicitActivity
+        ? eligible.find(turn => Object.hasOwn(turn.reply, 'eventTargets'))
+        : eligible[0] && Object.hasOwn(eligible[0].reply, 'eventTargets') ? eligible[0] : undefined;
+      const targets = parseAssistantCampusEventTargets(source?.reply.eventTargets, schoolId);
+      const choice = selectCampusEventTarget(targets, eventCommand.selection);
+      if (source && 'target' in choice) {
+        await previewCampusEvent(source, choice.target, current);
+        return;
+      }
+      setTurns(previous => [...previous, { question: current, reply: {
+        answer: 'message' in choice ? choice.message : '請先選擇要加入的活動。', steps: [], cards: [],
+        dataRead: true, eventTargets: targets,
+      } }]);
+      setQuestion('');
+      setError('');
+      setRecoverableQuestion(previous => previous === current ? '' : previous);
+      return;
+    }
+    if (!tronClass && !selection && isAssistantTaskRetryQuestion(current)) {
+      const source = [...turns].reverse().find(turn => {
+        const retry = taskRetryForTurn(turn);
+        return retry && retry.expiresAt > Date.now();
+      });
+      if (!source) {
+        setError('目前沒有可接續的未完成資料查詢，請重新描述要查的項目。');
+        return;
+      }
+      await retryTasks(source, taskRetryForTurn(source)!.stepIds, current);
+      return;
+    }
+    const publicCompound = !tronClass && !selection && publicCourseCompoundRequest(current, schoolId);
+    const publicCourseIntent = !tronClass && !publicCompound && !selection && resolvePublicCourseAssistantIntent(current, schoolId);
+    const followup = taskProfile === 'student' && !tronClass && !publicCompound && !publicCourseIntent && !selection ? courseworkStudyFollowup(current) : null;
     const targets = parseAssistantCourseworkTargets(turns.at(-1)?.reply.courseworkTargets);
     const studyDate = followup?.date ?? turns.at(-1)?.reply.courseworkDate;
     let studySelection = selection;
@@ -490,7 +804,7 @@ function V2Conversation({
     }
     // Only the shared, complete pickup request can use the model-free server
     // planner. Its account/session still comes from the authenticated route.
-    const readRoute = !tronClass && !studySelection ? assistantQuestionReadRoute(taskProfile, current) : null;
+    const readRoute = !tronClass && !publicCompound && !studySelection ? assistantQuestionReadRoute(taskProfile, current) : null;
     const roleGuide = readRoute?.roleGuide;
     if (roleGuide) {
       setTurns(previous => [...previous, { question: current, taskProfile,
@@ -502,7 +816,7 @@ function V2Conversation({
     }
     const foodPickup = !tronClass && !studySelection && taskProfile === 'student' && parseAssistantFoodPickupIntent(current) !== null;
     if (foodPickup && !foodPickupEnabled) return;
-    const local = !foodPickup && readRoute?.local && answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: readRoute.preferCampusReads });
+    const local = !publicCompound && !studySelection && !foodPickup && readRoute?.local && answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: readRoute.preferCampusReads });
     if (local && !publicCourseIntent) {
       setTurns((previous) => [...previous, { question: current,
         reply: { answer: local.content, steps: [], cards: [], local } }]);
@@ -510,7 +824,7 @@ function V2Conversation({
       setError('');
       return;
     }
-    const personalRead = !foodPickup && readRoute?.personal;
+    const personalRead = !publicCompound && !studySelection && !foodPickup && readRoute?.personal;
     if ((!consent || !ready) && !tronClass && !publicCourseIntent && !personalRead && !studySelection && !foodPickup) return;
     busy.current = true;
     const pendingAsk = new AbortController();
@@ -584,7 +898,8 @@ function V2Conversation({
       }
       if ((!ready || !consent) && !studySelection && !foodPickup) return;
       const history = studySelection || foodPickup ? [] : turns.filter((turn) => (turn.taskProfile ?? 'student') === taskProfile &&
-        !turn.tronClass && !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead &&
+        !turn.tronClass && !turn.publicCourse && !turn.reply.local && !turn.reply.demo && !turn.reply.dataRead && turn.reply.publicCourseResults === undefined &&
+        turn.reply.eventTargets === undefined && !turn.reply.campusEventPreview &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: assistantAnswerWithExecution(t, actionStates.current) },
@@ -598,7 +913,10 @@ function V2Conversation({
         reply = await send('ask', { question: current, history, consent, taskProfile, routeToken: routeToken.current,
           ...(studyTarget ? { studyTarget } : {}) }, pendingAsk.signal);
       }
-      reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
+      reply = { ...reply, demo: undefined, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
+      if (publicCompound || reply.publicCourseResults !== undefined || reply.eventTargets !== undefined ||
+        reply.campusEventPreview || parseAssistantTaskPlan(reply.taskPlan)) reply.dataRead = true;
+      if (reply.eventTargets !== undefined) reply.eventTargets = parseAssistantCampusEventTargets(reply.eventTargets, schoolId);
       // The last selected source stays an untrusted hint for a fresh read, never a model-history fact.
       reply.courseworkTargets = parseAssistantCourseworkTargets(
         reply.courseworkTargets ?? (studySelection ? [studySelection.target] : undefined));
@@ -609,11 +927,11 @@ function V2Conversation({
       if (foodPickup) reply.dataRead = true;
       if (reply.cards.length) {
         for (const card of turns.flatMap((turn) => turn.reply.cards)) {
-          if (canConfirmAction(actionStates.current[card.mutationId]))
+          if ((card.conversationId || conversation.current) === conversation.current && canConfirmAction(actionStates.current[card.mutationId]))
             setAction(card, { status: 'superseded' });
         }
       }
-      setTurns((t) => [...t, { question: current, reply, taskProfile }]);
+      setTurns((t) => [...t, { question: current, reply, taskProfile, conversationId: conversation.current }]);
       setRecoverableQuestion((previous) => previous === current ? '' : previous);
     } catch (e) {
       if (tronClass && tronClassEpoch !== tronClassAuthorityEpoch.current) return;
@@ -751,6 +1069,7 @@ function V2Conversation({
     }
   }
   async function revisePlan(turn: V2Turn, instruction: string, protectedIndices: readonly number[] = []): Promise<{ ok: boolean; message: string }> {
+    if (turn.reply.campusEventPreview) return { ok: false, message: '這是活動來源行程，請重新查詢來源後再準備。' };
     if (busy.current || !active() || !ready || !revisionConsent.current)
       return { ok: false, message: '請先等目前操作完成，並同意模型處理後再重新預覽。' };
     const continuing = revisionTurns.current.has(turn) && turn.reply.cards.every(card =>
@@ -822,9 +1141,9 @@ function V2Conversation({
         }
       }
       const after = getPlanRevisionEvents({ question: current, reply });
-      reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
+      reply = { ...reply, demo: undefined, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
       for (const card of turns.flatMap(value => value.reply.cards)) {
-        if (canConfirmAction(actionStates.current[card.mutationId]))
+        if ((card.conversationId || conversation.current) === conversation.current && canConfirmAction(actionStates.current[card.mutationId]))
           setAction(card, { status: 'superseded' });
       }
       const revisedTurn = { question: '修改原先安排：' + instruction.trim(), reply };
@@ -863,6 +1182,7 @@ function V2Conversation({
     | { kind: 'selection'; keepMutationIds: string[] }
     | { kind: 'shift'; change: PlanShiftChange },
   ): Promise<{ ok: boolean; message: string }> {
+    if (turn.reply.campusEventPreview) return { ok: false, message: '這是活動來源行程，請重新查詢來源後再準備。' };
     const selecting = request.kind === 'selection', shifting = request.kind === 'shift';
     const attempts = selecting ? selectionRevisionTurns.current : shifting ? shiftRevisionTurns.current : preciseRevisionTurns.current;
     if (busy.current || !active() || !journalReadyRef.current)
@@ -951,9 +1271,10 @@ function V2Conversation({
           ? '新預覽與指定保留項目的內容或順序不一致，沒有提供可確認的安排。'
           : '新預覽與指定的時間或其他原項目不一致，沒有提供可確認的安排。' };
       }
-      reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
+      reply = { ...reply, demo: undefined, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
       for (const card of turns.flatMap(value => value.reply.cards)) {
-        if (canConfirmAction(actionStates.current[card.mutationId])) setAction(card, { status: 'superseded' });
+        if ((card.conversationId || conversation.current) === conversation.current && canConfirmAction(actionStates.current[card.mutationId]))
+          setAction(card, { status: 'superseded' });
       }
       const revisedTurn = { question: (selecting ? '選擇要建立的行程：' : shifting ? '整組調整時間：' : '精確調整時間：') + edit.label, reply };
       if (selecting || shifting || individualConfirmationTurns.current.has(turn)) individualConfirmationTurns.current.add(revisedTurn);
@@ -1064,6 +1385,7 @@ function V2Conversation({
       blocked={!journalReady || pending || hasUnresolvedAssistantAction(states)}
       onRestore={shiftDrafts.restore} onDiscard={shiftDrafts.discard} />
     <AssistantThread
+      preferredWorkContext={preferredWorkContext}
       inline={!!inlineDraft}
       schoolId={schoolId}
       taskProfile={taskProfile}
@@ -1096,6 +1418,10 @@ function V2Conversation({
       onRecoverQuestion={recoverQuestion}
       onAsk={() => void ask()}
       onStudyTarget={(target, date) => void ask({ target, date })}
+      onEventTarget={(turn, target) => void previewCampusEvent(turn, target)}
+      eventBlockedReason={eventPreparationBlockReason(turns, states, journalReady)}
+      onTaskRetry={(turn, stepIds) => void retryTasks(turn, stepIds)}
+      taskRetryForTurn={taskRetryForTurn}
       onStop={inlineDraft && asking ? () => askRequest.current?.abort() : undefined}
       onConfirm={(cards) => void execute(cards)}
       allowBatchConfirmation={turn => !individualConfirmationTurns.current.has(turn)}
@@ -1106,6 +1432,7 @@ function V2Conversation({
         client={tronClassAgent} owner={localScope.owner} pending={pending}
         onAuthorityChanged={() => invalidateTronClassAuthority()}
         onAsk={input => void ask(undefined, input)} /> : null}
+      demoScope={{ context, accountId, schoolId }}
       renderPlanComparison={turn => {
         const comparison = planComparisons.current.get(turn);
         return comparison ? comparison.shiftedIndices !== undefined
@@ -1117,6 +1444,7 @@ function V2Conversation({
           : <AssistantPlanComparison {...comparison} /> : null;
       }}
       renderPlanRevision={turn => {
+        if (turn.reply.campusEventPreview) return null;
         if (turn.reply.cards.some(card => card.sourceBound === 'food-pickup')) return null;
         const source = sourceForTurn(turn);
         return <>
@@ -1234,7 +1562,7 @@ function AssistantRoute({ cloudEnabled }: { cloudEnabled: boolean }) {
 }
 export function Assistant({ children, cloudEnabled = true }: { children?: ReactNode; cloudEnabled?: boolean }) {
   return (
-    <SiteShell title="助理" subtitle="查詢課表、作業、餐點與校園服務。">
+    <SiteShell title="助理" subtitle="查詢課務、門市與校園資訊，接續安排個人行程。">
       {children}
       <Suspense fallback={<p>載入中…</p>}>
         <AssistantRoute cloudEnabled={cloudEnabled} />

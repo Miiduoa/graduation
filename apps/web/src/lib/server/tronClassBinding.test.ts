@@ -5,7 +5,7 @@ import {
   createTronClassBindingService, TRONCLASS_BINDING_TTL_MS, TRONCLASS_LOGIN_WINDOW_MS,
   type TronClassBindingStore,
 } from './tronClassBinding';
-import { PuCampusError, type TronClassSession } from './puCampusClient';
+import { PuCampusError, type PuCampusGateway, type TronClassSession } from './puCampusClient';
 
 const OWNER = 'platform:pa_12345678-1234-1234-1234-123456789abc';
 const SECRET = 'binding-tests-only-secret-at-least-thirty-two';
@@ -46,7 +46,7 @@ function input(expectedRevision: string | null = null, account = '410123456') {
 function setup() {
   const data = store();
   const clock = { value: NOW };
-  const login = vi.fn(async () => loginResult());
+  const login = vi.fn<PuCampusGateway['loginTronClass']>(async () => loginResult());
   const service = createTronClassBindingService({ db: data.db, login, now: () => clock.value, encryptionSecret: SECRET });
   return { ...data, service, login, clock };
 }
@@ -154,6 +154,107 @@ describe('independent TronClass binding', () => {
     await service.connect(OWNER, input());
     await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 409 });
     expect(login).toHaveBeenCalledOnce();
+  });
+
+  it('does not consume quota or contact school for an already cancelled connection', async () => {
+    const { service, login, docs } = setup();
+    const controller = new AbortController();
+    controller.abort(new Error('private caller cancellation reason'));
+    await expect(service.connect(OWNER, input(), controller.signal)).rejects.toMatchObject({
+      status: 499, code: 'TRONCLASS_LOGIN_CANCELLED', message: 'TRONCLASS_LOGIN_CANCELLED',
+    });
+    expect(login).not.toHaveBeenCalled();
+    expect(docs.size).toBe(0);
+  });
+
+  it('stops waiting for a store that ignores cancellation without starting school login later', async () => {
+    const { db, docs } = store();
+    const controller = new AbortController();
+    let finish!: (value: TronClassBindingStore) => void;
+    const getStore = vi.fn(() => new Promise<TronClassBindingStore>((resolve) => { finish = resolve; }));
+    const login = vi.fn<PuCampusGateway['loginTronClass']>(async () => loginResult());
+    const service = createTronClassBindingService({ getStore, login, encryptionSecret: SECRET });
+    const pending = service.connect(OWNER, input(), controller.signal);
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'TRONCLASS_LOGIN_CANCELLED' });
+    await vi.waitFor(() => expect(getStore).toHaveBeenCalledOnce());
+    controller.abort();
+    await rejected;
+    finish(db);
+    await Promise.resolve();
+    expect(login).not.toHaveBeenCalled();
+    expect(docs.size).toBe(0);
+  });
+
+  it('cancels a late ignored login, keeps its rate-limit attempt, and never persists its session', async () => {
+    const { service, login, docs } = setup();
+    const controller = new AbortController();
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+    let finish!: (value: TronClassSession) => void;
+    login.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const pending = service.connect(OWNER, input(), controller.signal);
+    const rejected = expect(pending).rejects.toMatchObject({ status: 499, code: 'TRONCLASS_LOGIN_CANCELLED' });
+    await vi.waitFor(() => expect(login).toHaveBeenCalledOnce());
+    expect(login.mock.calls[0]?.[2]?.signal).toBe(controller.signal);
+    controller.abort();
+    await rejected;
+    finish(loginResult());
+    await Promise.resolve();
+    expect(docs.has(bindingPath())).toBe(false);
+    expect([...docs.values()].filter(row => row.scope === 'owner' || row.scope === 'account'))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ timestamps: [NOW] })]));
+    expect(remove.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(2);
+    expect(await service.getStatus(OWNER)).toMatchObject({ connected: false, revision: null });
+  });
+
+  it.each([false, true])('does not write an aborted binding after transaction read (existing connection: %s)', async (connected) => {
+    const { service, login, docs, db } = setup();
+    const prior = connected ? await service.connect(OWNER, input()) : await service.getStatus(OWNER);
+    const original = structuredClone(docs.get(bindingPath()));
+    const controller = new AbortController();
+    const run = db.runTransaction;
+    let attempts = 0;
+    db.runTransaction = (work) => run(transaction => {
+      attempts++;
+      return work({
+        ...transaction,
+        get: async ref => {
+          const value = await transaction.get(ref);
+          // The first transaction records quota; the second persists binding.
+          if (attempts === 2) controller.abort();
+          return value;
+        },
+      });
+    });
+    await expect(service.connect(OWNER, input(prior.revision), controller.signal))
+      .rejects.toMatchObject({ status: 499, code: 'TRONCLASS_LOGIN_CANCELLED' });
+    expect(login).toHaveBeenCalledTimes(connected ? 2 : 1);
+    expect(docs.get(bindingPath())).toEqual(original);
+    expect(await service.getStatus(OWNER)).toEqual(prior);
+  });
+
+  it('aborts quota transaction before writes and never sends credentials', async () => {
+    const { service, login, docs, db } = setup();
+    const controller = new AbortController();
+    const run = db.runTransaction;
+    db.runTransaction = (work) => run(transaction => work({
+      ...transaction,
+      get: async ref => { const value = await transaction.get(ref); controller.abort(); return value; },
+    }));
+    await expect(service.connect(OWNER, input(), controller.signal)).rejects.toMatchObject({ code: 'TRONCLASS_LOGIN_CANCELLED' });
+    expect(login).not.toHaveBeenCalled();
+    expect(docs.size).toBe(0);
+  });
+
+  it('preserves a completed connection when its former caller later aborts', async () => {
+    const { service } = setup();
+    const controller = new AbortController();
+    const add = vi.spyOn(controller.signal, 'addEventListener');
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+    const status = await service.connect(OWNER, input(), controller.signal);
+    expect(add.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(2);
+    expect(remove.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(2);
+    controller.abort();
+    expect(await service.getStatus(OWNER)).toEqual(status);
   });
 
   it('cannot resurrect a pending first connection after unlink', async () => {
