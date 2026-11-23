@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { useEffect, useId, useState } from 'react';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { campusEventPreviewIssue, campusEventTargetKey, parseAssistantCampusEventTargets,
@@ -49,7 +49,7 @@ export function AssistantCampusEvents({ targets: raw, schoolId, pending, blocked
               onClick={() => {
                 if (!pending && !blockedReason && !campusEventPreviewIssue(target, Date.now())) onSelect(target);
               }}>加入個人行事曆</button>}
-            <Link className={styles.source} href={target.href}>{sourceOnly ? '重新查看活動來源' : '查看活動來源'}</Link>
+            <AssistantReplyLink className={styles.source} href={target.href}>{sourceOnly ? '重新查看活動來源' : '查看活動來源'}</AssistantReplyLink>
           </div>
         </li>;
       })}

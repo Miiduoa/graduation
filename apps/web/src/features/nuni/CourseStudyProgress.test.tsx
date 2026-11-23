@@ -269,6 +269,79 @@ it('can save just the reading position before any note or model use', async () =
   } finally { view.unmount(); }
 });
 
+it.each([1, 2])('opens a reference answer from an initially collapsed v%i backup', async (version) => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const data = progress();
+  const exam = data.passages['1:1'].modes.exam;
+  exam.selectedLessonId = 1;
+  Object.assign(exam.lessons[0], { attempt: '\u200b', answerVisible: false });
+  const backup = JSON.parse(serializeCourseStudyProgress(data));
+  selectFile(progressFile(JSON.stringify({ ...backup, version })));
+  fireEvent.click(await screen.findByRole('button', { name: '還原這份進度' }));
+
+  expect(inputValue('先寫下你的想法')).toBe('\u200b');
+  expect(screen.queryByText('第一輪的參考回答。')).toBeNull();
+  const compare = screen.getByRole('button', { name: '對照參考回答' });
+  expect(compare.hasAttribute('disabled')).toBe(false);
+  fireEvent.click(compare);
+  expect(screen.getByText('第一輪的參考回答。')).toBeTruthy();
+});
+
+it.each([
+  [1, '\u200b'], [2, '\u200b'], [1, '\ufff9'], [1, '\u2060\ufe0f'],
+] as const)('restores and reopens a legacy v%i reveal after a collapsed backup round trip (%#)', async (version, attempt) => {
+  const create = vi.fn().mockReturnValue('blob:study-progress');
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; static revokeObjectURL = vi.fn(); });
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const data = progress();
+  const mode = data.passages['1:1'].modes.exam;
+  mode.selectedLessonId = 1;
+  mode.lessons[0].attempt = attempt;
+  const legacy = JSON.parse(serializeCourseStudyProgress(data));
+  legacy.version = version;
+  legacy.passages['1:1'].modes.exam.lessons[0].attempt = attempt;
+  selectFile(progressFile(JSON.stringify(legacy)));
+  await screen.findByRole('region', { name: '閱讀進度預覽' });
+  fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+
+  await screen.findByRole('heading', { name: '第一輪講解' });
+  expect(inputValue('先寫下你的想法')).toBe(attempt);
+  expect(screen.getByText('第一輪的參考回答。')).toBeTruthy();
+  const collapse = screen.getByRole('button', { name: '收起參考回答' });
+  expect(collapse.getAttribute('aria-expanded')).toBe('true');
+  expect(collapse.hasAttribute('disabled')).toBe(false);
+  fireEvent.click(collapse);
+  expect(screen.queryByText('第一輪的參考回答。')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '對照參考回答' }));
+  expect(screen.getByText('第一輪的參考回答。')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '收起參考回答' }));
+
+  fireEvent.click(screen.getByRole('button', { name: '儲存閱讀進度' }));
+  const backup = await readBlob(create.mock.calls[0][0] as Blob);
+  const saved = parseCourseStudyProgress(backup, scope).passages['1:1'].modes.exam.lessons[0];
+  expect(saved).toMatchObject({ attempt, answerVisible: false });
+  selectFile(progressFile(backup));
+  await screen.findByRole('region', { name: '閱讀進度預覽' });
+  fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+  expect(screen.queryByText('第一輪的參考回答。')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '對照參考回答' }));
+  expect(screen.getByText('第一輪的參考回答。')).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: '下載本次筆記' }));
+  expect(await readBlob(create.mock.calls[1][0] as Blob)).toContain('第一輪的參考回答。');
+
+  fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: '\u200d\u2800' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存閱讀進度' }));
+  const draftBackup = await readBlob(create.mock.calls[2][0] as Blob);
+  selectFile(progressFile(draftBackup));
+  await screen.findByRole('region', { name: '閱讀進度預覽' });
+  fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+  expect(inputValue('先寫下你的想法')).toBe('\u200d\u2800');
+  expect(screen.getByRole('button', { name: '對照參考回答' }).hasAttribute('disabled')).toBe(false);
+});
+
 it('restores the selected PDF page, mode, notes and lesson branch without automatically generating', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
   const data = progress();
@@ -305,6 +378,40 @@ it('restores the selected PDF page, mode, notes and lesson branch without automa
   expect(request.question).toBe(data.passages['1:1'].modes.exam.question);
   expect(request.passage.text).toBe(savedText);
   expect(request.history.turns.map((turn: { response: TutorExplanation }) => turn.response.title)).toEqual(['第一輪講解', '第三輪講解']);
+});
+
+it('copies and restores the exact self-check draft and follows up with an invisible legacy quote', async () => {
+  const data = progress();
+  const quote = '\u200b\u0301';
+  const draft = '\u200b\u0301\u200f';
+  data.source.sections[1].text += quote;
+  const lesson = data.passages['1:1'].modes.exam.lessons[2];
+  lesson.response.sourceQuote = quote;
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  await preview(data);
+  fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+  await screen.findByRole('heading', { name: '第三輪講解' });
+
+  const label = '先寫下你的想法';
+  fireEvent.change(screen.getByLabelText(label), { target: { value: draft } });
+  expect(inputValue(label)).toBe(draft);
+  fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+  const raw = (await screen.findByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement).value;
+  expect(parseCourseStudyProgress(raw, scope).passages['1:1'].modes.exam.lessons[2]).toMatchObject({
+    attempt: draft, answerVisible: false,
+  });
+
+  expect(JSON.parse(raw).version).toBe(2);
+  expect(raw).not.toContain('answerReviewAllowed');
+
+  fireEvent.change(screen.getByLabelText(label), { target: { value: '備份以後的草稿' } });
+  fireEvent.change(screen.getByLabelText(restoreLabel), { target: { files: [progressFile(raw)] } });
+  fireEvent.click(await screen.findByRole('button', { name: '還原這份進度' }));
+  expect(inputValue(label)).toBe(draft);
+  expect(screen.getByRole('button', { name: '對照參考回答' }).hasAttribute('disabled')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: '接著追問' }));
+  await waitFor(() => expect(mocks.run).toHaveBeenCalledTimes(1));
+  expect(mocks.run.mock.calls[0][0].history.turns.at(-1).response.sourceQuote).toBe(quote);
 });
 
 it('labels restored material as a saved copy even when its ID matches the current course material', async () => {

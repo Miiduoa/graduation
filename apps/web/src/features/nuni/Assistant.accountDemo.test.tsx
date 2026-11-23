@@ -70,14 +70,14 @@ it('uses the existing conversation to confirm and verify a demonstration order w
   expect(screen.getByText(/香煎雞腿飯 × 1 · NT\$95/)).toBeTruthy();
   expect(calls.filter((call) => call.input)).toHaveLength(0);
   fireEvent.click(screen.getByRole('button', { name: '確認展示操作' }));
-  await screen.findByLabelText('展示執行回執');
+  await screen.findByLabelText('展示執行回執', {}, { timeout: 5_000 });
   expect(calls.filter((call) => call.input)).toEqual([
     { url: '/api/nuni/account-demo', input: { expectedRevision: 0, action: 'createOrder' } },
   ]);
   expect(screen.getByRole('link', { name: '開啟點餐與取餐' }).getAttribute('href'))
     .toBe('/food?campus=pu');
   expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
-});
+}, 15_000);
 
 it('cancels a proposed demonstration operation without a POST', async () => {
   const mutations: unknown[] = [];

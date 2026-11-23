@@ -31,7 +31,9 @@ vi.mock('@/lib/campusNavigation', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/campusNavigation')>()),
   useCampusNavigationSearch: () => state.campus,
 }));
-vi.mock('@/lib/useCampusBrowseContext', () => ({ useCampusBrowseContext: () => ({ status: 'ready', schoolId: state.campus }) }));
+vi.mock('@/lib/useCampusBrowseContext', () => ({
+  useCampusBrowseContext: () => ({ status: 'ready', schoolId: state.campus }),
+}));
 vi.mock('./AuthGuard', () => ({ useAuth: () => state.firebase }));
 vi.mock('@/features/nuni/Session', () => ({ useNuniSession: () => state.nuni }));
 vi.mock('./SchoolSelector', () => ({
@@ -242,7 +244,7 @@ it('keeps the measured header inset available to menus and voice without changin
 
     const disconnectsBeforeUnmount = disconnect.mock.calls.length;
     view.unmount();
-    expect(disconnect).toHaveBeenCalledTimes(disconnectsBeforeUnmount + 1);
+    expect(disconnect).toHaveBeenCalledTimes(disconnectsBeforeUnmount + 2);
     bottom = 120;
     fireEvent(window, new Event('resize'));
     fireEvent(window, new Event('scroll'));

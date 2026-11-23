@@ -3,7 +3,7 @@ import { Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { PublicCatalogCourse, PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import { appendPersonalImports, snapshotPersonalImports, undoLastPersonalImport, type PersonalImportScope } from '../services/personalImports';
-import { findCatalogSameSlotChange, findCatalogTimetableOverlaps, preparePublicCourseTimetableImport, type CatalogSlotChange, type CatalogTimetableOverlap, type PublicCourseTimetablePreview } from '../services/publicCourseTimetableImport';
+import { findCatalogSameSlotChange, findCatalogTimetableOverlaps, preparePublicCourseTimetableImport, type CatalogSlotChange, type CatalogTimetableOverlap, type PublicCourseSourceEvidence, type PublicCourseTimetablePreview } from '../services/publicCourseTimetableImport';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { Button } from '../ui/components';
 import { theme } from '../ui/theme';
@@ -12,6 +12,7 @@ import { safeNavigate } from '../utils/safeNavigate';
 type Props = {
   schoolId: PublicCourseCatalogResponse['schoolId'];
   course: PublicCatalogCourse;
+  evidence?: PublicCourseSourceEvidence;
   navigation?: Parameters<typeof safeNavigate>[0];
 };
 type Outcome =
@@ -132,6 +133,7 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
   return <View style={{ gap: 10, padding: 12, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10 }}>
     <Text accessibilityRole="header" style={{ color: theme.colors.text, fontWeight: '600' }}>加入前核對</Text>
     <Text style={body}>{preview.schoolName} · {preview.academicYear} 學年度第 {preview.semester} 學期</Text>
+    <Text style={body}>{preview.rows[0]?.source?.name ?? '課程來源未提供'}</Text>
     {preview.rows.map((row) => <Text key={row.id} style={body}>
       {row.title} · 星期{row.dayOfWeek ? '一二三四五六日'[row.dayOfWeek - 1] : '待確認'} {row.startTime}–{row.endTime}
       {row.location ? ` · ${row.location}` : ' · 教室未提供'}
@@ -202,7 +204,7 @@ function AccountReview({ schoolId, ...props }: ReviewProps & { schoolId: Props['
     </Text>
     <Button text="收起核對" kind="ghost" onPress={props.onClose} />
   </View>;
-  return <ScopedReview key={JSON.stringify([scopeKey, props.preview.csv])} {...props}
+  return <ScopedReview key={JSON.stringify([scopeKey, props.preview.csv, props.preview.rows[0]?.source?.name])} {...props}
     scope={scope} scopeKey={scopeKey} liveScopeKey={liveScopeKey} />;
 }
 
@@ -220,9 +222,10 @@ function CurrentCourseProposal({ schoolId, preview, navigation }: {
     onClose={() => setOpen(false)} />;
 }
 
-export function PublicCourseImportAction({ schoolId, course, navigation }: Props) {
-  const preview = useMemo(() => preparePublicCourseTimetableImport(schoolId, course), [schoolId, course]);
+export function PublicCourseImportAction({ schoolId, course, evidence, navigation }: Props) {
+  const preview = useMemo(() => preparePublicCourseTimetableImport(schoolId, course, evidence),
+    [schoolId, course, evidence?.sourceUrl, evidence?.fetchedAt]);
   if (!preview) return null;
   // CSV includes school, term, class identity, instructor and every meeting.
-  return <CurrentCourseProposal key={preview.csv} schoolId={schoolId} preview={preview} navigation={navigation} />;
+  return <CurrentCourseProposal key={JSON.stringify([preview.csv, preview.rows[0]?.source?.name])} schoolId={schoolId} preview={preview} navigation={navigation} />;
 }

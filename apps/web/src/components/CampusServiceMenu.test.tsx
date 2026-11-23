@@ -1,6 +1,7 @@
+import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directoryStorageFailures';
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CampusServiceMenu } from './CampusServiceMenu';
 import { AppHeader } from './AppHeader';
 import { visibleCampusServices } from '@/lib/campusServices';
@@ -825,4 +826,136 @@ it('restores the expanded service family when returning to the menu origin', () 
   expect(screen.getByRole('link', { name: '教材收藏' }).closest('details')!.open).toBe(true);
   expect(screen.getByRole('link', { name: '校園地圖' }).getAttribute('aria-current')).toBe('page');
   expect(screen.getByRole('link', { name: '教材收藏' }).getAttribute('aria-current')).toBeNull();
+});
+
+describe.each(directoryStorageFailures)('menu navigation with storage %s', (failure) => {
+  it.each(['service link', 'directory link', 'submit'] as const)('follows the %s', (entry) => {
+    render(<CampusServiceMenu />);
+    const menu = screen.getByText('所有服務').closest('details')!;
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    const link = entry === 'service link'
+      ? screen.getByRole('link', { name: '圖書館' })
+      : screen.getByRole('link', { name: /尋找校園服務/ });
+    const expectedPath = entry === 'service link' ? '/library' : '/search';
+    const click = vi.fn();
+    document.addEventListener('click', click);
+    const previousState = window.history.state;
+    const storage = rejectDirectoryStorage(failure);
+    try {
+      fireEvent.click(entry === 'submit' ? screen.getByRole('button', { name: '查看結果' }) : link);
+      const linkClicks = click.mock.calls
+        .map(([event]) => event as MouseEvent)
+        .filter((event) => event.target === link);
+      expect(linkClicks).toHaveLength(1);
+      expect(linkClicks[0].defaultPrevented).toBe(false);
+      expect(new URL((link as HTMLAnchorElement).href).pathname).toBe(expectedPath);
+      expect(menu.open).toBe(false);
+      expect(screen.queryByText('搜尋草稿暫時無法儲存，請稍後再試。')).toBeNull();
+    } finally {
+      document.removeEventListener('click', click);
+      storage.mockRestore();
+    }
+    expect(window.history.state).toEqual(previousState);
+  });
+});
+
+it.each([{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }])(
+  'keeps the open search and current history intact for modified service clicks %j',
+  (modifiers) => {
+    render(<CampusServiceMenu />);
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.click(screen.getByRole('button', { name: '篩選校園生活' }));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    const original = window.history.state;
+    fireEvent.click(screen.getByRole('link', { name: '圖書館' }), modifiers);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+    expect(screen.getByRole('button', { name: '篩選校園生活' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(window.history.state).toEqual(original);
+    expect(sessionStorage.getItem('campus.directory.search.v1')).toBeNull();
+  },
+);
+
+it.each(['cancelled', 'new-tab', 'download'])(
+  'does not discard the search for a %s service link',
+  (kind) => {
+    render(<CampusServiceMenu />);
+    fireEvent.click(screen.getByText('所有服務'));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+    const link = screen.getByRole('link', { name: '圖書館' });
+    if (kind === 'cancelled')
+      link.addEventListener('click', (event) => event.preventDefault(), { once: true });
+    if (kind === 'new-tab') link.setAttribute('target', '_blank');
+    if (kind === 'download') link.setAttribute('download', 'service.txt');
+    fireEvent.click(link);
+    expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+    expect(sessionStorage.getItem('campus.directory.search.v1')).toBeNull();
+  },
+);
+
+it('keeps the search open when the full directory is opened in another tab', () => {
+  render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書' } });
+  fireEvent.click(screen.getByRole('link', { name: /尋找校園服務/ }), { metaKey: true });
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+  expect(sessionStorage.getItem('campus.directory.search.v1')).toBeNull();
+});
+
+it('submits the explicit search with the same filters and campus, without forwarding unrelated parameters', () => {
+  navigation.search = 'schoolId=pu&campus=pu&session=private&q=old';
+  window.history.replaceState({}, '', `/map?${navigation.search}`);
+  render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.click(screen.getByRole('button', { name: '篩選校園生活' }));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書 & 續借' } });
+  const directory = screen.getByRole('link', { name: /尋找校園服務/ });
+  const follow = vi.fn(() => directory.getAttribute('href'));
+  directory.addEventListener('click', follow);
+  fireEvent.click(screen.getByRole('button', { name: '查看結果' }));
+  expect(follow).toHaveBeenCalledTimes(1);
+  const destination = new URL(follow.mock.results[0].value!, window.location.origin);
+  expect(destination.pathname).toBe('/search');
+  expect(Object.fromEntries(destination.searchParams)).toEqual({
+    schoolId: 'pu',
+    campus: 'pu',
+    q: '借書 & 續借',
+    category: 'campus',
+  });
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+});
+
+it('lets Enter choose Chinese characters before allowing an explicit full-search submission', () => {
+  render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  const input = screen.getByRole('searchbox');
+  const form = screen.getByRole('search', { name: '搜尋校園服務' });
+  const directory = screen.getByRole('link', { name: /尋找校園服務/ });
+  const follow = vi.fn(() => directory.getAttribute('href'));
+  directory.addEventListener('click', follow);
+  input.focus();
+  fireEvent.compositionStart(input);
+  fireEvent.change(input, { target: { value: '圖書' } });
+  fireEvent.keyDown(input, { key: 'ArrowDown', isComposing: false });
+  expect(document.activeElement).toBe(input);
+  fireEvent.keyDown(input, { key: 'Escape', isComposing: false });
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect(fireEvent.keyDown(input, { key: 'Enter', isComposing: true })).toBe(false);
+  fireEvent.submit(form);
+  expect(follow).not.toHaveBeenCalled();
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  fireEvent.compositionEnd(input);
+  expect(fireEvent.keyDown(input, { key: 'Enter', keyCode: 229 })).toBe(false);
+  expect(follow).not.toHaveBeenCalled();
+  fireEvent.change(input, { target: { value: '圖書館' } });
+  expect(fireEvent.keyDown(input, { key: 'Enter' })).toBe(true);
+  fireEvent.submit(form);
+  expect(follow).toHaveBeenCalledTimes(1);
+  expect(follow.mock.results[0].value).toBe('/search?q=%E5%9C%96%E6%9B%B8%E9%A4%A8');
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
 });

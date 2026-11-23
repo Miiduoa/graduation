@@ -18,6 +18,7 @@ import { areFunctionsConfigured } from '@/lib/functionsUrl';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { currentReturnPath } from '@/lib/navigation';
+import { AssistantLinkNavigation, useAssistantLinkNavigation } from './AssistantReplyLink';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { useAssistantEnabled } from './AssistantEnabledProvider';
 import { useAuth } from './AuthGuard';
@@ -43,11 +44,13 @@ function TodayConversation({
   schoolId,
   cloudEnabled,
   preferredWorkContext,
+  onNavigate,
 }: {
   account: Account;
   schoolId: string;
   cloudEnabled: boolean;
   preferredWorkContext?: AssistantWorkContext;
+  onNavigate?: (href: string) => void;
 }) {
   const [text, setText] = useState('');
   const [nuniFreeform, setNuniFreeform] = useState(false);
@@ -77,6 +80,7 @@ function TodayConversation({
         {searchOpen && (
           <QuickCampusEntry
             compact
+            onNavigate={onNavigate}
             onAsk={
               canAsk
                 ? (phrase) => {
@@ -123,8 +127,10 @@ export function TodayCampusEntry({
   focusRequest = 0,
   returnAnchor = 'today-voice-entry',
   preferredWorkContext,
+  onNavigate,
 }: {
   preferredWorkContext?: AssistantWorkContext;
+  onNavigate?: (href: string) => void;
   active?: boolean;
   focusRequest?: number;
   returnAnchor?: 'today-voice-entry' | 'campus-assistant-entry';
@@ -172,15 +178,28 @@ export function TodayCampusEntry({
   }, [active, focusRequest]);
   return (
     <div ref={entry}>
-      <CampusEntryContent returnPath={returnPath} preferredWorkContext={preferredWorkContext} />
+      <AssistantLinkNavigation.Provider value={onNavigate}>
+        <CampusEntryContent
+          returnPath={returnPath}
+          preferredWorkContext={preferredWorkContext}
+          onNavigate={onNavigate}
+        />
+      </AssistantLinkNavigation.Provider>
     </div>
   );
 }
 
-function CampusEntryContent({ returnPath, preferredWorkContext }: {
-  returnPath: string; preferredWorkContext?: AssistantWorkContext;
+function CampusEntryContent({
+  returnPath,
+  preferredWorkContext,
+  onNavigate,
+}: {
+  returnPath: string;
+  preferredWorkContext?: AssistantWorkContext;
+  onNavigate?: (href: string) => void;
 }) {
   const hydrated = useClientHydrated();
+  const navigateLink = useAssistantLinkNavigation();
   const auth = useAuth();
   const nuni = useNuniSession();
   const enabled = useAssistantEnabled();
@@ -213,7 +232,9 @@ function CampusEntryContent({ returnPath, preferredWorkContext }: {
       <>
         {!uid && !session ? (
           <p className={styles.hint}>
-            <LoginLink returnPath={returnPath}>登入後，接著詢問校園助理</LoginLink>
+            <LoginLink returnPath={returnPath} onNavigateClick={navigateLink}>
+              登入後，接著詢問校園助理
+            </LoginLink>
           </p>
         ) : account && campus.status === 'unselected' ? (
           <p className={styles.hint}>請先從頁首選擇學校，就能在這裡詢問校園助理。</p>
@@ -222,6 +243,7 @@ function CampusEntryContent({ returnPath, preferredWorkContext }: {
           compact
           key={JSON.stringify([uid, session?.context, campus.schoolId])}
           onAsk={null}
+          onNavigate={onNavigate}
         />
       </>
     );
@@ -229,6 +251,7 @@ function CampusEntryContent({ returnPath, preferredWorkContext }: {
   return (
     <TodayConversation
       preferredWorkContext={preferredWorkContext}
+      onNavigate={onNavigate}
       key={JSON.stringify([
         uid,
         session?.context,
