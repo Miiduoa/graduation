@@ -266,11 +266,24 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
     if (process.env.TRONCLASS_RETENTION_ENABLED === 'true' && !isTronClassRetentionSchedulerReady()) {
       await wait(waitForTronClassRetentionFirstSweep);
     }
-    const platformClosureReady = ownerKey.startsWith('platform:')
-      ? (await import('./tronClassPlatformClosure')).readTronClassPlatformClosureConfig
+    // A platform account also needs a verified closure pipeline (outbox, worker
+    // privileges and triggers), proven by a recent successful worker batch.
+    const platformClosure = ownerKey.startsWith('platform:')
+      ? await wait(async () => {
+        const [{ readTronClassPlatformClosureConfig }, scheduler] = await Promise.all([
+          import('./tronClassPlatformClosure'), import('./tronClassPlatformClosureScheduler'),
+        ]);
+        return { readTronClassPlatformClosureConfig, ...scheduler };
+      })
       : null;
+    if (platformClosure && platformClosure.readTronClassPlatformClosureConfig(process.env) !== null &&
+      !platformClosure.isTronClassPlatformClosureSchedulerReady()) {
+      await wait(platformClosure.waitForTronClassPlatformClosureFirstBatch);
+    }
     check();
-    const closureReady = () => platformClosureReady === null || platformClosureReady(process.env) !== null;
+    const closureReady = () => platformClosure === null ||
+      (platformClosure.readTronClassPlatformClosureConfig(process.env) !== null &&
+        platformClosure.isTronClassPlatformClosureSchedulerReady());
     assertRetentionEnabled(isTronClassRetentionSchedulerReady(), closureReady());
     const encryptionKey = key();
     const db = await wait(getStore);

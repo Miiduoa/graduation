@@ -14,6 +14,12 @@ vi.mock('./tronClassRetentionScheduler', () => ({
   isTronClassRetentionSchedulerReady: schedulerReady,
   waitForTronClassRetentionFirstSweep: waitForFirstSweep,
 }));
+const closureReady = vi.hoisted(() => vi.fn(() => true));
+const waitForFirstClosureBatch = vi.hoisted(() => vi.fn<() => Promise<void>>());
+vi.mock('./tronClassPlatformClosureScheduler', () => ({
+  isTronClassPlatformClosureSchedulerReady: closureReady,
+  waitForTronClassPlatformClosureFirstBatch: waitForFirstClosureBatch,
+}));
 
 const OWNER = 'platform:pa_12345678-1234-1234-1234-123456789abc';
 const SECRET = 'binding-tests-only-secret-at-least-thirty-two';
@@ -65,6 +71,8 @@ beforeEach(() => {
   waitForFirstSweep.mockReset().mockResolvedValue(undefined);
   schedulerReady.mockReset();
   schedulerReady.mockReturnValue(true);
+  closureReady.mockReset().mockReturnValue(true);
+  waitForFirstClosureBatch.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true');
   vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED', 'true');
   vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL', 'postgresql://synthetic:synthetic@127.0.0.1:5432/synthetic');
@@ -227,7 +235,8 @@ describe('independent TronClass binding', () => {
     expect([...docs.values()].filter(row => row.scope === 'owner' || row.scope === 'owner-account'))
       .toEqual(expect.arrayContaining([expect.objectContaining({ timestamps: [expect.objectContaining({ timestamp: NOW })] })]));
     const registered = add.mock.calls.filter(([event]) => event === 'abort').map(([, listener]) => listener);
-    expect(registered).toHaveLength(3);
+    // Retention, platform closure readiness, store and transaction waits; each listener is removed.
+    expect(registered).toHaveLength(4);
     expect(remove.mock.calls.filter(([event]) => event === 'abort').map(([, listener]) => listener)).toEqual(registered);
     expect(await service.getStatus(OWNER)).toMatchObject({ connected: false, revision: null });
   });
@@ -278,7 +287,8 @@ describe('independent TronClass binding', () => {
     const remove = vi.spyOn(controller.signal, 'removeEventListener');
     const status = await service.connect(OWNER, input(), controller.signal);
     const registered = add.mock.calls.filter(([event]) => event === 'abort').map(([, listener]) => listener);
-    expect(registered).toHaveLength(3);
+    // Retention, platform closure readiness, store and transaction waits; each listener is removed.
+    expect(registered).toHaveLength(4);
     expect(remove.mock.calls.filter(([event]) => event === 'abort').map(([, listener]) => listener)).toEqual(registered);
     controller.abort();
     expect(await service.getStatus(OWNER)).toEqual(status);
@@ -435,6 +445,32 @@ describe('independent TronClass binding', () => {
     await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 503, code: 'TRONCLASS_RETENTION_REQUIRED' });
     expect(login).not.toHaveBeenCalled();
     expect(docs.size).toBe(0);
+  });
+
+  it('rejects a platform binding before login and storage until a worker batch has verified the closure pipeline', async () => {
+    closureReady.mockReturnValue(false);
+    const { service, login, docs } = setup();
+    await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 503, code: 'TRONCLASS_RETENTION_REQUIRED' });
+    expect(waitForFirstClosureBatch).toHaveBeenCalledOnce();
+    expect(login).not.toHaveBeenCalled();
+    expect(docs.size).toBe(0);
+  });
+
+  it('proceeds when the first verified closure batch completes during the initial wait', async () => {
+    closureReady.mockReturnValue(false);
+    waitForFirstClosureBatch.mockImplementation(async () => { closureReady.mockReturnValue(true); });
+    const { service, login } = setup();
+    await expect(service.connect(OWNER, input())).resolves.toMatchObject({ connected: true });
+    expect(login).toHaveBeenCalledOnce();
+  });
+
+  it('does not require the platform closure pipeline for a Firebase owner', async () => {
+    closureReady.mockReturnValue(false);
+    vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED', 'false');
+    const { service, login } = setup();
+    await expect(service.connect('firebase:school-user-1', input())).resolves.toMatchObject({ connected: true });
+    expect(login).toHaveBeenCalledOnce();
+    expect(waitForFirstClosureBatch).not.toHaveBeenCalled();
   });
 
   it('rejects binding before login and storage when retention is still unready after the initial wait', async () => {

@@ -39,7 +39,28 @@ export const TRONCLASS_PLATFORM_CLOSURE_SQL = {
     SET lease_token = NULL, lease_expires_at = NULL, last_failure = 'cleanup_failed',
       next_attempt_at = clock_timestamp() + make_interval(secs => LEAST(1800, (30 * power(2, LEAST(attempts - 1, 6)))::integer))
     WHERE id = $1::bigint AND lease_token = $2::uuid RETURNING id::text`,
+  // Readiness of the whole closure pipeline, not just the worker's configuration:
+  // the outbox exists with the worker's privileges and both enabled triggers are
+  // installed on the platform account table that the worker's search path resolves.
+  ready: `SELECT (
+      to_regclass('tronclass_account_closure_outbox') IS NOT NULL
+      AND to_regclass('platform_accounts') IS NOT NULL
+      AND coalesce(has_table_privilege(to_regclass('tronclass_account_closure_outbox'), 'SELECT'), false)
+      AND coalesce(has_any_column_privilege(to_regclass('tronclass_account_closure_outbox'), 'UPDATE'), false)
+      AND coalesce(has_table_privilege(to_regclass('tronclass_account_closure_outbox'), 'DELETE'), false)
+      AND (SELECT count(DISTINCT trigger.tgname) FROM pg_trigger trigger
+        WHERE trigger.tgrelid = to_regclass('platform_accounts') AND NOT trigger.tgisinternal
+          AND trigger.tgenabled <> 'D'
+          AND trigger.tgname IN ('tronclass_account_closed', 'tronclass_account_deleted')) = 2
+    ) AS ready`,
 } as const;
+
+/** Fails closed unless the outbox, worker privileges and closure triggers are all in place. */
+export async function verifyTronClassPlatformClosureReady(query: SqlQuery): Promise<void> {
+  let rows: Record<string, unknown>[];
+  try { rows = await query(TRONCLASS_PLATFORM_CLOSURE_SQL.ready, []); } catch { return unavailable(); }
+  if (rows.length !== 1 || rows[0].ready !== true) return unavailable();
+}
 
 function unavailable(): never { throw new NuniError(503, 'TRONCLASS_PLATFORM_CLOSURE_UNAVAILABLE'); }
 function eventId(value: unknown): value is string {
@@ -127,7 +148,9 @@ export async function runDefaultTronClassPlatformClosureBatch(
   ]);
   const admin = await getFirebaseAdmin();
   if (!admin?.db) return unavailable();
-  const store = createSqlTronClassPlatformClosureStore(tronClassPlatformClosureQuery(config.databaseUrl));
+  const query = tronClassPlatformClosureQuery(config.databaseUrl);
+  await verifyTronClassPlatformClosureReady(query);
+  const store = createSqlTronClassPlatformClosureStore(query);
   const result = await createTronClassPlatformClosureWorker({ store,
     closeOwner: ownerKey => closeTronClassOwner({ db: admin.db, ownerKey }),
   })();

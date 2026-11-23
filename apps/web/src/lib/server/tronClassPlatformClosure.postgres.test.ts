@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
-import { createSqlTronClassPlatformClosureStore, createTronClassPlatformClosureWorker } from './tronClassPlatformClosure';
+import { createSqlTronClassPlatformClosureStore, createTronClassPlatformClosureWorker, verifyTronClassPlatformClosureReady } from './tronClassPlatformClosure';
 import { createTronClassPlatformClosureDatabase } from './tronClassPlatformClosureDatabase';
 
 // A disposable loopback test database only. Product DB URLs are never read.
@@ -216,6 +216,28 @@ describe.skipIf(!port)('real PostgreSQL platform closure outbox', () => {
       expect(await store(first).complete((await store(first).claim())!)).toBe(true);
     } finally { await first.query('RESET ROLE'); }
     expect(await events()).toEqual([]);
+  });
+
+  it('reports the closure pipeline ready only with the worker ACL and both enabled triggers', async () => {
+    const ready = () => verifyTronClassPlatformClosureReady(async (sql, parameters) => (await first.query(sql, parameters)).rows);
+    await first.query(`SET ROLE ${workerRole}`);
+    try { await expect(ready()).resolves.toBeUndefined(); }
+    finally { await first.query('RESET ROLE'); }
+    await first.query(`SET ROLE ${closerRole}`);
+    try { await expect(ready()).rejects.toMatchObject({ code: 'TRONCLASS_PLATFORM_CLOSURE_UNAVAILABLE' }); }
+    finally { await first.query('RESET ROLE'); }
+    for (const trigger of ['tronclass_account_closed', 'tronclass_account_deleted']) {
+      await control.query(`ALTER TABLE platform_accounts DISABLE TRIGGER ${trigger}`);
+      await first.query(`SET ROLE ${workerRole}`);
+      try { await expect(ready()).rejects.toMatchObject({ code: 'TRONCLASS_PLATFORM_CLOSURE_UNAVAILABLE' }); }
+      finally {
+        await first.query('RESET ROLE');
+        await control.query(`ALTER TABLE platform_accounts ENABLE TRIGGER ${trigger}`);
+      }
+    }
+    await first.query('SET search_path TO public');
+    try { await expect(ready()).rejects.toMatchObject({ code: 'TRONCLASS_PLATFORM_CLOSURE_UNAVAILABLE' }); }
+    finally { await first.query(`SET search_path TO ${schema}`); }
   });
 
   it('lets the platform closure trigger enqueue without granting the API role direct queue or trigger-function access', async () => {

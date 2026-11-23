@@ -7,6 +7,7 @@ import { createTronClassAgentGrantService } from './tronClassAgentGrants';
 vi.mock('server-only', () => ({}));
 
 vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerReady: () => true, waitForTronClassRetentionFirstSweep: async () => undefined }));
+vi.mock('./tronClassPlatformClosureScheduler', () => ({ isTronClassPlatformClosureSchedulerReady: () => true, waitForTronClassPlatformClosureFirstBatch: async () => undefined }));
 
 const OWNER = 'platform:pa_grant_fixture';
 const NOW = Date.parse('2026-11-13T09:00:00Z');

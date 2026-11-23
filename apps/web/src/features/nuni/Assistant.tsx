@@ -772,6 +772,7 @@ function V2Conversation({
       // selected source is not a full list and cannot reveal an older list.
       const eligible: V2Turn[] = [];
       for (const turn of [...turns].reverse()) {
+        if (turn.tronClass?.compound) continue;
         if (turn.reply.campusEventPreview) {
           if (turn.campusEventDiscovery) break;
           continue;
@@ -811,8 +812,11 @@ function V2Conversation({
     const publicCompound = !tronClass && !selection && publicCourseCompoundRequest(current, schoolId);
     const publicCourseIntent = !tronClass && !publicCompound && !selection && resolvePublicCourseAssistantIntent(current, schoolId);
     const followup = taskProfile === 'student' && !tronClass && !publicCompound && !publicCourseIntent && !selection ? courseworkStudyFollowup(current) : null;
-    const targets = parseAssistantCourseworkTargets(turns.at(-1)?.reply.courseworkTargets);
-    const studyDate = followup?.date ?? turns.at(-1)?.reply.courseworkDate;
+    // TronClass supplements of a multi-clause request follow the planner turn
+    // and must not hide the coursework it listed.
+    const contextTurn = [...turns].reverse().find(turn => !turn.tronClass?.compound);
+    const targets = parseAssistantCourseworkTargets(contextTurn?.reply.courseworkTargets);
+    const studyDate = followup?.date ?? contextTurn?.reply.courseworkDate;
     let studySelection = selection;
     if (followup) {
       if (targets.length !== 1) {
@@ -880,7 +884,8 @@ function V2Conversation({
             invalidateTronClassAuthority(pendingAsk);
           tronClassObservedGrant.current = { revision: result.revision, version: result.grantVersion };
           setTurns(previous => [...previous, { question: current,
-            reply: { answer: result.answer, steps: [], cards: [], dataRead: true }, tronClass: { result } }]);
+            reply: { answer: result.answer, steps: [], cards: [], dataRead: true },
+            tronClass: { result, ...(compoundClause ? { compound: true as const } : {}) } }]);
           setRecoverableQuestion(previous => previous === current ? '' : previous);
         } catch (reason) {
           if (tronClassEpoch !== tronClassAuthorityEpoch.current) return;
@@ -905,6 +910,7 @@ function V2Conversation({
             tronClass: {
               accessRequired: reason.code.includes('AGENT_PERMISSION'),
               unconnected: reason.status === 401 || /RECONNECT_REQUIRED|NOT_CONNECTED|BINDING_CHANGED/.test(reason.code),
+              ...(compoundClause ? { compound: true as const } : {}),
             } }]);
         }
         return;

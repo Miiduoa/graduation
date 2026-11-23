@@ -53,6 +53,41 @@ const OTHER_SERVICE_OR_SCHEDULE = /(?:頁面|畫面|入口|校園|學校|系上|
 const NEGATED = /(?:不要|別|不准|禁止|無須|不用|不需要|do\s+not|don't|never)/i;
 const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
 
+const CHAINED_WRITE = /(?:並|再|然後|直接|自動|順便|同時|and|then).{0,25}(?:繳交|提交|送出|上傳|submit|upload)/i;
+const EXPLICIT_WRITE = /(?:幫我|替我|代我|請|直接|自動)\s*(?:把|將)?\s*(?:繳交|提交|送出|交出|交作業|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名)|(?:submit|upload|delete|post|reply|withdraw)\b/i;
+
+/** Examples, translations, quotes, general explanations and negated reads do not authorize a private read. */
+function authorizesPrivateRead(original: string): boolean {
+  return !(/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(original) ||
+    /^[「『“"'][\s\S]*[」』”"']$/.test(original) ||
+    /(?:不要|別|不准|禁止|無須|不用|不需要|do\s+not|don't|never)\s*.{0,80}(?:讀取|查詢|查看|查|列出|下載|準備|代理|read|fetch|download)/i.test(original));
+}
+
+/**
+ * "查未交作業，不要繳交" authorizes a read, not a write. Strip only
+ * explicitly negated write clauses before evaluating the positive command.
+ */
+function withoutNegatedWrites(original: string): string {
+  return original.replace(/(?:不要|別|不准|禁止|無須|不用|不需要|do\s+not|don't|never)\s*(?:幫我|替我|代我|自動|直接)?\s*(?:繳交|提交|送出|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|submit|upload|delete|post|reply)[^，。；,;]*/gi, '');
+}
+
+function toOperationText(text: string): string {
+  return text.replace(/(?:尚未|還沒|未|沒|待|已)(?:繳交|提交|交|繳)|not\s+submitted|unsubmitted/gi, '待辦');
+}
+
+/**
+ * Splitting a request must not drop context that covers the whole sentence:
+ * a translation, quote, explanation or negated read anywhere keeps every clause
+ * out of the private read, and a requested write anywhere keeps the request with
+ * the original planner instead of reading beside an unhandled write.
+ */
+function wholeRequestAllowsCompoundRead(question: string): boolean {
+  const original = question.normalize('NFKC').trim();
+  if (!authorizesPrivateRead(original)) return false;
+  const operationText = toOperationText(withoutNegatedWrites(original));
+  return !CHAINED_WRITE.test(operationText) && !EXPLICIT_WRITE.test(operationText);
+}
+
 /**
  * For a multi-clause request, list the clauses the TronClass Agent should also
  * answer. The whole request still goes to the original cross-service planning
@@ -64,7 +99,7 @@ const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
 export function tronClassCompoundClauses(question: string): string[] {
   if (typeof question !== 'string' || !question.trim() || question.length > 1000 ||
     !TRONCLASS_KEYWORD.test(question) || !isMultiClauseRequest(question) ||
-    tronClassExplicitNavigationQuestion(question)) return [];
+    tronClassExplicitNavigationQuestion(question) || !wholeRequestAllowsCompoundRead(question)) return [];
   const clauses = question.normalize('NFKC').split(CLAUSE_SEPARATOR).map(part => part.trim()).filter(Boolean);
   const result: string[] = [];
   const seen = new Set<string>();
@@ -108,23 +143,18 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
   const original = question.trim();
   if (isExistingTronClassNavigation(original)) return null;
   if (isMultiClauseRequest(original)) return null;
-  // Examples, translations and general explanations do not authorize a private read.
-  if (/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(original) ||
-    /^[「『“"'][\s\S]*[」』”"']$/.test(original) ||
-    /(?:不要|別|不准|禁止|無須|不用|不需要|do\s+not|don't|never)\s*.{0,80}(?:讀取|查詢|查看|查|列出|下載|準備|代理|read|fetch|download)/i.test(original)) return null;
-  // "查未交作業，不要繳交" authorizes a read, not a write. Strip only
-  // explicitly negated write clauses before evaluating the positive command.
-  const text = original.replace(/(?:不要|別|不准|禁止|無須|不用|不需要|do\s+not|don't|never)\s*(?:幫我|替我|代我|自動|直接)?\s*(?:繳交|提交|送出|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|submit|upload|delete|post|reply)[^，。；,;]*/gi, '');
+  if (!authorizesPrivateRead(original)) return null;
+  const text = withoutNegatedWrites(original);
   if (/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i.test(text)) {
     return { intent: 'capabilities', pendingOnly: false };
   }
   const pendingOnly = /(?:未交|未繳|待交|待繳|待提交|尚未(?:交|繳|提交)|還沒(?:交|繳|提交)|沒(?:交|繳)|pending|unsubmitted|not\s+submitted)/i.test(text);
-  const operationText = text.replace(/(?:尚未|還沒|未|沒|待|已)(?:繳交|提交|交|繳)|not\s+submitted|unsubmitted/gi, '待辦');
+  const operationText = toOperationText(text);
   const preparation = /(?:準備|預覽|草稿|起草|prepare|draft)/i.test(text) && /(?:作業|homework|assignment)/i.test(text);
   if (preparation && /(?:下載|download)/i.test(text)) return { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' };
-  const chainedWrite = /(?:並|再|然後|直接|自動|順便|同時|and|then).{0,25}(?:繳交|提交|送出|上傳|submit|upload)/i.test(operationText);
+  const chainedWrite = CHAINED_WRITE.test(operationText);
   if (preparation && !chainedWrite) return { intent: 'prepare', pendingOnly };
-  const explicitWrite = /(?:幫我|替我|代我|請|直接|自動)\s*(?:把|將)?\s*(?:繳交|提交|送出|交出|交作業|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名)|(?:submit|upload|delete|post|reply|withdraw)\b/i.test(operationText);
+  const explicitWrite = EXPLICIT_WRITE.test(operationText);
   if (explicitWrite || chainedWrite || /(?:發[佈布文]|回[覆復]|留言|刪除|撤回|退選|選課|填答|評分|測驗|考試|問卷|簽到|簽退|點名)/.test(text)) {
     return { intent: 'unsupported', pendingOnly: false };
   }

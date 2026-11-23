@@ -152,6 +152,7 @@ describe('explicit default worker wiring', () => {
     runtime.closeTronClassOwner.mockResolvedValue(undefined);
     let claimed = false;
     const query = vi.fn<SqlQuery>(async (sql, parameters) => {
+      if (sql === TRONCLASS_PLATFORM_CLOSURE_SQL.ready) return [{ ready: true }];
       if (sql === TRONCLASS_PLATFORM_CLOSURE_SQL.complete) return [{ id: '1' }];
       if (claimed) return [];
       claimed = true;
@@ -161,7 +162,8 @@ describe('explicit default worker wiring', () => {
     expect(await runDefaultTronClassPlatformClosureBatch(configured)).toEqual({ claimed: 1, completed: 1, failed: 0, stale: 0 });
     expect(runtime.dedicatedQuery).toHaveBeenCalledExactlyOnceWith(configured.TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL);
     expect(runtime.closeTronClassOwner).toHaveBeenCalledExactlyOnceWith({ db, ownerKey: `platform:${accountId}` });
-    expect(runtime.closeTronClassOwner.mock.invocationCallOrder[0]).toBeLessThan(query.mock.invocationCallOrder[1]);
+    expect(query.mock.calls[0][0]).toBe(TRONCLASS_PLATFORM_CLOSURE_SQL.ready);
+    expect(runtime.closeTronClassOwner.mock.invocationCallOrder[0]).toBeLessThan(query.mock.invocationCallOrder[2]);
   });
 
   it('does not claim queue events if privileged Firestore initialization is unavailable', async () => {
@@ -176,6 +178,7 @@ describe('explicit default worker wiring', () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
     let claimed = false;
     const query = vi.fn<SqlQuery>(async (sql, parameters) => {
+      if (sql === TRONCLASS_PLATFORM_CLOSURE_SQL.ready) return [{ ready: true }];
       if (sql === TRONCLASS_PLATFORM_CLOSURE_SQL.retry) return [{ id: '1' }];
       if (claimed) return [];
       claimed = true;
@@ -185,5 +188,22 @@ describe('explicit default worker wiring', () => {
     expect(await runDefaultTronClassPlatformClosureBatch(configured)).toEqual({ claimed: 1, completed: 0, failed: 1, stale: 0 });
     expect(warning).toHaveBeenCalledExactlyOnceWith('TronClass platform account cleanup failed');
     expect(query.mock.calls.some(([sql]) => sql === TRONCLASS_PLATFORM_CLOSURE_SQL.complete)).toBe(false);
+  });
+
+  it.each([
+    ['not ready', async () => [{ ready: false }]],
+    ['no row', async () => []],
+    ['a non-boolean answer', async () => [{ ready: 'true' }]],
+    ['a failing query', async () => { throw new Error('private-db-detail'); }],
+  ] as const)('claims nothing when the closure pipeline reports %s', async (_name, readiness) => {
+    runtime.getFirebaseAdmin.mockResolvedValue({ db: { synthetic: true } });
+    const query = vi.fn<SqlQuery>(async (sql) => {
+      if (sql === TRONCLASS_PLATFORM_CLOSURE_SQL.ready) return readiness() as Promise<Record<string, unknown>[]>;
+      throw new Error('queue must not be touched');
+    });
+    runtime.dedicatedQuery.mockReturnValue(query);
+    await expect(runDefaultTronClassPlatformClosureBatch(configured)).rejects.toThrow('TRONCLASS_PLATFORM_CLOSURE_UNAVAILABLE');
+    expect(query).toHaveBeenCalledExactlyOnceWith(TRONCLASS_PLATFORM_CLOSURE_SQL.ready, []);
+    expect(runtime.closeTronClassOwner).not.toHaveBeenCalled();
   });
 });

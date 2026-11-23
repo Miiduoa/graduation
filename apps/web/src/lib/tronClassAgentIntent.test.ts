@@ -126,6 +126,14 @@ describe('TronClass clauses inside a multi-clause request', () => {
     '查公車，然後看校園公告',
     '請幫我打開玩課雲作業與教材頁面，可以嗎？',
     '開啟玩課雲作業，教材頁面',
+    '請把這句翻成英文，下載玩課雲講義',
+    '翻譯成英文：玩課雲作業，查公車',
+    '「玩課雲作業，下載講義」',
+    '這段怎麼說，玩課雲作業',
+    '不要查玩課雲，查公車',
+    '不要讀取，玩課雲作業和講義',
+    '下載玩課雲講義，然後幫我繳交',
+    '玩課雲作業，幫我上傳附件',
   ])('adds no Agent read to %s', question => {
     expect(tronClassCompoundClauses(question)).toEqual([]);
   });

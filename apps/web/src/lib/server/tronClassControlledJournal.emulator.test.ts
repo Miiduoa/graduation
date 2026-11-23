@@ -17,6 +17,7 @@ import {
 vi.mock('server-only', () => ({}));
 
 vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerReady: () => true, waitForTronClassRetentionFirstSweep: async () => undefined }));
+vi.mock('./tronClassPlatformClosureScheduler', () => ({ isTronClassPlatformClosureSchedulerReady: () => true, waitForTronClassPlatformClosureFirstBatch: async () => undefined }));
 
 const { closeTronClassOwner } = createRequire(import.meta.url)(
   '../../../../../backend/functions/tronClassAccountLifecycle.js',
