@@ -3207,7 +3207,8 @@ it.each([
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  const valid = !['truncated', 'invalid JSON', 'invalid snapshot', 'invalid length', 'conflicting framing'].includes(variant);
+  const valid = !['understated', 'overstated', 'truncated', 'invalid JSON',
+    'invalid snapshot', 'invalid length', 'conflicting framing'].includes(variant);
   expect(await within(dialog).findByText(valid ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(valid ? buildings : []);
   expect(json).not.toHaveBeenCalled();
@@ -3558,6 +3559,45 @@ it('accepts a complete, correctly sized JSON snapshot with a valid Content-Lengt
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+// A downstream captive-portal/WebView bridge may expose inconsistent
+// identity framing even when the JSON is syntactically complete and has a
+// valid school/source/geometry contract. Do not install it as audited 3D.
+it.each([
+  { description: 'overdelivered bytes', delta: -1 },
+  { description: 'truncated declared body', delta: 1 },
+])('rejects $description of a 200 identity-encoded OSM snapshot', async ({ delta }) => {
+  const { library, body } = sourcedLibraryFootprintFixture();
+  const bytes = new TextEncoder().encode(body);
+  const cancel = vi.fn();
+  const response = new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes);
+      // Deliberately keep the overdelivery stream open: rejection must not
+      // wait for EOF once more bytes arrive than the header permits.
+      if (delta > 0) controller.close();
+    },
+    cancel,
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'identity',
+      'Content-Length': String(bytes.byteLength + delta) },
+  });
+  const json = vi.spyOn(response, 'json');
+  const fetchMock = vi.fn().mockResolvedValue(response);
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]}
+    selected={library} onSelect={vi.fn()} />);
+  const dialog = within(await open());
+  expect(await dialog.findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(dialog.getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
+  expect(dialog.getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(json).not.toHaveBeenCalled();
+  expect(fetchMock).toHaveBeenCalledOnce();
+  if (delta < 0) await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+  else expect(cancel).not.toHaveBeenCalled();
+});
+
 function sourcedLibraryFootprintFixture() {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
@@ -3722,11 +3762,11 @@ it.each(capabilityCases.flatMap((capability) =>
 it.each([
   { length: '0', accepted: false },
   { length: '000', accepted: false },
-  { length: '1', accepted: true },
-  { length: '2000000', accepted: true },
+  { length: '1', accepted: false },
+  { length: '2000000', accepted: false },
   // The Fetch Headers constructor strips surrounding HTTP OWS before JS sees it.
-  // The normalized value '0040' is legal; actual decoded bytes are capped separately.
-  { length: ' 0040 ', accepted: true },
+  // '0040' is a valid decimal header, but it must match identity body bytes.
+  { length: ' 0040 ', accepted: false },
   { length: '', accepted: false },
   { length: '40, 40', accepted: false },
   { length: '2000001', accepted: false },
@@ -3741,7 +3781,7 @@ it.each([
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
   expect(await within(dialog).findByText(accepted ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(read).toHaveBeenCalledTimes(accepted ? 1 : 0);
+  expect(read).toHaveBeenCalledTimes(['0', '000', '', '40, 40', '2000001'].includes(length) ? 0 : 1);
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(accepted ? buildings : []);
 });
 
@@ -3803,7 +3843,10 @@ it.each([
       start(controller) { controller.enqueue(bytes); controller.close(); },
     }), {
       status: 200,
-      headers: { 'Content-Encoding': coding, 'Content-Length': '40' },
+      // For an explicitly identity-encoded response, the declared byte count
+      // must equal the decoded body. Other codings describe transport bytes.
+      headers: { 'Content-Encoding': coding,
+        'Content-Length': coding === 'identity' ? String(bytes.byteLength) : '40' },
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
     render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
@@ -3895,7 +3938,8 @@ it.each([
     ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
   await waitFor(() => expect(scene.create.mock.lastCall?.[2].footprints).toEqual(accepted ? buildings : []));
   expect(getReader).toHaveBeenCalledTimes(rejectedOnHeaders ? 0 : 1);
-  expect(read).toHaveBeenCalledTimes(rejectedOnHeaders ? 0 : oversized ? 2 : 3);
+  expect(read).toHaveBeenCalledTimes(rejectedOnHeaders ? 0 :
+    (oversized && length === '20') ? 1 : oversized ? 2 : 3);
   expect(cancel).toHaveBeenCalledTimes(oversized ? 1 : 0);
   expect(cancelBody).toHaveBeenCalledTimes(rejectedOnHeaders ? 1 : 0);
   expect(releaseLock).toHaveBeenCalledTimes(rejectedOnHeaders ? 0 : 1);
