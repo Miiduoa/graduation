@@ -37,12 +37,59 @@ export function tronClassDisabledNavigationQuestion(question: string): string | 
 const CLAUSE_SEPARATOR = /(?:然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|[，,；;。！!？?、和與])+/u;
 
 /**
- * 只攔截單個子句。只要以跨服務規劃相同的分隔詞切成兩個以上子句，
- * 就整句交還原本的規劃，不由 TronClass Agent 攔截，行為與 merge-base 相同。
+ * 單一子句才由 TronClass Agent 直接回答。切成兩個以上子句時，整句仍交給原本的
+ * 跨服務規劃，其中的玩課雲子句另由 tronClassCompoundClauses 交給 Agent 補充回答。
  */
 function isMultiClauseRequest(question: string): boolean {
   const clauses = question.normalize('NFKC').split(CLAUSE_SEPARATOR).map(part => part.trim()).filter(Boolean);
   return clauses.length >= 2;
+}
+
+const TRONCLASS_KEYWORD = /(?:\btron\s*class\b|創課|玩課雲)/i;
+// A clause without its own TronClass keyword continues the TronClass request only
+// when it names TronClass data and nothing that belongs to another service.
+const TRONCLASS_CONTINUATION = /(?:作業|教材|講義|附件|檔案|未交|未繳|待交|待繳|還沒交|還沒繳|沒交|沒繳|homework|assignments?|materials?|handouts?)/i;
+const OTHER_SERVICE_OR_SCHEDULE = /(?:頁面|畫面|入口|校園|學校|系上|社團|公車|交通|課表|成績|行事曆|日曆|空堂|時段|安排|排程|提醒|設定|失物|餐|活動|地圖|教室|今天|明天|後天|早上|上午|中午|下午|晚上|分鐘|小時|\d{1,2}\s*[:：點])/u;
+const NEGATED = /(?:不要|別|不准|禁止|無須|不用|不需要|do\s+not|don't|never)/i;
+const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
+
+/**
+ * For a multi-clause request, list the clauses the TronClass Agent should also
+ * answer. The whole request still goes to the original cross-service planning
+ * unchanged, so nothing it plans (navigation, calendar blocks, bus, notices…)
+ * is lost; these clauses only add the private TronClass read beside it.
+ * Explicit navigation stays with the planner, and a clause is never rewritten
+ * into a write or a schedule.
+ */
+export function tronClassCompoundClauses(question: string): string[] {
+  if (typeof question !== 'string' || !question.trim() || question.length > 1000 ||
+    !TRONCLASS_KEYWORD.test(question) || !isMultiClauseRequest(question) ||
+    tronClassExplicitNavigationQuestion(question)) return [];
+  const clauses = question.normalize('NFKC').split(CLAUSE_SEPARATOR).map(part => part.trim()).filter(Boolean);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  let context = false;
+  for (const clause of clauses) {
+    let candidate: string | null = null;
+    if (TRONCLASS_KEYWORD.test(clause)) {
+      context = true;
+      candidate = clause;
+    } else if (context && TRONCLASS_CONTINUATION.test(clause) && !OTHER_SERVICE_OR_SCHEDULE.test(clause) && !NEGATED.test(clause)) {
+      candidate = `玩課雲${clause}`;
+    }
+    if (!candidate || OTHER_SERVICE_OR_SCHEDULE.test(candidate.replace(TRONCLASS_KEYWORD, ''))) continue;
+    const bare = candidate.replace(/[?!.。]+$/u, '').trim();
+    if (tronClassExplicitNavigationQuestion(candidate) || isTronClassNavigationTarget(bare) ||
+      isTronClassNavigationTarget(bare.replace(/^(?:(?:請|麻煩)?(?:幫我|替我)?(?:開啟|打開|開|前往|進入))\s*/u, ''))) continue;
+    const parsed = parseTronClassAgentIntent(candidate);
+    if (!parsed || parsed.intent === 'capabilities') continue;
+    const key = `${parsed.intent}:${parsed.pendingOnly}:${parsed.unsupportedReason ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(candidate);
+    if (result.length >= MAX_COMPOUND_TRONCLASS_CLAUSES) break;
+  }
+  return result;
 }
 
 export type TronClassAgentQueryIntent = {
@@ -57,7 +104,7 @@ export type TronClassAgentQueryIntent = {
  */
 export function parseTronClassAgentIntent(question: string): TronClassAgentQueryIntent | null {
   if (typeof question !== 'string' || !question.trim() || question.length > 1000 ||
-    !/(?:\btron\s*class\b|創課|玩課雲)/i.test(question)) return null;
+    !TRONCLASS_KEYWORD.test(question)) return null;
   const original = question.trim();
   if (isExistingTronClassNavigation(original)) return null;
   if (isMultiClauseRequest(original)) return null;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion } from './tronClassAgentIntent';
+import { canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses } from './tronClassAgentIntent';
 
 describe('explicit TronClass navigation', () => {
   it.each(['開啟玩課雲作業', '前往玩課雲作業頁', '進入 TronClass 頁面', 'open TronClass 作業'])(
@@ -95,4 +95,43 @@ describe('explicit TronClass command routing', () => {
       expect(canAnswerTronClassQuestion(question)).toBe(false);
     },
   );
+});
+
+describe('TronClass clauses inside a multi-clause request', () => {
+  it.each([
+    ['開啟玩課雲作業，查一下還沒交的有哪些', ['玩課雲查一下還沒交的有哪些']],
+    ['玩課雲作業和教材有哪些', ['玩課雲教材有哪些']],
+    ['玩課雲作業，下載講義', ['玩課雲下載講義']],
+    ['TronClass 查未交作業，不要繳交', ['TronClass 查未交作業']],
+    ['查玩課雲未交作業和校園公告', ['查玩課雲未交作業']],
+    ['幫我查 TronClass 未交作業，然後查公車', ['幫我查 TronClass 未交作業']],
+    ['TronClass 未交作業，還沒交的作業', ['TronClass 未交作業']],
+  ])('answers the TronClass part of %s with the Agent', (question, expected) => {
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual(expected);
+  });
+
+  it.each([
+    '開啟玩課雲作業，安排今天下午作業準備30分鐘',
+    '玩課雲作業，查公車',
+    '玩課雲作業和查公車',
+    '玩課雲作業，查校園公告',
+    '玩課雲作業，查成績',
+    '玩課雲，查今天課表',
+    '打開玩課雲然後查社團',
+    '玩課雲作業順便查公車',
+    '玩課雲作業，開啟設定',
+    '玩課雲作業',
+    'TronClass 有哪些未交作業',
+    '查公車，然後看校園公告',
+    '請幫我打開玩課雲作業與教材頁面，可以嗎？',
+    '開啟玩課雲作業，教材頁面',
+  ])('adds no Agent read to %s', question => {
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('never turns a continuation clause into a TronClass write or schedule', () => {
+    expect(tronClassCompoundClauses('查玩課雲作業，安排明天作業時段')).toEqual(['查玩課雲作業']);
+    expect(tronClassCompoundClauses('查玩課雲作業，不要上傳附件')).toEqual(['查玩課雲作業']);
+  });
 });

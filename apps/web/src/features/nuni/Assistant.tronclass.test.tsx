@@ -101,22 +101,74 @@ it.each([
 });
 
 it.each([
-  '玩課雲作業，查公車',
-  '玩課雲作業和查公車',
-  '玩課雲作業，查校園公告',
-  '開啟玩課雲作業，查一下還沒交的有哪些',
-  '開啟玩課雲作業，安排今天下午作業準備30分鐘',
-])('leaves the multi-clause request %s on the existing cross-service plan', async question => {
-  const fetch = vi.fn(async (url: string) => {
+  ['玩課雲作業，查公車', []],
+  ['玩課雲作業和查公車', []],
+  ['玩課雲作業，查校園公告', []],
+  ['開啟玩課雲作業，安排今天下午作業準備30分鐘', []],
+  ['開啟玩課雲作業，查一下還沒交的有哪些', ['玩課雲查一下還沒交的有哪些']],
+  ['查玩課雲未交作業和校園公告', ['查玩課雲未交作業']],
+  ['幫我查 TronClass 未交作業，然後查公車', ['幫我查 TronClass 未交作業']],
+])('keeps the whole multi-clause request %s on the existing cross-service plan and adds its TronClass clauses %j', async (question, clauses) => {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => { void init;
     if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
     if (url === '/api/tronclass/agent') return json(base);
+    if (url === '/api/nuni/assistant/ask') return json({ answer: '跨服務規劃結果', steps: [], cards: [] });
     return json({ answer: '', steps: [], cards: [] });
   });
   vi.stubGlobal('fetch', fetch);
   render(<Assistant />);
   fireEvent.click(await screen.findByRole('checkbox'));
   await ask(question);
-  await waitFor(() => expect(fetch.mock.calls.some(([url]) => !url.endsWith('/capability'))).toBe(true));
+  await screen.findByText('跨服務規劃結果');
+  const planned = fetch.mock.calls.filter(([url]) => url === '/api/nuni/assistant/ask').map(([, init]) => body(init).question);
+  expect(planned).toEqual([question]);
+  if (clauses.length) await screen.findByRole('heading', { name: '私人期中報告' });
+  await waitFor(() => expect(fetch.mock.calls.filter(([url]) => url === '/api/tronclass/agent')
+    .map(([, init]) => body(init).question)).toEqual(clauses));
+  // The planner's reply comes first and stays in the thread beside the TronClass answer.
+  expect(screen.getByText('跨服務規劃結果')).toBeTruthy();
+});
+
+it('keeps the planner reply and adds no disabled notice when the TronClass integration is off', async () => {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => { void init;
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json({ error: 'TRONCLASS_DISABLED', message: '整合已停用' }, 503);
+    if (url === '/api/nuni/assistant/ask') return json({ answer: '跨服務規劃結果', steps: [], cards: [] });
+    return json({ answer: '', steps: [], cards: [] });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  fireEvent.click(await screen.findByRole('checkbox'));
+  await ask('TronClass 未交作業，教材有哪些，查公車');
+  await screen.findByText('跨服務規劃結果');
+  await waitFor(() => expect(fetch.mock.calls.filter(([url]) => url === '/api/tronclass/agent')).toHaveLength(1));
+  await act(async () => { await Promise.resolve(); });
+  expect(screen.queryByText('整合已停用')).toBeNull();
+  expect(fetch.mock.calls.filter(([url]) => url === '/api/tronclass/agent')).toHaveLength(1);
+});
+
+it('does not start the TronClass clauses after the planner request is stopped', async () => {
+  let release!: () => void;
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json(base);
+    if (url === '/api/nuni/assistant/ask') {
+      return new Promise<Response>((resolve, reject) => {
+        release = () => resolve(json({ answer: '跨服務規劃結果', steps: [], cards: [] }));
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    }
+    return json({ answer: '', steps: [], cards: [] });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  fireEvent.click(await screen.findByRole('checkbox'));
+  await ask('查玩課雲未交作業和校園公告');
+  await waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/nuni/assistant/ask')).toBe(true));
+  fireEvent.click(await screen.findByRole('button', { name: /停止/ }));
+  await screen.findByText(/已停止這次回答/);
+  void release;
+  await act(async () => { await Promise.resolve(); });
   expect(fetch.mock.calls.some(([url]) => url === '/api/tronclass/agent')).toBe(false);
 });
 
