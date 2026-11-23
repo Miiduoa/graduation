@@ -1357,9 +1357,17 @@ describe.each([
             await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
           }
 
-          expect(Boolean(view.queryByText('社群簡介已儲存。'))).toBe(mergeBaseConfirms);
+          const confirms = !metadata.hasPendingWrites && mergeBaseConfirms;
+          expect(Boolean(view.queryByText('社群簡介已儲存。'))).toBe(confirms);
           expect(setDoc).toHaveBeenCalledTimes(1);
-          if (mergeBaseConfirms) {
+          if (metadata.hasPendingWrites) {
+            expect(view.getByLabelText('一句話介紹').props.value).toBe(draft.headline);
+            expect(view.getByLabelText('個人簡介').props.value).toBe(draft.bio);
+            expect(view.getByLabelText('作品連結').props.value).toBe(draft.linkUrl);
+            expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+            expect(view.getByLabelText('核對儲存結果').props.accessibilityState.disabled).toBe(false);
+            expect(view.queryByText(/伺服器資料與上次送出的內容不同/)).toBeNull();
+          } else if (confirms) {
             expect(view.queryByLabelText('核對儲存結果')).toBeNull();
             expect(view.queryByLabelText('儲存簡介')).toBeNull();
           } else if (flow === 'manual after timeout') {
@@ -1384,7 +1392,7 @@ describe.each([
 test.each([
   { hasPendingWrites: false },
   { hasPendingWrites: true },
-])('a late acknowledged save confirms with pending metadata $hasPendingWrites after timeout', async ({
+])('a late acknowledged save after timeout respects pending metadata $hasPendingWrites', async ({
   hasPendingWrites,
 }) => {
   jest.useFakeTimers();
@@ -1421,10 +1429,17 @@ test.each([
     expect(setDoc).toHaveBeenCalledTimes(1);
     expect(getDocFromServer).toHaveBeenCalledTimes(1);
     expect(readCreatorCard).toHaveBeenCalledTimes(1);
-    expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
-    expect(view.getByText(card.bio)).toBeTruthy();
-    expect(view.queryByLabelText('核對儲存結果')).toBeNull();
-    expect(view.queryByLabelText('個人簡介')).toBeNull();
+    if (hasPendingWrites) {
+      expect(view.queryByText('社群簡介已儲存。')).toBeNull();
+      expect(view.getByText(/仍無法核對伺服器資料/)).toBeTruthy();
+      expect(view.getByLabelText('個人簡介').props.value).toBe(card.bio);
+      expect(view.getByLabelText('核對儲存結果').props.accessibilityState.disabled).toBe(false);
+    } else {
+      expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+      expect(view.getByText(card.bio)).toBeTruthy();
+      expect(view.queryByLabelText('核對儲存結果')).toBeNull();
+      expect(view.queryByLabelText('個人簡介')).toBeNull();
+    }
   } finally {
     jest.useRealTimers();
   }
