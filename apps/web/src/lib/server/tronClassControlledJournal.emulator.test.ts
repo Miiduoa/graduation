@@ -15,7 +15,7 @@ import {
   type TronClassSubmissionBindings, type TronClassSubmissionFirestore,
 } from './tronClassSubmission';
 
-vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerStarted: () => true }));
+vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerReady: () => true }));
 
 const { closeTronClassOwner } = createRequire(import.meta.url)(
   '../../../../../backend/functions/tronClassAccountLifecycle.js',

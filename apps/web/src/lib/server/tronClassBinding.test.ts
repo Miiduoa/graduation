@@ -7,8 +7,12 @@ import {
 } from './tronClassBinding';
 import { PuCampusError, type PuCampusGateway, type TronClassSession } from './puCampusClient';
 
-const schedulerStarted = vi.hoisted(() => vi.fn(() => true));
-vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerStarted: schedulerStarted }));
+const schedulerReady = vi.hoisted(() => vi.fn(() => true));
+const waitForFirstSweep = vi.hoisted(() => vi.fn<() => Promise<void>>());
+vi.mock('./tronClassRetentionScheduler', () => ({
+  isTronClassRetentionSchedulerReady: schedulerReady,
+  waitForTronClassRetentionFirstSweep: waitForFirstSweep,
+}));
 
 const OWNER = 'platform:pa_12345678-1234-1234-1234-123456789abc';
 const SECRET = 'binding-tests-only-secret-at-least-thirty-two';
@@ -57,8 +61,9 @@ function setup() {
 function bindingPath(owner = OWNER) { return `_tronClassBindings/${createHash('sha256').update(owner).digest('hex')}`; }
 
 beforeEach(() => {
-  schedulerStarted.mockReset();
-  schedulerStarted.mockReturnValue(true);
+  waitForFirstSweep.mockReset().mockResolvedValue(undefined);
+  schedulerReady.mockReset();
+  schedulerReady.mockReturnValue(true);
   vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true');
 });
 afterEach(() => vi.unstubAllEnvs());
@@ -406,12 +411,35 @@ describe('independent TronClass binding', () => {
     expect(docs.size).toBe(0);
   });
 
-  it('rejects binding before login and storage when the retention scheduler has not started', async () => {
-    schedulerStarted.mockReturnValue(false);
+  it('rejects binding before login and storage when retention is still unready after the initial wait', async () => {
+    schedulerReady.mockReturnValue(false);
     const { service, login, docs } = setup();
     await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 503, code: 'TRONCLASS_RETENTION_REQUIRED' });
     expect(login).not.toHaveBeenCalled();
     expect(docs.size).toBe(0);
+  });
+
+  it('proceeds when the first sweep makes retention ready during the initial wait', async () => {
+    schedulerReady.mockReturnValue(false);
+    const { service, login, docs } = setup();
+    waitForFirstSweep.mockImplementationOnce(async () => {
+      expect(login).not.toHaveBeenCalled();
+      expect(docs.size).toBe(0);
+      schedulerReady.mockReturnValue(true);
+    });
+    await expect(service.connect(OWNER, input())).resolves.toMatchObject({ connected: true });
+    expect(waitForFirstSweep).toHaveBeenCalledOnce();
+  });
+
+  it('does not save a verified session if the last successful sweep becomes stale during login', async () => {
+    const { service, login, docs } = setup();
+    login.mockImplementationOnce(async () => {
+      schedulerReady.mockReturnValue(false);
+      return loginResult();
+    });
+    await expect(service.connect(OWNER, input())).rejects.toMatchObject({ code: 'TRONCLASS_RETENTION_REQUIRED' });
+    expect(waitForFirstSweep).not.toHaveBeenCalled();
+    expect(docs.has(bindingPath())).toBe(false);
   });
 
   it('does not save a verified session if retention is disabled during login', async () => {

@@ -158,8 +158,8 @@ function recentAttempts(snapshot: Snapshot, now: number, limit: number): LoginAt
   return (value as LoginAttempt[]).filter((entry) => tronClassLoginAttemptTimestamp(entry) > now - TRONCLASS_LOGIN_WINDOW_MS);
 }
 
-function assertRetentionEnabled(schedulerStarted: boolean): void {
-  if (process.env.TRONCLASS_RETENTION_ENABLED !== 'true' || !schedulerStarted) {
+function assertRetentionEnabled(schedulerReady: boolean): void {
+  if (process.env.TRONCLASS_RETENTION_ENABLED !== 'true' || !schedulerReady) {
     throw new NuniError(503, 'TRONCLASS_RETENTION_REQUIRED');
   }
 }
@@ -257,8 +257,12 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
     checkedRevision(input.expectedRevision);
     const expectedRevision = input.expectedRevision;
     const account = checkedAccount(input.account);
-    const { isTronClassRetentionSchedulerStarted } = await wait(() => import('./tronClassRetentionScheduler'));
-    assertRetentionEnabled(isTronClassRetentionSchedulerStarted());
+    const { isTronClassRetentionSchedulerReady, waitForTronClassRetentionFirstSweep } =
+      await wait(() => import('./tronClassRetentionScheduler'));
+    if (process.env.TRONCLASS_RETENTION_ENABLED === 'true' && !isTronClassRetentionSchedulerReady()) {
+      await wait(waitForTronClassRetentionFirstSweep);
+    }
+    assertRetentionEnabled(isTronClassRetentionSchedulerReady());
     const encryptionKey = key();
     const db = await wait(getStore);
     check();
@@ -341,7 +345,7 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
       // abort before this write must not replace or establish a connection.
       check();
       if ((current?.revision ?? null) !== expectedRevision) changed();
-      assertRetentionEnabled(isTronClassRetentionSchedulerStarted());
+      assertRetentionEnabled(isTronClassRetentionSchedulerReady());
       transaction.set(ref, row);
     });
     check();
