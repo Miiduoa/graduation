@@ -65,6 +65,7 @@ function respond(path: string, _context?: string, input?: unknown) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState(null, '', '/merchant/workspace');
   mocks.auth.session = { platformAccountId: 'account-a', context: 'context-a' };
   mocks.auth.loading = false;
   mocks.auth.pendingLogout = false;
@@ -312,7 +313,7 @@ it('shows review instructions and actual authorized location readiness', async (
   expect(within(locations).getByText('已核准，待完成營運設定')).toBeTruthy();
   expect(within(locations).getByText(/待完成：確認營運設定與條款、建立菜單/)).toBeTruthy();
   expect(within(locations).queryByText('營業中')).toBeNull();
-  fireEvent.click(within(locations).getByRole('button', { name: '管理門市：一樓' }));
+  fireEvent.click(within(locations).getByRole('link', { name: '管理門市：一樓' }));
   await waitFor(() =>
     expect(mocks.request).toHaveBeenCalledWith(
       'merchant-workspaces/campus-one/location-1',
@@ -412,7 +413,7 @@ it('retains an uncertain menu through a session network error, but clears it for
     return respond(path, context, input);
   });
   const view = render(<MerchantWorkspace />);
-  fireEvent.click(await screen.findByRole('button', { name: '管理門市：一樓' }));
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
   await screen.findByLabelText('品項 1 名稱');
   for (const [label, value] of [
     ['品項 1 名稱', '保留便當'],
@@ -431,7 +432,6 @@ it('retains an uncertain menu through a session network error, but clears it for
   mocks.auth.session = { platformAccountId: 'account-a', context: 'renewed-context' };
   mocks.auth.error = '';
   view.rerender(<MerchantWorkspace />);
-  fireEvent.click(await screen.findByRole('button', { name: '管理門市：一樓' }));
   await screen.findByLabelText('品項 1 名稱');
   expect((screen.getByLabelText('品項 1 名稱') as HTMLInputElement).value).toBe('保留便當');
   expect(
@@ -443,7 +443,6 @@ it('retains an uncertain menu through a session network error, but clears it for
   );
   mocks.auth.session = { platformAccountId: 'account-b', context: 'other-context' };
   view.rerender(<MerchantWorkspace />);
-  fireEvent.click(await screen.findByRole('button', { name: '管理門市：一樓' }));
   await screen.findByLabelText('品項 1 名稱');
   expect((screen.getByLabelText('品項 1 名稱') as HTMLInputElement).value).toBe('');
 });
@@ -479,10 +478,8 @@ it.each(['approved', 'under-review'])(
     render(<MerchantLocationsPage />);
     await screen.findByText('測試餐坊／學生餐廳');
     const applications = screen.getByRole('region', { name: '申請進度' });
-    expect(
-      within(applications).queryByRole('button', { name: '前往管理門市：第二門市' }),
-    ).toBeNull();
-    const link = within(applications).queryByRole('button', { name: '前往管理門市：第一門市' });
+    expect(within(applications).queryByRole('link', { name: '前往管理門市：第二門市' })).toBeNull();
+    const link = within(applications).queryByRole('link', { name: '前往管理門市：第一門市' });
     if (state !== 'approved') {
       expect(link).toBeNull();
       return;
@@ -508,7 +505,7 @@ it('explains how to continue when an approved application has no same-campus wor
   render(<MerchantLocationsPage />);
   await screen.findByText('這個場域的門市尚未出現在清單，請重新載入；若仍未出現，請聯絡受理單位。');
   expect(screen.getByRole('heading', { name: '申請已核准，等待門市權限' })).toBeTruthy();
-  expect(screen.queryByRole('button', { name: /前往管理門市/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /前往管理門市/ })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
   await waitFor(() =>
     expect(
@@ -575,12 +572,62 @@ it('prioritizes the actual authorized store for a returning operator and hides i
   expect(screen.getByRole('link', { name: '選擇門市' }).getAttribute('href')).toBe(
     '#merchant-locations-title',
   );
-  expect(screen.getByRole('button', { name: '管理門市：第一門市' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '管理門市：第一門市' })).toBeTruthy();
   expect(screen.queryByLabelText('申請場域')).toBeNull();
   mocks.request.mockRejectedValue(new Error('offline'));
   fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
   await screen.findByRole('alert');
   expect(screen.queryByRole('heading', { name: '開始今天的門市工作' })).toBeNull();
-  expect(screen.queryByRole('button', { name: '管理門市：第一門市' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '管理門市：第一門市' })).toBeNull();
   expect(screen.queryByRole('heading', { name: '開始申請第一間門市' })).toBeNull();
+});
+
+it('keeps a drafted or uncertain application in place when opening a store would leave its page', async () => {
+  window.history.replaceState(null, '', '/merchant');
+  let showStore = false;
+  mocks.request.mockImplementation((path, context, input) => {
+    if (input) return Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
+    if (path === 'merchant-workspaces' && showStore)
+      return Promise.resolve({
+        workspaces: [
+          {
+            tenantId: 'campus-one',
+            tenantName: '第一校園',
+            merchantName: '餐坊',
+            locationId: 'location-1',
+            locationName: '第一門市',
+            campusName: '主校區',
+            merchantStatus: 'active',
+            locationStatus: 'open',
+            activated: true,
+            publicAccess: true,
+            missingRequirements: [],
+          },
+        ],
+      });
+    return respond(path, context, input);
+  });
+  render(<MerchantWorkspace />);
+  await fillApplication();
+  showStore = true;
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  const store = await screen.findByRole('link', { name: '管理門市：第一門市' });
+  fireEvent.click(store);
+  expect(window.location.pathname).toBe('/merchant');
+  expect(screen.getByText(/進駐資料尚未送出/)).toBeTruthy();
+  expect((screen.getByLabelText('對外品牌名稱') as HTMLInputElement).value).toBe('測試餐坊');
+  fireEvent.click(screen.getByRole('button', { name: '送出進駐申請' }));
+  await screen.findByText(/尚未確認是否收件/);
+  fireEvent.click(store);
+  expect(window.location.pathname).toBe('/merchant');
+  expect(screen.getByText(/進駐申請尚未確認完成/)).toBeTruthy();
+  const separate = screen.getByRole('link', { name: '在新分頁開啟門市' });
+  expect(separate.getAttribute('target')).toBe('_blank');
+  expect(separate.getAttribute('href')).toBe(
+    '/merchant/workspace?tenant=campus-one&location=location-1',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '重試同一份申請' }));
+  await waitFor(() => expect(mocks.request.mock.calls.filter((call) => call[2])).toHaveLength(2));
+  const writes = mocks.request.mock.calls.filter((call) => call[2]);
+  expect(writes[1][2]).toEqual(writes[0][2]);
 });

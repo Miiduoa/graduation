@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { NuniError } from '@campus/shared/src/nuni';
 import { merchantWorkspaceStateLabel } from '@campus/shared/src/nuniMerchant';
 import { isMerchantWorkspaceOperational } from '@campus/shared/src/merchantJourney';
@@ -15,6 +16,11 @@ import { Input, Select, Textarea } from '@/components/ui/Input';
 import styles from './MerchantWorkspace.module.css';
 import { MerchantOrderDesk } from './MerchantOrderDesk';
 import type { FoodDraftCache } from '@/features/food/foodState';
+import {
+  merchantWorkspaceHref,
+  type MerchantWorkspaceSection,
+  type MerchantWorkspaceQueue,
+} from '@/lib/merchantWorkspaceNavigation';
 
 type Detail = NuniMerchantWorkspaceDetail;
 type SettingDraft = Omit<NuniMerchantSettingsInput, 'termsVersion' | 'expectedVersion'> & {
@@ -73,6 +79,7 @@ export function MerchantOperations({
   suspended,
   drafts,
   foodDrafts,
+  navigation,
   onBack,
   onExpired,
   onChanged,
@@ -83,7 +90,12 @@ export function MerchantOperations({
   suspended: boolean;
   drafts: MerchantOperationDrafts;
   foodDrafts?: FoodDraftCache;
-  onBack(): void;
+  navigation?: {
+    section: MerchantWorkspaceSection;
+    queue: MerchantWorkspaceQueue;
+    onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+  };
+  onBack?(): void;
   onExpired(): void;
   onChanged(detail: Detail): void;
 }) {
@@ -110,6 +122,12 @@ export function MerchantOperations({
   const [menuBlocked, setMenuBlocked] = useState(saved?.menuBlocked ?? false);
   const [activationConfirmed, setActivationConfirmed] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
+  const ordersOpen = navigation ? navigation.section === 'orders' : showOrders;
+  const workspaceHeading = useRef<HTMLHeadingElement>(null);
+  const hasDetail = !!detail;
+  useEffect(() => {
+    if (hasDetail && document.activeElement === document.body) workspaceHeading.current?.focus();
+  }, [hasDetail, navigation?.section]);
   const [localFoodDrafts] = useState<FoodDraftCache>(() => new Map());
   const active = useRef(false);
   const lock = useRef(false);
@@ -264,13 +282,34 @@ export function MerchantOperations({
     !detail.onlinePaymentAvailable &&
     detail.paymentMode === 'online-and-counter' &&
     detail.termsVersion === 'merchant-terms-v1';
+  const sectionHref = (section: MerchantWorkspaceSection) =>
+    merchantWorkspaceHref({
+      tenantId,
+      locationId,
+      section,
+      queue: navigation?.queue,
+    });
 
   return (
     <div className={styles.stack}>
       <div className={styles.toolbar}>
-        <Button onClick={onBack} disabled={!!busy}>
-          返回我的門市
-        </Button>
+        {navigation ? (
+          <Link
+            className="btn"
+            href="/merchant/workspace"
+            aria-disabled={!!busy || undefined}
+            onClick={(event) => {
+              if (busy) event.preventDefault();
+              else navigation.onNavigate(event);
+            }}
+          >
+            返回我的門市
+          </Link>
+        ) : (
+          <Button onClick={onBack} disabled={!!busy}>
+            返回我的門市
+          </Button>
+        )}
         <Button disabled={!!busy || loading} onClick={() => void read()}>
           重新讀取門市狀態
         </Button>
@@ -281,7 +320,7 @@ export function MerchantOperations({
       {detail && draft && (
         <>
           <section className={styles.intro} aria-label="門市現況">
-            <h2>
+            <h2 ref={workspaceHeading} tabIndex={-1}>
               {detail.merchantName}／{detail.locationName}
             </h2>
             <p>
@@ -298,21 +337,50 @@ export function MerchantOperations({
             )}
           </section>
 
-          {operational && (
+          {navigation && (
+            <nav className={styles.workspaceNav} aria-label="門市工作">
+              <Link
+                href={sectionHref('overview')}
+                aria-current={!ordersOpen ? 'page' : undefined}
+                onClick={navigation.onNavigate}
+              >
+                門市概況
+              </Link>
+              <Link
+                href={sectionHref('orders')}
+                aria-current={ordersOpen ? 'page' : undefined}
+                onClick={navigation.onNavigate}
+              >
+                訂單與收銀
+              </Link>
+            </nav>
+          )}
+
+          {operational && (!navigation || !ordersOpen) && (
             <section className={styles.panel} aria-labelledby="merchant-daily-work-title">
               <h3 id="merchant-daily-work-title">門市工作台</h3>
               <p>開班、確認收款、準備餐點與核對取餐憑證。暫停新訂單時，仍可處理已收到的訂單。</p>
-              <Button
-                variant="primary"
-                disabled={locked}
-                aria-expanded={showOrders}
-                aria-controls="merchant-order-workspace"
-                onClick={() => setShowOrders((value) => !value)}
-              >
-                {showOrders ? '收起訂單工作台' : '處理訂單與收銀'}
-              </Button>
+              {navigation ? (
+                <Link
+                  className="btn primary"
+                  href={sectionHref('orders')}
+                  onClick={navigation.onNavigate}
+                >
+                  處理訂單與收銀
+                </Link>
+              ) : (
+                <Button
+                  variant="primary"
+                  disabled={locked}
+                  aria-expanded={showOrders}
+                  aria-controls="merchant-order-workspace"
+                  onClick={() => setShowOrders((value) => !value)}
+                >
+                  {showOrders ? '收起訂單工作台' : '處理訂單與收銀'}
+                </Button>
+              )}
               <div id="merchant-order-workspace">
-                {showOrders && !locked && (
+                {!navigation && showOrders && !locked && (
                   <MerchantOrderDesk
                     key={`${context}:${tenantId}:${locationId}`}
                     context={context}
@@ -325,7 +393,44 @@ export function MerchantOperations({
             </section>
           )}
 
-          {!detail.activated && (
+          {navigation &&
+            ordersOpen &&
+            (operational ? (
+              locked ? (
+                <p role="status">正在重新確認門市，確認後會接回訂單工作台。</p>
+              ) : (
+                <MerchantOrderDesk
+                  key={`${context}:${tenantId}:${locationId}`}
+                  context={context}
+                  tenantId={tenantId}
+                  locationId={locationId}
+                  cache={foodDrafts ?? localFoodDrafts}
+                  queue={navigation.queue}
+                  queueHref={(queue) =>
+                    merchantWorkspaceHref({ tenantId, locationId, section: 'orders', queue })
+                  }
+                  onQueueChange={(event) => navigation.onNavigate(event)}
+                />
+              )
+            ) : (
+              <section className={styles.panel} aria-labelledby="merchant-orders-unavailable-title">
+                <h3 id="merchant-orders-unavailable-title">這間門市尚未開放訂單工作台</h3>
+                <p>
+                  {detail.activated
+                    ? '目前的門市狀態需要由場域管理者確認，請聯絡管理者恢復營運權限。'
+                    : '請先確認門市狀態與營運條件。完成設定並啟用後，就能在這裡接單與收銀。'}
+                </p>
+                <Link
+                  className="btn primary"
+                  href={sectionHref('overview')}
+                  onClick={navigation.onNavigate}
+                >
+                  查看門市概況
+                </Link>
+              </section>
+            ))}
+
+          {!ordersOpen && !detail.activated && (
             <section className={styles.panel} aria-labelledby="merchant-settings-title">
               <h3 id="merchant-settings-title">1. 確認營運方式</h3>
               <form
@@ -430,7 +535,7 @@ export function MerchantOperations({
             </section>
           )}
 
-          {canDowngrade && (
+          {!ordersOpen && canDowngrade && (
             <section className={styles.panel}>
               <h3>改用現場付款</h3>
               <p>
@@ -457,7 +562,7 @@ export function MerchantOperations({
             </section>
           )}
 
-          {!detail.activated && (
+          {!ordersOpen && !detail.activated && (
             <section className={styles.panel} aria-labelledby="merchant-menu-title">
               <h3 id="merchant-menu-title">2. 建立首次菜單</h3>
               {menuExists ? (
@@ -600,85 +705,89 @@ export function MerchantOperations({
             </section>
           )}
 
-          <section className={styles.panel} aria-labelledby="merchant-activate-title">
-            <h3 id="merchant-activate-title">
-              {detail.activated ? '接單狀態' : '3. 確認後啟用門市'}
-            </h3>
-            <dl className={styles.summary}>
-              <div>
-                <dt>服務方式</dt>
-                <dd>
-                  {detail.serviceModes
-                    .map((mode) => modes.find(([value]) => value === mode)?.[1] ?? mode)
-                    .join('、')}
-                </dd>
-              </div>
-              <div>
-                <dt>付款方式</dt>
-                <dd>{detail.paymentMode === 'counter-only' ? '現場櫃檯付款' : '線上及櫃檯付款'}</dd>
-              </div>
-              <div>
-                <dt>有庫存的上架品項</dt>
-                <dd>{detail.publishedMenuItems} 項</dd>
-              </div>
-            </dl>
-            {!detail.activated ? (
-              <>
-                <p>啟用後，門市會公開並開始接單。以上是目前已儲存的資料。</p>
-                {settings && <p>營運設定還有未儲存的草稿，請先儲存或改用目前設定。</p>}
-                <label className={styles.confirmation}>
-                  <input
-                    type="checkbox"
-                    disabled={locked || !canActivate || !!settings}
-                    checked={activationConfirmed}
-                    onChange={(event) => setActivationConfirmed(event.target.checked)}
-                  />
-                  我已確認門市、營運方式及菜單，現在開放接單
-                </label>
-                <Button
-                  disabled={locked || !canActivate || !!settings || !activationConfirmed}
-                  variant="primary"
-                  onClick={() =>
-                    void mutate('activate', async (current) => {
-                      const next = await operations.activate(tenantId, locationId);
-                      if (!current()) return;
-                      accept(next);
-                      setNotice(`門市狀態已更新：${merchantWorkspaceStateLabel(next)}。`);
-                    })
-                  }
-                >
-                  確認啟用門市
-                </Button>
-              </>
-            ) : operational ? (
-              <>
-                <p>
-                  {detail.locationStatus === 'open'
-                    ? '目前開放接單。暫停後，已收到的訂單仍需處理。'
-                    : '目前暫停接單。恢復前會重新確認菜單與付款設定。'}
-                </p>
-                <Button
-                  disabled={locked}
-                  onClick={() =>
-                    void mutate('availability', async (current) => {
-                      const next = await operations.setAvailability(
-                        tenantId,
-                        locationId,
-                        detail.locationStatus === 'closed',
-                      );
-                      if (!current()) return;
-                      accept(next);
-                      setNotice(`門市狀態已更新：${merchantWorkspaceStateLabel(next)}。`);
-                    })
-                  }
-                >
-                  {detail.locationStatus === 'open' ? '暫停接單' : '恢復接單'}
-                </Button>
-              </>
-            ) : (
-              <p>門市的營運狀態需要由場域管理者確認，這裡無法自行恢復接單。</p>
-            )}
-          </section>
+          {!ordersOpen && (
+            <section className={styles.panel} aria-labelledby="merchant-activate-title">
+              <h3 id="merchant-activate-title">
+                {detail.activated ? '接單狀態' : '3. 確認後啟用門市'}
+              </h3>
+              <dl className={styles.summary}>
+                <div>
+                  <dt>服務方式</dt>
+                  <dd>
+                    {detail.serviceModes
+                      .map((mode) => modes.find(([value]) => value === mode)?.[1] ?? mode)
+                      .join('、')}
+                  </dd>
+                </div>
+                <div>
+                  <dt>付款方式</dt>
+                  <dd>
+                    {detail.paymentMode === 'counter-only' ? '現場櫃檯付款' : '線上及櫃檯付款'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>有庫存的上架品項</dt>
+                  <dd>{detail.publishedMenuItems} 項</dd>
+                </div>
+              </dl>
+              {!detail.activated ? (
+                <>
+                  <p>啟用後，門市會公開並開始接單。以上是目前已儲存的資料。</p>
+                  {settings && <p>營運設定還有未儲存的草稿，請先儲存或改用目前設定。</p>}
+                  <label className={styles.confirmation}>
+                    <input
+                      type="checkbox"
+                      disabled={locked || !canActivate || !!settings}
+                      checked={activationConfirmed}
+                      onChange={(event) => setActivationConfirmed(event.target.checked)}
+                    />
+                    我已確認門市、營運方式及菜單，現在開放接單
+                  </label>
+                  <Button
+                    disabled={locked || !canActivate || !!settings || !activationConfirmed}
+                    variant="primary"
+                    onClick={() =>
+                      void mutate('activate', async (current) => {
+                        const next = await operations.activate(tenantId, locationId);
+                        if (!current()) return;
+                        accept(next);
+                        setNotice(`門市狀態已更新：${merchantWorkspaceStateLabel(next)}。`);
+                      })
+                    }
+                  >
+                    確認啟用門市
+                  </Button>
+                </>
+              ) : operational ? (
+                <>
+                  <p>
+                    {detail.locationStatus === 'open'
+                      ? '目前開放接單。暫停後，已收到的訂單仍需處理。'
+                      : '目前暫停接單。恢復前會重新確認菜單與付款設定。'}
+                  </p>
+                  <Button
+                    disabled={locked}
+                    onClick={() =>
+                      void mutate('availability', async (current) => {
+                        const next = await operations.setAvailability(
+                          tenantId,
+                          locationId,
+                          detail.locationStatus === 'closed',
+                        );
+                        if (!current()) return;
+                        accept(next);
+                        setNotice(`門市狀態已更新：${merchantWorkspaceStateLabel(next)}。`);
+                      })
+                    }
+                  >
+                    {detail.locationStatus === 'open' ? '暫停接單' : '恢復接單'}
+                  </Button>
+                </>
+              ) : (
+                <p>門市的營運狀態需要由場域管理者確認，這裡無法自行恢復接單。</p>
+              )}
+            </section>
+          )}
         </>
       )}
     </div>
