@@ -396,6 +396,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const pageSuspended = useRef(false);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
+  const sceneContainer = useRef<HTMLDivElement | null>(null);
   const restartButton = useRef<HTMLButtonElement | null>(null);
   const manualOpenButton = useRef<HTMLButtonElement | null>(null);
   // Only move keyboard focus into the recovery UI when it was inside the 3D scene.
@@ -836,20 +837,28 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       document.addEventListener('focusin', onFocusChange, true);
       document.addEventListener('focusout', onFocusChange, true);
     } catch { /* Window events still recheck layout in partial WebViews. */ }
-    // A touch that lands on the canvas host proves the host is on screen at
-    // that point, whatever a stale visual viewport still claims (for example an
-    // Android back-key dismissal that leaves the text field focused). Trust
-    // that evidence until the viewport geometry really changes.
-    const onHostTouched = () => {
+    // The overlay receives input while the canvas host is inert. A touch in
+    // the scene can disprove stale viewport bounds after keyboard dismissal.
+    const onSceneTouched = (event: Event) => {
+      const target = event.target;
+      const restart = restartButton.current;
+      if (!(target instanceof Node)) return;
+      // Keep the button mounted through its click so manual restart can run.
+      if (restart?.contains(target)) return;
+      if (!restart && !host.contains(target)) return;
       try {
         const viewport = window.visualViewport;
-        if (viewport) ignoredViewport = viewportSignature(viewport);
+        if (viewport) {
+          if (isPinchZoomed(viewport) || measureKeyboardOpen() === true) return;
+          ignoredViewport = viewportSignature(viewport);
+        }
       } catch { /* Partial WebViews: nothing to ignore. */ }
       syncVisibility();
     };
+    const container = sceneContainer.current;
     const touchEvents = ['pointerdown', 'touchstart', 'mousedown'] as const;
     for (const event of touchEvents) {
-      try { host.addEventListener(event, onHostTouched, { passive: true }); }
+      try { container?.addEventListener(event, onSceneTouched, { capture: true, passive: true }); }
       catch { /* Manual restart remains available. */ }
     }
     let visualViewport: VisualViewport | null | undefined;
@@ -868,7 +877,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       for (const id of focusTimers) window.clearTimeout(id);
       focusTimers.clear();
       for (const event of touchEvents) {
-        try { host.removeEventListener(event, onHostTouched); }
+        try { container?.removeEventListener(event, onSceneTouched, true); }
         catch { /* Complete the remaining cleanup. */ }
       }
       try {
@@ -932,7 +941,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   }, [paused, status, host]);
   return (
     <>
-    <div className={styles.scene} data-spatial-state={status}>
+    <div ref={sceneContainer} className={styles.scene} data-spatial-state={status}>
       <div
         ref={setHost}
         className={styles.sceneHost}

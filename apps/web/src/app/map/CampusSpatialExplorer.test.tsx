@@ -2497,11 +2497,15 @@ it('automatically expires silent viewport occlusion after a fresh visible observ
 it('keeps confirmed keyboard occlusion paused and resumes when keyboard geometry clears', async () => {
   const keyboard = Object.assign(new EventTarget(), { boundingRect: new DOMRect(0, 200, 320, 400) });
   vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: keyboard } }));
-  const { viewport, graphics, bounds, field } = await openKeyboardCoveredScene();
+  const { viewport, dialog, graphics, bounds, field } = await openKeyboardCoveredScene();
   vi.useFakeTimers();
   try {
     act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
     act(() => vi.advanceTimersByTime(10_000));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    const overlay = within(dialog).getByText(/立體畫面已暫停/);
+    fireEvent.pointerDown(overlay);
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
 
     keyboard.boundingRect = new DOMRect();
@@ -2516,15 +2520,17 @@ it('keeps confirmed keyboard occlusion paused and resumes when keyboard geometry
   }
 });
 
-it('resumes 3D when the visitor touches the canvas while a stale viewport and a focused field remain', async () => {
+it('resumes 3D when the visitor touches the paused scene overlay while a stale viewport and a focused field remain', async () => {
   const { viewport, dialog, graphics, bounds } = await openKeyboardCoveredScene();
   try {
     // Back-key dismissal: the field keeps focus, the viewport height is stale
-    // and no event fires. Nothing can touch the canvas while a keyboard truly
-    // covers it, so a touch on it is proof that it is visible.
+    // and no event fires. The overlay receives touches while the host is inert.
     expect(viewport.height).toBe(200);
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
-    fireEvent.pointerDown(graphics);
+    const overlay = within(dialog).getByText(/立體畫面已暫停/);
+    expect(graphics.hasAttribute('inert')).toBe(true);
+    expect(overlay.closest('[inert]')).toBeNull();
+    fireEvent.pointerDown(overlay);
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     expect(scene.create).toHaveBeenCalledTimes(1);
     expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
@@ -2544,7 +2550,10 @@ it('always resumes with the manual restart button while the visual viewport is s
     // Android can dismiss the keyboard with the back key without blurring the
     // field, so neither focus nor viewport events reveal the stale height.
     expect(viewport.height).toBe(200);
-    fireEvent.click(within(dialog).getByRole('button', { name: '重新啟動立體畫面' }));
+    const restart = within(dialog).getByRole('button', { name: '重新啟動立體畫面' });
+    fireEvent.pointerDown(restart);
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBe(restart);
+    fireEvent.click(restart);
     await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
@@ -2588,6 +2597,8 @@ it('still pauses when a pinch-zoomed visual viewport leaves the canvas outside i
     viewport.scale = 2;
     viewport.height = 200;
     act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    fireEvent.pointerDown(within(dialog).getByText(/立體畫面已暫停/));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
     viewport.scale = 1;
     viewport.height = window.innerHeight;
