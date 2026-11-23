@@ -1668,9 +1668,13 @@ describe('public Providence building geometry route', () => {
     vi.useFakeTimers();
     const cancel = vi.fn(() => { throw new Error('stream bridge cleanup failed'); });
     const getReader = vi.fn();
+    const responseHeaders = new Headers({ 'Content-Type': 'application/json', 'Retry-After': '3600' });
+    for (const [name, value] of Object.entries(headers)) {
+      if (typeof value === 'string') responseHeaders.set(name, value);
+    }
     const upstream = vi.fn().mockResolvedValue({
       status,
-      headers: new Headers({ 'Content-Type': 'application/json', 'Retry-After': '3600', ...headers }),
+      headers: responseHeaders,
       body: { cancel, getReader },
     });
     vi.stubGlobal('fetch', upstream);
