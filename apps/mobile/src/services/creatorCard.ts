@@ -31,17 +31,14 @@ function cardRef(schoolId: string, ownerUid: string) {
   return doc(getDb(), 'schools', schoolId, 'creatorProfiles', ownerUid);
 }
 
-/** Display reads accept local overlays. Save confirmation requires committed fields. */
-export async function readCreatorCard(
-  schoolId: string, ownerUid: string, { requireCommitted = false } = {},
-): Promise<CreatorCard | null> {
+async function readCardSnapshot(schoolId: string, ownerUid: string, requireCommitted: boolean) {
   const snapshot = await getDocFromServer(cardRef(schoolId, ownerUid));
-  // Even a server fetch can include uncommitted local overlays. Never treat
-  // provisional card fields as proof that an uncertain save reached the server.
-  if (requireCommitted && snapshot.metadata.hasPendingWrites) {
+  const hasPendingWrites = snapshot.metadata.hasPendingWrites;
+  // A server fetch can still include an uncommitted local overlay.
+  if (requireCommitted && hasPendingWrites) {
     throw new Error('Creator card has pending writes');
   }
-  if (!snapshot.exists()) return null;
+  if (!snapshot.exists()) return { value: null, hasPendingWrites };
   const data = snapshot.data() as Record<string, unknown>;
   if (data.schoolId !== schoolId || data.ownerUid !== ownerUid) {
     throw new Error('Creator card scope mismatch');
@@ -49,7 +46,17 @@ export async function readCreatorCard(
   const card = readCreatorCardFields(data);
   hiddenFields.set(card, new Set(CARD_FIELDS.filter((field) =>
     Object.prototype.hasOwnProperty.call(data, field) && card[field] === '' && data[field] !== '')));
-  return card;
+  return { value: card, hasPendingWrites };
+}
+
+export function readCreatorCardSnapshot(schoolId: string, ownerUid: string) {
+  return readCardSnapshot(schoolId, ownerUid, false);
+}
+
+export async function readCreatorCard(
+  schoolId: string, ownerUid: string, { requireCommitted = false } = {},
+): Promise<CreatorCard | null> {
+  return (await readCardSnapshot(schoolId, ownerUid, requireCommitted)).value;
 }
 
 /** Save a whole bounded public card and confirm the written values against the server. */

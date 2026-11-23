@@ -5,7 +5,7 @@ import {
 } from '@campus/shared/src/creatorCard';
 import {
   creatorCardFieldMatches, hasHiddenCreatorCardValue, isCreatorCardAccessDenied,
-  readCreatorCard, saveCreatorCard,
+  readCreatorCard, readCreatorCardSnapshot, saveCreatorCard,
 } from '../../services/creatorCard';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
@@ -76,6 +76,8 @@ function ScopedCreatorCardPanel({
     setEditing(open);
   };
   const published = useRef<CreatorCard | null>(null);
+  const hasConfirmedCard = useRef(false);
+  const showingProvisionalCard = useRef(false);
   const accessDenied = useRef(false);
   const cardVersion = useRef(0);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
@@ -132,6 +134,8 @@ function ScopedCreatorCardPanel({
     // A concurrent save check may settle after a refresh revoked access.
     if (accessDenied.current) return;
     cardVersion.current += 1;
+    hasConfirmedCard.current = true;
+    showingProvisionalCard.current = false;
     published.current = value;
     acceptSavedPortfolioLink(value?.linkUrl ?? '');
     setState({ status: 'ready', value });
@@ -141,8 +145,19 @@ function ScopedCreatorCardPanel({
     let live = true;
     // A save confirmation can publish a newer value while this read is pending.
     const version = cardVersion.current;
-    void readCreatorCard(schoolId, ownerUid).then((value) => {
+    void readCreatorCardSnapshot(schoolId, ownerUid).then(({ value, hasPendingWrites }) => {
       if (!live || cardVersion.current !== version) return;
+      if (hasPendingWrites) {
+        if (hasConfirmedCard.current || showingProvisionalCard.current) {
+          if (accessDenied.current) setState({ status: 'error' });
+          return;
+        }
+        accessDenied.current = false;
+        showingProvisionalCard.current = true;
+        acceptSavedPortfolioLink(value?.linkUrl ?? '');
+        setState({ status: 'ready', value });
+        return;
+      }
       if (editingNow.current && !pendingWrite.current) {
         const previous = published.current ?? EMPTY_CREATOR_CARD;
         const merged = { ...(value ?? EMPTY_CREATOR_CARD) };
@@ -164,6 +179,7 @@ function ScopedCreatorCardPanel({
       if (!live) return;
       if (isCreatorCardAccessDenied(error)) {
         accessDenied.current = true;
+        showingProvisionalCard.current = false;
         acceptSavedPortfolioLink('');
         setState({ status: 'error' });
       } else {

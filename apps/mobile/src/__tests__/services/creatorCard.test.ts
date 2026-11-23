@@ -1,6 +1,6 @@
 import { getDocFromServer, setDoc } from 'firebase/firestore';
 import { readCreatorCardFields } from '@campus/shared/src/creatorCard';
-import { isCreatorCardAccessDenied, readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
+import { isCreatorCardAccessDenied, readCreatorCard, readCreatorCardSnapshot, saveCreatorCard } from '../../services/creatorCard';
 
 jest.mock('../../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('firebase/firestore', () => ({
@@ -66,7 +66,7 @@ describe.each(['headline', 'bio', 'linkUrl', 'pinnedPostId', 'extra'] as const)(
 
 test('an unpublished profile is different from a permission-denied read', async () => {
   jest.mocked(getDocFromServer)
-    .mockResolvedValueOnce({ exists: () => false } as never)
+    .mockResolvedValueOnce({ exists: () => false, metadata: { hasPendingWrites: false } } as never)
     .mockRejectedValueOnce(new Error('permission-denied'));
   expect(await readCreatorCard('pu', 'alice')).toBeNull();
   await expect(readCreatorCard('pu', 'alice')).rejects.toThrow('permission-denied');
@@ -170,4 +170,13 @@ test('an unresolved portfolio clear cannot be confirmed from a pending local ove
     .resolves.toEqual(draft);
   expect(setDoc).toHaveBeenCalledTimes(1);
   expect(getDocFromServer).toHaveBeenCalledTimes(3);
+});
+
+test.each([true, false])('display reads retain pending metadata (%s) for a missing card', async (hasPendingWrites) => {
+  jest.mocked(getDocFromServer).mockResolvedValueOnce({
+    exists: () => false, metadata: { hasPendingWrites },
+  } as never);
+  await expect(readCreatorCardSnapshot('pu', 'alice')).resolves.toEqual({
+    value: null, hasPendingWrites,
+  });
 });

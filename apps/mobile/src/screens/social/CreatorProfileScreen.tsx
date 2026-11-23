@@ -35,7 +35,10 @@ type CreatorListItem =
   | { key: string; tiles: MediaTile[] };
 
 type Props = {
-  navigation?: { navigate?: (screen: string, params?: Record<string, unknown>) => void };
+  navigation?: {
+    navigate?: (screen: string, params?: Record<string, unknown>) => void;
+    addListener?: (event: 'focus', callback: () => void) => () => void;
+  };
   route?: { params?: { memberUid?: string; schoolId?: string } };
 };
 
@@ -98,6 +101,7 @@ function ScopedCreatorProfile({
   const [followRevision, setFollowRevision] = useState(0);
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [savedRevision, setSavedRevision] = useState(0);
+  const [focusRevision, setFocusRevision] = useState(0);
   const [moreBusy, setMoreBusy] = useState(false);
   const [moreError, setMoreError] = useState('');
   const [followError, setFollowError] = useState('');
@@ -115,6 +119,10 @@ function ScopedCreatorProfile({
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
+
+  useEffect(() => navigation?.addListener?.('focus', () => {
+    setFocusRevision((n) => n + 1);
+  }), [navigation]);
 
   useEffect(() => {
     let live = true;
@@ -298,7 +306,7 @@ function ScopedCreatorProfile({
               </View>
             )}
             <CreatorCardPanel schoolId={schoolId} ownerUid={memberUid} own={own}
-              refreshKey={`${tab}:${refreshRevision}:${savedRevision}`} />
+              refreshKey={`${tab}:${refreshRevision}:${savedRevision}:${focusRevision}`} />
             <CreatorHighlight key={schoolId + ':' + memberUid}
               schoolId={schoolId} memberUid={memberUid} own={own} candidates={postRows}
               openPost={(postId) => navigation?.navigate?.('PostDetail', { postId })} />

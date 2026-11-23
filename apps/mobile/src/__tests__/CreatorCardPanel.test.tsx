@@ -4,7 +4,7 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import { getDocFromServer, setDoc } from 'firebase/firestore';
 import { creatorCardDocumentPassesRules, CREATOR_CARD_LIMITS, readCreatorCardFields, validateCreatorCard } from '@campus/shared/src/creatorCard';
 import { CreatorCardPanel } from '../screens/social/CreatorCardPanel';
-import { readCreatorCard, saveCreatorCard } from '../services/creatorCard';
+import { readCreatorCard, readCreatorCardSnapshot, saveCreatorCard } from '../services/creatorCard';
 
 jest.mock('../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('firebase/firestore', () => ({
@@ -16,6 +16,7 @@ jest.mock('firebase/firestore', () => ({
 jest.mock('../services/creatorCard', () => ({
   ...jest.requireActual('../services/creatorCard'),
   readCreatorCard: jest.fn(),
+  readCreatorCardSnapshot: jest.fn(),
   saveCreatorCard: jest.fn(),
 }));
 
@@ -26,6 +27,10 @@ beforeEach(() => {
   jest.mocked(setDoc).mockReset();
   jest.mocked(readCreatorCard).mockReset();
   jest.mocked(saveCreatorCard).mockReset();
+  jest.mocked(readCreatorCardSnapshot).mockReset().mockImplementation(async (schoolId, ownerUid) => ({
+    value: await readCreatorCard(schoolId, ownerUid),
+    hasPendingWrites: false,
+  }));
   jest.mocked(readCreatorCard).mockResolvedValue(null);
   jest.mocked(saveCreatorCard).mockResolvedValue({
     headline: '校園攝影', bio: '分享校園生活', linkUrl: '',
@@ -1451,7 +1456,7 @@ test('the first display shows an existing pending snapshot and refreshes to the 
   const card = { headline: '校園攝影', bio: '待提交簡介', linkUrl: 'https://example.org/' };
   const committed = { ...card, bio: '已提交簡介' };
   const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
-  jest.mocked(readCreatorCard).mockImplementation(service.readCreatorCard);
+  jest.mocked(readCreatorCardSnapshot).mockImplementation(service.readCreatorCardSnapshot);
   jest.mocked(getDocFromServer)
     .mockResolvedValueOnce({
       exists: () => true,

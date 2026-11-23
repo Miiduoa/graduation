@@ -1,11 +1,11 @@
 import React from 'react';
-import { RefreshControl } from 'react-native';
+import { Linking, RefreshControl } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { CreatorProfileScreen } from '../screens/social/CreatorProfileScreen';
 import { listCreatorPosts, readCreatorIdentity } from '../services/creatorProfile';
 import { loadCampusPostBookmarks } from '../services/campusPostBookmarks';
 import { followUser, listFollowingIds, unfollowUser } from '../services/follows';
-import { readCreatorCard, saveCreatorCard } from '../services/creatorCard';
+import { readCreatorCard, readCreatorCardSnapshot, saveCreatorCard } from '../services/creatorCard';
 import { readCreatorPin, saveCreatorPin } from '../services/creatorPin';
 
 const mockAuth = {
@@ -35,6 +35,7 @@ jest.mock('../services/creatorPin', () => ({
 jest.mock('../services/creatorCard', () => ({
   ...jest.requireActual('../services/creatorCard'),
   readCreatorCard: jest.fn(async () => null),
+  readCreatorCardSnapshot: jest.fn(),
   saveCreatorCard: jest.fn(),
 }));
 jest.mock('../services/campusPostBookmarks', () => ({
@@ -60,6 +61,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(readCreatorCard).mockReset().mockResolvedValue(null);
   jest.mocked(saveCreatorCard).mockReset();
+  jest.mocked(readCreatorCardSnapshot).mockReset().mockImplementation(async (schoolId, ownerUid) => ({
+    value: await readCreatorCard(schoolId, ownerUid),
+    hasPendingWrites: false,
+  }));
   mockAuth.user = { uid: 'alice', displayName: 'Alice' };
   mockAuth.profile = null;
   mockAuth.loading = false;
@@ -267,6 +272,78 @@ test.each(['save now', 'reopen editor'])('tab refresh merges only the changed fi
   }
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
   expect(saveCreatorCard).toHaveBeenCalledWith('pu', 'alice', merged, expect.any(Function));
+});
+
+test.each([
+  ['收藏', '尚未提交的簡介', 'https://example.org/pending'],
+  ['下拉', '尚未提交的簡介', 'https://example.org/pending'],
+  ['收藏', '', ''],
+  ['下拉', '', ''],
+])('pending writes on %s preserve the confirmed bio and link after rejection and cancel (%j)', async (
+  entry, bio, linkUrl,
+) => {
+  const original = { headline: '', bio: '已確認簡介', linkUrl: 'https://example.org/original' };
+  const overlay = { ...original, bio, linkUrl };
+  const reads = jest.mocked(readCreatorCardSnapshot)
+    .mockResolvedValueOnce({ value: original, hasPendingWrites: false })
+    .mockResolvedValueOnce({ value: overlay, hasPendingWrites: true });
+  let rejectSave!: (error: Error) => void;
+  jest.mocked(saveCreatorCard).mockReturnValueOnce(new Promise((_, reject) => { rejectSave = reject; }));
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+  fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), bio);
+  fireEvent.changeText(view.getByLabelText('作品連結'), linkUrl);
+  fireEvent.press(view.getByLabelText('儲存簡介'));
+  await act(async () => {
+    if (entry === '收藏') fireEvent.press(view.getByLabelText('我的收藏'));
+    else fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
+  });
+  expect(reads).toHaveBeenCalledTimes(2);
+  expect(view.getByLabelText('正在確認儲存…').props.accessibilityState.disabled).toBe(true);
+  await act(async () => { rejectSave(new Error('permission-denied')); });
+  fireEvent.press(view.getByLabelText('取消編輯'));
+  expect(view.getByText(original.bio)).toBeTruthy();
+  if (bio) expect(view.queryByText(bio)).toBeNull();
+  const openLink = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  try {
+    await act(async () => { fireEvent.press(view.getByLabelText('查看作品連結')); });
+    expect(openLink).toHaveBeenCalledWith(original.linkUrl);
+  } finally {
+    openLink.mockRestore();
+  }
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+});
+
+test('focus keeps the newly confirmed card through a pending refresh and accepts a later committed update', async () => {
+  const original = { headline: '', bio: '最初的簡介', linkUrl: '' };
+  const confirmed = { ...original, bio: '核對成功的簡介' };
+  const latest = { ...original, bio: '他機提交的簡介' };
+  jest.mocked(readCreatorCardSnapshot)
+    .mockResolvedValueOnce({ value: original, hasPendingWrites: false })
+    .mockResolvedValueOnce({ value: { ...original, bio: '' }, hasPendingWrites: true })
+    .mockResolvedValueOnce({ value: latest, hasPendingWrites: false });
+  jest.mocked(saveCreatorCard).mockImplementation(async (_schoolId, _uid, _draft, confirm) => {
+    await confirm?.(async () => confirmed);
+    return confirmed;
+  });
+  let focus!: () => void;
+  const unsubscribe = jest.fn();
+  const navigation = { addListener: jest.fn((_event, callback) => {
+    focus = callback;
+    return unsubscribe;
+  }) };
+  const view = render(<CreatorProfileScreen navigation={navigation} route={{ params: { memberUid: 'alice' } }} />);
+  fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), confirmed.bio);
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  expect(view.getByText(confirmed.bio)).toBeTruthy();
+  expect(navigation.addListener).toHaveBeenCalledWith('focus', expect.any(Function));
+  await act(async () => { focus(); });
+  expect(view.getByText(confirmed.bio)).toBeTruthy();
+  await act(async () => { focus(); });
+  expect(view.getByText(latest.bio)).toBeTruthy();
+  view.unmount();
+  expect(unsubscribe).toHaveBeenCalledTimes(1);
 });
 
 test('access denial on refresh hides the external card until an authorized retry succeeds', async () => {
