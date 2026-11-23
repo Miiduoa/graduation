@@ -10,6 +10,7 @@ import { Input, Textarea, Select } from '../../../apps/web/src/components/ui/Inp
 import { CampusIcon } from '../../../apps/web/src/components/CampusIcon';
 import { QuickCampusEntry } from '../../../apps/web/src/components/QuickCampusEntry';
 import { PageRecovery } from '../../../apps/web/src/components/PageRecovery';
+import { PageLoadingCard } from '../../../apps/web/src/components/PageLoadingCard';
 import { ServiceDirectory } from '../../../apps/web/src/components/ServiceDirectory';
 import {
   applyWebAppearancePreferences,
@@ -70,6 +71,9 @@ function Controls() {
         </Button>
         <Button type="button" variant="outline" onClick={() => navigate('/interface-feedback')}>
           檢查操作回饋
+        </Button>
+        <Button type="button" variant="outline" onClick={() => navigate('/interface-loading')}>
+          檢查載入狀態
         </Button>
         <Button
           type="button"
@@ -307,6 +311,13 @@ function Fixture() {
               </>
             ) : pathname === '/interface-feedback' ? (
               <ActionFeedback />
+            ) : pathname === '/interface-loading' ? (
+              <section id="interface-loading-samples" style={{ display: 'grid', gap: 24 }}>
+                <div className={home.heading}><h1>課程資料</h1></div>
+                <PageLoadingCard message="正在讀取課程內容…" />
+                <PageLoadingCard message="正在確認登入狀態…" compact />
+                <PageLoadingCard message="正在讀取跨領域人工智慧實務與應用專題課程的教材與作業資料…" />
+              </section>
             ) : pathname === '/life' || pathname === '/connect' ? (
               <>
                 <div className={home.heading}>

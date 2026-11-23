@@ -18,6 +18,7 @@ on:
       - 'apps/web/src/components/QuickCampusEntry*'
       - 'apps/web/src/components/VoiceDictationButton*'
       - 'apps/web/src/components/PageRecovery*'
+      - 'apps/web/src/components/PageLoadingCard*'
       - 'apps/web/src/app/error.tsx'
       - 'apps/web/src/app/not-found.tsx'
       - 'apps/web/src/app/search/**'

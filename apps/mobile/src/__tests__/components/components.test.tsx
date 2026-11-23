@@ -99,9 +99,13 @@ describe('UI Components', () => {
       expect(onPress).not.toHaveBeenCalled();
     });
 
-    it('should show loading state', () => {
-      const { getByText } = render(<Button text="Submit" loading />);
-      expect(getByText('處理中...')).toBeTruthy();
+    it('should keep the action readable and expose its loading state', () => {
+      const { getByRole, getByText } = render(<Button text="Submit" loading />);
+      expect(getByText('Submit')).toBeTruthy();
+      expect(getByRole('button', { name: 'Submit' })).toHaveAccessibilityState({
+        disabled: true,
+        busy: true,
+      });
     });
 
     it('should apply different sizes', () => {

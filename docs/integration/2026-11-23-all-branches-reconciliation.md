@@ -2,7 +2,7 @@
 
 ## 來源範圍
 
-來源快照見同目錄 `2026-11-23-all-branches-sources.json`。此次從 main `b75017aa56c4211931662cf6b61933b47aeb0211` 開始，納入盤點的全部 17 個來源分支；整合期間另同步最新 main `8aaefb93ada76113792b7f21559fcba2b0170db5`。來源提交均保留為祖先。
+來源快照見同目錄 `2026-11-23-all-branches-sources.json`。此次從 main `b75017aa56c4211931662cf6b61933b47aeb0211` 開始，先納入盤點的 17 個來源分支，於 16:44（台灣時間）最後盤點再納入新分支 #754，共 18 個來源；整合期間另同步最新 main `8aaefb93ada76113792b7f21559fcba2b0170db5`。來源提交均保留為祖先。
 
 #719 在整合期間由 GitHub 合併為 main 的 `8aaefb93`，其來源分支隨後刪除。該 squash commit 與來源 `916bf756` 的 tree 完全相同，本候選合入兩者後內容亦不變；快照保留原來源 SHA，讓已刪除分支的歷史仍可追溯。來源版本固定於本輪快照，最終結果須以同一候選的檢查為準。
 
@@ -49,6 +49,20 @@
 本次只將 Security Gates runner 明確對齊 `ubuntu-24.04`；原安裝腳本與 fixture 完全保留，真實 process group／flock／sudo 逾時邊界及故意錯置邊界的失敗對照仍執行。所有安全檢查、PostgreSQL 服務、依賴稽核、步驟、相依閘門及失敗政策均未刪除或放寬。既有 workflow contract 測試新增跨工作流程的 runner 一致性檢查：修正前確實因 `ubuntu-latest` 與 `ubuntu-24.04` 不同而失敗。這項調整驗證的是既定 Ubuntu 24 支援範圍；Ubuntu 26 的底層程序差異尚未定位，也不宣稱相容。最終新 head 仍須在遠端重新執行完整檢查。
 
 後續 head `1429f997eaced0818219d3ab488e662d9d865abf` 的 [Security Gates job 137545683441](https://github.com/Miiduoa/graduation/actions/runs/45130751175/job/137545683441) 已成功，實際回報安裝恢復 fixture **14/14 passed**。同 head 的完整核心 CI 亦已通過；這是中間版本的診斷證據，最後新增來源與修正仍須以 PR 最終 head 再次驗證。
+
+## 16:44 最終來源盤點與後續整合
+
+先前候選 `e563c9c189650a87994f83d5304d562f010770e1` 的 [完整核心 CI](https://github.com/Miiduoa/graduation/actions/runs/45134684974)、Python、Chroma、MLX、CodeQL，以及 14 個 browser／mobile-agent／Maestro workflows 均已成功。其 [iOS Release 與兩個 smoke](https://github.com/Miiduoa/graduation/actions/runs/45134685171) 在實際 iPhone 17 Pro／iOS 26.4 simulator 執行，兩份 JUnit 各 1 test、0 failures／errors／skipped；不包含 full native suite。這些是上一候選的證據，不能當成後續變更已通過遠端檢查。
+
+最後盤點另發現 #754 `21547d426144311ba8babc5828f26bff484b8205`、#722 `15856e4d2132df62ac5e043b8d84efe0b1582d74` 與 #740 `d6c7fbed784520c624393eb49e94a8f046744ef9`。本輪將來源固定為此快照，再以新候選驗收：
+
+- #754 的共用抽屜、通知閱讀時間、系統／App 減少動態偏好、載入狀態與中文課程搜尋納入整合。SiteShell 衝突保留共用 AppFrame，只更新載入提示；interface QA 的來源清單同時保留 task_flow.py 與 loading.py，不移除任何既有驗收。
+- #722 保留沒有 TextDecoder 時仍逐塊檢查上限的改進，以及拒絕無法量測原始大小的 JSON-only body；原可見面積、同批最後 entry、WebGL 暫停恢復和 fixture ID 精確比對不變。
+- #740 首次讀取新增 requireCommitted 必須保留；來源改回 media/list 重掛載所造成的 pending write／draft 遺失風險仍以穩定 owner panel 修正。持續保留焦點與分頁重新讀取、撤權優先與所有 captured-first fallback 共用失效記錄。
+
+此輪專項已確認新共用 Mobile UI 6 suites／107 tests、Web 課程清單與地圖 3 files／796 tests 通過；完整合併後的 creator 3 suites／1,773 tests 全過，0 failed／skipped，完整 Mobile／Web typecheck 通過。相關 lint 為 0 errors；Web 有 10 warnings，未調降 lint 政策。真實 interface fixture 可建置，360 source hashes／27 explicit import boundaries。完整新候選的驗證結果仍以 PR 對應精確 head 的遠端檢查為準。
+
+卡片增量先做實際失敗對照：d6 原元件會在 pending save → media → 再次 save 送出 2 次，且 refresh 的 permission-denied／scope mismatch 保留舊內容；e563 原元件則未拒絕 pending initial 與 pending clear snapshot。整合後九個關鍵情境通過，產品只新增兩處 requireCommitted:true，原狀態與授權防護保留；沒有以刪除安全案例取得通過結果。
 
 ## 合併與既有功能開關
 

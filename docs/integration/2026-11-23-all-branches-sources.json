@@ -1,9 +1,9 @@
 {
-  "capturedAt": "2026-11-23T07:44:46Z",
+  "capturedAt": "2026-11-23T08:44:58Z",
   "repository": "Miiduoa/graduation",
   "mainBaseline": "8aaefb93ada76113792b7f21559fcba2b0170db5",
-  "sourceBranchCount": 17,
-  "snapshotNote": "保留本次盤點的 17 個來源提交；#719 在整合期間已合入最新 main 並刪除來源分支，仍保留其 SHA 以追溯歷史。",
+  "sourceBranchCount": 18,
+  "snapshotNote": "保留本次最終盤點的 18 個來源提交；#719 已合入 main 並刪除來源分支，仍保留其 SHA。納入 16:44（台灣時間）觀測到的 #754 新分支與 #722、#740 後續提交；之後的新提交不自動歸入本輪驗收。",
   "branches": [
     {
       "name": "dependabot/npm_and_yarn/backend/functions/functions-patch-minor-fb4b230888",
@@ -41,6 +41,11 @@
       "pullRequest": 750
     },
     {
+      "name": "feat/nuni-system-experience-20261123",
+      "sha": "21547d426144311ba8babc5828f26bff484b8205",
+      "pullRequest": 754
+    },
+    {
       "name": "feat/nuni-task-flow-20261121",
       "sha": "04aaccd2cfe6e9966bf8f1e071cb9c0c4ba9dcd1",
       "pullRequest": 739
@@ -52,7 +57,7 @@
     },
     {
       "name": "fix/campus-spatial-offscreen-webgl-start-20261119",
-      "sha": "2103a2e7332df116e8858c450df815b8017fd41f",
+      "sha": "15856e4d2132df62ac5e043b8d84efe0b1582d74",
       "pullRequest": 722
     },
     {
@@ -72,7 +77,7 @@
     },
     {
       "name": "fix/mobile-creator-card-confirm-timeout-20261121",
-      "sha": "722bc40d485223c11ab24bc7359f270c322e8c52",
+      "sha": "d6c7fbed784520c624393eb49e94a8f046744ef9",
       "pullRequest": 740
     },
     {

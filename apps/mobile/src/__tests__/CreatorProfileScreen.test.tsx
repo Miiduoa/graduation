@@ -1,6 +1,7 @@
 import React from 'react';
 import { Linking, RefreshControl } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
+import { getDocFromServer } from 'firebase/firestore';
 import { CreatorProfileScreen } from '../screens/social/CreatorProfileScreen';
 import { listCreatorPosts, readCreatorIdentity } from '../services/creatorProfile';
 import { loadCampusPostBookmarks } from '../services/campusPostBookmarks';
@@ -22,7 +23,12 @@ jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../state/school', () => ({
   useSchool: () => ({ school: mockSchool, selectionReady: mockSelectionReady }),
 }));
-jest.mock('../firebase', () => ({ isFirebaseMockMode: () => mockFirebase }));
+jest.mock('../firebase', () => ({ getDb: jest.fn(), isFirebaseMockMode: () => mockFirebase }));
+jest.mock('firebase/firestore', () => ({
+  ...jest.requireActual('firebase/firestore'),
+  doc: jest.fn(),
+  getDocFromServer: jest.fn(),
+}));
 jest.mock('../screens/social/CreatorHighlight', () => ({ CreatorHighlight: () => null }));
 jest.mock('../services/creatorProfile', () => ({
   listCreatorPosts: jest.fn(),
@@ -206,6 +212,7 @@ test('permission denial takes priority over a save that settled during refresh',
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(getDocFromServer).mockReset();
   jest.mocked(readCreatorCard).mockReset().mockResolvedValue(null);
   jest.mocked(saveCreatorCard).mockReset();
   mockAuth.user = { uid: 'alice', displayName: 'Alice' };
@@ -388,7 +395,7 @@ test('tab changes and refreshes reload cards created, edited and cleared on anot
   expect(await view.findByLabelText('建立社群簡介')).toBeTruthy();
   expect(view.queryByText(updated.bio)).toBeNull();
   expect(reads).toHaveBeenCalledTimes(5);
-  expect(reads).toHaveBeenLastCalledWith('pu', 'alice');
+  expect(reads).toHaveBeenLastCalledWith('pu', 'alice', { requireCommitted: true });
 });
 
 test.each(['save now', 'reopen editor'])('tab refresh merges only the changed fields before %s', async (action) => {
@@ -436,6 +443,29 @@ test.each(['我的收藏', '下拉', '重試名片'])('keeps the successful firs
   await act(async () => { resolveFirst(card); });
   expect(view.getByText(card.bio)).toBeTruthy();
   expect(view.queryByText('社群簡介暫時無法讀取。')).toBeNull();
+});
+
+test('pull refresh keeps the confirmed intro when the server read still includes a pending clear', async () => {
+  const card = { headline: '', bio: '已確認簡介', linkUrl: 'https://example.org/' };
+  const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
+  jest.mocked(readCreatorCard).mockImplementation(service.readCreatorCard);
+  const snapshots = jest.mocked(getDocFromServer)
+    .mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({ schoolId: 'pu', ownerUid: 'alice', ...card }),
+      metadata: { hasPendingWrites: false },
+    } as never)
+    .mockResolvedValueOnce({
+      exists: () => false,
+      metadata: { hasPendingWrites: true },
+    } as never);
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+  await view.findByText(card.bio);
+  await act(async () => { fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh'); });
+  expect(listCreatorPosts).toHaveBeenCalledTimes(2);
+  expect(view.getByText(card.bio)).toBeTruthy();
+  expect(view.getByLabelText('查看作品連結')).toBeTruthy();
+  expect(snapshots).toHaveBeenCalledTimes(2);
 });
 
 test.each([

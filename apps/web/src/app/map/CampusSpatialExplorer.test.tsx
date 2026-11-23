@@ -2849,37 +2849,17 @@ it.each(['ASCII', 'UTF-8'] as const)(
   },
 );
 
-it.each([
-  { name: 'no headers', encoding: null, length: null, result: 'accept' },
-  { name: 'identity without length', encoding: 'identity', length: null, result: 'accept' },
-  { name: 'identity with length', encoding: 'identity', length: 'actual', result: 'accept' },
-  { name: 'implicit identity with length', encoding: null, length: 'actual', result: 'accept' },
-  { name: 'oversized declaration', encoding: null, length: '2000001', result: 'skip' },
-  { name: 'gzip', encoding: 'gzip', length: '100', result: 'accept' },
-  { name: 'gzip without length', encoding: 'gzip', length: null, result: 'accept' },
-  { name: 'oversized UTF-8 payload without length', encoding: null, length: null, oversized: true, result: 'reject' },
-  { name: 'oversized identity payload', encoding: 'identity', length: '100', oversized: true, result: 'reject' },
-  { name: 'invalid snapshot', encoding: null, length: null, result: 'reject' },
-])('validates JSON-only WebView snapshots ($name)', async ({ name, encoding, length, oversized, result }) => {
-  const { library, buildings, body } = sourcedLibraryFootprintFixture();
-  // Trailing whitespace contributes to wire length but disappears after parsing.
-  const raw = body + '\n';
-  const payload = JSON.parse(raw) as Record<string, unknown>;
-  if (name === 'invalid snapshot') delete payload.buildings;
-  if (oversized) payload.extra = '中'.repeat(700_000);
-  const json = vi.fn().mockResolvedValue(payload);
+it.each([null, '100', '2000001'])('rejects JSON-only responses with Content-Length %j before parsing', async (length) => {
+  const { library, body } = sourcedLibraryFootprintFixture();
+  const json = vi.fn(async () => JSON.parse(body));
   const headers = new Headers();
-  if (encoding !== null) headers.set('Content-Encoding', encoding);
-  if (length !== null) {
-    headers.set('Content-Length', length === 'actual' ? String(new TextEncoder().encode(raw).byteLength) : length);
-  }
+  if (length !== null) headers.set('Content-Length', length);
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers, json }));
   render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  const accepted = result === 'accept';
-  expect(await within(dialog).findByText(accepted ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
-  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(accepted ? buildings : []));
-  expect(json).toHaveBeenCalledTimes(result === 'skip' ? 0 : 1);
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(json).not.toHaveBeenCalled();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
@@ -3349,9 +3329,9 @@ it.each(capabilityCases.flatMap((capability) =>
     if (capability === 'no TextEncoder' || capability === 'partial TextEncoder') {
       return { ok: true, status: 200, json, text: async () => raw };
     }
-    if (capability === 'no body.getReader') return { ok: true, status: 200, json, body: {} };
+    if (capability === 'no body.getReader') return { ok: true, status: 200, text: async () => raw, body: {} };
     if (capability === 'throwing body.getReader') return {
-      ok: true, status: 200, json,
+      ok: true, status: 200, text: async () => raw,
       body: { get getReader() { throw new TypeError('stream reader unavailable'); } },
     };
     return new Response(raw, { headers: { 'Content-Type': 'application/json' } });
@@ -3461,21 +3441,6 @@ it.each(capabilityCases.flatMap((capability) =>
   }
 });
 
-it.each(['TextDecoder', 'TextEncoder'] as const)(
-  'keeps the post-JSON size cap when %s is missing',
-  async (codec) => {
-    const { library, body } = sourcedLibraryFootprintFixture();
-    const json = vi.fn(async () => ({ ...JSON.parse(body), padding: 'x'.repeat(2_000_001) }));
-    vi.stubGlobal(codec, undefined);
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json })));
-    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-    const dialog = await open();
-    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    expect(json).toHaveBeenCalledOnce();
-    expect(scene.create.mock.lastCall?.[2].footprints).toEqual([]);
-  },
-);
-
 it.each([
   { length: '0', accepted: false },
   { length: '000', accepted: false },
@@ -3546,21 +3511,6 @@ it.each([
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-it('rejects oversized multibyte JSON-only WebView data without TextEncoder', async () => {
-  const { library, body } = sourcedLibraryFootprintFixture();
-  const payload = { ...JSON.parse(body) as Record<string, unknown>, padding: '中'.repeat(700_000) };
-  const json = vi.fn().mockResolvedValue(payload);
-  vi.stubGlobal('TextEncoder', undefined);
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, status: 200, headers: new Headers(), json,
-  }));
-  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-  const dialog = await open();
-  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-  expect(json).toHaveBeenCalledOnce();
-  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
-});
-
 // Merge-base reads Fetch's decoded body independently of Content-Encoding.
 it.each([
   'gzip', 'GZIP', 'x-gzip', ' br ', 'deflate', 'zstd', 'dcb', 'dcz',
@@ -3621,6 +3571,59 @@ it.each([
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it.each([
+  { length: null, oversized: true },
+  { length: '20', oversized: true },
+  { length: null, oversized: false },
+  { length: '2000001', oversized: false },
+])('bounds reader bytes without TextDecoder (%j)', async ({ length, oversized }) => {
+  const { library, buildings, body } = sourcedLibraryFootprintFixture();
+  const valid = new TextEncoder().encode(`{"padding":"中",${body.slice(1)}`);
+  const read = vi.fn();
+  if (oversized) {
+    read.mockResolvedValueOnce({ value: new Uint8Array(1_000_000) })
+      .mockResolvedValueOnce({ value: new Uint8Array(1_000_001) });
+  } else {
+    const split = valid.indexOf(0xe4) + 1;
+    read.mockResolvedValueOnce({ value: valid.subarray(0, split) })
+      .mockResolvedValueOnce({ value: valid.subarray(split) })
+      .mockResolvedValueOnce({ done: true });
+  }
+  // Further reads would consume more of the oversized body.
+  read.mockRejectedValue(new Error('Unexpected extra read'));
+  const cancel = vi.fn();
+  const releaseLock = vi.fn();
+  const getReader = vi.fn(() => ({ read, cancel, releaseLock }));
+  const cancelBody = vi.fn();
+  const text = vi.fn();
+  const json = vi.fn();
+  const arrayBuffer = vi.fn();
+  const blob = vi.fn();
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  if (length !== null) headers.set('Content-Length', length);
+  vi.stubGlobal('TextDecoder', undefined);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, status: 200, headers,
+    body: { getReader, cancel: cancelBody }, text, json, arrayBuffer, blob,
+  }));
+
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const rejectedOnHeaders = length === '2000001';
+  const accepted = !oversized && !rejectedOnHeaders;
+  expect(await within(dialog).findByText(accepted
+    ? /1 棟公開建築輪廓/ : /公開建築輪廓目前無法取得/)).toBeTruthy();
+  await waitFor(() => expect(scene.create.mock.lastCall?.[2].footprints).toEqual(accepted ? buildings : []));
+  expect(getReader).toHaveBeenCalledTimes(rejectedOnHeaders ? 0 : 1);
+  expect(read).toHaveBeenCalledTimes(rejectedOnHeaders ? 0 : oversized ? 2 : 3);
+  expect(cancel).toHaveBeenCalledTimes(oversized ? 1 : 0);
+  expect(cancelBody).toHaveBeenCalledTimes(rejectedOnHeaders ? 1 : 0);
+  expect(releaseLock).toHaveBeenCalledTimes(rejectedOnHeaders ? 0 : 1);
+  for (const bufferBody of [text, json, arrayBuffer, blob]) {
+    expect(bufferBody).not.toHaveBeenCalled();
+  }
 });
 
 // A downstream WebView/proxy can return an endless stream of zero-byte chunks.

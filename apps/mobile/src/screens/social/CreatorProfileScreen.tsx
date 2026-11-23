@@ -101,7 +101,7 @@ function ScopedCreatorProfile({
   const firstCardRead = useRef<FirstCardRead | null | undefined>(undefined);
   const readIntro = useCallback(() => {
     const first = firstCardRead.current;
-    const read = readCreatorCard(schoolId, memberUid);
+    const read = readCreatorCard(schoolId, memberUid, { requireCommitted: true });
     // Only a still-pending first read of one's own card can back up a failed reload.
     if (first === null) return read;
     const clearFirst = (record: FirstCardRead) => {

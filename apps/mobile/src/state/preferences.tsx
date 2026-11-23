@@ -165,6 +165,11 @@ export function usePreferences(): PreferencesContextType {
   return context;
 }
 
+/** Shared chrome can read saved preferences without requiring this provider. */
+export function useOptionalPreferences(): PreferencesContextType | null {
+  return useContext(PreferencesContext);
+}
+
 // ===== Language Display Names =====
 
 export const LANGUAGE_NAMES: Record<Language, string> = {

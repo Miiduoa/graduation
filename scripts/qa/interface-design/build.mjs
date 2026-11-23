@@ -105,6 +105,7 @@ const inputs = [
     'scripts/qa/interface-design/navigation.py',
     'scripts/qa/interface-design/feedback.py',
     'scripts/qa/interface-design/task_flow.py',
+    'scripts/qa/interface-design/loading.py',
     'scripts/qa/browser/install-playwright.sh',
     'package.json',
     'apps/web/package.json',

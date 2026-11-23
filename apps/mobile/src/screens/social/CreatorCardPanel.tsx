@@ -147,7 +147,7 @@ function ScopedCreatorCardPanel({
     let live = true;
     // A save confirmation can publish a newer value while this read is pending.
     const version = cardVersion.current;
-    const read = readIntro ? readIntro() : readCreatorCard(schoolId, ownerUid);
+    const read = readIntro ? readIntro() : readCreatorCard(schoolId, ownerUid, { requireCommitted: true });
     void read.then((value) => {
       if (!live || cardVersion.current !== version) return;
       if (editingNow.current && !pendingWrite.current) {
