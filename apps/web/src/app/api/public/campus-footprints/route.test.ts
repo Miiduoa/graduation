@@ -12,6 +12,33 @@ const osmPayload = JSON.stringify({
     version: 7, timestamp: '2026-10-15T08:09:10Z', user: 'editor-name', uid: 22 }],
 });
 
+// Match the media-type cases in the other footprint consumer's tests.
+const compatibleFootprintContentTypes = new Set<string | null>([
+  null, 'application/json', ' APPLICATION/JSON ',
+  'Application/Json ; charset = "UTF-8"', 'application/json; CHARSET=utf-8',
+  'application/custom+json', 'APPLICATION/VND.EXAMPLE_CAMPUS+JSON',
+  'application/vnd.overpass+json; profile="campus"',
+  'application/vnd.overpass+json ; profile="campus; extended view"; charset=UTF-8',
+  'application/json; profile="note; charset=iso-8859-1"',
+]);
+const footprintContentTypes = [
+  ...compatibleFootprintContentTypes,
+  'text/html', 'text/plain', 'text/plain; charset=utf-8', 'application/xml',
+  'application/octet-stream', 'application/json, text/html', 'text/custom+json',
+  'application/json; charset=iso-8859-1', 'application/json; charset=utf-16',
+  'application/vnd.overpass+json; charset="Shift_JIS"', 'application/json; charset=',
+  'application/json; charset=UTF-8; charset=iso-8859-1',
+  'application/json; profile="unterminated; charset=UTF-8',
+  '', ';', 'application/', 'application/+json', 'application/bad name+json',
+];
+
+// A string passed directly to Response defaults to text/plain.
+function jsonResponse(body: string, init?: ResponseInit): Response {
+  const headers = new Headers(init?.headers);
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  return new Response(body, { ...init, headers });
+}
+
 beforeEach(() => {
   vi.resetModules();
 });
@@ -90,7 +117,7 @@ describe('public Providence building geometry route', () => {
     // Fetch Response.ok is true for every 2xx. A proxy's partial (206) or
     // transformed (203) response is not a complete OSM source snapshot.
     const upstream = vi.fn().mockImplementation(async () =>
-      new Response(osmPayload, { status }));
+      jsonResponse(osmPayload, { status }));
     vi.stubGlobal('fetch', upstream);
     const { GET } = await import('./route');
 
@@ -109,7 +136,7 @@ describe('public Providence building geometry route', () => {
     // Even with a valid JSON body, Content-Range denotes a byte-range
     // representation, not proof of a complete OSM export.
     const upstream = vi.fn().mockImplementation(async () =>
-      new Response(osmPayload, {
+      jsonResponse(osmPayload, {
         status: 200,
         headers: { 'Content-Range': 'bytes 0-99/200' },
       }));
@@ -126,6 +153,187 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  // RFC 9112 rejects TE+CL because two framing rules make even apparently
+  // valid JSON ambiguous. Never read a stalled upstream response or cache it.
+  it.each([
+    { coding: 'chunked', retryAfter: null, wait: 600 },
+    { coding: 'gzip, chunked', retryAfter: '3600', wait: 3600 },
+    { coding: '', retryAfter: null, wait: 600 },
+  ])('rejects conflicting Overpass Transfer-Encoding $coding and Content-Length', async ({
+    coding, retryAfter, wait,
+  }) => {
+    const headers = new Headers({
+      'Content-Type': 'application/json',
+      'Transfer-Encoding': coding,
+      'Content-Length': String(new TextEncoder().encode(osmPayload).byteLength),
+    });
+    if (retryAfter !== null) headers.set('Retry-After', retryAfter);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(osmPayload));
+        // Deliberately do not close: checking headers must not wait for EOF.
+      },
+    });
+    const response = new Response(stream, { status: 200, headers });
+    const cancel = vi.spyOn(response.body!, 'cancel');
+    const read = vi.spyOn(response.body!, 'getReader');
+    const upstream = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+
+    const first = await GET();
+    expect(first.status).toBe(503);
+    expect(first.headers.get('Cache-Control')).toBe('no-store');
+    expect(Number(first.headers.get('Retry-After'))).toBeGreaterThanOrEqual(wait - 1);
+    expect(read).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect((await first.json()).error).toMatch(/temporarily unavailable/);
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a normal chunked Overpass response valid without Content-Length', async () => {
+    const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'Transfer-Encoding': 'chunked' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const result = await GET();
+    expect(result.status).toBe(200);
+    expect((await result.json()).buildings).toHaveLength(1);
+    expect(upstream).toHaveBeenCalledOnce();
+  });
+
+  const encodings = [null, 'identity', 'gzip', 'br', 'deflate', 'x-unknown', '', 'gzip, br'];
+  const bodies = ['complete', 'incomplete', 'oversized', 'empty', 'unclosed'] as const;
+  it.each(footprintContentTypes.flatMap((contentType) => encodings.flatMap((encoding) =>
+    bodies.map((kind) => ({ contentType, encoding, kind })),
+  )))('validates upstream MIME $contentType / encoding $encoding / $kind', async ({
+    contentType, encoding, kind,
+  }) => {
+    vi.useFakeTimers();
+    const headers = new Headers();
+    if (contentType !== null) headers.set('Content-Type', contentType);
+    if (encoding !== null) headers.set('Content-Encoding', encoding);
+    const payload = {
+      complete: osmPayload,
+      incomplete: osmPayload.slice(0, -1),
+      oversized: osmPayload.padEnd(500_001, ' '),
+      empty: '',
+      unclosed: osmPayload,
+    }[kind];
+    // Fetch exposes decoded bytes for supported compressed responses.
+    if (kind === 'empty') headers.set('Content-Length', '0');
+    else if (['gzip', 'br', 'deflate'].includes(encoding ?? '')) headers.set('Content-Length', '42');
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(payload));
+        if (kind !== 'unclosed') controller.close();
+      },
+      cancel,
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(body, { headers }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const request = GET();
+    await vi.advanceTimersByTimeAsync(12_000);
+    const response = await request;
+
+    const baseAccepts = kind === 'complete' && compatibleFootprintContentTypes.has(contentType) &&
+      [null, 'identity', 'gzip', 'br', 'deflate'].includes(encoding);
+    expect(response.status).toBe(baseAccepts ? 200 : 503);
+    if (baseAccepts) {
+      expect(await response.json()).toMatchObject({
+        stale: false, buildings: [{ poiId: 'pu-library', osmVersion: 7 }],
+      });
+    } else {
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      if (kind === 'unclosed') expect(cancel).toHaveBeenCalledOnce();
+    }
+    expect((await GET()).status).toBe(response.status);
+    expect(upstream).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    'text/html; charset=utf-8',
+    'application/xhtml+xml',
+    'application/octet-stream',
+    'application/json, text/html',
+    'text/plain',
+    '',
+  ])('rejects invalid HTTP 200 MIME %j before reading a stalled Overpass body', async (type) => {
+    // The body is intentionally valid JSON but never closes. The server must
+    // reject the explicit incompatible media header without waiting 12 seconds,
+    // decoding a byte, caching a false building, or awaiting a stuck cancel.
+    let cancelled = 0;
+    let pulls = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      // Even a JSON-looking initial chunk is not a complete response until EOF.
+      start(controller) { controller.enqueue(new TextEncoder().encode(osmPayload)); },
+      pull() { pulls += 1; return new Promise<void>(() => {}); },
+      cancel() { cancelled += 1; return new Promise<void>(() => {}); },
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(stream, {
+      status: 200, headers: { 'Content-Type': type },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const result = await GET();
+    expect(result.status).toBe(503);
+    expect(result.headers.get('Cache-Control')).toBe('no-store');
+    expect(result.headers.get('Retry-After')).toBeTruthy();
+    expect(cancelled).toBe(1);
+    // The fixture's stream source may be pulled speculatively by the runtime,
+    // but no data from it can be accepted or read as a valid Overpass snapshot.
+    expect(pulls).toBeLessThanOrEqual(1);
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps dated stale outlines after an HTML 200 and refreshes from a valid JSON media type', async () => {
+    const start = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockImplementationOnce(async () => new Response(osmPayload, {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }))
+        .mockImplementationOnce(async () => new Response('<html>login required</html>', {
+          status: 200, headers: { 'Content-Type': 'text/html', 'Retry-After': '1800' },
+        }))
+        .mockImplementationOnce(async () => new Response(osmPayload, {
+          status: 200, headers: { 'Content-Type': 'application/vnd.overpass+json' },
+        }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const first = await GET();
+      expect(first.status).toBe(200);
+      const verified = await first.json();
+      clock.mockReturnValue(start + 25 * 60 * 60 * 1000);
+      const fallback = await GET();
+      expect(fallback.status).toBe(200);
+      expect(fallback.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(Number(fallback.headers.get('Retry-After'))).toBeGreaterThanOrEqual(1800);
+      expect(await fallback.json()).toMatchObject({
+        stale: true, fetchedAt: verified.fetchedAt, buildings: verified.buildings,
+      });
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+
+      clock.mockReturnValue(start + 26 * 60 * 60 * 1000);
+      const refreshed = await GET();
+      expect(refreshed.status).toBe(200);
+      expect(await refreshed.json()).toMatchObject({
+        stale: false, fetchedAt: new Date(Date.now()).toISOString(), buildings: verified.buildings,
+      });
+      expect(upstream).toHaveBeenCalledTimes(3);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it.each([
     { declared: 0, description: 'zero bytes' },
     { declared: new TextEncoder().encode(osmPayload).byteLength - 1, description: 'too few bytes' },
@@ -135,7 +343,7 @@ describe('public Providence building geometry route', () => {
     // identity body length. HTTP 200 and JSON.parse alone do not prove that
     // every advertised byte arrived, so it must never become a 24h snapshot.
     const upstream = vi.fn().mockImplementation(async () =>
-      new Response(osmPayload, {
+      jsonResponse(osmPayload, {
         status: 200, headers: { 'Content-Length': String(declared) },
       }));
     vi.stubGlobal('fetch', upstream);
@@ -149,7 +357,7 @@ describe('public Providence building geometry route', () => {
 
   it('accepts an identity Overpass body when its declared length matches', async () => {
     const upstream = vi.fn().mockImplementation(async () =>
-      new Response(osmPayload, {
+      jsonResponse(osmPayload, {
         status: 200,
         headers: { 'Content-Length': String(new TextEncoder().encode(osmPayload).byteLength) },
       }));
@@ -167,7 +375,7 @@ describe('public Providence building geometry route', () => {
     // original compressed length header. Model that Fetch contract, without
     // implying this mock represents a real gzip network transfer.
     const upstream = vi.fn().mockImplementation(async () =>
-      new Response(osmPayload, {
+      jsonResponse(osmPayload, {
         status: 200,
         headers: { 'Content-Encoding': 'gzip', 'Content-Length': '42' },
       }));
@@ -184,7 +392,7 @@ describe('public Providence building geometry route', () => {
       // This synthetic fetch body is already valid JSON. An unreviewed or
       // stacked coding must not disable identity length verification simply
       // because Content-Encoding is non-null.
-      const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+      const upstream = vi.fn().mockResolvedValue(jsonResponse(osmPayload, {
         status: 200,
         headers: { 'Content-Encoding': encoding, 'Content-Length': '1' },
       }));
@@ -232,7 +440,7 @@ describe('public Providence building geometry route', () => {
       // A compressed wire body with Content-Length: 000 has no bytes from
       // which Fetch could have decoded this JSON. This is a synthetic
       // contradictory header/body pair, not a recorded Overpass incident.
-      const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+      const upstream = vi.fn().mockResolvedValue(jsonResponse(osmPayload, {
         status: 200,
         headers: { 'Content-Encoding': encoding, 'Content-Length': '000' },
       }));
@@ -275,7 +483,7 @@ describe('public Providence building geometry route', () => {
     async (encoding) => {
       // A mocked Fetch response provides already-decoded JSON; no claim about
       // live Overpass compression or transfer correctness.
-      const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+      const upstream = vi.fn().mockResolvedValue(jsonResponse(osmPayload, {
         status: 200,
         headers: { 'Content-Encoding': encoding,
           'Content-Length': encoding === 'identity'
@@ -294,7 +502,7 @@ describe('public Providence building geometry route', () => {
     // Content-Length. A transport length over the decoded cap is not, by
     // itself, evidence that the decoded OSM JSON exceeds our memory budget.
     // This is a synthetic Fetch header/body contract, not a live OSM request.
-    const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(osmPayload, {
       status: 200,
       headers: { 'Content-Encoding': 'gzip', 'Content-Length': '500001' },
     }));
@@ -309,7 +517,7 @@ describe('public Providence building geometry route', () => {
 
   it('rejects a decoded gzip body over 500 KB despite a short encoded length', async () => {
     // Untrusted compressed bodies must still obey the *decoded* streaming cap.
-    const upstream = vi.fn().mockResolvedValue(new Response(' '.repeat(500_001), {
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(' '.repeat(500_001), {
       status: 200,
       headers: { 'Content-Encoding': 'gzip', 'Content-Length': '42' },
     }));
@@ -352,8 +560,8 @@ describe('public Providence building geometry route', () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(originalTime);
     try {
       const upstream = vi.fn()
-        .mockImplementationOnce(async () => new Response(osmPayload, { status: 200 }))
-        .mockImplementationOnce(async () => new Response(osmPayload, { status: 206 }));
+        .mockImplementationOnce(async () => jsonResponse(osmPayload, { status: 200 }))
+        .mockImplementationOnce(async () => jsonResponse(osmPayload, { status: 206 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
       const first = await GET();
@@ -384,7 +592,7 @@ describe('public Providence building geometry route', () => {
       // Each real fetch has a new single-use response body; reusing one mock Response
       // makes the second refresh fail with "Body is unusable" and masks cache behavior.
       const upstream = vi.fn().mockImplementation(async () =>
-        new Response(osmPayload, { status: 200 }));
+        jsonResponse(osmPayload, { status: 200 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
       const initial = await GET();
@@ -419,7 +627,7 @@ describe('public Providence building geometry route', () => {
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
         tags: { landuse: 'grass', 'demolished:building': 'yes' } }],
     });
-    const mockedFetch = vi.fn().mockResolvedValue(new Response(invalidPayload, { status: 200 }));
+    const mockedFetch = vi.fn().mockResolvedValue(jsonResponse(invalidPayload, { status: 200 }));
     vi.stubGlobal('fetch', mockedFetch);
     const { GET } = await import('./route');
     const response = await GET();
@@ -436,7 +644,7 @@ describe('public Providence building geometry route', () => {
         tags: { building: 'yes', 'demolished:building': 'yes' },
       }],
     });
-    const mockedFetch = vi.fn().mockResolvedValue(new Response(contradictory, { status: 200 }));
+    const mockedFetch = vi.fn().mockResolvedValue(jsonResponse(contradictory, { status: 200 }));
     vi.stubGlobal('fetch', mockedFetch);
     const { GET } = await import('./route');
     const first = await GET();
@@ -452,7 +660,7 @@ describe('public Providence building geometry route', () => {
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
         tags: { building: 'yes', height: '50 ft' } }],
     });
-    const upstream = vi.fn().mockResolvedValue(new Response(feetPayload, { status: 200 }));
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(feetPayload, { status: 200 }));
     vi.stubGlobal('fetch', upstream);
     const { GET } = await import('./route');
     const response = await GET();
@@ -466,12 +674,33 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
-  it('does not invent a 12m building when Overpass explicitly reports an unsupported height unit', async () => {
-    const invalid = JSON.stringify({
+  it('accepts documented OSM yard heights through the public API with sourced provenance', async () => {
+    // Synthetic OSM fixture; this is not a measured campus building height.
+    const yardPayload = JSON.stringify({
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
         tags: { building: 'yes', height: '50 yd' } }],
     });
-    const upstream = vi.fn().mockResolvedValue(new Response(invalid, { status: 200 }));
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(yardPayload, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.buildings).toHaveLength(1);
+    expect(body.buildings[0]).toMatchObject({
+      poiId: 'pu-library', heightBasis: 'osm-tag',
+    });
+    expect(body.buildings[0].heightMeters).toBeCloseTo(45.72, 6);
+    expect((await GET()).status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not invent a 12m building when Overpass explicitly reports an unsupported height unit', async () => {
+    const invalid = JSON.stringify({
+      elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
+        tags: { building: 'yes', height: '50 cubits' } }],
+    });
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(invalid, { status: 200 }));
     vi.stubGlobal('fetch', upstream);
     const { GET } = await import('./route');
     const first = await GET();
@@ -488,7 +717,7 @@ describe('public Providence building geometry route', () => {
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
         tags: { building: 'yes', 'building:part': 'yes', height: '18 m' } }],
     });
-    const upstream = vi.fn().mockResolvedValue(new Response(partsOnly, { status: 200 }));
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(partsOnly, { status: 200 }));
     vi.stubGlobal('fetch', upstream);
     const { GET } = await import('./route');
     const first = await GET();
@@ -505,7 +734,7 @@ describe('public Providence building geometry route', () => {
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
         tags: { building: 'yes', height: '18 m', location: 'underground' } }],
     });
-    const upstream = vi.fn().mockResolvedValue(new Response(underground, { status: 200 }));
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(underground, { status: 200 }));
     vi.stubGlobal('fetch', upstream);
     const { GET } = await import('./route');
 
@@ -526,7 +755,7 @@ describe('public Providence building geometry route', () => {
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
         tags: { building: 'yes', ruins: '' } }],
     });
-    const upstream = vi.fn().mockResolvedValue(new Response(ambiguous, { status: 200 }));
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(ambiguous, { status: 200 }));
     vi.stubGlobal('fetch', upstream);
     const { GET } = await import('./route');
     const first = await GET();
@@ -543,7 +772,7 @@ describe('public Providence building geometry route', () => {
         tags: { building: 'yes', ruins: 'yes', height: '20' },
       }],
     });
-    const upstream = vi.fn().mockResolvedValue(new Response(ruinedPayload, { status: 200 }));
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(ruinedPayload, { status: 200 }));
     vi.stubGlobal('fetch', upstream);
     const { GET } = await import('./route');
     const result = await GET();
@@ -561,7 +790,7 @@ describe('public Providence building geometry route', () => {
       osm3s: { timestamp_osm_base: baseTime },
       ...JSON.parse(osmPayload),
     });
-    const upstream = vi.fn().mockResolvedValue(new Response(payload, { status: 200 }));
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(payload, { status: 200 }));
     vi.stubGlobal('fetch', upstream);
     const { GET } = await import('./route');
     const response = await GET();
@@ -579,7 +808,7 @@ describe('public Providence building geometry route', () => {
     const now = Date.now();
     const baseTime = stamp(now - 10 * 60_000);
     const impossibleWayEdit = stamp(now - 60_000);
-    const upstream = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(JSON.stringify({
       osm3s: { timestamp_osm_base: baseTime },
       elements: [{ ...JSON.parse(osmPayload).elements[0], version: 99, timestamp: impossibleWayEdit }],
     }), { status: 200 }));
@@ -612,7 +841,7 @@ describe('public Providence building geometry route', () => {
         osm3s: { timestamp_osm_base: baseTime },
         ...JSON.parse(osmPayload),
       });
-      const upstream = vi.fn().mockImplementation(async () => new Response(payload, { status: 200 }));
+      const upstream = vi.fn().mockImplementation(async () => jsonResponse(payload, { status: 200 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
       const first = await GET();
@@ -660,7 +889,7 @@ describe('public Providence building geometry route', () => {
         ...JSON.parse(osmPayload),
       });
       const upstream = vi.fn()
-        .mockResolvedValueOnce(new Response(payload, { status: 200 }))
+        .mockResolvedValueOnce(jsonResponse(payload, { status: 200 }))
         .mockRejectedValue(new Error('Overpass offline'));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
@@ -695,7 +924,7 @@ describe('public Providence building geometry route', () => {
     ['null timestamp', { timestamp_osm_base: null }],
   ])('rejects an explicit osm3s header with %s instead of caching undated geometry', async (_case, osm3s) => {
     const payload = JSON.stringify({ osm3s, ...JSON.parse(osmPayload) });
-    const upstream = vi.fn().mockResolvedValue(new Response(payload, { status: 200 }));
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(payload, { status: 200 }));
     vi.stubGlobal('fetch', upstream);
     const { GET } = await import('./route');
     const response = await GET();
@@ -717,8 +946,8 @@ describe('public Providence building geometry route', () => {
       osm3s: { copyright: 'OpenStreetMap contributors' }, ...JSON.parse(osmPayload),
     });
     const upstream = vi.fn()
-      .mockResolvedValueOnce(new Response(initialPayload, { status: 200 }))
-      .mockResolvedValueOnce(new Response(malformedPayload, { status: 200 }));
+      .mockResolvedValueOnce(jsonResponse(initialPayload, { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse(malformedPayload, { status: 200 }));
     vi.stubGlobal('fetch', upstream);
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
@@ -749,7 +978,7 @@ describe('public Providence building geometry route', () => {
       osm3s: { timestamp_osm_base: baseTime },
       ...JSON.parse(osmPayload),
     });
-    const upstream = vi.fn().mockResolvedValue(new Response(payload, { status: 200 }));
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(payload, { status: 200 }));
     vi.stubGlobal('fetch', upstream);
     const { GET } = await import('./route');
     const first = await GET();
@@ -761,7 +990,7 @@ describe('public Providence building geometry route', () => {
   });
 
   it('fails closed on implausible future or malformed Overpass replication metadata', async () => {
-    const upstream = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(JSON.stringify({
       osm3s: { timestamp_osm_base: '2099-01-01T00:00:00Z' },
       ...JSON.parse(osmPayload),
     }), { status: 200 }));
@@ -789,7 +1018,7 @@ describe('public Providence building geometry route', () => {
     const original = JSON.parse(osmPayload).elements[0];
     const duplicate = { ...original, tags: { building: 'yes', height: '90' } };
     const payload = JSON.stringify({ elements: [original, duplicate] });
-    const mockedFetch = vi.fn().mockResolvedValue(new Response(payload, { status: 200 }));
+    const mockedFetch = vi.fn().mockResolvedValue(jsonResponse(payload, { status: 200 }));
     vi.stubGlobal('fetch', mockedFetch);
     const { GET } = await import('./route');
     const first = await GET();
@@ -808,7 +1037,7 @@ describe('public Providence building geometry route', () => {
       ...JSON.parse(osmPayload),
       remark: 'runtime error: Query timed out in "query"',
     });
-    const mockedFetch = vi.fn().mockResolvedValue(new Response(partial, { status: 200 }));
+    const mockedFetch = vi.fn().mockResolvedValue(jsonResponse(partial, { status: 200 }));
     vi.stubGlobal('fetch', mockedFetch);
     const { GET } = await import('./route');
     const first = await GET();
@@ -836,10 +1065,10 @@ describe('public Providence building geometry route', () => {
           })
           : '{"elements":[{"type":"way","id":255784049';
         const upstream = vi.fn()
-          .mockResolvedValueOnce(new Response(incomplete, {
+          .mockResolvedValueOnce(jsonResponse(incomplete, {
             status: 200, headers: { 'Retry-After': '3600' },
           }))
-          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+          .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
         vi.stubGlobal('fetch', upstream);
         const { GET } = await import('./route');
 
@@ -870,8 +1099,8 @@ describe('public Providence building geometry route', () => {
     const day = 24 * 60 * 60 * 1000;
     try {
       const upstream = vi.fn()
-        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify({
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }))
+        .mockResolvedValueOnce(jsonResponse(JSON.stringify({
           ...JSON.parse(osmPayload),
           remark: 'runtime error: Query timed out',
         }), { status: 200, headers: { 'Retry-After': '3600' } }));
@@ -902,8 +1131,8 @@ describe('public Providence building geometry route', () => {
       remark: 'runtime error: Query run out of memory',
     });
     const mockedFetch = vi.fn()
-      .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
-      .mockResolvedValueOnce(new Response(partial, { status: 200 }));
+      .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse(partial, { status: 200 }));
     vi.stubGlobal('fetch', mockedFetch);
     const { GET } = await import('./route');
     const start = Date.now();
@@ -1034,7 +1263,7 @@ describe('public Providence building geometry route', () => {
     const upstream = vi.fn()
       // Simulate a proxy ignoring AbortSignal entirely; this promise never settles.
       .mockImplementationOnce(() => new Promise<Response>(() => {}))
-      .mockImplementationOnce(async () => new Response(osmPayload, { status: 200 }));
+      .mockImplementationOnce(async () => jsonResponse(osmPayload, { status: 200 }));
     vi.stubGlobal('fetch', upstream);
     const { GET } = await import('./route');
     const pending = GET();
@@ -1119,7 +1348,7 @@ describe('public Providence building geometry route', () => {
   it('stops serving unverified stale building geometry after seven days of upstream failure', async () => {
     const day = 24 * 60 * 60 * 1000;
     const mockedFetch = vi.fn()
-      .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }))
       .mockRejectedValue(new Error('upstream still down'));
     vi.stubGlobal('fetch', mockedFetch);
     const { GET } = await import('./route');
@@ -1194,7 +1423,7 @@ describe('public Providence building geometry route', () => {
     try {
       const upstream = vi.fn()
         .mockResolvedValueOnce(new Response('client blocked', { status: 406 }))
-        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
 
@@ -1225,7 +1454,7 @@ describe('public Providence building geometry route', () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
       const upstream = vi.fn()
-        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }))
         .mockResolvedValueOnce(new Response('client blocked', { status: 406 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
@@ -1257,10 +1486,10 @@ describe('public Providence building geometry route', () => {
         // Synthetic statuses (including 520): no assertion that the live server
         // has emitted them. Valid geometry in a 206 reply must still be refused.
         const upstream = vi.fn()
-          .mockResolvedValueOnce(new Response(osmPayload, {
+          .mockResolvedValueOnce(jsonResponse(osmPayload, {
             status, headers: { 'Retry-After': '3600' },
           }))
-          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+          .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
         vi.stubGlobal('fetch', upstream);
         const { GET } = await import('./route');
 
@@ -1292,11 +1521,11 @@ describe('public Providence building geometry route', () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
       const upstream = vi.fn()
-        .mockResolvedValueOnce(new Response(osmPayload, {
+        .mockResolvedValueOnce(jsonResponse(osmPayload, {
           status: 200,
           headers: { 'Content-Range': 'bytes 0-99/200', 'Retry-After': '3600' },
         }))
-        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
       const rejected = await GET();
@@ -1320,11 +1549,11 @@ describe('public Providence building geometry route', () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
       const upstream = vi.fn()
-        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }))
         .mockResolvedValueOnce(new Response('upstream unavailable', {
           status: 500, headers: { 'Retry-After': '3600' },
         }))
-        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
       const first = await (await GET()).json();
@@ -1376,7 +1605,7 @@ describe('public Providence building geometry route', () => {
           .mockResolvedValueOnce(new Response('busy', {
             status, headers: { 'Retry-After': header },
           }))
-          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+          .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
         vi.stubGlobal('fetch', upstream);
         const { GET } = await import('./route');
         const rejected = await GET();
@@ -1408,7 +1637,7 @@ describe('public Providence building geometry route', () => {
         .mockResolvedValueOnce(new Response('rate limited', {
           status: 429, headers: { 'Retry-After': '3600' },
         }))
-        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
       const first = await GET();
@@ -1438,11 +1667,11 @@ describe('public Providence building geometry route', () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
       const upstream = vi.fn()
-        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }))
         .mockResolvedValueOnce(new Response('overloaded', {
           status: 503, headers: { 'Retry-After': retryAfter },
         }))
-        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
       const initial = await (await GET()).json();
@@ -1489,6 +1718,157 @@ describe('public Providence building geometry route', () => {
     vi.restoreAllMocks();
   });
   it.each([
+    {
+      label: 'ISO calendar date instead of an HTTP-date',
+      headers: { 'Retry-After': '2099-01-01' },
+    },
+    {
+      label: 'nonstandard long-weekday date without RFC 850 hyphens',
+      headers: { 'Retry-After': 'Sunday, 15 Nov 2026 23:00:00 GMT' },
+    },
+    {
+      label: 'non-HTTP origin Date that would inflate a legitimate retry to a day',
+      headers: {
+        Date: '2000-01-01',
+        'Retry-After': new Date(Date.parse('2026-11-15T01:00:00Z')).toUTCString(),
+      },
+    },
+  ])('does not trust $label when deciding the public Overpass retry window',
+    async ({ headers }) => {
+      // Synthetic proxy headers, not observations from the live Overpass API.
+      // The local clock is already 90 minutes ahead of the nominal origin.
+      // Bad date formats should use the ordinary 10-minute safety backoff,
+      // rather than locking all campus users out for up to 24 hours.
+      const start = Date.parse('2026-11-15T01:30:00Z');
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+      try {
+        const upstreamHeaders = new Headers();
+        for (const [name, value] of Object.entries(headers)) {
+          if (typeof value === 'string') upstreamHeaders.set(name, value);
+        }
+        const upstream = vi.fn()
+          .mockResolvedValueOnce(new Response('overloaded', { status: 503, headers: upstreamHeaders }))
+          .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
+        vi.stubGlobal('fetch', upstream);
+        const { GET } = await import('./route');
+
+        const rejected = await GET();
+        expect(rejected.status).toBe(503);
+        expect(rejected.headers.get('Retry-After')).toBe('600');
+        expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+
+        clock.mockReturnValue(start + 9 * 60_000);
+        expect((await GET()).headers.get('Retry-After')).toBe('60');
+        expect(upstream).toHaveBeenCalledTimes(1);
+        clock.mockReturnValue(start + 10 * 60_000 + 1_000);
+        const recovered = await GET();
+        expect(recovered.status).toBe(200);
+        expect((await recovered.json()).buildings).toHaveLength(1);
+        expect(upstream).toHaveBeenCalledTimes(2);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+  it('uses the HTTP RFC 850 year window rather than Date.parse for a 2050 Retry-After', async () => {
+    // In December 2049, year "50" is 2050 (one hour away), not 1950.
+    // Node Date.parse instead interprets 01-Jan-50 as 1950 and sees the
+    // wrong weekday, silently collapsing the provider backoff to 10 minutes.
+    const start = Date.parse('2049-12-31T23:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response('busy', {
+          status: 503, headers: { 'Retry-After': 'Saturday, 01-Jan-50 00:00:00 GMT' },
+        }))
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Retry-After')).toBe('3600');
+      clock.mockReturnValue(start + 59 * 60_000);
+      expect((await GET()).headers.get('Retry-After')).toBe('60');
+      expect(upstream).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(start + 60 * 60_000 + 1000);
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([
+    {
+      label: 'just beyond fifty full years',
+      retryAfter: 'Monday, 23-Nov-76 00:00:00 GMT',
+      expectedCooldown: '600',
+    },
+    {
+      label: 'still inside fifty full years',
+      retryAfter: 'Saturday, 21-Nov-76 00:00:00 GMT',
+      expectedCooldown: '86400',
+    },
+  ])('resolves an RFC 850 date $label by the whole 50-year deadline', async ({
+    retryAfter, expectedCooldown,
+  }) => {
+    // At 2026-11-22, 2076-11-23 is >50 years in the future and must
+    // become 1976-11-23; its weekday is Tuesday, not Monday. The old
+    // year-only pivot would falsely accept 2076 and back off for a day.
+    // 2076-11-21 remains within 50 calendar years and is still valid.
+    const start = Date.parse('2026-11-22T00:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn().mockResolvedValue(new Response('busy', {
+        status: 503, headers: { 'Retry-After': retryAfter },
+      }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Retry-After')).toBe(expectedCooldown);
+      expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([
+    ['IMF-fixdate', 'Sun, 15 Nov 2026 23:00:00 GMT', 15],
+    ['RFC 850', 'Sunday, 15-Nov-26 23:00:00 GMT', 15],
+    ['asctime', 'Sun Nov 15 23:00:00 2026', 15],
+    ['asctime with a space-padded day', 'Sun Nov  8 23:00:00 2026', 8],
+  ])('honours %s HTTP-date Retry-After in Asia/Taipei', async (_format, retryAfter, day) => {
+    vi.stubEnv('TZ', 'Asia/Taipei');
+    const start = Date.UTC(2026, 10, day, 1, 30);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      expect(new Date(start).getTimezoneOffset()).toBe(-480);
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response('busy', {
+          status: 503, headers: { 'Retry-After': retryAfter },
+        }))
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Retry-After')).toBe('77400');
+      clock.mockReturnValue(start + 10 * 60_000);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(start + 77401 * 1000);
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
     { label: 'HTTP 503', mode: 'error' },
     { label: 'HTTP 200 Content-Range', mode: 'range' },
     { label: 'HTTP 200 Overpass remark', mode: 'remark' },
@@ -1508,16 +1888,16 @@ describe('public Providence building geometry route', () => {
       const bad = mode === 'error'
         ? new Response('overloaded', { status: 503, headers })
         : mode === 'range'
-          ? new Response(osmPayload, { status: 200,
+          ? jsonResponse(osmPayload, { status: 200,
               headers: { ...headers, 'Content-Range': 'bytes 0-99/200' } })
           : mode === 'remark'
-            ? new Response(JSON.stringify({ remark: 'runtime error: timeout', elements: [] }), {
+            ? jsonResponse(JSON.stringify({ remark: 'runtime error: timeout', elements: [] }), {
                 status: 200, headers,
               })
-            : new Response('{"elements":[', { status: 200, headers });
+            : jsonResponse('{"elements":[', { status: 200, headers });
       const upstream = vi.fn()
         .mockResolvedValueOnce(bad)
-        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
       const rejected = await GET();
@@ -1554,7 +1934,7 @@ describe('public Providence building geometry route', () => {
             'Retry-After': new Date(serverNow + 60 * 60_000).toUTCString(),
           },
         }))
-        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
       expect((await GET()).headers.get('Retry-After')).toBe('9000');
@@ -1664,10 +2044,10 @@ describe('public Providence building geometry route', () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
       const upstream = vi.fn()
-        .mockResolvedValueOnce(new Response(JSON.stringify({ elements: [] }), {
+        .mockResolvedValueOnce(jsonResponse(JSON.stringify({ elements: [] }), {
           status: 200, headers: { 'Retry-After': '3600' },
         }))
-        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
 
@@ -1704,11 +2084,11 @@ describe('public Providence building geometry route', () => {
       const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
       try {
         const upstream = vi.fn()
-          .mockResolvedValueOnce(new Response(responseBody, {
+          .mockResolvedValueOnce(jsonResponse(responseBody, {
             status: 200,
             headers: { 'Content-Length': contentLength, 'Retry-After': '3600' },
           }))
-          .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+          .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
         vi.stubGlobal('fetch', upstream);
         const { GET } = await import('./route');
 
@@ -1736,7 +2116,7 @@ describe('public Providence building geometry route', () => {
   );
 
   it('still accepts valid HTTP 200 geometry when Retry-After happens to be present', async () => {
-    const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+    const upstream = vi.fn().mockResolvedValue(jsonResponse(osmPayload, {
       status: 200, headers: { 'Retry-After': '3600' },
     }));
     vi.stubGlobal('fetch', upstream);
@@ -1762,13 +2142,13 @@ describe('public Providence building geometry route', () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
       const upstream = vi.fn()
-        .mockResolvedValueOnce(new Response(JSON.stringify({
+        .mockResolvedValueOnce(jsonResponse(JSON.stringify({
           osm3s, elements: JSON.parse(osmPayload).elements,
         }), {
           status: 200,
           headers: retryAfter === null ? {} : { 'Retry-After': retryAfter },
         }))
-        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+        .mockResolvedValueOnce(jsonResponse(osmPayload, { status: 200 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
       const rejected = await GET();

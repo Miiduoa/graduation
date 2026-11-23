@@ -505,13 +505,18 @@ export async function run(input: RunInput) {
     }
     const taskRequest = input.planRevision ? null : crossServiceRequest(input.question, now, input.binding.schoolId);
     if (taskRequest) {
+      // Check the parsed task as well as the conversational guide. A wording
+      // difference must not move professional work into another task context.
+      if (profile.id !== 'student' && taskRequest.operations.some(operation =>
+        operation.workSession && operation.workSession.profileId !== profile.id))
+        throw new V2Error(409, 'TASK_CONTEXT_MISMATCH');
       const eventMapSelections: Record<string, import('./publicEvent').PublicEventTarget> = {};
       const merchantSelections: Record<string, import('./roleWorkspaceReads').MerchantTarget> = {};
       const result = await runCrossService({ request: taskRequest, tools, binding: input.binding, signal, now,
         onEventMapSelection: (stepId, target) => { eventMapSelections[stepId] = target; },
         onMerchantSelection: (stepId, target) => { merchantSelections[stepId] = target; } });
       const taskRetry = issueTaskRetry({ question: input.question, request: taskRequest, plan: result.taskPlan,
-        binding: input.binding, secret: input.secret, now, eventMapSelections, merchantSelections });
+        binding: input.binding, secret: input.secret, now, taskProfile: profile.id, eventMapSelections, merchantSelections });
       steps.push(...result.steps);
       stopReason = result.stopReason;
       log('assistant.completed');

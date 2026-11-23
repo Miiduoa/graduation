@@ -32,9 +32,13 @@ export function resolveCampusAssignmentTarget(input: {
   const snapshot = validCampusSenseSnapshot(input.snapshot, input.scope, now);
   if (!snapshot || snapshot.assignments.status !== 'available' ||
       typeof input.assignment.title !== 'string' || !input.assignment.title.trim()) return null;
-  const title = campusAssignmentDisplayTitle(input.assignment.title);
+  // The source payload can be cut to 140 characters. A 140-character row
+  // might be an incomplete title, so it cannot authorize a precise handoff.
+  // The 130-character UI preview is never a source identity.
+  const title = input.assignment.title.replace(/\s+/g, ' ').trim();
   const matches = snapshot.assignments.items.filter((row) =>
-    campusAssignmentDisplayTitle(row.title) === title &&
+    row.title.length < 140 &&
+    row.title.replace(/\s+/g, ' ').trim() === title &&
     row.groupName === (input.assignment.groupName ?? '') &&
     row.dueAt === (input.assignment.dueAt ?? null));
   // Same-title tasks must never pick whichever happens to appear first.

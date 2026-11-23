@@ -1,5 +1,6 @@
 import type { AssistantServiceId } from '@campus/shared/src/assistantServices';
 import { parseAssistantCalendarIntent } from '@campus/shared/src/assistantCalendarIntent';
+import { parseAssistantWorkSessionIntent, type AssistantWorkSessionIntent } from '@campus/shared/src/assistantWorkSessionIntent';
 import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
 import { publicCourseAssistantSource, type PublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { addDays, date, taipeiDate, type Obj } from './contracts';
@@ -16,7 +17,7 @@ export type CrossServiceOperation = {
   id: string;
   label: string;
   serviceId: AssistantServiceId;
-  kind: 'read' | 'study' | 'event' | 'free-time' | 'materials' | 'clubs' | 'transit' | 'reorder' | 'handoff' | 'public-course' | 'map-location';
+  kind: 'read' | 'study' | 'event' | 'work-session' | 'free-time' | 'materials' | 'clubs' | 'transit' | 'reorder' | 'handoff' | 'public-course' | 'map-location';
   tool?: string;
   args: Obj;
   dependsOn: string[];
@@ -26,6 +27,7 @@ export type CrossServiceOperation = {
   publicCourseIntent?: PublicCourseAssistantIntent;
   mapSource?: { kind: 'event'; index: number };
   eventIssue?: string;
+  workSession?: AssistantWorkSessionIntent;
 };
 export type CrossServiceRequest = { operations: CrossServiceOperation[] };
 
@@ -131,6 +133,17 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
     return next;
   };
   for (let index = 0; index < clauses.length; index++) {
+    const clause = clauses[index].question.replace(/^先(?=查|看|幫我)/, '');
+    // Exact work-slot commands also precede public-course classification:
+    // "找 ... 備課空檔" requests personal time, not a course catalogue.
+    const workSession = parseAssistantWorkSessionIntent(clause, now);
+    if (workSession) {
+      add({ kind: workSession.mode === 'find' ? 'free-time' : 'work-session',
+        label: workSession.mode === 'find' ? `找可用的${workSession.title}時段` : `準備個人${workSession.title}行程`,
+        serviceId: 'calendar', args: { date: workSession.date, from: workSession.from,
+          to: workSession.to, minMinutes: workSession.minutes }, question: clause, workSession });
+      continue;
+    }
     const publicCourseIntent = clauses[index].publicCourseIntent;
     if (publicCourseIntent) {
       const source = publicCourseIntent.kind === 'search' ? publicCourseAssistantSource(publicCourseIntent) : null;
@@ -139,7 +152,6 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
         args: publicCourseIntent.kind === 'search' ? publicCourseArguments(publicCourseIntent) : {}, publicCourseIntent });
       continue;
     }
-    const clause = clauses[index].question.replace(/^先(?=查|看|幫我)/, '');
     const connected = connectedServiceRead(clause);
     if (connected) {
       add({ kind: 'read', ...connected });
@@ -270,8 +282,10 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
   }
   const singleSourceRead = requested.length === 1 && requested[0].kind === 'read' &&
     ['get_campus_announcements', 'get_campus_events', 'get_lost_found', 'get_campus_map', 'get_public_social', 'get_school_info', 'get_teaching_overview', 'get_merchant_overview'].includes(requested[0].tool || '');
-  if ((!singleSourceRead && requested.length < 2) || requested.length > 12 || (!singleSourceRead &&
-      new Set(requested.map(op => op.kind === 'public-course' || op.tool === 'get_campus_map' || op.tool === 'get_school_info' ? op.kind + ':' + op.tool + ':' + JSON.stringify(op.args)
+  const singleWorkSession = requested.length === 1 && Boolean(requested[0].workSession);
+  if ((!singleSourceRead && !singleWorkSession && requested.length < 2) || requested.length > 12 || (!singleSourceRead && !singleWorkSession &&
+      new Set(requested.map(op => op.workSession ? op.kind + ':' + op.workSession.title + ':' + JSON.stringify(op.args)
+        : op.kind === 'public-course' || op.tool === 'get_campus_map' || op.tool === 'get_school_info' ? op.kind + ':' + op.tool + ':' + JSON.stringify(op.args)
         : op.kind === 'read' ? op.tool : op.kind + ':' + op.serviceId)).size < 2)) return null;
   const operations: CrossServiceOperation[] = [];
   let serial = requested.length;
@@ -283,6 +297,30 @@ export function crossServiceRequest(question: string, now: number, schoolId = ''
     return operation;
   };
   for (const operation of requested) {
+    // A work source named later in the same request still precedes its
+    // dependent plan. Its original identity is kept for signed read retries.
+    if (operations.some(previous => previous.id === operation.id)) continue;
+    if (operation.workSession) {
+      const work = operation.workSession;
+      const sources = requested.filter(source => work.profileId === 'teacher' ? source.tool === 'get_teaching_overview'
+        : work.profileId === 'merchant' ? source.tool === 'get_merchant_overview'
+          : work.profileId === 'club' ? source.kind === 'clubs' : false);
+      for (const source of sources)
+        if (!operations.some(previous => previous.id === source.id)) operations.push(source);
+      const schedule = prerequisite('get_schedule', { from: work.date, to: work.date }, '核對安排當日課表', 'timetable');
+      const calendar = prerequisite('get_calendar', { from: work.date, to: work.date }, '核對安排當日行程', 'calendar');
+      const dependencies = [...sources.map(source => source.id), schedule.id, calendar.id];
+      if (operation.kind === 'free-time') operation.dependsOn = dependencies;
+      else {
+        const free: CrossServiceOperation = { id: 'task-' + (++serial), kind: 'free-time',
+          label: `找可用的${work.title}時段`, serviceId: 'calendar', args: { ...operation.args },
+          question: operation.question, workSession: { ...work, mode: 'find' }, dependsOn: dependencies };
+        operations.push(free);
+        operation.dependsOn = [...sources.map(source => source.id), free.id];
+      }
+      operations.push(operation);
+      continue;
+    }
     if (operation.kind === 'study' || operation.kind === 'free-time') {
       const day = String(operation.args.date);
       const schedule = prerequisite('get_schedule', { from: day, to: day }, '核對安排當日課表', 'timetable');

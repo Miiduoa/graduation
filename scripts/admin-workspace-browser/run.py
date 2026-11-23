@@ -420,9 +420,10 @@ async def scenarios(browser, report):
     fixtures.append(fixture)
     page = await new_page(browser, fixture, report, 320, 720)
     await page.goto(f"{ORIGIN}/admin?theme=dark#merchants")
+    merchant_application = fixture.merchant_applications[0]
     merchant = page.get_by_role(
         "article",
-        name="慢慢食堂／學生生活館二樓共享餐飲空間與戶外取餐窗口店家進件",
+        name=f"{merchant_application['brandName']}／{merchant_application['locationName']}店家進件",
         exact=True,
     )
     await merchant.get_by_role("button", name="核准進件", exact=True).click()

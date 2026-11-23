@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { isSupportedUtf8JsonMediaType } from '@/app/map/jsonMediaType';
 import {
   parseProvidenceOsmFootprints,
   stripOsmRevisionsAfter,
@@ -63,6 +64,56 @@ class OverpassRateLimitError extends Error {
   }
 }
 
+// HTTP-date permits IMF-fixdate and two legacy wire formats (RFC 9110 §5.6.7).
+// Date.parse accepts additional non-HTTP strings such as ISO calendar dates;
+// allowing those as a proxy's Date/Retry-After can falsely lock the campus map
+// for 24 hours. Reconstruct each allowed wire representation from the parsed
+// UTC instant, rejecting normalized/impossible dates and arbitrary formats.
+const HTTP_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const HTTP_LONG_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const HTTP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function parseHttpDateMillis(value: string | null, now: number): number | null {
+  if (value === null) return null;
+  // Date.parse uses an implementation-specific pivot for RFC 850's two-digit
+  // year (e.g. "50" becomes 1950 even when the request is made in 2049).
+  // RFC 9110 requires resolving the year relative to the recipient's clock:
+  // a date appearing more than 50 years in the future belongs to the past.
+  const legacy = /^([A-Za-z]+), (\d{2})-([A-Za-z]{3})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) GMT$/.exec(value);
+  if (legacy) {
+    const monthIndex = HTTP_MONTHS.indexOf(legacy[3]);
+    if (monthIndex < 0) return null;
+    const referenceYear = new Date(now).getUTCFullYear();
+    let year = Math.floor(referenceYear / 100) * 100 + Number(legacy[4]);
+    // The RFC 9110 limit is a complete 50-year period, not only a
+    // difference between year numbers. At 2026-11-22, 2076-11-23 is
+    // already more than 50 years ahead and must be read as 1976.
+    const fiftyYearCutoff = new Date(now);
+    fiftyYearCutoff.setUTCFullYear(referenceYear + 50);
+    const candidate = Date.UTC(year, monthIndex, Number(legacy[2]),
+      Number(legacy[5]), Number(legacy[6]), Number(legacy[7]));
+    if (candidate > fiftyYearCutoff.getTime()) year -= 100;
+    else if (year < referenceYear - 50) year += 100;
+    const parsed = Date.UTC(year, monthIndex, Number(legacy[2]),
+      Number(legacy[5]), Number(legacy[6]), Number(legacy[7]));
+    const date = new Date(parsed);
+    const canonical = `${HTTP_LONG_WEEKDAYS[date.getUTCDay()]}, ${String(date.getUTCDate()).padStart(2, '0')}-${HTTP_MONTHS[date.getUTCMonth()]}-${String(year % 100).padStart(2, '0')} ${date.toUTCString().slice(17, 25)} GMT`;
+    // Reject invalid weekday, impossible dates and normalized time components.
+    return value === canonical ? parsed : null;
+  }
+  const isAsctime = /^[A-Za-z]{3} [A-Za-z]{3} (?: \d|\d{2}) \d{2}:\d{2}:\d{2} \d{4}$/.test(value);
+  // asctime omits the zone on the wire, but HTTP dates are always UTC.
+  const parsed = Date.parse(isAsctime ? `${value} GMT` : value);
+  if (!Number.isFinite(parsed)) return null;
+  const date = new Date(parsed);
+  if (date.toUTCString() === value) return parsed;
+  const day = String(date.getUTCDate());
+  const month = HTTP_MONTHS[date.getUTCMonth()];
+  const time = date.toUTCString().slice(17, 25);
+  const asctime = `${HTTP_WEEKDAYS[date.getUTCDay()]} ${month} ${day.padStart(2, ' ')} ${time} ${date.getUTCFullYear()}`;
+  return value === asctime ? parsed : null;
+}
+
 function overpassRetryAfterMs(header: string | null, now: number, serverDate: string | null = null): number {
   if (!header) return ERROR_COOLDOWN_MS;
   const value = header.trim();
@@ -76,14 +127,13 @@ function overpassRetryAfterMs(header: string | null, now: number, serverDate: st
     requestedMs = digits.length > 5 || (digits.length === 5 && digits >= '86400')
       ? MAX_RETRY_AFTER_MS : Number(digits) * 1000;
   } else {
-    const dateMs = Date.parse(value);
-    // HTTP-date Retry-After and the upstream Date share the same server clock.
-    // If our host is ahead, local subtraction alone can shorten a one-hour
-    // pause to the ten-minute default and repeatedly overload public Overpass.
-    // Keep the more conservative of the local and server-relative durations.
-    const originMs = serverDate === null ? NaN : Date.parse(serverDate);
-    requestedMs = Number.isFinite(dateMs)
-      ? Math.max(dateMs - now, Number.isFinite(originMs) ? dateMs - originMs : -Infinity)
+    const dateMs = parseHttpDateMillis(value, now);
+    // Only a recognized HTTP-date is a trustworthy origin-clock reference.
+    // Invalid intermediary dates must never amplify a ten-minute fallback
+    // into a 24-hour cooldown or silently shorten a valid server pause.
+    const originMs = parseHttpDateMillis(serverDate, now);
+    requestedMs = dateMs !== null
+      ? Math.max(dateMs - now, originMs !== null ? dateMs - originMs : -Infinity)
       : NaN;
   }
   if (!Number.isFinite(requestedMs) || requestedMs <= 0) return ERROR_COOLDOWN_MS;
@@ -276,6 +326,26 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     if (response.body) void response.body.cancel().catch(() => {});
     // Even HTTP 200 is not a complete source when a proxy sends Content-Range.
     // Retain any upstream cooldown instead of retrying a partial response at 10m.
+    throw new OverpassRateLimitError(overpassRetryAfterMs(
+      response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
+    ));
+  }
+  // RFC 9112 §6.3: Transfer-Encoding and Content-Length cannot both frame
+  // one HTTP response. A misconfigured intermediary can otherwise make a
+  // complete-looking JSON fragment appear to be a verified 24-hour OSM map.
+  // Reject the conflicting headers before reading even a stalled body.
+  if (response.headers.get('transfer-encoding') !== null &&
+      response.headers.get('content-length') !== null) {
+    if (response.body) void response.body.cancel().catch(() => {});
+    throw new OverpassRateLimitError(overpassRetryAfterMs(
+      response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
+    ));
+  }
+  // A captive portal or reverse proxy may return HTTP 200 with an explicit
+  // HTML/binary MIME while providing JSON-shaped data. Do not turn that into
+  // a 24-hour audited building snapshot. Cancel a stalled body immediately.
+  if (!isSupportedUtf8JsonMediaType(response.headers.get('content-type'))) {
+    if (response.body) void response.body.cancel().catch(() => {});
     throw new OverpassRateLimitError(overpassRetryAfterMs(
       response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));

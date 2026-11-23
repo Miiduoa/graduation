@@ -143,3 +143,47 @@ it('submits a confirmed write with its run id and no fabricated receipt', async 
     payload: { courseId: 'class-1' }, agentRunId: '01234567-89ab-4cde-8012-3456789abcde',
   })).rejects.toMatchObject({ code: 'invalid-response' });
 });
+
+const cancelPayload = { reservationId: 'wash-1', expectedReservationVersion: 'a'.repeat(64), machineId: 'A2',
+  dormitory: '女生宿舍', startTime: '2030-01-02T09:00:00+08:00', reservedUntil: '2030-01-02T02:00:00.000Z' };
+const cancelInput = { userId: 'alice', schoolId: 'pu', toolName: 'cancelWashingReservation',
+  payload: cancelPayload, agentRunId: '01234567-89ab-4cde-8012-3456789abcde' };
+const cancelReceipt = { success: true, toolName: 'cancelWashingReservation', reservationId: 'wash-1', machineId: 'A2',
+  dormitory: '女生宿舍', startTime: cancelPayload.startTime, reservedUntil: cancelPayload.reservedUntil,
+  status: 'cancelled', schoolId: 'pu', userId: 'alice' };
+it.each([cancelPayload.reservedUntil, null])('accepts only the complete matching cancellation receipt with end %s', async reservedUntil => {
+  state.callable.mockResolvedValue({ data: { ...cancelReceipt, reservedUntil } });
+  await expect(executeCampusAgentWrite({ ...cancelInput, payload: { ...cancelPayload, reservedUntil } }))
+    .resolves.toMatchObject({ success: true, reservationId: 'wash-1', status: 'cancelled' });
+  expect(state.callable).toHaveBeenCalledWith(expect.objectContaining({ agentRunId: cancelInput.agentRunId,
+    input: { ...cancelPayload, reservedUntil } }));
+});
+it.each([
+  { success: true, toolName: 'cancelWashingReservation' },
+  ...['reservationId', 'machineId', 'dormitory', 'startTime', 'reservedUntil', 'status', 'schoolId', 'userId']
+    .flatMap(key => [{ ...cancelReceipt, [key]: undefined }, { ...cancelReceipt, [key]: 'different' }]),
+])('rejects incomplete or mismatched cancellation receipt %#', async data => {
+  state.callable.mockResolvedValue({ data });
+  await expect(executeCampusAgentWrite(cancelInput)).rejects.toMatchObject({ code: 'invalid-response' });
+});
+it.each(['reservationId', 'expectedReservationVersion', 'machineId', 'dormitory', 'startTime', 'reservedUntil'])
+  ('does not dispatch incomplete cancellation missing %s', async key => {
+    const payload = { ...cancelPayload } as Record<string, unknown>;
+    delete payload[key];
+    state.callable.mockResolvedValue({ data: cancelReceipt });
+    await expect(executeCampusAgentWrite({ ...cancelInput, payload })).rejects.toThrow();
+    expect(state.callable).not.toHaveBeenCalled();
+  });
+it('does not accept cancellation success after abort or account change', async () => {
+  let finish!: (result: unknown) => void;
+  state.callable.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const controller = new AbortController();
+  const pending = executeCampusAgentWrite(cancelInput, controller.signal);
+  controller.abort();
+  finish({ data: cancelReceipt });
+  await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  const changed = executeCampusAgentWrite(cancelInput);
+  state.uid = 'bob';
+  finish({ data: cancelReceipt });
+  await expect(changed).rejects.toMatchObject({ code: 'session-changed' });
+});

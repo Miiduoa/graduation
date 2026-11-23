@@ -84,7 +84,7 @@ test('student context preserves every existing tool while unavailable sources st
   assert.ok(student.capabilities.some((item) => item.id === 'student-services' && item.serviceIds.includes('school-lms')));
   assert.equal(student.capabilities.some((item) => item.level === 'query' && item.serviceIds.includes('school-lms')), false);
   assert.equal(student.capabilities.some((item) => item.level === 'query' && item.serviceIds.includes('grades')), false);
-  for (const id of ['announcements', 'events', 'map', 'library']) {
+  for (const id of ['library']) {
     assert.equal(student.capabilities.some((item) => item.level === 'query' && item.serviceIds.includes(id)), false,
       `${id} currently has an entry projection, not a content reader`);
   }
@@ -170,5 +170,47 @@ test('shared profiles, examples, capability lists and tool vocabulary cannot be 
     }
     assert.throws(() => profile.toolNames.push('delete_user'));
     assert.equal(assistantRoleToolAllowed(profile.id, 'delete_user'), false);
+  }
+});
+
+
+test('all six contexts expose the same connected public readers without adding private role sources', () => {
+  const common = ['get_campus_announcements', 'get_campus_events', 'get_school_info', 'get_public_social'];
+  for (const profile of ASSISTANT_ROLE_PROFILES) {
+    const capability = profile.capabilities.find(item => item.id === 'public-campus-reading');
+    assert.equal(capability.level, 'query');
+    assert.deepEqual([...capability.serviceIds], ['announcements', 'events', 'public-social', 'school-info']);
+    for (const name of common) assert.equal(assistantRoleToolAllowed(profile.id, name), true, `${profile.id}: ${name}`);
+  }
+  for (const id of ['club', 'school', 'platform']) {
+    for (const name of ['get_teaching_overview', 'get_merchant_overview', 'get_due_work', 'list_food_orders']) {
+      assert.equal(assistantRoleToolAllowed(id, name), false, `${id}: ${name}`);
+    }
+  }
+});
+
+test('work-session examples use personal planning capabilities instead of professional write tools', () => {
+  for (const profile of ASSISTANT_ROLE_PROFILES.filter(item => item.id !== 'student')) {
+    const capability = profile.capabilities.find(item => item.id === 'work-session');
+    assert.equal(capability.level, 'prepare');
+    assert.deepEqual([...capability.toolNames], ['get_schedule', 'get_calendar', 'find_free_time', 'propose_personal_event']);
+    assert.ok(profile.examples.some(example => example.capabilityId === 'work-session'));
+    assert.match(profile.guidance, /來源不完整時不能宣稱有空/);
+  }
+});
+
+
+test('all six contexts can locate a campus place or a classroom from their own timetable', () => {
+  for (const profile of ASSISTANT_ROLE_PROFILES) {
+    const capability = profile.capabilities.find(item => item.id === 'campus-map');
+    assert.equal(capability.level, 'query');
+    assert.deepEqual([...capability.serviceIds], ['map', 'timetable']);
+    assert.deepEqual([...capability.toolNames], ['get_campus_map', 'get_schedule']);
+    assert.equal(assistantRoleToolAllowed(profile.id, 'get_campus_map'), true);
+    assert.equal(assistantRoleToolAllowed(profile.id, 'get_schedule'), true);
+    if (profile.id !== 'student') {
+      assert.equal(assistantRoleToolAllowed(profile.id, 'list_courses'), false);
+      assert.equal(assistantRoleToolAllowed(profile.id, 'get_due_work'), false);
+    }
   }
 });

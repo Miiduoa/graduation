@@ -1,0 +1,216 @@
+{
+  "main": "67ed7458339e4db981ed016926affa465d995d2f",
+  "incoming": "8e07b78a90c751cc616c761a19580f86a0e44775",
+  "sources": [
+    {
+      "pr": 439,
+      "original_head": "3aba27760f9de953c7ed110bb8c91d48efc80516",
+      "final_head": "cdae72c53be721508a57452547bbfef32146bb1e",
+      "original_is_final_ancestor": true,
+      "main_merge": "cdf5b67e2eda2a4bc024a2d2659cd9b126ca26c4 建立平台帳號公開 Agent 任務入場候選 (#439)"
+    },
+    {
+      "pr": 470,
+      "original_head": "0291b03a6bd3c0be3f213421945fc5752f4b5a43",
+      "final_head": "a2d96540e3776f9d0606ce42776f350a6151b5be",
+      "original_is_final_ancestor": true,
+      "main_merge": "58dc17ccfba698cad54d704a6bf7036476f8e5d3 fix(lms): guard TronClass cache reads and writes across session changes (#470)"
+    },
+    {
+      "pr": 473,
+      "original_head": "4b4883c872e8b13a576d562d9f4dcd456b09530e",
+      "final_head": "254013b28cc4309bba834b42a35c3805aa09b0d9",
+      "original_is_final_ancestor": true,
+      "main_merge": "04114be9d09717b746dcc29641939454f9a443ca 手機校園助理可按課名選作業、查繳交紀錄並返回原清單 (#473)"
+    },
+    {
+      "pr": 501,
+      "original_head": "b169cddbe7ce4a3191e58cd078be41ace2a4453d",
+      "final_head": "243d665610d64f290f220128e50274f584a658e4",
+      "original_is_final_ancestor": true,
+      "main_merge": "d24a75644a0fc0ff7932d22e290d2f183d44bf37 重整「今天」頁的日程視覺，支援原頁語音問答 (#501)"
+    },
+    {
+      "pr": 502,
+      "original_head": "ed2cf4ee5d86418f6920b826d951f24ce737278a",
+      "final_head": "25837920e9ec0bed600e0f7881f224e015a2d155",
+      "original_is_final_ancestor": true,
+      "main_merge": "9e07c8047a70b1209f83aed8f107a39714d599a8 宿舍報修可直接送出並用單號回查進度 (#502)"
+    },
+    {
+      "pr": 503,
+      "original_head": "3a02bc069aecd72144683b850529ceeef3b3f525",
+      "final_head": "7add4572bd0da64adbce9f72156241c09ad1f719",
+      "original_is_final_ancestor": true,
+      "main_merge": "945981ae7c0b6e4949b17613a26f964645601099 讓 138 校可離線選校，修正跨校助理、課程與作業入口 (#503)"
+    },
+    {
+      "pr": 504,
+      "original_head": "8a3b99231671be0c5fbde0a4ca5b2e16acffa3f6",
+      "final_head": "8a3b99231671be0c5fbde0a4ca5b2e16acffa3f6",
+      "original_is_final_ancestor": true,
+      "main_merge": "cacea7e600b5908d7c3837c515e350312c143387 集中跨端點餐與失物招領規則，整理維護入口 (#504)"
+    },
+    {
+      "pr": 505,
+      "original_head": "cf01955620ad3ceef0fa75229e897e79528b4695",
+      "final_head": "447b9dc117624762079dc380c14ed4e7936ca253",
+      "original_is_final_ancestor": true,
+      "main_merge": "0bbb08ef7aadc46d6c0b462f69a39ad3f141bc43 減少個人課表比對重複課程與衝堂的計算量 (#505)"
+    },
+    {
+      "pr": 506,
+      "original_head": "031fb85a79a018bc40c6e79b391db7082971e0b3",
+      "final_head": "031fb85a79a018bc40c6e79b391db7082971e0b3",
+      "original_is_final_ancestor": true,
+      "main_merge": "09d11b7b69132d3048d0d6fa84ef5200afee4374 修正行事曆匯入時標題、地點與時區被引號內網址干擾 (#506)"
+    },
+    {
+      "pr": 507,
+      "original_head": "6f7ce0fb69e61969aac3470896aada58b08b951c",
+      "final_head": "6f7ce0fb69e61969aac3470896aada58b08b951c",
+      "original_is_final_ancestor": true,
+      "main_merge": "36317460d47e1c977e2f78b6e0701e79b3f45077 宿舍洗衣倒數可選手機到時提醒，支援延長、清除與切校 (#507)"
+    },
+    {
+      "pr": 508,
+      "original_head": "74e6ee915967b84772252f3c5a2ca34067b83e63",
+      "final_head": "891c1c04aef482f82eafe0433454b71dbaa7b190",
+      "original_is_final_ancestor": true,
+      "main_merge": "7a8bd8199ce4d62733451a7c73f028f78a5ce220 修正活動時區影響整份行事曆，縮短大量 UTC 行程的匯入時間 (#508)"
+    },
+    {
+      "pr": 509,
+      "original_head": "3e28f642b5e86a86bd30e68713200adf57577224",
+      "final_head": "7553d2dcc1baeecb7662118162aeca05488b30f0",
+      "original_is_final_ancestor": true,
+      "main_merge": "a14c5c9aec81effe8428d87f3492e55e3c1dc1d2 手機助理可連續調整空堂日期、鐘點與長度 (#509)"
+    },
+    {
+      "pr": 510,
+      "original_head": "45fabce927155123ce630087977fbeca4068336d",
+      "final_head": "cc72529fc1aca6c7822588986f5e9fcde3f8726a",
+      "original_is_final_ancestor": true,
+      "main_merge": "162d3aa6ef5705b532314badd3d6269729175b43 校園服務接續操作：請假可查舊單並撤回、餐點調整確認後才儲存 (#510)"
+    },
+    {
+      "pr": 511,
+      "original_head": "051b265053b003cc02a4ff9faed5a34309ee09ce",
+      "final_head": "518b807df0ae94507a6ad69dac00834a33c85910",
+      "original_is_final_ancestor": true,
+      "main_merge": "9dca1ee7188cd9484927a73d9de7d7c2f46a21d4 修正店家、教職員與管理員的註冊及登入流程 (#511)"
+    },
+    {
+      "pr": 512,
+      "original_head": "ff6509b008c20f338da347134acb664b0ffc1162",
+      "final_head": "7b4e80afe546a5710bfdd22c0ad0600db9abb65c",
+      "original_is_final_ancestor": true,
+      "main_merge": "33e65c2b26848b60a9fea9b4272d19b73cb29760 修正手機課程教材的部分載入與附件來源核對 (#512)"
+    },
+    {
+      "pr": 513,
+      "original_head": "7d26311a5d9256c3b753af0fe0916b8e7b41ab8a",
+      "final_head": "8cae6b25108ac4a3cd67d3310d499eab85b011d0",
+      "original_is_final_ancestor": true,
+      "main_merge": "4357441c686a1ce4b4bf493f7b51dcc4c4850ebb 手機校園助理回答課表前核對課表擁有者 (#513)"
+    },
+    {
+      "pr": 514,
+      "original_head": "bc1513a71bd252e00d1bf4b82c4a11b8b05d23fb",
+      "final_head": "bc1513a71bd252e00d1bf4b82c4a11b8b05d23fb",
+      "original_is_final_ancestor": true,
+      "main_merge": "6fd652c706d11d3e3ea189d41c5bcbbdd7c8cff2 手機匯入頁只讀取一次紀錄，忽略帳號重驗前的舊錯誤 (#514)"
+    },
+    {
+      "pr": 516,
+      "original_head": "ceeba265c3a2bfb325af95ef241eccac32c4719d",
+      "final_head": "3db45e1a38143154d0107926c683cf3736e0aa59",
+      "original_is_final_ancestor": true,
+      "main_merge": "d1555303423d5e57da47048a2695fb22ef11a1b1 點名頁開放相機掃碼、首頁通知換帳號即清除 (#516)"
+    },
+    {
+      "pr": 517,
+      "original_head": "9e9f97d7d4a5879dde7e0923ccb06fb00b730865",
+      "final_head": "a950682200871084dfb797e981075885e335a120",
+      "original_is_final_ancestor": true,
+      "main_merge": "3ba18e768175b0e28a2841f5a559dd15506286fb 修補課堂越權、作業繳交紀錄、公開課表與附件的存取漏洞 (#517)"
+    },
+    {
+      "pr": 518,
+      "original_head": "ef891a65fb00d566b336ebee3aed0aeb6cd1da14",
+      "final_head": "40d7f85eb64c2700d509a74a54cf836b8af6bf12",
+      "original_is_final_ancestor": true,
+      "main_merge": "ff8a5b9c85e36617cfa697c331a36b4ad634b96d 校園助理自動中止越權與逾時工作，隔離對話並加入無人演練 (#518)"
+    },
+    {
+      "pr": 519,
+      "original_head": "331423a76a3dc3f3b090204dc8f36a68c22ed4e1",
+      "final_head": "05c5ae3f57f6ecd4f4c14eadd81433691c31389d",
+      "original_is_final_ancestor": true,
+      "main_merge": "9b3a540843557c20bb26cb1002a89393cc114ee6 首次使用由學生選校，隔離手機背景資料與網頁校務頁面 (#519)"
+    },
+    {
+      "pr": 520,
+      "original_head": "52fd78644013eccbc02eb87a9d9a3b7f2e945330",
+      "final_head": "0658f74dc3361f6ecc14fb02fa1bd8f9745004b2",
+      "original_is_final_ancestor": true,
+      "main_merge": "8053eb986042e8797709e8e35ef77de1ac474d28 暨大開課查詢接上正式校方資料，支援手機與網頁課表核對 (#520)"
+    },
+    {
+      "pr": 521,
+      "original_head": "1284c5c1c3fcf5d6702650ca01706b8bfbbb9620",
+      "final_head": "1284c5c1c3fcf5d6702650ca01706b8bfbbb9620",
+      "original_is_final_ancestor": true,
+      "main_merge": "d2ede211afc6cf71ea486d9a9f10476e7867ddc3 失物招領可看實物照片，候車時可放大路線與完整終點 (#521)"
+    },
+    {
+      "pr": 523,
+      "original_head": "24b85d71b1bef20c9e0850be88827f50c1212cda",
+      "final_head": "69a43d7945a6675db6118a61f8e8557d279cf0bf",
+      "original_is_final_ancestor": true,
+      "main_merge": "067436cd830f92d9ebbd301408b9500bbf29c295 手機助理可保存計畫並精確開啟作業與測驗 (#523)"
+    },
+    {
+      "pr": 524,
+      "original_head": "d4d368d7fd238fdafafbd67d0e7c9f24abb87595",
+      "final_head": "689f4eeb77c1001aac1414b23ae000b49d7643dd",
+      "original_is_final_ancestor": true,
+      "main_merge": "18af527f7809da69ea8d51b231c515862665a424 新增數位學生證、NFC 感應出示與單次學號核對 (#524)"
+    },
+    {
+      "pr": 525,
+      "original_head": "f457ab9c4694474a4d7e12757c9e9b0e31a253e0",
+      "final_head": "30f7a4077b3576afa3bc004bfd7afb1c146db25c",
+      "original_is_final_ancestor": true,
+      "main_merge": "d5619fb8f113bb651d4a05b16e329b95187bd776 Web 店家明細改為擬物熱感紙收據 (#525)"
+    },
+    {
+      "pr": 526,
+      "original_head": "9349defdea72d0363be8c2975c075dbe312cb5d7",
+      "final_head": "cf2224873983d50cf38ff86ec19c492aac551ebc",
+      "original_is_final_ancestor": true,
+      "main_merge": "71616d03b2b94fdfaf4a30122f4198e77d062583 清大／暨大公開查課與課表核對，接入 Web／手機助理 (#526)"
+    },
+    {
+      "pr": 527,
+      "original_head": "d3ac07c95f136a84855b8abcc95dc57c6d79447c",
+      "final_head": "9de1a84ac06f25f56af32443c9457dfe5130ca00",
+      "original_is_final_ancestor": true,
+      "main_merge": "040957b6b36f41c9f5558c1b8bbc61d3a9a5a7f7 校園實物介面與動畫，加入成績冊、書籤夾與銘牌 (#527)"
+    },
+    {
+      "pr": 528,
+      "original_head": "5b48d6e947e570d5e66b067acb044d6677c15ba4",
+      "final_head": "d79834689c067abda37e254f815f92965f94b536",
+      "original_is_final_ancestor": true,
+      "main_merge": "8c5d8f4773e7c9534336e5fe1fbd835603ced116 重整平台管理：統一待辦、審核、校方授權與開通流程 (#528)"
+    },
+    {
+      "pr": 531,
+      "original_head": "db160e8f91cacb50cdfeb1a6fa52c6db8baa4d61",
+      "final_head": "9a156c99a1745db792c7718f0e5c1b1b3c30a426",
+      "original_is_final_ancestor": true,
+      "main_merge": "19782c90c4af8e3b5e74459f8348b12dca6c310c 通知可搜尋與分類，返回保留條件並直達正確校園服務 (#531)"
+    }
+  ]
+}

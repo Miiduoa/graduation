@@ -1806,6 +1806,36 @@ describe('firestore security rules', () => {
     );
   });
 
+  test('本人既有訂單相容性：active、轉學生與缺少新欄位的舊帳號可讀取，停權與刪帳仍拒絕', async () => {
+    const mirror = 'users/alice/schools/pu/orders/existing';
+    const receipt = { userId: 'alice', schoolId: 'pu', status: 'confirmed', queueNumber: 7, createdAt: new Date() };
+    await seedFirestore(async (db) => {
+      await db.doc(mirror).set(receipt);
+    });
+    const db = testEnv.authenticatedContext('alice').firestore();
+    for (const profile of [
+      { status: 'active', schoolId: 'pu' },
+      { status: 'active', schoolId: 'nthu', primarySchoolId: 'nthu' },
+      { displayName: '舊帳號' },
+    ]) {
+      await seedFirestore(async (admin) => { await admin.doc('users/alice').set(profile); });
+      const order = await assertSucceeds(db.doc(mirror).get());
+      assert.equal(order.data().queueNumber, 7);
+      await assertSucceeds(db.collection('users/alice/schools/pu/orders').orderBy('createdAt', 'desc').limit(30).get());
+    }
+    for (const accountState of [
+      { accountDeletionInProgress: true },
+      ...['deleted', 'disabled', 'suspended', 'inactive'].map((status) => ({ status })),
+    ]) {
+      await seedFirestore(async (admin) => { await admin.doc('users/alice').set(accountState); });
+      await assertFails(db.doc(mirror).get());
+      await assertFails(db.collection('users/alice/schools/pu/orders').orderBy('createdAt', 'desc').limit(30).get());
+    }
+    await seedFirestore(async (admin) => { await admin.doc('users/alice').set({ status: 'active' }); });
+    assert.equal((await assertSucceeds(db.doc(mirror).get())).data().queueNumber, 7);
+    await assertFails(testEnv.authenticatedContext('bob').firestore().doc(mirror).get());
+  });
+
   test('prevent owners from forging canonical or mirrored order receipts, including cancellation writes', async () => {
     const canonical = 'schools/tw-demo-uni/orders/receipt';
     const mirror = 'users/alice/schools/tw-demo-uni/orders/receipt';

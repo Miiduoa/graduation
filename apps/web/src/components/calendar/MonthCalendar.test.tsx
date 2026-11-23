@@ -1,7 +1,34 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
+import { afterEach, expect, it, vi } from 'vitest';
 import type { PersonalImportRecord } from '@campus/shared';
 import { MonthCalendar } from './MonthCalendar';
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+const baseProps = {
+  records: [] as PersonalImportRecord[],
+  month: '2028-01',
+  selectedDate: '2028-01-31',
+  onDate: vi.fn(),
+  onEdit: vi.fn(),
+  disabled: false,
+};
+
+function focusDate(date: string) {
+  const button = screen.getByRole('button', { name: date });
+  act(() => button.focus());
+  return button;
+}
+
+function dateTabStops() {
+  return screen
+    .getAllByRole('button', { name: /^\d{4}-\d{2}-\d{2}$/ })
+    .filter((button) => button.tabIndex === 0);
+}
 
 it('顯示每日名稱、展開更多、選日期及沿用事件物件', () => {
   const records: PersonalImportRecord[] = Array.from({ length: 3 }, (_, i) => ({
@@ -35,10 +62,225 @@ it('顯示每日名稱、展開更多、選日期及沿用事件物件', () => {
   expect(screen.getByRole('button', { name: records[0].title })).toBeTruthy();
   expect(screen.queryByText('合成2')).toBeNull();
   fireEvent.click(screen.getByText('還有 1 筆'));
-  fireEvent.click(screen.getByText('合成2'));
-  expect(onEdit).toHaveBeenCalledWith(records[2]);
+  const edit = screen.getByRole('button', { name: '合成2' });
+  fireEvent.click(edit);
+  expect(onEdit).toHaveBeenCalledWith(records[2], edit);
+  const date = screen.getByRole('button', { name: '2024-03-01' });
+  expect(document.getElementById(date.getAttribute('aria-describedby')!)?.textContent).toBe(
+    '3 筆行程',
+  );
   fireEvent.click(screen.getByRole('button', { name: '2024-03-01' }));
   expect(onDate).toHaveBeenCalledWith('2024-03-01');
   fireEvent.click(screen.getByText('收合'));
   expect(screen.queryByText('合成2')).toBeNull();
+});
+
+it('日期只保留一個 Tab 入口，方向鍵移動焦點而不改選日', () => {
+  const onDate = vi.fn();
+  render(<MonthCalendar {...baseProps} selectedDate="2028-01-12" onDate={onDate} />);
+  expect(dateTabStops()).toEqual([screen.getByRole('button', { name: '2028-01-12' })]);
+  fireEvent.keyDown(focusDate('2028-01-12'), { key: 'ArrowDown' });
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '2028-01-19' }));
+  expect(dateTabStops()).toEqual([document.activeElement]);
+  expect(screen.getByRole('button', { name: '2028-01-12' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  expect(onDate).not.toHaveBeenCalled();
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '2028-01-20' }));
+  fireEvent.keyDown(document.activeElement!, { key: 'Home' });
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '2028-01-16' }));
+  fireEvent.keyDown(document.activeElement!, { key: 'End' });
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '2028-01-22' }));
+  fireEvent.click(document.activeElement!);
+  expect(onDate).toHaveBeenCalledExactlyOnceWith('2028-01-22');
+});
+
+it('PageDown 跨到閏年短月保留焦點，只有選取後才改當日內容', () => {
+  const onDate = vi.fn();
+  function ControlledCalendar() {
+    const [month, setMonth] = useState('2028-01');
+    const [selectedDate, setSelectedDate] = useState('2028-01-31');
+    return (
+      <MonthCalendar
+        {...baseProps}
+        month={month}
+        selectedDate={selectedDate}
+        onMonthChange={(next) => {
+          setMonth(next);
+          setSelectedDate('');
+        }}
+        onDate={(date) => {
+          onDate(date);
+          setSelectedDate(date);
+        }}
+      />
+    );
+  }
+  render(<ControlledCalendar />);
+  fireEvent.keyDown(focusDate('2028-01-31'), { key: 'PageDown' });
+  expect(screen.getByRole('heading', { name: '2028 / 02' })).toBeTruthy();
+  const target = screen.getByRole('button', { name: '2028-02-29' });
+  expect(document.activeElement).toBe(target);
+  expect(target.getAttribute('aria-pressed')).toBe('false');
+  expect(dateTabStops()).toEqual([target]);
+  expect(onDate).not.toHaveBeenCalled();
+  fireEvent.click(target);
+  expect(onDate).toHaveBeenCalledExactlyOnceWith('2028-02-29');
+  expect(target.getAttribute('aria-pressed')).toBe('true');
+  fireEvent.keyDown(target, { key: 'ArrowRight' });
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '2028-03-01' }));
+  expect(onDate).toHaveBeenCalledTimes(1);
+});
+
+it('外部月份或日期更新不搶走目前控制的焦點', () => {
+  const { rerender } = render(
+    <>
+      <button type="button">回今天</button>
+      <MonthCalendar {...baseProps} />
+    </>,
+  );
+  const outside = screen.getByRole('button', { name: '回今天' });
+  act(() => outside.focus());
+  rerender(
+    <>
+      <button type="button">回今天</button>
+      <MonthCalendar {...baseProps} month="2028-02" selectedDate="2028-02-14" />
+    </>,
+  );
+  expect(document.activeElement).toBe(outside);
+  expect(dateTabStops()).toEqual([screen.getByRole('button', { name: '2028-02-14' })]);
+  rerender(
+    <>
+      <button type="button">回今天</button>
+      <MonthCalendar {...baseProps} month="2028-02" selectedDate="2028-02-21" />
+    </>,
+  );
+  expect(document.activeElement).toBe(outside);
+  expect(dateTabStops()).toEqual([screen.getByRole('button', { name: '2028-02-21' })]);
+});
+
+it('缺少跨月回呼時留在邊界，不攔截瀏覽器快捷鍵', () => {
+  render(<MonthCalendar {...baseProps} />);
+  const last = focusDate('2028-01-31');
+  fireEvent.keyDown(last, { key: 'ArrowRight' });
+  expect(document.activeElement).toBe(last);
+  expect(dateTabStops()).toEqual([last]);
+  const shortcut = new KeyboardEvent('keydown', {
+    key: 'ArrowLeft',
+    altKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  fireEvent(last, shortcut);
+  expect(shortcut.defaultPrevented).toBe(false);
+  expect(document.activeElement).toBe(last);
+});
+
+it('今天依台灣日期標示，禁止編輯時仍可查看日期', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2028-01-30T16:30:00Z'));
+  const onDate = vi.fn();
+  render(<MonthCalendar {...baseProps} selectedDate="" disabled onDate={onDate} />);
+  const today = screen.getByRole('button', { name: '2028-01-31' });
+  expect(today.getAttribute('aria-current')).toBe('date');
+  expect(dateTabStops()).toEqual([today]);
+  expect(document.getElementById(today.getAttribute('aria-describedby')!)?.textContent).toBe(
+    '今天，沒有個人行程',
+  );
+  fireEvent.click(today);
+  expect(onDate).toHaveBeenCalledExactlyOnceWith('2028-01-31');
+});
+
+it('重新開啟窄月格時完整露出已選日期，僅調整月格的水平捲動', () => {
+  const originalBounds = Element.prototype.getBoundingClientRect;
+  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(216);
+  vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(616);
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this.getAttribute('role') === 'region') return new DOMRect(40, 500, 216, 400);
+    if (this.getAttribute('aria-label') === '2028-01-18') {
+      const viewport = this.closest('[role="region"]')!;
+      return new DOMRect(40 + 176 - viewport.scrollLeft, 600, 88, 96);
+    }
+    return originalBounds.call(this);
+  });
+  const pageScroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+  const pageScrollBefore = window.scrollY;
+  const onDate = vi.fn();
+  const view = render(<button type="button">月格</button>);
+  const switcher = screen.getByRole('button', { name: '月格' });
+  switcher.focus();
+
+  view.rerender(
+    <>
+      <button type="button">月格</button>
+      <MonthCalendar {...baseProps} selectedDate="2028-01-18" onDate={onDate} />
+    </>,
+  );
+  const viewport = screen.getByRole('region', { name: '2028-01 月格，週日起始' });
+  const selected = screen.getByRole('button', { name: '2028-01-18' });
+  expect(viewport.scrollLeft).toBe(48);
+  expect(selected.getBoundingClientRect().left).toBeGreaterThanOrEqual(
+    viewport.getBoundingClientRect().left,
+  );
+  expect(selected.getBoundingClientRect().right).toBeLessThanOrEqual(
+    viewport.getBoundingClientRect().right,
+  );
+  expect(document.activeElement).toBe(switcher);
+  expect(window.scrollY).toBe(pageScrollBefore);
+  expect(pageScroll).not.toHaveBeenCalled();
+  expect(onDate).not.toHaveBeenCalled();
+
+  // A later list→month return creates another viewport; selection remains visible.
+  view.rerender(<button type="button">月格</button>);
+  view.rerender(
+    <>
+      <button type="button">月格</button>
+      <MonthCalendar {...baseProps} selectedDate="2028-01-18" onDate={onDate} />
+    </>,
+  );
+  expect(screen.getByRole('region', { name: '2028-01 月格，週日起始' }).scrollLeft).toBe(48);
+  expect(document.activeElement).toBe(switcher);
+  expect(pageScroll).not.toHaveBeenCalled();
+});
+
+it('外部選日移到左側時只捲回必要距離，不搶焦點或重設已可見的月份', () => {
+  const view = render(
+    <>
+      <button type="button">回今天</button>
+      <MonthCalendar {...baseProps} selectedDate="" />
+    </>,
+  );
+  const outside = screen.getByRole('button', { name: '回今天' });
+  outside.focus();
+  const viewport = screen.getByRole('region', { name: '2028-01 月格，週日起始' });
+  const selected = screen.getByRole('button', { name: '2028-01-23' });
+  Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 216 });
+  Object.defineProperty(viewport, 'scrollWidth', { configurable: true, value: 616 });
+  viewport.scrollLeft = 200;
+  vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(new DOMRect(40, 500, 216, 400));
+  vi.spyOn(selected, 'getBoundingClientRect').mockImplementation(
+    () => new DOMRect(40 - viewport.scrollLeft, 600, 88, 96),
+  );
+  const pageScroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+
+  view.rerender(
+    <>
+      <button type="button">回今天</button>
+      <MonthCalendar {...baseProps} selectedDate="2028-01-23" />
+    </>,
+  );
+  expect(viewport.scrollLeft).toBe(0);
+  expect(document.activeElement).toBe(outside);
+  expect(pageScroll).not.toHaveBeenCalled();
+
+  viewport.scrollLeft = 20;
+  view.rerender(
+    <>
+      <button type="button">回今天</button>
+      <MonthCalendar {...baseProps} selectedDate="2028-01-23" disabled />
+    </>,
+  );
+  expect(viewport.scrollLeft).toBe(20);
+  expect(document.activeElement).toBe(outside);
 });

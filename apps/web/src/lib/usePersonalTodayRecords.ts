@@ -1,7 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { withClassExceptions, type ClassException, type PersonalImportRecord } from '@campus/shared';
+import {
+  withClassExceptions,
+  type ClassException,
+  type PersonalImportRecord,
+} from '@campus/shared';
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import { useAuth } from '@/components/AuthGuard';
 import { loadPersonalTimetable, type StoredTimetable } from '@/lib/timetable/store';
@@ -31,6 +35,7 @@ export function usePersonalTodayRecords() {
   const imported = usePersonalImports(context.scope, !context.loading);
   const [manualState, setManualState] = useState<{
     key: string;
+    attempt: number;
     records: PersonalImportRecord[] | null;
     exceptions?: ClassException[];
     error: string;
@@ -39,7 +44,11 @@ export function usePersonalTodayRecords() {
   const { owner, schoolId } = context.scope;
   const uid = user?.uid ?? null;
   const scopeKey = JSON.stringify([owner, schoolId, uid]);
-  const retry = useCallback(() => setAttempt((value) => value + 1), []);
+  const retryImports = imported.retry;
+  const retry = useCallback(() => {
+    retryImports();
+    setAttempt((value) => value + 1);
+  }, [retryImports]);
   useEffect(() => {
     if (context.loading) return;
     let active = true;
@@ -49,12 +58,19 @@ export function usePersonalTodayRecords() {
       try {
         const data = await loadPersonalTimetable(uid, schoolId, owner);
         if (active && request === generation) {
-          setManualState({ key: scopeKey, records: withClassExceptions(manualRecords(data), data.classExceptions), exceptions: data.classExceptions, error: '' });
+          setManualState({
+            key: scopeKey,
+            attempt,
+            records: withClassExceptions(manualRecords(data), data.classExceptions),
+            exceptions: data.classExceptions,
+            error: '',
+          });
         }
       } catch {
         if (active && request === generation) {
           setManualState({
             key: scopeKey,
+            attempt,
             records: null,
             error: '手動課表暫時讀不到，請保留瀏覽器資料後重試。',
           });
@@ -77,7 +93,17 @@ export function usePersonalTodayRecords() {
   }, [uid, owner, schoolId, scopeKey, context.loading, attempt]);
   const visible = !context.loading && manualState?.key === scopeKey ? manualState : null;
   const manual = visible?.records ?? null;
-  const loaded = !imported.loading && visible !== null;
-  const error = imported.error || visible?.error || '';
-  return { context, imported: { ...imported, records: withClassExceptions(imported.records, visible?.exceptions) }, manual, retry, loaded, error, schoolId, scopeKey };
+  const manualLoaded = visible?.attempt === attempt;
+  const loaded = !imported.loading && manualLoaded;
+  const error = imported.error || (manualLoaded ? visible?.error : '') || '';
+  return {
+    context,
+    imported: { ...imported, records: withClassExceptions(imported.records, visible?.exceptions) },
+    manual,
+    retry,
+    loaded,
+    error,
+    schoolId,
+    scopeKey,
+  };
 }

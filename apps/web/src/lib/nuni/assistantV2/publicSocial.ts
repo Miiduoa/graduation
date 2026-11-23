@@ -89,17 +89,7 @@ export function publicSocialHref(schoolId: string): string {
 
 /** Match the whole read request. Private community, ownership, dates, named
  * subjects, other schools and follow-on actions cannot become a generic feed. */
-export function parsePublicSocialRead(question: string): {
-  tool: 'get_public_social'; args: PublicSocialArguments;
-} | null {
-  if (typeof question !== 'string' || !question.trim() || question.length > 120 ||
-      /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(question)) return null;
-  let value = question.normalize('NFKC').trim().replace(/[。！？!?]+$/, '').replace(/\s+/g, '');
-  value = value.replace(/^(?:(?:麻煩你|麻煩|請問|請|幫我|替我|我想|想|查詢|查看|查一下|看一下|看看|查|看|列出|顯示|核對|目前的|目前|最近的|最近|最新的|最新))*/, '');
-  value = value.replace(/(?:有哪些|有什麼|資訊|資料)?(?:嗎|呢)?$/, '');
-  return /^(?:(?:本校|所選校園|目前校園|校園)的?)?(?:公開交流|公開動態|公開貼文|公開看板(?:動態|貼文)|跨校公開交流)$/.test(value)
-    ? { tool: 'get_public_social', args: {} } : null;
-}
+export { parsePublicSocialRead } from '@campus/shared/src/assistantPublicReadIntent';
 
 /** Reuse the platform public-feed parser, adding exact-school provenance and
  * bounded records before data enters the Agent. No private author IDs are read. */

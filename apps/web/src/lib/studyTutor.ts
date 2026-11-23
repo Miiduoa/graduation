@@ -382,3 +382,6 @@ export function parseTutorExplanation(raw: string, passage: StudyPassage): Tutor
     ...(hasSteps ? { steps: readTutorSteps(data.steps, passage) } : {}),
   };
 }
+
+// Reading saved and generated explanations uses the same source validation.
+export const parseSavedTutorExplanation = parseTutorExplanation;

@@ -19,7 +19,11 @@ const state = vi.hoisted(() => ({
   campusLoading: false,
   schoolRole: null as string | null,
   schoolRoleCalls: [] as Array<[string | null | undefined, string | null | undefined]>,
-  session: null as null | { context: string; platformAccountId: string; isPlatformOperator?: boolean },
+  session: null as null | {
+    context: string;
+    platformAccountId: string;
+    isPlatformOperator?: boolean;
+  },
   sessionLoading: false,
   sessionError: '',
   pendingLogout: false,
@@ -192,11 +196,29 @@ it('keeps Firebase tasks and published feedback available alongside the nuni ent
   expect(screen.getByRole('link', { name: /分析完整/ }).getAttribute('href')).toBe(
     '/course/firebase#assignment-reviewed',
   );
-  expect(await screen.findByText(/E 校園與 TronClass 的學校來源已停用/)).toBeTruthy();
+  expect(await screen.findByText(/E 校園資料擷取暫停。可獨立連接靜宜 TronClass/)).toBeTruthy();
+  expect(screen.queryByText(/E 校園與 TronClass 的學校來源已停用/)).toBeNull();
+  expect(screen.getByRole('link', { name: '連接 TronClass' }).getAttribute('href')).toBe(
+    '/tronclass',
+  );
   expect(loadHomeData).toHaveBeenCalledWith('alice');
   expect(screen.getByRole('link', { name: '前往 nuni 課程' }).getAttribute('href')).toBe(
     '/classroom',
   );
+});
+
+it('shows a lost connection on Today while keeping the already loaded assignment available', async () => {
+  vi.mocked(loadHomeData).mockResolvedValue(data('資料庫管理'));
+  render(<HomePage />);
+  await screen.findAllByText('資料庫管理 作業');
+  const main = screen.getByRole('main');
+  fireEvent(window, new Event('offline'));
+  expect(screen.getByText('目前沒有網路連線，恢復連線後再試。')).toBeTruthy();
+  expect(screen.getByRole('main')).toBe(main);
+  expect(within(main).getAllByText('資料庫管理 作業').length).toBeGreaterThan(0);
+  fireEvent(window, new Event('online'));
+  expect(screen.queryByText('目前沒有網路連線，恢復連線後再試。')).toBeNull();
+  expect(screen.getByRole('main').id).toBe('today-content');
 });
 
 it('does not report an empty course list as success after a failed load', async () => {
@@ -284,7 +306,9 @@ it('does not tell a teacher they have no homework and opens the teacher course w
   });
   render(<HomePage />);
   const teacherToday = await screen.findByTestId('teacher-today');
-  expect(within(teacherToday).getByRole('heading', { name: '待批改與授課' })).toBeTruthy();
+  expect(within(teacherToday).getByRole('heading', { name: '授課課程' })).toBeTruthy();
+  expect(screen.queryByText('目前沒有即將到期的學生作業。')).toBeNull();
+  expect(screen.queryByText(/目前沒有待批改項目/)).toBeNull();
   // The teacher workspace manages assignments; /course/teach remains the content page.
   expect(
     within(teacherToday)
@@ -866,6 +890,40 @@ it.each(['dual', 'student', 'empty'])(
   },
 );
 
+it('shows refreshed assignment links when an open conversation keeps the teacher home visible', async () => {
+  const teaching = { id: 'teach', name: '教學實習', role: 'owner-teacher', unreadCount: 0 };
+  vi.mocked(loadHomeData)
+    .mockResolvedValueOnce(data('教學實習', { courses: [teaching], tasks: [] }))
+    .mockResolvedValueOnce(
+      data('教學實習', {
+        courses: [teaching],
+        tasks: [
+          {
+            id: 'hw-1',
+            courseId: 'teach',
+            courseName: '教學實習',
+            title: '教學實習作業',
+            dueAt: '2099-01-02T12:30:00Z',
+            href: '/course/teach#assignment-hw-1',
+          },
+        ],
+      }),
+    );
+  render(<HomePage />);
+  await screen.findByTestId('teacher-today');
+  fireEvent.click(screen.getByRole('button', { name: '頁首助理' }));
+  const question = await screen.findByRole('searchbox');
+
+  await act(async () => window.dispatchEvent(new Event('pageshow')));
+
+  const teacherToday = within(screen.getByTestId('teacher-today'));
+  const due = within(teacherToday.getByRole('region', { name: '即將到期作業' }));
+  expect(due.getByRole('link', { name: /教學實習作業/ }).getAttribute('href')).toBe(
+    '/course/teach#assignment-hw-1',
+  );
+  expect(screen.getByRole('searchbox')).toBe(question);
+});
+
 it.each(['teacher', 'student'])(
   'retains previous %s data and mode when a background source fails',
   async (mode) => {
@@ -886,7 +944,9 @@ it.each(['teacher', 'student'])(
     expect(await screen.findByRole('button', { name: '重試校園課程' })).toBeTruthy();
     if (mode === 'teacher') {
       expect(screen.getByTestId('teacher-today')).toBeTruthy();
-      expect(within(screen.getByTestId('teacher-today')).getByRole('link', { name: /保留授課/ })).toBeTruthy();
+      expect(
+        within(screen.getByTestId('teacher-today')).getByRole('link', { name: /保留授課/ }),
+      ).toBeTruthy();
       expect(screen.getAllByRole('link', { name: /保留授課/ })).toHaveLength(1);
       expect(document.getElementById('teaching-courses')).toBeNull();
     } else expect(screen.getAllByText('保留修課 作業').length).toBeGreaterThan(0);
@@ -1146,7 +1206,12 @@ it('gives the homepage agent only platform tasks, retaining their exact source I
     ).toBe(true),
   );
   const input = vi.mocked(TodayAgent).mock.calls.at(-1)![0];
-  expect(input).toMatchObject({ context: state.session.context, accountId: 'alice-platform', loading: false, compact: true });
+  expect(input).toMatchObject({
+    context: state.session.context,
+    accountId: 'alice-platform',
+    loading: false,
+    compact: true,
+  });
   expect(input.tasks).toEqual(platform.tasks);
   expect(input.tasks.some((task) => task.courseName === '學校課程')).toBe(false);
 });
@@ -1158,8 +1223,10 @@ it('keeps the day and its next action before the student card utility', async ()
   const today = screen.getByRole('heading', { level: 1, name: '今天' });
   const card = screen.getByRole('link', { name: /數位學生證.*開啟卡片/ });
   expect(today.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(screen.getByTestId('today-unified-flow').compareDocumentPosition(card) &
-    Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(
+    screen.getByTestId('today-unified-flow').compareDocumentPosition(card) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
 });
 
 it('removes the platform agent while its session is uncertain even when school auth remains', async () => {

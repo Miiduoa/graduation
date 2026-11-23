@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { NuniError } from '@campus/shared/src/nuni';
 import {
   createNuniFoodClient,
@@ -25,8 +26,14 @@ import {
   type FoodIntent,
 } from '@/features/food/foodState';
 import { merchantOrderBucket, merchantOrderNextStep } from '@/features/food/foodOrderGuidance';
+import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
+import {
+  merchantWorkspaceHref,
+  type MerchantWorkspaceQueue,
+} from '@/lib/merchantWorkspaceNavigation';
 import styles from '@/features/food/Food.module.css';
 import { PickupScanner } from './PickupScanner';
+import deskStyles from './MerchantOrderDesk.module.css';
 
 const actionLabels: Record<string, string> = {
   'record-counter-payment': '登記櫃檯收款',
@@ -48,11 +55,17 @@ export function MerchantOrderDesk({
   tenantId,
   locationId,
   cache,
+  queue: controlledQueue,
+  onQueueChange,
+  queueHref,
 }: {
   context: string;
   tenantId: string;
   locationId: string;
   cache: FoodDraftCache;
+  queue?: MerchantWorkspaceQueue;
+  onQueueChange?: (event: MouseEvent<HTMLAnchorElement>, queue: MerchantWorkspaceQueue) => void;
+  queueHref?: (queue: MerchantWorkspaceQueue) => string;
 }) {
   const auth = useNuniSession();
   const accountId = auth.session?.platformAccountId ?? '';
@@ -64,7 +77,11 @@ export function MerchantOrderDesk({
     [context],
   );
   const scope = `merchant-food:${tenantId}:${locationId}`;
-  const [cursor, setCursor] = useState<string | undefined>();
+  const [cursor, setCursor] = useFoodDraft<string | undefined>(cache, `${scope}:cursor`, undefined);
+  const [localQueue, setLocalQueue] = useState<MerchantWorkspaceQueue>('all');
+  const currentQueue = controlledQueue ?? localQueue;
+  const previousQueue = useRef(currentQueue);
+  const queueHintId = useId();
   const load = useCallback(async () => {
     const [queue, shift] = await Promise.all([
       client.listMerchantOrders(tenantId, locationId, { limit: 50, cursor }),
@@ -167,6 +184,37 @@ export function MerchantOrderDesk({
     [data.data],
   );
   useEffect(() => {
+    if (previousQueue.current === currentQueue) return;
+    // Already submitted work retains its original confirmation and recovery path.
+    if (task.busy || task.pending) return;
+    previousQueue.current = currentQueue;
+    setSelected(null);
+    setConfirmed(false);
+  }, [currentQueue, task.busy, task.pending]);
+  const hrefForQueue = (value: MerchantWorkspaceQueue) =>
+    queueHref?.(value) ??
+    merchantWorkspaceHref({ tenantId, locationId, section: 'orders', queue: value });
+  const changeQueue = (event: MouseEvent<HTMLAnchorElement>, value: MerchantWorkspaceQueue) => {
+    if (onQueueChange) {
+      onQueueChange(event, value);
+      return;
+    }
+    if (controlledQueue !== undefined || !isCurrentTabNavigationClick(event, event.currentTarget))
+      return;
+    event.preventDefault();
+    setLocalQueue(value);
+    if (value !== currentQueue && !task.busy && !task.pending) {
+      setSelected(null);
+      setConfirmed(false);
+    }
+  };
+  const visibleOrderCount =
+    currentQueue === 'incoming'
+      ? incomingOrders.length
+      : currentQueue === 'active'
+        ? activeOrders.length
+        : incomingOrders.length + activeOrders.length;
+  useEffect(() => {
     if (!confirmedShift || !data.data || task.busy || task.pending) return;
     const shift = data.data.shift;
     if (
@@ -255,7 +303,24 @@ export function MerchantOrderDesk({
       </div>
       <p>暫停接單後，已收到的餐點仍會留在這裡。每個動作依目前訂單與你的門市權限提供。</p>
       {data.loading && <p role="status">正在核對訂單與班別…</p>}
-      {data.error && <p role="alert">{data.error}</p>}
+      {data.error && (
+        <div>
+          <p role="alert">{data.error}</p>
+          {cursor && (
+            <Button
+              disabled={task.busy}
+              onClick={() => {
+                setSelected(null);
+                setConfirmed(false);
+                setShiftConfirm(false);
+                setCursor(undefined);
+              }}
+            >
+              回到第一頁待處理訂單
+            </Button>
+          )}
+        </div>
+      )}
       <FoodMutationStatus task={task} />
       {receipt && <p role="status">{receipt}</p>}
       {data.data && (
@@ -307,8 +372,55 @@ export function MerchantOrderDesk({
               <h3>待處理訂單</h3>
               <p className={styles.muted}>先處理待收款與確認，再進行備餐與取餐。</p>
             </div>
-            {!data.data.queue.orders.length && <p>這一頁沒有待處理的訂單。</p>}
-            {incomingOrders.length > 0 && (
+            <div className={deskStyles.filters}>
+              <nav aria-label="訂單篩選" aria-describedby={queueHintId}>
+                {(
+                  [
+                    { value: 'all', label: '全部', count: data.data.queue.orders.length },
+                    { value: 'incoming', label: '待收款與確認', count: incomingOrders.length },
+                    { value: 'active', label: '備餐與取餐', count: activeOrders.length },
+                  ] as const
+                ).map(({ value, label, count }) => (
+                  <Link
+                    key={value}
+                    href={hrefForQueue(value)}
+                    prefetch={false}
+                    aria-current={currentQueue === value ? 'page' : undefined}
+                    aria-label={`${label}，本頁 ${count} 筆`}
+                    onClick={(event) => changeQueue(event, value)}
+                  >
+                    <span>{label}</span>
+                    <span className={deskStyles.count} aria-hidden="true">
+                      {count}
+                    </span>
+                  </Link>
+                ))}
+              </nav>
+              <p id={queueHintId} className={deskStyles.hint}>
+                數字只包含目前這一頁已載入的訂單。
+              </p>
+            </div>
+            {visibleOrderCount === 0 && (
+              <div className={deskStyles.empty}>
+                <p>
+                  {currentQueue === 'all'
+                    ? '這一頁沒有待處理的訂單。'
+                    : currentQueue === 'incoming'
+                      ? '這一頁沒有待收款與確認的訂單。'
+                      : '這一頁沒有備餐與取餐的訂單。'}
+                </p>
+                {currentQueue !== 'all' && (
+                  <Link
+                    href={hrefForQueue('all')}
+                    prefetch={false}
+                    onClick={(event) => changeQueue(event, 'all')}
+                  >
+                    清除篩選，查看本頁全部訂單
+                  </Link>
+                )}
+              </div>
+            )}
+            {currentQueue !== 'active' && incomingOrders.length > 0 && (
               <div className={styles.orderGroup} aria-label="待收款與確認">
                 <h4 className={styles.orderGroupTitle}>
                   待收款與確認 <span>{incomingOrders.length}</span>
@@ -335,7 +447,7 @@ export function MerchantOrderDesk({
                 ))}
               </div>
             )}
-            {activeOrders.length > 0 && (
+            {currentQueue !== 'incoming' && activeOrders.length > 0 && (
               <div className={styles.orderGroup} aria-label="進行中訂單">
                 <h4 className={styles.orderGroupTitle}>
                   備餐與取餐 <span>{activeOrders.length}</span>

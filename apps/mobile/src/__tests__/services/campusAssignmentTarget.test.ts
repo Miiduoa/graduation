@@ -87,12 +87,47 @@ test('different groups distinguish otherwise identical task titles', () => {
   expect(resolve(value)?.params.groupId).toBe('course_1');
 });
 
-test('normalizes the planner display title without accepting a fabricated source on the candidate', () => {
+test('a verified full long title opens its source, never a candidate-supplied ID', () => {
   const value = snapshot();
-  value.assignments.items[0].title = '長'.repeat(140);
-  const candidate = { ...assignment, title: '長'.repeat(130), source: { ...source, assignmentId: 'fake' } };
-  expect(resolveCampusAssignmentTarget({ assignment: candidate, snapshot: value, scope, now })?.params.assignmentId)
-    .toBe('work_1');
+  const fullTitle = '長'.repeat(130) + '期末報告';
+  value.assignments.items[0].title = fullTitle;
+  const candidate = { ...assignment, title: fullTitle, source: { ...source, assignmentId: 'fake' } };
+  expect(resolveCampusAssignmentTarget({ assignment: candidate, snapshot: value, scope, now }))
+    .toEqual({ route: 'HomeworkSubmit', params: { groupId: 'course_1', assignmentId: 'work_1' } });
+});
+
+test.each([false, true])('similar long titles are never confused (reverse: %s)', (reverse) => {
+  const value = snapshot();
+  const prefix = '長'.repeat(130);
+  const first = prefix + '期末報告';
+  const second = prefix + '另一份作業';
+  value.assignments.items[0].title = first;
+  value.assignments.items.push({ ...assignment, title: second, source: { ...source, assignmentId: 'work_2' } });
+  value.assignments.count = 2;
+  if (reverse) value.assignments.items.reverse();
+  const target = (title: string) => resolveCampusAssignmentTarget({
+    assignment: { ...assignment, title }, snapshot: value, scope, now,
+  });
+  expect(target(prefix)).toBeNull();
+  expect(target(first)?.params.assignmentId).toBe('work_1');
+  expect(target(second)?.params.assignmentId).toBe('work_2');
+  expect(target(prefix + '其他資料')).toBeNull();
+});
+
+test('cannot authorize an exact destination from a 140-character server-capped title', () => {
+  const value = snapshot();
+  const title = '長'.repeat(140);
+  value.assignments.items[0].title = title;
+  expect(resolveCampusAssignmentTarget({ assignment: { ...assignment, title }, snapshot: value, scope, now }))
+    .toBeNull();
+  expect(resolveCampusAssignmentTarget({
+    assignment: { ...assignment, title: title.slice(0, 130) }, snapshot: value, scope, now,
+  })).toBeNull();
+  // A shorter title known to be complete is still reachable.
+  const fullTitle = '長'.repeat(139);
+  value.assignments.items[0].title = fullTitle;
+  expect(resolveCampusAssignmentTarget({ assignment: { ...assignment, title: fullTitle }, snapshot: value, scope, now })
+    ?.params.assignmentId).toBe('work_1');
 });
 
 test('the live snapshot parser retains only valid handoff references', async () => {

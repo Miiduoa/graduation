@@ -121,6 +121,8 @@ function extractScheduleSnippet(text, maxLength = 80) {
 function detectCampusAssistantIntent(input) {
   const text = (typeof input === 'string' ? input : input && input.content) || '';
   if (!text) return 'general';
+  const washingIntent = require('../agent/washingReservationSelection').washingReservationIntent(text);
+  if (washingIntent) return washingIntent;
   // 能力說明 / help
   if (/(你會什麼|能做什麼|功能|help|what.*can.*you|capabilities)/i.test(text)) {
     return 'help';

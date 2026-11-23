@@ -77,7 +77,7 @@ describe('event map retries preserve the originally selected identity', () => {
   it('binds only identity and reads updated details for the same event after a new first item', async () => {
     const { fixture, taskRetry } = await prepare();
     expect(taskRetry?.stepIds).toEqual(['task-2']);
-    expect(payload(taskRetry!)).toMatchObject({ version: 2, eventMapSelections: { 'task-2': originalTarget } });
+    expect(payload(taskRetry!)).toMatchObject({ version: 4, taskProfile: 'student', eventMapSelections: { 'task-2': originalTarget } });
     expect(payload(taskRetry!).eventMapSelections).toEqual({ 'task-2': originalTarget });
     expect(fixture.adapter.campusMap).toHaveBeenCalledExactlyOnceWith({ query: '活動b大樓', limit: 5 });
     const read = eventRead(['x', 'a', 'b']);

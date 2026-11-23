@@ -1,0 +1,530 @@
+import { isTronClassSubmissionHistory } from '@campus/shared/src/tronClassSubmissionHistory';
+import { isTronClassSubmissionAvailability } from '@campus/shared/src/tronClassSubmissionAvailability';
+import { decodeTronClassCourseIndex, type TronClassCourseIndex } from '@campus/shared/src/tronClassCourseIndex';
+import { decodeTronClassAcknowledgedReadbackResult } from '@campus/shared/src/tronClassSubmissionConfirmation';
+import {
+  decodeTronClassPreparationCancellation,
+  type TronClassPreparationCancellation,
+} from '@campus/shared/src/tronClassSubmissionCancellation';
+import { isTronClassAssignmentDetails } from './tronClassAssignmentDetails';
+import type {
+  TronClassConnection,
+  TronClassPreparation,
+  TronClassSnapshot,
+  TronClassSubmissionResult,
+  TronClassUploadedFile,
+} from './tronClassIntegrationTypes';
+
+export type TronClassIdentity =
+  | { kind: 'platform'; context: string }
+  | { kind: 'firebase'; getIdToken: () => Promise<string> };
+
+export class TronClassRequestError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status = 0,
+  ) {
+    super(message);
+    this.name = 'TronClassRequestError';
+  }
+}
+
+export function tronClassErrorMessage(reason: unknown): string {
+  if (reason instanceof TronClassRequestError) return reason.message;
+  return '連線尚未完成，請確認網路後再試。';
+}
+
+export function safeTronClassHref(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.origin === 'https://tronclass.pu.edu.tw' && !url.username && !url.password
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function tronClassUploadKey(value: string | null | undefined): string | null {
+  const safe = safeTronClassHref(value);
+  if (!safe) return null;
+  try {
+    const url = new URL(safe);
+    if (url.search || url.hash) return null;
+    const match = /^\/api\/uploads\/([^/]+)\/blob$/.exec(url.pathname);
+    const key = match ? decodeURIComponent(match[1]) : '';
+    return /^[A-Za-z0-9._-]{1,200}$/.test(key) && key !== '.' && key !== '..' ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
+
+export async function downloadedTronClassFile(response: Response): Promise<{ blob: Blob; filename: string }> {
+  const type = response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase();
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const encodedName = /(?:^|;)\s*filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  if (
+    !type ||
+    ['text/html', 'application/xhtml+xml'].includes(type) ||
+    !/^attachment(?:;|$)/i.test(disposition) ||
+    !encodedName ||
+    !response.body
+  )
+    return invalidResponse();
+  let filename: string;
+  try {
+    filename = decodeURIComponent(encodedName)
+      .replace(/[<>:"/\\|?*\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, '_')
+      .trim()
+      .slice(0, 200);
+  } catch {
+    return invalidResponse();
+  }
+  if (!filename || filename === '.' || filename === '..') return invalidResponse();
+  const tooLarge = () =>
+    new TronClassRequestError(
+      'TRONCLASS_DOWNLOAD_TOO_LARGE',
+      '這份附件較大，請開啟原始教材下載。',
+      413,
+    );
+  const length = response.headers.get('Content-Length');
+  if (length && (!/^\d+$/.test(length) || Number(length) > MAX_DOWNLOAD_BYTES)) {
+    await response.body.cancel();
+    throw tooLarge();
+  }
+  const reader = response.body.getReader();
+  const chunks: ArrayBuffer[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) break;
+      total += result.value.byteLength;
+      if (total > MAX_DOWNLOAD_BYTES) {
+        await reader.cancel();
+        throw tooLarge();
+      }
+      chunks.push(new Uint8Array(result.value).buffer);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (length && total !== Number(length)) return invalidResponse();
+  return { blob: new Blob(chunks, { type }), filename };
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+const isText = (value: unknown): value is string => typeof value === 'string';
+const isNullableText = (value: unknown): boolean => value === null || isText(value);
+const isId = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+const isTime = (value: unknown): value is string =>
+  isText(value) && Number.isFinite(Date.parse(value));
+const isRevision = (value: unknown): value is string =>
+  isText(value) && /^[a-f0-9]{32}$/.test(value);
+const isOperationId = (value: unknown): value is string =>
+  isText(value) && /^[A-Za-z0-9_-]{16,80}$/.test(value);
+const isArrayOf = (value: unknown, check: (item: unknown) => boolean, max = 5000): boolean =>
+  Array.isArray(value) && value.length <= max && value.every(check);
+const invalidResponse = (): never => {
+  throw new TronClassRequestError('INVALID_RESPONSE', '尚未收到可確認的回覆，請稍後重新查詢。');
+};
+
+function isReceipt(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    value.source === 'tronclass' &&
+    value.status === 'submitted' &&
+    isText(value.id) &&
+    value.id.length > 0 &&
+    isId(value.courseId) &&
+    isId(value.homeworkId) &&
+    isTime(value.submittedAt) &&
+    isText(value.content) &&
+    isArrayOf(
+      value.attachments,
+      (file) =>
+        isRecord(file) &&
+        isText(file.name) &&
+        typeof file.size === 'number' &&
+        Number.isSafeInteger(file.size) &&
+        file.size >= 0,
+      100,
+    )
+  );
+}
+
+export function parseTronClassResult(action: string, value: unknown, input: Record<string, unknown>): unknown {
+  if (action === 'courses') return decodeTronClassCourseIndex(value) ?? invalidResponse();
+  if (!isRecord(value)) return invalidResponse();
+  if (['status', 'connect', 'disconnect'].includes(action)) {
+    if (
+      value.schoolId !== 'pu' ||
+      typeof value.connected !== 'boolean' ||
+      !(value.revision === null || isRevision(value.revision)) ||
+      !isNullableText(value.account) ||
+      !isNullableText(value.userName) ||
+      !(value.expiresAt === null || isTime(value.expiresAt)) ||
+      !(value.studentKey === undefined || value.studentKey === null ||
+        (value.connected === true && typeof value.studentKey === 'string' && /^[a-f0-9]{64}$/.test(value.studentKey))) ||
+      (value.connected && (!isRevision(value.revision) || !isText(value.account) || !value.account))
+    )
+      return invalidResponse();
+  } else if (action === 'sync') {
+    const hasScope = (item: unknown): item is Record<string, unknown> =>
+      isRecord(item) &&
+      (item.courseId === null || isId(item.courseId)) &&
+      isText(item.courseName) &&
+      isText(item.title) &&
+      isText(item.href);
+    if (
+      !isRevision(value.revision) ||
+      !isTime(value.fetchedAt) ||
+      typeof value.partial !== 'boolean' ||
+      !isArrayOf(
+        value.courses,
+        (item) =>
+          isRecord(item) &&
+          isId(item.id) &&
+          isText(item.name) &&
+          isText(item.code) &&
+          isArrayOf(item.teachers, isText, 100) &&
+          isNullableText(item.semester) &&
+          isText(item.status) &&
+          isText(item.href),
+        1000,
+      ) ||
+      !isArrayOf(
+        value.homework,
+        (item) =>
+          hasScope(item) &&
+          isId(item.id) &&
+          isId(item.courseId) &&
+          (item.deadline === null || isTime(item.deadline)) &&
+          isText(item.deadlineLabel) &&
+          (item.submitted === null || typeof item.submitted === 'boolean') &&
+          isText(item.description),
+      ) ||
+      !isArrayOf(
+        value.announcements,
+        (item) =>
+          hasScope(item) &&
+          (isText(item.id) || isId(item.id)) &&
+          isText(item.content) &&
+          (item.publishedAt === null || isTime(item.publishedAt)) &&
+          isText(item.source),
+      ) ||
+      !isArrayOf(
+        value.materials,
+        (item) =>
+          hasScope(item) &&
+          (isText(item.id) || isId(item.id)) &&
+          isText(item.type) &&
+          isArrayOf(
+            item.files,
+            (file) =>
+              isRecord(file) &&
+              isText(file.name) &&
+              typeof file.allowDownload === 'boolean' &&
+              isNullableText(file.downloadHref),
+            500,
+          ),
+      ) ||
+      !isArrayOf(
+        value.errors,
+        (item) =>
+          isRecord(item) &&
+          (item.courseId === null || isId(item.courseId)) &&
+          ['courses', 'homework', 'materials', 'announcements'].includes(String(item.area)) &&
+          isText(item.message),
+        1000,
+      )
+    )
+      return invalidResponse();
+  } else if (action === 'prepare') {
+    if (
+      value.source !== 'tronclass' ||
+      value.schoolId !== 'pu' ||
+      value.courseId !== input.courseId ||
+      value.homeworkId !== input.homeworkId ||
+      !isRevision(value.revision) ||
+      !isText(value.title) ||
+      !isText(value.description) ||
+      !(value.deadline === null || isTime(value.deadline)) ||
+      typeof value.canSubmit !== 'boolean' ||
+      !isNullableText(value.blockedReason) ||
+      typeof value.maxFiles !== 'number' ||
+      !Number.isSafeInteger(value.maxFiles) ||
+      value.maxFiles < 0 ||
+      typeof value.maxFileBytes !== 'number' ||
+      !Number.isSafeInteger(value.maxFileBytes) ||
+      value.maxFileBytes < 0 ||
+      !isArrayOf(value.allowedContentTypes, isText, 100) ||
+      !(value.receipt === null || isReceipt(value.receipt))
+    )
+      return invalidResponse();
+    if (value.rules !== undefined) {
+      const rules = value.rules;
+      if (!isRecord(rules)) return invalidResponse();
+      if (rules.status === 'unknown') {
+        if (Object.keys(rules).some((key) => key !== 'status') || value.canSubmit) return invalidResponse();
+      } else if (rules.status === 'confirmed') {
+        if (Object.keys(rules).some((key) => !['status', 'allowsText', 'allowsAttachments', 'maxTotalBytes'].includes(key)) ||
+          typeof rules.allowsText !== 'boolean' || typeof rules.allowsAttachments !== 'boolean' ||
+          typeof rules.maxTotalBytes !== 'number' || !Number.isSafeInteger(rules.maxTotalBytes) || rules.maxTotalBytes < 0 ||
+          !isArrayOf(value.allowedContentTypes, (type) => isText(type) && type.length <= 100 &&
+            /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(type), 50)) return invalidResponse();
+      } else return invalidResponse();
+    }
+    if (value.history !== undefined && !isTronClassSubmissionHistory(value.history, {
+      courseId: input.courseId as number, homeworkId: input.homeworkId as number,
+    })) return invalidResponse();
+    if (value.details !== undefined && !isTronClassAssignmentDetails(value.details)) return invalidResponse();
+    if (value.availability !== undefined && !isTronClassSubmissionAvailability(value.availability, {
+      courseId: input.courseId as number, homeworkId: input.homeworkId as number,
+    }, value.revision)) return invalidResponse();
+    if (
+      isRecord(value.receipt) &&
+      (value.receipt.courseId !== input.courseId || value.receipt.homeworkId !== input.homeworkId)
+    )
+      return invalidResponse();
+  } else if (action === 'cancel-preparation') {
+    if (!isOperationId(input.operationId) || !isId(input.courseId) || !isId(input.homeworkId) ||
+      !isRevision(input.revision)) return invalidResponse();
+    const result = decodeTronClassPreparationCancellation(value, {
+      operationId: input.operationId, courseId: input.courseId, homeworkId: input.homeworkId,
+    });
+    if (!result) return invalidResponse();
+    return result;
+  } else if (action === 'submit' || action === 'reconcile') {
+    if (value.status === 'confirmed') {
+      if (!isOperationId(input.operationId) ||
+        (action === 'submit' && (!isId(input.courseId) || !isId(input.homeworkId)))) return invalidResponse();
+      const result = decodeTronClassAcknowledgedReadbackResult(value, {
+        operationId: input.operationId,
+        ...(action === 'submit' ? { courseId: input.courseId as number, homeworkId: input.homeworkId as number } : {}),
+      });
+      if (!result) return invalidResponse();
+      return result;
+    }
+    if (
+      (value.status !== 'submitted' && value.status !== 'unknown') ||
+      Object.prototype.hasOwnProperty.call(value, 'confirmation') ||
+      !isOperationId(value.operationId) ||
+      value.operationId !== input.operationId ||
+      (value.status === 'submitted' ? !isReceipt(value.receipt) : value.receipt !== null)
+    )
+      return invalidResponse();
+    if (
+      action === 'submit' &&
+      isRecord(value.receipt) &&
+      (value.receipt.courseId !== input.courseId || value.receipt.homeworkId !== input.homeworkId)
+    )
+      return invalidResponse();
+  } else if (action === 'upload') {
+    if (
+      value.status !== 'uploaded' ||
+      value.fileId !== input.fileId ||
+      value.name !== input.name ||
+      value.size !== input.size ||
+      !isText(value.contentType) ||
+      !isText(value.sha256) ||
+      !/^[a-f0-9]{64}$/.test(value.sha256)
+    )
+      return invalidResponse();
+  }
+  return value;
+}
+
+export function createTronClassClient(identity: TronClassIdentity) {
+  async function headers(): Promise<Record<string, string>> {
+    if (identity.kind === 'platform') return { 'X-Campus-Session': identity.context };
+    return { Authorization: `Bearer ${await identity.getIdToken()}` };
+  }
+
+  async function responseValue<T>(response: Response): Promise<T> {
+    let value: unknown;
+    try {
+      value = await response.json();
+    } catch {
+      throw new TronClassRequestError(
+        'INVALID_RESPONSE',
+        '尚未收到可確認的回覆，請稍後重新查詢。',
+        response.status,
+      );
+    }
+    if (!response.ok) {
+      const error = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+      throw new TronClassRequestError(
+        typeof error.error === 'string' ? error.error : 'REQUEST_FAILED',
+        typeof error.message === 'string' ? error.message : '暫時無法完成，請稍後再試。',
+        response.status,
+      );
+    }
+    if (!value || typeof value !== 'object')
+      throw new TronClassRequestError(
+        'INVALID_RESPONSE',
+        '尚未收到可確認的回覆，請稍後重新查詢。',
+        response.status,
+      );
+    return value as T;
+  }
+
+  async function request<T>(action: string, input: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted();
+    const authHeaders = await headers();
+    signal?.throwIfAborted();
+    const deadline = AbortSignal.timeout(action === 'connect' || action === 'disconnect' ? 90000 : 60000);
+    const response = await fetch('/api/tronclass', {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      redirect: 'error',
+      signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...input, action }),
+    });
+    const value = await responseValue<unknown>(response);
+    signal?.throwIfAborted();
+    return parseTronClassResult(action, value, input) as T;
+  }
+
+  async function downloadFile(path: '/api/tronclass/material-download' | '/api/tronclass/submission-attachment',
+    input: Record<string, unknown>, signal?: AbortSignal): Promise<{ blob: Blob; filename: string }> {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    const timer = setTimeout(abort, 60000);
+    try {
+      const authHeaders = await headers();
+      if (controller.signal.aborted) throw new TronClassRequestError('REQUEST_CANCELLED', '下載已取消。');
+      const response = await fetch(path, {
+        method: 'POST', cache: 'no-store', credentials: 'same-origin', redirect: 'error',
+        signal: controller.signal,
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) await responseValue<unknown>(response);
+      return await downloadedTronClassFile(response);
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+    }
+  }
+
+  return {
+    status: () => request<TronClassConnection>('status'),
+    connect: (account: string, password: string, expectedRevision: string | null, signal?: AbortSignal) =>
+      request<TronClassConnection>('connect', {
+        schoolId: 'pu',
+        account,
+        password,
+        expectedRevision,
+      }, signal),
+    disconnect: (expectedRevision: string | null) =>
+      request<TronClassConnection>('disconnect', { expectedRevision }),
+    courses: (signal?: AbortSignal) => request<TronClassCourseIndex>('courses', {}, signal),
+    sync: (courseId?: number, signal?: AbortSignal) =>
+      request<TronClassSnapshot>('sync', courseId === undefined ? {} : { courseId }, signal),
+    async downloadMaterial(input: {
+      courseId: number;
+      activityId: number;
+      uploadKey: string;
+      revision: string;
+    }, signal?: AbortSignal): Promise<{ blob: Blob; filename: string }> {
+      if (
+        !isId(input.courseId) ||
+        !isId(input.activityId) ||
+        !isRevision(input.revision) ||
+        !/^[A-Za-z0-9._-]{1,200}$/.test(input.uploadKey) ||
+        ['.', '..'].includes(input.uploadKey)
+      )
+        return invalidResponse();
+      return downloadFile('/api/tronclass/material-download', input, signal);
+    },
+    async downloadSubmissionAttachment(input: {
+      courseId: number;
+      homeworkId: number;
+      submissionId: string;
+      uploadId: number;
+      revision: string;
+    }, signal?: AbortSignal): Promise<{ blob: Blob; filename: string }> {
+      if (!isId(input.courseId) || !isId(input.homeworkId) || !isId(input.uploadId) ||
+        !isRevision(input.revision) || typeof input.submissionId !== 'string' ||
+        !/^[1-9]\d{0,15}$/.test(input.submissionId) || !Number.isSafeInteger(Number(input.submissionId)) ||
+        Object.keys(input).some(key => !['courseId', 'homeworkId', 'submissionId', 'uploadId', 'revision'].includes(key))) {
+        return invalidResponse();
+      }
+      return downloadFile('/api/tronclass/submission-attachment', input, signal);
+    },
+    prepare: (courseId: number, homeworkId: number) =>
+      request<TronClassPreparation>('prepare', { courseId, homeworkId }),
+    submit: (input: {
+      courseId: number;
+      homeworkId: number;
+      revision: string;
+      operationId: string;
+      content: string;
+      attachments: string[];
+      confirmed: true;
+    }) => request<TronClassSubmissionResult>('submit', input),
+    reconcile: (operationId: string, revision: string) =>
+      request<TronClassSubmissionResult>('reconcile', { operationId, revision }),
+    async cancelPreparation(input: {
+      courseId: number;
+      homeworkId: number;
+      revision: string;
+      operationId: string;
+    }): Promise<TronClassPreparationCancellation> {
+      if (!isRecord(input)) return invalidResponse();
+      // The auth token and network response may arrive after the caller changes
+      // its selection. Both the request and decoder use this one captured scope.
+      const expected = Object.freeze({ ...input });
+      if (Object.keys(expected).some(key => !['courseId', 'homeworkId', 'revision', 'operationId'].includes(key)) ||
+        !isId(expected.courseId) || !isId(expected.homeworkId) ||
+        !isRevision(expected.revision) || !isOperationId(expected.operationId)) return invalidResponse();
+      return request<TronClassPreparationCancellation>('cancel-preparation', expected);
+    },
+    async upload(input: {
+      courseId: number;
+      homeworkId: number;
+      revision: string;
+      operationId: string;
+      fileId: string;
+      file: File;
+    }): Promise<TronClassUploadedFile> {
+      const authHeaders = await headers();
+      const query = new URLSearchParams({
+        courseId: String(input.courseId),
+        homeworkId: String(input.homeworkId),
+        revision: input.revision,
+        operationId: input.operationId,
+        fileId: input.fileId,
+        name: input.file.name,
+      });
+      const response = await fetch(`/api/tronclass?${query}`, {
+        method: 'PUT',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        redirect: 'error',
+        signal: AbortSignal.timeout(60000),
+        headers: { ...authHeaders, 'Content-Type': input.file.type || 'application/octet-stream' },
+        body: input.file,
+      });
+      const value = await responseValue<unknown>(response);
+      return parseTronClassResult('upload', value, {
+        fileId: input.fileId,
+        name: input.file.name,
+        size: input.file.size,
+      }) as TronClassUploadedFile;
+    },
+  };
+}
+
+export type TronClassClient = ReturnType<typeof createTronClassClient>;

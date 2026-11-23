@@ -70,6 +70,54 @@ test('guests, other-campus members and nonmembers cannot read or write the card'
   await assertFails(bob.collection('schools/pu/creatorProfiles').get());
 });
 
+test('a student can clear a legacy portfolio URL without altering a foreign-school card', async () => {
+  const alice = environment.authenticatedContext('alice').firestore();
+  const bob = environment.authenticatedContext('bob').firestore();
+  const charlie = environment.authenticatedContext('charlie').firestore();
+  const otherUrl = 'https://example.org/other-campus';
+
+  // A formerly allowed URL may now be malformed; only a test admin seeds it.
+  // The legitimate student must still be able to clear it through the real rules.
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await doc(db).set(card({ linkUrl: 'http://retired.example.org' }));
+    await doc(db, 'other', 'alice').set(card({
+      schoolId: 'other', linkUrl: otherUrl,
+    }));
+  });
+
+  await assertSucceeds(doc(alice).set({
+    linkUrl: '', updatedAt: serverTimestamp(),
+  }, { merge: true }));
+  const published = await assertSucceeds(doc(bob).get({ source: 'server' }));
+  if (published.data()?.linkUrl !== '' ||
+      published.data()?.bio !== '分享校園攝影、課程與社團活動。') {
+    throw Error('Clearing the legacy URL lost or failed to commit the public card');
+  }
+
+  // Alice owns both document IDs, but is not a member of the other school.
+  await assertFails(doc(alice, 'other').get({ source: 'server' }));
+  await assertFails(doc(alice, 'other').set({
+    linkUrl: '', updatedAt: serverTimestamp(),
+  }, { merge: true }));
+  const otherCard = await assertSucceeds(doc(charlie, 'other').get({ source: 'server' }));
+  if (otherCard.data()?.linkUrl !== otherUrl) {
+    throw Error('Foreign-school card was unexpectedly modified');
+  }
+
+  // Revoke school membership after the successful clear. A late retry must fail.
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc('schools/pu/members/alice').update({ status: 'inactive' });
+  });
+  await assertFails(doc(alice).set({
+    linkUrl: 'https://example.org/retry', updatedAt: serverTimestamp(),
+  }, { merge: true }));
+  const afterRevocation = await assertSucceeds(doc(bob).get({ source: 'server' }));
+  if (afterRevocation.data()?.linkUrl !== '') {
+    throw Error('Revoked owner changed a confirmed cleared URL');
+  }
+});
+
 test('cannot spoof school, owner, private fields, untrusted link or oversized content', async () => {
   const alice = environment.authenticatedContext('alice').firestore();
   await assertFails(doc(alice).set(card({ schoolId: 'other' })));

@@ -2794,86 +2794,40 @@ export type TCWriteResult = {
   error?: string;
 };
 
-/** 在課程討論區建立新討論串 */
-export async function tcPostDiscussion(
-  courseId: number,
-  input: { title: string; content?: string },
-): Promise<TCWriteResult> {
+function legacyTronClassWriteUnavailable(): TCWriteResult {
   if (!isTronClassDataFetchEnabled()) {
     return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
   }
-  await ensureBackendSessionLoaded();
-  if (shouldUseBackendSession()) {
-    return await fetchTronClassBackend<TCWriteResult>('postDiscussion', { courseId, input });
-  }
-  const endpoints = [
-    `${TC_BASE}/api/courses/${courseId}/discussions`,
-    `${TC_BASE}/api/courses/${courseId}/forums`,
-  ];
-  for (const url of endpoints) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: input.title, content: input.content ?? '' }),
-      });
-      if (res.ok) {
-        const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-        return { success: true, id: (data.id as number | string | undefined) };
-      }
-    } catch {
-      /* try next endpoint */
-    }
-  }
-  return { success: false, error: '無法建立討論（連線或權限失敗）' };
+  // These legacy writers have no verified school contract or receipt reader.
+  // Enabling reads must never enable guessed POST endpoints or POST retries.
+  return {
+    success: false,
+    error: '此學校目前尚未開放此項站內操作，請至 TronClass 完成操作並確認紀錄。',
+  };
+}
+
+/** 在課程討論區建立新討論串 */
+export async function tcPostDiscussion(
+  _courseId: number,
+  _input: { title: string; content?: string },
+): Promise<TCWriteResult> {
+  return legacyTronClassWriteUnavailable();
 }
 
 /** 在討論串底下回覆 */
 export async function tcPostDiscussionReply(
-  courseId: number,
-  discussionId: number,
-  content: string,
+  _courseId: number,
+  _discussionId: number,
+  _content: string,
 ): Promise<TCWriteResult> {
-  if (!isTronClassDataFetchEnabled()) {
-    return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
-  }
-  await ensureBackendSessionLoaded();
-  if (shouldUseBackendSession()) {
-    return await fetchTronClassBackend<TCWriteResult>('postDiscussionReply', {
-      courseId,
-      discussionId,
-      content,
-    });
-  }
-  const endpoints = [
-    `${TC_BASE}/api/courses/${courseId}/discussions/${discussionId}/posts`,
-    `${TC_BASE}/api/courses/${courseId}/forums/${discussionId}/posts`,
-  ];
-  for (const url of endpoints) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
-      });
-      if (res.ok) {
-        const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-        return { success: true, id: (data.id as number | string | undefined) };
-      }
-    } catch {
-      /* try next */
-    }
-  }
-  return { success: false, error: '回覆失敗' };
+  return legacyTronClassWriteUnavailable();
 }
 
 /** 繳交作業 */
 export async function tcSubmitHomework(
-  courseId: number,
-  hwId: number,
-  input: {
+  _courseId: number,
+  _hwId: number,
+  _input: {
     content?: string;
     /** 附件 URI 列表，會分別上傳 */
     attachments?: Array<{ uri: string; name: string; type?: string }>;
@@ -2882,57 +2836,13 @@ export async function tcSubmitHomework(
   if (!isTronClassDataFetchEnabled()) {
     return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
   }
-  await ensureBackendSessionLoaded();
-  if (shouldUseBackendSession()) {
-    return await fetchTronClassBackend<TCWriteResult>('submitHomework', {
-      courseId,
-      hwId,
-      input,
-    });
-  }
-  try {
-    // 1. 先把附件上傳（multipart）
-    const uploadedKeys: string[] = [];
-    for (const att of input.attachments ?? []) {
-      const form = new FormData();
-      form.append('file', {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        uri: att.uri,
-        name: att.name,
-        type: att.type ?? 'application/octet-stream',
-      } as any);
-      const upRes = await fetch(`${TC_BASE}/api/uploads`, {
-        method: 'POST',
-        credentials: 'include',
-        body: form as unknown as BodyInit,
-      });
-      if (upRes.ok) {
-        const upData = (await upRes.json().catch(() => ({}))) as Record<string, unknown>;
-        const key = String(upData.key ?? upData.id ?? '');
-        if (key) uploadedKeys.push(key);
-      }
-    }
-    // 2. 建立繳交紀錄
-    const res = await fetch(
-      `${TC_BASE}/api/courses/${courseId}/homework/${hwId}/submissions`,
-      {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: input.content ?? '',
-          upload_keys: uploadedKeys,
-        }),
-      },
-    );
-    if (res.ok) {
-      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      return { success: true, id: (data.id as number | string | undefined) };
-    }
-    return { success: false, error: `送出失敗 (${res.status})` };
-  } catch (e) {
-    return { success: false, error: String((e as Error)?.message ?? e) };
-  }
+  // This legacy path has no implemented backend writer and its direct POST
+  // never verified a school receipt. Do not revive it by enabling the read
+  // switch: native submission must use the scoped server operation workflow.
+  return {
+    success: false,
+    error: '此學校目前尚未開放站內作業繳交，請至 TronClass 作業頁完成繳交並確認紀錄。',
+  };
 }
 
 /** 取得課程問卷列表（TronClass survey endpoint，可能未公開；回傳空陣列代表沒有） */
@@ -2967,35 +2877,11 @@ export async function tcFetchSurveys(courseId: number): Promise<
 
 /** 送出問卷答案 */
 export async function tcSubmitSurvey(
-  courseId: number,
-  surveyId: number,
-  answers: Record<string, unknown>,
+  _courseId: number,
+  _surveyId: number,
+  _answers: Record<string, unknown>,
 ): Promise<TCWriteResult> {
-  if (!isTronClassDataFetchEnabled()) {
-    return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
-  }
-  await ensureBackendSessionLoaded();
-  if (shouldUseBackendSession()) {
-    return await fetchTronClassBackend<TCWriteResult>('submitSurvey', {
-      courseId,
-      surveyId,
-      answers,
-    });
-  }
-  try {
-    const res = await fetch(
-      `${TC_BASE}/api/courses/${courseId}/surveys/${surveyId}/responses`,
-      {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers }),
-      },
-    );
-    return { success: res.ok };
-  } catch (e) {
-    return { success: false, error: String((e as Error)?.message ?? e) };
-  }
+  return legacyTronClassWriteUnavailable();
 }
 
 /** 取得同儕互評任務 */
@@ -3032,40 +2918,16 @@ export async function tcFetchPeerReviews(courseId: number): Promise<
 
 /** 送出同儕互評 */
 export async function tcSubmitPeerReview(
-  courseId: number,
-  reviewId: number,
-  payload: {
+  _courseId: number,
+  _reviewId: number,
+  _payload: {
     scores: Record<string, string>;
     comments?: Record<string, string>;
     overallFeedback?: string;
     totalScore?: number;
   },
 ): Promise<TCWriteResult> {
-  if (!isTronClassDataFetchEnabled()) {
-    return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
-  }
-  await ensureBackendSessionLoaded();
-  if (shouldUseBackendSession()) {
-    return await fetchTronClassBackend<TCWriteResult>('submitPeerReview', {
-      courseId,
-      reviewId,
-      payload,
-    });
-  }
-  try {
-    const res = await fetch(
-      `${TC_BASE}/api/courses/${courseId}/peer_reviews/${reviewId}/submissions`,
-      {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      },
-    );
-    return { success: res.ok };
-  } catch (e) {
-    return { success: false, error: String((e as Error)?.message ?? e) };
-  }
+  return legacyTronClassWriteUnavailable();
 }
 
 /** 構建教材檔案的下載/檢視 URL */

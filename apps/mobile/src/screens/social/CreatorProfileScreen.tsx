@@ -29,15 +29,16 @@ type ReadState<T> =
 type PostsPage = { rows: CampusPostDoc[]; cursor: CreatorCursor; hasMore: boolean };
 type FollowState = 'loading' | 'following' | 'not-following' | 'pending' | 'error';
 type PinState = { status: 'loading' } | { status: 'error' } | { status: 'ready'; value: CreatorPin };
-type CreatorListItem = {
-  key: string;
-  post: CampusPostDoc;
-  mediaUrl?: string;
-  mediaIndex?: number;
-};
+type MediaTile = { key: string; post: CampusPostDoc; url: string; index: number };
+type CreatorListItem =
+  | { key: string; post: CampusPostDoc }
+  | { key: string; tiles: MediaTile[] };
 
 type Props = {
-  navigation?: { navigate?: (screen: string, params?: Record<string, unknown>) => void };
+  navigation?: {
+    navigate?: (screen: string, params?: Record<string, unknown>) => void;
+    addListener?: (event: 'focus', callback: () => void) => () => void;
+  };
   route?: { params?: { memberUid?: string; schoolId?: string } };
 };
 
@@ -100,6 +101,7 @@ function ScopedCreatorProfile({
   const [followRevision, setFollowRevision] = useState(0);
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [savedRevision, setSavedRevision] = useState(0);
+  const [focusRevision, setFocusRevision] = useState(0);
   const [moreBusy, setMoreBusy] = useState(false);
   const [moreError, setMoreError] = useState('');
   const [followError, setFollowError] = useState('');
@@ -117,6 +119,10 @@ function ScopedCreatorProfile({
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
+
+  useEffect(() => navigation?.addListener?.('focus', () => {
+    setFocusRevision((n) => n + 1);
+  }), [navigation]);
 
   useEffect(() => {
     let live = true;
@@ -250,11 +256,19 @@ function ScopedCreatorProfile({
     ? saved.status === 'ready' ? saved.value : []
     : tab === 'posts' && pinnedPost
       ? postRows.filter((post) => post.id !== pinnedPost.id) : postRows;
-  const rows: CreatorListItem[] = tab === 'media'
-    ? postRows.flatMap((post) => mediaUrls(post).map((url, mediaIndex) => ({
-        key: `media:${post.id}:${mediaIndex}`, post, mediaUrl: url, mediaIndex,
-      })))
-    : visiblePosts.map((post) => ({ key: `post:${post.id}`, post }));
+  // Keep the list header mounted across tabs. FlatList requires a remount
+  // when numColumns changes, so each media row supplies its own columns.
+  const rows: CreatorListItem[] = [];
+  if (tab === 'media') {
+    const tiles = postRows.flatMap((post) => mediaUrls(post).map((url, index) => ({
+      key: `media:${post.id}:${index}`, post, url, index,
+    })));
+    for (let index = 0; index < tiles.length; index += 3) {
+      rows.push({ key: tiles[index].key, tiles: tiles.slice(index, index + 3) });
+    }
+  } else {
+    for (const post of visiblePosts) rows.push({ key: `post:${post.id}`, post });
+  }
   const reading = tab === 'saved' ? saved.status === 'loading' : posts.status === 'loading' || (tab === 'posts' && pin.status === 'loading');
   const failed = tab === 'saved' ? saved.status === 'error' : posts.status === 'error';
 
@@ -264,13 +278,11 @@ function ScopedCreatorProfile({
 
   return (
     <FlatList
-      key={tab === 'media' ? 'media' : 'list'}
       testID="creator-profile-list"
       style={styles.root}
       contentContainerStyle={styles.listContent}
       data={reading || failed ? [] : rows}
       keyExtractor={(entry) => entry.key}
-      numColumns={tab === 'media' ? 3 : 1}
       refreshControl={<RefreshControl refreshing={reading} onRefresh={retry} />}
       ListHeaderComponent={
         <>
@@ -293,7 +305,8 @@ function ScopedCreatorProfile({
                 <Action label="重試名片" onPress={() => setRefreshRevision((n) => n + 1)} />
               </View>
             )}
-            <CreatorCardPanel schoolId={schoolId} ownerUid={memberUid} own={own} />
+            <CreatorCardPanel schoolId={schoolId} ownerUid={memberUid} own={own}
+              refreshKey={`${tab}:${refreshRevision}:${savedRevision}:${focusRevision}`} />
             <CreatorHighlight key={schoolId + ':' + memberUid}
               schoolId={schoolId} memberUid={memberUid} own={own} candidates={postRows}
               openPost={(postId) => navigation?.navigate?.('PostDetail', { postId })} />
@@ -373,21 +386,26 @@ function ScopedCreatorProfile({
           {tab === 'saved' && <Text style={styles.savedNote}>私人收藏 · 最多顯示最近 40 筆</Text>}
         </>
       }
-      renderItem={({ item: tile }) => {
-        const item = tile.post;
-        const first = tile.mediaUrl ?? mediaUrls(item)[0];
-        if (tab === 'media') return (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`查看媒體貼文：${item.title || '貼文'}${mediaUrls(item).length > 1 ? `（第 ${(tile.mediaIndex ?? 0) + 1} 張）` : ''}`}
-            onPress={() => navigation?.navigate?.('PostDetail', { postId: item.id })}
-            style={styles.mediaTile}
-          >
-            {first && !isVideo(first)
-              ? <Image source={{ uri: first }} style={styles.mediaImage} />
-              : <Text style={styles.videoLabel}>影片</Text>}
-          </Pressable>
+      renderItem={({ item: row }) => {
+        if ('tiles' in row) return (
+          <View style={styles.mediaRow}>
+            {row.tiles.map(({ key, post, url, index }) => (
+              <Pressable
+                key={key}
+                accessibilityRole="button"
+                accessibilityLabel={`查看媒體貼文：${post.title || '貼文'}${mediaUrls(post).length > 1 ? `（第 ${index + 1} 張）` : ''}`}
+                onPress={() => navigation?.navigate?.('PostDetail', { postId: post.id })}
+                style={styles.mediaTile}
+              >
+                {isVideo(url)
+                  ? <Text style={styles.videoLabel}>影片</Text>
+                  : <Image source={{ uri: url }} style={styles.mediaImage} />}
+              </Pressable>
+            ))}
+          </View>
         );
+        const item = row.post;
+        const first = mediaUrls(item)[0];
         return (
           <View>
           <Pressable
@@ -550,6 +568,7 @@ const createStyles = () => StyleSheet.create({
     height: 90, width: 90, borderRadius: 10, overflow: 'hidden',
     justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.surface2,
   },
+  mediaRow: { flexDirection: 'row' },
   mediaTile: {
     flex: 1, maxWidth: '32%', aspectRatio: 1, margin: 2, backgroundColor: theme.colors.surface2,
     justifyContent: 'center', alignItems: 'center', overflow: 'hidden',

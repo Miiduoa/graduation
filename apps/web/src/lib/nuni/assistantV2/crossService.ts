@@ -6,7 +6,8 @@ import {
 } from '@campus/shared/src/assistantTaskPlan';
 import { assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
 import { formatImportedAcademicSummary, type ImportedAcademicSummary } from '@campus/shared/src/importedAcademicSummary';
-import { bounded, clip, isSessionInvalidation, type Binding, type Card, type Obj, type Step, V2Error } from './contracts';
+import { bounded, clip, eventArgs, isSessionInvalidation, type Binding, type Card, type Obj, type Step, V2Error } from './contracts';
+import { eventInterval } from './actions';
 import { directReadAnswer, directReadCourseworkTargets, type DirectRead } from './directRead';
 import { informationAnswer } from './information';
 import { parseAssistantPublicCourseResults } from '@campus/shared/src/assistantPublicCourseResults';
@@ -41,6 +42,43 @@ const label = (value: unknown, fallback = '未提供') => typeof value === 'stri
   ? clip(value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').trim(), 240) : fallback;
 const partial = (value: Obj) => value.partial === true || value.truncated === true ||
   value.incomplete === true || Boolean(value.nextCursor) || Number(value.unplaced || 0) > 0;
+
+/** Select from the verified free-time result, then reserve only the requested
+ * duration. Pending cards also occupy time without being treated as saved. */
+function workSessionEvent(operation: CrossServiceOperation, value: unknown, cards: readonly Card[], now: number): Obj | null {
+  const work = operation.workSession;
+  const source = unwrap(value);
+  if (!work || source.source !== 'personal-imports' || !Array.isArray(source.slots) || partial(source))
+    throw new V2Error(502, 'INVALID_WORK_SESSION_SOURCE');
+  const duration = work.minutes * 60000;
+  const earliest = Date.parse(`${work.date}T${work.from}:00+08:00`);
+  const latest = Date.parse(`${work.date}T${work.to}:00+08:00`);
+  const busy = cards.filter(card => card.tool === 'propose_personal_event')
+    .map(card => eventInterval(eventArgs(card.args))).sort((left, right) => left[0] - right[0]);
+  const slots = rows(source.slots).map(slot => {
+    if (slot.date !== work.date || typeof slot.startTime !== 'string' || typeof slot.endTime !== 'string' ||
+        !/^([01]\d|2[0-3]):[0-5]\d$/.test(slot.startTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(slot.endTime))
+      throw new V2Error(502, 'INVALID_WORK_SESSION_SOURCE');
+    const start = Date.parse(`${work.date}T${slot.startTime}:00+08:00`);
+    const end = Date.parse(`${work.date}T${slot.endTime}:00+08:00`);
+    if (start < earliest || end > latest || start >= end || !Number.isFinite(start + end))
+      throw new V2Error(502, 'INVALID_WORK_SESSION_SOURCE');
+    return { start, end };
+  }).sort((left, right) => left.start - right.start);
+  const event = (start: number) => ({ title: work.title, date: work.date, allDay: false,
+    startTime: new Date(start + 28800000).toISOString().slice(11, 16),
+    endTime: new Date(start + duration + 28800000).toISOString().slice(11, 16) });
+  for (const slot of slots) {
+    let cursor = Math.max(slot.start, Math.ceil((now + 1) / 60000) * 60000);
+    for (const [start, end] of busy) {
+      if (end <= cursor || start >= slot.end) continue;
+      if (Math.min(start, slot.end) - cursor >= duration) return event(cursor);
+      cursor = Math.max(cursor, end);
+    }
+    if (slot.end - cursor >= duration) return event(cursor);
+  }
+  return null;
+}
 
 function mapStepStatus(read: CampusMapRead): AssistantTaskStep['status'] {
   if (read.status !== 'ready' || read.resolution === 'unmatched') return 'blocked';
@@ -199,7 +237,8 @@ function readPlanCourseworkTargets(
 ): AssistantCourseworkTarget[] {
   // A prepared plan keeps its original confirmation/revision path. A new source
   // button must not quietly replace an existing calendar or food proposal.
-  if (request.operations.some(operation => operation.kind === 'study' || operation.kind === 'event' || operation.kind === 'reorder')) return [];
+  if (request.operations.some(operation => operation.kind === 'study' || operation.kind === 'event' ||
+      operation.kind === 'work-session' || operation.kind === 'reorder')) return [];
   const work = request.operations.filter(operation => operation.kind === 'read' && operation.tool === 'get_due_work' &&
     (operation.directRead?.kind === 'due-work' || operation.informationRead?.kind === 'work'));
   // The existing pronoun follow-up can select a sole candidate automatically.
@@ -389,15 +428,47 @@ export async function runCrossService(input: {
       } else if (operation.kind === 'free-time') {
         const value = await call('find_free_time', operation.args, operation.question);
         const originalSlots = rows(unwrap(value).slots);
-        const slots = input.availableAfter === undefined ? originalSlots : originalSlots.filter(row =>
+        let slots = input.availableAfter === undefined ? originalSlots : originalSlots.filter(row =>
           typeof row.date === 'string' && typeof row.startTime === 'string' &&
           Date.parse(row.date + 'T' + row.startTime + ':00+08:00') >= input.availableAfter!);
-        results.set(operation.id, input.availableAfter === undefined ? value : { ...unwrap(value), slots });
+        if (operation.workSession) {
+          const availableAfter = Math.ceil((Math.max(now, input.availableAfter ?? now) + 1) / 60000) * 60000;
+          slots = originalSlots.flatMap(row => {
+            const start = Math.max(Date.parse(row.date + 'T' + row.startTime + ':00+08:00'), availableAfter);
+            const end = Date.parse(row.date + 'T' + row.endTime + ':00+08:00');
+            return end - start >= operation.workSession!.minutes * 60000
+              ? [{ ...row, startTime: new Date(start + 28800000).toISOString().slice(11, 16), minutes: (end - start) / 60000 }] : [];
+          });
+        }
+        results.set(operation.id, input.availableAfter === undefined && !operation.workSession ? value : { ...unwrap(value), slots });
         step.status = slots.length ? 'completed' : 'blocked';
         step.summary = slots.length ? '已核對同步課表與個人行程，可用時段：' + slots.slice(0, 5)
           .map(row => `${label(row.date)} ${label(row.startTime)}–${label(row.endTime)}`).join('、')
           : originalSlots.length ? '原查詢時段已經過去，沒有可接續安排的未來空檔。'
           : '指定日期與時段內沒有符合長度的空檔，尚未安排。';
+      } else if (operation.kind === 'work-session') {
+        const source = operation.dependsOn.map(id => request.operations.find(previous => previous.id === id))
+          .find(previous => previous?.kind === 'free-time');
+        if (!source || !results.has(source.id)) {
+          step.summary = '尚未核對這次工作安排的可用時段，沒有建立行程。';
+          continue;
+        }
+        const event = workSessionEvent(operation, results.get(source.id), tools.cards, Math.max(now, input.availableAfter ?? now));
+        if (!event) {
+          step.summary = '指定時間內沒有符合長度的未來空檔，或已被本次其他待確認行程占用，尚未建立行程。';
+          continue;
+        }
+        const proposal = unwrap(await call('propose_personal_event', event, operation.question));
+        const cards = tools.cards.slice(beforeCards);
+        if (!cards.length) {
+          step.status = proposal.unavailable === 'WRITES_DISABLED' ? 'handoff' : 'blocked';
+          step.href = assistantServiceHref('calendar', binding.schoolId) || undefined;
+          step.summary = '已核對可用時段；目前尚未開放新增個人行程，請到個人行事曆接續。';
+          continue;
+        }
+        step.status = 'ready';
+        step.cardIds = cards.map(card => card.mutationId);
+        step.summary = `已核對同步課表與個人行程，準備「${label(event.title)}」${event.date} ${event.startTime}–${event.endTime}，共 ${operation.workSession!.minutes} 分鐘。確認後才會儲存為你的個人行程；工作本身仍待處理。`;
       } else if (operation.kind === 'study') {
         const pending = pendingTasks(operation);
         if (!pending.length) {

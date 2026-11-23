@@ -1,0 +1,42 @@
+.previewImage {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 8px;
+}
+
+.limits,
+.selection {
+  flex: 1 1 100%;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--font-body-size, 0.9375rem);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.limits {
+  color: var(--muted);
+}
+
+.selection {
+  padding: 12px 16px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.selection p {
+  margin: 0;
+}
+
+.selection ul {
+  margin: 8px 0 0;
+  padding-inline-start: 20px;
+}
+
+.selection li + li {
+  margin-top: 8px;
+}

@@ -90,7 +90,8 @@ it.each(profiles)('%s can submit and answer its own timetable without model cons
   noRemoteRead();
 });
 
-it.each(profiles.flatMap(profile => ['查我的待辦', '查我要繳的', '查我的\n成績', '查我的\t學分紀錄']
+it.each(profiles.flatMap(profile => ['查我的待辦', '查我要繳的', '查我的\n成績', '查我的\t學分紀錄',
+  '查詢 TronClass 課程', '下載 TronClass 教材', '幫我準備 TronClass 作業']
   .map(question => [profile, question] as const)))(
   '%s routes %j to work guidance before any local or student reader', async (profile, question) => {
     await open(profile);
@@ -115,8 +116,9 @@ it('a complete personal timetable query is not redirected by broad teacher keywo
   noRemoteRead();
 });
 
-it.each(['今天有什麼課程', '下一堂課在哪裡', '查我的課表',
-      '下一堂課在哪裡呢', '今天有什麼課程嗎'])(
+// Location questions use the scoped map route; all role variants are covered
+// in AssistantCampusMap.test.tsx. Other timetable questions keep this path.
+it.each(['今天有什麼課程', '查我的課表', '今天有什麼課程嗎'])(
   'teacher falls back from a missing device timetable to the cloud answer: %s', async question => {
     localStorage.clear();
     const fetcher = vi.fn(async (url: string, init?: RequestInit) => {

@@ -1,0 +1,97 @@
+{
+  "capturedAt": "2026-11-23T07:09:22.840698+00:00",
+  "repository": "Miiduoa/graduation",
+  "mainBaseline": "b75017aa56c4211931662cf6b61933b47aeb0211",
+  "sourceBranchCount": 17,
+  "branches": [
+    {
+      "name": "dependabot/npm_and_yarn/backend/functions/functions-patch-minor-fb4b230888",
+      "sha": "1ba40c96fcc8f3f1f036c2de74fc336355e76811",
+      "pullRequest": 746
+    },
+    {
+      "name": "dependabot/pip/backend/ai-server/ai-server-pip-patch-minor-db01d85267",
+      "sha": "1445008c13c617e886f4329794c4e357c4d0ce96",
+      "pullRequest": 747
+    },
+    {
+      "name": "dependabot/pip/backend/ai-server/numpy-gte-2.5.5",
+      "sha": "cceb31073a6fa9b548e6f9459cf37abcd22c5008",
+      "pullRequest": 748
+    },
+    {
+      "name": "feat/agent-role-orchestration-20261123",
+      "sha": "29eb04f58238c388123d3408cd8250cb7270e719",
+      "pullRequest": 751
+    },
+    {
+      "name": "feat/agent-washing-cancellation-cloud-20261117",
+      "sha": "3205c5a88bfe6f4f325a8a7b2b994cec637eea8a",
+      "pullRequest": 703
+    },
+    {
+      "name": "feat/calendar-day-flow-20261123",
+      "sha": "5646e7197e40fe19ece15e016282bcda506d726a",
+      "pullRequest": 752
+    },
+    {
+      "name": "feat/merchant-workspace-continuity-20261123",
+      "sha": "d45d0405e8b2295a80b6bceb529f63ad4bcada40",
+      "pullRequest": 750
+    },
+    {
+      "name": "feat/nuni-task-flow-20261121",
+      "sha": "04aaccd2cfe6e9966bf8f1e071cb9c0c4ba9dcd1",
+      "pullRequest": 739
+    },
+    {
+      "name": "feat/tronclass-native-submit-20261113",
+      "sha": "5d0543d9a82de67adb8bf578cd20a28916eeae21",
+      "pullRequest": 616
+    },
+    {
+      "name": "fix/campus-spatial-offscreen-webgl-start-20261119",
+      "sha": "7a16ad640c7e86cb18e3c9b3a6c9560c8741e470",
+      "pullRequest": 722
+    },
+    {
+      "name": "fix/course-study-invisible-source-evidence-20261119",
+      "sha": "091ae222561c2d3cfa957759e30cca1fd7f0823d",
+      "pullRequest": 719
+    },
+    {
+      "name": "fix/mobile-agent-exact-homework-handoff-20261122",
+      "sha": "a926543cca8d1e61a9d1c1920b5b6bca9f715d71",
+      "pullRequest": 741
+    },
+    {
+      "name": "fix/mobile-board-subscribe-pending-20261120",
+      "sha": "0759938b30860382073b33904255b6c125720d35",
+      "pullRequest": 729
+    },
+    {
+      "name": "fix/mobile-creator-card-confirm-timeout-20261121",
+      "sha": "b31d8351be73a374f9df8d89c5f6f8e52a1ee3e1",
+      "pullRequest": 740
+    },
+    {
+      "name": "fix/multi-school-web-catalog-freshness-20261123",
+      "sha": "8aefa6f4850f06648544cdf0d5500c10adeded3f",
+      "pullRequest": 749
+    },
+    {
+      "name": "integration/all-branches-20261121",
+      "sha": "a3447cb016b7180d976884468e1c497a0cbfa7ff",
+      "pullRequest": 738
+    },
+    {
+      "name": "integration/campus-services-20261106",
+      "sha": "8e07b78a90c751cc616c761a19580f86a0e44775",
+      "pullRequest": 515
+    },
+    {
+      "name": "main",
+      "sha": "b75017aa56c4211931662cf6b61933b47aeb0211"
+    }
+  ]
+}

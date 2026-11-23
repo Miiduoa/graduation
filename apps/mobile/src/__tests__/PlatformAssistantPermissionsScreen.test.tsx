@@ -119,7 +119,7 @@ test('Google-only users can save both account preferences without a school login
   expect(saveSchool).not.toHaveBeenCalled();
 });
 
-test('dual identities show independent Google and school groups and retain the 12 school permissions', async () => {
+test('dual identities show independent Google and school groups and retain the 13 school permissions', async () => {
   mockSchool = { user: { uid: 'school-user' } };
   const request = jest.fn().mockResolvedValue(state());
   mockPlatform = auth(request);
@@ -127,13 +127,15 @@ test('dual identities show independent Google and school groups and retain the 1
   await waitFor(() => expect(view.getByLabelText('送出請假申請').props.disabled).toBe(false));
   expect(view.getByText('Google 帳號的代辦動作')).toBeTruthy();
   expect(view.getByText('學校帳號的寫入動作')).toBeTruthy();
-  expect(view.getAllByRole('switch')).toHaveLength(14);
+  expect(view.getAllByRole('switch')).toHaveLength(15);
+  expect(view.getByLabelText('取消洗衣預約').props.value).toBe(false);
+  fireEvent(view.getByLabelText('取消洗衣預約'), 'valueChange', true);
   fireEvent(view.getByLabelText('預約座位'), 'valueChange', true);
   fireEvent.press(view.getByText('儲存助理權限'));
   await waitFor(() =>
     expect(saveSchool).toHaveBeenCalledWith(
       'school-user',
-      expect.objectContaining({ reserveSeat: true }),
+      expect.objectContaining({ reserveSeat: true, cancelWashingReservation: true }),
     ),
   );
   expect(request).toHaveBeenCalledTimes(1);

@@ -71,8 +71,14 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
     value: {
-      request: (key: string, action: () => unknown) => {
-        const next = (queues.get(key) || Promise.resolve()).then(action);
+      request: (
+        key: string,
+        options: LockOptions | (() => unknown),
+        callback?: () => unknown,
+      ) => {
+        const next = (queues.get(key) || Promise.resolve()).then(
+          typeof options === 'function' ? options : callback,
+        );
         queues.set(
           key,
           next.catch(() => {}),
@@ -84,6 +90,69 @@ beforeEach(() => {
 });
 
 describe('browser personal import synchronization', () => {
+  it('times out queued sync settings and sync work without changing data', async () => {
+    await savePersonalImportBatch(scope, rows());
+    await setPersonalImportSyncEnabled(scope, true, () => true);
+    const original = readPersonalImports(scope);
+    const request = vi.fn((_key: string, { signal }: LockOptions) =>
+      new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }),
+    );
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } });
+    vi.useFakeTimers();
+    try {
+      const sync = syncPersonalImports(scope, identity, () => true);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await sync;
+      expect(getPersonalImportSyncStatus(scope)).toMatchObject({
+        phase: 'error',
+        message: expect.stringContaining('已逾時'),
+      });
+      const enable = expect(setPersonalImportSyncEnabled(scope, true, () => true)).rejects.toThrow(
+        '等待其他分頁完成個人紀錄操作已逾時',
+      );
+      await vi.advanceTimersByTimeAsync(15_000);
+      await enable;
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(request.mock.calls.every(([, options]) => options.signal?.aborted)).toBe(true);
+      expect(readPersonalImportSyncState(scope).enabled).toBe(true);
+      expect(readPersonalImports(scope)).toEqual(original);
+      expect(browserRequest).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rechecks the active scope before writing the disabled setting', async () => {
+    await savePersonalImportBatch(scope, rows());
+    await setPersonalImportSyncEnabled(scope, true, () => true);
+    const key = personalImportsStorageKey(scope);
+    const before = localStorage.getItem(key);
+    let checks = 0;
+
+    // Allow the initial check and lock acquisition, then invalidate before saving.
+    await expect(setPersonalImportSyncEnabled(scope, false, () => ++checks <= 2)).rejects.toThrow(
+      '帳號或校園已切換',
+    );
+    expect(localStorage.getItem(key)).toBe(before);
+  });
+
+  it('keeps the ledger intact when writing the disabled setting exceeds quota', async () => {
+    await setPersonalImportSyncEnabled(scope, true, () => true);
+    const key = personalImportsStorageKey(scope);
+    const before = localStorage.getItem(key);
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+    try {
+      await expect(setPersonalImportSyncEnabled(scope, false, () => true)).rejects.toThrow('空間不足');
+      expect(localStorage.getItem(key)).toBe(before);
+    } finally {
+      write.mockRestore();
+    }
+  });
+
   it('requires per-account and per-school consent before any network request', async () => {
     await savePersonalImportBatch(scope, rows());
     await syncPersonalImports(scope, identity, () => true);
