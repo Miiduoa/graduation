@@ -165,6 +165,15 @@ let cache: Snapshot | null = null;
 let pending: Promise<Snapshot> | null = null;
 let unavailableUntil = 0;
 
+// Rejected responses may still have an open body. A broken stream bridge can
+// throw synchronously from cancel(), or return a non-Promise. Cleanup must
+// never mask the HTTP status / Retry-After or delay the rejection.
+function cancelUnreadBody(response: Response): void {
+  try {
+    if (response.body) void Promise.resolve(response.body.cancel()).catch(() => {});
+  } catch { /* Best-effort cleanup; preserve the original rejection policy. */ }
+}
+
 // Overpass can omit Content-Length or serve compressed responses. Stop reading at the
 // decoded byte limit; checking .text().length afterwards would still buffer an
 // unbounded upstream response in the Node process.
@@ -187,7 +196,7 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   // Content-Length measures the decoded bytes. Do not silently classify an
   // ambiguous identity response as compressed and skip its length check.
   if (!['identity', 'gzip', 'br', 'deflate'].includes(coding)) {
-    if (response.body) void response.body.cancel().catch(() => {});
+    cancelUnreadBody(response);
     throw new Error('Unsupported OSM content encoding');
   }
   const identityEncoded = coding === 'identity';
@@ -202,7 +211,7 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
     // The response body may still be streaming even though the declared size
     // already violates our limit. Cancel without awaiting: an uncooperative
     // upstream must not hold the shared request open while cancellation stalls.
-    if (response.body) void response.body.cancel().catch(() => {});
+    cancelUnreadBody(response);
     throw new Error('OSM response too large');
   }
   // Any HTTP 200 Overpass JSON snapshot requires a non-empty body. A declared
@@ -210,7 +219,7 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   // data. Reject it before reading: even a stalled stream must not consume the
   // full 12-second deadline when its header already contradicts the payload.
   if (lengthHeader !== null && declared === 0) {
-    if (response.body) void response.body.cancel().catch(() => {});
+    cancelUnreadBody(response);
     throw new Error('OSM response declares an empty body');
   }
   if (!response.body) {
@@ -315,7 +324,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     // indefinitely (including 406/429/503 responses from a congested proxy).
     // We only need status/Retry-After. Release the unused body immediately,
     // without awaiting cancellation from an uncooperative upstream.
-    if (response.body) void response.body.cancel().catch(() => {});
+    cancelUnreadBody(response);
     // A malformed fixed query (400) or blocked/forbidden client (403/406)
     // cannot recover by hammering public Overpass every ten minutes.
     // Allow a full-day cooldown; do not treat these as transient congestion.
@@ -338,7 +347,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   // A proxy must not promote a partial map export into a fresh campus snapshot,
   // even when the returned fragment happens to be syntactically valid JSON.
   if (response.headers.get('content-range') !== null) {
-    if (response.body) void response.body.cancel().catch(() => {});
+    cancelUnreadBody(response);
     // Even HTTP 200 is not a complete source when a proxy sends Content-Range.
     // Retain any upstream cooldown instead of retrying a partial response at 10m.
     throw new OverpassRateLimitError(overpassRetryAfterMs(
@@ -351,7 +360,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   // Reject the conflicting headers before reading even a stalled body.
   if (response.headers.get('transfer-encoding') !== null &&
       response.headers.get('content-length') !== null) {
-    if (response.body) void response.body.cancel().catch(() => {});
+    cancelUnreadBody(response);
     throw new OverpassRateLimitError(overpassRetryAfterMs(
       response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));
@@ -360,7 +369,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   // HTML/binary MIME while providing JSON-shaped data. Do not turn that into
   // a 24-hour audited building snapshot. Cancel a stalled body immediately.
   if (!isSupportedUtf8JsonMediaType(response.headers.get('content-type'))) {
-    if (response.body) void response.body.cancel().catch(() => {});
+    cancelUnreadBody(response);
     throw new OverpassRateLimitError(overpassRetryAfterMs(
       response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));
