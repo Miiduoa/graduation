@@ -1334,6 +1334,33 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the server alive when a stalled Overpass reader throws during deadline cancellation', async () => {
+    vi.useFakeTimers();
+    // An incomplete stream bridge may throw from cancel() rather than return
+    // a Promise. The abort event fires inside the 12-second deadline timer.
+    const reader = {
+      read: vi.fn(() => new Promise<ReadableStreamReadResult<Uint8Array>>(() => {})),
+      cancel: vi.fn(() => { throw new Error('stream bridge cancelled synchronously'); }),
+      releaseLock: vi.fn(),
+    };
+    const upstream = vi.fn().mockResolvedValue({
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      body: { getReader: () => reader },
+    });
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const pending = GET();
+    await vi.advanceTimersByTimeAsync(12_000);
+    const response = await pending;
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(reader.cancel).toHaveBeenCalledTimes(1);
+    expect(upstream.mock.calls[0][1].signal.aborted).toBe(true);
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the fallback explicit and rate limits repeated upstream failures', async () => {
     const mockedFetch = vi.fn().mockRejectedValue(new Error('timeout'));
     vi.stubGlobal('fetch', mockedFetch);
