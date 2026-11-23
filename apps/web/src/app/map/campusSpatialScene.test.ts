@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BufferGeometry, Camera, ExtrudeGeometry, InstancedMesh, Material, Matrix4, Mesh, PlaneGeometry, Scene, Vector3 } from 'three';
+import { BufferGeometry, Camera, ExtrudeGeometry, InstancedMesh, Material, Matrix4, Mesh, MeshStandardMaterial, PlaneGeometry, Scene, Vector3 } from 'three';
 import { buildCampusSpatialModel } from './campusSpatialModel';
 import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
 import { parseProvidenceOsmFootprints, parseProvidenceFootprintResponse, type ProvidenceFootprint } from './providenceFootprints';
@@ -856,6 +856,49 @@ it('extrudes OSM footprints in geographically aligned meters only for known spat
   expect(otherVolumes).toBe(0);
 });
 
+
+
+it('visually distinguishes unsurveyed 12m volume height without losing the warning after selection or theme changes', () => {
+  // Synthetic dimensions only: this test does not assert any actual campus height.
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const campus = buildCampusSpatialModel([library]);
+  const { lat, lng } = campus.points[0].location;
+  const base: ProvidenceFootprint = {
+    poiId: library.id, name: library.name, sourceUrl: library.sourceUrl,
+    outline: [
+      [lng - 0.00005, lat - 0.00005], [lng + 0.00005, lat - 0.00005],
+      [lng + 0.00005, lat + 0.00005], [lng - 0.00005, lat + 0.00005],
+    ],
+    heightMeters: 12, heightBasis: 'illustrative',
+  };
+  const materialState = (footprint: ProvidenceFootprint) => {
+    const { scene, renderer } = setup(campus, undefined, [footprint]);
+    drawFrame();
+    const graph = renderer.render.mock.calls.at(-1)![0] as Scene;
+    const volumes: Mesh[] = [];
+    graph.traverse((item) => {
+      if (item instanceof Mesh && item.geometry instanceof ExtrudeGeometry) volumes.push(item);
+    });
+    expect(volumes).toHaveLength(1);
+    const material = volumes[0].material as MeshStandardMaterial;
+    const read = () => ({
+      transparent: material.transparent,
+      opacity: material.opacity,
+      depthWrite: material.depthWrite,
+    });
+    const initial = read();
+    scene.setView({ selectedId: library.id, overhead: false, motion: false, dark: true });
+    drawFrame();
+    return { initial, selectedDark: read() };
+  };
+
+  const illustration = materialState(base);
+  const sourced = materialState({ ...base, heightBasis: 'osm-tag', heightMeters: 18 });
+  expect(illustration.initial).toEqual({ transparent: true, opacity: 0.44, depthWrite: false });
+  expect(illustration.selectedDark).toEqual(illustration.initial);
+  expect(sourced.initial).toEqual({ transparent: false, opacity: 1, depthWrite: true });
+  expect(sourced.selectedDark).toEqual(sourced.initial);
+});
 
 it('does not zoom out for a tall building whose POI is absent from the current campus view', () => {
   // A filtering change can keep an older API footprint in memory. It must not
