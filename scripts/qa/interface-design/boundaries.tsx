@@ -48,8 +48,11 @@ export function navigate(href: string) {
   ledger.navigations.push(href);
   // The routing boundary supplies synthetic route data; use actual browser
   // history so product return-entry handling is not simulated by pathname alone.
-  history.replaceState({ ...history.state, interfaceRoute: state }, '');
-  const destination = { ...state, pathname: url.pathname, search: url.search.slice(1) };
+  // Product search publishes its filters with replaceState before the router
+  // acknowledges them. Preserve the real source URL in this routing boundary.
+  const source = { ...state, pathname: location.pathname, search: location.search.slice(1) };
+  history.replaceState({ ...history.state, interfaceRoute: source }, '');
+  const destination = { ...source, pathname: url.pathname, search: url.search.slice(1) };
   const destinationUrl = url.pathname + url.search + url.hash;
   if (destinationUrl !== location.pathname + location.search + location.hash) {
     history.pushState({ interfaceRoute: destination }, '', destinationUrl);
@@ -150,7 +153,8 @@ export const usePersonalTodayRecords = () => {
 export const interpretCampusRequest = async () => {
   throw new Error('Semantic network is disabled in the interface fixture');
 };
-export const browserRequest = async () => {
+export const browserRequest = async (action: string) => {
+  if (action === 'sign-in-options') return { google: true, studentId: true };
   throw new Error('Platform network is disabled in the interface fixture');
 };
 
