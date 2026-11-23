@@ -9,10 +9,15 @@ import { operationId, revision } from './fixtures/tronClassIntegration';
 
 const handle = `ps_${'a'.repeat(43)}`;
 const originalFetch = global.fetch;
-const originalNativeConnectEnabled = process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED;
 const mockGetIdToken = jest.fn();
 let mockUser: { uid: string; getIdToken: typeof mockGetIdToken } | null;
 jest.mock('../firebase', () => ({ getAuthInstance: () => ({ currentUser: mockUser }) }));
+let mockExpoFetch: jest.Mock | undefined;
+jest.mock('expo/fetch', () => ({
+  get fetch() {
+    return mockExpoFetch;
+  },
+}));
 jest.mock('../services/tronClassNativeDownload', () => ({
   ...jest.requireActual('../services/tronClassNativeDownload'),
   requestNativeTronClassSubmissionDownload: jest.fn(),
@@ -20,14 +25,12 @@ jest.mock('../services/tronClassNativeDownload', () => ({
 const submissionInput = { courseId: 10, homeworkId: 20, submissionId: '30', uploadId: 40, revision };
 const downloadMock = jest.mocked(requestNativeTronClassSubmissionDownload);
 beforeEach(() => {
-  delete process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED;
   mockUser = { uid: 'school-a', getIdToken: mockGetIdToken };
   mockGetIdToken.mockReset().mockResolvedValue('fresh-token');
   downloadMock.mockReset().mockResolvedValue({ bytes: new Uint8Array([1]), filename: 'answer.pdf', contentType: 'application/pdf' });
+  mockExpoFetch = jest.fn();
 });
 afterEach(() => {
-  if (originalNativeConnectEnabled === undefined) delete process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED;
-  else process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED = originalNativeConnectEnabled;
   global.fetch = originalFetch;
 });
 
@@ -88,55 +91,114 @@ it.each([
   await expect(read(cancelled.signal)).rejects.toMatchObject({ code: cancellationCode });
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
-it.each([undefined, 'false', 'TRUE', ' true '])(
-  'rejects Platform and Firebase connect before network access with flag %s',
-  async (flag) => {
-    if (flag !== undefined) process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED = flag;
+it.each(['connect', 'disconnect', 'submit', 'cancel-preparation'])(
+  'never retries a %s whose reply was lost',
+  async (action) => {
+    const fetchMock = jest.fn().mockRejectedValue(new Error('lost reply'));
+    global.fetch = fetchMock;
+    mockExpoFetch = jest.fn().mockRejectedValue(new Error('lost reply'));
+    await expect(nuniBffRequest('tronclass', handle, { action })).rejects.toMatchObject({
+      code: 'NETWORK_ERROR',
+    });
+    expect(fetchMock.mock.calls.length + mockExpoFetch.mock.calls.length).toBe(1);
+  },
+);
+
+const credentialInput = {
+  action: 'connect',
+  schoolId: 'pu',
+  account: 'student',
+  password: 'school-secret',
+  expectedRevision: null,
+};
+const connected = { connected: true, revision, account: 'student' };
+const credentialTransports = [
+  {
+    name: 'Platform',
+    authorization: `Platform ${handle}`,
+    connect: () => nuniBffRequest('tronclass', handle, credentialInput),
+  },
+  {
+    name: 'Firebase',
+    authorization: 'Bearer fresh-token',
+    connect: () => nativeTronClassFirebaseRequest('school-a', () => true, credentialInput),
+  },
+];
+
+it.each(credentialTransports)(
+  'sends the school password through $name only with the native redirect-refusing fetch, never the global fetch',
+  async ({ authorization, connect }) => {
     const fetchMock = jest.fn();
     global.fetch = fetchMock;
-    const input = { action: 'connect' };
-
-    await expect(nuniBffRequest('tronclass', handle, input)).rejects.toMatchObject({
-      code: 'TRONCLASS_NATIVE_CONNECT_DISABLED',
+    mockExpoFetch = jest.fn(async () => ({ ok: true, status: 200, redirected: false, text: async () => JSON.stringify(connected) }));
+    await expect(connect()).resolves.toEqual(connected);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockExpoFetch).toHaveBeenCalledTimes(1);
+    expect(mockExpoFetch).toHaveBeenCalledWith('https://nuni.tw/api/tronclass', {
+      method: 'POST',
+      redirect: 'error',
+      credentials: 'omit',
+      signal: expect.any(AbortSignal),
+      headers: {
+        Accept: 'application/json',
+        Authorization: authorization,
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      },
+      body: JSON.stringify(credentialInput),
     });
-    await expect(nativeTronClassFirebaseRequest('school-a', () => true, input))
-      .rejects.toMatchObject({ code: 'TRONCLASS_NATIVE_CONNECT_DISABLED' });
-    expect(mockGetIdToken).not.toHaveBeenCalled();
+  },
+);
+
+it.each(credentialTransports)(
+  'rejects a $name binding reply that reports any redirect, without sending the password again',
+  async ({ connect }) => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    for (const reply of [
+      { ok: true, status: 200, redirected: true },
+      { ok: false, status: 307, redirected: false },
+      { ok: false, status: 308, redirected: false },
+    ]) {
+      mockExpoFetch = jest.fn(async () => ({ ...reply, text: async () => JSON.stringify(connected) }));
+      await expect(connect()).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+      expect(mockExpoFetch).toHaveBeenCalledTimes(1);
+    }
     expect(fetchMock).not.toHaveBeenCalled();
   },
 );
 
-it('dispatches connect through both transports when the flag is true', async () => {
-  process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED = 'true';
-  const fetchMock = jest.fn(async () => ({ ok: true, text: async () => '{}' }));
-  global.fetch = fetchMock as unknown as typeof fetch;
-  const input = { action: 'connect' };
-
-  await expect(nuniBffRequest('tronclass', handle, input)).resolves.toEqual({});
-  await expect(nativeTronClassFirebaseRequest('school-a', () => true, input)).resolves.toEqual({});
-  expect(fetchMock).toHaveBeenCalledTimes(2);
-  for (const authorization of [`Platform ${handle}`, 'Bearer fresh-token']) {
-    expect(fetchMock).toHaveBeenCalledWith('https://nuni.tw/api/tronclass', expect.objectContaining({
-      method: 'POST',
-      redirect: 'error',
-      body: JSON.stringify(input),
-      headers: expect.objectContaining({ Authorization: authorization }),
-    }));
-  }
-});
-
-it.each(['connect', 'disconnect', 'submit', 'cancel-preparation'])(
-  'never retries a %s whose reply was lost',
-  async (action) => {
-    if (action === 'connect') process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED = 'true';
-    const fetchMock = jest.fn().mockRejectedValue(new Error('lost reply'));
+it.each(credentialTransports)(
+  'maps a refused $name redirect to a network failure and never falls back to the global fetch',
+  async ({ connect }) => {
+    const fetchMock = jest.fn();
     global.fetch = fetchMock;
-    await expect(nuniBffRequest('tronclass', handle, { action })).rejects.toMatchObject({
-      code: 'NETWORK_ERROR',
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    mockExpoFetch = jest.fn().mockRejectedValue(new Error("Redirect is not allowed when redirect mode is 'error'"));
+    await expect(connect()).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+    expect(mockExpoFetch).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   },
 );
+
+it.each(credentialTransports)(
+  'fails closed for $name when the native fetch is unavailable',
+  async ({ connect }) => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    mockExpoFetch = undefined;
+    await expect(connect()).rejects.toMatchObject({ code: 'TRONCLASS_SECURE_TRANSPORT_UNAVAILABLE' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+
+it('keeps non-credential TronClass reads on the existing transport', async () => {
+  const fetchMock = jest.fn(async () => ({ ok: true, text: async () => '{}' }));
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await nuniBffRequest('tronclass', handle, { action: 'status' });
+  await nativeTronClassFirebaseRequest('school-a', () => true, { action: 'status' });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(mockExpoFetch).not.toHaveBeenCalled();
+});
 it('encodes only the upload scope at the fixed BFF and never retries a lost upload', async () => {
   const fetchMock = jest.fn().mockRejectedValue(new Error('lost upload reply'));
   global.fetch = fetchMock;
@@ -178,7 +240,6 @@ it('uses a fresh Firebase token for a verified school owner without falling back
       redirect: 'error',
     }),
   );
-  process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED = 'true';
   mockGetIdToken.mockImplementationOnce(async () => {
     mockUser = { uid: 'school-b', getIdToken: mockGetIdToken };
     return 'stale-token';

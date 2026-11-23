@@ -20,7 +20,6 @@ import {
   nativeTronClassFirebaseSubmissionDownload,
   tronClassUploadQuery,
 } from '../services/tronClassNativeTransport';
-import { isTronClassNativeConnectEnabled } from '../services/tronClassNativeConnectEnabled';
 import type {
   TronClassConnection,
   TronClassCourseIndex,
@@ -237,7 +236,6 @@ function EnabledTronClassWorkspace() {
 }
 
 function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient }) {
-  const nativeConnectEnabled = isTronClassNativeConnectEnabled();
   const navigation = React.useContext(NavigationContext);
   const [connection, setConnection] = useState<TronClassConnection | null>(null);
   const [snapshot, setSnapshot] = useState<TronClassSnapshot | null>(null);
@@ -439,7 +437,6 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
   }, [client, navigation]);
   async function connect() {
     if (
-      !nativeConnectEnabled ||
       lock.current ||
       assignmentBusy ||
       !current() ||
@@ -617,7 +614,6 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
     setError('');
     setSelected(row);
   };
-  const needsConnection = (reconnecting || !connection?.connected) && statusKnown;
   return (
     <AIScreen keyboardShouldPersistTaps="handled">
       <AIHero
@@ -637,24 +633,10 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
           </Text>
         ) : null}
         <Text style={copy}>
-          {nativeConnectEnabled ? '校方密碼僅用於這次驗證；' : null}
-          文字草稿留在本頁，附件會暫存於 App
+          校方密碼僅用於這次驗證；文字草稿留在本頁，附件會暫存於 App
           並在離頁時清除。連接不會改變你的 nuni 身分。
         </Text>
-        {needsConnection && !nativeConnectEnabled ? (
-          <>
-            <Text style={copy}>請先到網頁版 nuni 連接 TronClass</Text>
-            <AIButton
-              label="開啟網頁版 nuni"
-              onPress={() => {
-                void Linking.openURL('https://nuni.tw/tronclass').catch(() => {
-                  if (current()) setError('無法開啟網頁版 nuni，請稍後再試。');
-                });
-              }}
-            />
-          </>
-        ) : null}
-        {needsConnection && nativeConnectEnabled ? (
+        {(reconnecting || !connection?.connected) && statusKnown ? (
           <>
             <TextInput
               accessibilityLabel="TronClass 帳號"
@@ -690,7 +672,7 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
             />
           </>
         ) : null}
-        {nativeConnectEnabled && connection?.connected && !reconnecting ? (
+        {connection?.connected && !reconnecting ? (
           <AIButton
             label="重新連接或切換校方帳號"
             variant="ghost"
