@@ -364,7 +364,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended.current || document.hidden;
     const isOffscreen = () => visibility === 'hidden' ||
-      (visibility === 'unknown' && measureLayoutVisibility() === false);
+      (visibility === 'unknown' && measureLayoutVisibility() === false) ||
+      // IntersectionObserver checks layout intersection, not whether a mobile
+      // keyboard has reduced the *visual* viewport over the 3D canvas.
+      // A positive observer entry must never reactivate an obscured WebGL scene.
+      measureVisualViewportVisibility() === false;
     const isDeferred = () => isOffscreen() || isBackgrounded() || (saveData && !hasDataConsent);
     const defer = () => {
       setDeferredCause(isBackgrounded() ? 'background' :
@@ -592,15 +596,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     }
     // Keyboard transitions can move the host without a window event.
     const onVisualViewportChange = () => {
-      if (visibility === 'visible') return;
-      if (visibility === 'hidden') {
-        // A stale offscreen observer result can linger after the keyboard or
-        // visual viewport moves the host back onscreen without a new entry.
-        // Only the visual viewport counts here: intersecting the layout
-        // viewport while the keyboard still covers the canvas is not visible.
-        if (measureVisualViewportVisibility() !== true) return;
+      const visibleInVisualViewport = measureVisualViewportVisibility();
+      if (visibility === 'hidden' && visibleInVisualViewport === true) {
+        // Recover from a stale hidden observer entry after the keyboard moves.
+        // A valid intersection with the visual viewport is evidence the host
+        // has returned, even if this WebView emits no new observer callback.
         visibility = 'unknown';
       }
+      // Also run when the observer last said "visible": a shrinking mobile
+      // viewport can cover the canvas while its layout intersection stays true.
+      // Invalid/missing visual geometry is not proof that the host is hidden.
       syncVisibility();
     };
     let visualViewport: VisualViewport | null | undefined;
