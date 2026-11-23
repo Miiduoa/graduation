@@ -4,7 +4,8 @@ import {
   CREATOR_CARD_LIMITS, EMPTY_CREATOR_CARD, validateCreatorCard, type CreatorCard,
 } from '@campus/shared/src/creatorCard';
 import {
-  creatorCardFieldMatches, hasHiddenCreatorCardValue, readCreatorCard, saveCreatorCard,
+  creatorCardFieldMatches, hasHiddenCreatorCardValue, isCreatorCardAccessDenied,
+  readCreatorCard, saveCreatorCard,
 } from '../../services/creatorCard';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
@@ -75,6 +76,7 @@ function ScopedCreatorCardPanel({
     setEditing(open);
   };
   const published = useRef<CreatorCard | null>(null);
+  const accessDenied = useRef(false);
   const cardVersion = useRef(0);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const currentDraft = useRef(draft);
@@ -86,10 +88,10 @@ function ScopedCreatorCardPanel({
   const revisions = useRef<FieldRevisions>({});
   const submittedRevisions = useRef<FieldRevisions>({});
   const [recoverable, setRecoverable] = useState<RecoverableDraft>({});
-  const replaceDraft = (value: CreatorCard) => {
+  const replaceDraft = useCallback((value: CreatorCard) => {
     currentDraft.current = value;
     setDraft(value);
-  };
+  }, []);
   const [saving, setSaving] = useState(false);
   // Keep the submitted draft and its normalized server fields until a read
   // resolves the uncertain write. The ref also guards stale button callbacks.
@@ -127,6 +129,8 @@ function ScopedCreatorCardPanel({
   }, []);
 
   const acceptCard = useCallback((value: CreatorCard | null) => {
+    // A concurrent save check may settle after a refresh revoked access.
+    if (accessDenied.current) return;
     cardVersion.current += 1;
     published.current = value;
     acceptSavedPortfolioLink(value?.linkUrl ?? '');
@@ -137,13 +141,37 @@ function ScopedCreatorCardPanel({
     let live = true;
     // A save confirmation can publish a newer value while this read is pending.
     const version = cardVersion.current;
-    void readCreatorCard(schoolId, ownerUid, { requireCommitted: true }).then((value) => {
-      if (live && cardVersion.current === version) acceptCard(value);
-    }).catch(() => {
-      if (live) setState((previous) => previous.status === 'ready' ? previous : { status: 'error' });
+    void readCreatorCard(schoolId, ownerUid).then((value) => {
+      if (!live || cardVersion.current !== version) return;
+      if (editingNow.current && !pendingWrite.current) {
+        const previous = published.current ?? EMPTY_CREATOR_CARD;
+        const merged = { ...(value ?? EMPTY_CREATOR_CARD) };
+        for (const field of CARD_FIELDS) {
+          const local = currentDraft.current[field];
+          if (editedFields.current.has(field) &&
+            (local !== previous[field] ||
+              (local === '' && hasHiddenCreatorCardValue(previous, field)))) {
+            merged[field] = local;
+          } else {
+            editedFields.current.delete(field);
+          }
+        }
+        replaceDraft(merged);
+      }
+      accessDenied.current = false;
+      acceptCard(value);
+    }).catch((error: unknown) => {
+      if (!live) return;
+      if (isCreatorCardAccessDenied(error)) {
+        accessDenied.current = true;
+        acceptSavedPortfolioLink('');
+        setState({ status: 'error' });
+      } else {
+        setState((previous) => previous.status === 'ready' ? previous : { status: 'error' });
+      }
     });
     return () => { live = false; };
-  }, [schoolId, ownerUid, attempt, refreshKey, acceptCard]);
+  }, [schoolId, ownerUid, attempt, refreshKey, acceptCard, acceptSavedPortfolioLink, replaceDraft]);
 
   const beginEdit = () => {
     if (!own || editorLocked() || state.status !== 'ready') return;

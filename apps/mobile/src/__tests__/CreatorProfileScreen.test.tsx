@@ -240,7 +240,56 @@ test('tab changes and refreshes reload cards created, edited and cleared on anot
   expect(await view.findByLabelText('建立社群簡介')).toBeTruthy();
   expect(view.queryByText(updated.bio)).toBeNull();
   expect(reads).toHaveBeenCalledTimes(5);
-  expect(reads).toHaveBeenLastCalledWith('pu', 'alice', { requireCommitted: true });
+  expect(reads).toHaveBeenLastCalledWith('pu', 'alice');
+});
+
+test.each(['save now', 'reopen editor'])('tab refresh merges only the changed fields before %s', async (action) => {
+  const original = { headline: '舊標題', bio: '舊簡介', linkUrl: '' };
+  const latest = { headline: '他機標題', bio: '他機簡介', linkUrl: 'https://example.org/' };
+  const merged = { ...latest, headline: '本機標題' };
+  jest.mocked(readCreatorCard).mockResolvedValueOnce(original).mockResolvedValueOnce(latest);
+  jest.mocked(saveCreatorCard).mockResolvedValueOnce(merged);
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+  fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+  fireEvent.changeText(view.getByLabelText('一句話介紹'), merged.headline);
+  fireEvent.changeText(view.getByLabelText('作品連結'), 'https://example.net/');
+  fireEvent.changeText(view.getByLabelText('作品連結'), '');
+  await act(async () => { fireEvent.press(view.getByLabelText('相片與影片')); });
+  expect(view.getByLabelText('一句話介紹').props.value).toBe(merged.headline);
+  expect(view.getByLabelText('個人簡介').props.value).toBe(latest.bio);
+  expect(view.getByLabelText('作品連結').props.value).toBe(latest.linkUrl);
+  if (action === 'reopen editor') {
+    fireEvent.press(view.getByLabelText('取消編輯'));
+    fireEvent.press(view.getByLabelText('編輯社群簡介'));
+    expect(view.getByLabelText('一句話介紹').props.value).toBe(latest.headline);
+    expect(view.getByLabelText('個人簡介').props.value).toBe(latest.bio);
+    fireEvent.changeText(view.getByLabelText('一句話介紹'), merged.headline);
+  }
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  expect(saveCreatorCard).toHaveBeenCalledWith('pu', 'alice', merged, expect.any(Function));
+});
+
+test('access denial on refresh hides the external card until an authorized retry succeeds', async () => {
+  const old = { headline: '', bio: '校園限定簡介', linkUrl: 'https://example.org/' };
+  const latest = { ...old, bio: '重新授權後的簡介' };
+  jest.mocked(readCreatorCard).mockResolvedValueOnce(old)
+    .mockRejectedValueOnce({ code: 'unavailable' })
+    .mockRejectedValueOnce({ code: 'permission-denied' })
+    .mockRejectedValueOnce({ code: 'unavailable' })
+    .mockResolvedValueOnce(latest);
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'bob' } }} />);
+  expect(await view.findByText(old.bio)).toBeTruthy();
+  await act(async () => { fireEvent.press(view.getByLabelText('相片與影片')); });
+  expect(view.getByText(old.bio)).toBeTruthy();
+  expect(view.getByLabelText('查看作品連結')).toBeTruthy();
+  await act(async () => { fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh'); });
+  expect(view.getByText('社群簡介暫時無法讀取。')).toBeTruthy();
+  expect(view.queryByText(old.bio)).toBeNull();
+  expect(view.queryByLabelText('查看作品連結')).toBeNull();
+  await act(async () => { fireEvent.press(view.getByLabelText('重新讀取社群簡介')); });
+  expect(view.queryByText(old.bio)).toBeNull();
+  fireEvent.press(view.getByLabelText('重新讀取社群簡介'));
+  expect(await view.findByText(latest.bio)).toBeTruthy();
 });
 
 test('switching tabs and retrying the identity card refresh the intro while preserving the open draft', async () => {
@@ -261,20 +310,47 @@ test('switching tabs and retrying the identity card refresh the intro while pres
   expect(view.getByText(updated.bio)).toBeTruthy();
 });
 
-test('rapid tab changes ignore out-of-order intro reads', async () => {
+test.each(['old card', 'access denial'])('rapid tab changes ignore a stale %s', async (result) => {
   const card = { headline: '', bio: '最新簡介', linkUrl: '' };
   let resolveMedia!: (value: typeof card) => void;
+  let rejectMedia!: (error: { code: string }) => void;
   jest.mocked(readCreatorCard).mockResolvedValueOnce(null)
-    .mockReturnValueOnce(new Promise((resolve) => { resolveMedia = resolve; }))
+    .mockReturnValueOnce(new Promise((resolve, reject) => {
+      resolveMedia = resolve;
+      rejectMedia = reject;
+    }))
     .mockResolvedValueOnce(card);
   const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
   await view.findByLabelText('建立社群簡介');
   fireEvent.press(view.getByLabelText('相片與影片'));
   fireEvent.press(view.getByLabelText('我的收藏'));
   expect(await view.findByText(card.bio)).toBeTruthy();
-  await act(async () => { resolveMedia({ ...card, bio: '過期簡介' }); });
+  await act(async () => {
+    if (result === 'access denial') rejectMedia({ code: 'permission-denied' });
+    else resolveMedia({ ...card, bio: '過期簡介' });
+  });
   expect(view.getByText(card.bio)).toBeTruthy();
   expect(view.queryByText('過期簡介')).toBeNull();
+});
+
+test('a save resolving after access denial cannot restore the hidden card', async () => {
+  const original = { headline: '', bio: '舊簡介', linkUrl: 'https://example.org/' };
+  const saved = { ...original, bio: '已確認的簡介' };
+  let resolveSave!: (value: typeof saved) => void;
+  jest.mocked(readCreatorCard).mockResolvedValueOnce(original)
+    .mockRejectedValueOnce({ code: 'firestore/unauthenticated' });
+  jest.mocked(saveCreatorCard).mockReturnValueOnce(new Promise((resolve) => { resolveSave = resolve; }));
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+  fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), saved.bio);
+  fireEvent.press(view.getByLabelText('儲存簡介'));
+  await act(async () => { fireEvent.press(view.getByLabelText('相片與影片')); });
+  expect(view.getByText('社群簡介暫時無法讀取。')).toBeTruthy();
+  await act(async () => { resolveSave(saved); });
+  expect(view.getByText('社群簡介暫時無法讀取。')).toBeTruthy();
+  expect(view.queryByText(saved.bio)).toBeNull();
+  expect(view.queryByLabelText('查看作品連結')).toBeNull();
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
 });
 
 test('an intro refresh started during a save cannot replace its confirmed result', async () => {

@@ -1,6 +1,6 @@
 import { getDocFromServer, setDoc } from 'firebase/firestore';
 import { readCreatorCardFields } from '@campus/shared/src/creatorCard';
-import { readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
+import { isCreatorCardAccessDenied, readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 
 jest.mock('../../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('firebase/firestore', () => ({
@@ -20,6 +20,16 @@ const snap = (value: Record<string, unknown>) => ({
   data: () => value,
 });
 beforeEach(() => jest.clearAllMocks());
+
+test.each([
+  [{ code: 'permission-denied' }, true],
+  [{ code: 'firestore/unauthenticated' }, true],
+  [new Error('Missing or insufficient permissions.'), true],
+  [{ code: 'unavailable' }, false],
+  [new Error('offline'), false],
+])('classifies card read error %p', (error, denied) => {
+  expect(isCreatorCardAccessDenied(error)).toBe(denied);
+});
 
 test('reads only a school-scoped published card', async () => {
   jest.mocked(getDocFromServer).mockResolvedValue(snap({ ...card, phone: 'private' }) as never);
@@ -147,9 +157,11 @@ test('an unresolved portfolio clear cannot be confirmed from a pending local ove
   jest.mocked(setDoc).mockRejectedValueOnce(new Error('unavailable'));
   jest.mocked(getDocFromServer)
     .mockResolvedValueOnce(pendingSnapshot as never)
+    .mockResolvedValueOnce(pendingSnapshot as never)
     .mockResolvedValueOnce(snap({ ...card, linkUrl: '' }) as never);
 
   await expect(saveCreatorCard('pu', 'alice', draft)).rejects.toThrow('unavailable');
+  await expect(readCreatorCard('pu', 'alice')).resolves.toEqual(draft);
   await expect(readCreatorCard('pu', 'alice', { requireCommitted: true }))
     .rejects.toThrow('pending writes');
   // Once a genuinely committed snapshot arrives, manual re-check may succeed;
@@ -157,5 +169,5 @@ test('an unresolved portfolio clear cannot be confirmed from a pending local ove
   await expect(readCreatorCard('pu', 'alice', { requireCommitted: true }))
     .resolves.toEqual(draft);
   expect(setDoc).toHaveBeenCalledTimes(1);
-  expect(getDocFromServer).toHaveBeenCalledTimes(2);
+  expect(getDocFromServer).toHaveBeenCalledTimes(3);
 });

@@ -1447,6 +1447,30 @@ test.each([
   }
 });
 
+test('the first display shows an existing pending snapshot and refreshes to the committed card', async () => {
+  const card = { headline: '校園攝影', bio: '待提交簡介', linkUrl: 'https://example.org/' };
+  const committed = { ...card, bio: '已提交簡介' };
+  const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
+  jest.mocked(readCreatorCard).mockImplementation(service.readCreatorCard);
+  jest.mocked(getDocFromServer)
+    .mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({ schoolId: 'pu', ownerUid: 'bob', ...card }),
+      metadata: { hasPendingWrites: true },
+    } as never)
+    .mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({ schoolId: 'pu', ownerUid: 'bob', ...committed }),
+      metadata: { hasPendingWrites: false },
+    } as never);
+  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} />);
+  expect(await view.findByText(card.bio)).toBeTruthy();
+  expect(view.queryByText('社群簡介暫時無法讀取。')).toBeNull();
+  expect(view.getByLabelText('查看作品連結')).toBeTruthy();
+  view.rerender(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} refreshKey="media" />);
+  expect(await view.findByText(committed.bio)).toBeTruthy();
+});
+
 test('a known pending intro write keeps matching local fields provisional', async () => {
   jest.useFakeTimers();
   try {

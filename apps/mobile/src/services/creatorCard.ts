@@ -16,6 +16,14 @@ export function creatorCardFieldMatches(card: CreatorCard, field: keyof CreatorC
   return card[field] === expected;
 }
 
+export function isCreatorCardAccessDenied(error: unknown): boolean {
+  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
+  const denied = /^(?:firestore\/)?(?:permission-denied|unauthenticated)$/;
+  return (typeof code === 'string' && denied.test(code)) ||
+    (typeof message === 'string' &&
+      (denied.test(message) || message === 'Missing or insufficient permissions.'));
+}
+
 function cardRef(schoolId: string, ownerUid: string) {
   if (!schoolId || !ownerUid || schoolId.includes('/') || ownerUid.includes('/')) {
     throw new Error('Invalid creator card scope');
@@ -23,7 +31,7 @@ function cardRef(schoolId: string, ownerUid: string) {
   return doc(getDb(), 'schools', schoolId, 'creatorProfiles', ownerUid);
 }
 
-/** The school-owned directory stays read-only. Creator card fields are opt-in. */
+/** Display reads accept local overlays. Save confirmation requires committed fields. */
 export async function readCreatorCard(
   schoolId: string, ownerUid: string, { requireCommitted = false } = {},
 ): Promise<CreatorCard | null> {
