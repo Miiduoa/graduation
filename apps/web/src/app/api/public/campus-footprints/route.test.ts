@@ -1656,6 +1656,38 @@ describe('public Providence building geometry route', () => {
       }
     });
 
+  it.each([
+    { status: 429, headers: {}, cooldown: 3600 },
+    { status: 403, headers: {}, cooldown: 86400 },
+    { status: 200, headers: { 'Content-Range': 'bytes 0-99/200' }, cooldown: 3600 },
+    { status: 200, headers: { 'Content-Type': 'text/html' }, cooldown: 3600 },
+    { status: 200, headers: { 'Content-Length': '0' }, cooldown: 3600 },
+  ])('preserves the $cooldown second cooldown when cancelling unread HTTP $status throws', async ({
+    status, headers, cooldown,
+  }) => {
+    vi.useFakeTimers();
+    const cancel = vi.fn(() => { throw new Error('stream bridge cleanup failed'); });
+    const getReader = vi.fn();
+    const upstream = vi.fn().mockResolvedValue({
+      status,
+      headers: new Headers({ 'Content-Type': 'application/json', 'Retry-After': '3600', ...headers }),
+      body: { cancel, getReader },
+    });
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const failed = await GET();
+    expect(failed.status).toBe(503);
+    expect(failed.headers.get('Cache-Control')).toBe('no-store');
+    expect(failed.headers.get('Retry-After')).toBe(String(cooldown));
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(getReader).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(660_000);
+    const cooling = await GET();
+    expect(cooling.status).toBe(503);
+    expect(cooling.headers.get('Retry-After')).toBe(String(cooldown - 660));
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('obeys a one-hour Overpass 429 Retry-After rather than retrying after ten minutes', async () => {
     const start = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
