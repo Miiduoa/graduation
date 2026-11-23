@@ -681,6 +681,7 @@ async def scenario(browser, origin, config, report):
         section_failures = []
 
         async def check_section(name, operation):
+            original_viewport = page.viewport_size
             try:
                 await operation()
             except Exception as failure:
@@ -689,7 +690,18 @@ async def scenario(browser, origin, config, report):
                 await capture(name + '-failure', full_page=False)
                 (OUTPUT / (config['name'] + '-' + name + '-failure.html')).write_text(await page.content(), encoding='utf-8')
                 report.setdefault('sectionLedgers', []).append(await page.evaluate('window.__interfaceQA.snapshot()'))
-                await page.goto(origin + '/?' + urlencode(params))
+                await page.set_viewport_size(original_viewport)
+                async def reset_after_failure(dialog):
+                    report.setdefault('resetDialogs', []).append({'section': name, 'type': dialog.type})
+                    if dialog.type == 'beforeunload':
+                        await dialog.accept()
+                    else:
+                        await dialog.dismiss()
+                page.on('dialog', reset_after_failure)
+                try:
+                    await page.goto(origin + '/?' + urlencode(params))
+                finally:
+                    page.remove_listener('dialog', reset_after_failure)
                 await expect(page.get_by_role('heading', name='今天', exact=True)).to_be_visible()
 
         await check_section('forms', lambda: check_dialogs_and_fields(page, config, report, capture))

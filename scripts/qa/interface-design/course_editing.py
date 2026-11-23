@@ -3,11 +3,21 @@ from urllib.parse import urlencode, urlsplit
 from playwright.async_api import expect
 
 
+async def checkpoint_ledger(page, report, stage):
+    ledger = await page.evaluate('window.__interfaceQA.snapshot()')
+    report.setdefault('courseEditingLedgers', []).append({'stage': stage, **ledger})
+    assert not ledger['requests'], (stage, ledger)
+    assert ledger['logouts'] == 0, (stage, ledger)
+
+
 async def check_course_editing(page, config, report, capture):
     origin = urlsplit(page.url)._replace(path='', query='', fragment='').geturl()
     params = {key: value for key, value in config.items() if key in ('theme', 'role', 'text', 'motion', 'font')}
     params['path'] = '/interface-course-editing'
     address = origin + '/?' + urlencode(params)
+    # Reloading creates a new document and a fresh ledger. Preserve and verify
+    # every phase before replacing it, including the preceding suite section.
+    await checkpoint_ledger(page, report, 'before-course-editing')
     await page.goto(address)
     await expect(page.get_by_role('heading', name='課程編輯與接續')).to_be_visible()
 
@@ -83,6 +93,8 @@ async def check_course_editing(page, config, report, capture):
         await other.wait_for_load_state('domcontentloaded')
         destination = urlsplit(other.url)
         assert destination.path == '/course/interface-course' and destination.fragment == 'assignment-work-a', other.url
+        await expect(other.get_by_role('heading', name='課務導覽', exact=True)).to_be_visible()
+        await checkpoint_ledger(other, report, 'coursework-new-tab')
         await expect(editor).to_be_visible()
         await expect(name).to_have_value('資料結構・尚未儲存的修改')
         await expect(confirmation).to_have_count(0)
@@ -122,6 +134,7 @@ async def check_course_editing(page, config, report, capture):
     await page.set_viewport_size(original)
     report['checks'].append('Course edits survive cancel, Escape and a real new tab; only explicit discard leaves the editor, including at a 360px viewport height')
 
+    await checkpoint_ledger(page, report, 'after-draft-navigation')
     await page.goto(address)
     await opener.click()
     await editor.get_by_role('button', name='儲存', exact=True).click()
@@ -139,8 +152,15 @@ async def check_course_editing(page, config, report, capture):
 
     # This is a test reset after the intentionally unresolved synthetic save.
     # Explicitly accept the native beforeunload guard rather than bypassing it.
-    page.once('dialog', lambda dialog: dialog.accept())
-    await page.goto(origin + '/?' + urlencode({key: value for key, value in params.items() if key != 'path'}))
+    await checkpoint_ledger(page, report, 'after-pending-navigation')
+    async def accept_reset_guard(dialog):
+        assert dialog.type == 'beforeunload', dialog.type
+        await dialog.accept()
+    page.on('dialog', accept_reset_guard)
+    try:
+        await page.goto(origin + '/?' + urlencode({key: value for key, value in params.items() if key != 'path'}))
+    finally:
+        page.remove_listener('dialog', accept_reset_guard)
 
 
 async def _settle_scroll(page):
