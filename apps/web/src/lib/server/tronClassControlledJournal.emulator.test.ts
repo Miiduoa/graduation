@@ -14,6 +14,7 @@ import {
   TRONCLASS_SUBMISSION_COLLECTION, TRONCLASS_SUBMISSION_LOCK_COLLECTION,
   type TronClassSubmissionBindings, type TronClassSubmissionFirestore,
 } from './tronClassSubmission';
+vi.mock('server-only', () => ({}));
 
 vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerReady: () => true, waitForTronClassRetentionFirstSweep: async () => undefined }));
 
@@ -116,6 +117,8 @@ describe.skipIf(!localEmulator)('controlled TronClass journal with real Firestor
 
   beforeAll(() => {
     vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true');
+    vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED', 'true');
+    vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL', 'postgresql://synthetic:synthetic@127.0.0.1:5432/synthetic');
     app = initializeApp({ projectId: PROJECT }, `${PROJECT}-first-client`);
     otherApp = initializeApp({ projectId: PROJECT }, `${PROJECT}-second-client`);
     db = getFirestore(app);

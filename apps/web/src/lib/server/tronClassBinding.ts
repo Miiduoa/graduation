@@ -158,17 +158,12 @@ function recentAttempts(snapshot: Snapshot, now: number, limit: number): LoginAt
   return (value as LoginAttempt[]).filter((entry) => tronClassLoginAttemptTimestamp(entry) > now - TRONCLASS_LOGIN_WINDOW_MS);
 }
 
-function platformClosureConfigured(env: Record<string, string | undefined> = process.env): boolean {
-  return env.TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED === 'true' &&
-    !!env.TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL?.trim();
-}
-
-function assertRetentionEnabled(schedulerReady: boolean, ownerKey: string): void {
+function assertRetentionEnabled(schedulerReady: boolean, closureReady: boolean): void {
   if (process.env.TRONCLASS_RETENTION_ENABLED !== 'true' || !schedulerReady) {
     throw new NuniError(503, 'TRONCLASS_RETENTION_REQUIRED');
   }
-  // 平台帳號硬刪後只能靠帳號關閉 outbox 清理，worker 未啟用時不保存新的校方 session。
-  if (ownerKey.startsWith('platform:') && !platformClosureConfigured()) {
+  // 平台帳號硬刪後只能靠帳號關閉 outbox 清理；worker 設定未通過同一份驗證時，不保存新的校方 session。
+  if (!closureReady) {
     throw new NuniError(503, 'TRONCLASS_RETENTION_REQUIRED');
   }
 }
@@ -271,7 +266,12 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
     if (process.env.TRONCLASS_RETENTION_ENABLED === 'true' && !isTronClassRetentionSchedulerReady()) {
       await wait(waitForTronClassRetentionFirstSweep);
     }
-    assertRetentionEnabled(isTronClassRetentionSchedulerReady(), ownerKey);
+    const platformClosureReady = ownerKey.startsWith('platform:')
+      ? (await import('./tronClassPlatformClosure')).readTronClassPlatformClosureConfig
+      : null;
+    check();
+    const closureReady = () => platformClosureReady === null || platformClosureReady(process.env) !== null;
+    assertRetentionEnabled(isTronClassRetentionSchedulerReady(), closureReady());
     const encryptionKey = key();
     const db = await wait(getStore);
     check();
@@ -354,7 +354,7 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
       // abort before this write must not replace or establish a connection.
       check();
       if ((current?.revision ?? null) !== expectedRevision) changed();
-      assertRetentionEnabled(isTronClassRetentionSchedulerReady(), ownerKey);
+      assertRetentionEnabled(isTronClassRetentionSchedulerReady(), closureReady());
       transaction.set(ref, row);
     });
     check();

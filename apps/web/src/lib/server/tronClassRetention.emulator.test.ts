@@ -77,6 +77,8 @@ describe.skipIf(!localEmulator)('bounded TronClass retention with real Firestore
 
   beforeAll(() => {
     vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true');
+    vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED', 'true');
+    vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL', 'postgresql://synthetic:synthetic@127.0.0.1:5432/synthetic');
     app = initializeApp({ projectId: PROJECT }, `${PROJECT}-first-client`);
     otherApp = initializeApp({ projectId: PROJECT }, `${PROJECT}-second-client`);
     db = getFirestore(app);

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyTronClassAgentPermissions } from '@campus/shared/src/tronClassAgentPermissions';
 import { createTronClassBindingService, type TronClassBindingStore } from './tronClassBinding';
 import { createTronClassAgentGrantService } from './tronClassAgentGrants';
+vi.mock('server-only', () => ({}));
 
 vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerReady: () => true, waitForTronClassRetentionFirstSweep: async () => undefined }));
 

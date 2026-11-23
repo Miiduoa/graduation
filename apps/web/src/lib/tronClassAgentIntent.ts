@@ -33,19 +33,20 @@ export function tronClassDisabledNavigationQuestion(question: string): string | 
   return null;
 }
 
-const OTHER_SERVICE_CLAUSE = /公車|校車|課表|行事曆|社團|失物|圖書館|餐廳|學餐|地圖|宿舍|請假|校園活動|\b(?:bus|transit)\b/i;
+// 與跨服務規劃相同的分隔詞，確保兩邊切句一致。
+const CLAUSE_SEPARATOR = /(?:然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|[，,；;。！!？?、])+/u;
+const TRONCLASS_DATA_CLAUSE = /作業|未交|未繳|待交|待繳|還沒|尚未|教材|講義|檔案|附件|公告|課程|修課|下載|準備|草稿|繳交|提交|成績|能做什麼|功能|權限|homework|assignment|material|download|pending|tron\s*class/i;
 
 /**
- * 「玩課雲作業，查公車」這類以玩課雲入口開頭、又帶其他校園服務的複合請求，
+ * 「玩課雲作業，查公車」這類以玩課雲入口開頭、後面接的不是玩課雲資料查詢的複合請求，
  * 維持原本的跨服務規劃，不由 TronClass Agent 攔截。
  */
 function isCompoundLmsHandoff(question: string): boolean {
   if (question.length > 160) return false;
-  const clauses = question.normalize('NFKC').split(/(?:然後|接著|並且|另外|同時|以及|[，,；;。、])+/u)
-    .map(part => part.trim()).filter(Boolean);
+  const clauses = question.normalize('NFKC').split(CLAUSE_SEPARATOR).map(part => part.trim()).filter(Boolean);
   if (clauses.length < 2) return false;
   const head = clauses[0].replace(/^(?:(?:請|麻煩)?(?:幫我|替我)?(?:開啟|打開|開|前往|進入))\s*/u, '');
-  return isTronClassNavigationTarget(head) && clauses.slice(1).some(part => OTHER_SERVICE_CLAUSE.test(part));
+  return isTronClassNavigationTarget(head) && clauses.slice(1).some(part => !TRONCLASS_DATA_CLAUSE.test(part));
 }
 
 export type TronClassAgentQueryIntent = {

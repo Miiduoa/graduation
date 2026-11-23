@@ -6,6 +6,7 @@ import {
   type TronClassBindingStore,
 } from './tronClassBinding';
 import { PuCampusError, type PuCampusGateway, type TronClassSession } from './puCampusClient';
+vi.mock('server-only', () => ({}));
 
 const schedulerReady = vi.hoisted(() => vi.fn(() => true));
 const waitForFirstSweep = vi.hoisted(() => vi.fn<() => Promise<void>>());
@@ -427,6 +428,7 @@ describe('independent TronClass binding', () => {
   it.each([
     ['worker flag off', { TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED: 'false' }],
     ['database URL missing', { TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL: '' }],
+    ['database URL invalid', { TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL: 'https://not-a-database.example/closure' }],
   ])('rejects a platform binding before login and storage when account cleanup is not ready (%s)', async (_name, env) => {
     for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
     const { service, login, docs } = setup();
