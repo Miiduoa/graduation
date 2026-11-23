@@ -98,6 +98,86 @@ after(async () => {
 
 describe('firestore security rules', () => {
 
+  test('transferred campus health staff cannot replay confidential patient records', async () => {
+    const paths = [
+      'schools/pu/healthRecords/private-record',
+      'schools/pu/healthAppointments/private-appointment',
+    ];
+    await seedFirestore(async (db) => {
+      for (const uid of ['admin', 'healthStaff', 'patient', 'student']) {
+        await db.doc('users/' + uid).set(campusBoundProfile('pu'));
+        await db.doc('schools/pu/members/' + uid).set({
+          status: 'active', role: uid === 'admin' ? 'admin' : 'student',
+        });
+      }
+      await db.doc('schools/pu/serviceRoles/healthStaff').set({
+        status: 'active', health: true,
+      });
+      for (const path of paths) {
+        await db.doc(path).set({
+          userId: 'patient', notes: 'Synthetic private care details',
+        });
+      }
+    });
+    const admin = testEnv.authenticatedContext('admin').firestore();
+    const staff = testEnv.authenticatedContext('healthStaff').firestore();
+    const patient = testEnv.authenticatedContext('patient').firestore();
+    const student = testEnv.authenticatedContext('student').firestore();
+    const stranger = testEnv.authenticatedContext('stranger').firestore();
+    const check = async (db, allowed) => {
+      for (const path of paths) {
+        const read = db.doc(path).get({ source: 'server' });
+        if (allowed) await assertSucceeds(read);
+        else await assertFails(read);
+      }
+    };
+    await check(admin, true);
+    await check(staff, true);
+    await check(patient, true);
+    await check(student, false);
+    await check(stranger, false);
+
+    // Retain source-school administrator/service grants and the same auth context.
+    await seedFirestore(async (db) => {
+      await db.doc('users/admin').set(campusBoundProfile('other'));
+      await db.doc('users/healthStaff').set(campusBoundProfile('other'));
+    });
+    await Promise.all([check(admin, false), check(staff, false)]);
+    await Promise.all([check(admin, false), check(staff, false)]);
+    // Patients must still be able to retrieve their own records after transfer.
+    await seedFirestore(db => db.doc('users/patient').set(campusBoundProfile('other')));
+    await check(patient, true);
+
+    // Either conflicting canonical field fails closed; stale membership is insufficient.
+    await seedFirestore(async (db) => {
+      await db.doc('users/admin').set({
+        status: 'active', schoolId: 'pu', primarySchoolId: 'other',
+      });
+      await db.doc('users/healthStaff').set({
+        status: 'active', schoolId: 'other', primarySchoolId: 'pu',
+      });
+    });
+    await Promise.all([check(admin, false), check(staff, false)]);
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/admin').set(campusBoundProfile('pu'));
+      await db.doc('users/healthStaff').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/admin').update({ status: 'revoked' });
+      await db.doc('schools/pu/serviceRoles/healthStaff').update({ status: 'revoked' });
+    });
+    await Promise.all([check(admin, false), check(staff, false)]);
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/admin').update({ status: 'active' });
+      await db.doc('schools/pu/serviceRoles/healthStaff').update({ status: 'active' });
+    });
+    await Promise.all([check(admin, true), check(staff, true)]);
+    await seedFirestore(db => db.doc('users/healthStaff').delete());
+    await check(staff, false);
+    await seedFirestore(db => db.doc('users/healthStaff').set(campusBoundProfile('pu')));
+    await check(staff, true);
+  });
+
+
   test('transferred campus members cannot replay private AI knowledge reads', async () => {
     const group = 'groups/ai-knowledge-campus-transfer';
     const schoolOnly = 'schools/pu/aiKnowledge/school-only';
