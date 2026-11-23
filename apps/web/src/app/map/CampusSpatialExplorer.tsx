@@ -1135,6 +1135,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
   const previousPoint = model.points[index - 1];
   const nextPoint = model.points[index + 1];
   const [destinationQuery, setDestinationQuery] = useState('');
+  const destinationSearchRef = useRef<HTMLInputElement>(null);
   const searchId = useId();
   const searchStatusId = useId();
   const searchTerms = model.points.length > 1 ? normalizeSpatialSearch(destinationQuery).split(/\s+/).filter(Boolean) : [];
@@ -1754,10 +1755,19 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
               <div className={styles.selectField}>
                 {model.points.length > 1 && <>
                   <label htmlFor={searchId}>搜尋導覽地點</label>
-                  <input id={searchId} type="search" value={destinationQuery}
-                    placeholder="地點、棟別或樓層"
-                    aria-describedby={searchTerms.length ? searchStatusId : undefined}
-                    onChange={(event) => setDestinationQuery(event.target.value)} />
+                  <div className={styles.searchRow}>
+                    <input ref={destinationSearchRef} id={searchId} type="search" value={destinationQuery}
+                      placeholder="地點、棟別或樓層"
+                      aria-describedby={searchTerms.length ? searchStatusId : undefined}
+                      onChange={(event) => setDestinationQuery(event.target.value)} />
+                    <button className="btn" type="button" aria-label="清除地點搜尋"
+                      disabled={destinationQuery.length === 0}
+                      onClick={() => {
+                        // Return focus before disabling the clear control; keep the selected destination.
+                        destinationSearchRef.current?.focus();
+                        setDestinationQuery('');
+                      }}>清除</button>
+                  </div>
                   {searchTerms.length > 0 && <small id={searchStatusId} role="status">
                     {matchingPoints.length === 0 ? '沒有符合的地點，請調整關鍵字。' : `找到 ${matchingPoints.length} 個地點。`}
                     {currentOutsideSearch ? ' 目前選擇仍保留，搜尋不會變更導航目的地。' : ''}
