@@ -3,9 +3,13 @@ import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import { handleTronClassIntegration, type TronClassRouteDependencies } from './tronClassIntegrationRoute';
+import { TRONCLASS_MAX_FILE_BYTES } from './tronClassSubmission';
 
 vi.mock('./tronClassIntegrationSource', () => ({ createTronClassIntegrationReader: vi.fn(), createTronClassCourseIndexReader: vi.fn() }));
-vi.mock('./tronClassSubmission', () => ({ getDefaultTronClassSubmissionService: vi.fn() }));
+vi.mock('./tronClassSubmission', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./tronClassSubmission')>(),
+  getDefaultTronClassSubmissionService: vi.fn(),
+}));
 
 const revision = 'a'.repeat(32);
 const operationId = 'operation-1234567890';
@@ -13,14 +17,19 @@ const fileId = 'attachment-1234567890';
 const ownerKey = 'platform:pa_00000000-0000-4000-8000-000000000001';
 const disconnected = { schoolId: 'pu', connected: false, revision: null, account: null, userName: null, expiresAt: null };
 
-function setup() {
+function setup({ attachmentWritesEnabled = false } = {}) {
   const bindings = {
     getStatus: vi.fn().mockResolvedValue(disconnected),
     connect: vi.fn().mockResolvedValue({ ...disconnected, connected: true, revision, account: '410000001' }),
     disconnect: vi.fn().mockResolvedValue({ ...disconnected, revision }),
     requireBinding: vi.fn(), assertCurrent: vi.fn().mockResolvedValue(undefined),
   };
-  const submissions = { assertAttachmentWritesEnabled: vi.fn(), prepare: vi.fn(), upload: vi.fn(), submit: vi.fn(), reconcile: vi.fn(), cancelPreparation: vi.fn() };
+  const submissions = {
+    assertAttachmentWritesEnabled: vi.fn(() => {
+      if (!attachmentWritesEnabled) throw new NuniError(503, 'TRONCLASS_WRITES_DISABLED');
+    }),
+    prepare: vi.fn(), upload: vi.fn(), submit: vi.fn(), reconcile: vi.fn(), cancelPreparation: vi.fn(),
+  };
   const authenticate = vi.fn().mockResolvedValue({ ownerKey, provider: 'platform' });
   const read = vi.fn().mockResolvedValue({ revision, fetchedAt: '2026-11-13T00:00:00.000Z', courses: [], homework: [], errors: [], partial: false });
   const courses = vi.fn().mockResolvedValue({ kind: 'course-index', revision, fetchedAt: '2026-11-18T00:00:00.000Z', courses: [], errors: [], partial: false });
@@ -302,7 +311,7 @@ it('does not expose upstream exception bodies or session secrets', async () => {
 });
 
 it('accepts an authenticated bounded raw upload with a checked binding version', async () => {
-  const { dependencies, submissions, bindings } = setup();
+  const { dependencies, submissions, bindings } = setup({ attachmentWritesEnabled: true });
   submissions.upload.mockResolvedValue({ fileId, name: '報告.pdf', contentType: 'application/pdf', size: 3, sha256: 'a'.repeat(64), status: 'uploaded' });
   const params = new URLSearchParams({ courseId: '101', homeworkId: '201', revision, operationId, fileId, name: '報告.pdf' });
   const response = await handleTronClassIntegration(new NextRequest(`https://nuni.tw/api/tronclass?${params}`, {
@@ -321,21 +330,37 @@ function uploadRequest(headers: Record<string, string> = {}) {
 }
 
 it('rejects an oversized declared Content-Length before accessing the body or provider', async () => {
-  const { dependencies, submissions, bindings } = setup();
-  const request = uploadRequest({ 'Content-Length': String(10 * 1024 * 1024 + 1) });
+  const { dependencies, submissions, bindings, getSubmissions } = setup({ attachmentWritesEnabled: true });
+  const request = uploadRequest({ 'Content-Length': String(TRONCLASS_MAX_FILE_BYTES + 1) });
   const body = vi.spyOn(request, 'body', 'get');
   const response = await handleTronClassIntegration(request, dependencies);
   expect(response.status).toBe(413);
+  expect(body).not.toHaveBeenCalled();
+  expect(getSubmissions).not.toHaveBeenCalled();
+  expect(bindings.assertCurrent).not.toHaveBeenCalled();
+  expect(submissions.upload).not.toHaveBeenCalled();
+});
+
+it('rejects an upload with writes disabled before accessing the body or binding', async () => {
+  const { dependencies, submissions, bindings } = setup();
+  const request = uploadRequest();
+  const body = vi.spyOn(request, 'body', 'get');
+  const response = await handleTronClassIntegration(request, dependencies);
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ error: 'TRONCLASS_WRITES_DISABLED' });
   expect(body).not.toHaveBeenCalled();
   expect(bindings.assertCurrent).not.toHaveBeenCalled();
   expect(submissions.upload).not.toHaveBeenCalled();
 });
 
 it('rejects the third concurrent upload before accessing its body and releases slots after failure', async () => {
-  const { dependencies, submissions } = setup();
-  let failUploads!: (reason: Error) => void;
-  const pending = new Promise<never>((_, reject) => { failUploads = reject; });
-  submissions.upload.mockReturnValue(pending);
+  const { dependencies, submissions } = setup({ attachmentWritesEnabled: true });
+  let releaseUploads!: () => void;
+  const pending = new Promise<void>((resolve) => { releaseUploads = resolve; });
+  submissions.upload.mockImplementation(async () => {
+    await pending;
+    throw new Error('fixture upload failure');
+  });
   const first = handleTronClassIntegration(uploadRequest(), dependencies);
   const second = handleTronClassIntegration(uploadRequest(), dependencies);
   try {
@@ -347,9 +372,11 @@ it('rejects the third concurrent upload before accessing its body and releases s
     expect(await response.json()).toMatchObject({ error: 'TRONCLASS_UPLOAD_BUSY' });
     expect(body).not.toHaveBeenCalled();
   } finally {
-    failUploads(new Error('fixture upload failure'));
+    releaseUploads();
     await Promise.all([first, second]);
   }
+  expect((await first).status).toBe(503);
+  expect((await second).status).toBe(503);
   submissions.upload.mockResolvedValue({ status: 'uploaded' });
   expect((await handleTronClassIntegration(uploadRequest(), dependencies)).status).toBe(200);
 });

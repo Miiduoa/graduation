@@ -84,9 +84,16 @@ describe('independent TronClass binding', () => {
     expect(JSON.stringify(status)).not.toContain('teacher');
     expect(await service.getStatus(OWNER)).toEqual(status);
     expect(docs.get(bindingPath())?.purgeAt).toEqual(new Date(NOW + TRONCLASS_BINDING_TTL_MS));
-    expect([...docs.values()].find((row) => row.scope === 'owner')).toMatchObject({ ownerKey: OWNER,
-      purgeAt: new Date(NOW + TRONCLASS_LOGIN_WINDOW_MS) });
-    expect([...docs.values()].find((row) => row.scope === 'account')).not.toHaveProperty('ownerKey');
+    const budget = {
+      timestamps: [expect.objectContaining({ timestamp: NOW, id: expect.any(String) })],
+      purgeAt: new Date(NOW + TRONCLASS_LOGIN_WINDOW_MS),
+    };
+    const rows = [...docs.values()];
+    expect(rows.find((row) => row.scope === 'owner')).toMatchObject({ ...budget, ownerKey: OWNER });
+    expect(rows.find((row) => row.scope === 'owner-account')).toMatchObject({ ...budget, ownerKey: OWNER });
+    const target = rows.find((row) => row.scope === 'target-account');
+    expect(target).toMatchObject(budget);
+    expect(target).not.toHaveProperty('ownerKey');
   });
 
   it('keeps provider owners isolated even when their account id text is the same', async () => {
@@ -201,6 +208,7 @@ describe('independent TronClass binding', () => {
   it('cancels a late ignored login, keeps its rate-limit attempt, and never persists its session', async () => {
     const { service, login, docs } = setup();
     const controller = new AbortController();
+    const add = vi.spyOn(controller.signal, 'addEventListener');
     const remove = vi.spyOn(controller.signal, 'removeEventListener');
     let finish!: (value: TronClassSession) => void;
     login.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
@@ -215,7 +223,9 @@ describe('independent TronClass binding', () => {
     expect(docs.has(bindingPath())).toBe(false);
     expect([...docs.values()].filter(row => row.scope === 'owner' || row.scope === 'owner-account'))
       .toEqual(expect.arrayContaining([expect.objectContaining({ timestamps: [expect.objectContaining({ timestamp: NOW })] })]));
-    expect(remove.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(2);
+    const registered = add.mock.calls.filter(([event]) => event === 'abort').map(([, listener]) => listener);
+    expect(registered).toHaveLength(3);
+    expect(remove.mock.calls.filter(([event]) => event === 'abort').map(([, listener]) => listener)).toEqual(registered);
     expect(await service.getStatus(OWNER)).toMatchObject({ connected: false, revision: null });
   });
 
@@ -264,8 +274,9 @@ describe('independent TronClass binding', () => {
     const add = vi.spyOn(controller.signal, 'addEventListener');
     const remove = vi.spyOn(controller.signal, 'removeEventListener');
     const status = await service.connect(OWNER, input(), controller.signal);
-    expect(add.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(2);
-    expect(remove.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(2);
+    const registered = add.mock.calls.filter(([event]) => event === 'abort').map(([, listener]) => listener);
+    expect(registered).toHaveLength(3);
+    expect(remove.mock.calls.filter(([event]) => event === 'abort').map(([, listener]) => listener)).toEqual(registered);
     controller.abort();
     expect(await service.getStatus(OWNER)).toEqual(status);
   });

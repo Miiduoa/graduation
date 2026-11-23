@@ -6,7 +6,7 @@ import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import { createTronClassBindingService, TRONCLASS_BINDING_TTL_MS, type TronClassBindingStore } from './tronClassBinding';
 import { createTronClassRetentionWorker, TRONCLASS_RETENTION_BATCH_SIZE, type TronClassRetentionStore } from './tronClassRetention';
 
-vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerReady: () => true }));
+vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerReady: () => true, waitForTronClassRetentionFirstSweep: async () => undefined }));
 
 vi.mock('server-only', () => ({}));
 const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST ?? '';
