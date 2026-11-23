@@ -119,7 +119,10 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
     // This local response contains only bytes that passed the size check.
     // Without a fatal decoder, reject malformed UTF-8 before text() can
     // silently replace it with U+FFFD.
-    if (!decoder && !isWellFormedUtf8(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes))) {
+    // Some older WebViews accept { fatal: true } but silently ignore it,
+    // replacing invalid source bytes with U+FFFD. Even a seemingly usable
+    // TextDecoder must not turn corrupted OSM data into valid JSON geometry.
+    if (!isWellFormedUtf8(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes))) {
       throw new Error('Building outline response is not valid UTF-8');
     }
     const raw = decoder ? decoder.decode(bytes) : await new Response(bytes).text();
