@@ -688,6 +688,10 @@ it('offers an accessible way to recover a suspended scene when mobile visibility
     act(() => intersection?.(entries, {} as IntersectionObserver));
   };
 
+  // Keyboard focus was on the active 3D host when it suspended.
+  // Only then should the recovery control receive focus.
+  host.focus();
+  expect(document.activeElement).toBe(host);
   notify(false, 200);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
   expect(within(dialog).getByText(/立體畫面已暫停/)).toBeTruthy();
@@ -719,6 +723,46 @@ it('offers an accessible way to recover a suspended scene when mobile visibility
   expect(document.activeElement).toBe(host);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('keeps keyboard focus on directions instead of stealing it during offscreen 3D suspension', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const directions = within(dialog).getByRole('link', { name: '開啟步行導航' });
+  const notify = (visible: boolean) => act(() => intersection?.([{
+    target: host, isIntersecting: visible,
+    intersectionRect: { width: visible ? 280 : 0, height: visible ? 160 : 0 },
+  }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
+
+  // Scrolling away from an unfocused 3D canvas must not pull focus off a
+  // walking route; the same is true when the canvas later resumes.
+  directions.focus();
+  notify(false);
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  expect(document.activeElement).toBe(directions);
+  expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+  notify(true);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(document.activeElement).toBe(directions);
+
+  // When 3D itself held focus, move to the recovery button. But respect a
+  // subsequent deliberate focus change before resuming.
+  host.focus();
+  notify(false);
+  const recovery = within(dialog).getByRole('button', { name: '重新啟動立體畫面' });
+  expect(document.activeElement).toBe(recovery);
+  directions.focus();
+  notify(true);
+  expect(document.activeElement).toBe(directions);
+  expect(scene.create).toHaveBeenCalledTimes(1);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
