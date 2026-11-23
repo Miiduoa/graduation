@@ -15,7 +15,7 @@ const osmPayload = JSON.stringify({
 // Match the media-type cases in the other footprint consumer's tests.
 const compatibleFootprintContentTypes = new Set<string | null>([
   null, 'application/json', ' APPLICATION/JSON ',
-  'Application/Json ; charset = "UTF-8"', 'application/json; charset=iso-8859-1',
+  'Application/Json ; charset = "UTF-8"', 'application/json; CHARSET=utf-8',
   'application/custom+json', 'APPLICATION/VND.EXAMPLE_CAMPUS+JSON',
   'application/vnd.overpass+json; profile="campus"',
   'application/vnd.overpass+json ; profile="campus; extended view"; charset=UTF-8',
@@ -24,6 +24,9 @@ const footprintContentTypes = [
   ...compatibleFootprintContentTypes,
   'text/html', 'text/plain', 'text/plain; charset=utf-8', 'application/xml',
   'application/octet-stream', 'application/json, text/html', 'text/custom+json',
+  'application/json; charset=iso-8859-1', 'application/json; charset=utf-16',
+  'application/vnd.overpass+json; charset="Shift_JIS"', 'application/json; charset=',
+  'application/json; charset=UTF-8; charset=iso-8859-1',
   '', ';', 'application/', 'application/+json', 'application/bad name+json',
 ];
 
