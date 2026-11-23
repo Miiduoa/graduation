@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from playwright.async_api import async_playwright, expect
 from quick_search import check_quick_search
 from feedback import check_action_feedback
+from loading import check_loading_feedback
 from navigation import check_navigation_geometry, check_service_navigation, check_today_reading_width
 
 OUTPUT = Path(__file__).resolve().parents[3] / 'artifacts' / 'interface-design'
@@ -693,6 +694,7 @@ async def scenario(browser, origin, config, report):
 
         await check_section('forms', lambda: check_dialogs_and_fields(page, config, report, capture))
         await check_section('action-feedback', lambda: check_action_feedback(page, config, report, capture))
+        await check_section('loading-feedback', lambda: check_loading_feedback(page, config, report, capture))
         await check_section('quick-search', lambda: check_quick_search(page, config, report, capture))
         await check_section('service-navigation', lambda: check_service_navigation(page, config, report, capture))
         if config['name'] in ('desktop-light', 'compact-dark-site-motion'):

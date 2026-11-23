@@ -12,6 +12,7 @@ import { SchoolDataScope } from './SchoolDataScope';
 import { AccountDemoFeature } from './AccountDemoFeature';
 import { AcademicNavigation } from './academic/AcademicNavigation';
 import { ServiceBreadcrumbs } from './ServiceBreadcrumbs';
+import { PageLoadingCard } from './PageLoadingCard';
 
 export function SiteShell(props: {
   header?: React.ReactNode;
@@ -59,7 +60,7 @@ export function SiteShell(props: {
           <AcademicNavigation />
           <AccountDemoFeature />
         </Suspense>
-        <Suspense fallback={<p role="status">載入中…</p>}>{props.children}</Suspense>
+        <Suspense fallback={<PageLoadingCard message="載入中…" />}>{props.children}</Suspense>
         <SiteFooter />
       </main>
     </div>

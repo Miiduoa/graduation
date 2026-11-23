@@ -53,6 +53,8 @@ export function WorkspaceList() {
   const api = useRef(classes);
   const sessionRefresh = useRef(refreshSession);
   const active = useRef(false);
+  const courseSearch = useRef<HTMLInputElement>(null);
+  const composing = useRef(false);
   const [items, setItems] = useState<NuniWorkspace[] | null>(null);
   const [error, setError] = useState('');
   const [reading, setReading] = useState(true);
@@ -68,9 +70,9 @@ export function WorkspaceList() {
   const courseCodeFromUrl = (params.get('code') ?? '').trim().slice(0, 40);
   // replaceState 不會同步 Next.js useSearchParams；記住已清除的歸因鍵，改搜尋後立刻失效。
   const timetableAttributionKey = `${fromTimetableParam ? '1' : '0'}\0${courseCodeFromUrl}\0${queryFromUrl}`;
-  const [clearedTimetableAttributionKey, setClearedTimetableAttributionKey] = useState<string | null>(
-    null,
-  );
+  const [clearedTimetableAttributionKey, setClearedTimetableAttributionKey] = useState<
+    string | null
+  >(null);
   const clearedTimetableAttribution = clearedTimetableAttributionKey === timetableAttributionKey;
 
   useLayoutEffect(() => {
@@ -174,13 +176,17 @@ export function WorkspaceList() {
     replaceStudyQuery('q', value);
     clearTimetableAttribution();
   };
+  const clearSearch = () => {
+    changeQuery('');
+    courseSearch.current?.focus();
+  };
   const changeTaskFilter = (value: StudyAgendaFilter) => {
     setTaskFilter(value);
     replaceStudyQuery('task', value, 'pending');
     clearTimetableAttribution();
   };
   const resetDirectory = () => {
-    changeQuery('');
+    clearSearch();
     changeFilter('all');
   };
 
@@ -258,26 +264,37 @@ export function WorkspaceList() {
                     <CampusIcon name="search" size={18} />
                     <span className={styles.srOnly}>搜尋課程名稱</span>
                     <input
+                      ref={courseSearch}
                       type="search"
                       value={query}
                       maxLength={120}
                       placeholder="搜尋課程名稱"
                       autoComplete="off"
                       onChange={(event) => changeQuery(event.target.value)}
+                      onCompositionStart={() => {
+                        composing.current = true;
+                      }}
+                      onCompositionEnd={() => {
+                        composing.current = false;
+                      }}
+                      onBlur={() => {
+                        composing.current = false;
+                      }}
                       onKeyDown={(event) => {
-                        if (event.key === 'Escape') {
+                        if (
+                          event.key === 'Escape' &&
+                          !composing.current &&
+                          !event.nativeEvent.isComposing &&
+                          event.keyCode !== 229
+                        ) {
                           event.preventDefault();
-                          changeQuery('');
+                          clearSearch();
                         }
                       }}
                     />
                   </label>
                   {query && (
-                    <button
-                      type="button"
-                      className={styles.textButton}
-                      onClick={() => changeQuery('')}
-                    >
+                    <button type="button" className={styles.textButton} onClick={clearSearch}>
                       清除搜尋
                     </button>
                   )}
@@ -368,9 +385,7 @@ export function WorkspaceList() {
                             ? 'classroom-query-unique'
                             : undefined
                         }
-                        aria-current={
-                          fromTimetable && matchKind === 'unique' ? 'page' : undefined
-                        }
+                        aria-current={fromTimetable && matchKind === 'unique' ? 'page' : undefined}
                       >
                         <span className={styles.courseIdentity}>
                           <CampusIcon
@@ -408,7 +423,10 @@ export function WorkspaceList() {
               <h2>此裝置收藏</h2>
             </div>
             <p>收藏過的教材放在這裡，方便下次接著看。只保留在此瀏覽器的目前帳號。</p>
-            <Link className={`${shared.button} ${shared.secondary}`} href={classroomDirectoryHref(context, 'bookmarks')}>
+            <Link
+              className={`${shared.button} ${shared.secondary}`}
+              href={classroomDirectoryHref(context, 'bookmarks')}
+            >
               查看收藏的教材
             </Link>
           </section>
@@ -499,8 +517,7 @@ export function WorkspaceList() {
             </div>
           </section>
           <p className={styles.scopeNote}>
-            這裡是你在 nuni
-            加入的課程，與瀏覽中的學校分開管理；校方正式課程與成績仍以學校系統為準。
+            這裡是你在 nuni 加入的課程，與瀏覽中的學校分開管理；校方正式課程與成績仍以學校系統為準。
           </p>
         </aside>
       </div>

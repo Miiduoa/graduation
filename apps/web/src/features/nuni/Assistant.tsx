@@ -4,6 +4,7 @@ import { AssistantReplyAnchor, AssistantReplyLink } from '@/components/Assistant
 import { Suspense, useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
+import { PageLoadingCard } from '@/components/PageLoadingCard';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { answerPublicCourseQuestion } from '@campus/shared/src/publicCourseAssistantClient';
 import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
@@ -1512,7 +1513,7 @@ export function Assistant({ children, cloudEnabled = true }: { children?: ReactN
   return (
     <SiteShell title="助理" subtitle="查詢課務、門市與校園資訊，接續安排個人行程。">
       {children}
-      <Suspense fallback={<p>載入中…</p>}>
+      <Suspense fallback={<PageLoadingCard message="載入中…" />}>
         <AssistantRoute cloudEnabled={cloudEnabled} />
       </Suspense>
     </SiteShell>

@@ -27,6 +27,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import { useTabBarContentBottomPadding } from './navigationTheme';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 function useSafeInsetsOrDefault() {
   const value = React.useContext(SafeAreaInsetsContext);
@@ -171,6 +172,7 @@ export function Card(props: {
   iconColor?: string;
 }) {
   useVisualTheme();
+  const reducedMotion = useReducedMotion();
   const variant = props.variant ?? 'default';
 
   const variantStyles = {
@@ -294,7 +296,7 @@ export function Card(props: {
         onPress={props.onPress}
         style={({ pressed }) => ({
           opacity: pressed ? 0.92 : 1,
-          transform: [{ scale: pressed ? 0.98 : 1 }],
+          transform: [{ scale: pressed && !reducedMotion ? 0.98 : 1 }],
         })}
       >
         {content}
@@ -384,8 +386,10 @@ export function Button(props: {
   style?: StyleProp<ViewStyle>;
 }) {
   useVisualTheme();
+  const reducedMotion = useReducedMotion();
   const kind = props.kind ?? 'secondary';
   const disabled = !!props.disabled || !!props.loading;
+  const inactive = !!props.disabled && !props.loading;
   const size = props.size ?? 'default';
 
   const bgColors: Record<string, string> = {
@@ -449,14 +453,15 @@ export function Button(props: {
       disabled={disabled}
       onPress={props.onPress}
       accessibilityRole="button"
-      accessibilityState={{ disabled }}
+      accessibilityState={{ disabled, busy: !!props.loading }}
       accessibilityLabel={props.accessibilityLabel ?? props.text}
+      accessibilityValue={props.loading ? { text: '處理中' } : undefined}
       style={({ pressed }) => [
         {
           paddingVertical: s.paddingVertical,
           paddingHorizontal: s.paddingHorizontal,
           borderRadius: s.radius,
-          backgroundColor: disabled
+          backgroundColor: inactive
             ? theme.colors.disabledBg
             : pressed
               ? pressedBg[kind]
@@ -469,31 +474,71 @@ export function Button(props: {
           gap: theme.space.xs,
           alignSelf: props.fullWidth ? 'stretch' : 'flex-start',
           minHeight: 44,
-          transform: [{ scale: pressed && !disabled ? 0.97 : 1 }],
+          minWidth: 44,
+          maxWidth: '100%',
+          flexShrink: 1,
+          transform: [{ scale: pressed && !disabled && !reducedMotion ? 0.97 : 1 }],
         },
         props.style,
       ]}
     >
-      {props.loading ? (
-        <ActivityIndicator size="small" color={textColors[kind]} />
-      ) : props.icon ? (
+      {props.icon ? (
         <Ionicons
           name={props.icon as any}
           size={s.fontSize + 1}
-          color={disabled ? theme.colors.disabledText : textColors[kind]}
+          color={inactive ? theme.colors.disabledText : textColors[kind]}
+          accessible={false}
         />
       ) : null}
       <Text
         style={{
-          color: disabled ? theme.colors.disabledText : textColors[kind],
+          color: inactive ? theme.colors.disabledText : textColors[kind],
           fontWeight: '600',
           fontSize: s.fontSize,
           letterSpacing: 0,
+          flexShrink: 1,
+          textAlign: 'center',
         }}
       >
-        {props.loading ? '處理中...' : props.text}
+        {props.text}
       </Text>
+      {props.loading && <ButtonActivity color={textColors[kind]} reducedMotion={reducedMotion} />}
     </Pressable>
+  );
+}
+
+/** Decorative progress stays outside layout so the action never changes size. */
+function ButtonActivity({ color, reducedMotion }: { color: string; reducedMotion: boolean }) {
+  const opacity = useRef(new Animated.Value(0.65)).current;
+  useEffect(() => {
+    if (reducedMotion) {
+      opacity.setValue(0.85);
+      return;
+    }
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 1, duration: 650, useNativeDriver: true, isInteraction: false,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.4, duration: 650, useNativeDriver: true, isInteraction: false,
+        }),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [opacity, reducedMotion]);
+  return (
+    <Animated.View
+      pointerEvents="none"
+      accessible={false}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={{
+        position: 'absolute', left: 12, right: 12, bottom: 4,
+        height: 2, borderRadius: 1, backgroundColor: color, opacity,
+      }}
+    />
   );
 }
 
@@ -1125,27 +1170,46 @@ export function AnimatedCard(props: {
   variant?: 'default' | 'elevated';
 }) {
   useVisualTheme();
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(16)).current;
+  const reducedMotion = useReducedMotion();
+  const fadeAnim = useRef(new Animated.Value(reducedMotion ? 1 : 0)).current;
+  const translateY = useRef(new Animated.Value(reducedMotion ? 0 : 8)).current;
+  const revealed = useRef(reducedMotion);
+  const initialDelay = useRef(Math.min(150, Math.max(0, props.delay ?? 0))).current;
 
   useEffect(() => {
-    Animated.parallel([
+    if (reducedMotion || revealed.current) {
+      revealed.current = true;
+      fadeAnim.setValue(1);
+      translateY.setValue(0);
+      return;
+    }
+    const animation = Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 450,
-        delay: props.delay ?? 0,
+        duration: 220,
+        delay: initialDelay,
         useNativeDriver: true,
+        isInteraction: false,
         easing: Easing.out(Easing.cubic),
       }),
       Animated.timing(translateY, {
         toValue: 0,
-        duration: 450,
-        delay: props.delay ?? 0,
+        duration: 220,
+        delay: initialDelay,
         useNativeDriver: true,
+        isInteraction: false,
         easing: Easing.out(Easing.cubic),
       }),
-    ]).start();
-  }, []);
+    ]);
+    let active = true;
+    animation.start(({ finished }) => {
+      if (active && finished) revealed.current = true;
+    });
+    return () => {
+      active = false;
+      animation.stop();
+    };
+  }, [fadeAnim, initialDelay, reducedMotion, translateY]);
 
   return (
     <Animated.View
