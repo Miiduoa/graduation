@@ -3460,7 +3460,7 @@ it.each([
   { length: '2000001', oversized: false },
 ])('bounds reader bytes without TextDecoder (%j)', async ({ length, oversized }) => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
-  const valid = new TextEncoder().encode(body.replace('{', '{"padding":"中",'));
+  const valid = new TextEncoder().encode(`{"padding":"中",${body.slice(1)}`);
   const read = vi.fn();
   if (oversized) {
     read.mockResolvedValueOnce({ value: new Uint8Array(1_000_000) })
