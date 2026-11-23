@@ -153,13 +153,15 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
-  it('converts OSM-standard km, mi and yd building heights without inventing metres', () => {
+  it('converts OSM-standard km, mi, nmi and yd heights without inventing metres', () => {
     // These are synthetic tags, not claims about any current campus building.
-    // OSM documents kilometre, mile and yard as explicit length/height units;
+    // OSM documents kilometre, mile, nautical mile and yard as explicit height units;
     // convert the measured tag instead of substituting a 12 m illustration.
     const valid: Array<[string, number]> = [
       ['0.018 km', 18],
       ['0.012 mi', 19.312128],
+      ['0.010 nmi', 18.52],
+      ['0.050 nmi', 92.6],
       ['20 yd', 18.288],
     ];
     for (const [height, expected] of valid) {
@@ -177,7 +179,7 @@ describe('Providence OSM building outlines', () => {
     // or extrude a value outside the bounded 2.5–100 metre scene contract.
     for (const height of [
       '0.018km', '0.012 MI', '20 yards', '20 cm', '0.0001 km',
-      '0.2 km', '200 mi', '12 yd; 10 ft', '1e-2 km',
+      '0.010nmi', '0.060 nmi', '0.2 km', '200 mi', '12 yd; 10 ft', '1e-2 km',
     ]) {
       expect(parseProvidenceOsmFootprints({
         elements: [way(255784049, library, { building: 'school', height })],
