@@ -691,7 +691,24 @@ export function createCampusSpatialScene(
     instances.push(stems, feet, caps);
     const matrix = new Matrix4();
     const flat = new Matrix4().makeRotationX(-Math.PI / 2);
+    // The same place name can appear on several buildings. Visible 3D
+    // marker buttons must identify the same specific destination as the
+    // modal's location selector, including for keyboard and screen readers.
+    // Use only the mapped category and POI coordinate, never an assumed
+    // building entrance or floor.
+    const nameCounts = new Map<string, number>();
+    const categoryCounts = new Map<string, number>();
+    for (const point of model.points) {
+      nameCounts.set(point.name, (nameCounts.get(point.name) ?? 0) + 1);
+      const key = JSON.stringify([point.name, point.category]);
+      categoryCounts.set(key, (categoryCounts.get(key) ?? 0) + 1);
+    }
     model.points.forEach((point, index) => {
+      const repeatedName = (nameCounts.get(point.name) ?? 0) > 1;
+      const repeatedCategory = (categoryCounts.get(JSON.stringify([point.name, point.category])) ?? 0) > 1;
+      const markerName = repeatedName
+        ? `${point.name}（${point.category || '未分類'}${repeatedCategory ? ` · 清單第 ${index + 1} 項` : ''}）`
+        : point.name;
       const roof = rooftopMarkerHeightById.get(point.id);
       if (roof === undefined) {
         stems.setMatrixAt(index, matrix.makeTranslation(point.x, pinHeight / 2, point.z));
@@ -710,9 +727,11 @@ export function createCampusSpatialScene(
       }
       const button = document.createElement('button');
       button.type = 'button';
-      button.textContent = point.name;
-      button.title = point.name;
-      button.setAttribute('aria-label', `聚焦${point.name}`);
+      button.textContent = markerName;
+      button.title = markerName;
+      button.setAttribute('aria-label', `聚焦${markerName}${repeatedCategory
+        ? ` · 地圖座標 ${point.location.lat}, ${point.location.lng}`
+        : ''}`);
       button.dataset.spatialMarker = point.id;
       Object.assign(button.style, {
         position: 'absolute', left: '0', top: '0', minHeight: '44px', boxSizing: 'border-box',
