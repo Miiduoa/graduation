@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { isDemoCourseId } from '../data/demoCoursesAdapter';
 import { isTronClassWriteLocked, TRONCLASS_WRITE_LOCKED_MESSAGE } from '../services/tronClassClient';
 
 type SurveyQuestionType = 'single' | 'multi' | 'text' | 'scale';
@@ -80,7 +81,6 @@ const SAMPLE_QUESTIONS: SurveyQuestion[] = [
 
 export default function SurveyScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
-  const writeLocked = isTronClassWriteLocked();
   const title = props.route?.params?.title ?? '課程問卷';
   const courseName = props.route?.params?.courseName;
   const surveyId = props.route?.params?.surveyId ?? '';
@@ -90,8 +90,12 @@ export default function SurveyScreen(props: RouteProps) {
   const [answers, setAnswers] = useState<Record<string, string | string[] | number>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
+  const numericSurveyId = Number(String(surveyId).replace(/^tc:/, '')) || 0;
+  const usingSample = !props.route?.params?.questions || !numericCourseId || !numericSurveyId ||
+    isDemoCourseId(numericCourseId);
+  const writeLocked = !usingSample && isTronClassWriteLocked();
   const readOnly = writeLocked || submitted;
-  const usingSample = !props.route?.params?.questions;
 
   const updateSingle = (qid: string, val: string) =>
     setAnswers((a) => ({ ...a, [qid]: val }));
@@ -118,9 +122,7 @@ export default function SurveyScreen(props: RouteProps) {
     }
     setSubmitting(true);
     try {
-      const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
-      const numericSurveyId = Number(String(surveyId).replace(/^tc:/, '')) || 0;
-      if (usingSample || !numericCourseId || !numericSurveyId) {
+      if (usingSample) {
         // 範例問卷模式（沒接到真 API）— 仍模擬送出讓使用者體驗完整流程
         await new Promise((r) => setTimeout(r, 400));
       } else {

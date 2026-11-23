@@ -61,10 +61,11 @@ type RouteProps = {
 export default function CourseDiscussionScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
   const auth = useAuth();
-  const writeLocked = isTronClassWriteLocked();
   const groupName = props.route?.params?.groupName ?? '課程討論';
   const groupIdStr = props.route?.params?.groupId ?? '';
   const courseId = Number(groupIdStr.replace(/^tc:/, '')) || 0;
+  const isDemo = isDemoCourseId(courseId);
+  const writeLocked = !!courseId && !isDemo && isTronClassWriteLocked();
 
   const [threads, setThreads] = useState<TCDiscussion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,7 +95,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
       return;
     }
     try {
-      if (isDemoCourseId(courseId)) {
+      if (isDemo) {
         // demo course → 直接用 mock data，不打 TronClass
         const base = demoFetchDiscussions(courseId) as TCDiscussion[];
         setThreads(mergeDemoThreads(courseId, base));
@@ -108,7 +109,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [courseId, mergeDemoThreads]);
+  }, [courseId, isDemo, mergeDemoThreads]);
 
   useEffect(() => {
     load();
@@ -123,7 +124,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
     if (!courseId) return;
     setPosting(true);
     try {
-      if (isDemoCourseId(courseId)) {
+      if (isDemo) {
         // demo course → 本地新增、不打後端
         const newId = Date.now();
         const newThread: TCDiscussion = {
@@ -217,7 +218,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
     } finally {
       setPosting(false);
     }
-  }, [writeLocked, newTitle, newBody, courseId, load, mergeDemoThreads]);
+  }, [writeLocked, isDemo, newTitle, newBody, courseId, load, mergeDemoThreads]);
 
   if (loading) {
     return (
@@ -250,7 +251,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
           />
         }
       >
-        {isDemoCourseId(courseId) ? (
+        {isDemo ? (
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: theme.space.sm }}>
             <CourseDemoDataRibbon />
           </View>

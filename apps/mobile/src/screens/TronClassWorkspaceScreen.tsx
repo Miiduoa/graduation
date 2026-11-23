@@ -746,10 +746,11 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
       ) : null}
       {ready && selected ? (
         <TronClassAssignmentPanel
-          key={`${connection.revision}:${selected.courseId}:${selected.id}`}
+          key={`${connection.revision}:${connection.studentKey ?? ''}:${selected.courseId}:${selected.id}`}
           client={client}
           fileCache={fileCache}
           revision={connection.revision!}
+          studentKey={rememberedKey.current}
           homework={selected}
           initialDraft={draftIdentity.current === connection.studentKey
             ? drafts.find((item) => item.courseId === selected.courseId && item.homeworkId === selected.id)
@@ -759,6 +760,7 @@ function NativeTronClassWorkspace({ client }: { client: NativeTronClassClient })
           isBindingCurrent={() => {
             const binding = latestConnection.current;
             return current() && binding?.connected === true && binding.revision === connection.revision &&
+              binding.studentKey === connection.studentKey &&
               typeof binding.expiresAt === 'string' && Number.isFinite(Date.parse(binding.expiresAt)) &&
               new Date(binding.expiresAt).toISOString() === binding.expiresAt && Date.parse(binding.expiresAt) > Date.now();
           }}

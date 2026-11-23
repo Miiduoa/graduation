@@ -88,7 +88,6 @@ const SAMPLE_RUBRIC: Rubric = {
 
 export default function PeerReviewSubmitScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
-  const writeLocked = isTronClassWriteLocked();
   const passedAssignmentTitle = props.route?.params?.assignmentTitle ?? '同儕互評';
   const courseId = Number(String(props.route?.params?.courseId ?? '').replace(/^tc:/, '')) || 0;
 
@@ -161,6 +160,10 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
   const [overallFeedback, setOverallFeedback] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const reviewIdNum = Number(reviewId.replace(/^tc:/, '')) || 0;
+  const usingSample = !props.route?.params?.rubric || !reviewIdNum || !courseId ||
+    isDemoCourseId(courseId);
+  const writeLocked = !usingSample && isTronClassWriteLocked();
   const readOnly = writeLocked || submitted;
 
   // 切換不同 review 時清空輸入
@@ -192,9 +195,6 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
     }
     setSubmitting(true);
     try {
-      const courseId = Number(String(props.route?.params?.courseId ?? '').replace(/^tc:/, '')) || 0;
-      const reviewIdNum = Number(String(reviewId).replace(/^tc:/, '')) || 0;
-      const usingSample = !props.route?.params?.rubric || !reviewIdNum || !courseId;
       if (!usingSample) {
         const { tcSubmitPeerReview } = await import('../services/tronClassClient');
         const result = await tcSubmitPeerReview(courseId, reviewIdNum, {
@@ -257,7 +257,6 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
           title={passedAssignmentTitle}
           meta={courseId ? `課程 ID ${courseId}` : undefined}
         />
-        {writeLocked && <Text style={{ color: theme.colors.text }}>{TRONCLASS_WRITE_LOCKED_MESSAGE}</Text>}
         <EmptyState
           icon="ribbon-outline"
           title="尚未有互評任務"

@@ -370,7 +370,7 @@ it.each(['submit', 'reconcile'] as const)(
     const pending = new Promise((resolve) => { resolveOperation = resolve; });
     mockBffRequest.mockImplementation((path, context, input) =>
       input.action === action ? pending : defaultRequest(path, context, input));
-    if (action === 'reconcile') await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+    if (action === 'reconcile') await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
     const view = render(<TronClassWorkspaceScreen />);
     if (action === 'submit') {
       await openAssignment(view);
@@ -390,7 +390,7 @@ it.each(['submit', 'reconcile'] as const)(
     fireEvent.press(view.getByRole('button', { name: '返回作業清單' }));
     expect(view.getByRole('button', { name: '已繳交，0 份' })).toBeTruthy();
     expect(view.getByRole('button', { name: '待繳交，1 份' })).toBeTruthy();
-    expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(input.operationId);
+    expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(input.operationId);
   },
 );
 
@@ -424,7 +424,7 @@ it('performs fresh preparation after preview and confirmation, then shows acknow
   });
   expect(view.getByText('來源紀錄時間：未提供')).toBeTruthy();
   expect(view.queryByText(/^繳交時間：/)).toBeNull();
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBeNull();
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBeNull();
 });
 it('selects native files, freezes bytes for preview, uploads once and submits only the returned verified ID', async () => {
   mockPreparation = { ...preparation, canSubmit: true, blockedReason: null };
@@ -459,7 +459,7 @@ it('selects native files, freezes bytes for preview, uploads once and submits on
   expect(actions('submit')[0].attachments).toEqual([mockUpload.mock.calls[0][4].fileId]);
   expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
   expect(AsyncStorage.setItem).toHaveBeenCalledWith(
-    expect.stringContaining('pending.v1:'),
+    expect.stringContaining('pending.v2:'),
     actions('submit')[0].operationId,
   );
 });
@@ -514,7 +514,7 @@ it('never resends a lost submit reply and only queries the original operation', 
   await confirmAndSend(view);
   await view.findByText('前次送出結果待確認');
   const pending = actions('submit')[0].operationId;
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(pending);
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(pending);
   fireEvent.press(view.getByRole('button', { name: '查詢原送出結果' }));
   await waitFor(() => expect(actions('reconcile')).toHaveLength(1));
   expect(actions('reconcile')[0]).toEqual({ action: 'reconcile', operationId: pending, revision });
@@ -522,7 +522,7 @@ it('never resends a lost submit reply and only queries the original operation', 
   expect(view.queryByRole('button', { name: '確認並繳交至 TronClass' })).toBeNull();
 });
 it('restores a pending operation as read-only reconciliation before any editor can send', async () => {
-  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
   const view = render(<TronClassWorkspaceScreen />);
   fireEvent.press(await view.findByRole('button', { name: homework.title }));
   await view.findByText('前次送出結果待確認');
@@ -530,8 +530,34 @@ it('restores a pending operation as read-only reconciliation before any editor c
   expect(actions('submit')).toHaveLength(0);
   expect(view.queryByLabelText('作業內容')).toBeNull();
 });
+it.each([studentKey, 'f'.repeat(64)])(
+  'reconciles a pending operation after reconnect only for the same student: %s',
+  async (key) => {
+    await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
+    mockConnection = { ...connection, connected: false, studentKey: null };
+    const view = render(<TronClassWorkspaceScreen />);
+    const passwordInput = await view.findByLabelText('TronClass 密碼');
+    mockConnection = { ...connection, revision: nextRevision, studentKey: key };
+    mockSnapshot = { ...snapshot, revision: nextRevision };
+    mockPreparation = { ...preparation, revision: nextRevision };
+    fireEvent.changeText(passwordInput, 'fixture-input');
+    fireEvent.press(view.getByRole('button', { name: '驗證並連接 TronClass' }));
+    if (key === studentKey) {
+      fireEvent.press(await view.findByRole('button', { name: homework.title }));
+      await view.findByText('前次送出結果待確認');
+      await waitFor(() => expect(actions('reconcile')).toEqual([
+        { action: 'reconcile', operationId, revision: nextRevision },
+      ]));
+    } else {
+      await openAssignment(view);
+      expect(view.queryByText('前次送出結果待確認')).toBeNull();
+      expect(actions('reconcile')).toHaveLength(0);
+    }
+    expect(actions('submit')).toHaveLength(0);
+  },
+);
 it('unlocks editing only after the server explicitly proves that the final submission was not started', async () => {
-  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
   mockBffRequest.mockImplementation((path, context, input) =>
     input.action === 'reconcile'
       ? Promise.reject(new NuniError(409, 'TRONCLASS_SUBMISSION_NOT_STARTED'))
@@ -540,7 +566,7 @@ it('unlocks editing only after the server explicitly proves that the final submi
   const view = render(<TronClassWorkspaceScreen />);
   await openAssignment(view);
   await view.findByText('已確認這次作業未送出，請重新預覽與確認後再繳交。');
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBeNull();
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBeNull();
   expect(actions('submit')).toHaveLength(0);
 });
 it('explicitly stops a failed upload preparation, keeps text and files, and requires a fresh preview before a new operation', async () => {
@@ -561,14 +587,14 @@ it('explicitly stops a failed upload preparation, keeps text and files, and requ
   await confirmAndSend(view);
   await view.findByText('前次送出結果待確認');
   const firstOperation = mockUpload.mock.calls[0][4].operationId;
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(firstOperation);
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(firstOperation);
   expect(actions('cancel-preparation')).toHaveLength(0);
   expect(actions('submit')).toHaveLength(0);
   fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
   await view.findByText('已停止尚未送出的準備，文字與附件已保留。請重新預覽與確認後再繳交。');
   expect(actions('cancel-preparation')).toEqual([{ action: 'cancel-preparation',
     courseId: 10, homeworkId: 20, revision, operationId: firstOperation }]);
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBeNull();
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBeNull();
   expect(view.getByLabelText('作業內容').props.value).toBe('保留原本整理的答案');
   expect(view.getByText('答案.pdf · 3 B')).toBeTruthy();
   expect(view.queryByRole('button', { name: '確認並繳交至 TronClass' })).toBeNull();
@@ -587,7 +613,7 @@ it('explicitly stops a failed upload preparation, keeps text and files, and requ
 });
 it.each(['unknown', 'malformed', 'network'])(
   'keeps the pending operation and disables editing after a %s cancellation outcome', async (outcome) => {
-    await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+    await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
     mockBffRequest.mockImplementation((path, context, input) => {
       if (input.action !== 'cancel-preparation') return defaultRequest(path, context, input);
       if (outcome === 'network') return Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
@@ -600,7 +626,7 @@ it.each(['unknown', 'malformed', 'network'])(
     fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
     await waitFor(() => expect(actions('cancel-preparation')).toHaveLength(1));
     await waitFor(() => expect(view.getByRole('button', { name: '停止準備並返回編輯' })).not.toBeDisabled());
-    expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(operationId);
+    expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(operationId);
     expect(view.getByText('前次送出結果待確認')).toBeTruthy();
     expect(view.queryByLabelText('作業內容')).toBeNull();
     expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
@@ -609,7 +635,7 @@ it.each(['unknown', 'malformed', 'network'])(
   },
 );
 it('keeps a cancelled operation pending when device storage removal fails and allows explicit retry', async () => {
-  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
   mockBffRequest.mockImplementation((path, context, input) => input.action === 'cancel-preparation'
     ? Promise.resolve({ status: 'cancelled', operationId, courseId: 10, homeworkId: 20 })
     : defaultRequest(path, context, input));
@@ -620,15 +646,15 @@ it('keeps a cancelled operation pending when device storage removal fails and al
   fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
   await view.findByText('已停止準備，但無法更新裝置紀錄。請再次停止準備後再編輯。');
   expect(view.queryByLabelText('作業內容')).toBeNull();
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(operationId);
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(operationId);
   fireEvent.press(view.getByRole('button', { name: '停止準備並返回編輯' }));
   await view.findByLabelText('作業內容');
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBeNull();
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBeNull();
   expect(actions('cancel-preparation')).toHaveLength(2);
   expect(actions('submit')).toHaveLength(0);
 });
 it('preserves a newer same-owner pending operation when an earlier cancellation response arrives', async () => {
-  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
   let finish: (value: unknown) => void = () => undefined;
   mockBffRequest.mockImplementation((path, context, input) => input.action === 'cancel-preparation'
     ? new Promise(resolve => { finish = resolve; })
@@ -641,12 +667,12 @@ it('preserves a newer same-owner pending operation when an earlier cancellation 
   // Another screen has independently resolved the old operation and started a
   // new one while this screen is still waiting for its original cancellation.
   const newer = '22222222-2222-4222-8222-222222222222';
-  await clearNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
-  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, newer);
+  await clearNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
+  await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, newer);
   const removals = jest.mocked(AsyncStorage.removeItem).mock.calls.length;
   await act(async () => { finish({ status: 'cancelled', operationId, courseId: 10, homeworkId: 20 }); });
   await view.findByText('裝置已有另一筆待查操作，請返回作業清單再開啟，先查證該筆紀錄。');
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(newer);
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(newer);
   expect(AsyncStorage.removeItem).toHaveBeenCalledTimes(removals);
   expect(view.getByText('前次送出結果待確認')).toBeTruthy();
   expect(view.queryByLabelText('作業內容')).toBeNull();
@@ -655,7 +681,7 @@ it('preserves a newer same-owner pending operation when an earlier cancellation 
 });
 it.each(['owner', 'session', 'unmount', 'expired-binding'])(
   'does not clear a pending operation for a delayed cancellation after %s changes', async (change) => {
-    await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+    await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
     let finish: (value: unknown) => void = () => undefined;
     mockBffRequest.mockImplementation((path, context, input) => input.action === 'cancel-preparation'
       ? new Promise(resolve => { finish = resolve; })
@@ -678,7 +704,7 @@ it.each(['owner', 'session', 'unmount', 'expired-binding'])(
       view.rerender(<TronClassWorkspaceScreen />);
     }
     await act(async () => { finish({ status: 'cancelled', operationId, courseId: 10, homeworkId: 20 }); });
-    expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(operationId);
+    expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(operationId);
     expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
     expect(actions('submit')).toHaveLength(0);
     if (change !== 'unmount') expect(view.queryByLabelText('作業內容')).toBeNull();
@@ -993,7 +1019,7 @@ it.each(['no-descriptor', 'no-capability'] as const)('keeps history attachment n
 it('keeps a denied history download out of the native share sheet without altering the pending operation', async () => {
   mockPreparation = { ...preparation, history: submissionHistory };
   mockSubmissionDownload.mockRejectedValueOnce(new NuniError(403, 'TRONCLASS_SUBMISSION_ATTACHMENT_DENIED'));
-  await saveNativeTronClassPending(`platform:${accountA}`, 10, 20, operationId);
+  await saveNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20, operationId);
   const view = render(<TronClassWorkspaceScreen />);
   fireEvent.press(await view.findByRole('button', { name: homework.title }));
   const download = await view.findByRole('button', { name: '下載並分享作業附件：先前答案.pdf' });
@@ -1001,7 +1027,7 @@ it('keeps a denied history download out of the native share sheet without alteri
   fireEvent.press(download);
   await view.findByText('校方尚未允許下載這份作業附件，請重新讀取作業紀錄。');
   expect(mockShare).not.toHaveBeenCalled();
-  expect(await readNativeTronClassPending(`platform:${accountA}`, 10, 20)).toBe(operationId);
+  expect(await readNativeTronClassPending(`platform:${accountA}`, studentKey, 10, 20)).toBe(operationId);
   expect(actions('submit')).toHaveLength(0);
   expect(actions('reconcile')).toHaveLength(1);
   expect(view.getByText('前次送出結果待確認')).toBeTruthy();
