@@ -19,6 +19,7 @@ const compatibleFootprintContentTypes = new Set<string | null>([
   'application/custom+json', 'APPLICATION/VND.EXAMPLE_CAMPUS+JSON',
   'application/vnd.overpass+json; profile="campus"',
   'application/vnd.overpass+json ; profile="campus; extended view"; charset=UTF-8',
+  'application/json; profile="note; charset=iso-8859-1"',
 ]);
 const footprintContentTypes = [
   ...compatibleFootprintContentTypes,
@@ -27,6 +28,7 @@ const footprintContentTypes = [
   'application/json; charset=iso-8859-1', 'application/json; charset=utf-16',
   'application/vnd.overpass+json; charset="Shift_JIS"', 'application/json; charset=',
   'application/json; charset=UTF-8; charset=iso-8859-1',
+  'application/json; profile="unterminated; charset=UTF-8',
   '', ';', 'application/', 'application/+json', 'application/bad name+json',
 ];
 
