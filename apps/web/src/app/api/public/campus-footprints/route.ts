@@ -338,6 +338,17 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
       response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
     ));
   }
+  // RFC 9112 §6.3: Transfer-Encoding and Content-Length cannot both frame
+  // one HTTP response. A misconfigured intermediary can otherwise make a
+  // complete-looking JSON fragment appear to be a verified 24-hour OSM map.
+  // Reject the conflicting headers before reading even a stalled body.
+  if (response.headers.get('transfer-encoding') !== null &&
+      response.headers.get('content-length') !== null) {
+    if (response.body) void response.body.cancel().catch(() => {});
+    throw new OverpassRateLimitError(overpassRetryAfterMs(
+      response.headers.get('retry-after'), Date.now(), response.headers.get('date'),
+    ));
+  }
   // A captive portal or reverse proxy may return HTTP 200 with an explicit
   // HTML/binary MIME while providing JSON-shaped data. Do not turn that into
   // a 24-hour audited building snapshot. Cancel a stalled body immediately.
