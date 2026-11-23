@@ -1439,7 +1439,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
                     {auditedWayCandidateCount > visibleFootprints.length && <span>
                       目前範圍另有 {auditedWayCandidateCount - visibleFootprints.length} 筆清單中的 OSM 建築 way 未取得可顯示的有效外框；不代表建築不存在，也不代表已驗證入口。
                     </span>}
-                    <span>依 OpenStreetMap 圖徵立體化。高度使用 OSM 標註或 12 公尺示意值，未經校方測量；不是室內導覽或無障礙路線。</span>
+                    <span>依 OpenStreetMap 建築外框立體化：實色量體的高度來自 OSM 使用者標註；半透明量體的高度採 12 公尺示意值。兩者均未經校方測量，不代表建築真實外觀、室內樓層或無障礙路線。</span>
                     {footprintDate && <small>資料讀取：{footprintDate}{footprintStale ? '（暫用舊快照）' : ''}</small>}
                     {footprintBaseDate && <small>OSM 資料庫同步：{footprintBaseDate}（非現地查證）</small>}
                     {footprintStale && <>
