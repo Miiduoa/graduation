@@ -435,6 +435,67 @@ it('uses the legacy default without an observer when host edges contradict its d
   }
 });
 
+it('uses the latest matching observation in one rapid-scroll batch', async () => {
+  // Several crossings may be delivered together; an older visible entry
+  // must not wake an offscreen GPU, even if a foreign entry comes last.
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  let top = window.innerHeight + 30;
+  const originalBounds = Element.prototype.getBoundingClientRect;
+  const bounds = vi.spyOn(Element.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: Element) {
+      return this.getAttribute('aria-label') === '校園地點空間圖'
+        ? new DOMRect(0, top, 320, 180)
+        : originalBounds.call(this);
+    });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
+    const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    const other = document.createElement('div');
+    expect(scene.create).not.toHaveBeenCalled();
+
+    act(() => intersection?.([
+      observerEntry(host, true, undefined, 1),
+      observerEntry(host, false, undefined, 2),
+      observerEntry(other, true, undefined, 3),
+    ], {} as IntersectionObserver));
+    expect(scene.create).not.toHaveBeenCalled();
+    expect(host.parentElement?.dataset.spatialState).toBe('deferred');
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+
+    top = 40;
+    act(() => intersection?.([
+      observerEntry(host, false, undefined, 4),
+      observerEntry(host, true, undefined, 5),
+    ], {} as IntersectionObserver));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    act(() => intersection?.([
+      observerEntry(host, true, undefined, 6),
+      observerEntry(host, false, undefined, 7),
+      observerEntry(other, true, undefined, 8),
+    ], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(within(dialog).getByText(/立體畫面已暫停/)).toBeTruthy();
+
+    act(() => intersection?.([
+      observerEntry(host, false, undefined, 9),
+      observerEntry(host, true, undefined, 10),
+    ], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('does not allocate offscreen WebGL or start its deadline until the canvas enters view', async () => {
   // Override the normal on-screen observer fixture: a scrollable narrow
   // viewport can open the modal with the graphics below the fold.
