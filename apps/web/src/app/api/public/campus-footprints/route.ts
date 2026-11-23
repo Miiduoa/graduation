@@ -228,7 +228,16 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   // not guaranteed to cancel an already-exposed body reader (or a proxy mock).
   // Cancel the reader directly when the server-side deadline expires. Never
   // await cancellation: a broken stream may never acknowledge it.
-  const cancelOnAbort = () => { void reader.cancel().catch(() => {}); };
+  // A partially implemented fetch/stream bridge may throw synchronously
+  // instead of returning a rejected promise from cancel(). An abort fired by
+  // the deadline must never escape its event listener and crash the request.
+  let cancelRequested = false;
+  const cancelOnAbort = () => {
+    if (cancelRequested) return;
+    cancelRequested = true;
+    try { void Promise.resolve(reader.cancel()).catch(() => {}); }
+    catch { /* Best-effort cancellation: the independent deadline still settles. */ }
+  };
   if (signal.aborted) cancelOnAbort();
   else signal.addEventListener('abort', cancelOnAbort, { once: true });
   const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -276,9 +285,10 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
       // Cancellation is best-effort. A broken proxy/stream can accept a cancel
       // request but never settle its promise; waiting here turns an already
       // rejected oversized payload into a 12-second server timeout.
-      void reader.cancel().catch(() => {});
+      cancelOnAbort();
     }
-    reader.releaseLock();
+    try { reader.releaseLock(); }
+    catch { /* A broken upstream reader must not mask the original parse failure. */ }
   }
 }
 
