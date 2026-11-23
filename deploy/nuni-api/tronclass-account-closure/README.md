@@ -63,6 +63,8 @@ worker 不需要 `platform_accounts` 的 SELECT、UPDATE 或 DELETE；**不可�
 4. 先保持 worker 旗標關閉發布相容 Web；migration 與專用角色驗收完成後，再設定專用 DB URL 及精確啟用旗標，重啟 Node instance。
 5. 以受控平台帳號驗證關帳事件、Firestore barrier／私人紀錄清理、outbox 成功刪除及故障後重試。此驗收不需要寫入校方作業。
 
+Web 端平台帳號的新綁定會檢查 worker 旗標與專用 DB URL 皆已設定，否則回覆 `TRONCLASS_RETENTION_REQUIRED` 且不保存校方 session；因此步驟 4 的 migration 驗收完成前，平台帳號無法新綁定。
+
 回滾 worker 時可關閉旗標並保留 outbox／trigger，事件會等待恢復；不能刪除 Firestore 永久關帳 barrier 或不確定的校方作業鎖。
 
 ## 隔離測試

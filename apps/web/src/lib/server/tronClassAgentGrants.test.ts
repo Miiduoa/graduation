@@ -42,7 +42,11 @@ async function setup() {
   return { rows, clock, hooks, bindings, grants, db, revision: linked.revision! };
 }
 
-beforeEach(() => vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true'));
+beforeEach(() => {
+  vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true');
+  vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED', 'true');
+  vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL', 'postgresql://synthetic:synthetic@127.0.0.1:5432/synthetic');
+});
 afterEach(() => vi.unstubAllEnvs());
 
 describe('TronClass Agent grants', () => {

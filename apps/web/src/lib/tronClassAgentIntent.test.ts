@@ -71,4 +71,14 @@ describe('explicit TronClass command routing', () => {
   it('does not automatically dispatch two different requested operations', () => {
     expect(parseTronClassAgentIntent('幫我下載 TronClass 教材並準備作業')).toEqual({ intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' });
   });
+
+  it.each(['玩課雲作業，查公車', '開啟玩課雲作業，查公車資訊', '玩課雲，查今天課表', '打開玩課雲然後查社團'])(
+    'leaves the compound LMS handoff %s on the existing cross-service plan',
+    question => expect(canAnswerTronClassQuestion(question)).toBe(false),
+  );
+
+  it.each(['開啟玩課雲作業，查一下還沒交的有哪些', '玩課雲作業，看成績'])(
+    'still sends the TronClass-only query %s to the Agent',
+    question => expect(canAnswerTronClassQuestion(question)).toBe(true),
+  );
 });

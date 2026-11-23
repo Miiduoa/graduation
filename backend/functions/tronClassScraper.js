@@ -1204,19 +1204,22 @@ async function tcFetchAnnouncements(cookies) {
   }
 }
 
-/** @param {TronClassReadOptions} readOptions */
-async function tcFetchAnnouncementsStrict(cookies, readOptions = {}) {
+/** @param {TronClassReadOptions=} readOptions */
+async function tcFetchAnnouncementsStrict(cookies, readOptions) {
+  // 未帶讀取選項的舊呼叫端維持原本行為，不套用新的逾時與大小上限。
   const data = await tcFetchJson(`${TC_BASE}/api/announcement`, cookies,
-    { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 });
+    readOptions === undefined ? {}
+      : { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 });
   const items = data?.announcements;
   if (!Array.isArray(items)) throw httpError(200);
   return items;
 }
 
-/** @param {TronClassReadOptions} readOptions */
-async function tcFetchCourseAnnouncementsStrict(cookies, courseId, readOptions = {}) {
+/** @param {TronClassReadOptions=} readOptions */
+async function tcFetchCourseAnnouncementsStrict(cookies, courseId, readOptions) {
   const data = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/announcements`, cookies,
-    { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 });
+    readOptions === undefined ? {}
+      : { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 });
   const items =
     data?.announcements ??
     data?.notifications ??

@@ -102,7 +102,7 @@ it.each([
 
 it('queries the Agent when a page-opening phrase also asks for outstanding homework', async () => {
   const question = '開啟玩課雲作業，查一下還沒交的有哪些';
-  const fetch = vi.fn(async (url: string, _init?: RequestInit) => {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => { void init;
     if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
     if (url === '/api/tronclass/agent') return json(base);
     throw new Error(`Unexpected request: ${url}`);
@@ -114,6 +114,20 @@ it('queries the Agent when a page-opening phrase also asks for outstanding homew
   const request = fetch.mock.calls.find(([url]) => url === '/api/tronclass/agent');
   expect(body(request?.[1])).toMatchObject({ question });
   expect(screen.queryByRole('link', { name: /^開啟玩課雲作業/ })).toBeNull();
+});
+
+it('keeps a compound LMS handoff and bus request on the existing cross-service plan', async () => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json(base);
+    return json({ answer: '', steps: [], cards: [] });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  fireEvent.click(await screen.findByRole('checkbox'));
+  await ask('玩課雲作業，查公車');
+  await waitFor(() => expect(fetch.mock.calls.some(([url]) => !url.endsWith('/capability'))).toBe(true));
+  expect(fetch.mock.calls.some(([url]) => url === '/api/tronclass/agent')).toBe(false);
 });
 
 it.each(['玩課雲', '玩課雲作業'])('falls back to the school LMS link for %s when the Agent is disabled', async question => {

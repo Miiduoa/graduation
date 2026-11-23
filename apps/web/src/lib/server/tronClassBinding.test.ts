@@ -65,6 +65,8 @@ beforeEach(() => {
   schedulerReady.mockReset();
   schedulerReady.mockReturnValue(true);
   vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true');
+  vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED', 'true');
+  vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL', 'postgresql://synthetic:synthetic@127.0.0.1:5432/synthetic');
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -416,6 +418,17 @@ describe('independent TronClass binding', () => {
 
   it.each([undefined, 'false', 'TRUE'])('rejects binding before school login or storage when retention is %s', async (flag) => {
     vi.stubEnv('TRONCLASS_RETENTION_ENABLED', flag);
+    const { service, login, docs } = setup();
+    await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 503, code: 'TRONCLASS_RETENTION_REQUIRED' });
+    expect(login).not.toHaveBeenCalled();
+    expect(docs.size).toBe(0);
+  });
+
+  it.each([
+    ['worker flag off', { TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED: 'false' }],
+    ['database URL missing', { TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL: '' }],
+  ])('rejects a platform binding before login and storage when account cleanup is not ready (%s)', async (_name, env) => {
+    for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
     const { service, login, docs } = setup();
     await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 503, code: 'TRONCLASS_RETENTION_REQUIRED' });
     expect(login).not.toHaveBeenCalled();
