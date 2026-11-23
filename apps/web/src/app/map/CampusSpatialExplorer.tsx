@@ -585,12 +585,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // Only entries for this canvas host may change its visibility.
           // Legacy callback shims may omit target; a *different* explicit
           // target is never proof that our map entered the viewport.
+          // A throwing target getter is not an omitted target: a broken or
+          // foreign callback must never wake an offscreen WebGL context.
           const hostEntries = entries.filter((entry) => {
             try {
               const target = entry.target;
               return !target || target === host;
             } catch {
-              return true;
+              return false;
             }
           });
           // Observer entries are queued in transition order. Use the last
