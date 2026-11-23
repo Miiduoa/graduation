@@ -280,6 +280,36 @@ test.each([
   expect(await AsyncStorage.getItem(ledger.personalImportStorageKey(scope))).toBe(before);
 });
 
+
+test.each([undefined, 2])('official credits complete a partial timetable with saved credits %s', async (credits) => {
+  const preview = preparePublicCourseTimetableImport('nthu', nthu)!;
+  const firstSlot = { ...preview.rows[0], credits };
+  const { ledger: original } = await ledger.appendPersonalImports(scope, [firstSlot]);
+
+  const view = render(<PublicCourseImportAction schoolId="nthu" course={nthu} navigation={navigation} />);
+  review(view);
+  confirm(view);
+  await view.findByText(/已加入 1 個上課時段。另有 1 個重複時段未新增。/);
+
+  const { records } = await ledger.loadPersonalImports(scope);
+  expect(records[0]).toEqual(original.records[0]);
+  expect(records[1]).toMatchObject({ dayOfWeek: preview.rows[1].dayOfWeek, credits: 3 });
+});
+
+test.each(['nthu', 'ncnu'] as const)('equivalent numeric %s credits do not falsely reject a duplicate', async (schoolId) => {
+  mockScope = { owner: scope.owner, schoolId };
+  const course = schoolId === 'nthu' ? nthu : ncnu;
+  const oldPreview = preparePublicCourseTimetableImport(schoolId, { ...course, credits: '3.00' })!;
+  const currentPreview = preparePublicCourseTimetableImport(schoolId, course)!;
+  expect(oldPreview.rows[0].credits).toBe(3);
+  await ledger.appendPersonalImports(mockScope, oldPreview.rows);
+  const view = render(<PublicCourseImportAction schoolId={schoolId} course={course} navigation={navigation} />);
+  review(view);
+  confirm(view);
+  await view.findByText('這些時段已在個人課表，沒有重複新增。');
+  expect((await ledger.loadPersonalImports(mockScope)).records).toHaveLength(oldPreview.rows.length);
+});
+
 test('the storage write lock rejects moved official meetings without a UI preflight', async () => {
   const previous = preparePublicCourseTimetableImport('nthu', nthu)!;
   await ledger.appendPersonalImports(scope, previous.rows);
@@ -502,7 +532,8 @@ test('switching the public campus cannot reuse a review opened for another schoo
   expect(view.queryByText('確認加入個人課表')).toBeNull();
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   review(view);
-  expect(view.getByText(/國立暨南國際大學/)).toBeTruthy();
+  // Source provenance is also rendered; assert the exact school/term heading, not an ambiguous name match.
+  expect(view.getByText('國立暨南國際大學 · 115 學年度第 1 學期')).toBeTruthy();
 });
 
 test('a refreshed offering that later returns to its prior details still requires a fresh tap', () => {
