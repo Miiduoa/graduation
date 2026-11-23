@@ -585,6 +585,13 @@ it('uses the last matching observer entry at viewport boundaries and keeps rende
   expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
   expect(scene.create).toHaveBeenCalledTimes(1);
 
+  // An empty callback is not an offscreen entry. A WebView that delivers []
+  // must not pause a still-visible map or open its focus-stealing recovery UI.
+  const activeCallsBeforeEmpty = scene.setActive.mock.calls.length;
+  notify();
+  expect(scene.setActive).toHaveBeenCalledTimes(activeCallsBeforeEmpty);
+  expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+
   const offscreenEntry = observerEntry(host, false);
   notify(offscreenEntry, sliver);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
