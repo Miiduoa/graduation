@@ -651,7 +651,7 @@ it('uses the latest viewport state when a fast mobile scroll batches observer en
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-it('checks current geometry for a delayed entry and ignores foreign targets', async () => {
+it('honors the latest host entry, then checks geometry on resize, and ignores foreign targets', async () => {
   let observedHost: Element | null = null;
   let top = window.innerHeight + 10;
   vi.stubGlobal('IntersectionObserver', class {
@@ -688,6 +688,8 @@ it('checks current geometry for a delayed entry and ignores foreign targets', as
   const notify = () => act(() =>
     intersection?.([observerEntry(graphics, true, undefined, 150)], {} as IntersectionObserver));
   notify();
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  fireEvent.resize(window);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
   bounds.mockReturnValue(new DOMRect(0, 40, 320, 180));
   notify();
@@ -1026,11 +1028,7 @@ it('remeasures on manual restart and resumes despite unchanged stale VisualViewp
   }
 });
 
-// Some embedded WebViews report a window-root intersection for pixels that
-// are fully clipped by the scrollable modal. The automatic observer path must
-// enforce the same dialog clipping check as manual startup before allocating
-// mobile WebGL, without disabling external walking navigation.
-it('keeps automatic WebGL deferred when an intersecting canvas is clipped by the dialog', async () => {
+it('keeps automatic WebGL deferred when the canvas is clipped and the observer is silent', async () => {
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) { intersection = callback; }
     observe() {}
@@ -1059,8 +1057,6 @@ it('keeps automatic WebGL deferred when an intersecting canvas is clipped by the
     const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
     const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
     // The host overlaps the dialog border but ends above the scrollport.
-    act(() => intersection?.([observerEntry(graphics, true, undefined, 1)],
-      {} as IntersectionObserver));
     expect(scene.create).not.toHaveBeenCalled();
     expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
@@ -1812,10 +1808,17 @@ it('keeps WebGL suspended if scroll restoration moves the canvas offscreen befor
   // Synthetic Safari bfcache regression: the previous IntersectionObserver
   // entry said visible, but page restore scrolls the host outside the viewport.
   // No GPU restart until a new intersecting event confirms its position.
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
   render(<CampusSpatialExplorer school="other-school" locations={places}
     selected={places[0]} onSelect={vi.fn()} />);
   const dialog = await open();
   const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  act(() => intersection?.([observerEntry(graphics, true, new DOMRect(0, 0, 320, 180))],
+    {} as IntersectionObserver));
   const offscreenTop = window.innerHeight + 120;
   const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue({
     x: 0, y: offscreenTop, left: 0, top: offscreenTop,
@@ -1847,7 +1850,61 @@ it('keeps WebGL suspended if scroll restoration moves the canvas offscreen befor
   }
 });
 
-it.each(['observer', 'viewport'])('recovers iOS WebGL when %s detects visual offscreen first', async (firstEvent) => {
+it.each(['foreground', 'save-data', 'pagehide', 'visibilitychange'] as const)(
+  'handles a fresh visible entry with stale keyboard bounds during startup in %s',
+  async (mode) => {
+    const viewport = Object.assign(new EventTarget(), {
+      width: window.innerWidth, offsetLeft: 0, offsetTop: 0,
+    });
+    const readHeight = vi.fn(() => 100);
+    Object.defineProperty(viewport, 'height', { get: readHeight });
+    vi.stubGlobal('visualViewport', viewport);
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    const connection = Object.getOwnPropertyDescriptor(navigator, 'connection');
+    if (mode === 'save-data') {
+      Object.defineProperty(navigator, 'connection', { configurable: true, value: { saveData: true } });
+    }
+    const rect = new DOMRect(0, 150, 320, 180);
+    const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('aria-label') === '校園地點空間圖' ? rect : new DOMRect();
+    });
+    try {
+      render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+      fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+      const host = screen.getByRole('group', { name: '校園地點空間圖' });
+      const visible = observerEntry(host, true, rect);
+      expect(host.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+      if (mode === 'pagehide') fireEvent(window, new Event('pagehide'));
+      if (mode === 'visibilitychange') {
+        Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+        fireEvent(document, new Event('visibilitychange'));
+      }
+      bounds.mockClear();
+      readHeight.mockClear();
+      await act(async () => intersection?.([visible], {} as IntersectionObserver));
+      expect(bounds.mock.contexts).toContain(host);
+      expect(readHeight).toHaveBeenCalled();
+      expect(readHeight).toHaveReturnedWith(100);
+      if (mode === 'foreground') {
+        expect(scene.create).toHaveBeenCalledTimes(1);
+        expect(scene.setActive).toHaveBeenLastCalledWith(true);
+      } else {
+        expect(scene.create).not.toHaveBeenCalled();
+        expect(host.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+      }
+    } finally {
+      bounds.mockRestore();
+      if (connection) Object.defineProperty(navigator, 'connection', connection);
+      else Reflect.deleteProperty(navigator, 'connection');
+    }
+  },
+);
+
+it.each(['observer', 'viewport'])('recovers paused iOS WebGL through a fresh %s report', async (recovery) => {
   // On Safari the keyboard or pinch zoom can shrink/offset visualViewport
   // while innerHeight stays unchanged and the observer is delayed.
   const viewport = Object.assign(new EventTarget(), {
@@ -1869,19 +1926,30 @@ it.each(['observer', 'viewport'])('recovers iOS WebGL when %s detects visual off
   try {
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     viewport.height = top - 10;
-    if (firstEvent === 'observer') {
-      act(() => intersection?.([observerEntry(graphics, true, new DOMRect(0, top, 320, 40), 99)],
-        {} as IntersectionObserver));
-    } else {
-      act(() => viewport.dispatchEvent(new Event('resize')));
-    }
+    act(() => viewport.dispatchEvent(new Event('resize')));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
     expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
-    // Some iOS WebViews never emit a new intersection record when the soft
-    // keyboard closes. A positive viewport measurement must resume the SAME
-    // already-created scene without a new observer callback.
+    if (recovery === 'observer') {
+      // The keyboard closes but the viewport continues to report its old height.
+      act(() => intersection?.([observerEntry(graphics, true, new DOMRect(0, top, 320, 40), 99)],
+        {} as IntersectionObserver));
+      expect(viewport.height).toBe(top - 10);
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
+      fireEvent.focus(window);
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+      viewport.height = top - 20;
+      act(() => viewport.dispatchEvent(new Event('resize')));
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+      expect(scene.setActive).toHaveBeenLastCalledWith(true);
+      act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    }
+    // A positive measurement also recovers when no observer entry arrives.
     viewport.height = window.innerHeight;
     act(() => viewport.dispatchEvent(new Event('resize')));
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
@@ -1909,6 +1977,10 @@ it.each(['observer', 'viewport'])('recovers iOS WebGL when %s detects visual off
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     viewport.height = top - 10;
     act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    fireEvent(window, new Event('orientationchange'));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
     fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
     expect(scene.dispose).toHaveBeenCalledTimes(1);
@@ -2410,7 +2482,8 @@ it.each(
       // A manual open can override unchanged VisualViewport bounds when the
       // host still overlaps the layout viewport.
       const manualOverride = startup === 'manual' && phase === 'first';
-      const shouldRender = (inView || manualOverride) && observerAllowsRendering;
+      const freshObservation = event === 'positive' || (event === 'focus' && initial === 'positive');
+      const shouldRender = (inView || manualOverride || freshObservation) && observerAllowsRendering;
       expect(scene.create).toHaveBeenCalledTimes(shouldRender ? mergeBaseAllocations : existingAllocations);
       if (shouldRender || phase === 'paused') expect(scene.setActive).toHaveBeenLastCalledWith(shouldRender);
       expect(host.parentElement?.getAttribute('data-spatial-state')).toBe(shouldRender || phase === 'paused' ? 'ready' : 'deferred');
@@ -2426,14 +2499,14 @@ const visibilityStates = ['unknown', 'visible', 'hidden'] as const;
 const visibilityTransitions = [
   { event: 'observer visible', startup: ['start', 'start', 'start'], running: ['unchanged', 'unchanged', 'start'] },
   { event: 'observer hidden', startup: ['unchanged', 'unchanged', 'unchanged'], running: ['pause', 'pause', 'unchanged'] },
-  { event: 'observer silent', startup: ['unchanged', 'unchanged', 'unchanged'], running: ['unchanged', 'unchanged', 'unchanged'] },
+  { event: 'observer silent', startup: ['unchanged', 'start', 'unchanged'], running: ['unchanged', 'unchanged', 'unchanged'] },
   { event: 'viewport visible', startup: ['start', 'start', 'unchanged'], running: ['unchanged', 'unchanged', 'unchanged'] },
   { event: 'viewport offscreen', startup: ['unchanged', 'unchanged', 'unchanged'], running: ['pause', 'pause', 'unchanged'] },
   { event: 'viewport invalid', startup: ['start', 'start', 'unchanged'], running: ['unchanged', 'unchanged', 'unchanged'] },
   { event: 'viewport throws', startup: ['start', 'start', 'unchanged'], running: ['unchanged', 'unchanged', 'unchanged'] },
   { event: 'remount', startup: ['start', 'start', 'start'], running: ['start', 'start', 'start'] },
   { event: 'manual open', startup: ['start', 'start', 'start'], running: ['unchanged', 'unchanged', 'unchanged'] },
-  { event: 'manual restart', startup: ['unchanged', 'unchanged', 'unchanged'], running: ['unchanged', 'unchanged', 'start'] },
+  { event: 'manual restart', startup: ['unchanged', 'start', 'unchanged'], running: ['unchanged', 'unchanged', 'start'] },
   { event: 'data update', startup: ['start', 'start', 'start'], running: ['start', 'start', 'start'] },
   { event: 'leave page', startup: ['unchanged', 'unchanged', 'unchanged'], running: ['pause', 'pause', 'unchanged'] },
   { event: 'return to page', startup: ['start', 'start', 'start'], running: ['start', 'start', 'start'] },
@@ -2497,10 +2570,7 @@ it.each(visibilityTransitions.flatMap(({ event, startup, running }) =>
     }
     await act(async () => {
       switch (event) {
-        case 'observer visible':
-          height = 800;
-          notify(true);
-          break;
+        case 'observer visible': notify(true); break;
         case 'observer hidden': notify(false); break;
         case 'observer silent': intersection?.([], {} as IntersectionObserver); break;
         case 'viewport visible':
@@ -2752,10 +2822,12 @@ it('pauses a ready mobile WebGL scene when viewport resize moves the host offscr
   }
 });
 
-it('ignores a late positive viewport notification when Safari restored the host offscreen', async () => {
-  // A queued observer event can arrive *after* pageshow with a new timestamp
-  // even though its intersection rectangle describes the pre-restore scroll.
-  // It must not undo the current DOM-position guard or wake the mobile GPU.
+it('ignores a queued positive entry from the observer replaced on pageshow', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
   render(<CampusSpatialExplorer school="other-school" locations={places}
     selected={places[0]} onSelect={vi.fn()} />);
   const dialog = await open();
@@ -2767,12 +2839,13 @@ it('ignores a late positive viewport notification when Safari restored the host 
     toJSON: () => ({}),
   } as DOMRect);
   try {
+    const previousObserver = intersection;
     fireEvent(window, new Event('pagehide'));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
     fireEvent(window, new Event('pageshow'));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
 
-    act(() => intersection?.([{
+    act(() => previousObserver?.([{
       isIntersecting: true, target: graphics, time: 100,
       intersectionRect: { width: 320, height: 180 },
     }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));

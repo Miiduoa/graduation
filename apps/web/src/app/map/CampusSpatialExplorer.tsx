@@ -371,9 +371,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       const override = manualGeometry.current;
       const matchesManualBounds = override?.host === host && override.bounds === geometry?.bounds;
       if (override?.bounds !== undefined && !matchesManualBounds) manualGeometry.current = null;
-      return visibility === 'hidden' || (geometry?.visible === false && !matchesManualBounds);
+      // A fresh positive observer entry can outlive stale keyboard bounds.
+      return visibility === 'hidden' ||
+        (visibility !== 'visible' && geometry?.visible === false && !matchesManualBounds);
     };
-    const isDeferred = () => isBackgrounded() || (saveData && !hasDataConsent) || isOffscreen();
+    const isDeferred = () => isOffscreen() || isBackgrounded() || (saveData && !hasDataConsent);
     const defer = () => {
       setDeferredCause(isBackgrounded() ? 'background' :
         saveData && !hasDataConsent ? 'data-saver' : 'offscreen');
@@ -381,7 +383,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
     const updateVisibility = () => {
       if (!scene) return;
-      const shouldRender = !isBackgrounded() && !isOffscreen();
+      const shouldRender = !isOffscreen() && !isBackgrounded();
       scene.setActive(shouldRender);
       setRenderSuspended(!shouldRender);
     };
@@ -545,8 +547,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         } catch { /* retry when the same instance becomes usable again */ }
       }
     };
-    const syncViewport = () => {
+    const syncViewport = (event?: Event) => {
       if (!active) return;
+      // Only a geometry event confirming that the host is offscreen can
+      // invalidate a positive observation without a new observer entry.
+      if (event && event.type !== 'focus' && visibility === 'visible' &&
+          measureHostViewport()?.visible === false) visibility = 'unknown';
       refreshVisualViewportListeners();
       updateVisibility();
       if (!started && !isDeferred()) startWhenVisible();
@@ -656,7 +662,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
     // Nested dialog scroll can move the canvas without an observer callback.
-    const viewportEvents = ['resize', 'scroll', 'focus'] as const;
+    const viewportEvents = ['resize', 'scroll', 'orientationchange', 'focus'] as const;
     for (const event of viewportEvents) {
       try { window.addEventListener(event, syncViewport, event === 'scroll' ? { capture: true, passive: true } : false); }
       catch { /* Observer and page events still report visibility. */ }
