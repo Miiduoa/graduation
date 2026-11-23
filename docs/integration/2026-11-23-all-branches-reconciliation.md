@@ -1,6 +1,40 @@
 # 2026-11-23 全分支整合決策
 
-## 來源範圍
+## 20:26 固定來源：以最新主線決策為準
+
+本輪固定來源見 `2026-11-23-all-branches-sources.json`：現存共 18 個分支，扣除 main 後 17 個具有未合入提交；其中 14 個是功能、修正或依賴分支，3 個是整合分支（包含本 PR）。前一輪 16:44 的 18 個來源快照另保留於 `previousSnapshots`，不與目前現存分支數混算。
+
+前一候選為 `ae40bc6f6c9dd72d5b61ac59f02a2d27c505ea08`。其後 #740 已正式 squash 合入 main `15bdca30796646d93263ddf8442eca248aa196b4`，來源分支亦已刪除。20:09 初次盤點之後，20:26 再補入準備期間新增的地圖 `281ac372f1e02e693dd8ebac3d8bb64ebbb1dd68` 與 TronClass `b557781206280e94255fa37b03942ef596eba34b`，並固定此來源切點。其餘已捕捉分支由前一候選保留。
+
+### 主線的社群簡介決策
+
+#740 最後核可的版本明確撤回先前的嚴格顯示讀取、複雜草稿還原與額外分頁自動重新讀取。此主線決策取代下方 16:44 歷史紀錄中「首次讀取 requireCommitted 必須保留」的判斷。
+
+本輪採用主線簡化的編輯介面與一般顯示契約：初次載入及一般顯示可以呈現尚在同步的資料，但不能據此解除未確認寫入或宣稱儲存成功。自動寫後確認及「核對儲存結果」的手動確認均須直接要求 committed snapshot。自己的社群簡介在所有分頁保持同一實例，保留未確認寫入狀態；外部使用者的卡片仍依主線顯示行為處理。主線的三欄媒體排列保留。
+
+不恢復已撤回的 FirstCardRead bridge、複雜 recoverable draft UI 或逐欄位 revision。必要的 owner／school、晚到操作、撤權優先及未確認寫入保護，直接由現有初次讀取、明確重試與儲存操作邊界處理。測試以目前存在的行為為準；已明確撤回的介面與重新讀取功能不列為本輪仍保留的功能。
+
+### 地圖的鍵盤遮蔽與可見性
+
+納入來源新增的 visualViewport 尺寸與位移判斷、鍵盤遮蔽時暫停／恢復、暫停 marker 的鍵盤焦點隔離，以及恢復時不搶走導覽連結焦點。原本的最後一筆 observer entry、正交集面積、小正 threshold 與防禦性幾何讀取保留。來源中的舊測試仍要求鍵盤遮蔽後繼續繪製，與新功能相反；以實際失敗對照確認後，改為驗證遮蔽期間持續暫停、解除後復用同一 scene，避免以刪除斷言掩蓋衝突。
+
+### TronClass 的後續防護
+
+納入三個來源提交：獨立連線預設需明確啟用，綁定前及提交交易內確認到期清理已啟用；登入額度以呼叫者與其帳號計算，暫時性來源失敗只退回自己的 attempt ticket。附件寫入在讀取 request body 前核對開關與綁定，沿用既有檔案大小上限並限制同時上傳數。行動工作區遵循總開關；尚未開放的討論、問卷與互評寫入顯示唯讀說明。刪帳只對符合既有 TronClass owner 格式的 UID 執行該子系統清理，並在 relay 記錄遮蔽數字路徑。
+
+這些是來源程式與範例設定的整合，不會替正式環境啟用功能；正式繳交與 tenant／storage 驗收要求仍保留。
+
+### 本輪驗證
+
+- Creator：先在 main 基準實際重現 4 個失敗，再以同四例確認修正。三組完整 suites 為 24／17／53，合計 **94 passed，0 failed／skipped**；main 的既有案例保留。先前 1,773 個案例中的大量 recovery／timeout／bridge／自動重新讀取案例隨 main 明確撤回的功能移除，不將舊測試總數當成本輪仍執行的證據。
+- Map：最新固定來源整合後兩組完整 suites **803 passed，0 failed／skipped**（732 component／71 scene）。24 個 rebuild cases 保留精確重建次數，並驗證 keyboard pause → resume；manual restart 保留第二次 allocation，只補上真正移入可視範圍的 scroll fixture。最後兩個增量檔 lint 為 0 errors／4 warnings。
+- TronClass Mobile：15 suites／**291 passed**，0 failed／skipped。Functions 刪帳與 relay 相關 3 suites／**77 passed**，0 failed／skipped；修改檔案 lint 通過；launcher **1 passed**。
+- TronClass Web：73 files 的完整相關範圍中，68 files 通過、4 個 emulator files／38 tests 因沒有本機 emulator 略過；剩餘 UI suite 在並行執行時出現等待逾時。將該完整 UI suite 單獨執行後 **65／65 passed**，原 5 秒與 DOM 等待門檻不變。合計 69 個可執行檔案的 2,472 個不同案例均取得通過結果，但不將它描述成同一次執行完全無失敗；遠端新 head 全套仍須重新驗收。新增 retention reservation／空退款 row 的真實 Firestore 驗證須由 emulator job 提供。
+- TronClass 的來源另有測試遺漏：`owner-account` 新契約仍保留舊 `account` 斷言，upload route 的 module mock 漏掉新增使用的檔案大小常數，以及 controlled-journal emulator 新增 vi 呼叫卻未 import。已在實際測試與型別失敗後修正斷言、partial mock 與 import，保留原安全條件。新刪帳 regex 觸發既有 no-control-regex lint；改用 lifecycle 已採用的 regex 加控制字元檢查，保持同樣 UID 邊界，不調降 lint 規則。
+
+整合後完整 Mobile／Web typecheck 均已通過。變更檔 lint：Mobile 14 檔為 0 errors／13 warnings，Web 18 檔為 0 errors／4 warnings；Functions 修改檔為 0 errors。未更動 lint 或型別政策。18 個現存 refs（17 個非 main 分支與 main）全部驗證為候選祖先。最終 GitHub 候選 SHA 與遠端完整檢查結果由 PR #753 記錄。以下歷史驗證僅對應其註明的舊候選，不能把舊 head 的綠勾當成本輪已通過。
+
+## 16:44 以前的來源範圍（歷史紀錄）
 
 來源快照見同目錄 `2026-11-23-all-branches-sources.json`。此次從 main `b75017aa56c4211931662cf6b61933b47aeb0211` 開始，先納入盤點的 17 個來源分支，於 16:44（台灣時間）最後盤點再納入新分支 #754，共 18 個來源；整合期間另同步最新 main `8aaefb93ada76113792b7f21559fcba2b0170db5`。來源提交均保留為祖先。
 

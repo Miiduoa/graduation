@@ -595,9 +595,25 @@ export function createCampusSpatialScene(
     if (appearanceChanged) updateAppearance();
     requestFrame();
   }
+  function syncMarkerFocus(enabled: boolean) {
+    try {
+      if (enabled) {
+        labelLayer.removeAttribute('inert');
+        labelLayer.removeAttribute('aria-hidden');
+      } else {
+        labelLayer.setAttribute('inert', '');
+        labelLayer.setAttribute('aria-hidden', 'true');
+      }
+    } catch { /* Partial WebViews still honor tabindex on each marker. */ }
+    for (const { button } of labels) {
+      button.tabIndex = enabled ? 0 : -1;
+    }
+  }
+
   function setActive(next: boolean) {
     if (disposed || active === next) return;
     active = next;
+    syncMarkerFocus(active);
     if (!active) {
       cancelFrame();
       cancelDrag();

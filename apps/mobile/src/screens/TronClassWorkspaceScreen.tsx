@@ -31,6 +31,7 @@ import {
   TronClassAssignmentPanel,
   tronClassNativeTime,
 } from './tronclass/TronClassAssignmentPanel';
+import { isTronClassDataFetchEnabled } from '../services/tronClassDataEnabled';
 import { safeNavigate } from '../utils/safeNavigate';
 import {
   NativeTronClassFileCache,
@@ -71,8 +72,30 @@ function homeworkOrder(left: TronClassHomework, right: TronClassHomework): numbe
   return leftDeadline === rightDeadline ? 0 : leftDeadline < rightDeadline ? -1 : 1;
 }
 
-/** One independently verified BFF owner, with platform-session precedence over Firebase. */
 export function TronClassWorkspaceScreen() {
+  const navigation = React.useContext(NavigationContext);
+  if (isTronClassDataFetchEnabled()) return <EnabledTronClassWorkspace />;
+
+  return (
+    <AIScreen>
+      <AICard>
+        <Text accessibilityRole="alert" style={copy}>此功能目前未開放</Text>
+        <AIButton label="返回" onPress={() => {
+          if (!navigation) return;
+          if (navigation.canGoBack()) {
+            navigation.goBack();
+            return;
+          }
+          const home = navigation.getState().routeNames.includes('LoginLanding') ? 'LoginLanding' : 'LearnHome';
+          safeNavigate(navigation, home);
+        }} />
+      </AICard>
+    </AIScreen>
+  );
+}
+
+/** One independently verified BFF owner, with platform-session precedence over Firebase. */
+function EnabledTronClassWorkspace() {
   const platform = useNuniSession();
   const school = useAuth();
   const navigation = React.useContext(NavigationContext);

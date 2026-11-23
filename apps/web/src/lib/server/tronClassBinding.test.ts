@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import {
   createTronClassBindingService, TRONCLASS_BINDING_TTL_MS, TRONCLASS_LOGIN_WINDOW_MS,
@@ -53,6 +53,7 @@ function setup() {
 
 function bindingPath(owner = OWNER) { return `_tronClassBindings/${createHash('sha256').update(owner).digest('hex')}`; }
 
+beforeEach(() => vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true'));
 afterEach(() => vi.unstubAllEnvs());
 
 describe('independent TronClass binding', () => {
@@ -73,7 +74,9 @@ describe('independent TronClass binding', () => {
     expect(docs.get(bindingPath())?.purgeAt).toEqual(new Date(NOW + TRONCLASS_BINDING_TTL_MS));
     expect([...docs.values()].find((row) => row.scope === 'owner')).toMatchObject({ ownerKey: OWNER,
       purgeAt: new Date(NOW + TRONCLASS_LOGIN_WINDOW_MS) });
-    expect([...docs.values()].find((row) => row.scope === 'account')).not.toHaveProperty('ownerKey');
+    expect([...docs.values()].find((row) => row.scope === 'owner-account')).toMatchObject({ ownerKey: OWNER,
+      purgeAt: new Date(NOW + TRONCLASS_LOGIN_WINDOW_MS) });
+    expect([...docs.values()].some((row) => row.scope === 'account')).toBe(false);
   });
 
   it('keeps provider owners isolated even when their account id text is the same', async () => {
@@ -200,8 +203,8 @@ describe('independent TronClass binding', () => {
     finish(loginResult());
     await Promise.resolve();
     expect(docs.has(bindingPath())).toBe(false);
-    expect([...docs.values()].filter(row => row.scope === 'owner' || row.scope === 'account'))
-      .toEqual(expect.arrayContaining([expect.objectContaining({ timestamps: [NOW] })]));
+    expect([...docs.values()].filter(row => row.scope === 'owner' || row.scope === 'owner-account'))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ timestamps: [expect.objectContaining({ timestamp: NOW })] })]));
     expect(remove.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(2);
     expect(await service.getStatus(OWNER)).toMatchObject({ connected: false, revision: null });
   });
@@ -278,14 +281,14 @@ describe('independent TronClass binding', () => {
     const marker = { schoolId: 'pu', state: 'closed', ownerHash: createHash('sha256').update(OWNER).digest('hex'),
       revision: 'c'.repeat(32), updatedAt: NOW };
     docs.set(bindingPath(), marker);
-    for (const [path, row] of docs) if (row.scope === 'owner') docs.delete(path);
+    for (const [path, row] of docs) if (row.ownerKey === OWNER && path.startsWith('_tronClassLoginAttempts/')) docs.delete(path);
     finish(loginResult());
     await expect(pending).rejects.toMatchObject({ code: 'SIGN_IN_REQUIRED' });
     await expect(service.connect(OWNER, input(marker.revision))).rejects.toMatchObject({ code: 'SIGN_IN_REQUIRED' });
     await expect(service.disconnect(OWNER, marker.revision)).rejects.toMatchObject({ code: 'SIGN_IN_REQUIRED' });
     await expect(service.requireBinding(OWNER)).rejects.toMatchObject({ code: 'SIGN_IN_REQUIRED' });
     expect(docs.get(bindingPath())).toEqual(marker);
-    expect([...docs.values()].some((row) => row.scope === 'owner')).toBe(false);
+    expect([...docs.keys()].some((path) => path.startsWith('_tronClassLoginAttempts/'))).toBe(false);
     expect(login).toHaveBeenCalledOnce();
   });
 
@@ -311,20 +314,54 @@ describe('independent TronClass binding', () => {
     expect(docs.has(bindingPath())).toBe(false);
   });
 
-  it('enforces a persistent account limit across owners and equivalent student account spellings', async () => {
+  it('enforces a persistent owner/account limit across equivalent account spellings without affecting another owner', async () => {
     const { service, login, db, clock } = setup();
     login.mockRejectedValue(new PuCampusError('credentials', 'fixture'));
     for (let i = 0; i < 5; i++) {
-      await expect(service.connect(`firebase:owner-${i}`, input(null, i % 2 ? 's410123456@pu.edu.tw' : '410123456')))
+      await expect(service.connect(OWNER, input(null, i % 2 ? 's410123456@pu.edu.tw' : '410123456')))
         .rejects.toMatchObject({ status: 401 });
     }
     // Recreating the service does not reset the rate limit.
     const restarted = createTronClassBindingService({ db, login, now: () => clock.value, encryptionSecret: SECRET });
-    await expect(restarted.connect('firebase:new-owner', input())).rejects.toMatchObject({ status: 429 });
+    await expect(restarted.connect(OWNER, input())).rejects.toMatchObject({ status: 429 });
     expect(login).toHaveBeenCalledTimes(5);
-    clock.value += TRONCLASS_LOGIN_WINDOW_MS;
     await expect(restarted.connect('firebase:new-owner', input())).rejects.toMatchObject({ status: 401 });
-    expect(login).toHaveBeenCalledTimes(6);
+    clock.value += TRONCLASS_LOGIN_WINDOW_MS;
+    await expect(restarted.connect(OWNER, input())).rejects.toMatchObject({ status: 401 });
+    expect(login).toHaveBeenCalledTimes(7);
+  });
+
+  it('refunds transport failures without refunding verified credential failures at the same timestamp', async () => {
+    const { service, login } = setup();
+    login.mockRejectedValueOnce(new PuCampusError('credentials', 'fixture'));
+    await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 401 });
+    login.mockRejectedValue(new PuCampusError('timeout', 'fixture'));
+    for (let i = 0; i < 6; i++) {
+      await expect(service.connect(OWNER, input())).rejects.toMatchObject({ code: 'TRONCLASS_LOGIN_UNAVAILABLE' });
+    }
+    login.mockRejectedValue(new PuCampusError('credentials', 'fixture'));
+    for (let i = 0; i < 4; i++) {
+      await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 401 });
+    }
+    await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 429 });
+  });
+
+  it.each([undefined, 'false', 'TRUE'])('rejects binding before school login or storage when retention is %s', async (flag) => {
+    vi.stubEnv('TRONCLASS_RETENTION_ENABLED', flag);
+    const { service, login, docs } = setup();
+    await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 503, code: 'TRONCLASS_RETENTION_REQUIRED' });
+    expect(login).not.toHaveBeenCalled();
+    expect(docs.size).toBe(0);
+  });
+
+  it('does not save a verified session if retention is disabled during login', async () => {
+    const { service, login, docs } = setup();
+    login.mockImplementationOnce(async () => {
+      vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'false');
+      return loginResult();
+    });
+    await expect(service.connect(OWNER, input())).rejects.toMatchObject({ code: 'TRONCLASS_RETENTION_REQUIRED' });
+    expect(docs.has(bindingPath())).toBe(false);
   });
 
   it('limits one platform account across different school accounts', async () => {

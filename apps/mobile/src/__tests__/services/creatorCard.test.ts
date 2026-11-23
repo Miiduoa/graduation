@@ -1,6 +1,6 @@
 import { getDocFromServer, setDoc } from 'firebase/firestore';
 import { readCreatorCardFields } from '@campus/shared/src/creatorCard';
-import { isCreatorCardAccessDenied, isCreatorCardTransientReadError, readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
+import { isCreatorCardAccessDenied, readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 
 jest.mock('../../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('firebase/firestore', () => ({
@@ -29,18 +29,6 @@ test.each([
   [new Error('offline'), false],
 ])('classifies card read error %p', (error, denied) => {
   expect(isCreatorCardAccessDenied(error)).toBe(denied);
-});
-
-test.each([
-  [{ code: 'unavailable' }, true],
-  [{ code: 'firestore/deadline-exceeded' }, true],
-  [new Error('offline'), true],
-  [{ code: 'permission-denied', message: 'offline' }, false],
-  [{ code: 'firestore/unauthenticated' }, false],
-  [new Error('Creator card scope mismatch'), false],
-  [new Error('unexpected server response'), false],
-])('allows first-read fallback only for a transient error %p', (error, transient) => {
-  expect(isCreatorCardTransientReadError(error)).toBe(transient);
 });
 
 test('reads only a school-scoped published card', async () => {
@@ -189,4 +177,14 @@ test.each([true, false])('display reads return null for a missing card with pend
     exists: () => false, metadata: { hasPendingWrites },
   } as never);
   await expect(readCreatorCard('pu', 'alice')).resolves.toBeNull();
+});
+
+test('save confirmation rejects a pending overlay even after setDoc returns', async () => {
+  const draft = { headline: card.headline, bio: card.bio, linkUrl: '' };
+  jest.mocked(setDoc).mockResolvedValue(undefined);
+  jest.mocked(getDocFromServer).mockResolvedValue({
+    ...snap({ ...card, linkUrl: '' }),
+    metadata: { fromCache: false, hasPendingWrites: true },
+  } as never);
+  await expect(saveCreatorCard('pu', 'alice', draft)).rejects.toThrow('pending writes');
 });

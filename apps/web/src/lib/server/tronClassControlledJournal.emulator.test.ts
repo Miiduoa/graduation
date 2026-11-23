@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { deleteApp, initializeApp, type App } from 'firebase-admin/app';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import { createTronClassBindingService, type TronClassBindingStore } from './tronClassBinding';
@@ -113,6 +113,7 @@ describe.skipIf(!localEmulator)('controlled TronClass journal with real Firestor
   const document = async (path: string) => (await db.doc(path).get()).data();
 
   beforeAll(() => {
+    vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true');
     app = initializeApp({ projectId: PROJECT }, `${PROJECT}-first-client`);
     otherApp = initializeApp({ projectId: PROJECT }, `${PROJECT}-second-client`);
     db = getFirestore(app);
@@ -136,6 +137,7 @@ describe.skipIf(!localEmulator)('controlled TronClass journal with real Firestor
   }, 20_000);
 
   afterAll(async () => {
+    vi.unstubAllEnvs();
     await Promise.all([db.terminate(), otherDb.terminate()]);
     await Promise.all([deleteApp(app), deleteApp(otherApp)]);
   });

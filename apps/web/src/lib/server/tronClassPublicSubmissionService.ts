@@ -29,6 +29,7 @@ export type TronClassPublicSubmitInput = OperationInput & {
 };
 export type TronClassPublicSubmissionResult = TronClassSubmissionResult | TronClassAcknowledgedReadbackResult;
 export type TronClassPublicSubmissionService = {
+  assertAttachmentWritesEnabled(): void;
   prepare(ownerKey: string, scope: TronClassHomeworkScope, signal?: AbortSignal): Promise<TronClassPreparedSubmission>;
   upload(ownerKey: string, input: TronClassPublicUploadInput, signal?: AbortSignal): Promise<TronClassUploadedAttachment>;
   submit(ownerKey: string, input: TronClassPublicSubmitInput, signal?: AbortSignal): Promise<TronClassPublicSubmissionResult>;
@@ -230,6 +231,7 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
         };
       });
     },
+    assertAttachmentWritesEnabled: guardAttachmentWrites,
     async upload(ownerKey, rawInput, signal) {
       operation(ownerKey, rawInput);
       if (Object.keys(rawInput).some(key => !['courseId', 'homeworkId', 'revision', 'operationId', 'fileId', 'name', 'contentType', 'bytes'].includes(key)) ||

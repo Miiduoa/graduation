@@ -257,7 +257,7 @@ function createCjsRelayFetch(config, fetchImpl = globalThis.fetch, now = Date.no
         JSON.stringify({
           msg: 'pu_edge_relay_client',
           host: parsed.hostname,
-          path: parsed.pathname,
+          path: parsed.pathname.replace(/\/\d+(?=\/|$)/g, '/:id'),
           status: response.status,
           ms: Date.now() - started,
           ...(colo ? { colo } : {}),

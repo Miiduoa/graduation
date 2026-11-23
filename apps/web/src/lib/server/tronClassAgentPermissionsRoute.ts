@@ -35,7 +35,7 @@ export async function handleTronClassAgentPermissions(request: NextRequest, depe
   rateLimit?: (ownerKey: string) => void;
 } = {}): Promise<Response> {
   try {
-    if (process.env.TRONCLASS_INTEGRATION_ENABLED === 'false') throw new NuniError(503, 'TRONCLASS_DISABLED');
+    if (process.env.TRONCLASS_INTEGRATION_ENABLED !== 'true') throw new NuniError(503, 'TRONCLASS_DISABLED');
     if (request.method !== 'POST') return response(405, { error: 'METHOD_NOT_ALLOWED' });
     const authenticate = dependencies.authenticate ?? authenticateTronClassActor;
     const actor = await authenticate(request);

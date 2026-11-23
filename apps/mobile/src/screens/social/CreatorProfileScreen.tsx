@@ -18,7 +18,6 @@ import {
 } from '../../services/creatorProfile';
 import type { CampusPostDoc } from '../../services/feed';
 import { readCreatorPin, saveCreatorPin, type CreatorPin } from '../../services/creatorPin';
-import { isCreatorCardTransientReadError, readCreatorCard } from '../../services/creatorCard';
 import { CreatorCardPanel } from './CreatorCardPanel';
 import { CreatorHighlight } from './CreatorHighlight';
 
@@ -27,10 +26,6 @@ type ReadState<T> =
   | { status: 'loading' }
   | { status: 'error' }
   | { status: 'ready'; value: T };
-type FirstCardRead = {
-  promise: ReturnType<typeof readCreatorCard>;
-  invalidatedBy: { error: unknown } | null;
-};
 type PostsPage = { rows: CampusPostDoc[]; cursor: CreatorCursor; hasMore: boolean };
 type FollowState = 'loading' | 'following' | 'not-following' | 'pending' | 'error';
 type PinState = { status: 'loading' } | { status: 'error' } | { status: 'ready'; value: CreatorPin };
@@ -40,10 +35,7 @@ type CreatorListItem =
   | { key: string; tiles: MediaTile[] };
 
 type Props = {
-  navigation?: {
-    navigate?: (screen: string, params?: Record<string, unknown>) => void;
-    addListener?: (event: 'focus', callback: () => void) => () => void;
-  };
+  navigation?: { navigate?: (screen: string, params?: Record<string, unknown>) => void };
   route?: { params?: { memberUid?: string; schoolId?: string } };
 };
 
@@ -98,47 +90,6 @@ function ScopedCreatorProfile({
 }) {
   const styles = useThemeStyleSheet(createStyles);
   const own = viewerUid === memberUid;
-  const firstCardRead = useRef<FirstCardRead | null | undefined>(undefined);
-  const readIntro = useCallback(() => {
-    const first = firstCardRead.current;
-    const read = readCreatorCard(schoolId, memberUid, { requireCommitted: true });
-    // Only a still-pending first read of one's own card can back up a failed reload.
-    if (first === null) return read;
-    const clearFirst = (record: FirstCardRead) => {
-      if (firstCardRead.current === record) firstCardRead.current = null;
-    };
-    if (first === undefined) {
-      const record: FirstCardRead = { promise: read, invalidatedBy: null };
-      firstCardRead.current = record;
-      // Normal completion ends future lookups without invalidating a reload
-      // that already captured this first read while it was still pending.
-      void read.then(() => clearFirst(record), () => clearFirst(record));
-      return read;
-    }
-    return read.then((value) => {
-      clearFirst(first);
-      return value;
-    }, (error: unknown) => {
-      if (!isCreatorCardTransientReadError(error)) {
-        // Invalidate the record held by every concurrent reload, not just the
-        // lookup ref. A fallback may already be waiting on the first Promise.
-        first.invalidatedBy = { error };
-        clearFirst(first);
-        throw error;
-      }
-      const requireValidFallback = () => {
-        if (first.invalidatedBy) throw first.invalidatedBy.error;
-      };
-      requireValidFallback();
-      return first.promise.then((value) => {
-        requireValidFallback();
-        return value;
-      }, (reason: unknown) => {
-        requireValidFallback();
-        throw reason;
-      });
-    });
-  }, [schoolId, memberUid]);
   const [tab, setTab] = useState<ProfileTab>('posts');
   const [identity, setIdentity] = useState<ReadState<CreatorIdentity | null>>({ status: 'loading' });
   const [posts, setPosts] = useState<ReadState<PostsPage>>({ status: 'loading' });
@@ -147,7 +98,6 @@ function ScopedCreatorProfile({
   const [followRevision, setFollowRevision] = useState(0);
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [savedRevision, setSavedRevision] = useState(0);
-  const [focusRevision, setFocusRevision] = useState(0);
   const [moreBusy, setMoreBusy] = useState(false);
   const [moreError, setMoreError] = useState('');
   const [followError, setFollowError] = useState('');
@@ -165,10 +115,6 @@ function ScopedCreatorProfile({
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
-
-  useEffect(() => navigation?.addListener?.('focus', () => {
-    setFocusRevision((n) => n + 1);
-  }), [navigation]);
 
   useEffect(() => {
     let live = true;
@@ -302,8 +248,6 @@ function ScopedCreatorProfile({
     ? saved.status === 'ready' ? saved.value : []
     : tab === 'posts' && pinnedPost
       ? postRows.filter((post) => post.id !== pinnedPost.id) : postRows;
-  // Keep the list header mounted across tabs. FlatList requires a remount
-  // when numColumns changes, so each media row supplies its own columns.
   const rows: CreatorListItem[] = [];
   if (tab === 'media') {
     const tiles = postRows.flatMap((post) => mediaUrls(post).map((url, index) => ({
@@ -324,6 +268,7 @@ function ScopedCreatorProfile({
 
   return (
     <FlatList
+      key={own ? 'owner' : tab === 'media' ? 'media' : 'list'}
       testID="creator-profile-list"
       style={styles.root}
       contentContainerStyle={styles.listContent}
@@ -351,10 +296,7 @@ function ScopedCreatorProfile({
                 <Action label="重試名片" onPress={() => setRefreshRevision((n) => n + 1)} />
               </View>
             )}
-            {/* The owner's editor keeps its unresolved write and draft across tabs. */}
-            <CreatorCardPanel key={own ? 'owner' : tab} schoolId={schoolId} ownerUid={memberUid} own={own}
-              readIntro={own ? readIntro : undefined}
-              reloadRevision={`${tab}:${refreshRevision}:${savedRevision}:${focusRevision}`} />
+            <CreatorCardPanel schoolId={schoolId} ownerUid={memberUid} own={own} />
             <CreatorHighlight key={schoolId + ':' + memberUid}
               schoolId={schoolId} memberUid={memberUid} own={own} candidates={postRows}
               openPost={(postId) => navigation?.navigate?.('PostDetail', { postId })} />

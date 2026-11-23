@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { NuniError } from '@campus/shared/src/nuni';
 import { handleTronClassAgentPermissions } from './tronClassAgentPermissionsRoute';
@@ -21,6 +21,8 @@ function setup() {
   return { authenticate, grants, rateLimit };
 }
 afterEach(() => vi.unstubAllEnvs());
+
+beforeEach(() => vi.stubEnv('TRONCLASS_INTEGRATION_ENABLED', 'true'));
 
 describe('TronClass Agent permission HTTP boundary', () => {
   it('returns only the authenticated owner grant without caching', async () => {

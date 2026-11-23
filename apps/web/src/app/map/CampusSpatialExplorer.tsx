@@ -334,6 +334,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const pageSuspended = useRef(false);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
+  const restartButton = useRef<HTMLButtonElement | null>(null);
+  // Only move keyboard focus into the recovery UI when it was inside the 3D scene.
+  // An observer pause caused by scrolling must not steal focus from directions or POI controls.
+  const restoreFocusAfterPause = useRef(false);
+  const sceneWasSuspended = useRef(false);
   const view = useMemo(() => ({
     selectedId,
     overhead,
@@ -363,7 +368,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended.current || document.hidden;
     const isOffscreen = () => visibility === 'hidden' ||
-      (visibility === 'unknown' && measureLayoutVisibility() === false);
+      (visibility === 'unknown' && measureLayoutVisibility() === false) ||
+      // IntersectionObserver checks layout intersection, not whether a mobile
+      // keyboard has reduced the *visual* viewport over the 3D canvas.
+      // A positive observer entry must never reactivate an obscured WebGL scene.
+      measureVisualViewportVisibility() === false;
     const isDeferred = () => isOffscreen() || isBackgrounded() || (saveData && !hasDataConsent);
     const defer = () => {
       setDeferredCause(isBackgrounded() ? 'background' :
@@ -373,6 +382,19 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     const updateVisibility = () => {
       if (!scene) return;
       const shouldRender = !isOffscreen() && !isBackgrounded();
+      // Capture focus before setActive() marks 3D marker buttons inert. Some
+      // browsers blur the active marker immediately on that DOM change.
+      if (!shouldRender && !sceneWasSuspended.current) {
+        restoreFocusAfterPause.current = host.contains(host.ownerDocument.activeElement);
+      } else if (shouldRender && sceneWasSuspended.current) {
+        // Auto-resume unmounts the restart control. If it holds keyboard
+        // focus, return it to the scene instead of leaving it on document.body.
+        const focused = host.ownerDocument.activeElement;
+        if (focused && focused === restartButton.current) {
+          restoreFocusAfterPause.current = true;
+        }
+      }
+      sceneWasSuspended.current = !shouldRender;
       scene.setActive(shouldRender);
       setRenderSuspended(!shouldRender);
     };
@@ -445,23 +467,25 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     let scrollDialog: Element | null | undefined;
     try { scrollDialog = host.closest?.('dialog'); }
     catch { /* Dialog clipping is optional when this API is unavailable. */ }
-    const measureLayoutVisibility = (): boolean | null => {
+    const measureVisibilityAgainst = (
+      viewLeft: number, viewTop: number, viewRight: number, viewBottom: number,
+      clipToDialog = true,
+    ): boolean | null => {
       try {
         const rect = host.getBoundingClientRect();
-        const width = window.innerWidth;
-        const height = window.innerHeight;
         // Incomplete geometry cannot establish an empty intersection.
         if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height,
-          width, height].every(Number.isFinite) ||
-          rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0 ||
+          viewLeft, viewTop, viewRight, viewBottom].every(Number.isFinite) ||
+          rect.width <= 0 || rect.height <= 0 ||
+          viewRight <= viewLeft || viewBottom <= viewTop ||
           rect.right <= rect.left || rect.bottom <= rect.top) return null;
         // The dialog clips its overflowing contents even where the window
         // still has visible pixels outside the dialog.
-        const dialogRect = scrollDialog?.getBoundingClientRect();
-        let clippedLeft = Math.max(rect.left, 0);
-        let clippedTop = Math.max(rect.top, 0);
-        let clippedRight = Math.min(rect.right, width);
-        let clippedBottom = Math.min(rect.bottom, height);
+        const dialogRect = clipToDialog ? scrollDialog?.getBoundingClientRect() : undefined;
+        let clippedLeft = Math.max(rect.left, viewLeft);
+        let clippedTop = Math.max(rect.top, viewTop);
+        let clippedRight = Math.min(rect.right, viewRight);
+        let clippedBottom = Math.min(rect.bottom, viewBottom);
         if (scrollDialog && dialogRect) {
           const { clientLeft, clientTop, clientWidth, clientHeight } = scrollDialog;
           const contentLeft = dialogRect.left + clientLeft;
@@ -480,6 +504,27 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       } catch {
         // A broken host/layout measurement is not evidence of an offscreen
         // canvas; keep the observer and manual recovery available.
+        return null;
+      }
+    };
+    const measureLayoutVisibility = (): boolean | null =>
+      measureVisibilityAgainst(0, 0, window.innerWidth, window.innerHeight);
+    // The pause path (isOffscreen) uses the visual viewport alone: a positive
+    // observer entry already reflects dialog clipping. Only a stale hidden
+    // result must also prove the canvas is inside the dialog scrollport.
+    const measureVisualViewportVisibility = (clipToDialog = false): boolean | null => {
+      try {
+        const viewport = window.visualViewport;
+        if (!viewport) return null;
+        const left = viewport.offsetLeft;
+        const top = viewport.offsetTop;
+        const width = viewport.width;
+        const height = viewport.height;
+        if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+          return null;
+        }
+        return measureVisibilityAgainst(left, top, left + width, top + height, clipToDialog);
+      } catch {
         return null;
       }
     };
@@ -582,11 +627,30 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
     // Nested dialog scroll can move the canvas without an observer callback.
-    const viewportEvents = ['resize', 'scroll', 'orientationchange'] as const;
+    const viewportEvents = ['resize', 'scroll', 'orientationchange', 'focus'] as const;
     for (const event of viewportEvents) {
       try { window.addEventListener(event, syncVisibility, event === 'scroll' ? { capture: true, passive: true } : false); }
       catch { /* Observer and page events still report visibility. */ }
     }
+    // Keyboard transitions can move the host without a window event.
+    const onVisualViewportChange = () => {
+      if (visibility === 'hidden' && measureVisualViewportVisibility(true) === true) {
+        // Recover from a stale hidden observer entry after the keyboard moves.
+        // A valid intersection with the visual viewport is evidence the host
+        // has returned, even if this WebView emits no new observer callback.
+        visibility = 'unknown';
+      }
+      // Also run when the observer last said "visible": a shrinking mobile
+      // viewport can cover the canvas while its layout intersection stays true.
+      // Invalid/missing visual geometry is not proof that the host is hidden.
+      syncVisibility();
+    };
+    let visualViewport: VisualViewport | null | undefined;
+    try {
+      visualViewport = window.visualViewport;
+      visualViewport?.addEventListener('resize', onVisualViewportChange);
+      visualViewport?.addEventListener('scroll', onVisualViewportChange);
+    } catch { /* Window events still recheck layout in partial WebViews. */ }
     syncVisibility();
     return () => {
       active = false;
@@ -601,6 +665,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         try { window.removeEventListener(event, syncVisibility, event === 'scroll'); }
         catch { /* Complete the remaining cleanup. */ }
       }
+      try {
+        visualViewport?.removeEventListener('resize', onVisualViewportChange);
+        visualViewport?.removeEventListener('scroll', onVisualViewportChange);
+      } catch { /* Complete scene cleanup even in partial WebViews. */ }
       pendingCreate = null;
       scene?.dispose();
       runtime.current = null;
@@ -608,6 +676,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   }, [host, model, onSelect, onCameraChange, footprints, manualStart]);
 
   const startManually = () => {
+    // The user's explicit recovery action should return keyboard focus to 3D
+    // once it is usable, even if focus was outside the scene when it paused.
+    if (status === 'ready' && renderSuspended) restoreFocusAfterPause.current = true;
     // A recovery button may be visible while the canvas is below the modal
     // scrollport. Focus alone does not scroll in some mobile WebViews.
     // Bring the host into view before the new scene measures its bounds.
@@ -617,6 +688,26 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     try { host?.focus(); } catch { /* Focus is advisory. */ }
     onManualStart();
   };
+  const paused = status === 'ready' && renderSuspended;
+  useEffect(() => {
+    if (paused) {
+      // An offscreen suspension is not a navigation request. Leave keyboard
+      // focus on directions/other controls unless the 3D host held it.
+      if (restoreFocusAfterPause.current) {
+        try { restartButton.current?.focus({ preventScroll: true }); } catch { /* Focus is advisory. */ }
+      }
+      return;
+    }
+    if (status === 'ready' && restoreFocusAfterPause.current) {
+      restoreFocusAfterPause.current = false;
+      if (!host) return;
+      const focused = host.ownerDocument.activeElement;
+      // Do not override a deliberate focus move made while the scene paused.
+      if (focused === host.ownerDocument.body || focused === restartButton.current) {
+        try { host.focus({ preventScroll: true }); } catch { /* Focus is advisory. */ }
+      }
+    }
+  }, [paused, status, host]);
   return (
     <>
     <div className={styles.scene} data-spatial-state={status}>
@@ -625,8 +716,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         className={styles.sceneHost}
         role="group"
         aria-label="校園地點空間圖"
-        aria-describedby={status === 'ready' ? helpId : undefined}
-        tabIndex={status === 'ready' ? 0 : -1}
+        aria-describedby={status === 'ready' && !paused ? helpId : undefined}
+        aria-hidden={paused || undefined}
+        tabIndex={status === 'ready' && !paused ? 0 : -1}
+        inert={paused || undefined}
       />
       {status !== 'ready' && (
         <div className={styles.sceneMessage} role="status">
@@ -650,7 +743,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       {status === 'ready' && renderSuspended && (
         <div className={styles.sceneMessage} role="status">
           <p>立體畫面已暫停。回到空間圖會自動恢復；若沒有恢復，可手動重新啟動。</p>
-          <button className="btn" type="button" onClick={startManually}>重新啟動立體畫面</button>
+          <button ref={restartButton} className="btn" type="button" onClick={startManually}>重新啟動立體畫面</button>
         </div>
       )}
       <span className={styles.sceneCaption}>地點位置示意</span>
