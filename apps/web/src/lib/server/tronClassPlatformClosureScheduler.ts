@@ -41,8 +41,9 @@ export async function waitForTronClassPlatformClosureFirstBatch(): Promise<void>
 
 function hasFailedEvents(result: unknown): boolean {
   if (!result || typeof result !== 'object' || !('failed' in result)) return false;
-  const failed = (result as { failed: unknown }).failed;
-  return typeof failed !== 'number' || !Number.isFinite(failed) || failed !== 0;
+  const pending = (value: unknown) => typeof value !== 'number' || !Number.isFinite(value) || value !== 0;
+  const { failed, retrying } = result as { failed: unknown; retrying?: unknown };
+  return pending(failed) || ('retrying' in result && pending(retrying));
 }
 
 export function startTronClassPlatformClosureScheduler(

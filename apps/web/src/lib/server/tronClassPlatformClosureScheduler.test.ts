@@ -102,6 +102,21 @@ describe('opt-in platform closure scheduler', () => {
     expect(isTronClassPlatformClosureSchedulerReady()).toBe(false);
   });
 
+  it('does not count an empty batch as a success while an earlier failed cleanup is still waiting to retry', async () => {
+    vi.useFakeTimers(); vi.resetModules();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const run = vi.fn().mockResolvedValue({ claimed: 0, completed: 0, failed: 0, stale: 0, retrying: 1 });
+    const { startTronClassPlatformClosureScheduler, isTronClassPlatformClosureSchedulerReady, TRONCLASS_CLOSURE_INTERVAL_MS } =
+      await import('./tronClassPlatformClosureScheduler');
+    startTronClassPlatformClosureScheduler(configured, run);
+    await vi.advanceTimersByTimeAsync(TRONCLASS_CLOSURE_INTERVAL_MS * 2);
+    expect(run.mock.calls.length).toBeGreaterThan(1);
+    expect(isTronClassPlatformClosureSchedulerReady()).toBe(false);
+    run.mockResolvedValue({ claimed: 1, completed: 1, failed: 0, stale: 0, retrying: 0 });
+    await vi.advanceTimersByTimeAsync(TRONCLASS_CLOSURE_INTERVAL_MS);
+    expect(isTronClassPlatformClosureSchedulerReady()).toBe(true);
+  });
+
   it('lets a binding wait briefly for the first batch and is shared across module instances', async () => {
     vi.useFakeTimers(); vi.resetModules();
     vi.spyOn(Math, 'random').mockReturnValue(0.2);

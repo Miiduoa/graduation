@@ -31,6 +31,7 @@ function memoryStore() {
     claim: vi.fn<TronClassPlatformClosureStore['claim']>().mockResolvedValueOnce({ ...lease }).mockResolvedValue(null),
     complete: vi.fn<TronClassPlatformClosureStore['complete']>().mockResolvedValue(true),
     retry: vi.fn<TronClassPlatformClosureStore['retry']>().mockResolvedValue(true),
+    retrying: vi.fn<TronClassPlatformClosureStore['retrying']>().mockResolvedValue(0),
   };
 }
 
@@ -121,6 +122,14 @@ describe('parameterized PostgreSQL queue boundary', () => {
     await expect(store.claim()).rejects.toMatchObject({ code: 'TRONCLASS_PLATFORM_CLOSURE_UNAVAILABLE' });
   });
 
+  it('counts events that still carry a failed cleanup, and fails closed on malformed evidence', async () => {
+    expect(await createSqlTronClassPlatformClosureStore(async () => [{ retrying: '0' }]).retrying()).toBe(0);
+    expect(await createSqlTronClassPlatformClosureStore(async () => [{ retrying: '3' }]).retrying()).toBe(3);
+    for (const rows of [[], [{ retrying: 3 }], [{ retrying: '-1' }], [{ retrying: '1' }, { retrying: '1' }]])
+      await expect(createSqlTronClassPlatformClosureStore(async () => rows).retrying())
+        .rejects.toMatchObject({ code: 'TRONCLASS_PLATFORM_CLOSURE_UNAVAILABLE' });
+  });
+
   it('sanitizes SQL failures and rejects a completion for an unrelated event', async () => {
     const failed = createSqlTronClassPlatformClosureStore(async () => { throw new Error('private connection string'); });
     await expect(failed.claim()).rejects.toThrow('TRONCLASS_PLATFORM_CLOSURE_UNAVAILABLE');
@@ -140,7 +149,7 @@ describe('explicit default worker wiring', () => {
     { ...configured, TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL: 'postgresql://host/' },
   ])('does not inherit general database settings or start without an exact opt-in: %j', async env => {
     expect(readTronClassPlatformClosureConfig(env)).toBeNull();
-    expect(await runDefaultTronClassPlatformClosureBatch(env)).toEqual({ claimed: 0, completed: 0, failed: 0, stale: 0 });
+    expect(await runDefaultTronClassPlatformClosureBatch(env)).toEqual({ claimed: 0, completed: 0, failed: 0, stale: 0, retrying: 0 });
     expect(runtime.getFirebaseAdmin).not.toHaveBeenCalled();
     expect(runtime.dedicatedQuery).not.toHaveBeenCalled();
     expect(runtime.closeTronClassOwner).not.toHaveBeenCalled();
@@ -153,13 +162,14 @@ describe('explicit default worker wiring', () => {
     let claimed = false;
     const query = vi.fn<SqlQuery>(async (sql, parameters) => {
       if (sql === TRONCLASS_PLATFORM_CLOSURE_SQL.ready) return [{ ready: true }];
+      if (sql === TRONCLASS_PLATFORM_CLOSURE_SQL.retrying) return [{ retrying: '0' }];
       if (sql === TRONCLASS_PLATFORM_CLOSURE_SQL.complete) return [{ id: '1' }];
       if (claimed) return [];
       claimed = true;
       return [{ id: '1', platform_account_id: accountId, reason: 'deleted', attempts: 1, lease_token: parameters![0] }];
     });
     runtime.dedicatedQuery.mockReturnValue(query);
-    expect(await runDefaultTronClassPlatformClosureBatch(configured)).toEqual({ claimed: 1, completed: 1, failed: 0, stale: 0 });
+    expect(await runDefaultTronClassPlatformClosureBatch(configured)).toEqual({ claimed: 1, completed: 1, failed: 0, stale: 0, retrying: 0 });
     expect(runtime.dedicatedQuery).toHaveBeenCalledExactlyOnceWith(configured.TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL);
     expect(runtime.closeTronClassOwner).toHaveBeenCalledExactlyOnceWith({ db, ownerKey: `platform:${accountId}` });
     expect(query.mock.calls[0][0]).toBe(TRONCLASS_PLATFORM_CLOSURE_SQL.ready);
@@ -180,12 +190,13 @@ describe('explicit default worker wiring', () => {
     const query = vi.fn<SqlQuery>(async (sql, parameters) => {
       if (sql === TRONCLASS_PLATFORM_CLOSURE_SQL.ready) return [{ ready: true }];
       if (sql === TRONCLASS_PLATFORM_CLOSURE_SQL.retry) return [{ id: '1' }];
+      if (sql === TRONCLASS_PLATFORM_CLOSURE_SQL.retrying) return [{ retrying: '1' }];
       if (claimed) return [];
       claimed = true;
       return [{ id: '1', platform_account_id: accountId, reason: 'closed', attempts: 1, lease_token: parameters![0] }];
     });
     runtime.dedicatedQuery.mockReturnValue(query);
-    expect(await runDefaultTronClassPlatformClosureBatch(configured)).toEqual({ claimed: 1, completed: 0, failed: 1, stale: 0 });
+    expect(await runDefaultTronClassPlatformClosureBatch(configured)).toEqual({ claimed: 1, completed: 0, failed: 1, stale: 0, retrying: 1 });
     expect(warning).toHaveBeenCalledExactlyOnceWith('TronClass platform account cleanup failed');
     expect(query.mock.calls.some(([sql]) => sql === TRONCLASS_PLATFORM_CLOSURE_SQL.complete)).toBe(false);
   });

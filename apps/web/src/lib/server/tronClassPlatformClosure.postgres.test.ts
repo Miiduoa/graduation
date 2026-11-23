@@ -149,6 +149,8 @@ describe.skipIf(!port)('real PostgreSQL platform closure outbox', () => {
     expect(pending).toMatchObject({ attempts: 1, lease_token: null, lease_expires_at: null, last_failure: 'cleanup_failed' });
     expect(JSON.stringify(pending)).not.toContain('private-cookie');
     expect(await store(second).claim()).toBeNull();
+    // Backing-off events are invisible to claim() but still count as unfinished cleanup.
+    expect(await store(second).retrying()).toBe(1);
     expect((await control.query('SELECT next_attempt_at > clock_timestamp() AS waiting FROM tronclass_account_closure_outbox')).rows)
       .toEqual([{ waiting: true }]);
     await control.query("UPDATE tronclass_account_closure_outbox SET next_attempt_at=clock_timestamp()-interval '1 second'");
@@ -226,6 +228,16 @@ describe.skipIf(!port)('real PostgreSQL platform closure outbox', () => {
     await first.query(`SET ROLE ${closerRole}`);
     try { await expect(ready()).rejects.toMatchObject({ code: 'TRONCLASS_PLATFORM_CLOSURE_UNAVAILABLE' }); }
     finally { await first.query('RESET ROLE'); }
+    // The worker needs UPDATE on every lease and retry column, not just any one of them.
+    for (const column of ['attempts', 'next_attempt_at', 'lease_token', 'lease_expires_at', 'last_failure']) {
+      await control.query(`REVOKE UPDATE (${column}) ON tronclass_account_closure_outbox FROM ${workerRole}`);
+      await first.query(`SET ROLE ${workerRole}`);
+      try { await expect(ready()).rejects.toMatchObject({ code: 'TRONCLASS_PLATFORM_CLOSURE_UNAVAILABLE' }); }
+      finally {
+        await first.query('RESET ROLE');
+        await control.query(`GRANT UPDATE (${column}) ON tronclass_account_closure_outbox TO ${workerRole}`);
+      }
+    }
     // A replica-only trigger does not fire for ordinary closure transactions.
     for (const [trigger, mode] of ['tronclass_account_closed', 'tronclass_account_deleted']
       .flatMap(name => [[name, 'DISABLE TRIGGER'], [name, 'ENABLE REPLICA TRIGGER']] as const)) {
