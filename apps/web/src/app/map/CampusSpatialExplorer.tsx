@@ -378,6 +378,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       // browsers blur the active marker immediately on that DOM change.
       if (!shouldRender && !sceneWasSuspended.current) {
         restoreFocusAfterPause.current = host.contains(host.ownerDocument.activeElement);
+      } else if (shouldRender && sceneWasSuspended.current) {
+        // Auto-resume unmounts the restart control. If it holds keyboard
+        // focus, return it to the scene instead of leaving it on document.body.
+        const focused = host.ownerDocument.activeElement;
+        if (focused && focused === restartButton.current) {
+          restoreFocusAfterPause.current = true;
+        }
       }
       sceneWasSuspended.current = !shouldRender;
       scene.setActive(shouldRender);
@@ -566,7 +573,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     }
     // Keyboard transitions can move the host without a window event.
     const onVisualViewportChange = () => {
-      if (visibility === 'unknown') syncVisibility();
+      if (visibility === 'visible') return;
+      if (visibility === 'hidden') {
+        // A stale offscreen observer result can linger after the keyboard or
+        // visual viewport moves the host back onscreen without a new entry.
+        if (measureLayoutVisibility() !== true) return;
+        visibility = 'unknown';
+      }
+      syncVisibility();
     };
     let visualViewport: VisualViewport | null | undefined;
     try {

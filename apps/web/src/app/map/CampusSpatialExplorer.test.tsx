@@ -766,6 +766,39 @@ it('keeps keyboard focus on directions instead of stealing it during offscreen 3
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+it('moves focus from the restart button into the scene when auto-resume removes it', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const directions = within(dialog).getByRole('link', { name: '開啟步行導航' });
+  const notify = (visible: boolean) => act(() => intersection?.([{
+    target: host, isIntersecting: visible,
+    intersectionRect: { width: visible ? 280 : 0, height: visible ? 160 : 0 },
+  }] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver));
+
+  // Pause left focus on walking directions. The visitor then tabs to the
+  // restart control; auto-resume must not drop that focus onto document.body.
+  directions.focus();
+  notify(false);
+  const recovery = within(dialog).getByRole('button', { name: '重新啟動立體畫面' });
+  expect(document.activeElement).toBe(directions);
+  recovery.focus();
+  expect(document.activeElement).toBe(recovery);
+  notify(true);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+  expect(document.activeElement).toBe(host);
+  expect(host.tabIndex).toBe(0);
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('uses the last matching entry even when it has no timestamp', async () => {
   let observedHost: Element | null = null;
   vi.stubGlobal('IntersectionObserver', class {
@@ -1841,7 +1874,7 @@ it.each((['missing', 'silent', 'hidden'] as const).flatMap((observer) =>
     await act(async () => {
       (source === 'visualViewport' ? viewport : window).dispatchEvent(new Event(event));
     });
-    if (observer === 'hidden') {
+    if (observer === 'hidden' && source !== 'visualViewport') {
       expect(scene.create).not.toHaveBeenCalled();
       fireEvent.click(manual);
     }
@@ -2117,11 +2150,21 @@ it('pauses on layout resize and resumes on visual viewport resize when the obser
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     expect(scene.create).toHaveBeenCalledTimes(1);
 
+    bounds.mockReturnValue(new DOMRect(0, height + 10, 320, 150));
     act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
     act(() => viewport.dispatchEvent(new Event('resize')));
     act(() => viewport.dispatchEvent(new Event('scroll')));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
 
+    // A later keyboard/viewport change can bring the host onscreen without a
+    // fresh observer entry. Remeasure and resume instead of staying paused.
+    bounds.mockReturnValue(new DOMRect(0, 40, 320, 150));
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+
+    act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
     act(() => intersection?.([{
       isIntersecting: true, target: graphics, time: 100,
       intersectionRect: { width: 320, height: 50 },
