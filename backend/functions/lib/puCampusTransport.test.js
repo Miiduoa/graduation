@@ -358,3 +358,23 @@ test('env-based alt relay signs listed hosts to the alt URL and keeps others on 
   );
   info.mockRestore();
 });
+
+test('relay log replaces numeric path ids so student ids are not logged', async () => {
+  const logs = [];
+  const info = jest.spyOn(console, 'info').mockImplementation((message) => logs.push(String(message)));
+  const relayFetch = createCjsRelayFetch(
+    { url: 'https://pu-edge-relay.example.workers.dev', secret: 'unit-test-secret' },
+    async () => new Response('ok'),
+    () => 1_700_000_000_000,
+    () => 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  );
+  await sendWithCampusFetch({
+    url: 'https://tronclass.pu.edu.tw/api/course/123/student/456789/submissions',
+    method: 'GET',
+    fetch: relayFetch,
+  });
+  const entry = JSON.parse(logs[0]);
+  expect(entry.path).toBe('/api/course/:id/student/:id/submissions');
+  expect(logs[0]).not.toContain('456789');
+  info.mockRestore();
+});
