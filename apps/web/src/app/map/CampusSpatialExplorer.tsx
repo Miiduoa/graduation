@@ -588,6 +588,36 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         return null;
       }
     };
+    const viewportSignature = (viewport: VisualViewport): string =>
+      [viewport.offsetLeft, viewport.offsetTop, viewport.width, viewport.height,
+        viewport.scale].join(':');
+    // Manual restart always wins over a visual viewport that may be stale.
+    let ignoredViewport: string | null = null;
+    if (manualStart > 0) {
+      try {
+        const viewport = window.visualViewport;
+        if (viewport) ignoredViewport = viewportSignature(viewport);
+      } catch { /* Partial WebViews: nothing to ignore. */ }
+    }
+    const isTextEntryTarget = (element: Element | null): boolean => {
+      if (!element) return false;
+      const tag = element.tagName;
+      if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+      if (tag === 'INPUT') {
+        const type = ((element as HTMLInputElement).type || 'text').toLowerCase();
+        return !['button', 'checkbox', 'radio', 'range', 'submit', 'reset', 'image',
+          'file', 'color', 'hidden'].includes(type);
+      }
+      return (element as HTMLElement).isContentEditable === true;
+    };
+    const visualViewportMayObscureCanvas = (viewport: VisualViewport): boolean => {
+      // Pinch zoom legitimately leaves parts of the layout outside the visual
+      // viewport and always reports its own resize/scroll events.
+      const scale = viewport.scale;
+      if (typeof scale === 'number' && Number.isFinite(scale) && scale > 1.01) return true;
+      try { return isTextEntryTarget(host.ownerDocument.activeElement); }
+      catch { return false; }
+    };
     // The pause path (isOffscreen) uses the visual viewport alone: a positive
     // observer entry already reflects dialog clipping. Only a stale hidden
     // result must also prove the canvas is inside the dialog scrollport.
@@ -601,6 +631,18 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         const height = viewport.height;
         if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
           return null;
+        }
+        // Some WebViews keep reporting the keyboard-shrunk height after the
+        // keyboard is dismissed and emit no further viewport event. A shrunk
+        // visual viewport is only evidence of an obscured canvas while
+        // something can actually be showing a keyboard or the page is
+        // pinch-zoomed; otherwise treat the geometry as unknown.
+        if (!clipToDialog && !visualViewportMayObscureCanvas(viewport)) return null;
+        // The visitor explicitly restarted 3D while the viewport read this
+        // way. Ignore that exact (possibly stale) geometry until it changes.
+        if (ignoredViewport !== null) {
+          if (viewportSignature(viewport) === ignoredViewport) return null;
+          ignoredViewport = null;
         }
         return measureVisibilityAgainst(left, top, left + width, top + height, clipToDialog);
       } catch {
@@ -697,6 +739,23 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       // Invalid/missing visual geometry is not proof that the host is hidden.
       syncVisibility();
     };
+    // Dismissing the keyboard (blur) or opening it can change the visual
+    // viewport after the focus event, and some WebViews never report it.
+    // Re-measure right away and again once the keyboard animation settles.
+    const focusTimers = new Set<number>();
+    const onFocusChange = () => {
+      for (const delay of [0, 350]) {
+        const id = window.setTimeout(() => {
+          focusTimers.delete(id);
+          if (active) syncVisibility();
+        }, delay);
+        focusTimers.add(id);
+      }
+    };
+    try {
+      document.addEventListener('focusin', onFocusChange, true);
+      document.addEventListener('focusout', onFocusChange, true);
+    } catch { /* Window events still recheck layout in partial WebViews. */ }
     let visualViewport: VisualViewport | null | undefined;
     try {
       visualViewport = window.visualViewport;
@@ -707,6 +766,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     return () => {
       active = false;
       if (timeout !== null) window.clearTimeout(timeout);
+      for (const id of focusTimers) window.clearTimeout(id);
+      focusTimers.clear();
+      try {
+        document.removeEventListener('focusin', onFocusChange, true);
+        document.removeEventListener('focusout', onFocusChange, true);
+      } catch { /* Complete the remaining cleanup. */ }
       // A broken embedded WebView may throw even on disconnect(). Complete
       // scene and listener cleanup regardless; never leak a WebGL context.
       disconnectObserver();

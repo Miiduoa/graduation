@@ -81,7 +81,21 @@ beforeEach(() => {
   });
 });
 
+// A soft keyboard can only be covering content while a text field has focus.
+function showKeyboard() {
+  const field = document.createElement('input');
+  field.type = 'text';
+  field.setAttribute('data-test-keyboard-field', '');
+  document.body.appendChild(field);
+  act(() => field.focus());
+  return field;
+}
+function hideKeyboard(field?: HTMLElement) {
+  act(() => (field ?? document.querySelector<HTMLElement>('[data-test-keyboard-field]'))?.blur());
+}
+
 afterEach(() => {
+  document.querySelectorAll('[data-test-keyboard-field]').forEach((field) => field.remove());
   document.documentElement.removeAttribute('data-reduced-motion');
   document.documentElement.removeAttribute('data-theme');
   vi.unstubAllGlobals();
@@ -1466,10 +1480,12 @@ it.each(
     vi.spyOn(host, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 100, 320, 180));
     // A keyboard that covers the canvas pauses it without a new allocation,
     // and the scene resumes as soon as the visual viewport returns.
+    showKeyboard();
     viewport.height = 50;
     act(() => viewport.dispatchEvent(new Event('resize')));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
     viewport.height = window.innerHeight;
+    hideKeyboard();
     act(() => viewport.dispatchEvent(new Event('resize')));
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     fireEvent.scroll(dialog);
@@ -2335,6 +2351,7 @@ it('stays paused after a hidden observer when the canvas misses the visual viewp
 
     // Keyboard still open: the host intersects the layout viewport but sits
     // below the visual viewport. Do not treat that as visible or resume.
+    showKeyboard();
     viewport.height = 200;
     act(() => viewport.dispatchEvent(new Event('resize')));
     act(() => viewport.dispatchEvent(new Event('scroll')));
@@ -2343,6 +2360,7 @@ it('stays paused after a hidden observer when the canvas misses the visual viewp
 
     // Dismissing the keyboard expands the visual viewport over the host.
     viewport.height = window.innerHeight;
+    hideKeyboard();
     act(() => viewport.dispatchEvent(new Event('resize')));
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     expect(scene.create).toHaveBeenCalledTimes(1);
@@ -2374,6 +2392,7 @@ it('pauses a layout-visible 3D canvas behind the mobile keyboard until the visua
 
     // The canvas is still inside the layout viewport, but the on-screen
     // keyboard now covers it in the shorter visual viewport.
+    showKeyboard();
     viewport.height = 200;
     act(() => viewport.dispatchEvent(new Event('resize')));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
@@ -2387,10 +2406,119 @@ it('pauses a layout-visible 3D canvas behind the mobile keyboard until the visua
     // Dismiss the keyboard; the existing WebGL scene resumes without a
     // second allocation even when the observer stays silent.
     viewport.height = window.innerHeight;
+    hideKeyboard();
     act(() => viewport.dispatchEvent(new Event('resize')));
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     expect(scene.create).toHaveBeenCalledTimes(1);
     expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+async function openKeyboardCoveredScene() {
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0, scale: 1,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 400, 320, 150));
+  act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  const field = showKeyboard();
+  viewport.height = 200;
+  act(() => viewport.dispatchEvent(new Event('resize')));
+  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+  return { viewport, dialog, graphics, bounds, field };
+}
+
+it('resumes 3D after the keyboard closes even when the WebView keeps the shrunken visual viewport', async () => {
+  const { viewport, dialog, bounds, field } = await openKeyboardCoveredScene();
+  try {
+    // The keyboard is dismissed but this WebView neither updates the visual
+    // viewport height nor sends a resize/scroll event, and the observer stays
+    // silent. Losing text focus must re-measure and stop trusting the stale
+    // geometry instead of staying paused forever.
+    hideKeyboard(field);
+    expect(viewport.height).toBe(200);
+    await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+
+    // Opening the keyboard again over the canvas still pauses 3D.
+    showKeyboard();
+    await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(false));
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+it('always resumes with the manual restart button while the visual viewport is stale', async () => {
+  const { viewport, dialog, bounds } = await openKeyboardCoveredScene();
+  try {
+    // Android can dismiss the keyboard with the back key without blurring the
+    // field, so neither focus nor viewport events reveal the stale height.
+    expect(viewport.height).toBe(200);
+    fireEvent.click(within(dialog).getByRole('button', { name: '重新啟動立體畫面' }));
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+
+    // A genuine new keyboard geometry is trusted again and pauses the scene.
+    const rebuilt = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    const rebuiltBounds = vi.spyOn(rebuilt, 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(0, 400, 320, 150));
+    showKeyboard();
+    viewport.height = 180;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    // Restoring the full height resumes it.
+    viewport.height = window.innerHeight;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    rebuiltBounds.mockRestore();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+it('still pauses when a pinch-zoomed visual viewport leaves the canvas outside it', async () => {
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0, scale: 1,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 400, 320, 150));
+  try {
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    viewport.scale = 2;
+    viewport.height = 200;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    viewport.scale = 1;
+    viewport.height = window.innerHeight;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
   } finally {
     bounds.mockRestore();
   }
