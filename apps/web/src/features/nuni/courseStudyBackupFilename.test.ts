@@ -8,7 +8,26 @@ import { courseStudyBackupFilenameStem as mergeBaseFilenameStem } from './__fixt
 describe('backup filename stems compared with merge-base', () => {
   const defaultStem = '讀書白板';
 
+  it('preserves the merge-base stem for every Unicode scalar outside the invisible set', () => {
+    const invisible = /[\p{White_Space}\p{Cc}\p{Default_Ignorable_Code_Point}]/u;
+    const unassignedOrPrivate = /[\p{Cn}\p{Co}]/u;
+    for (let point = 0; point <= 0x10ffff; point += 1) {
+      if (point >= 0xd800 && point <= 0xdfff) continue;
+      const title = String.fromCodePoint(point);
+      const expected = mergeBaseFilenameStem(title);
+      const actual = courseStudyBackupFilenameStem(title);
+      if (actual === expected) continue;
+      if (actual === defaultStem && invisible.test(title) && !unassignedOrPrivate.test(title)) continue;
+      expect(actual, `U+${point.toString(16).toUpperCase().padStart(4, '0')}`).toBe(expected);
+    }
+  });
+
   it.each([
+    ...Array.from('\u0600\u0601\u0602\u0603\u0604\u0605\u06dd\u070f\u08e2\u{110bd}',
+      (symbol) => [`visible format symbol U+${symbol.codePointAt(0)?.toString(16).toUpperCase()}`, symbol + '.pdf']),
+    ['interlinear annotation anchor retained by merge-base', '\ufff9.pdf'],
+    ['unassigned default-ignorable code point', '\u{e0000}.pdf'],
+    ['private-use code point', '\ue000.pdf'],
     ['Devanagari spacing mark (Mc)', 'ः.pdf'],
     ['Bengali spacing mark (Mc)', 'ঃ.pdf'],
     ['Thai tone mark (Mn)', '\u0e48.pdf'],
@@ -26,6 +45,8 @@ describe('backup filename stems compared with merge-base', () => {
     ['Unicode next-line whitespace', '\u0085'],
     ['empty after extension removal', '.pdf'],
     ['visible text with invisible characters', '\u061c課\u200c程\u200b.pdf'],
+    ['visible format symbol with invisible characters', '\u200c\u06dd\ufe0f.pdf'],
+    ['invisible characters between visible symbols', '\u06dd\ufe0f\u200c\u070f.pdf'],
     ['Persian text with ZWNJ', 'می‌روم.md'],
     ['emoji with ZWJ', '👩‍💻.md'],
     ['emoji with variation selector', '✈️.pdf'],
@@ -45,10 +66,9 @@ describe('backup filename stems compared with merge-base', () => {
     ['ZWNJ', '\u200c'],
     ['ZWJ', '\u200d\u200d'],
     ['ZWJ before an extension', '\u200d.md'],
-    ['format character', '\ufff9'],
     ['variation selectors', '\ufe0f\u{e0100}'],
     ['default-ignorable non-mark', '\u3164'],
-    ['mixed invisible characters', '\u3000\u200c\u200d\ufeff\u202e\ufe0f.pdf'],
+    ['mixed invisible characters', '\u3000\u200c\u200d\ufeff\u202e\ufe0f\u00ad.pdf'],
   ])('uses the default stem for %s retained by merge-base', (_label, title) => {
     expect(mergeBaseFilenameStem(title)).not.toBe(defaultStem);
     expect(courseStudyBackupFilenameStem(title)).toBe(defaultStem);
@@ -71,6 +91,8 @@ describe('backup filename visible truncation', () => {
   it('keeps an actually visible character that still fits within the cap', () => {
     const prefix = '\u3164'.repeat(47);
     expect(courseStudyBackupFilenameStem(prefix + '課程.pdf')).toBe(prefix + '課');
+    expect(courseStudyBackupFilenameStem(prefix + '\u06dd')).toBe(prefix + '\u06dd');
+    expect(courseStudyBackupFilenameStem('課'.repeat(46) + '\u06dd一後續.pdf')).toBe('課'.repeat(46) + '\u06dd一');
     expect(courseStudyBackupFilenameStem('課' + '\u3164'.repeat(80))).toBe('課' + '\u3164'.repeat(47));
   });
 });
