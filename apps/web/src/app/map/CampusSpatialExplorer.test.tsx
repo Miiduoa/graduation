@@ -190,7 +190,9 @@ it('filters visible destinations without silently replacing the selected navigat
   const props = { school: 'other-school', selected: classrooms[0], onSelect: vi.fn() };
   const view = render(<CampusSpatialExplorer {...props} locations={classrooms} />);
   const dialog = within(await open());
-  const search = dialog.getByRole('searchbox', { name: '搜尋導覽地點' });
+  const search = dialog.getByRole('searchbox', { name: '搜尋導覽地點' }) as HTMLInputElement;
+  const clearSearch = dialog.getByRole('button', { name: '清除地點搜尋' }) as HTMLButtonElement;
+  expect(clearSearch.disabled).toBe(true);
   const picker = dialog.getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement;
   const values = () => Array.from(picker.options).map((option) => option.value);
   const destination = () => new URL(dialog.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!)
@@ -209,9 +211,15 @@ it('filters visible destinations without silently replacing the selected navigat
   expect(values()).toEqual(['b']);
   expect(dialog.getByText(/沒有符合的地點/)).toBeTruthy();
   expect(destination()).toBe('24.228,120.582');
-  fireEvent.change(search, { target: { value: '' } });
+  expect(clearSearch.disabled).toBe(false);
+  clearSearch.focus();
+  fireEvent.click(clearSearch);
+  expect(search.value).toBe('');
+  expect(document.activeElement).toBe(search);
+  expect(clearSearch.disabled).toBe(true);
   expect(values()).toEqual(['a', 'b', 'c']);
   expect(picker.value).toBe('b');
+  expect(destination()).toBe('24.228,120.582');
   expect(scene.create).toHaveBeenCalledTimes(1);
 
   fireEvent.change(search, { target: { value: '不存在的教室' } });
