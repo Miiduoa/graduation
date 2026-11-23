@@ -920,6 +920,22 @@ async def check_account_footer_contrast(page):
 
 
 async def check_unsigned_today(page, campus='pu'):
+    # The resolved browse context enriches known schools even when the visit
+    # only supplied ?campus=. Keep explicit fixture expectations: neither the
+    # login return path nor its outer scope may be inferred from the actual href.
+    expected_contexts = {
+        'pu': (
+            '/?schoolId=pu&campus=pu&school=PU',
+            {'schoolId': 'pu', 'campus': 'pu', 'school': 'PU'},
+        ),
+        'nthu': (
+            '/?schoolId=nthu&campus=nthu&school=NTHU',
+            {'schoolId': 'nthu', 'campus': 'nthu', 'school': 'NTHU'},
+        ),
+        'all': ('/?campus=all', {'campus': 'all'}),
+    }
+    assert campus in expected_contexts, f'Unspecified guest-home fixture campus: {campus}'
+    expected_return, expected_context = expected_contexts[campus]
     today = page.get_by_test_id('student-today')
     await expect(today).to_be_visible()
     await expect(today.get_by_test_id('today-skeleton')).to_have_count(0)
@@ -947,7 +963,7 @@ async def check_unsigned_today(page, campus='pu'):
     sign_in = welcome.get_by_role('link', name='登入查看作業與通知', exact=True)
     await expect(sign_in).to_be_visible()
     assert_login_destination(
-        await sign_in.get_attribute('href'), f'/?campus={campus}', {'campus': campus}
+        await sign_in.get_attribute('href'), expected_return, expected_context
     )
 
     # First use has one setup action. Private placeholders and a second empty
@@ -962,8 +978,17 @@ async def check_unsigned_today(page, campus='pu'):
     await expect(today.get_by_role('link', name='匯入課表', exact=True)).to_have_count(0)
     quick_services = today.get_by_role('navigation', name='常用校園服務')
     await expect(quick_services.get_by_role('link')).to_have_count(4)
-    for link in await quick_services.get_by_role('link').all():
-        assert parse_qs(urlparse(await link.get_attribute('href')).query).get('campus') == [campus]
+    for link, expected_path in zip(
+        await quick_services.get_by_role('link').all(),
+        ['/map', '/bus', '/cafeteria', '/library'],
+        strict=True,
+    ):
+        destination = urlparse(await link.get_attribute('href'))
+        assert destination.path == expected_path, destination
+        assert parse_qs(destination.query, keep_blank_values=True) == {
+            key: [value] for key, value in expected_context.items()
+        }, destination
+        assert not destination.fragment, destination
     await expect(page.get_by_role('link', name='登入', exact=True)).to_be_visible()
     await expect(today.get_by_role('button', name='設定首頁安排', exact=True)).to_be_visible()
     await expect(today.get_by_role('form', name='首頁安排偏好')).to_have_count(0)
@@ -2031,7 +2056,7 @@ async def main():
                 }
                 for start, label, destination, section, extra in [
                     ('/', '查看行事曆', '/calendar', '課務', {}),
-                    ('/', '加入課程', '/classroom', '課務', {}),
+                    ('/', '加入 nuni 課程', '/classroom', '課務', {}),
                     ('/classroom', '課業成績與回饋', '/grades', '課務', {'tab': ['feedback']}),
                     ('/classroom/account', '前往我的課程', '/classroom', '課務', {}),
                     ('/classroom/course/invalid-id', '回到我的課程', '/classroom', '課務', {}),

@@ -188,6 +188,12 @@
   line-height: 1.6;
 }
 
+.welcome a,
+.shortcuts a {
+  /* Native keyboard scrolling must leave room for the complete focus ring. */
+  scroll-margin: 12px;
+}
+
 .welcome a:focus-visible,
 .shortcuts a:focus-visible {
   outline: 3px solid var(--focus-ring);

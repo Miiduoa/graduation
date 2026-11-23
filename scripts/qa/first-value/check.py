@@ -132,8 +132,28 @@ async def check_journey(page, config, report):
     for target in keyboard_targets:
         await page.keyboard.press('Tab')
         await expect(target).to_be_focused()
-        await expect(target).to_be_in_viewport(ratio=1)
-        assert await target.evaluate("node => {const s=getComputedStyle(node);return s.outlineStyle !== 'none' && parseFloat(s.outlineWidth)>=2;}"), 'No visible keyboard focus'
+        handle = await target.element_handle()
+        try:
+            await expect(target).to_be_in_viewport(ratio=1)
+            # Wait for native smooth scrolling, without moving the target in JS.
+            await page.wait_for_function('''node => {
+              const r=node.getBoundingClientRect(); const s=getComputedStyle(node);
+              const ring=parseFloat(s.outlineWidth)+Math.max(0,parseFloat(s.outlineOffset));
+              return r.left>=ring && r.top>=ring && r.right+ring<=innerWidth && r.bottom+ring<=innerHeight;
+            }''', arg=handle, timeout=5000)
+        finally:
+            focus = await target.evaluate('''node => {
+              const r=node.getBoundingClientRect(); const s=getComputedStyle(node);
+              const ring=parseFloat(s.outlineWidth)+Math.max(0,parseFloat(s.outlineOffset));
+              return {name:node.textContent.trim(),style:s.outlineStyle,width:parseFloat(s.outlineWidth),
+                offset:s.outlineOffset,scrollMargin:s.scrollMargin,scrollY,
+                ring,left:r.left,top:r.top,right:r.right,bottom:r.bottom,viewportWidth:innerWidth,viewportHeight:innerHeight};
+            }''')
+            report.setdefault('keyboardFocus', []).append(focus)
+            await handle.dispose()
+        assert focus['style'] != 'none' and focus['width'] >= 2, ('No visible keyboard focus', focus)
+        assert focus['left'] >= focus['ring'] and focus['right'] + focus['ring'] <= focus['viewportWidth'], ('Focus ring clipped horizontally', focus)
+        assert focus['top'] >= focus['ring'] and focus['bottom'] + focus['ring'] <= focus['viewportHeight'], ('Focus ring clipped vertically', focus)
     report['checks'].append('Native Tab reaches every setup action and shortcut with visible focus and browser scrolling')
 
     draft = page.get_by_label('合成助理草稿（僅驗證同範圍更新）', exact=True)
@@ -345,6 +365,7 @@ async def run():
                     print(f"PASS {config['name']}: {len(report['checks'])} journey checks, {len(report['geometry'])} geometry states", flush=True)
                 except Exception as error:
                     report['failure'] = repr(error)
+                    await page.screenshot(path=str(OUTPUT / f"{config['name']}-failure-viewport.png"))
                     await page.screenshot(path=str(OUTPUT / f"{config['name']}-failure.png"), full_page=True)
                     failure = error
                     break
