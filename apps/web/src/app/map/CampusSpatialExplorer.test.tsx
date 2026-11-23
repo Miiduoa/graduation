@@ -6053,3 +6053,32 @@ it('keeps map chooser entries unique when blank and 未分類 category names dis
   expect(chooser.value).toBe('unknown-label');
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
+
+it('cancels an interrupted OSM reader after partial bytes and keeps external walking directions', async () => {
+  const { library } = sourcedLibraryFootprintFixture();
+  // A WebView/network bridge may reject read() after returning a partial
+  // chunk. The fetch itself has already resolved, so it cannot clean up the
+  // acquired stream for us; a failed snapshot must not leave it draining.
+  const read = vi.fn()
+    .mockResolvedValueOnce({ done: false, value: new TextEncoder().encode('{"schoolId":') })
+    .mockRejectedValueOnce(new Error('connection interrupted'));
+  const cancel = vi.fn().mockResolvedValue(undefined);
+  const releaseLock = vi.fn();
+  const json = vi.fn();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, status: 200,
+    headers: new Headers({ 'Content-Type': 'application/json' }),
+    body: { getReader: () => ({ read, cancel, releaseLock }) },
+    json,
+  }));
+  render(<CampusSpatialExplorer school="pu" locations={[library]}
+    selected={library} onSelect={vi.fn()} />);
+  const dialog = within(await open());
+  expect(await dialog.findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(releaseLock).toHaveBeenCalledOnce();
+  expect(json).not.toHaveBeenCalled();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(dialog.getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
