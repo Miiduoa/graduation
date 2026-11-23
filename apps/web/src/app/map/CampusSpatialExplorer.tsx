@@ -71,13 +71,21 @@ const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 // Response.json() buffers the entire document before our snapshot validator
 // runs. Bound the *actual decoded bytes* so untrusted downstream responses
 // cannot exhaust mobile memory even without a reliable Content-Length.
-// Prefer supported byte/text readers; only JSON-only WebViews check after parsing.
+// A JSON-only response cannot expose the original byte count.
 async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
   let decoder: TextDecoder | undefined;
   try {
     const candidate = new TextDecoder('utf-8', { fatal: true });
     if (candidate.decode(new Uint8Array([0xe4, 0xb8, 0xad])) === '中') decoder = candidate;
-  } catch { /* WebView may only support Response.json() */ }
+  } catch { /* WebView may lack a usable TextDecoder. */ }
+
+  const parseBytes = async (bytes: ArrayBuffer | Uint8Array<ArrayBuffer>) => {
+    // Fetch can decode UTF-8 even when the global TextDecoder is unavailable.
+    // This local response contains only bytes that passed the size check.
+    const raw = decoder ? decoder.decode(bytes) : await new Response(bytes).text();
+    if (signal?.aborted) throw new Error('Building outline read aborted');
+    return JSON.parse(raw) as unknown;
+  };
 
   const checkSize = (length: number) => {
     if (length > MAX_DECLARED_FOOTPRINT_BYTES) {
@@ -106,31 +114,26 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
   };
 
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-  if (decoder) {
+  try {
+    reader = response.body?.getReader?.();
+    if (reader && typeof reader.read !== 'function') {
+      reader.releaseLock?.();
+      reader = undefined;
+    }
+  } catch { reader = undefined; }
+
+  if (!reader) {
+    let bytes: ArrayBuffer | undefined;
     try {
-      const body = response.body;
-      reader = body?.getReader?.();
-      if (reader && typeof reader.read !== 'function') {
-        reader.releaseLock?.();
-        reader = undefined;
-      }
-    } catch { reader = undefined; }
-  }
-  if (!reader || !decoder) {
-    if (decoder) {
-      let bytes: ArrayBuffer | undefined;
-      try {
-        const readBytes = response.arrayBuffer ??
-          (typeof Response !== 'undefined' && response instanceof Response ? Response.prototype.arrayBuffer : undefined);
-        bytes = await readBytes?.call(response);
-      } catch (error) {
-        if (response.bodyUsed) throw error;
-      }
-      if (bytes && (Object.prototype.toString.call(bytes) === '[object ArrayBuffer]' || ArrayBuffer.isView(bytes))) {
-        if (signal?.aborted) throw new Error('Building outline read aborted');
-        checkSize(bytes.byteLength);
-        return JSON.parse(decoder.decode(bytes)) as unknown;
-      }
+      const readBytes = response.arrayBuffer ??
+        (typeof Response !== 'undefined' && response instanceof Response ? Response.prototype.arrayBuffer : undefined);
+      bytes = await readBytes?.call(response);
+    } catch (error) {
+      if (response.bodyUsed) throw error;
+    }
+    if (bytes && (Object.prototype.toString.call(bytes) === '[object ArrayBuffer]' || ArrayBuffer.isView(bytes))) {
+      checkSize(bytes.byteLength);
+      return parseBytes(bytes);
     }
     // text() can expose an unparsed body even if TextEncoder is missing.
     // Prefer it to eager json(), so the UTF-8 size limit is checked first.
@@ -146,13 +149,7 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
         return JSON.parse(raw) as unknown;
       }
     }
-    // JSON-only WebViews can still apply a limit after parsing.
-    const payload: unknown = await response.json();
-    if (signal?.aborted) throw new Error('Building outline read aborted');
-    const normalized = JSON.stringify(payload);
-    if (typeof normalized !== 'string') throw new Error('Invalid building outline response');
-    checkTextSize(normalized);
-    return payload;
+    throw new Error('Building outline response has no measurable body');
   }
   // A mobile pagehide/unmount/timeout may arrive after the fetch headers but
   // while response-body streaming is still pending. Abort the *reader* as well
@@ -210,7 +207,7 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
     try { reader.releaseLock(); } catch { /* Partially implemented reader. */ }
   }
   if (signal?.aborted) throw new Error('Building outline read aborted');
-  return JSON.parse(decoder.decode(bytes.subarray(0, total))) as unknown;
+  return parseBytes(bytes.subarray(0, total));
 }
 const OSM_COOLDOWN_STORAGE_KEY = 'nuni:pu:osm-footprint-cooldown-until';
 
