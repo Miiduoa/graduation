@@ -2925,7 +2925,10 @@ it('keeps the first passage export after measuring 25 passages and continues its
   fireEvent.click(screen.getByRole('button', { name: '只依原文重新講解' }));
   await waitFor(() => expect(runs()).toEqual([1, 2]));
   expect(screen.getByText(/第 2 次量測/)).toBeTruthy();
-});
+// This intentionally mounts 25 full teaching passages, exercising navigation
+// and retained exports. Its end-to-end DOM work can exceed Vitest's 5s default
+// on a shared CI runner; keep the timeout local to this stress scenario.
+}, 30_000);
 
 it('clears timing across courses and after closing and reopening the board', async () => {
   mockSuccessfulTiming();
