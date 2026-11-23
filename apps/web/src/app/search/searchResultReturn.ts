@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useSyncExternalStore, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
 
 const SEARCH_RETURN_STATE = '__campusSearchResultReturn';
 type ResultKind = 'service' | 'suggested' | 'assistant';
@@ -128,6 +128,10 @@ export function useSearchResultReturn({
   filters: string;
 }) {
   const historyReturn = useSyncExternalStore(subscribeReturn, getReturn, getServerReturn);
+  const liveState = useRef({ scope, ready, blocked, queryString, filters });
+  useLayoutEffect(() => {
+    liveState.current = { scope, ready, blocked, queryString, filters };
+  }, [blocked, filters, queryString, ready, scope]);
 
   useEffect(() => {
     if (!historyReturn || getReturn() !== historyReturn) return;
@@ -163,23 +167,58 @@ export function useSearchResultReturn({
     // AI previews belong to their original request. If they are no longer on
     // screen, resume at the results without retaining private data or requerying.
     const target = link ?? (current.kind === 'suggested' ? resultsHeading.current : null);
-    publishReturn(null);
-    if (!target) return;
+    if (!target) {
+      publishReturn(null);
+      return;
+    }
 
     const active = document.activeElement;
     if (
       active instanceof HTMLElement &&
       active !== target &&
       active.matches('a, button, input, select, textarea, summary, [contenteditable="true"]')
-    )
+    ) {
+      publishReturn(null);
       return;
-
-    let parent = target.parentElement;
-    while (parent && directory.current?.contains(parent)) {
-      if (parent instanceof HTMLDetailsElement) parent.setAttribute('open', '');
-      parent = parent.parentElement;
     }
-    target.focus({ preventScroll: true });
-    target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+
+    // Native history restoration runs after popstate and can start a smooth
+    // scroll after this effect. Resume on the next frame, before paint, without
+    // changing the browser's global history.scrollRestoration preference.
+    const frame = window.requestAnimationFrame(() => {
+      if (getReturn() !== historyReturn) return;
+      const latest = readReturn(window.history.state);
+      const live = liveState.current;
+      const focus = document.activeElement;
+      if (
+        !target.isConnected ||
+        !directory.current?.contains(target) ||
+        latest?.token !== historyReturn.token ||
+        latest.url !== historyReturn.url ||
+        latest.url !== currentUrl() ||
+        latest.scope !== live.scope ||
+        latest.filters !== live.filters ||
+        new URL(latest.url, window.location.origin).searchParams.toString() !== live.queryString ||
+        !live.ready ||
+        live.blocked ||
+        (focus !== active && focus !== target && focus !== document.body)
+      ) {
+        publishReturn(null);
+        return;
+      }
+      publishReturn(null);
+      let parent = target.parentElement;
+      while (parent && directory.current?.contains(parent)) {
+        if (parent instanceof HTMLDetailsElement) parent.setAttribute('open', '');
+        parent = parent.parentElement;
+      }
+      target.focus({ preventScroll: true });
+      // nearest may do nothing when the target is already visible in this
+      // frame. Explicitly stop the pending native smooth restoration first so
+      // it cannot subsequently move the focused title behind the bottom bar.
+      window.scrollTo({ top: window.scrollY, left: window.scrollX, behavior: 'instant' });
+      target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [blocked, directory, filters, historyReturn, queryString, ready, resultsHeading, scope]);
 }
