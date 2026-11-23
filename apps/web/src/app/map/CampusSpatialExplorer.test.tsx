@@ -2464,6 +2464,28 @@ it('resumes 3D after the keyboard closes even when the WebView keeps the shrunke
   }
 });
 
+it('resumes 3D when the visitor touches the canvas while a stale viewport and a focused field remain', async () => {
+  const { viewport, dialog, graphics, bounds } = await openKeyboardCoveredScene();
+  try {
+    // Back-key dismissal: the field keeps focus, the viewport height is stale
+    // and no event fires. Nothing can touch the canvas while a keyboard truly
+    // covers it, so a touch on it is proof that it is visible.
+    expect(viewport.height).toBe(200);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    fireEvent.pointerDown(graphics);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+
+    // A real change of the geometry is trusted again.
+    viewport.height = 180;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('always resumes with the manual restart button while the visual viewport is stale', async () => {
   const { viewport, dialog, bounds } = await openKeyboardCoveredScene();
   try {

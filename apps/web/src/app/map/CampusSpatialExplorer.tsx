@@ -767,6 +767,22 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       document.addEventListener('focusin', onFocusChange, true);
       document.addEventListener('focusout', onFocusChange, true);
     } catch { /* Window events still recheck layout in partial WebViews. */ }
+    // A touch that lands on the canvas host proves the host is on screen at
+    // that point, whatever a stale visual viewport still claims (for example an
+    // Android back-key dismissal that leaves the text field focused). Trust
+    // that evidence until the viewport geometry really changes.
+    const onHostTouched = () => {
+      try {
+        const viewport = window.visualViewport;
+        if (viewport) ignoredViewport = viewportSignature(viewport);
+      } catch { /* Partial WebViews: nothing to ignore. */ }
+      syncVisibility();
+    };
+    const touchEvents = ['pointerdown', 'touchstart', 'mousedown'] as const;
+    for (const event of touchEvents) {
+      try { host.addEventListener(event, onHostTouched, { passive: true }); }
+      catch { /* Manual restart remains available. */ }
+    }
     let visualViewport: VisualViewport | null | undefined;
     try {
       visualViewport = window.visualViewport;
@@ -779,6 +795,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       if (timeout !== null) window.clearTimeout(timeout);
       for (const id of focusTimers) window.clearTimeout(id);
       focusTimers.clear();
+      for (const event of touchEvents) {
+        try { host.removeEventListener(event, onHostTouched); }
+        catch { /* Complete the remaining cleanup. */ }
+      }
       try {
         document.removeEventListener('focusin', onFocusChange, true);
         document.removeEventListener('focusout', onFocusChange, true);
