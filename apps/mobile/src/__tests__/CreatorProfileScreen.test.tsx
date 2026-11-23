@@ -1,6 +1,7 @@
 import React from 'react';
-import { Linking, RefreshControl } from 'react-native';
+import { RefreshControl } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
+import { getDocFromServer } from 'firebase/firestore';
 import { CreatorProfileScreen } from '../screens/social/CreatorProfileScreen';
 import { listCreatorPosts, readCreatorIdentity } from '../services/creatorProfile';
 import { loadCampusPostBookmarks } from '../services/campusPostBookmarks';
@@ -22,7 +23,12 @@ jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../state/school', () => ({
   useSchool: () => ({ school: mockSchool, selectionReady: mockSelectionReady }),
 }));
-jest.mock('../firebase', () => ({ isFirebaseMockMode: () => mockFirebase }));
+jest.mock('../firebase', () => ({ getDb: jest.fn(), isFirebaseMockMode: () => mockFirebase }));
+jest.mock('firebase/firestore', () => ({
+  ...jest.requireActual('firebase/firestore'),
+  doc: jest.fn(),
+  getDocFromServer: jest.fn(),
+}));
 jest.mock('../screens/social/CreatorHighlight', () => ({ CreatorHighlight: () => null }));
 jest.mock('../services/creatorProfile', () => ({
   listCreatorPosts: jest.fn(),
@@ -58,6 +64,7 @@ const page = (posts: typeof myPost[], hasMore = false) => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(getDocFromServer).mockReset();
   jest.mocked(readCreatorCard).mockReset().mockResolvedValue(null);
   jest.mocked(saveCreatorCard).mockReset();
   mockAuth.user = { uid: 'alice', displayName: 'Alice' };
@@ -216,34 +223,7 @@ test('a denied pin read is retried, never treated as an empty pin', async () => 
   expect(readCreatorPin).toHaveBeenCalledTimes(2);
 });
 
-test('tab changes and refreshes reload cards created, edited and cleared on another device', async () => {
-  const card = { headline: '', bio: '另一台裝置建立的簡介', linkUrl: '' };
-  const updated = { ...card, bio: '另一台裝置修改的簡介' };
-  const reads = jest.mocked(readCreatorCard)
-    .mockResolvedValueOnce(null)
-    .mockResolvedValueOnce(card)
-    .mockRejectedValueOnce(new Error('offline'))
-    .mockResolvedValueOnce(updated)
-    .mockResolvedValueOnce(null);
-  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
-  expect(await view.findByLabelText('建立社群簡介')).toBeTruthy();
-  fireEvent.press(view.getByLabelText('相片與影片'));
-  expect(await view.findByText(card.bio)).toBeTruthy();
-
-  await act(async () => { fireEvent.press(view.getByLabelText('我的收藏')); });
-  expect(view.queryByText(card.bio)).toBeNull();
-  expect(view.getByText('社群簡介暫時無法讀取。')).toBeTruthy();
-  fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
-  expect(await view.findByText(updated.bio)).toBeTruthy();
-
-  fireEvent.press(view.getByLabelText('貼文'));
-  expect(await view.findByLabelText('建立社群簡介')).toBeTruthy();
-  expect(view.queryByText(updated.bio)).toBeNull();
-  expect(reads).toHaveBeenCalledTimes(5);
-  expect(reads).toHaveBeenLastCalledWith('pu', 'alice');
-});
-
-test('switching tabs starts a new editor from the freshly read card', async () => {
+test('entering media starts a new editor from the freshly read card', async () => {
   const original = { headline: '舊標題', bio: '舊簡介', linkUrl: '' };
   const latest = { headline: '他機標題', bio: '他機簡介', linkUrl: 'https://example.org/' };
   jest.mocked(readCreatorCard).mockResolvedValueOnce(original).mockResolvedValueOnce(latest);
@@ -258,105 +238,100 @@ test('switching tabs starts a new editor from the freshly read card', async () =
   expect(view.getByLabelText('作品連結').props.value).toBe(latest.linkUrl);
 });
 
-test.each(['我的收藏', '下拉', '重試名片'])('keeps the successful first card when a read started by %s fails', async (entry) => {
-  const card = { headline: '', bio: '首次讀取的簡介', linkUrl: 'https://example.org/' };
-  let resolveFirst!: (value: typeof card) => void;
-  let rejectReload!: (error: Error) => void;
-  const reads = jest.mocked(readCreatorCard)
-    .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
-    .mockReturnValueOnce(new Promise((_, reject) => { rejectReload = reject; }));
-  jest.mocked(readCreatorIdentity).mockRejectedValueOnce(new Error('offline'));
+test('posts and saved share the editor and preserve unsaved changes from the confirmed card', async () => {
+  const card = { headline: '已確認標題', bio: '已確認簡介', linkUrl: 'https://example.org/' };
+  const reads = jest.mocked(readCreatorCard).mockResolvedValueOnce(card);
   const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
-  await view.findByLabelText('重試名片');
+  fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+  expect(view.getByLabelText('一句話介紹').props.value).toBe(card.headline);
+  fireEvent.changeText(view.getByLabelText('一句話介紹'), '未儲存標題');
+  for (const tab of ['我的收藏', '貼文']) {
+    await act(async () => { fireEvent.press(view.getByLabelText(tab)); });
+    expect(view.getByLabelText('一句話介紹').props.value).toBe('未儲存標題');
+    expect(view.getByLabelText('個人簡介').props.value).toBe(card.bio);
+    expect(view.getByLabelText('作品連結').props.value).toBe(card.linkUrl);
+  }
   expect(reads).toHaveBeenCalledTimes(1);
-  if (entry === '下拉') fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
-  else fireEvent.press(view.getByLabelText(entry));
-  expect(reads).toHaveBeenCalledTimes(2);
-  await act(async () => { rejectReload(new Error('offline')); });
-  expect(view.getByText('正在讀取社群簡介…')).toBeTruthy();
+});
+
+test.each(['stalls', 'fails'])('shows the first intro while the refreshed post request %s', async (outcome) => {
+  const card = { headline: '', bio: '首次讀取的簡介', linkUrl: '' };
+  let resolveFirst!: (value: typeof card) => void;
+  let rejectPosts!: (error: Error) => void;
+  const reads = jest.mocked(readCreatorCard)
+    .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }));
+  jest.mocked(listCreatorPosts).mockResolvedValueOnce(page([myPost]))
+    .mockReturnValueOnce(new Promise((_, reject) => { rejectPosts = reject; }));
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+  await view.findByText(myPost.title);
+  fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
+  expect(listCreatorPosts).toHaveBeenCalledTimes(2);
   await act(async () => { resolveFirst(card); });
   expect(view.getByText(card.bio)).toBeTruthy();
-  expect(view.queryByText('社群簡介暫時無法讀取。')).toBeNull();
+  if (outcome === 'fails') {
+    await act(async () => { rejectPosts(new Error('offline')); });
+    expect(view.getByText(card.bio)).toBeTruthy();
+  }
+  expect(reads).toHaveBeenCalledTimes(1);
 });
 
-test.each([
-  ['收藏', '尚未提交的簡介', 'https://example.org/pending'],
-  ['下拉', '尚未提交的簡介', 'https://example.org/pending'],
-  ['收藏', '', ''],
-  ['下拉', '', ''],
-])('refresh on %s displays the returned bio and link when editing is closed (%j)', async (
-  entry, bio, linkUrl,
-) => {
-  const original = { headline: '', bio: '已確認簡介', linkUrl: 'https://example.org/original' };
-  const overlay = { ...original, bio, linkUrl };
+test('retrying identity preserves the first intro read', async () => {
+  const card = { headline: '', bio: '首次讀取的簡介', linkUrl: '' };
+  let resolveFirst!: (value: typeof card) => void;
   const reads = jest.mocked(readCreatorCard)
-    .mockResolvedValueOnce(original)
-    .mockResolvedValueOnce(overlay);
-  let rejectSave!: (error: Error) => void;
-  jest.mocked(saveCreatorCard).mockReturnValueOnce(new Promise((_, reject) => { rejectSave = reject; }));
+    .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }));
+  jest.mocked(readCreatorIdentity).mockRejectedValueOnce(new Error('offline'))
+    .mockReturnValueOnce(new Promise(() => {}));
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+  fireEvent.press(await view.findByLabelText('重試名片'));
+  expect(readCreatorIdentity).toHaveBeenCalledTimes(2);
+  await act(async () => { resolveFirst(card); });
+  expect(view.getByText(card.bio)).toBeTruthy();
+  expect(reads).toHaveBeenCalledTimes(1);
+});
+
+test('pull refresh keeps the displayed intro even when a pending clear is available', async () => {
+  const card = { headline: '', bio: '已確認簡介', linkUrl: 'https://example.org/' };
+  const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
+  jest.mocked(readCreatorCard).mockImplementation(service.readCreatorCard);
+  const snapshots = jest.mocked(getDocFromServer)
+    .mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({ schoolId: 'pu', ownerUid: 'alice', ...card }),
+      metadata: { hasPendingWrites: false },
+    } as never)
+    .mockResolvedValueOnce({
+      exists: () => false,
+      metadata: { hasPendingWrites: true },
+    } as never);
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+  await view.findByText(card.bio);
+  await act(async () => { fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh'); });
+  expect(listCreatorPosts).toHaveBeenCalledTimes(2);
+  expect(view.getByText(card.bio)).toBeTruthy();
+  expect(view.getByLabelText('查看作品連結')).toBeTruthy();
+  expect(snapshots).toHaveBeenCalledTimes(1);
+});
+
+test('switching between posts and saved keeps an uncertain write blocked', async () => {
+  const card = { headline: '', bio: '已確認簡介', linkUrl: '' };
+  const draft = { ...card, bio: '待核對的簡介' };
+  const reads = jest.mocked(readCreatorCard).mockResolvedValueOnce(card).mockResolvedValueOnce(draft);
+  const save = jest.mocked(saveCreatorCard).mockRejectedValueOnce(new Error('write result unknown'));
   const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
   fireEvent.press(await view.findByLabelText('編輯社群簡介'));
-  fireEvent.changeText(view.getByLabelText('個人簡介'), bio);
-  fireEvent.changeText(view.getByLabelText('作品連結'), linkUrl);
-  fireEvent.press(view.getByLabelText('儲存簡介'));
-  await act(async () => {
-    if (entry === '收藏') fireEvent.press(view.getByLabelText('我的收藏'));
-    else fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
-  });
-  expect(reads).toHaveBeenCalledTimes(2);
-  if (entry === '下拉') {
-    expect(view.getByLabelText('正在確認儲存…').props.accessibilityState.disabled).toBe(true);
-  }
-  await act(async () => { rejectSave(new Error('permission-denied')); });
-  if (entry === '下拉') fireEvent.press(view.getByLabelText('取消編輯'));
-  else expect(view.queryByLabelText('個人簡介')).toBeNull();
-  expect(view.queryByText(original.bio)).toBeNull();
-  if (bio) expect(view.getByText(bio)).toBeTruthy();
-  const openLink = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
-  try {
-    if (linkUrl) {
-      await act(async () => { fireEvent.press(view.getByLabelText('查看作品連結')); });
-      expect(openLink).toHaveBeenCalledWith(linkUrl);
-    } else {
-      expect(view.queryByLabelText('查看作品連結')).toBeNull();
-    }
-  } finally {
-    openLink.mockRestore();
-  }
-  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
-});
-
-test('focus reloads the bio after a confirmed save', async () => {
-  const original = { headline: '', bio: '最初的簡介', linkUrl: '' };
-  const confirmed = { ...original, bio: '核對成功的簡介' };
-  const latest = { ...original, bio: '他機提交的簡介' };
-  jest.mocked(readCreatorCard)
-    .mockResolvedValueOnce(original)
-    .mockResolvedValueOnce(null)
-    .mockResolvedValueOnce(latest);
-  jest.mocked(saveCreatorCard).mockImplementation(async (_schoolId, _uid, _draft, confirm) => {
-    await confirm?.(async () => confirmed);
-    return confirmed;
-  });
-  let focus!: () => void;
-  const unsubscribe = jest.fn();
-  const navigation = { addListener: jest.fn((_event, callback) => {
-    focus = callback;
-    return unsubscribe;
-  }) };
-  const view = render(<CreatorProfileScreen navigation={navigation} route={{ params: { memberUid: 'alice' } }} />);
-  fireEvent.press(await view.findByLabelText('編輯社群簡介'));
-  fireEvent.changeText(view.getByLabelText('個人簡介'), confirmed.bio);
+  fireEvent.changeText(view.getByLabelText('個人簡介'), draft.bio);
   await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
-  expect(view.getByText(confirmed.bio)).toBeTruthy();
-  expect(navigation.addListener).toHaveBeenCalledWith('focus', expect.any(Function));
-  await act(async () => { focus(); });
-  expect(view.getByLabelText('建立社群簡介')).toBeTruthy();
-  expect(view.queryByText(confirmed.bio)).toBeNull();
-  await act(async () => { focus(); });
-  expect(view.getByText(latest.bio)).toBeTruthy();
-  view.unmount();
-  expect(unsubscribe).toHaveBeenCalledTimes(1);
+  for (const tab of ['我的收藏', '貼文']) {
+    await act(async () => { fireEvent.press(view.getByLabelText(tab)); });
+    expect(view.getByLabelText('個人簡介').props.value).toBe(draft.bio);
+    expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+    fireEvent.press(view.getByLabelText('儲存簡介'));
+  }
+  expect(reads).toHaveBeenCalledTimes(1);
+  await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+  expect(view.getByText(draft.bio)).toBeTruthy();
+  expect(save).toHaveBeenCalledTimes(1);
 });
 
 test.each(['unavailable', 'permission-denied'])('switching to media hides the old external card when the read fails with %s', async (code) => {
@@ -424,13 +399,11 @@ test('a save resolving after access denial cannot restore the hidden card', asyn
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
 });
 
-test('a pull refresh started during a save cannot replace its confirmed result', async () => {
+test('a save can finish normally after a pull refresh', async () => {
   const card = { headline: '', bio: '原本的簡介', linkUrl: '' };
   const saved = { ...card, bio: '剛確認的簡介' };
-  let resolveRefresh!: (value: typeof card) => void;
   let resolveSave!: (value: typeof card) => void;
-  jest.mocked(readCreatorCard).mockResolvedValueOnce(card)
-    .mockReturnValueOnce(new Promise((resolve) => { resolveRefresh = resolve; }));
+  const reads = jest.mocked(readCreatorCard).mockResolvedValueOnce(card);
   jest.mocked(saveCreatorCard).mockReturnValueOnce(new Promise((resolve) => { resolveSave = resolve; }));
   const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
   fireEvent.press(await view.findByLabelText('編輯社群簡介'));
@@ -438,7 +411,7 @@ test('a pull refresh started during a save cannot replace its confirmed result',
   fireEvent.press(view.getByLabelText('儲存簡介'));
   fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
   await act(async () => { resolveSave(saved); });
-  await act(async () => { resolveRefresh(card); });
+  expect(reads).toHaveBeenCalledTimes(1);
   expect(view.getByText(saved.bio)).toBeTruthy();
   expect(view.queryByText(card.bio)).toBeNull();
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
@@ -507,7 +480,6 @@ describe.each(['pending', 'save timeout', 'checking', 'check failed'] as const)(
             if (status === 'checking') startCheck();
 
             if (action === 'refresh') {
-              reads.mockResolvedValueOnce(latest);
               await act(async () => {
                 fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
               });

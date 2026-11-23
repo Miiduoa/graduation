@@ -18,7 +18,6 @@ import {
 } from '../../services/creatorProfile';
 import type { CampusPostDoc } from '../../services/feed';
 import { readCreatorPin, saveCreatorPin, type CreatorPin } from '../../services/creatorPin';
-import { readCreatorCard } from '../../services/creatorCard';
 import { CreatorCardPanel } from './CreatorCardPanel';
 import { CreatorHighlight } from './CreatorHighlight';
 
@@ -36,10 +35,7 @@ type CreatorListItem =
   | { key: string; tiles: MediaTile[] };
 
 type Props = {
-  navigation?: {
-    navigate?: (screen: string, params?: Record<string, unknown>) => void;
-    addListener?: (event: 'focus', callback: () => void) => () => void;
-  };
+  navigation?: { navigate?: (screen: string, params?: Record<string, unknown>) => void };
   route?: { params?: { memberUid?: string; schoolId?: string } };
 };
 
@@ -94,23 +90,6 @@ function ScopedCreatorProfile({
 }) {
   const styles = useThemeStyleSheet(createStyles);
   const own = viewerUid === memberUid;
-  const firstCardRead = useRef<ReturnType<typeof readCreatorCard> | null | undefined>(undefined);
-  const readIntro = useCallback(() => {
-    const first = firstCardRead.current;
-    const read = readCreatorCard(schoolId, memberUid);
-    // Only a still-pending first read of one's own card can back up a failed reload.
-    if (first === null) return read;
-    const clearFirst = () => { firstCardRead.current = null; };
-    if (first === undefined) {
-      firstCardRead.current = read;
-      void read.then(clearFirst, clearFirst);
-      return read;
-    }
-    return read.then((value) => {
-      clearFirst();
-      return value;
-    }, () => first);
-  }, [schoolId, memberUid]);
   const [tab, setTab] = useState<ProfileTab>('posts');
   const [identity, setIdentity] = useState<ReadState<CreatorIdentity | null>>({ status: 'loading' });
   const [posts, setPosts] = useState<ReadState<PostsPage>>({ status: 'loading' });
@@ -119,7 +98,6 @@ function ScopedCreatorProfile({
   const [followRevision, setFollowRevision] = useState(0);
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [savedRevision, setSavedRevision] = useState(0);
-  const [focusRevision, setFocusRevision] = useState(0);
   const [moreBusy, setMoreBusy] = useState(false);
   const [moreError, setMoreError] = useState('');
   const [followError, setFollowError] = useState('');
@@ -137,10 +115,6 @@ function ScopedCreatorProfile({
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
-
-  useEffect(() => navigation?.addListener?.('focus', () => {
-    setFocusRevision((n) => n + 1);
-  }), [navigation]);
 
   useEffect(() => {
     let live = true;
@@ -274,8 +248,6 @@ function ScopedCreatorProfile({
     ? saved.status === 'ready' ? saved.value : []
     : tab === 'posts' && pinnedPost
       ? postRows.filter((post) => post.id !== pinnedPost.id) : postRows;
-  // Keep the list header mounted across tabs. FlatList requires a remount
-  // when numColumns changes, so each media row supplies its own columns.
   const rows: CreatorListItem[] = [];
   if (tab === 'media') {
     const tiles = postRows.flatMap((post) => mediaUrls(post).map((url, index) => ({
@@ -296,6 +268,7 @@ function ScopedCreatorProfile({
 
   return (
     <FlatList
+      key={tab === 'media' ? 'media' : 'list'}
       testID="creator-profile-list"
       style={styles.root}
       contentContainerStyle={styles.listContent}
@@ -323,9 +296,7 @@ function ScopedCreatorProfile({
                 <Action label="重試名片" onPress={() => setRefreshRevision((n) => n + 1)} />
               </View>
             )}
-            <CreatorCardPanel key={tab} schoolId={schoolId} ownerUid={memberUid} own={own}
-              readIntro={own ? readIntro : undefined}
-              reloadRevision={`${refreshRevision}:${savedRevision}:${focusRevision}`} />
+            <CreatorCardPanel schoolId={schoolId} ownerUid={memberUid} own={own} />
             <CreatorHighlight key={schoolId + ':' + memberUid}
               schoolId={schoolId} memberUid={memberUid} own={own} candidates={postRows}
               openPost={(postId) => navigation?.navigate?.('PostDetail', { postId })} />

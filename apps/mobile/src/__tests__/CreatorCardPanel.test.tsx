@@ -1447,31 +1447,7 @@ test.each([
   }
 });
 
-test('a pending refresh replaces the previously committed card on display', async () => {
-  const card = { headline: '校園攝影', bio: '已提交簡介', linkUrl: 'https://example.org/' };
-  const refreshed = { ...card, bio: '待提交簡介' };
-  const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
-  jest.mocked(readCreatorCard).mockImplementation(service.readCreatorCard);
-  jest.mocked(getDocFromServer)
-    .mockResolvedValueOnce({
-      exists: () => true,
-      data: () => ({ schoolId: 'pu', ownerUid: 'bob', ...card }),
-      metadata: { hasPendingWrites: false },
-    } as never)
-    .mockResolvedValueOnce({
-      exists: () => true,
-      data: () => ({ schoolId: 'pu', ownerUid: 'bob', ...refreshed }),
-      metadata: { hasPendingWrites: true },
-    } as never);
-  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} />);
-  expect(await view.findByText(card.bio)).toBeTruthy();
-  expect(view.queryByText('社群簡介暫時無法讀取。')).toBeNull();
-  expect(view.getByLabelText('查看作品連結')).toBeTruthy();
-  view.rerender(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} reloadRevision="1" />);
-  expect(await view.findByText(refreshed.bio)).toBeTruthy();
-});
-
-test('editing the first pending card preserves untouched fields and waits for committed confirmation', async () => {
+test('a pending initial snapshot is retried before it can initialize the editor or confirm a save', async () => {
   const card = { headline: '校園攝影', bio: '記錄校園生活', linkUrl: 'https://example.org/' };
   const updated = { ...card, headline: '校園影像紀錄' };
   const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
@@ -1484,11 +1460,15 @@ test('editing the first pending card preserves untouched fields and waits for co
   jest.mocked(saveCreatorCard).mockImplementation(service.saveCreatorCard);
   jest.mocked(setDoc).mockResolvedValueOnce(undefined);
   jest.mocked(getDocFromServer)
-    .mockResolvedValueOnce(snapshot(card, true) as never)
+    .mockResolvedValueOnce(snapshot({ headline: '', bio: '', linkUrl: '' }, true) as never)
+    .mockResolvedValueOnce(snapshot(card, false) as never)
     .mockResolvedValueOnce(snapshot(updated, true) as never)
     .mockResolvedValueOnce(snapshot(updated, false) as never);
 
   const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+  const retry = await view.findByLabelText('重新讀取社群簡介');
+  expect(view.queryByLabelText('建立社群簡介')).toBeNull();
+  fireEvent.press(retry);
   expect(await view.findByText(card.headline)).toBeTruthy();
   expect(view.getByText(card.bio)).toBeTruthy();
   expect(view.getByLabelText('查看作品連結')).toBeTruthy();

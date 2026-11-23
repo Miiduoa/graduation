@@ -56,8 +56,6 @@ type CreatorCardPanelProps = {
   schoolId: string;
   ownerUid: string;
   own: boolean;
-  readIntro?: () => ReturnType<typeof readCreatorCard>;
-  reloadRevision?: string;
 };
 
 export function CreatorCardPanel(props: CreatorCardPanelProps) {
@@ -70,7 +68,7 @@ export function CreatorCardPanel(props: CreatorCardPanelProps) {
 }
 
 function ScopedCreatorCardPanel({
-  schoolId, ownerUid, own, readIntro, reloadRevision,
+  schoolId, ownerUid, own,
 }: CreatorCardPanelProps) {
   const styles = useThemeStyleSheet(createStyles);
   const [state, setState] = useState<CardState>({ status: 'loading' });
@@ -82,7 +80,6 @@ function ScopedCreatorCardPanel({
     setEditing(open);
   };
   const currentCard = useRef<CreatorCard | null>(null);
-  const cardVersion = useRef(0);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const currentDraft = useRef(draft);
   // Keep clear operations even when the field originally displayed as empty.
@@ -134,7 +131,6 @@ function ScopedCreatorCardPanel({
   }, []);
 
   const acceptCard = useCallback((value: CreatorCard | null) => {
-    cardVersion.current += 1;
     currentCard.current = value;
     acceptSavedPortfolioLink(value?.linkUrl ?? '');
     setState({ status: 'ready', value });
@@ -142,33 +138,14 @@ function ScopedCreatorCardPanel({
 
   useEffect(() => {
     let live = true;
-    // A save confirmation can publish a newer value while this read is pending.
-    const version = cardVersion.current;
-    const read = readIntro ? readIntro() : readCreatorCard(schoolId, ownerUid);
-    void read.then((value) => {
-      if (!live || cardVersion.current !== version) return;
-      if (editingNow.current && !pendingWrite.current) {
-        const previous = currentCard.current ?? EMPTY_CREATOR_CARD;
-        const merged = { ...(value ?? EMPTY_CREATOR_CARD) };
-        for (const field of CARD_FIELDS) {
-          const local = currentDraft.current[field];
-          if (editedFields.current.has(field) &&
-            (local !== previous[field] ||
-              (local === '' && hasHiddenCreatorCardValue(previous, field)))) {
-            merged[field] = local;
-          } else {
-            editedFields.current.delete(field);
-          }
-        }
-        replaceDraft(merged);
-      }
-      acceptCard(value);
+    setState({ status: 'loading' });
+    void readCreatorCard(schoolId, ownerUid, { requireCommitted: true }).then((value) => {
+      if (live) acceptCard(value);
     }).catch(() => {
-      if (!live || cardVersion.current !== version) return;
-      setState((previous) => own && previous.status === 'ready' ? previous : { status: 'error' });
+      if (live) setState({ status: 'error' });
     });
     return () => { live = false; };
-  }, [schoolId, ownerUid, own, attempt, readIntro, reloadRevision, acceptCard, replaceDraft]);
+  }, [schoolId, ownerUid, attempt, acceptCard]);
 
   const beginEdit = () => {
     if (!own || editorLocked() || state.status !== 'ready') return;
