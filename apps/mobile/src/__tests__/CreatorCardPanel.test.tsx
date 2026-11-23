@@ -4,7 +4,7 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import { getDocFromServer, setDoc } from 'firebase/firestore';
 import { creatorCardDocumentPassesRules, CREATOR_CARD_LIMITS, readCreatorCardFields, validateCreatorCard } from '@campus/shared/src/creatorCard';
 import { CreatorCardPanel } from '../screens/social/CreatorCardPanel';
-import { readCreatorCard, readCreatorCardSnapshot, saveCreatorCard } from '../services/creatorCard';
+import { readCreatorCard, saveCreatorCard } from '../services/creatorCard';
 
 jest.mock('../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('firebase/firestore', () => ({
@@ -16,7 +16,6 @@ jest.mock('firebase/firestore', () => ({
 jest.mock('../services/creatorCard', () => ({
   ...jest.requireActual('../services/creatorCard'),
   readCreatorCard: jest.fn(),
-  readCreatorCardSnapshot: jest.fn(),
   saveCreatorCard: jest.fn(),
 }));
 
@@ -27,10 +26,6 @@ beforeEach(() => {
   jest.mocked(setDoc).mockReset();
   jest.mocked(readCreatorCard).mockReset();
   jest.mocked(saveCreatorCard).mockReset();
-  jest.mocked(readCreatorCardSnapshot).mockReset().mockImplementation(async (schoolId, ownerUid) => ({
-    value: await readCreatorCard(schoolId, ownerUid),
-    hasPendingWrites: false,
-  }));
   jest.mocked(readCreatorCard).mockResolvedValue(null);
   jest.mocked(saveCreatorCard).mockResolvedValue({
     headline: '校園攝影', bio: '分享校園生活', linkUrl: '',
@@ -1452,28 +1447,69 @@ test.each([
   }
 });
 
-test('the first display shows an existing pending snapshot and refreshes to the committed card', async () => {
-  const card = { headline: '校園攝影', bio: '待提交簡介', linkUrl: 'https://example.org/' };
-  const committed = { ...card, bio: '已提交簡介' };
+test('a pending refresh replaces the previously committed card on display', async () => {
+  const card = { headline: '校園攝影', bio: '已提交簡介', linkUrl: 'https://example.org/' };
+  const refreshed = { ...card, bio: '待提交簡介' };
   const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
-  jest.mocked(readCreatorCardSnapshot).mockImplementation(service.readCreatorCardSnapshot);
+  jest.mocked(readCreatorCard).mockImplementation(service.readCreatorCard);
   jest.mocked(getDocFromServer)
     .mockResolvedValueOnce({
       exists: () => true,
       data: () => ({ schoolId: 'pu', ownerUid: 'bob', ...card }),
-      metadata: { hasPendingWrites: true },
+      metadata: { hasPendingWrites: false },
     } as never)
     .mockResolvedValueOnce({
       exists: () => true,
-      data: () => ({ schoolId: 'pu', ownerUid: 'bob', ...committed }),
-      metadata: { hasPendingWrites: false },
+      data: () => ({ schoolId: 'pu', ownerUid: 'bob', ...refreshed }),
+      metadata: { hasPendingWrites: true },
     } as never);
   const view = render(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} />);
   expect(await view.findByText(card.bio)).toBeTruthy();
   expect(view.queryByText('社群簡介暫時無法讀取。')).toBeNull();
   expect(view.getByLabelText('查看作品連結')).toBeTruthy();
   view.rerender(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} refreshKey="media" />);
-  expect(await view.findByText(committed.bio)).toBeTruthy();
+  expect(await view.findByText(refreshed.bio)).toBeTruthy();
+});
+
+test('editing the first pending card preserves untouched fields and waits for committed confirmation', async () => {
+  const card = { headline: '校園攝影', bio: '記錄校園生活', linkUrl: 'https://example.org/' };
+  const updated = { ...card, headline: '校園影像紀錄' };
+  const service = jest.requireActual<typeof import('../services/creatorCard')>('../services/creatorCard');
+  const snapshot = (value: typeof card, hasPendingWrites: boolean) => ({
+    exists: () => true,
+    data: () => ({ schoolId: 'pu', ownerUid: 'alice', ...value }),
+    metadata: { hasPendingWrites },
+  });
+  jest.mocked(readCreatorCard).mockImplementation(service.readCreatorCard);
+  jest.mocked(saveCreatorCard).mockImplementation(service.saveCreatorCard);
+  jest.mocked(setDoc).mockResolvedValueOnce(undefined);
+  jest.mocked(getDocFromServer)
+    .mockResolvedValueOnce(snapshot(card, true) as never)
+    .mockResolvedValueOnce(snapshot(updated, true) as never)
+    .mockResolvedValueOnce(snapshot(updated, false) as never);
+
+  const view = render(<CreatorCardPanel schoolId="pu" ownerUid="alice" own />);
+  expect(await view.findByText(card.headline)).toBeTruthy();
+  expect(view.getByText(card.bio)).toBeTruthy();
+  expect(view.getByLabelText('查看作品連結')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('編輯社群簡介'));
+  expect(view.getByLabelText('一句話介紹').props.value).toBe(card.headline);
+  expect(view.getByLabelText('個人簡介').props.value).toBe(card.bio);
+  expect(view.getByLabelText('作品連結').props.value).toBe(card.linkUrl);
+
+  fireEvent.changeText(view.getByLabelText('一句話介紹'), updated.headline);
+  await act(async () => { fireEvent.press(view.getByLabelText('儲存簡介')); });
+  expect(setDoc).toHaveBeenCalledWith(undefined, {
+    schoolId: 'pu', ownerUid: 'alice', ...updated, updatedAt: 'SERVER_TIME',
+  }, { merge: true });
+  expect(view.queryByText('社群簡介已儲存。')).toBeNull();
+  expect(view.getByLabelText('儲存簡介').props.accessibilityState.disabled).toBe(true);
+
+  await act(async () => { fireEvent.press(view.getByLabelText('核對儲存結果')); });
+  expect(view.getByText('社群簡介已儲存。')).toBeTruthy();
+  expect(view.getByText(updated.headline)).toBeTruthy();
+  expect(view.getByText(updated.bio)).toBeTruthy();
+  expect(setDoc).toHaveBeenCalledTimes(1);
 });
 
 test('a known pending intro write keeps matching local fields provisional', async () => {

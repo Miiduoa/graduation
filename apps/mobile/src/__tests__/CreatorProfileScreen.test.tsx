@@ -5,7 +5,7 @@ import { CreatorProfileScreen } from '../screens/social/CreatorProfileScreen';
 import { listCreatorPosts, readCreatorIdentity } from '../services/creatorProfile';
 import { loadCampusPostBookmarks } from '../services/campusPostBookmarks';
 import { followUser, listFollowingIds, unfollowUser } from '../services/follows';
-import { readCreatorCard, readCreatorCardSnapshot, saveCreatorCard } from '../services/creatorCard';
+import { readCreatorCard, saveCreatorCard } from '../services/creatorCard';
 import { readCreatorPin, saveCreatorPin } from '../services/creatorPin';
 
 const mockAuth = {
@@ -35,7 +35,6 @@ jest.mock('../services/creatorPin', () => ({
 jest.mock('../services/creatorCard', () => ({
   ...jest.requireActual('../services/creatorCard'),
   readCreatorCard: jest.fn(async () => null),
-  readCreatorCardSnapshot: jest.fn(),
   saveCreatorCard: jest.fn(),
 }));
 jest.mock('../services/campusPostBookmarks', () => ({
@@ -61,10 +60,6 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(readCreatorCard).mockReset().mockResolvedValue(null);
   jest.mocked(saveCreatorCard).mockReset();
-  jest.mocked(readCreatorCardSnapshot).mockReset().mockImplementation(async (schoolId, ownerUid) => ({
-    value: await readCreatorCard(schoolId, ownerUid),
-    hasPendingWrites: false,
-  }));
   mockAuth.user = { uid: 'alice', displayName: 'Alice' };
   mockAuth.profile = null;
   mockAuth.loading = false;
@@ -279,14 +274,14 @@ test.each([
   ['下拉', '尚未提交的簡介', 'https://example.org/pending'],
   ['收藏', '', ''],
   ['下拉', '', ''],
-])('pending writes on %s preserve the confirmed bio and link after rejection and cancel (%j)', async (
+])('refresh on %s displays the returned bio and link when editing is closed (%j)', async (
   entry, bio, linkUrl,
 ) => {
   const original = { headline: '', bio: '已確認簡介', linkUrl: 'https://example.org/original' };
   const overlay = { ...original, bio, linkUrl };
-  const reads = jest.mocked(readCreatorCardSnapshot)
-    .mockResolvedValueOnce({ value: original, hasPendingWrites: false })
-    .mockResolvedValueOnce({ value: overlay, hasPendingWrites: true });
+  const reads = jest.mocked(readCreatorCard)
+    .mockResolvedValueOnce(original)
+    .mockResolvedValueOnce(overlay);
   let rejectSave!: (error: Error) => void;
   jest.mocked(saveCreatorCard).mockReturnValueOnce(new Promise((_, reject) => { rejectSave = reject; }));
   const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
@@ -302,26 +297,30 @@ test.each([
   expect(view.getByLabelText('正在確認儲存…').props.accessibilityState.disabled).toBe(true);
   await act(async () => { rejectSave(new Error('permission-denied')); });
   fireEvent.press(view.getByLabelText('取消編輯'));
-  expect(view.getByText(original.bio)).toBeTruthy();
-  if (bio) expect(view.queryByText(bio)).toBeNull();
+  expect(view.queryByText(original.bio)).toBeNull();
+  if (bio) expect(view.getByText(bio)).toBeTruthy();
   const openLink = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
   try {
-    await act(async () => { fireEvent.press(view.getByLabelText('查看作品連結')); });
-    expect(openLink).toHaveBeenCalledWith(original.linkUrl);
+    if (linkUrl) {
+      await act(async () => { fireEvent.press(view.getByLabelText('查看作品連結')); });
+      expect(openLink).toHaveBeenCalledWith(linkUrl);
+    } else {
+      expect(view.queryByLabelText('查看作品連結')).toBeNull();
+    }
   } finally {
     openLink.mockRestore();
   }
   expect(saveCreatorCard).toHaveBeenCalledTimes(1);
 });
 
-test('focus keeps the newly confirmed card through a pending refresh and accepts a later committed update', async () => {
+test('focus reloads the bio after a confirmed save', async () => {
   const original = { headline: '', bio: '最初的簡介', linkUrl: '' };
   const confirmed = { ...original, bio: '核對成功的簡介' };
   const latest = { ...original, bio: '他機提交的簡介' };
-  jest.mocked(readCreatorCardSnapshot)
-    .mockResolvedValueOnce({ value: original, hasPendingWrites: false })
-    .mockResolvedValueOnce({ value: { ...original, bio: '' }, hasPendingWrites: true })
-    .mockResolvedValueOnce({ value: latest, hasPendingWrites: false });
+  jest.mocked(readCreatorCard)
+    .mockResolvedValueOnce(original)
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce(latest);
   jest.mocked(saveCreatorCard).mockImplementation(async (_schoolId, _uid, _draft, confirm) => {
     await confirm?.(async () => confirmed);
     return confirmed;
@@ -339,7 +338,8 @@ test('focus keeps the newly confirmed card through a pending refresh and accepts
   expect(view.getByText(confirmed.bio)).toBeTruthy();
   expect(navigation.addListener).toHaveBeenCalledWith('focus', expect.any(Function));
   await act(async () => { focus(); });
-  expect(view.getByText(confirmed.bio)).toBeTruthy();
+  expect(view.getByLabelText('建立社群簡介')).toBeTruthy();
+  expect(view.queryByText(confirmed.bio)).toBeNull();
   await act(async () => { focus(); });
   expect(view.getByText(latest.bio)).toBeTruthy();
   view.unmount();

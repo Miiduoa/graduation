@@ -5,7 +5,7 @@ import {
 } from '@campus/shared/src/creatorCard';
 import {
   creatorCardFieldMatches, hasHiddenCreatorCardValue, isCreatorCardAccessDenied,
-  readCreatorCard, readCreatorCardSnapshot, saveCreatorCard,
+  readCreatorCard, saveCreatorCard,
 } from '../../services/creatorCard';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
@@ -75,9 +75,7 @@ function ScopedCreatorCardPanel({
     editingNow.current = open;
     setEditing(open);
   };
-  const published = useRef<CreatorCard | null>(null);
-  const hasConfirmedCard = useRef(false);
-  const showingProvisionalCard = useRef(false);
+  const currentCard = useRef<CreatorCard | null>(null);
   const accessDenied = useRef(false);
   const cardVersion = useRef(0);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
@@ -134,9 +132,7 @@ function ScopedCreatorCardPanel({
     // A concurrent save check may settle after a refresh revoked access.
     if (accessDenied.current) return;
     cardVersion.current += 1;
-    hasConfirmedCard.current = true;
-    showingProvisionalCard.current = false;
-    published.current = value;
+    currentCard.current = value;
     acceptSavedPortfolioLink(value?.linkUrl ?? '');
     setState({ status: 'ready', value });
   }, [acceptSavedPortfolioLink]);
@@ -145,21 +141,10 @@ function ScopedCreatorCardPanel({
     let live = true;
     // A save confirmation can publish a newer value while this read is pending.
     const version = cardVersion.current;
-    void readCreatorCardSnapshot(schoolId, ownerUid).then(({ value, hasPendingWrites }) => {
+    void readCreatorCard(schoolId, ownerUid).then((value) => {
       if (!live || cardVersion.current !== version) return;
-      if (hasPendingWrites) {
-        if (hasConfirmedCard.current || showingProvisionalCard.current) {
-          if (accessDenied.current) setState({ status: 'error' });
-          return;
-        }
-        accessDenied.current = false;
-        showingProvisionalCard.current = true;
-        acceptSavedPortfolioLink(value?.linkUrl ?? '');
-        setState({ status: 'ready', value });
-        return;
-      }
       if (editingNow.current && !pendingWrite.current) {
-        const previous = published.current ?? EMPTY_CREATOR_CARD;
+        const previous = currentCard.current ?? EMPTY_CREATOR_CARD;
         const merged = { ...(value ?? EMPTY_CREATOR_CARD) };
         for (const field of CARD_FIELDS) {
           const local = currentDraft.current[field];
@@ -179,7 +164,7 @@ function ScopedCreatorCardPanel({
       if (!live) return;
       if (isCreatorCardAccessDenied(error)) {
         accessDenied.current = true;
-        showingProvisionalCard.current = false;
+        currentCard.current = null;
         acceptSavedPortfolioLink('');
         setState({ status: 'error' });
       } else {
@@ -193,7 +178,7 @@ function ScopedCreatorCardPanel({
     if (!own || editorLocked() || state.status !== 'ready') return;
     if (!pendingWrite.current) {
       editedFields.current.clear();
-      replaceDraft(published.current ?? EMPTY_CREATOR_CARD);
+      replaceDraft(state.value ?? EMPTY_CREATOR_CARD);
       setFeedback('');
     }
     setEditorOpen(true);
@@ -203,9 +188,9 @@ function ScopedCreatorCardPanel({
     // Native text events queued before the inputs were disabled can still arrive.
     if (!editingNow.current) return;
     if (currentDraft.current[field] === value &&
-      (value !== '' || !published.current || !hasHiddenCreatorCardValue(published.current, field))) return;
+      (value !== '' || !currentCard.current || !hasHiddenCreatorCardValue(currentCard.current, field))) return;
     revisions.current[field] = ++nextRevision.current;
-    if (value && value === published.current?.[field] && !savingFlight.current && !pendingWrite.current) {
+    if (value && value === currentCard.current?.[field] && !savingFlight.current && !pendingWrite.current) {
       editedFields.current.delete(field);
     } else {
       editedFields.current.add(field);
@@ -220,7 +205,7 @@ function ScopedCreatorCardPanel({
     if (pendingWrite.current) return;
     revisions.current = { ...submittedRevisions.current };
     editedFields.current.clear();
-    replaceDraft(published.current ?? EMPTY_CREATOR_CARD);
+    replaceDraft(currentCard.current ?? EMPTY_CREATOR_CARD);
     setFeedback('');
   };
 
@@ -317,7 +302,7 @@ function ScopedCreatorCardPanel({
 
   const restorableEntry = (field: CardField) => {
     const entry = recoverable[field];
-    return entry && (!entry.onlyWhenMissing || published.current === null) &&
+    return entry && (!entry.onlyWhenMissing || currentCard.current === null) &&
       (revisions.current[field] ?? 0) <= entry.revision ? entry : undefined;
   };
 
@@ -366,7 +351,7 @@ function ScopedCreatorCardPanel({
       return;
     }
 
-    const base = published.current;
+    const base = currentCard.current;
     const edits = CARD_FIELDS.filter((field) => editedFields.current.has(field) &&
       (!base || base[field] !== expected[field] ||
         (expected[field] === '' && hasHiddenCreatorCardValue(base, field))));

@@ -1,6 +1,6 @@
 import { getDocFromServer, setDoc } from 'firebase/firestore';
 import { readCreatorCardFields } from '@campus/shared/src/creatorCard';
-import { isCreatorCardAccessDenied, readCreatorCard, readCreatorCardSnapshot, saveCreatorCard } from '../../services/creatorCard';
+import { isCreatorCardAccessDenied, readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 
 jest.mock('../../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('firebase/firestore', () => ({
@@ -172,11 +172,9 @@ test('an unresolved portfolio clear cannot be confirmed from a pending local ove
   expect(getDocFromServer).toHaveBeenCalledTimes(3);
 });
 
-test.each([true, false])('display reads retain pending metadata (%s) for a missing card', async (hasPendingWrites) => {
+test.each([true, false])('display reads return null for a missing card with pending metadata %s', async (hasPendingWrites) => {
   jest.mocked(getDocFromServer).mockResolvedValueOnce({
     exists: () => false, metadata: { hasPendingWrites },
   } as never);
-  await expect(readCreatorCardSnapshot('pu', 'alice')).resolves.toEqual({
-    value: null, hasPendingWrites,
-  });
+  await expect(readCreatorCard('pu', 'alice')).resolves.toBeNull();
 });

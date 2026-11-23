@@ -31,14 +31,15 @@ function cardRef(schoolId: string, ownerUid: string) {
   return doc(getDb(), 'schools', schoolId, 'creatorProfiles', ownerUid);
 }
 
-async function readCardSnapshot(schoolId: string, ownerUid: string, requireCommitted: boolean) {
+export async function readCreatorCard(
+  schoolId: string, ownerUid: string, { requireCommitted = false } = {},
+): Promise<CreatorCard | null> {
   const snapshot = await getDocFromServer(cardRef(schoolId, ownerUid));
-  const hasPendingWrites = snapshot.metadata.hasPendingWrites;
   // A server fetch can still include an uncommitted local overlay.
-  if (requireCommitted && hasPendingWrites) {
+  if (requireCommitted && snapshot.metadata.hasPendingWrites) {
     throw new Error('Creator card has pending writes');
   }
-  if (!snapshot.exists()) return { value: null, hasPendingWrites };
+  if (!snapshot.exists()) return null;
   const data = snapshot.data() as Record<string, unknown>;
   if (data.schoolId !== schoolId || data.ownerUid !== ownerUid) {
     throw new Error('Creator card scope mismatch');
@@ -46,17 +47,7 @@ async function readCardSnapshot(schoolId: string, ownerUid: string, requireCommi
   const card = readCreatorCardFields(data);
   hiddenFields.set(card, new Set(CARD_FIELDS.filter((field) =>
     Object.prototype.hasOwnProperty.call(data, field) && card[field] === '' && data[field] !== '')));
-  return { value: card, hasPendingWrites };
-}
-
-export function readCreatorCardSnapshot(schoolId: string, ownerUid: string) {
-  return readCardSnapshot(schoolId, ownerUid, false);
-}
-
-export async function readCreatorCard(
-  schoolId: string, ownerUid: string, { requireCommitted = false } = {},
-): Promise<CreatorCard | null> {
-  return (await readCardSnapshot(schoolId, ownerUid, requireCommitted)).value;
+  return card;
 }
 
 /** Save a whole bounded public card and confirm the written values against the server. */
