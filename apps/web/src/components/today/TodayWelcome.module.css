@@ -194,7 +194,11 @@
   scroll-margin: 12px;
 }
 
-.welcome a:focus-visible,
+.welcome a:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
 .shortcuts a:focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
