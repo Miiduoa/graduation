@@ -693,12 +693,20 @@ it('offers an accessible way to recover a suspended scene when mobile visibility
   expect(within(dialog).getByText(/立體畫面已暫停/)).toBeTruthy();
   const recovery = within(dialog).getByRole('button', { name: '重新啟動立體畫面' });
   expect(recovery).toBeTruthy();
+  expect(document.activeElement).toBe(recovery);
+  expect(host.tabIndex).toBe(-1);
+  expect(host.getAttribute('aria-hidden')).toBe('true');
+  expect(host.hasAttribute('inert')).toBe(true);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
   notify(true, 300);
   expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(host.tabIndex).toBe(0);
+  expect(host.hasAttribute('aria-hidden')).toBe(false);
+  expect(host.hasAttribute('inert')).toBe(false);
+  expect(document.activeElement).toBe(host);
 
   // No later callback arrives after the second pause. The explicit recovery
   // restarts one context, while preserving map keyboard focus and walking link.
@@ -1955,7 +1963,11 @@ it.each(visibilityTransitions.flatMap(({ event, startup, running }) =>
     <CampusSpatialExplorer school="other-school" locations={locations} selected={null} onSelect={onSelect} />;
   const { rerender, unmount } = render(explorer(places));
   const openTour = () => fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
-  const host = () => screen.getByRole('group', { name: '校園地點空間圖' });
+  const host = () => {
+    const node = document.querySelector<HTMLElement>('[aria-label="校園地點空間圖"]');
+    if (!node) throw new Error('missing spatial host');
+    return node;
+  };
   const notify = (visible: boolean, callback = intersection) =>
     callback?.([observerEntry(host(), visible)], {} as IntersectionObserver);
   try {
@@ -3388,7 +3400,11 @@ it.each(capabilityCases.flatMap((capability) =>
     <CampusSpatialExplorer school="pu" locations={locations} selected={library} onSelect={onSelect} />;
   const { rerender, unmount } = render(explorer([library]));
   const dialog = () => screen.getByRole('dialog');
-  const host = () => within(dialog()).getByRole('group', { name: '校園地點空間圖' });
+  const host = () => {
+    const node = dialog().querySelector<HTMLElement>('[aria-label="校園地點空間圖"]');
+    if (!node) throw new Error('missing spatial host');
+    return node;
+  };
   const notify = (visible: boolean) => act(() =>
     intersection?.([observerEntry(host(), visible)], {} as IntersectionObserver));
   const check = async (action: string) => {

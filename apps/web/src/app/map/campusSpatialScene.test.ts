@@ -237,6 +237,27 @@ describe('optional spatial canvas lifecycle', () => {
     expect(target.z).toBeCloseTo(model.points[0].z, 6);
   });
 
+  it('removes marker buttons from the tab order while the scene is inactive', () => {
+    const { scene, container } = setup();
+    drawFrame();
+    const markers = [...container.querySelectorAll<HTMLButtonElement>('[data-spatial-marker]')];
+    expect(markers.length).toBeGreaterThan(0);
+    const layer = markers[0].parentElement;
+    for (const button of markers) expect(button.tabIndex).toBe(0);
+    expect(layer?.hasAttribute('inert')).toBe(false);
+    expect(layer?.getAttribute('aria-hidden')).toBe(null);
+
+    scene.setActive(false);
+    expect(layer?.hasAttribute('inert')).toBe(true);
+    expect(layer?.getAttribute('aria-hidden')).toBe('true');
+    for (const button of markers) expect(button.tabIndex).toBe(-1);
+
+    scene.setActive(true);
+    expect(layer?.hasAttribute('inert')).toBe(false);
+    expect(layer?.getAttribute('aria-hidden')).toBe(null);
+    for (const button of markers) expect(button.tabIndex).toBe(0);
+  });
+
   it('ignores identical resize notifications while redrawing on DPR changes and tab resume', () => {
     const { scene, renderer } = setup();
     drawFrame();

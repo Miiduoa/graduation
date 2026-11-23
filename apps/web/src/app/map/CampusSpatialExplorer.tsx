@@ -330,6 +330,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const pageSuspended = useRef(false);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
+  const restartButton = useRef<HTMLButtonElement | null>(null);
+  const wasPaused = useRef(false);
   const view = useMemo(() => ({
     selectedId,
     overhead,
@@ -597,6 +599,18 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     try { host?.focus(); } catch { /* Focus is advisory. */ }
     onManualStart();
   };
+  const paused = status === 'ready' && renderSuspended;
+  useEffect(() => {
+    if (paused) {
+      wasPaused.current = true;
+      try { restartButton.current?.focus(); } catch { /* Focus is advisory. */ }
+      return;
+    }
+    if (wasPaused.current && status === 'ready') {
+      wasPaused.current = false;
+      try { host?.focus(); } catch { /* Focus is advisory. */ }
+    }
+  }, [paused, status, host]);
   return (
     <>
     <div className={styles.scene} data-spatial-state={status}>
@@ -605,8 +619,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         className={styles.sceneHost}
         role="group"
         aria-label="校園地點空間圖"
-        aria-describedby={status === 'ready' ? helpId : undefined}
-        tabIndex={status === 'ready' ? 0 : -1}
+        aria-describedby={status === 'ready' && !paused ? helpId : undefined}
+        aria-hidden={paused || undefined}
+        tabIndex={status === 'ready' && !paused ? 0 : -1}
+        inert={paused || undefined}
       />
       {status !== 'ready' && (
         <div className={styles.sceneMessage} role="status">
@@ -630,7 +646,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       {status === 'ready' && renderSuspended && (
         <div className={styles.sceneMessage} role="status">
           <p>立體畫面已暫停。回到空間圖會自動恢復；若沒有恢復，可手動重新啟動。</p>
-          <button className="btn" type="button" onClick={startManually}>重新啟動立體畫面</button>
+          <button ref={restartButton} className="btn" type="button" onClick={startManually}>重新啟動立體畫面</button>
         </div>
       )}
       <span className={styles.sceneCaption}>地點位置示意</span>
