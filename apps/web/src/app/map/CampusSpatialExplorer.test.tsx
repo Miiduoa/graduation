@@ -181,6 +181,36 @@ it('disambiguates same-name campus markers before opening walking or flat-map na
   expect(onSelect).toHaveBeenCalledWith(duplicatePlaces[2]);
 });
 
+it('includes existing building and floor context in duplicate destination controls without claiming an entrance', async () => {
+  // Synthetic records only: neither building nor room names are campus evidence.
+  const classrooms: MapLocation[] = [
+    { id: 'room-a', name: '討論室', category: '教學', description: '', building: '甲棟', floor: '2F', lat: 24.225, lng: 120.58 },
+    { id: 'room-b', name: '討論室', category: '教學', description: '', building: '乙棟', floor: '3F', lat: 24.227, lng: 120.581 },
+    { id: 'room-c', name: '討論室', category: '教學', description: '', lat: 24.229, lng: 120.582 },
+  ];
+  render(<CampusSpatialExplorer school="other-school" locations={classrooms}
+    selected={classrooms[0]} onSelect={vi.fn()} />);
+  const dialog = within(await open());
+  const picker = dialog.getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement;
+  const options = Array.from(picker.options).map((option) => option.text);
+  expect(options).toEqual([
+    '討論室（教學 · 地點資料：甲棟 · 樓層：2F · 地圖座標 24.225, 120.58 · 清單第 1 項）',
+    '討論室（教學 · 地點資料：乙棟 · 樓層：3F · 地圖座標 24.227, 120.581 · 清單第 2 項）',
+    '討論室（教學 · 地圖座標 24.229, 120.582 · 清單第 3 項）',
+  ]);
+  fireEvent.click(dialog.getByRole('button', { name: `下一個地點：${options[1]}` }));
+  expect(picker.value).toBe('room-b');
+  expect(dialog.getByRole('slider', { name: /導覽進度/ }).getAttribute('aria-valuetext')).toContain(options[1]);
+  expect(dialog.getByText(/同名地點：目前選擇/).textContent).toContain('地點資料：乙棟 · 樓層：3F');
+  expect(dialog.getByText(/導航僅以目前地點標記為目的地/).textContent).toContain('並非已核實的校舍入口');
+  expect(new URL(dialog.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!)
+    .searchParams.get('destination')).toBe('24.227,120.581');
+  expect(new URL(dialog.getByRole('link', { name: '開啟 Apple 地圖步行導航' }).getAttribute('href')!)
+    .searchParams.get('daddr')).toBe('24.227,120.581');
+  fireEvent.change(picker, { target: { value: 'room-c' } });
+  expect(dialog.getByText(/同名地點：目前選擇/).textContent).not.toContain('地點資料：');
+});
+
 it('shows the original marker coordinate and updates both navigation destinations on selection', async () => {
   render(<CampusSpatialExplorer school="other-school" locations={places}
     selected={places[0]} onSelect={vi.fn()} />);
