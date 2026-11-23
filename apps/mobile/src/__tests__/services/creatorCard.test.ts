@@ -134,3 +134,28 @@ test('a missing content field confirms when its displayed value matches', async 
     ...legacy, ...draft, updatedAt: 'SERVER_TIME',
   }, { merge: true });
 });
+
+
+test('an unresolved portfolio clear cannot be confirmed from a pending local overlay', async () => {
+  const draft = { headline: card.headline, bio: card.bio, linkUrl: '' };
+  // A rejected/uncertain write may still appear locally, even after requesting
+  // the server. A matching display value is not proof of a committed clear.
+  const pendingSnapshot = {
+    ...snap({ ...card, linkUrl: '' }),
+    metadata: { fromCache: false, hasPendingWrites: true },
+  };
+  jest.mocked(setDoc).mockRejectedValueOnce(new Error('unavailable'));
+  jest.mocked(getDocFromServer)
+    .mockResolvedValueOnce(pendingSnapshot as never)
+    .mockResolvedValueOnce(snap({ ...card, linkUrl: '' }) as never);
+
+  await expect(saveCreatorCard('pu', 'alice', draft)).rejects.toThrow('unavailable');
+  await expect(readCreatorCard('pu', 'alice', { requireCommitted: true }))
+    .rejects.toThrow('pending writes');
+  // Once a genuinely committed snapshot arrives, manual re-check may succeed;
+  // neither read retries an ambiguous write.
+  await expect(readCreatorCard('pu', 'alice', { requireCommitted: true }))
+    .resolves.toEqual(draft);
+  expect(setDoc).toHaveBeenCalledTimes(1);
+  expect(getDocFromServer).toHaveBeenCalledTimes(2);
+});
