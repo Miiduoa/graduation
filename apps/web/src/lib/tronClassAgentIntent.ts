@@ -64,7 +64,7 @@ const NEGATED_WRITE_START = new RegExp(NEGATED_WRITE_SOURCE, 'giu');
 const STARTS_NEGATED_WRITE = new RegExp(`^${NEGATED_WRITE_SOURCE}`, 'iu');
 // Read routing excludes the object of a negated write so it cannot select a read tool.
 const READ_ACTION_BOUNDARY = new RegExp(
-  `${CLAUSE_SEPARATOR.source}|並|再|而且|[:：\\r\\n]|\\b(?:and|then|also)\\b`, 'iu',
+  `${CLAUSE_SEPARATOR.source}|只要|只|改成|改查|而是|查|看|顯示|列出|確認|並|再|而且|[:：\\r\\n]|\\b(?:and|then|also)\\b`, 'iu',
 );
 function readRoutingText(text: string): string {
   let result = '';
@@ -80,8 +80,16 @@ function readRoutingText(text: string): string {
 }
 const WRITE_CUE = /(?:記得|立即|馬上|再|然後|接著|接下來|之後|後|請|幫我|替我|代我|直接|自動|順便|同時|並|\b(?:please|then|immediately))\s*$/iu;
 const STATUS_PREFIX = /(?:(?:是否|有沒有|有無|有哪些|哪些)\s*(?:已經|已|有)?\s*|尚未|還沒|未|沒|待|已經|已)$/u;
-const STATUS_SUFFIX = /^(?:了沒|(?:過的?|了的?|的|之)?\s*(?:狀態|紀錄|記錄|情況|歷史|有哪些))/u;
-const WRITE_OBJECT = /^\s*(?:報告|檔|文件|版|附件|作業|report\b|files?\b|documents?\b|versions?\b|attachments?\b|assignments?\b|homework\b)/iu;
+const STATUS_NOUN_SOURCE = '(?:過的?|了的?|的|之)?\\s*(?:狀態|紀錄|記錄|情況|進度|歷史)';
+const STATUS_PREDICATE_SOURCE = '(?:嗎|呢|了沒|如何|怎樣|是什麼|有沒有|查詢|一下|給我看)';
+// 和／與 can start a follow-up clause or be part of the write object's name.
+const STATUS_FOLLOWUP_SOURCE = `[和與]\\s*(?:查|看|顯示|列出|確認|下載|公告|通知|${TRONCLASS_CONTINUATION.source}|${OTHER_SERVICE_OR_SCHEDULE.source})`;
+const STATUS_END_SOURCE = `\\s*(?=$|\\p{P}|${STATUS_FOLLOWUP_SOURCE})`;
+const STATUS_SUFFIX = new RegExp(`^(?:了沒|${STATUS_NOUN_SOURCE}(?:\\s*${STATUS_PREDICATE_SOURCE})?)${STATUS_END_SOURCE}`, 'u');
+const HOMEWORK_STATUS_SUFFIX = new RegExp(
+  `^\\s*(?:的?作業)?\\s*(?:的?有哪些)?(?:${STATUS_END_SOURCE}|\\s*(?=${NEGATED_WRITE_SOURCE}))`, 'iu',
+);
+const STATUS_HOW = new RegExp(`((?:${SUBMIT_VERB_SOURCE})${STATUS_NOUN_SOURCE})\\s*如何${STATUS_END_SOURCE}`, 'giu');
 
 // An ASCII apostrophe between letters is an English contraction, not a quote.
 const QUOTE = /[「」『』“”‘’"`]|(?<![A-Za-z])'|'(?![A-Za-z])/u;
@@ -94,11 +102,10 @@ function hasWriteCommand(text: string): boolean {
     if (!match[1] || WRITE_CUE.test(before)) return true;
 
     const after = text.slice(match.index + match[0].length);
-    const statusSuffix = after.match(STATUS_SUFFIX);
+    // Keep the established homework filters such as「尚未提交的作業」.
     const statusPrefix = before.match(STATUS_PREFIX);
-    const object = after.slice(statusSuffix?.[0].length ?? 0);
-    if ((!statusPrefix && !statusSuffix) || WRITE_OBJECT.test(object) ||
-      (statusPrefix && WRITE_CUE.test(before.slice(0, statusPrefix.index)))) return true;
+    if (statusPrefix && WRITE_CUE.test(before.slice(0, statusPrefix.index))) return true;
+    if (!STATUS_SUFFIX.test(after) && !(statusPrefix && HOMEWORK_STATUS_SUFFIX.test(after))) return true;
   }
   return false;
 }
@@ -110,7 +117,9 @@ function authorizesPrivateRead(original: string): boolean {
     if (!STARTS_NEGATED_WRITE.test(rest) &&
       /^.{0,80}(?:讀取|查詢|查看|查|列出|下載|準備|代理|read|fetch|download)/i.test(rest)) return false;
   }
-  return !(/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(original) ||
+  // A terminal「如何」in a status query asks for the current state.
+  const explanationText = original.replace(STATUS_HOW, '$1');
+  return !(/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(explanationText) ||
     /^[「『“"'][\s\S]*[」』”"']$/.test(original));
 }
 

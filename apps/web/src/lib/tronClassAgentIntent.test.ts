@@ -188,6 +188,8 @@ describe('TronClass clauses inside a multi-clause request', () => {
 
 describe('write occurrences in TronClass requests', () => {
   it.each([
+    '查玩課雲作業，也上傳狀態截圖，以及校園公告',
+    '查玩課雲作業，繳交狀態表給老師',
     '查玩課雲作業繳交狀態後記得上傳狀態報告，查校園公告',
     '查玩課雲作業後立即上傳狀態報告，以及校園公告',
     '查玩課雲作業，不要繳交舊版接下來上傳新版',
@@ -220,6 +222,47 @@ describe('write occurrences in TronClass requests', () => {
     `查玩課雲作業${verb}狀態${object}，查校園公告`,
   )))('recognizes the object without a command cue in %s', question => {
     expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each(['狀態', '紀錄', '情況', '進度'].flatMap(noun =>
+    ['截圖', '表', '報告', '清單', '摘要', '給老師', '到學系', '至系辦', '一下給老師', '查詢表'].map(tail =>
+      `查玩課雲作業繳交${noun}${tail}`,
+    ),
+  ))('treats trailing text outside the status allowlist as a write in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+    expect(tronClassCompoundClauses(`${question}，校園公告`)).toEqual([]);
+  });
+
+  it.each(['和解書', '與會名單'])('does not treat the start of %s as a conjunction', tail => {
+    expect(tronClassCompoundClauses(`查玩課雲作業繳交狀態${tail}，校園公告`)).toEqual([]);
+  });
+
+  it.each(['', '嗎？', '呢', '了沒', '如何', '怎樣', '是什麼', '有沒有', '查詢', '一下', '給我看'].map(tail =>
+    `玩課雲顯示一下我的作業繳交進度${tail}`,
+  ))('allows the complete status query %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'homework', pendingOnly: false });
+    expect(tronClassCompoundClauses(`${question}，校園公告`)).toEqual([question.replace(/？$/, '')]);
+  });
+
+  it.each([
+    '玩課雲作業上傳情況',
+    '玩課雲作業查一下繳交進度',
+    '玩課雲看我的作業提交紀錄',
+    '玩課雲列出作業上載狀態',
+    '玩課雲確認作業繳交進度',
+  ])('keeps the status query %s eligible for homework reads', question => {
+    expect(tronClassCompoundClauses(`${question}，校園公告`)).toEqual([question]);
+  });
+
+  it.each([
+    '不要繳交只要查玩課雲作業狀態',
+    '不要繳交舊版只查玩課雲作業狀態',
+    '不要繳交附件改查玩課雲作業狀態',
+    '不要上傳截圖改成顯示玩課雲作業狀態',
+    '不要上傳截圖而是列出玩課雲作業',
+  ])('preserves an adjacent read after a negated write in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'homework', pendingOnly: false });
+    expect(parseTronClassAgentIntent(`${question}上傳新版`)).toEqual({ intent: 'unsupported', pendingOnly: false });
   });
 
   it.each(['不要', '別', '勿', '不用'].flatMap(negation =>
