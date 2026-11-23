@@ -331,7 +331,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
   const restartButton = useRef<HTMLButtonElement | null>(null);
-  const wasPaused = useRef(false);
+  // Only move keyboard focus into the recovery UI when it was inside the 3D scene.
+  // An observer pause caused by scrolling must not steal focus from directions or POI controls.
+  const restoreFocusAfterPause = useRef(false);
+  const sceneWasSuspended = useRef(false);
   const view = useMemo(() => ({
     selectedId,
     overhead,
@@ -371,6 +374,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     const updateVisibility = () => {
       if (!scene) return;
       const shouldRender = !isOffscreen() && !isBackgrounded();
+      // Capture focus before setActive() marks 3D marker buttons inert. Some
+      // browsers blur the active marker immediately on that DOM change.
+      if (!shouldRender && !sceneWasSuspended.current) {
+        restoreFocusAfterPause.current = host.contains(host.ownerDocument.activeElement);
+      }
+      sceneWasSuspended.current = !shouldRender;
       scene.setActive(shouldRender);
       setRenderSuspended(!shouldRender);
     };
@@ -590,6 +599,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   }, [host, model, onSelect, onCameraChange, footprints, manualStart]);
 
   const startManually = () => {
+    // The user's explicit recovery action should return keyboard focus to 3D
+    // once it is usable, even if focus was outside the scene when it paused.
+    if (status === 'ready' && renderSuspended) restoreFocusAfterPause.current = true;
     // A recovery button may be visible while the canvas is below the modal
     // scrollport. Focus alone does not scroll in some mobile WebViews.
     // Bring the host into view before the new scene measures its bounds.
@@ -602,13 +614,21 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const paused = status === 'ready' && renderSuspended;
   useEffect(() => {
     if (paused) {
-      wasPaused.current = true;
-      try { restartButton.current?.focus(); } catch { /* Focus is advisory. */ }
+      // An offscreen suspension is not a navigation request. Leave keyboard
+      // focus on directions/other controls unless the 3D host held it.
+      if (restoreFocusAfterPause.current) {
+        try { restartButton.current?.focus({ preventScroll: true }); } catch { /* Focus is advisory. */ }
+      }
       return;
     }
-    if (wasPaused.current && status === 'ready') {
-      wasPaused.current = false;
-      try { host?.focus(); } catch { /* Focus is advisory. */ }
+    if (status === 'ready' && restoreFocusAfterPause.current) {
+      restoreFocusAfterPause.current = false;
+      if (!host) return;
+      const focused = host.ownerDocument.activeElement;
+      // Do not override a deliberate focus move made while the scene paused.
+      if (focused === host.ownerDocument.body || focused === restartButton.current) {
+        try { host.focus({ preventScroll: true }); } catch { /* Focus is advisory. */ }
+      }
     }
   }, [paused, status, host]);
   return (
