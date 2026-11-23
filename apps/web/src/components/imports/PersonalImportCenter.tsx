@@ -479,8 +479,8 @@ function PersonalRecordEditor({
           aria-label="修改個人紀錄"
           onSubmit={submit}
           onFocusCapture={(event) => {
-            const field = titleRef.current;
-            if (!field || event.target !== field) return;
+            const field = event.target;
+            if (!(field instanceof HTMLInputElement) || field !== titleRef.current) return;
             const dialog = field.closest('dialog');
             if (!dialog?.open) return;
             const bounds = dialog.getBoundingClientRect();
