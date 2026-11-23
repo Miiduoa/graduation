@@ -470,4 +470,35 @@ describe('write occurrences in TronClass requests', () => {
   ])('keeps the TronClass status read when a source cue remains after negation in %s', question => {
     expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'homework', pendingOnly: false });
   });
+
+  it.each([
+    '玩課雲請把附件放入作業區',
+    '玩課雲請把附件：放到作業區',
+    '玩課雲請將附件：貼上作業區',
+    '玩課雲把檔案塞進作業區',
+    '玩課雲把報告投入作業區',
+  ])('blocks placement of a submission object in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+  });
+
+  it.each([
+    '查玩課雲作業，請把附件放入作業區',
+    '查玩課雲作業，請把附件：放到作業區',
+    '查玩課雲作業，請將附件：貼上作業區',
+  ])('suppresses a compound read for placement in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '不要把玩課雲作業貼上，只要校園公告',
+    '不要繳交玩課雲作業，查作業狀態',
+    '不要繳交這份和玩課雲作業附件，只查校園公告',
+    '不要將玩課雲附件放入，只要校園公告',
+    '不要提交這份與玩課雲作業，改查校園公告',
+  ])('does not inherit a TronClass source from a negated write in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
 });

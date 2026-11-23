@@ -55,11 +55,13 @@ const NEGATION_SOURCE = "不要|別|勿|不准|禁止|無須|不用|不需要|\\
 const NEGATED = new RegExp(NEGATION_SOURCE, 'i');
 const NEGATIONS = new RegExp(NEGATION_SOURCE, 'gi');
 const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
+const PLACEMENT_VERB_SOURCE = '放[入到進上]|貼[上到入]|丟[到給入]|塞[入進到]|投[入進到]|搬[到去]';
 const SUBMIT_VERB_SOURCE = [
   '重新(?:繳交|提交|上傳|上載)|繳交|提交|送出|交出|上傳|上載',
   '補交|補繳|遲交|重交|重繳|上繳|遞交|呈交|交付|繳回|交回|附上|夾帶|送件|寄出',
   // Object may come before the verb, as in「把附件回傳／傳給老師」.
   '回傳|傳給|傳到|傳回|傳送|傳去|送給|送到|寄給|寄到|遞給|遞到|轉給|轉到|轉寄',
+  PLACEMENT_VERB_SOURCE,
   '\\b(?:submit|upload|resubmit|hand\\s+in|turn\\s+in|send\\s+(?:in|to|back)|forward)\\b',
   // Short verbs also form commands with a preceding object or no object.
   '[交繳]',
@@ -68,12 +70,18 @@ const OTHER_WRITE_VERB_SOURCE = '發[佈布文]|回[覆復]|留言|刪除|撤回
 const WRITE_VERB = new RegExp(`(${SUBMIT_VERB_SOURCE})|${OTHER_WRITE_VERB_SOURCE}`, 'giu');
 const WRITE_NEGATION_SOURCE = `(?:${NEGATION_SOURCE})\\s*(?:(?:幫我|替我|代我|自動|直接)\\s*)*`;
 const WRITE_NEGATION = new RegExp(`${WRITE_NEGATION_SOURCE}$`, 'iu');
-const NEGATED_WRITE_SOURCE = `${WRITE_NEGATION_SOURCE}(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})`;
+// 把／將 may place the object before the verb:「不要把玩課雲作業貼上」.
+const NEGATED_BA_FILL = '(?:(?:把|將)\\s*(?:(?![，,；;。！!？?\\r\\n]|然後|接著|接下來|順便|並且|另外|同時).){0,40}?)?';
+const NEGATED_WRITE_SOURCE = `${WRITE_NEGATION_SOURCE}${NEGATED_BA_FILL}(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})`;
 const NEGATED_WRITE_START = new RegExp(NEGATED_WRITE_SOURCE, 'giu');
 const STARTS_NEGATED_WRITE = new RegExp(`^${NEGATED_WRITE_SOURCE}`, 'iu');
-// Read routing excludes the object of a negated write so it cannot select a read tool.
-const READ_ACTION_BOUNDARY = new RegExp(
-  `${CLAUSE_SEPARATOR.source}|只要|只|改成|改查|而是|查|看|顯示|列出|確認|並|再|而且|[:：\\r\\n]|\\b(?:and|then|also)\\b`, 'iu',
+// Stop clearing a negated write at a new action, not at 和／與 inside its object.
+const NEGATED_WRITE_STOP = new RegExp(
+  '(?:然後|接著|順便|並且|另外|同時|也幫我|再幫我|並幫我|[，,；;。！!？?\\r\\n])+|' +
+  '只要|只|改成|改查|而是|查|看|顯示|列出|確認|' +
+  `(?:[和與及、]|以及)\\s*(?:(?:請|幫我|替我|代我|直接|自動)\\s*)*(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})|` +
+  '\\b(?:and|then|also)\\b',
+  'iu',
 );
 function readRoutingText(text: string): string {
   let result = '';
@@ -81,7 +89,7 @@ function readRoutingText(text: string): string {
   for (const match of text.matchAll(NEGATED_WRITE_START)) {
     if (match.index < start) continue;
     const end = match.index + match[0].length;
-    const boundary = text.slice(end).search(READ_ACTION_BOUNDARY);
+    const boundary = text.slice(end).search(NEGATED_WRITE_STOP);
     result += text.slice(start, match.index) + ' ';
     start = boundary < 0 ? text.length : end + boundary;
   }
@@ -172,18 +180,25 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
 }
 
 const BA_OBJECT = '(?:附件|檔案?|文件|作業|報告|截圖|作品|心得|講義|考卷|表單|修訂稿)';
-const BA_TRANSFER = '(?:回傳|傳(?:給|到|回|去|送)|送(?:給|到|出|件)|寄(?:給|到|出)|遞(?:給|到|交)|轉(?:給|到|寄)|[交繳]|上[傳載]|提交|放[到進上]|貼[到上]|丟[到給])';
+const BA_TRANSFER = `(?:回傳|傳(?:給|到|回|去|送)|送(?:給|到|出|件)|寄(?:給|到|出)|遞(?:給|到|交)|轉(?:給|到|寄)|[交繳]|上[傳載]|提交|${PLACEMENT_VERB_SOURCE})`;
 const BA_NEGATION = new RegExp(`${WRITE_NEGATION_SOURCE}$`, 'iu');
+const BA_QUERY = /(?:查詢|查看|確認|顯示|列出|告訴我|查|看)/u;
+const BA_OBJECT_RE = new RegExp(BA_OBJECT, 'u');
+const BA_TRANSFER_RE = new RegExp(BA_TRANSFER, 'u');
 
 function hasBaObjectWrite(text: string): boolean {
   for (const match of text.matchAll(/[把將]/gu)) {
     const before = text.slice(0, match.index);
     if (BA_NEGATION.test(before)) continue;
-    const segmentRest = text.slice(match.index + match[0].length).split(/[,;。?!、:\r\n]/u)[0] ?? '';
-    if (new RegExp(`${BA_OBJECT}[\\s\\S]{0,20}${BA_TRANSFER}|${BA_TRANSFER}`, 'u').test(segmentRest) &&
-      new RegExp(BA_OBJECT, 'u').test(segmentRest)) {
-      return true;
-    }
+    // Keep colons inside the same 把／將 command, as in「把附件：放到作業區」.
+    const segmentRest = text.slice(match.index + match[0].length).split(/[,;。！!？?、\r\n]/u)[0] ?? '';
+    const object = BA_OBJECT_RE.exec(segmentRest);
+    if (!object) continue;
+    if (BA_TRANSFER_RE.test(segmentRest)) return true;
+    const afterObject = segmentRest.slice(object.index + object[0].length).replace(/^[\s:：]+/u, '');
+    if (!afterObject) return true;
+    if (BA_QUERY.test(afterObject) && !BA_TRANSFER_RE.test(afterObject)) continue;
+    return true;
   }
   return false;
 }
@@ -223,16 +238,19 @@ function wholeRequestAllowsCompoundRead(question: string): boolean {
  * into a write or a schedule.
  */
 export function tronClassCompoundClauses(question: string): string[] {
+  const original = question.normalize('NFKC').trim();
   if (typeof question !== 'string' || !question.trim() || question.length > 1000 ||
     !TRONCLASS_KEYWORD.test(question) || !isMultiClauseRequest(question) ||
-    tronClassExplicitNavigationQuestion(question) || !wholeRequestAllowsCompoundRead(question)) return [];
-  const clauses = question.normalize('NFKC').split(CLAUSE_SEPARATOR).map(part => part.trim()).filter(Boolean);
+    tronClassExplicitNavigationQuestion(question) || !wholeRequestAllowsCompoundRead(question) ||
+    !TRONCLASS_KEYWORD.test(readRoutingText(original))) return [];
+  const clauses = original.split(CLAUSE_SEPARATOR).map(part => part.trim()).filter(Boolean);
   const result: string[] = [];
   const seen = new Set<string>();
   let context = false;
   for (const clause of clauses) {
     let candidate: string | null = null;
     if (TRONCLASS_KEYWORD.test(clause)) {
+      if (!TRONCLASS_KEYWORD.test(readRoutingText(clause))) continue;
       context = true;
       candidate = clause;
     } else if (context && TRONCLASS_CONTINUATION.test(clause) && !OTHER_SERVICE_OR_SCHEDULE.test(clause) && !NEGATED.test(clause)) {
