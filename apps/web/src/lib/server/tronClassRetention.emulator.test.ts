@@ -6,6 +6,9 @@ import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import { createTronClassBindingService, TRONCLASS_BINDING_TTL_MS, type TronClassBindingStore } from './tronClassBinding';
 import { createTronClassRetentionWorker, TRONCLASS_RETENTION_BATCH_SIZE, type TronClassRetentionStore } from './tronClassRetention';
 
+vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerReady: () => true, waitForTronClassRetentionFirstSweep: async () => undefined }));
+vi.mock('./tronClassPlatformClosureScheduler', () => ({ isTronClassPlatformClosureSchedulerReady: () => true, waitForTronClassPlatformClosureFirstBatch: async () => undefined }));
+
 vi.mock('server-only', () => ({}));
 const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST ?? '';
 const localEmulator = /^(?:127\.0\.0\.1|localhost):\d{1,5}$/.test(emulatorHost);
@@ -75,6 +78,8 @@ describe.skipIf(!localEmulator)('bounded TronClass retention with real Firestore
 
   beforeAll(() => {
     vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true');
+    vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED', 'true');
+    vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL', 'postgresql://synthetic:synthetic@127.0.0.1:5432/synthetic');
     app = initializeApp({ projectId: PROJECT }, `${PROJECT}-first-client`);
     otherApp = initializeApp({ projectId: PROJECT }, `${PROJECT}-second-client`);
     db = getFirestore(app);
@@ -96,6 +101,8 @@ describe.skipIf(!localEmulator)('bounded TronClass retention with real Firestore
     const removable: Array<[string, Record<string, unknown>]> = [
       [`${BINDINGS}/expired`, binding()], [`${QUOTAS}/owner`, { ...quota(), scope: 'owner', ownerKey: OWNER }],
       [`${QUOTAS}/account`, quota()],
+      [`${QUOTAS}/target-account`, { ...quota(), scope: 'target-account',
+        timestamps: Array<number>(20).fill(NOW - 3600_000) }],
       [`${QUOTAS}/owner-account`, { ...quota(), scope: 'owner-account', ownerKey: OWNER,
         timestamps: [{ timestamp: NOW - 3600_000, id: 'a'.repeat(32) }] }],
       [`${QUOTAS}/refunded`, { ...quota(), scope: 'owner-account', ownerKey: OWNER, timestamps: [] }],
@@ -107,6 +114,7 @@ describe.skipIf(!localEmulator)('bounded TronClass retention with real Firestore
       [`${BINDINGS}/disconnected`, { ...binding(), state: 'disconnected' }],
       [`${BINDINGS}/renewed`, { ...binding(), expiresAt: NOW + 3600_000 }],
       [`${QUOTAS}/recent`, { ...quota(), timestamps: [NOW] }],
+      [`${QUOTAS}/recent-target`, { ...quota(), scope: 'target-account', timestamps: [NOW] }],
       [`${QUOTAS}/recent-reservation`, { ...quota(), scope: 'owner-account', ownerKey: OWNER,
         timestamps: [{ timestamp: NOW, id: 'b'.repeat(32) }] }],
       [`${QUOTAS}/unrecognized`, { ...quota(), scope: 'other' }],
@@ -178,7 +186,7 @@ describe.skipIf(!localEmulator)('bounded TronClass retention with real Firestore
     expect((await read(`${QUOTAS}/renewing`))?.timestamps).toEqual([NOW]);
   }, 20_000);
 
-  it('scans at most fifty candidates across collections and continues past protected rows', async () => {
+  it('uses independent collection budgets and continues past protected rows', async () => {
     const rows: Array<[string, Record<string, unknown>]> = [];
     for (let i = 0; i < 25; i += 1) {
       const id = String(i).padStart(3, '0');
@@ -186,24 +194,18 @@ describe.skipIf(!localEmulator)('bounded TronClass retention with real Firestore
     }
     // Older protected rows occupy the first operation pages; a cursor must
     // eventually reach the safe drafts rather than rescan these forever.
-    for (let i = 0; i < 20; i += 1) rows.push([`${OPERATIONS}/protected-${i}`, {
+    for (let i = 0; i < TRONCLASS_RETENTION_BATCH_SIZE; i += 1) rows.push([`${OPERATIONS}/protected-${i}`, {
       ...operation(), state: 'unknown', purgeAt: new Date(NOW - 2),
     }]);
     await seed(rows);
     const run = worker();
     const first = await run();
-    expect(first.scanned).toBe(TRONCLASS_RETENTION_BATCH_SIZE);
-    let removed = first.deleted;
-    for (let i = 0; i < 5; i += 1) {
-      const result = await run();
-      expect(result.scanned).toBeLessThanOrEqual(TRONCLASS_RETENTION_BATCH_SIZE);
-      removed += result.deleted;
-    }
-    expect(removed).toBe(75);
+    expect(first).toEqual({ scanned: TRONCLASS_RETENTION_BATCH_SIZE + 50, deleted: 50, skipped: false });
+    expect(await run()).toEqual({ scanned: 25, deleted: 25, skipped: false });
     expect((await db.collection(BINDINGS).get()).empty).toBe(true);
     expect((await db.collection(QUOTAS).get()).empty).toBe(true);
     const remaining = await db.collection(OPERATIONS).get();
-    expect(remaining.size).toBe(20);
+    expect(remaining.size).toBe(TRONCLASS_RETENTION_BATCH_SIZE);
     expect(remaining.docs.every(doc => doc.data().state === 'unknown')).toBe(true);
   }, 30_000);
 

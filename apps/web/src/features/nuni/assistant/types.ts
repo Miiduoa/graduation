@@ -59,6 +59,9 @@ export type V2Turn = {
     accessRequired?: boolean;
     unconnected?: boolean;
     inactive?: boolean;
+    /** A TronClass supplement appended after the planner answered a multi-clause
+     * request. It never replaces the planner turn as follow-up context. */
+    compound?: true;
   };
 };
 

@@ -274,8 +274,13 @@ export default function HomePage() {
     const timer = window.setTimeout(() => setLeavingTodoIds([]), 200);
     return () => window.clearTimeout(timer);
   }, [todos]);
+  // Partial course callbacks do not set updatedAt. Keep a confirmed snapshot
+  // actionable during same-account refreshes without treating the first partial
+  // response as a complete empty account.
+  const courseDataResolved =
+    sources.length > 0 && sources.every((source) => !!rows[source]?.updatedAt);
   const lmsUnconnected =
-    signedIn && !!data && !error && !loading && !failed && data.courses.length === 0;
+    signedIn && !!data && !error && !failed && courseDataResolved && data.courses.length === 0;
 
   const assistant = (
     <TodayAssistantDisclosure
@@ -389,6 +394,7 @@ export default function HomePage() {
           unsigned={!signedIn}
           skeleton={busy}
           refreshing={loading && !!data}
+          courseDataResolved={courseDataResolved}
           todos={todos}
           todosError={error || data?.tasksError || ''}
           lmsUnconnected={lmsUnconnected}

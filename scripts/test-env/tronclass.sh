@@ -8,6 +8,19 @@ set -euo pipefail
 umask 077
 TRONCLASS_PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$TRONCLASS_PROJECT_ROOT"
+
+# env.sh pins the listeners to loopback. Check the requested host before
+# sourcing it so a non-loopback request still disables school binding.
+TRONCLASS_LOCAL_BINDING=true
+for requested_host in "${TEST_HOST:-127.0.0.1}" "${HOST:-127.0.0.1}"; do
+  case "$requested_host" in
+    127.0.0.1|localhost) ;;
+    *) TRONCLASS_LOCAL_BINDING=false ;;
+  esac
+done
+if [[ -n "${CI:-}${TRONCLASS_MANAGED_PREVIEW:-}${VERCEL:-}${NETLIFY:-}${CODESPACES:-}${GITPOD_WORKSPACE_ID:-}" ]]; then
+  TRONCLASS_LOCAL_BINDING=false
+fi
 source scripts/test-env/env.sh
 
 for TRONCLASS_ENV_FILE in .env .env.local .env.development .env.development.local \
@@ -41,7 +54,7 @@ export SCHOOL_STUDENT_ID_LOGIN_ENABLED=true
 export NUNI_CLASSROOM_ENABLED=false
 export PLATFORM_GOOGLE_LOGIN_ENABLED=false
 export CAMPUS_LEGACY_ENABLED=false
-export TRONCLASS_INTEGRATION_ENABLED=true
+export TRONCLASS_INTEGRATION_ENABLED="$TRONCLASS_LOCAL_BINDING"
 export TRONCLASS_RETENTION_ENABLED=true
 export TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED=false
 export NEXT_PUBLIC_LMS_V2=false
@@ -109,13 +122,18 @@ node scripts/test-env/seed.cjs --missing-only >"$TRONCLASS_RUNTIME_DIR/seed.log"
 node scripts/build-functions-shared.cjs
 node scripts/import-ai/prepare-assets.mjs
 echo "Full Web: $WEB_PUBLIC_ORIGIN/login?returnUrl=%2Ftronclass&schoolId=pu&reconnect=school"
-echo "Local account: S0000001; password: campus-test-1234 (public emulator fixture)."
-echo "Logs: $TRONCLASS_RUNTIME_DIR. Real school credentials are entered only in the TronClass form."
+echo "Use the local test student sign-in button."
+echo "Logs: $TRONCLASS_RUNTIME_DIR."
+if [ "$TRONCLASS_INTEGRATION_ENABLED" = true ]; then
+  echo 'School binding is for single-user local use only. Enter school credentials in the TronClass form.'
+else
+  echo 'School binding is disabled. Use synthetic fixtures only.'
+fi
 cd apps/web
 node ../../node_modules/next/dist/bin/next dev --webpack -p "$TEST_WEB_PORT" -H "$TEST_HOST" \
   >"$TRONCLASS_RUNTIME_DIR/web.log" 2>&1 &
 TRONCLASS_WEB_PID=$!
-if [ "${TRONCLASS_VERIFY_RUNTIME:-}" = '1' ]; then
+if [ "${TRONCLASS_VERIFY_RUNTIME:-}" = '1' ] && [ "$TRONCLASS_INTEGRATION_ENABLED" = true ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
   node scripts/test-env/verify-tronclass.cjs >"$TRONCLASS_RUNTIME_DIR/acceptance.log" 2>&1
   echo "Verified real emulator authentication and Firestore persistence; see $TRONCLASS_RUNTIME_DIR/acceptance.json."

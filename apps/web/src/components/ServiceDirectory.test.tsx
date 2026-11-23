@@ -242,3 +242,113 @@ it.each([
   fireEvent.click(screen.getByRole('link', { name: '圖書館' }), modifier);
   expect(window.history.state).toEqual(nextHistoryState);
 });
+
+it.each([
+  { journey: 'life', query: '', heading: '服務目錄' },
+  { journey: 'connect', query: '', heading: '服務目錄' },
+  { journey: 'life', query: '&q=借書', heading: '搜尋結果' },
+  { journey: 'connect', query: '&q=好友', heading: '搜尋結果' },
+  { journey: 'life', query: '&q=找不到的服務xyz', heading: '搜尋結果' },
+  { journey: 'connect', query: '&q=找不到的服務xyz', heading: '搜尋結果' },
+  { journey: 'life', query: '&group=travel', heading: '出門與交通' },
+  { journey: 'connect', query: '&group=people', heading: '找人與聊天' },
+  { journey: 'life', query: '&access=public', heading: '免登入服務' },
+  { journey: 'connect', query: '&access=public', heading: '免登入服務' },
+] as const)(
+  'explicit search in $journey focuses its $heading result, including empty and filter-only states ($query)',
+  ({ journey, query, heading }) => {
+    location(`/${journey}?campus=pu${query}#services`);
+    render(<ServiceDirectory journey={journey} />);
+    const input = screen.getByRole('searchbox');
+    input.focus();
+    const previousUrl = window.location.href;
+    const previousState = window.history.state;
+
+    fireEvent.submit(screen.getByRole('search'));
+
+    const resultHeading = screen.getByRole('heading', { name: heading, level: 2 });
+    const region = screen.getByRole('region', { name: '服務搜尋結果' });
+    expect(document.activeElement).toBe(resultHeading);
+    expect(resultHeading.getAttribute('tabindex')).toBe('-1');
+    expect(region.id).toBe(input.getAttribute('aria-controls'));
+    expect(region.contains(resultHeading)).toBe(true);
+    expect(resultHeading.getAttribute('aria-describedby')).toBe(screen.getByRole('status').id);
+    expect(window.location.href).toBe(previousUrl);
+    expect(window.history.state).toEqual(previousState);
+  },
+);
+
+it.each(['life', 'connect'] as const)(
+  'the visible search action and native submit share one result target in %s',
+  (journey) => {
+    location(`/${journey}?campus=pu`);
+    render(<ServiceDirectory journey={journey} />);
+    const input = screen.getByRole('searchbox');
+    const action = screen.getByRole('button', { name: '查看結果' });
+    input.focus();
+    fireEvent.click(action);
+    const heading = screen.getByRole('heading', { name: '服務目錄', level: 2 });
+    expect(document.activeElement).toBe(heading);
+    expect(action.getAttribute('type')).toBe('submit');
+    expect(action.getAttribute('aria-controls')).toBe(input.getAttribute('aria-controls'));
+
+    input.focus();
+    expect(fireEvent.keyDown(input, { key: 'Enter' })).toBe(true);
+    fireEvent.submit(screen.getByRole('search'));
+    expect(document.activeElement).toBe(heading);
+  },
+);
+
+it('live filtering keeps the current control focused and preserves the result heading across result states', () => {
+  render(<ServiceDirectory journey="life" />);
+  const input = screen.getByRole('searchbox');
+  const heading = screen.getByRole('heading', { name: '服務目錄', level: 2 });
+  input.focus();
+  fireEvent.change(input, { target: { value: '借書' } });
+  expect(document.activeElement).toBe(input);
+  expect(screen.getByRole('heading', { name: '搜尋結果', level: 2 })).toBe(heading);
+  expect(screen.getByRole('link', { name: '圖書館' })).toBeTruthy();
+
+  const category = screen.getByRole('button', { name: '出門與交通' });
+  category.focus();
+  fireEvent.click(category);
+  expect(document.activeElement).toBe(category);
+  expect(screen.getByRole('heading', { name: '沒有找到符合的服務' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '搜尋結果', level: 2 })).toBe(heading);
+  fireEvent.click(screen.getByRole('button', { name: '查看結果' }));
+  expect(document.activeElement).toBe(heading);
+
+  fireEvent.click(screen.getByRole('button', { name: '顯示全部服務' }));
+  expect(document.activeElement).toBe(input);
+  expect(screen.getByRole('heading', { name: '服務目錄', level: 2 })).toBe(heading);
+});
+
+it('composition keeps Enter and Escape with the input method and does not submit unfinished text', () => {
+  render(<ServiceDirectory journey="life" />);
+  const input = screen.getByRole('searchbox') as HTMLInputElement;
+  const form = screen.getByRole('search');
+  input.focus();
+  fireEvent.compositionStart(input);
+  fireEvent.change(input, { target: { value: '借' } });
+  expect(fireEvent.keyDown(input, { key: 'Enter' })).toBe(false);
+  fireEvent.keyDown(input, { key: 'Escape' });
+  fireEvent.submit(form);
+  expect(document.activeElement).toBe(input);
+  expect(input.value).toBe('借');
+  expect(new URL(window.location.href).searchParams.has('q')).toBe(false);
+
+  fireEvent.compositionEnd(input, { data: '借書', target: { value: '借書' } });
+  expect(new URL(window.location.href).searchParams.get('q')).toBe('借書');
+  // Safari can report compositionend before the confirming Enter keydown.
+  expect(fireEvent.keyDown(input, { key: 'Enter', keyCode: 229 })).toBe(false);
+  fireEvent.keyDown(input, { key: 'Escape', keyCode: 229 });
+  expect(document.activeElement).toBe(input);
+  expect(input.value).toBe('借書');
+  expect(fireEvent.keyDown(input, { key: 'Enter', isComposing: true })).toBe(false);
+  fireEvent.keyDown(input, { key: 'Escape', isComposing: true });
+  expect(input.value).toBe('借書');
+
+  expect(fireEvent.keyDown(input, { key: 'Enter' })).toBe(true);
+  fireEvent.submit(form);
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '搜尋結果', level: 2 }));
+});

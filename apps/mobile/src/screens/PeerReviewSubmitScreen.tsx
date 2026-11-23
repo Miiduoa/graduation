@@ -23,7 +23,7 @@ import { useNavigation } from '@react-navigation/native';
 import { safeNavigate } from '../utils/safeNavigate';
 
 import { evaluateRubric, type Rubric, type RubricScore } from '@campus/shared';
-import { tcFetchPeerReviews, isTronClassWriteLocked, TRONCLASS_WRITE_LOCKED_MESSAGE } from '../services/tronClassClient';
+import { tcFetchPeerReviews } from '../services/tronClassClient';
 import { isDemoCourseId, demoFetchPeerReviews } from '../data/demoCoursesAdapter';
 import { theme } from '../ui/theme';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
@@ -88,7 +88,6 @@ const SAMPLE_RUBRIC: Rubric = {
 
 export default function PeerReviewSubmitScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
-  const writeLocked = isTronClassWriteLocked();
   const passedAssignmentTitle = props.route?.params?.assignmentTitle ?? '同儕互評';
   const courseId = Number(String(props.route?.params?.courseId ?? '').replace(/^tc:/, '')) || 0;
 
@@ -161,7 +160,6 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
   const [overallFeedback, setOverallFeedback] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const readOnly = writeLocked || submitted;
 
   // 切換不同 review 時清空輸入
   useEffect(() => {
@@ -185,7 +183,6 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
   const complete = rubric.criteria.every((c) => scores[c.id]);
 
   const handleSubmit = async () => {
-    if (readOnly) return;
     if (!complete) {
       Alert.alert('請完成所有評分項', '每個 criterion 都要選一個等級才能送出。');
       return;
@@ -257,7 +254,6 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
           title={passedAssignmentTitle}
           meta={courseId ? `課程 ID ${courseId}` : undefined}
         />
-        {writeLocked && <Text style={{ color: theme.colors.text }}>{TRONCLASS_WRITE_LOCKED_MESSAGE}</Text>}
         <EmptyState
           icon="ribbon-outline"
           title="尚未有互評任務"
@@ -300,7 +296,6 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
           title={assignmentTitle}
           meta={`對象 · ${anonymousAuthor}`}
         />
-        {writeLocked && <Text style={{ color: theme.colors.text }}>{TRONCLASS_WRITE_LOCKED_MESSAGE}</Text>}
         {availableReviews.length > 1 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
             {availableReviews.map((r, i) => (
@@ -430,13 +425,12 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
               {c.levels.map((l) => (
                 <Pressable
                   key={l.id}
-                  disabled={readOnly}
                   onPress={() =>
-                    !readOnly && setScores((s) => ({ ...s, [c.id]: l.id }))
+                    !submitted && setScores((s) => ({ ...s, [c.id]: l.id }))
                   }
                   accessibilityRole="button"
                   accessibilityLabel={`${c.title}：${l.label}，${l.points} 分`}
-                  accessibilityState={{ selected: scores[c.id] === l.id, disabled: readOnly }}
+                  accessibilityState={{ selected: scores[c.id] === l.id, disabled: submitted }}
                   style={{
                     flex: 1,
                     padding: 10,
@@ -470,7 +464,7 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
             <TextInput
               value={comments[c.id] ?? ''}
               onChangeText={(t) => setComments((cs) => ({ ...cs, [c.id]: t }))}
-              editable={!readOnly}
+              editable={!submitted}
               accessibilityLabel={`${c.title}的逐項回饋`}
               placeholder="這一項的具體回饋（選填）"
               placeholderTextColor={theme.colors.muted}
@@ -517,7 +511,7 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
         <TextInput
           value={overallFeedback}
           onChangeText={setOverallFeedback}
-          editable={!readOnly}
+          editable={!submitted}
           accessibilityLabel="整體匿名回饋"
           placeholder="例如：你的論述很清晰，但建議補一個反例會更有說服力。"
           placeholderTextColor={theme.colors.muted}
@@ -536,7 +530,7 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
           }}
         />
 
-        {!readOnly && (
+        {!submitted && (
           <Pressable
             onPress={handleSubmit}
             disabled={submitting || !complete}

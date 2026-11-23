@@ -1334,6 +1334,33 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the server alive when a stalled Overpass reader throws during deadline cancellation', async () => {
+    vi.useFakeTimers();
+    // An incomplete stream bridge may throw from cancel() rather than return
+    // a Promise. The abort event fires inside the 12-second deadline timer.
+    const reader = {
+      read: vi.fn(() => new Promise<ReadableStreamReadResult<Uint8Array>>(() => {})),
+      cancel: vi.fn(() => { throw new Error('stream bridge cancelled synchronously'); }),
+      releaseLock: vi.fn(),
+    };
+    const upstream = vi.fn().mockResolvedValue({
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      body: { getReader: () => reader },
+    });
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const pending = GET();
+    await vi.advanceTimersByTimeAsync(12_000);
+    const response = await pending;
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(reader.cancel).toHaveBeenCalledTimes(1);
+    expect(upstream.mock.calls[0][1].signal.aborted).toBe(true);
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the fallback explicit and rate limits repeated upstream failures', async () => {
     const mockedFetch = vi.fn().mockRejectedValue(new Error('timeout'));
     vi.stubGlobal('fetch', mockedFetch);
@@ -1629,6 +1656,42 @@ describe('public Providence building geometry route', () => {
       }
     });
 
+  it.each([
+    { status: 429, headers: {}, cooldown: 3600 },
+    { status: 403, headers: {}, cooldown: 86400 },
+    { status: 200, headers: { 'Content-Range': 'bytes 0-99/200' }, cooldown: 3600 },
+    { status: 200, headers: { 'Content-Type': 'text/html' }, cooldown: 3600 },
+    { status: 200, headers: { 'Content-Length': '0' }, cooldown: 3600 },
+  ])('preserves the $cooldown second cooldown when cancelling unread HTTP $status throws', async ({
+    status, headers, cooldown,
+  }) => {
+    vi.useFakeTimers();
+    const cancel = vi.fn(() => { throw new Error('stream bridge cleanup failed'); });
+    const getReader = vi.fn();
+    const responseHeaders = new Headers({ 'Content-Type': 'application/json', 'Retry-After': '3600' });
+    for (const [name, value] of Object.entries(headers)) {
+      if (typeof value === 'string') responseHeaders.set(name, value);
+    }
+    const upstream = vi.fn().mockResolvedValue({
+      status,
+      headers: responseHeaders,
+      body: { cancel, getReader },
+    });
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const failed = await GET();
+    expect(failed.status).toBe(503);
+    expect(failed.headers.get('Cache-Control')).toBe('no-store');
+    expect(failed.headers.get('Retry-After')).toBe(String(cooldown));
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(getReader).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(660_000);
+    const cooling = await GET();
+    expect(cooling.status).toBe(503);
+    expect(cooling.headers.get('Retry-After')).toBe(String(cooldown - 660));
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('obeys a one-hour Overpass 429 Retry-After rather than retrying after ten minutes', async () => {
     const start = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
@@ -1835,11 +1898,54 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+  it('keeps a one-hour cooldown for a zero-padded asctime Retry-After and Date', async () => {
+    // merge-base cooled for 3600 s here; rejecting the two-digit day dropped it to 600 s.
+    const serverNow = Date.parse('2026-11-02T00:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(serverNow);
+    try {
+      const upstream = vi.fn().mockResolvedValue(new Response('busy', {
+        status: 503,
+        headers: { Date: 'Mon Nov 02 00:00:00 2026', 'Retry-After': 'Mon Nov 02 01:00:00 2026' },
+      }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Retry-After')).toBe('3600');
+      clock.mockReturnValue(serverNow + 30 * 60_000);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([
+    ['wrong weekday', 'Tue Nov 02 01:00:00 2026'],
+    ['impossible day', 'Mon Nov 31 01:00:00 2026'],
+    ['unpadded day', 'Mon Nov 2 01:00:00 2026'],
+  ])('does not trust an asctime Retry-After with a %s', async (_label, retryAfter) => {
+    const serverNow = Date.parse('2026-11-02T00:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(serverNow);
+    try {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('busy', {
+        status: 503, headers: { 'Retry-After': retryAfter },
+      })));
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Retry-After')).toBe('600');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it.each([
     ['IMF-fixdate', 'Sun, 15 Nov 2026 23:00:00 GMT', 15],
     ['RFC 850', 'Sunday, 15-Nov-26 23:00:00 GMT', 15],
     ['asctime', 'Sun Nov 15 23:00:00 2026', 15],
     ['asctime with a space-padded day', 'Sun Nov  8 23:00:00 2026', 8],
+    ['asctime with a zero-padded day', 'Sun Nov 08 23:00:00 2026', 8],
   ])('honours %s HTTP-date Retry-After in Asia/Taipei', async (_format, retryAfter, day) => {
     vi.stubEnv('TZ', 'Asia/Taipei');
     const start = Date.UTC(2026, 10, day, 1, 30);

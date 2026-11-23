@@ -294,9 +294,9 @@ it('keeps each campus course and fallback isolated through NTU–NCKU–NTU navi
 });
 
 it.each([
-  ['ntu', '加入課程', '/classroom'],
+  ['ntu', '加入 nuni 課程', '/classroom'],
   ['ntu', '查看行事曆', '/calendar'],
-  ['all', '加入課程', '/classroom'],
+  ['all', '加入 nuni 課程', '/classroom'],
   ['all', '查看行事曆', '/calendar'],
 ])('continues the %s home journey through %s despite a saved PU preference', async (campus, label, path) => {
   const owner = prepare('platform');

@@ -128,11 +128,12 @@ interface ConfirmModalProps {
   cancelText?: string;
   variant?: 'danger' | 'warning' | 'info';
   loading?: boolean;
+  pendingAction?: ReactNode;
 }
 
 function ConfirmDialog({
   onClose, onConfirm, title, message, confirmText = '確認', cancelText = '取消',
-  variant = 'info', loading = false,
+  variant = 'info', loading = false, pendingAction,
 }: ConfirmModalProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const inFlight = useRef(false);
@@ -193,6 +194,7 @@ function ConfirmDialog({
     >
       <p id={messageId} className={styles.message}>{message}</p>
       {busy && <p role="status" className={styles.notice}>正在處理，請勿重複送出。</p>}
+      {busy && pendingAction}
       {error && <p role="alert" className={styles.error}>{error}</p>}
     </ModalSurface>
   );

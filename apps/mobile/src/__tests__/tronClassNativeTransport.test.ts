@@ -12,6 +12,12 @@ const originalFetch = global.fetch;
 const mockGetIdToken = jest.fn();
 let mockUser: { uid: string; getIdToken: typeof mockGetIdToken } | null;
 jest.mock('../firebase', () => ({ getAuthInstance: () => ({ currentUser: mockUser }) }));
+let mockExpoFetch: jest.Mock | undefined;
+jest.mock('expo/fetch', () => ({
+  get fetch() {
+    return mockExpoFetch;
+  },
+}));
 jest.mock('../services/tronClassNativeDownload', () => ({
   ...jest.requireActual('../services/tronClassNativeDownload'),
   requestNativeTronClassSubmissionDownload: jest.fn(),
@@ -22,6 +28,7 @@ beforeEach(() => {
   mockUser = { uid: 'school-a', getIdToken: mockGetIdToken };
   mockGetIdToken.mockReset().mockResolvedValue('fresh-token');
   downloadMock.mockReset().mockResolvedValue({ bytes: new Uint8Array([1]), filename: 'answer.pdf', contentType: 'application/pdf' });
+  mockExpoFetch = jest.fn();
 });
 afterEach(() => {
   global.fetch = originalFetch;
@@ -89,12 +96,109 @@ it.each(['connect', 'disconnect', 'submit', 'cancel-preparation'])(
   async (action) => {
     const fetchMock = jest.fn().mockRejectedValue(new Error('lost reply'));
     global.fetch = fetchMock;
+    mockExpoFetch = jest.fn().mockRejectedValue(new Error('lost reply'));
     await expect(nuniBffRequest('tronclass', handle, { action })).rejects.toMatchObject({
       code: 'NETWORK_ERROR',
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.length + mockExpoFetch.mock.calls.length).toBe(1);
   },
 );
+
+const credentialInput = {
+  action: 'connect',
+  schoolId: 'pu',
+  account: 'student',
+  password: 'school-secret',
+  expectedRevision: null,
+};
+const connected = { connected: true, revision, account: 'student' };
+const credentialTransports = [
+  {
+    name: 'Platform',
+    authorization: `Platform ${handle}`,
+    connect: () => nuniBffRequest('tronclass', handle, credentialInput),
+  },
+  {
+    name: 'Firebase',
+    authorization: 'Bearer fresh-token',
+    connect: () => nativeTronClassFirebaseRequest('school-a', () => true, credentialInput),
+  },
+];
+
+it.each(credentialTransports)(
+  'sends the school password through $name only with the native redirect-refusing fetch, never the global fetch',
+  async ({ authorization, connect }) => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    mockExpoFetch = jest.fn(async () => ({ ok: true, status: 200, redirected: false, text: async () => JSON.stringify(connected) }));
+    await expect(connect()).resolves.toEqual(connected);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockExpoFetch).toHaveBeenCalledTimes(1);
+    expect(mockExpoFetch).toHaveBeenCalledWith('https://nuni.tw/api/tronclass', {
+      method: 'POST',
+      redirect: 'error',
+      credentials: 'omit',
+      signal: expect.any(AbortSignal),
+      headers: {
+        Accept: 'application/json',
+        Authorization: authorization,
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      },
+      body: JSON.stringify(credentialInput),
+    });
+  },
+);
+
+it.each(credentialTransports)(
+  'rejects a $name binding reply that reports any redirect, without sending the password again',
+  async ({ connect }) => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    for (const reply of [
+      { ok: true, status: 200, redirected: true },
+      { ok: false, status: 307, redirected: false },
+      { ok: false, status: 308, redirected: false },
+    ]) {
+      mockExpoFetch = jest.fn(async () => ({ ...reply, text: async () => JSON.stringify(connected) }));
+      await expect(connect()).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+      expect(mockExpoFetch).toHaveBeenCalledTimes(1);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+
+it.each(credentialTransports)(
+  'maps a refused $name redirect to a network failure and never falls back to the global fetch',
+  async ({ connect }) => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    mockExpoFetch = jest.fn().mockRejectedValue(new Error("Redirect is not allowed when redirect mode is 'error'"));
+    await expect(connect()).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+    expect(mockExpoFetch).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+
+it.each(credentialTransports)(
+  'fails closed for $name when the native fetch is unavailable',
+  async ({ connect }) => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    mockExpoFetch = undefined;
+    await expect(connect()).rejects.toMatchObject({ code: 'TRONCLASS_SECURE_TRANSPORT_UNAVAILABLE' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+
+it('keeps non-credential TronClass reads on the existing transport', async () => {
+  const fetchMock = jest.fn(async () => ({ ok: true, text: async () => '{}' }));
+  global.fetch = fetchMock as unknown as typeof fetch;
+  await nuniBffRequest('tronclass', handle, { action: 'status' });
+  await nativeTronClassFirebaseRequest('school-a', () => true, { action: 'status' });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(mockExpoFetch).not.toHaveBeenCalled();
+});
 it('encodes only the upload scope at the fixed BFF and never retries a lost upload', async () => {
   const fetchMock = jest.fn().mockRejectedValue(new Error('lost upload reply'));
   global.fetch = fetchMock;

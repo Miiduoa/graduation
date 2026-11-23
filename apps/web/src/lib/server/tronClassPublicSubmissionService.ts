@@ -169,7 +169,7 @@ export function createTronClassPublicSubmissionService(dependencies: TronClassPu
       if (Object.keys(input).some(key => !['courseId', 'homeworkId', 'revision', 'operationId'].includes(key))) invalid();
       // Stopping an unclaimed preparation remains available when writes are off.
       // The journal transaction, never a client phase or absent response, decides.
-      return journal.cancelPreparation(ownerKey, input);
+      return journal.cancelPreparation(ownerKey, input, enabled);
     },
     async prepare(ownerKey, input, signal) {
       return withTronClassPreparationRead(signal, async read => {

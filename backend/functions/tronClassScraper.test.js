@@ -514,6 +514,21 @@ describe('tronClassScraper', () => {
     expect(https.request.mock.calls[0][0].path).toBe('/api/courses/10001/activities');
   });
 
+  test('keeps the legacy site announcement read free of the new 8 second deadline', async () => {
+    jest.useFakeTimers();
+    https.request.mockImplementation(() => {
+      const request = new EventEmitter();
+      request.write = jest.fn(); request.end = jest.fn(); request.destroy = jest.fn();
+      return request;
+    });
+    const pending = tcFetchAnnouncementsStrict({ session: 'cookie' });
+    pending.catch(() => {});
+    await jest.advanceTimersByTimeAsync(9_000);
+    expect(https.request).toHaveBeenCalledTimes(1);
+    expect(https.request.mock.results[0].value.destroy).not.toHaveBeenCalled();
+    jest.useRealTimers();
+  });
+
   test('does not treat course announcement 404 as an empty success', async () => {
     mockHttpsResponse({ status: 404, body: '{}' });
     await expect(tcFetchCourseAnnouncementsStrict({ session: 'cookie' }, 10001)).rejects.toMatchObject({

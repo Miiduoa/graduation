@@ -419,7 +419,7 @@ export function createTronClassClient(identity: TronClassIdentity) {
   }
 
   return {
-    status: () => request<TronClassConnection>('status'),
+    status: (signal?: AbortSignal) => request<TronClassConnection>('status', {}, signal),
     connect: (account: string, password: string, expectedRevision: string | null, signal?: AbortSignal) =>
       request<TronClassConnection>('connect', {
         schoolId: 'pu',

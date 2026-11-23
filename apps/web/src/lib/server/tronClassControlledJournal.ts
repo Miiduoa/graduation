@@ -238,7 +238,7 @@ export function createTronClassControlledJournal({ db, bindings, now = Date.now 
     contractVerified: false as const,
     async cancelPreparation(ownerKey: string, value: {
       operationId: string; revision: string; courseId: number; homeworkId: number;
-    }): Promise<TronClassPreparationCancellation> {
+    }, canCreateCancellation: () => boolean = () => true): Promise<TronClassPreparationCancellation> {
       owner(ownerKey);
       if (!object(value) || Object.keys(value).some(key => !['courseId', 'homeworkId', 'revision', 'operationId'].includes(key)) ||
         !positiveId(value.courseId) || !positiveId(value.homeworkId) ||
@@ -261,6 +261,7 @@ export function createTronClassControlledJournal({ db, bindings, now = Date.now 
         if (lock.exists) return result('unknown');
         if (operation?.state === 'cancelled') return result('cancelled');
         if (operation && operation.state !== 'preparing') return result('unknown');
+        if (!operation && !canCreateCancellation()) return result('cancelled');
         // The phone saves an ID before its first upload. A durable tombstone is
         // also required for a missing record: a delayed upload/final must not
         // create that operation after the UI has been told it can edit again.

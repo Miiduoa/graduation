@@ -2,7 +2,7 @@
 
 import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvider';
 
-import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -22,6 +22,12 @@ import { useSignInOptions } from '@/lib/signInOptions';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { CampusIcon } from '@/components/CampusIcon';
 import { resolveCampusActions, getQuickCampusActions } from '@/lib/quickCampusActions';
+import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
+import {
+  clearSearchResultReturn,
+  rememberSearchResultReturn,
+  useSearchResultReturn,
+} from './searchResultReturn';
 import styles from './search.module.css';
 import {
   serviceAccessLabel,
@@ -100,6 +106,20 @@ function ServiceDirectory() {
     filters.scope === draftScope || confirmedScope === null
       ? filters
       : { query: '', category: 'all' as const };
+  const returnScope = JSON.stringify([account.ownerScope, schoolSearch, campusId]);
+  const returnFilters = JSON.stringify([query, category]);
+  useSearchResultReturn({
+    directory,
+    resultsHeading,
+    scope: returnScope,
+    ready: canRemember,
+    blocked:
+      account.status === 'error' ||
+      account.status === 'signing-out' ||
+      selection?.catalogStatus === 'error',
+    queryString,
+    filters: returnFilters,
+  });
   useLayoutEffect(() => {
     if (!account.canRemember) return;
     const changedOwner = confirmedScope !== null && confirmedScope !== draftScope;
@@ -114,6 +134,7 @@ function ServiceDirectory() {
     }
     setConfirmedScope(draftScope);
     if (changedOwner) {
+      clearSearchResultReturn();
       editedFilters.current = null;
       historyRestoration.current = null;
       compositionScope.current = null;
@@ -267,6 +288,7 @@ function ServiceDirectory() {
     next: { query: string; category: ServiceCategory | 'all' },
     persist = true,
   ) {
+    clearSearchResultReturn();
     requestSequence.current += 1;
     setAnalysis(null);
     setFilters({ scope: draftScope, ...next });
@@ -310,8 +332,19 @@ function ServiceDirectory() {
     updateFilters({ query: '', category: 'all' });
     searchInput.current?.focus();
   }
-  function rememberLeaving(href: string) {
+  function rememberLeaving(
+    event: MouseEvent<HTMLAnchorElement>,
+    href: string,
+    kind: 'service' | 'suggested' | 'assistant',
+  ) {
+    if (!isCurrentTabNavigationClick(event, event.currentTarget)) return;
     if (!canRemember) return;
+    rememberSearchResultReturn({
+      scope: returnScope,
+      filters: returnFilters,
+      href,
+      kind,
+    });
     rememberDirectorySearch('search', {
       path: '/search',
       destination: href,
@@ -328,7 +361,10 @@ function ServiceDirectory() {
         key={service.href}
         className={`${styles.service}${secondary ? ` ${styles.secondaryService}` : ''}`}
         href={campusServiceHref(service.href, schoolSearch)}
-        onClick={() => rememberLeaving(campusServiceHref(service.href, schoolSearch))}
+        data-search-return-kind="service"
+        onClick={(event) =>
+          rememberLeaving(event, campusServiceHref(service.href, schoolSearch), 'service')
+        }
       >
         <div>
           <h3>{service.name}</h3>
@@ -493,7 +529,8 @@ function ServiceDirectory() {
                 <Link
                   className={styles.assistantLink}
                   href={assistantHref}
-                  onClick={() => rememberLeaving(assistantHref)}
+                  data-search-return-kind="assistant"
+                  onClick={(event) => rememberLeaving(event, assistantHref, 'assistant')}
                 >
                   交給校園助理
                 </Link>
@@ -541,7 +578,14 @@ function ServiceDirectory() {
                     key={action.href}
                     href={campusServiceHref(action.href, schoolSearch)}
                     className={styles.smartAction}
-                    onClick={() => rememberLeaving(campusServiceHref(action.href, schoolSearch))}
+                    data-search-return-kind="suggested"
+                    onClick={(event) =>
+                      rememberLeaving(
+                        event,
+                        campusServiceHref(action.href, schoolSearch),
+                        'suggested',
+                      )
+                    }
                   >
                     <strong>{action.name}</strong>
                     <small>{action.text}</small>

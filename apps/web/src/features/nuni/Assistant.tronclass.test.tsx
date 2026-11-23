@@ -80,6 +80,173 @@ it('answers in the existing conversation without cloud consent and keeps private
   expect(JSON.stringify(cloudBodies)).not.toMatch(/TronClass|私人|evil\.test/);
 });
 
+it.each([
+  ['開啟玩課雲作業', '開啟玩課雲作業', '/school-lms?schoolId=pu'],
+  ['幫我開玩課雲', '開啟玩課雲作業', '/school-lms?schoolId=pu'],
+  ['請幫我打開玩課雲作業與教材頁面，可以嗎？', '開啟玩課雲作業', '/school-lms?schoolId=pu'],
+  ['open TronClass 作業', '開啟玩課雲作業', '/school-lms?schoolId=pu'],
+  ['進入 TronClass 頁面', '開啟校方課程', '/school-courses?schoolId=pu'],
+])('opens the existing page for %s with the Agent enabled', async (question, label, href) => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json(base);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  await ask(question);
+  const link = await screen.findByRole('link', { name: new RegExp('^' + label) });
+  expect(link.getAttribute('href')).toBe(href);
+  expect(fetch.mock.calls.some(([url]) => url === '/api/tronclass/agent')).toBe(false);
+});
+
+it.each([
+  ['玩課雲作業，查公車', []],
+  ['玩課雲作業和查公車', []],
+  ['玩課雲作業，查校園公告', []],
+  ['開啟玩課雲作業，安排今天下午作業準備30分鐘', []],
+  ['開啟玩課雲作業，查一下還沒交的有哪些', ['玩課雲查一下還沒交的有哪些']],
+  ['查玩課雲未交作業和校園公告', ['查玩課雲未交作業']],
+  ['幫我查 TronClass 未交作業，然後查公車', ['幫我查 TronClass 未交作業']],
+])('keeps the whole multi-clause request %s on the existing cross-service plan and adds its TronClass clauses %j', async (question, clauses) => {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => { void init;
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json(base);
+    if (url === '/api/nuni/assistant/ask') return json({ answer: '跨服務規劃結果', steps: [], cards: [] });
+    return json({ answer: '', steps: [], cards: [] });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  fireEvent.click(await screen.findByRole('checkbox'));
+  await ask(question);
+  await screen.findByText('跨服務規劃結果');
+  const planned = fetch.mock.calls.filter(([url]) => url === '/api/nuni/assistant/ask').map(([, init]) => body(init).question);
+  expect(planned).toEqual([question]);
+  if (clauses.length) await screen.findByRole('heading', { name: '私人期中報告' });
+  await waitFor(() => expect(fetch.mock.calls.filter(([url]) => url === '/api/tronclass/agent')
+    .map(([, init]) => body(init).question)).toEqual(clauses));
+  // The planner's reply comes first and stays in the thread beside the TronClass answer.
+  expect(screen.getByText('跨服務規劃結果')).toBeTruthy();
+});
+
+it('keeps the planner coursework as follow-up context after its TronClass supplement', async () => {
+  const target = { workspaceId: 'cw_one', taskId: 'cwa_one', kind: 'assignment', title: '期末資料模型',
+    courseTitle: '資料庫管理', dueAt: '2099-11-13T10:00:00Z' };
+  const planned: Record<string, unknown>[] = [];
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json(base);
+    if (url === '/api/nuni/assistant/ask') {
+      planned.push(body(init));
+      return planned.length === 1
+        ? json({ answer: '跨服務規劃結果', steps: [], cards: [], dataRead: true, courseworkTargets: [target] })
+        : json({ answer: '已核對作業與課間空堂，請確認準備時間。', steps: [], cards: [], dataRead: true });
+    }
+    return json({ answer: '', steps: [], cards: [] });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  fireEvent.click(await screen.findByRole('checkbox'));
+  await ask('查玩課雲未交作業和校園公告');
+  await screen.findByRole('heading', { name: '私人期中報告' });
+  await waitFor(() => expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true));
+  await ask('幫這份作業，今天找 30 分鐘空堂。');
+  await screen.findByText('已核對作業與課間空堂，請確認準備時間。');
+  expect(planned).toHaveLength(2);
+  expect(planned[1].studyTarget).toMatchObject({ workspaceId: 'cw_one', taskId: 'cwa_one', kind: 'assignment' });
+  expect(screen.queryByText(/請先查詢未交作業/)).toBeNull();
+});
+
+it('keeps the planner activity list as the ordinal source after its TronClass supplement', async () => {
+  let lock = Promise.resolve();
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: (_key: string, action: () => unknown) => {
+    const task = lock.then(action); lock = task.then(() => undefined, () => undefined); return task;
+  } } });
+  const events = [1, 2].map(index => ({ schoolId: 'pu', source: 'school-club-events', id: `activity-${index}`,
+    title: `來源活動 ${index}`, startsAt: '2030-11-16T06:00:00.000Z', endsAt: '2030-11-16T08:00:00.000Z',
+    checkedAt: '2026-11-16T06:00:00.000Z', location: '活動中心', href: `/events/activity-${index}?schoolId=pu&source=school-club-events` }));
+  const previews: Record<string, unknown>[] = [];
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json(base);
+    if (url === '/api/nuni/assistant/ask') return json({ version: 2, answer: '跨服務規劃結果', steps: [], cards: [], dataRead: true, eventTargets: events });
+    if (url.endsWith('/event-preview')) { previews.push(body(init)); return json({ version: 2, answer: '已重新核對選定的活動，等待確認。', steps: [], cards: [] }); }
+    return json({ answer: '', steps: [], cards: [] });
+  });
+  vi.stubGlobal('fetch', fetch);
+  try {
+    render(<Assistant />);
+    fireEvent.click(await screen.findByRole('checkbox'));
+    await ask('查近期活動和玩課雲未交作業');
+    await screen.findByRole('heading', { name: '私人期中報告' });
+    await waitFor(() => expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true));
+    await ask('把第二個加入行程');
+    await waitFor(() => expect(previews.some(preview => (preview.event as { id?: string } | undefined)?.id === 'activity-2')).toBe(true));
+    expect(screen.queryByText('請先選擇要加入的活動。')).toBeNull();
+  } finally {
+    Reflect.deleteProperty(navigator, 'locks');
+  }
+});
+
+it('keeps the planner reply and adds no disabled notice when the TronClass integration is off', async () => {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => { void init;
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json({ error: 'TRONCLASS_DISABLED', message: '整合已停用' }, 503);
+    if (url === '/api/nuni/assistant/ask') return json({ answer: '跨服務規劃結果', steps: [], cards: [] });
+    return json({ answer: '', steps: [], cards: [] });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  fireEvent.click(await screen.findByRole('checkbox'));
+  await ask('TronClass 未交作業，教材有哪些，查公車');
+  await screen.findByText('跨服務規劃結果');
+  await waitFor(() => expect(fetch.mock.calls.filter(([url]) => url === '/api/tronclass/agent')).toHaveLength(1));
+  await act(async () => { await Promise.resolve(); });
+  expect(screen.queryByText('整合已停用')).toBeNull();
+  expect(fetch.mock.calls.filter(([url]) => url === '/api/tronclass/agent')).toHaveLength(1);
+});
+
+it('does not start the TronClass clauses after the planner request is stopped', async () => {
+  let release!: () => void;
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json(base);
+    if (url === '/api/nuni/assistant/ask') {
+      return new Promise<Response>((resolve, reject) => {
+        release = () => resolve(json({ answer: '跨服務規劃結果', steps: [], cards: [] }));
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    }
+    return json({ answer: '', steps: [], cards: [] });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  fireEvent.click(await screen.findByRole('checkbox'));
+  await ask('查玩課雲未交作業和校園公告');
+  await waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/nuni/assistant/ask')).toBe(true));
+  fireEvent.click(await screen.findByRole('button', { name: /停止/ }));
+  await screen.findByText(/已停止這次回答/);
+  void release;
+  await act(async () => { await Promise.resolve(); });
+  expect(fetch.mock.calls.some(([url]) => url === '/api/tronclass/agent')).toBe(false);
+});
+
+it.each(['玩課雲', '玩課雲作業'])('falls back to the school LMS link for %s when the Agent is disabled', async question => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json({ error: 'TRONCLASS_DISABLED', message: '整合已停用' }, 503);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  await ask(question);
+  const link = await screen.findByRole('link', { name: /^開啟玩課雲作業/ });
+  expect(link.getAttribute('href')).toBe('/school-lms?schoolId=pu');
+  expect(fetch.mock.calls.some(([url]) => url === '/api/tronclass/agent')).toBe(true);
+  expect(screen.queryByText('整合已停用')).toBeNull();
+  expect(fetch.mock.calls.some(([url]) => url === '/api/nuni/assistant/ask')).toBe(false);
+});
+
 it('continues an ambiguous material request with a verified course selection', async () => {
   const calls: Record<string, unknown>[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {

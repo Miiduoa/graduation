@@ -19,6 +19,8 @@ export type TronClassPlatformClosureStore = {
   claim(): Promise<TronClassPlatformClosureLease | null>;
   complete(lease: TronClassPlatformClosureLease): Promise<boolean>;
   retry(lease: TronClassPlatformClosureLease): Promise<boolean>;
+  /** Events whose earlier cleanup failed and that are still waiting (leased, backing off or due). */
+  retrying(): Promise<number>;
 };
 export type TronClassPlatformClosureBatch = { claimed: number; completed: number; failed: number; stale: number };
 
@@ -39,7 +41,33 @@ export const TRONCLASS_PLATFORM_CLOSURE_SQL = {
     SET lease_token = NULL, lease_expires_at = NULL, last_failure = 'cleanup_failed',
       next_attempt_at = clock_timestamp() + make_interval(secs => LEAST(1800, (30 * power(2, LEAST(attempts - 1, 6)))::integer))
     WHERE id = $1::bigint AND lease_token = $2::uuid RETURNING id::text`,
+  retrying: `SELECT count(*)::text AS retrying FROM tronclass_account_closure_outbox WHERE last_failure IS NOT NULL`,
+  // Readiness of the whole closure pipeline, not just the worker's configuration:
+  // the outbox exists with the worker's privileges and both enabled triggers are
+  // installed on the platform account table that the worker's search path resolves.
+  ready: `SELECT (
+      to_regclass('tronclass_account_closure_outbox') IS NOT NULL
+      AND to_regclass('platform_accounts') IS NOT NULL
+      AND coalesce(has_table_privilege(to_regclass('tronclass_account_closure_outbox'), 'SELECT'), false)
+      AND coalesce(has_column_privilege(to_regclass('tronclass_account_closure_outbox'), 'attempts', 'UPDATE'), false)
+      AND coalesce(has_column_privilege(to_regclass('tronclass_account_closure_outbox'), 'next_attempt_at', 'UPDATE'), false)
+      AND coalesce(has_column_privilege(to_regclass('tronclass_account_closure_outbox'), 'lease_token', 'UPDATE'), false)
+      AND coalesce(has_column_privilege(to_regclass('tronclass_account_closure_outbox'), 'lease_expires_at', 'UPDATE'), false)
+      AND coalesce(has_column_privilege(to_regclass('tronclass_account_closure_outbox'), 'last_failure', 'UPDATE'), false)
+      AND coalesce(has_table_privilege(to_regclass('tronclass_account_closure_outbox'), 'DELETE'), false)
+      AND (SELECT count(DISTINCT trigger.tgname) FROM pg_trigger trigger
+        WHERE trigger.tgrelid = to_regclass('platform_accounts') AND NOT trigger.tgisinternal
+          AND trigger.tgenabled IN ('O', 'A')
+          AND trigger.tgname IN ('tronclass_account_closed', 'tronclass_account_deleted')) = 2
+    ) AS ready`,
 } as const;
+
+/** Fails closed unless the outbox, worker privileges and closure triggers are all in place. */
+export async function verifyTronClassPlatformClosureReady(query: SqlQuery): Promise<void> {
+  let rows: Record<string, unknown>[];
+  try { rows = await query(TRONCLASS_PLATFORM_CLOSURE_SQL.ready, []); } catch { return unavailable(); }
+  if (rows.length !== 1 || rows[0].ready !== true) return unavailable();
+}
 
 function unavailable(): never { throw new NuniError(503, 'TRONCLASS_PLATFORM_CLOSURE_UNAVAILABLE'); }
 function eventId(value: unknown): value is string {
@@ -77,6 +105,12 @@ export function createSqlTronClassPlatformClosureStore(query: SqlQuery): TronCla
     },
     complete: lease => finish(TRONCLASS_PLATFORM_CLOSURE_SQL.complete, lease),
     retry: lease => finish(TRONCLASS_PLATFORM_CLOSURE_SQL.retry, lease),
+    async retrying() {
+      const rows = await run(TRONCLASS_PLATFORM_CLOSURE_SQL.retrying, []);
+      const count = rows.length === 1 ? rows[0].retrying : undefined;
+      if (typeof count !== 'string' || !/^\d{1,18}$/.test(count)) return unavailable();
+      return Number(count);
+    },
   };
 }
 
@@ -119,18 +153,23 @@ export function readTronClassPlatformClosureConfig(env: Record<string, string | 
 /** No HTTP entry point. Only explicit worker configuration can reach either store. */
 export async function runDefaultTronClassPlatformClosureBatch(
   env: Record<string, string | undefined> = process.env,
-): Promise<TronClassPlatformClosureBatch> {
+): Promise<TronClassPlatformClosureBatch & { retrying: number }> {
   const config = readTronClassPlatformClosureConfig(env);
-  if (!config) return { claimed: 0, completed: 0, failed: 0, stale: 0 };
+  if (!config) return { claimed: 0, completed: 0, failed: 0, stale: 0, retrying: 0 };
   const [{ getFirebaseAdmin }, { closeTronClassOwner }] = await Promise.all([
     import('./firebaseAdmin'), import('../../../../../backend/functions/tronClassAccountLifecycle.js'),
   ]);
   const admin = await getFirebaseAdmin();
   if (!admin?.db) return unavailable();
-  const store = createSqlTronClassPlatformClosureStore(tronClassPlatformClosureQuery(config.databaseUrl));
+  const query = tronClassPlatformClosureQuery(config.databaseUrl);
+  await verifyTronClassPlatformClosureReady(query);
+  const store = createSqlTronClassPlatformClosureStore(query);
   const result = await createTronClassPlatformClosureWorker({ store,
     closeOwner: ownerKey => closeTronClassOwner({ db: admin.db, ownerKey }),
   })();
-  if (result.failed > 0) console.warn('TronClass platform account cleanup failed');
-  return result;
+  // Events that failed earlier and are still backing off are not visible to this
+  // batch (it only claims due events), yet their cleanup has not completed.
+  const retrying = await store.retrying();
+  if (result.failed > 0 || retrying > 0) console.warn('TronClass platform account cleanup failed');
+  return { ...result, retrying };
 }

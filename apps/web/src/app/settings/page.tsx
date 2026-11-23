@@ -34,6 +34,7 @@ import {
 import { deleteTodaySenseModelCache } from '@/lib/todaySenseAgentRuntime';
 
 import { AccountDemoSettings } from '@/components/AccountDemoSettings';
+import { PWAInstallSettings } from '@/components/PWAInstallSettings';
 import { SiteShell } from '@/components/SiteShell';
 import { NuniAccountPanel } from '@/components/NuniAccountPanel';
 import { useNuniSession } from '@/features/nuni/Session';
@@ -642,6 +643,7 @@ function SettingsContent({
             </button>
           </SettingRow>
         </section>
+        <PWAInstallSettings />
         <section aria-labelledby="service-information">
           <h3 className={styles.groupHeading} id="service-information">
             服務資訊

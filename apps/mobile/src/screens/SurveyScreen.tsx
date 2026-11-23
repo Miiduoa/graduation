@@ -17,7 +17,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { isTronClassWriteLocked, TRONCLASS_WRITE_LOCKED_MESSAGE } from '../services/tronClassClient';
 
 type SurveyQuestionType = 'single' | 'multi' | 'text' | 'scale';
 
@@ -80,7 +79,6 @@ const SAMPLE_QUESTIONS: SurveyQuestion[] = [
 
 export default function SurveyScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
-  const writeLocked = isTronClassWriteLocked();
   const title = props.route?.params?.title ?? '課程問卷';
   const courseName = props.route?.params?.courseName;
   const surveyId = props.route?.params?.surveyId ?? '';
@@ -90,7 +88,6 @@ export default function SurveyScreen(props: RouteProps) {
   const [answers, setAnswers] = useState<Record<string, string | string[] | number>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const readOnly = writeLocked || submitted;
   const usingSample = !props.route?.params?.questions;
 
   const updateSingle = (qid: string, val: string) =>
@@ -108,7 +105,6 @@ export default function SurveyScreen(props: RouteProps) {
     setAnswers((a) => ({ ...a, [qid]: n }));
 
   const handleSubmit = async () => {
-    if (readOnly) return;
     // 必填檢查
     for (const q of questions) {
       if (q.required && (answers[q.id] === undefined || answers[q.id] === '')) {
@@ -153,8 +149,6 @@ export default function SurveyScreen(props: RouteProps) {
           <Text style={{ color: '#8E8E93', marginTop: 4 }}>{courseName}</Text>
         ) : null}
 
-        {writeLocked && <Text style={{ color: '#1C1C1E' }}>{TRONCLASS_WRITE_LOCKED_MESSAGE}</Text>}
-
         {questions.map((q, idx) => (
           <View
             key={q.id}
@@ -175,9 +169,7 @@ export default function SurveyScreen(props: RouteProps) {
               q.options?.map((opt) => (
                 <Pressable
                   key={opt.id}
-                  accessibilityRole="button"
-                  disabled={readOnly}
-                  onPress={() => !readOnly && updateSingle(q.id, opt.id)}
+                  onPress={() => !submitted && updateSingle(q.id, opt.id)}
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
@@ -207,9 +199,7 @@ export default function SurveyScreen(props: RouteProps) {
                 return (
                   <Pressable
                     key={opt.id}
-                    accessibilityRole="button"
-                    disabled={readOnly}
-                    onPress={() => !readOnly && updateMulti(q.id, opt.id)}
+                    onPress={() => !submitted && updateMulti(q.id, opt.id)}
                     style={{
                       flexDirection: 'row',
                       alignItems: 'center',
@@ -239,9 +229,7 @@ export default function SurveyScreen(props: RouteProps) {
                   return (
                     <Pressable
                       key={n}
-                      accessibilityRole="button"
-                      disabled={readOnly}
-                      onPress={() => !readOnly && updateScale(q.id, n)}
+                      onPress={() => !submitted && updateScale(q.id, n)}
                       style={{
                         flex: 1,
                         padding: 12,
@@ -269,7 +257,7 @@ export default function SurveyScreen(props: RouteProps) {
               <TextInput
                 value={String(answers[q.id] ?? '')}
                 onChangeText={(t) => updateText(q.id, t)}
-                editable={!readOnly}
+                editable={!submitted}
                 multiline
                 numberOfLines={4}
                 placeholder="自由作答（可空白）"
@@ -289,7 +277,7 @@ export default function SurveyScreen(props: RouteProps) {
           </View>
         ))}
 
-        {!readOnly && (
+        {!submitted && (
           <Pressable
             onPress={handleSubmit}
             disabled={submitting}

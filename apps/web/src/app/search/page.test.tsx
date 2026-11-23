@@ -2,7 +2,7 @@ import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directo
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SearchPage from './page';
 import { visibleCampusServices } from '@/lib/campusServices';
 import { DIRECTORY_SEARCH_STORAGE_KEY } from '@/lib/campusDirectorySearch';
@@ -1044,4 +1044,479 @@ describe.each(directoryStorageFailures)('search navigation with storage %s', (fa
       storage.mockRestore();
     }
   });
+});
+
+describe('continuing a search after opening a service', () => {
+  const nextState = { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: ['search'], unrelated: 7 };
+  const librarySearch = '/search?campus=pu&q=%E5%80%9F%E6%9B%B8&category=campus';
+  const scroll = vi.fn();
+  const stopScroll = vi.fn();
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameSequence = 0;
+  let originalScroll: PropertyDescriptor | undefined;
+  let originalWindowMethods: Record<string, PropertyDescriptor | undefined>;
+
+  function nextFrame() {
+    act(() => {
+      const callbacks = [...frames.values()];
+      frames.clear();
+      callbacks.forEach((callback) => callback(performance.now()));
+    });
+  }
+
+  function renderAfterFrame() {
+    const view = render(<SearchPage />);
+    nextFrame();
+    return {
+      ...view,
+      rerender(ui: Parameters<typeof view.rerender>[0]) {
+        view.rerender(ui);
+        nextFrame();
+      },
+    };
+  }
+
+  function move(url: string, state: unknown = nextState) {
+    window.history.replaceState(state, '', url);
+  }
+
+  function traverse(url: string, state: unknown) {
+    move(url, state);
+    act(() => window.dispatchEvent(new PopStateEvent('popstate', { state })));
+  }
+
+  function leaveLibrary() {
+    move(librarySearch);
+    const view = renderAfterFrame();
+    fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+    const entry = window.history.state;
+    view.unmount();
+    move('/library?campus=pu');
+    return entry;
+  }
+
+  beforeEach(() => {
+    originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scroll,
+    });
+    scroll.mockClear();
+    stopScroll.mockClear();
+    frames.clear();
+    frameSequence = 0;
+    originalWindowMethods = Object.fromEntries(
+      ['requestAnimationFrame', 'cancelAnimationFrame', 'scrollTo'].map((name) => [
+        name,
+        Object.getOwnPropertyDescriptor(window, name),
+      ]),
+    );
+    Object.defineProperties(window, {
+      requestAnimationFrame: {
+        configurable: true,
+        value: (callback: FrameRequestCallback) => {
+          const id = ++frameSequence;
+          frames.set(id, callback);
+          return id;
+        },
+      },
+      cancelAnimationFrame: {
+        configurable: true,
+        value: (id: number) => frames.delete(id),
+      },
+      scrollTo: { configurable: true, value: stopScroll },
+    });
+    traverse('/search', nextState);
+  });
+
+  afterEach(() => {
+    if (originalScroll)
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScroll);
+    else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+    for (const [name, descriptor] of Object.entries(originalWindowMethods)) {
+      if (descriptor) Object.defineProperty(window, name, descriptor);
+      else Reflect.deleteProperty(window, name);
+    }
+  });
+
+  it('Back restores the original result and search filters, once, even when received while unmounted', () => {
+    const entry = leaveLibrary();
+    expect(entry).toMatchObject(nextState);
+    traverse(librarySearch, entry);
+    const view = renderAfterFrame();
+    const library = screen.getByRole('link', { name: /^圖書館/ });
+    expect(document.activeElement).toBe(library);
+    expect(scroll).toHaveBeenCalledWith({
+      block: 'nearest',
+      inline: 'nearest',
+      behavior: 'instant',
+    });
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+    expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+
+    const search = screen.getByRole('searchbox');
+    search.focus();
+    view.rerender(<SearchPage />);
+    expect(document.activeElement).toBe(search);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(window.history.state).toEqual(entry);
+  });
+
+  it('Forward and Back can resume the same entry again without replaying it on a fresh visit', () => {
+    const entry = leaveLibrary();
+    traverse(librarySearch, entry);
+    const view = renderAfterFrame();
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    view.unmount();
+    traverse('/library?campus=pu', nextState);
+    traverse(librarySearch, entry);
+    const returned = renderAfterFrame();
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    returned.unmount();
+
+    // Reusing the URL/history data without a traversal must not opt into restoration.
+    move(librarySearch, entry);
+    renderAfterFrame();
+    expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    expect(scroll).toHaveBeenCalledTimes(2);
+  });
+
+  it('opens both enclosing disclosures and resumes the exact secondary service', () => {
+    move('/search?campus=pu');
+    const view = renderAfterFrame();
+    fireEvent.click(screen.getByText(/更多學習與課務服務/));
+    fireEvent.click(screen.getByLabelText('成績的相關服務'));
+    fireEvent.click(screen.getByLabelText('課程與作業的相關服務'));
+    fireEvent.click(screen.getByRole('link', { name: /^成績回饋/ }));
+    const entry = window.history.state;
+    view.unmount();
+    move('/grades?tab=feedback&campus=pu');
+    traverse('/search?campus=pu', entry);
+    renderAfterFrame();
+    const feedback = screen.getByRole('link', { name: /^成績回饋/ });
+    const family = feedback.closest('details')!;
+    expect(family.open).toBe(true);
+    expect(family.parentElement!.closest('details')!.open).toBe(true);
+    expect(
+      screen.getByLabelText('課程與作業的相關服務').parentElement!.getAttribute('open'),
+    ).not.toBeNull();
+    expect(document.activeElement).toBe(feedback);
+  });
+
+  it('restores an available recommendation without resending the request to AI', () => {
+    userState.uid = 'alice';
+    const url = '/search?campus=pu&q=' + encodeURIComponent('今天要上什麼課？');
+    move(url);
+    const view = renderAfterFrame();
+    const recommendations = screen.getByRole('region', { name: '根據需求推薦的服務' });
+    const link = within(recommendations).getAllByRole('link')[0];
+    const href = link.getAttribute('href')!;
+    fireEvent.click(link);
+    const entry = window.history.state;
+    view.unmount();
+    move(href);
+    traverse(url, entry);
+    renderAfterFrame();
+    const resumed = within(screen.getByRole('region', { name: '根據需求推薦的服務' }))
+      .getAllByRole('link')
+      .find((item) => item.getAttribute('href') === href);
+    expect(document.activeElement).toBe(resumed);
+    expect(interpretCampusRequest).not.toHaveBeenCalled();
+  });
+
+  it('resumes at results when a request-only AI recommendation is gone, without retaining its private preview', async () => {
+    userState.uid = 'alice';
+    vi.mocked(interpretCampusRequest).mockResolvedValue({
+      status: 'understood',
+      source: 'model',
+      summary: '查看本學期',
+      destinations: ['/grades'],
+      clarifyingQuestion: null,
+      previews: [
+        {
+          destination: '/grades',
+          status: 'available',
+          source: 'campus-platform',
+          message: '個人成績摘要',
+          items: [],
+        },
+      ],
+    });
+    const url = '/search?campus=pu&q=' + encodeURIComponent('這學期表現怎樣');
+    move(url);
+    const view = renderAfterFrame();
+    fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+    fireEvent.click(await screen.findByRole('link', { name: /個人成績摘要/ }));
+    const entry = window.history.state;
+    expect(JSON.stringify(entry)).not.toContain('個人成績摘要');
+    expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).not.toContain('個人成績摘要');
+    view.unmount();
+    move('/grades?tab=semester&campus=pu');
+    traverse(url, entry);
+    renderAfterFrame();
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: '搜尋結果' }));
+    expect(screen.queryByText('個人成績摘要')).toBeNull();
+    expect(interpretCampusRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns to the assistant handoff without sending the preserved question', () => {
+    userState.uid = 'alice';
+    move(librarySearch);
+    const view = renderAfterFrame();
+    const link = screen.getByRole('link', { name: '交給校園助理' });
+    const destination = link.getAttribute('href')!;
+    fireEvent.click(link);
+    const entry = window.history.state;
+    view.unmount();
+    move(destination);
+    traverse(librarySearch, entry);
+    renderAfterFrame();
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: '交給校園助理' }));
+    expect(interpretCampusRequest).not.toHaveBeenCalled();
+  });
+
+  it('waits for the Router URL and rendered results to agree before restoring', () => {
+    const entry = leaveLibrary();
+    traverse(librarySearch, entry);
+    router.search = '?campus=pu&q=%E5%85%AC%E8%BB%8A';
+    const view = renderAfterFrame();
+    expect(scroll).not.toHaveBeenCalled();
+    router.search = new URL(librarySearch, window.location.origin).search;
+    view.rerender(<SearchPage />);
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['pointer', 'keyboard', 'scroll', 'focus'] as const)(
+    'does not take focus after a person continues by %s while the Router catches up',
+    (interaction) => {
+      const entry = leaveLibrary();
+      traverse(librarySearch, entry);
+      router.search = '?campus=pu';
+      const view = renderAfterFrame();
+      const search = screen.getByRole('searchbox');
+      if (interaction === 'pointer') fireEvent.pointerDown(search);
+      if (interaction === 'keyboard') fireEvent.keyDown(search, { key: 'Tab' });
+      if (interaction === 'scroll') fireEvent.wheel(window);
+      if (interaction === 'focus') search.focus();
+      router.search = new URL(librarySearch, window.location.origin).search;
+      view.rerender(<SearchPage />);
+      expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+      expect(scroll).not.toHaveBeenCalled();
+    },
+  );
+
+  it('respects interaction before the search page remounts', () => {
+    const entry = leaveLibrary();
+    traverse(librarySearch, entry);
+    fireEvent.touchStart(window);
+    renderAfterFrame();
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it('waits for the same account to resolve and discards a return into a different account', () => {
+    userState.uid = 'alice';
+    const entry = leaveLibrary();
+    traverse(librarySearch, entry);
+    userState.loading = true;
+    const view = renderAfterFrame();
+    expect(scroll).not.toHaveBeenCalled();
+    userState.loading = false;
+    view.rerender(<SearchPage />);
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    view.unmount();
+
+    move('/library?campus=pu');
+    traverse(librarySearch, entry);
+    userState.uid = 'bob';
+    renderAfterFrame();
+    expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not restore after the resolved campus changes even when the search URL is unchanged', () => {
+    selection.current = {
+      selectedSchool: { id: 'pu', code: 'PU' },
+      loading: false,
+      catalogStatus: 'ready',
+    };
+    move('/search?q=%E5%80%9F%E6%9B%B8');
+    const view = renderAfterFrame();
+    fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+    const entry = window.history.state;
+    view.unmount();
+    move('/library?campus=pu');
+    selection.current = {
+      selectedSchool: { id: 'nthu', code: 'NTHU' },
+      loading: false,
+      catalogStatus: 'ready',
+    };
+    traverse('/search?q=%E5%80%9F%E6%9B%B8', entry);
+    renderAfterFrame();
+    expect(screen.getByRole('link', { name: /^圖書館/ }).getAttribute('href')).toContain(
+      'campus=nthu',
+    );
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it('waits for the same campus to finish resolving before moving focus', () => {
+    selection.current = {
+      selectedSchool: { id: 'pu', code: 'PU' },
+      loading: false,
+      catalogStatus: 'ready',
+    };
+    const entry = leaveLibrary();
+    traverse(librarySearch, entry);
+    selection.current.loading = true;
+    const view = renderAfterFrame();
+    expect(scroll).not.toHaveBeenCalled();
+    selection.current.loading = false;
+    view.rerender(<SearchPage />);
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+  });
+
+  it.each(['error', 'signing-out', 'different session'] as const)(
+    'does not restore across an unavailable or replaced platform session: %s',
+    (state) => {
+      userState.platform = true;
+      const entry = leaveLibrary();
+      traverse(librarySearch, entry);
+      userState.platformLoading = true;
+      const view = renderAfterFrame();
+      expect(scroll).not.toHaveBeenCalled();
+      userState.platformLoading = false;
+      if (state === 'error') userState.platformError = 'Session unavailable';
+      if (state === 'signing-out') userState.pendingLogout = true;
+      if (state === 'different session') userState.context = 'different-context';
+      view.rerender(<SearchPage />);
+      expect(scroll).not.toHaveBeenCalled();
+      userState.platformError = '';
+      userState.pendingLogout = false;
+      userState.context = 'platform-context';
+      view.rerender(<SearchPage />);
+      expect(scroll).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    '/search?campus=nthu&q=%E5%80%9F%E6%9B%B8&category=campus',
+    '/search?campus=pu&q=%E5%80%9F%E6%9B%B8',
+    librarySearch + '#another-position',
+  ])('does not use a saved return in another URL: %s', (url) => {
+    const entry = leaveLibrary();
+    traverse(url, entry);
+    renderAfterFrame();
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { ctrlKey: true },
+    { metaKey: true },
+    { shiftKey: true },
+    { altKey: true },
+    { button: 1 },
+  ])('does not mark the original entry when opening with %j', (modifier) => {
+    move(librarySearch);
+    renderAfterFrame();
+    fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }), modifier);
+    expect(window.history.state).toEqual(nextState);
+  });
+
+  it('editing the search invalidates its prior return even before composition is published', () => {
+    move(librarySearch);
+    const view = renderAfterFrame();
+    fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+    const search = screen.getByRole('searchbox');
+    fireEvent.compositionStart(search);
+    fireEvent.change(search, { target: { value: '借書館' } });
+    const entry = window.history.state;
+    view.unmount();
+    move('/library?campus=pu');
+    traverse(librarySearch, entry);
+    renderAfterFrame();
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it('keeps service navigation available when History access is denied', () => {
+    move(librarySearch);
+    renderAfterFrame();
+    const history = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {
+      throw new DOMException('History unavailable', 'SecurityError');
+    });
+    try {
+      const link = screen.getByRole('link', { name: /^圖書館/ });
+      expect(fireEvent.click(link)).toBe(true);
+      expect(link.getAttribute('href')).toBe('/library?campus=pu');
+    } finally {
+      history.mockRestore();
+    }
+  });
+
+  it('waits until the traversal finishes, stops native smooth scrolling, then reveals the result once', () => {
+    const entry = leaveLibrary();
+    traverse(librarySearch, entry);
+    render(<SearchPage />);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(stopScroll).not.toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    nextFrame();
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    expect(stopScroll).toHaveBeenCalledWith({
+      top: window.scrollY,
+      left: window.scrollX,
+      behavior: 'instant',
+    });
+    expect(stopScroll.mock.invocationCallOrder[0]).toBeLessThan(scroll.mock.invocationCallOrder[0]);
+    nextFrame();
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['pointer', 'keyboard', 'wheel', 'touch', 'focus'] as const)(
+    'abandons a ready return when the person chooses a new %s interaction before the next frame',
+    (interaction) => {
+      const entry = leaveLibrary();
+      traverse(librarySearch, entry);
+      render(<SearchPage />);
+      const search = screen.getByRole('searchbox');
+      if (interaction === 'pointer') fireEvent.pointerDown(search);
+      if (interaction === 'keyboard') fireEvent.keyDown(search, { key: 'Tab' });
+      if (interaction === 'wheel') fireEvent.wheel(window);
+      if (interaction === 'touch') fireEvent.touchStart(window);
+      if (interaction === 'focus') screen.getByRole('heading', { name: '搜尋結果' }).focus();
+      nextFrame();
+      expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+      expect(scroll).not.toHaveBeenCalled();
+      expect(stopScroll).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['account', 'campus', 'entry', 'url', 'unmount'] as const)(
+    'rechecks the %s boundary before applying a scheduled return',
+    (change) => {
+      userState.uid = 'alice';
+      const entry = leaveLibrary();
+      traverse(librarySearch, entry);
+      const view = render(<SearchPage />);
+      if (change === 'account') {
+        userState.uid = 'bob';
+        view.rerender(<SearchPage />);
+      }
+      if (change === 'campus') {
+        selection.current = {
+          selectedSchool: { id: 'nthu', code: 'NTHU' },
+          loading: false,
+          catalogStatus: 'ready',
+        };
+        view.rerender(<SearchPage />);
+      }
+      if (change === 'entry') move(librarySearch, nextState);
+      if (change === 'url') move(librarySearch + '#changed', entry);
+      if (change === 'unmount') view.unmount();
+      nextFrame();
+      expect(scroll).not.toHaveBeenCalled();
+      expect(stopScroll).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -2,9 +2,15 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AppFrame } from './AppFrame';
 
+const navigation = vi.hoisted(() => ({ pathname: '/' }));
+vi.mock('next/navigation', () => ({
+  usePathname: () => navigation.pathname,
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock('./AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
 
 afterEach(() => {
+  navigation.pathname = '/';
   vi.restoreAllMocks();
 });
 
@@ -55,31 +61,47 @@ it('offers a waiting update without reloading or discarding the active task', as
   }
 });
 
-it('makes installation dismissible from the shared frame without leaving the task', async () => {
+it('keeps installation unobtrusive during a task and dismissible on the life page', async () => {
   const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: vi.fn().mockReturnValue({ matches: false }),
   });
   try {
-    render(
+    const content = () => (
       <AppFrame>
         <h1>今天的課程</h1>
-      </AppFrame>,
+        <input aria-label="尚未送出的內容" defaultValue="下週小組報告" />
+      </AppFrame>
     );
+    const page = render(content());
+    const field = screen.getByRole('textbox', { name: '尚未送出的內容' });
+    field.focus();
+    const prompt = vi.fn();
     const event = new Event('beforeinstallprompt', { cancelable: true });
     Object.assign(event, {
-      prompt: vi.fn(),
+      prompt,
       userChoice: Promise.resolve({ outcome: 'dismissed' }),
     });
     await act(async () => {
       window.dispatchEvent(event);
     });
     expect(event.defaultPrevented).toBe(true);
+    expect(screen.queryByRole('region', { name: '加入主畫面' })).toBeNull();
+    expect(document.activeElement).toBe(field);
+    expect((field as HTMLInputElement).value).toBe('下週小組報告');
+    expect(prompt).not.toHaveBeenCalled();
+
+    navigation.pathname = '/life';
+    page.rerender(content());
     expect(screen.getByRole('region', { name: '加入主畫面' })).toBeTruthy();
+    expect(document.activeElement).toBe(field);
     fireEvent.click(screen.getByRole('button', { name: '暫時不用' }));
     expect(screen.queryByRole('region', { name: '加入主畫面' })).toBeNull();
     expect(screen.getByRole('heading', { name: '今天的課程' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: '尚未送出的內容' })).toBe(field);
+    expect((field as HTMLInputElement).value).toBe('下週小組報告');
+    expect(prompt).not.toHaveBeenCalled();
   } finally {
     if (original) Object.defineProperty(window, 'matchMedia', original);
     else Reflect.deleteProperty(window, 'matchMedia');

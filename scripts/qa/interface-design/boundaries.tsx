@@ -19,11 +19,12 @@ let state = {
   pathname: query.get('path') || (location.pathname === '/index.html' ? '/' : location.pathname),
   search: routeQuery.toString(),
   schoolId: 'pu' as string | null,
+  identityLoading: false,
 };
 history.replaceState(
   { ...history.state, interfaceRoute: state },
   '',
-  state.pathname + '?' + state.search,
+  state.pathname + '?' + state.search + location.hash,
 );
 const role = query.get('role') || 'student';
 const ledger = { requests: [] as string[], navigations: [] as string[], logouts: 0 };
@@ -48,8 +49,11 @@ export function navigate(href: string) {
   ledger.navigations.push(href);
   // The routing boundary supplies synthetic route data; use actual browser
   // history so product return-entry handling is not simulated by pathname alone.
-  history.replaceState({ ...history.state, interfaceRoute: state }, '');
-  const destination = { ...state, pathname: url.pathname, search: url.search.slice(1) };
+  // Product search publishes its filters with replaceState before the router
+  // acknowledges them. Preserve the real source URL in this routing boundary.
+  const source = { ...state, pathname: location.pathname, search: location.search.slice(1) };
+  history.replaceState({ ...history.state, interfaceRoute: source }, '');
+  const destination = { ...source, pathname: url.pathname, search: url.search.slice(1) };
   const destinationUrl = url.pathname + url.search + url.hash;
   if (destinationUrl !== location.pathname + location.search + location.hash) {
     history.pushState({ interfaceRoute: destination }, '', destinationUrl);
@@ -93,14 +97,25 @@ export default function Link({
 export const usePathname = () => useFixture().pathname;
 export const useSearchParams = () => new URLSearchParams(useFixture().search);
 export const useRouter = () => ({ push: navigate, replace: navigate });
-export const useAuth = () => ({
-  user: null,
-  loading: false,
-  error: null,
-  signOutUser: async () => {
-    ledger.logouts += 1;
-  },
-});
+export function useAuth() {
+  const current = useFixture();
+  return {
+    user: null,
+    loading: current.identityLoading,
+    error: null,
+    signOutUser: async () => {
+      ledger.logouts += 1;
+    },
+  };
+}
+
+/** Simulates identity revalidation at the provider boundary, never a UI handler. */
+export function setRecordFixtureIdentityLoading(identityLoading: boolean) {
+  if (state.pathname !== '/interface-record-editing') {
+    throw new Error('Identity controls belong only to the isolated record fixture');
+  }
+  update({ ...state, identityLoading });
+}
 export const useNuniSession = () => ({
   session:
     role === 'guest'
@@ -150,7 +165,8 @@ export const usePersonalTodayRecords = () => {
 export const interpretCampusRequest = async () => {
   throw new Error('Semantic network is disabled in the interface fixture');
 };
-export const browserRequest = async () => {
+export const browserRequest = async (action: string) => {
+  if (action === 'sign-in-options') return { google: true, studentId: true };
   throw new Error('Platform network is disabled in the interface fixture');
 };
 

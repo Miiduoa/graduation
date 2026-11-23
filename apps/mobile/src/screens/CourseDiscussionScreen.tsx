@@ -24,8 +24,6 @@ import { Ionicons } from '@expo/vector-icons';
 
 import {
   tcFetchDiscussions,
-  isTronClassWriteLocked,
-  TRONCLASS_WRITE_LOCKED_MESSAGE,
   tcPostDiscussion,
   type TCDiscussion,
 } from '../services/tronClassClient';
@@ -61,7 +59,6 @@ type RouteProps = {
 export default function CourseDiscussionScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
   const auth = useAuth();
-  const writeLocked = isTronClassWriteLocked();
   const groupName = props.route?.params?.groupName ?? '課程討論';
   const groupIdStr = props.route?.params?.groupId ?? '';
   const courseId = Number(groupIdStr.replace(/^tc:/, '')) || 0;
@@ -115,7 +112,6 @@ export default function CourseDiscussionScreen(props: RouteProps) {
   }, [load]);
 
   const handlePost = useCallback(async () => {
-    if (writeLocked) return;
     if (!newTitle.trim()) {
       Alert.alert('請輸入標題');
       return;
@@ -217,7 +213,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
     } finally {
       setPosting(false);
     }
-  }, [writeLocked, newTitle, newBody, courseId, load, mergeDemoThreads]);
+  }, [newTitle, newBody, courseId, load, mergeDemoThreads]);
 
   if (loading) {
     return (
@@ -267,9 +263,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
         ) : null}
 
         {/* 新發文 */}
-        {writeLocked ? (
-          <Text style={{ color: theme.colors.text }}>{TRONCLASS_WRITE_LOCKED_MESSAGE}</Text>
-        ) : composing ? (
+        {composing ? (
           <View
             style={{
               marginTop: 16,
@@ -388,8 +382,8 @@ export default function CourseDiscussionScreen(props: RouteProps) {
           <EmptyState
             icon="chatbubbles-outline"
             title="還沒有討論串"
-            subtitle={writeLocked ? "有新討論時會出現在這裡。" : "你可以是第一個提問的人，老師或同學回覆後會出現在這裡。"}
-            hint={writeLocked ? undefined : "發起短標題問題，並在教材頁對照章節，回覆會更快。"}
+            subtitle="你可以是第一個提問的人，老師或同學回覆後會出現在這裡。"
+            hint="發起短標題問題，並在教材頁對照章節，回覆會更快。"
             showCalmHero
           />
         ) : (

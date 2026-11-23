@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyTronClassAgentPermissions } from '@campus/shared/src/tronClassAgentPermissions';
 import { createTronClassBindingService, type TronClassBindingStore } from './tronClassBinding';
 import { createTronClassAgentGrantService } from './tronClassAgentGrants';
+vi.mock('server-only', () => ({}));
+
+vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerReady: () => true, waitForTronClassRetentionFirstSweep: async () => undefined }));
+vi.mock('./tronClassPlatformClosureScheduler', () => ({ isTronClassPlatformClosureSchedulerReady: () => true, waitForTronClassPlatformClosureFirstBatch: async () => undefined }));
 
 const OWNER = 'platform:pa_grant_fixture';
 const NOW = Date.parse('2026-11-13T09:00:00Z');
@@ -40,7 +44,11 @@ async function setup() {
   return { rows, clock, hooks, bindings, grants, db, revision: linked.revision! };
 }
 
-beforeEach(() => vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true'));
+beforeEach(() => {
+  vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true');
+  vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED', 'true');
+  vi.stubEnv('TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL', 'postgresql://synthetic:synthetic@127.0.0.1:5432/synthetic');
+});
 afterEach(() => vi.unstubAllEnvs());
 
 describe('TronClass Agent grants', () => {
