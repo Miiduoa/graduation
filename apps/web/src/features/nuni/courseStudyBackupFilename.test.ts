@@ -6,10 +6,12 @@ import { courseStudyPracticeCheckpointFilename } from './courseStudyPracticeChec
 import { courseStudyBackupFilenameStem as mergeBaseFilenameStem } from './__fixtures__/courseStudyMergeBase/courseStudyBackupFilename';
 
 describe('backup filename stems compared with merge-base', () => {
-  it('matches merge-base for every Unicode code point, including lone surrogates', () => {
+  it('keeps the merge-base names for readable code points, and safely names invisible-only titles', () => {
     for (let point = 0; point <= 0x10ffff; point += 1) {
       const title = String.fromCodePoint(point);
-      const expected = mergeBaseFilenameStem(title);
+      const baseline = mergeBaseFilenameStem(title);
+      const expected = /[^\p{Default_Ignorable_Code_Point}\u2800]/u.test(baseline)
+        ? baseline : '讀書白板';
       const actual = courseStudyBackupFilenameStem(title);
       if (actual !== expected) {
         expect(actual, `U+${point.toString(16).toUpperCase().padStart(4, '0')}`).toBe(expected);
@@ -61,12 +63,30 @@ describe('backup filename stems compared with merge-base', () => {
     ['visible text and format symbol at the truncation boundary', '課'.repeat(46) + '\u06dd一後續.pdf'],
     ['visible text before a long Hangul filler run', '課' + '\u3164'.repeat(80)],
   ])('matches merge-base for %s', (_label, title) => {
-    const stem = mergeBaseFilenameStem(title);
+    const baseline = mergeBaseFilenameStem(title);
+    const stem = /[^\p{Default_Ignorable_Code_Point}\u2800]/u.test(baseline)
+      ? baseline : '讀書白板';
     expect(courseStudyBackupFilenameStem(title)).toBe(stem);
     expect(courseStudyNotesFilename(title)).toBe(stem + '-學習筆記.txt');
     expect(courseStudyProgressFilename(title)).toBe(stem + '-閱讀進度.campus-study.json');
     expect(courseStudyPracticeCheckpointFilename(title)).toBe(stem + '-逐題練習.campus-practice.json');
   });
+  it('keeps mobile TXT and checkpoint filenames visible when truncation hides the readable title', () => {
+    const hidden = '\u3164'.repeat(48) + '資料分析.pdf';
+    expect(mergeBaseFilenameStem(hidden)).toBe('\u3164'.repeat(48));
+    expect(courseStudyBackupFilenameStem(hidden)).toBe('讀書白板');
+    expect(courseStudyNotesFilename(hidden)).toBe('讀書白板-學習筆記.txt');
+    expect(courseStudyProgressFilename(hidden)).toBe('讀書白板-閱讀進度.campus-study.json');
+    expect(courseStudyPracticeCheckpointFilename(hidden)).toBe('讀書白板-逐題練習.campus-practice.json');
+
+    expect(courseStudyBackupFilenameStem('\u200d'.repeat(52) + '講義.md')).toBe('讀書白板');
+    expect(courseStudyBackupFilenameStem('\u2800'.repeat(52) + '課程.txt')).toBe('讀書白板');
+    // A visible character at the cut is still enough to distinguish the file.
+    expect(courseStudyBackupFilenameStem('\u3164'.repeat(47) + '課程.pdf'))
+      .toBe('\u3164'.repeat(47) + '課');
+    expect(courseStudyBackupFilenameStem('👩‍💻 課程.pdf')).toBe('👩‍💻 課程');
+  });
+
 });
 
 describe('mobile backup filename grapheme boundaries', () => {

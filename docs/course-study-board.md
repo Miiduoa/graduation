@@ -1,3 +1,9 @@
+## 2026-11-23：修復不可見 Unicode 課名造成手機備份檔名空白
+
+- 重新核對現行 `courseStudyBackupFilenameStem`，發現原有 `trim()` 只排除空白，未排除 Hangul Filler U+3164、ZWJ/ZWNJ、Default-Ignorable 字元與 Braille Blank U+2800。若教材標題前 48 個 code points 都不可見，而真正課名在截斷界線之後，TXT、閱讀進度及逐題練習 JSON 下載檔名會保留看似空白的前綴。
+- 現在**在字素安全截斷後**確認至少存在一個可顯示的字元；無可辨識文字才以「讀書白板」作為備份檔名前綴。包含可見文字的正常繁中、Emoji ZWJ、波斯文 ZWNJ、數學符號原名不變。新增 Unicode 全碼點基準對照與長不可見前綴／TXT／兩種 JSON 格式的正反測試，清楚紀錄此安全改善與 merge-base 的**刻意差異**；沒有修改教材內容、匯出內容、v1/v2 閱讀與 v1 練習 JSON。
+- 本輪僅有程式與自動回歸驗證路徑；即使新 SHA 的 CI／CodeQL 成功，也不等於手機檔案 App、VoiceOver／TalkBack、WebGPU 中文教學或 Ahaboard 同題同機實測通過。指定 App 5504170 APPROVED 與全部實機 gate 未完成前維持 Draft，不合併、不部署。
+
 ## 2026-11-23：本機朗讀不讓拉丁轉寫語音搶先於繁體中文
 
 - 修正 iOS／Android 可用語音清單的保守排序：原本 BCP 47 `zh-Latn-TW` 或 `cmn_Latn_TW` 因地區是 TW，被視同優先的繁中漢字語音，可能在真正的 `zh-Hant-HK` 或 `zh-TW` 之前選中拉丁轉寫語音。現在對明確非漢字 script 子標籤採較低優先級；保留原有 `zh-Hans-TW` 排除、繁中地區順序及僅選 `localService` 的隱私界線。沒有網路語音回退。

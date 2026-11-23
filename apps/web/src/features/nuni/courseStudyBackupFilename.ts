@@ -115,5 +115,12 @@ export function courseStudyBackupFilenameStem(sourceTitle: string): string {
     .trim()
     .replace(/\.(pdf|txt|md|markdown)$/i, '')
     .replace(/^[. ]+|[. ]+$/gu, '');
-  return truncateFilenameStem(safe).trim() || '讀書白板';
+  const filename = truncateFilenameStem(safe).trim();
+  // Unicode default-ignorable characters and the Braille blank remain
+  // nonempty after trim(). A 48-code-point cut can hide the only readable
+  // part of the course title, leaving a visually blank download filename.
+  // Keep ZWJ/ZWNJ inside otherwise readable multilingual/emoji titles.
+  return /[^\p{Default_Ignorable_Code_Point}\u2800]/u.test(filename)
+    ? filename
+    : '讀書白板';
 }
