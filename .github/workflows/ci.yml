@@ -19,7 +19,9 @@ env:
 jobs:
   security-gates:
     name: Security Gates
-    runs-on: ubuntu-latest
+    # Process-level installer recovery must match the supported Ubuntu runtime
+    # used by every job that actually installs the browser and system packages.
+    runs-on: ubuntu-24.04
     services:
       public-cafeteria-postgres:
         image: postgres:17

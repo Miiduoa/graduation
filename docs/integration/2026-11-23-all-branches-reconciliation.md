@@ -32,6 +32,14 @@
 
 本文件記錄整合時已取得的證據；完整整合的驗證結果以 PR 最終精確 head 的 Actions、CodeQL、瀏覽器與原生相容性檢查為準。舊來源綠勾不代表本候選已通過。
 
+## 安裝恢復檢查的遠端作業系統差異
+
+整合 head `b1bd642737e0c8c9ecf60ed68c36ac5aba03b5a7` 的 [Security Gates job 137542005566](https://github.com/Miiduoa/graduation/actions/runs/45129660060/job/137542005566) 在 `ubuntu-latest` 當時指向的 Ubuntu 26.04.1 上失敗：第一個真實 process／flock 案例逾時後，三次受限 `dpkg` 恢復仍無法取得測試鎖。因此前述本機 job-control 修正尚不足以證明 Ubuntu 26 相容，不能以本機通過結果覆蓋遠端失敗。
+
+同一 head 的 [Admin browser job 137542005087](https://github.com/Miiduoa/graduation/actions/runs/45129659981/job/137542005087) 使用 Ubuntu 24.04.5，於 `2026-11-23T07:16:36Z` 實際執行相同 fixture 並回報 **14/14 passed**，之後亦成功執行真正瀏覽器安裝。逐項讀取工作流程確認，所有實際呼叫 `install-playwright.sh` 的工作均明確使用 `ubuntu-24.04`，只有 Security Gates 的獨立恢復測試因 `ubuntu-latest` 轉移而採用不同主版本。
+
+本次只將 Security Gates runner 明確對齊 `ubuntu-24.04`；原安裝腳本與 fixture 完全保留，真實 process group／flock／sudo 逾時邊界及故意錯置邊界的失敗對照仍執行。所有安全檢查、PostgreSQL 服務、依賴稽核、步驟、相依閘門及失敗政策均未刪除或放寬。既有 workflow contract 測試新增跨工作流程的 runner 一致性檢查：修正前確實因 `ubuntu-latest` 與 `ubuntu-24.04` 不同而失敗。這項調整驗證的是既定 Ubuntu 24 支援範圍；Ubuntu 26 的底層程序差異尚未定位，也不宣稱相容。最終新 head 仍須在遠端重新執行完整檢查。
+
 ## 合併與既有功能開關
 
 main 規則 26004626 仍要求 App 5504170（nuni-merge-gate）對最終候選核發「審查通過」。沒有變更此規則，沒有用一般 PR Approve 或同名檢查替代。

@@ -225,6 +225,28 @@ test('production workflows fail closed unless the run is on main', () => {
   assertFailsOffMain(announcements.jobs.sync.steps[0]);
 });
 
+test('installer recovery gates use the same pinned Ubuntu runtime as real browser installation', () => {
+  const supportedRunner = workflow.jobs['build-web']['runs-on'];
+  assert.match(supportedRunner, /^ubuntu-\d+\.\d+$/);
+  const installers = [];
+  const directory = path.join(__dirname, '../.github/workflows');
+  for (const file of fs.readdirSync(directory).filter((name) => name.endsWith('.yml'))) {
+    for (const [name, browserJob] of Object.entries(parseWorkflow(file).jobs)) {
+      if (browserJob.steps?.some((step) => step.run?.includes('scripts/qa/browser/install-playwright.sh'))) {
+        installers.push(`${file}:${name}`);
+        assert.equal(browserJob['runs-on'], supportedRunner, `${file}:${name} changed installer runtime`);
+      }
+    }
+  }
+  assert.ok(installers.length > 0, 'no real browser installation jobs were checked');
+  const security = workflow.jobs['security-gates'];
+  assert.equal(security['runs-on'], supportedRunner, 'recovery gate drifted from real browser installation');
+  const readiness = security.steps.find((step) => step.name === 'Test deployment readiness gates');
+  assert.ok(readiness.run.includes('bash scripts/qa/browser/install-playwright.test.sh'));
+  assert.notEqual(readiness['continue-on-error'], true);
+  assert.notEqual(security['continue-on-error'], true);
+});
+
 test('assistant CI uses isolated frozen installs and gates summary and manual Firebase release', () => {
   const assistant = workflow.jobs['test-nuni-assistant'];
   assert.deepEqual(assistant.permissions, { contents: 'read' });
