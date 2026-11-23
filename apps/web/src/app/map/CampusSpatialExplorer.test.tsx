@@ -676,6 +676,17 @@ it('honors the latest host entry, then checks geometry on resize, and ignores fo
   expect(scene.create).not.toHaveBeenCalled();
   expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
 
+  // A malformed WebView entry whose target getter throws is not a legacy
+  // entry with no target. It must not be trusted to start offscreen WebGL.
+  const unreadableTarget = {
+    isIntersecting: true,
+    time: 901,
+    get target(): Element { throw new Error('IntersectionObserver target inaccessible'); },
+  } as unknown as IntersectionObserverEntry;
+  act(() => intersection?.([unreadableTarget], {} as IntersectionObserver));
+  expect(scene.create).not.toHaveBeenCalled();
+  expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+
   top = 40;
   act(() => intersection?.(([{ isIntersecting: true, time: 100, target: graphics }] as unknown as IntersectionObserverEntry[]), {} as IntersectionObserver));
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
