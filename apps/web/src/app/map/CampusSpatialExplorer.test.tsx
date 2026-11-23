@@ -1681,6 +1681,68 @@ it('suspends a ready WebGL scene on pagehide even without a hidden document', as
   expect(scene.setActive).not.toHaveBeenCalled();
 });
 
+const layoutRecoveryEvents = [
+  { source: 'visualViewport', event: 'resize' },
+  { source: 'visualViewport', event: 'scroll' },
+  { source: 'window', event: 'resize' },
+  { source: 'window', event: 'scroll' },
+  { source: 'window', event: 'focus' },
+  { source: 'window', event: 'pageshow' },
+] as const;
+
+it.each((['missing', 'silent', 'hidden'] as const).flatMap((observer) =>
+  layoutRecoveryEvents.map(({ source, event }) => ({ observer, source, event })),
+))('rechecks initial offscreen layout on $source $event with a $observer observer', async ({
+  observer, source, event,
+}) => {
+  const viewport = Object.assign(new EventTarget(), { height: 200 });
+  vi.stubGlobal('visualViewport', viewport);
+  vi.stubGlobal('IntersectionObserver', observer === 'missing' ? undefined : class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  let top = window.innerHeight + 40;
+  const bounds = vi.spyOn(Element.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: Element) {
+      return this.getAttribute('aria-label') === '校園地點空間圖'
+        ? new DOMRect(0, top, 320, 180)
+        : new DOMRect();
+    });
+  try {
+    const { unmount } = render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const graphics = screen.getByRole('group', { name: '校園地點空間圖' });
+    const manual = screen.getByRole('button', { name: '手動開啟立體畫面' });
+    expect(scene.create).not.toHaveBeenCalled();
+    if (observer === 'hidden') {
+      act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
+    }
+
+    top = 40;
+    viewport.height = window.innerHeight;
+    await act(async () => {
+      (source === 'visualViewport' ? viewport : window).dispatchEvent(new Event(event));
+    });
+    if (observer === 'hidden') {
+      expect(scene.create).not.toHaveBeenCalled();
+      fireEvent.click(manual);
+    }
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(graphics.parentElement?.dataset.spatialState).toBe('ready');
+
+    unmount();
+    bounds.mockClear();
+    viewport.dispatchEvent(new Event('resize'));
+    viewport.dispatchEvent(new Event('scroll'));
+    expect(bounds).not.toHaveBeenCalled();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('keeps rendering when the observer is visible and keyboard bounds shrink or stay stale', async () => {
   const viewport = Object.assign(new EventTarget(), {
     width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
@@ -1902,7 +1964,9 @@ it.each(visibilityTransitions.flatMap(({ event, startup, running }) =>
   }
 });
 
-it('pauses a ready WebGL scene on layout resize when the observer is silent', async () => {
+it('pauses on layout resize and resumes on visual viewport resize when the observer is silent', async () => {
+  const viewport = new EventTarget();
+  vi.stubGlobal('visualViewport', viewport);
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) { intersection = callback; }
     observe() {}
@@ -1929,6 +1993,15 @@ it('pauses a ready WebGL scene on layout resize when the observer is silent', as
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 
     vi.stubGlobal('innerHeight', height);
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+
+    act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    act(() => viewport.dispatchEvent(new Event('scroll')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
     act(() => intersection?.([{
       isIntersecting: true, target: graphics, time: 100,
       intersectionRect: { width: 320, height: 50 },

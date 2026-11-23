@@ -539,11 +539,21 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
     // Nested dialog scroll can move the canvas without an observer callback.
-    const viewportEvents = ['resize', 'scroll', 'orientationchange'] as const;
+    const viewportEvents = ['resize', 'scroll', 'orientationchange', 'focus'] as const;
     for (const event of viewportEvents) {
       try { window.addEventListener(event, syncVisibility, event === 'scroll' ? { capture: true, passive: true } : false); }
       catch { /* Observer and page events still report visibility. */ }
     }
+    // Keyboard transitions can move the host without a window event.
+    const onVisualViewportChange = () => {
+      if (visibility === 'unknown') syncVisibility();
+    };
+    let visualViewport: VisualViewport | null | undefined;
+    try {
+      visualViewport = window.visualViewport;
+      visualViewport?.addEventListener('resize', onVisualViewportChange);
+      visualViewport?.addEventListener('scroll', onVisualViewportChange);
+    } catch { /* Window events still recheck layout in partial WebViews. */ }
     syncVisibility();
     return () => {
       active = false;
@@ -558,6 +568,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         try { window.removeEventListener(event, syncVisibility, event === 'scroll'); }
         catch { /* Complete the remaining cleanup. */ }
       }
+      try {
+        visualViewport?.removeEventListener('resize', onVisualViewportChange);
+        visualViewport?.removeEventListener('scroll', onVisualViewportChange);
+      } catch { /* Complete scene cleanup even in partial WebViews. */ }
       pendingCreate = null;
       scene?.dispose();
       runtime.current = null;
