@@ -19,6 +19,7 @@ import { isProvidencePendingVerification, providencePlaceSourceUrl } from './pro
 import { PROVIDENCE_CAMPUS_PLACES, PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
 import { parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
 import { reuseUnchangedProvidenceFootprints } from './footprintSnapshotEquality';
+import { isSupportedUtf8JsonMediaType } from './jsonMediaType';
 import BuildingPlanPreview from './buildingPlans/BuildingPlanPreview';
 import styles from './CampusSpatialExplorer.module.css';
 
@@ -72,13 +73,6 @@ const MAX_DECLARED_FOOTPRINT_BYTES = 2_000_000;
 const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 
 // Keep this media-type rule aligned between the Overpass route and browser.
-function isSupportedFootprintMediaType(response: Response): boolean {
-  const declared = response.headers?.get('content-type');
-  if (declared == null) return true;
-  const mediaType = declared.split(';', 1)[0].trim();
-  return /^application\/(?:json|[a-z0-9!#$%&'*+.^_`|~-]+\+json)$/i.test(mediaType);
-}
-
 // Response.json() buffers the entire document before our snapshot validator
 // runs. Bound the *actual decoded bytes* so untrusted downstream responses
 // cannot exhaust mobile memory even without a reliable Content-Length.
@@ -1230,7 +1224,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
         const emptySuccess = response.ok && contentLength !== null && Number(contentLength) === 0;
         // Reject incompatible 200 media before reading a potentially stalled
         // captive-portal body, without changing other HTTP status handling.
-        const invalidMediaType = !isSupportedFootprintMediaType(response);
+        const invalidMediaType = !isSupportedUtf8JsonMediaType(response.headers?.get('content-type') ?? null);
         if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
             contentRange !== null || invalidFraming || invalidContentLength || emptySuccess || invalidMediaType) {
           // Fetch resolves at the response headers. A rejected 2xx/3xx/5xx
