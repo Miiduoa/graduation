@@ -177,13 +177,14 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       checkIdentityLength(bytes.byteLength);
       return parseBytes(bytes);
     }
-    // text() can expose an unparsed body even if TextEncoder is missing.
-    // Prefer it to eager json(), so the UTF-8 size limit is checked first.
-    // text() drops a UTF-8 BOM, so its re-counted bytes cannot be compared
-    // with an identity Content-Length; keep the original json() path there.
-    if (typeof response.text === 'function' && declaredIdentityBytes === null) {
+    // Some older WebViews expose text() but no readable body or arrayBuffer().
+    // Verify their decoded UTF-8 byte count before parsing, including any
+    // identity Content-Length. text() strips an optional UTF-8 BOM: if that
+    // makes the length unverifiable, reject the optional outline instead of
+    // silently accepting a mismatched or truncated source representation.
+    if (typeof response.text === 'function') {
       let raw: string | undefined;
-      try { raw = await response.text?.(); }
+      try { raw = await response.text(); }
       catch (error) {
         if (response.bodyUsed) throw error;
       }
@@ -193,8 +194,10 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
         return JSON.parse(raw) as unknown;
       }
     }
-    // JSON-only bridges keep the original behavior: parse via json().
-    return response.json() as Promise<unknown>;
+    // JSON-only bridges expose no raw bytes. Their body can exceed the size
+    // cap and cannot be compared to Content-Length, so json() is not a safe
+    // fallback for trusted OSM geometry. Keep POIs and external directions.
+    throw new Error('Building outline response bytes unavailable');
   }
   // A mobile pagehide/unmount/timeout may arrive after the fetch headers but
   // while response-body streaming is still pending. Abort the *reader* as well
