@@ -100,23 +100,13 @@ it.each([
   expect(fetch.mock.calls.some(([url]) => url === '/api/tronclass/agent')).toBe(false);
 });
 
-it('queries the Agent when a page-opening phrase also asks for outstanding homework', async () => {
-  const question = '開啟玩課雲作業，查一下還沒交的有哪些';
-  const fetch = vi.fn(async (url: string, init?: RequestInit) => { void init;
-    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
-    if (url === '/api/tronclass/agent') return json(base);
-    throw new Error(`Unexpected request: ${url}`);
-  });
-  vi.stubGlobal('fetch', fetch);
-  render(<Assistant />);
-  await ask(question);
-  await screen.findByRole('heading', { name: '私人期中報告' });
-  const request = fetch.mock.calls.find(([url]) => url === '/api/tronclass/agent');
-  expect(body(request?.[1])).toMatchObject({ question });
-  expect(screen.queryByRole('link', { name: /^開啟玩課雲作業/ })).toBeNull();
-});
-
-it('keeps a compound LMS handoff and bus request on the existing cross-service plan', async () => {
+it.each([
+  '玩課雲作業，查公車',
+  '玩課雲作業和查公車',
+  '玩課雲作業，查校園公告',
+  '開啟玩課雲作業，查一下還沒交的有哪些',
+  '開啟玩課雲作業，安排今天下午作業準備30分鐘',
+])('leaves the multi-clause request %s on the existing cross-service plan', async question => {
   const fetch = vi.fn(async (url: string) => {
     if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
     if (url === '/api/tronclass/agent') return json(base);
@@ -125,7 +115,7 @@ it('keeps a compound LMS handoff and bus request on the existing cross-service p
   vi.stubGlobal('fetch', fetch);
   render(<Assistant />);
   fireEvent.click(await screen.findByRole('checkbox'));
-  await ask('玩課雲作業，查公車');
+  await ask(question);
   await waitFor(() => expect(fetch.mock.calls.some(([url]) => !url.endsWith('/capability'))).toBe(true));
   expect(fetch.mock.calls.some(([url]) => url === '/api/tronclass/agent')).toBe(false);
 });

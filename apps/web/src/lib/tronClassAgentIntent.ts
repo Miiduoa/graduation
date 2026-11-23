@@ -35,15 +35,14 @@ export function tronClassDisabledNavigationQuestion(question: string): string | 
 
 // 與跨服務規劃相同的分隔詞（含「和／與」），確保兩邊切句一致。
 const CLAUSE_SEPARATOR = /(?:然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|[，,；;。！!？?、和與])+/u;
-const TRONCLASS_DATA_CLAUSE = /作業|未交|未繳|待交|待繳|還沒|尚未|教材|講義|附件|下載|準備|草稿|繳交|提交|送出|上傳|交出|交作業|刪除|撤回|玩課雲|創課|homework|assignment|material|download|pending|tron\s*class/i;
 
 /**
- * 保守規則：多個子句中只要有任何一句不是玩課雲資料查詢（例如「玩課雲作業，查公車」），
- * 就整句交還原本的跨服務規劃，不由 TronClass Agent 攔截，行為與 merge-base 相同。
+ * 只攔截單個子句。只要以跨服務規劃相同的分隔詞切成兩個以上子句，
+ * 就整句交還原本的規劃，不由 TronClass Agent 攔截，行為與 merge-base 相同。
  */
-function hasNonTronClassClause(question: string): boolean {
+function isMultiClauseRequest(question: string): boolean {
   const clauses = question.normalize('NFKC').split(CLAUSE_SEPARATOR).map(part => part.trim()).filter(Boolean);
-  return clauses.length >= 2 && clauses.some(part => !TRONCLASS_DATA_CLAUSE.test(part));
+  return clauses.length >= 2;
 }
 
 export type TronClassAgentQueryIntent = {
@@ -61,7 +60,7 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
     !/(?:\btron\s*class\b|創課|玩課雲)/i.test(question)) return null;
   const original = question.trim();
   if (isExistingTronClassNavigation(original)) return null;
-  if (hasNonTronClassClause(original)) return null;
+  if (isMultiClauseRequest(original)) return null;
   // Examples, translations and general explanations do not authorize a private read.
   if (/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(original) ||
     /^[「『“"'][\s\S]*[」』”"']$/.test(original) ||
