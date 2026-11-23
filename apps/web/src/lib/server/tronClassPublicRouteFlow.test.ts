@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
 import { NextRequest } from 'next/server';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import { handleTronClassIntegration, type TronClassRouteDependencies } from './tronClassIntegrationRoute';
 import { createTronClassPublicSubmissionService } from './tronClassPublicSubmissionService';
@@ -20,7 +20,7 @@ const TARGET = Object.freeze({ uploadId: 601, mode: 'raw' as const, url: 'https:
 const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
 
 /** All school data and HTTP are synthetic; the public route, adapter and v2 journal run unchanged. */
-function environment() {
+function environment(contractVerified = true) {
   const rows = new Map<string, Record<string, unknown>>();
   const snapshot = (path: string) => ({ exists: rows.has(path), data: () => structuredClone(rows.get(path)) });
   let queue = Promise.resolve();
@@ -105,7 +105,7 @@ function environment() {
   const service = createTronClassPublicSubmissionService({
     db, bindings, now: () => NOW, readonlyPrepare: async () => structuredClone(prepared),
     legacyReconcile: async () => { throw new Error('v2 must not use v1'); },
-    enabled: () => enabled, contractVerified: true,
+    enabled: () => enabled, contractVerified,
     authorization: async owner => ({ binding: await bindings.requireBinding(owner), assignment: structuredClone(assignment),
       mode: 'normal', historyComplete: true, priorSubmissionIds: finalRow ? [501] : [], userSubmitCount: finalRow ? 1 : 0,
       ordinaryWindowConfirmed: true, prerequisitesConfirmed: true }),
@@ -122,21 +122,41 @@ function environment() {
   const post = (body: unknown) => handleTronClassIntegration(new NextRequest('https://nuni.tw/api/tronclass', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }), dependencies);
-  const upload = () => {
+  const uploadRequest = () => {
     const query = new URLSearchParams({ courseId: '101', homeworkId: '202', revision: REVISION,
       operationId: OPERATION, fileId: FILE, name: '作業.pdf' });
-    return handleTronClassIntegration(new NextRequest(`https://nuni.tw/api/tronclass?${query}`, {
+    return new NextRequest(`https://nuni.tw/api/tronclass?${query}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/pdf' }, body: BYTES,
-    }), dependencies);
+    });
   };
   const submit = () => post({ action: 'submit', ...SCOPE, revision: REVISION, operationId: OPERATION,
     content: '我的 <報告>\n合成附件', attachments: [FILE], confirmed: true });
-  return { post, upload, submit, rows, fetchSchool, fetchStorage, finalPosts: () => finalPosts,
+  const upload = (request = uploadRequest()) => handleTronClassIntegration(request, dependencies);
+  return { post, upload, uploadRequest, submit, rows, fetchSchool, fetchStorage, finalPosts: () => finalPosts,
     setMissingReadback: (value: boolean) => { missingReadback = value; }, disable: () => { enabled = false; } };
 }
 
+beforeEach(() => vi.stubEnv('TRONCLASS_INTEGRATION_ENABLED', 'true'));
+afterEach(() => vi.unstubAllEnvs());
+
 describe('public HTTP to durable v2 school workflow', () => {
   const cancelInput = { action: 'cancel-preparation', ...SCOPE, revision: REVISION, operationId: OPERATION };
+
+  it.each([
+    { enabled: false, contractVerified: true, error: 'TRONCLASS_WRITES_DISABLED' },
+    { enabled: true, contractVerified: false, error: 'TRONCLASS_SUBMISSION_UNAVAILABLE' },
+  ])('rejects PUT with $error before accessing the attachment body', async ({ enabled, contractVerified, error }) => {
+    const s = environment(contractVerified);
+    if (!enabled) s.disable();
+    const request = s.uploadRequest();
+    const body = vi.spyOn(request, 'body', 'get');
+    const response = await s.upload(request);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error });
+    expect(body).not.toHaveBeenCalled();
+    expect(s.fetchSchool).not.toHaveBeenCalled();
+    expect(s.fetchStorage).not.toHaveBeenCalled();
+  });
 
   it('stops an upload-only preparation and blocks delayed final and upload calls without school writes', async () => {
     const s = environment();

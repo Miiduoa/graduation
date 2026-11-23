@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyTronClassAgentPermissions } from '@campus/shared/src/tronClassAgentPermissions';
 import { createTronClassBindingService, type TronClassBindingStore } from './tronClassBinding';
 import { createTronClassAgentGrantService } from './tronClassAgentGrants';
@@ -39,6 +39,9 @@ async function setup() {
   const grants = createTronClassAgentGrantService({ db, bindings, now: () => clock.now });
   return { rows, clock, hooks, bindings, grants, db, revision: linked.revision! };
 }
+
+beforeEach(() => vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true'));
+afterEach(() => vi.unstubAllEnvs());
 
 describe('TronClass Agent grants', () => {
   it('requires separate consent and never returns school credentials or account fields', async () => {

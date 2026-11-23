@@ -240,7 +240,7 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 
 使用者確認送出後，UI 先重新取得完整規則，再一次核對文字、所有附件、檔名、空檔、個別大小、合計大小及 MIME。任何一項不合格，都在第一個 upload 前停止並保留草稿。重新讀取失敗會移除舊的送出資格，不讓先前的 `canSubmit` 繼續生效。後端原有規則檢查仍保留。
 
-回應使用 `Cache-Control: no-store, private`，不快取私人校方資料。一般請求每 owner 每程序每分鐘 60 次，課程清單及完整同步各自每分鐘 6 次；另有 Firestore 持久化登入嘗試限制（15 分鐘：owner 6 次、同校方帳號 5 次）。一般請求限制不是跨程序全域配額。
+回應使用 `Cache-Control: no-store, private`，不快取私人校方資料。一般請求每 owner 每程序每分鐘 60 次，課程清單及完整同步各自每分鐘 6 次；另有 Firestore 持久化登入嘗試限制（15 分鐘：每個呼叫者 6 次、每組呼叫者與校方帳號 5 次；上游傳輸失敗會退回額度）。一般請求限制不是跨程序全域配額。
 
 ### 教材附件下載
 
@@ -421,7 +421,8 @@ Binary 證據只採用先前 metadata 中完全相同的同來源 `upload_url`�
 | `WEB_PUBLIC_ORIGIN` | Web 頁面的完整 origin，例如正式站 `https://nuni.tw`；Platform cookie 操作以此核對同源。測試站須填入其實際來源，不能直接沿用正式站 origin。 |
 | `NUNI_API_BASE_URL` | 平台 session 查證的既有 API；預設為 `https://api.nuni.tw`。使用 Platform 帳號時須可連線。 |
 | `BFF_SESSION_SECRET` | Platform session 加密及頁面身分核對所需，至少 32 字元；也可作為未另設 TronClass secret 時的加密來源。 |
-| `TRONCLASS_INTEGRATION_ENABLED=false` | 緊急停止本整合路由；未設時允許綁定與唯讀操作 |
+| `TRONCLASS_INTEGRATION_ENABLED=true` | 整合路由預設停用，只有明確設為 `true` 才開放。正式開放綁定前須先接通關帳清理 worker |
+| `TRONCLASS_RETENTION_ENABLED=true` | 綁定與重新連線須明確啟用到期清理，才可保存加密的校方 session |
 | `TRONCLASS_SESSION_SECRET` | 至少 32 字元，用來衍生 session 加密密鑰；未設時沿用 `BFF_SESSION_SECRET` |
 | `TRONCLASS_HOMEWORK_WRITE_ENABLED=true` | 只有來源契約也已驗證時才可能允許寫入；本分支 adapter 仍固定拒絕 |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | 放在 **Web runtime** 的既有 `campus-one-tw` 服務帳戶原始 JSON。`getFirebaseAdmin()` 不讀 `FIREBASE_SERVICE_ACCOUNT_BASE64`；缺少此設定時綁定狀態、登入限流與 session 保存皆不可用。 |
@@ -443,7 +444,7 @@ Firebase 既有 `accountDeletion` 在標記關帳後，會呼叫 server-only 的
 
 1. 將 binding 改成永久關閉標記，只保留 owner hash、隨機 revision、時間與狀態，先阻止進行中的登入或操作寫回。
 2. 對該 owner 的鎖交易式重讀。只有持久化 `not-sent` 才能釋放；其他鎖改成不含身分、檔案或內容的 `owner-deleted` 標記，避免校方同學生換 nuni 帳號後重送。
-3. 分頁刪除該 owner 的作業 ledger 與登入嘗試。共用的校方帳號登入配額不因刪帳歸零。
+3. 分頁刪除該 owner 的作業 ledger 與登入嘗試，包含該 owner 各校方帳號的個別配額。
 
 所有 ledger 變更的 transaction 也會讀取關閉標記，防止清理完成後被尚未結束的請求重新建立。已確認收據的 ledger 日後到期清除，仍會保留作業鎖；重放同一 operation ID 也不能重新送交。
 

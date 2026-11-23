@@ -74,6 +74,7 @@ describe.skipIf(!localEmulator)('bounded TronClass retention with real Firestore
   };
 
   beforeAll(() => {
+    vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true');
     app = initializeApp({ projectId: PROJECT }, `${PROJECT}-first-client`);
     otherApp = initializeApp({ projectId: PROJECT }, `${PROJECT}-second-client`);
     db = getFirestore(app);
@@ -86,6 +87,7 @@ describe.skipIf(!localEmulator)('bounded TronClass retention with real Firestore
     expect(response.ok).toBe(true);
   }, 20_000);
   afterAll(async () => {
+    vi.unstubAllEnvs();
     await Promise.all([db.terminate(), otherDb.terminate()]);
     await Promise.all([deleteApp(app), deleteApp(otherApp)]);
   });
@@ -93,7 +95,11 @@ describe.skipIf(!localEmulator)('bounded TronClass retention with real Firestore
   it('deletes only expired connected bindings, quotas and v1 draft/submitted records; keeps barriers and locks', async () => {
     const removable: Array<[string, Record<string, unknown>]> = [
       [`${BINDINGS}/expired`, binding()], [`${QUOTAS}/owner`, { ...quota(), scope: 'owner', ownerKey: OWNER }],
-      [`${QUOTAS}/account`, quota()], [`${OPERATIONS}/draft`, operation()],
+      [`${QUOTAS}/account`, quota()],
+      [`${QUOTAS}/owner-account`, { ...quota(), scope: 'owner-account', ownerKey: OWNER,
+        timestamps: [{ timestamp: NOW - 3600_000, id: 'a'.repeat(32) }] }],
+      [`${QUOTAS}/refunded`, { ...quota(), scope: 'owner-account', ownerKey: OWNER, timestamps: [] }],
+      [`${OPERATIONS}/draft`, operation()],
       [`${OPERATIONS}/submitted`, { ...operation(), state: 'submitted' }],
     ];
     const retained: Array<[string, Record<string, unknown>]> = [
@@ -101,6 +107,8 @@ describe.skipIf(!localEmulator)('bounded TronClass retention with real Firestore
       [`${BINDINGS}/disconnected`, { ...binding(), state: 'disconnected' }],
       [`${BINDINGS}/renewed`, { ...binding(), expiresAt: NOW + 3600_000 }],
       [`${QUOTAS}/recent`, { ...quota(), timestamps: [NOW] }],
+      [`${QUOTAS}/recent-reservation`, { ...quota(), scope: 'owner-account', ownerKey: OWNER,
+        timestamps: [{ timestamp: NOW, id: 'b'.repeat(32) }] }],
       [`${QUOTAS}/unrecognized`, { ...quota(), scope: 'other' }],
       [`${OPERATIONS}/unknown`, { ...operation(), state: 'unknown' }],
       [`${OPERATIONS}/submitting`, { ...operation(), state: 'submitting' }],

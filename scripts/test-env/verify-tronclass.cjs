@@ -15,7 +15,7 @@ assert.equal(process.env.FIREBASE_AUTH_EMULATOR_HOST, '127.0.0.1:19291');
 assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:18291');
 assert.equal(process.env.NODE_ENV, 'development');
 assert.equal(process.env.FIREBASE_SERVICE_ACCOUNT_JSON, undefined);
-assert.equal(process.env.TRONCLASS_RETENTION_ENABLED, 'false');
+assert.equal(process.env.TRONCLASS_RETENTION_ENABLED, 'true');
 assert.equal(process.env.TRONCLASS_PLATFORM_CLOSURE_WORKER_ENABLED, 'false');
 for (const name of ['TRONCLASS_PLATFORM_CLOSURE_DATABASE_URL', 'FILE_STORAGE_BACKEND',
   'NEXT_PUBLIC_FILE_STORAGE_BACKEND', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY',

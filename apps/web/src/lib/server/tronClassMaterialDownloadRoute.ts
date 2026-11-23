@@ -119,7 +119,7 @@ export async function handleTronClassFileDownload<Input extends { revision: stri
 ): Promise<Response> {
   let release: (() => void) | undefined;
   try {
-    if (process.env.TRONCLASS_INTEGRATION_ENABLED === 'false') throw new NuniError(503, 'TRONCLASS_DISABLED');
+    if (process.env.TRONCLASS_INTEGRATION_ENABLED !== 'true') throw new NuniError(503, 'TRONCLASS_DISABLED');
     if (request.method !== 'POST') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
     const authenticate = dependencies.authenticate ?? authenticateTronClassActor;
     const actor = await authenticate(request);

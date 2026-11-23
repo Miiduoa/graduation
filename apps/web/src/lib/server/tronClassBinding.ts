@@ -133,12 +133,29 @@ function publicStatus(row: StoredBinding | null, now: number): TronClassBindingS
   };
 }
 
-function recentAttempts(snapshot: Snapshot, now: number, limit: number): number[] {
+type LoginAttempt = number | { timestamp: number; id: string };
+
+export function tronClassLoginAttemptTimestamp(entry: unknown): number {
+  const timestamp = typeof entry === 'object' && entry !== null &&
+    'id' in entry && typeof entry.id === 'string' && REVISION.test(entry.id) &&
+    'timestamp' in entry ? entry.timestamp : entry;
+  return typeof timestamp === 'number' && Number.isSafeInteger(timestamp) && timestamp >= 0 ? timestamp : NaN;
+}
+
+function recentAttempts(snapshot: Snapshot, now: number, limit: number): LoginAttempt[] {
   if (!snapshot.exists) return [];
   const value = snapshot.data()?.timestamps;
-  if (!Array.isArray(value) || value.length > limit || value.some((entry) =>
-    typeof entry !== 'number' || !Number.isSafeInteger(entry) || entry < 0 || entry > now)) unavailable();
-  return (value as number[]).filter((entry) => entry > now - TRONCLASS_LOGIN_WINDOW_MS);
+  if (!Array.isArray(value) || value.length > limit || value.some((entry) => {
+    const timestamp = tronClassLoginAttemptTimestamp(entry);
+    return !Number.isFinite(timestamp) || timestamp > now;
+  })) unavailable();
+  return (value as LoginAttempt[]).filter((entry) => tronClassLoginAttemptTimestamp(entry) > now - TRONCLASS_LOGIN_WINDOW_MS);
+}
+
+function assertRetentionEnabled(): void {
+  if (process.env.TRONCLASS_RETENTION_ENABLED !== 'true') {
+    throw new NuniError(503, 'TRONCLASS_RETENTION_REQUIRED');
+  }
 }
 
 /** Owns independent LMS connections; never creates a school membership or an e-campus session. */
@@ -233,29 +250,49 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
     checkedRevision(input.expectedRevision);
     const expectedRevision = input.expectedRevision;
     const account = checkedAccount(input.account);
+    assertRetentionEnabled();
     const encryptionKey = key();
     const db = await wait(getStore);
     check();
     const ref = bindingRef(db, ownerKey);
-    const rateId = (kind: string, value: string) => createHmac('sha256', encryptionKey)
-      .update(JSON.stringify(['tronclass-login:v1', kind, value])).digest('hex');
-    const ownerRate = db.doc(`_tronClassLoginAttempts/${rateId('owner', ownerKey)}`);
-    const accountRate = db.doc(`_tronClassLoginAttempts/${rateId('account', canonicalizePuStudentId(account) ?? account.replace(/@pu\.edu\.tw$/, ''))}`);
+    const rateId = (kind: string, ...values: string[]) => createHmac('sha256', encryptionKey)
+      .update(JSON.stringify(['tronclass-login:v1', kind, ...values])).digest('hex');
+    const accountKey = canonicalizePuStudentId(account) ?? account.replace(/@pu\.edu\.tw$/, '');
+    const budgets = [
+      { ref: db.doc(`_tronClassLoginAttempts/${rateId('owner', ownerKey)}`), scope: 'owner', limit: TRONCLASS_OWNER_LOGIN_LIMIT },
+      { ref: db.doc(`_tronClassLoginAttempts/${rateId('owner-account', ownerKey, accountKey)}`), scope: 'owner-account', limit: TRONCLASS_ACCOUNT_LOGIN_LIMIT },
+    ];
+    const attemptId = randomBytes(16).toString('hex');
+    const budgetRow = (scope: string, timestamps: LoginAttempt[], at: number) => ({
+      ownerKey, scope, timestamps,
+      purgeAt: new Date(timestamps.length ? Math.max(...timestamps.map(tronClassLoginAttemptTimestamp)) + TRONCLASS_LOGIN_WINDOW_MS : at),
+    });
     await db.runTransaction(async (transaction) => {
       check();
-      const [binding, owner, accountAttempts] = await Promise.all([
-        transaction.get(ref), transaction.get(ownerRate), transaction.get(accountRate),
+      const [binding, ...snapshots] = await Promise.all([
+        transaction.get(ref), ...budgets.map((budget) => transaction.get(budget.ref)),
       ]);
       check();
       if ((stored(binding, ownerKey)?.revision ?? null) !== expectedRevision) changed();
       const timestamp = now();
-      const own = recentAttempts(owner, timestamp, TRONCLASS_OWNER_LOGIN_LIMIT);
-      const remote = recentAttempts(accountAttempts, timestamp, TRONCLASS_ACCOUNT_LOGIN_LIMIT);
-      if (own.length >= TRONCLASS_OWNER_LOGIN_LIMIT || remote.length >= TRONCLASS_ACCOUNT_LOGIN_LIMIT) {
-        throw new NuniError(429, 'TRONCLASS_LOGIN_RATE_LIMITED');
-      }
-      transaction.set(ownerRate, { ownerKey, scope: 'owner', timestamps: [...own, timestamp], purgeAt: new Date(timestamp + TRONCLASS_LOGIN_WINDOW_MS) });
-      transaction.set(accountRate, { scope: 'account', timestamps: [...remote, timestamp], purgeAt: new Date(timestamp + TRONCLASS_LOGIN_WINDOW_MS) });
+      const attemptsByBudget = budgets.map(({ limit }, index) => {
+        const attempts = recentAttempts(snapshots[index], timestamp, limit);
+        if (attempts.length >= limit) throw new NuniError(429, 'TRONCLASS_LOGIN_RATE_LIMITED');
+        return attempts;
+      });
+      budgets.forEach(({ ref, scope }, index) => {
+        transaction.set(ref, budgetRow(scope, [...attemptsByBudget[index], { timestamp, id: attemptId }], timestamp));
+      });
+    });
+    const refundAttempt = () => db.runTransaction(async (transaction) => {
+      const snapshots = await Promise.all(budgets.map((budget) => transaction.get(budget.ref)));
+      const at = now();
+      budgets.forEach(({ ref, scope, limit }, index) => {
+        const attempts = recentAttempts(snapshots[index], at, limit);
+        const remaining = attempts.filter((attempt) => typeof attempt === 'number' || attempt.id !== attemptId);
+        // Cleanup may already have removed the row. Never recreate it on refund.
+        if (remaining.length !== attempts.length) transaction.set(ref, budgetRow(scope, remaining, at));
+      });
     });
     check();
     let session: TronClassSession;
@@ -270,11 +307,13 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
       if (error instanceof PuCampusError && error.kind === 'credentials') {
         throw new NuniError(401, 'TRONCLASS_INVALID_CREDENTIALS');
       }
+      await refundAttempt();
       throw new NuniError(502, 'TRONCLASS_LOGIN_UNAVAILABLE');
     }
     check();
     const verifiedCookies = cookies(session?.cookies);
     if (!verifiedCookies || !Number.isSafeInteger(session?.userId) || session.userId! <= 0) {
+      await refundAttempt();
       throw new NuniError(502, 'TRONCLASS_IDENTITY_UNVERIFIED');
     }
     const timestamp = now();
@@ -294,6 +333,7 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
       // abort before this write must not replace or establish a connection.
       check();
       if ((current?.revision ?? null) !== expectedRevision) changed();
+      assertRetentionEnabled();
       transaction.set(ref, row);
     });
     check();

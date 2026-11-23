@@ -113,6 +113,7 @@ describe.skipIf(!localEmulator)('controlled TronClass journal with real Firestor
   const document = async (path: string) => (await db.doc(path).get()).data();
 
   beforeAll(() => {
+    vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true');
     app = initializeApp({ projectId: PROJECT }, `${PROJECT}-first-client`);
     otherApp = initializeApp({ projectId: PROJECT }, `${PROJECT}-second-client`);
     db = getFirestore(app);
@@ -136,6 +137,7 @@ describe.skipIf(!localEmulator)('controlled TronClass journal with real Firestor
   }, 20_000);
 
   afterAll(async () => {
+    vi.unstubAllEnvs();
     await Promise.all([db.terminate(), otherDb.terminate()]);
     await Promise.all([deleteApp(app), deleteApp(otherApp)]);
   });
