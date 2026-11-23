@@ -5340,3 +5340,24 @@ it('discloses missing audited way outlines without treating a partial OSM reply 
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
+
+it('keeps map chooser entries unique when blank and 未分類 category names display identically', async () => {
+  // Synthetic locations; coordinates identify markers only, not building entrances.
+  const duplicates: MapLocation[] = [
+    { id: 'unknown-empty', name: '同名站點', category: '', description: '', lat: 24, lng: 120 },
+    { id: 'unknown-label', name: '同名站點', category: '未分類', description: '', lat: 24.001, lng: 120.001 },
+    { id: 'library', name: '圖書館', category: '圖書館', description: '', lat: 24.002, lng: 120.002 },
+  ];
+  render(<CampusSpatialExplorer school="other-school" locations={duplicates}
+    selected={duplicates[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const chooser = within(dialog).getByRole('combobox') as HTMLSelectElement;
+  expect([...chooser.options].map((option) => option.textContent)).toEqual([
+    '同名站點（未分類 · 地圖座標 24, 120 · 清單第 1 項）',
+    '同名站點（未分類 · 地圖座標 24.001, 120.001 · 清單第 2 項）',
+    '圖書館',
+  ]);
+  fireEvent.change(chooser, { target: { value: 'unknown-label' } });
+  expect(chooser.value).toBe('unknown-label');
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
