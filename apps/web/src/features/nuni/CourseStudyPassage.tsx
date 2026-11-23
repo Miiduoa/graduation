@@ -70,6 +70,7 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
       timingCopyTimeout.current = null;
     }
   }, []);
+  const latestRun = timingLog.at(-1)?.run;
   // The downloadable file and manually selectable field must contain exactly
   // the same privacy-scoped measurements, never lesson or student text.
   const timingExportText = useMemo(() => JSON.stringify({
@@ -416,13 +417,15 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
         {speaking && <p className={styles.note}>停止朗讀後，就能用語音提問。</p>}
         <p className={styles.status} role="status" aria-live="polite">{progress}</p>
         {timing && <p className={styles.note}>
+          {latestRun !== undefined && `第 ${latestRun} 次量測。`}
           本次裝置端講解{timing.outcome === 'success' ? '完成' : timing.outcome === 'cancelled' ? '已停止' : '未完成'}：
           準備 {Math.round(timing.preparationMs)} 毫秒，
           {timing.generationMs === null ? '尚未收到生成階段訊號' : `生成 ${Math.round(timing.generationMs)} 毫秒`}，
           合計 {Math.round(timing.totalMs)} 毫秒。僅為本次瀏覽器量測，不能據此認定冷啟、暖啟或回答正確。
         </p>}
         {timingLog.length > 0 && <details>
-          <summary>本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）</summary>
+          <summary>本段裝置端 AI 耗時紀錄（最近 10 次，編號持續累加）</summary>
+          <p className={styles.note}>超過 10 次時會移除本段最早的紀錄。關閉白板、切換課程或重新匯入後會清除所有段落的紀錄。</p>
           <p className={styles.note}>可長按或鍵盤選取下方 JSON，逐次保存當次閱讀方式、成功、失敗與取消的瀏覽器量測。
             不包含教材、問題或個人筆記，也不是可還原的閱讀進度。downloadProgressObserved 僅表示本次收到模型下載進度；false 不代表快取命中或暖啟。冷啟／暖啟、實際裝置與網路條件仍需另外註記；
             不代表已驗證回答正確或優於其他產品。</p>

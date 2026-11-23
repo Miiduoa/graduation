@@ -323,7 +323,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   const [pendingPracticeAction, setPendingPracticeAction] = useState<'replace' | 'discard' | null>(null);
   const revision = useRef(0);
   const [mode, setMode] = useState<StudyMode>('understand');
-  const [timingLogs, setTimingLogs] = useState(() => new Map<string, StudyTimingEntry[]>());
+  const [timingLogs, setTimingLogs] = useState(() => new Map<string, { lastRun: number; entries: StudyTimingEntry[] }>());
   const [paste, setPaste] = useState('');
   const [textEncoding, setTextEncoding] = useState<StudyTextEncoding>('utf-8');
   const [progressPaste, setProgressPaste] = useState('');
@@ -392,7 +392,8 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     item.note.trim() || item.needsReview || Object.values(item.modes).some((value) => value.lessons.length));
   // Include unsent questions and active practice: importing a new source would otherwise erase them.
   // Even a changed reading position, mode, or whitespace-only draft is unsaved work.
-  const hasStudyChanges = !!practiceRound || !!pausedRound ||
+  const hasTimingLogs = timingLogs.size > 0;
+  const hasStudyChanges = hasTimingLogs || !!practiceRound || !!pausedRound ||
     (!!source && (sectionIndex !== 0 || passageIndex !== 0 || mode !== 'understand')) ||
     Object.values(session.passages).some((item) =>
       item.note.length > 0 || item.needsReview || Object.values(item.modes).some((value) =>
@@ -597,6 +598,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     setSectionIndex(0);
     setPassageIndex(0);
     revision.current += 1;
+    setTimingLogs(new Map());
     setSession({ revision: revision.current, passages: {} });
     setPracticeRound(null);
     setPausedRound(null);
@@ -996,6 +998,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     setPassageIndex(progress.position.passageIndex);
     setMode(progress.position.mode);
     revision.current += 1;
+    setTimingLogs(new Map());
     setSession({ revision: revision.current, passages: progress.passages });
     setPracticeRound(round ? { ...round, revision: revision.current } : null);
     setPausedRound(null);
@@ -1062,6 +1065,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
       {pendingSource && <section className={styles.restorePreview} aria-labelledby={replaceHeadingId}>
         <h4 id={replaceHeadingId} ref={replaceHeading} tabIndex={-1}>要改讀另一份教材嗎？</h4>
         <p className={styles.note}>準備改讀「{pendingSource.source.title}」。確認後會取代目前教材、筆記、未送出的問題和逐題練習，且無法從這個分頁復原。需要保留請先取消並儲存閱讀或練習 JSON。</p>
+        {hasTimingLogs && <p className={styles.note}>更換教材會清除白板的量測紀錄。若要保留，請先取消並依段落匯出量測 JSON。</p>}
         {progressPaste.length > 0 && <p className={styles.note}>尚未確認還原的進度 JSON 也會被清除。需要保留請先取消並複製這段 JSON；它不會自動儲存。</p>}
         <div className={styles.actions}>
           <button type="button" className={`${styles.button} ${styles.primary}`} onClick={() => {
@@ -1109,6 +1113,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
       {confirmClose && <section className={styles.closeWarning} aria-labelledby={closeHeadingId}>
         <h4 id={closeHeadingId} ref={closeHeading} tabIndex={-1}>要關閉讀書白板嗎？</h4>
         <p className={styles.note}>關閉會清除目前分頁的筆記、未送出問題與逐題練習。若要下次繼續，請先取消關閉並儲存閱讀或練習進度；下載檔案不會自動上傳。</p>
+        {hasTimingLogs && <p className={styles.note}>關閉也會清除白板的量測紀錄。若要保留，請先取消並依段落匯出量測 JSON。</p>}
         {paste.length > 0 && <p className={styles.note}>尚未加入白板的貼上文字不包含在閱讀或練習進度備份中。若要保留，請先取消關閉並複製貼上文字；也可以先將它加入白板再另存進度，但加入新教材會取代目前的閱讀內容。</p>}
         {progressPaste.length > 0 && <p className={styles.note}>貼上的進度 JSON 尚未確認還原，關閉後會清除貼上的文字。若要保留，請先取消關閉。</p>}
         <div className={styles.actions}>
@@ -1154,6 +1159,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
         </dl>
         <p className={styles.note}>還原會取代目前白板內容；需要保留時，可先{practiceRound || pausedRound?.revision === session.revision
           ? '儲存完整練習與閱讀進度' : '儲存目前的閱讀進度'}。檔案中的教材副本可能與最新課程不同。</p>
+        {hasTimingLogs && <p className={styles.note}>還原也會清除白板的量測紀錄。若要保留，請先取消並依段落匯出量測 JSON。</p>}
         <div className={styles.actions}>
           <button type="button" className={`${styles.button} ${styles.primary}`} onClick={restoreProgress}>還原這份進度</button>
           <button type="button" className={styles.button} onClick={() => {
@@ -1307,20 +1313,16 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
             <span>第 {passageIndex + 1} 段，共 {passages.length} 段</span><span>{section?.label}</span>
           </div>
           <CourseStudyPassage key={`${timingKey}:${mode}`} passage={passage} mode={mode} memory={memory}
-            timingLog={timingLogs.get(timingKey) ?? []}
-            onTiming={(sample) => setTimingLogs((previous) => {
-              const entries = previous.get(timingKey) ?? [];
-              const run = (entries.at(-1)?.run ?? 0) + 1;
-              const updated = new Map(previous);
-              updated.delete(timingKey);
-              updated.set(timingKey, [...entries, { run, ...sample }].slice(-10));
-              // Keep only the 20 most recently measured passages in this board.
-              if (updated.size > 20) {
-                const oldest = updated.keys().next();
-                if (!oldest.done) updated.delete(oldest.value);
-              }
-              return updated;
-            })}
+            timingLog={timingLogs.get(timingKey)?.entries ?? []}
+            onTiming={(sample) => {
+              if (revision.current !== session.revision) return;
+              setTimingLogs((previous) => {
+                const log = previous.get(timingKey);
+                const run = (log?.lastRun ?? 0) + 1;
+                const entries = [...(log?.entries ?? []), { run, ...sample }].slice(-10);
+                return new Map(previous).set(timingKey, { lastRun: run, entries });
+              });
+            }}
             onChange={(update) => {
               invalidateCopyFeedback();
               setSession((previous) => previous.revision !== session.revision ? previous : {

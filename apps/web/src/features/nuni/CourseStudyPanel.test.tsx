@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { runInNewContext } from 'node:vm';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { studySourceFromText, type TutorExplanation } from '@/lib/studyTutor';
+import { STUDY_TUTOR_LIMITS, studySourceFromText, type TutorExplanation } from '@/lib/studyTutor';
 import { CourseStudyPanel, readStudyFileBytes } from './CourseStudyPanel';
 import { COURSE_STUDY_PROGRESS_LIMITS, parseCourseStudyProgress, serializeCourseStudyProgress } from './courseStudyProgress';
 import { parseStudyPracticeCheckpoint } from './courseStudyPracticeCheckpoint';
@@ -2769,7 +2769,7 @@ it('keeps selectable local timing samples without exporting source text or answe
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
   await screen.findByRole('region', { name: '本段 AI 講解' });
-  fireEvent.click(screen.getByText('本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）'));
+  fireEvent.click(screen.getByText('本段裝置端 AI 耗時紀錄（最近 10 次，編號持續累加）'));
   const output = screen.getByRole('textbox', { name: '本段裝置端 AI 耗時紀錄 JSON' }) as HTMLTextAreaElement;
   expect(output.readOnly).toBe(true);
   expect(JSON.parse(output.value)).toEqual({
@@ -2798,7 +2798,7 @@ it('recovers the same manually selectable timing JSON after switching mode and p
   const longMaterial = { ...material, body: `${material.body}${'甲'.repeat(1600)}${'乙'.repeat(1600)}` };
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={longMaterial} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
-  const summary = '本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）';
+  const summary = '本段裝置端 AI 耗時紀錄（最近 10 次，編號持續累加）';
   const field = () => screen.getByRole('textbox', { name: '本段裝置端 AI 耗時紀錄 JSON' }) as HTMLTextAreaElement;
   fireEvent.click(await screen.findByText(summary));
   const original = field().value;
@@ -2835,7 +2835,7 @@ it('records the mode used for each AI timing sample, even after switching readin
   fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'exam' } });
   fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
   await waitFor(() => expect(mocks.run).toHaveBeenCalledTimes(2));
-  const summary = '本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）';
+  const summary = '本段裝置端 AI 耗時紀錄（最近 10 次，編號持續累加）';
   fireEvent.click(await screen.findByText(summary));
   const readEntries = () => JSON.parse(
     (screen.getByRole('textbox', { name: '本段裝置端 AI 耗時紀錄 JSON' }) as HTMLTextAreaElement).value,
@@ -2856,20 +2856,20 @@ it('retains original run numbers after the ten-sample timing window rolls over',
     attempts += 1;
     request.onTiming?.({
       preparationMs: attempts,
-      generationMs: attempts === 4 ? null : attempts * 2,
+      generationMs: attempts === 7 ? null : attempts * 2,
       totalMs: attempts * 3,
-      outcome: attempts === 4 ? 'failed' : 'success',
+      outcome: attempts === 7 ? 'failed' : 'success',
     });
-    if (attempts === 4) throw new Error('模擬裝置端生成失敗');
+    if (attempts === 7) throw new Error('模擬裝置端生成失敗');
     return explanation;
   });
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
   await screen.findByRole('region', { name: '本段 AI 講解' });
-  fireEvent.click(screen.getByText('本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）'));
+  fireEvent.click(screen.getByText('本段裝置端 AI 耗時紀錄（最近 10 次，編號持續累加）'));
   const output = screen.getByRole('textbox', { name: '本段裝置端 AI 耗時紀錄 JSON' }) as HTMLTextAreaElement;
 
-  for (let expectedRun = 2; expectedRun <= 12; expectedRun += 1) {
+  for (let expectedRun = 2; expectedRun <= 15; expectedRun += 1) {
     fireEvent.click(screen.getByRole('button', { name: '只依原文重新講解' }));
     await waitFor(() => {
       const measurements = JSON.parse(output.value).measurements as Array<{ run: number }>;
@@ -2878,18 +2878,96 @@ it('retains original run numbers after the ten-sample timing window rolls over',
   }
   const report = JSON.parse(output.value);
   expect(report.measurements.map((entry: { run: number }) => entry.run))
-    .toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    .toEqual([6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
   expect(report.measurements[1]).toEqual({
-    run: 4, mode: 'understand', outcome: 'failed', downloadProgressObserved: false,
-    preparationMs: 4, generationMs: null, totalMs: 12,
+    run: 7, mode: 'understand', outcome: 'failed', downloadProgressObserved: false,
+    preparationMs: 7, generationMs: null, totalMs: 21,
   });
   expect(report.measurements[9]).toEqual({
-    run: 12, mode: 'understand', outcome: 'success', downloadProgressObserved: false,
-    preparationMs: 12, generationMs: 24, totalMs: 36,
+    run: 15, mode: 'understand', outcome: 'success', downloadProgressObserved: false,
+    preparationMs: 15, generationMs: 30, totalMs: 45,
   });
+  expect(screen.getByText(/第 15 次量測/)).toBeTruthy();
   expect(output.value).not.toContain(material.body);
   expect(output.value).not.toContain(explanation.answer);
   expect(output.value).not.toContain(scope.platformAccountId);
+});
+
+const timingSummary = '本段裝置端 AI 耗時紀錄（最近 10 次，編號持續累加）';
+
+function mockSuccessfulTiming() {
+  mocks.run.mockImplementation(async (request) => {
+    request.onTiming?.({ preparationMs: 10, generationMs: 20, totalMs: 30, outcome: 'success' });
+    return explanation;
+  });
+}
+
+it('keeps the first passage export after measuring 25 passages and continues its numbering on remount', async () => {
+  mockSuccessfulTiming();
+  const longMaterial = { ...material, body: '甲'.repeat(25 * STUDY_TUTOR_LIMITS.passageCharacters) };
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={longMaterial} onClose={vi.fn()} />);
+
+  for (let index = 0; index < 25; index += 1) {
+    if (index > 0) fireEvent.click(screen.getByRole('button', { name: '下一段' }));
+    fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+    await screen.findByRole('region', { name: '本段 AI 講解' });
+  }
+  expect(mocks.run).toHaveBeenCalledTimes(25);
+  for (let index = 0; index < 24; index += 1) {
+    fireEvent.click(screen.getByRole('button', { name: '上一段' }));
+  }
+  fireEvent.click(screen.getByText(timingSummary));
+  expect(screen.getByRole('button', { name: '下載量測 JSON' })).toBeTruthy();
+  const field = screen.getByRole<HTMLTextAreaElement>('textbox', { name: '本段裝置端 AI 耗時紀錄 JSON' });
+  const runs = () => (JSON.parse(field.value).measurements as Array<{ run: number }>).map(({ run }) => run);
+  expect(runs()).toEqual([1]);
+
+  fireEvent.click(screen.getByRole('button', { name: '只依原文重新講解' }));
+  await waitFor(() => expect(runs()).toEqual([1, 2]));
+  expect(screen.getByText(/第 2 次量測/)).toBeTruthy();
+});
+
+it('clears timing across courses and after closing and reopening the board', async () => {
+  mockSuccessfulTiming();
+  const onClose = vi.fn();
+  const board = <CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={onClose} />;
+  const { rerender } = render(board);
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByText(timingSummary);
+  rerender(<CourseStudyPanel scope={{ ...scope, workspaceId: 'another-course' }} courseTitle="第二門課"
+    material={material} onClose={onClose} />);
+  expect(screen.queryByText(timingSummary)).toBeNull();
+  rerender(board);
+  expect(screen.queryByText(timingSummary)).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByText(/第 1 次量測/);
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  expect(screen.getByText(/關閉也會清除白板的量測紀錄/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認關閉白板' }));
+  expect(onClose).toHaveBeenCalledOnce();
+  rerender(<></>);
+  rerender(board);
+  expect(screen.queryByText(timingSummary)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByText(/第 1 次量測/);
+});
+
+it('keeps timing until a source replacement is confirmed, then starts a new log', async () => {
+  mockSuccessfulTiming();
+  const onClose = vi.fn();
+  const { rerender } = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={onClose} />);
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByText(timingSummary);
+
+  rerender(<CourseStudyPanel scope={scope} courseTitle="資料庫"
+    material={{ ...material, id: 'new-material' }} onClose={onClose} />);
+  expect(screen.getByText(/更換教材會清除白板的量測紀錄/)).toBeTruthy();
+  expect(screen.getByText(timingSummary)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認改讀新教材' }));
+  expect(screen.queryByText(timingSummary)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByText(/第 1 次量測/);
 });
 
 it('validates pasted and previewed progress UTF-8 limits without allocating a Blob on mobile', () => {

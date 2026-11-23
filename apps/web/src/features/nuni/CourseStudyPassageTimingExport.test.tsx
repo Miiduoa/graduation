@@ -41,8 +41,8 @@ it('downloads the selectable JSON and gives each URL its own lifetime across unm
   try {
     const { unmount } = render(<TimingPassage />);
     fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
-    await waitFor(() => expect(screen.getByText('本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）')).toBeTruthy());
-    fireEvent.click(screen.getByText('本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）'));
+    await waitFor(() => expect(screen.getByText('本段裝置端 AI 耗時紀錄（最近 10 次，編號持續累加）')).toBeTruthy());
+    fireEvent.click(screen.getByText('本段裝置端 AI 耗時紀錄（最近 10 次，編號持續累加）'));
     const output = screen.getByRole('textbox', { name: '本段裝置端 AI 耗時紀錄 JSON' }) as HTMLTextAreaElement;
     fireEvent.click(screen.getByRole('button', { name: '全選量測 JSON' }));
     expect(document.activeElement).toBe(output);
@@ -93,7 +93,7 @@ it('keeps manual selection and failed attempts when a mobile download bridge ret
     render(<TimingPassage />);
     fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
     await screen.findByText('模擬裝置端失敗');
-    fireEvent.click(screen.getByText('本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）'));
+    fireEvent.click(screen.getByText('本段裝置端 AI 耗時紀錄（最近 10 次，編號持續累加）'));
     const output = screen.getByRole('textbox', { name: '本段裝置端 AI 耗時紀錄 JSON' }) as HTMLTextAreaElement;
     const original = output.value;
     fireEvent.click(screen.getByRole('button', { name: '下載量測 JSON' }));
@@ -121,7 +121,7 @@ it('copies the exact JSON only after the standard Clipboard Promise<void> respon
   try {
     render(<TimingPassage />);
     fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
-    fireEvent.click(await screen.findByText('本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）'));
+    fireEvent.click(await screen.findByText('本段裝置端 AI 耗時紀錄（最近 10 次，編號持續累加）'));
     const output = screen.getByRole('textbox', { name: '本段裝置端 AI 耗時紀錄 JSON' }) as HTMLTextAreaElement;
     const copy = screen.getByRole('button', { name: '複製量測 JSON' });
 
@@ -156,7 +156,7 @@ async function openTimingExport() {
   });
   const { unmount } = render(<TimingPassage />);
   fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
-  fireEvent.click(await screen.findByText('本段裝置端 AI 耗時紀錄（僅本頁、最近 10 次）'));
+  fireEvent.click(await screen.findByText('本段裝置端 AI 耗時紀錄（最近 10 次，編號持續累加）'));
   return {
     unmount,
     copy: screen.getByRole('button', { name: '複製量測 JSON' }),
