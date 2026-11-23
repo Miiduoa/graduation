@@ -38,12 +38,13 @@ describe('opt-in platform closure scheduler', () => {
     const { startTronClassPlatformClosureScheduler, TRONCLASS_CLOSURE_INTERVAL_MS } = await import('./tronClassPlatformClosureScheduler');
     expect(startTronClassPlatformClosureScheduler(configured, run)).toBe(true);
     expect(startTronClassPlatformClosureScheduler(configured, run)).toBe(false);
-    await vi.advanceTimersByTimeAsync(2499);
     expect(run).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(0);
     expect(run).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledExactlyOnceWith('TronClass platform account cleanup failed');
-    await vi.advanceTimersByTimeAsync(TRONCLASS_CLOSURE_INTERVAL_MS + 2500);
+    await vi.advanceTimersByTimeAsync(TRONCLASS_CLOSURE_INTERVAL_MS + 2499);
+    expect(run).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(run).toHaveBeenCalledTimes(2);
   });
 
@@ -82,6 +83,25 @@ describe('opt-in platform closure scheduler', () => {
     expect(isTronClassPlatformClosureSchedulerReady()).toBe(false);
   });
 
+  it('does not count a batch that left closure events for retry as a success', async () => {
+    vi.useFakeTimers(); vi.resetModules();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const run = vi.fn().mockResolvedValueOnce({ claimed: 1, completed: 0, failed: 1, stale: 0 })
+      .mockResolvedValue({ claimed: 1, completed: 1, failed: 0, stale: 0 });
+    const { startTronClassPlatformClosureScheduler, isTronClassPlatformClosureSchedulerReady, TRONCLASS_CLOSURE_INTERVAL_MS } =
+      await import('./tronClassPlatformClosureScheduler');
+    startTronClassPlatformClosureScheduler(configured, run);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(isTronClassPlatformClosureSchedulerReady()).toBe(false);
+    await vi.advanceTimersByTimeAsync(TRONCLASS_CLOSURE_INTERVAL_MS);
+    expect(isTronClassPlatformClosureSchedulerReady()).toBe(true);
+    // Cleanup that keeps failing lets readiness expire even though each batch returns.
+    run.mockResolvedValue({ claimed: 1, completed: 0, failed: 1, stale: 0 });
+    await vi.advanceTimersByTimeAsync(10 * 60_000 + TRONCLASS_CLOSURE_INTERVAL_MS);
+    expect(isTronClassPlatformClosureSchedulerReady()).toBe(false);
+  });
+
   it('lets a binding wait briefly for the first batch and is shared across module instances', async () => {
     vi.useFakeTimers(); vi.resetModules();
     vi.spyOn(Math, 'random').mockReturnValue(0.2);
@@ -93,9 +113,8 @@ describe('opt-in platform closure scheduler', () => {
     expect(other.startTronClassPlatformClosureScheduler(configured, run)).toBe(false);
     let waited = false;
     const waiting = other.waitForTronClassPlatformClosureFirstBatch().then(() => { waited = true; });
-    await vi.advanceTimersByTimeAsync(999);
     expect(waited).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(0);
     await waiting;
     expect(other.isTronClassPlatformClosureSchedulerReady()).toBe(true);
   });

@@ -50,7 +50,7 @@ export const TRONCLASS_PLATFORM_CLOSURE_SQL = {
       AND coalesce(has_table_privilege(to_regclass('tronclass_account_closure_outbox'), 'DELETE'), false)
       AND (SELECT count(DISTINCT trigger.tgname) FROM pg_trigger trigger
         WHERE trigger.tgrelid = to_regclass('platform_accounts') AND NOT trigger.tgisinternal
-          AND trigger.tgenabled <> 'D'
+          AND trigger.tgenabled IN ('O', 'A')
           AND trigger.tgname IN ('tronclass_account_closed', 'tronclass_account_deleted')) = 2
     ) AS ready`,
 } as const;

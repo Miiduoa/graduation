@@ -63,7 +63,7 @@ worker 不需要 `platform_accounts` 的 SELECT、UPDATE 或 DELETE；**不可�
 4. 先保持 worker 旗標關閉發布相容 Web；migration 與專用角色驗收完成後，再設定專用 DB URL 及精確啟用旗標，重啟 Node instance。
 5. 以受控平台帳號驗證關帳事件、Firestore barrier／私人紀錄清理、outbox 成功刪除及故障後重試。此驗收不需要寫入校方作業。
 
-Web 端平台帳號的新綁定除了檢查 worker 旗標與專用 DB URL 皆已設定，還要求本 instance 的 worker 在 10 分鐘內完成過一次批次；每次批次開始前，worker 會以專用角色確認 outbox 與 `platform_accounts` 存在、具備 outbox SELECT／UPDATE／DELETE 權限，且 `tronclass_account_closed`、`tronclass_account_deleted` 兩個 trigger 皆已啟用。剛啟動時最多等待首次批次 3 秒。任何一項未通過都回覆 `TRONCLASS_RETENTION_REQUIRED` 且不保存校方 session；因此步驟 4 的 migration 驗收完成前，平台帳號無法新綁定。
+Web 端平台帳號的新綁定除了檢查 worker 旗標與專用 DB URL 皆已設定，還要求本 instance 的 worker 在 10 分鐘內完成過一次全部成功、未留下待重試清理失敗的批次；每次批次開始前，worker 會以專用角色確認 outbox 與 `platform_accounts` 存在、具備 outbox SELECT／UPDATE／DELETE 權限，且 `tronclass_account_closed`、`tronclass_account_deleted` 兩個 trigger 皆以一般交易會觸發的模式啟用（停用或 replica-only 都不算）。首次批次在啟動時立即執行，綁定最多等待 3 秒。任何一項未通過都回覆 `TRONCLASS_RETENTION_REQUIRED` 且不保存校方 session；因此步驟 4 的 migration 驗收完成前，平台帳號無法新綁定。
 
 回滾 worker 時可關閉旗標並保留 outbox／trigger，事件會等待恢復；不能刪除 Firestore 永久關帳 barrier 或不確定的校方作業鎖。
 

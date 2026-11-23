@@ -134,6 +134,11 @@ describe('TronClass clauses inside a multi-clause request', () => {
     '不要讀取，玩課雲作業和講義',
     '下載玩課雲講義，然後幫我繳交',
     '玩課雲作業，幫我上傳附件',
+    '「查玩課雲未交作業和講義」，查校園公告',
+    '他說『玩課雲作業』，查公車',
+    '查玩課雲未交作業，繳交附件',
+    '下載玩課雲講義，上傳報告',
+    '玩課雲作業，submit it',
   ])('adds no Agent read to %s', question => {
     expect(tronClassCompoundClauses(question)).toEqual([]);
   });
@@ -141,5 +146,6 @@ describe('TronClass clauses inside a multi-clause request', () => {
   it('never turns a continuation clause into a TronClass write or schedule', () => {
     expect(tronClassCompoundClauses('查玩課雲作業，安排明天作業時段')).toEqual(['查玩課雲作業']);
     expect(tronClassCompoundClauses('查玩課雲作業，不要上傳附件')).toEqual(['查玩課雲作業']);
+    expect(tronClassCompoundClauses('查玩課雲作業繳交狀態，和校園公告')).toEqual(['查玩課雲作業繳交狀態']);
   });
 });

@@ -218,7 +218,7 @@ describe.skipIf(!port)('real PostgreSQL platform closure outbox', () => {
     expect(await events()).toEqual([]);
   });
 
-  it('reports the closure pipeline ready only with the worker ACL and both enabled triggers', async () => {
+  it('reports the closure pipeline ready only with the worker ACL and both triggers firing for ordinary transactions', async () => {
     const ready = () => verifyTronClassPlatformClosureReady(async (sql, parameters) => (await first.query(sql, parameters)).rows);
     await first.query(`SET ROLE ${workerRole}`);
     try { await expect(ready()).resolves.toBeUndefined(); }
@@ -226,8 +226,10 @@ describe.skipIf(!port)('real PostgreSQL platform closure outbox', () => {
     await first.query(`SET ROLE ${closerRole}`);
     try { await expect(ready()).rejects.toMatchObject({ code: 'TRONCLASS_PLATFORM_CLOSURE_UNAVAILABLE' }); }
     finally { await first.query('RESET ROLE'); }
-    for (const trigger of ['tronclass_account_closed', 'tronclass_account_deleted']) {
-      await control.query(`ALTER TABLE platform_accounts DISABLE TRIGGER ${trigger}`);
+    // A replica-only trigger does not fire for ordinary closure transactions.
+    for (const [trigger, mode] of ['tronclass_account_closed', 'tronclass_account_deleted']
+      .flatMap(name => [[name, 'DISABLE TRIGGER'], [name, 'ENABLE REPLICA TRIGGER']] as const)) {
+      await control.query(`ALTER TABLE platform_accounts ${mode} ${trigger}`);
       await first.query(`SET ROLE ${workerRole}`);
       try { await expect(ready()).rejects.toMatchObject({ code: 'TRONCLASS_PLATFORM_CLOSURE_UNAVAILABLE' }); }
       finally {

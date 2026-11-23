@@ -39,6 +39,12 @@ export async function waitForTronClassPlatformClosureFirstBatch(): Promise<void>
   }
 }
 
+function hasFailedEvents(result: unknown): boolean {
+  if (!result || typeof result !== 'object' || !('failed' in result)) return false;
+  const failed = (result as { failed: unknown }).failed;
+  return typeof failed !== 'number' || !Number.isFinite(failed) || failed !== 0;
+}
+
 export function startTronClassPlatformClosureScheduler(
   env: Record<string, string | undefined> = process.env,
   run: () => Promise<unknown> = () => runDefaultTronClassPlatformClosureBatch(env),
@@ -57,7 +63,10 @@ export function startTronClassPlatformClosureScheduler(
     .finally(() => { delete state.firstBatch; });
   const batch = async () => {
     try {
-      await run();
+      // A batch that left any closure event for retry is not a success: new
+      // platform bindings stay closed until cleanup actually completes again.
+      // The default batch already logs the generalized failure.
+      if (hasFailedEvents(await run())) return;
       state.lastSuccessfulBatchAt = Date.now();
     } catch {
       console.warn('TronClass platform account cleanup failed');
@@ -69,7 +78,9 @@ export function startTronClassPlatformClosureScheduler(
         if (first) firstBatchDone();
         schedule();
       }
-    }, (first ? 0 : TRONCLASS_CLOSURE_INTERVAL_MS) + Math.floor(Math.random() * JITTER_MS));
+      // The first batch runs at once so a cold start can open bindings within
+      // the short first-batch wait; later batches are spread by jitter.
+    }, first ? 0 : TRONCLASS_CLOSURE_INTERVAL_MS + Math.floor(Math.random() * JITTER_MS));
     timer.unref();
   };
   schedule(true);

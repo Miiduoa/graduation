@@ -53,6 +53,9 @@ const OTHER_SERVICE_OR_SCHEDULE = /(?:頁面|畫面|入口|校園|學校|系上|
 const NEGATED = /(?:不要|別|不准|禁止|無須|不用|不需要|do\s+not|don't|never)/i;
 const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
 
+const QUOTE = /[「」『』“”‘’"`]/u;
+const WRITE_VERB = /(?:繳交|提交|送出|交出|交作業|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名|退選|選課|\b(?:submit|upload|delete|post|reply|withdraw)\b)/i;
+const SUBMISSION_STATUS = /(?:狀態|紀錄|記錄|情況|有哪些|是否|有沒有)/u;
 const CHAINED_WRITE = /(?:並|再|然後|直接|自動|順便|同時|and|then).{0,25}(?:繳交|提交|送出|上傳|submit|upload)/i;
 const EXPLICIT_WRITE = /(?:幫我|替我|代我|請|直接|自動)\s*(?:把|將)?\s*(?:繳交|提交|送出|交出|交作業|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名)|(?:submit|upload|delete|post|reply|withdraw)\b/i;
 
@@ -83,9 +86,15 @@ function toOperationText(text: string): string {
  */
 function wholeRequestAllowsCompoundRead(question: string): boolean {
   const original = question.normalize('NFKC').trim();
-  if (!authorizesPrivateRead(original)) return false;
-  const operationText = toOperationText(withoutNegatedWrites(original));
-  return !CHAINED_WRITE.test(operationText) && !EXPLICIT_WRITE.test(operationText);
+  // Quoted text anywhere may be split apart, so no clause can be trusted as a command.
+  if (QUOTE.test(original) || !authorizesPrivateRead(original)) return false;
+  const positive = withoutNegatedWrites(original);
+  const operationText = toOperationText(positive);
+  if (CHAINED_WRITE.test(operationText) || EXPLICIT_WRITE.test(operationText)) return false;
+  // A bare write clause such as "繳交附件" is still a write request; only a
+  // status question about submissions stays a read.
+  return !positive.split(CLAUSE_SEPARATOR).some(clause =>
+    WRITE_VERB.test(toOperationText(clause)) && !SUBMISSION_STATUS.test(clause));
 }
 
 /**
