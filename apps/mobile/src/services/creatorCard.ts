@@ -7,7 +7,6 @@ import {
 const CARD_FIELDS = ['headline', 'bio', 'linkUrl'] as const;
 // Retain which empty display fields still have a value to clear on the server.
 const hiddenFields = new WeakMap<CreatorCard, ReadonlySet<keyof CreatorCard>>();
-const pendingCardWrites = new Map<string, number>();
 
 export function hasHiddenCreatorCardValue(card: CreatorCard, field: keyof CreatorCard): boolean {
   return hiddenFields.get(card)?.has(field) ?? false;
@@ -29,10 +28,9 @@ export async function readCreatorCard(
   schoolId: string, ownerUid: string, { requireCommitted = false } = {},
 ): Promise<CreatorCard | null> {
   const snapshot = await getDocFromServer(cardRef(schoolId, ownerUid));
-  // Firestore reports pending writes for the whole document. Only a known
-  // local intro write can make a matching card provisional.
-  if (requireCommitted && snapshot.metadata.hasPendingWrites &&
-    pendingCardWrites.has(JSON.stringify([schoolId, ownerUid]))) {
+  // Even a server fetch can include uncommitted local overlays. Never treat
+  // provisional card fields as proof that an uncertain save reached the server.
+  if (requireCommitted && snapshot.metadata.hasPendingWrites) {
     throw new Error('Creator card has pending writes');
   }
   if (!snapshot.exists()) return null;
@@ -53,17 +51,9 @@ export async function saveCreatorCard(
 ): Promise<CreatorCard> {
   const normalized = validateCreatorCard(draft);
   const ref = cardRef(schoolId, ownerUid);
-  const scope = JSON.stringify([schoolId, ownerUid]);
-  pendingCardWrites.set(scope, (pendingCardWrites.get(scope) ?? 0) + 1);
-  try {
-    await setDoc(ref, {
-      schoolId, ownerUid, ...normalized, updatedAt: serverTimestamp(),
-    }, { merge: true });
-  } finally {
-    const pending = pendingCardWrites.get(scope) ?? 0;
-    if (pending <= 1) pendingCardWrites.delete(scope);
-    else pendingCardWrites.set(scope, pending - 1);
-  }
+  await setDoc(ref, {
+    schoolId, ownerUid, ...normalized, updatedAt: serverTimestamp(),
+  }, { merge: true });
   const confirmed = await confirm(() => readCreatorCard(schoolId, ownerUid, { requireCommitted: true }));
   if (!confirmed || CARD_FIELDS.some((field) => !creatorCardFieldMatches(confirmed, field, normalized[field]))) {
     throw new Error('Creator card update was not confirmed');
