@@ -281,7 +281,7 @@
     flex: 1 1 100%;
   }
   .monthNavigation button {
-    flex: 1 1 0;
+    flex: 1 1 auto;
   }
   .views {
     margin-inline-start: 0;

@@ -126,6 +126,43 @@ async def assert_selected_day_revealed(page, date, previous_scroll_y, report):
     await expect(page.get_by_role('button', name='月格', exact=True)).to_be_focused()
 
 
+async def assert_month_controls_fit(page, report):
+    controls = page.get_by_role('group', name='切換月份', exact=True)
+    for label in ('上一月', '回今天', '下一月'):
+        button = controls.get_by_role('button', name=label, exact=True)
+        await expect(button).to_be_visible()
+        state = await button.evaluate('''button => {
+          const group = button.closest('[role="group"]');
+          const box = button.getBoundingClientRect();
+          const container = group.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(button);
+          const textRects = [...range.getClientRects()].filter(r => r.width && r.height)
+            .map(r => ({left: r.left, right: r.right, top: r.top, bottom: r.bottom}));
+          return {label: button.textContent.trim(), viewport: innerWidth,
+            button: {left: box.left, right: box.right, top: box.top, bottom: box.bottom},
+            container: {left: container.left, right: container.right,
+              top: container.top, bottom: container.bottom}, textRects};
+        }''')
+        report.setdefault('monthControlLayouts', []).append(state)
+        rects = state['textRects']
+        assert rects and max(rect['top'] for rect in rects) - min(rect['top'] for rect in rects) <= 1, (
+            f'Short month-control label wraps into multiple lines: {state}')
+        box, container = state['button'], state['container']
+        assert box['left'] >= -1 and box['right'] <= state['viewport'] + 1, (
+            f'Month control leaves the viewport: {state}')
+        assert box['left'] >= container['left'] - 1 and box['right'] <= container['right'] + 1, (
+            f'Month control leaves its container horizontally: {state}')
+        assert box['top'] >= container['top'] - 1 and box['bottom'] <= container['bottom'] + 1, (
+            f'Month control leaves its container vertically: {state}')
+        for rect in rects:
+            assert rect['left'] >= box['left'] - 1 and rect['right'] <= box['right'] + 1, (
+                f'Month label is horizontally clipped inside its button: {state}')
+            assert rect['top'] >= box['top'] - 1 and rect['bottom'] <= box['bottom'] + 1, (
+                f'Month label is vertically clipped inside its button: {state}')
+    report['checks'].append('Month navigation keeps each short label on one line, wrapping whole buttons within the available container and viewport')
+
+
 async def inspect_layout(page, stage, report):
     layout = await page.evaluate('''() => ({
       viewport: innerWidth,
@@ -193,6 +230,7 @@ async def run_scenario(browser, server_url, config):
         await page.goto(server_url + '/?' + query)
         await expect(page.get_by_role('button', name='新增行程', exact=True)).to_be_enabled()
         await set_month(page, '2028-01')
+        await assert_month_controls_fit(page, report)
         await capture('month')
 
         await page.get_by_role('button', name='新增行程', exact=True).click()
