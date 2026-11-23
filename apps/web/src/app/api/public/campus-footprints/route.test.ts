@@ -126,6 +126,58 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  // RFC 9112 rejects TE+CL because two framing rules make even apparently
+  // valid JSON ambiguous. Never read a stalled upstream response or cache it.
+  it.each([
+    { coding: 'chunked', retryAfter: null, wait: 600 },
+    { coding: 'gzip, chunked', retryAfter: '3600', wait: 3600 },
+    { coding: '', retryAfter: null, wait: 600 },
+  ])('rejects conflicting Overpass Transfer-Encoding $coding and Content-Length', async ({
+    coding, retryAfter, wait,
+  }) => {
+    const headers = new Headers({
+      'Content-Type': 'application/json',
+      'Transfer-Encoding': coding,
+      'Content-Length': String(new TextEncoder().encode(osmPayload).byteLength),
+    });
+    if (retryAfter !== null) headers.set('Retry-After', retryAfter);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(osmPayload));
+        // Deliberately do not close: checking headers must not wait for EOF.
+      },
+    });
+    const response = new Response(stream, { status: 200, headers });
+    const cancel = vi.spyOn(response.body!, 'cancel');
+    const read = vi.spyOn(response.body!, 'getReader');
+    const upstream = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+
+    const first = await GET();
+    expect(first.status).toBe(503);
+    expect(first.headers.get('Cache-Control')).toBe('no-store');
+    expect(Number(first.headers.get('Retry-After'))).toBeGreaterThanOrEqual(wait - 1);
+    expect(read).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect((await first.json()).error).toMatch(/temporarily unavailable/);
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a normal chunked Overpass response valid without Content-Length', async () => {
+    const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'Transfer-Encoding': 'chunked' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const result = await GET();
+    expect(result.status).toBe(200);
+    expect((await result.json()).buildings).toHaveLength(1);
+    expect(upstream).toHaveBeenCalledOnce();
+  });
+
   // Explicit non-JSON media must now fail before the stream is consumed.
   // Legacy no-header and UTF-8 text/plain Overpass replies remain supported.
   const contentTypes = [
