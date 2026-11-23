@@ -43,6 +43,11 @@ type Props = {
   onChange: (update: (previous: StudyPassageMemory) => StudyPassageMemory) => void;
 };
 
+// Keep writes ordered even when the reader unmounts. A submitted clipboard
+// write cannot be cancelled, including after its UI acknowledgement times out.
+let timingClipboardWritePending = false;
+let nextTimingClipboardWrite: (() => void) | undefined;
+
 export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming, onChange }: Props) {
   const [availability, setAvailability] = useState<ReturnType<typeof getStudyTutorAvailability> | null>(null);
   const [busy, setBusy] = useState(false);
@@ -194,6 +199,7 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
   function copyTimingExport(button: HTMLButtonElement) {
     invalidateTimingCopy();
     const request = timingCopyRequest.current;
+    const isLatest = () => timingCopyRequest.current === request;
     const focusIsUnclaimed = () => document.activeElement === document.body || document.activeElement === null;
     let focusedElsewhere = document.activeElement !== button && !focusIsUnclaimed();
     // A pending WebView clipboard request must not refocus a hidden tab or a
@@ -207,7 +213,7 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
       if (document.visibilityState !== 'visible') pageWasBackgrounded = true;
     };
     const manual = () => {
-      if (timingCopyRequest.current !== request) return;
+      if (!isLatest()) return;
       if (!pageWasBackgrounded && document.visibilityState === 'visible' &&
         (document.activeElement === button || (focusIsUnclaimed() && !focusedElsewhere))) {
         selectTimingExport();
@@ -216,41 +222,60 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
         setTimingExportMessage('瀏覽器未確認複製；完整 JSON 仍在下方，可按「全選量測 JSON」手動保存。');
       }
     };
-    try {
-      const clipboard = navigator.clipboard;
-      if (typeof clipboard?.writeText !== 'function') { manual(); return; }
-      const result: unknown = clipboard.writeText(timingExportText);
-      // Some WebView bridges return true despite never copying anything.
-      if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
+    const write = async () => {
+      if (!isLatest()) return;
+      timingClipboardWritePending = true;
+      try {
+        const clipboard = navigator.clipboard;
+        if (typeof clipboard?.writeText !== 'function') { manual(); return; }
+        if (!isLatest()) return;
+        const result: unknown = clipboard.writeText(timingExportText);
+        // Some WebView bridges return true despite never copying anything.
+        if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
+          manual();
+          return;
+        }
+        if (isLatest()) timingCopyTimeout.current = setTimeout(manual, 5000);
+        const acknowledged: unknown = await result;
+        if (!isLatest()) return;
+        if (acknowledged !== undefined) { manual(); return; }
+        invalidateTimingCopy();
+        setTimingExportMessage('瀏覽器已接受複製指令；請貼上確認內容。若無法貼上，可全選下方 JSON。');
+      } catch {
         manual();
-        return;
+      } finally {
+        timingClipboardWritePending = false;
+        const next = nextTimingClipboardWrite;
+        nextTimingClipboardWrite = undefined;
+        next?.();
       }
-      setTimingExportMessage('正在等待瀏覽器確認複製；仍可全選下方 JSON 手動保存。');
-      document.addEventListener('focusin', trackFocus);
-      window.addEventListener('blur', trackPageBlur);
-      document.addEventListener('visibilitychange', trackVisibility);
+    };
+
+    setTimingExportMessage('正在等待瀏覽器確認複製；仍可全選下方 JSON 手動保存。');
+    document.addEventListener('focusin', trackFocus);
+    window.addEventListener('blur', trackPageBlur);
+    document.addEventListener('visibilitychange', trackVisibility);
+    stopWatchingTimingCopyFocus.current = () => {
+      document.removeEventListener('focusin', trackFocus);
+      window.removeEventListener('blur', trackPageBlur);
+      document.removeEventListener('visibilitychange', trackVisibility);
+    };
+    if (timingClipboardWritePending) {
+      const queuedWrite = () => { void write(); };
+      nextTimingClipboardWrite = queuedWrite;
+      const stopWatching = stopWatchingTimingCopyFocus.current;
       stopWatchingTimingCopyFocus.current = () => {
-        document.removeEventListener('focusin', trackFocus);
-        window.removeEventListener('blur', trackPageBlur);
-        document.removeEventListener('visibilitychange', trackVisibility);
+        stopWatching();
+        if (nextTimingClipboardWrite === queuedWrite) nextTimingClipboardWrite = undefined;
       };
-      timingCopyTimeout.current = setTimeout(manual, 5000);
-      void Promise.resolve(result as PromiseLike<unknown>).then(
-        (acknowledged) => {
-          if (timingCopyRequest.current !== request) return;
-          if (acknowledged !== undefined) { manual(); return; }
-          invalidateTimingCopy();
-          setTimingExportMessage('瀏覽器已接受複製指令；請貼上確認內容。若無法貼上，可全選下方 JSON。');
-        },
-        manual,
-      );
-    } catch {
-      manual();
+    } else {
+      void write();
     }
   }
 
   function downloadTimingExport() {
     invalidateTimingCopy();
+    const request = timingCopyRequest.current;
     const anchor = document.createElement('a');
     let url: string | null = null;
     try {
@@ -262,9 +287,12 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
       anchor.download = 'nuni-study-tutor-timing.json';
       anchor.hidden = true;
       document.body.append(anchor);
+      if (timingCopyRequest.current !== request) return;
       anchor.click();
+      if (timingCopyRequest.current !== request) return;
       setTimingExportMessage('已交給瀏覽器下載量測 JSON，但無法確認檔案是否已儲存；若沒有檔案，請改用「全選量測 JSON」。');
     } catch {
+      if (timingCopyRequest.current !== request) return;
       setTimingExportMessage('瀏覽器未接受量測 JSON 下載；完整紀錄仍保留，可按「全選量測 JSON」手動保存。');
     } finally {
       anchor.remove();

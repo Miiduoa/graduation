@@ -18,7 +18,7 @@ function TimingPassage() {
   const [memory, setMemory] = useState(emptyStudyPassage);
   return <CourseStudyPassage passage={passage} mode="understand" memory={memory}
     onChange={setMemory} timingLog={timingLog}
-    onTiming={(sample) => setTimingLog([{ run: 1, ...sample }])} />;
+    onTiming={(sample) => setTimingLog((previous) => [...previous, { run: previous.length + 1, ...sample }])} />;
 }
 
 beforeEach(() => mocks.run.mockReset());
@@ -164,13 +164,19 @@ async function openTimingExport() {
   };
 }
 
-async function withClipboardTimers(writeText: () => Promise<unknown>, run: () => Promise<void>) {
+async function withClipboardTimers(writeText: (text: string) => Promise<unknown>, run: () => Promise<void>) {
   const previous = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  let settlePending!: () => void;
+  const cleanup = new Promise<void>((resolve) => { settlePending = resolve; });
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: (text: string) => Promise.race([writeText(text), cleanup]) },
+  });
   vi.useFakeTimers();
   try {
     await run();
   } finally {
+    await act(async () => settlePending());
     vi.useRealTimers();
     if (previous) Object.defineProperty(navigator, 'clipboard', previous);
     else Reflect.deleteProperty(navigator, 'clipboard');
@@ -268,9 +274,86 @@ it('ignores the previous copy timer and late clipboard result after a second cli
     expect(document.activeElement).toBe(copy);
     expect(screen.getByText(/正在等待瀏覽器確認複製/)).toBeTruthy();
 
-    act(() => vi.advanceTimersByTime(1000));
+    act(() => vi.advanceTimersByTime(5000));
     expect(document.activeElement).toBe(output);
     expect(screen.getByText(/已全選這份量測 JSON/)).toBeTruthy();
+  });
+});
+
+async function addTimingMeasurement() {
+  mocks.run.mockImplementationOnce(async (request) => {
+    request.onTiming?.({ preparationMs: 21, generationMs: 29, totalMs: 50, outcome: 'success' });
+    return answer;
+  });
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '只依原文重新講解' })));
+}
+
+function clipboardCompletion() {
+  let complete!: () => void;
+  let fail!: () => void;
+  const result = new Promise<void>((resolve, reject) => {
+    complete = resolve;
+    fail = () => reject(new Error('clipboard denied'));
+  });
+  return { result, complete, fail };
+}
+
+it.each([
+  { clicks: 2, staleFails: false },
+  { clicks: 3, staleFails: false },
+  { clicks: 2, staleFails: true },
+])('keeps the latest JSON after $clicks clicks (stale write fails: $staleFails)', async ({ clicks, staleFails }) => {
+  const { copy, output } = await openTimingExport();
+  const first = clipboardCompletion();
+  const latest = clipboardCompletion();
+  let pasted = '';
+  const writeText = vi.fn((text: string) => latest.result.then(() => { pasted = text; }))
+    .mockImplementationOnce((text) => first.result.then(() => { pasted = text; }));
+
+  await withClipboardTimers(writeText, async () => {
+    const original = output.value;
+    fireEvent.click(copy);
+    for (let index = 1; index < clicks; index += 1) {
+      await addTimingMeasurement();
+      fireEvent.click(copy);
+    }
+    const expected = output.value;
+    expect(JSON.parse(expected).measurements.map((entry: StudyTimingEntry) => entry.run))
+      .toEqual(Array.from({ length: clicks }, (_, index) => index + 1));
+
+    // If submitted early, the newest write would finish before the oldest one.
+    await act(async () => latest.complete());
+    expect(writeText.mock.calls).toEqual([[original]]);
+    expect(pasted).toBe('');
+    expect(screen.getAllByRole('status').map((status) => status.textContent).join(' ')).toContain('正在等待瀏覽器確認複製');
+
+    await act(async () => (staleFails ? first.fail() : first.complete()));
+    expect(writeText.mock.calls).toEqual([[original], [expected]]);
+    expect(pasted).toBe(expected);
+    expect(screen.getAllByRole('status').map((status) => status.textContent).join(' ')).toContain('瀏覽器已接受複製指令');
+  });
+});
+
+it('retries a failed copy using the latest measurements', async () => {
+  const { copy, output } = await openTimingExport();
+  const first = clipboardCompletion();
+  let pasted = '';
+  const writeText = vi.fn(async (text: string) => { pasted = text; })
+    .mockReturnValueOnce(first.result);
+
+  await withClipboardTimers(writeText, async () => {
+    const original = output.value;
+    fireEvent.click(copy);
+    await act(async () => first.fail());
+    expect(screen.getAllByRole('status').map((status) => status.textContent).join(' ')).toMatch(/未確認/);
+    await addTimingMeasurement();
+
+    copy.focus();
+    await act(async () => fireEvent.click(copy));
+    expect(writeText.mock.calls).toEqual([[original], [output.value]]);
+    expect(JSON.parse(pasted).measurements).toHaveLength(2);
+    expect(pasted).toBe(output.value);
+    expect(screen.getAllByRole('status').map((status) => status.textContent).join(' ')).toContain('瀏覽器已接受複製指令');
   });
 });
 
