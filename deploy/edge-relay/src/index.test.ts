@@ -209,6 +209,31 @@ it('marks placement_miss when execution is not near Taiwan', async () => {
   log.mockRestore();
 });
 
+it('does not log attachment keys or file identifiers from private download paths', async () => {
+  const logs: string[] = [];
+  const log = vi.spyOn(console, 'log').mockImplementation((message) => {
+    logs.push(String(message));
+  });
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('ok')));
+  const fileId = '0123456789abcdef0123456789abcdef01234567';
+  const targets = [
+    'https://relay-test.pu.edu.tw/api/uploads/legacykey/blob',
+    `https://relay-test.pu.edu.tw/files/${fileId}/notes.pdf?Signature=secret`,
+    'https://relay-test.pu.edu.tw/files/abc123def456/report2024.pdf',
+  ];
+  for (const [index, target] of targets.entries()) {
+    const request = await signedRelayRequest(target, { method: 'GET' }, Date.now(), `${String(index).padStart(2, '0')}cba9876543210fedcba98765432100`);
+    await handleRelayRequest(request, { RELAY_SECRET: SECRET }, Date.now(), createMemoryNonceStore());
+  }
+  expect(logs.map(line => (JSON.parse(line) as { path: string }).path)).toEqual([
+    '/api/uploads/:id/blob',
+    '/files/:id/notes.pdf',
+    '/files/:id/:id',
+  ]);
+  expect(logs.join('\n')).not.toMatch(/0123456789abcdef|Signature|abc123def456|report2024|legacykey/);
+  log.mockRestore();
+});
+
 it('accepts nested pu.edu.tw hosts and keeps redirect manual', async () => {
   const upstream = vi.fn<typeof fetch>(async () => new Response('html', { status: 200 }));
   vi.stubGlobal('fetch', upstream);

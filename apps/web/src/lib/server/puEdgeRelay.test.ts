@@ -204,6 +204,30 @@ it('signs body, cookie and content-type then sends campus requests to the worker
   info.mockRestore();
 });
 
+it('does not log attachment keys or file identifiers from private download paths', async () => {
+  const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+  const relay = vi.fn<FetchLike>(async () => new Response('ok'));
+  const fetchLike = createPuRelayFetch({
+    env: { PU_EDGE_RELAY_URL: RELAY_URL, PU_EDGE_RELAY_SECRET: SECRET },
+    fetch: relay,
+    nonce: () => FIXED_NONCE,
+  });
+  const fileId = '0123456789abcdef0123456789abcdef01234567';
+  await fetchLike('https://tronclass.pu.edu.tw/api/uploads/legacykey/blob');
+  await fetchLike('https://tronclass.pu.edu.tw/api/uploads/legacy-key-with-dashes.v2/blob');
+  await fetchLike(`https://tronclass.pu.edu.tw/files/${fileId}/notes.pdf?Signature=secret`);
+  await fetchLike('https://tronclass.pu.edu.tw/files/abc123def456/report2024.pdf');
+  const paths = info.mock.calls.map(call => (JSON.parse(String(call[0])) as { path: string }).path);
+  expect(paths).toEqual([
+    '/api/uploads/:id/blob',
+    '/api/uploads/:id/blob',
+    '/files/:id/notes.pdf',
+    '/files/:id/:id',
+  ]);
+  expect(info.mock.calls.join('\n')).not.toMatch(/0123456789abcdef|Signature|abc123def456|report2024|legacy/);
+  info.mockRestore();
+});
+
 it('logs placement_miss when the worker did not run near Taiwan', async () => {
   const info = vi.spyOn(console, 'info').mockImplementation(() => {});
   const relay = vi.fn<FetchLike>(async () => new Response('ok', { headers: { [RELAY_COLO_HEADER]: 'remote-NRT' } }));

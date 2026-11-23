@@ -43,6 +43,10 @@ describe('explicit TronClass command routing', () => {
     ['幫我繳交 TronClass 未交作業', 'unsupported', false],
     ['幫我把 TronClass 未交作業全部繳交', 'unsupported', false],
     ['幫我準備 TronClass 作業並送出', 'unsupported', false],
+    ['TronClass 作業狀態後把附件上傳', 'unsupported', false],
+    ['TronClass 查作業狀態：上傳附件', 'unsupported', false],
+    ['TronClass 是否已繳交的作業', 'homework', false],
+    ['TronClass 我的作業繳交紀錄', 'homework', false],
     ['幫我回覆 TronClass 討論', 'unsupported', false],
     ['TronClass 問卷填答', 'unsupported', false],
   ] as const)('routes %s without model-chosen tools', (question, intent, pendingOnly) => {
@@ -160,6 +164,12 @@ describe('TronClass clauses inside a multi-clause request', () => {
     '查玩課雲作業繳交狀態：繳交附件，校園公告',
     '查玩課雲作業繳交狀態:提交報告，校園公告',
     '查玩課雲作業繳交狀態，然後查看狀態並上傳附件',
+    '查玩課雲作業狀態後把附件上傳，查校園公告',
+    '查玩課雲作業繳交狀態後把附件上傳，看看校園公告',
+    '查玩課雲作業狀態後將附件提交，校園公告',
+    '查玩課雲作業狀態後請幫我把附件上傳，校園公告',
+    '查玩課雲作業狀態並把附件上傳，校園公告',
+    '查玩課雲作業狀態順便上傳附件，校園公告',
   ])('adds no Agent read to %s', question => {
     expect(tronClassCompoundClauses(question)).toEqual([]);
   });
@@ -171,5 +181,7 @@ describe('TronClass clauses inside a multi-clause request', () => {
     expect(tronClassCompoundClauses('查玩課雲作業繳交狀態，和校園公告')).toEqual(['查玩課雲作業繳交狀態']);
     expect(tronClassCompoundClauses('查玩課雲未交作業，不要繳交附件！校園公告')).toEqual(['查玩課雲未交作業']);
     expect(tronClassCompoundClauses('查玩課雲作業繳交狀態，校園公告')).toEqual(['查玩課雲作業繳交狀態']);
+    expect(tronClassCompoundClauses('查玩課雲是否已繳交的作業，校園公告')).toEqual(['查玩課雲是否已繳交的作業']);
+    expect(tronClassCompoundClauses('查玩課雲作業的繳交紀錄和校園公告')).toEqual(['查玩課雲作業的繳交紀錄']);
   });
 });

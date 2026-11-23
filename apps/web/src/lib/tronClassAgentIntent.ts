@@ -58,7 +58,7 @@ const WRITE_VERB_SOURCE = '繳交|提交|送出|交出|交作業|上傳|發[佈�
 const ACTION_BOUNDARY = [
   '然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|而且|並|再|和|與|、|\\band\\b|\\bthen\\b|\\balso\\b',
   '[，,；;。！!？?：:\\r\\n]',
-  `(?:之後|後)\\s*(?:再|並|請|幫我|替我|代我|直接|自動)*\\s*(?=(?:${WRITE_VERB_SOURCE}))`,
+  `(?:之後|後)\\s*(?:再|並|請|幫我|替我|代我|直接|自動|把|將)*\\s*(?=(?:${WRITE_VERB_SOURCE}))`,
 ].join('|');
 const ACTION_SEGMENT_SEPARATOR = new RegExp(`(?:${ACTION_BOUNDARY})+`, 'iu');
 const NEGATED_WRITE = new RegExp(
@@ -76,7 +76,15 @@ const WRITE_VERB_OTHER_THAN_SUBMIT = /(?:發[佈布文]|回[覆復]|留言|刪�
 // The clause itself must open as a read request ("查…繳交狀態"); a clause that opens with
 // the write verb ("繳交…狀態報告") is a command whatever nouns follow it.
 const READ_STATUS_QUESTION = /^(?:請|麻煩|幫我|替我)*\s*(?:查詢|查看|查|看|列出|顯示|確認|check|show|list)/i;
-const SUBMISSION_STATUS = /(?:狀態|紀錄|記錄|情況|有哪些|是否|有沒有)/u;
+// 只有「繳交狀態／繳交紀錄」「是否已繳交」這種名詞片語才是在問狀態；片語以外
+// 若還剩繳交類動詞（例如「查作業狀態後把附件上傳」），那個動詞就是要求。
+const SUBMISSION_STATUS_PHRASE = new RegExp(
+  `(?:${SUBMIT_VERB.source})(?:過的?|了的?|的|之)?\\s*(?:狀態|紀錄|記錄|情況|歷史|有哪些)|` +
+  `(?:是否|有沒有|有無|有哪些|哪些)\\s*(?:已經|已|有)?\\s*(?:${SUBMIT_VERB.source})`, 'giu');
+/** True when a submit-type verb remains after removing submission-status noun phrases. */
+function hasSubmitCommand(text: string): boolean {
+  return SUBMIT_VERB.test(toOperationText(text).replace(SUBMISSION_STATUS_PHRASE, ' '));
+}
 const CHAINED_WRITE = /(?:並|再|然後|直接|自動|順便|同時|and|then).{0,25}(?:繳交|提交|送出|上傳|submit|upload)/i;
 const EXPLICIT_WRITE = /(?:幫我|替我|代我|請|直接|自動)\s*(?:把|將)?\s*(?:繳交|提交|送出|交出|交作業|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名)|(?:submit|upload|delete|post|reply|withdraw)\b/i;
 
@@ -118,7 +126,7 @@ function wholeRequestAllowsCompoundRead(question: string): boolean {
   // status question about submissions stays a read.
   return !positive.split(ACTION_SEGMENT_SEPARATOR).some(clause =>
     WRITE_VERB.test(toOperationText(clause)) &&
-    !(SUBMIT_VERB.test(clause) && SUBMISSION_STATUS.test(clause) && READ_STATUS_QUESTION.test(clause) &&
+    !(READ_STATUS_QUESTION.test(clause) && !hasSubmitCommand(clause) &&
       !WRITE_VERB_OTHER_THAN_SUBMIT.test(clause)));
 }
 
@@ -192,7 +200,7 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
   if (explicitWrite || chainedWrite || /(?:發[佈布文]|回[覆復]|留言|刪除|撤回|退選|選課|填答|評分|測驗|考試|問卷|簽到|簽退|點名)/.test(text)) {
     return { intent: 'unsupported', pendingOnly: false };
   }
-  if (/(?:繳交|提交|送出|上傳)/.test(operationText) && !/(?:狀態|紀錄|記錄|情況|有哪些|是否|有沒有)/.test(text)) {
+  if (hasSubmitCommand(operationText)) {
     return { intent: 'unsupported', pendingOnly: false };
   }
   if (/(?:下載|download)/i.test(text)) return { intent: 'download', pendingOnly: false };
