@@ -1209,7 +1209,9 @@ it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'zero-area',
       top = 59;
       fireEvent.scroll(dialog);
       if (mode === 'zero-area' || blocksVisibility) notify(false);
-      expect(scene.setActive).toHaveBeenLastCalledWith(reportsVisibility && !blocksVisibility);
+      // The dialog scrollport now measurably clips the canvas, so even a stale
+      // positive observer entry must keep the WebGL scene paused.
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
       top = 120;
       fireEvent.resize(window);
       expect(scene.setActive).toHaveBeenLastCalledWith(!blocksVisibility);
