@@ -340,13 +340,14 @@ service cloud.firestore {
         && campusPostCommentCountNum(after) == campusPostCommentCountNum(before) + 1;
     }
 
+    // Match the legacy group-discussion list's visibility filter.
     function isVisibleRootPost(post) {
-      let published = post.get('published', null);
-      let status = post.get('status', null);
-      let deleted = post.get('deleted', null);
-      return (published == null || published == true)
-        && (status == null || status in ['active', 'published'])
-        && (deleted == null || deleted == false)
+      return post.get('published', null) != false
+        && !(post.get('status', null) in [
+          'draft', 'scheduled', 'pending', 'unpublished',
+          'archived', 'cancelled', 'canceled', 'deleted'
+        ])
+        && post.get('deleted', null) != true
         && post.get('deletedAt', null) == null;
     }
 

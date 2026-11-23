@@ -8300,6 +8300,63 @@ describe('legacy authorization matrix against the PR merge base', () => {
     ['owner cannot read unreleased feedback under either rule set', 'former', get(`${reviews}/unsubmitted`), false, false],
   ];
 
+  const hiddenStatuses = [
+    'draft', 'scheduled', 'pending', 'unpublished',
+    'archived', 'cancelled', 'canceled', 'deleted',
+  ];
+  const visibilityFields = {
+    published: [undefined, null, '', true, false, 0],
+    deleted: [undefined, null, '', true, false, 1],
+    deletedAt: [undefined, null, '', date],
+    status: [undefined, null, '', ' \t\n', 'active', 'published', 'legacy', false, 0, ...hiddenStatuses],
+  };
+
+  // Every combination includes a corresponding legacy root comment.
+  const visibilityCases = [];
+  for (const published of visibilityFields.published) {
+    for (const deleted of visibilityFields.deleted) {
+      for (const deletedAt of visibilityFields.deletedAt) {
+        for (const status of visibilityFields.status) {
+          const fields = { published, deleted, deletedAt, status };
+          const id = `visibility-${visibilityCases.length}`;
+          const post = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
+          // Equivalent to the groupDiscussionHandlers list predicate.
+          const listed = published !== false && deleted !== true && deletedAt == null
+            && !hiddenStatuses.includes(status);
+          visibilityCases.push({ id, post, listed });
+        }
+      }
+    }
+  }
+
+  async function checkVisibilityMatrix(environment, baseline) {
+    const member = environment.authenticatedContext('member').firestore();
+    // Stay below the Firestore batch limit and bound concurrent requests.
+    const chunkSize = 40;
+    for (let offset = 0; offset < visibilityCases.length; offset += chunkSize) {
+      const chunk = visibilityCases.slice(offset, offset + chunkSize);
+      await environment.withSecurityRulesDisabled(async context => {
+        const db = context.firestore();
+        const batch = db.batch();
+        for (const { id, post } of chunk) {
+          batch.set(db.doc(`groupPosts/${id}`), { ...post, groupId: 'matrix-course', authorId: 'teacher' });
+          batch.set(db.doc(`comments/${id}`), { postId: id });
+        }
+        await batch.commit();
+      });
+      await Promise.all(chunk.flatMap(({ id, post, listed }) =>
+        [`groupPosts/${id}`, `comments/${id}`].map(async document => {
+          try {
+            const check = baseline || listed ? assertSucceeds : assertFails;
+            await check(member.doc(document).get({ source: 'server' }));
+          } catch (error) {
+            throw new Error(`${document} (visibility fields ${JSON.stringify(post)})`, { cause: error });
+          }
+        }),
+      ));
+    }
+  }
+
   for (const baseline of [true, false]) {
     describe(baseline ? 'merge base' : 'proposed rules', {
       // CI uses shallow checkouts. Always run the proposed rules cases there.
@@ -8320,6 +8377,10 @@ describe('legacy authorization matrix against the PR merge base', () => {
       });
       after(async () => {
         if (environment) await environment.cleanup();
+      });
+
+      test('legacy post and comment visibility matches the listing for every field combination', async () => {
+        await checkVisibilityMatrix(environment, baseline);
       });
 
       // Write cases use different documents (or reads before
