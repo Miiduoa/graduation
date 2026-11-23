@@ -159,20 +159,34 @@ function mergeBaseDate(value: unknown): string | null {
 }
 
 const dates = [
-  ['ISO Z', '2026-11-02T01:00:00Z', true, true],
-  ['offset', '2026-11-02T09:00:00+08:00', true, true],
-  ['leap day', '2028-02-29T08:15:00Z', true, true],
-  ['no timezone', '2026-11-02T09:00:00', false, false],
-  ['legacy text', 'November 2, 2026 09:00:00 GMT', false, false],
-  ['extended year', '+010000-01-01T00:00:00.000Z', false, true],
-  ['invalid text', 'not-a-date', false, false],
-  ['non-leap day', '2026-02-29T08:00:00Z', false, true],
-  ['rollover', '2026-04-31T09:00:00Z', false, true],
-  ['offset beyond 14 hours', '2026-10-28T00:30:00+15:00', false, true],
-  ['null', null, true, false],
+  ['ISO Z', '2026-11-02T01:00:00Z', 'preserve', true],
+  ['offset crossing a UTC day', '2026-11-02T00:30:00+08:00', 'preserve', true],
+  ['no timezone', '2026-11-02T09:00:00', 'preserve', false],
+  ['legacy text', 'November 2, 2026 09:00:00 GMT', 'preserve', false],
+  ['positive extended year', '+010000-01-01T00:00:00.000Z', 'preserve', true],
+  ['negative extended year', '-000001-01-01T00:00:00.000Z', 'preserve', true],
+  ['extended leap day', '+010000-02-29T00:00:00.000Z', 'preserve', true],
+  ['date-only year under 100', '0000-02-29', 'preserve', false],
+  ['space-padded legacy date', ' November 2, 2026 09:00:00 GMT ', 'preserve', false],
+  ['milliseconds', '2026-11-02T09:00:00.120+08:00', 'preserve', true],
+  ['serialized numeric timestamp', new Date(1793581200123).toISOString(), 'preserve', true],
+  ['leap day', '2028-02-29T08:15:00Z', 'preserve', true],
+  ['offset beyond 14 hours', '2026-10-28T00:30:00+15:00', 'preserve', true],
+  ['non-leap day', '2026-02-29T08:00:00Z', 'rollover', true],
+  ['February 30', '2026-02-30T08:00:00Z', 'rollover', true],
+  ['legacy February 30', 'February 30, 2026 08:00:00 GMT', 'rollover', false],
+  ['legacy April 31', '4/31/2026', 'rollover', false],
+  ['midnight rollover', '2026-11-02T24:00:00Z', 'rollover', true],
+  ['April 31', '2026-04-31T09:00:00Z', 'rollover', true],
+  ['extended rollover', '-000001-02-29T08:00:00-08:00', 'rollover', true],
+  ['invalid offset', '2026-10-28T00:30:00+24:00', 'invalid', false],
+  ['invalid text', 'not-a-date', 'invalid', false],
+  ['empty string', '', 'invalid', false],
+  ['non-string', 42, 'invalid', false],
+  ['null', null, 'preserve', false],
 ] as const;
 
-describe.each(dates)('%s row date', (_label, date, keepFreshDate, confirmedOffline) => {
+describe.each(dates)('%s row date', (_label, date, behavior, confirmedOffline) => {
   describe.each(['date', 'number', 'missing'] as const)('%s field', (field) => {
     test.each(['plain', 'some=null', 'map=null', 'read-only length', 'iterator=null'] as const)(
       '%s arrays preserve reuse and isolate row-date errors on refresh', async (arrayShape) => {
@@ -205,23 +219,25 @@ describe.each(dates)('%s row date', (_label, date, keepFreshDate, confirmedOffli
           ownerUid: scope.uid, schoolId: scope.schoolId, schoolName: '靜宜大學', checkedAt: payload.checkedAt,
           timetable: { source: 'saved-device-copy' as const, courses: [], updatedAt: payload.checkedAt },
         };
-        const base = mergeBaseValid(bare, now);
-        for (const [question, otherEvidence] of [
-          ['有哪些待交作業？', '資料庫期末報告'],
-          ['校園公告', '其他公告'],
-          ['今天要先做什麼？', '手機課表副本'],
-        ]) {
-          const answer = runOfflineCampusTool(question, context, restored, scope.uid);
-          expect(answer).toEqual(runOfflineCampusTool(question, context, base, scope.uid));
-          expect(answer?.content).toContain(otherEvidence);
-        }
+        expect(runOfflineCampusTool('有哪些待交作業？', context, restored, scope.uid)
+          ?.assignmentRead?.items.map(({ title }) => title).sort()).toEqual(['資料庫期末報告', '週二練習'].sort());
+        expect(runOfflineCampusTool('校園公告', context, restored, scope.uid)
+          ?.announcementRead?.items.map(({ title }) => title)).toContain('其他公告');
+        expect(runOfflineCampusTool('今天要先做什麼？', context, restored, scope.uid)?.content)
+          .toContain('手機課表副本在這個期間沒有排課');
         const undatedQuestion = '沒有截止日期的作業有哪些？';
         const undated = runOfflineCampusTool(undatedQuestion, context, restored, scope.uid);
         expect(undated?.assignmentRead?.items.map(({ title }) => title))
           .toEqual(field === 'date' && confirmedOffline ? [] : ['週二練習']);
 
         const rowDate = field === 'date' ? date : field === 'number' ? 42 : undefined;
-        const expectedDate = field === 'date' && keepFreshDate ? mergeBaseDate(rowDate) : null;
+        let expectedDate: string | null = null;
+        if (field !== 'date' || behavior === 'invalid') {
+          expect(() => mergeBaseDate(rowDate)).toThrow('invalid-sense-response');
+        } else {
+          const baseDate = mergeBaseDate(rowDate);
+          if (behavior === 'preserve') expectedDate = baseDate;
+        }
         mockCallable.mockResolvedValueOnce({ data: payload });
         const fresh = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
         expect(fresh).toEqual({
@@ -251,4 +267,43 @@ test('keeps the merge-base freshness check for a restored legacy synchronization
   const now = Date.parse('2026-03-02T08:00:00Z');
   expect(mergeBaseValid(snapshot, now)).toBe(snapshot);
   expect(validCampusSenseSnapshot(snapshot, scope, now)).toBe(snapshot);
+});
+
+test.each(dates)('%s synchronization time follows merge-base freshness', async (_label, date) => {
+  const parsed = typeof date === 'string' ? Date.parse(date) : NaN;
+  const now = Number.isFinite(parsed) ? parsed : Date.now();
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
+  try {
+    const payload = { ...envelope(), checkedAt: date };
+    const baseline = { ...payload, userId: scope.uid } as CampusSenseSnapshot;
+    mockCallable.mockResolvedValueOnce({ data: payload });
+
+    const refresh = refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
+    if (typeof date === 'string' && mergeBaseValid(baseline, now)) {
+      expect((await refresh).checkedAt).toBe(baseline.checkedAt);
+    } else {
+      await expect(refresh).rejects.toThrow(typeof date === 'string' ? 'expired-sense-response' : 'invalid-sense-response');
+    }
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+test('an extended-year deadline is dated and an extended-year future announcement is excluded', async () => {
+  const payload = envelope();
+  const date = '+010000-01-01T00:00:00.000Z';
+  const futureAssignment = { ...payload.assignments.items[1], dueAt: date };
+  payload.assignments.items[1] = futureAssignment;
+  payload.announcements.items = [
+    { title: '未來公告', publishedAt: date },
+    { title: '已發布公告', publishedAt: payload.checkedAt },
+  ];
+  mockCallable.mockResolvedValueOnce({ data: payload });
+
+  const fresh = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
+  const context = { ownerUid: scope.uid, schoolId: scope.schoolId, schoolName: '靜宜大學', checkedAt: payload.checkedAt };
+  const query = (question: string) => runOfflineCampusTool(question, context, fresh, scope.uid);
+  expect(query('沒有截止日期的作業有哪些？')?.assignmentRead?.items).toEqual([]);
+  expect(query('尚未逾期的作業有哪些？')?.assignmentRead?.items).toContainEqual(futureAssignment);
+  expect(query('校園公告')?.announcementRead?.items).toEqual([payload.announcements.items[1]]);
 });

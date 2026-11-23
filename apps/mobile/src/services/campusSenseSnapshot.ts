@@ -3,7 +3,6 @@ import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../fi
 import { parseCampusAssignmentSource, type CampusAssignmentSource } from './campusAssignmentSource';
 import { parseCampusAnnouncementSource, type CampusAnnouncementSource } from './campusAnnouncementSource';
 import { abortableCampusRead } from './abortableCampusRead';
-import { isRealTimestamp } from './campusTimestamp';
 
 export type SenseSourceStatus = 'available' | 'unavailable';
 export type AssignmentCoverageReason = 'complete' | 'legacy-partial' | 'read-budget';
@@ -57,9 +56,59 @@ function count(value: unknown, source: SenseSourceStatus): number | null {
   }
   return value;
 }
+const SOURCE_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+function legacyYear(value: string): number {
+  const year = Number(value);
+  return year < 50 ? 2000 + year : year < 100 ? 1900 + year : year;
+}
+
+function sourceClockFields(value: string): number[] | null {
+  const iso = /^(\d{4}|[+-]\d{6})-(\d{2})-(\d{2})(?=T|(?![\s\S]))(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?/i.exec(value);
+  if (iso) return iso.slice(1).map((field) => Number(field ?? 0));
+
+  // Date.parse also accepts legacy numeric and English month-name dates.
+  const time = /(?:^|\s)(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?/.exec(value);
+  const clock = time?.slice(1).map((field) => Number(field ?? 0)) ?? [];
+  const numeric = /^(\d{1,6})[-/.\s]+(\d{1,2})[-/.\s]+(\d{1,6})(?![\d:])/.exec(value.trimStart());
+  if (numeric) {
+    const [, first, middle, last] = numeric;
+    const firstNumber = Number(first);
+    if (firstNumber === 0 || firstNumber > 31) return [legacyYear(first), Number(middle), Number(last), ...clock];
+    return [legacyYear(last), firstNumber, Number(middle), ...clock];
+  }
+  const legacy = time ? value.replace(time[0], '') : value;
+  const namedMonth = /\b([a-z]{3,})[\s-]+(\d{1,2})[,]?[\s-]+(\d{1,6})(?!\d)/i.exec(legacy);
+  const monthInMiddle = /\b(\d{1,6})[\s-]+([a-z]{3,})[,]?[\s-]+(\d{1,6})(?!\d)/i.exec(legacy);
+  const named = namedMonth ?? monthInMiddle;
+  if (named) {
+    const [, first, second, last] = named;
+    const month = namedMonth ? first : second;
+    const monthNumber = SOURCE_MONTHS.indexOf(month.slice(0, 3).toLowerCase()) + 1;
+    if (monthNumber) {
+      if (namedMonth) return [legacyYear(last), monthNumber, Number(second), ...clock];
+      if (Number(first) > 31 || Number(first) === 0) return [legacyYear(first), monthNumber, Number(last), ...clock];
+      return [legacyYear(last), monthNumber, Number(first), ...clock];
+    }
+  }
+  return null;
+}
+
 // An unconfirmed date does not invalidate the row or its source.
 function sourceDate(value: unknown): string | null {
-  return isRealTimestamp(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  if (!Number.isFinite(Date.parse(value))) return null;
+
+  const fields = sourceClockFields(value);
+  if (fields) {
+    const [year, month, day, hour = 0, minute = 0, second = 0] = fields;
+    // Use a Gregorian cycle to avoid Date.UTC's 0–99 remapping and its range limits.
+    const cycleYear = 2000 + ((year % 400) + 400) % 400;
+    const clock = new Date(Date.UTC(cycleYear, month - 1, day, hour, minute, second));
+    if (clock.getUTCFullYear() !== cycleYear || clock.getUTCMonth() + 1 !== month ||
+        clock.getUTCDate() !== day) return null;
+  }
+  return value;
 }
 
 function readSourceRows<T>(items: readonly unknown[], limit: number, parse: (item: unknown) => T): T[] {
