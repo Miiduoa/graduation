@@ -50,7 +50,7 @@ import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
 import type { AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
 import { parseAssistantFoodPickupIntent } from '@campus/shared/src/assistantFoodPickupIntent';
-import { getAssistantRoleProfile, type AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
+import { assistantRoleToolAllowed, getAssistantRoleProfile, type AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
 type Step = {
   intent: AssistantIntent;
   confirmation: string;
@@ -709,7 +709,8 @@ function V2Conversation({
       return;
     }
     const mapCommand = !selection ? parseCampusMapCommand(current) : null;
-    if (mapCommand && (taskProfile === 'student' || mapCommand.kind === 'place')) {
+    if (mapCommand && assistantRoleToolAllowed(taskProfile, 'get_campus_map') &&
+      (mapCommand.kind === 'place' || assistantRoleToolAllowed(taskProfile, 'get_schedule'))) {
       await requestCampusMap(mapCommand, current);
       return;
     }

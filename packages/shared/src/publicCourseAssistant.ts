@@ -11,6 +11,7 @@ import {
 import { mockSchools } from './schools';
 import { extractPublicCourseAssistantFilters } from './publicCourseAssistantFilters';
 import { splitPublicCourseClauses } from './publicCourseClauses';
+import { parseAssistantWorkSessionIntent } from './assistantWorkSessionIntent';
 import {
   hasPublicCourseFilters,
   parsePublicCourseFilters,
@@ -106,6 +107,10 @@ export function resolvePublicCourseAssistantIntent(
   selectedSchoolId?: string | null,
 ): PublicCourseAssistantIntent | null {
   if (typeof question !== 'string' || !question.trim() || question.length > 2000) return null;
+  // A complete request for personal work time stays with the scoped planner.
+  // In particular, the final 課 in 備課 does not make it a course catalog lookup.
+  // Share this boundary with browser/native routing and server composition.
+  if (parseAssistantWorkSessionIntent(question)) return null;
   let text = question
     .normalize('NFKC')
     .trim()

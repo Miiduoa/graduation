@@ -115,8 +115,9 @@ it('a complete personal timetable query is not redirected by broad teacher keywo
   noRemoteRead();
 });
 
-it.each(['今天有什麼課程', '下一堂課在哪裡', '查我的課表',
-      '下一堂課在哪裡呢', '今天有什麼課程嗎'])(
+// Location questions use the scoped map route; all role variants are covered
+// in AssistantCampusMap.test.tsx. Other timetable questions keep this path.
+it.each(['今天有什麼課程', '查我的課表', '今天有什麼課程嗎'])(
   'teacher falls back from a missing device timetable to the cloud answer: %s', async question => {
     localStorage.clear();
     const fetcher = vi.fn(async (url: string, init?: RequestInit) => {

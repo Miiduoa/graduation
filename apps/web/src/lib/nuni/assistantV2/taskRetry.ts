@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { parseAssistantTaskPlan, type AssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
 import { parseAssistantTaskRetry, type AssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
+import { ASSISTANT_ROLE_PROFILES, assistantRoleToolAllowed, getAssistantRoleProfile, type AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
 import { canonical, hash, V2Error, type Adapter, type Binding, type Obj } from './contracts';
 import { crossServiceRequest, type CrossServiceOperation, type CrossServiceRequest } from './crossServiceRequest';
 import { runCrossService, type EventMapSelections, type MerchantSelections } from './crossService';
@@ -23,15 +24,29 @@ function isRead(operation: CrossServiceOperation): boolean {
       (operation.kind !== 'public-course' || operation.publicCourseIntent?.kind === 'search');
 }
 
+/** A retry keeps the original task context as well as the API's authorization.
+ * It cannot repair a context mismatch by falling back to the student tool set. */
+function contextAllowsRead(operation: CrossServiceOperation, taskProfile: AssistantRoleProfileId): boolean {
+  if (operation.workSession && taskProfile !== 'student' && operation.workSession.profileId !== taskProfile) return false;
+  const names = operation.kind === 'read' ? [operation.tool || '']
+    : operation.kind === 'free-time' ? ['find_free_time']
+      : operation.kind === 'materials' ? ['get_materials', 'list_courses']
+        : operation.kind === 'clubs' ? ['list_clubs', ...(operation.args.feed ? ['get_club_feed'] : [])]
+          : operation.kind === 'transit' ? ['get_transit']
+            : operation.kind === 'public-course' ? ['get_public_courses']
+              : operation.kind === 'map-location' ? ['get_campus_map'] : [];
+  return names.length > 0 && names.every(name => assistantRoleToolAllowed(taskProfile, name));
+}
+
 /** Include only the selected reads and their exact, read-only source dependencies. */
 function readClosure(request: CrossServiceRequest, stepIds: string[], eventMapSelections: EventMapSelections = {},
-  merchantSelections: MerchantSelections = {}): CrossServiceRequest | null {
+  merchantSelections: MerchantSelections = {}, taskProfile: AssistantRoleProfileId = 'student'): CrossServiceRequest | null {
   const byId = new Map(request.operations.map(operation => [operation.id, operation]));
   const selected = new Set<string>(), visiting = new Set<string>();
   const visit = (id: string): boolean => {
     if (selected.has(id)) return true;
     const operation = byId.get(id);
-    if (!operation || !isRead(operation) || visiting.has(id)) return false;
+    if (!operation || !isRead(operation) || !contextAllowsRead(operation, taskProfile) || visiting.has(id)) return false;
     // Replaying an ordinal against a fresh event list can silently select a
     // different event. An event-map continuation always needs its original ID.
     if (operation.kind === 'map-location' && operation.mapSource?.kind === 'event' &&
@@ -105,12 +120,16 @@ export function issueTaskRetry(input: {
   secret: string;
   now: number;
   parsedAt?: number;
+  /** Fixed task vocabulary, signed with the retry; never an account-role grant. */
+  taskProfile?: AssistantRoleProfileId;
   /** Produced by the server's verified event selection, never a client hint. */
   eventMapSelections?: EventMapSelections;
   merchantSelections?: MerchantSelections;
 }): AssistantTaskRetry | undefined {
   const plan = parseAssistantTaskPlan(input.plan);
   if (!plan) return undefined;
+  const profile = getAssistantRoleProfile(input.taskProfile ?? 'student');
+  if (!profile) return undefined;
   let eventMapSelections: Record<string, PublicEventTarget>;
   let merchantSelections: Record<string, MerchantTarget>;
   try { eventMapSelections = verifiedEventMapSelections(input.eventMapSelections ?? {}, input.request, input.binding.schoolId); }
@@ -118,23 +137,20 @@ export function issueTaskRetry(input: {
   try { merchantSelections = verifiedMerchantSelections(input.merchantSelections ?? {}, input.request); }
   catch { return undefined; }
   const stepIds = plan.steps.filter(step => ['blocked', 'partial'].includes(step.status) && !step.cardIds?.length &&
-    readClosure(input.request, [step.id], eventMapSelections, merchantSelections)).map(step => step.id);
+    readClosure(input.request, [step.id], eventMapSelections, merchantSelections, profile.id)).map(step => step.id);
   if (!stepIds.length) return undefined;
-  const closure = readClosure(input.request, stepIds, eventMapSelections, merchantSelections)!;
+  const closure = readClosure(input.request, stepIds, eventMapSelections, merchantSelections, profile.id)!;
   const selectedEvents = Object.fromEntries(closure.operations.flatMap(operation =>
     Object.hasOwn(eventMapSelections, operation.id) ? [[operation.id, eventMapSelections[operation.id]]] : []));
-  const bindsEvents = Object.keys(selectedEvents).length > 0;
   const selectedMerchants = Object.fromEntries(closure.operations.flatMap(operation =>
     Object.hasOwn(merchantSelections, operation.id) ? [[operation.id, merchantSelections[operation.id]]] : []));
-  const bindsMerchants = Object.keys(selectedMerchants).length > 0;
   const parsedAt = input.parsedAt ?? input.now;
   const expiresAt = parsedAt + RETRY_TTL_MS;
   if (!Number.isSafeInteger(parsedAt) || !Number.isSafeInteger(expiresAt) || input.now < parsedAt || input.now >= expiresAt)
     return undefined;
-  const payload = { version: bindsMerchants ? 3 : bindsEvents ? 2 : 1, binding: hash(input.binding), question: input.question,
+  const payload = { version: 4, binding: hash(input.binding), question: input.question, taskProfile: profile.id,
     parsedAt, expiresAt, requestHash: hash(input.request), stepIds,
-    ...(bindsEvents || bindsMerchants ? { eventMapSelections: selectedEvents } : {}),
-    ...(bindsMerchants ? { merchantSelections: selectedMerchants } : {}) };
+    eventMapSelections: selectedEvents, merchantSelections: selectedMerchants };
   const body = Buffer.from(canonical(payload)).toString('base64url');
   return parseAssistantTaskRetry({ version: 1, token: body + '.' + mac(body, input.secret), stepIds, expiresAt }, plan) ?? undefined;
 }
@@ -154,13 +170,18 @@ function retryProof(input: { token: unknown; stepIds: unknown; binding: Binding;
   const keys = Object.keys(proof).sort().join(',');
   const versioned = proof.version === 1 ? keys === 'binding,expiresAt,parsedAt,question,requestHash,stepIds,version'
     : proof.version === 2 ? keys === 'binding,eventMapSelections,expiresAt,parsedAt,question,requestHash,stepIds,version'
-      : proof.version === 3 && keys === 'binding,eventMapSelections,expiresAt,merchantSelections,parsedAt,question,requestHash,stepIds,version';
+      : proof.version === 3 ? keys === 'binding,eventMapSelections,expiresAt,merchantSelections,parsedAt,question,requestHash,stepIds,version'
+        : proof.version === 4 && keys === 'binding,eventMapSelections,expiresAt,merchantSelections,parsedAt,question,requestHash,stepIds,taskProfile,version';
   if (!versioned || proof.binding !== hash(input.binding) ||
       typeof proof.question !== 'string' || proof.question.length > 1000 ||
       !Number.isSafeInteger(proof.parsedAt) || !Number.isSafeInteger(proof.expiresAt) ||
       (proof.expiresAt as number) - (proof.parsedAt as number) !== RETRY_TTL_MS ||
       !Number.isSafeInteger(input.now) || input.now < (proof.parsedAt as number)) return invalid();
   if (input.now >= (proof.expiresAt as number)) throw new V2Error(409, 'TASK_RETRY_EXPIRED');
+  // Older proofs did not bind a context, even when issued in a professional
+  // profile. Their closure is restricted below to reads shared by all profiles.
+  const profile = getAssistantRoleProfile(proof.version === 4 ? proof.taskProfile : 'student');
+  if (!profile) return invalid();
   const issued = parseAssistantTaskRetry({ version: 1, token: input.token, stepIds: proof.stepIds, expiresAt: proof.expiresAt });
   const selected = parseAssistantTaskRetry({ version: 1, token: input.token, stepIds: input.stepIds, expiresAt: proof.expiresAt });
   if (!issued || !selected || selected.stepIds.some(id => !issued.stepIds.includes(id))) return invalid();
@@ -168,13 +189,16 @@ function retryProof(input: { token: unknown; stepIds: unknown; binding: Binding;
   // The graph fingerprint also rejects a changed grammar after a deployment.
   const request = crossServiceRequest(proof.question, proof.parsedAt as number, input.binding.schoolId);
   if (!request || hash(request) !== proof.requestHash) return invalid();
-  const eventMapSelections = verifiedEventMapSelections(proof.version === 2 || proof.version === 3 ? proof.eventMapSelections : {}, request, input.binding.schoolId);
-  const merchantSelections = verifiedMerchantSelections(proof.version === 3 ? proof.merchantSelections : {}, request);
+  const eventMapSelections = verifiedEventMapSelections(proof.version !== 1 ? proof.eventMapSelections : {}, request, input.binding.schoolId);
+  const merchantSelections = verifiedMerchantSelections(proof.version === 3 || proof.version === 4 ? proof.merchantSelections : {}, request);
   if (proof.version === 2 && !Object.keys(eventMapSelections).length) return invalid();
   if (proof.version === 3 && !Object.keys(merchantSelections).length) return invalid();
-  const subset = readClosure(request, selected.stepIds, eventMapSelections, merchantSelections);
+  const subset = readClosure(request, selected.stepIds, eventMapSelections, merchantSelections, profile.id);
   if (!subset) return invalid();
-  return { request, subset, question: proof.question, parsedAt: proof.parsedAt as number, eventMapSelections, merchantSelections };
+  if (proof.version !== 4 && ASSISTANT_ROLE_PROFILES.some(candidate =>
+    !readClosure(request, selected.stepIds, eventMapSelections, merchantSelections, candidate.id))) return invalid();
+  return { request, subset, question: proof.question, parsedAt: proof.parsedAt as number,
+    taskProfile: profile.id, eventMapSelections, merchantSelections };
 }
 
 /** No model, proposals, writes, or proposal-generation reset. Replays are fresh reads only. */
@@ -193,7 +217,7 @@ export async function retryTaskReads(input: {
   // Empty question prevents a completed study/reorder clause from influencing
   // any tools used in this read-only continuation.
   const tools = createTools(input.adapter, input.binding, input.secret, input.now, false, false, '', false, proof.question,
-    Object.values(proof.merchantSelections)[0]);
+    Object.values(proof.merchantSelections)[0], proof.taskProfile);
   const result = await runCrossService({ request: proof.subset, tools, binding: input.binding,
     now: input.now, signal: input.signal, availableAfter: input.now, eventMapSelections: proof.eventMapSelections,
     merchantSelections: proof.merchantSelections });
@@ -201,7 +225,7 @@ export async function retryTaskReads(input: {
   if (result.cards.length) throw new V2Error(503, 'TASK_RETRY_UNSAFE');
   const taskRetry = issueTaskRetry({ question: proof.question, request: proof.request, plan: result.taskPlan,
     binding: input.binding, secret: input.secret, now: input.now + Math.max(0, Date.now() - started), parsedAt: proof.parsedAt,
-    eventMapSelections: proof.eventMapSelections, merchantSelections: proof.merchantSelections });
+    taskProfile: proof.taskProfile, eventMapSelections: proof.eventMapSelections, merchantSelections: proof.merchantSelections });
   return { version: 2, ...result, ...(taskRetry ? { taskRetry } : {}),
     answer: result.answer.replace('已依這次需求逐項處理：', '已重新核對選取的項目與必要來源；其他結果及待確認內容保留在原處：'),
     modelCalls: 0, usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, simulation: input.adapter.simulation };

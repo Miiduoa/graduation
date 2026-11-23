@@ -140,18 +140,7 @@ export function parseSchoolInfoResult(raw: unknown, schoolId: string, args: unkn
 
 /** Whole-clause grammar only: a named campus, department, person, live status,
  * route, or extra operation must remain with the conversational planner. */
-export function parseSchoolInfoRead(question: string): { tool: 'get_school_info'; args: SchoolInfoArguments } | null {
-  if (typeof question !== 'string' || !question.trim() || question.length > 160 ||
-      /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(question)) return null;
-  let value = question.normalize('NFKC').trim().replace(/[。！？!?]+$/, '').trim();
-  value = value.replace(/^(?:(?:請問|麻煩你|麻煩|請|幫我|替我|我想)\s*)+/, '');
-  value = value.replace(/^(?:(?:查詢|查看|查一下|看一下|看看|列出|顯示|查|看)\s*)+/, '');
-  const match = /^(?:(?:我|我們)的)?(?:學校|本校|目前學校|所選學校)(?:的)?(資訊|基本資料|聯絡資訊|地址|電話|總機|總機電話|官網|官方網站)(?:(?:是|有)?(?:什麼|多少|哪個)|在哪裡|在哪|為何)?(?:嗎|呢)?$/.exec(value);
-  if (!match) return null;
-  const field: SchoolInfoField = /地址/.test(match[1]) ? 'address'
-    : /電話|總機/.test(match[1]) ? 'phone' : /官網|官方網站/.test(match[1]) ? 'website' : 'overview';
-  return { tool: 'get_school_info', args: { field } };
-}
+export { parseSchoolInfoRead } from '@campus/shared/src/assistantPublicReadIntent';
 
 export function formatSchoolInfoRead(read: SchoolInfoRead): string {
   const lines: string[] = [];
