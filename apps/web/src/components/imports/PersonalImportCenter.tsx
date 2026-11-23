@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type RefObject } from 'react';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
+import { ConfirmModal, Modal } from '@/components/ui/Modal';
 import {
   createPersonalImportId,
   serializePersonalImportsCsv,
@@ -130,6 +131,7 @@ function RowFields({
   periodProfile,
   onRefreshWorkspaces,
   aiSource = false,
+  titleRef,
 }: {
   row: PersonalImportRow;
   onChange: (row: PersonalImportRow) => void;
@@ -137,16 +139,20 @@ function RowFields({
   periodProfile?: PeriodProfileId;
   onRefreshWorkspaces?: () => void;
   aiSource?: boolean;
+  titleRef?: RefObject<HTMLInputElement | null>;
 }) {
   const update = (field: keyof PersonalImportRow, value: string | number | boolean | undefined) =>
     onChange({ ...row, [field]: value });
   const issues = validatePersonalImportRow(row, { periodProfile });
   const invalid = (name: keyof PersonalImportRow) =>
     issues.some((issue) => issue.severity === 'error' && issue.field === name);
+  const unconfirmedCourse = !!row.linkedCourseId &&
+    !workspaces.some((item) => item.id === row.linkedCourseId);
   const field = (name: keyof PersonalImportRow, label: string, type = 'text') => (
     <label className={styles.field}>
       {label}
       <input
+        ref={name === 'title' ? titleRef : undefined}
         type={type}
         aria-invalid={invalid(name) || undefined}
         value={String(row[name] ?? '')}
@@ -282,6 +288,7 @@ function RowFields({
       <details
         className={styles.source}
         open={
+          unconfirmedCourse ||
           issues.some(
             (issue) =>
               issue.severity === 'error' &&
@@ -318,6 +325,7 @@ function RowFields({
           <label className={styles.field}>
             連結我的課程
             <select
+              aria-invalid={unconfirmedCourse || undefined}
               value={row.linkedCourseId || ''}
               onChange={(event) => update('linkedCourseId', event.target.value || undefined)}
             >
@@ -358,6 +366,186 @@ function RowFields({
         <summary>{aiSource ? 'AI 辨讀的來源片段（請與原檔核對）' : '核對原始文字'}</summary>
         <pre>{row.source.rawText || '這筆是手動新增的資料。'}</pre>
       </details>
+    </>
+  );
+}
+
+function PersonalRecordEditor({
+  original,
+  workspaces,
+  periodProfile,
+  paused,
+  saving,
+  onRefreshWorkspaces,
+  onCommit,
+  onClose,
+}: {
+  original: PersonalImportRecord;
+  workspaces: NuniWorkspace[];
+  periodProfile?: PeriodProfileId;
+  paused: boolean;
+  saving: boolean;
+  onRefreshWorkspaces: () => void;
+  onCommit: (row: PersonalImportRow | null) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [row, setRow] = useState<PersonalImportRow>(() => ({ ...original }));
+  const [confirmation, setConfirmation] = useState<'discard' | 'remove' | null>(null);
+  const [error, setError] = useState('');
+  const [pending, setPending] = useState(false);
+  const inFlight = useRef(false);
+  const active = useRef(false);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const dirty = JSON.stringify(row) !== JSON.stringify(original);
+  const busy = saving || pending;
+
+  useLayoutEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+  useEffect(() => {
+    if (!dirty && !busy) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeLeaving);
+    return () => window.removeEventListener('beforeunload', warnBeforeLeaving);
+  }, [dirty, busy]);
+
+  function requestClose() {
+    if (paused || busy || inFlight.current || confirmation) return;
+    if (dirty) setConfirmation('discard');
+    else onClose();
+  }
+
+  async function commit(revised: PersonalImportRow | null) {
+    if (paused || saving || inFlight.current || !active.current) return;
+    inFlight.current = true;
+    setPending(true);
+    setError('');
+    try {
+      await onCommit(revised);
+    } catch (cause) {
+      if (active.current) setError(errorMessage(cause));
+      throw cause;
+    } finally {
+      inFlight.current = false;
+      if (active.current) setPending(false);
+    }
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (paused || busy || inFlight.current || confirmation) return;
+    const invalid = validatePersonalImportRow(row, { periodProfile })
+      .some((issue) => issue.severity === 'error');
+    const unconfirmedCourse = !!row.linkedCourseId &&
+      !workspaces.some((item) => item.id === row.linkedCourseId);
+    if (invalid || unconfirmedCourse) {
+      setError(invalid
+        ? '請先修正標示的欄位，再儲存修改。'
+        : '課程連結尚未確認，請重新選擇，或選擇先保留個人紀錄。');
+      const control = formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+      // A person can collapse details after a validation error already opened them.
+      // Reveal every containing section before handing keyboard focus to the field.
+      for (let parent = control?.parentElement; parent && parent !== formRef.current; parent = parent.parentElement) {
+        if (parent instanceof HTMLDetailsElement) parent.open = true;
+      }
+      control?.focus();
+      return;
+    }
+    // The form keeps the specific error visible; ConfirmModal handles rejected removals.
+    void commit(row).catch(() => {});
+  }
+
+  return (
+    <>
+      <Modal
+        isOpen={!paused}
+        title={`編輯 ${original.title}`}
+        description="修改這筆個人紀錄，儲存後才會更新。"
+        onClose={requestClose}
+        initialFocusRef={titleRef}
+        closeOnEsc={!busy && !confirmation}
+        closeOnOverlayClick={false}
+        showCloseButton={!busy}
+        size="lg"
+      >
+        <form
+          ref={formRef}
+          className={styles.recordEditor}
+          aria-label="修改個人紀錄"
+          onSubmit={submit}
+          onFocusCapture={(event) => {
+            const field = titleRef.current;
+            if (!field || event.target !== field) return;
+            const dialog = field.closest('dialog');
+            if (!dialog?.open) return;
+            const bounds = dialog.getBoundingClientRect();
+            const target = field.getBoundingClientRect();
+            const top = bounds.top + dialog.clientTop;
+            const bottom = top + dialog.clientHeight;
+            // Native modal focus uses preventScroll; long names can put the first
+            // field below the visible dialog, especially with larger text.
+            if (dialog.clientHeight > 0 && (target.top < top || target.bottom > bottom)) {
+              field.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+            }
+          }}
+          noValidate
+        >
+          <fieldset disabled={busy} className={styles.fieldset}>
+            <RowFields
+              row={row}
+              titleRef={titleRef}
+              workspaces={workspaces}
+              periodProfile={periodProfile}
+              onRefreshWorkspaces={onRefreshWorkspaces}
+              onChange={(next) => {
+                if (busy || inFlight.current || paused) return;
+                setRow(next);
+                setError('');
+              }}
+            />
+          </fieldset>
+          {error && <p className={styles.recordEditError} role="alert">{error}</p>}
+          {busy && <p role="status">正在儲存變更，請稍候…</p>}
+          <div className={styles.recordEditActions}>
+            <button
+              className="btn btn-danger"
+              type="button"
+              disabled={busy}
+              onClick={() => { setError(''); setConfirmation('remove'); }}
+            >
+              移除這筆
+            </button>
+            <button className="btn" type="button" disabled={busy} onClick={requestClose}>
+              取消編輯
+            </button>
+            <button className="btn primary" type="submit" disabled={busy}>
+              {busy ? '儲存中…' : '儲存修改'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+      <ConfirmModal
+        isOpen={!paused && confirmation !== null}
+        title={confirmation === 'remove' ? `移除「${original.title}」？` : '放棄這筆修改？'}
+        message={confirmation === 'remove'
+          ? `這筆已匯入的個人紀錄會被移除。${error ? `\n${error}` : ''}`
+          : '尚未儲存的修改會被捨棄，原有個人紀錄不變。'}
+        confirmText={confirmation === 'remove' ? '確認移除' : '放棄修改'}
+        cancelText={confirmation === 'remove' ? '保留紀錄' : '繼續編輯'}
+        variant="danger"
+        loading={busy}
+        onClose={() => { if (!busy && !inFlight.current && !paused) setConfirmation(null); }}
+        onConfirm={() => {
+          if (busy || inFlight.current || paused) return;
+          if (confirmation === 'remove') return commit(null);
+          onClose();
+        }}
+      />
     </>
   );
 }
@@ -475,10 +663,7 @@ function ImportWorkspace({
   const [linkStatus, setLinkStatus] = useState('');
   const [lastBatch, setLastBatch] = useState('');
   const [undoOpen, setUndoOpen] = useState(false);
-  const [editing, setEditing] = useState<{
-    original: PersonalImportRecord;
-    row: PersonalImportRow;
-  } | null>(null);
+  const [editing, setEditing] = useState<PersonalImportRecord | null>(null);
   const [search, setSearch] = useState('');
   const [draftReady, setDraftReady] = useState(false);
   const [draftReadFailed, setDraftReadFailed] = useState(false);
@@ -498,6 +683,21 @@ function ImportWorkspace({
   const review = useRef<HTMLElement>(null);
   const undoKeep = useRef<HTMLButtonElement>(null);
   const keepAiDraft = useRef<HTMLButtonElement>(null);
+  const savedSearch = useRef<HTMLInputElement>(null);
+  const savedEditButtons = useRef(new Map<string, HTMLButtonElement>());
+  const pendingSavedFocus = useRef<string | null>(null);
+  useEffect(() => {
+    if (editing || paused || saving || pendingSavedFocus.current === null) return;
+    const id = pendingSavedFocus.current;
+    pendingSavedFocus.current = null;
+    // Runs after the closed dialogs release their native focus and scroll sessions.
+    const opener = savedEditButtons.current.get(id);
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+    else {
+      savedSearch.current?.focus({ preventScroll: true });
+      savedSearch.current?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'nearest' });
+    }
+  }, [editing, paused, saving]);
   const setPreview = (url: string) => {
     if (previewUrl.current === url) return;
     if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
@@ -1308,6 +1508,30 @@ function ImportWorkspace({
       }
     } catch (error) {
       if (active.current) setNotice(errorMessage(error));
+    } finally {
+      writing.current = false;
+      if (active.current) setSaving(false);
+    }
+  };
+  const closeRecordEditor = (id: string) => {
+    pendingSavedFocus.current = id;
+    setEditing(null);
+  };
+  const commitRecordEdit = async (
+    original: PersonalImportRecord,
+    revised: PersonalImportRow | null,
+  ) => {
+    if (writing.current || suspended.current || !active.current)
+      throw new Error('目前無法儲存這筆修改，請稍後再試。');
+    writing.current = true;
+    setSaving(true);
+    try {
+      // Keep the opening snapshot: the store rejects updates made against a stale ledger.
+      await changePersonalImport(scope, original, revised, () => active.current && !suspended.current);
+      if (active.current) {
+        setNotice(revised ? '個人紀錄已更新。' : '已移除這筆個人紀錄。');
+        closeRecordEditor(original.id);
+      }
     } finally {
       writing.current = false;
       if (active.current) setSaving(false);
@@ -2646,6 +2870,7 @@ function ImportWorkspace({
         <label className={styles.field}>
           搜尋個人紀錄
           <input
+            ref={savedSearch}
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -2674,10 +2899,18 @@ function ImportWorkspace({
                     )}
                 </div>
                 <button
+                  ref={(button) => {
+                    if (button) savedEditButtons.current.set(row.id, button);
+                    else savedEditButtons.current.delete(row.id);
+                  }}
                   type="button"
                   className="btn"
-                  disabled={saving}
-                  onClick={() => setEditing({ original: row, row: { ...row } })}
+                  disabled={saving || reading || !!editing}
+                  onClick={(event) => {
+                    if (editing || writing.current || suspended.current) return;
+                    event.currentTarget.focus({ preventScroll: true });
+                    setEditing({ ...row });
+                  }}
                 >
                   編輯 {row.title}
                 </button>
@@ -2737,76 +2970,17 @@ function ImportWorkspace({
           </div>
         )}
         {editing && (
-          <section className={styles.row} aria-label="編輯個人紀錄">
-            <h3>編輯 {editing.original.title}</h3>
-            <fieldset disabled={saving} className={styles.fieldset}>
-              <RowFields
-                row={editing.row}
-                workspaces={workspaces}
-                periodProfile={periodProfile}
-                onRefreshWorkspaces={() => setLinkRefreshVersion((v) => v + 1)}
-                onChange={(row) => setEditing({ ...editing, row })}
-              />
-            </fieldset>
-            <div className={styles.actions}>
-              <button
-                className="btn primary"
-                type="button"
-                disabled={
-                  saving ||
-                  validatePersonalImportRow(editing.row, { periodProfile }).some(
-                    (issue) => issue.severity === 'error',
-                  ) ||
-                  !!(
-                    editing.row.linkedCourseId &&
-                    !workspaces.some((item) => item.id === editing.row.linkedCourseId)
-                  )
-                }
-                onClick={() =>
-                  void mutate(
-                    () =>
-                      changePersonalImport(
-                        scope,
-                        editing.original,
-                        editing.row,
-                        () => active.current && !suspended.current,
-                      ),
-                    '個人紀錄已更新。',
-                  )
-                }
-              >
-                儲存修改
-              </button>
-              <button
-                className="btn"
-                type="button"
-                disabled={saving}
-                onClick={() => setEditing(null)}
-              >
-                取消編輯
-              </button>
-              <button
-                className="btn"
-                type="button"
-                disabled={saving}
-                onClick={() => {
-                  if (window.confirm(`確定移除「${editing.original.title}」這筆個人紀錄？`))
-                    void mutate(
-                      () =>
-                        changePersonalImport(
-                          scope,
-                          editing.original,
-                          null,
-                          () => active.current && !suspended.current,
-                        ),
-                      '已移除這筆個人紀錄。',
-                    );
-                }}
-              >
-                移除這筆
-              </button>
-            </div>
-          </section>
+          <PersonalRecordEditor
+            key={editing.id}
+            original={editing}
+            workspaces={workspaces}
+            periodProfile={periodProfile}
+            paused={paused}
+            saving={saving}
+            onRefreshWorkspaces={() => setLinkRefreshVersion((v) => v + 1)}
+            onCommit={(row) => commitRecordEdit(editing, row)}
+            onClose={() => closeRecordEditor(editing.id)}
+          />
         )}
       </section>
     </div>

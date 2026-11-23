@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
@@ -6,6 +6,7 @@ import {
   personalImportSavedNotice,
   personalImportUndoBody,
   personalImportUndoneNotice,
+  parsePersonalImport,
 } from '@campus/shared';
 import { readPersonalImportDocumentFile } from '@/lib/personalImportDocuments';
 import { createPersonalImportImagePreview } from '@/lib/personalImportImagePreview';
@@ -21,6 +22,7 @@ import {
   personalImportsStorageKey,
   readPersonalImports,
   savePersonalImportBatch,
+  changePersonalImport,
 } from '@/lib/personalImports';
 import { serializePersonalImportBackup, type PersonalImportRecord } from '@campus/shared';
 import { browserRequest } from '@/features/nuni/Session';
@@ -61,6 +63,9 @@ vi.mock('@/lib/personalImportAi', () => ({
   deletePersonalImportAiModelCache: vi.fn(),
 }));
 vi.mock('@/lib/personalImportImagePreview', () => ({ createPersonalImportImagePreview: vi.fn() }));
+const dialogDescriptors = ['showModal', 'close'].map(
+  (name) => [name, Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name)] as const,
+);
 beforeEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
@@ -89,9 +94,23 @@ beforeEach(() => {
     value: { request: (_key: string, fn: () => unknown) => Promise.resolve().then(fn) },
   });
   Element.prototype.scrollIntoView = vi.fn();
+  // jsdom has no native top layer; real focus containment is checked in browser QA.
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) { this.setAttribute('open', ''); },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) { this.removeAttribute('open'); },
+  });
 });
 afterEach(() => {
+  cleanup();
   document.documentElement.removeAttribute('data-reduced-motion');
+  for (const [name, descriptor] of dialogDescriptors) {
+    if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
+    else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
+  }
 });
 
 it('uses the current motion preference each time an import preview is revealed', async () => {
@@ -225,6 +244,317 @@ async function confirmUndo() {
   fireEvent.click(screen.getByRole('button', { name: '撤銷上次匯入' }));
   fireEvent.click(screen.getByRole('button', { name: '撤銷' }));
 }
+async function savedRecordsForEditing() {
+  const parsed = parsePersonalImport('課程名稱,學分,成績\n資料庫,3,85\n英文,2,90', {
+    kind: 'grades', schoolId: context.schoolId, academicYear: '115', semester: '1',
+  });
+  await savePersonalImportBatch(context, parsed.rows);
+  return readPersonalImports(context);
+}
+
+function holdRecordWrite() {
+  let release!: () => void;
+  const request = vi.fn((_key: string, action: () => unknown) => new Promise((resolve, reject) => {
+    release = () => { void Promise.resolve().then(action).then(resolve, reject); };
+  }));
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } });
+  return { request, release: () => release() };
+}
+
+it('opens saved-record editing at the first field and restores its opener on a clean cancel', async () => {
+  await savedRecordsForEditing();
+  render(<PersonalImportCenter />);
+  const opener = await screen.findByRole('button', { name: '編輯 資料庫' });
+  fireEvent.click(opener);
+  const dialog = screen.queryByRole('dialog', { name: '編輯 資料庫' })!;
+  expect(dialog).not.toBeNull();
+  expect(dialog.tagName).toBe('DIALOG');
+  expect(document.activeElement).toBe(within(dialog).getByLabelText('名稱'));
+  const unload = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(unload);
+  expect(unload.defaultPrevented).toBe(false);
+  fireEvent.click(within(dialog).getByRole('button', { name: '取消編輯' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(opener);
+});
+
+it('reveals the saved-record name when a long dialog heading puts initial focus outside its viewport', async () => {
+  const original = (await savedRecordsForEditing())[0];
+  const title = '資料庫管理與資訊應用'.repeat(6);
+  await changePersonalImport(context, original, { ...original, title });
+  render(<PersonalImportCenter />);
+  vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) {
+    return this.tagName === 'DIALOG' ? 180 : 0;
+  });
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    return this.tagName === 'DIALOG'
+      ? new DOMRect(10, 20, 300, 180)
+      : new DOMRect(30, 260, 240, 44);
+  });
+  fireEvent.click(await screen.findByRole('button', { name: `編輯 ${title}` }));
+  const field = within(screen.getByRole('dialog')).getByLabelText('名稱');
+  expect(document.activeElement).toBe(field);
+  expect(Element.prototype.scrollIntoView).toHaveBeenLastCalledWith({ behavior: 'instant', block: 'nearest' });
+  expect(vi.mocked(Element.prototype.scrollIntoView).mock.contexts.at(-1)).toBe(field);
+});
+
+it('keeps dirty saved-record changes through another edit request and an Escape cancellation', async () => {
+  await savedRecordsForEditing();
+  render(<PersonalImportCenter />);
+  const opener = await screen.findByRole('button', { name: '編輯 資料庫' });
+  const other = screen.getByRole('button', { name: '編輯 英文' });
+  fireEvent.click(opener);
+  const dialog = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  const grade = within(dialog).getByLabelText('成績') as HTMLInputElement;
+  fireEvent.change(grade, { target: { value: '88' } });
+  fireEvent.click(other);
+  expect(grade.value).toBe('88');
+  expect(screen.queryByRole('dialog', { name: '編輯 英文' })).toBeNull();
+  const unload = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(unload);
+  expect(unload.defaultPrevented).toBe(true);
+  grade.focus();
+  fireEvent(dialog, new Event('cancel', { cancelable: true }));
+  const confirmation = screen.getByRole('dialog', { name: '放棄這筆修改？' });
+  fireEvent.click(within(confirmation).getByRole('button', { name: '繼續編輯' }));
+  expect(grade.value).toBe('88');
+  expect(document.activeElement).toBe(grade);
+  fireEvent.click(within(dialog).getByRole('button', { name: '取消編輯' }));
+  fireEvent.click(screen.getByRole('button', { name: '放棄修改' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(opener);
+  expect(readPersonalImports(context)[0].grade).toBe('85');
+  const after = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(after);
+  expect(after.defaultPrevented).toBe(false);
+});
+
+it('validates saved-record form submission, focuses the invalid field, and saves through Enter semantics', async () => {
+  await savedRecordsForEditing();
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  const dialog = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  const form = within(dialog).getByRole('form', { name: '修改個人紀錄' });
+  const name = within(dialog).getByLabelText('名稱') as HTMLInputElement;
+  fireEvent.change(name, { target: { value: '' } });
+  fireEvent.submit(form);
+  expect(within(dialog).getByRole('alert').textContent).toContain('請先修正');
+  expect(document.activeElement).toBe(name);
+  expect(readPersonalImports(context)[0].title).toBe('資料庫');
+  fireEvent.change(name, { target: { value: '資料庫管理' } });
+  fireEvent.submit(form);
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(readPersonalImports(context).find((row) => row.title === '資料庫管理')).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '編輯 資料庫管理' }));
+});
+
+it('keeps a failed saved-record save and its error inside the editor', async () => {
+  await savedRecordsForEditing();
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  const dialog = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  const grade = within(dialog).getByLabelText('成績') as HTMLInputElement;
+  fireEvent.change(grade, { target: { value: '88' } });
+  const storageMethods = Object.hasOwn(localStorage, 'setItem') ? localStorage : Object.getPrototypeOf(localStorage);
+  vi.spyOn(storageMethods, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+  fireEvent.submit(within(dialog).getByRole('form', { name: '修改個人紀錄' }));
+  await waitFor(() => expect(within(dialog).getByRole('alert').textContent).toContain('沒有存成'));
+  expect(grade.value).toBe('88');
+  expect(grade.disabled).toBe(false);
+  expect(readPersonalImports(context)[0].grade).toBe('85');
+});
+
+it('blocks duplicate saved-record writes and closing while a storage lock is pending', async () => {
+  const original = (await savedRecordsForEditing())[0];
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  const dialog = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  const grade = within(dialog).getByLabelText('成績') as HTMLInputElement;
+  fireEvent.change(grade, { target: { value: '88' } });
+  const lock = holdRecordWrite();
+  const form = within(dialog).getByRole('form', { name: '修改個人紀錄' });
+  fireEvent.submit(form);
+  fireEvent.submit(form);
+  expect(lock.request).toHaveBeenCalledOnce();
+  expect((grade.closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true);
+  expect(within(dialog).queryByRole('button', { name: '關閉視窗' })).toBeNull();
+  fireEvent(dialog, new Event('cancel', { cancelable: true }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '取消編輯' }));
+  expect(screen.getAllByRole('dialog')).toEqual([dialog]);
+  expect(readPersonalImports(context).find((row) => row.id === original.id)?.grade).toBe('85');
+  await act(async () => { lock.release(); });
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(readPersonalImports(context).find((row) => row.id === original.id)?.grade).toBe('88');
+});
+
+it('restores saved-record search focus when a saved rename no longer matches the filter', async () => {
+  await savedRecordsForEditing();
+  render(<PersonalImportCenter />);
+  const search = screen.getByRole('searchbox', { name: '搜尋個人紀錄' });
+  fireEvent.change(search, { target: { value: '資料庫' } });
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  const editor = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  fireEvent.change(within(editor).getByLabelText('名稱'), { target: { value: '資訊管理' } });
+  fireEvent.submit(within(editor).getByRole('form', { name: '修改個人紀錄' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(screen.queryByRole('button', { name: '編輯 資訊管理' })).toBeNull();
+  expect(document.activeElement).toBe(search);
+  expect(vi.mocked(Element.prototype.scrollIntoView).mock.contexts.at(-1)).toBe(search);
+  expect(readPersonalImports(context).some((row) => row.title === '資訊管理')).toBe(true);
+});
+
+it('reveals an unconfirmed saved-record course link when form validation needs it', async () => {
+  const original = (await savedRecordsForEditing())[0];
+  await changePersonalImport(context, original, { ...original, linkedCourseId: 'course-not-joined' });
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  const editor = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  fireEvent.submit(within(editor).getByRole('form', { name: '修改個人紀錄' }));
+  const link = within(editor).getByRole('combobox', { name: '連結我的課程' });
+  expect(within(editor).getByRole('alert').textContent).toContain('課程連結尚未確認');
+  expect(document.activeElement).toBe(link);
+  expect((link.closest('details') as HTMLDetailsElement).open).toBe(true);
+});
+
+it('reopens a manually collapsed saved-record section before focusing its invalid field', async () => {
+  await savedRecordsForEditing();
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  const editor = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  const year = within(editor).getByLabelText('學年度');
+  fireEvent.change(year, { target: { value: '' } });
+  const section = year.closest('details')!;
+  section.open = false;
+  fireEvent(section, new Event('toggle'));
+  expect(section.open).toBe(false);
+  fireEvent.submit(within(editor).getByRole('form', { name: '修改個人紀錄' }));
+  expect(section.open).toBe(true);
+  expect(document.activeElement).toBe(year);
+});
+
+it('keeps the original saved-record snapshot when another tab updates the ledger', async () => {
+  const original = (await savedRecordsForEditing())[0];
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  const dialog = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  const grade = within(dialog).getByLabelText('成績') as HTMLInputElement;
+  fireEvent.change(grade, { target: { value: '88' } });
+  await act(async () => { await changePersonalImport(context, original, { ...original, grade: '91' }); });
+  expect(grade.value).toBe('88');
+  fireEvent.submit(within(dialog).getByRole('form', { name: '修改個人紀錄' }));
+  await waitFor(() => expect(within(dialog).getByRole('alert').textContent).toContain('另一個頁面'));
+  expect(readPersonalImports(context).find((row) => row.id === original.id)?.grade).toBe('91');
+  expect(grade.value).toBe('88');
+});
+
+it('hides the saved-record portal while identity is paused, resumes the same scope, and clears another account', async () => {
+  await savedRecordsForEditing();
+  const view = render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('成績'), { target: { value: '88' } });
+  context.loading = true;
+  view.rerender(<PersonalImportCenter />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  context.loading = false;
+  view.rerender(<PersonalImportCenter />);
+  expect((within(screen.getByRole('dialog')).getByLabelText('成績') as HTMLInputElement).value).toBe('88');
+  context.owner = 'platform:another-owner';
+  view.rerender(<PersonalImportCenter />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByText('資料庫')).toBeNull();
+});
+
+it.each(['account', 'school', 'pause'] as const)(
+  'rejects a queued saved-record write after a %s change without exposing the old editor',
+  async (change) => {
+    const originalScope = { owner: context.owner, schoolId: context.schoolId };
+    const original = (await savedRecordsForEditing())[0];
+    const view = render(<PersonalImportCenter />);
+    fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+    const editor = screen.getByRole('dialog', { name: '編輯 資料庫' });
+    fireEvent.change(within(editor).getByLabelText('成績'), { target: { value: '88' } });
+    const lock = holdRecordWrite();
+    fireEvent.submit(within(editor).getByRole('form', { name: '修改個人紀錄' }));
+    if (change === 'account') context.owner = 'platform:another-owner';
+    else if (change === 'school') context.schoolId = 'ntu';
+    else context.loading = true;
+    view.rerender(<PersonalImportCenter />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await act(async () => { lock.release(); });
+    expect(readPersonalImports(originalScope).find((row) => row.id === original.id)?.grade).toBe('85');
+    if (change === 'pause') {
+      context.loading = false;
+      view.rerender(<PersonalImportCenter />);
+      const resumed = screen.getByRole('dialog', { name: '編輯 資料庫' });
+      expect((within(resumed).getByLabelText('成績') as HTMLInputElement).value).toBe('88');
+      expect(within(resumed).getByRole('alert').textContent).toContain('帳號或校園已切換');
+    } else {
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(readPersonalImports(context)).toHaveLength(0);
+    }
+  },
+);
+
+it('confirms saved-record removal by name and returns focus to record search after deletion', async () => {
+  const original = (await savedRecordsForEditing())[0];
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  const editor = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  fireEvent.click(within(editor).getByRole('button', { name: '移除這筆' }));
+  const confirmation = screen.getByRole('dialog', { name: '移除「資料庫」？' });
+  expect(document.activeElement).toBe(within(confirmation).getByRole('button', { name: '保留紀錄' }));
+  expect(readPersonalImports(context).some((row) => row.id === original.id)).toBe(true);
+  fireEvent.click(within(confirmation).getByRole('button', { name: '確認移除' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(readPersonalImports(context).some((row) => row.id === original.id)).toBe(false);
+  const search = screen.getByRole('searchbox', { name: '搜尋個人紀錄' });
+  expect(document.activeElement).toBe(search);
+  expect(vi.mocked(Element.prototype.scrollIntoView).mock.contexts.at(-1)).toBe(search);
+});
+
+it('keeps saved-record removal pending until one storage write completes', async () => {
+  const original = (await savedRecordsForEditing())[0];
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  const editor = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  fireEvent.click(within(editor).getByRole('button', { name: '移除這筆' }));
+  const confirmation = screen.getByRole('dialog', { name: '移除「資料庫」？' });
+  const confirm = within(confirmation).getByRole('button', { name: '確認移除' });
+  const lock = holdRecordWrite();
+  fireEvent.click(confirm);
+  fireEvent.click(confirm);
+  fireEvent(confirmation, new Event('cancel', { cancelable: true }));
+  fireEvent.click(within(confirmation).getByRole('button', { name: '保留紀錄' }));
+  expect(lock.request).toHaveBeenCalledOnce();
+  expect(screen.getByRole('dialog', { name: '移除「資料庫」？' })).toBe(confirmation);
+  expect((within(editor).getByLabelText('名稱').closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true);
+  const unload = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(unload);
+  expect(unload.defaultPrevented).toBe(true);
+  expect(readPersonalImports(context).some((row) => row.id === original.id)).toBe(true);
+  await act(async () => { lock.release(); });
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(readPersonalImports(context).some((row) => row.id === original.id)).toBe(false);
+});
+
+it('keeps a failed saved-record removal open with an error and retains the stored record', async () => {
+  const original = (await savedRecordsForEditing())[0];
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  const editor = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  fireEvent.click(within(editor).getByRole('button', { name: '移除這筆' }));
+  const confirmation = screen.getByRole('dialog', { name: '移除「資料庫」？' });
+  const storageMethods = Object.hasOwn(localStorage, 'setItem') ? localStorage : Object.getPrototypeOf(localStorage);
+  vi.spyOn(storageMethods, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+  fireEvent.click(within(confirmation).getByRole('button', { name: '確認移除' }));
+  await waitFor(() => expect(within(confirmation).getByRole('alert')).toBeTruthy());
+  expect(confirmation.textContent).toContain('沒有存成');
+  expect(readPersonalImports(context).some((row) => row.id === original.id)).toBe(true);
+  fireEvent.click(within(confirmation).getByRole('button', { name: '保留紀錄' }));
+  expect(screen.queryByRole('dialog', { name: '移除「資料庫」？' })).toBeNull();
+  expect(within(editor).getByRole('alert').textContent).toContain('沒有存成');
+});
+
 it('reviews edits before persistence, reimport dedupes, undo only reverses the new batch', async () => {
   render(<PersonalImportCenter />);
   await prepare();

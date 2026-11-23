@@ -11,6 +11,7 @@ from playwright.async_api import async_playwright, expect
 from quick_search import check_quick_search
 from feedback import check_action_feedback
 from course_editing import check_course_editing
+from record_editing import check_record_editing
 from navigation import check_navigation_geometry, check_service_navigation, check_today_reading_width
 
 OUTPUT = Path(__file__).resolve().parents[3] / 'artifacts' / 'interface-design'
@@ -709,6 +710,7 @@ async def scenario(browser, origin, config, report):
         await check_section('quick-search', lambda: check_quick_search(page, config, report, capture))
         await check_section('service-navigation', lambda: check_service_navigation(page, config, report, capture))
         await check_section('course-editing', lambda: check_course_editing(page, config, report, capture))
+        await check_section('record-editing', lambda: check_record_editing(page, config, report, capture))
         if config['name'] in ('desktop-light', 'compact-dark-site-motion'):
             await check_section('short-services', lambda: check_short_service_menu(page, report, capture))
             await check_section('short-navigation', lambda: check_short_navigation_panels(page, report, capture))
