@@ -72,7 +72,7 @@ test('既有教師與管理員保留管理權，但不能直接調整角色', as
   }
 });
 
-test('社員管理沿用有效資格與角色，明確校籍衝突時拒絕', async () => {
+test('社員管理沿用目標學校的有效資格與角色', async () => {
   const db = env.authenticatedContext('officer').firestore();
   const club = db.doc('groups/club');
   const roster = db.doc('groups/club/members/student');
@@ -81,15 +81,15 @@ test('社員管理沿用有效資格與角色，明確校籍衝突時拒絕', as
     { status: 'active' },
     { status: 'active', primarySchoolId: 'school' },
     { status: 'active', primarySchoolId: 'school', schoolId: 'other' },
+    { status: 'active', primarySchoolId: 'other', schoolId: 'other' },
   ]) {
     await env.withSecurityRulesDisabled(async (context) => {
       const user = context.firestore().doc('users/officer');
       if (profile === null) await user.delete();
       else await user.set(profile);
     });
-    const check = profile?.schoolId === 'other' ? assertFails : assertSucceeds;
-    await check(club.update({ name: '社團名稱' }));
-    await check(roster.update({ phone: '0911111111' }));
+    await assertSucceeds(club.update({ name: '社團名稱' }));
+    await assertSucceeds(roster.update({ phone: '0911111111' }));
   }
   await env.withSecurityRulesDisabled((context) => context.firestore().doc('users/officer').delete());
 });

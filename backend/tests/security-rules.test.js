@@ -98,7 +98,7 @@ after(async () => {
 
 describe('firestore security rules', () => {
 
-  test('transferred campus health staff cannot replay confidential patient records', async () => {
+  test('health records require the target-school role or patient ownership', async () => {
     const paths = [
       'schools/pu/healthRecords/private-record',
       'schools/pu/healthAppointments/private-appointment',
@@ -153,13 +153,12 @@ describe('firestore security rules', () => {
       await db.doc('users/admin').set(campusBoundProfile('other'));
       await db.doc('users/healthStaff').set(campusBoundProfile('other'));
     });
-    await Promise.all([check(admin, false), check(staff, false)]);
-    await Promise.all([check(admin, false), check(staff, false)]);
+    await Promise.all([check(admin, true), check(staff, true)]);
     // Patients must still be able to retrieve their own records after transfer.
     await seedFirestore(db => db.doc('users/patient').set(campusBoundProfile('other')));
     await check(patient, true);
 
-    // Either conflicting canonical field fails closed; stale membership is insufficient.
+    // Either profile field can differ while the target-school role stays active.
     await seedFirestore(async (db) => {
       await db.doc('users/admin').set({
         status: 'active', schoolId: 'pu', primarySchoolId: 'other',
@@ -168,7 +167,7 @@ describe('firestore security rules', () => {
         status: 'active', schoolId: 'other', primarySchoolId: 'pu',
       });
     });
-    await Promise.all([check(admin, false), check(staff, false)]);
+    await Promise.all([check(admin, true), check(staff, true)]);
 
     await seedFirestore(async (db) => {
       await db.doc('users/admin').set(campusBoundProfile('pu'));
@@ -190,7 +189,7 @@ describe('firestore security rules', () => {
   });
 
 
-  test('transferred campus members cannot replay private AI knowledge reads', async () => {
+  test('private knowledge reads follow active school and course roles', async () => {
     const group = 'groups/ai-knowledge-campus-transfer';
     const schoolOnly = 'schools/pu/aiKnowledge/school-only';
     const staffOnly = 'schools/pu/aiKnowledge/staff-only';
@@ -224,19 +223,19 @@ describe('firestore security rules', () => {
     // Membership and SDK auth context remain unchanged across both transfers.
     await seedFirestore((db) => db.doc('users/alice').set(campusBoundProfile('other')));
     for (let replay = 0; replay < 2; replay++) {
-      await assertFails(alice.doc(schoolOnly).get({ source: 'server' }));
-      await assertFails(alice.doc(groupOnly).get({ source: 'server' }));
+      await assertSucceeds(alice.doc(schoolOnly).get({ source: 'server' }));
+      await assertSucceeds(alice.doc(groupOnly).get({ source: 'server' }));
     }
     await assertSucceeds(alice.doc(publicChunk).get({ source: 'server' }));
     await seedFirestore((db) => db.doc('users/editor').set(campusBoundProfile('other')));
-    await assertFails(editor.doc(staffOnly).get({ source: 'server' }));
+    await assertSucceeds(editor.doc(staffOnly).get({ source: 'server' }));
 
-    // Partial/contradictory school bindings cannot revive an old private audience.
+    // Split profile bindings leave the active target memberships unchanged.
     await seedFirestore((db) => db.doc('users/alice').set({
       status: 'active', schoolId: 'other', primarySchoolId: 'pu',
     }));
-    await assertFails(alice.doc(schoolOnly).get({ source: 'server' }));
-    await assertFails(alice.doc(groupOnly).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(schoolOnly).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(groupOnly).get({ source: 'server' }));
 
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
@@ -260,10 +259,10 @@ describe('firestore security rules', () => {
   });
 
 
-  test('new group creation cannot replay stale school membership after transfer', async () => {
+  test('new group creation requires active membership in the target school', async () => {
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
-      // Keep both memberships active to model delayed source-school revocation.
+      // Keep both memberships active to model simultaneous enrollment.
       await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'student' });
       await db.doc('schools/other-school/members/alice').set({ status: 'active', role: 'student' });
     });
@@ -274,23 +273,22 @@ describe('firestore security rules', () => {
         type: 'course', verification: { status: 'unverified' },
       });
     await assertSucceeds(createGroup('school-create-valid'));
-    await assertFails(createGroup('school-create-wrong-campus', 'other-school'));
+    await assertSucceeds(createGroup('school-create-wrong-campus', 'other-school'));
 
-    // Same authenticated context and old-school membership: an already
-    // transferred user can create at the new campus, never at the old campus.
+    // Both memberships remain active after the login school changes.
     await seedFirestore(db => db.doc('users/alice').set(campusBoundProfile('other-school')));
     await Promise.all([
-      assertFails(createGroup('school-create-old-replay-1')),
-      assertFails(createGroup('school-create-old-replay-2')),
+      assertSucceeds(createGroup('school-create-old-replay-1')),
+      assertSucceeds(createGroup('school-create-old-replay-2')),
     ]);
     await assertSucceeds(createGroup('school-create-new-valid', 'other-school'));
 
-    // Conflicting partial-transfer fields do not bind either campus.
+    // Split profile bindings still permit creation at either active school.
     await seedFirestore(db => db.doc('users/alice').set({
       status: 'active', schoolId: 'other-school', primarySchoolId: 'pu',
     }));
-    await assertFails(createGroup('school-create-conflict-pu'));
-    await assertFails(createGroup('school-create-conflict-other', 'other-school'));
+    await assertSucceeds(createGroup('school-create-conflict-pu'));
+    await assertSucceeds(createGroup('school-create-conflict-other', 'other-school'));
 
     // Active membership still authorizes creation when the profile is missing.
     await seedFirestore(db => db.doc('users/alice').delete());
@@ -305,7 +303,7 @@ describe('firestore security rules', () => {
     await assertSucceeds(createGroup('school-create-restored'));
   });
 
-  test('stale campus managers cannot rewrite course materials and quizzes after transfer', async () => {
+  test('course materials and quizzes require active school and manager membership', async () => {
     const groupId = 'course-curriculum-replay';
     const root = 'groups/' + groupId;
     const paths = [
@@ -335,21 +333,18 @@ describe('firestore security rules', () => {
       await assertSucceeds(teacher.doc(p).update({ title: 'Current instructor edit' }));
     }
 
-    // Reuse the authenticated client: old group and school memberships remain
-    // active despite the canonical account transferring to a new campus.
+    // The same teaching grants stay active after login at another school.
     await seedFirestore(db => db.doc('users/teacher').set(campusBoundProfile('other-school')));
     for (const [i, p] of paths.entries()) {
-      await assertFails(teacher.doc(p).update({ title: 'Stale manager write' }));
-      await assertFails(teacher.doc(p).delete());
-      await assertFails(teacher.doc(p + '-replay-' + i).set({ title: 'Replayed new item' }));
+      await assertSucceeds(teacher.doc(p).update({ title: 'Stale manager write' }));
+      await assertSucceeds(teacher.doc(p + '-replay-' + i).set({ title: 'Replayed new item' }));
     }
-    // During a partially applied school transfer neither conflicting binding
-    // authorizes access to the old campus.
+    // A split profile binding also leaves both grants intact.
     await seedFirestore(db => db.doc('users/teacher').set({
       status: 'active', schoolId: 'other-school', primarySchoolId: 'pu',
     }));
     for (const p of paths) {
-      await assertFails(teacher.doc(p).update({ title: 'Conflicting campus' }));
+      await assertSucceeds(teacher.doc(p).update({ title: 'Conflicting campus' }));
     }
     await seedFirestore(async db => {
       await db.doc('users/teacher').set(campusBoundProfile('pu'));
@@ -378,7 +373,7 @@ describe('firestore security rules', () => {
     }
   });
 
-  test('transferred group managers cannot replay membership and group administration writes', async () => {
+  test('group administration requires an active target-school manager', async () => {
     const groupPath = 'groups/campus-admin-replay';
     const memberPath = groupPath + '/members/alice';
     const managerPath = groupPath + '/members/teacher';
@@ -415,20 +410,19 @@ describe('firestore security rules', () => {
       await db.doc('users/teacher').set(campusBoundProfile('other-school'));
     });
     for (let attempt = 0; attempt < 2; attempt++) {
-      await assertFails(group.update({ title: 'Stale instructor edit' }));
-      await assertFails(member.update({ status: 'removed' }));
-      await assertFails(member.delete());
-      await assertFails(legacy.update({ status: 'removed' }));
+      await assertSucceeds(group.update({ title: 'Stale instructor edit' }));
+      await assertSucceeds(member.update({ status: 'removed' }));
+      await assertSucceeds(legacy.update({ status: 'removed' }));
     }
-    // Conflicting canonical campus fields must not authenticate the old school.
+    // Group administration follows the target memberships.
     await seedFirestore(async (db) => {
       await db.doc('users/teacher').set({
         status: 'active', schoolId: 'other-school', primarySchoolId: 'pu',
       });
     });
-    await assertFails(group.update({ title: 'Conflicting campus edit' }));
-    await assertFails(member.update({ status: 'removed' }));
-    await assertFails(legacy.update({ status: 'removed' }));
+    await assertSucceeds(group.update({ title: 'Conflicting campus edit' }));
+    await assertSucceeds(member.update({ status: 'removed' }));
+    await assertSucceeds(legacy.update({ status: 'removed' }));
     await seedFirestore(async (db) => {
       await db.doc('users/teacher').set(campusBoundProfile('pu'));
       await db.doc('schools/pu/members/teacher').update({ status: 'removed' });
@@ -913,7 +907,7 @@ describe('firestore security rules', () => {
     await assertSucceeds(bob.doc('postLikes/bob-pu').delete());
   });
 
-  test('legacy root posts and scoped comments enforce visibility, campus transfer and revocation', async () => {
+  test('legacy root posts and scoped comments enforce visibility and membership revocation', async () => {
     const publicFields = { published: true, status: 'published', deleted: false, deletedAt: null };
     const nullableFields = ['status', 'published', 'deleted'];
     const nullablePosts = nullableFields.map(field => 'root-null-' + field);
@@ -990,10 +984,10 @@ describe('firestore security rules', () => {
     await seedFirestore(db => db.doc('groups/root-pu/members/teacher').update({ status: 'active' }));
     await assertSucceeds(teacher.doc('groupPosts/root-draft').get());
 
-    // The author must not bypass campus transfer with an otherwise valid group role.
+    // The active author retains preview access after changing login schools.
     await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'ncku' }));
-    await assertFails(alice.doc('groupPosts/root-draft').get());
-    await assertFails(alice.doc('comments/root-draft-comment').get());
+    await assertSucceeds(alice.doc('groupPosts/root-draft').get());
+    await assertSucceeds(alice.doc('comments/root-draft-comment').get());
     await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'pu' }));
     await assertSucceeds(alice.doc('groupPosts/root-draft').get());
 
@@ -1014,20 +1008,19 @@ describe('firestore security rules', () => {
       await assertSucceeds(like.get());
     }
 
-    // Both school fields are server-owned. A partial transfer can leave
-    // old membership active; conflicting fields must not authorize the old ID.
+    // Active school and group memberships permit interaction with visible posts.
     await seedFirestore(db => db.doc('users/bob').update({ primarySchoolId: 'ncku' }));
-    await assertFails(bob.doc('groupPosts/root-public').get());
-    await assertFails(bob.doc('comments/root-public-comment').get());
-    await assertFails(commentsFor(bob, 'root-public'));
-    await assertFails(bob.doc('postLikes/root-existing-like').get());
-    await assertFails(bob.doc('postLikes/conflicting-school-replay').set({ postId: 'root-public', userId: 'bob' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await assertSucceeds(bob.doc('comments/root-public-comment').get());
+    await assertSucceeds(commentsFor(bob, 'root-public'));
+    await assertSucceeds(bob.doc('postLikes/root-existing-like').get());
+    await assertSucceeds(bob.doc('postLikes/conflicting-school-replay').set({ postId: 'root-public', userId: 'bob' }));
     await seedFirestore(db => db.doc('users/bob').update({ primarySchoolId: 'pu' }));
     await assertSucceeds(bob.doc('groupPosts/root-public').get());
 
     await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'ncku' }));
-    await assertFails(bob.doc('groupPosts/root-public').get());
-    await assertFails(bob.doc('postLikes/reverse-school-replay').set({ postId: 'root-public', userId: 'bob' }));
+    await assertSucceeds(bob.doc('groupPosts/root-public').get());
+    await assertSucceeds(bob.doc('postLikes/reverse-school-replay').set({ postId: 'root-public', userId: 'bob' }));
     await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'pu' }));
     await assertSucceeds(bob.doc('groupPosts/root-public').get());
 
@@ -1036,16 +1029,6 @@ describe('firestore security rules', () => {
     await assertSucceeds(bob.doc('groupPosts/root-public').get());
     await seedFirestore(db => db.doc('users/bob').set({ status: 'active', schoolId: 'pu', primarySchoolId: 'pu' }));
 
-    // Reuse the same signed-in client: stale old-school group and school
-    // membership documents must not survive a canonical school transfer.
-    await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'ncku' }));
-    await assertFails(bob.doc('groupPosts/root-public').get());
-    await assertFails(bob.doc('comments/root-public-comment').get());
-    await assertFails(bob.doc('postLikes/root-existing-like').get());
-    await assertFails(bob.doc('postLikes/root-new-like').delete());
-    await assertFails(bob.doc('postLikes/root-replay').set({ postId: 'root-public', userId: 'bob' }));
-    await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'pu' }));
-    await assertSucceeds(bob.doc('groupPosts/root-public').get());
     await seedFirestore(db => db.doc('groups/root-pu/members/bob').update({ status: 'revoked' }));
     for (const id of ['root-public', 'root-legacy', 'root-active', ...nullablePosts]) {
       await assertFails(bob.doc('groupPosts/' + id).get({ source: 'server' }));
@@ -1064,9 +1047,7 @@ describe('firestore security rules', () => {
     await seedFirestore(db => db.doc('groups/root-pu/members/bob').update({ status: 'revoked' }));
     await assertFails(bob.doc('postLikes/root-new-like').delete());
     await seedFirestore(db => db.doc('groups/root-pu/members/bob').update({ status: 'active' }));
-    await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'ncku' }));
-    await assertFails(bob.doc('postLikes/root-new-like').delete());
-    await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'pu' }));
+    await seedFirestore(db => db.doc('users/bob').set(campusBoundProfile('ncku')));
     await assertSucceeds(bob.doc('postLikes/root-new-like').delete());
   });
 
@@ -3131,7 +3112,7 @@ describe('firestore security rules', () => {
   });
 
 
-  test('stale campus staff grants cannot replay private receipts and grading metadata', async () => {
+  test('private staff reads require active target memberships', async () => {
     const group = 'groups/staff-campus-replay-1';
     const assignment = group + '/assignments/work-1';
     const nested = assignment + '/submissions/bob';
@@ -3191,16 +3172,14 @@ describe('firestore security rules', () => {
     // The assigned reviewer retains access to their historical receipt.
     await assertSucceeds(aliceDb.doc(review).get({ source: 'server' }));
 
-    // Old membership remains active, but the profile has a conflicting school.
-    // The same authenticated client must lose every staff-only route immediately.
+    // Both target memberships stay active when either profile field changes.
     await seedFirestore((db) => db.doc('users/teacher').update({ primarySchoolId: 'other' }));
-    await denyStaleStaff();
-    await denyStaleStaff();
+    await allowStaffReads();
     await seedFirestore((db) => db.doc('users/teacher').update({ primarySchoolId: 'pu' }));
     await allowStaffReads();
 
     await seedFirestore((db) => db.doc('users/teacher').update({ schoolId: 'other' }));
-    await denyStaleStaff();
+    await allowStaffReads();
     await seedFirestore((db) => db.doc('users/teacher').update({ schoolId: 'pu' }));
     await allowStaffReads();
 
@@ -3221,7 +3200,7 @@ describe('firestore security rules', () => {
     await assertSucceeds(teacherDb.doc(extraReview).delete());
   });
 
-  test('course assignment metadata writes revoke immediately on canonical school transfer', async () => {
+  test('course assignment metadata writes revoke when target membership or account access is revoked', async () => {
     const group = 'groups/assignment-campus-transfer-1';
     const base = group + '/assignments/';
     const draft = base + 'draft';
@@ -3264,14 +3243,9 @@ describe('firestore security rules', () => {
     await assertSucceeds(teacher.doc(published).update(revised('Legitimate published edit')));
     await assertFails(bob.doc(fresh).set({ type: 'assignment', title: 'Student escalation' }));
 
-    // The old school and course membership remain active. The same signed-in
-    // teacher must lose every write when either server-owned school ID diverges.
-    await seedFirestore(db => db.doc('users/teacher').update({ primarySchoolId: 'other' }));
-    await cannotWrite();
-    await cannotWrite();
-    await seedFirestore(db => db.doc('users/teacher').update({ primarySchoolId: 'pu', schoolId: 'other' }));
-    await cannotWrite();
-    await seedFirestore(db => db.doc('users/teacher').update({ schoolId: 'pu' }));
+    await seedFirestore(db => db.doc('users/teacher').set(campusBoundProfile('other')));
+    await assertSucceeds(teacher.doc(draft).update({ title: 'Cross-school edit' }));
+    await assertSucceeds(teacher.doc(published).update(revised('Cross-school published edit')));
 
     await seedFirestore(db => db.doc(group + '/members/teacher').update({ status: 'removed' }));
     await cannotWrite();
@@ -3329,7 +3303,7 @@ describe('firestore security rules', () => {
     await assertFails(reviewer.get({ source: 'server' }));
     await assertFails(owner.get({ source: 'server' }));
     await seedFirestore(db => db.doc('users/teacher').update({ primarySchoolId: 'other' }));
-    await assertFails(teacher.get({ source: 'server' }));
+    await assertSucceeds(teacher.get({ source: 'server' }));
     await seedFirestore(db => db.doc('users/teacher').update({ primarySchoolId: 'pu' }));
     await assertSucceeds(teacher.get({ source: 'server' }));
   });
@@ -3378,10 +3352,10 @@ describe('firestore security rules', () => {
     await assertSucceeds(alice.get({ source: 'server' }));
     await assertSucceeds(alice.update({ comment: 'Authorized feedback' }));
     await assertSucceeds(carol.get({ source: 'server' }));
-    // Live campus revocation must apply to the very same authenticated client.
+    // Changing login school preserves an active review assignment.
     await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'other' }));
-    await assertFails(alice.get({ source: 'server' }));
-    await assertFails(alice.update({ comment: 'Replay after transfer' }));
+    await assertSucceeds(alice.get({ source: 'server' }));
+    await assertSucceeds(alice.update({ comment: 'Feedback from a cross-school member' }));
     await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'pu' }));
     await assertSucceeds(alice.get({ source: 'server' }));
 
@@ -3456,9 +3430,9 @@ describe('firestore security rules', () => {
     await seedFirestore(db => db.doc(review).set({ submissionOwnerId: 'bob' }));
     await allowAlice();
 
-    // Revocation applies to the same authenticated client, including replays.
+    // The same authenticated client retains access until target membership is revoked.
     await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'other' }));
-    await denyAlice();
+    await allowAlice();
     await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'pu' }));
     await allowAlice();
     await seedFirestore(db => db.doc(group + '/members/alice').update({ status: 'removed' }));
@@ -3536,8 +3510,6 @@ describe('firestore security rules', () => {
       await db.doc(`${group}/members/teacher`).update({ status: 'active' });
       await db.doc('users/teacher').update({ schoolId: 'other' });
     });
-    await denyTeacher();
-    await seedFirestore(db => db.doc('users/teacher').set({ status: 'active', schoolId: 'pu' }));
     await assertSucceeds(teacherRow.get({ source: 'server' }));
     await assertSucceeds(teacherRow.update({ finalScore: 93 }));
     await seedFirestore(db => db.doc('schools/pu/members/teacher').update({ status: 'removed' }));
@@ -3869,7 +3841,9 @@ describe('firestore security rules', () => {
       await db.doc('schools/pu/members/alice').update({ status: 'active' });
       await db.doc('users/alice').update({ primarySchoolId: 'other' });
     });
-    await denyAlice();
+    await assertSucceeds(aliceLegacy.get({ source: 'server' }));
+    await assertSucceeds(aliceNested.get({ source: 'server' }));
+    await assertSucceeds(aliceReview.update({ comment: 'Feedback after changing login school' }));
     await seedFirestore((db) => db.doc('users/alice').delete());
     await assertSucceeds(aliceLegacy.get({ source: 'server' }));
     await assertSucceeds(aliceNested.get({ source: 'server' }));
@@ -4816,7 +4790,7 @@ describe('storage security rules', () => {
   });
 
 
-  test('conflicting school bindings revoke story GET, LIST, receipts and owner mutations', async () => {
+  test('story access accepts either profile binding while receipts require schoolId', async () => {
     const now = Date.now();
     const storyPath = 'campusStories/transfer-conflict';
     const receiptPath = storyPath + '/schools/pu/authors/alice/views/bob';
@@ -4852,15 +4826,14 @@ describe('storage security rules', () => {
       await db.doc('users/bob').update({ primarySchoolId: 'other' });
       await db.doc('users/alice').update({ schoolId: 'other' });
     });
-    await assertFails(story.get());
-    await assertFails(list.get());
-    await assertFails(receipt.get());
-    await assertFails(bob.doc('campusStories/replayed-transfer').set({
+    await assertSucceeds(story.get());
+    await assertSucceeds(list.get());
+    await assertSucceeds(receipt.get());
+    await assertSucceeds(bob.doc('campusStories/replayed-transfer').set({
       ...payload, authorUid: 'bob',
     }));
-    await assertFails(alice.doc(storyPath).get());
-    await assertFails(alice.doc(storyPath).delete());
-    await assertFails(alice.doc('campusStories/forged-transfer').set(payload));
+    await assertSucceeds(alice.doc(storyPath).get());
+    await assertSucceeds(alice.doc('campusStories/forged-transfer').set(payload));
 
     await seedFirestore(async (db) => {
       await db.doc('users/bob').update({ primarySchoolId: 'pu' });
@@ -5841,7 +5814,7 @@ describe('course assignment submissions', () => {
     });
     return { batch, revision };
   }
-  test('transferred teachers cannot replay initial grading or audited corrections with old memberships', async () => {
+  test('cross-school teachers can grade until target membership is revoked', async () => {
     await seedPublishedGrade();
     const teacher = testEnv.authenticatedContext('teacher').firestore();
     const student = testEnv.authenticatedContext('alice').firestore();
@@ -5867,29 +5840,7 @@ describe('course assignment submissions', () => {
     const revise = () => correctionBatch(teacher).batch.commit();
     await assertFails(pathTo(student).update({ gradeScore: 90 }));
 
-    // Server changes canonical campus only; the same authenticated teacher
-    // context and both old school/course memberships remain in place.
-    await seedFirestore(db => db.doc('users/teacher').set({ primarySchoolId: 'other-campus' }));
-    await Promise.all([assertFails(publish()), assertFails(provisional())]);
-    await assertFails(revise());
-    await assertFails(revise()); // lost-response replay
-    // A transferred teacher must also lose private-submission read access.
-    // Inspect the unchanged receipts only through the isolated admin fixture.
-    await assertFails(initial.get());
-    await assertFails(legacy.get());
-    await testEnv.withSecurityRulesDisabled(async (context) => {
-      const db = context.firestore();
-      assert.equal((await db.doc(initial.path).get()).data().gradePublished, undefined);
-      assert.equal((await db.doc(legacy.path).get()).data().grade, undefined);
-    });
-
-    // Neither one-sided transfer direction may authorize an old-campus grade.
-    await seedFirestore(db => db.doc('users/teacher').set({
-      status: 'active', schoolId: 'other-campus', primarySchoolId: 'school-1',
-    }));
-    await assertFails(publish());
-    await assertFails(revise());
-    await seedFirestore(db => db.doc('users/teacher').set(campusBoundProfile('school-1')));
+    await seedFirestore(db => db.doc('users/teacher').set(campusBoundProfile('other-campus')));
     await seedFirestore(db => db.doc('schools/school-1/members/teacher').update({ status: 'removed' }));
     await assertFails(provisional());
     await assertFails(revise());
@@ -6021,7 +5972,7 @@ describe('protected attendance records', () => {
     await assertFails(group('removed').collection('liveSessionSecrets').doc('current').get());
   });
 
-  test('transferred staff cannot replay attendance QR secrets, private roster or correction logs', async () => {
+  test('attendance staff reads follow active target-school and course membership', async () => {
     await seedAttendance();
     await seedFirestore((db) => db.doc('groups/attendance-class/attendanceSessions/current/attendanceCorrections/rev-1').set({
       studentUid: 'alice', teacherUid: 'teacher', reason: 'Synthetic correction',
@@ -6058,13 +6009,12 @@ describe('protected attendance records', () => {
 
     // Canonical profile changes are server-side, without replacing the old auth token.
     await seedFirestore((db) => db.doc('users/teacher').set({ primarySchoolId: 'other-campus' }));
-    await expectStaffDenied();
-    await expectStaffDenied(); // replay with the same authenticated context
+    await expectStaffAllowed();
     await seedFirestore((db) => db.doc('users/teacher').update({ primarySchoolId: 'tw-demo-uni' }));
     await expectStaffAllowed();
 
     await seedFirestore((db) => db.doc('users/teacher').update({ schoolId: 'other-campus' }));
-    await expectStaffDenied();
+    await expectStaffAllowed();
     await seedFirestore((db) => db.doc('users/teacher').update({ schoolId: 'tw-demo-uni' }));
     await expectStaffAllowed();
 
@@ -8200,23 +8150,32 @@ describe('legacy authorization matrix against the PR merge base', () => {
 
       put(group, { schoolId: 'matrix-school', type: 'course' });
       put(assignment, { type: 'assignment', points: 100 });
-      for (const uid of ['teacher', 'member', 'former', 'withdrawn', 'outsider', 'transferredTeacher']) {
-        const staff = ['teacher', 'transferredTeacher'].includes(uid);
-        put(`users/${uid}`, {
-          status: 'active',
-          ...(['former', 'transferredTeacher'].includes(uid) ? { schoolId: 'new-school' } : {}),
-        });
+      for (const uid of ['teacher', 'member', 'admin', 'healthStaff', 'former', 'withdrawn', 'outsider']) {
+        const staff = uid === 'teacher';
+        put(`users/${uid}`, campusBoundProfile('new-school'));
         put(`${school}/members/${uid}`, {
           status: uid === 'former' ? 'removed' : 'active',
-          role: staff ? 'editor' : 'student',
+          role: uid === 'admin' ? 'admin' : staff ? 'editor' : 'student',
         });
-        if (uid !== 'outsider') {
+        put(`schools/new-school/members/${uid}`, { status: 'active', role: 'student' });
+        if (['teacher', 'member', 'former', 'withdrawn'].includes(uid)) {
           put(`${group}/members/${uid}`, {
             status: ['former', 'withdrawn'].includes(uid) ? 'removed' : 'active',
             role: staff ? 'instructor' : 'member',
           });
         }
       }
+      put(`${school}/serviceRoles/healthStaff`, { status: 'active', health: true });
+      put(`${school}/healthRecords/private`, { userId: 'patient' });
+      put(`${school}/healthAppointments/private`, { userId: 'patient' });
+      put(`${group}/knowledgeBase/handout`, { type: 'reference', title: 'Handout' });
+      put(`${group}/modules/week-one/materials/lesson`, { title: 'Lesson' });
+      put(`${group}/quizzes/check`, { title: 'Quiz' });
+      put(`${group}/milestones/first`, { title: 'Milestone' });
+      put('groupMembers/matrix-member', { groupId: 'matrix-course', userId: 'member' });
+      put(`${reviews}/member`, { reviewerId: 'member', submissionOwnerId: 'reviewee', submittedAt: null });
+      put('submissions/matrix-reviewee', { userId: 'reviewee', groupId: 'matrix-course', assignmentId: 'work' });
+      put(`${assignment}/submissions/member/gradeRevisions/prior-revision`, { revision: 1 });
       put(`${assignment}/submissions/member`, {
         userId: 'member', submittedAt: date, content: 'Answer',
       });
@@ -8256,30 +8215,52 @@ describe('legacy authorization matrix against the PR merge base', () => {
   const update = (doc, data) => (db) => db.doc(doc).update(data);
   const remove = (doc) => (db) => db.doc(doc).delete();
   const cases = [
-    ['active school member without bindings creates a group', 'member',
+    ['cross-school teacher updates course metadata', 'teacher', update(group, { title: 'Course' })],
+    ['cross-school teacher updates group membership', 'teacher',
+      update(`${group}/members/member`, { displayName: 'Member' })],
+    ['cross-school teacher updates legacy group membership', 'teacher',
+      update('groupMembers/matrix-member', { displayName: 'Member' })],
+    ...['knowledgeBase/handout', 'modules/week-one/materials/lesson', 'quizzes/check', 'milestones/first']
+      .map(doc => [`cross-school teacher edits ${doc}`, 'teacher', update(`${group}/${doc}`, { title: 'Edit' })]),
+    ['cross-school teacher reads another member’s gradebook row', 'teacher', get(`${grades}/historical`)],
+    ['cross-school teacher writes the gradebook', 'teacher', set(`${grades}/new`, { userId: 'member' })],
+    ['cross-school teacher reads an audit revision', 'teacher',
+      get(`${assignment}/submissions/member/gradeRevisions/prior-revision`)],
+    ['cross-school teacher reads another member’s nested submission', 'teacher', get(`${assignment}/submissions/member`)],
+    ['cross-school teacher reads another member’s legacy submission', 'teacher', get(legacySubmission)],
+    ['cross-school reviewer reads an assigned legacy submission', 'member', get('submissions/matrix-reviewee')],
+    ['cross-school reviewer reads their assignment', 'member', get(`${reviews}/member`)],
+    ['cross-school reviewer edits their feedback', 'member', update(`${reviews}/member`, { comment: 'Feedback' })],
+    ['cross-school teacher assigns a reviewer', 'teacher',
+      set(`${reviews}/new`, { reviewerId: 'new', submissionOwnerId: 'member' })],
+    ...['admin', 'healthStaff'].flatMap(uid => ['healthRecords', 'healthAppointments'].map(collection =>
+      [`cross-school ${uid} reads ${collection}`, uid, get(`${school}/${collection}/private`)])),
+    ['other-school account without a target role cannot read a health record', 'outsider',
+      get(`${school}/healthRecords/private`), false, false],
+    ['active school member creates a group', 'member',
       set('groups/matrix-created', { schoolId: 'matrix-school', createdBy: 'member' })],
-    ['teacher without bindings creates course content', 'teacher',
+    ['teacher creates course content', 'teacher',
       set(`${group}/modules/new`, { title: 'Module' })],
-    ['teacher without bindings creates an assignment', 'teacher',
+    ['teacher creates an assignment', 'teacher',
       set(`${group}/assignments/new`, { title: 'Assignment' })],
-    ['teacher without bindings publishes a grade', 'teacher',
+    ['teacher publishes a grade', 'teacher',
       update(`${assignment}/submissions/member`, {
         gradeScore: 90, gradeFeedback: 'Good work', gradePublished: true,
         gradePublishedBy: 'teacher', gradePublishedAt: serverTimestamp(),
       })],
-    ['teacher without bindings lists attendance records', 'teacher',
+    ['teacher lists attendance records', 'teacher',
       (db) => db.collection(`${attendance}/attendanceRecords`).get({ source: 'server' })],
-    ['teacher without bindings reads attendance corrections', 'teacher',
+    ['teacher reads attendance corrections', 'teacher',
       get(`${attendance}/attendanceCorrections/change`)],
-    ['teacher without bindings reads their session secret record', 'teacher',
+    ['teacher reads their session secret record', 'teacher',
       get(`${group}/liveSessionSecrets/meeting`)],
-    ['active member without bindings reads private school knowledge', 'member',
+    ['active member reads private school knowledge', 'member',
       get(`${school}/aiKnowledge/school`)],
-    ['active editor without bindings reads private school knowledge', 'teacher',
+    ['active editor reads private school knowledge', 'teacher',
       get(`${school}/aiKnowledge/editor`)],
-    ['active member without bindings reads private course knowledge', 'member',
+    ['active member reads private course knowledge', 'member',
       get(`${group}/aiKnowledge/course`)],
-    ['active member without bindings reads a legacy post', 'member', get(visiblePost)],
+    ['active member reads a legacy post', 'member', get(visiblePost)],
     ['active member reads comments on the legacy post', 'member', get('comments/matrix-legacy')],
     ['active member reads their existing legacy like', 'member', get('postLikes/matrix-legacy-own')],
     ['active member reads a peer receipt on the legacy post', 'member', get('postLikes/matrix-legacy-peer')],
@@ -8290,13 +8271,13 @@ describe('legacy authorization matrix against the PR merge base', () => {
     ['transferred owner reads a historical grade row without userId', 'former', get(`${grades}/former`)],
     ['transferred owner queries historical grades by userId', 'former',
       (db) => db.collection(grades).where('userId', '==', 'former').get({ source: 'server' })],
-    ['withdrawn owner without bindings reads a historical grade', 'withdrawn', get(`${grades}/withdrawn`)],
-    ['enrolled owner without bindings reads released feedback', 'member', get(`${reviews}/feedback-member`)],
+    ['withdrawn owner reads a historical grade', 'withdrawn', get(`${grades}/withdrawn`)],
+    ['enrolled owner reads released feedback', 'member', get(`${reviews}/feedback-member`)],
     ['transferred owner reads released feedback', 'former', get(`${reviews}/feedback-former`)],
     ['transferred owner queries their released feedback', 'former',
       (db) => db.collection(reviews).where('submissionOwnerId', '==', 'former')
         .where('submittedAt', '>=', date).get({ source: 'server' })],
-    ['withdrawn owner without bindings reads released feedback', 'withdrawn', get(`${reviews}/feedback-withdrawn`)],
+    ['withdrawn owner reads released feedback', 'withdrawn', get(`${reviews}/feedback-withdrawn`)],
     ['revoked reviewer cannot read another student’s legacy submission', 'withdrawn',
       get(legacySubmission), true, false],
     ['revoked reviewer cannot read the old review assignment', 'withdrawn',
@@ -8309,8 +8290,7 @@ describe('legacy authorization matrix against the PR merge base', () => {
       get(`${reviews}/outsider`), true, false],
     ['non-member assigned reviewer cannot edit the review assignment', 'outsider',
       update(`${reviews}/outsider`, { comment: 'Feedback' }), true, false],
-    ['transferred teacher with conflicting school cannot read the old attendance roster', 'transferredTeacher',
-      get(`${attendance}/attendanceRecords/member`), true, false],
+    ['cross-school teacher reads the attendance roster', 'teacher', get(`${attendance}/attendanceRecords/member`)],
     ['member cannot open a hidden post', 'member', get(hiddenPost), true, false],
     ['member cannot read a hidden post’s like receipt', 'member', get('postLikes/matrix-hidden'), true, false],
     ['member cannot add a like to a hidden post', 'member',
