@@ -140,7 +140,6 @@ test.each([
   await expect(refreshCampusSenseSnapshot({ scope, isCurrent: () => true })).rejects.toThrow('invalid-sense-response');
 });
 
-
 // The scope/freshness check and row-date parser at merge-base 1a1f36863.
 function mergeBaseValid(snapshot: CampusSenseSnapshot, now: number): CampusSenseSnapshot | null {
   if (!scope.uid || !scope.schoolId || !snapshot ||
@@ -159,37 +158,38 @@ function mergeBaseDate(value: unknown): string | null {
 }
 
 const dates = [
-  ['ISO Z', '2026-11-02T01:00:00Z', 'preserve', true],
-  ['offset crossing a UTC day', '2026-11-02T00:30:00+08:00', 'preserve', true],
-  ['no timezone', '2026-11-02T09:00:00', 'preserve', false],
-  ['legacy text', 'November 2, 2026 09:00:00 GMT', 'preserve', false],
-  ['positive extended year', '+010000-01-01T00:00:00.000Z', 'preserve', true],
-  ['negative extended year', '-000001-01-01T00:00:00.000Z', 'preserve', true],
-  ['extended leap day', '+010000-02-29T00:00:00.000Z', 'preserve', true],
-  ['date-only year under 100', '0000-02-29', 'preserve', false],
-  ['space-padded legacy date', ' November 2, 2026 09:00:00 GMT ', 'preserve', false],
-  ['milliseconds', '2026-11-02T09:00:00.120+08:00', 'preserve', true],
-  ['serialized numeric timestamp', new Date(1793581200123).toISOString(), 'preserve', true],
-  ['leap day', '2028-02-29T08:15:00Z', 'preserve', true],
-  ['offset beyond 14 hours', '2026-10-28T00:30:00+15:00', 'preserve', true],
-  ['non-leap day', '2026-02-29T08:00:00Z', 'rollover', true],
-  ['February 30', '2026-02-30T08:00:00Z', 'rollover', true],
-  ['legacy February 30', 'February 30, 2026 08:00:00 GMT', 'rollover', false],
-  ['legacy April 31', '4/31/2026', 'rollover', false],
-  ['midnight rollover', '2026-11-02T24:00:00Z', 'rollover', true],
-  ['April 31', '2026-04-31T09:00:00Z', 'rollover', true],
-  ['extended rollover', '-000001-02-29T08:00:00-08:00', 'rollover', true],
-  ['invalid offset', '2026-10-28T00:30:00+24:00', 'invalid', false],
-  ['invalid text', 'not-a-date', 'invalid', false],
-  ['empty string', '', 'invalid', false],
-  ['non-string', 42, 'invalid', false],
-  ['null', null, 'preserve', false],
+  ['ISO Z', '2026-11-02T01:00:00Z', true],
+  ['offset crossing a UTC day', '2026-11-02T00:30:00+08:00', true],
+  ['no timezone', '2026-11-02T09:00:00', false],
+  ['legacy text', 'November 2, 2026 09:00:00 GMT', false],
+  ['positive extended year', '+010000-01-01T00:00:00.000Z', true],
+  ['negative extended year', '-000001-01-01T00:00:00.000Z', true],
+  ['extended leap day', '+010000-02-29T00:00:00.000Z', true],
+  ['date-only year under 100', '0000-02-29', false],
+  ['space-padded legacy date', ' November 2, 2026 09:00:00 GMT ', false],
+  ['milliseconds', '2026-11-02T09:00:00.120+08:00', true],
+  ['serialized numeric timestamp', new Date(1793581200123).toISOString(), true],
+  ['leap day', '2028-02-29T08:15:00Z', true],
+  ['offset beyond 14 hours', '2026-10-28T00:30:00+15:00', true],
+  ['non-leap day', '2026-02-29T08:00:00Z', true],
+  ['February 30', '2026-02-30T08:00:00Z', true],
+  ['legacy February 30', 'February 30, 2026 08:00:00 GMT', false],
+  ['legacy April 31', '4/31/2026', false],
+  ['midnight rollover', '2026-11-02T24:00:00Z', true],
+  ['April 31', '2026-04-31T09:00:00Z', true],
+  ['extended rollover', '-000001-02-29T08:00:00-08:00', true],
+  ['invalid offset', '2026-10-28T00:30:00+24:00', false],
+  ['invalid text', 'not-a-date', false],
+  ['empty string', '', false],
+  ['non-string', {}, false],
+  ['numeric timestamp', 1793581200123, false],
+  ['null', null, false],
 ] as const;
 
-describe.each(dates)('%s row date', (_label, date, behavior, confirmedOffline) => {
+describe.each(dates)('%s row date', (_label, date, confirmedOffline) => {
   describe.each(['date', 'number', 'missing'] as const)('%s field', (field) => {
     test.each(['plain', 'some=null', 'map=null', 'read-only length', 'iterator=null'] as const)(
-      '%s arrays preserve reuse and isolate row-date errors on refresh', async (arrayShape) => {
+      '%s arrays preserve snapshot reuse and offline reads', async (arrayShape) => {
         const payload = envelope();
         const now = Date.parse(payload.checkedAt);
         const applyDate = (row: object, key: string) => {
@@ -206,11 +206,6 @@ describe.each(dates)('%s row date', (_label, date, behavior, confirmedOffline) =
           if (arrayShape === 'iterator=null') Object.defineProperty(items, Symbol.iterator, { value: null });
         };
         const restored = { ...payload, userId: scope.uid } as CampusSenseSnapshot;
-        const bare = {
-          ...restored,
-          assignments: { ...restored.assignments, items: restored.assignments.items.slice() },
-          announcements: { ...restored.announcements, items: restored.announcements.items.slice() },
-        };
         modify(payload.assignments.items);
         modify(payload.announcements.items);
 
@@ -229,38 +224,68 @@ describe.each(dates)('%s row date', (_label, date, behavior, confirmedOffline) =
         const undated = runOfflineCampusTool(undatedQuestion, context, restored, scope.uid);
         expect(undated?.assignmentRead?.items.map(({ title }) => title))
           .toEqual(field === 'date' && confirmedOffline ? [] : ['週二練習']);
-
-        const rowDate = field === 'date' ? date : field === 'number' ? 42 : undefined;
-        let expectedDate: string | null = null;
-        if (field !== 'date' || behavior === 'invalid') {
-          expect(() => mergeBaseDate(rowDate)).toThrow('invalid-sense-response');
-        } else {
-          const baseDate = mergeBaseDate(rowDate);
-          if (behavior === 'preserve') expectedDate = baseDate;
-        }
-        mockCallable.mockResolvedValueOnce({ data: payload });
-        const fresh = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
-        expect(fresh).toEqual({
-          ...bare,
-          assignments: {
-            ...bare.assignments,
-            items: [bare.assignments.items[0], { ...bare.assignments.items[1], dueAt: expectedDate }],
-            coverage: { complete: true, pages: 1, reason: 'complete' },
-          },
-          announcements: {
-            ...bare.announcements,
-            items: [{ ...bare.announcements.items[0], publishedAt: expectedDate }, bare.announcements.items[1]],
-          },
-        });
-        expect(validCampusSenseSnapshot(fresh, scope, now)).toBe(fresh);
-        if (expectedDate === null) {
-          expect(runOfflineCampusTool(undatedQuestion, context, fresh, scope.uid)?.assignmentRead?.items)
-            .toEqual([{ ...bare.assignments.items[1], dueAt: null }]);
-        }
       },
     );
   });
 });
+
+describe.each(['dueAt', 'publishedAt'] as const)('%s on refresh', (field) => {
+  test.each([...dates, ['missing', undefined, false] as const])(
+    '%s matches the merge-base date parser', async (_label, date) => {
+      const payload = envelope();
+      const row = field === 'dueAt' ? payload.assignments.items[1] : payload.announcements.items[0];
+      if (date === undefined) Reflect.deleteProperty(row, field);
+      else Reflect.set(row, field, date);
+
+      // Snapshot the expected result before passing the payload to refresh.
+      let expectedDate: string | null;
+      try {
+        expectedDate = mergeBaseDate(date);
+      } catch (error) {
+        expect(error).toEqual(new Error('invalid-sense-response'));
+        mockCallable.mockResolvedValueOnce({ data: payload });
+        await expect(refreshCampusSenseSnapshot({ scope, isCurrent: () => true }))
+          .rejects.toThrow('invalid-sense-response');
+        return;
+      }
+
+      const expected = {
+        ...payload,
+        userId: scope.uid,
+        assignments: {
+          ...payload.assignments,
+          items: field === 'dueAt'
+            ? [payload.assignments.items[0], { ...payload.assignments.items[1], dueAt: expectedDate }]
+            : payload.assignments.items,
+          coverage: { complete: true, pages: 1, reason: 'complete' },
+        },
+        announcements: {
+          ...payload.announcements,
+          items: field === 'publishedAt'
+            ? [{ ...payload.announcements.items[0], publishedAt: expectedDate }]
+            : payload.announcements.items,
+        },
+      };
+      mockCallable.mockResolvedValueOnce({ data: payload });
+      const fresh = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
+      expect(fresh).toStrictEqual(expected);
+      expect(validCampusSenseSnapshot(fresh, scope, Date.parse(payload.checkedAt))).toBe(fresh);
+    },
+  );
+});
+
+test.each(['some', 'map', 'slice', Symbol.iterator] as const)(
+  'refresh reads source rows when %s is shadowed', async (method) => {
+    const payload = envelope();
+    for (const items of [payload.assignments.items, payload.announcements.items]) {
+      Object.defineProperty(items, method, { value: null });
+    }
+    mockCallable.mockResolvedValueOnce({ data: payload });
+    const fresh = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
+    expect(fresh.assignments.items).toEqual(payload.assignments.items);
+    expect(fresh.announcements.items).toEqual(payload.announcements.items);
+  },
+);
 
 test('keeps the merge-base freshness check for a restored legacy synchronization time', () => {
   const snapshot = { ...envelope(), userId: scope.uid, checkedAt: '2026-02-30T08:00:00Z' } as CampusSenseSnapshot;
