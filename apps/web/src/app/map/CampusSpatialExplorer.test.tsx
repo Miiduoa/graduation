@@ -2904,6 +2904,48 @@ it('closes an emptied tour and does not reopen it when location data returns', a
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
+it('opens destination details and walking navigation when the selected deep link resolves during the tour', async () => {
+  const props = { school: 'other-school', onSelect: vi.fn() };
+  const view = render(<CampusSpatialExplorer {...props} locations={[places[1]]} selected={null} />);
+  const tour = within(await open());
+  expect(tour.getByText('請選擇地點，確認位置後再開啟導航。')).toBeTruthy();
+  expect(tour.queryByRole('link', { name: /步行導航/ })).toBeNull();
+
+  await act(async () => {
+    view.rerender(<CampusSpatialExplorer {...props} locations={places} selected={places[0]} />);
+  });
+
+  expect(tour.getByRole('heading', { name: places[0].name })).toBeTruthy();
+  const google = new URL(tour.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!);
+  const apple = new URL(tour.getByRole('link', { name: '開啟 Apple 地圖步行導航' }).getAttribute('href')!);
+  const coordinates = `${places[0].lat},${places[0].lng}`;
+  expect(google.searchParams.get('destination')).toBe(coordinates);
+  expect(apple.searchParams.get('daddr')).toBe(coordinates);
+});
+
+it('keeps the explicitly requested overview when a selected deep link resolves', async () => {
+  const props = { school: 'other-school', locations: places, onSelect: vi.fn() };
+  const view = render(<CampusSpatialExplorer {...props} selected={null} />);
+  const tour = within(await open());
+  fireEvent.click(tour.getByRole('button', { name: '看全部地點' }));
+
+  view.rerender(<CampusSpatialExplorer {...props} selected={places[0]} />);
+
+  expect(tour.getByRole('combobox')).toHaveProperty('value', '');
+  expect(tour.queryByRole('link', { name: /步行導航/ })).toBeNull();
+});
+
+it('keeps the destination chosen in the tour when a selected deep link resolves', async () => {
+  const props = { school: 'other-school', locations: places, onSelect: vi.fn() };
+  const view = render(<CampusSpatialExplorer {...props} selected={null} />);
+  const tour = within(await open());
+  fireEvent.change(tour.getByRole('combobox'), { target: { value: places[1].id } });
+
+  view.rerender(<CampusSpatialExplorer {...props} selected={places[0]} />);
+
+  expect(tour.getByRole('heading', { name: places[1].name })).toBeTruthy();
+});
+
 it('withdraws inherited navigation when a source makes the original automatic match ambiguous', async () => {
   const props = { school: 'other-school', onSelect: vi.fn() };
   const view = render(<CampusSpatialExplorer {...props} locations={places} selected={places[0]} />);

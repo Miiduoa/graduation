@@ -1051,9 +1051,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
   // A student's explicit 3D start also authorizes its optional OSM transfer.
   // Save-Data must defer BOTH WebGL and the parent dialog's network request.
   const deferOutlinesForSaveData = manualStart === 0 && requestsReducedData();
-  // Capture the inherited destination when the dialog opens. MapClient may
+  // Capture the first inherited destination. MapClient may
   // resolve the same selected ID to a different location after a source update.
-  const [selection, setSelection] = useState<{ id: string; identity: string; inherited?: boolean } | 'revoked' | null>(() =>
+  const [selection, setSelection] = useState<{ id: string; identity: string; inherited?: boolean } | 'revoked' | 'cleared' | null>(() =>
     selected ? { id: selected.id, identity: spatialDestinationIdentity(selected), inherited: true } : null);
   const [overview, setOverview] = useState(!selected);
   const [overhead, setOverhead] = useState(false);
@@ -1085,7 +1085,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
   const restoredCooldownRef = useRef(footprintRetryAfter !== null);
   const [camera, setCamera] = useState<CampusSpatialCamera>({ bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   const changeCamera = useCallback((next: CampusSpatialCamera) => setCamera(normalizeSpatialCamera(next)), []);
-  const chosen = selection === 'revoked' ? null : selection;
+  const inheritedIdentity = selected ? spatialDestinationIdentity(selected) : null;
+  if (selection === null && selected && inheritedIdentity !== null && model.points.some((point) =>
+    point.id === selected.id && spatialDestinationIdentity(point.location) === inheritedIdentity)) {
+    setSelection({ id: selected.id, identity: inheritedIdentity, inherited: true });
+    setOverview(false);
+  }
+  const chosen = typeof selection === 'object' ? selection : null;
   const selectedPoint = model.points.find((point) =>
     point.id === chosen?.id && spatialDestinationIdentity(point.location) === chosen.identity);
   // The preview owns an editing session scoped to the building ID.
@@ -1093,7 +1099,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
     locations.find((location) => location.id === buildingPlanId);
   if (buildingPlanId !== null && !buildingPlanPlace) setBuildingPlanId(null);
   if (chosen && (!selectedPoint ||
-      (chosen.inherited && (!selected || spatialDestinationIdentity(selected) !== chosen.identity)))) {
+      (chosen.inherited && inheritedIdentity !== chosen.identity))) {
     setSelection('revoked');
     setOverview(true);
     setCamera((previous) => ({ ...previous, zoom: 1 }));
@@ -1633,6 +1639,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
             />
             <div className={styles.viewTools} role="group" aria-label="導覽視角">
               <button className="btn" type="button" aria-pressed={showOverview} onClick={() => {
+                if (selection === null) setSelection('cleared');
                 setOverview(true);
                 setCamera((previous) => ({ ...previous, zoom: 1 }));
               }}>
