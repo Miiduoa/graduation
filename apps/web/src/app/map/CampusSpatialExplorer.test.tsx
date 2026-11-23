@@ -726,6 +726,54 @@ it('offers an accessible way to recover a suspended scene when mobile visibility
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
+it('suspends stale observer-positive WebGL while nested dialog scroll clips the canvas', async () => {
+  // Some embedded WebViews keep their last positive IntersectionObserver entry
+  // when only a nested modal scrollport moves. The canvas is still inside the
+  // window, but not inside the modal's visible content: do not render offscreen.
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const hostBounds = vi.spyOn(host, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(8, 40, 300, 160));
+  const dialogBounds = vi.spyOn(dialog, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 0, 600, 250));
+  Object.defineProperties(dialog, {
+    clientWidth: { configurable: true, value: 600 },
+    clientHeight: { configurable: true, value: 250 },
+  });
+  try {
+    act(() => intersection?.([observerEntry(host, true)] as IntersectionObserverEntry[],
+      {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    // Still inside the browser viewport, but below the modal's clipped edge.
+    hostBounds.mockReturnValue(new DOMRect(8, 310, 300, 160));
+    fireEvent.scroll(dialog);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(within(dialog).getByText(/立體畫面已暫停/)).toBeTruthy();
+
+    // Even another stale positive entry must not restart GPU drawing.
+    act(() => intersection?.([observerEntry(host, true)] as IntersectionObserverEntry[],
+      {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    hostBounds.mockReturnValue(new DOMRect(8, 40, 300, 160));
+    fireEvent.scroll(dialog);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  } finally {
+    hostBounds.mockRestore();
+    dialogBounds.mockRestore();
+  }
+});
+
 it('keeps keyboard focus on directions instead of stealing it during offscreen 3D suspension', async () => {
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) { intersection = callback; }
