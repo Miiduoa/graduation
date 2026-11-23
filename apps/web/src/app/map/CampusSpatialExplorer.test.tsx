@@ -4032,6 +4032,29 @@ it.each([
   }
 });
 
+it.each(['invalid continuation', 'truncated sequence', 'overlong', 'surrogate'] as const)(
+  'rejects malformed UTF-8 reader bytes without TextDecoder (%s)', async (kind) => {
+  const { library, body } = sourcedLibraryFootprintFixture();
+  const prefix = new TextEncoder().encode('{"padding":"');
+  const bad = kind === 'invalid continuation' ? [0xe4, 0x41, 0x41]
+    : kind === 'truncated sequence' ? [0xe4, 0xb8]
+    : kind === 'overlong' ? [0xc0, 0xaf] : [0xed, 0xa0, 0x80];
+  const suffix = new TextEncoder().encode('",' + body.slice(1));
+  const bytes = new Uint8Array([...prefix, ...bad, ...suffix]);
+  const read = vi.fn().mockResolvedValueOnce({ value: bytes }).mockResolvedValueOnce({ done: true });
+  const getReader = vi.fn(() => ({ read, cancel: vi.fn(), releaseLock: vi.fn() }));
+  vi.stubGlobal('TextDecoder', undefined);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, status: 200, headers: new Headers({ 'Content-Type': 'application/json' }),
+    body: { getReader, cancel: vi.fn() }, text: vi.fn(), json: vi.fn(), arrayBuffer: vi.fn(), blob: vi.fn(),
+  }));
+
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  await waitFor(() => expect(scene.create.mock.lastCall?.[2].footprints).toEqual([]));
+});
+
 // A downstream WebView/proxy can return an endless stream of zero-byte chunks.
 // The 2 MB decoded-byte guard alone never progresses; cap stream iterations to
 // keep the map responsive even when microtasks starve the 15s timeout.

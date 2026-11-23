@@ -72,6 +72,27 @@ const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 // runs. Bound the *actual decoded bytes* so untrusted downstream responses
 // cannot exhaust mobile memory even without a reliable Content-Length.
 // A JSON-only response cannot expose the original byte count.
+function isWellFormedUtf8(bytes: Uint8Array): boolean {
+  for (let i = 0; i < bytes.length;) {
+    const b = bytes[i];
+    if (b <= 0x7f) { i += 1; continue; }
+    let need: number; let min: number; let code: number;
+    if (b >= 0xc2 && b <= 0xdf) { need = 1; min = 0x80; code = b & 0x1f; }
+    else if (b >= 0xe0 && b <= 0xef) { need = 2; min = 0x800; code = b & 0x0f; }
+    else if (b >= 0xf0 && b <= 0xf4) { need = 3; min = 0x10000; code = b & 0x07; }
+    else return false;
+    if (i + need >= bytes.length) return false;
+    for (let k = 1; k <= need; k += 1) {
+      const c = bytes[i + k];
+      if ((c & 0xc0) !== 0x80) return false;
+      code = (code << 6) | (c & 0x3f);
+    }
+    if (code < min || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return false;
+    i += need + 1;
+  }
+  return true;
+}
+
 async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
   // Browser fetch exposes decoded body bytes, while a compressed response's
   // Content-Length describes the wire representation. Compare exact lengths
@@ -96,6 +117,11 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
   const parseBytes = async (bytes: ArrayBuffer | Uint8Array<ArrayBuffer>) => {
     // Fetch can decode UTF-8 even when the global TextDecoder is unavailable.
     // This local response contains only bytes that passed the size check.
+    // Without a fatal decoder, reject malformed UTF-8 before text() can
+    // silently replace it with U+FFFD.
+    if (!decoder && !isWellFormedUtf8(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes))) {
+      throw new Error('Building outline response is not valid UTF-8');
+    }
     const raw = decoder ? decoder.decode(bytes) : await new Response(bytes).text();
     if (signal?.aborted) throw new Error('Building outline read aborted');
     return JSON.parse(raw) as unknown;
