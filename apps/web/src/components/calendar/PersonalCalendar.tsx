@@ -4,7 +4,15 @@ import { MonthCalendar } from './MonthCalendar';
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 import {
   buildPersonalEventsCalendar,
   personalEventsOnDate,
@@ -34,6 +42,7 @@ import {
   type PersonalImportScope,
 } from '@/lib/personalImports';
 import { loadHomeData } from '@/lib/homeOverview';
+import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigationLinks';
 import {
   calendarCourseDeadlinesInMonth,
   calendarCourseDeadlinesOnDate,
@@ -50,15 +59,18 @@ import {
   CALENDAR_DUE_UNSIGNED,
 } from '@/lib/todayCourseWork';
 import styles from '@/components/imports/PersonalImport.module.css';
+import workspaceStyles from './PersonalCalendar.module.css';
 
 function EventFormFields({
   draft,
   disabled,
   onChange,
+  titleRef,
 }: {
   draft: PersonalEventDraft;
   disabled: boolean;
   onChange: (draft: PersonalEventDraft) => void;
+  titleRef: RefObject<HTMLInputElement | null>;
 }) {
   const set = (patch: Partial<PersonalEventDraft>) => onChange({ ...draft, ...patch });
   return (
@@ -67,6 +79,7 @@ function EventFormFields({
         <label className={styles.field}>
           標題
           <input
+            ref={titleRef}
             type="text"
             maxLength={200}
             value={draft.title}
@@ -159,7 +172,9 @@ export function PersonalCalendar() {
   const school = useOptionalSelectedSchool();
   const params = useSearchParams();
   const explicitSchool =
-    params?.get('campus')?.trim() || params?.get('schoolId')?.trim() || params?.get('school')?.trim();
+    params?.get('campus')?.trim() ||
+    params?.get('schoolId')?.trim() ||
+    params?.get('school')?.trim();
   const authErrorBlocks = !!auth.error && !nuni?.session;
   const identityPending =
     !!nuni?.loading ||
@@ -276,6 +291,13 @@ function PersonalCalendarWorkspace({
   const signedIn = Boolean(user?.uid || nuniAccountId);
   const scope = context.scope;
   const scopeKey = context.scopeKey;
+  const schoolSearch = buildCampusNavigationSearch(
+    null,
+    scope.schoolId === 'personal' ? null : { id: scope.schoolId },
+    true,
+  );
+  const importHref = campusServiceHref('/import?kind=events', schoolSearch);
+  const todayHref = campusServiceHref('/', schoolSearch);
   const ledger = usePersonalImports(scope, !paused);
   const [month, setMonth] = useState(() => emptyPersonalEventDraft().date.slice(0, 7));
   const [calendarView, setCalendarView] = useState<'month' | 'list'>('month');
@@ -323,8 +345,7 @@ function PersonalCalendarWorkspace({
             ? nuniResult.value
             : [];
         const lmsOk = lmsResult.status === 'fulfilled';
-        const nuniOk =
-          nuniResult.status === 'fulfilled' && nuniResult.value !== 'cancelled';
+        const nuniOk = nuniResult.status === 'fulfilled' && nuniResult.value !== 'cancelled';
         if (!lmsOk && !nuniOk) {
           setDues({ uid: uid ?? null, items: [], status: 'error' });
           return;
@@ -351,6 +372,14 @@ function PersonalCalendarWorkspace({
   const [mode, setMode] = useState<'idle' | 'create' | 'edit'>('idle');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<PersonalEventDraft>(() => emptyPersonalEventDraft());
+  const [initialDraft, setInitialDraft] = useState<PersonalEventDraft | null>(null);
+  const editorRef = useRef<HTMLElement | null>(null);
+  const titleRef = useRef<HTMLInputElement | null>(null);
+  const createButtonRef = useRef<HTMLButtonElement | null>(null);
+  const dayHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const pendingFocus = useRef<'editor' | 'return' | 'saved' | null>(null);
+  const [editorRevision, setEditorRevision] = useState(0);
   const [baseline, setBaseline] = useState<PersonalImportRecord | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
@@ -411,7 +440,38 @@ function PersonalCalendarWorkspace({
   }, []);
   useLayoutEffect(() => {
     suspended.current = paused;
+    if (paused) pendingFocus.current = null;
   }, [paused]);
+
+  useLayoutEffect(() => {
+    if (paused || !pendingFocus.current) return;
+    const target = pendingFocus.current;
+    pendingFocus.current = null;
+    if (target === 'editor' && mode !== 'idle') {
+      titleRef.current?.focus();
+      return;
+    }
+    if (mode !== 'idle') return;
+    if (target === 'saved') {
+      dayHeadingRef.current?.focus({ preventScroll: true });
+      dayHeadingRef.current?.scrollIntoView?.({ block: 'nearest' });
+      return;
+    }
+    const trigger = returnFocusRef.current;
+    // A month/list change can remove the original event control while editing.
+    // Never restore focus into a hidden or disabled control.
+    if (
+      trigger?.isConnected &&
+      !trigger.closest('[hidden]') &&
+      !trigger.matches(':disabled') &&
+      window.getComputedStyle(trigger).display !== 'none'
+    ) {
+      trigger.focus({ preventScroll: true });
+      trigger.scrollIntoView?.({ block: 'nearest' });
+    } else {
+      createButtonRef.current?.focus({ preventScroll: true });
+    }
+  }, [paused, mode, editorRevision, month, selectedDate]);
 
   const monthEvents = useMemo(
     () => filterPersonalEvents(ledger.records, month),
@@ -436,28 +496,55 @@ function PersonalCalendarWorkspace({
   const isActiveScope = (target: PersonalImportScope) =>
     active.current && scopeKey === personalImportsStorageKey(target);
 
-  const openCreate = () => {
+  const mayDiscardDraft = () =>
+    mode === 'idle' ||
+    !initialDraft ||
+    JSON.stringify(draft) === JSON.stringify(initialDraft) ||
+    window.confirm('尚有未儲存的修改，要捨棄這些內容嗎？');
+
+  const openCreate = (trigger?: HTMLElement) => {
     if (suspended.current || writing.current) return;
+    if (!mayDiscardDraft()) return;
+    const next = emptyPersonalEventDraft();
+    next.date = selectedDate || (next.date.startsWith(month) ? next.date : `${month}-01`);
+    setInitialDraft(next);
+    returnFocusRef.current = trigger ?? createButtonRef.current;
+    pendingFocus.current = 'editor';
+    setEditorRevision((value) => value + 1);
     setMode('create');
     setSelectedId(null);
     setBaseline(null);
-    setDraft(emptyPersonalEventDraft());
+    setDraft(next);
     setFormError('');
     setNotice('');
   };
 
-  const openEdit = (row: PersonalImportRecord) => {
+  const openEdit = (row: PersonalImportRecord, trigger?: HTMLElement) => {
     if (suspended.current || writing.current) return;
+    if (mode === 'edit' && selectedId === row.id) {
+      titleRef.current?.focus();
+      return;
+    }
+    if (!mayDiscardDraft()) return;
+    const next = draftFromPersonalEvent(row);
+    setInitialDraft(next);
+    returnFocusRef.current =
+      trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    pendingFocus.current = 'editor';
+    setEditorRevision((value) => value + 1);
     setMode('edit');
     setSelectedId(row.id);
     setBaseline(row);
-    setDraft(draftFromPersonalEvent(row));
+    setDraft(next);
     setFormError('');
     setNotice('');
   };
 
   const cancelForm = () => {
     if (suspended.current || writing.current) return;
+    if (!mayDiscardDraft()) return;
+    pendingFocus.current = 'return';
+    setInitialDraft(null);
     setMode('idle');
     setSelectedId(null);
     setBaseline(null);
@@ -479,6 +566,19 @@ function PersonalCalendarWorkspace({
     try {
       await action();
       if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
+      // Reveal the saved day only while the user is still editing. Changing the
+      // month after they moved elsewhere would also remove its focused date.
+      // A receipt during identity revalidation still completes the hidden form.
+      const continueEditingContext =
+        suspended.current ||
+        editorRef.current?.contains(document.activeElement) ||
+        document.activeElement === document.body;
+      if (continueEditingContext) {
+        setMonth(draft.date.slice(0, 7));
+        setSelectedDate(draft.date);
+        if (!suspended.current) pendingFocus.current = 'saved';
+      }
+      setInitialDraft(null);
       setNotice(success);
       setMode('idle');
       setBaseline(null);
@@ -543,6 +643,13 @@ function PersonalCalendarWorkspace({
     )
       .then(() => {
         if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
+        if (
+          !suspended.current &&
+          (editorRef.current?.contains(document.activeElement) ||
+            document.activeElement === document.body)
+        )
+          pendingFocus.current = 'return';
+        setInitialDraft(null);
         setNotice('已刪除這筆個人行程。');
         setMode('idle');
         setBaseline(null);
@@ -592,16 +699,21 @@ function PersonalCalendarWorkspace({
   };
 
   return (
-    <div className={styles.root}>
-      <section className={styles.panel}>
-        <div className={styles.heading}>
-          <h2>活動、考試、作業截止與自己的安排</h2>
+    <div className={`${styles.root} ${workspaceStyles.root}`}>
+      <section className={`${styles.panel} ${workspaceStyles.panel}`} aria-label="個人行程工作區">
+        <div className={`${styles.heading} ${workspaceStyles.heading}`}>
+          <div>
+            <p className={workspaceStyles.eyebrow}>{context.schoolName}</p>
+            <h2>行程與安排</h2>
+            <p className={workspaceStyles.subtitle}>選一天，查看行程或加入新的安排。</p>
+          </div>
           <div className={styles.actions}>
             <button
+              ref={createButtonRef}
               type="button"
               className="btn primary"
               disabled={!canMutate}
-              onClick={openCreate}
+              onClick={(event) => openCreate(event.currentTarget)}
             >
               新增行程
             </button>
@@ -615,16 +727,19 @@ function PersonalCalendarWorkspace({
             </button>
           </div>
         </div>
-        <p className={styles.note}>
-          這裡是 {context.schoolName} 的個人行程，並與手機版一樣顯示已加入課程的作業截止。個人行程不是學校正式紀錄。
-          {ledger.ready && (ledger.syncEnabled
-            ? personalEventPersistenceCopy(true)
-            : '裝置同步尚未開啟。在此頁新增、編輯或刪除的行程會先保留於這台裝置；先前已存入帳號的資料仍以帳號紀錄為準。')}
-        </p>
-        <details className={styles.source}>
-          <summary>關於匯入與匯出</summary>
+        <details className={`${styles.source} ${workspaceStyles.storage}`}>
+          <summary>儲存與匯入說明</summary>
           <p className={styles.note}>
-            從檔案匯入或匯出行事曆檔，只是整理自己的安排，不會完成報名，也不會自動設定系統提醒。
+            這裡是 {context.schoolName}{' '}
+            的個人行程，並與手機版一樣顯示已加入課程的作業截止。個人行程不是學校正式紀錄。
+            {ledger.ready &&
+              (ledger.syncEnabled
+                ? personalEventPersistenceCopy(true)
+                : '裝置同步尚未開啟。在此頁新增、編輯或刪除的行程會先保留於這台裝置；先前已存入帳號的資料仍以帳號紀錄為準。')}
+          </p>
+          <p className={styles.note}>
+            從檔案匯入或匯出行事曆檔，只是整理自己的安排，不會完成報名，也不會自動設定系統提醒。{' '}
+            <Link href={importHref}>從截圖或檔案匯入</Link>
           </p>
         </details>
         {exportNotice && <p role="status">{exportNotice}</p>}
@@ -635,68 +750,78 @@ function PersonalCalendarWorkspace({
               : '在目前帳號與校園的個人行事曆找不到這筆行程；它可能尚未同步或已移除。'}
           </p>
         )}
-        <label className={styles.field}>
-          查看月份
-          <input
-            type="month"
-            value={month}
-            onChange={(event) => {
-              if (isCalendarMonth(event.target.value)) changeMonth(event.target.value);
-            }}
-          />
-        </label>
-        <div className={styles.actions}>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => changeMonth(shiftCalendarMonth(month, -1))}
-          >
-            上一月
-          </button>
-          <button type="button" className="btn" onClick={goToday}>
-            回今天
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => changeMonth(shiftCalendarMonth(month, 1))}
-          >
-            下一月
-          </button>
-          <button
-            type="button"
-            className="btn"
-            aria-pressed={calendarView === 'month'}
-            onClick={() => setCalendarView('month')}
-          >
-            月格
-          </button>
-          <button
-            type="button"
-            className="btn"
-            aria-pressed={calendarView === 'list'}
-            onClick={() => {
-              setCalendarView('list');
-              setSelectedDate('');
-            }}
-          >
-            列表
-          </button>
+        <div className={workspaceStyles.toolbar}>
+          <label className={`${styles.field} ${workspaceStyles.monthField}`}>
+            查看月份
+            <input
+              type="month"
+              value={month}
+              onChange={(event) => {
+                if (isCalendarMonth(event.target.value)) changeMonth(event.target.value);
+              }}
+            />
+          </label>
+          <div className={workspaceStyles.monthNavigation} role="group" aria-label="切換月份">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => changeMonth(shiftCalendarMonth(month, -1))}
+            >
+              上一月
+            </button>
+            <button type="button" className="btn" onClick={goToday}>
+              回今天
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => changeMonth(shiftCalendarMonth(month, 1))}
+            >
+              下一月
+            </button>
+          </div>
+          <div className={workspaceStyles.views} role="group" aria-label="檢視方式">
+            <button
+              type="button"
+              className="btn"
+              aria-pressed={calendarView === 'month'}
+              onClick={() => setCalendarView('month')}
+            >
+              月格
+            </button>
+            <button
+              type="button"
+              className="btn"
+              aria-pressed={calendarView === 'list'}
+              onClick={() => {
+                setCalendarView('list');
+              }}
+            >
+              列表
+            </button>
+          </div>
         </div>
         {!paused && ledger.ready && !ledger.error && calendarView === 'month' && (
           <MonthCalendar
-            key={month}
             records={monthEvents}
             month={month}
             selectedDate={selectedDate}
             onDate={setSelectedDate}
+            onMonthChange={changeMonth}
             onEdit={openEdit}
             disabled={!canMutate}
           />
         )}
         {selectedDate && (
-          <div className={styles.actions}>
-            <h3>{selectedDate} 的行程</h3>
+          <div className={workspaceStyles.daySummary}>
+            <div>
+              <h3 ref={dayHeadingRef} tabIndex={-1}>
+                {selectedDate} 的行程
+              </h3>
+              {ledger.ready && (
+                <p>{events.length ? `${events.length} 筆個人行程` : '尚無個人行程'}</p>
+              )}
+            </div>
             <button
               type="button"
               className="btn"
@@ -717,16 +842,22 @@ function PersonalCalendarWorkspace({
         {notice && <p role="status">{notice}</p>}
 
         {(mode === 'create' || mode === 'edit') && (
-          <section className={styles.row} aria-label={mode === 'create' ? '新增行程' : '編輯行程'}>
+          <section
+            ref={editorRef}
+            className={workspaceStyles.editor}
+            aria-label={mode === 'create' ? '新增行程' : '編輯行程'}
+            aria-busy={saving || undefined}
+          >
             <h3>{mode === 'create' ? '新增行程' : `編輯 ${baseline?.title || '行程'}`}</h3>
             <EventFormFields
               draft={draft}
+              titleRef={titleRef}
               disabled={saving || paused}
               onChange={(next) => {
                 if (!suspended.current && !writing.current) setDraft(next);
               }}
             />
-            {draftIssues.length > 0 && (
+            {draftIssues.length > 0 && JSON.stringify(draft) !== JSON.stringify(initialDraft) && (
               <ul className={styles.issues}>
                 {draftIssues.map((issue) => (
                   <li key={`${issue.code}-${issue.field}`}>{issue.message}</li>
@@ -734,7 +865,9 @@ function PersonalCalendarWorkspace({
               </ul>
             )}
             {formError && (
-              <p id={formErrorId} role="alert">{formError}</p>
+              <p id={formErrorId} role="alert">
+                {formError}
+              </p>
             )}
             <div className={styles.actions}>
               {mode === 'create' ? (
@@ -796,10 +929,14 @@ function PersonalCalendarWorkspace({
                 ? '這一天還沒有行程；下方仍可查看作業截止。'
                 : CALENDAR_DUE_EMPTY_DAY
               : '這個月還沒有行程。'}
-            {!selectedDate ? '按「新增行程」直接建立，或從上方「從截圖或檔案匯入」。' : null}
+            {!selectedDate && (
+              <>
+                按「新增行程」直接建立，或<Link href={importHref}>從截圖或檔案匯入</Link>。
+              </>
+            )}
           </p>
         ) : calendarView === 'list' || selectedDate ? (
-          <ul className={styles.saved}>
+          <ul className={`${styles.saved} ${workspaceStyles.agenda}`} aria-label="個人行程列表">
             {events.map((event) => (
               <li
                 key={event.id}
@@ -826,7 +963,7 @@ function PersonalCalendarWorkspace({
                   className="btn"
                   disabled={!ledger.ready || saving}
                   aria-pressed={selectedId === event.id && mode === 'edit'}
-                  onClick={() => openEdit(event)}
+                  onClick={(click) => openEdit(event, click.currentTarget)}
                 >
                   編輯
                 </button>
@@ -836,18 +973,26 @@ function PersonalCalendarWorkspace({
         ) : null}
       </section>
 
-      <section className={styles.panel} aria-labelledby="calendar-due-title" data-testid="calendar-due">
+      <section
+        className={`${styles.panel} ${workspaceStyles.panel}`}
+        aria-labelledby="calendar-due-title"
+        data-testid="calendar-due"
+      >
         <div className={styles.heading}>
           <h2 id="calendar-due-title">{CALENDAR_DUE_TITLE}</h2>
-          <Link className="btn" href="/">
+          <Link className="btn" href={todayHref}>
             回今天看期限
           </Link>
         </div>
         {!signedIn && !authLoading && !nuniLoading ? (
           <p className={styles.empty}>
-            {CALENDAR_DUE_UNSIGNED} <Link href="/">前往今天</Link>
+            {CALENDAR_DUE_UNSIGNED} <Link href={todayHref}>前往今天</Link>
           </p>
-        ) : !signedIn || dueStatus === 'loading' || dueStatus === 'idle' || authLoading || nuniLoading ? (
+        ) : !signedIn ||
+          dueStatus === 'loading' ||
+          dueStatus === 'idle' ||
+          authLoading ||
+          nuniLoading ? (
           <p role="status">正在讀取作業截止…</p>
         ) : dueStatus === 'error' && visibleDues.length === 0 ? (
           <>
@@ -861,7 +1006,7 @@ function PersonalCalendarWorkspace({
         ) : visibleDues.length === 0 ? (
           <p className={styles.empty}>
             {selectedDate ? CALENDAR_DUE_EMPTY_DAY : CALENDAR_DUE_EMPTY}{' '}
-            <Link href="/">回今天</Link>
+            <Link href={todayHref}>回今天</Link>
           </p>
         ) : (
           <ul className={styles.saved} data-testid="calendar-due-list">

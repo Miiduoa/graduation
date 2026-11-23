@@ -1,5 +1,11 @@
-import { useMemo, useState } from 'react';
-import { buildMonthCalendar, MONTH_WEEKDAYS, type PersonalImportRecord } from '@campus/shared';
+import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  buildMonthCalendar,
+  emptyPersonalEventDraft,
+  MONTH_WEEKDAYS,
+  type PersonalImportRecord,
+} from '@campus/shared';
+import { monthCalendarKeyboardDate } from './monthCalendarNavigation';
 import styles from './MonthCalendar.module.css';
 
 export function MonthCalendar({
@@ -8,17 +14,75 @@ export function MonthCalendar({
   selectedDate,
   onDate,
   onEdit,
+  onMonthChange,
   disabled,
 }: {
   records: readonly PersonalImportRecord[];
   month: string;
   selectedDate: string;
   onDate: (date: string) => void;
-  onEdit: (event: PersonalImportRecord) => void;
+  onEdit: (event: PersonalImportRecord, trigger?: HTMLButtonElement) => void;
+  onMonthChange?: (month: string) => void;
   disabled: boolean;
 }) {
   const [expanded, setExpanded] = useState<string[]>([]);
+  const [focusState, setFocusState] = useState({ selection: selectedDate, date: selectedDate });
+  const today = emptyPersonalEventDraft().date;
+  const descriptionId = useId();
+  const dateButtons = useRef(new Map<string, HTMLButtonElement>());
+  const pendingFocus = useRef<{ date: string; origin: HTMLButtonElement } | null>(null);
   const days = useMemo(() => buildMonthCalendar(records, month), [records, month]);
+  // External selection (for example “Today”) updates the next tab stop, never the active focus.
+  if (focusState.selection !== selectedDate) {
+    setFocusState({
+      selection: selectedDate,
+      date: selectedDate.startsWith(`${month}-`) ? selectedDate : focusState.date,
+    });
+  }
+  const tabDate = days.some((day) => day?.date === focusState.date)
+    ? focusState.date
+    : days.some((day) => day?.date === selectedDate)
+      ? selectedDate
+      : today.startsWith(`${month}-`)
+        ? today
+        : `${month}-01`;
+
+  useLayoutEffect(() => {
+    const requested = pendingFocus.current;
+    if (!requested || !requested.date.startsWith(`${month}-`)) return;
+    const target = dateButtons.current.get(requested.date);
+    if (!target) return;
+    pendingFocus.current = null;
+    if (document.activeElement !== requested.origin && document.activeElement !== document.body)
+      return;
+    target.focus({ preventScroll: true });
+    target.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+  }, [month, focusState.date]);
+
+  const moveDate = (event: KeyboardEvent<HTMLButtonElement>, date: string) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (
+      ![
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowUp',
+        'ArrowDown',
+        'Home',
+        'End',
+        'PageUp',
+        'PageDown',
+      ].includes(event.key)
+    )
+      return;
+    event.preventDefault();
+    const target = monthCalendarKeyboardDate(date, event.key);
+    if (!target || target === date) return;
+    if (!target.startsWith(`${month}-`) && !onMonthChange) return;
+    pendingFocus.current = { date: target, origin: event.currentTarget };
+    setFocusState({ selection: selectedDate, date: target });
+    if (!target.startsWith(`${month}-`)) onMonthChange?.(target.slice(0, 7));
+  };
+
   return (
     <section className={styles.calendar} aria-label="每月行程">
       <header className={styles.header}>
@@ -31,9 +95,10 @@ export function MonthCalendar({
         className={styles.viewport}
         role="region"
         aria-label={`${month} 月格，週日起始`}
+        aria-describedby={`${descriptionId}-keyboard`}
         tabIndex={0}
       >
-        <div className={styles.grid}>
+        <div className={styles.grid} key={month}>
           {MONTH_WEEKDAYS.map((day) => (
             <div className={styles.weekday} key={day}>
               <span className={styles.srOnly}>週</span>
@@ -44,14 +109,32 @@ export function MonthCalendar({
             day ? (
               <div className={styles.day} key={day.date}>
                 <button
+                  ref={(node) => {
+                    if (node) dateButtons.current.set(day.date, node);
+                    else dateButtons.current.delete(day.date);
+                  }}
                   type="button"
                   className={styles.date}
                   aria-label={day.date}
+                  aria-describedby={`${descriptionId}-${day.date}`}
                   aria-pressed={selectedDate === day.date}
+                  aria-current={today === day.date ? 'date' : undefined}
+                  tabIndex={tabDate === day.date ? 0 : -1}
+                  onFocus={() => setFocusState({ selection: selectedDate, date: day.date })}
+                  onKeyDown={(event) => moveDate(event, day.date)}
                   onClick={() => onDate(day.date)}
                 >
-                  {Number(day.date.slice(-2))}
+                  <span className={styles.dateNumber}>{Number(day.date.slice(-2))}</span>
+                  <span className={styles.markers} aria-hidden="true">
+                    {day.events.slice(0, 3).map((event) => (
+                      <span key={event.id} />
+                    ))}
+                  </span>
                 </button>
+                <span id={`${descriptionId}-${day.date}`} className={styles.srOnly}>
+                  {today === day.date ? '今天，' : ''}
+                  {day.events.length ? `${day.events.length} 筆行程` : '沒有個人行程'}
+                </span>
                 {(expanded.includes(day.date) ? day.events : day.events.slice(0, 2)).map(
                   (event) => (
                     <button
@@ -60,7 +143,7 @@ export function MonthCalendar({
                       aria-label={event.title}
                       key={event.id}
                       disabled={disabled}
-                      onClick={() => onEdit(event)}
+                      onClick={(click) => onEdit(event, click.currentTarget)}
                     >
                       <span className={styles.eventTitle}>{event.title}</span>
                     </button>
@@ -89,7 +172,17 @@ export function MonthCalendar({
           )}
         </div>
       </div>
-      <p className={styles.hint}>選一天，查看當日行程</p>
+      <div className={styles.footer}>
+        <p className={styles.hint}>選一天，查看當日行程</p>
+        <p className={styles.legend}>
+          <span aria-hidden="true" />
+          有行程
+        </p>
+      </div>
+      <p className={styles.srOnly} id={`${descriptionId}-keyboard`}>
+        方向鍵移動日期，Home 與 End 移到本週首尾，PageUp 與 PageDown 切換月份，按 Enter
+        或空白鍵選取日期。
+      </p>
     </section>
   );
 }
