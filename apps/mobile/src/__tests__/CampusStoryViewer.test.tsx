@@ -2,7 +2,7 @@ import React from 'react';
 import { AppState, Pressable, Text } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { CampusStoryViewer, useCampusStories } from '../screens/social/CampusStoryViewer';
-import type { CampusStoryDoc } from '../services/stories';
+import { markStoryViewed, type CampusStoryDoc } from '../services/stories';
 
 jest.mock('../firebase', () => ({ isFirebaseMockMode: () => false }));
 jest.mock('../services/stories', () => ({
@@ -28,8 +28,163 @@ function Shelf({ rows }: { rows: CampusStoryDoc[] }) {
     </>
   );
 }
+function ScopedShelf({
+  rows,
+  schoolId,
+  uid,
+}: {
+  rows: CampusStoryDoc[];
+  schoolId: string;
+  uid: string;
+}) {
+  const deck = useCampusStories(rows, schoolId, uid);
+  return (
+    <>
+      {deck.groups.map((group) => (
+        <Pressable key={group.authorUid} onPress={() => deck.openGroup(group)}>
+          <Text>開啟{group.authorUid}</Text>
+        </Pressable>
+      ))}
+      <Text>{deck.seen.has('shared') ? '已讀' : '未讀'}</Text>
+      <CampusStoryViewer deck={deck} names={{ bob: '小柏' }} />
+    </>
+  );
+}
+
 const common = { schoolId: 'pu', authorUid: 'bob', kind: 'text' as const };
 describe('story playback clock', () => {
+  test('does not carry story navigation or view markers to another campus or student', () => {
+    jest.mocked(markStoryViewed).mockClear();
+    const expiresAt = Date.now() + 100_000;
+    const rows: CampusStoryDoc[] = [
+      { ...common, id: 'shared', createdAt: 1, text: '甲校活動', expiresAt },
+      { ...common, id: 'shared', schoolId: 'other', createdAt: 2, text: '乙校活動', expiresAt },
+    ];
+    const view = render(<ScopedShelf rows={rows} schoolId="pu" uid="alice" />);
+
+    fireEvent.press(view.getByText('開啟bob'));
+    expect(view.getByText('甲校活動')).toBeTruthy();
+    expect(view.getByText('已讀')).toBeTruthy();
+
+    // The new campus reuses the document ID, but must not inherit an open story.
+    view.rerender(<ScopedShelf rows={rows} schoolId="other" uid="alice" />);
+    expect(view.queryByText('甲校活動')).toBeNull();
+    expect(view.queryByText('乙校活動')).toBeNull();
+    expect(view.getByText('未讀')).toBeTruthy();
+    fireEvent.press(view.getByText('開啟bob'));
+    expect(view.getByText('乙校活動')).toBeTruthy();
+    expect(view.getByText('已讀')).toBeTruthy();
+
+    // Switching student at the same campus must likewise require a fresh open.
+    view.rerender(<ScopedShelf rows={rows} schoolId="other" uid="charlie" />);
+    expect(view.queryByText('乙校活動')).toBeNull();
+    expect(view.getByText('未讀')).toBeTruthy();
+    fireEvent.press(view.getByText('開啟bob'));
+    expect(view.getByText('乙校活動')).toBeTruthy();
+    expect(markStoryViewed).toHaveBeenCalledTimes(3);
+    expect(jest.mocked(markStoryViewed).mock.calls.map((call) => [call[0].schoolId, call[1]])).toEqual([
+      ['pu', 'alice'],
+      ['other', 'alice'],
+      ['other', 'charlie'],
+    ]);
+    view.unmount();
+  });
+
+  test('a late receipt failure from a prior visit cannot duplicate a newer pending view', async () => {
+    jest.mocked(markStoryViewed).mockClear();
+    let rejectFirst: ((reason?: Error) => void) | undefined;
+    jest.mocked(markStoryViewed).mockImplementationOnce(
+      () => new Promise<void>((_resolve, reject) => { rejectFirst = reject; }),
+    );
+    jest.mocked(markStoryViewed).mockImplementationOnce(() => new Promise<void>(() => {}));
+
+    const expiresAt = Date.now() + 100_000;
+    const rows: CampusStoryDoc[] = [
+      { ...common, id: 'shared', createdAt: 1, text: '社團通知', expiresAt },
+      { ...common, id: 'shared', schoolId: 'other', createdAt: 2, text: '乙校通知', expiresAt },
+    ];
+    const view = render(<ScopedShelf rows={rows} schoolId="pu" uid="alice" />);
+    fireEvent.press(view.getByText('開啟bob'));
+    expect(markStoryViewed).toHaveBeenCalledTimes(1);
+
+    // Leave the campus while the first view receipt is still in flight.
+    view.rerender(<ScopedShelf rows={rows} schoolId="other" uid="alice" />);
+    expect(view.queryByText('社團通知')).toBeNull();
+    view.rerender(<ScopedShelf rows={rows} schoolId="pu" uid="alice" />);
+    expect(view.queryByText('社團通知')).toBeNull();
+    fireEvent.press(view.getByText('開啟bob'));
+    expect(markStoryViewed).toHaveBeenCalledTimes(2);
+
+    // The first request fails after the second has started with the same scoped ID.
+    await act(async () => {
+      rejectFirst?.(new Error('older campus visit failed'));
+      await Promise.resolve();
+    });
+    fireEvent.press(view.getByLabelText('關閉限時動態'));
+    fireEvent.press(view.getByText('開啟bob'));
+    // Reopening while the second receipt is pending must not send a duplicate.
+    expect(markStoryViewed).toHaveBeenCalledTimes(2);
+    view.unmount();
+  });
+
+  test('ignores stale metadata from an older playback session after pause and resume', () => {
+    const view = render(
+      <Shelf
+        rows={[{
+          ...common,
+          id: 'video-metadata-restarted',
+          kind: 'video',
+          mediaUrl: 'https://example.com/activity.mp4',
+          expiresAt: Date.now() + 100_000,
+        }]}
+      />,
+    );
+    fireEvent.press(view.getByText('開啟bob'));
+    fireEvent.press(view.getByLabelText('播放影片'));
+    const staleReady = view.getByLabelText('限時動態影片').props.onReadyForDisplay;
+
+    // An older decoder can report the wrong duration after the student resumes.
+    fireEvent.press(view.getByLabelText('暫停播放'));
+    fireEvent.press(view.getByLabelText('播放影片'));
+    act(() => staleReady({ status: { isLoaded: true, durationMillis: 18000 } }));
+    expect(view.getByText('載入影片…')).toBeTruthy();
+
+    // The current session may still populate the actual video duration.
+    const freshReady = view.getByLabelText('限時動態影片').props.onReadyForDisplay;
+    act(() => freshReady({ status: { isLoaded: true, durationMillis: 12500 } }));
+    expect(view.getByText('0 / 13 秒')).toBeTruthy();
+    expect(view.getByLabelText('限時動態影片').props.shouldPlay).toBe(true);
+    view.unmount();
+  });
+
+  test('ignores a stale video error after pause and resume on the same story', () => {
+    const view = render(
+      <Shelf
+        rows={[{
+          ...common,
+          id: 'video-restarted',
+          kind: 'video',
+          mediaUrl: 'https://example.com/campus-video.mp4',
+          expiresAt: Date.now() + 100_000,
+        }]}
+      />,
+    );
+    fireEvent.press(view.getByText('開啟bob'));
+    fireEvent.press(view.getByLabelText('播放影片'));
+    const outdatedError = view.getByLabelText('限時動態影片').props.onError;
+
+    // Pausing and resuming creates a new playback session for the same clip.
+    fireEvent.press(view.getByLabelText('暫停播放'));
+    fireEvent.press(view.getByLabelText('播放影片'));
+    expect(view.getByLabelText('限時動態影片').props.shouldPlay).toBe(true);
+
+    // A native error queued by the older session cannot replace the new player.
+    act(() => outdatedError('stale decoder callback'));
+    expect(view.queryByText('影片暫時無法播放')).toBeNull();
+    expect(view.getByLabelText('限時動態影片').props.shouldPlay).toBe(true);
+    view.unmount();
+  });
+
   beforeEach(() => {
     jest.useFakeTimers();
   });
@@ -298,6 +453,43 @@ describe('story playback clock', () => {
     expect(view.getByLabelText('限時動態影片').props.shouldPlay).toBe(false);
     fireEvent.press(view.getByLabelText('關閉限時動態'));
     act(() => nativeEnd({ isLoaded: true, didJustFinish: true }));
+    expect(view.queryByLabelText('限時動態影片')).toBeNull();
+    view.unmount();
+  });
+
+  test('a paused video retry ignores a late decoder failure from the previous player', () => {
+    const view = render(
+      <Shelf
+        rows={[{
+          ...common,
+          id: 'video-retry-late-error',
+          kind: 'video',
+          mediaUrl: 'https://example.com/retry.mp4',
+          expiresAt: Date.now() + 100_000,
+        }]}
+      />,
+    );
+    fireEvent.press(view.getByText('開啟bob'));
+    const firstPlayer = view.getByLabelText('限時動態影片');
+    const staleError = firstPlayer.props.onError;
+    // A paused player can fail before the student has pressed Play.
+    fireEvent(firstPlayer, 'error', 'first decoder error');
+    expect(view.getByText('影片暫時無法播放')).toBeTruthy();
+
+    fireEvent.press(view.getByText('重新載入影片'));
+    const retryPlayer = view.getByLabelText('限時動態影片');
+    expect(retryPlayer.props.isMuted).toBe(true);
+    expect(retryPlayer.props.shouldPlay).toBe(false);
+
+    // A queued callback from the replaced native player must not fail the retry.
+    act(() => staleError('old decoder callback after retry'));
+    expect(view.queryByText('影片暫時無法播放')).toBeNull();
+    expect(view.getByLabelText('限時動態影片')).toBeTruthy();
+
+    // A real failure from the current player still has to be shown.
+    fireEvent(retryPlayer, 'error', 'current decoder error');
+    expect(view.getByText('影片暫時無法播放')).toBeTruthy();
+    fireEvent.press(view.getByText('看完了'));
     expect(view.queryByLabelText('限時動態影片')).toBeNull();
     view.unmount();
   });

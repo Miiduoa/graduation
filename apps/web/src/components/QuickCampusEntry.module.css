@@ -74,6 +74,7 @@
   flex-shrink: 0;
 }
 .searchForm {
+  container: quick-campus-search / inline-size;
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -385,6 +386,29 @@
   }
   .inputRow > svg {
     display: none;
+  }
+}
+
+/* Keep the field readable when either a narrow panel or larger text leaves
+   too little room beside the submit label. The query follows this form's
+   width and font size, including compact entries on wide screens. */
+@container quick-campus-search (max-width: 20em) {
+  .inputRow {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 8px;
+  }
+
+  .inputRow > svg {
+    display: none;
+  }
+
+  .inputRow input {
+    padding-inline: 4px;
+  }
+
+  .searchButton {
+    width: 100%;
+    max-width: none;
   }
 }
 

@@ -25,6 +25,8 @@ import { LoginLink } from './LoginLink';
 import { currentReturnPath } from '@/lib/navigation';
 import { PRIMARY_DESTINATIONS, primaryNavigationSection } from '@/lib/primaryNavigation';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
+import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
+import { observeMobileNavigationInset } from '@/lib/mobileNavigationInset';
 
 const CampusAssistantEntry = lazy(async () => ({
   default: (await import('./TodayCampusEntry')).TodayCampusEntry,
@@ -58,6 +60,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
   const [busy, setBusy] = useState(false);
   const id = useId();
   const header = useRef<HTMLElement>(null);
+  const primaryNavigation = useRef<HTMLElement>(null);
   const accountMenu = useRef<HTMLDetailsElement>(null);
   const accountTrigger = useRef<HTMLElement>(null);
   const [accountScope, setAccountScope] = useState<string | null>(null);
@@ -100,6 +103,10 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
   useLayoutEffect(() => {
     if (assistantOpen) quickPanel.current?.focus({ preventScroll: true });
   }, [assistantOpen]);
+  useLayoutEffect(() => {
+    const navigation = primaryNavigation.current;
+    if (navigation) return observeMobileNavigationInset(navigation);
+  }, []);
   const hideAssistant = useCallback(() => {
     quickPanel.current
       ?.querySelectorAll<HTMLButtonElement>(
@@ -299,15 +306,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
                   <span className={headerStyles.retryIndicator} aria-hidden />
                 )}
               </summary>
-              <div
-                className={headerStyles.accountPanel}
-                id={`${id}-account`}
-                onClick={(event) => {
-                  if (event.target instanceof Element && event.target.closest('a')) {
-                    if (accountMenu.current) accountMenu.current.open = false;
-                  }
-                }}
-              >
+              <div className={headerStyles.accountPanel} id={`${id}-account`}>
                 <div className={headerStyles.accountHeading}>
                   <span>帳號</span>
                   <button type="button" onClick={closeAccount} aria-label="關閉帳號選單">
@@ -332,14 +331,32 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
                   </p>
                 )}
                 {!checking && (user || nuni.session) && (
-                  <Link href="/profile">
+                  <Link
+                    href="/profile"
+                    onClick={(event) => {
+                      if (
+                        isCurrentTabNavigationClick(event, event.currentTarget)
+                      ) {
+                        if (accountMenu.current) accountMenu.current.open = false;
+                      }
+                    }}
+                  >
                     <CampusIcon name="profile" size={18} />
                     我的帳號
                     <CampusIcon name="arrow" size={16} />
                   </Link>
                 )}
                 {!checking && nuni.session?.isPlatformOperator && (
-                  <Link href="/admin">
+                  <Link
+                    href="/admin"
+                    onClick={(event) => {
+                      if (
+                        isCurrentTabNavigationClick(event, event.currentTarget)
+                      ) {
+                        if (accountMenu.current) accountMenu.current.open = false;
+                      }
+                    }}
+                  >
                     <CampusIcon name="services" size={18} />
                     平台管理
                     <CampusIcon name="arrow" size={16} />
@@ -393,7 +410,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
             </LoginLink>
           ) : null}
         </div>
-        <nav aria-label="主要導覽" className={headerStyles.nav}>
+        <nav ref={primaryNavigation} aria-label="主要導覽" className={headerStyles.nav}>
           {PRIMARY_DESTINATIONS.map((destination) => (
             <Link
               key={destination.id}
@@ -402,7 +419,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
               title={destination.id === 'study' ? '課務：課表、課程與作業、成績' : undefined}
             >
               <CampusIcon name={destination.icon} size={17} />
-              {destination.label}
+              <span className={headerStyles.navLabel}>{destination.label}</span>
             </Link>
           ))}
         </nav>
@@ -428,11 +445,6 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
               closeAssistant();
             }
           }}
-          onClick={(event) => {
-            if (event.target instanceof Element && event.target.closest('a')) {
-              closeAssistant();
-            }
-          }}
         >
           <div className={headerStyles.voicePanelHeading}>
             <h2>校園助理</h2>
@@ -445,6 +457,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
               active={assistantOpen}
               focusRequest={panel.focusRequest}
               returnAnchor="campus-assistant-entry"
+              onNavigate={closeAssistant}
             />
           </Suspense>
         </section>

@@ -311,9 +311,10 @@ async function loadCourseContents(
     source.fetchCourseAnnouncements(cookies, course.id),
   ]);
 
-  // Preserve main's session checks on the original feeds. The supplementary
-  // endpoint can be denied independently; report it without hiding readable data.
+  // A supplementary courseware feed may be absent (404), but an HTTP 401
+  // still invalidates the session. Never return or cache a partial success.
   if (!activitiesResult.ok) requireAuthorizedSchoolRead(activitiesResult.status);
+  if (!coursewareResult.ok) requireAuthorizedSchoolRead(coursewareResult.status);
   if (!announcementResult.ok) requireAuthorizedSchoolRead(announcementResult.status);
 
   const materials: LmsMaterialItem[] = [];
@@ -389,7 +390,7 @@ async function loadCourseContents(
   return { announcements, materials, errors };
 }
 
-function readCachedExtras(value: unknown, nowMs: number): {
+function readCachedExtras(value: unknown, nowMs: number, allowedCourseIds: Set<number>): {
   extras: Record<string, CachedCourseContents>;
   pruned: boolean;
 } {
@@ -401,9 +402,10 @@ function readCachedExtras(value: unknown, nowMs: number): {
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
     const courseId = positiveId(key);
     const row = record(item);
-    if (!courseId || !cacheStillFresh(row.expiresAt, nowMs) ||
+    if (!courseId || !allowedCourseIds.has(courseId) || !cacheStillFresh(row.expiresAt, nowMs) ||
       typeof row.fetchedAt !== 'string' || typeof row.expiresAt !== 'string' ||
-      !Array.isArray(row.announcements) || !Array.isArray(row.materials) || !Array.isArray(row.errors)) {
+      !Array.isArray(row.announcements) || !Array.isArray(row.materials) || !Array.isArray(row.errors) ||
+      row.errors.some((error) => record(error).status === 401)) {
       pruned = true;
       continue;
     }
@@ -610,7 +612,13 @@ export function createTronClassLmsHandler({
         cacheData.ownerUid === uid && cacheData.sessionId === linkedId &&
         cacheData.sessionVersion === sessionVersion &&
         cacheStillFresh(cacheData.expiresAt, now()) && publicSnapshot(cacheData.snapshot, uid, now())) {
-        const pruned = readCachedExtras(cacheData.extras, now());
+        // An extra cached course is not proof of enrollment in this snapshot.
+        // Drop entries no longer present in the verified course list.
+        const allowedCourseIds = new Set((cacheData.snapshot as LmsReadonlySnapshot).courses.flatMap((course) => {
+          const id = positiveId(record(course).id);
+          return id ? [id] : [];
+        }));
+        const pruned = readCachedExtras(cacheData.extras, now(), allowedCourseIds);
         extras = refresh ? {} : pruned.extras;
         cachedHomework = refresh ? null : homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid, now())!);
         shouldPruneExtras = !refresh && pruned.pruned;
@@ -687,7 +695,7 @@ export function createTronClassLmsHandler({
       }
 
       if (courseId) {
-        const course = snapshot.courses.find((item) => item.id === courseId);
+        const course = snapshot.courses.find((item) => positiveId(record(item).id) === courseId);
         if (course && (refresh || !extras[String(courseId)])) {
           const contents = await loadCourseContents(source, cookies, course);
           fetchedFromSchool = true;

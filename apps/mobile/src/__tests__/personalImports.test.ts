@@ -1,6 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   meetupWindows,
+  periodProfileForSchool,
+  periodTimes,
+  planPersonalImport,
   serializePersonalImportBackup,
   parsePersonalImportBackup,
   type PersonalImportRow,
@@ -47,6 +50,54 @@ test('append is durable, duplicate-safe, and isolated by account and school', as
   );
   expect((await loadPersonalImports({ ...scope, schoolId: 'ntu' })).records).toHaveLength(0);
 });
+
+const creditStates = [
+  { label: 'missing', fields: {} },
+  { label: 'undefined', fields: { credits: undefined } },
+  { label: 'null', fields: { credits: null } },
+  { label: 'empty', fields: { credits: '' } },
+  { label: 'zero', fields: { credits: 0 } },
+  { label: 'same', fields: { credits: 3 } },
+  { label: 'different', fields: { credits: 2 } },
+];
+const creditMatrix = creditStates.flatMap((saved) =>
+  [undefined, 3].flatMap((incoming) =>
+    [false, true].map((complete) => ({
+      saved: saved.label, fields: saved.fields, incoming, complete,
+    })),
+  ),
+);
+
+test.each(creditMatrix)(
+  'catalog append matches merge-base with saved credits $saved, incoming $incoming, extra slot $complete',
+  async ({ fields, incoming, complete }) => {
+    const periodProfile = periodProfileForSchool(scope.schoolId);
+    const [[startTime], [, endTime]] = periodTimes(periodProfile);
+    const firstSlot = { ...row('duplicate'), courseCode: 'MATH101', startTime, endTime };
+    const duplicate = { ...firstSlot, credits: incoming };
+    const missing = { ...duplicate, id: 'missing', dayOfWeek: 2 };
+    const rows = complete ? [duplicate, missing] : [duplicate];
+    const saved = { ...firstSlot, id: 'saved', ...fields } as PersonalImportRow;
+    const original = (await appendPersonalImports(scope, [saved])).ledger;
+    const result = await appendPersonalImports(scope, rows, () => true, {
+      protectCatalogTimetableSlots: true,
+    });
+
+    // For these identical slots the merge-base catalog guard allows the write.
+    // Its shared planner is unchanged and supplies the expected records.
+    const batch = result.ledger.batches[result.ledger.batches.length - 1];
+    const expected = planPersonalImport(original.records, rows, {
+      batchId: complete ? batch.id : 'preview',
+      importedAt: batch.createdAt,
+      periodProfile,
+    });
+    expect(result.added).toBe(complete ? 1 : 0);
+    expect(result.duplicates).toBe(1);
+    expect(result.ledger.records).toEqual(expected.records);
+    expect(result.ledger.records[0]).toEqual(original.records[0]);
+    expect((await loadPersonalImports(scope)).records).toEqual(expected.records);
+  },
+);
 
 test('NCKU and NTPU accounts do not see each other’s timetable imports', async () => {
   const ncku = { owner: 'nuni:chengda', schoolId: 'ncku' };

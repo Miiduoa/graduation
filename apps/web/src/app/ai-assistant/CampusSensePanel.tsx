@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { useEffect, useState } from 'react';
 import {
   getCampusAssistantSnapshot,
@@ -85,7 +85,7 @@ export function CampusSensePanel({ userId, schoolId, revision, onAsk }: Props) {
           <div className={styles.senseItem}>
             <div className={styles.senseItemTop}>
               <span>待處理作業</span>
-              <Link href="/today-v2">前往待辦</Link>
+              <AssistantReplyLink href="/today-v2">前往待辦</AssistantReplyLink>
             </div>
             {loading && !snapshot ? (
               <p className={styles.senseMuted}>正在確認…</p>
@@ -111,7 +111,7 @@ export function CampusSensePanel({ userId, schoolId, revision, onAsk }: Props) {
           <div className={styles.senseItem}>
             <div className={styles.senseItemTop}>
               <span>最新校園公告</span>
-              <Link href="/announcements">查看公告</Link>
+              <AssistantReplyLink href="/announcements">查看公告</AssistantReplyLink>
             </div>
             {loading && !snapshot ? (
               <p className={styles.senseMuted}>正在確認…</p>
@@ -134,7 +134,7 @@ export function CampusSensePanel({ userId, schoolId, revision, onAsk }: Props) {
           <div className={styles.senseItem}>
             <div className={styles.senseItemTop}>
               <span>今日課表</span>
-              <Link href="/timetable">開啟課表</Link>
+              <AssistantReplyLink href="/timetable">開啟課表</AssistantReplyLink>
             </div>
             {loading && !snapshot ? (
               <p className={styles.senseMuted}>正在確認…</p>

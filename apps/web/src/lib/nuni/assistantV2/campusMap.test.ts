@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { getOfficialCampusMapUrl } from '@campus/shared/src/campusMapLookup';
 import { PROVIDENCE_CAMPUS_PLACES } from '@campus/shared/src/providenceCampus';
 import {
-  campusMapHref, campusMapMatch, formatCampusMapRead, parseCampusMapArguments, parseCampusMapResult,
-  type CampusMapRead,
+  boundedTransitStopMarker, campusMapHref, campusMapMatch, formatCampusMapRead, parseCampusMapArguments,
+  parseCampusMapResult, type CampusMapRead,
 } from './campusMap';
 
 function result(query = '任垣樓501'): CampusMapRead {
@@ -88,6 +88,80 @@ describe('map query and source contract', () => {
     expect(campusMapMatch('nthu', 'PH101', hall)).toBeNull();
     expect(campusMapMatch('pu', 'XX101', hall)).toBeNull();
     expect(campusMapMatch('pu', '主顧樓501', hall)).toBe('building');
+  });
+
+  it('does not treat a teaching-looking POI with transit markers as a classroom building', () => {
+    const hall = PROVIDENCE_CAMPUS_PLACES.find(place => place.id === 'pu-zhugu')!;
+    const spoof = {
+      id: 'synthetic-unrecognized-stop',
+      name: hall.name,
+      category: 'academic',
+      description: 'PH303 附近候車',
+      lat: hall.lat,
+      lng: hall.lng,
+      building: '主顧樓',
+      transitStopIds: ['unknown-stop-1'],
+    };
+    const { transitStopIds: _ignored, ...withoutMarkers } = spoof;
+    expect(campusMapMatch('pu', 'PH303', spoof)).toBe('search');
+    expect(campusMapMatch('pu', 'PH303', withoutMarkers)).toBe('building');
+    const value = result('PH303');
+    const item = {
+      id: spoof.id, schoolId: 'pu', name: spoof.name, category: spoof.category, description: spoof.description,
+      lat: spoof.lat, lng: spoof.lng, building: spoof.building, facilities: [],
+      source: 'school-pois' as const, sourcePath: 'schools/pu/pois',
+      href: campusMapHref('pu', 'PH303', spoof.id), match: 'search' as const, verification: 'published' as const,
+      transitStopIds: spoof.transitStopIds,
+    };
+    value.items = [item];
+    value.resolution = 'candidates';
+    const parsed = parseCampusMapResult(value, 'pu', { query: 'PH303', limit: 5 });
+    expect(parsed.items[0].match).toBe('search');
+    expect(parsed.items[0]).toHaveProperty('transitStopIds', ['1']);
+    expect(parseCampusMapResult(parsed, 'pu', { query: 'PH303', limit: 5 }).items[0].match).toBe('search');
+    const oversized = { ...item, transitStopIds: { nested: 'x'.repeat(10_000), more: Array.from({ length: 5000 }, (_, i) => i) } };
+    const bounded = parseCampusMapResult({ ...value, items: [oversized] }, 'pu', { query: 'PH303', limit: 5 });
+    expect(bounded.items[0].match).toBe('search');
+    expect(bounded.items[0]).toHaveProperty('transitStopIds', ['1']);
+    expect(JSON.stringify(bounded.items[0]).length).toBeLessThan(JSON.stringify(oversized).length);
+    expect(parseCampusMapResult(bounded, 'pu', { query: 'PH303', limit: 5 }).items[0].match).toBe('search');
+    expect(() => parseCampusMapResult({
+      ...value,
+      items: [{ ...item, match: 'building' }],
+      resolution: 'matched',
+    }, 'pu', { query: 'PH303', limit: 5 })).toThrow('INVALID_CAMPUS_MAP_RESULT');
+    const blankIds = Array(33).fill(' ');
+    const blankHall = { ...withoutMarkers, transitStopIds: blankIds };
+    expect(boundedTransitStopMarker(blankHall)).toEqual({});
+    expect(campusMapMatch('pu', 'PH303', { ...blankHall, ...boundedTransitStopMarker(blankHall) })).toBe('building');
+    const blankValue = result('PH303');
+    blankValue.items = [{
+      id: spoof.id, schoolId: 'pu', name: spoof.name, category: 'academic', description: '',
+      lat: spoof.lat, lng: spoof.lng, building: spoof.building, facilities: [],
+      source: 'school-pois', sourcePath: 'schools/pu/pois',
+      href: campusMapHref('pu', 'PH303', spoof.id), match: 'building', verification: 'published',
+      transitStopIds: blankIds,
+    } as CampusMapRead['items'][number] & { transitStopIds: string[] }];
+    const parsedBlank = parseCampusMapResult(blankValue, 'pu', { query: 'PH303', limit: 5 });
+    expect(parsedBlank.items[0].match).toBe('building');
+    expect(parsedBlank.items[0]).not.toHaveProperty('transitStopIds');
+  });
+
+  it('does not treat a bus-stop category as a classroom building after display clipping', () => {
+    const hall = PROVIDENCE_CAMPUS_PLACES.find(place => place.id === 'pu-zhugu')!;
+    const fullCategory = 'Bus Stop (North Campus inbound service at the main Engineering Hall entrance) - Temporary';
+    const clippedCategory = Array.from(fullCategory).slice(0, 80).join('').trim();
+    const stop = {
+      id: 'synthetic-clipped-stop-category',
+      name: 'Temporary Stop',
+      category: clippedCategory,
+      description: '',
+      lat: hall.lat,
+      lng: hall.lng,
+      building: '主顧樓',
+    };
+    expect(campusMapMatch('pu', 'PH303', stop)).not.toBe('building');
+    expect(campusMapMatch('pu', 'PH303', { ...stop, category: fullCategory })).not.toBe('building');
   });
 
   it('keeps partial coverage ahead of candidates and the fact that no route was executed', () => {

@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directoryStorageFailures';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { createRef } from 'react';
 import { callCampusAssistant } from '@/lib/campusAssistantClient';
@@ -8,6 +9,7 @@ import {
   rocSchoolYear,
 } from '@campus/shared/src/campusAnnouncementQuality';
 import { AssistantEnabledProvider } from './AssistantEnabledProvider';
+import { AppHeader } from './AppHeader';
 import {
   TodayAssistantDisclosure,
   TodayCampusEntry,
@@ -34,6 +36,7 @@ vi.mock('./AuthGuard', () => ({
     error: null,
   }),
 }));
+vi.mock('./SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/features/nuni/Session', () => {
   const session = () => ({
     session: state.context ? { context: state.context, platformAccountId: state.accountId } : null,
@@ -180,6 +183,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 afterEach(() => {
+  cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -611,6 +615,69 @@ it('keeps the visible answer and follow-up input usable without a speech engine'
   expect(field.value).toBe('教室在哪裡？');
 });
 
+it('closes the header panel for a same-page answer link opened in the current tab', async () => {
+  state.pathname = '/map';
+  state.search = 'campus=pu';
+  window.history.replaceState({}, '', '/map?campus=pu');
+  mockNuniAsk(() => reply(
+    '[目前地圖](/map?campus=pu) [其他校園](/map?campus=nthu) [地圖區段](/map?campus=pu#places)',
+  ));
+  render(<AssistantEnabledProvider enabled><AppHeader /></AssistantEnabledProvider>);
+  const trigger = screen.getByRole('button', { name: '開啟校園助理' });
+  fireEvent.click(trigger);
+  const field = await screen.findByRole('textbox', { name: '問題' }, { timeout: 5000 });
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '校園地圖' } });
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  const link = await screen.findByRole('link', { name: '目前地圖' });
+  const panel = screen.getByRole('dialog', { name: '校園助理' });
+  link.addEventListener('click', (event) => event.preventDefault(), { once: true });
+  fireEvent.click(link);
+  expect(panel.hidden).toBe(false);
+  fireEvent.click(link, { ctrlKey: true });
+  expect(panel.hidden).toBe(false);
+  link.setAttribute('target', '_blank');
+  fireEvent.click(link);
+  expect(panel.hidden).toBe(false);
+  link.removeAttribute('target');
+  link.setAttribute('download', '');
+  fireEvent.click(link);
+  expect(panel.hidden).toBe(false);
+  link.removeAttribute('download');
+  for (const name of ['其他校園', '地圖區段']) {
+    const other = screen.getByRole('link', { name });
+    other.addEventListener('click', (event) => event.preventDefault(), { once: true });
+    fireEvent.click(other);
+    expect(panel.hidden).toBe(false);
+  }
+  fireEvent.click(link);
+  expect(panel.hidden).toBe(true);
+  expect(document.activeElement).toBe(trigger);
+});
+
+it.each(directoryStorageFailures)('closes the header panel on a service click with storage %s', async (failure) => {
+  state.pathname = '/map';
+  state.search = 'campus=pu';
+  window.history.replaceState({}, '', '/map?campus=pu');
+  mockNuniAsk(() => reply(''));
+  render(<AssistantEnabledProvider enabled><AppHeader /></AssistantEnabledProvider>);
+  const trigger = screen.getByRole('button', { name: '開啟校園助理' });
+  fireEvent.click(trigger);
+  const panel = screen.getByRole('dialog', { name: '校園助理' });
+  fireEvent.click(await within(panel).findByRole('button', { name: '找校園服務' }));
+  fireEvent.change(within(panel).getByRole('searchbox'), { target: { value: '借書' } });
+  const link = within(panel).getByRole<HTMLAnchorElement>('link', { name: /圖書館/ });
+  const storage = rejectDirectoryStorage(failure);
+  try {
+    expect(fireEvent.click(link)).toBe(true);
+    expect(new URL(link.href).pathname).toBe('/library');
+    expect(panel.hidden).toBe(true);
+    expect(document.activeElement).toBe(trigger);
+  } finally {
+    storage.mockRestore();
+  }
+});
+
 it('keeps a guest Today assistant login in the selected campus and returns to the same disclosure', () => {
   state.context = null;
   state.school = 'nthu';
@@ -988,4 +1055,98 @@ it('stops a Today map read, preserves both drafts and ignores its late result af
   expect(mapRead).toHaveBeenCalledOnce();
   expect(ask).toHaveBeenCalledOnce();
   expect(ask.mock.calls[0][0]).toMatchObject({ question: followup, history: [] });
+});
+
+const todayLinkCases = [
+  { destination: 'same URL', href: '/map?campus=pu' },
+  { destination: 'different URL', href: '/map?campus=nthu' },
+  { destination: 'external link', href: 'https://example.org/campus' },
+  { destination: 'same-page anchor', href: '/map?campus=pu#map-result' },
+];
+
+// The merge-base keeps the disclosure open on link activation. Escape closes
+// it and returns focus to the opening control for every kind of link.
+it.each(todayLinkCases.flatMap((linkCase) =>
+  ['click', 'Enter', 'Escape'].map((gesture) => ({ ...linkCase, gesture })),
+).concat(['new tab', 'outside click', 'switch tab', 'same-page history'].map((gesture) => ({
+  ...todayLinkCases[0],
+  gesture,
+}))))('matches the Today focus baseline ($destination, $gesture)', async ({ href, gesture }) => {
+  const synthesis = installSpeech();
+  state.pathname = '/map';
+  state.search = 'campus=pu';
+  window.history.replaceState({}, '', '/map?campus=pu');
+  const external = href.startsWith('https://');
+  if (external) {
+    state.context = null;
+    state.uid = 'alice';
+    vi.mocked(callCampusAssistant).mockResolvedValue({
+      content: '校園資訊請參閱來源。',
+      citations: [{ url: href, label: '回覆連結' }],
+    });
+  } else {
+    mockNuniAsk(() => reply(`[回覆連結](${href})`));
+  }
+
+  const handle = createRef<TodayAssistantHandle>();
+  const onOpenChange = vi.fn();
+  render(
+    <AssistantEnabledProvider enabled={!external}>
+      <button type="button" onClick={() => handle.current?.openAssistant()}>開啟助理</button>
+      <div id="map-result">地圖結果</div>
+      <TodayAssistantDisclosure ref={handle} onOpenChange={onOpenChange} />
+    </AssistantEnabledProvider>,
+  );
+  const trigger = screen.getByRole('button', { name: '開啟助理' });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const field = await screen.findByRole('textbox', { name: external ? '你的問題' : '問題' });
+  if (!external) fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '目前校園' } });
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  const link = await screen.findByRole<HTMLAnchorElement>('link', { name: '回覆連結' });
+  expect(link.getAttribute('href')).toBe(href);
+  if (external) expect(link.target).toBe('_blank');
+  fireEvent.click(screen.getByRole('button', { name: '朗讀回覆' }));
+  expect(synthesis.speak).toHaveBeenCalledOnce();
+
+  const panel = link.closest('details')!;
+  expect(panel.open).toBe(true);
+  link.focus();
+  expect(document.activeElement).toBe(link);
+
+  if (gesture === 'Escape' || gesture === 'Enter') {
+    fireEvent.keyDown(link, { key: gesture });
+  }
+  if (gesture === 'click' || gesture === 'Enter' || gesture === 'new tab') {
+    // jsdom does not synthesize the anchor click on Enter or load a destination.
+    window.addEventListener('click', (event) => event.preventDefault(), { once: true });
+    fireEvent.click(link, { detail: gesture === 'Enter' ? 0 : 1, metaKey: gesture === 'new tab' });
+  }
+  if (gesture === 'outside click') {
+    const outside = screen.getByText('地圖結果');
+    fireEvent.pointerDown(outside);
+    fireEvent.click(outside);
+  }
+  if (gesture === 'switch tab') {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    for (const state of ['hidden', 'visible'] as const) {
+      visibility.mockReturnValue(state);
+      fireEvent(document, new Event('visibilitychange'));
+    }
+    visibility.mockRestore();
+  }
+  if (gesture === 'same-page history') {
+    act(() => {
+      window.history.replaceState({}, '', '/map?campus=pu#map-result');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+  }
+
+  const closes = gesture === 'Escape';
+  expect(panel.open).toBe(!closes);
+  expect(document.activeElement).toBe(closes ? trigger : link);
+  expect(onOpenChange).toHaveBeenLastCalledWith(!closes);
+  expect(synthesis.cancel).toHaveBeenCalledTimes(closes ? 1 : 0);
 });

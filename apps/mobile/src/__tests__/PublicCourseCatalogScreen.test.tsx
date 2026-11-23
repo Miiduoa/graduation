@@ -51,6 +51,42 @@ function nthuJson(courses: unknown[] = [nthuCourse], extra: Record<string, unkno
     truncated: false, courses, ...extra,
   }) };
 }
+
+test.each([
+  { schoolId: 'nthu' as const, schoolName: '國立清華大學',
+    sourceUrl: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json',
+    fetchedAt: '2026-11-06T08:00:00.000Z', displayTime: '2026-11-06 16:00（台灣時間；非校方更新時間）' },
+  { schoolId: 'ncnu' as const, schoolName: '國立暨南國際大學',
+    sourceUrl: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall',
+    fetchedAt: undefined, displayTime: '時間未提供' },
+])('mobile $schoolId review draft preserves exact semester and official retrieval evidence', async ({ schoolId, schoolName, sourceUrl, fetchedAt, displayTime }) => {
+  setBrowsingSchoolId(schoolId);
+  await AsyncStorage.clear();
+  const original = globalThis.fetch;
+  const course = schoolId === 'nthu' ? nthuCourse : ncnuDatabaseCourse;
+  const write = jest.spyOn(AsyncStorage, 'setItem');
+  const navigation = { navigate: jest.fn(), getState: () => ({ routeNames: ['PersonalImport'] }) };
+  try {
+    globalThis.fetch = jest.fn().mockResolvedValue({
+      ok: true, headers: { get: () => null },
+      text: async () => JSON.stringify({ schoolId, sourceUrl, fetchedAt, truncated: false, courses: [course] }),
+    });
+    const view = render(<CourseCatalogScreen navigation={navigation} route={{ params: { filter: { keyword: course.code } } }} />);
+    await view.findByText(course.title);
+    fireEvent.press(view.getByText('帶入課表核對'));
+    await waitFor(() => expect(write.mock.calls.some(([key]) => String(key).endsWith(':grid-draft:v1'))).toBe(true));
+    const draftWrite = write.mock.calls.find(([key]) => String(key).endsWith(':grid-draft:v1'))!;
+    const draft = JSON.parse(draftWrite[1]) as { academicYear: string; semester: string; source: { name: string }; rows: Array<{ source: { name: string } }> };
+    const expected = `${schoolName}｜115學年度第1學期公開開課資料｜來源：${sourceUrl}｜資料擷取：${displayTime}`;
+    expect(draft.academicYear).toBe('115');
+    expect(draft.semester).toBe('1');
+    expect(draft.source.name).toBe(expected);
+    expect(draft.rows.length).toBeGreaterThan(0);
+    expect(draft.rows.every((row) => row.source.name === expected)).toBe(true);
+    view.unmount();
+  } finally { globalThis.fetch = original; write.mockRestore(); }
+});
+
 test('cross-listed mobile catalog cards have unique keys and only the latest tapped card reports a successful copy', async () => {
   setBrowsingSchoolId('ncnu');
   const original = globalThis.fetch;
