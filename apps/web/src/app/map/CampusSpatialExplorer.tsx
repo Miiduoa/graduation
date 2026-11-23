@@ -1027,6 +1027,12 @@ function spatialPlaceContext(place: MapLocation): string {
   return [building, floor ? `樓層：${floor}` : null].filter(Boolean).join(' · ');
 }
 
+// Search only the currently visible POI records, not inferred classroom numbers
+// or route data. NFKC allows full-width letters and digits from timetables.
+function normalizeSpatialSearch(value: string): string {
+  return value.normalize('NFKC').toLowerCase().trim();
+}
+
 function SpatialDialog({ school, locations, selected, onSelect, onClose, manualStart, onManualStart }: Props & {
   onClose: () => void;
   manualStart: number;
@@ -1128,6 +1134,20 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);
   const previousPoint = model.points[index - 1];
   const nextPoint = model.points[index + 1];
+  const [destinationQuery, setDestinationQuery] = useState('');
+  const searchId = useId();
+  const searchStatusId = useId();
+  const searchTerms = model.points.length > 1 ? normalizeSpatialSearch(destinationQuery).split(/\s+/).filter(Boolean) : [];
+  const matchingPoints = searchTerms.length === 0 ? model.points : model.points.filter((point) => {
+    const searchable = normalizeSpatialSearch([
+      point.name, point.category, point.location.building, point.location.floor,
+    ].filter(Boolean).join(' '));
+    return searchTerms.every((term) => searchable.includes(term));
+  });
+  // Filtering suggestions is not a destination change. Keep the explicit
+  // current choice visible even when it does not match the search.
+  const currentOutsideSearch = selectedPoint && !matchingPoints.some((point) => point.id === selectedPoint.id);
+  const pickerPoints = currentOutsideSearch ? [selectedPoint, ...matchingPoints] : matchingPoints;
   const selectId = useId();
   const progressId = useId();
   const directionsNoteId = useId();
@@ -1732,10 +1752,21 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
           </div>
             <div className={styles.details}>
               <div className={styles.selectField}>
+                {model.points.length > 1 && <>
+                  <label htmlFor={searchId}>搜尋導覽地點</label>
+                  <input id={searchId} type="search" value={destinationQuery}
+                    placeholder="地點、棟別或樓層"
+                    aria-describedby={searchTerms.length ? searchStatusId : undefined}
+                    onChange={(event) => setDestinationQuery(event.target.value)} />
+                  {searchTerms.length > 0 && <small id={searchStatusId} role="status">
+                    {matchingPoints.length === 0 ? '沒有符合的地點，請調整關鍵字。' : `找到 ${matchingPoints.length} 個地點。`}
+                    {currentOutsideSearch ? ' 目前選擇仍保留，搜尋不會變更導航目的地。' : ''}
+                  </small>}
+                </>}
                 <label htmlFor={selectId}>想去哪裡</label>
                 <select id={selectId} value={place?.id ?? ''} onChange={(event) => selectPlace(event.target.value)}>
                   {!place && <option value="" disabled>請選擇地點</option>}
-                  {model.points.map((point) => <option key={point.id} value={point.id}>{optionLabels.get(point.id) ?? point.name}</option>)}
+                  {pickerPoints.map((point) => <option key={point.id} value={point.id}>{optionLabels.get(point.id) ?? point.name}</option>)}
                 </select>
               </div>
               {place ? <>
