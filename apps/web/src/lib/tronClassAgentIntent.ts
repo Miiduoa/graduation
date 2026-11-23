@@ -46,6 +46,7 @@ function isMultiClauseRequest(question: string): boolean {
 }
 
 const TRONCLASS_KEYWORD = /(?:\btron\s*class\b|創課|玩課雲)/i;
+const LMS_SOURCE = '(?:玩課雲|創課|tron\\s*class)';
 // A clause without its own TronClass keyword continues the TronClass request only
 // when it names TronClass data and nothing that belongs to another service.
 const TRONCLASS_CONTINUATION = /(?:作業|教材|講義|附件|檔案|未交|未繳|待交|待繳|還沒交|還沒繳|沒交|沒繳|homework|assignments?|materials?|handouts?)/i;
@@ -54,7 +55,17 @@ const NEGATION_SOURCE = "不要|別|勿|不准|禁止|無須|不用|不需要|\\
 const NEGATED = new RegExp(NEGATION_SOURCE, 'i');
 const NEGATIONS = new RegExp(NEGATION_SOURCE, 'gi');
 const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
-const SUBMIT_VERB_SOURCE = '繳交|提交|送出|交出|交作業|上傳|上載|\\b(?:submit|upload)\\b|[交繳](?=了[沒嗎]|沒|過了嗎)';
+const SUBMISSION_OBJECT_SOURCE = `(?:作業|報告|附件|檔案?|文件|作品|心得|講義|考卷|表單|新版|舊版|出去|上去|給|${LMS_SOURCE}|\\b(?:homework|assignments?|files?|attachments?)\\b)`;
+// Keep the object in the suffix so the same verb match can serve commands and homework filters.
+const SHORT_SUBMIT_SOURCE = `[交繳](?=\\s*(?:(?:(?:這|那|一)[份個]|我的|這週|本週)\\s*)*${SUBMISSION_OBJECT_SOURCE}|了[沒嗎]|沒|過了嗎)`;
+const SUBMIT_VERB_SOURCE = [
+  '重新(?:繳交|提交|上傳|上載)|繳交|提交|送出|交出|上傳|上載',
+  '補交|補繳|遲交|重交|重繳|上繳|遞交|呈交|交付|繳回|交回|附上|夾帶|送件|寄出',
+  '回傳(?=\\s*(?:附件|檔案?|文件))',
+  '\\b(?:submit|upload|resubmit|hand\\s+in|turn\\s+in)\\b',
+  SHORT_SUBMIT_SOURCE,
+  '(?<=[未沒待已])[交繳](?=\\s*(?:的|有哪些|$|[,;。?!、和與]))',
+].join('|');
 const OTHER_WRITE_VERB_SOURCE = '發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名|退選|選課|\\b(?:delete|post|reply|withdraw)\\b';
 const WRITE_VERB = new RegExp(`(${SUBMIT_VERB_SOURCE})|${OTHER_WRITE_VERB_SOURCE}`, 'giu');
 const WRITE_NEGATION_SOURCE = `(?:${NEGATION_SOURCE})\\s*(?:(?:幫我|替我|代我|自動|直接)\\s*)*`;
@@ -92,6 +103,7 @@ const GOVERNED_STATUS = new RegExp(
   `^${STATUS_NOUN_SOURCE}(?:\\s*(?:${STATUS_QUESTION_SOURCE}|查詢|一下|給我看))?${STATUS_BOUNDARY_SOURCE}`, 'u',
 );
 const SUBMISSION_QUESTION = new RegExp(`^(?:了沒|了嗎|沒|過了嗎)${STATUS_BOUNDARY_SOURCE}`, 'u');
+const SUBMISSION_DEADLINE = new RegExp(`^作業\\s*(?:的\\s*)?(?:期限|截止(?:日(?:期)?|時間)?)(?:\\s*(?:是)?(?:什麼時候|哪一天|哪天|嗎|呢))?${STATUS_BOUNDARY_SOURCE}`, 'u');
 const HOMEWORK_STATUS_SUFFIX = new RegExp(
   `^\\s*(?:的?作業)?\\s*(?:的?有哪些)?(?:${STATUS_BOUNDARY_SOURCE}|\\s*(?=${CLAUSE_SEPARATOR.source}|${NEGATED_WRITE_SOURCE}))`, 'iu',
 );
@@ -99,7 +111,7 @@ const STATUS_EXPLANATION = new RegExp(
   `((?:${SUBMIT_VERB_SOURCE})${STATUS_NOUN_SOURCE})\\s*(?:如何|怎麼樣)${STATUS_BOUNDARY_SOURCE}`, 'giu',
 );
 
-const LMS_SOURCE = '(?:玩課雲|創課|tron\\s*class)';
+const LMS_SUBJECT = new RegExp(`^${LMS_SOURCE}\\s*(?:的\\s*)?$`, 'iu');
 const HOMEWORK_SUBJECT = new RegExp(`^(?:${LMS_SOURCE}\\s*(?:的\\s*)?)?(?:我的\\s*)?作業\\s*的?\\s*$`, 'iu');
 const READ_STATUS_PREFIX = new RegExp(
   `^(?:${LMS_SOURCE}\\s*(?:作業\\s*)?)?(?:(?:請|麻煩|幫我|替我|只要|只)\\s*)*` +
@@ -138,6 +150,7 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
     const segment = before.split(/[,;。?!、:\r\n]/u).at(-1)!.trimStart();
     if ((GOVERNED_STATUS.test(after) || SUBMISSION_QUESTION.test(after)) &&
       (readGovernsStatus(segment) || HOMEWORK_SUBJECT.test(segment))) continue;
+    if (SUBMISSION_DEADLINE.test(after) && (readGovernsStatus(segment) || LMS_SUBJECT.test(segment))) continue;
 
     // Preserve homework filters such as「尚未提交的作業」.
     const statusPrefix = before.match(STATUS_PREFIX);

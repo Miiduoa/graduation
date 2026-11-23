@@ -187,6 +187,62 @@ describe('TronClass clauses inside a multi-clause request', () => {
 });
 
 describe('write occurrences in TronClass requests', () => {
+  const submissionCues = ['也', '順便', '再', '並', '另外', '同時'];
+  const submissionCommands = [
+    ...['繳', '交'].flatMap(verb => [
+      '作業', '報告', '附件', '檔案', '作品', '心得', '講義', '考卷', '表單',
+      '玩課雲作業', ' TronClass 作業', '出去', '上去', '給老師', '這份報告',
+    ].map(object => verb + object)),
+    ...[
+      '補交', '補繳', '遲交', '重交', '重新繳交', '重新上傳', '上繳', '遞交',
+      '呈交', '交付', '繳回', '交回', '回傳', '附上', '夾帶', '送件', '寄出',
+    ].flatMap(verb => ['附件', '檔案'].map(object => verb + object)),
+    ...['hand in', 'turn in', 'resubmit'].flatMap(verb =>
+      ['the assignment', 'the attachment'].map(object => `${verb} ${object}`)),
+  ];
+
+  it.each(submissionCommands)('blocks the standalone submission %s', command => {
+    expect(parseTronClassAgentIntent(`玩課雲幫我${command}`)).toEqual({ intent: 'unsupported', pendingOnly: false });
+  });
+
+  it.each(submissionCues.flatMap(cue => submissionCommands.map(command => [cue, command] as const)))(
+    'blocks a private read before %s %s even after a negated submission',
+    (cue, command) => {
+      expect(parseTronClassAgentIntent(`查玩課雲作業${cue}${command}`)?.intent ?? 'planner')
+        .toBe(['順便', '另外', '同時'].includes(cue) ? 'planner' : 'unsupported');
+      expect(tronClassCompoundClauses(`查玩課雲作業${cue}${command}`)).toEqual([]);
+      expect(tronClassCompoundClauses(`查玩課雲作業，${cue}${command}`)).toEqual([]);
+      expect(tronClassCompoundClauses(`查玩課雲作業，不要補交舊版${cue}${command}`)).toEqual([]);
+      expect(parseTronClassAgentIntent(`查玩課雲作業不要補交舊版${command}`))
+        .toEqual({ intent: 'unsupported', pendingOnly: false });
+    },
+  );
+
+  it.each(['幫我繳玩課雲作業', 'TronClass 附件請補交'])('blocks %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+  });
+
+  it.each(['查玩課雲作業，順便繳作業', '查玩課雲作業，補交附件'])(
+    'suppresses the compound read for %s',
+    question => expect(tronClassCompoundClauses(question)).toEqual([]),
+  );
+
+  it.each([
+    '查玩課雲尚未提交的作業', '查玩課雲未交作業', '查玩課雲還沒交的作業',
+    '查玩課雲沒交作業', '查玩課雲尚未繳交的作業', '查玩課雲待繳作業', '查玩課雲有哪些待繳',
+  ])('keeps the pending homework filter in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'homework', pendingOnly: true });
+    expect(tronClassCompoundClauses(`${question}和校園公告`)).toEqual([question]);
+  });
+
+  it.each([
+    '玩課雲作業交了嗎', '查玩課雲交作業期限', '玩課雲交作業截止日',
+    '不要補交附件只要查玩課雲作業狀態', '不要繳作業只查玩課雲作業狀態',
+    'TronClass homework turnaround time', 'TronClass homework hand index',
+  ])('keeps the homework read %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'homework', pendingOnly: false });
+  });
+
   it.each([
     '查玩課雲作業，也上傳狀態，以及校園公告',
     '查玩課雲作業，也上傳狀態和附件，以及校園公告',
