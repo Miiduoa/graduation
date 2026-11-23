@@ -3,7 +3,7 @@ import { Platform, Pressable, Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { CampusEvidencePlan, CampusPlanPriority, CampusPlanRoute } from '../services/offlineCampusPlanner';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
-import { resolveCampusAssignmentMatch, type CampusAssignmentIdentity } from '../services/campusAssignmentTarget';
+import type { CampusAssignmentIdentity } from '../services/campusAssignmentTarget';
 import type { NuniPlanActivityIdentity } from '../services/nuniPlanAssignmentTarget';
 import type { safeNavigate } from '../utils/safeNavigate';
 import { CampusAssignmentReminderAction } from './CampusAssignmentReminderAction';
@@ -72,12 +72,10 @@ export function CampusEvidencePlanCard({
   useEffect(() => {
     spacePressedStep.current = null;
   }, [disabled, plan]);
-  const usesCampusAssignmentAction = (assignment: CampusAssignmentIdentity & NuniPlanActivityIdentity) =>
-    assignment.kind !== 'quiz' && (!assignment.nuniSource || Boolean(assignment.expectedSource));
   const assignmentAction = (assignment: CampusAssignmentIdentity & NuniPlanActivityIdentity) => {
     if (historical) return null;
     if (renderAssignmentAction) return renderAssignmentAction(assignment);
-    if (!usesCampusAssignmentAction(assignment)) return null;
+    if (assignment.kind === 'quiz') return null;
     return reminderContext && navigation ? (
       <CampusAssignmentOpenButton
         assignment={assignment}
@@ -101,18 +99,6 @@ export function CampusEvidencePlanCard({
         </Text>
       </View>
       {plan.steps.map((step, index) => {
-        const match = step.fullAssignmentTitle && step.evidence === 'authorized-assignments' &&
-          !historical && !renderAssignmentAction && usesCampusAssignmentAction(step) &&
-          reminderContext && typeof navigation?.navigate === 'function' && reminderContext.isCurrent()
-          ? resolveCampusAssignmentMatch({
-            assignment: step,
-            snapshot: reminderContext.snapshot,
-            scope: { uid: reminderContext.userId, schoolId: reminderContext.schoolId },
-          })
-          : null;
-        const displayTitle = match?.fullTitle === step.fullAssignmentTitle
-          ? step.fullAssignmentTitle ?? step.title
-          : step.title;
         const priorityColor = historical ? aiTokens.muted : step.priority === 'overdue' || step.priority === 'urgent'
           ? aiTokens.danger : step.priority === 'soon' ? aiTokens.warning : aiTokens.muted;
         const done = progress?.completedStepIds.includes(step.id) ?? false;
@@ -159,7 +145,7 @@ export function CampusEvidencePlanCard({
               </Text>
               <View style={{ flex: 1, gap: 5 }}>
                 <Text style={{ color: aiTokens.text, fontSize: 15, fontWeight: '700' }}>
-                  {displayTitle}
+                  {step.title}
                 </Text>
                 <Text style={{ color: priorityColor, fontSize: 12, fontWeight: '600' }}>
                   {historical ? '規劃當時：' : ''}{PRIORITY[step.priority]}{step.kind === 'quiz' ? ' · 測驗參考期限' : ''}
@@ -185,8 +171,7 @@ export function CampusEvidencePlanCard({
             {!historical && reminderContext && step.kind !== 'quiz' ? (
               <CampusAssignmentReminderAction
                 key={step.id + ':' + step.dueAt}
-                step={{ title: step.title, groupName: step.groupName, dueAt: step.dueAt,
-                  evidence: step.evidence, route: step.route }}
+                step={step}
                 snapshot={reminderContext.snapshot}
                 userId={reminderContext.userId}
                 schoolId={reminderContext.schoolId}
@@ -197,7 +182,7 @@ export function CampusEvidencePlanCard({
             {progress ? (
               <Pressable
                 accessibilityRole="checkbox"
-                accessibilityLabel={'我已處理：' + displayTitle}
+                accessibilityLabel={'我已處理：' + step.title}
                 accessibilityState={{ checked: done, disabled }}
                 aria-checked={done}
                 disabled={disabled}

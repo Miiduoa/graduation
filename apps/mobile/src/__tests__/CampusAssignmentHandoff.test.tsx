@@ -1,7 +1,5 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
-import { AIButton } from '../ui/aiFirst';
-import { resolveCampusAssignmentTarget as resolveMergeBaseTarget } from './fixtures/campusAssignmentMergeBase';
 import { CampusAssignmentOpenButton } from '../screens/CampusAssignmentOpenButton';
 import { CampusEvidencePlanCard } from '../screens/CampusEvidencePlanCard';
 import { CampusAssistantScreen } from '../screens/CampusAssistantScreen';
@@ -43,7 +41,7 @@ function plan(): CampusEvidencePlan {
   return {
     title: '今日優先行動', overview: '依據已同步資料', checkedAt: new Date(now).toISOString(),
     limitations: [], content: '本機規劃',
-    steps: [{ ...assignment, expectedSource: snapshot().assignments.items[0].source, id: 'assignment-0', detail: '核對繳交要求',
+    steps: [{ ...assignment, id: 'assignment-0', detail: '核對繳交要求',
       evidence: 'authorized-assignments', priority: 'urgent', route: '/classroom' }],
   };
 }
@@ -71,55 +69,6 @@ test('opens only the verified homework page, with no prefills or automatic write
     params: { groupId: 'course_1', assignmentId: 'work_1' },
   });
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
-});
-
-const matchOptions = [true, false];
-const resyncCases = ['same', 'different'].flatMap((id) =>
-  matchOptions.flatMap((title) =>
-    matchOptions.flatMap((course) =>
-      matchOptions.map((deadline) => ({ id, title, course, deadline })))));
-
-describe.each(['before', 'after'] as const)('%s resync', (phase) => {
-  describe.each(['old', 'new'] as const)('%s screen callback', (screen) => {
-    test.each(resyncCases)('ID $id, title $title, course $course, deadline $deadline', (matches) => {
-      const navigate = jest.fn();
-      const oldSnapshot = snapshot();
-      const newSnapshot = snapshot();
-      newSnapshot.checkedAt = new Date(now + 1000).toISOString();
-      jest.mocked(Date.now).mockReturnValue(now + 1000);
-      newSnapshot.assignments.items[0] = {
-        title: matches.title ? '  資料庫報告  ' : '另一份報告',
-        groupName: matches.course ? assignment.groupName : '另一門課',
-        dueAt: matches.deadline ? assignment.dueAt : '2026-10-27T13:00:00Z',
-        source: { kind: 'group-assignment', groupId: 'course_1',
-          assignmentId: matches.id === 'same' ? 'work_1' : 'work_2' },
-      };
-      const refreshed = phase === 'after' ? newSnapshot : oldSnapshot;
-      const button = (value: CampusSenseSnapshot, item: typeof assignment) => (
-        <CampusAssignmentOpenButton assignment={item} context={context(value)}
-          navigation={{ navigate }} disabled={false} />
-      );
-      const newAssignment = { ...assignment, title: ' 資料庫報告 ' };
-      const view = render(button(oldSnapshot, assignment));
-      // Retain the old event callback to model a tap on the previous screen
-      // after React has rendered the next snapshot.
-      const oldPress = view.UNSAFE_getByType(AIButton).props.onPress;
-      view.rerender(button(refreshed, newAssignment));
-      const newPress = view.UNSAFE_queryByType(AIButton)?.props.onPress;
-
-      const target = resolveMergeBaseTarget({
-        assignment: screen === 'old' ? assignment : newAssignment,
-        snapshot: screen === 'old' ? oldSnapshot : refreshed,
-        scope: { uid: 'A', schoolId: 'pu' },
-      });
-      const press = screen === 'old' ? oldPress : newPress;
-      expect(Boolean(press)).toBe(Boolean(target));
-      act(() => { press?.(); });
-      expect(navigate.mock.calls).toEqual(target ? [[
-        '學習', { initial: false, screen: target.route, params: target.params },
-      ]] : []);
-    });
-  });
 });
 
 test('rechecks expiry at tap time and shows recovery instead of navigating stale data', () => {
@@ -164,8 +113,8 @@ test('daily and undated task entries retain exact assignment navigation', () => 
   fullPlan.agenda = {
     timetableAvailable: false, assignmentsAvailable: true, ignoredCourses: 0,
     days: [{ date: '2026-10-27', label: '10/27（週二）', courses: [], gaps: [], conflicts: [],
-      deadlines: [{ ...assignment, expectedSource: value.assignments.items[0].source, timeLabel: '20:00', overdue: false }] }],
-    outsideWindow: [{ title: '未訂截止的作業', groupName: '程式設計', dueAt: null, expectedSource: value.assignments.items[1].source, reason: 'undated' }],
+      deadlines: [{ ...assignment, timeLabel: '20:00', overdue: false }] }],
+    outsideWindow: [{ title: '未訂截止的作業', groupName: '程式設計', dueAt: null, reason: 'undated' }],
   };
   const navigate = jest.fn();
   const view = render(<CampusEvidencePlanCard plan={fullPlan} disabled={false}

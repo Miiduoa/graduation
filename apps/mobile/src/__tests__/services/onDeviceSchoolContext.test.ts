@@ -1216,6 +1216,29 @@ test('keeps the complete saved course set for offline tools, while limiting mode
   expect(prompt).toContain('不可據此判定某天沒課');
 });
 
+test('prompt reads snapshot array indices even when own methods are shadowed', async () => {
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const saved: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: '資料庫作業', groupName: '資料庫', dueAt: null }],
+    },
+    announcements: { status: 'available', items: [{ title: '校園公告樣本', publishedAt: null }] },
+  };
+  const expected = formatOnDeviceSchoolPrompt(local, saved, 'alice');
+  expect(expected).toContain('資料庫作業');
+  expect(expected).toContain('校園公告樣本');
+  for (const items of [saved.assignments.items, saved.announcements.items]) {
+    Object.defineProperties(items, {
+      some: { value: null }, map: { value: null }, slice: { value: null },
+      length: { writable: false }, [Symbol.iterator]: { value: null },
+    });
+  }
+  expect(formatOnDeviceSchoolPrompt(local, saved, 'alice')).toBe(expected);
+});
+
 test('only includes an authorized and fresh campus snapshot for its original account', async () => {
   const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
   const saved: CampusSenseSnapshot = {

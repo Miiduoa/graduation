@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { useEffect, useRef, useState } from 'react';
 import { ACCOUNT_DEMO_ACTION_LABELS } from '@campus/shared/src/accountDemo';
 import {
@@ -62,11 +62,11 @@ export function AccountDemoAssistantCard({ proposal, scope }: {
       {status === 'cancelled' && <p className={styles.status}>已取消，沒有送出展示操作。</p>}
       {status === 'verified' && <div className={styles.receipt} aria-label="展示執行回執">
         <p className={`${styles.status} ${styles.statusOk}`}>已完成「{title}」，帳號展示紀錄已核對。</p>
-        <Link className={styles.pageLink} href={destination.href}>開啟{destination.label}</Link>
+        <AssistantReplyLink className={styles.pageLink} href={destination.href}>開啟{destination.label}</AssistantReplyLink>
       </div>}
       {status === 'unknown' && <div>
         <p className={styles.alert} role="alert">{error}</p>
-        <Link className={styles.pageLink} href={destination.href}>開啟{destination.label}核對</Link>
+        <AssistantReplyLink className={styles.pageLink} href={destination.href}>開啟{destination.label}核對</AssistantReplyLink>
       </div>}
     </article>
   );

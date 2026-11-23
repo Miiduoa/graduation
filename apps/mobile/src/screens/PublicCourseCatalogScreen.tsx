@@ -19,6 +19,7 @@ import { hasPersonalImportDraft } from '../services/imports/personalImportDraft'
 
 import { PublicCourseImportAction } from '../components/PublicCourseImportAction';
 import { queuePublicCourseClipboardCopy } from '../services/publicCourseClipboardQueue';
+import { publicCourseImportSource, type PublicCourseSourceEvidence } from '../services/publicCourseTimetableImport';
 
 type Result = { filters: PublicCourseFilters } & (
   | { status: 'loading' | 'error'; query: string }
@@ -59,12 +60,13 @@ type Props = {
   navigation?: Parameters<typeof safeNavigate>[0];
 };
 
-function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedback, onCopy }: Props & {
+function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedback, onCopy, sourceEvidence }: Props & {
   course: PublicCatalogCourse;
   cardId: string;
   rowNumber: number;
   copyFeedback: ClipboardFeedback | null;
   onCopy: (csv: string, cardId: string) => void;
+  sourceEvidence?: PublicCourseSourceEvidence;
 }) {
   const scope = usePersonalImportScope();
   const scopeRef = useRef(scope);
@@ -100,7 +102,7 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
       if (!text) return;
       const academicYear = course.semester.slice(0, -1);
       const semester = course.semester.slice(-1);
-      const source = { type: 'paste' as const, name: schoolId === 'nthu' ? '清華大學本學期開設課程' : '暨南大學本學期開設課程' };
+      const source = publicCourseImportSource(schoolId, course.semester, sourceEvidence);
       const { rows, issues } = parsePersonalImport(text, { kind: 'timetable', schoolId, academicYear, semester, source });
       if (!rows.length || issues.some(issue => issue.severity === 'error')) {
         setNotice('課表資料需要手動核對，請前往匯入我的資料。');
@@ -151,7 +153,7 @@ function CourseCard({ course, schoolId, navigation, cardId, rowNumber, copyFeedb
     {csv && <View style={{ gap: 8, marginTop: 8 }}>
       <Button text="帶入課表核對" accessibilityLabel={`帶入課表核對：${spokenCourse}`} kind="primary" onPress={() => { void review(course); }} />
       {notice ? <Text accessibilityRole="alert" style={body}>{notice}</Text> : null}
-      <PublicCourseImportAction course={course} schoolId={schoolId} navigation={navigation} />
+      <PublicCourseImportAction course={course} schoolId={schoolId} navigation={navigation} evidence={sourceEvidence} />
       <Button text="複製課表匯入資料" accessibilityLabel={`複製課表匯入資料：${spokenCourse}`} kind="ghost" onPress={() => onCopy(csv, cardId)} />
       {copied && <Text accessibilityLiveRegion="polite" style={body}>已複製，請到匯入頁貼上並核對上課時間。</Text>}
       {manualCopy && <>
@@ -396,6 +398,7 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
           </Text>}
         </View>}
         renderItem={({ item, index }) => <CourseCard course={item} schoolId={schoolId} navigation={navigation}
+          sourceEvidence={result?.status === 'ready' ? result.data : undefined}
           cardId={publicCourseCardKey(item, index)} rowNumber={index + 1}
           copyFeedback={copyFeedback} onCopy={copyCourse} />}
       />

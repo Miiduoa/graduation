@@ -40,31 +40,6 @@ const reminderContext = { userId: 'firebase-user', schoolId: 'pu', snapshot: nul
 beforeEach(() => jest.clearAllMocks());
 afterEach(() => jest.restoreAllMocks());
 
-test.each([12, 47, 130])('無法確認開啟目標時，標題與進度標籤保留原本的步驟文字（%i 字）', (width) => {
-  const input = plan();
-  const prefix = '課堂實作'.repeat(40);
-  const fullTitles = ['原稿', '修訂稿'].map((suffix) => prefix + suffix);
-  input.agenda = undefined;
-  input.steps = fullTitles.map((fullAssignmentTitle, index) => ({
-    ...input.steps[0],
-    id: 'work-' + index,
-    title: prefix.slice(0, width) + (width === 47 ? '…' : ''),
-    fullAssignmentTitle,
-  }));
-  const onToggleStep = jest.fn();
-  const view = render(<CampusEvidencePlanCard plan={input} disabled={false}
-    progress={{ completedStepIds: [], onToggleStep }} />);
-  const headings = view.getAllByText(input.steps[0].title);
-  expect(headings).toHaveLength(input.steps.length);
-  headings.forEach((heading, index) => {
-    expect(heading.props.numberOfLines).toBeUndefined();
-    expect(heading.props.ellipsizeMode).toBeUndefined();
-    fireEvent.press(view.getAllByRole('checkbox', { name: '我已處理：' + input.steps[index].title })[index]);
-    expect(onToggleStep).toHaveBeenLastCalledWith(input.steps[index].id, true);
-  });
-  fullTitles.forEach((title) => expect(view.queryByText(title)).toBeNull());
-});
-
 function renderProgressCard(disabled = false) {
   const input = plan();
   const onToggle = jest.fn();
@@ -263,22 +238,12 @@ test('an injected renderer that declines a source does not fall through into a F
 
 test('without the platform renderer the existing live Firebase action still receives its own context', () => {
   const navigation = { navigate: jest.fn() };
-  const livePlan = plan();
-  livePlan.steps[0].expectedSource = { kind: 'group-assignment', groupId: 'course', assignmentId: 'work' };
-  livePlan.steps[0].fullAssignmentTitle = livePlan.steps[0].title;
-  const card = (context = reminderContext) => <CampusEvidencePlanCard plan={livePlan} disabled={false}
-    reminderContext={context} navigation={navigation} />;
-  const view = render(card());
+  render(<CampusEvidencePlanCard plan={plan()} disabled={false}
+    reminderContext={reminderContext} navigation={navigation} />);
   expect(CampusAssignmentOpenButton).toHaveBeenCalledWith(expect.objectContaining({
-    assignment: expect.objectContaining({ title: '資料庫報告' }),
-    context: reminderContext, navigation, disabled: false,
+    assignment: expect.objectContaining({ title: '資料庫報告' }), context: reminderContext, navigation, disabled: false,
   }), undefined);
-  const nextContext = { ...reminderContext, isCurrent: () => false };
-  view.rerender(card(nextContext));
-  const calls = jest.mocked(CampusAssignmentOpenButton).mock.calls;
-  expect(calls[0][0].context).toBe(reminderContext);
-  expect(calls[0][0].context.isCurrent()).toBe(true);
-  expect(calls[calls.length - 1][0].context).toBe(nextContext);
+  expect(CampusAssignmentReminderAction).toHaveBeenCalled();
 });
 
 test('quiz steps, daily deadlines and undated work preserve their kind and live target without enabling assignment reminders', () => {

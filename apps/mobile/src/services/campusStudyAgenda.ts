@@ -1,4 +1,3 @@
-import type { CampusAssignmentIdentity } from './campusAssignmentTarget';
 import { inspectCampusClockAvailability } from './campusClockAvailability';
 import type { NuniPlanAssignmentSource, NuniPlanQuizSource } from './nuniPlanAssignmentTarget';
 
@@ -10,7 +9,7 @@ export interface AgendaCourse {
   end: number;
   room?: string;
 }
-export interface AgendaAssignment extends Pick<CampusAssignmentIdentity, 'fullAssignmentTitle' | 'summaryAssignmentTitle' | 'expectedSource'> {
+export interface AgendaAssignment {
   /** Absent on older saved plans, whose deadlines are assignments. */
   kind?: 'assignment' | 'quiz';
   title: string;
