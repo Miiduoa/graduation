@@ -505,14 +505,23 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // target is never proof that our map entered the viewport.
           // A throwing target getter is not an omitted target: a broken or
           // foreign callback must never wake an offscreen WebGL context.
-          const entry = entries.find((candidate) => {
+          // Browsers can queue several threshold crossings before a single
+          // callback, especially during a fast scroll. The last matching
+          // entry reflects the latest known visibility; selecting the first
+          // can start WebGL after the host has already left the viewport.
+          let entry: IntersectionObserverEntry | undefined;
+          for (let index = entries.length - 1; index >= 0; index -= 1) {
+            const candidate = entries[index];
             try {
               const target = candidate.target;
-              return !target || target === host;
+              if (!target || target === host) {
+                entry = candidate;
+                break;
+              }
             } catch {
-              return false;
+              // A malformed/foreign target is not evidence for this host.
             }
-          });
+          }
           if (entries.length && !entry) return;
           visibility = (entry?.isIntersecting ?? false) ? 'visible' : 'hidden';
           if (observing) syncVisibility();
