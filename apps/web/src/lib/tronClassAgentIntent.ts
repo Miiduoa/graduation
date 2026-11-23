@@ -75,26 +75,97 @@ const NEGATED_BA_FILL = '(?:(?:把|將)\\s*(?:(?![，,；;。！!？?\\r\\n]|然
 const NEGATED_WRITE_SOURCE = `${WRITE_NEGATION_SOURCE}${NEGATED_BA_FILL}(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})`;
 const NEGATED_WRITE_START = new RegExp(NEGATED_WRITE_SOURCE, 'giu');
 const STARTS_NEGATED_WRITE = new RegExp(`^${NEGATED_WRITE_SOURCE}`, 'iu');
-// Stop clearing a negated write at a new action, not at 和／與 inside its object.
-const NEGATED_WRITE_STOP = new RegExp(
-  '(?:然後|接著|順便|並且|另外|同時|也幫我|再幫我|並幫我|[，,；;。！!？?\\r\\n])+|' +
-  '只要|只|改成|改查|而是|查|看|顯示|列出|確認|' +
-  `(?:[和與及、]|以及)\\s*(?:(?:請|幫我|替我|代我|直接|自動)\\s*)*(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})|` +
-  '\\b(?:and|then|also)\\b',
-  'iu',
-);
+const NOUN_COMPOUNDS = [
+  '交通資訊', '交通', '交流', '交換', '交易', '交際', '交響', '交友', '交集', '交往',
+  '交界', '交替', '交錯', '交叉', '交會', '交織', '交情', '交遊', '交涉', '交戰',
+  '交鋒', '交口', '交加', '交匯', '交管', '交白',
+  '調查',
+];
+const QUERY_COMPOUNDS = ['告訴我', '查詢', '查看', '顯示', '列出', '確認', '查一下', '看一下'];
+const QUERY_START = new Set(['查', '看', ...QUERY_COMPOUNDS]);
+const ACTION_CUES = ['只要', '只', '改成', '改查', '而是'];
+const CLAUSE_CUES = ['然後', '接著', '順便', '並且', '另外', '同時', '也幫我', '再幫我', '並幫我'];
+const CONJ_CUES = ['以及', '和', '與', '及', '、'];
+
+type TokenKind = 'noun' | 'query' | 'cue' | 'conj' | 'punct' | 'other';
+type Token = { value: string; start: number; end: number; kind: TokenKind };
+
+const LEXICON: { value: string; kind: TokenKind }[] = [
+  ...NOUN_COMPOUNDS.map(value => ({ value, kind: 'noun' as const })),
+  ...QUERY_COMPOUNDS.map(value => ({ value, kind: 'query' as const })),
+  ...ACTION_CUES.map(value => ({ value, kind: 'cue' as const })),
+  ...CLAUSE_CUES.map(value => ({ value, kind: 'cue' as const })),
+  ...CONJ_CUES.map(value => ({ value, kind: 'conj' as const })),
+].sort((a, b) => b.value.length - a.value.length);
+
+function tokenize(text: string): Token[] {
+  const tokens: Token[] = [];
+  let index = 0;
+  while (index < text.length) {
+    const from = index;
+    const entry = LEXICON.find(item => text.startsWith(item.value, index));
+    if (entry) {
+      tokens.push({ value: entry.value, start: from, end: from + entry.value.length, kind: entry.kind });
+      index += entry.value.length;
+      continue;
+    }
+    const ch = text[index]!;
+    const kind: TokenKind = ch === '查' || ch === '看' ? 'query'
+      : /[，,；;。！!？?\r\n]/.test(ch) ? 'punct'
+      : 'other';
+    tokens.push({ value: ch, start: from, end: from + 1, kind });
+    index += 1;
+  }
+  return tokens;
+}
+
+function tokenCovering(text: string, index: number): Token | undefined {
+  return tokenize(text).find(token => token.start <= index && index < token.end);
+}
+
+function isRelativeQuery(tokens: Token[], token: Token): boolean {
+  const at = tokens.indexOf(token);
+  const next = tokens[at + 1]?.value;
+  const prev = tokens[at - 1]?.value;
+  return next === '的' || prev === '剛' || prev === '所' || prev === '已' || prev === '曾經' || prev === '剛才';
+}
+
+function nextNegatedWriteStop(text: string, from: number): number {
+  const rest = text.slice(from);
+  const tokens = tokenize(rest);
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) return token.start;
+    if (token.kind === 'cue' && ACTION_CUES.includes(token.value)) return token.start;
+    if (token.kind === 'query' && QUERY_START.has(token.value) && !isRelativeQuery(tokens, token)) return token.start;
+    if (token.kind === 'conj') {
+      const after = rest.slice(token.end);
+      if (new RegExp(`^(?:(?:請|幫我|替我|代我|直接|自動)\\s*)*(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})`, 'iu').test(after)) {
+        return token.start;
+      }
+    }
+    if (/^(?:and|then|also)\b/i.test(rest.slice(token.start))) return token.start;
+  }
+  return -1;
+}
+
+const QUOTE_PAIRS: Array<readonly [string, string]> = [
+  ['「', '」'], ['『', '』'], ['“', '”'], ['‘', '’'], ['"', '"'], ['`', '`'],
+];
+
 function readRoutingText(text: string): string {
   let result = '';
   let start = 0;
   for (const match of text.matchAll(NEGATED_WRITE_START)) {
     if (match.index < start) continue;
     const end = match.index + match[0].length;
-    const boundary = text.slice(end).search(NEGATED_WRITE_STOP);
+    const boundary = nextNegatedWriteStop(text, end);
     result += text.slice(start, match.index) + ' ';
     start = boundary < 0 ? text.length : end + boundary;
   }
   return result + text.slice(start);
 }
+
 const ADDITIVE_CUE = /(?:也|還|並|並且|順便|同時|再|另外|以及|和|跟|與|及)\s*$/u;
 const WRITE_CUE = /(?:記得|立即|馬上|然後|接著|接下來|之後|後|請|幫我|替我|代我|直接|自動|\b(?:please|then|immediately))\s*$/iu;
 const STATUS_PREFIX = /(?:(?:是否|有沒有|有無|有哪些|哪些)\s*(?:已經|已|有)?\s*|尚未|還沒|未|沒|待|已經|已)$/u;
@@ -154,8 +225,8 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
 
     const after = text.slice(match.index + match[0].length).trimStart();
     const segment = before.split(/[,;。?!、:\r\n]/u).at(-1)!.trimStart();
-    // 「交」 begins nouns such as 交通 and 交流, which are not submission commands.
-    if (match[0] === '交' && /^(?:通|流|易|換|際|友|集|叉|往)/u.test(text.slice(match.index + 1))) continue;
+    // A lone 交／繳 is a write; the same character inside a noun token is not.
+    if ((match[0] === '交' || match[0] === '繳') && tokenCovering(text, match.index)?.kind === 'noun') continue;
     if (ADDITIVE_CUE.test(before)) return STATUS_NOUN.test(after) ? 'planner' : 'unsupported';
     if (WRITE_CUE.test(before)) return 'unsupported';
     if (segment.includes('把')) return 'unsupported';
@@ -202,13 +273,16 @@ function hasBaObjectWrite(text: string): boolean {
   return false;
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function textWithoutQuotedSpans(text: string): string {
-  return text
-    .replace(/「[^」]*」/gu, ' ')
-    .replace(/『[^』]*』/gu, ' ')
-    .replace(/“[^”]*”/gu, ' ')
-    .replace(/"[^"]*"/gu, ' ')
-    .replace(/(?<![A-Za-z])'[^']*'(?![A-Za-z])/gu, ' ');
+  let result = text;
+  for (const [open, close] of QUOTE_PAIRS) {
+    result = result.replace(new RegExp(`${escapeRegex(open)}[^${escapeRegex(close)}]*${escapeRegex(close)}`, 'gu'), ' ');
+  }
+  return result.replace(/(?<![A-Za-z])'[^']*'(?![A-Za-z])/gu, ' ');
 }
 
 function keywordOnlyInsideQuotes(text: string): boolean {

@@ -520,9 +520,35 @@ describe('write occurrences in TronClass requests', () => {
     '查玩課雲跨文化交流課程',
     '查玩課雲交流區公告',
     '查玩課雲交通資訊作業說明',
+    '查玩課雲交響樂課程',
+    '查玩課雲交換生課程',
   ])('keeps the course or notice read in %s', question => {
     const parsed = parseTronClassAgentIntent(question);
     expect(parsed?.intent).not.toBe('unsupported');
     expect(parsed?.intent).toBeTruthy();
+  });
+
+  it.each([
+    '不要繳交調查報告和玩課雲作業附件，只查校園公告',
+    '不要繳交我剛查看的玩課雲作業，只查校園公告',
+    '不要繳交我剛查看的玩課雲作業',
+  ])('does not treat a query character inside a negated object as a new read in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('keeps a legitimate later TronClass read after a negated object that contains 查 or 看', () => {
+    expect(tronClassCompoundClauses('不要繳交調查報告和玩課雲作業附件，只查校園公告，查創課教材')).toEqual(['查創課教材']);
+  });
+
+  it.each([
+    '原文是 ‘查玩課雲作業’',
+    '`查玩課雲作業`',
+    '備註：「查玩課雲作業」',
+    '請解釋「玩課雲作業」',
+  ])('does not authorize a private read from a quoted mention in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
   });
 });
