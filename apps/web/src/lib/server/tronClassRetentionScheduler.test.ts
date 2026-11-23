@@ -1,7 +1,8 @@
 // @vitest-environment node
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
-afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
+beforeEach(() => vi.stubGlobal('__tronClassRetentionSchedulerStarted', undefined));
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 const configured = { NODE_ENV: process.env.NODE_ENV, NEXT_RUNTIME: 'nodejs', TRONCLASS_RETENTION_ENABLED: 'true' };
 it.each([
@@ -23,8 +24,11 @@ it('starts once with jitter and schedules the next batch only after the current 
   let complete!: () => void;
   const slow = new Promise<void>(resolve => { complete = resolve; });
   const run = vi.fn().mockReturnValueOnce(slow).mockResolvedValue(undefined);
-  const { startTronClassRetentionScheduler, TRONCLASS_RETENTION_INTERVAL_MS } = await import('./tronClassRetentionScheduler');
+  const { isTronClassRetentionSchedulerStarted, startTronClassRetentionScheduler, TRONCLASS_RETENTION_INTERVAL_MS } = await import('./tronClassRetentionScheduler');
+  expect(isTronClassRetentionSchedulerStarted()).toBe(false);
+  expect(TRONCLASS_RETENTION_INTERVAL_MS + 60_000).toBeLessThanOrEqual(5 * 60_000);
   expect(startTronClassRetentionScheduler(configured, run)).toBe(true);
+  expect(isTronClassRetentionSchedulerStarted()).toBe(true);
   expect(startTronClassRetentionScheduler(configured, run)).toBe(false);
   await vi.advanceTimersByTimeAsync(29_999);
   expect(run).not.toHaveBeenCalled();
@@ -51,4 +55,17 @@ it('logs only a fixed message and continues after provider failures', async () =
   expect(log.mock.calls).toEqual([['TronClass retention failed']]);
   await vi.advanceTimersByTimeAsync(TRONCLASS_RETENTION_INTERVAL_MS + 30_000);
   expect(run).toHaveBeenCalledTimes(2);
+});
+
+it('stays unready after timer registration fails and can retry initialization', async () => {
+  vi.useFakeTimers();
+  vi.resetModules();
+  const { isTronClassRetentionSchedulerStarted, startTronClassRetentionScheduler } = await import('./tronClassRetentionScheduler');
+  const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementationOnce(() => { throw new Error('timer unavailable'); });
+  const run = vi.fn().mockResolvedValue(undefined);
+  expect(() => startTronClassRetentionScheduler(configured, run)).toThrow('timer unavailable');
+  expect(isTronClassRetentionSchedulerStarted()).toBe(false);
+  timer.mockRestore();
+  expect(startTronClassRetentionScheduler(configured, run)).toBe(true);
+  expect(isTronClassRetentionSchedulerStarted()).toBe(true);
 });

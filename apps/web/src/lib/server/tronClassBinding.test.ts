@@ -7,6 +7,9 @@ import {
 } from './tronClassBinding';
 import { PuCampusError, type PuCampusGateway, type TronClassSession } from './puCampusClient';
 
+const schedulerStarted = vi.hoisted(() => vi.fn(() => true));
+vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerStarted: schedulerStarted }));
+
 const OWNER = 'platform:pa_12345678-1234-1234-1234-123456789abc';
 const SECRET = 'binding-tests-only-secret-at-least-thirty-two';
 const PASSWORD = 'private-password-not-for-storage';
@@ -53,7 +56,11 @@ function setup() {
 
 function bindingPath(owner = OWNER) { return `_tronClassBindings/${createHash('sha256').update(owner).digest('hex')}`; }
 
-beforeEach(() => vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true'));
+beforeEach(() => {
+  schedulerStarted.mockReset();
+  schedulerStarted.mockReturnValue(true);
+  vi.stubEnv('TRONCLASS_RETENTION_ENABLED', 'true');
+});
 afterEach(() => vi.unstubAllEnvs());
 
 describe('independent TronClass binding', () => {
@@ -393,6 +400,14 @@ describe('independent TronClass binding', () => {
 
   it.each([undefined, 'false', 'TRUE'])('rejects binding before school login or storage when retention is %s', async (flag) => {
     vi.stubEnv('TRONCLASS_RETENTION_ENABLED', flag);
+    const { service, login, docs } = setup();
+    await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 503, code: 'TRONCLASS_RETENTION_REQUIRED' });
+    expect(login).not.toHaveBeenCalled();
+    expect(docs.size).toBe(0);
+  });
+
+  it('rejects binding before login and storage when the retention scheduler has not started', async () => {
+    schedulerStarted.mockReturnValue(false);
     const { service, login, docs } = setup();
     await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 503, code: 'TRONCLASS_RETENTION_REQUIRED' });
     expect(login).not.toHaveBeenCalled();

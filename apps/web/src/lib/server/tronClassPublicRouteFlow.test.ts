@@ -173,14 +173,28 @@ describe('public HTTP to durable v2 school workflow', () => {
     expect([...s.rows.keys()].some(path => path.startsWith('_tronClassSubmissionLocks/'))).toBe(false);
   });
 
-  it('cancels a locally saved ID before its first upload, including while school writes are disabled', async () => {
-    const s = environment();
-    s.disable();
+  it.each([
+    { enabled: false, contractVerified: true },
+    { enabled: true, contractVerified: false },
+  ])('returns a no-op cancellation for a missing operation when writes are blocked (%j)', async ({ enabled, contractVerified }) => {
+    const s = environment(contractVerified);
+    if (!enabled) s.disable();
+    const before = structuredClone([...s.rows]);
     expect(await (await s.post(cancelInput)).json()).toEqual({ status: 'cancelled', operationId: OPERATION, ...SCOPE });
     expect(await (await s.post(cancelInput)).json()).toEqual({ status: 'cancelled', operationId: OPERATION, ...SCOPE });
     expect(s.fetchSchool).not.toHaveBeenCalled();
     expect(s.fetchStorage).not.toHaveBeenCalled();
-    expect([...s.rows.values()].filter(row => row.operationId === OPERATION)).toHaveLength(1);
+    expect([...s.rows]).toEqual(before);
+  });
+
+  it('still cancels an existing preparation after school writes are disabled', async () => {
+    const s = environment();
+    expect((await s.upload()).status).toBe(200);
+    const calls = vi.mocked(s.fetchSchool).mock.calls.length;
+    s.disable();
+    expect(await (await s.post(cancelInput)).json()).toEqual({ status: 'cancelled', operationId: OPERATION, ...SCOPE });
+    expect([...s.rows.values()].find(row => row.operationId === OPERATION)).toMatchObject({ state: 'cancelled' });
+    expect(s.fetchSchool).toHaveBeenCalledTimes(calls);
   });
 
   it('cannot turn an already attempted final into editable work or release its persistent lock', async () => {

@@ -48,7 +48,7 @@ import { campusEventIdentity, campusEventPreviewIssue, campusEventTargetKey, par
   type AssistantCampusEventTarget } from '@/lib/assistantCampusEvent';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
-import { canAnswerTronClassQuestion, isTronClassNavigationTarget } from '@/lib/tronClassAgentIntent';
+import { canAnswerTronClassQuestion, tronClassDisabledNavigationQuestion } from '@/lib/tronClassAgentIntent';
 import { createTronClassAgentClient, isTronClassAuthorityError, type TronClassAgentQuestion } from '@/lib/tronClassAgentClient';
 import { TronClassRequestError } from '@/lib/tronClassIntegrationClient';
 import { AssistantTronClassResult } from './assistant/AssistantTronClassResult';
@@ -857,9 +857,11 @@ function V2Conversation({
           if (tronClassEpoch !== tronClassAuthorityEpoch.current) return;
           if (pendingAsk.signal.aborted || scopeSignal.aborted || !(reason instanceof TronClassRequestError)) throw reason;
           if (isTronClassAuthorityError(reason)) invalidateTronClassAuthority(pendingAsk);
-          if (!tronClassSelection && reason.status === 503 && reason.code === 'TRONCLASS_DISABLED' &&
-              isTronClassNavigationTarget(current.normalize('NFKC').trim().replace(/[?!.。]+$/u, '').trim())) {
-            const navigation = answerAssistantLocally('開啟玩課雲作業', localScope);
+          if (!tronClassSelection && reason.status === 503 && reason.code === 'TRONCLASS_DISABLED') {
+            const navigationQuestion = tronClassDisabledNavigationQuestion(current);
+            const readRoute = navigationQuestion && assistantQuestionReadRoute(taskProfile, navigationQuestion);
+            const navigation = navigationQuestion && readRoute && readRoute.local &&
+              answerAssistantLocally(navigationQuestion, localScope, { preferCampusReads: readRoute.preferCampusReads });
             if (navigation) {
               setTurns(previous => [...previous, { question: current, taskProfile,
                 reply: { answer: navigation.content, steps: [], cards: [], local: navigation } }]);

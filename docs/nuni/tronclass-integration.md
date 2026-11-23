@@ -273,7 +273,7 @@ Agent grant 存在既有 server-only 綁定文件中，每次更新以 `revision
 
 **停止準備。** Web 與 Mobile 都在第一次附件上傳或 final 請求之前保存不透明 operation ID。本機儲存失敗時不開始上傳；一旦保存後的請求失敗，就保留同一 ID 與稿件，不直接建立另一筆送出。使用者可在待確認畫面明確選擇「停止準備並返回編輯」。
 
-新 `cancel-preparation` 與唯讀 `reconcile` 是不同操作。伺服器在同一個 Firestore transaction 核對有效綁定、學生身分、課程／作業、原 operation 及共享作業鎖；只有 preparing 且沒有 final lock 時，才把 operation 改為 `cancelled`。手機可能已保存 ID 但第一個請求尚未抵達，所以不存在的 operation 也必須先建立持久的取消紀錄，才可回覆停止成功。此紀錄保留 `purgeAt: null`；延遲的上傳結果與 final claim 不能重新建立或恢復原操作。
+新 `cancel-preparation` 與唯讀 `reconcile` 是不同操作。伺服器在同一個 Firestore transaction 核對有效綁定、學生身分、課程／作業、原 operation 及共享作業鎖；只有 preparing 且沒有 final lock 時，才把 operation 改為 `cancelled`。手機可能已保存 ID 但第一個請求尚未抵達。正式寫入已開放時，會為不存在的 operation 建立持久的取消紀錄（`purgeAt: null`），防止晚到的上傳或 final claim 建立原操作。正式寫入封鎖時，若 operation 與作業鎖均不存在，直接回傳 `cancelled` 表示無需取消，不新增文件。
 
 已存在 final claim、acknowledgment 或共享作業鎖時，回覆 `unknown`，不更動 operation／lock、不呼叫校方，不把「尚未收到回覆」當成「沒有送出」。同一已驗證學生重新連線後可停止原準備，仍保留原 revision 與檔案紀錄；換成另一學生、錯課／錯作業及舊格式操作都不能覆寫。停止準備不會撤回校方作業，已在途的附件傳輸也可能留下未關聯檔案。
 
@@ -452,7 +452,7 @@ Firebase 既有 `accountDeletion` 在標記關帳後，會呼叫 server-only 的
 
 **平台帳號（Google／nuni）關帳接線：**本分支新增 PostgreSQL 的帳號狀態／刪除 trigger，與真實 `platform_accounts` 關帳交易一同寫入 durable outbox。背景 worker 以 lease token 領取並呼叫同一 `closeTronClassOwner()`，成功才刪除事件及其 platform ID；失敗固定錯誤碼、退避重試，程序中斷後可重新領取。worker 只讀明確關帳事件，不掃不存在的帳號猜測關帳，也沒有讓客戶端任意傳 owner 的 HTTP 端點。專用資料庫設定、最小權限、候選 migration 與啟用順序見 [平台關帳部署說明](../../deploy/nuni-api/tronclass-account-closure/README.md)。本輪未套用正式 PostgreSQL migration，因此不能宣稱 production 平台關帳已啟用自動清理。
 
-**到期清理：**`TRONCLASS_RETENTION_ENABLED=true` 會在 Node.js Web 程序啟用背景 worker，每 15 分鐘加 0–60 秒 jitter 執行一次；每輪三個固定集合合計最多掃描 50 筆。同一程序不重疊，跨程序由 Firestore transaction 重讀目前期限及狀態後決定是否刪除。換綁、配額續期或 draft 轉成 unknown 時不會被舊查詢結果刪除。游標與輪換順序避免不應刪除的紀錄堵住其他已到期資料。這個方式保留 Spark 部署相容性，不依賴付費 TTL；仍受實際服務運作與 Firestore 配額影響，不承諾到期瞬間刪除。
+**到期清理：**`TRONCLASS_RETENTION_ENABLED=true` 會在 Node.js Web 程序啟用背景 worker，每輪結束後等待 4 分鐘加未滿 60 秒的隨機延遲。三個固定集合各自最多掃描 200 筆，每輪合計最多 600 筆。掃描失敗後仍會排定下一輪。新綁定須等目前程序成功啟動清理排程。同一程序不重疊，跨程序由 Firestore transaction 重讀目前期限及狀態後決定是否刪除。換綁、配額續期或 draft 轉成 unknown 時不會被舊查詢結果刪除。游標與輪換順序避免不應刪除的紀錄堵住其他已到期資料。這個方式保留 Spark 部署相容性，不依賴付費 TTL；仍受實際服務運作與 Firestore 配額影響，不承諾到期瞬間刪除。
 
 程式依以下期限清理，伺服器授權仍即時核對到期時間，不等待背景刪除：
 

@@ -158,8 +158,8 @@ function recentAttempts(snapshot: Snapshot, now: number, limit: number): LoginAt
   return (value as LoginAttempt[]).filter((entry) => tronClassLoginAttemptTimestamp(entry) > now - TRONCLASS_LOGIN_WINDOW_MS);
 }
 
-function assertRetentionEnabled(): void {
-  if (process.env.TRONCLASS_RETENTION_ENABLED !== 'true') {
+function assertRetentionEnabled(schedulerStarted: boolean): void {
+  if (process.env.TRONCLASS_RETENTION_ENABLED !== 'true' || !schedulerStarted) {
     throw new NuniError(503, 'TRONCLASS_RETENTION_REQUIRED');
   }
 }
@@ -257,7 +257,8 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
     checkedRevision(input.expectedRevision);
     const expectedRevision = input.expectedRevision;
     const account = checkedAccount(input.account);
-    assertRetentionEnabled();
+    const { isTronClassRetentionSchedulerStarted } = await wait(() => import('./tronClassRetentionScheduler'));
+    assertRetentionEnabled(isTronClassRetentionSchedulerStarted());
     const encryptionKey = key();
     const db = await wait(getStore);
     check();
@@ -340,7 +341,7 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
       // abort before this write must not replace or establish a connection.
       check();
       if ((current?.revision ?? null) !== expectedRevision) changed();
-      assertRetentionEnabled();
+      assertRetentionEnabled(isTronClassRetentionSchedulerStarted());
       transaction.set(ref, row);
     });
     check();

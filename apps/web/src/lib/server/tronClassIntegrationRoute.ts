@@ -59,7 +59,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   TRONCLASS_LOGIN_UNAVAILABLE: 'TronClass 登入服務暫時無法回應，請稍後再試。',
   TRONCLASS_IDENTITY_UNVERIFIED: '這次登入尚未確認學校帳號身分，請重新連線。',
   TRONCLASS_CONFIGURATION_REQUIRED: 'TronClass 連線服務尚未完成設定。',
-  TRONCLASS_RETENTION_REQUIRED: 'TronClass 綁定暫停，因為尚未啟用校方登入資料的到期清理。',
+  TRONCLASS_RETENTION_REQUIRED: 'TronClass 綁定暫停，因為校方登入資料的到期清理尚未就緒。',
   TRONCLASS_UPLOAD_BUSY: '同時上傳的附件過多，請稍後再試。',
   TRONCLASS_UPLOAD_FAILED: '附件尚未全部上傳，作業沒有送出。',
   TRONCLASS_OPERATION_CONFLICT: '這筆操作內容已變更，請重新核對送出狀態。',

@@ -1,7 +1,19 @@
+import { resolveAssistantServiceIntent } from '@campus/shared/src/assistantServices';
 import type { TronClassAgentIntent } from './tronClassAgentTypes';
 
 export function isTronClassNavigationTarget(text: string): boolean {
   return /^(?:玩課雲|tronclass)(?:作業|課程)?$/i.test(text);
+}
+
+export function tronClassDisabledNavigationQuestion(question: string): string | null {
+  const intent = resolveAssistantServiceIntent(question);
+  if (intent?.kind === 'open' && intent.service.id === 'school-lms') return question;
+  const text = question.normalize('NFKC').trim().replace(/[?!.。]+$/u, '').trim();
+  // Preserve the disabled integration's existing shortcuts and colloquial open command.
+  if (isTronClassNavigationTarget(text.replace(/^(?:(?:請|麻煩)?(?:幫我|替我)?(?:開啟|打開|開|前往|進入))\s*/u, ''))) {
+    return '開啟玩課雲作業';
+}
+  return null;
 }
 
 export type TronClassAgentQueryIntent = {

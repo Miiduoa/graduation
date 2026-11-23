@@ -5,6 +5,8 @@ import { emptyTronClassAgentPermissions } from '@campus/shared/src/tronClassAgen
 import { createTronClassBindingService, type TronClassBindingStore } from './tronClassBinding';
 import { createTronClassAgentGrantService } from './tronClassAgentGrants';
 
+vi.mock('./tronClassRetentionScheduler', () => ({ isTronClassRetentionSchedulerStarted: () => true }));
+
 const OWNER = 'platform:pa_grant_fixture';
 const NOW = Date.parse('2026-11-13T09:00:00Z');
 const ALL = { readCourseData: true, downloadMaterials: true, prepareHomework: true };

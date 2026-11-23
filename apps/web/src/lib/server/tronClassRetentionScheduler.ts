@@ -1,16 +1,20 @@
 import 'server-only';
 import { runDefaultTronClassRetentionBatch } from './tronClassRetention';
 
-export const TRONCLASS_RETENTION_INTERVAL_MS = 15 * 60_000;
+export const TRONCLASS_RETENTION_INTERVAL_MS = 4 * 60_000;
 const JITTER_MS = 60_000;
-let started = false;
+// Next.js instrumentation and route handlers can load separate module instances.
+const processState = globalThis as typeof globalThis & { __tronClassRetentionSchedulerStarted?: boolean };
+
+export function isTronClassRetentionSchedulerStarted(): boolean {
+  return processState.__tronClassRetentionSchedulerStarted === true;
+}
 
 export function startTronClassRetentionScheduler(
   env: NodeJS.ProcessEnv = process.env,
   run: () => Promise<unknown> = () => runDefaultTronClassRetentionBatch(env),
 ): boolean {
-  if (started || env.NEXT_RUNTIME !== 'nodejs' || env.TRONCLASS_RETENTION_ENABLED !== 'true') return false;
-  started = true;
+  if (isTronClassRetentionSchedulerStarted() || env.NEXT_RUNTIME !== 'nodejs' || env.TRONCLASS_RETENTION_ENABLED !== 'true') return false;
   const schedule = (first = false) => {
     const timer = setTimeout(async () => {
       try { await run(); }
@@ -22,5 +26,6 @@ export function startTronClassRetentionScheduler(
     timer.unref();
   };
   schedule(true);
+  processState.__tronClassRetentionSchedulerStarted = true;
   return true;
 }
