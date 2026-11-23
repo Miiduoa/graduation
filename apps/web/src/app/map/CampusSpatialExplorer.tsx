@@ -153,7 +153,9 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
     }
     // text() can expose an unparsed body even if TextEncoder is missing.
     // Prefer it to eager json(), so the UTF-8 size limit is checked first.
-    if (typeof response.text === 'function') {
+    // text() drops a UTF-8 BOM, so its re-counted bytes cannot be compared
+    // with an identity Content-Length; keep the original json() path there.
+    if (typeof response.text === 'function' && declaredIdentityBytes === null) {
       let raw: string | undefined;
       try { raw = await response.text?.(); }
       catch (error) {
@@ -165,7 +167,8 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
         return JSON.parse(raw) as unknown;
       }
     }
-    throw new Error('Building outline response has no measurable body');
+    // JSON-only bridges keep the original behavior: parse via json().
+    return response.json() as Promise<unknown>;
   }
   // A mobile pagehide/unmount/timeout may arrive after the fetch headers but
   // while response-body streaming is still pending. Abort the *reader* as well
