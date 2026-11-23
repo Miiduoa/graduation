@@ -147,7 +147,10 @@
   color: var(--text);
   background: var(--surface, var(--bg));
 }
+.searchRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
+.searchRow > button { min-width: 48px; min-height: 48px; white-space: nowrap; }
 .selectField input[type='search'] { font-weight: 400; }
+.selectField input[type='search']::-webkit-search-cancel-button { display: none; }
 .selectField small { color: var(--muted); line-height: 1.5; }
 .progress label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .progress label span { font-variant-numeric: tabular-nums; }
