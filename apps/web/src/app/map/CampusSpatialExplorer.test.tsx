@@ -1844,7 +1844,9 @@ it.each((['missing', 'silent', 'hidden'] as const).flatMap((observer) =>
 ))('rechecks initial offscreen layout on $source $event with a $observer observer', async ({
   observer, source, event,
 }) => {
-  const viewport = Object.assign(new EventTarget(), { height: 200 });
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: 200, offsetLeft: 0, offsetTop: 0,
+  });
   vi.stubGlobal('visualViewport', viewport);
   vi.stubGlobal('IntersectionObserver', observer === 'missing' ? undefined : class {
     constructor(callback: IntersectionObserverCallback) { intersection = callback; }
@@ -2118,7 +2120,9 @@ it.each(visibilityTransitions.flatMap(({ event, startup, running }) =>
 });
 
 it('pauses on layout resize and resumes on visual viewport resize when the observer is silent', async () => {
-  const viewport = new EventTarget();
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
+  });
   vi.stubGlobal('visualViewport', viewport);
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) { intersection = callback; }
@@ -2176,6 +2180,46 @@ it('pauses on layout resize and resumes on visual viewport resize when the obser
     scene.setActive.mockClear();
     fireEvent(window, new Event('resize'));
     expect(scene.setActive).not.toHaveBeenCalled();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+it('stays paused after a hidden observer when the canvas misses the visual viewport', async () => {
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 400, 320, 150));
+  try {
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    // Keyboard still open: the host intersects the layout viewport but sits
+    // below the visual viewport. Do not treat that as visible or resume.
+    viewport.height = 200;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    act(() => viewport.dispatchEvent(new Event('scroll')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+
+    // Dismissing the keyboard expands the visual viewport over the host.
+    viewport.height = window.innerHeight;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
   } finally {
     bounds.mockRestore();
   }

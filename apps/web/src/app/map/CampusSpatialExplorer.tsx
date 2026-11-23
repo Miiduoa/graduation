@@ -459,23 +459,24 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     let scrollDialog: Element | null | undefined;
     try { scrollDialog = host.closest?.('dialog'); }
     catch { /* Dialog clipping is optional when this API is unavailable. */ }
-    const measureLayoutVisibility = (): boolean | null => {
+    const measureVisibilityAgainst = (
+      viewLeft: number, viewTop: number, viewRight: number, viewBottom: number,
+    ): boolean | null => {
       try {
         const rect = host.getBoundingClientRect();
-        const width = window.innerWidth;
-        const height = window.innerHeight;
         // Incomplete geometry cannot establish an empty intersection.
         if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height,
-          width, height].every(Number.isFinite) ||
-          rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0 ||
+          viewLeft, viewTop, viewRight, viewBottom].every(Number.isFinite) ||
+          rect.width <= 0 || rect.height <= 0 ||
+          viewRight <= viewLeft || viewBottom <= viewTop ||
           rect.right <= rect.left || rect.bottom <= rect.top) return null;
         // The dialog clips its overflowing contents even where the window
         // still has visible pixels outside the dialog.
         const dialogRect = scrollDialog?.getBoundingClientRect();
-        let clippedLeft = Math.max(rect.left, 0);
-        let clippedTop = Math.max(rect.top, 0);
-        let clippedRight = Math.min(rect.right, width);
-        let clippedBottom = Math.min(rect.bottom, height);
+        let clippedLeft = Math.max(rect.left, viewLeft);
+        let clippedTop = Math.max(rect.top, viewTop);
+        let clippedRight = Math.min(rect.right, viewRight);
+        let clippedBottom = Math.min(rect.bottom, viewBottom);
         if (scrollDialog && dialogRect) {
           const { clientLeft, clientTop, clientWidth, clientHeight } = scrollDialog;
           const contentLeft = dialogRect.left + clientLeft;
@@ -494,6 +495,24 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       } catch {
         // A broken host/layout measurement is not evidence of an offscreen
         // canvas; keep the observer and manual recovery available.
+        return null;
+      }
+    };
+    const measureLayoutVisibility = (): boolean | null =>
+      measureVisibilityAgainst(0, 0, window.innerWidth, window.innerHeight);
+    const measureVisualViewportVisibility = (): boolean | null => {
+      try {
+        const viewport = window.visualViewport;
+        if (!viewport) return null;
+        const left = viewport.offsetLeft;
+        const top = viewport.offsetTop;
+        const width = viewport.width;
+        const height = viewport.height;
+        if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+          return null;
+        }
+        return measureVisibilityAgainst(left, top, left + width, top + height);
+      } catch {
         return null;
       }
     };
@@ -577,7 +596,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       if (visibility === 'hidden') {
         // A stale offscreen observer result can linger after the keyboard or
         // visual viewport moves the host back onscreen without a new entry.
-        if (measureLayoutVisibility() !== true) return;
+        // Only the visual viewport counts here: intersecting the layout
+        // viewport while the keyboard still covers the canvas is not visible.
+        if (measureVisualViewportVisibility() !== true) return;
         visibility = 'unknown';
       }
       syncVisibility();
