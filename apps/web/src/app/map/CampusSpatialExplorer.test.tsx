@@ -4280,6 +4280,44 @@ it.each(['invalid continuation', 'truncated sequence', 'overlong', 'surrogate'] 
   await waitFor(() => expect(scene.create.mock.lastCall?.[2].footprints).toEqual([]));
 });
 
+// Some embedded WebViews construct TextDecoder with { fatal: true } but
+// silently ignore that option, replacing bad source bytes with U+FFFD.
+// A corrupted yet syntactically parseable 200 JSON must not install OSM geometry.
+it.each([
+  { kind: 'invalid UTF-8 continuation', bad: [0xe4, 0x41, 0x41] },
+  { kind: 'UTF-8 encoded surrogate', bad: [0xed, 0xa0, 0x80] },
+])('rejects $kind when a WebView TextDecoder ignores fatal mode', async ({ bad }) => {
+  const { library, body } = sourcedLibraryFootprintFixture();
+  const prefix = new TextEncoder().encode('{"padding":"');
+  const suffix = new TextEncoder().encode('",' + body.slice(1));
+  const corrupted = new Uint8Array([...prefix, ...bad, ...suffix]);
+  const NativeDecoder = TextDecoder;
+  // A non-fatal native decoder will silently make the bad input valid JSON.
+  expect(JSON.parse(new NativeDecoder('utf-8').decode(corrupted))).toHaveProperty('schoolId', 'pu');
+  vi.stubGlobal('TextDecoder', class {
+    decode(bytes: Uint8Array) { return new NativeDecoder('utf-8').decode(bytes); }
+  });
+  const read = vi.fn().mockResolvedValueOnce({ value: corrupted })
+    .mockResolvedValueOnce({ done: true });
+  const releaseLock = vi.fn();
+  const json = vi.fn();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, status: 200,
+    headers: new Headers({ 'Content-Type': 'application/json' }),
+    body: { getReader: () => ({ read, cancel: vi.fn(), releaseLock }) },
+    json,
+  }));
+
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(releaseLock).toHaveBeenCalledTimes(1);
+  expect(json).not.toHaveBeenCalled();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 // A downstream WebView/proxy can return an endless stream of zero-byte chunks.
 // The 2 MB decoded-byte guard alone never progresses; cap stream iterations to
 // keep the map responsive even when microtasks starve the 15s timeout.
