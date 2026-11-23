@@ -465,6 +465,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     catch { /* Dialog clipping is optional when this API is unavailable. */ }
     const measureVisibilityAgainst = (
       viewLeft: number, viewTop: number, viewRight: number, viewBottom: number,
+      clipToDialog = true,
     ): boolean | null => {
       try {
         const rect = host.getBoundingClientRect();
@@ -476,7 +477,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           rect.right <= rect.left || rect.bottom <= rect.top) return null;
         // The dialog clips its overflowing contents even where the window
         // still has visible pixels outside the dialog.
-        const dialogRect = scrollDialog?.getBoundingClientRect();
+        const dialogRect = clipToDialog ? scrollDialog?.getBoundingClientRect() : undefined;
         let clippedLeft = Math.max(rect.left, viewLeft);
         let clippedTop = Math.max(rect.top, viewTop);
         let clippedRight = Math.min(rect.right, viewRight);
@@ -504,7 +505,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
     const measureLayoutVisibility = (): boolean | null =>
       measureVisibilityAgainst(0, 0, window.innerWidth, window.innerHeight);
-    const measureVisualViewportVisibility = (): boolean | null => {
+    // The pause path (isOffscreen) uses the visual viewport alone: a positive
+    // observer entry already reflects dialog clipping. Only a stale hidden
+    // result must also prove the canvas is inside the dialog scrollport.
+    const measureVisualViewportVisibility = (clipToDialog = false): boolean | null => {
       try {
         const viewport = window.visualViewport;
         if (!viewport) return null;
@@ -515,7 +519,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
           return null;
         }
-        return measureVisibilityAgainst(left, top, left + width, top + height);
+        return measureVisibilityAgainst(left, top, left + width, top + height, clipToDialog);
       } catch {
         return null;
       }
@@ -596,8 +600,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     }
     // Keyboard transitions can move the host without a window event.
     const onVisualViewportChange = () => {
-      const visibleInVisualViewport = measureVisualViewportVisibility();
-      if (visibility === 'hidden' && visibleInVisualViewport === true) {
+      if (visibility === 'hidden' && measureVisualViewportVisibility(true) === true) {
         // Recover from a stale hidden observer entry after the keyboard moves.
         // A valid intersection with the visual viewport is evidence the host
         // has returned, even if this WebView emits no new observer callback.

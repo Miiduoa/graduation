@@ -1033,7 +1033,7 @@ it.each(['outside the viewport', 'clipped by the dialog'])('scrolls before resta
 
 it('remeasures layout on manual restart after an offscreen observer result', async () => {
   const viewport = Object.assign(new EventTarget(), {
-    width: 800, height: 200, offsetLeft: 0, offsetTop: 0,
+    width: 800, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
   });
   vi.stubGlobal('visualViewport', viewport);
   vi.stubGlobal('IntersectionObserver', class {
@@ -1407,10 +1407,14 @@ it.each(
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
 
     vi.spyOn(host, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 100, 320, 180));
+    // A keyboard that covers the canvas pauses it without a new allocation,
+    // and the scene resumes as soon as the visual viewport returns.
     viewport.height = 50;
     act(() => viewport.dispatchEvent(new Event('resize')));
-    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
     viewport.height = window.innerHeight;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
     fireEvent.scroll(dialog);
     fireEvent.resize(window);
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
@@ -1902,7 +1906,8 @@ it('keeps rendering when the observer is visible and keyboard bounds shrink or s
   render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
   const dialog = await open();
   const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
-  const rect = new DOMRect(0, 400, 320, 180);
+  // Inside the shrunk (200px) visual viewport, so only stale bounds change.
+  const rect = new DOMRect(0, 20, 320, 120);
   vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(rect);
   act(() => intersection?.([observerEntry(graphics, true, rect)], {} as IntersectionObserver));
 
