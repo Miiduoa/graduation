@@ -1133,3 +1133,18 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - RED 測試-only `5c66a5c56100531e2f9853fcb7584734a0a56c84` 的 [Security rules and transactions #45090623998](https://github.com/Miiduoa/graduation/actions/runs/45090623998) 實際 **561 tests／560 pass／1 fail／0 skipped**，新增 `transferred campus health staff cannot replay confidential patient records` 在原規則下明確「Expected request to fail, but it succeeded」，定位到測試轉校後重放，證實舊權限可達。
 - 原 Rules 修補 `4125142c601292422a34ee819c9f64249caf12c6` 的 [Rules workflow #45090880485](https://github.com/Miiduoa/graduation/actions/runs/45090880485) 是 **561 tests／558 pass／3 fail／0 skipped**；新增越權回歸已 `ok 1`，失敗是 `school-responsibility-rules.test.cjs` 兩個合法健康集合管理員／health-staff 讀取與一次正常 editor 角色授權，fixture 沒建立可信 `users/admin`、`users/editor`、`users/health-staff` 的 canonical school profile。
 - 本次只補上述 **合成測試使用者** 的伺服器校籍資料，不改健康紀錄的 Rules 檢查、不把失敗當作可省略。需在後續精確 SHA 真 Firebase Emulator 再驗證所有測試、同一角色正常查詢與跨校撤權案例，不能提前宣稱 GREEN。未操作正式病歷、金鑰、token、migration、E 校園、發布或受限 audit。
+
+### PR #743 相容範圍收斂
+
+Firestore 規則採回 merge-base `40cbb474d2d435a784f5356b08a0984059903d82`。本節更新上文候選版本對下列路徑的描述，供後續重做時對照。
+
+| 規則範圍 | 起始 HEAD `480b5588` 與基準的差異及本輪結果 |
+| --- | --- |
+| 跨校登入 | 起始 HEAD 已撤除共用登入綁定的額外拒絕，沿用目標校有效資格。各功能在基準本來就有的個別條件仍適用。 |
+| 舊根集合貼文、留言與按讚收據 | 起始 HEAD 已撤除發布與封存狀態的額外限制。本輪採回讀取函式原式，依父貼文群組的有效會籍判斷。 |
+| 成績列與巢狀作業收據 | 撤除本人 UID 路徑的新擁有者一致性檢查。巢狀作業仍要求有效群組及校籍，根集合本人收據仍依既有欄位優先順序。 |
+| 舊作業指派評閱 | 評閱收據路徑與提交擁有者對應即可授權根集合提交讀取。撤除新增的群組、校籍與收據內嵌評閱者條件。 |
+| 退課或校籍撤銷後的互評 | 恢復本人評閱路徑的草稿與已提交紀錄讀寫。更新仍受基準的身分欄位條件約束。 |
+| 互評更新 | 恢復客戶端首次送出時間、重送刷新及單獨修改留言或分數。規則保護 `reviewerId` 與 `submissionOwnerId`，其餘更新沿用基準。 |
+
+兩版規則使用同一批測試資料與預期。未受指派的他人資料、撤權後依會籍控制的巢狀提交、目標校資格不足時的群組權限，以及舊按讚收據的建立權屬與禁止列舉，仍依基準拒絕。

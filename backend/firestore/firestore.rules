@@ -23,10 +23,12 @@ service cloud.firestore {
     // school membership must not authorize a deleted account, and a
     // client-rebuilt student profile cannot stamp schoolId / primarySchoolId.
     function isCanonicalStoryMember(schoolId) {
-      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
-      return isSchoolMember(schoolId) && exists(userPath)
-        && (get(userPath).data.get('schoolId', '') == schoolId
-          || get(userPath).data.get('primarySchoolId', '') == schoolId);
+      return isSchoolMember(schoolId)
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('primarySchoolId', '') == schoolId
+        );
     }
 
     function hasAnyServiceRole(schoolId, uid) {
@@ -162,8 +164,12 @@ service cloud.firestore {
 
     function canManageGroup(groupId) {
       return isActiveGroupMember(groupId)
-        && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role
-          in ['admin', 'owner', 'instructor', 'moderator'];
+        && (
+          get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'admin'
+          || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'owner'
+          || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'instructor'
+          || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'moderator'
+        );
     }
 
     // An active old-school membership alone must not permit access after transfer.
@@ -341,9 +347,8 @@ service cloud.firestore {
     }
 
     function canReadGroupPost(postId) {
-      let postPath = /databases/$(database)/documents/groupPosts/$(postId);
-      return isSignedIn() && exists(postPath)
-        && isActiveGroupMember(get(postPath).data.groupId);
+      return exists(/databases/$(database)/documents/groupPosts/$(postId))
+        && isActiveGroupMember(get(/databases/$(database)/documents/groupPosts/$(postId)).data.groupId);
     }
 
     function canReadAssignment(assignmentId) {
@@ -396,19 +401,11 @@ service cloud.firestore {
         && acceptsStudentSubmission(groupId, assignmentId);
     }
 
-    function matchesPathOwner(data, field, ownerId) {
-      return data.get(field, null) in [null, '', ownerId];
-    }
-
-    // Legacy top-level submissions also need live reviewer membership.
     function isAssignedReviewer(groupId, assignmentId, submissionId, data) {
-      let receiptPath = /databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/peerReviews/$(request.auth.uid);
-      return isActiveGroupMember(groupId)
-        && exists(receiptPath)
-        // A review assignment stored at Alice's path but explicitly owned by
-        // another reviewer must never reveal that student's private submission.
-        && matchesPathOwner(get(receiptPath).data, 'reviewerId', request.auth.uid)
-        && get(receiptPath).data.submissionOwnerId == submissionOwnerId(data, submissionId);
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/peerReviews/$(request.auth.uid))
+        && get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/peerReviews/$(request.auth.uid)).data.submissionOwnerId
+          == submissionOwnerId(data, submissionId);
     }
 
     function canReadSubmissionDoc(groupId, assignmentId, submissionId, data) {
@@ -426,6 +423,7 @@ service cloud.firestore {
       let before = resource.data;
       let after = request.resource.data;
       return group.get('type', '') == 'course'
+        && isSchoolMember(group.get('schoolId', ''))
         && assignment.get('type', '') == 'assignment'
         && assignment.get('points', 0) is number
         && assignment.get('points', 0) > 0
@@ -449,10 +447,13 @@ service cloud.firestore {
     // Earlier clients write a provisional grade/feedback pair. Keep the first
     // write compatible while disallowing silent revisions and answer edits.
     function validFirstLegacyGrade(groupId, assignmentId, studentId) {
+      let group = get(/databases/$(database)/documents/groups/$(groupId)).data;
       let assignment = get(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)).data;
       let before = resource.data;
       let after = request.resource.data;
-      return before.get('userId', '') == studentId
+      return (group.get('type', '') != 'course'
+          || isSchoolMember(group.get('schoolId', '')))
+        && before.get('userId', '') == studentId
         && before.get('submittedAt', null) != null
         && before.get('gradePublished', false) != true
         && before.get('grade', null) == null
@@ -482,6 +483,7 @@ service cloud.firestore {
       let revisionId = after.get('gradeRevisionId', '');
       let revisionPath = /databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/submissions/$(studentId)/gradeRevisions/$(revisionId);
       return group.get('type', '') == 'course'
+        && isSchoolMember(group.get('schoolId', ''))
         && revisionId is string && revisionId.size() >= 10 && revisionId.size() <= 150
         && revisionId != before.get('gradeRevisionId', '')
         && after.diff(before).affectedKeys().hasOnly([
@@ -517,6 +519,7 @@ service cloud.firestore {
       let after = getAfter(/databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/submissions/$(studentId)).data;
       let change = request.resource.data;
       return group.get('type', '') == 'course'
+        && isSchoolMember(group.get('schoolId', ''))
         && previous.get('gradePublished', false) == true
         && after.get('gradePublished', false) == true
         && change.keys().hasAll([
@@ -544,13 +547,10 @@ service cloud.firestore {
         && change.revision == previous.get('gradeRevisionCount', 0) + 1;
     }
 
-    function canReadPeerReviewDoc(groupId, reviewerId, data) {
-      return (isSignedIn() && data.get('submissionOwnerId', null) == request.auth.uid
-          && data.get('submittedAt', null) != null)
-        || canManageGroup(groupId)
-        || (isSignedIn() && reviewerId == request.auth.uid
-          && matchesPathOwner(data, 'reviewerId', reviewerId)
-          && (data.get('submittedAt', null) != null || isActiveGroupMember(groupId)));
+    function canReadPeerReviewDoc(groupId, assignmentId, reviewerId, data) {
+      return canManageGroup(groupId)
+        || (isSignedIn() && reviewerId == request.auth.uid)
+        || (isSignedIn() && data.submissionOwnerId == request.auth.uid && data.submittedAt != null);
     }
 
     // AI server-side metadata logs are written by Admin SDK only.
@@ -1140,7 +1140,6 @@ service cloud.firestore {
         && isSchoolMember(request.resource.data.schoolId)
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.get('verification', {'status': 'unverified'}) == {'status': 'unverified'};
-
       allow update: if canManageGroup(groupId)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['schoolId', 'createdBy', 'verification', 'type']);
       allow delete: if canManageGroup(groupId);
@@ -1459,20 +1458,9 @@ service cloud.firestore {
           && resource.data.get('type', '') != 'assignment';
 
         match /submissions/{submissionId} {
-          // Document IDs are not proof of receipt ownership: imported data may
-          // explicitly belong to a different student. Allow an owner to probe
-          // their missing or unbound receipt while respecting explicit ownership.
           allow read: if isActiveGroupMember(groupId)
-            && (
-              (submissionId == request.auth.uid
-                && (resource == null || (
-                  matchesPathOwner(resource.data, 'userId', submissionId)
-                  && matchesPathOwner(resource.data, 'uid', submissionId)
-                  && matchesPathOwner(resource.data, 'studentId', submissionId)
-                )))
-              || (resource != null
-                && canReadSubmissionDoc(groupId, assignmentId, submissionId, resource.data))
-            );
+            && (submissionId == request.auth.uid
+              || canReadSubmissionDoc(groupId, assignmentId, submissionId, resource.data));
           allow create: if validStudentSubmission(groupId, assignmentId, submissionId)
             && request.resource.data.keys().hasOnly([
               'userId', 'groupId', 'assignmentId', 'content', 'attachments', 'answers', 'status', 'submittedAt', 'updatedAt'
@@ -1504,43 +1492,26 @@ service cloud.firestore {
         }
 
         match /peerReviews/{reviewerId} {
-          // A reviewer may only edit feedback, not teacher-owned metadata.
-          // Publishing feedback is a one-way transition at server time.
-          function validReviewerFeedbackUpdate() {
-            let changed = request.resource.data.diff(resource.data).affectedKeys();
-            return changed.hasOnly(['comment', 'scores', 'submittedAt', 'updatedAt'])
-              && (!changed.hasAny(['submittedAt'])
-                || (resource.data.get('submittedAt', null) == null
-                  && request.resource.data.get('submittedAt', null) == request.time));
-          }
-
-          allow read: if (resource == null && isActiveGroupMember(groupId) && reviewerId == request.auth.uid)
-            || canReadPeerReviewDoc(groupId, reviewerId, resource.data);
+          allow read: if canReadPeerReviewDoc(groupId, assignmentId, reviewerId, resource.data);
           allow create: if canManageGroup(groupId)
             && request.resource.data.reviewerId == reviewerId;
           allow update: if canManageGroup(groupId)
             || (
-              isActiveGroupMember(groupId)
+              isSignedIn()
               && reviewerId == request.auth.uid
-              // A mis-keyed imported receipt must not grant its path owner
-              // permission to edit another person's explicitly owned review.
-              && resource.data.get('reviewerId', null) == request.auth.uid
               && request.resource.data.reviewerId == resource.data.reviewerId
               && request.resource.data.submissionOwnerId == resource.data.submissionOwnerId
-              && validReviewerFeedbackUpdate()
             );
           allow delete: if canManageGroup(groupId);
         }
       }
 
       match /gradebook/{entryId} {
-        // Direct ownership also authorizes queries constrained by userId.
-        allow read: if (isSignedIn() && (
-            resource.data.userId == request.auth.uid
-            || (entryId == request.auth.uid
-              && (resource == null || matchesPathOwner(resource.data, 'userId', entryId)))
-          ))
-          || canManageGroup(groupId);
+        allow read: if canManageGroup(groupId)
+          || (isSignedIn() && (
+            entryId == request.auth.uid
+            || resource.data.userId == request.auth.uid
+          ));
         allow create, update, delete: if canManageGroup(groupId);
       }
 
@@ -2384,14 +2355,16 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Group Posts (global collection for simplicity)
     match /groupPosts/{docId} {
       allow read: if canReadGroupPost(docId);
       allow write: if false;
     }
 
     match /postLikes/{docId} {
-      // Exact-document reads follow parent membership. Only the voter can
-      // create or delete a receipt.
+      // A global list of votes exposes campus members' identities across
+      // groups. Keep exact-document reads to members of the parent post;
+      // enumeration is server-only until consumers use a school-scoped index.
       allow get: if isSignedIn()
         && resource.data.get('postId', null) is string
         && canReadGroupPost(resource.data.postId);
@@ -2405,6 +2378,7 @@ service cloud.firestore {
       allow update: if false;
     }
 
+    // Comments
     match /comments/{docId} {
       allow read: if canReadGroupPost(resource.data.postId);
       allow write: if false;

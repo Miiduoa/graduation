@@ -91,7 +91,18 @@ test('社員管理沿用目標學校的有效資格與角色', async () => {
     await assertSucceeds(club.update({ name: '社團名稱' }));
     await assertSucceeds(roster.update({ phone: '0911111111' }));
   }
-  await env.withSecurityRulesDisabled((context) => context.firestore().doc('users/officer').delete());
+  await env.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await db.doc('schools/other/members/officer').set({ status: 'active' });
+    await db.doc('schools/school/members/officer').delete();
+  });
+  await assertFails(club.update({ name: '社團名稱' }));
+  await assertFails(roster.update({ phone: '0911111111' }));
+  await env.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await db.doc('schools/school/members/officer').set({ status: 'active' });
+    await db.doc('users/officer').delete();
+  });
 });
 
 test('所有客戶端均不可繞過伺服器讀寫活動、報名及簽到', async () => {

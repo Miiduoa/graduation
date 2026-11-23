@@ -3059,7 +3059,7 @@ describe('firestore security rules', () => {
     );
   });
 
-  test('gradebook document ID never overrides a contradictory explicit userId', async () => {
+  test('gradebook preserves UID-path and explicit userId reads', async () => {
     const group = 'groups/gradebook-owner-conflict-1';
     const aliceId = `${group}/gradebook/alice`;
     const bobId = `${group}/gradebook/bob`;
@@ -3086,10 +3086,9 @@ describe('firestore security rules', () => {
     const owned = await assertSucceeds(alice.doc(aliceId).get({ source: 'server' }));
     assert.equal(owned.data().userId, 'alice');
 
-    // A mis-keyed row must not become readable to the wrong student.
     await seedFirestore(db => db.doc(aliceId).set({ userId: 'bob', finalScore: 74 }));
-    await assertFails(alice.doc(aliceId).get({ source: 'server' }));
-    await assertFails(bob.doc(bobId).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(aliceId).get({ source: 'server' }));
+    await assertSucceeds(bob.doc(bobId).get({ source: 'server' }));
     await assertSucceeds(bob.doc(aliceId).get({ source: 'server' }));
     await assertSucceeds(alice.doc(bobId).get({ source: 'server' }));
     await assertSucceeds(alice.doc(opaque).get({ source: 'server' }));
@@ -3301,7 +3300,7 @@ describe('firestore security rules', () => {
       await db.doc(receipt).update({ submittedAt: null });
       await db.doc(group + '/members/alice').update({ status: 'removed' });
     });
-    await assertFails(reviewer.get({ source: 'server' }));
+    await assertSucceeds(reviewer.get({ source: 'server' }));
     await assertFails(owner.get({ source: 'server' }));
     await seedFirestore(db => db.doc('users/teacher').update({ primarySchoolId: 'other' }));
     await assertSucceeds(teacher.get({ source: 'server' }));
@@ -3310,7 +3309,7 @@ describe('firestore security rules', () => {
   });
 
 
-  test('peer review path ID never overrides an explicitly different reviewerId on GET or UPDATE', async () => {
+  test('peer review path retains access while reviewerId remains immutable', async () => {
     const group = 'groups/review-owner-mismatch-1';
     const receipt = group + '/assignments/work-1/peerReviews/alice';
     await seedFirestore(async (db) => {
@@ -3339,9 +3338,10 @@ describe('firestore security rules', () => {
     const teacher = testEnv.authenticatedContext('teacher').firestore().doc(receipt);
     const outsider = testEnv.authenticatedContext('outsider').firestore().doc(receipt);
 
-    // The path holder must neither read nor overwrite another reviewer.
-    await assertFails(alice.get({ source: 'server' }));
-    await assertFails(alice.update({ comment: 'Forged feedback' }));
+    // The path holder can edit feedback while preserving the embedded reviewerId.
+    await assertSucceeds(alice.get({ source: 'server' }));
+    await assertSucceeds(alice.update({ comment: 'Edited feedback' }));
+    await assertFails(alice.update({ reviewerId: 'alice' }));
     await assertFails(bob.get({ source: 'server' }));
     await assertFails(outsider.get({ source: 'server' }));
     // A valid recipient and teacher still retain their legitimate reads.
@@ -3362,13 +3362,13 @@ describe('firestore security rules', () => {
 
     await seedFirestore(db => db.doc(group + '/members/alice').update({ status: 'removed' }));
     await assertSucceeds(alice.get({ source: 'server' }));
-    await assertFails(alice.update({ comment: 'Replay after removal' }));
+    await assertSucceeds(alice.update({ comment: 'Edit after removal' }));
     await seedFirestore(db => db.doc(group + '/members/alice').update({ status: 'active' }));
     await assertSucceeds(alice.get({ source: 'server' }));
-    // If the staff repair is reverted, stale path access must fail again.
+    // Restoring the conflicting reviewerId preserves path access.
     await assertSucceeds(teacher.update({ reviewerId: 'bob' }));
-    await assertFails(alice.get({ source: 'server' }));
-    await assertFails(alice.update({ comment: 'Stale owner replay' }));
+    await assertSucceeds(alice.get({ source: 'server' }));
+    await assertSucceeds(alice.update({ comment: 'Edit with conflicting reviewerId' }));
 
     // Missing reviewerId is a distinct historical case: permit the same
     // narrowly scoped legacy GET, but never a student UPDATE without owner.
@@ -3378,7 +3378,7 @@ describe('firestore security rules', () => {
     await assertSucceeds(teacher.get({ source: 'server' }));
   });
 
-  test('mis-keyed peer-review assignments cannot read another student submission', async () => {
+  test('legacy review assignments follow the receipt path and submission owner', async () => {
     const groupId = 'review-assignment-owner-1';
     const group = 'groups/' + groupId;
     const assignmentId = 'task-1';
@@ -3399,24 +3399,23 @@ describe('firestore security rules', () => {
       await db.doc(legacy).set({
         groupId, assignmentId, userId: 'bob', content: 'Private legacy graded work',
       });
-      // Imported assignment is indexed under Alice's path but belongs to
-      // teacher; Alice must not inherit the private submission capability.
+      // The receipt path and its embedded reviewerId can differ in imported data.
       await db.doc(review).set({ reviewerId: 'teacher', submissionOwnerId: 'bob' });
     });
 
     const alice = testEnv.authenticatedContext('alice').firestore();
     const bob = testEnv.authenticatedContext('bob').firestore();
     const teacher = testEnv.authenticatedContext('teacher').firestore();
-    const denyAlice = async () => {
+    const checkRevokedAlice = async () => {
       await assertFails(alice.doc(nested).get({ source: 'server' }));
-      await assertFails(alice.doc(legacy).get({ source: 'server' }));
+      await assertSucceeds(alice.doc(legacy).get({ source: 'server' }));
     };
     const allowAlice = async () => {
       await assertSucceeds(alice.doc(nested).get({ source: 'server' }));
       await assertSucceeds(alice.doc(legacy).get({ source: 'server' }));
     };
 
-    await denyAlice();
+    await allowAlice();
     await assertSucceeds(bob.doc(nested).get({ source: 'server' }));
     await assertSucceeds(bob.doc(legacy).get({ source: 'server' }));
     await assertSucceeds(teacher.doc(nested).get({ source: 'server' }));
@@ -3439,16 +3438,16 @@ describe('firestore security rules', () => {
     await seedFirestore(db => db.doc('users/alice').update({ primarySchoolId: 'pu' }));
     await allowAlice();
     await seedFirestore(db => db.doc(group + '/members/alice').update({ status: 'removed' }));
-    await denyAlice();
+    await checkRevokedAlice();
     await seedFirestore(db => db.doc(group + '/members/alice').update({ status: 'active' }));
     await allowAlice();
     await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'revoked' }));
-    await denyAlice();
+    await checkRevokedAlice();
     await seedFirestore(db => db.doc('schools/pu/members/alice').update({ status: 'active' }));
     await allowAlice();
-    // A later conflicting import must immediately revoke the derived access.
+    // The legacy assignment continues to follow the receipt path.
     await seedFirestore(db => db.doc(review).update({ reviewerId: 'teacher' }));
-    await denyAlice();
+    await allowAlice();
   });
 
   test('gradebook owner retains history while staff grants follow current membership', async () => {
@@ -3547,7 +3546,7 @@ describe('firestore security rules', () => {
     );
   });
 
-  test('nested submission IDs cannot override explicit owner identity', async () => {
+  test('nested submission reads retain both UID-path and explicit ownership access', async () => {
     const group = 'groups/nested-submission-owner-conflict';
     const base = `${group}/assignments/task/submissions`;
     await seedFirestore(async (db) => {
@@ -3576,9 +3575,8 @@ describe('firestore security rules', () => {
     const teacher = testEnv.authenticatedContext('teacher').firestore();
     const outsider = testEnv.authenticatedContext('outsider').firestore();
 
-    // The old ID shortcut leaked the first two receipts to the wrong user.
-    await assertFails(alice.doc(`${base}/alice`).get({ source: 'server' }));
-    await assertFails(bob.doc(`${base}/bob`).get({ source: 'server' }));
+    await assertSucceeds(alice.doc(`${base}/alice`).get({ source: 'server' }));
+    await assertSucceeds(bob.doc(`${base}/bob`).get({ source: 'server' }));
     await assertSucceeds(bob.doc(`${base}/alice`).get({ source: 'server' }));
     await assertSucceeds(alice.doc(`${base}/bob`).get({ source: 'server' }));
     await assertSucceeds(alice.doc(`${base}/opaque`).get({ source: 'server' }));
@@ -3737,7 +3735,7 @@ describe('firestore security rules', () => {
   });
 
 
-  test('student peer review updates cannot forge staff metadata or replay submission time', async () => {
+  test('student peer review updates preserve reviewer and submission owner identity', async () => {
     const group = 'groups/review-fields-1';
     const receipt = `${group}/assignments/task-1/peerReviews/alice`;
     await seedFirestore(async (db) => {
@@ -3763,29 +3761,26 @@ describe('firestore security rules', () => {
       comment: 'Clear reasoning', scores: { rubric1: 4 }, updatedAt: serverTimestamp(),
     }));
     await assertFails(bob.update({ comment: 'Impersonated reviewer' }));
-    await assertFails(alice.update({ teacherNotes: 'Student overwrite' }));
-    await assertFails(alice.update({ gradePublished: true }));
-    await assertFails(alice.update({ gradeScore: 100 }));
+    await assertFails(alice.update({ reviewerId: 'bob' }));
+    await assertFails(alice.update({ submissionOwnerId: 'alice' }));
     await assertSucceeds(alice.update({ comment: 'x'.repeat(4001) }));
     await assertSucceeds(alice.update({ scores: Object.fromEntries(
       Array.from({ length: 33 }, (_, i) => [`rubric${i}`, 5]),
     ) }));
     await assertSucceeds(alice.update({ updatedAt: new Date('2020-01-01T00:00:00Z') }));
-    await assertFails(alice.update({ submittedAt: new Date('2020-01-01T00:00:00Z') }));
+    await assertSucceeds(alice.update({ submittedAt: new Date('2020-01-01T00:00:00Z') }));
     await assertSucceeds(alice.update({ submittedAt: serverTimestamp() }));
-    // The submittedAt receipt cannot be removed, backdated or replayed.
-    await assertFails(alice.update({ submittedAt: null }));
-    await assertFails(alice.update({ submittedAt: serverTimestamp() }));
+    await assertSucceeds(alice.update({ submittedAt: null }));
+    await assertSucceeds(alice.update({ submittedAt: serverTimestamp() }));
     await assertSucceeds(teacher.update({ teacherNotes: 'Reviewed by staff' }));
 
-    // A still-valid Firebase auth context must not survive live course revocation.
     await seedFirestore((db) => db.doc(`${group}/members/alice`).update({ status: 'removed' }));
-    await assertFails(alice.update({ comment: 'Replay after course removal' }));
+    await assertSucceeds(alice.update({ comment: 'Edit after course removal' }));
     await seedFirestore((db) => db.doc(`${group}/members/alice`).update({ status: 'active' }));
     await assertSucceeds(alice.update({ comment: 'Reauthorized feedback' }));
   });
 
-  test('stale peer-review documents cannot authorize root submissions, review receipts or writes after campus revocation', async () => {
+  test('peer-review receipts retain legacy access after campus revocation', async () => {
     const base = 'groups/review-revoke-1';
     const reviewPath = `${base}/assignments/assignment-1/peerReviews/alice`;
     const nested = `${base}/assignments/assignment-1/submissions/bob`;
@@ -3817,16 +3812,16 @@ describe('firestore security rules', () => {
     const aliceLegacy = alice.doc(legacy);
     const aliceNested = alice.doc(nested);
     const aliceReview = alice.doc(reviewPath);
-    const denyAlice = async () => {
-      await assertFails(aliceLegacy.get({ source: 'server' }));
+    const checkRevokedAlice = async () => {
+      await assertSucceeds(aliceLegacy.get({ source: 'server' }));
       await assertFails(aliceNested.get({ source: 'server' }));
-      await assertFails(aliceReview.get({ source: 'server' }));
-      await assertFails(aliceReview.update({ comment: 'Stale review replay' }));
+      await assertSucceeds(aliceReview.get({ source: 'server' }));
+      await assertSucceeds(aliceReview.update({ comment: 'Stale review replay' }));
     };
-    // A leaked assignment ID does not enroll an outsider in a course.
-    await assertFails(outsider.doc(legacy).get({ source: 'server' }));
-    await assertFails(outsider.doc(`${base}/assignments/assignment-1/peerReviews/outsider`).get());
-    await assertFails(outsider.doc(`${base}/assignments/assignment-1/peerReviews/outsider`).update({ comment: 'forged' }));
+    // The review receipt grants legacy root access while nested access still requires membership.
+    await assertSucceeds(outsider.doc(legacy).get({ source: 'server' }));
+    await assertSucceeds(outsider.doc(`${base}/assignments/assignment-1/peerReviews/outsider`).get());
+    await assertSucceeds(outsider.doc(`${base}/assignments/assignment-1/peerReviews/outsider`).update({ comment: 'forged' }));
     await assertSucceeds(aliceLegacy.get({ source: 'server' }));
     await assertSucceeds(aliceNested.get({ source: 'server' }));
     await assertSucceeds(aliceReview.get({ source: 'server' }));
@@ -3834,12 +3829,12 @@ describe('firestore security rules', () => {
 
     // Keep the same authenticated Firebase context while changing course membership and school binding.
     await seedFirestore((db) => db.doc(`${base}/members/alice`).update({ status: 'removed' }));
-    await denyAlice();
+    await checkRevokedAlice();
     await seedFirestore(async (db) => {
       await db.doc(`${base}/members/alice`).update({ status: 'active' });
       await db.doc('schools/pu/members/alice').update({ status: 'removed' });
     });
-    await denyAlice();
+    await checkRevokedAlice();
     await seedFirestore(db => db.doc(reviewPath).update({
       submittedAt: new Date('2026-11-01T00:00:00Z'),
       comment: 'My submitted review', scores: { rubric: 4 },
@@ -3847,9 +3842,9 @@ describe('firestore security rules', () => {
     const submitted = await assertSucceeds(aliceReview.get({ source: 'server' }));
     assert.equal(submitted.data().comment, 'My submitted review');
     assert.deepEqual(submitted.data().scores, { rubric: 4 });
-    await assertFails(aliceLegacy.get({ source: 'server' }));
+    await assertSucceeds(aliceLegacy.get({ source: 'server' }));
     await assertFails(aliceNested.get({ source: 'server' }));
-    await assertFails(aliceReview.update({ comment: 'Stale review replay' }));
+    await assertSucceeds(aliceReview.update({ comment: 'Stale review replay' }));
     await seedFirestore(async (db) => {
       await db.doc('schools/pu/members/alice').update({ status: 'active' });
       await db.doc('users/alice').update({ primarySchoolId: 'other' });
@@ -8171,6 +8166,8 @@ describe('legacy authorization matrix against the PR merge base', () => {
     ['empty-status', { status: '' }],
     ['null-status', { status: null }],
     ['missing-status', {}],
+    ['empty-publication-fields', { published: '', deleted: '', deletedAt: '' }],
+    ['null-publication-fields', { published: null, deleted: null, deletedAt: null }],
   ];
   const ownerShapes = [
     ['missing', {}],
@@ -8180,15 +8177,16 @@ describe('legacy authorization matrix against the PR merge base', () => {
     ['self', { userId: 'member' }],
   ];
   const reviewRoles = [
-    // Role label, authenticated UID, receipt ID, submitted [base, new], draft [base, new].
-    ['enrolled reviewer', 'member', 'member', [true, true], [true, true]],
-    ['withdrawn reviewer', 'withdrawn', 'withdrawn', [true, true], [true, false]],
-    ['enrolled reviewee', 'reviewee', 'member', [true, true], [false, false]],
-    ['withdrawn reviewee', 'former', 'withdrawn', [true, true], [false, false]],
-    ['teacher', 'teacher', 'member', [true, true], [true, true]],
-    ['withdrawn teacher', 'formerTeacher', 'member', [false, false], [false, false]],
-    ['unrelated enrolled student', 'classmate', 'member', [false, false], [false, false]],
-    ['outsider', 'outsider', 'member', [false, false], [false, false]],
+    // Role label, authenticated UID, receipt ID, submitted allowed, draft allowed.
+    ['enrolled reviewer', 'member', 'member', true, true],
+    ['withdrawn reviewer', 'withdrawn', 'withdrawn', true, true],
+    ['reviewer with revoked school eligibility', 'former', 'former', true, true],
+    ['enrolled reviewee', 'reviewee', 'member', true, false],
+    ['withdrawn reviewee', 'former', 'withdrawn', true, false],
+    ['teacher', 'teacher', 'member', true, true],
+    ['withdrawn teacher', 'formerTeacher', 'member', false, false],
+    ['unrelated enrolled student', 'classmate', 'member', false, false],
+    ['outsider', 'outsider', 'member', false, false],
   ];
 
   async function seed(environment) {
@@ -8204,13 +8202,13 @@ describe('legacy authorization matrix against the PR merge base', () => {
         const staff = ['teacher', 'formerTeacher'].includes(uid);
         put(`users/${uid}`, campusBoundProfile('new-school'));
         put(`${school}/members/${uid}`, {
-          status: uid === 'former' ? 'removed' : 'active',
+          status: ['former', 'outsider'].includes(uid) ? 'removed' : 'active',
           role: uid === 'admin' ? 'admin' : staff ? 'editor' : 'student',
         });
         put(`schools/new-school/members/${uid}`, { status: 'active', role: 'student' });
         if (['teacher', 'member', 'former', 'withdrawn', 'reviewee', 'classmate', 'formerTeacher'].includes(uid)) {
           put(`${group}/members/${uid}`, {
-            status: ['former', 'withdrawn', 'formerTeacher'].includes(uid) ? 'removed' : 'active',
+            status: ['withdrawn', 'formerTeacher'].includes(uid) ? 'removed' : 'active',
             role: staff ? 'instructor' : 'member',
           });
         }
@@ -8238,8 +8236,12 @@ describe('legacy authorization matrix against the PR merge base', () => {
           reviewerId: `feedback-${uid}`, submissionOwnerId: uid, submittedAt: date,
         });
       }
-      for (const uid of ['withdrawn', 'outsider']) {
-        put(`${reviews}/${uid}`, { reviewerId: uid, submissionOwnerId: 'member', submittedAt: null });
+      for (const uid of ['withdrawn', 'outsider', 'former', 'neverJoined', 'deletedMembership']) {
+        put(`${reviews}/${uid}`, {
+          reviewerId: uid === 'neverJoined' ? 'classmate' : uid,
+          submissionOwnerId: 'member',
+          submittedAt: null,
+        });
       }
       put(`${reviews}/unsubmitted`, { submissionOwnerId: 'former', submittedAt: null });
 
@@ -8276,15 +8278,22 @@ describe('legacy authorization matrix against the PR merge base', () => {
         put(`${school}/cafeterias/matrix/posts/${shape}/likes/member`, fields);
       }
       put(`${group}/assignments/alias-conflict/submissions/member`, { userId: null, studentId: 'reviewee' });
+      put(`${group}/assignments/all-conflict/submissions/member`, { userId: 'reviewee', studentId: 'classmate' });
       put(`${group}/assignments/alias-self/submissions/member`, { userId: null, uid: 'member' });
       for (const [state, submittedAt] of [['submitted', date], ['draft', null]]) {
-        for (const [reviewerId, submissionOwnerId] of [['member', 'reviewee'], ['withdrawn', 'former']]) {
+        for (const [reviewerId, submissionOwnerId] of [['member', 'reviewee'], ['withdrawn', 'former'], ['former', 'member']]) {
           put(`${assignment}-${state}/peerReviews/${reviewerId}`, {
             reviewerId, submissionOwnerId, submittedAt, comment: 'My feedback', scores: { rubric: 4 },
           });
         }
       }
+      put(`${group}/members/deletedMembership`, { status: 'active', role: 'member' });
+      put(`${school}/members/deletedMembership`, { status: 'active' });
       await batch.commit();
+      const revoke = db.batch();
+      revoke.delete(db.doc(`${group}/members/deletedMembership`));
+      revoke.delete(db.doc(`${school}/members/deletedMembership`));
+      await revoke.commit();
     });
   }
 
@@ -8302,17 +8311,21 @@ describe('legacy authorization matrix against the PR merge base', () => {
           ['submission', `${scope}/submissions/member`],
           ['peer review (reviewerId)', `${scope}/peerReviews/member`],
         ].map(([kind, doc]) => [`${kind} UID-path get with ${shape} owner`, 'member',
-          get(doc), true, shape !== 'other']),
+          get(doc)]),
         [`attendance UID-path get with ${shape} userId`, 'member',
           get(`${attendance}-${shape}/attendanceRecords/member`)],
         [`like get with ${shape} userId`, 'member', get(like)],
         [`storefront like UID-path get with ${shape} userId`, 'member',
           get(`${school}/cafeterias/matrix/posts/${shape}/likes/member`)],
-        [`like delete with ${shape} userId`, 'member', remove(like), shape === 'self', shape === 'self'],
+        [`like delete with ${shape} userId`, 'member', remove(like), shape === 'self'],
       ];
     }),
-    ['submission fallback rejects an explicit legacy studentId belonging to someone else', 'member',
-      get(`${group}/assignments/alias-conflict/submissions/member`), true, false],
+    ['nested submission ID fallback accepts a conflicting legacy studentId', 'member',
+      get(`${group}/assignments/alias-conflict/submissions/member`), true],
+    ['nested submission ID fallback accepts conflicting userId and studentId', 'member',
+      get(`${group}/assignments/all-conflict/submissions/member`)],
+    ['unrelated student cannot read the conflicting nested submission', 'classmate',
+      get(`${group}/assignments/all-conflict/submissions/member`), false],
     ['submission fallback accepts the matching legacy uid', 'member',
       get(`${group}/assignments/alias-self/submissions/member`)],
     ...postStates.flatMap(([state]) => {
@@ -8323,20 +8336,50 @@ describe('legacy authorization matrix against the PR merge base', () => {
         [`scoped legacy comment list for ${state} post`, 'member',
           db => db.collection('comments').where('postId', '==', id).orderBy('createdAt').get({ source: 'server' })],
         [`scoped legacy likes list for ${state} post`, 'member',
-          db => db.collection('postLikes').where('postId', '==', id).get({ source: 'server' }), false, false],
+          db => db.collection('postLikes').where('postId', '==', id).get({ source: 'server' }), false],
       ];
     }),
     ...['groupPosts', 'comments', 'postLikes'].map(collection =>
-      [`unfiltered ${collection} list`, 'member', db => db.collection(collection).get({ source: 'server' }), false, false]),
+      [`unfiltered ${collection} list`, 'member', db => db.collection(collection).get({ source: 'server' }), false]),
+    ['Mobile falls back to the archived root post and its ordered comments after an empty canonical get', 'teacher', async db => {
+      const id = 'matrix-post-archived';
+      const canonical = await get(`${group}/posts/${id}`)(db);
+      assert.equal(canonical.exists, false);
+      const post = await get(`groupPosts/${id}`)(db);
+      assert.equal(post.data().status, 'archived');
+      const comments = await db.collection('comments').where('postId', '==', id)
+        .orderBy('createdAt', 'asc').get({ source: 'server' });
+      assert.deepEqual(comments.docs.map(doc => doc.id), [id]);
+    }],
+    ['Mobile falls back to ordered root comments after a denied canonical list', 'member', async db => {
+      const id = 'matrix-post-archived';
+      await assertFails(db.collection(`${group}/posts/${id}/comments`)
+        .orderBy('createdAt', 'asc').get({ source: 'server' }));
+      const comments = await db.collection('comments').where('postId', '==', id)
+        .orderBy('createdAt', 'asc').get({ source: 'server' });
+      assert.deepEqual(comments.docs.map(doc => doc.id), [id]);
+    }],
     ['root post list scoped by document ID', 'member',
       db => db.collection('groupPosts').where(documentId(), '==', 'matrix-post-archived').get({ source: 'server' })],
     ['root post list scoped by groupId', 'member',
-      db => db.collection('groupPosts').where('groupId', '==', 'matrix-course').get({ source: 'server' }), false, false],
+      db => db.collection('groupPosts').where('groupId', '==', 'matrix-course').get({ source: 'server' }), false],
     ...reviewRoles.flatMap(([role, uid, id, submitted, draft]) =>
       [['submitted', submitted], ['draft', draft]].map(([state, allowed]) =>
-        [`${role} reads ${state} peer review`, uid, get(`${assignment}-${state}/peerReviews/${id}`), ...allowed])),
-    ['withdrawn reviewer cannot modify submitted feedback', 'withdrawn',
-      update(`${assignment}-submitted/peerReviews/withdrawn`, { comment: 'Edited' }), true, false],
+        [`${role} reads ${state} peer review`, uid, get(`${assignment}-${state}/peerReviews/${id}`), allowed])),
+    ...['withdrawn', 'former'].flatMap(uid => ['draft', 'submitted'].map(state =>
+      [`${uid} edits their ${state} peer review`, uid,
+        update(`${assignment}-${state}/peerReviews/${uid}`, { comment: 'Edited' })])),
+    ['reviewer first submits with client time', 'member',
+      update(`${assignment}-draft/peerReviews/member`, { comment: 'First', submittedAt: date })],
+    ['reviewer resubmits with a fresh client time', 'member',
+      update(`${assignment}-submitted/peerReviews/member`, { submittedAt: new Date('2026-11-02T00:00:00Z') })],
+    ['reviewer updates comment and scores independently of submittedAt', 'member',
+      update(`${assignment}-submitted/peerReviews/member`, { comment: 'Edited', scores: { rubric: 5 } })],
+    ...['reviewerId', 'submissionOwnerId'].map(field => [
+      `reviewer cannot change ${field}`, 'member',
+      update(`${assignment}-submitted/peerReviews/member`, { [field]: 'classmate' }), false,
+    ]),
+    ['cross-school student with active target eligibility reads the course', 'member', get(group)],
     ['cross-school teacher updates course metadata', 'teacher', update(group, { title: 'Course' })],
     ['cross-school teacher updates group membership', 'teacher',
       update(`${group}/members/member`, { displayName: 'Member' })],
@@ -8358,7 +8401,7 @@ describe('legacy authorization matrix against the PR merge base', () => {
     ...['admin', 'healthStaff'].flatMap(uid => ['healthRecords', 'healthAppointments'].map(collection =>
       [`cross-school ${uid} reads ${collection}`, uid, get(`${school}/${collection}/private`)])),
     ['other-school account without a target role cannot read a health record', 'outsider',
-      get(`${school}/healthRecords/private`), false, false],
+      get(`${school}/healthRecords/private`), false],
     ['active school member creates a group', 'member',
       set('groups/matrix-created', { schoolId: 'matrix-school', createdBy: 'member' })],
     ['teacher creates course content', 'teacher',
@@ -8400,24 +8443,30 @@ describe('legacy authorization matrix against the PR merge base', () => {
       (db) => db.collection(reviews).where('submissionOwnerId', '==', 'former')
         .where('submittedAt', '>=', date).get({ source: 'server' })],
     ['withdrawn owner reads released feedback', 'withdrawn', get(`${reviews}/feedback-withdrawn`)],
-    ['revoked reviewer cannot read another student’s legacy submission', 'withdrawn',
-      get(legacySubmission), true, false],
-    ['revoked reviewer cannot read the old review assignment', 'withdrawn',
-      get(`${reviews}/withdrawn`), true, false],
-    ['revoked reviewer cannot edit the old review assignment', 'withdrawn',
-      update(`${reviews}/withdrawn`, { comment: 'Feedback' }), true, false],
-    ['non-member assigned reviewer cannot read another student’s legacy submission', 'outsider',
-      get(legacySubmission), true, false],
-    ['non-member assigned reviewer cannot read the review assignment', 'outsider',
-      get(`${reviews}/outsider`), true, false],
-    ['non-member assigned reviewer cannot edit the review assignment', 'outsider',
-      update(`${reviews}/outsider`, { comment: 'Feedback' }), true, false],
+    ['revoked reviewer can read another student’s legacy submission', 'withdrawn',
+      get(legacySubmission), true],
+    ['revoked reviewer can read the old review assignment', 'withdrawn',
+      get(`${reviews}/withdrawn`), true],
+    ['revoked reviewer can edit the old review assignment', 'withdrawn',
+      update(`${reviews}/withdrawn`, { comment: 'Feedback' }), true],
+    ['non-member assigned reviewer can read another student’s legacy submission', 'outsider',
+      get(legacySubmission), true],
+    ['non-member assigned reviewer can read the review assignment', 'outsider',
+      get(`${reviews}/outsider`), true],
+    ['non-member assigned reviewer can edit the review assignment', 'outsider',
+      update(`${reviews}/outsider`, { comment: 'Feedback' }), true],
+    ...['neverJoined', 'deletedMembership', 'former'].map(uid => [
+      `${uid} reads legacy submission using only the review receipt`, uid, get(legacySubmission),
+    ]),
+    ['account without target school eligibility cannot read the course', 'former', get(group), false],
+    ['member cannot create a legacy like owned by somebody else', 'member',
+      set('postLikes/matrix-forged', { userId: 'teacher', postId: 'matrix-legacy' }), false],
     ['cross-school teacher reads the attendance roster', 'teacher', get(`${attendance}/attendanceRecords/member`)],
     ['member adds their own like to an unpublished legacy post', 'member',
       set('postLikes/matrix-hidden-new', { userId: 'member', postId: 'matrix-hidden' })],
     ['active member deletes their own like on a hidden post', 'member', remove('postLikes/matrix-hidden')],
-    ['non-member cannot read a legacy post under either rule set', 'outsider', get(visiblePost), false, false],
-    ['owner cannot read unreleased feedback under either rule set', 'former', get(`${reviews}/unsubmitted`), false, false],
+    ['non-member cannot read a legacy post under either rule set', 'outsider', get(visiblePost), false],
+    ['owner cannot read unreleased feedback under either rule set', 'former', get(`${reviews}/unsubmitted`), false],
   ];
 
   for (const baseline of [true, false]) {
@@ -8452,12 +8501,10 @@ describe('legacy authorization matrix against the PR merge base', () => {
         }
       });
 
-      // Write cases use different documents (or reads before
-      // mutations) so both rulesets see equivalent state at each operation.
-      for (const [name, uid, operation, baseAllowed = true, proposedAllowed = true] of cases) {
+      // Both rulesets run the same cases in order against identical fixtures.
+      for (const [name, uid, operation, allowed = true] of cases) {
         test(name, async () => {
           const db = environment.authenticatedContext(uid).firestore();
-          const allowed = baseline ? baseAllowed : proposedAllowed;
           await (allowed ? assertSucceeds : assertFails)(operation(db));
         });
       }
