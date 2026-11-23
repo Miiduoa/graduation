@@ -61,6 +61,49 @@ import {
 import styles from '@/components/imports/PersonalImport.module.css';
 import workspaceStyles from './PersonalCalendar.module.css';
 
+function CalendarDateField({
+  label,
+  type,
+  value,
+  onChange,
+  required,
+  className = '',
+}: {
+  label: string;
+  type: 'month' | 'date' | 'time';
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+  className?: string;
+}) {
+  const inputId = useId();
+  const valueId = `${inputId}-value`;
+  const parts = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec(value);
+  const readableValue =
+    parts && type !== 'time'
+      ? `${parts[1]} 年 ${Number(parts[2])} 月${parts[3] ? ` ${Number(parts[3])} 日` : ''}`
+      : value;
+
+  return (
+    <div className={`${styles.field} ${className}`}>
+      <label htmlFor={inputId}>{label}</label>
+      <input
+        id={inputId}
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+        aria-describedby={value ? valueId : undefined}
+      />
+      {value && (
+        <time id={valueId} dateTime={value} className={workspaceStyles.nativeValue}>
+          {readableValue}
+        </time>
+      )}
+    </div>
+  );
+}
+
 function EventFormFields({
   draft,
   disabled,
@@ -87,23 +130,19 @@ function EventFormFields({
             required
           />
         </label>
-        <label className={styles.field}>
-          日期
-          <input
-            type="date"
-            value={draft.date}
-            onChange={(event) => set({ date: event.target.value })}
-            required
-          />
-        </label>
-        <label className={styles.field}>
-          {draft.allDay ? '結束日期（不含當天，可留空）' : '結束日期（跨日才填）'}
-          <input
-            type="date"
-            value={draft.endDate}
-            onChange={(event) => set({ endDate: event.target.value })}
-          />
-        </label>
+        <CalendarDateField
+          label="日期"
+          type="date"
+          value={draft.date}
+          onChange={(date) => set({ date })}
+          required
+        />
+        <CalendarDateField
+          label={draft.allDay ? '結束日期（不含當天，可留空）' : '結束日期（跨日才填）'}
+          type="date"
+          value={draft.endDate}
+          onChange={(endDate) => set({ endDate })}
+        />
         <label className={styles.check}>
           <input
             type="checkbox"
@@ -121,24 +160,20 @@ function EventFormFields({
         </label>
         {!draft.allDay && (
           <>
-            <label className={styles.field}>
-              開始時間
-              <input
-                type="time"
-                value={draft.startTime}
-                onChange={(event) => set({ startTime: event.target.value })}
-                required
-              />
-            </label>
-            <label className={styles.field}>
-              結束時間
-              <input
-                type="time"
-                value={draft.endTime}
-                onChange={(event) => set({ endTime: event.target.value })}
-                required
-              />
-            </label>
+            <CalendarDateField
+              label="開始時間"
+              type="time"
+              value={draft.startTime}
+              onChange={(startTime) => set({ startTime })}
+              required
+            />
+            <CalendarDateField
+              label="結束時間"
+              type="time"
+              value={draft.endTime}
+              onChange={(endTime) => set({ endTime })}
+              required
+            />
           </>
         )}
         <label className={styles.field}>
@@ -751,16 +786,15 @@ function PersonalCalendarWorkspace({
           </p>
         )}
         <div className={workspaceStyles.toolbar}>
-          <label className={`${styles.field} ${workspaceStyles.monthField}`}>
-            查看月份
-            <input
-              type="month"
-              value={month}
-              onChange={(event) => {
-                if (isCalendarMonth(event.target.value)) changeMonth(event.target.value);
-              }}
-            />
-          </label>
+          <CalendarDateField
+            className={workspaceStyles.monthField}
+            label="查看月份"
+            type="month"
+            value={month}
+            onChange={(value) => {
+              if (isCalendarMonth(value)) changeMonth(value);
+            }}
+          />
           <div className={workspaceStyles.monthNavigation} role="group" aria-label="切換月份">
             <button
               type="button"

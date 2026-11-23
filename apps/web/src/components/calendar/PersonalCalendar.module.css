@@ -75,6 +75,18 @@
   font-variant-numeric: tabular-nums;
 }
 
+.nativeValue {
+  display: none;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .monthNavigation {
   display: flex;
   flex-wrap: wrap;
@@ -157,8 +169,8 @@
   font-size: 0.875rem;
 }
 
-.editor fieldset label:first-child,
-.editor fieldset label:last-child {
+.editor fieldset > div > label:first-child,
+.editor fieldset > div > label:last-child {
   grid-column: 1 / -1;
 }
 
@@ -250,7 +262,13 @@
 
 @media (max-width: 540px) {
   .panel {
-    padding: 0.875rem;
+    padding: 14px;
+  }
+  .editor {
+    padding: 12px;
+  }
+  .nativeValue {
+    display: block;
   }
   .toolbar {
     align-items: center;

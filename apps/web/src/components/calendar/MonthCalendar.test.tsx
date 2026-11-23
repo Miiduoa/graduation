@@ -4,7 +4,10 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { PersonalImportRecord } from '@campus/shared';
 import { MonthCalendar } from './MonthCalendar';
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 const baseProps = {
   records: [] as PersonalImportRecord[],
@@ -187,4 +190,97 @@ it('今天依台灣日期標示，禁止編輯時仍可查看日期', () => {
   );
   fireEvent.click(today);
   expect(onDate).toHaveBeenCalledExactlyOnceWith('2028-01-31');
+});
+
+it('重新開啟窄月格時完整露出已選日期，僅調整月格的水平捲動', () => {
+  const originalBounds = Element.prototype.getBoundingClientRect;
+  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(216);
+  vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(616);
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this.getAttribute('role') === 'region') return new DOMRect(40, 500, 216, 400);
+    if (this.getAttribute('aria-label') === '2028-01-18') {
+      const viewport = this.closest('[role="region"]')!;
+      return new DOMRect(40 + 176 - viewport.scrollLeft, 600, 88, 96);
+    }
+    return originalBounds.call(this);
+  });
+  const pageScroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+  const pageScrollBefore = window.scrollY;
+  const onDate = vi.fn();
+  const view = render(<button type="button">月格</button>);
+  const switcher = screen.getByRole('button', { name: '月格' });
+  switcher.focus();
+
+  view.rerender(
+    <>
+      <button type="button">月格</button>
+      <MonthCalendar {...baseProps} selectedDate="2028-01-18" onDate={onDate} />
+    </>,
+  );
+  const viewport = screen.getByRole('region', { name: '2028-01 月格，週日起始' });
+  const selected = screen.getByRole('button', { name: '2028-01-18' });
+  expect(viewport.scrollLeft).toBe(48);
+  expect(selected.getBoundingClientRect().left).toBeGreaterThanOrEqual(
+    viewport.getBoundingClientRect().left,
+  );
+  expect(selected.getBoundingClientRect().right).toBeLessThanOrEqual(
+    viewport.getBoundingClientRect().right,
+  );
+  expect(document.activeElement).toBe(switcher);
+  expect(window.scrollY).toBe(pageScrollBefore);
+  expect(pageScroll).not.toHaveBeenCalled();
+  expect(onDate).not.toHaveBeenCalled();
+
+  // A later list→month return creates another viewport; selection remains visible.
+  view.rerender(<button type="button">月格</button>);
+  view.rerender(
+    <>
+      <button type="button">月格</button>
+      <MonthCalendar {...baseProps} selectedDate="2028-01-18" onDate={onDate} />
+    </>,
+  );
+  expect(screen.getByRole('region', { name: '2028-01 月格，週日起始' }).scrollLeft).toBe(48);
+  expect(document.activeElement).toBe(switcher);
+  expect(pageScroll).not.toHaveBeenCalled();
+});
+
+it('外部選日移到左側時只捲回必要距離，不搶焦點或重設已可見的月份', () => {
+  const view = render(
+    <>
+      <button type="button">回今天</button>
+      <MonthCalendar {...baseProps} selectedDate="" />
+    </>,
+  );
+  const outside = screen.getByRole('button', { name: '回今天' });
+  outside.focus();
+  const viewport = screen.getByRole('region', { name: '2028-01 月格，週日起始' });
+  const selected = screen.getByRole('button', { name: '2028-01-23' });
+  Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 216 });
+  Object.defineProperty(viewport, 'scrollWidth', { configurable: true, value: 616 });
+  viewport.scrollLeft = 200;
+  vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(new DOMRect(40, 500, 216, 400));
+  vi.spyOn(selected, 'getBoundingClientRect').mockImplementation(
+    () => new DOMRect(40 - viewport.scrollLeft, 600, 88, 96),
+  );
+  const pageScroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+
+  view.rerender(
+    <>
+      <button type="button">回今天</button>
+      <MonthCalendar {...baseProps} selectedDate="2028-01-23" />
+    </>,
+  );
+  expect(viewport.scrollLeft).toBe(0);
+  expect(document.activeElement).toBe(outside);
+  expect(pageScroll).not.toHaveBeenCalled();
+
+  viewport.scrollLeft = 20;
+  view.rerender(
+    <>
+      <button type="button">回今天</button>
+      <MonthCalendar {...baseProps} selectedDate="2028-01-23" disabled />
+    </>,
+  );
+  expect(viewport.scrollLeft).toBe(20);
+  expect(document.activeElement).toBe(outside);
 });

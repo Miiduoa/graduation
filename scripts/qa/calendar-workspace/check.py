@@ -51,6 +51,81 @@ def day_heading(page, date):
     return page.get_by_role('heading').filter(has_text=date)
 
 
+async def assert_complete_field_value(page, label, value, text, report):
+    field = page.get_by_label(label, exact=True)
+    await expect(field).to_have_value(value)
+    state = await field.evaluate('''field => {
+      const ids = (field.getAttribute('aria-describedby') || '').split(/\\s+/).filter(Boolean);
+      const time = ids.map(id => document.getElementById(id)).find(node => node?.tagName === 'TIME');
+      if (!time) return { found: false, describedBy: ids };
+      const rect = time.getBoundingClientRect();
+      const style = getComputedStyle(time);
+      const range = document.createRange();
+      range.selectNodeContents(time);
+      const textRects = [...range.getClientRects()].filter(r => r.width && r.height)
+        .map(r => ({left: r.left, right: r.right, top: r.top, bottom: r.bottom}));
+      const clips = [];
+      for (let ancestor = time.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const css = getComputedStyle(ancestor);
+        const box = ancestor.getBoundingClientRect();
+        if (['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowX) ||
+            ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowY)) {
+          clips.push({left: box.left + ancestor.clientLeft, top: box.top + ancestor.clientTop,
+            right: box.left + ancestor.clientLeft + ancestor.clientWidth,
+            bottom: box.top + ancestor.clientTop + ancestor.clientHeight,
+            x: ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowX),
+            y: ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowY)});
+        }
+      }
+      return {found: true, describedBy: ids, machineValue: time.getAttribute('datetime'),
+        text: time.textContent.replace(/\\s+/g, ' ').trim(), viewport: innerWidth,
+        display: style.display, visibility: style.visibility, opacity: style.opacity,
+        clipPath: style.clipPath, lineClamp: style.webkitLineClamp,
+        rect: {left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+          width: rect.width, height: rect.height}, textRects, clips};
+    }''')
+    report.setdefault('readableFieldValues', []).append({'label': label, 'expected': value, **state})
+    assert state['found'], f'{label} is missing its associated visible full-value time element: {state}'
+    assert state['machineValue'] == value and state['text'] == text, f'{label} full value does not match the input: {state}'
+    assert state['display'] != 'none' and state['visibility'] == 'visible' and float(state['opacity']) > 0, (
+        f'{label} full value is hidden: {state}')
+    assert state['clipPath'] == 'none' and state['lineClamp'] in ('none', '', '0'), (
+        f'{label} full value is clipped or line-clamped: {state}')
+    box = state['rect']
+    assert box['width'] > 0 and box['height'] > 0 and state['textRects'], f'{label} has no rendered complete value: {state}'
+    for rect in state['textRects']:
+        assert rect['left'] >= -1 and rect['right'] <= state['viewport'] + 1, f'{label} text extends outside the viewport: {state}'
+        assert rect['left'] >= box['left'] - 1 and rect['right'] <= box['right'] + 1, f'{label} text is horizontally clipped: {state}'
+        assert rect['top'] >= box['top'] - 1 and rect['bottom'] <= box['bottom'] + 1, f'{label} text is vertically clipped: {state}'
+        for clip in state['clips']:
+            assert not clip['x'] or (rect['left'] >= clip['left'] - 1 and rect['right'] <= clip['right'] + 1), (
+                f'{label} text is clipped by an ancestor horizontally: {state}')
+            assert not clip['y'] or (rect['top'] >= clip['top'] - 1 and rect['bottom'] <= clip['bottom'] + 1), (
+                f'{label} text is clipped by an ancestor vertically: {state}')
+
+
+async def assert_selected_day_revealed(page, date, previous_scroll_y, report):
+    button = page.get_by_role('button', name=date, exact=True)
+    state = await button.evaluate('''button => {
+      const viewport = button.closest('[role="region"]');
+      const outer = viewport.getBoundingClientRect();
+      const rect = button.getBoundingClientRect();
+      return {date: button.getAttribute('aria-label'),
+        left: rect.left, right: rect.right, width: rect.width,
+        visibleLeft: outer.left + viewport.clientLeft,
+        visibleRight: outer.left + viewport.clientLeft + viewport.clientWidth,
+        scrollLeft: viewport.scrollLeft, clientWidth: viewport.clientWidth,
+        scrollWidth: viewport.scrollWidth, windowScrollY: window.scrollY};
+    }''')
+    report.setdefault('selectedDayVisibility', []).append(state)
+    assert state['width'] > 0, f'Selected day is not rendered: {state}'
+    assert state['left'] >= state['visibleLeft'] - 1 and state['right'] <= state['visibleRight'] + 1, (
+        f'Selected day is only partly visible after returning to month view: {state}')
+    assert abs(state['windowScrollY'] - previous_scroll_y) <= 1, (
+        f'Revealing the selected day unexpectedly scrolled the whole page: {previous_scroll_y} -> {state}')
+    await expect(page.get_by_role('button', name='月格', exact=True)).to_be_focused()
+
+
 async def inspect_layout(page, stage, report):
     layout = await page.evaluate('''() => ({
       viewport: innerWidth,
@@ -132,9 +207,17 @@ async def run_scenario(browser, server_url, config):
         await page.get_by_role('button', name='列表', exact=True).click()
         await expect(day_heading(page, '2028-01-18')).to_be_visible()
         await expect(page.get_by_role('heading', name='月底整理', exact=True)).to_have_count(0)
-        await page.get_by_role('button', name='月格', exact=True).click()
+        month_control = page.get_by_role('button', name='月格', exact=True)
+        await month_control.scroll_into_view_if_needed()
+        await month_control.focus()
+        scroll_before_month = await page.evaluate('window.scrollY')
+        await month_control.click()
         await expect(page.get_by_role('button', name='2028-01-18', exact=True)).to_have_attribute('aria-pressed', 'true')
         report['checks'].append('Switching month/list preserves the chosen day and its personal events plus course deadlines')
+        # Do not click or focus the selected date first: that would let the
+        # browser repair the product's horizontal position and hide a regression.
+        await assert_selected_day_revealed(page, '2028-01-18', scroll_before_month, report)
+        report['checks'].append('Returning to month view fully reveals the selected day inside the horizontal viewport without taking focus from the view control')
         await capture('day')
 
         await page.get_by_role('button', name='新增行程', exact=True).click()
@@ -142,6 +225,11 @@ async def run_scenario(browser, server_url, config):
         await expect(page.get_by_label('日期', exact=True)).to_have_value('2028-01-18')
         await page.get_by_label('標題', exact=True).fill('驗收新增行程')
         await page.get_by_label('地點（選填）', exact=True).fill('校園討論室')
+        if config['width'] <= 540:
+            await assert_complete_field_value(page, '查看月份', '2028-01', '2028 年 1 月', report)
+            await assert_complete_field_value(page, '日期', '2028-01-18', '2028 年 1 月 18 日', report)
+            await assert_complete_field_value(page, '開始時間', '09:00', '09:00', report)
+            await assert_complete_field_value(page, '結束時間', '10:00', '10:00', report)
         await capture('create')
         before = await page.evaluate('window.__calendarQA.snapshot()')
         await page.get_by_role('button', name='儲存行程', exact=True).click()
@@ -201,6 +289,9 @@ async def run_scenario(browser, server_url, config):
         await row.get_by_role('button', name='編輯', exact=True).click()
         await expect(page.get_by_label('標題', exact=True)).to_be_focused()
         await page.get_by_label('日期', exact=True).fill('2028-02-09')
+        if config['width'] <= 540:
+            await assert_complete_field_value(page, '日期', '2028-02-09', '2028 年 2 月 9 日', report)
+            report['checks'].append('Full month, date and time values are visibly associated with mobile inputs, fit without clipped text and update immediately when rescheduling')
         await page.get_by_role('button', name='儲存修改', exact=True).click()
         await expect(page.get_by_label('查看月份', exact=True)).to_have_value('2028-02')
         await expect(day_heading(page, '2028-02-09')).to_be_focused()

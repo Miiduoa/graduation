@@ -29,6 +29,7 @@ export function MonthCalendar({
   const [focusState, setFocusState] = useState({ selection: selectedDate, date: selectedDate });
   const today = emptyPersonalEventDraft().date;
   const descriptionId = useId();
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const dateButtons = useRef(new Map<string, HTMLButtonElement>());
   const pendingFocus = useRef<{ date: string; origin: HTMLButtonElement } | null>(null);
   const days = useMemo(() => buildMonthCalendar(records, month), [records, month]);
@@ -46,6 +47,28 @@ export function MonthCalendar({
       : today.startsWith(`${month}-`)
         ? today
         : `${month}-01`;
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const selected = dateButtons.current.get(selectedDate);
+    if (!viewport || !selected || viewport.clientWidth <= 0) return;
+    const maxScroll = viewport.scrollWidth - viewport.clientWidth;
+    if (maxScroll <= 0) return;
+    const bounds = viewport.getBoundingClientRect();
+    const dateBounds = selected.getBoundingClientRect();
+    const left = bounds.left + viewport.clientLeft;
+    const right = left + viewport.clientWidth;
+    const adjustment =
+      dateBounds.left < left
+        ? dateBounds.left - left
+        : dateBounds.right > right
+          ? dateBounds.right - right
+          : 0;
+    // Returning from the list creates a new viewport at scrollLeft=0. Reveal only
+    // the selected column; keep focus and the page's vertical position untouched.
+    if (adjustment !== 0)
+      viewport.scrollLeft = Math.max(0, Math.min(maxScroll, viewport.scrollLeft + adjustment));
+  }, [month, selectedDate]);
 
   useLayoutEffect(() => {
     const requested = pendingFocus.current;
@@ -92,6 +115,7 @@ export function MonthCalendar({
         </h3>
       </header>
       <div
+        ref={viewportRef}
         className={styles.viewport}
         role="region"
         aria-label={`${month} 月格，週日起始`}
