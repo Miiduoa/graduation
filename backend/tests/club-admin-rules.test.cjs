@@ -212,3 +212,28 @@ test('所有既有社團在試辦關閉時仍可取得安全名單，拒絕跨�
     await db.terminate();
   }
 });
+
+test('舊社團封存貼文、留言與按讚收據只供有效社員讀取', async () => {
+  await env.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await db.doc('groupPosts/club-archive').set({ groupId: 'club', status: 'archived' });
+    await db.doc('comments/club-archive').set({ postId: 'club-archive' });
+    await db.doc('postLikes/club-archive').set({ postId: 'club-archive', userId: 'president' });
+    await db.doc('schools/school/members/former').set({ status: 'active' });
+    await db.doc('groups/club/members/former').set({ status: 'removed', role: 'member' });
+  });
+
+  for (const [uid, check] of [
+    ['student', assertSucceeds], ['former', assertFails], ['outsider', assertFails],
+  ]) {
+    const db = env.authenticatedContext(uid).firestore();
+    for (const collection of ['groupPosts', 'comments', 'postLikes']) {
+      await check(db.doc(`${collection}/club-archive`).get({ source: 'server' }));
+    }
+    await check(db.collection('comments').where('postId', '==', 'club-archive').get({ source: 'server' }));
+  }
+
+  const student = env.authenticatedContext('student').firestore();
+  await assertFails(student.collection('postLikes').where('postId', '==', 'club-archive').get({ source: 'server' }));
+  await assertFails(student.doc('postLikes/club-archive').delete());
+});

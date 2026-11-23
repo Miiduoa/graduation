@@ -340,39 +340,10 @@ service cloud.firestore {
         && campusPostCommentCountNum(after) == campusPostCommentCountNum(before) + 1;
     }
 
-    // Match the legacy group-discussion list's visibility filter.
-    function isVisibleRootPost(post) {
-      return post.get('published', null) != false
-        && !(post.get('status', null) in [
-          'draft', 'scheduled', 'pending', 'unpublished',
-          'archived', 'cancelled', 'canceled', 'deleted'
-        ])
-        && post.get('deleted', null) != true
-        && post.get('deletedAt', null) == null;
-    }
-
     function canReadGroupPost(postId) {
       let postPath = /databases/$(database)/documents/groupPosts/$(postId);
       return isSignedIn() && exists(postPath)
-        && canReadExistingRootPost(get(postPath).data);
-    }
-
-    function canReadExistingRootPost(post) {
-      let groupId = post.get('groupId', null);
-      return groupId is string && groupId.size() > 0
-        && isActiveGroupMember(groupId)
-        && (post.get('authorId', '') == request.auth.uid
-          || canManageGroup(groupId)
-          || isVisibleRootPost(post));
-    }
-
-    // Draft previews do not authorize reactions. Legacy posts use the same
-    // visibility defaults for posts, comments, and likes.
-    function canReactToRootPost(postId) {
-      let postPath = /databases/$(database)/documents/groupPosts/$(postId);
-      return isSignedIn() && exists(postPath)
-        && isActiveGroupMember(get(postPath).data.groupId)
-        && isVisibleRootPost(get(postPath).data);
+        && isActiveGroupMember(get(postPath).data.groupId);
     }
 
     function canReadAssignment(assignmentId) {
@@ -425,6 +396,10 @@ service cloud.firestore {
         && acceptsStudentSubmission(groupId, assignmentId);
     }
 
+    function matchesPathOwner(data, field, ownerId) {
+      return data.get(field, null) in [null, '', ownerId];
+    }
+
     // Legacy top-level submissions also need live reviewer membership.
     function isAssignedReviewer(groupId, assignmentId, submissionId, data) {
       let receiptPath = /databases/$(database)/documents/groups/$(groupId)/assignments/$(assignmentId)/peerReviews/$(request.auth.uid);
@@ -432,8 +407,7 @@ service cloud.firestore {
         && exists(receiptPath)
         // A review assignment stored at Alice's path but explicitly owned by
         // another reviewer must never reveal that student's private submission.
-        // Only genuinely missing reviewerId fields keep legacy read support.
-        && get(receiptPath).data.get('reviewerId', request.auth.uid) == request.auth.uid
+        && matchesPathOwner(get(receiptPath).data, 'reviewerId', request.auth.uid)
         && get(receiptPath).data.submissionOwnerId == submissionOwnerId(data, submissionId);
     }
 
@@ -574,9 +548,9 @@ service cloud.firestore {
       return (isSignedIn() && data.get('submissionOwnerId', null) == request.auth.uid
           && data.get('submittedAt', null) != null)
         || canManageGroup(groupId)
-        || (isActiveGroupMember(groupId)
-          && reviewerId == request.auth.uid
-          && data.get('reviewerId', request.auth.uid) == request.auth.uid);
+        || (isSignedIn() && reviewerId == request.auth.uid
+          && matchesPathOwner(data, 'reviewerId', reviewerId)
+          && (data.get('submittedAt', null) != null || isActiveGroupMember(groupId)));
     }
 
     // AI server-side metadata logs are written by Admin SDK only.
@@ -1487,10 +1461,15 @@ service cloud.firestore {
         match /submissions/{submissionId} {
           // Document IDs are not proof of receipt ownership: imported data may
           // explicitly belong to a different student. Allow an owner to probe
-          // their missing receipt without exposing an existing misbound row.
+          // their missing or unbound receipt while respecting explicit ownership.
           allow read: if isActiveGroupMember(groupId)
             && (
-              (resource == null && submissionId == request.auth.uid)
+              (submissionId == request.auth.uid
+                && (resource == null || (
+                  matchesPathOwner(resource.data, 'userId', submissionId)
+                  && matchesPathOwner(resource.data, 'uid', submissionId)
+                  && matchesPathOwner(resource.data, 'studentId', submissionId)
+                )))
               || (resource != null
                 && canReadSubmissionDoc(groupId, assignmentId, submissionId, resource.data))
             );
@@ -1535,7 +1514,8 @@ service cloud.firestore {
                   && request.resource.data.get('submittedAt', null) == request.time));
           }
 
-          allow read: if canReadPeerReviewDoc(groupId, reviewerId, resource.data);
+          allow read: if (resource == null && isActiveGroupMember(groupId) && reviewerId == request.auth.uid)
+            || canReadPeerReviewDoc(groupId, reviewerId, resource.data);
           allow create: if canManageGroup(groupId)
             && request.resource.data.reviewerId == reviewerId;
           allow update: if canManageGroup(groupId)
@@ -1558,7 +1538,7 @@ service cloud.firestore {
         allow read: if (isSignedIn() && (
             resource.data.userId == request.auth.uid
             || (entryId == request.auth.uid
-              && (resource == null || !resource.data.keys().hasAny(['userId'])))
+              && (resource == null || matchesPathOwner(resource.data, 'userId', entryId)))
           ))
           || canManageGroup(groupId);
         allow create, update, delete: if canManageGroup(groupId);
@@ -2410,32 +2390,23 @@ service cloud.firestore {
     }
 
     match /postLikes/{docId} {
-      // Members can read receipts for visible posts. Only the voter can
-      // create or delete their receipt.
+      // Exact-document reads follow parent membership. Only the voter can
+      // create or delete a receipt.
       allow get: if isSignedIn()
         && resource.data.get('postId', null) is string
-        && canReactToRootPost(resource.data.postId);
+        && canReadGroupPost(resource.data.postId);
       allow list: if false;
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
-        && request.resource.data.get('postId', null) is string
-        && canReactToRootPost(request.resource.data.postId);
-      function canWithdrawLike(postId) {
-        let postPath = /databases/$(database)/documents/groupPosts/$(postId);
-        return exists(postPath) && isActiveGroupMember(get(postPath).data.groupId);
-      }
-
+        && canReadGroupPost(request.resource.data.postId);
       allow delete: if isSignedIn()
         && resource.data.userId == request.auth.uid
-        && resource.data.get('postId', null) is string
-        && canWithdrawLike(resource.data.postId);
+        && canReadGroupPost(resource.data.postId);
       allow update: if false;
     }
 
-    // Comments inherit the parent's membership and publication checks.
     match /comments/{docId} {
-      allow read: if resource.data.postId is string
-        && canReadGroupPost(resource.data.postId);
+      allow read: if canReadGroupPost(resource.data.postId);
       allow write: if false;
     }
 
