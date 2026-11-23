@@ -588,9 +588,11 @@ it('uses the last matching observer entry at viewport boundaries and keeps rende
   const offscreenEntry = observerEntry(host, false);
   notify(offscreenEntry, sliver);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  // Scrolling or resizing without a newer observer event must not override
+  // the last verified host visibility state.
   fireEvent.scroll(dialog);
   fireEvent.resize(window);
-  expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
   notify(sliver, offscreenEntry);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
   notify();
