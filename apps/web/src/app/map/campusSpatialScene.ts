@@ -700,12 +700,12 @@ export function createCampusSpatialScene(
     const categoryCounts = new Map<string, number>();
     for (const point of model.points) {
       nameCounts.set(point.name, (nameCounts.get(point.name) ?? 0) + 1);
-      const key = JSON.stringify([point.name, point.category]);
+      const key = JSON.stringify([point.name, point.category || '未分類']);
       categoryCounts.set(key, (categoryCounts.get(key) ?? 0) + 1);
     }
     model.points.forEach((point, index) => {
       const repeatedName = (nameCounts.get(point.name) ?? 0) > 1;
-      const repeatedCategory = (categoryCounts.get(JSON.stringify([point.name, point.category])) ?? 0) > 1;
+      const repeatedCategory = (categoryCounts.get(JSON.stringify([point.name, point.category || '未分類'])) ?? 0) > 1;
       const markerName = repeatedName
         ? `${point.name}（${point.category || '未分類'}${repeatedCategory ? ` · 清單第 ${index + 1} 項` : ''}）`
         : point.name;
