@@ -2464,6 +2464,58 @@ it('resumes 3D after the keyboard closes even when the WebView keeps the shrunke
   }
 });
 
+it('automatically expires silent viewport occlusion after a fresh visible observer entry', async () => {
+  const { viewport, dialog, graphics, bounds, field } = await openKeyboardCoveredScene();
+  vi.useFakeTimers();
+  try {
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    act(() => vi.advanceTimersByTime(3_999));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    // A real keyboard transition renews the evidence, even with the same bounds.
+    act(() => viewport.dispatchEvent(new Event('scroll')));
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    act(() => vi.advanceTimersByTime(3_999));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    // The keyboard can disappear without a blur or any further event.
+    act(() => vi.advanceTimersByTime(1));
+    expect(document.activeElement).toBe(field);
+    expect(viewport.height).toBe(200);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  } finally {
+    vi.useRealTimers();
+    bounds.mockRestore();
+  }
+});
+
+it('keeps confirmed keyboard occlusion paused and resumes when keyboard geometry clears', async () => {
+  const keyboard = Object.assign(new EventTarget(), { boundingRect: new DOMRect(0, 200, 320, 400) });
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: keyboard } }));
+  const { viewport, graphics, bounds, field } = await openKeyboardCoveredScene();
+  vi.useFakeTimers();
+  try {
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    keyboard.boundingRect = new DOMRect();
+    act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+    expect(document.activeElement).toBe(field);
+    expect(viewport.height).toBe(200);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+    bounds.mockRestore();
+  }
+});
+
 it('resumes 3D when the visitor touches the canvas while a stale viewport and a focused field remain', async () => {
   const { viewport, dialog, graphics, bounds } = await openKeyboardCoveredScene();
   try {
@@ -2976,23 +3028,35 @@ it('drops a building preview when its selected campus location is withdrawn', as
   const dialog = await open();
   fireEvent.click(within(dialog).getByRole('button', { name: '平面圖建模預覽' }));
   await screen.findByRole('dialog', { name: '平面圖建模預覽' });
-  view.rerender(<CampusSpatialExplorer {...props} selected={null} />);
+  view.rerender(<CampusSpatialExplorer {...props} locations={places.slice(1)} selected={null} />);
   expect(screen.queryByRole('dialog', { name: '平面圖建模預覽' })).toBeNull();
   expect(screen.getByRole('dialog', { name: '校園空間導覽' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '平面圖建模預覽' })).toBeNull();
 });
 
-it.each([true, false])('requires a fresh preview request after a same-ID coordinate update (preview open: %s)', async (previewOpen) => {
+it.each([true, false])('revokes navigation and preserves any open editor after a same-ID update (preview open: %s)', async (previewOpen) => {
   const props = { school: 'other-school', onSelect: vi.fn() };
   const view = render(<CampusSpatialExplorer {...props} locations={places} selected={places[0]} />);
   const dialog = await open();
   if (previewOpen) {
     fireEvent.click(within(dialog).getByRole('button', { name: '平面圖建模預覽' }));
-    await screen.findByRole('dialog', { name: '平面圖建模預覽' });
+    const preview = within(await screen.findByRole('dialog', { name: '平面圖建模預覽' }));
+    fireEvent.click(preview.getByRole('button', { name: '載入示意範例' }));
+    fireEvent.click(preview.getByText('管理樓層'));
+    const floor = within(preview.getByRole('group', { name: '1F 樓層設定' }));
+    fireEvent.click(floor.getByRole('button', { name: '編輯樓層' }));
+    fireEvent.change(floor.getByLabelText('樓層名稱'), { target: { value: '未匯出的樓層名稱' } });
+    fireEvent.click(floor.getByRole('button', { name: '套用樓層設定' }));
+    expect(preview.getByRole('group', { name: '未匯出的樓層名稱 樓層設定' })).toBeTruthy();
   }
 
-  const moved = { ...places[0], lat: places[0].lat + 0.002 };
+  const moved = { ...places[0], name: '更新後的圖書館', category: '學習', lat: places[0].lat + 0.002 };
   view.rerender(<CampusSpatialExplorer {...props} locations={[moved, ...places.slice(1)]} selected={moved} />);
+  if (previewOpen) {
+    const preview = screen.getByRole('dialog', { name: '平面圖建模預覽', description: moved.name });
+    expect(within(preview).getByRole('group', { name: '未匯出的樓層名稱 樓層設定' })).toBeTruthy();
+    fireEvent.click(within(preview).getByRole('button', { name: '關閉視窗' }));
+  }
   const tour = within(screen.getByRole('dialog', { name: '校園空間導覽' }));
   expect(screen.queryByRole('dialog', { name: '平面圖建模預覽' })).toBeNull();
   expect(tour.getByRole('button', { name: '看全部地點' }).getAttribute('aria-pressed')).toBe('true');
@@ -3002,7 +3066,6 @@ it.each([true, false])('requires a fresh preview request after a same-ID coordin
   expect(tour.getByRole('combobox')).toHaveProperty('value', '');
 
   fireEvent.change(tour.getByRole('combobox'), { target: { value: places[1].id } });
-  // The merge-base opens the preview only after its button is pressed.
   expect(screen.queryByRole('dialog', { name: '平面圖建模預覽' })).toBeNull();
   expect(tour.getByRole('heading', { name: places[1].name })).toBeTruthy();
   expect(tour.getByRole('button', { name: '上一個地點' }).hasAttribute('disabled')).toBe(false);

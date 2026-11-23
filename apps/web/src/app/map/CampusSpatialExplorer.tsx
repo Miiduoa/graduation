@@ -602,8 +602,29 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     const viewportSignature = (viewport: VisualViewport): string =>
       [viewport.offsetLeft, viewport.offsetTop, viewport.width, viewport.height,
         viewport.scale].join(':');
+    type VirtualKeyboard = EventTarget & { boundingRect: DOMRectReadOnly; overlaysContent?: boolean };
+    let virtualKeyboard: VirtualKeyboard | undefined;
+    try {
+      virtualKeyboard = (window.navigator as Navigator & { virtualKeyboard?: VirtualKeyboard }).virtualKeyboard;
+    } catch { /* Optional in embedded browsers. */ }
+    let keyboardGeometryAvailable = false;
+    const measureKeyboardOpen = (): boolean | null => {
+      try {
+        const bounds = virtualKeyboard?.boundingRect;
+        if (!bounds || ![bounds.width, bounds.height].every(Number.isFinite)) return null;
+        const open = bounds.width > 0 && bounds.height > 0;
+        // A zero rectangle can also mean the browser has never exposed geometry.
+        keyboardGeometryAvailable ||= open || virtualKeyboard?.overlaysContent === true;
+        return keyboardGeometryAvailable ? open : null;
+      } catch {
+        return null;
+      }
+    };
+    const isPinchZoomed = (viewport: VisualViewport) =>
+      Number.isFinite(viewport.scale) && viewport.scale > 1.01;
     // Manual restart always wins over a visual viewport that may be stale.
     let ignoredViewport: string | null = null;
+    let expiredViewport: string | null = null;
     if (manualStart > 0) {
       try {
         const viewport = window.visualViewport;
@@ -624,8 +645,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     const visualViewportMayObscureCanvas = (viewport: VisualViewport): boolean => {
       // Pinch zoom legitimately leaves parts of the layout outside the visual
       // viewport and always reports its own resize/scroll events.
-      const scale = viewport.scale;
-      if (typeof scale === 'number' && Number.isFinite(scale) && scale > 1.01) return true;
+      if (isPinchZoomed(viewport)) return true;
       try { return isTextEntryTarget(host.ownerDocument.activeElement); }
       catch { return false; }
     };
@@ -649,6 +669,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // something can actually be showing a keyboard or the page is
         // pinch-zoomed; otherwise treat the geometry as unknown.
         if (!clipToDialog && !visualViewportMayObscureCanvas(viewport)) return null;
+        const keyboardOpen = measureKeyboardOpen();
+        if (!clipToDialog && !isPinchZoomed(viewport) && keyboardOpen === false) return null;
+        if (expiredViewport !== null) {
+          if (viewportSignature(viewport) !== expiredViewport) expiredViewport = null;
+          else if (!clipToDialog && keyboardOpen === null) return null;
+        }
         // The visitor explicitly restarted 3D while the viewport read this
         // way. Ignore that exact (possibly stale) geometry until it changes.
         if (ignoredViewport !== null) {
@@ -660,8 +686,44 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         return null;
       }
     };
+    let observerConfirmedVisible = false;
+    let viewportRecheck: number | null = null;
+    const cancelViewportRecheck = () => {
+      if (viewportRecheck !== null) window.clearTimeout(viewportRecheck);
+      viewportRecheck = null;
+    };
+    const getUnconfirmedOcclusion = (): string | null => {
+      if (!observerConfirmedVisible || visibility !== 'visible' || isBackgrounded() ||
+          measureDialogScrollportVisibility() === false || measureKeyboardOpen() !== null) return null;
+      try {
+        const viewport = window.visualViewport;
+        if (!viewport || isPinchZoomed(viewport) || measureVisualViewportVisibility() !== false) return null;
+        return viewportSignature(viewport);
+      } catch {
+        return null;
+      }
+    };
+    const scheduleViewportRecheck = () => {
+      const signature = getUnconfirmedOcclusion();
+      if (signature === null) {
+        cancelViewportRecheck();
+        return;
+      }
+      if (viewportRecheck !== null) return;
+      // Without keyboard geometry, a silent open keyboard and a stale
+      // viewport can look identical. Only expire visual-only occlusion after
+      // a fresh positive IO entry and four quiet seconds. Viewport events
+      // reset that evidence, and confirmed keyboard or dialog clipping wins.
+      viewportRecheck = window.setTimeout(() => {
+        viewportRecheck = null;
+        if (!active) return;
+        if (getUnconfirmedOcclusion() === signature) expiredViewport = signature;
+        syncVisibility();
+      }, 4_000);
+    };
     const syncVisibility = () => {
       if (!active) return;
+      scheduleViewportRecheck();
       updateVisibility();
       if (!started && !isDeferred()) startWhenVisible();
       else syncPendingStartup();
@@ -708,6 +770,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // turn that no-op into a hidden event that suspends an onscreen map.
           if (!entry) return;
           visibility = entry.isIntersecting ? 'visible' : 'hidden';
+          observerConfirmedVisible = observing && entry.isIntersecting;
           if (observing) syncVisibility();
         });
         intersection = current;
@@ -739,6 +802,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     }
     // Keyboard transitions can move the host without a window event.
     const onVisualViewportChange = () => {
+      observerConfirmedVisible = false;
+      expiredViewport = null;
+      cancelViewportRecheck();
       if (visibility === 'hidden' && measureVisualViewportVisibility(true) === true) {
         // Recover from a stale hidden observer entry after the keyboard moves.
         // A valid intersection with the visual viewport is evidence the host
@@ -789,9 +855,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       visualViewport?.addEventListener('resize', onVisualViewportChange);
       visualViewport?.addEventListener('scroll', onVisualViewportChange);
     } catch { /* Window events still recheck layout in partial WebViews. */ }
+    try { virtualKeyboard?.addEventListener('geometrychange', syncVisibility); }
+    catch { /* Visual viewport and observer events still report visibility. */ }
     syncVisibility();
     return () => {
       active = false;
+      cancelViewportRecheck();
       if (timeout !== null) window.clearTimeout(timeout);
       for (const id of focusTimers) window.clearTimeout(id);
       focusTimers.clear();
@@ -817,6 +886,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         visualViewport?.removeEventListener('resize', onVisualViewportChange);
         visualViewport?.removeEventListener('scroll', onVisualViewportChange);
       } catch { /* Complete scene cleanup even in partial WebViews. */ }
+      try { virtualKeyboard?.removeEventListener('geometrychange', syncVisibility); }
+      catch { /* Complete scene cleanup even in partial WebViews. */ }
       pendingCreate = null;
       scene?.dispose();
       runtime.current = null;
@@ -983,7 +1054,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
     selected ? { id: selected.id, identity: spatialDestinationIdentity(selected), inherited: true } : null);
   const [overview, setOverview] = useState(!selected);
   const [overhead, setOverhead] = useState(false);
-  const [buildingPlanOpen, setBuildingPlanOpen] = useState(false);
+  const [buildingPlanId, setBuildingPlanId] = useState<string | null>(null);
   const [footprints, setFootprints] = useState<ProvidenceFootprint[]>([]);
   const [footprintAttempt, setFootprintAttempt] = useState(0);
   const [footprintStatus, setFootprintStatus] = useState<'loading' | 'ready' | 'unavailable' | 'deferred'>(
@@ -1014,10 +1085,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
   const chosen = selection === 'revoked' ? null : selection;
   const selectedPoint = model.points.find((point) =>
     point.id === chosen?.id && spatialDestinationIdentity(point.location) === chosen.identity);
+  // The preview owns an editing session scoped to the building ID.
+  const buildingPlanPlace = model.points.find((point) => point.id === buildingPlanId)?.location ??
+    locations.find((location) => location.id === buildingPlanId);
+  if (buildingPlanId !== null && !buildingPlanPlace) setBuildingPlanId(null);
   if (chosen && (!selectedPoint ||
       (chosen.inherited && (!selected || spatialDestinationIdentity(selected) !== chosen.identity)))) {
     setSelection('revoked');
-    setBuildingPlanOpen(false);
     setOverview(true);
     setCamera((previous) => ({ ...previous, zoom: 1 }));
   }
@@ -1515,13 +1589,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
 
   // Replace the spatial modal so there is only one focus trap and graphics context.
   // The key prevents a late local-file read from crossing a school/building boundary.
-  if (buildingPlanOpen && place) {
+  if (buildingPlanPlace) {
     return <BuildingPlanPreview
-      key={`${school}:${place.id}`}
+      key={`${school}:${buildingPlanPlace.id}`}
       schoolId={school}
-      buildingId={place.id}
-      buildingName={place.name}
-      onClose={() => setBuildingPlanOpen(false)}
+      buildingId={buildingPlanPlace.id}
+      buildingName={buildingPlanPlace.name}
+      onClose={() => setBuildingPlanId(null)}
     />;
   }
 
@@ -1731,7 +1805,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
                 <a className="btn" href={walkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟步行導航</a>
                 <a className="btn" href={appleWalkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟 Apple 地圖步行導航</a>
                 <p id={directionsNoteId} className={styles.note}>導航僅以目前地點標記為目的地，並非已核實的校舍入口、可通行道路或無障礙動線；請依現場指標確認。</p>
-                <button className="btn" type="button" onClick={() => setBuildingPlanOpen(true)}>平面圖建模預覽</button>
+                <button className="btn" type="button" onClick={() => setBuildingPlanId(place.id)}>平面圖建模預覽</button>
                 {source && <a className={styles.source} href={source} target="_blank" rel="noopener noreferrer">查看地點資料來源 ↗</a>}
               </div>
               </> : <p className={styles.note} role="status" aria-live="polite" aria-atomic="true">
