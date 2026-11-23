@@ -4040,16 +4040,35 @@ it.each([
   expect(fetchMock).toHaveBeenCalledOnce();
 });
 
-it('reads the final successful outline response after a redirect', async () => {
-  const { library, buildings, body } = sourcedLibraryFootprintFixture();
-  const response = jsonResponse(body);
-  vi.spyOn(response, 'redirected', 'get').mockReturnValue(true);
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+it('rejects redirected HTTP 200 footprints before reading even valid-looking JSON', async () => {
+  // A login gateway, CDN or WebView bridge must not exchange an audited OSM
+  // snapshot for another endpoint's JSON, even when the body passes the schema.
+  // The real fetch rejects redirects itself; simulate a bridge that ignores
+  // redirect: 'error' and returns a followed response anyway.
+  const { library } = sourcedLibraryFootprintFixture();
+  const cancel = vi.fn().mockResolvedValue(undefined);
+  const getReader = vi.fn(() => { throw new Error('Redirected body must not be read'); });
+  const json = vi.fn();
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200, redirected: true,
+    headers: new Headers({ 'Content-Type': 'application/json' }),
+    body: { cancel, getReader },
+    json,
+  });
+  vi.stubGlobal('fetch', fetchMock);
   render(<CampusSpatialExplorer school="pu" locations={[library]}
     selected={library} onSelect={vi.fn()} />);
   const dialog = await open();
-  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
-  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledWith('/api/public/campus-footprints', expect.objectContaining({
+    redirect: 'error', signal: expect.any(AbortSignal),
+  }));
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(getReader).not.toHaveBeenCalled();
+  expect(json).not.toHaveBeenCalled();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
 it('accepts a small, valid non-streaming text response for legacy WebViews', async () => {
