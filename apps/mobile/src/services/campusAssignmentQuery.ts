@@ -1,4 +1,5 @@
 import type { CampusSenseSnapshot } from './campusSenseSnapshot';
+import { isRealTimestamp } from './campusTimestamp';
 
 export type CampusAssignmentFilter = 'all' | 'today' | 'seven-days' | 'overdue' | 'undated';
 export type CampusAssignmentSort = 'deadline' | 'course';
@@ -16,18 +17,22 @@ function taiwanDay(time: number): number {
 }
 
 export function assignmentDueTime(value: string | null): number | null {
-  const time = value ? Date.parse(value) : NaN;
-  return Number.isFinite(time) ? time : null;
+  // Date.parse silently turns impossible dates (e.g. Feb 30) into another day.
+  // Do not promote a malformed or offset-free source deadline into student advice.
+  if (!isRealTimestamp(value)) return null;
+  return Date.parse(value);
 }
 
 export function assignmentDeadlineLabel(row: CampusAssignmentRow, now: number): string {
   const due = assignmentDueTime(row.dueAt);
-  if (due === null) return '截止日期未提供，請核對原始作業頁';
+  if (due === null) return row.dueAt === null
+    ? '截止日期未提供，請核對原始作業頁'
+    : '截止日期格式無法核對，請核對原始作業頁';
   const text = new Intl.DateTimeFormat('zh-TW', {
     timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric',
     hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
   }).format(new Date(due));
-  return (due < now ? '期限已過 · ' : '截止 ') + text;
+  return (due < now ? '期限已過 · ' : due === now ? '正好到截止點 · ' : '截止 ') + text;
 }
 
 export interface CampusAssignmentQueryResult {

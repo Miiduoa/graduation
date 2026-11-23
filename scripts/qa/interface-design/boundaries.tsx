@@ -3,16 +3,28 @@ import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent } from
 // Only data providers, Next routing and network boundaries are replaced. Product
 // navigation, disclosures, controls, content components and CSS remain real.
 const query = new URLSearchParams(location.search);
+export const fixtureOptions = query;
 const listeners = new Set<() => void>();
 const schools = [
   { id: 'pu', code: 'PU', name: '靜宜大學', shortName: '靜宜', status: 'open' },
   { id: 'nchu', code: 'NCHU', name: '國立中興大學', shortName: '中興', status: 'open' },
 ];
+const routeQuery = new URLSearchParams(query);
+for (const key of ['path', 'theme', 'role', 'text', 'motion', 'font']) routeQuery.delete(key);
+if (!['school', 'schoolId', 'campus'].some((key) => routeQuery.has(key))) {
+  routeQuery.set('schoolId', 'pu');
+  routeQuery.set('campus', 'pu');
+}
 let state = {
-  pathname: query.get('path') || '/',
-  search: 'schoolId=pu&campus=pu',
+  pathname: query.get('path') || (location.pathname === '/index.html' ? '/' : location.pathname),
+  search: routeQuery.toString(),
   schoolId: 'pu' as string | null,
 };
+history.replaceState(
+  { ...history.state, interfaceRoute: state },
+  '',
+  state.pathname + '?' + state.search,
+);
 const role = query.get('role') || 'student';
 const ledger = { requests: [] as string[], navigations: [] as string[], logouts: 0 };
 const subscribe = (listener: () => void) => {
@@ -34,8 +46,24 @@ export function navigate(href: string) {
   const url = new URL(href, location.origin);
   if (url.origin !== location.origin) throw new Error('Fixture navigation must remain local');
   ledger.navigations.push(href);
-  update({ ...state, pathname: url.pathname, search: url.search.slice(1) });
+  // The routing boundary supplies synthetic route data; use actual browser
+  // history so product return-entry handling is not simulated by pathname alone.
+  history.replaceState({ ...history.state, interfaceRoute: state }, '');
+  const destination = { ...state, pathname: url.pathname, search: url.search.slice(1) };
+  const destinationUrl = url.pathname + url.search + url.hash;
+  if (destinationUrl !== location.pathname + location.search + location.hash) {
+    history.pushState({ interfaceRoute: destination }, '', destinationUrl);
+  }
+  update(destination);
 }
+window.addEventListener('popstate', () => {
+  const restored = history.state?.interfaceRoute;
+  update({
+    ...state,
+    pathname: restored?.pathname ?? location.pathname,
+    search: restored?.search ?? location.search.slice(1),
+  });
+});
 export default function Link({
   href = '/',
   onClick,

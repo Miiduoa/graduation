@@ -1,3 +1,5 @@
+import { keepModalTextareasReadable } from './modalKeyboardFocus';
+
 /** Lifecycle shared by all native dialogs. Each document owns one scroll lock. */
 type ScrollState = {
   dialogs: HTMLDialogElement[];
@@ -25,11 +27,13 @@ export function openModalSession(dialog: HTMLDialogElement, initialFocus?: HTMLE
   }
   state.dialogs.push(dialog);
   if (initialFocus && dialog.contains(initialFocus)) initialFocus.focus({ preventScroll: true });
+  const releaseKeyboardVisibility = keepModalTextareasReadable(dialog);
 
   let released = false;
   return () => {
     if (released) return;
     released = true;
+    releaseKeyboardVisibility();
     const current = sessions.get(doc);
     const wasTop = current?.dialogs.at(-1) === dialog;
     const active = doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
@@ -42,7 +46,11 @@ export function openModalSession(dialog: HTMLDialogElement, initialFocus?: HTMLE
     // Removing a lower layer must not steal focus from the active dialog.
     const restore = wasTop ? previousFocus : active;
     const top = current?.dialogs.at(-1);
-    if (restore?.isConnected && !restore.closest('dialog:not([open])') && (!top || top.contains(restore))) {
+    if (
+      restore?.isConnected &&
+      !restore.closest('dialog:not([open])') &&
+      (!top || top.contains(restore))
+    ) {
       restore.focus({ preventScroll: true });
     }
   };
@@ -51,5 +59,10 @@ export function openModalSession(dialog: HTMLDialogElement, initialFocus?: HTMLE
 /** A click that starts inside a dialog and ends outside is not a dismissal. */
 export function isOutsideDialog(dialog: HTMLDialogElement, clientX: number, clientY: number) {
   const bounds = dialog.getBoundingClientRect();
-  return clientX < bounds.left || clientX > bounds.right || clientY < bounds.top || clientY > bounds.bottom;
+  return (
+    clientX < bounds.left ||
+    clientX > bounds.right ||
+    clientY < bounds.top ||
+    clientY > bounds.bottom
+  );
 }

@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { AssistantReplyAnchor, AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { Suspense, useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
@@ -38,6 +39,7 @@ import { assistantPermissionMessage, inAppHref } from './assistant/copy';
 import { parseAssistantCalendarEvent, parseAssistantCalendarExecutionResult } from '@campus/shared/src/assistantExecution';
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal, removeAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
+import { accountDemoAssistantIntent, prepareAccountDemoAssistant } from '@/lib/accountDemoAssistant';
 import { answerAssistantLocally } from '@/lib/assistantLocalActions';
 import { answerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
 import { courseworkStudyFollowup, courseworkStudyTarget, parseAssistantCourseworkTargets, type AssistantCourseworkSelection } from '@/lib/assistantCoursework';
@@ -186,11 +188,11 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
       {ready && (
         <>
           <nav aria-label="公開服務入口">
-            <Link href={'/map?schoolId=' + encodeURIComponent(schoolId)}>直接開啟校園地圖</Link> ·{' '}
-            <Link href={'/bus?schoolId=' + encodeURIComponent(schoolId)}>直接開啟公車資訊</Link> ·{' '}
-            <Link href={'/cafeteria?schoolId=' + encodeURIComponent(schoolId)}>
+            <AssistantReplyLink href={'/map?schoolId=' + encodeURIComponent(schoolId)}>直接開啟校園地圖</AssistantReplyLink> ·{' '}
+            <AssistantReplyLink href={'/bus?schoolId=' + encodeURIComponent(schoolId)}>直接開啟公車資訊</AssistantReplyLink> ·{' '}
+            <AssistantReplyLink href={'/cafeteria?schoolId=' + encodeURIComponent(schoolId)}>
               直接開啟餐廳資訊
-            </Link>
+            </AssistantReplyLink>
           </nav>
           {!providerReady && <p role="status">模型目前無法使用，可直接開啟公開服務入口。</p>}
           <p>請選擇公開服務。確認摘要後才會將公開服務資料傳送給模型。</p>
@@ -241,11 +243,11 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
               )}
             </div>
           )}
-          {href && <Link href={href}>開啟服務頁面</Link>}
+          {href && <AssistantReplyLink href={href}>開啟服務頁面</AssistantReplyLink>}
           {source && (
-            <a href={source} target="_blank" rel="noopener noreferrer">
+            <AssistantReplyAnchor href={source} target="_blank" rel="noopener noreferrer">
               學校官方公開導覽
-            </a>
+            </AssistantReplyAnchor>
           )}
           {error && <p role="alert">{error}</p>}
           {pending && <p role="status">查詢中…</p>}
@@ -682,6 +684,30 @@ function V2Conversation({
       ? `幫「${selection.target.title}」${selection.date ? '在 ' + selection.date + ' ' : ''}找 30 分鐘準備時間`
       : question.trim();
     if (!current || busy.current || (selection && taskProfile !== 'student')) return;
+    if (!selection && accountDemoAssistantIntent(current)) {
+      busy.current = true;
+      setPending(true);
+      setPendingAction('ask');
+      setError('');
+      setQuestion('');
+      try {
+        const demo = await prepareAccountDemoAssistant(current, { context, accountId, schoolId }, undefined, active);
+        if (!active() || !demo) return;
+        setTurns((previous) => [...previous, { question: current, taskProfile,
+          reply: { answer: demo.answer, steps: [], cards: [], demo } }]);
+        setRecoverableQuestion((previous) => previous === current ? '' : previous);
+      } catch (failure) {
+        if (active()) {
+          setError(failure instanceof Error && !/^[A-Z_]+$/.test(failure.message)
+            ? failure.message : '展示資料目前讀不到，請稍後再試。');
+          setRecoverableQuestion(current);
+        }
+      } finally {
+        busy.current = false;
+        if (active()) setPending(false);
+      }
+      return;
+    }
     const mapCommand = !selection ? parseCampusMapCommand(current) : null;
     if (mapCommand && (taskProfile === 'student' || mapCommand.kind === 'place')) {
       await requestCampusMap(mapCommand, current);
@@ -830,7 +856,7 @@ function V2Conversation({
       }
       if ((!ready || !consent) && !studySelection && !foodPickup) return;
       const history = studySelection || foodPickup ? [] : turns.filter((turn) => (turn.taskProfile ?? 'student') === taskProfile &&
-        !turn.publicCourse && !turn.reply.local && !turn.reply.dataRead && turn.reply.publicCourseResults === undefined &&
+        !turn.publicCourse && !turn.reply.local && !turn.reply.demo && !turn.reply.dataRead && turn.reply.publicCourseResults === undefined &&
         turn.reply.eventTargets === undefined && !turn.reply.campusEventPreview &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
@@ -845,7 +871,7 @@ function V2Conversation({
         reply = await send('ask', { question: current, history, consent, taskProfile, routeToken: routeToken.current,
           ...(studyTarget ? { studyTarget } : {}) }, pendingAsk.signal);
       }
-      reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
+      reply = { ...reply, demo: undefined, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
       if (publicCompound || reply.publicCourseResults !== undefined || reply.eventTargets !== undefined ||
         reply.campusEventPreview || parseAssistantTaskPlan(reply.taskPlan)) reply.dataRead = true;
       if (reply.eventTargets !== undefined) reply.eventTargets = parseAssistantCampusEventTargets(reply.eventTargets, schoolId);
@@ -1071,7 +1097,7 @@ function V2Conversation({
         }
       }
       const after = getPlanRevisionEvents({ question: current, reply });
-      reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
+      reply = { ...reply, demo: undefined, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
       for (const card of turns.flatMap(value => value.reply.cards)) {
         if ((card.conversationId || conversation.current) === conversation.current && canConfirmAction(actionStates.current[card.mutationId]))
           setAction(card, { status: 'superseded' });
@@ -1201,7 +1227,7 @@ function V2Conversation({
           ? '新預覽與指定保留項目的內容或順序不一致，沒有提供可確認的安排。'
           : '新預覽與指定的時間或其他原項目不一致，沒有提供可確認的安排。' };
       }
-      reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
+      reply = { ...reply, demo: undefined, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
       for (const card of turns.flatMap(value => value.reply.cards)) {
         if ((card.conversationId || conversation.current) === conversation.current && canConfirmAction(actionStates.current[card.mutationId]))
           setAction(card, { status: 'superseded' });
@@ -1354,6 +1380,7 @@ function V2Conversation({
       allowBatchConfirmation={turn => !individualConfirmationTurns.current.has(turn)}
       onCancel={(turn, index) => void cancel(turn, index)}
       onReconcile={(card) => void reconcile(card)}
+      demoScope={{ context, accountId, schoolId }}
       renderPlanComparison={turn => {
         const comparison = planComparisons.current.get(turn);
         return comparison ? comparison.shiftedIndices !== undefined

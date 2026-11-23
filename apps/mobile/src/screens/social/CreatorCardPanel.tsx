@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
-  CREATOR_CARD_LIMITS, EMPTY_CREATOR_CARD, type CreatorCard,
+  CREATOR_CARD_LIMITS, EMPTY_CREATOR_CARD, validateCreatorCard, type CreatorCard,
 } from '@campus/shared/src/creatorCard';
 import { readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 import { theme } from '../../ui/theme';
@@ -12,14 +12,15 @@ type CardState =
   | { status: 'error' }
   | { status: 'ready'; value: CreatorCard | null };
 
-function CardButton({ label, onPress, disabled = false, primary = false }: {
-  label: string; onPress: () => void; disabled?: boolean; primary?: boolean;
+function CardButton({ label, onPress, disabled = false, primary = false, busy = false }: {
+  label: string; onPress: () => void; disabled?: boolean; primary?: boolean; busy?: boolean;
 }) {
   const styles = useThemeStyleSheet(createStyles);
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled, busy }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [styles.button, primary && styles.primary,
@@ -30,16 +31,50 @@ function CardButton({ label, onPress, disabled = false, primary = false }: {
   );
 }
 
-export function CreatorCardPanel({
+type CreatorCardPanelProps = { schoolId: string; ownerUid: string; own: boolean };
+
+export function CreatorCardPanel(props: CreatorCardPanelProps) {
+  // A new instance per profile/authorization scope prevents old draft, feedback
+  // and pending save responses from appearing under another account or school.
+  return <ScopedCreatorCardPanel
+    key={JSON.stringify([props.schoolId, props.ownerUid, props.own])}
+    {...props}
+  />;
+}
+
+function ScopedCreatorCardPanel({
   schoolId, ownerUid, own,
-}: { schoolId: string; ownerUid: string; own: boolean }) {
+}: CreatorCardPanelProps) {
   const styles = useThemeStyleSheet(createStyles);
   const [state, setState] = useState<CardState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
+  const currentDraft = useRef(draft);
+  const replaceDraft = (value: CreatorCard) => {
+    currentDraft.current = value;
+    setDraft(value);
+  };
   const [saving, setSaving] = useState(false);
+  // Keep the submitted draft and its normalized server fields until a read
+  // resolves the uncertain write. The ref also guards stale button callbacks.
+  const pendingWrite = useRef<{ draft: CreatorCard; expected: CreatorCard } | null>(null);
+  const [needsConfirmation, setNeedsConfirmation] = useState(false);
+  const savingFlight = useRef(false);
+  const [openingLink, setOpeningLink] = useState(false);
+  const openingLinkFlight = useRef(false);
+  const [linkError, setLinkError] = useState('');
+  // A pending OS handoff belongs to the URL visible when it was pressed.
+  // A later edit may replace that URL before the old handoff rejects.
+  const currentPortfolioLink = useRef('');
+  const mounted = useRef(false);
   const [feedback, setFeedback] = useState('');
+  currentPortfolioLink.current = state.status === 'ready' ? state.value?.linkUrl ?? '' : '';
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -53,27 +88,122 @@ export function CreatorCardPanel({
   }, [schoolId, ownerUid, attempt]);
 
   const beginEdit = () => {
-    if (!own || state.status !== 'ready') return;
-    setDraft(state.value ?? EMPTY_CREATOR_CARD);
-    setFeedback('');
+    if (!own || savingFlight.current || state.status !== 'ready') return;
+    if (!pendingWrite.current) {
+      replaceDraft(state.value ?? EMPTY_CREATOR_CARD);
+      setFeedback('');
+    }
     setEditing(true);
   };
 
+  const changeDraft = (field: keyof CreatorCard, value: string) => {
+    replaceDraft({ ...currentDraft.current, [field]: value });
+    if (!pendingWrite.current) setFeedback('');
+  };
+
+  const cancelEdit = () => {
+    if (savingFlight.current) return;
+    setEditing(false);
+    if (!pendingWrite.current) setFeedback('');
+  };
+
+  const confirmPreviousSave = async () => {
+    const submitted = pendingWrite.current;
+    if (!mounted.current || !own || !submitted || savingFlight.current || state.status !== 'ready') return;
+    savingFlight.current = true;
+    setSaving(true);
+    setFeedback('');
+    let latest: CreatorCard | null;
+    try {
+      latest = await readCreatorCard(schoolId, ownerUid);
+    } catch {
+      if (mounted.current) {
+        setFeedback('仍無法核對伺服器資料，草稿已保留，請稍後重試核對。');
+      }
+      return;
+    } finally {
+      if (mounted.current) {
+        savingFlight.current = false;
+        setSaving(false);
+      }
+    }
+    if (!mounted.current) return;
+
+    currentPortfolioLink.current = latest?.linkUrl ?? '';
+    setLinkError('');
+    setState({ status: 'ready', value: latest });
+    pendingWrite.current = null;
+    setNeedsConfirmation(false);
+    const { expected } = submitted;
+    if (latest && latest.headline === expected.headline &&
+      latest.bio === expected.bio && latest.linkUrl === expected.linkUrl) {
+      finishSave(submitted.draft);
+    } else {
+      setFeedback('伺服器資料與上次送出的內容不同，草稿已保留。確認後可重新儲存。');
+    }
+  };
+
+  const finishSave = (submittedDraft: CreatorCard) => {
+    if (currentDraft.current === submittedDraft) {
+      setEditing(false);
+      setFeedback('社群簡介已儲存。');
+    } else {
+      setFeedback('上一筆已確認儲存，後續修改仍保留在草稿。');
+    }
+  };
+
   const submit = async () => {
-    if (!own || saving || state.status !== 'ready') return;
+    if (!mounted.current || !own || pendingWrite.current || savingFlight.current || state.status !== 'ready') return;
+    const submittedDraft = currentDraft.current;
+    let expected: CreatorCard;
+    try {
+      expected = validateCreatorCard(submittedDraft);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : '簡介格式有誤，請檢查後重試。');
+      return;
+    }
+
+    savingFlight.current = true;
     setSaving(true);
     setFeedback('');
     try {
-      const confirmed = await saveCreatorCard(schoolId, ownerUid, draft);
+      const confirmed = await saveCreatorCard(schoolId, ownerUid, submittedDraft);
+      if (!mounted.current) return;
+      currentPortfolioLink.current = confirmed.linkUrl;
+      setLinkError('');
       setState({ status: 'ready', value: confirmed });
-      setEditing(false);
-      setFeedback('社群簡介已儲存。');
-    } catch (error) {
-      setFeedback(error instanceof Error && /最多|HTTPS|有效/.test(error.message)
-        ? error.message
-        : '儲存尚未完成，輸入內容已保留，請確認連線及校籍後重試。');
+      finishSave(submittedDraft);
+    } catch {
+      if (!mounted.current) return;
+      pendingWrite.current = { draft: submittedDraft, expected };
+      setNeedsConfirmation(true);
+      setFeedback('無法確認簡介是否已儲存，草稿已保留。請先核對伺服器資料，避免重複送出。');
     } finally {
-      setSaving(false);
+      if (mounted.current) {
+        savingFlight.current = false;
+        setSaving(false);
+      }
+    }
+  };
+
+  const openPortfolioLink = async (url: string) => {
+    // Linking is an OS handoff: even a valid HTTPS URL may be rejected. Prevent
+    // a second tap from launching another handoff while the first is pending.
+    if (openingLinkFlight.current) return;
+    openingLinkFlight.current = true;
+    setOpeningLink(true);
+    setLinkError('');
+    try {
+      await Linking.openURL(url);
+    } catch {
+      if (mounted.current && currentPortfolioLink.current === url) {
+        setLinkError('無法開啟作品連結，請稍後再試。');
+      }
+    } finally {
+      if (mounted.current) {
+        openingLinkFlight.current = false;
+        setOpeningLink(false);
+      }
     }
   };
 
@@ -96,7 +226,7 @@ export function CreatorCardPanel({
           <TextInput
             accessibilityLabel="一句話介紹"
             value={draft.headline}
-            onChangeText={(headline) => setDraft((value) => ({ ...value, headline }))}
+            onChangeText={(headline) => changeDraft('headline', headline)}
             maxLength={CREATOR_CARD_LIMITS.headline}
             placeholder="例如：記錄校園日常的攝影愛好者"
             placeholderTextColor={theme.colors.textSecondary}
@@ -107,7 +237,7 @@ export function CreatorCardPanel({
           <TextInput
             accessibilityLabel="個人簡介"
             value={draft.bio}
-            onChangeText={(bio) => setDraft((value) => ({ ...value, bio }))}
+            onChangeText={(bio) => changeDraft('bio', bio)}
             multiline
             maxLength={CREATOR_CARD_LIMITS.bio}
             placeholder="分享興趣、社團、作品或你想和同學交流的事。"
@@ -120,7 +250,7 @@ export function CreatorCardPanel({
           <TextInput
             accessibilityLabel="作品連結"
             value={draft.linkUrl}
-            onChangeText={(linkUrl) => setDraft((value) => ({ ...value, linkUrl }))}
+            onChangeText={(linkUrl) => changeDraft('linkUrl', linkUrl)}
             maxLength={CREATOR_CARD_LIMITS.linkUrl}
             autoCapitalize="none"
             autoCorrect={false}
@@ -133,10 +263,15 @@ export function CreatorCardPanel({
           <Text style={styles.note}>這些內容只會顯示給所屬校園成員，不會帶入學號、電話或校務資料。</Text>
           {!!feedback && <Text accessibilityRole="alert" style={styles.error}>{feedback}</Text>}
           <View style={styles.actions}>
-            <CardButton label={saving ? '正在確認儲存…' : '儲存簡介'}
-              primary disabled={saving} onPress={() => void submit()} />
+            <CardButton label={saving && !needsConfirmation ? '正在確認儲存…' : '儲存簡介'}
+              primary disabled={saving || needsConfirmation} busy={saving}
+              onPress={() => void submit()} />
+            {needsConfirmation && (
+              <CardButton label={saving ? '正在核對伺服器…' : '核對儲存結果'}
+                disabled={saving} busy={saving} onPress={() => void confirmPreviousSave()} />
+            )}
             <CardButton label="取消編輯" disabled={saving}
-              onPress={() => { setEditing(false); setFeedback(''); }} />
+              onPress={cancelEdit} />
           </View>
         </View>
       ) : (
@@ -147,12 +282,15 @@ export function CreatorCardPanel({
             <Pressable
               accessibilityRole="link"
               accessibilityLabel="查看作品連結"
-              onPress={() => void Linking.openURL(state.value!.linkUrl)}
+              accessibilityState={{ disabled: openingLink, busy: openingLink }}
+              disabled={openingLink}
+              onPress={() => void openPortfolioLink(state.value!.linkUrl)}
               style={styles.external}
             >
               <Text style={styles.externalText}>查看作品連結</Text>
             </Pressable>
           )}
+          {!!linkError && <Text accessibilityRole="alert" style={styles.error}>{linkError}</Text>}
           {own && (
             <View style={styles.actions}>
               {!state.value?.headline && !state.value?.bio && !state.value?.linkUrl &&
@@ -160,7 +298,7 @@ export function CreatorCardPanel({
               <CardButton label={state.value ? '編輯社群簡介' : '建立社群簡介'} onPress={beginEdit} />
             </View>
           )}
-          {!!feedback && <Text accessibilityRole="text" style={styles.success}>{feedback}</Text>}
+          {!needsConfirmation && !!feedback && <Text accessibilityRole="text" style={styles.success}>{feedback}</Text>}
         </View>
       )}
     </View>
