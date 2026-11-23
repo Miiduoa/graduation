@@ -424,4 +424,50 @@ describe('write occurrences in TronClass requests', () => {
     expect(tronClassCompoundClauses('翻譯 submit 這個字，查玩課雲作業')).toEqual([]);
     expect(parseTronClassAgentIntent('玩課雲不要上傳附件')?.intent).toBe('capabilities');
   });
+
+  it.each([
+    '玩課雲請把附件回傳到作業區',
+    '玩課雲請幫我把附件傳給老師',
+    '玩課雲請將截圖轉給助教',
+    '玩課雲把檔案送到作業區',
+    '玩課雲把附件回傳',
+    '玩課雲請回傳附件到作業區',
+    '玩課雲請傳給老師這份附件',
+    '玩課雲把作業寄到學系',
+    '玩課雲把附件放到作業區',
+  ])('blocks object-fronted transfer in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+  });
+
+  it.each([
+    '查玩課雲作業，請把附件回傳到作業區',
+    '查玩課雲作業，請幫我把附件傳給老師',
+    '查玩課雲作業，請將截圖轉給助教',
+    '查玩課雲作業，把檔案送到作業區',
+    '查玩課雲作業，把附件回傳',
+    '查玩課雲作業，請回傳附件到作業區',
+  ])('suppresses a compound read for the transfer in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '不要繳交玩課雲作業只查校園公告',
+    '別繳交玩課雲作業只查校園公告',
+    '不要提交玩課雲作業改查校園公告',
+    '不要上傳玩課雲附件而是查校園公告',
+    '不用繳交玩課雲作業只查校園公告',
+  ])('does not authorize a private read when the only TronClass cue is inside a negated write in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '不要繳交只要查玩課雲作業狀態',
+    '不要繳交玩課雲作業只查玩課雲作業狀態',
+    '不要上傳截圖只要查玩課雲作業狀態',
+  ])('keeps the TronClass status read when a source cue remains after negation in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'homework', pendingOnly: false });
+  });
 });

@@ -58,8 +58,9 @@ const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
 const SUBMIT_VERB_SOURCE = [
   '重新(?:繳交|提交|上傳|上載)|繳交|提交|送出|交出|上傳|上載',
   '補交|補繳|遲交|重交|重繳|上繳|遞交|呈交|交付|繳回|交回|附上|夾帶|送件|寄出',
-  '回傳(?=\\s*(?:附件|檔案?|文件))',
-  '\\b(?:submit|upload|resubmit|hand\\s+in|turn\\s+in)\\b',
+  // Object may come before the verb, as in「把附件回傳／傳給老師」.
+  '回傳|傳給|傳到|傳回|傳送|傳去|送給|送到|寄給|寄到|遞給|遞到|轉給|轉到|轉寄',
+  '\\b(?:submit|upload|resubmit|hand\\s+in|turn\\s+in|send\\s+(?:in|to|back)|forward)\\b',
   // Short verbs also form commands with a preceding object or no object.
   '[交繳]',
 ].join('|');
@@ -164,7 +165,27 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
     }
     return 'unsupported';
   }
+  // 把／將 clauses can use a transfer verb that the list above has not named yet.
+  // If the object is a submission item and a transfer or placement verb follows, treat it as a write.
+  if (hasBaObjectWrite(text)) return 'unsupported';
   return null;
+}
+
+const BA_OBJECT = '(?:附件|檔案?|文件|作業|報告|截圖|作品|心得|講義|考卷|表單|修訂稿)';
+const BA_TRANSFER = '(?:回傳|傳(?:給|到|回|去|送)|送(?:給|到|出|件)|寄(?:給|到|出)|遞(?:給|到|交)|轉(?:給|到|寄)|[交繳]|上[傳載]|提交|放[到進上]|貼[到上]|丟[到給])';
+const BA_NEGATION = new RegExp(`${WRITE_NEGATION_SOURCE}$`, 'iu');
+
+function hasBaObjectWrite(text: string): boolean {
+  for (const match of text.matchAll(/[把將]/gu)) {
+    const before = text.slice(0, match.index);
+    if (BA_NEGATION.test(before)) continue;
+    const segmentRest = text.slice(match.index + match[0].length).split(/[,;。?!、:\r\n]/u)[0] ?? '';
+    if (new RegExp(`${BA_OBJECT}[\\s\\S]{0,20}${BA_TRANSFER}|${BA_TRANSFER}`, 'u').test(segmentRest) &&
+      new RegExp(BA_OBJECT, 'u').test(segmentRest)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Examples, translations, quotes, general explanations and negated reads do not authorize a private read. */
@@ -252,6 +273,8 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
   if (writeRoute === 'planner' || isMultiClauseRequest(original)) return null;
   if (writeRoute) return { intent: 'unsupported', pendingOnly: false };
   const text = readRoutingText(original);
+  // Keywords that only appeared inside a negated write do not authorize a private read.
+  if (!TRONCLASS_KEYWORD.test(text)) return null;
   if (/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i.test(text)) {
     return { intent: 'capabilities', pendingOnly: false };
   }
