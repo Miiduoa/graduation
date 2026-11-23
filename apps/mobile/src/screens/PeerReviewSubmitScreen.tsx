@@ -161,8 +161,7 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const reviewIdNum = Number(reviewId.replace(/^tc:/, '')) || 0;
-  const usingSample = !props.route?.params?.rubric || !reviewIdNum || !courseId ||
-    isDemoCourseId(courseId);
+  const usingSample = !props.route?.params?.rubric || !reviewIdNum || !courseId;
   const writeLocked = !usingSample && isTronClassWriteLocked();
   const readOnly = writeLocked || submitted;
 

@@ -64,9 +64,9 @@ test('discussion threads remain readable while the composer is hidden', async ()
   expect(view.queryByPlaceholderText('想討論的問題（限 60 字）')).toBeNull();
 });
 
-test('survey questions are visible while choices and free text are read-only', () => {
+test.each(['101', demoCourseId])('survey course %s shows questions with choices and free text read-only', (courseId) => {
   const view = render(<SurveyScreen route={{ params: {
-    courseId: 'tc:101',
+    courseId: `tc:${courseId}`,
     surveyId: 'tc:404',
     questions: [
       { id: 'q1', type: 'single', prompt: '滿意度', options: [{ id: 'a', label: '非常滿意' }] },
@@ -127,17 +127,29 @@ test('sample surveys can be completed with TronClass writes locked', async () =>
   expect(tcSubmitSurvey).not.toHaveBeenCalled();
 });
 
-test('demo peer reviews can be completed with TronClass writes locked', async () => {
+test('a peer review with a demo-list course ID and valid submit params remains read-only', async () => {
+  const view = render(<PeerReviewSubmitScreen route={{ params: {
+    courseId: demoCourseId,
+    reviewId: '80001',
+    rubric,
+  } }} />);
+
+  expect(await view.findByText('HW3 K-means 互評')).toBeTruthy();
+  expect(view.getByText(readOnlyNotice)).toBeTruthy();
+  expect(view.getByRole('button', { name: '論述清晰：優，4 分' })).toBeDisabled();
+  expect(view.queryByRole('button', { name: /送出互評/ })).toBeNull();
+  expect(tcSubmitPeerReview).not.toHaveBeenCalled();
+});
+
+test('sample peer reviews can be completed with TronClass writes locked', async () => {
   const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   try {
     const view = render(<PeerReviewSubmitScreen route={{ params: {
-      courseId: demoCourseId,
       reviewId: '80001',
       rubric,
     } }} />);
 
-    expect(await view.findByText('HW3 K-means 互評')).toBeTruthy();
-    fireEvent.press(view.getByRole('button', { name: '論述清晰：優，4 分' }));
+    fireEvent.press(await view.findByRole('button', { name: '論述清晰：優，4 分' }));
     fireEvent.press(view.getByRole('button', { name: '送出互評' }));
 
     await waitFor(() => expect(alert).toHaveBeenCalledWith(

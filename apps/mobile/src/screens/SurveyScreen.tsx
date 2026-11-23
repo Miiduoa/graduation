@@ -17,7 +17,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { isDemoCourseId } from '../data/demoCoursesAdapter';
 import { isTronClassWriteLocked, TRONCLASS_WRITE_LOCKED_MESSAGE } from '../services/tronClassClient';
 
 type SurveyQuestionType = 'single' | 'multi' | 'text' | 'scale';
@@ -92,8 +91,7 @@ export default function SurveyScreen(props: RouteProps) {
   const [submitted, setSubmitted] = useState(false);
   const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
   const numericSurveyId = Number(String(surveyId).replace(/^tc:/, '')) || 0;
-  const usingSample = !props.route?.params?.questions || !numericCourseId || !numericSurveyId ||
-    isDemoCourseId(numericCourseId);
+  const usingSample = !props.route?.params?.questions || !numericCourseId || !numericSurveyId;
   const writeLocked = !usingSample && isTronClassWriteLocked();
   const readOnly = writeLocked || submitted;
 
