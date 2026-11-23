@@ -45,8 +45,15 @@ it.each([
   ['zh-x-abcd', 3, 3],
   ['zh-u-ca-chinese', 3, 3],
   ['zh-Hant-u-nu-hanidec', 1, 1],
-  ['zh-Hant-HK-t-zh-latn', 1, 1],
-  ['zh-Hant-HK', 1, 1],
+  ['zh-Hant-HK-t-zh-latn', 1, 2],
+  ['zh-Hant-HK', 1, 2],
+  ['zh-Hant-MO', 1, 2],
+  ['zh-Hani-TW', 0, 0],
+  ['zh-Hani-HK', 2, 2],
+  ['zh-Hani-MO', 2, 2],
+  ['zh-Hani-CN', 3, 1],
+  ['zh-Hani', 3, 1],
+  ['Zh_cMN-hAnI_tW-X_DeMo', 0, 0],
   ['zh-Hans-TW', 4, 4],
   ['zh-TW-hans', 4, 4],
   ['zh-TW-demo', 0, 0],
@@ -55,13 +62,16 @@ it.each([
   ['Zh_cMN-hAnT_tW-X_DeMo', 0, 0],
   ['zh-Hant-419-1996', 1, 1],
   ['zh-HK', 2, 2],
+  ['zh-TW', 0, 0],
   ['cmn-MO', 2, 2],
   ['zh', 3, 3],
   ['zh-CN', 3, 3],
-  // Explicit non-Hant scripts rank last, and singleton payloads are ignored.
+  // Non-Han scripts rank last, and singleton payloads are ignored.
   ['zh-Latn-TW', 0, 4],
   ['cmn_Latn_TW', 0, 4],
   ['zh-Bopo-TW', 0, 4],
+  ['zh-Cyrl-TW', 0, 4],
+  ['zh-Kana-TW', 0, 4],
   ['zh-TW-x-hans', 4, 0],
   ['zh-u-ca-hans', 4, 3],
   ['zh-t-zh-tw', 0, 3],
@@ -92,10 +102,13 @@ it('prefers a Taiwanese voice with a private-use suffix over an installed Hong K
   expect((speak.mock.calls[0][0] as Utterance).voice).toBe(taiwanese);
 });
 
-it('prefers an installed Taiwanese voice over a Simplified Chinese voice listed first', () => {
-  const simplified = { lang: 'zh-CN', localService: true };
-  const taiwanese = { lang: 'zh-Hant-TW', localService: true };
-  voices = [simplified, taiwanese];
+it.each([
+  { taiwaneseLang: 'zh-Hant-TW', otherLang: 'zh-CN' },
+  { taiwaneseLang: 'zh-Hani-TW', otherLang: 'zh-CN' },
+  { taiwaneseLang: 'zh-Hani-TW', otherLang: 'zh-Hant-HK' },
+])('prefers installed $taiwaneseLang over $otherLang listed first', ({ taiwaneseLang, otherLang }) => {
+  const taiwanese = { lang: taiwaneseLang, localService: true };
+  voices = [{ lang: otherLang, localService: true }, taiwanese];
   render(<StudyReadAloud text="繁體中文教材" />);
   fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
   expect((speak.mock.calls[0][0] as Utterance).voice).toBe(taiwanese);
@@ -125,6 +138,7 @@ it.each([
 
 it.each([
   { romanized: 'zh-Latn-TW', traditional: 'zh-Hant-HK' },
+  { romanized: 'zh-Latn-TW', traditional: 'zh-Hani-TW' },
   { romanized: 'cmn_Latn_TW', traditional: 'zh-TW' },
 ])('does not prefer a local Latin-transliteration voice ($romanized) over installed Traditional Chinese', ({ romanized, traditional }) => {
   const romanizedVoice = { lang: romanized, localService: true };

@@ -198,11 +198,11 @@ export function localeRank(lang: string): number {
   const region = /^(?:[a-z]{2}|[0-9]{3})$/u.test(regionSubtag) ? regionSubtag : undefined;
   // Preserve the legacy ranking for device tags with Hans outside the script
   // position in the core. Extension and private-use subtags cannot affect rank.
-  if ((script && script !== 'hant') || subtags.includes('hans')) return 4;
+  const isHan = script === 'hani' || script === 'hant';
+  if ((script && !isHan) || subtags.includes('hans')) return 4;
   if (region === 'tw') return 0;
-  if (script === 'hant') return 1;
   if (region === 'hk' || region === 'mo') return 2;
-  return 3;
+  return isHan ? 1 : 3;
 }
 
 export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChange, rate: selectedRate, onRateChange }: {
