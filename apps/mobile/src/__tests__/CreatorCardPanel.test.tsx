@@ -244,6 +244,7 @@ describe.each([
             jest.mocked(getDocFromServer).mockResolvedValueOnce({
               exists: () => true,
               data: () => ({ schoolId: 'pu', ownerUid: 'alice', ...originalDocument }),
+              metadata: { hasPendingWrites: false },
             } as Awaited<ReturnType<typeof getDocFromServer>>);
             reads.mockImplementationOnce(service.readCreatorCard);
             saves.mockRejectedValueOnce(new Error('confirmation lost'));
@@ -816,6 +817,7 @@ test('clearing a hidden link during confirmation preserves the explicit edit', a
   jest.mocked(getDocFromServer).mockResolvedValueOnce({
     exists: () => true,
     data: () => ({ ...published, schoolId: 'pu', ownerUid: 'alice', linkUrl: 'http://example.org/old' }),
+    metadata: { hasPendingWrites: false },
   } as Awaited<ReturnType<typeof getDocFromServer>>);
   let resolveRead!: (value: typeof latest) => void;
   jest.mocked(readCreatorCard).mockImplementationOnce(service.readCreatorCard)
@@ -1329,7 +1331,7 @@ describe.each([
           const mergeBaseConfirms = published.headline === expected.headline &&
             published.bio === expected.bio && published.linkUrl === expected.linkUrl;
           jest.mocked(getDocFromServer)
-            .mockResolvedValueOnce({ exists: () => false } as never)
+            .mockResolvedValueOnce({ exists: () => false, metadata: { hasPendingWrites: false } } as never)
             .mockResolvedValueOnce({ exists: () => true, data: () => data, metadata } as never);
           let rejectWrite!: (error: Error) => void;
           if (flow === 'manual after timeout') {

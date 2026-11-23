@@ -216,6 +216,87 @@ test('a denied pin read is retried, never treated as an empty pin', async () => 
   expect(readCreatorPin).toHaveBeenCalledTimes(2);
 });
 
+test('tab changes and refreshes reload cards created, edited and cleared on another device', async () => {
+  const card = { headline: '', bio: '另一台裝置建立的簡介', linkUrl: '' };
+  const updated = { ...card, bio: '另一台裝置修改的簡介' };
+  const reads = jest.mocked(readCreatorCard)
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce(card)
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce(updated)
+    .mockResolvedValueOnce(null);
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+  expect(await view.findByLabelText('建立社群簡介')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('相片與影片'));
+  expect(await view.findByText(card.bio)).toBeTruthy();
+
+  await act(async () => { fireEvent.press(view.getByLabelText('我的收藏')); });
+  expect(view.getByText(card.bio)).toBeTruthy();
+  expect(view.queryByText('社群簡介暫時無法讀取。')).toBeNull();
+  fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
+  expect(await view.findByText(updated.bio)).toBeTruthy();
+
+  fireEvent.press(view.getByLabelText('貼文'));
+  expect(await view.findByLabelText('建立社群簡介')).toBeTruthy();
+  expect(view.queryByText(updated.bio)).toBeNull();
+  expect(reads).toHaveBeenCalledTimes(5);
+  expect(reads).toHaveBeenLastCalledWith('pu', 'alice', { requireCommitted: true });
+});
+
+test('switching tabs and retrying the identity card refresh the intro while preserving the open draft', async () => {
+  jest.mocked(readCreatorIdentity).mockRejectedValueOnce(new Error('offline'));
+  const card = { headline: '', bio: '已發布簡介', linkUrl: '' };
+  const updated = { ...card, bio: '伺服器新簡介' };
+  const reads = jest.mocked(readCreatorCard).mockResolvedValueOnce(card)
+    .mockResolvedValueOnce(null).mockResolvedValueOnce(updated);
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+  fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), '本機草稿');
+  await act(async () => { fireEvent.press(view.getByLabelText('相片與影片')); });
+  expect(view.getByLabelText('個人簡介').props.value).toBe('本機草稿');
+  await act(async () => { fireEvent.press(view.getByLabelText('重試名片')); });
+  expect(reads).toHaveBeenCalledTimes(3);
+  expect(view.getByLabelText('個人簡介').props.value).toBe('本機草稿');
+  fireEvent.press(view.getByLabelText('取消編輯'));
+  expect(view.getByText(updated.bio)).toBeTruthy();
+});
+
+test('rapid tab changes ignore out-of-order intro reads', async () => {
+  const card = { headline: '', bio: '最新簡介', linkUrl: '' };
+  let resolveMedia!: (value: typeof card) => void;
+  jest.mocked(readCreatorCard).mockResolvedValueOnce(null)
+    .mockReturnValueOnce(new Promise((resolve) => { resolveMedia = resolve; }))
+    .mockResolvedValueOnce(card);
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+  await view.findByLabelText('建立社群簡介');
+  fireEvent.press(view.getByLabelText('相片與影片'));
+  fireEvent.press(view.getByLabelText('我的收藏'));
+  expect(await view.findByText(card.bio)).toBeTruthy();
+  await act(async () => { resolveMedia({ ...card, bio: '過期簡介' }); });
+  expect(view.getByText(card.bio)).toBeTruthy();
+  expect(view.queryByText('過期簡介')).toBeNull();
+});
+
+test('an intro refresh started during a save cannot replace its confirmed result', async () => {
+  const card = { headline: '', bio: '原本的簡介', linkUrl: '' };
+  const saved = { ...card, bio: '剛確認的簡介' };
+  let resolveRefresh!: (value: typeof card) => void;
+  let resolveSave!: (value: typeof card) => void;
+  jest.mocked(readCreatorCard).mockResolvedValueOnce(card)
+    .mockReturnValueOnce(new Promise((resolve) => { resolveRefresh = resolve; }));
+  jest.mocked(saveCreatorCard).mockReturnValueOnce(new Promise((resolve) => { resolveSave = resolve; }));
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} />);
+  fireEvent.press(await view.findByLabelText('編輯社群簡介'));
+  fireEvent.changeText(view.getByLabelText('個人簡介'), saved.bio);
+  fireEvent.press(view.getByLabelText('儲存簡介'));
+  fireEvent.press(view.getByLabelText('相片與影片'));
+  await act(async () => { resolveSave(saved); });
+  await act(async () => { resolveRefresh(card); });
+  expect(view.getByText(saved.bio)).toBeTruthy();
+  expect(view.queryByText(card.bio)).toBeNull();
+  expect(saveCreatorCard).toHaveBeenCalledTimes(1);
+});
+
 // The merge-base keeps the entire draft when an uncertain editor closes.
 // The timeout states and the explicit mismatch restore action extend that
 // expectation to the confirmation controls in this branch.
@@ -269,18 +350,23 @@ describe.each(['pending', 'save timeout', 'checking', 'check failed'] as const)(
             }
             let resolveCheck!: (value: typeof published) => void;
             let rejectCheck!: (error: Error) => void;
-            reads.mockReturnValueOnce(new Promise((resolve, reject) => {
-              resolveCheck = resolve;
-              rejectCheck = reject;
-            }));
-            if (status === 'checking') press('核對儲存結果');
+            const startCheck = () => {
+              reads.mockReturnValueOnce(new Promise((resolve, reject) => {
+                resolveCheck = resolve;
+                rejectCheck = reject;
+              }));
+              press('核對儲存結果');
+            };
+            if (status === 'checking') startCheck();
 
             if (action === 'switch tabs') {
               for (const tab of ['相片與影片', '我的收藏', '貼文']) {
+                reads.mockResolvedValueOnce(latest);
                 await act(async () => { press(tab); });
                 expectDraft(draft);
               }
             } else if (action === 'refresh') {
+              reads.mockResolvedValueOnce(latest);
               await act(async () => {
                 fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
               });
@@ -299,7 +385,7 @@ describe.each(['pending', 'save timeout', 'checking', 'check failed'] as const)(
               // Use the published-view check after a real close in the mismatch
               // cases, to exercise restoration when no editor is mounted.
               if (action === 'cancel and reopen' && outcome === 'mismatch') press('取消編輯');
-              press('核對儲存結果');
+              startCheck();
             }
             expect(view.getByText('核對中')).toBeTruthy();
 

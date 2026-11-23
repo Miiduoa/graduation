@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   CREATOR_CARD_LIMITS, EMPTY_CREATOR_CARD, validateCreatorCard, type CreatorCard,
@@ -51,7 +51,7 @@ function CardButton({ label, onPress, disabled = false, primary = false, busy = 
   );
 }
 
-type CreatorCardPanelProps = { schoolId: string; ownerUid: string; own: boolean };
+type CreatorCardPanelProps = { schoolId: string; ownerUid: string; own: boolean; refreshKey?: string };
 
 export function CreatorCardPanel(props: CreatorCardPanelProps) {
   // A new instance per profile/authorization scope prevents old draft, feedback
@@ -63,7 +63,7 @@ export function CreatorCardPanel(props: CreatorCardPanelProps) {
 }
 
 function ScopedCreatorCardPanel({
-  schoolId, ownerUid, own,
+  schoolId, ownerUid, own, refreshKey,
 }: CreatorCardPanelProps) {
   const styles = useThemeStyleSheet(createStyles);
   const [state, setState] = useState<CardState>({ status: 'loading' });
@@ -75,6 +75,7 @@ function ScopedCreatorCardPanel({
     setEditing(open);
   };
   const published = useRef<CreatorCard | null>(null);
+  const cardVersion = useRef(0);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const currentDraft = useRef(draft);
   // Keep clear operations even when the field originally displayed as empty.
@@ -109,7 +110,7 @@ function ScopedCreatorCardPanel({
   const [feedback, setFeedback] = useState('');
   currentPortfolioLink.current = state.status === 'ready' ? state.value?.linkUrl ?? '' : '';
 
-  const acceptSavedPortfolioLink = (url: string) => {
+  const acceptSavedPortfolioLink = useCallback((url: string) => {
     if (currentPortfolioLink.current !== url) {
       // A handoff for a replaced URL no longer owns the visible link's busy
       // state. The OS Promise can still resolve, but it must not touch this UI.
@@ -118,28 +119,31 @@ function ScopedCreatorCardPanel({
     }
     currentPortfolioLink.current = url;
     setLinkError('');
-  };
+  }, []);
 
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
 
-  const acceptCard = (value: CreatorCard | null) => {
+  const acceptCard = useCallback((value: CreatorCard | null) => {
+    cardVersion.current += 1;
     published.current = value;
     acceptSavedPortfolioLink(value?.linkUrl ?? '');
     setState({ status: 'ready', value });
-  };
+  }, [acceptSavedPortfolioLink]);
 
   useEffect(() => {
     let live = true;
-    void readCreatorCard(schoolId, ownerUid).then((value) => {
-      if (live) acceptCard(value);
+    // A save confirmation can publish a newer value while this read is pending.
+    const version = cardVersion.current;
+    void readCreatorCard(schoolId, ownerUid, { requireCommitted: true }).then((value) => {
+      if (live && cardVersion.current === version) acceptCard(value);
     }).catch(() => {
-      if (live) setState({ status: 'error' });
+      if (live) setState((previous) => previous.status === 'ready' ? previous : { status: 'error' });
     });
     return () => { live = false; };
-  }, [schoolId, ownerUid, attempt]);
+  }, [schoolId, ownerUid, attempt, refreshKey, acceptCard]);
 
   const beginEdit = () => {
     if (!own || editorLocked() || state.status !== 'ready') return;

@@ -297,7 +297,8 @@ function ScopedCreatorProfile({
                 <Action label="重試名片" onPress={() => setRefreshRevision((n) => n + 1)} />
               </View>
             )}
-            <CreatorCardPanel schoolId={schoolId} ownerUid={memberUid} own={own} />
+            <CreatorCardPanel schoolId={schoolId} ownerUid={memberUid} own={own}
+              refreshKey={`${tab}:${refreshRevision}:${savedRevision}`} />
             <CreatorHighlight key={schoolId + ':' + memberUid}
               schoolId={schoolId} memberUid={memberUid} own={own} candidates={postRows}
               openPost={(postId) => navigation?.navigate?.('PostDetail', { postId })} />
