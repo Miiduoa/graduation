@@ -4,7 +4,7 @@
 
 ## 本輪來源
 
-接續 PR #616 的 `04ca3983b3eda1d0163363f233d9094e1932b4d5`，以正常雙親合併保留 main `f7f5acba2177562ed42ea73067d094b6e7946edb`。程式提交為 [4ca45957](https://github.com/Miiduoa/graduation/commit/4ca45957210181a940436f6808de5508b84bbcf5)，tree `80a7ae6b2dc0b64d9b6c9c2bd87634f423b12ee4` 與本機最後驗證的程式樹一致。後續文件提交不改變程式。
+接續 PR #616 的 `04ca3983b3eda1d0163363f233d9094e1932b4d5`，以正常雙親合併保留 main `f7f5acba2177562ed42ea73067d094b6e7946edb`。TronClass 程式提交為 [4ca45957](https://github.com/Miiduoa/graduation/commit/4ca45957210181a940436f6808de5508b84bbcf5)，tree `80a7ae6b2dc0b64d9b6c9c2bd87634f423b12ee4` 與本機最後驗證的程式樹一致；其後 `4fe1f49a` 只補驗證文件。
 
 ## 使用者會遇到的問題與修正
 
@@ -47,7 +47,7 @@ main 容許舊快取夾有格式不完整的獨立課程列，TronClass 分支�
 | 完整 Web／Mobile TypeScript | 兩端均 exit 0；Web 在最後身分穩定化修改後再執行一次並通過 |
 | 本輪 18 個修改程式檔及兩個 AI 合併檔的 ESLint／diff | 通過、零警告；沒有放寬 lint 設定 |
 | 擴及自動合併檔案的 ESLint | Web 19 檔、Mobile 6 檔皆零錯誤；Web 有一項 main 已存在的首頁 effect 警告，詳見下段 |
-| 瀏覽器安裝腳本 | 11 項通過，包含真正的 timeout／套件鎖恢復與慢速字型下載模型 |
+| 瀏覽器安裝腳本 | 首次 11 項通過；發布後另修正逾時釋鎖競態，追加驗證見下段 |
 | 隔離環境 launcher 與 seed | 5 項通過 |
 
 第一輪 Web typecheck 與其他大型工作並行時曾被系統終止（exit 137）；停止測試服務後單獨完整重跑通過，最後凍結版本再查一次也通過。沒有將第一次中止列為成功。
@@ -64,6 +64,20 @@ pnpm --filter mobile exec jest src/__tests__/TronClassWorkspaceScreen.test.tsx s
 bash scripts/qa/browser/install-playwright.test.sh
 node --test scripts/test-env/tronclass-launcher.test.mjs scripts/test-env/seed.test.cjs
 ```
+
+## 首次發布後的遠端檢查
+
+`4fe1f49a` 的 [CI](https://github.com/Miiduoa/graduation/actions/runs/45122976589) 已通過 Lint／Type Check、Functions、Firestore Rules；CodeQL 也通過。Security Gates 的三個依賴稽核步驟成功，但 [部署準備測試](https://github.com/Miiduoa/graduation/actions/runs/45122976589/job/137520776468) 失敗：瀏覽器安裝腳本的真實 timeout 測試中，模擬套件鎖仍被占用，接續的 `dpkg --configure -a` 模型無法取得鎖。此失敗沒有列為通過，後續工作與精確版本另行記錄。
+
+獨立的非 root 縮時測試分別以 flock 與真正 fcntl 鎖重現：`timeout` 被 SIGKILL 終止後，受測命令可能仍在退出，鎖尚未釋放。此行為也符合 [GNU timeout 文件](https://www.gnu.org/software/coreutils/manual/html_node/timeout-invocation.html) 對 exit 137 的說明。
+
+修補只在原安裝命令回 124／137 時，允許 `dpkg --configure -a` 最多三次恢復機會，中間等候 1／2 秒；每次使用同一 180 秒恢復預算的剩餘時間，保留原有 5 秒 kill-after。其他安裝錯誤仍只嘗試一次恢復。恢復未成功就停止，不繼續重試 apt 或瀏覽器安裝，不刪除系統套件鎖，也沒有放寬 CI 閘門。
+
+新增測試保留真實鎖與子行程，驗證延後釋鎖可恢復，以及把 timeout 錯移到 sudo 外層時仍必須失敗。延後釋鎖使用明確的 release marker 握手，第一輪必須實際遇到鎖；第二輪期限另確認小於第一輪，不重新取得 180 秒。最終 **13／13 通過**，`bash -n`、`git diff --check` 與獨立程式審查通過；把新測試套回舊安裝腳本，會在延後釋鎖案例 exit 1，確認回歸能抓到原缺陷。
+
+這筆追加修補只涉及安裝腳本、其測試與此文件；Web／Mobile／backend／packages／workflow 與 `4fe1f49a` 一致，沒有將舊版遠端結果冒充新 head 已全數通過。
+
+發布期間 main 前進到 `b75017aa56c4211931662cf6b61933b47aeb0211`，只增加三個既有權限規則測試檔與一份權限審查紀錄；本輪實際合併來源仍是上述 `f7f5acba`。不能將 main 的 CI 或前一版的成功結果直接當成本 PR 新 head 的驗收。
 
 ## 完整本機服務與真人測試的界線
 
