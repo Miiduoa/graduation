@@ -331,6 +331,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
   const restartButton = useRef<HTMLButtonElement | null>(null);
+  const manualOpenButton = useRef<HTMLButtonElement | null>(null);
   // Only move keyboard focus into the recovery UI when it was inside the 3D scene.
   // An observer pause caused by scrolling must not steal focus from directions or POI controls.
   const restoreFocusAfterPause = useRef(false);
@@ -423,6 +424,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         return;
       }
       if (timeout === null) timeout = window.setTimeout(fail, 12000);
+      // Automatic startup removes the manual-open control. If a keyboard user
+      // had focus on it (e.g. Tab scrolled the canvas into view), return focus
+      // to the canvas once it is ready instead of dropping it onto document.body.
+      const focused = host.ownerDocument.activeElement;
+      if (focused && focused === manualOpenButton.current) restoreFocusAfterPause.current = true;
       setStatus('loading');
       pendingCreate?.();
     };
@@ -696,7 +702,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
                 <p>{deferredCause === 'data-saver'
                   ? '瀏覽器已開啟省流量模式，因此立體畫面不會自動載入；仍可直接查看地點資訊與步行導航。需要 3D 時可自行開啟。'
                   : '尚未確認立體畫面在可見範圍；滑動至空間圖後才載入，以節省手機效能與電力。若沒有自動載入，可手動開啟。地點資訊與步行導航仍可使用。'}</p>
-                <button className="btn" type="button" onClick={startManually}>{deferredCause === 'data-saver' ? '仍要開啟立體畫面' : '手動開啟立體畫面'}</button>
+                <button ref={manualOpenButton} className="btn" type="button" onClick={startManually}>{deferredCause === 'data-saver' ? '仍要開啟立體畫面' : '手動開啟立體畫面'}</button>
               </>
           ) : <>
             <p>這次無法顯示立體畫面。你仍可選擇地點，查看資訊與導航。</p>

@@ -1898,6 +1898,71 @@ it.each((['missing', 'silent', 'hidden'] as const).flatMap((observer) =>
   }
 });
 
+it('moves keyboard focus to the canvas when automatic startup removes the manual-open button', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  let top = window.innerHeight + 40;
+  const bounds = vi.spyOn(Element.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: Element) {
+      return this.getAttribute('aria-label') === '校園地點空間圖'
+        ? new DOMRect(0, top, 320, 180)
+        : new DOMRect();
+    });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const graphics = screen.getByRole('group', { name: '校園地點空間圖' });
+    const manual = screen.getByRole('button', { name: '手動開啟立體畫面' });
+    manual.focus();
+    expect(document.activeElement).toBe(manual);
+    expect(scene.create).not.toHaveBeenCalled();
+
+    // Tabbing to the button scrolled the canvas into view: startup is automatic
+    // and the focused button disappears. Focus must not fall to document.body.
+    top = 40;
+    await act(async () => { fireEvent.scroll(window); });
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(graphics.parentElement?.dataset.spatialState).toBe('ready'));
+    expect(screen.queryByRole('button', { name: '手動開啟立體畫面' })).toBeNull();
+    expect(document.activeElement).toBe(graphics);
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+it('leaves focus alone when automatic startup removes the manual-open button but focus moved elsewhere', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  let top = window.innerHeight + 40;
+  const bounds = vi.spyOn(Element.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: Element) {
+      return this.getAttribute('aria-label') === '校園地點空間圖'
+        ? new DOMRect(0, top, 320, 180)
+        : new DOMRect();
+    });
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places}
+      selected={places[0]} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const graphics = screen.getByRole('group', { name: '校園地點空間圖' });
+    const directions = screen.getByRole('link', { name: '開啟步行導航' });
+    directions.focus();
+    top = 40;
+    await act(async () => { fireEvent.scroll(window); });
+    await waitFor(() => expect(graphics.parentElement?.dataset.spatialState).toBe('ready'));
+    expect(document.activeElement).toBe(directions);
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('keeps rendering when the observer is visible and keyboard bounds shrink or stay stale', async () => {
   const viewport = Object.assign(new EventTarget(), {
     width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,

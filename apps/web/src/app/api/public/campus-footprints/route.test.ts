@@ -1835,11 +1835,54 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+  it('keeps a one-hour cooldown for a zero-padded asctime Retry-After and Date', async () => {
+    // merge-base cooled for 3600 s here; rejecting the two-digit day dropped it to 600 s.
+    const serverNow = Date.parse('2026-11-02T00:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(serverNow);
+    try {
+      const upstream = vi.fn().mockResolvedValue(new Response('busy', {
+        status: 503,
+        headers: { Date: 'Mon Nov 02 00:00:00 2026', 'Retry-After': 'Mon Nov 02 01:00:00 2026' },
+      }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Retry-After')).toBe('3600');
+      clock.mockReturnValue(serverNow + 30 * 60_000);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([
+    ['wrong weekday', 'Tue Nov 02 01:00:00 2026'],
+    ['impossible day', 'Mon Nov 31 01:00:00 2026'],
+    ['unpadded day', 'Mon Nov 2 01:00:00 2026'],
+  ])('does not trust an asctime Retry-After with a %s', async (_label, retryAfter) => {
+    const serverNow = Date.parse('2026-11-02T00:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(serverNow);
+    try {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('busy', {
+        status: 503, headers: { 'Retry-After': retryAfter },
+      })));
+      const { GET } = await import('./route');
+      const rejected = await GET();
+      expect(rejected.status).toBe(503);
+      expect(rejected.headers.get('Retry-After')).toBe('600');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it.each([
     ['IMF-fixdate', 'Sun, 15 Nov 2026 23:00:00 GMT', 15],
     ['RFC 850', 'Sunday, 15-Nov-26 23:00:00 GMT', 15],
     ['asctime', 'Sun Nov 15 23:00:00 2026', 15],
     ['asctime with a space-padded day', 'Sun Nov  8 23:00:00 2026', 8],
+    ['asctime with a zero-padded day', 'Sun Nov 08 23:00:00 2026', 8],
   ])('honours %s HTTP-date Retry-After in Asia/Taipei', async (_format, retryAfter, day) => {
     vi.stubEnv('TZ', 'Asia/Taipei');
     const start = Date.UTC(2026, 10, day, 1, 30);

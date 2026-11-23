@@ -110,8 +110,13 @@ function parseHttpDateMillis(value: string | null, now: number): number | null {
   const day = String(date.getUTCDate());
   const month = HTTP_MONTHS[date.getUTCMonth()];
   const time = date.toUTCString().slice(17, 25);
-  const asctime = `${HTTP_WEEKDAYS[date.getUTCDay()]} ${month} ${day.padStart(2, ' ')} ${time} ${date.getUTCFullYear()}`;
-  return value === asctime ? parsed : null;
+  const prefix = `${HTTP_WEEKDAYS[date.getUTCDay()]} ${month} `;
+  const suffix = ` ${time} ${date.getUTCFullYear()}`;
+  // RFC 9110 asctime space-pads a one-digit day ("Nov  8"); servers also emit
+  // a zero-padded two-digit day ("Nov 08"). Both denote the same instant, as
+  // the merge-base Date.parse path accepted. Weekday and date still must match.
+  return value === `${prefix}${day.padStart(2, ' ')}${suffix}` ||
+    value === `${prefix}${day.padStart(2, '0')}${suffix}` ? parsed : null;
 }
 
 function overpassRetryAfterMs(header: string | null, now: number, serverDate: string | null = null): number {
