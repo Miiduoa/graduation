@@ -1,5 +1,9 @@
 import type { TronClassAgentIntent } from './tronClassAgentTypes';
 
+export function isTronClassNavigationTarget(text: string): boolean {
+  return /^(?:玩課雲|tronclass)(?:作業|課程)?$/i.test(text);
+}
+
 export type TronClassAgentQueryIntent = {
   intent: TronClassAgentIntent;
   pendingOnly: boolean;

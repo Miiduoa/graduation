@@ -286,7 +286,10 @@ describe('independent TronClass binding', () => {
     await expect(service.disconnect(OWNER, marker.revision)).rejects.toMatchObject({ code: 'SIGN_IN_REQUIRED' });
     await expect(service.requireBinding(OWNER)).rejects.toMatchObject({ code: 'SIGN_IN_REQUIRED' });
     expect(docs.get(bindingPath())).toEqual(marker);
-    expect([...docs.keys()].some((path) => path.startsWith('_tronClassLoginAttempts/'))).toBe(false);
+    expect([...docs.values()].filter(row => row.scope === 'owner' || row.scope === 'owner-account')).toEqual([]);
+    expect([...docs.values()].find(row => row.scope === 'target-account')).toMatchObject({
+      timestamps: [expect.objectContaining({ timestamp: NOW })],
+    });
     expect(login).toHaveBeenCalledOnce();
   });
 
@@ -330,18 +333,62 @@ describe('independent TronClass binding', () => {
   });
 
   it('refunds transport failures without refunding verified credential failures at the same timestamp', async () => {
-    const { service, login } = setup();
+    const { service, login, docs } = setup();
     login.mockRejectedValueOnce(new PuCampusError('credentials', 'fixture'));
     await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 401 });
-    login.mockRejectedValue(new PuCampusError('timeout', 'fixture'));
+    login.mockRejectedValue(new PuCampusError('timeout', 'fixture', { loginNotDelivered: true }));
     for (let i = 0; i < 6; i++) {
       await expect(service.connect(OWNER, input())).rejects.toMatchObject({ code: 'TRONCLASS_LOGIN_UNAVAILABLE' });
     }
+    expect([...docs.values()].find(row => row.scope === 'target-account')?.timestamps)
+      .toEqual([expect.objectContaining({ timestamp: NOW })]);
     login.mockRejectedValue(new PuCampusError('credentials', 'fixture'));
     for (let i = 0; i < 4; i++) {
       await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 401 });
     }
     await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 429 });
+  });
+
+  it('shares the target budget across callers and leaves room after one caller is limited', async () => {
+    const { service, login, docs } = setup();
+    login.mockRejectedValue(new PuCampusError('credentials', 'fixture'));
+    for (let caller = 0; caller < 4; caller++) {
+      const owner = `platform:pa_caller${caller}`;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const account = attempt % 2 ? ' CHANGYI@PU.EDU.TW ' : 'changyi';
+        await expect(service.connect(owner, input(null, account))).rejects.toMatchObject({ status: 401 });
+      }
+      await expect(service.connect(owner, input(null, 'changyi'))).rejects.toMatchObject({ status: 429 });
+    }
+    const freshOwner = 'platform:pa_fresh';
+    await expect(service.connect(freshOwner, input(null, 'changyi@pu.edu.tw'))).rejects.toMatchObject({ status: 429 });
+    expect(login).toHaveBeenCalledTimes(20);
+    const budget = [...docs.values()].find(row => row.scope === 'target-account');
+    expect(budget).toMatchObject({ timestamps: expect.any(Array), purgeAt: new Date(NOW + 15 * 60_000) });
+    expect(budget).not.toHaveProperty('ownerKey');
+  });
+
+  it.each([
+    new PuCampusError('unavailable', 'fixture', { code: 'HTTP_403' }),
+    new PuCampusError('timeout', 'fixture', { code: 'UND_ERR_HEADERS_TIMEOUT' }),
+  ])('keeps the debit when delivery cannot be ruled out (%s)', async (failure) => {
+    const { service, login } = setup();
+    login.mockRejectedValue(failure);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 502 });
+    }
+    await expect(service.connect(OWNER, input())).rejects.toMatchObject({ status: 429 });
+    expect(login).toHaveBeenCalledTimes(5);
+  });
+
+  it('requires reconnection for a legacy cookie jar while preserving its revision', async () => {
+    const { service, docs } = setup();
+    const connected = await service.connect(OWNER, input());
+    const row = docs.get(bindingPath())!;
+    docs.set(bindingPath(), { ...row, sealedCookies: String(row.sealedCookies).replace(/^v2\./, 'v1.') });
+    await expect(service.getStatus(OWNER)).resolves.toMatchObject({ connected: false, revision: connected.revision });
+    await expect(service.requireBinding(OWNER)).rejects.toMatchObject({ code: 'TRONCLASS_RECONNECT_REQUIRED' });
+    await expect(service.connect(OWNER, input(connected.revision))).resolves.toMatchObject({ connected: true });
   });
 
   it.each([undefined, 'false', 'TRUE'])('rejects binding before school login or storage when retention is %s', async (flag) => {

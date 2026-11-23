@@ -577,6 +577,32 @@ it('does not treat TronClass HTTP 400 as a credential error', async () => {
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/login?next='))).toBe(true);
 });
 
+it.each([
+  ['ENOTFOUND', true],
+  ['UND_ERR_CONNECT_TIMEOUT', true],
+  ['UND_ERR_HEADERS_TIMEOUT', false],
+  ['ECONNRESET', false],
+])('distinguishes pre-connection failures from uncertain login delivery (%s)', async (code, loginNotDelivered) => {
+  const fetch = vi.fn(async () => {
+    throw new TypeError('request failed', { cause: { code } });
+  });
+  const gateway = createPuCampusGateway({ fetch });
+  await expect(gateway.loginTronClass('changyi', 'fixture')).rejects.toMatchObject({ code, loginNotDelivered });
+  expect(fetch).toHaveBeenCalledOnce();
+});
+
+it('keeps delivery charged if a connection fails after native login has already reached the LMS', async () => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url.endsWith('/api/login')) return jsonResponse(403, { error: 'native login rejected' });
+    throw new TypeError('request failed', { cause: { code: 'ENOTFOUND' } });
+  });
+  const gateway = createPuCampusGateway({ fetch });
+  await expect(gateway.loginTronClass('changyi', 'fixture')).rejects.toMatchObject({
+    code: 'ENOTFOUND', loginNotDelivered: false,
+  });
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
 it('falls back to identity CAS when native TronClass login returns 400', async () => {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const href = String(url);
@@ -590,13 +616,16 @@ it('falls back to identity CAS when native TronClass login returns 400', async (
         headers: {
           Location:
             'https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login?service=https://tronclass.pu.edu.tw/login',
+          'set-cookie': 'route=lms-node; Path=/',
         },
       });
     }
     if (href.startsWith('https://identity.pu.edu.tw/auth/realms/pu/protocol/cas/login')) {
-      return htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML);
+      expect(new Headers(init?.headers).get('Cookie')).toBeNull();
+      return htmlResponse(200, TRONCLASS_CAS_LOGIN_HTML, { 'set-cookie': 'route=identity-node; Path=/' });
     }
     if (href.includes('/login-actions/authenticate') && method === 'POST') {
+      expect(new Headers(init?.headers).get('Cookie')).toBe('route=identity-node');
       expect(href).toContain('session_code=fixtureSessionCode');
       expect(String(init?.body || '')).toContain(`username=${encodeURIComponent('changyi')}`);
       expect(String(init?.body || '')).toContain(`password=${encodeURIComponent(SECRET)}`);
@@ -609,11 +638,13 @@ it('falls back to identity CAS when native TronClass login returns 400', async (
       });
     }
     if (href.startsWith('https://tronclass.pu.edu.tw/user/index')) {
+      expect(new Headers(init?.headers).get('Cookie')).toBe('route=lms-node');
       return htmlResponse(200, '<html><body>ok</body></html>', {
         'set-cookie': 'session=tc-cas; Path=/',
       });
     }
     if (href.endsWith('/api/profile')) {
+      expect(new Headers(init?.headers).get('Cookie')).not.toContain('KEYCLOAK');
       return jsonResponse(200, {
         id: 44,
         name: '王老師',
@@ -628,7 +659,7 @@ it('falls back to identity CAS when native TronClass login returns 400', async (
     userId: 44,
     userName: '王老師',
     role: 'teacher',
-    cookies: expect.objectContaining({ session: 'tc-cas' }),
+    cookies: { route: 'lms-node', session: 'tc-cas' },
   });
   expect(
     fetchMock.mock.calls.filter(([url]) => {

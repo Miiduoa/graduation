@@ -55,6 +55,7 @@ export const TRONCLASS_BINDING_TTL_MS = 12 * 60 * 60 * 1000;
 export const TRONCLASS_LOGIN_WINDOW_MS = 15 * 60 * 1000;
 export const TRONCLASS_OWNER_LOGIN_LIMIT = 6;
 export const TRONCLASS_ACCOUNT_LOGIN_LIMIT = 5;
+export const TRONCLASS_TARGET_LOGIN_LIMIT = 20;
 const REVISION = /^[a-f0-9]{32}$/;
 const MAX_COOKIES_BYTES = 32 * 1024;
 
@@ -62,9 +63,14 @@ function unavailable(): never { throw new NuniError(503, 'TRONCLASS_UNAVAILABLE'
 function changed(): never { throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED'); }
 function reconnect(): never { throw new NuniError(401, 'TRONCLASS_RECONNECT_REQUIRED'); }
 
+function isControlCharacter(character: string): boolean {
+  const code = character.charCodeAt(0);
+  return code < 32 || code === 127;
+}
+
 function checkedOwner(ownerKey: string): string {
-  if (typeof ownerKey !== 'string' || ownerKey.length > 200 ||
-    !/^(?:platform:pa_[A-Za-z0-9_-]+|firebase:[^\s/\x00-\x1f\x7f]{1,128})$/.test(ownerKey)) {
+  if (typeof ownerKey !== 'string' || ownerKey.length > 200 || [...ownerKey].some(isControlCharacter) ||
+    !/^(?:platform:pa_[A-Za-z0-9_-]+|firebase:[^\s/]{1,128})$/.test(ownerKey)) {
     throw new NuniError(401, 'SIGN_IN_REQUIRED');
   }
   return ownerKey;
@@ -92,8 +98,8 @@ function cookies(value: unknown): Record<string, string> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const entries = Object.entries(value);
   if (!entries.length || entries.length > 100 || entries.some(([name, item]) =>
-    !name || name.length > 200 || /[\s;=\x00-\x1f\x7f]/.test(name) ||
-    typeof item !== 'string' || !item || item.length > MAX_COOKIES_BYTES || /[;\x00-\x1f\x7f]/.test(item))) return null;
+    !name || name.length > 200 || /[\s;=]/.test(name) || [...name].some(isControlCharacter) ||
+    typeof item !== 'string' || !item || item.length > MAX_COOKIES_BYTES || item.includes(';') || [...item].some(isControlCharacter))) return null;
   if (Buffer.byteLength(JSON.stringify(value), 'utf8') > MAX_COOKIES_BYTES) return null;
   return Object.fromEntries(entries) as Record<string, string>;
 }
@@ -177,20 +183,21 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
   const seal = (ownerKey: string, revision: string, value: Record<string, string>) => {
     const iv = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', key(), iv);
-    cipher.setAAD(Buffer.from(JSON.stringify(['tronclass:v1', ownerKey, revision])));
+    cipher.setAAD(Buffer.from(JSON.stringify(['tronclass:lms-cookies:v2', ownerKey, revision])));
     const encrypted = Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]);
-    return ['v1', iv.toString('base64url'), encrypted.toString('base64url'), cipher.getAuthTag().toString('base64url')].join('.');
+    return ['v2', iv.toString('base64url'), encrypted.toString('base64url'), cipher.getAuthTag().toString('base64url')].join('.');
   };
   const unseal = (row: StoredBinding): Record<string, string> => {
     const encryptionKey = key();
     try {
       const [version, ...parts] = row.sealedCookies!.split('.');
-      if (version !== 'v1' || parts.length !== 3) reconnect();
+      // Legacy jars have no provenance and may contain CAS identity cookies.
+      if (version !== 'v2' || parts.length !== 3) reconnect();
       const [iv, encrypted, tag] = parts.map((part) => Buffer.from(part, 'base64url'));
       if (iv.length !== 12 || tag.length !== 16 || encrypted.length > MAX_COOKIES_BYTES ||
         [iv, encrypted, tag].some((bytes, index) => bytes.toString('base64url') !== parts[index])) reconnect();
       const cipher = createDecipheriv('aes-256-gcm', encryptionKey, iv);
-      cipher.setAAD(Buffer.from(JSON.stringify(['tronclass:v1', row.ownerKey, row.revision])));
+      cipher.setAAD(Buffer.from(JSON.stringify(['tronclass:lms-cookies:v2', row.ownerKey, row.revision])));
       cipher.setAuthTag(tag);
       const value = cookies(JSON.parse(Buffer.concat([cipher.update(encrypted), cipher.final()]).toString('utf8')));
       if (!value) reconnect();
@@ -261,10 +268,11 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
     const budgets = [
       { ref: db.doc(`_tronClassLoginAttempts/${rateId('owner', ownerKey)}`), scope: 'owner', limit: TRONCLASS_OWNER_LOGIN_LIMIT },
       { ref: db.doc(`_tronClassLoginAttempts/${rateId('owner-account', ownerKey, accountKey)}`), scope: 'owner-account', limit: TRONCLASS_ACCOUNT_LOGIN_LIMIT },
+      { ref: db.doc(`_tronClassLoginAttempts/${rateId('target-account', accountKey)}`), scope: 'target-account', limit: TRONCLASS_TARGET_LOGIN_LIMIT },
     ];
     const attemptId = randomBytes(16).toString('hex');
     const budgetRow = (scope: string, timestamps: LoginAttempt[], at: number) => ({
-      ownerKey, scope, timestamps,
+      ...(scope === 'target-account' ? {} : { ownerKey }), scope, timestamps,
       purgeAt: new Date(timestamps.length ? Math.max(...timestamps.map(tronClassLoginAttemptTimestamp)) + TRONCLASS_LOGIN_WINDOW_MS : at),
     });
     await db.runTransaction(async (transaction) => {
@@ -307,13 +315,12 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
       if (error instanceof PuCampusError && error.kind === 'credentials') {
         throw new NuniError(401, 'TRONCLASS_INVALID_CREDENTIALS');
       }
-      await refundAttempt();
+      if (error instanceof PuCampusError && error.loginNotDelivered) await refundAttempt();
       throw new NuniError(502, 'TRONCLASS_LOGIN_UNAVAILABLE');
     }
     check();
     const verifiedCookies = cookies(session?.cookies);
     if (!verifiedCookies || !Number.isSafeInteger(session?.userId) || session.userId! <= 0) {
-      await refundAttempt();
       throw new NuniError(502, 'TRONCLASS_IDENTITY_UNVERIFIED');
     }
     const timestamp = now();
@@ -321,7 +328,7 @@ export function createTronClassBindingService(dependencies: TronClassBindingDepe
     const row: StoredBinding = {
       ownerKey, schoolId: 'pu', revision, state: 'connected', account,
       userId: session.userId!,
-      userName: typeof session.userName === 'string' ? session.userName.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 200) || null : null,
+      userName: typeof session.userName === 'string' ? [...session.userName].filter(character => !isControlCharacter(character)).join('').trim().slice(0, 200) || null : null,
       updatedAt: timestamp, expiresAt: timestamp + TRONCLASS_BINDING_TTL_MS,
       purgeAt: new Date(timestamp + TRONCLASS_BINDING_TTL_MS),
       sealedCookies: seal(ownerKey, revision, verifiedCookies),

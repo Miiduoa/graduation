@@ -96,6 +96,8 @@ describe.skipIf(!localEmulator)('bounded TronClass retention with real Firestore
     const removable: Array<[string, Record<string, unknown>]> = [
       [`${BINDINGS}/expired`, binding()], [`${QUOTAS}/owner`, { ...quota(), scope: 'owner', ownerKey: OWNER }],
       [`${QUOTAS}/account`, quota()],
+      [`${QUOTAS}/target-account`, { ...quota(), scope: 'target-account',
+        timestamps: Array<number>(20).fill(NOW - 3600_000) }],
       [`${QUOTAS}/owner-account`, { ...quota(), scope: 'owner-account', ownerKey: OWNER,
         timestamps: [{ timestamp: NOW - 3600_000, id: 'a'.repeat(32) }] }],
       [`${QUOTAS}/refunded`, { ...quota(), scope: 'owner-account', ownerKey: OWNER, timestamps: [] }],
@@ -107,6 +109,7 @@ describe.skipIf(!localEmulator)('bounded TronClass retention with real Firestore
       [`${BINDINGS}/disconnected`, { ...binding(), state: 'disconnected' }],
       [`${BINDINGS}/renewed`, { ...binding(), expiresAt: NOW + 3600_000 }],
       [`${QUOTAS}/recent`, { ...quota(), timestamps: [NOW] }],
+      [`${QUOTAS}/recent-target`, { ...quota(), scope: 'target-account', timestamps: [NOW] }],
       [`${QUOTAS}/recent-reservation`, { ...quota(), scope: 'owner-account', ownerKey: OWNER,
         timestamps: [{ timestamp: NOW, id: 'b'.repeat(32) }] }],
       [`${QUOTAS}/unrecognized`, { ...quota(), scope: 'other' }],

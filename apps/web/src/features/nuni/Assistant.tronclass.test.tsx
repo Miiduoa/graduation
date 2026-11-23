@@ -80,6 +80,22 @@ it('answers in the existing conversation without cloud consent and keeps private
   expect(JSON.stringify(cloudBodies)).not.toMatch(/TronClass|私人|evil\.test/);
 });
 
+it.each(['玩課雲', '玩課雲作業'])('falls back to the school LMS link for %s when the Agent is disabled', async question => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json({ error: 'TRONCLASS_DISABLED', message: '整合已停用' }, 503);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  await ask(question);
+  const link = await screen.findByRole('link', { name: /^開啟玩課雲作業/ });
+  expect(link.getAttribute('href')).toBe('/school-lms?schoolId=pu');
+  expect(fetch.mock.calls.some(([url]) => url === '/api/tronclass/agent')).toBe(true);
+  expect(screen.queryByText('整合已停用')).toBeNull();
+  expect(fetch.mock.calls.some(([url]) => url === '/api/nuni/assistant/ask')).toBe(false);
+});
+
 it('continues an ambiguous material request with a verified course selection', async () => {
   const calls: Record<string, unknown>[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {

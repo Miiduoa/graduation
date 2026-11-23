@@ -1,6 +1,6 @@
 import 'server-only';
 import {
-  TRONCLASS_ACCOUNT_LOGIN_LIMIT, TRONCLASS_LOGIN_WINDOW_MS, TRONCLASS_OWNER_LOGIN_LIMIT, tronClassLoginAttemptTimestamp,
+  TRONCLASS_ACCOUNT_LOGIN_LIMIT, TRONCLASS_LOGIN_WINDOW_MS, TRONCLASS_OWNER_LOGIN_LIMIT, TRONCLASS_TARGET_LOGIN_LIMIT, tronClassLoginAttemptTimestamp,
 } from './tronClassBinding';
 
 type Data = Record<string, unknown>;
@@ -53,6 +53,7 @@ function canDelete(collection: Collection, row: Data | undefined, now: number): 
   }
   if (collection === '_tronClassLoginAttempts') {
     const maximum = row.scope === 'owner' ? TRONCLASS_OWNER_LOGIN_LIMIT
+      : row.scope === 'target-account' ? TRONCLASS_TARGET_LOGIN_LIMIT
       : (row.scope === 'account' || row.scope === 'owner-account') ? TRONCLASS_ACCOUNT_LOGIN_LIMIT : 0;
     // A stale purgeAt must never reset a renewed school-account login budget.
     return maximum > 0 && Array.isArray(row.timestamps) &&

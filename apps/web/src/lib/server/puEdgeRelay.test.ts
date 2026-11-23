@@ -212,8 +212,9 @@ it('logs placement_miss when the worker did not run near Taiwan', async () => {
     fetch: relay,
     nonce: () => FIXED_NONCE,
   });
-  await fetchLike('https://alcat.pu.edu.tw/');
+  await fetchLike('https://alcat.pu.edu.tw/student/12345678/detail/98765432?next=13579');
   expect(JSON.parse(String(info.mock.calls[0]?.[0]))).toMatchObject({
+    path: '/student/:id/detail/:id',
     colo: 'remote-NRT',
     placement_miss: true,
   });

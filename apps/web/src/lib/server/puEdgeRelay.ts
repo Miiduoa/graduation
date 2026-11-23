@@ -153,7 +153,7 @@ function logClientRelay(fields: {
     JSON.stringify({
       msg: 'pu_edge_relay_client',
       host: fields.host,
-      path: fields.path,
+      path: fields.path.replace(/\/\d+(?=\/|$)/g, '/:id'),
       status: fields.status,
       ms: fields.ms,
       ...(fields.colo ? { colo: fields.colo } : {}),

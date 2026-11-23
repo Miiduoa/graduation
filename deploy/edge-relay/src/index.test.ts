@@ -195,13 +195,14 @@ it('marks placement_miss when execution is not near Taiwan', async () => {
   });
   vi.stubGlobal('fetch', vi.fn(async () => new Response('ok')));
   const request = requestWithPlacement(
-    await signedRelayRequest('https://relay-test.pu.edu.tw/', { method: 'GET' }, Date.now(), 'fedcba9876543210fedcba9876543210'),
+    await signedRelayRequest('https://relay-test.pu.edu.tw/student/12345678/detail/98765432?next=13579', { method: 'GET' }, Date.now(), 'fedcba9876543210fedcba9876543210'),
     'remote-NRT',
   );
   const response = await handleRelayRequest(request, { RELAY_SECRET: SECRET }, Date.now(), createMemoryNonceStore());
   expect(response.status).toBe(200);
   expect(response.headers.get(RELAY_COLO_HEADER)).toBe('remote-NRT');
   expect(JSON.parse(logs[0] || '{}')).toMatchObject({
+    path: '/student/:id/detail/:id',
     colo: 'remote-NRT',
     placement_miss: true,
   });
