@@ -392,12 +392,11 @@ const sampleCourses = owned && timetable
   // A matching campus alone is not permission to disclose another student's data.
   // Recheck ownership and freshness at prompt construction, after async model loading.
   // Scope checks must not invoke a restored root getter before row validation.
-  // Validate restored descriptors before a freshness check can invoke untrusted
-  // accessors. A getter-backed row must not change evidence between checks.
-  const candidateSense = owned ? (senseSnapshot ?? null) : null;
-  const verifiedSense = safeCampusSenseForPrompt(candidateSense)
-    ? validCampusSenseSnapshot(candidateSense, { uid: expectedOwnerUid, schoolId }, deviceNowMs)
+  const candidateSense = owned && hasOwnEvidenceFields(senseSnapshot,
+    ['userId', 'schoolId', 'checkedAt', 'schedule', 'assignments', 'announcements'])
+    ? validCampusSenseSnapshot(senseSnapshot, { uid: expectedOwnerUid, schoolId }, deviceNowMs)
     : null;
+  const verifiedSense = safeCampusSenseForPrompt(candidateSense) ? candidateSense : null;
   // Derive both the small excerpt and its next deadline from one verified,
   // already-authorized snapshot and one device-clock reading. A small local
   // model should not have to guess priority from an overdue backlog.

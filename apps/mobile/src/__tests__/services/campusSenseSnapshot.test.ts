@@ -1,8 +1,10 @@
 import { httpsCallable } from 'firebase/functions';
+import { runOfflineCampusTool } from '../../services/offlineCampusTools';
 import {
   refreshCampusSenseSnapshot,
   validCampusSenseSnapshot,
   CAMPUS_SENSE_MAX_AGE_MS,
+  type CampusSenseSnapshot,
 } from '../../services/campusSenseSnapshot';
 
 let mockUid: string | null = 'A';
@@ -139,68 +141,114 @@ test.each([
 });
 
 
-test.each([
-  ['February 30', '2026-02-30T08:00:00Z', 'assignment'],
-  ['February 29 in a non-leap year', '2026-02-29T08:00:00Z', 'assignment'],
-  ['out-of-range timezone offset', '2026-10-28T00:30:00+15:00', 'assignment'],
-  ['April 31', '2026-04-31T09:00:00Z', 'announcement'],
-] as const)('rejects %s in an authorized %s source rather than shifting its deadline', async (_, timestamp, kind) => {
-  const payload = envelope();
-  if (kind === 'assignment') payload.assignments.items[0].dueAt = timestamp;
-  else payload.announcements.items[0].publishedAt = timestamp;
-  mockCallable.mockResolvedValueOnce({ data: payload });
-  await expect(refreshCampusSenseSnapshot({ scope, isCurrent: () => true }))
-    .rejects.toThrow('invalid-sense-response');
-  expect(mockCallable).toHaveBeenCalledTimes(1);
+// The scope/freshness check and row-date parser at merge-base 1a1f36863.
+function mergeBaseValid(snapshot: CampusSenseSnapshot, now: number): CampusSenseSnapshot | null {
+  if (!scope.uid || !scope.schoolId || !snapshot ||
+      snapshot.userId !== scope.uid || snapshot.schoolId !== scope.schoolId) return null;
+  const savedAt = Date.parse(snapshot.checkedAt);
+  if (!Number.isFinite(savedAt) || savedAt > now + 30_000 || now - savedAt > CAMPUS_SENSE_MAX_AGE_MS) return null;
+  return snapshot;
+}
+
+function mergeBaseDate(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
+    throw new Error('invalid-sense-response');
+  }
+  return value;
+}
+
+const dates = [
+  ['ISO Z', '2026-11-02T01:00:00Z', true, true],
+  ['offset', '2026-11-02T09:00:00+08:00', true, true],
+  ['leap day', '2028-02-29T08:15:00Z', true, true],
+  ['no timezone', '2026-11-02T09:00:00', false, false],
+  ['legacy text', 'November 2, 2026 09:00:00 GMT', false, false],
+  ['extended year', '+010000-01-01T00:00:00.000Z', false, true],
+  ['invalid text', 'not-a-date', false, false],
+  ['non-leap day', '2026-02-29T08:00:00Z', false, true],
+  ['rollover', '2026-04-31T09:00:00Z', false, true],
+  ['offset beyond 14 hours', '2026-10-28T00:30:00+15:00', false, true],
+  ['null', null, true, false],
+] as const;
+
+describe.each(dates)('%s row date', (_label, date, keepFreshDate, confirmedOffline) => {
+  describe.each(['date', 'number', 'missing'] as const)('%s field', (field) => {
+    test.each(['plain', 'some=null', 'map=null', 'read-only length', 'iterator=null'] as const)(
+      '%s arrays preserve reuse and isolate row-date errors on refresh', async (arrayShape) => {
+        const payload = envelope();
+        const now = Date.parse(payload.checkedAt);
+        const applyDate = (row: object, key: string) => {
+          if (field === 'missing') Reflect.deleteProperty(row, key);
+          else Reflect.set(row, key, field === 'number' ? 42 : date);
+        };
+        applyDate(payload.assignments.items[1], 'dueAt');
+        payload.announcements.items.push({ title: '其他公告', publishedAt: payload.checkedAt });
+        applyDate(payload.announcements.items[0], 'publishedAt');
+        const modify = (items: unknown[]) => {
+          if (arrayShape === 'read-only length') Object.defineProperty(items, 'length', { writable: false });
+          if (arrayShape === 'some=null') Object.defineProperty(items, 'some', { value: null });
+          if (arrayShape === 'map=null') Object.defineProperty(items, 'map', { value: null });
+          if (arrayShape === 'iterator=null') Object.defineProperty(items, Symbol.iterator, { value: null });
+        };
+        const restored = { ...payload, userId: scope.uid } as CampusSenseSnapshot;
+        const bare = {
+          ...restored,
+          assignments: { ...restored.assignments, items: restored.assignments.items.slice() },
+          announcements: { ...restored.announcements, items: restored.announcements.items.slice() },
+        };
+        modify(payload.assignments.items);
+        modify(payload.announcements.items);
+
+        expect(validCampusSenseSnapshot(restored, scope, now)).toBe(mergeBaseValid(restored, now));
+        const context = {
+          ownerUid: scope.uid, schoolId: scope.schoolId, schoolName: '靜宜大學', checkedAt: payload.checkedAt,
+          timetable: { source: 'saved-device-copy' as const, courses: [], updatedAt: payload.checkedAt },
+        };
+        const base = mergeBaseValid(bare, now);
+        for (const [question, otherEvidence] of [
+          ['有哪些待交作業？', '資料庫期末報告'],
+          ['校園公告', '其他公告'],
+          ['今天要先做什麼？', '手機課表副本'],
+        ]) {
+          const answer = runOfflineCampusTool(question, context, restored, scope.uid);
+          expect(answer).toEqual(runOfflineCampusTool(question, context, base, scope.uid));
+          expect(answer?.content).toContain(otherEvidence);
+        }
+        const undatedQuestion = '沒有截止日期的作業有哪些？';
+        const undated = runOfflineCampusTool(undatedQuestion, context, restored, scope.uid);
+        expect(undated?.assignmentRead?.items.map(({ title }) => title))
+          .toEqual(field === 'date' && confirmedOffline ? [] : ['週二練習']);
+
+        const rowDate = field === 'date' ? date : field === 'number' ? 42 : undefined;
+        const expectedDate = field === 'date' && keepFreshDate ? mergeBaseDate(rowDate) : null;
+        mockCallable.mockResolvedValueOnce({ data: payload });
+        const fresh = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
+        expect(fresh).toEqual({
+          ...bare,
+          assignments: {
+            ...bare.assignments,
+            items: [bare.assignments.items[0], { ...bare.assignments.items[1], dueAt: expectedDate }],
+            coverage: { complete: true, pages: 1, reason: 'complete' },
+          },
+          announcements: {
+            ...bare.announcements,
+            items: [{ ...bare.announcements.items[0], publishedAt: expectedDate }, bare.announcements.items[1]],
+          },
+        });
+        expect(validCampusSenseSnapshot(fresh, scope, now)).toBe(fresh);
+        if (expectedDate === null) {
+          expect(runOfflineCampusTool(undatedQuestion, context, fresh, scope.uid)?.assignmentRead?.items)
+            .toEqual([{ ...bare.assignments.items[1], dueAt: null }]);
+        }
+      },
+    );
+  });
 });
 
-test('preserves genuine leap-day and timezone-offset dates in the authorized source', async () => {
-  const payload = envelope();
-  payload.assignments.items[0].dueAt = '2028-02-29T08:15:00Z';
-  payload.announcements.items[0].publishedAt = '2026-10-28T00:30:00+08:00';
-  mockCallable.mockResolvedValueOnce({ data: payload });
-  const result = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
-  expect(result.assignments.items[0].dueAt).toBe('2028-02-29T08:15:00Z');
-  expect(result.announcements.items[0].publishedAt).toBe('2026-10-28T00:30:00+08:00');
-});
-
-test('rejects a restored impossible checkedAt even when Date.parse would roll it into the current minute', async () => {
-  const snapshot = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
-  const rollover = '2026-02-30T08:00:00Z';
-  const pretendNow = Date.parse('2026-03-02T08:00:00Z');
-  expect(validCampusSenseSnapshot({ ...snapshot, checkedAt: rollover }, scope, pretendNow)).toBeNull();
-});
-
-test('does not reuse a recent snapshot containing an impossible source date from an older parser', async () => {
-  const snapshot = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
-  const now = Date.parse(snapshot.checkedAt);
-  expect(validCampusSenseSnapshot(snapshot, scope, now)).not.toBeNull();
-  const assignment = {
-    ...snapshot,
-    assignments: {
-      ...snapshot.assignments,
-      items: snapshot.assignments.items.map((row, index) =>
-        index === 0 ? { ...row, dueAt: '2026-02-30T08:00:00Z' } : row),
-    },
-  };
-  const announcement = {
-    ...snapshot,
-    announcements: {
-      ...snapshot.announcements,
-      items: snapshot.announcements.items.map((row, index) =>
-        index === 0 ? { ...row, publishedAt: '2026-04-31T09:00:00Z' } : row),
-    },
-  };
-  expect(validCampusSenseSnapshot(assignment, scope, now)).toBeNull();
-  expect(validCampusSenseSnapshot(announcement, scope, now)).toBeNull();
-  // Missing deadlines are permitted; they must not be invented or treated as invalid.
-  expect(validCampusSenseSnapshot({
-    ...snapshot,
-    assignments: { ...snapshot.assignments, items: snapshot.assignments.items.map(
-      (row) => ({ ...row, dueAt: null }),
-    ) },
-    announcements: { ...snapshot.announcements, items: snapshot.announcements.items.map(
-      (row) => ({ ...row, publishedAt: null }),
-    ) },
-  }, scope, now)).not.toBeNull();
+test('keeps the merge-base freshness check for a restored legacy synchronization time', () => {
+  const snapshot = { ...envelope(), userId: scope.uid, checkedAt: '2026-02-30T08:00:00Z' } as CampusSenseSnapshot;
+  const now = Date.parse('2026-03-02T08:00:00Z');
+  expect(mergeBaseValid(snapshot, now)).toBe(snapshot);
+  expect(validCampusSenseSnapshot(snapshot, scope, now)).toBe(snapshot);
 });

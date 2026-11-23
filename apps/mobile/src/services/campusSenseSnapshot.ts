@@ -57,12 +57,18 @@ function count(value: unknown, source: SenseSourceStatus): number | null {
   }
   return value;
 }
-function dateString(value: unknown): string | null {
-  if (value === null) return null;
-  if (!isRealTimestamp(value)) {
-    throw new Error('invalid-sense-response');
+// An unconfirmed date does not invalidate the row or its source.
+function sourceDate(value: unknown): string | null {
+  return isRealTimestamp(value) ? value : null;
+}
+
+function readSourceRows<T>(items: readonly unknown[], limit: number, parse: (item: unknown) => T): T[] {
+  const size = Math.min(items.length, limit);
+  const rows = new Array<T>(size);
+  for (let index = 0; index < size; index += 1) {
+    if (index in items) rows[index] = parse(items[index]);
   }
-  return value;
+  return rows;
 }
 function requiredText(value: unknown, max: number): string {
   if (typeof value !== 'string' || !value.trim()) throw new Error('invalid-sense-response');
@@ -114,7 +120,7 @@ function parseSnapshot(payload: unknown, userId: string, schoolId: string): Pars
     assignments: {
       status: assignmentStatus, count: total,
       items: assignmentStatus === 'available'
-        ? assignments.items.map((item: unknown) => {
+        ? readSourceRows(assignments.items, CAMPUS_ASSIGNMENT_PAGE_SIZE, (item) => {
             const row = record(item);
             if (!row) throw new Error('invalid-sense-response');
             const source = row.source === undefined ? null : parseCampusAssignmentSource(row.source);
@@ -122,7 +128,7 @@ function parseSnapshot(payload: unknown, userId: string, schoolId: string): Pars
             return {
               title: requiredText(row.title, 140),
               groupName: typeof row.groupName === 'string' ? row.groupName.trim().slice(0, 100) : '',
-              dueAt: dateString(row.dueAt),
+              dueAt: sourceDate(row.dueAt),
               ...(source ? { source } : {}),
             };
           }) : [],
@@ -130,13 +136,13 @@ function parseSnapshot(payload: unknown, userId: string, schoolId: string): Pars
     announcements: {
       status: announcementStatus,
       items: announcementStatus === 'available'
-        ? announcements.items.slice(0, 12).map((item: unknown) => {
+        ? readSourceRows(announcements.items, 12, (item) => {
             const row = record(item);
             if (!row) throw new Error('invalid-sense-response');
             const source = row.source === undefined ? null : parseCampusAnnouncementSource(row.source);
             if (row.source !== undefined && !source) throw new Error('invalid-sense-response');
             return {
-              title: requiredText(row.title, 140), publishedAt: dateString(row.publishedAt),
+              title: requiredText(row.title, 140), publishedAt: sourceDate(row.publishedAt),
               ...(source ? { source } : {}),
             };
           }) : [],
@@ -156,16 +162,6 @@ export function validCampusSenseSnapshot(
 ): CampusSenseSnapshot | null {
   if (!scope.uid || !scope.schoolId || !snapshot ||
       snapshot.userId !== scope.uid || snapshot.schoolId !== scope.schoolId) return null;
-  // A rollover such as February 30 must not become a fresh, trusted snapshot.
-  if (!isRealTimestamp(snapshot.checkedAt)) return null;
-  // Recheck a snapshot held in memory as well as fresh callable data. A source
-  // accepted by an older parser must never regain trusted status on reuse.
-  if (!Array.isArray(snapshot.assignments?.items) ||
-      snapshot.assignments.items.some((row) => !row ||
-        (row.dueAt !== null && !isRealTimestamp(row.dueAt))) ||
-      !Array.isArray(snapshot.announcements?.items) ||
-      snapshot.announcements.items.some((row) => !row ||
-        (row.publishedAt !== null && !isRealTimestamp(row.publishedAt)))) return null;
   const savedAt = Date.parse(snapshot.checkedAt);
   if (!Number.isFinite(savedAt) || savedAt > now + 30_000 || now - savedAt > CAMPUS_SENSE_MAX_AGE_MS) return null;
   return snapshot;
@@ -210,7 +206,8 @@ export async function refreshCampusSenseSnapshot(input: {
   const items: CampusSenseSnapshot['assignments']['items'] = [];
   const identities = new Set<string>();
   const append = (rows: CampusSenseSnapshot['assignments']['items']) => {
-    for (const row of rows) {
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
       if (row.source) {
         const identity = JSON.stringify([row.source.groupId, row.source.assignmentId]);
         if (identities.has(identity)) throw new Error('duplicate-assignment-page');

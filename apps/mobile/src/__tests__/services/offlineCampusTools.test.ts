@@ -223,25 +223,11 @@ describe('scoped deadline reads', () => {
     ...authorizedSense, checkedAt,
     assignments: {
       status: 'available' as const, count: 8,
-      items: [monday, task('未確認', null), sunday, task('來源未提供期限', null), previous],
+      items: [monday, task('未確認', null), sunday, task('無時區', '2026-11-02T09:00:00'), previous],
     },
   };
   const read = (question: string, uid = 'alice', filter?: string) =>
     runOfflineCampusTool(question, context, source, uid, filter);
-
-  test('rejects a timezone-free restored source instead of silently reusing other deadlines', () => {
-    const invalid = {
-      ...source,
-      assignments: {
-        ...source.assignments,
-        items: [...source.assignments.items, task('無時區', '2026-11-02T09:00:00')],
-      },
-    };
-    const result = runOfflineCampusTool('明天有哪些作業截止？', context, invalid, 'alice');
-    expect(result).toMatchObject({ tool: 'online-required', route: '/classroom' });
-    expect(result?.content).not.toContain(monday.title);
-    expect(result?.assignmentRead).toBeUndefined();
-  });
 
   test('明天 only returns Taiwan Monday deadlines and distinguishes unknown dates from unread rows', () => {
     const answer = read('明天有哪些作業截止？');
@@ -258,7 +244,7 @@ describe('scoped deadline reads', () => {
     expect(read('有哪些逾期作業？')?.assignmentRead?.items).toEqual([previous]);
     expect(read('有哪些尚未逾期作業？')?.assignmentRead?.items).toEqual([sunday, monday]);
     expect(read('沒有截止日期的作業有哪些？')?.assignmentRead?.items.map((row) => row.title))
-      .toEqual(['未確認', '來源未提供期限']);
+      .toEqual(['未確認', '無時區']);
   });
 
   test('今天 includes earlier deadlines today; the next seven days start now and do not trigger the planner', () => {
