@@ -112,7 +112,6 @@ function pendingKey(owner: string, studentKey: string | null, courseId: number, 
     throw new Error('INVALID_PENDING_STUDENT_KEY');
   return `nuni.tronclass.pending.v2:${encodeURIComponent(owner)}:${studentKey}:${courseId}:${homeworkId}`;
 }
-}
 // Screens for the same owner/student/homework share one local journal. Serialize the
 // read/check/write interval so another mounted screen cannot replace an ID
 // between a conditional clear's read and remove. Other keys remain independent.
