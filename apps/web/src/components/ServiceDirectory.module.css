@@ -65,7 +65,8 @@
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
-.searchField input[type='search'] {
+/* The enclosing field owns the surface and rounded corners. */
+.directory .searchField input[type='search'] {
   flex: 1;
   min-width: 0;
   width: 100%;
