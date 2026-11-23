@@ -143,6 +143,11 @@ describe('TronClass clauses inside a multi-clause request', () => {
     "校園公告，'查玩課雲未交作業，下載教材'",
     '查玩課雲未交作業，不要上傳附件然後繳交附件',
     '查玩課雲未交作業，刪除繳交紀錄',
+    '查玩課雲未交作業，繳交包含目前狀態的報告',
+    '查玩課雲未交作業，繳交作業狀態報告',
+    '查玩課雲未交作業，不要上傳附件同時刪除草稿',
+    '查玩課雲未交作業，不要繳交附件順便刪除草稿',
+    '查玩課雲未交作業，不要繳交附件另外提交報告',
   ])('adds no Agent read to %s', question => {
     expect(tronClassCompoundClauses(question)).toEqual([]);
   });

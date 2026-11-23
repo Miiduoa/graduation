@@ -52,6 +52,11 @@ const TRONCLASS_CONTINUATION = /(?:作業|教材|講義|附件|檔案|未交|未
 const OTHER_SERVICE_OR_SCHEDULE = /(?:頁面|畫面|入口|校園|學校|系上|社團|公車|交通|課表|成績|行事曆|日曆|空堂|時段|安排|排程|提醒|設定|失物|餐|活動|地圖|教室|今天|明天|後天|早上|上午|中午|下午|晚上|分鐘|小時|\d{1,2}\s*[:：點])/u;
 const NEGATED = /(?:不要|別|不准|禁止|無須|不用|不需要|do\s+not|don't|never)/i;
 const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
+const ACTION_BOUNDARY = '然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|而且|並|再|和|與|、|\\band\\b|\\bthen\\b|\\balso\\b';
+const NEGATED_WRITE = new RegExp(
+  "(?:不要|別|不准|禁止|無須|不用|不需要|do\\s+not|don't|never)\\s*(?:幫我|替我|代我|自動|直接)?\\s*" +
+  "(?:繳交|提交|送出|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|submit|upload|delete|post|reply)" +
+  `(?:(?!${ACTION_BOUNDARY})[^，。；,;])*`, 'gi');
 
 // An ASCII apostrophe between letters is an English contraction, not a quote.
 const QUOTE = /[「」『』“”‘’"`]|(?<![A-Za-z])'|'(?![A-Za-z])/u;
@@ -60,6 +65,9 @@ const WRITE_VERB = /(?:繳交|提交|送出|交出|交作業|上傳|發[佈布�
 // write verb in a clause is a command, whatever else the clause says.
 const SUBMIT_VERB = /(?:繳交|提交|送出|交出|交作業|上傳|\b(?:submit|upload)\b)/i;
 const WRITE_VERB_OTHER_THAN_SUBMIT = /(?:發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名|退選|選課|\b(?:delete|post|reply|withdraw)\b)/i;
+// The clause itself must open as a read request ("查…繳交狀態"); a clause that opens with
+// the write verb ("繳交…狀態報告") is a command whatever nouns follow it.
+const READ_STATUS_QUESTION = /^(?:請|麻煩|幫我|替我)*\s*(?:查詢|查看|查|看|列出|顯示|確認|check|show|list)/i;
 const SUBMISSION_STATUS = /(?:狀態|紀錄|記錄|情況|有哪些|是否|有沒有)/u;
 const CHAINED_WRITE = /(?:並|再|然後|直接|自動|順便|同時|and|then).{0,25}(?:繳交|提交|送出|上傳|submit|upload)/i;
 const EXPLICIT_WRITE = /(?:幫我|替我|代我|請|直接|自動)\s*(?:把|將)?\s*(?:繳交|提交|送出|交出|交作業|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名)|(?:submit|upload|delete|post|reply|withdraw)\b/i;
@@ -76,7 +84,9 @@ function authorizesPrivateRead(original: string): boolean {
  * explicitly negated write clauses before evaluating the positive command.
  */
 function withoutNegatedWrites(original: string): string {
-  return original.replace(/(?:不要|別|不准|禁止|無須|不用|不需要|do\s+not|don't|never)\s*(?:幫我|替我|代我|自動|直接)?\s*(?:繳交|提交|送出|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|submit|upload|delete|post|reply)(?:(?!然後|接著|之後|再|並|而且|\band\b|\bthen\b)[^，。；,;])*/gi, '');
+  // A negation only covers its own write phrase: it stops at any word the clause
+  // splitter or the planner treats as starting another action.
+  return original.replace(NEGATED_WRITE, '');
 }
 
 function toOperationText(text: string): string {
@@ -100,7 +110,8 @@ function wholeRequestAllowsCompoundRead(question: string): boolean {
   // status question about submissions stays a read.
   return !positive.split(CLAUSE_SEPARATOR).some(clause =>
     WRITE_VERB.test(toOperationText(clause)) &&
-    !(SUBMIT_VERB.test(clause) && SUBMISSION_STATUS.test(clause) && !WRITE_VERB_OTHER_THAN_SUBMIT.test(clause)));
+    !(SUBMIT_VERB.test(clause) && SUBMISSION_STATUS.test(clause) && READ_STATUS_QUESTION.test(clause) &&
+      !WRITE_VERB_OTHER_THAN_SUBMIT.test(clause)));
 }
 
 /**
