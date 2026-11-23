@@ -72,6 +72,18 @@ it.each([
   expect((speak.mock.calls[0][0] as Utterance).voice).toBe(traditional);
 });
 
+it.each([
+  { romanized: 'zh-Latn-TW', traditional: 'zh-Hant-HK' },
+  { romanized: 'cmn_Latn_TW', traditional: 'zh-TW' },
+])('does not prefer a local Latin-transliteration voice ($romanized) over installed Traditional Chinese', ({ romanized, traditional }) => {
+  const romanizedVoice = { lang: romanized, localService: true };
+  const traditionalVoice = { lang: traditional, localService: true };
+  voices = [romanizedVoice, traditionalVoice];
+  render(<StudyReadAloud text="請朗讀教材中的繁體中文內容" />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect((speak.mock.calls[0][0] as Utterance).voice).toBe(traditionalVoice);
+});
+
 it('keeps an explicitly Simplified Chinese local voice usable when no Traditional voice exists', () => {
   const onlyVoice = { lang: 'zh-Hans-TW', localService: true };
   voices = [onlyVoice, remote];

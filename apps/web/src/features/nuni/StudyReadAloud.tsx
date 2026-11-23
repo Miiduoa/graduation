@@ -237,10 +237,11 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
       // rather than list order; never switch to a network-backed voice.
       const localeRank = (lang: string) => {
         const subtags = lang.toLowerCase().replace(/_/g, '-').split('-').slice(1);
-        // The script tag wins over a contradictory region tag. An explicitly
-        // Simplified voice such as zh-Hans-TW must not outrank an installed
-        // Traditional Chinese voice just because its region says TW.
+        // Script subtags outrank a contradictory region. A Taiwanese
+        // Latin-transliteration voice (zh-Latn-TW) is not a Han-character
+        // reading voice and must not outrank an installed Traditional voice.
         if (subtags.includes('hans')) return 4;
+        if (subtags.some((tag) => /^[a-z]{4}$/u.test(tag) && tag !== 'hant' && tag !== 'hans')) return 4;
         if (subtags.includes('tw')) return 0;
         if (subtags.includes('hant')) return 1;
         if (subtags.includes('hk') || subtags.includes('mo')) return 2;
