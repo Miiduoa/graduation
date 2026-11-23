@@ -1,6 +1,6 @@
 /**
  * A visible local filename stem shared by note TXT, reading JSON and practice
- * JSON exports. Fall back when the stem contains only invisible characters.
+ * JSON exports. Do not leak invisible format controls into mobile file lists.
  * Keep ZWJ/ZWNJ for readable multilingual and emoji lesson titles.
  */
 // A 48-code-point slice can leave one regional indicator of a flag, a
@@ -115,12 +115,5 @@ export function courseStudyBackupFilenameStem(sourceTitle: string): string {
     .trim()
     .replace(/\.(pdf|txt|md|markdown)$/i, '')
     .replace(/^[. ]+|[. ]+$/gu, '');
-  // Both the cleaned title and its exported 48-code-point prefix must be visible.
-  // Long default-ignorable prefixes can otherwise hide the only readable name.
-  // Preserve unassigned and private-use code points, including unassigned
-  // code points covered by Default_Ignorable_Code_Point.
-  const visibleCharacter = /[\p{Cn}\p{Co}]|[^\p{White_Space}\p{Cc}\p{Default_Ignorable_Code_Point}]/u;
-  if (!visibleCharacter.test(safe)) return '讀書白板';
-  const stem = truncateFilenameStem(safe).trim();
-  return visibleCharacter.test(stem) ? stem : '讀書白板';
+  return truncateFilenameStem(safe).trim() || '讀書白板';
 }

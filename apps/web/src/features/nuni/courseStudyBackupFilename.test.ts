@@ -6,19 +6,14 @@ import { courseStudyPracticeCheckpointFilename } from './courseStudyPracticeChec
 import { courseStudyBackupFilenameStem as mergeBaseFilenameStem } from './__fixtures__/courseStudyMergeBase/courseStudyBackupFilename';
 
 describe('backup filename stems compared with merge-base', () => {
-  const defaultStem = '讀書白板';
-
-  it('preserves the merge-base stem for every Unicode scalar outside the invisible set', () => {
-    const invisible = /[\p{White_Space}\p{Cc}\p{Default_Ignorable_Code_Point}]/u;
-    const unassignedOrPrivate = /[\p{Cn}\p{Co}]/u;
+  it('matches merge-base for every Unicode code point, including lone surrogates', () => {
     for (let point = 0; point <= 0x10ffff; point += 1) {
-      if (point >= 0xd800 && point <= 0xdfff) continue;
       const title = String.fromCodePoint(point);
       const expected = mergeBaseFilenameStem(title);
       const actual = courseStudyBackupFilenameStem(title);
-      if (actual === expected) continue;
-      if (actual === defaultStem && invisible.test(title) && !unassignedOrPrivate.test(title)) continue;
-      expect(actual, `U+${point.toString(16).toUpperCase().padStart(4, '0')}`).toBe(expected);
+      if (actual !== expected) {
+        expect(actual, `U+${point.toString(16).toUpperCase().padStart(4, '0')}`).toBe(expected);
+      }
     }
   });
 
@@ -35,7 +30,7 @@ describe('backup filename stems compared with merge-base', () => {
     ['Arabic fatha (Mn)', '\u064e.pdf'],
     ['combining acute accent (Mn)', '\u0301.pdf'],
     ['combining enclosing circle (Me)', '\u20dd.pdf'],
-    ['braille blank outside the allowed fallback set', '\u2800\u200d.pdf'],
+    ['braille blank with ZWJ', '\u2800\u200d.pdf'],
     ['zero-width space', '\u200b'],
     ['BOM', '\ufeff'],
     ['directional controls', '\u200e\u202e\u2069'],
@@ -54,46 +49,23 @@ describe('backup filename stems compared with merge-base', () => {
     ['reserved name', 'CON.txt'],
     ['reserved filename characters', '<>:"/\\|?*'],
     ['leading dots', '...課程.pdf'],
+    ['ZWNJ', '\u200c'],
+    ['ZWJ', '\u200d\u200d'],
+    ['ZWJ before an extension', '\u200d.md'],
+    ['variation selectors', '\ufe0f\u{e0100}'],
+    ['Hangul filler', '\u3164'],
+    ['mixed invisible characters', '\u3000\u200c\u200d\ufeff\u202e\ufe0f\u00ad.pdf'],
+    ['48 Hangul fillers before visible text', '\u3164'.repeat(48) + '課程.pdf'],
+    ['47 Hangul fillers before visible text', '\u3164'.repeat(47) + '課程.pdf'],
+    ['47 Hangul fillers before a visible format symbol', '\u3164'.repeat(47) + '\u06dd'],
+    ['visible text and format symbol at the truncation boundary', '課'.repeat(46) + '\u06dd一後續.pdf'],
+    ['visible text before a long Hangul filler run', '課' + '\u3164'.repeat(80)],
   ])('matches merge-base for %s', (_label, title) => {
     const stem = mergeBaseFilenameStem(title);
     expect(courseStudyBackupFilenameStem(title)).toBe(stem);
     expect(courseStudyNotesFilename(title)).toBe(stem + '-學習筆記.txt');
     expect(courseStudyProgressFilename(title)).toBe(stem + '-閱讀進度.campus-study.json');
     expect(courseStudyPracticeCheckpointFilename(title)).toBe(stem + '-逐題練習.campus-practice.json');
-  });
-
-  it.each([
-    ['ZWNJ', '\u200c'],
-    ['ZWJ', '\u200d\u200d'],
-    ['ZWJ before an extension', '\u200d.md'],
-    ['variation selectors', '\ufe0f\u{e0100}'],
-    ['default-ignorable non-mark', '\u3164'],
-    ['mixed invisible characters', '\u3000\u200c\u200d\ufeff\u202e\ufe0f\u00ad.pdf'],
-  ])('uses the default stem for %s retained by merge-base', (_label, title) => {
-    expect(mergeBaseFilenameStem(title)).not.toBe(defaultStem);
-    expect(courseStudyBackupFilenameStem(title)).toBe(defaultStem);
-    expect(courseStudyNotesFilename(title)).toBe(defaultStem + '-學習筆記.txt');
-    expect(courseStudyProgressFilename(title)).toBe(defaultStem + '-閱讀進度.campus-study.json');
-    expect(courseStudyPracticeCheckpointFilename(title)).toBe(defaultStem + '-逐題練習.campus-practice.json');
-  });
-});
-
-describe('backup filename visible truncation', () => {
-  it('falls back when only invisible Hangul fillers fit before the code-point cap', () => {
-    const prefix = '\u3164'.repeat(48);
-    const sourceTitle = prefix + '課程.pdf';
-    expect(courseStudyBackupFilenameStem(sourceTitle)).toBe('讀書白板');
-    expect(courseStudyNotesFilename(sourceTitle)).toBe('讀書白板-學習筆記.txt');
-    expect(courseStudyProgressFilename(sourceTitle)).toBe('讀書白板-閱讀進度.campus-study.json');
-    expect(courseStudyPracticeCheckpointFilename(sourceTitle)).toBe('讀書白板-逐題練習.campus-practice.json');
-  });
-
-  it('keeps an actually visible character that still fits within the cap', () => {
-    const prefix = '\u3164'.repeat(47);
-    expect(courseStudyBackupFilenameStem(prefix + '課程.pdf')).toBe(prefix + '課');
-    expect(courseStudyBackupFilenameStem(prefix + '\u06dd')).toBe(prefix + '\u06dd');
-    expect(courseStudyBackupFilenameStem('課'.repeat(46) + '\u06dd一後續.pdf')).toBe('課'.repeat(46) + '\u06dd一');
-    expect(courseStudyBackupFilenameStem('課' + '\u3164'.repeat(80))).toBe('課' + '\u3164'.repeat(47));
   });
 });
 
