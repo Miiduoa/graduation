@@ -154,9 +154,8 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
 
     const after = text.slice(match.index + match[0].length).trimStart();
     const segment = before.split(/[,;。?!、:\r\n]/u).at(-1)!.trimStart();
-    // In a standalone transit query, 「交」 is part of the noun 「交通」.
-    if (match[0] === '交' && /^(?:(?:查詢|查看|查|看)\s*)?$/u.test(segment) &&
-      /^通(?:資訊)?\s*(?=$|[,;。?!、])/u.test(text.slice(match.index + 1))) continue;
+    // 「交」 begins nouns such as 交通 and 交流, which are not submission commands.
+    if (match[0] === '交' && /^(?:通|流|易|換|際|友|集|叉|往)/u.test(text.slice(match.index + 1))) continue;
     if (ADDITIVE_CUE.test(before)) return STATUS_NOUN.test(after) ? 'planner' : 'unsupported';
     if (WRITE_CUE.test(before)) return 'unsupported';
     if (segment.includes('把')) return 'unsupported';
@@ -203,8 +202,22 @@ function hasBaObjectWrite(text: string): boolean {
   return false;
 }
 
+function textWithoutQuotedSpans(text: string): string {
+  return text
+    .replace(/「[^」]*」/gu, ' ')
+    .replace(/『[^』]*』/gu, ' ')
+    .replace(/“[^”]*”/gu, ' ')
+    .replace(/"[^"]*"/gu, ' ')
+    .replace(/(?<![A-Za-z])'[^']*'(?![A-Za-z])/gu, ' ');
+}
+
+function keywordOnlyInsideQuotes(text: string): boolean {
+  return TRONCLASS_KEYWORD.test(text) && !TRONCLASS_KEYWORD.test(textWithoutQuotedSpans(text));
+}
+
 /** Examples, translations, quotes, general explanations and negated reads do not authorize a private read. */
 function authorizesPrivateRead(original: string): boolean {
+  if (keywordOnlyInsideQuotes(original)) return false;
   for (const match of original.matchAll(NEGATIONS)) {
     const rest = original.slice(match.index);
     if (!STARTS_NEGATED_WRITE.test(rest) &&
@@ -212,7 +225,7 @@ function authorizesPrivateRead(original: string): boolean {
   }
   // Terminal status questions ask for the current state.
   const explanationText = original.replace(STATUS_EXPLANATION, '$1');
-  return !(/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(explanationText) ||
+  return !(/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|解釋|釋義|備註|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(explanationText) ||
     /^[「『“"'][\s\S]*[」』”"']$/.test(original));
 }
 
@@ -243,7 +256,9 @@ export function tronClassCompoundClauses(question: string): string[] {
     !TRONCLASS_KEYWORD.test(question) || !isMultiClauseRequest(question) ||
     tronClassExplicitNavigationQuestion(question) || !wholeRequestAllowsCompoundRead(question) ||
     !TRONCLASS_KEYWORD.test(readRoutingText(original))) return [];
-  const clauses = original.split(CLAUSE_SEPARATOR).map(part => part.trim()).filter(Boolean);
+  // Split the text after negated writes are removed, so 和／與 inside a
+  // negated object cannot become their own private-read clauses.
+  const clauses = readRoutingText(original).split(CLAUSE_SEPARATOR).map(part => part.trim()).filter(Boolean);
   const result: string[] = [];
   const seen = new Set<string>();
   let context = false;

@@ -501,4 +501,28 @@ describe('write occurrences in TronClass requests', () => {
     expect(canAnswerTronClassQuestion(question)).toBe(false);
     expect(tronClassCompoundClauses(question)).toEqual([]);
   });
+
+  it('does not turn a negated object into a homework read beside another TronClass clause', () => {
+    expect(tronClassCompoundClauses('查玩課雲公告，不要繳交這份和作業附件')).toEqual(['查玩課雲公告']);
+    expect(tronClassCompoundClauses('不要繳交這份和玩課雲作業附件，只查校園公告，查創課教材')).toEqual(['查創課教材']);
+  });
+
+  it.each([
+    '請解釋「玩課雲作業」',
+    '備註：「查玩課雲作業」',
+    '這句「玩課雲作業」是什麼意思',
+  ])('does not authorize a private read from a quoted or explained mention in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+  });
+
+  it.each([
+    '查玩課雲跨文化交流課程',
+    '查玩課雲交流區公告',
+    '查玩課雲交通資訊作業說明',
+  ])('keeps the course or notice read in %s', question => {
+    const parsed = parseTronClassAgentIntent(question);
+    expect(parsed?.intent).not.toBe('unsupported');
+    expect(parsed?.intent).toBeTruthy();
+  });
 });
