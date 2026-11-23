@@ -18,6 +18,7 @@ import {
 } from '../../services/creatorProfile';
 import type { CampusPostDoc } from '../../services/feed';
 import { readCreatorPin, saveCreatorPin, type CreatorPin } from '../../services/creatorPin';
+import { isCreatorCardTransientReadError, readCreatorCard } from '../../services/creatorCard';
 import { CreatorCardPanel } from './CreatorCardPanel';
 import { CreatorHighlight } from './CreatorHighlight';
 
@@ -26,6 +27,10 @@ type ReadState<T> =
   | { status: 'loading' }
   | { status: 'error' }
   | { status: 'ready'; value: T };
+type FirstCardRead = {
+  promise: ReturnType<typeof readCreatorCard>;
+  invalidatedBy: { error: unknown } | null;
+};
 type PostsPage = { rows: CampusPostDoc[]; cursor: CreatorCursor; hasMore: boolean };
 type FollowState = 'loading' | 'following' | 'not-following' | 'pending' | 'error';
 type PinState = { status: 'loading' } | { status: 'error' } | { status: 'ready'; value: CreatorPin };
@@ -93,6 +98,47 @@ function ScopedCreatorProfile({
 }) {
   const styles = useThemeStyleSheet(createStyles);
   const own = viewerUid === memberUid;
+  const firstCardRead = useRef<FirstCardRead | null | undefined>(undefined);
+  const readIntro = useCallback(() => {
+    const first = firstCardRead.current;
+    const read = readCreatorCard(schoolId, memberUid);
+    // Only a still-pending first read of one's own card can back up a failed reload.
+    if (first === null) return read;
+    const clearFirst = (record: FirstCardRead) => {
+      if (firstCardRead.current === record) firstCardRead.current = null;
+    };
+    if (first === undefined) {
+      const record: FirstCardRead = { promise: read, invalidatedBy: null };
+      firstCardRead.current = record;
+      // Normal completion ends future lookups without invalidating a reload
+      // that already captured this first read while it was still pending.
+      void read.then(() => clearFirst(record), () => clearFirst(record));
+      return read;
+    }
+    return read.then((value) => {
+      clearFirst(first);
+      return value;
+    }, (error: unknown) => {
+      if (!isCreatorCardTransientReadError(error)) {
+        // Invalidate the record held by every concurrent reload, not just the
+        // lookup ref. A fallback may already be waiting on the first Promise.
+        first.invalidatedBy = { error };
+        clearFirst(first);
+        throw error;
+      }
+      const requireValidFallback = () => {
+        if (first.invalidatedBy) throw first.invalidatedBy.error;
+      };
+      requireValidFallback();
+      return first.promise.then((value) => {
+        requireValidFallback();
+        return value;
+      }, (reason: unknown) => {
+        requireValidFallback();
+        throw reason;
+      });
+    });
+  }, [schoolId, memberUid]);
   const [tab, setTab] = useState<ProfileTab>('posts');
   const [identity, setIdentity] = useState<ReadState<CreatorIdentity | null>>({ status: 'loading' });
   const [posts, setPosts] = useState<ReadState<PostsPage>>({ status: 'loading' });
@@ -305,8 +351,10 @@ function ScopedCreatorProfile({
                 <Action label="重試名片" onPress={() => setRefreshRevision((n) => n + 1)} />
               </View>
             )}
-            <CreatorCardPanel schoolId={schoolId} ownerUid={memberUid} own={own}
-              refreshKey={`${tab}:${refreshRevision}:${savedRevision}:${focusRevision}`} />
+            {/* The owner's editor keeps its unresolved write and draft across tabs. */}
+            <CreatorCardPanel key={own ? 'owner' : tab} schoolId={schoolId} ownerUid={memberUid} own={own}
+              readIntro={own ? readIntro : undefined}
+              reloadRevision={`${tab}:${refreshRevision}:${savedRevision}:${focusRevision}`} />
             <CreatorHighlight key={schoolId + ':' + memberUid}
               schoolId={schoolId} memberUid={memberUid} own={own} candidates={postRows}
               openPost={(postId) => navigation?.navigate?.('PostDetail', { postId })} />

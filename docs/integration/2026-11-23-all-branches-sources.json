@@ -1,8 +1,9 @@
 {
-  "capturedAt": "2026-11-23T07:09:22.840698+00:00",
+  "capturedAt": "2026-11-23T07:44:46Z",
   "repository": "Miiduoa/graduation",
-  "mainBaseline": "b75017aa56c4211931662cf6b61933b47aeb0211",
+  "mainBaseline": "8aaefb93ada76113792b7f21559fcba2b0170db5",
   "sourceBranchCount": 17,
+  "snapshotNote": "保留本次盤點的 17 個來源提交；#719 在整合期間已合入最新 main 並刪除來源分支，仍保留其 SHA 以追溯歷史。",
   "branches": [
     {
       "name": "dependabot/npm_and_yarn/backend/functions/functions-patch-minor-fb4b230888",
@@ -51,12 +52,12 @@
     },
     {
       "name": "fix/campus-spatial-offscreen-webgl-start-20261119",
-      "sha": "7a16ad640c7e86cb18e3c9b3a6c9560c8741e470",
+      "sha": "2103a2e7332df116e8858c450df815b8017fd41f",
       "pullRequest": 722
     },
     {
       "name": "fix/course-study-invisible-source-evidence-20261119",
-      "sha": "091ae222561c2d3cfa957759e30cca1fd7f0823d",
+      "sha": "916bf75630b1d9b7bc0c6a6f7e6ae841e120d262",
       "pullRequest": 719
     },
     {
@@ -71,7 +72,7 @@
     },
     {
       "name": "fix/mobile-creator-card-confirm-timeout-20261121",
-      "sha": "b31d8351be73a374f9df8d89c5f6f8e52a1ee3e1",
+      "sha": "722bc40d485223c11ab24bc7359f270c322e8c52",
       "pullRequest": 740
     },
     {
@@ -91,7 +92,7 @@
     },
     {
       "name": "main",
-      "sha": "b75017aa56c4211931662cf6b61933b47aeb0211"
+      "sha": "8aaefb93ada76113792b7f21559fcba2b0170db5"
     }
   ]
 }

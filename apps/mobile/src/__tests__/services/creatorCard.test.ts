@@ -1,6 +1,6 @@
 import { getDocFromServer, setDoc } from 'firebase/firestore';
 import { readCreatorCardFields } from '@campus/shared/src/creatorCard';
-import { isCreatorCardAccessDenied, readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
+import { isCreatorCardAccessDenied, isCreatorCardTransientReadError, readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 
 jest.mock('../../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('firebase/firestore', () => ({
@@ -29,6 +29,18 @@ test.each([
   [new Error('offline'), false],
 ])('classifies card read error %p', (error, denied) => {
   expect(isCreatorCardAccessDenied(error)).toBe(denied);
+});
+
+test.each([
+  [{ code: 'unavailable' }, true],
+  [{ code: 'firestore/deadline-exceeded' }, true],
+  [new Error('offline'), true],
+  [{ code: 'permission-denied', message: 'offline' }, false],
+  [{ code: 'firestore/unauthenticated' }, false],
+  [new Error('Creator card scope mismatch'), false],
+  [new Error('unexpected server response'), false],
+])('allows first-read fallback only for a transient error %p', (error, transient) => {
+  expect(isCreatorCardTransientReadError(error)).toBe(transient);
 });
 
 test('reads only a school-scoped published card', async () => {

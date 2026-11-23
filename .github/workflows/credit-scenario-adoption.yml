@@ -49,6 +49,8 @@ jobs:
           node-version: '22.23.5'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Test bounded Chrome startup and process failures
+        run: node --test scripts/qa/credit-scenario-adoption-chrome.test.mjs
       - name: Shared adoption contracts
         run: |
           pnpm --filter @campus/shared exec tsc src/creditScenarioAdoption.ts --strict --target ES2022 --module commonjs --skipLibCheck --outDir ../../.credit-adoption-build

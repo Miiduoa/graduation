@@ -667,7 +667,12 @@ async def desktop(page, requests, resources):
     await page.wait_for_timeout(650)
     marker = page.locator("[data-spatial-marker]:visible").first
     marker_id = await marker.get_attribute("data-spatial-marker")
-    marker_name = await marker.inner_text()
+    # Same-name markers include category/ordinal labels; the detail heading
+    # must still match the raw name of the exact selected fixture ID.
+    marker_name = await page.evaluate(
+        "id => window.__campusSpatialFixturePlaceNames?.[id] ?? null", marker_id
+    )
+    assert isinstance(marker_name, str) and marker_name, f"Unknown fixture marker: {marker_id!r}"
     await marker.click()
     await expect(selector_for(page)).to_have_value(marker_id)
     await expect(dialog.get_by_role("heading", name=marker_name, exact=True)).to_be_visible()

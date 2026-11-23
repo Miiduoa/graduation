@@ -520,8 +520,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
               return false;
             }
           });
-          // Observer entries are queued in transition order. Use the last
-          // host entry even when timestamps are rounded, missing or repeated.
+          // W3C IO §3.2.5–3.2.6 append transitions to a queue before delivery.
+          // Use the last host entry even when timestamps are rounded,
+          // missing or repeated; the first can describe an obsolete state.
           const latest = hostEntries[hostEntries.length - 1];
           if (!latest) return;
           // Fall back to the original boolean when the optional rectangle
@@ -712,13 +713,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
     const categoryCounts = new Map<string, number>();
     for (const point of model.points) {
       nameCounts.set(point.name, (nameCounts.get(point.name) ?? 0) + 1);
-      const group = JSON.stringify([point.name, point.category]);
+      const group = JSON.stringify([point.name, point.category || '未分類']);
       categoryCounts.set(group, (categoryCounts.get(group) ?? 0) + 1);
     }
     const repeatedNames = new Set([...nameCounts].filter(([, count]) => count > 1).map(([name]) => name));
     const optionLabels = new Map(model.points.map((point, index) => {
       if (!repeatedNames.has(point.name)) return [point.id, point.name] as const;
-      const sameCategory = (categoryCounts.get(JSON.stringify([point.name, point.category])) ?? 0) > 1;
+      const sameCategory = (categoryCounts.get(JSON.stringify([point.name, point.category || '未分類'])) ?? 0) > 1;
       const detail = sameCategory
         ? ` · 地圖座標 ${point.location.lat}, ${point.location.lng} · 清單第 ${index + 1} 項`
         : '';

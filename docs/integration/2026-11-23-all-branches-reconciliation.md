@@ -2,7 +2,9 @@
 
 ## 來源範圍
 
-來源快照見同目錄 `2026-11-23-all-branches-sources.json`。此次以 main `b75017aa56c4211931662cf6b61933b47aeb0211` 為基底，納入快照內全部 17 個非 main 分支。整合保留來源提交為祖先，不以覆蓋 main 或刪除分支代替合併。
+來源快照見同目錄 `2026-11-23-all-branches-sources.json`。此次從 main `b75017aa56c4211931662cf6b61933b47aeb0211` 開始，納入盤點的全部 17 個來源分支；整合期間另同步最新 main `8aaefb93ada76113792b7f21559fcba2b0170db5`。來源提交均保留為祖先。
+
+#719 在整合期間由 GitHub 合併為 main 的 `8aaefb93`，其來源分支隨後刪除。該 squash commit 與來源 `916bf756` 的 tree 完全相同，本候選合入兩者後內容亦不變；快照保留原來源 SHA，讓已刪除分支的歷史仍可追溯。來源版本固定於本輪快照，最終結果須以同一候選的檢查為準。
 
 #515 的歷史已包含於 #738；洗衣取消與手機看板訂閱分支亦已有祖先關係，無須重複套用。其餘來源的後續提交均整合到同一候選。快照更新納入行事曆完整按鈕換行、校園 WebGL 可見性與教材朗讀排序的最新修正。
 
@@ -18,14 +20,20 @@
 
 1. #746 更新 npm 依賴後漏改 workspace pnpm lock；補齊 jose、ESLint 與對應傳遞依賴，維持 frozen-lockfile。
 2. #748 已要求 NumPy 2.5.5，但 Chroma／MLX 工作流程仍固定 2.5.4；測試安裝與版本斷言同步為 2.5.5，保留 1.26.4 遷移／回滾對照。
-3. #616 的瀏覽器安裝 fixture 會繼承 Bash job control，造成真實 flock 鎖的子行程邊界不穩定；只在 fixture 關閉 job control，加入 inherited-monitor 回歸。原安裝腳本的 180 秒恢復期限、重試上限及永久錯誤停止條件保留。原遠端失敗尚需本候選 CI 證明已排除。
+3. #616 的瀏覽器安裝 fixture 會繼承 Bash job control，造成真實 flock 鎖的子行程邊界不穩定；只在 fixture 關閉 job control，加入 inherited-monitor 回歸。原安裝腳本的 180 秒恢復期限、重試上限及永久錯誤停止條件保留；遠端作業系統差異及後續成功證據見下節。
 4. #749 在 render 呼叫 Date.now 造成 React purity lint 失敗；成功接收查詢回應時原子寫入 checkedAt，渲染使用固定差值。重新查詢刷新判定，來源 fetchedAt 與匯入草稿證據維持原值。
+5. #740 後續來源 `722bc40d` 在切分頁時重掛載自己的社群簡介，會清掉未確認寫入與草稿；亦刪除撤權優先處理，並讓首次讀取 fallback 吞掉撤權或來源 scope 錯誤。新增回歸實際重現重複儲存、撤權後舊內容回填及並發讀取競爭。整合保留 owner panel、以 tab revision 重新讀取；其他使用者卡片仍維持來源的重掛載意圖。首次讀取僅支援明確暫時網路錯誤，所有已捕獲該讀取的 fallback 共用可失效 record，等待前及完成後均驗證；撤權或來源錯誤會讓舊結果失效，只有新的有效讀取可恢復顯示。
+6. 修課方案真實 Chrome 驗收在 `1429f997` 連續兩次於 10 秒啟動期限結束，尚未進入任何功能斷言。將獨立 Chrome 啟動等待設為 30 秒，驗證有效 CDP port，並在 spawn error／提前 exit 時立即報告原因；原 UI 等待與 35 項功能斷言不變。持久測試涵蓋 11 秒才就緒、缺少執行檔、提前 exit 42、活程序一直沒有 port 的 30 秒上限，已加入同一 CI workflow。本機完整 Chrome 因環境 socket 限制未完成，真實瀏覽器驗收以最終候選遠端 CI 為準。
+7. #722 最新來源 `2103a2e7` 的同名地標標籤改善納入整合；空白分類與「未分類」視為同群，3D marker 與選擇清單可識別同名不同地點。其 observer 後續改動則實際重現零交集面積仍啟動 WebGL，以及同一 host 的 `[visible, hidden]` 批次仍維持 active。整合保留最後一筆 host entry、正交集面積、小正 threshold 與 getter 防護；完整保留新的標籤功能。依 [W3C Intersection Observer](https://www.w3.org/TR/intersection-observer/) §3.2.5–3.2.8，entry 依序進入 queue，而邊界相接時 isIntersecting 仍可為 true，因此以實際可見面積及最新狀態控制啟停。
 
 ## 已完成的專項驗證
 
 - TronClass LMS dispatch：172 項通過。
 - 角色路由、TronClass、工作情境、校園地圖與 retry：6 檔，125 項通過。
 - PublicCourseSearch：102 項通過；相關 ESLint、TypeScript 通過。
+- 社群簡介 panel、profile 與 service：3 套、1,772 項通過，0 skipped；完整 mobile TypeScript 及相關 ESLint 通過。另獨立驗證並發撤權發生於 fallback 開始前／等待中兩種時序，舊結果均被拒絕，正常首次讀取 fallback 仍可使用。
+- Chrome 啟動：4 種真實子程序情境通過；這些是啟動契約驗證，不代替真實瀏覽器的功能驗收。
+- 校園地圖：CampusSpatialExplorer 714 項、campusSpatialScene 70 項，合計 784 項通過；來源上的零面積啟動與離屏未暫停先重現失敗，再驗證修正及可見後恢復。
 - 瀏覽器安裝 fixture：一般模式及 inherited-monitor 模式各 14 項通過；移除修正的負對照失敗。
 - Python cloud hashed lock 安裝與 pip check 通過；boundary suite 104 項通過、4 項略過。
 - Functions npm ci、隔離部署封裝（142 exports）、lint 與既有 production dependency policy gate 通過；本地全套測試遇 Google 公鑰網路等待，須以最終遠端完整 CI 驗證。
@@ -39,6 +47,8 @@
 同一 head 的 [Admin browser job 137542005087](https://github.com/Miiduoa/graduation/actions/runs/45129659981/job/137542005087) 使用 Ubuntu 24.04.5，於 `2026-11-23T07:16:36Z` 實際執行相同 fixture 並回報 **14/14 passed**，之後亦成功執行真正瀏覽器安裝。逐項讀取工作流程確認，所有實際呼叫 `install-playwright.sh` 的工作均明確使用 `ubuntu-24.04`，只有 Security Gates 的獨立恢復測試因 `ubuntu-latest` 轉移而採用不同主版本。
 
 本次只將 Security Gates runner 明確對齊 `ubuntu-24.04`；原安裝腳本與 fixture 完全保留，真實 process group／flock／sudo 逾時邊界及故意錯置邊界的失敗對照仍執行。所有安全檢查、PostgreSQL 服務、依賴稽核、步驟、相依閘門及失敗政策均未刪除或放寬。既有 workflow contract 測試新增跨工作流程的 runner 一致性檢查：修正前確實因 `ubuntu-latest` 與 `ubuntu-24.04` 不同而失敗。這項調整驗證的是既定 Ubuntu 24 支援範圍；Ubuntu 26 的底層程序差異尚未定位，也不宣稱相容。最終新 head 仍須在遠端重新執行完整檢查。
+
+後續 head `1429f997eaced0818219d3ab488e662d9d865abf` 的 [Security Gates job 137545683441](https://github.com/Miiduoa/graduation/actions/runs/45130751175/job/137545683441) 已成功，實際回報安裝恢復 fixture **14/14 passed**。同 head 的完整核心 CI 亦已通過；這是中間版本的診斷證據，最後新增來源與修正仍須以 PR 最終 head 再次驗證。
 
 ## 合併與既有功能開關
 

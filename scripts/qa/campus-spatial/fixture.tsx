@@ -6,6 +6,11 @@ import type { MapLocation } from '../../../apps/web/src/app/map/mapService';
 import '../../../apps/web/src/app/globals.css';
 
 const places = withProvidenceCampusPlaces('pu', []);
+// Keep the QA oracle tied to fixture input IDs, independently of the
+// disambiguated marker/chooser labels rendered by the production component.
+Object.defineProperty(window, '__campusSpatialFixturePlaceNames', {
+  value: Object.freeze(Object.fromEntries(places.map(({ id, name }) => [id, name]))),
+});
 function Fixture() {
   const [selected, setSelected] = useState<MapLocation | null>(null);
   return (

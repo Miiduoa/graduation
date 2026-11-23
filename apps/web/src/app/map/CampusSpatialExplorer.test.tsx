@@ -484,7 +484,10 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
       intersection = callback;
       options = init;
     }
-    observe(target: Element) { observedHost = target; }
+    observe(target: Element) {
+      observedHost = target;
+      vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, window.innerHeight, 320, 180));
+    }
     disconnect = disconnect;
   });
   render(<CampusSpatialExplorer school="other-school" locations={places}
@@ -493,9 +496,6 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
   const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
   const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
   expect(observedHost).toBe(graphics);
-  // Edge-touch and positive-area transitions can both have isIntersecting=true.
-  // A second threshold is needed to receive the later visible-area callback.
-  expect(options?.threshold).toEqual([0, 1e-9, 0.01]);
   expect(scene.create).not.toHaveBeenCalled();
 
   const notify = (time: number, width: number, height: number, coordinates: Record<string, number | undefined> = {}) => {
@@ -518,8 +518,12 @@ it('does not start or resume WebGL when the canvas only touches the viewport edg
   notify(100, 0, 160);
   expect(scene.create).not.toHaveBeenCalled();
   expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
+  // W3C IO §3.2.8: an edge touch and a positive-area intersection can both
+  // have isIntersecting=true, so a positive threshold must trigger recovery.
+  expect(options?.threshold).toEqual([0, 1e-9, 0.01]);
 
   // A broken rectangle getter leaves the legacy positive flag usable.
+  vi.mocked(graphics.getBoundingClientRect).mockReturnValue(new DOMRect(0, 40, 320, 180));
   notifyThrowingRect(101);
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
@@ -597,24 +601,28 @@ it('uses the latest viewport state when a fast mobile scroll batches observer en
   vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 40, 320, 180));
 
   act(() => intersection?.([
-    { isIntersecting: false }, { isIntersecting: true },
-  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
+    observerEntry(graphics, true, new DOMRect(0, 40, 320, 180), 100),
+  ], {} as IntersectionObserver));
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
   expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
 
-  act(() => intersection?.([
-    { isIntersecting: true }, { isIntersecting: false },
-  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  // W3C IO §3.2.5–3.2.6 append transitions to a queue before delivery.
+  // A later hidden host entry must suspend an already-running renderer.
+  const visibleEntry = observerEntry(graphics, true, new DOMRect(0, 40, 320, 180), 110);
+  vi.mocked(graphics.getBoundingClientRect).mockReturnValue(new DOMRect(0, window.innerHeight + 10, 320, 180));
+  const hiddenEntry = observerEntry(graphics, false, undefined, 120);
+  act(() => intersection?.([visibleEntry, hiddenEntry], {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
   // An empty callback is not evidence that the canvas became visible.
   const callsBeforeEmpty = scene.setActive.mock.calls.length;
   act(() => intersection?.([] as IntersectionObserverEntry[], {} as IntersectionObserver));
   expect(scene.setActive.mock.calls.length).toBe(callsBeforeEmpty);
 
+  vi.mocked(graphics.getBoundingClientRect).mockReturnValue(new DOMRect(0, 40, 320, 180));
   act(() => intersection?.([
-    { isIntersecting: false }, { isIntersecting: true },
-  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
+    { ...hiddenEntry, time: 130 }, observerEntry(graphics, true, new DOMRect(0, 40, 320, 180), 140),
+  ], {} as IntersectionObserver));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
 
@@ -5451,4 +5459,25 @@ it('discloses missing audited way outlines without treating a partial OSM reply 
     .toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('keeps map chooser entries unique when blank and 未分類 category names display identically', async () => {
+  // Synthetic locations; coordinates identify markers only, not building entrances.
+  const duplicates: MapLocation[] = [
+    { id: 'unknown-empty', name: '同名站點', category: '', description: '', lat: 24, lng: 120 },
+    { id: 'unknown-label', name: '同名站點', category: '未分類', description: '', lat: 24.001, lng: 120.001 },
+    { id: 'library', name: '圖書館', category: '圖書館', description: '', lat: 24.002, lng: 120.002 },
+  ];
+  render(<CampusSpatialExplorer school="other-school" locations={duplicates}
+    selected={duplicates[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const chooser = within(dialog).getByRole('combobox') as HTMLSelectElement;
+  expect([...chooser.options].map((option) => option.textContent)).toEqual([
+    '同名站點（未分類 · 地圖座標 24, 120 · 清單第 1 項）',
+    '同名站點（未分類 · 地圖座標 24.001, 120.001 · 清單第 2 項）',
+    '圖書館',
+  ]);
+  fireEvent.change(chooser, { target: { value: 'unknown-label' } });
+  expect(chooser.value).toBe('unknown-label');
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });

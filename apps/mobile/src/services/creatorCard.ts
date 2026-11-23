@@ -24,6 +24,14 @@ export function isCreatorCardAccessDenied(error: unknown): boolean {
       (denied.test(message) || message === 'Missing or insufficient permissions.'));
 }
 
+export function isCreatorCardTransientReadError(error: unknown): boolean {
+  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
+  if (typeof code === 'string') {
+    return /^(?:firestore\/)?(?:unavailable|deadline-exceeded)$/.test(code);
+  }
+  return typeof message === 'string' && /^(?:offline|network request failed|failed to fetch)$/i.test(message);
+}
+
 function cardRef(schoolId: string, ownerUid: string) {
   if (!schoolId || !ownerUid || schoolId.includes('/') || ownerUid.includes('/')) {
     throw new Error('Invalid creator card scope');

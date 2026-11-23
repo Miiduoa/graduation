@@ -1142,3 +1142,38 @@ it('does not lift POIs on OSM wall boundaries or corners onto a claimed rooftop'
   expect(wall).toBeLessThan(18);
   expect(corner).toBeLessThan(18);
 });
+
+it('distinguishes duplicate 3D POI names by category and list position without inventing entrances', () => {
+  // Synthetic POIs: neither the names nor these coordinates claim to identify
+  // real campus buildings or accessible building entrances.
+  const repeated: MapLocation[] = [
+    { id: 'office-a', name: '同名大樓', category: '行政', description: '', lat: 24, lng: 120 },
+    { id: 'office-b', name: '同名大樓', category: '行政', description: '', lat: 24.001, lng: 120.001 },
+    { id: 'teaching', name: '同名大樓', category: '教學', description: '', lat: 24.002, lng: 120.002 },
+    { id: 'library', name: '圖書館', category: '圖書館', description: '', lat: 24.003, lng: 120.003 },
+    { id: 'unknown-empty', name: '同名站點', category: '', description: '', lat: 24.004, lng: 120.004 },
+    { id: 'unknown-label', name: '同名站點', category: '未分類', description: '', lat: 24.005, lng: 120.005 },
+  ];
+  const { container, onSelect } = setup(buildCampusSpatialModel(repeated));
+  const getMarker = (id: string) => container.querySelector<HTMLButtonElement>(
+    `button[data-spatial-marker="${id}"]`,
+  )!;
+
+  expect(getMarker('office-a').textContent).toBe('同名大樓（行政 · 清單第 1 項）');
+  expect(getMarker('office-b').textContent).toBe('同名大樓（行政 · 清單第 2 項）');
+  expect(getMarker('teaching').textContent).toBe('同名大樓（教學）');
+  expect(getMarker('library').textContent).toBe('圖書館');
+  // Two raw categories render as the *same* visible 未分類 label. The
+  // ordinal must disambiguate them too, not just identical raw strings.
+  expect(getMarker('unknown-empty').textContent).toBe('同名站點（未分類 · 清單第 5 項）');
+  expect(getMarker('unknown-label').textContent).toBe('同名站點（未分類 · 清單第 6 項）');
+  expect(getMarker('office-a').getAttribute('aria-label'))
+    .toBe('聚焦同名大樓（行政 · 清單第 1 項） · 地圖座標 24, 120');
+  expect(getMarker('office-b').getAttribute('aria-label'))
+    .toBe('聚焦同名大樓（行政 · 清單第 2 項） · 地圖座標 24.001, 120.001');
+  expect(getMarker('teaching').getAttribute('aria-label')).toBe('聚焦同名大樓（教學）');
+  expect(new Set(repeated.map(({ id }) => getMarker(id).getAttribute('aria-label'))).size)
+    .toBe(repeated.length);
+  getMarker('office-b').click();
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith('office-b');
+});

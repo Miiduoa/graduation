@@ -52,7 +52,13 @@ function CardButton({ label, onPress, disabled = false, primary = false, busy = 
   );
 }
 
-type CreatorCardPanelProps = { schoolId: string; ownerUid: string; own: boolean; refreshKey?: string };
+type CreatorCardPanelProps = {
+  schoolId: string;
+  ownerUid: string;
+  own: boolean;
+  readIntro?: () => ReturnType<typeof readCreatorCard>;
+  reloadRevision?: string;
+};
 
 export function CreatorCardPanel(props: CreatorCardPanelProps) {
   // A new instance per profile/authorization scope prevents old draft, feedback
@@ -64,7 +70,7 @@ export function CreatorCardPanel(props: CreatorCardPanelProps) {
 }
 
 function ScopedCreatorCardPanel({
-  schoolId, ownerUid, own, refreshKey,
+  schoolId, ownerUid, own, readIntro, reloadRevision,
 }: CreatorCardPanelProps) {
   const styles = useThemeStyleSheet(createStyles);
   const [state, setState] = useState<CardState>({ status: 'loading' });
@@ -76,7 +82,7 @@ function ScopedCreatorCardPanel({
     setEditing(open);
   };
   const currentCard = useRef<CreatorCard | null>(null);
-  const accessDenied = useRef(false);
+  const readBlocked = useRef(false);
   const cardVersion = useRef(0);
   const [draft, setDraft] = useState<CreatorCard>(EMPTY_CREATOR_CARD);
   const currentDraft = useRef(draft);
@@ -129,8 +135,8 @@ function ScopedCreatorCardPanel({
   }, []);
 
   const acceptCard = useCallback((value: CreatorCard | null) => {
-    // A concurrent save check may settle after a refresh revoked access.
-    if (accessDenied.current) return;
+    // A concurrent write may settle after a read revoked or invalidated scope.
+    if (readBlocked.current) return;
     cardVersion.current += 1;
     currentCard.current = value;
     acceptSavedPortfolioLink(value?.linkUrl ?? '');
@@ -141,7 +147,8 @@ function ScopedCreatorCardPanel({
     let live = true;
     // A save confirmation can publish a newer value while this read is pending.
     const version = cardVersion.current;
-    void readCreatorCard(schoolId, ownerUid).then((value) => {
+    const read = readIntro ? readIntro() : readCreatorCard(schoolId, ownerUid);
+    void read.then((value) => {
       if (!live || cardVersion.current !== version) return;
       if (editingNow.current && !pendingWrite.current) {
         const previous = currentCard.current ?? EMPTY_CREATOR_CARD;
@@ -158,21 +165,25 @@ function ScopedCreatorCardPanel({
         }
         replaceDraft(merged);
       }
-      accessDenied.current = false;
+      readBlocked.current = false;
       acceptCard(value);
     }).catch((error: unknown) => {
       if (!live) return;
-      if (isCreatorCardAccessDenied(error)) {
-        accessDenied.current = true;
+      // A denial must still take effect when a save advanced the card version
+      // after this read started. Only a new successful read can clear the latch.
+      const invalidScope = error instanceof Error && error.message === 'Creator card scope mismatch';
+      if (isCreatorCardAccessDenied(error) || invalidScope) {
+        readBlocked.current = true;
         currentCard.current = null;
         acceptSavedPortfolioLink('');
         setState({ status: 'error' });
-      } else {
-        setState((previous) => previous.status === 'ready' ? previous : { status: 'error' });
+        return;
       }
+      if (cardVersion.current !== version) return;
+      setState((previous) => own && previous.status === 'ready' ? previous : { status: 'error' });
     });
     return () => { live = false; };
-  }, [schoolId, ownerUid, attempt, refreshKey, acceptCard, acceptSavedPortfolioLink, replaceDraft]);
+  }, [schoolId, ownerUid, own, attempt, readIntro, reloadRevision, acceptCard, acceptSavedPortfolioLink, replaceDraft]);
 
   const beginEdit = () => {
     if (!own || editorLocked() || state.status !== 'ready') return;
