@@ -33,20 +33,17 @@ export function tronClassDisabledNavigationQuestion(question: string): string | 
   return null;
 }
 
-// 與跨服務規劃相同的分隔詞，確保兩邊切句一致。
-const CLAUSE_SEPARATOR = /(?:然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|[，,；;。！!？?、])+/u;
-const TRONCLASS_DATA_CLAUSE = /作業|未交|未繳|待交|待繳|還沒|尚未|教材|講義|檔案|附件|公告|課程|修課|下載|準備|草稿|繳交|提交|成績|能做什麼|功能|權限|homework|assignment|material|download|pending|tron\s*class/i;
+// 與跨服務規劃相同的分隔詞（含「和／與」），確保兩邊切句一致。
+const CLAUSE_SEPARATOR = /(?:然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|[，,；;。！!？?、和與])+/u;
+const TRONCLASS_DATA_CLAUSE = /作業|未交|未繳|待交|待繳|還沒|尚未|教材|講義|附件|下載|準備|草稿|繳交|提交|送出|上傳|交出|交作業|刪除|撤回|玩課雲|創課|homework|assignment|material|download|pending|tron\s*class/i;
 
 /**
- * 「玩課雲作業，查公車」這類以玩課雲入口開頭、後面接的不是玩課雲資料查詢的複合請求，
- * 維持原本的跨服務規劃，不由 TronClass Agent 攔截。
+ * 保守規則：多個子句中只要有任何一句不是玩課雲資料查詢（例如「玩課雲作業，查公車」），
+ * 就整句交還原本的跨服務規劃，不由 TronClass Agent 攔截，行為與 merge-base 相同。
  */
-function isCompoundLmsHandoff(question: string): boolean {
-  if (question.length > 160) return false;
+function hasNonTronClassClause(question: string): boolean {
   const clauses = question.normalize('NFKC').split(CLAUSE_SEPARATOR).map(part => part.trim()).filter(Boolean);
-  if (clauses.length < 2) return false;
-  const head = clauses[0].replace(/^(?:(?:請|麻煩)?(?:幫我|替我)?(?:開啟|打開|開|前往|進入))\s*/u, '');
-  return isTronClassNavigationTarget(head) && clauses.slice(1).some(part => !TRONCLASS_DATA_CLAUSE.test(part));
+  return clauses.length >= 2 && clauses.some(part => !TRONCLASS_DATA_CLAUSE.test(part));
 }
 
 export type TronClassAgentQueryIntent = {
@@ -64,7 +61,7 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
     !/(?:\btron\s*class\b|創課|玩課雲)/i.test(question)) return null;
   const original = question.trim();
   if (isExistingTronClassNavigation(original)) return null;
-  if (isCompoundLmsHandoff(original)) return null;
+  if (hasNonTronClassClause(original)) return null;
   // Examples, translations and general explanations do not authorize a private read.
   if (/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(original) ||
     /^[「『“"'][\s\S]*[」』”"']$/.test(original) ||

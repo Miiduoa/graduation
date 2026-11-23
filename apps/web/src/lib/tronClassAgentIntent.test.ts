@@ -72,12 +72,12 @@ describe('explicit TronClass command routing', () => {
     expect(parseTronClassAgentIntent('幫我下載 TronClass 教材並準備作業')).toEqual({ intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' });
   });
 
-  it.each(['玩課雲作業，查公車', '開啟玩課雲作業，查公車資訊', '玩課雲，查今天課表', '打開玩課雲然後查社團', '玩課雲作業順便查公車', '玩課雲作業，查交通', '玩課雲作業，開啟設定'])(
+  it.each(['玩課雲作業，查公車', '開啟玩課雲作業，查公車資訊', '玩課雲，查今天課表', '打開玩課雲然後查社團', '玩課雲作業順便查公車', '玩課雲作業，查交通', '玩課雲作業，開啟設定', '玩課雲作業和查公車', '玩課雲作業，查校園公告', '玩課雲作業，查成績'])(
     'leaves the compound LMS handoff %s on the existing cross-service plan',
     question => expect(canAnswerTronClassQuestion(question)).toBe(false),
   );
 
-  it.each(['開啟玩課雲作業，查一下還沒交的有哪些', '玩課雲作業，看成績', '玩課雲作業，下載講義', '玩課雲作業，再查公告'])(
+  it.each(['開啟玩課雲作業，查一下還沒交的有哪些', '玩課雲作業和教材有哪些', '玩課雲作業，下載講義', 'TronClass 查未交作業，不要繳交'])(
     'still sends the TronClass-only query %s to the Agent',
     question => expect(canAnswerTronClassQuestion(question)).toBe(true),
   );
