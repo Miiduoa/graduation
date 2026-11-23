@@ -181,6 +181,58 @@ it('disambiguates same-name campus markers before opening walking or flat-map na
   expect(onSelect).toHaveBeenCalledWith(duplicatePlaces[2]);
 });
 
+it('filters visible destinations without silently replacing the selected navigation marker', async () => {
+  const classrooms: MapLocation[] = [
+    { ...places[0], id: 'a', name: '討論室', building: '甲棟', floor: '2F' },
+    { ...places[1], id: 'b', name: '討論室', building: '乙棟', floor: '3F' },
+    { ...places[0], id: 'c', name: '圖書館', lat: 24.229 },
+  ];
+  const props = { school: 'other-school', selected: classrooms[0], onSelect: vi.fn() };
+  const view = render(<CampusSpatialExplorer {...props} locations={classrooms} />);
+  const dialog = within(await open());
+  const search = dialog.getByRole('searchbox', { name: '搜尋導覽地點' });
+  const picker = dialog.getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement;
+  const values = () => Array.from(picker.options).map((option) => option.value);
+  const destination = () => new URL(dialog.getByRole('link', { name: '開啟步行導航' }).getAttribute('href')!)
+    .searchParams.get('destination');
+
+  fireEvent.change(search, { target: { value: '乙棟　３ｆ' } });
+  expect(values()).toEqual(['a', 'b']);
+  expect(picker.value).toBe('a');
+  expect(destination()).toBe('24.226,120.58');
+  expect(dialog.getByText(/找到 1 個地點/).textContent).toContain('搜尋不會變更導航目的地');
+  fireEvent.change(picker, { target: { value: 'b' } });
+  expect(picker.value).toBe('b');
+  expect(destination()).toBe('24.228,120.582');
+  expect(values()).toEqual(['b']);
+  fireEvent.change(search, { target: { value: '不存在的教室' } });
+  expect(values()).toEqual(['b']);
+  expect(dialog.getByText(/沒有符合的地點/)).toBeTruthy();
+  expect(destination()).toBe('24.228,120.582');
+  fireEvent.change(search, { target: { value: '' } });
+  expect(values()).toEqual(['a', 'b', 'c']);
+  expect(picker.value).toBe('b');
+  expect(scene.create).toHaveBeenCalledTimes(1);
+
+  fireEvent.change(search, { target: { value: '不存在的教室' } });
+  view.rerender(<CampusSpatialExplorer {...props} locations={[classrooms[2]]} />);
+  expect(dialog.queryByRole('searchbox', { name: '搜尋導覽地點' })).toBeNull();
+  expect(values()).toEqual(['', 'c']);
+  expect(dialog.queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+});
+
+it('requires an explicit selection even when destination search finds a single result', async () => {
+  render(<CampusSpatialExplorer school="other-school" locations={places} selected={null} onSelect={vi.fn()} />);
+  const dialog = within(await open());
+  fireEvent.change(dialog.getByRole('searchbox', { name: '搜尋導覽地點' }), { target: { value: '圖書館' } });
+  const picker = dialog.getByRole('combobox', { name: '想去哪裡' }) as HTMLSelectElement;
+  expect(Array.from(picker.options).map((option) => option.value)).toEqual(['', 'library']);
+  expect(picker.value).toBe('');
+  expect(dialog.queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  fireEvent.change(picker, { target: { value: 'library' } });
+  expect(dialog.getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('includes existing building and floor context in duplicate destination controls without claiming an entrance', async () => {
   // Synthetic records only: neither building nor room names are campus evidence.
   const classrooms: MapLocation[] = [
