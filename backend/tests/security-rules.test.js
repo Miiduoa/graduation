@@ -915,6 +915,8 @@ describe('firestore security rules', () => {
 
   test('legacy root posts and scoped comments enforce visibility, campus transfer and revocation', async () => {
     const publicFields = { published: true, status: 'published', deleted: false, deletedAt: null };
+    const nullableFields = ['status', 'published', 'deleted'];
+    const nullablePosts = nullableFields.map(field => 'root-null-' + field);
     await seedFirestore(async (db) => {
       await db.doc('groups/root-pu').set({ schoolId: 'pu' });
       await db.doc('groups/root-ncku').set({ schoolId: 'ncku' });
@@ -932,8 +934,14 @@ describe('firestore security rules', () => {
       await db.doc('groupPosts/root-active').set({ groupId: 'root-pu', authorId: 'alice', status: 'active' });
       await db.doc('groupPosts/root-deleted').set({ groupId: 'root-pu', authorId: 'alice', ...publicFields, deleted: true });
       await db.doc('groupPosts/root-archived').set({ groupId: 'root-pu', authorId: 'alice', ...publicFields, status: 'archived' });
+      await db.doc('groupPosts/root-unpublished').set({ groupId: 'root-pu', authorId: 'alice', ...publicFields, published: false });
+      for (const field of nullableFields) {
+        await db.doc('groupPosts/root-null-' + field).set({
+          groupId: 'root-pu', authorId: 'alice', ...publicFields, [field]: null,
+        });
+      }
       await db.doc('groupPosts/root-cross').set({ groupId: 'root-ncku', authorId: 'outsider', ...publicFields });
-      for (const id of ['root-public', 'root-draft', 'root-legacy', 'root-active', 'root-deleted', 'root-archived']) {
+      for (const id of ['root-public', 'root-draft', 'root-legacy', 'root-active', 'root-deleted', 'root-archived', 'root-unpublished', ...nullablePosts]) {
         await db.doc('comments/' + id + '-comment').set({
           postId: id, body: 'Comment', createdAt: new Date('2026-11-01T00:00:00Z'),
         });
@@ -958,7 +966,7 @@ describe('firestore security rules', () => {
     await assertFails(bob.collection('comments').get());
     const commentsFor = (db, id) => db.collection('comments')
       .where('postId', '==', id).orderBy('createdAt', 'asc').get({ source: 'server' });
-    for (const id of ['root-public', 'root-legacy', 'root-active']) {
+    for (const id of ['root-public', 'root-legacy', 'root-active', ...nullablePosts]) {
       await assertSucceeds(bob.doc('groupPosts/' + id).get());
       await assertSucceeds(bob.doc('comments/' + id + '-comment').get());
       const comments = await assertSucceeds(commentsFor(bob, id));
@@ -966,7 +974,7 @@ describe('firestore security rules', () => {
       await assertFails(outsider.doc('groupPosts/' + id).get());
       await assertFails(commentsFor(outsider, id));
     }
-    for (const id of ['root-draft', 'root-deleted', 'root-archived']) {
+    for (const id of ['root-draft', 'root-deleted', 'root-archived', 'root-unpublished']) {
       await assertFails(bob.doc('groupPosts/' + id).get());
       await assertFails(bob.doc('comments/' + id + '-comment').get());
       await assertFails(commentsFor(bob, id));
@@ -999,6 +1007,12 @@ describe('firestore security rules', () => {
     await assertFails(teacher.doc('postLikes/root-draft-vote').set({ postId: 'root-draft', userId: 'teacher' }));
     await assertSucceeds(bob.doc('postLikes/root-new-like').set({ postId: 'root-public', userId: 'bob' }));
     await assertSucceeds(bob.doc('postLikes/root-legacy-like').set({ postId: 'root-legacy', userId: 'bob' }));
+
+    for (const postId of nullablePosts) {
+      const like = bob.doc('postLikes/' + postId);
+      await assertSucceeds(like.set({ postId, userId: 'bob' }));
+      await assertSucceeds(like.get());
+    }
 
     // Both school fields are server-owned. A partial transfer can leave
     // old membership active; conflicting fields must not authorize the old ID.
@@ -1033,7 +1047,7 @@ describe('firestore security rules', () => {
     await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'pu' }));
     await assertSucceeds(bob.doc('groupPosts/root-public').get());
     await seedFirestore(db => db.doc('groups/root-pu/members/bob').update({ status: 'revoked' }));
-    for (const id of ['root-public', 'root-legacy', 'root-active']) {
+    for (const id of ['root-public', 'root-legacy', 'root-active', ...nullablePosts]) {
       await assertFails(bob.doc('groupPosts/' + id).get({ source: 'server' }));
       await assertFails(bob.doc('comments/' + id + '-comment').get({ source: 'server' }));
       await assertFails(commentsFor(bob, id));
@@ -1045,8 +1059,14 @@ describe('firestore security rules', () => {
     await assertSucceeds(bob.doc('groupPosts/root-public').get());
     await seedFirestore(db => db.doc('groupPosts/root-public').update({ status: 'archived' }));
     await assertFails(bob.doc('groupPosts/root-public').get());
+    await assertFails(bob.doc('postLikes/root-archived-new-like').set({ postId: 'root-public', userId: 'bob' }));
+    await assertFails(alice.doc('postLikes/root-new-like').delete());
+    await seedFirestore(db => db.doc('groups/root-pu/members/bob').update({ status: 'revoked' }));
     await assertFails(bob.doc('postLikes/root-new-like').delete());
-    await seedFirestore(db => db.doc('groupPosts/root-public').update({ status: 'published' }));
+    await seedFirestore(db => db.doc('groups/root-pu/members/bob').update({ status: 'active' }));
+    await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'ncku' }));
+    await assertFails(bob.doc('postLikes/root-new-like').delete());
+    await seedFirestore(db => db.doc('users/bob').update({ schoolId: 'pu' }));
     await assertSucceeds(bob.doc('postLikes/root-new-like').delete());
   });
 
@@ -8295,7 +8315,7 @@ describe('legacy authorization matrix against the PR merge base', () => {
     ['member cannot read a hidden post’s like receipt', 'member', get('postLikes/matrix-hidden'), true, false],
     ['member cannot add a like to a hidden post', 'member',
       set('postLikes/matrix-hidden-new', { userId: 'member', postId: 'matrix-hidden' }), true, false],
-    ['member cannot delete a like on a hidden post', 'member', remove('postLikes/matrix-hidden'), true, false],
+    ['active member deletes their own like on a hidden post', 'member', remove('postLikes/matrix-hidden')],
     ['non-member cannot read a legacy post under either rule set', 'outsider', get(visiblePost), false, false],
     ['owner cannot read unreleased feedback under either rule set', 'former', get(`${reviews}/unsubmitted`), false, false],
   ];

@@ -356,9 +356,12 @@ service cloud.firestore {
     }
 
     function isVisibleRootPost(post) {
-      return post.get('published', true) == true
-        && post.get('status', 'active') in ['active', 'published']
-        && post.get('deleted', false) == false
+      let published = post.get('published', null);
+      let status = post.get('status', null);
+      let deleted = post.get('deleted', null);
+      return (published == null || published == true)
+        && (status == null || status in ['active', 'published'])
+        && (deleted == null || deleted == false)
         && post.get('deletedAt', null) == null;
     }
 
@@ -2461,10 +2464,15 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.get('postId', null) is string
         && canReactToRootPost(request.resource.data.postId);
+      function canWithdrawLike(postId) {
+        let postPath = /databases/$(database)/documents/groupPosts/$(postId);
+        return exists(postPath) && isActiveCurrentGroupMember(get(postPath).data.groupId);
+      }
+
       allow delete: if isSignedIn()
         && resource.data.userId == request.auth.uid
         && resource.data.get('postId', null) is string
-        && canReactToRootPost(resource.data.postId);
+        && canWithdrawLike(resource.data.postId);
       allow update: if false;
     }
 
