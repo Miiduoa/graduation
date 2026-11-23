@@ -82,6 +82,20 @@ set -euo pipefail
 [[ "$*" == '--configure -a' && "${MOCK_ROOT:-0}" == 1 ]]
 printf 'dpkg:%s\n' "$*" >> "$MOCK_LOG"
 if [[ "${MOCK_REPAIR_FAIL:-0}" == 1 ]]; then exit 1; fi
+if [[ "${MOCK_DPKG_HANG:-0}" == 1 ]]; then
+  count="$(grep -c '^dpkg:--configure -a$' "$MOCK_LOG" || true)"
+  if (( count == 1 )); then
+    # Simulate a recovery command whose helper keeps the lock and ignores TERM.
+    exec flock --no-fork -n "$MOCK_LOCK" bash -c '
+      trap "" TERM
+      touch "$MOCK_LOCK.interrupted"
+      echo dpkg-hung >> "$MOCK_LOG"
+      /bin/sleep 30 &
+      echo "$!" > "$MOCK_LOCK.child-pid"
+      wait "$!"
+    '
+  fi
+fi
 if [[ "${MOCK_DELAY_LOCK_RELEASE:-0}" == 1 ]]; then
   count="$(grep -c '^dpkg:--configure -a$' "$MOCK_LOG" || true)"
   if (( count == 1 )); then
@@ -154,7 +168,7 @@ export PATH="$mock_dir/bin:$PATH" MOCK_LOG="$mock_dir/install.log"
 
 assert_recovery_deadlines() {
   local expected="$1" line deadline
-  local pattern='^sudo:timeout --kill-after=5s ([0-9]+)s dpkg --configure -a$'
+  local pattern='^sudo:timeout --kill-after=5s ([0-9]+)s bash -c .* record-process-group [^ ]*/process-group dpkg --configure -a$'
   local -a commands=()
   mapfile -t commands < <(grep '^sudo:.* dpkg --configure -a$' "$MOCK_LOG")
   (( ${#commands[@]} == expected ))
@@ -291,6 +305,42 @@ flock -n "$MOCK_LOCK" true
 done
 export MOCK_CHILD_ONLY_TIMEOUT=0
 
+# The dpkg recovery command is bounded like an install attempt: when its own
+# timeout only kills the direct child, the installer must remove the lock-holding
+# survivors in the recovery's process group before the next recovery attempt.
+export MOCK_PROCESS_TEST=1 MOCK_CHILD_ONLY_TIMEOUT=1 MOCK_DPKG_HANG=1 MOCK_APT_FAILS=0 MOCK_LOCK="$mock_dir/dpkg-hang.lock"
+: > "$MOCK_LOG"
+if ! bash "$script_dir/install-playwright.sh" --fonts-noto-cjk > "$mock_dir/dpkg-hang-output.log" 2>&1; then
+  cat "$mock_dir/dpkg-hang-output.log" "$MOCK_LOG" >&2
+  exit 1
+fi
+grep -q '^dpkg-hung$' "$MOCK_LOG"
+[[ "$(grep -c '^dpkg:--configure -a$' "$MOCK_LOG")" -eq 2 ]]
+assert_recovery_deadlines 2
+# One cleanup for the timed-out install attempt and one for the timed-out recovery.
+[[ "$(grep -c '^sudo:kill -KILL -- -[1-9][0-9]*$' "$MOCK_LOG")" -eq 2 ]]
+flock -n "$MOCK_LOCK" true
+
+# Without the recovery cleanup, the surviving dpkg helper keeps the lock and
+# recovery stays failed after every bounded retry.
+export MOCK_LOCK="$mock_dir/dpkg-hang-no-cleanup.lock"
+grep -q '^          kill_timed_out_group "${elevation\[@\]}"$' "$script_dir/install-playwright.sh"
+sed 's/^          kill_timed_out_group "${elevation\[@\]}"$/          :/' \
+  "$script_dir/install-playwright.sh" > "$mock_dir/no-recovery-cleanup.sh"
+: > "$MOCK_LOG"
+if bash "$mock_dir/no-recovery-cleanup.sh" --fonts-noto-cjk > "$mock_dir/no-recovery-cleanup-output.log" 2>&1; then
+  echo 'A timed-out dpkg recovery without survivor cleanup incorrectly passed' >&2
+  exit 1
+fi
+grep -q 'could not recover interrupted package configuration' "$mock_dir/no-recovery-cleanup-output.log"
+if flock -n "$MOCK_LOCK" true; then
+  echo 'dpkg recovery cleanup test did not retain its child-held lock' >&2
+  exit 1
+fi
+kill -KILL "$(cat "$MOCK_LOCK.child-pid")" 2>/dev/null || true
+rm -f "$MOCK_LOCK.child-pid"
+export MOCK_PROCESS_TEST=0 MOCK_CHILD_ONLY_TIMEOUT=0 MOCK_DPKG_HANG=0
+
 # A delayed lock release after timeout gets a bounded retry, not an apt retry
 # while the database is still locked. Keep actual lock acquisition in dpkg.
 export MOCK_PROCESS_TEST=0 MOCK_TIMEOUT_FAILS=1 MOCK_DELAY_LOCK_RELEASE=1 MOCK_LOCK="$mock_dir/delayed.lock"
@@ -298,7 +348,7 @@ export MOCK_PROCESS_TEST=0 MOCK_TIMEOUT_FAILS=1 MOCK_DELAY_LOCK_RELEASE=1 MOCK_L
 bash "$script_dir/install-playwright.sh" --fonts-noto-cjk > "$mock_dir/delayed-output.log" 2>&1
 [[ "$(grep -c '^dpkg:--configure -a$' "$MOCK_LOG")" -eq 2 ]]
 assert_recovery_deadlines 2
-mapfile -t repair_limits < <(sed -n 's/^sudo:timeout --kill-after=5s \([0-9]*\)s dpkg --configure -a$/\1/p' "$MOCK_LOG")
+mapfile -t repair_limits < <(sed -n 's/^sudo:timeout --kill-after=5s \([0-9]*\)s bash -c .* record-process-group [^ ]*\/process-group dpkg --configure -a$/\1/p' "$MOCK_LOG")
 (( repair_limits[1] < repair_limits[0] ))
 [[ "$(grep -c '^sleep:1$' "$MOCK_LOG")" -eq 1 ]]
 flock -n "$MOCK_LOCK" true
@@ -344,4 +394,4 @@ assert_recovery_deadlines 1
 [[ "$(grep -c '^python:-m playwright install chromium$' "$MOCK_LOG" || true)" -eq 0 ]]
 grep -q 'could not recover interrupted package configuration' "$mock_dir/repair-output.log"
 
-echo 'Browser installation bounded retry tests: 14/14 passed'
+echo 'Browser installation bounded retry tests: 16/16 passed'

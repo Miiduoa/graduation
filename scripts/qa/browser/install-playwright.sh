@@ -38,7 +38,7 @@ retry_install() {
     elevation=(sudo)
     shift
   fi
-  local attempt install_status recovery_attempt recovery_deadline remaining recovered
+  local attempt install_status recovery_attempt recovery_deadline recovery_status remaining recovered
   for attempt in 1 2 3; do
     # sudo can start a separate session. Run timeout *after* elevation so it
     # owns and can signal the entire privileged apt process group on expiry.
@@ -68,9 +68,18 @@ retry_install() {
       for recovery_attempt in 1 2 3; do
         remaining=$((recovery_deadline - SECONDS))
         if (( remaining <= 0 )); then break; fi
-        if "${elevation[@]}" timeout --kill-after=5s "${remaining}s" dpkg --configure -a; then
+        # The recovery command is bounded the same way as an install attempt:
+        # record its process group so a timeout implementation that kills only
+        # the direct child cannot leave dpkg helpers holding the package lock.
+        : > "$attempt_group_file"
+        if "${elevation[@]}" timeout --kill-after=5s "${remaining}s" "${record_group[@]}" dpkg --configure -a; then
           recovered=1
           break
+        else
+          recovery_status=$?
+        fi
+        if [[ "$recovery_status" == 124 || "$recovery_status" == 137 ]]; then
+          kill_timed_out_group "${elevation[@]}"
         fi
         if [[ "$install_status" != 124 && "$install_status" != 137 ]] ||
           (( recovery_attempt == 3 || SECONDS + recovery_attempt >= recovery_deadline )); then break; fi

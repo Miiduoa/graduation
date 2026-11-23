@@ -148,6 +148,18 @@ describe('TronClass clauses inside a multi-clause request', () => {
     '查玩課雲未交作業，不要上傳附件同時刪除草稿',
     '查玩課雲未交作業，不要繳交附件順便刪除草稿',
     '查玩課雲未交作業，不要繳交附件另外提交報告',
+    '查玩課雲未交作業，不要上傳附件！刪除草稿',
+    '查玩課雲未交作業，不要上傳附件!刪除草稿',
+    '查玩課雲未交作業，不要上傳附件？刪除草稿',
+    '查玩課雲未交作業，不要上傳附件?刪除草稿',
+    '查玩課雲未交作業，不要繳交附件：刪除草稿',
+    '查玩課雲未交作業，不要繳交附件\n刪除草稿',
+    '查玩課雲未交作業，不要繳交附件後刪除草稿',
+    '查玩課雲未交作業和查看作業狀態後上傳附件',
+    '查玩課雲未交作業和查看作業狀態之後再上傳附件',
+    '查玩課雲作業繳交狀態：繳交附件，校園公告',
+    '查玩課雲作業繳交狀態:提交報告，校園公告',
+    '查玩課雲作業繳交狀態，然後查看狀態並上傳附件',
   ])('adds no Agent read to %s', question => {
     expect(tronClassCompoundClauses(question)).toEqual([]);
   });
@@ -157,5 +169,7 @@ describe('TronClass clauses inside a multi-clause request', () => {
     expect(tronClassCompoundClauses('查玩課雲作業，不要上傳附件')).toEqual(['查玩課雲作業']);
     expect(tronClassCompoundClauses("it's fine，查玩課雲作業，和校園公告")).toEqual(['查玩課雲作業']);
     expect(tronClassCompoundClauses('查玩課雲作業繳交狀態，和校園公告')).toEqual(['查玩課雲作業繳交狀態']);
+    expect(tronClassCompoundClauses('查玩課雲未交作業，不要繳交附件！校園公告')).toEqual(['查玩課雲未交作業']);
+    expect(tronClassCompoundClauses('查玩課雲作業繳交狀態，校園公告')).toEqual(['查玩課雲作業繳交狀態']);
   });
 });

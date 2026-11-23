@@ -52,15 +52,23 @@ const TRONCLASS_CONTINUATION = /(?:作業|教材|講義|附件|檔案|未交|未
 const OTHER_SERVICE_OR_SCHEDULE = /(?:頁面|畫面|入口|校園|學校|系上|社團|公車|交通|課表|成績|行事曆|日曆|空堂|時段|安排|排程|提醒|設定|失物|餐|活動|地圖|教室|今天|明天|後天|早上|上午|中午|下午|晚上|分鐘|小時|\d{1,2}\s*[:：點])/u;
 const NEGATED = /(?:不要|別|不准|禁止|無須|不用|不需要|do\s+not|don't|never)/i;
 const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
-const ACTION_BOUNDARY = '然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|而且|並|再|和|與|、|\\band\\b|\\bthen\\b|\\balso\\b';
+const WRITE_VERB_SOURCE = '繳交|提交|送出|交出|交作業|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名|退選|選課|\\b(?:submit|upload|delete|post|reply|withdraw)\\b';
+// 子句內的細切點：除了拆句分隔詞，冒號與接在「後／之後」之後的寫入動詞也開啟新的一段，
+// 讓否定清除與寫入檢查都不會跨過它們。
+const ACTION_BOUNDARY = [
+  '然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|而且|並|再|和|與|、|\\band\\b|\\bthen\\b|\\balso\\b',
+  '[，,；;。！!？?：:\\r\\n]',
+  `(?:之後|後)\\s*(?:再|並|請|幫我|替我|代我|直接|自動)*\\s*(?=(?:${WRITE_VERB_SOURCE}))`,
+].join('|');
+const ACTION_SEGMENT_SEPARATOR = new RegExp(`(?:${ACTION_BOUNDARY})+`, 'iu');
 const NEGATED_WRITE = new RegExp(
   "(?:不要|別|不准|禁止|無須|不用|不需要|do\\s+not|don't|never)\\s*(?:幫我|替我|代我|自動|直接)?\\s*" +
   "(?:繳交|提交|送出|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|submit|upload|delete|post|reply)" +
-  `(?:(?!${ACTION_BOUNDARY})[^，。；,;])*`, 'gi');
+  `(?:(?!${ACTION_BOUNDARY})[\\s\\S])*`, 'gi');
 
 // An ASCII apostrophe between letters is an English contraction, not a quote.
 const QUOTE = /[「」『』“”‘’"`]|(?<![A-Za-z])'|'(?![A-Za-z])/u;
-const WRITE_VERB = /(?:繳交|提交|送出|交出|交作業|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名|退選|選課|\b(?:submit|upload|delete|post|reply|withdraw)\b)/i;
+const WRITE_VERB = new RegExp(`(?:${WRITE_VERB_SOURCE})`, 'i');
 // Only asking about the state of a submission may mention submitting; any other
 // write verb in a clause is a command, whatever else the clause says.
 const SUBMIT_VERB = /(?:繳交|提交|送出|交出|交作業|上傳|\b(?:submit|upload)\b)/i;
@@ -108,7 +116,7 @@ function wholeRequestAllowsCompoundRead(question: string): boolean {
   if (CHAINED_WRITE.test(operationText) || EXPLICIT_WRITE.test(operationText)) return false;
   // A bare write clause such as "繳交附件" is still a write request; only a
   // status question about submissions stays a read.
-  return !positive.split(CLAUSE_SEPARATOR).some(clause =>
+  return !positive.split(ACTION_SEGMENT_SEPARATOR).some(clause =>
     WRITE_VERB.test(toOperationText(clause)) &&
     !(SUBMIT_VERB.test(clause) && SUBMISSION_STATUS.test(clause) && READ_STATUS_QUESTION.test(clause) &&
       !WRITE_VERB_OTHER_THAN_SUBMIT.test(clause)));

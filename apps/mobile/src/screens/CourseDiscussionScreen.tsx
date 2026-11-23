@@ -24,8 +24,6 @@ import { Ionicons } from '@expo/vector-icons';
 
 import {
   tcFetchDiscussions,
-  isTronClassWriteLocked,
-  TRONCLASS_WRITE_LOCKED_MESSAGE,
   tcPostDiscussion,
   type TCDiscussion,
 } from '../services/tronClassClient';
@@ -64,8 +62,6 @@ export default function CourseDiscussionScreen(props: RouteProps) {
   const groupName = props.route?.params?.groupName ?? '課程討論';
   const groupIdStr = props.route?.params?.groupId ?? '';
   const courseId = Number(groupIdStr.replace(/^tc:/, '')) || 0;
-  const isDemo = isDemoCourseId(courseId);
-  const writeLocked = !!courseId && !isDemo && isTronClassWriteLocked();
 
   const [threads, setThreads] = useState<TCDiscussion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,7 +91,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
       return;
     }
     try {
-      if (isDemo) {
+      if (isDemoCourseId(courseId)) {
         // demo course → 直接用 mock data，不打 TronClass
         const base = demoFetchDiscussions(courseId) as TCDiscussion[];
         setThreads(mergeDemoThreads(courseId, base));
@@ -109,14 +105,13 @@ export default function CourseDiscussionScreen(props: RouteProps) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [courseId, isDemo, mergeDemoThreads]);
+  }, [courseId, mergeDemoThreads]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const handlePost = useCallback(async () => {
-    if (writeLocked) return;
     if (!newTitle.trim()) {
       Alert.alert('請輸入標題');
       return;
@@ -124,7 +119,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
     if (!courseId) return;
     setPosting(true);
     try {
-      if (isDemo) {
+      if (isDemoCourseId(courseId)) {
         // demo course → 本地新增、不打後端
         const newId = Date.now();
         const newThread: TCDiscussion = {
@@ -218,7 +213,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
     } finally {
       setPosting(false);
     }
-  }, [writeLocked, isDemo, newTitle, newBody, courseId, load, mergeDemoThreads]);
+  }, [newTitle, newBody, courseId, load, mergeDemoThreads]);
 
   if (loading) {
     return (
@@ -251,7 +246,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
           />
         }
       >
-        {isDemo ? (
+        {isDemoCourseId(courseId) ? (
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: theme.space.sm }}>
             <CourseDemoDataRibbon />
           </View>
@@ -268,9 +263,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
         ) : null}
 
         {/* 新發文 */}
-        {writeLocked ? (
-          <Text style={{ color: theme.colors.text }}>{TRONCLASS_WRITE_LOCKED_MESSAGE}</Text>
-        ) : composing ? (
+        {composing ? (
           <View
             style={{
               marginTop: 16,
@@ -389,8 +382,8 @@ export default function CourseDiscussionScreen(props: RouteProps) {
           <EmptyState
             icon="chatbubbles-outline"
             title="還沒有討論串"
-            subtitle={writeLocked ? "有新討論時會出現在這裡。" : "你可以是第一個提問的人，老師或同學回覆後會出現在這裡。"}
-            hint={writeLocked ? undefined : "發起短標題問題，並在教材頁對照章節，回覆會更快。"}
+            subtitle="你可以是第一個提問的人，老師或同學回覆後會出現在這裡。"
+            hint="發起短標題問題，並在教材頁對照章節，回覆會更快。"
             showCalmHero
           />
         ) : (
