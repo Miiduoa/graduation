@@ -116,6 +116,40 @@ it('refuses coursework outside the returned course set and duplicate assignments
     parseNativeTronClassSnapshot({ ...snapshot, homework: [homework, homework] }),
   ).toThrow('INVALID_RESPONSE');
 });
+it.each(['announcements', 'materials'] as const)(
+  'rejects %s from a course absent from the native snapshot course set',
+  (area) => {
+    const foreignAnnouncement = {
+      id: 'notice-99', courseId: 99, courseName: '其他課程', title: '私人公告',
+      content: 'private fixture', publishedAt: stamp, href: 'https://tronclass.pu.edu.tw',
+      source: 'course',
+    };
+    const foreignMaterial = {
+      id: 'material-99', courseId: 99, courseName: '其他課程', title: '私人教材',
+      type: 'file', href: 'https://tronclass.pu.edu.tw', files: [],
+    };
+    const item = area === 'announcements' ? foreignAnnouncement : foreignMaterial;
+    expect(() => parseNativeTronClassSnapshot({ ...snapshot, [area]: [item] }))
+      .toThrow('INVALID_RESPONSE');
+  },
+);
+it('accepts only in-scope or explicitly school-wide supplemental items in a partial snapshot', () => {
+  const announcement = {
+    id: 'notice-10', courseId: 10, courseName: '程式設計', title: '課堂公告',
+    content: 'fixture content', publishedAt: stamp, href: 'https://tronclass.pu.edu.tw',
+    source: 'course',
+  };
+  const material = {
+    id: 'campus-file', courseId: null, courseName: '', title: '校園共用資料',
+    type: 'file', href: 'https://tronclass.pu.edu.tw', files: [],
+  };
+  const partial = { ...snapshot, partial: true,
+    announcements: [announcement], materials: [material],
+    errors: [{ courseId: 99, area: 'materials' as const, message: '其他課程無法同步。' }],
+  };
+  expect(parseNativeTronClassSnapshot(partial)).toEqual(partial);
+});
+
 it.each(['raw-school-id', 'A'.repeat(64), true])(
   'rejects an invalid verified identity fingerprint: %s',
   (studentKey) => {
