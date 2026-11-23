@@ -25,8 +25,6 @@ before(async () => {
       ['moderator', 'moderator'],
       ['instructor', 'instructor'],
     ]) {
-      // A current staff member must have a server-issued canonical campus binding.
-      await db.doc(`users/${uid}`).set({ status: 'active', schoolId: 'school', primarySchoolId: 'school' });
       await db.doc(`schools/school/members/${uid}`).set({ status: 'active' });
       await db
         .doc(`groups/club/members/${uid}`)
@@ -72,6 +70,28 @@ test('既有教師與管理員保留管理權，但不能直接調整角色', as
     await assertFails(db.doc('groups/club/members/student').update({ role: 'owner' }));
     await assertSucceeds(db.doc('groups/club/members/removable').delete());
   }
+});
+
+test('社員管理沿用有效資格與角色，明確校籍衝突時拒絕', async () => {
+  const db = env.authenticatedContext('officer').firestore();
+  const club = db.doc('groups/club');
+  const roster = db.doc('groups/club/members/student');
+  for (const profile of [
+    null,
+    { status: 'active' },
+    { status: 'active', primarySchoolId: 'school' },
+    { status: 'active', primarySchoolId: 'school', schoolId: 'other' },
+  ]) {
+    await env.withSecurityRulesDisabled(async (context) => {
+      const user = context.firestore().doc('users/officer');
+      if (profile === null) await user.delete();
+      else await user.set(profile);
+    });
+    const check = profile?.schoolId === 'other' ? assertFails : assertSucceeds;
+    await check(club.update({ name: '社團名稱' }));
+    await check(roster.update({ phone: '0911111111' }));
+  }
+  await env.withSecurityRulesDisabled((context) => context.firestore().doc('users/officer').delete());
 });
 
 test('所有客戶端均不可繞過伺服器讀寫活動、報名及簽到', async () => {
