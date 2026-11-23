@@ -388,11 +388,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended.current || document.hidden;
     const isOffscreen = () => visibility === 'hidden' ||
-      // A positive IntersectionObserver entry can become stale after a nested
-      // modal scroll (especially in embedded WebViews). Recheck the host against
-      // both the window and the dialog scrollport on every visibility event.
-      // Unknown/non-finite geometry is not evidence that the host is hidden.
-      measureLayoutVisibility() === false ||
+      (visibility === 'unknown' && measureLayoutVisibility() === false) ||
+      // A positive IntersectionObserver can be stale after nested modal
+      // scrolling. Only override that signal when the dialog's *actual*
+      // scrollport has valid measurements and demonstrably clips the canvas.
+      // Incomplete layout geometry must not contradict a valid observer.
+      (visibility === 'visible' && measureDialogScrollportVisibility() === false) ||
       // IntersectionObserver checks layout intersection, not whether a mobile
       // keyboard has reduced the *visual* viewport over the 3D canvas.
       // A positive observer entry must never reactivate an obscured WebGL scene.
@@ -538,6 +539,26 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
     const measureLayoutVisibility = (): boolean | null =>
       measureVisibilityAgainst(0, 0, window.innerWidth, window.innerHeight);
+    // Do not compare against the window viewport when the observer has
+    // positively identified this canvas: some WebViews report stale window
+    // dimensions while the dialog itself is onscreen. The dialog's measurable
+    // scrollport is the independent clipping boundary we can verify.
+    const measureDialogScrollportVisibility = (): boolean | null => {
+      if (!scrollDialog) return null;
+      try {
+        const dialogRect = scrollDialog.getBoundingClientRect();
+        const { clientLeft, clientTop, clientWidth, clientHeight } = scrollDialog;
+        const left = dialogRect.left + clientLeft;
+        const top = dialogRect.top + clientTop;
+        const right = left + clientWidth;
+        const bottom = top + clientHeight;
+        if (![left, top, right, bottom].every(Number.isFinite) ||
+            clientWidth <= 0 || clientHeight <= 0) return null;
+        return measureVisibilityAgainst(left, top, right, bottom, false);
+      } catch {
+        return null;
+      }
+    };
     // The pause path (isOffscreen) uses the visual viewport alone: a positive
     // observer entry already reflects dialog clipping. Only a stale hidden
     // result must also prove the canvas is inside the dialog scrollport.
