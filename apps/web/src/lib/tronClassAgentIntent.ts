@@ -85,18 +85,49 @@ const QUERY_COMPOUNDS = ['告訴我', '查詢', '查看', '顯示', '列出', '�
 const QUERY_START = new Set(['查', '看', ...QUERY_COMPOUNDS]);
 const ACTION_CUES = ['只要', '只', '改成', '改查', '而是'];
 const CLAUSE_CUES = ['然後', '接著', '順便', '並且', '另外', '同時', '也幫我', '再幫我', '並幫我'];
+const FUNCTION_CUES = [
+  '幫我', '替我', '代我', '幫忙', '請', '麻煩', '直接', '自動',
+  '不要', '不用', '不需要', '無須', '不准', '禁止', '別', '勿',
+  '我們', '你們', '他們', '她們', '我', '你', '您', '他', '她', '它',
+  '尚未', '還沒', '未', '待', '已', '沒',
+  '去', '來', '再', '也', '又', '都', '就', '才', '還', '先', '並', '且', '跟', '而',
+  '想', '要', '能', '可以', '可', '會',
+];
+const DOMAIN_NOUNS = [
+  '作業', '報告', '附件', '檔案', '作品', '心得', '講義', '考卷', '表單',
+  '公告', '通知', '教材', '課程', '課表', '修訂稿', '舊版', '新版', '這份', '那份',
+];
 const CONJ_CUES = ['以及', '和', '與', '及', '、'];
+const WRITE_COMPOUNDS = [
+  '重新繳交', '重新提交', '重新上傳', '重新上載', '繳交', '提交', '送出', '交出', '上傳', '上載',
+  '補交', '補繳', '遲交', '重交', '重繳', '上繳', '遞交', '呈交', '交付', '繳回', '交回',
+  '轉交', '代交', '面交', '附上', '夾帶', '送件', '寄出', '回傳', '傳給', '傳到', '傳回',
+  '傳送', '傳去', '送給', '送到', '寄給', '寄到', '遞給', '遞到', '轉給', '轉到', '轉寄',
+  '放入', '放到', '放進', '放上', '貼上', '貼到', '丟到', '塞進', '投入', '搬到',
+];
+const HAN_CHAR = /[\p{Script=Han}]/u;
 
 type TokenKind = 'noun' | 'query' | 'cue' | 'conj' | 'punct' | 'other';
 type Token = { value: string; start: number; end: number; kind: TokenKind };
 
 const LEXICON: { value: string; kind: TokenKind }[] = [
+  ...WRITE_COMPOUNDS.map(value => ({ value, kind: 'other' as const })),
+  ...DOMAIN_NOUNS.map(value => ({ value, kind: 'noun' as const })),
   ...NOUN_COMPOUNDS.map(value => ({ value, kind: 'noun' as const })),
   ...QUERY_COMPOUNDS.map(value => ({ value, kind: 'query' as const })),
   ...ACTION_CUES.map(value => ({ value, kind: 'cue' as const })),
   ...CLAUSE_CUES.map(value => ({ value, kind: 'cue' as const })),
+  ...FUNCTION_CUES.map(value => ({ value, kind: 'cue' as const })),
   ...CONJ_CUES.map(value => ({ value, kind: 'conj' as const })),
 ].sort((a, b) => b.value.length - a.value.length);
+
+function startsKnownQuery(text: string, index: number): boolean {
+  return QUERY_COMPOUNDS.some(value => text.startsWith(value, index));
+}
+
+function startsKnownWrite(text: string, index: number): boolean {
+  return WRITE_COMPOUNDS.some(value => text.startsWith(value, index));
+}
 
 function tokenize(text: string): Token[] {
   const tokens: Token[] = [];
@@ -110,6 +141,16 @@ function tokenize(text: string): Token[] {
       continue;
     }
     const ch = text[index]!;
+    const next = text[index + 1] ?? '';
+    // A leftover content character plus 查／看／交／繳 is in-word (審查、外交).
+    // Do not glue a verb character to the next word (交交通) or a known verb.
+    if (HAN_CHAR.test(ch) && HAN_CHAR.test(next) && /[查看交繳]/.test(next) &&
+      !/[查看交繳]/.test(ch) &&
+      !startsKnownQuery(text, from) && !startsKnownWrite(text, from)) {
+      tokens.push({ value: ch + next, start: from, end: from + 2, kind: 'noun' });
+      index += 2;
+      continue;
+    }
     const kind: TokenKind = ch === '查' || ch === '看' ? 'query'
       : /[，,；;。！!？?\r\n]/.test(ch) ? 'punct'
       : 'other';
@@ -139,10 +180,10 @@ function nextNegatedWriteStop(text: string, from: number): number {
     if (token.kind === 'cue' && ACTION_CUES.includes(token.value)) return token.start;
     if (token.kind === 'query' && QUERY_START.has(token.value) && !isRelativeQuery(tokens, token)) return token.start;
     if (token.kind === 'conj') {
-      const after = rest.slice(token.end);
-      if (new RegExp(`^(?:(?:請|幫我|替我|代我|直接|自動)\\s*)*(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})`, 'iu').test(after)) {
-        return token.start;
-      }
+      const skipped = rest.slice(token.end).match(/^(?:(?:請|幫我|替我|代我|直接|自動)\s*)*/u)?.[0].length ?? 0;
+      const at = token.end + skipped;
+      const write = new RegExp(`^(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})`, 'iu').exec(rest.slice(at));
+      if (write && tokenCovering(rest, at)?.kind !== 'noun') return token.start;
     }
     if (/^(?:and|then|also)\b/i.test(rest.slice(token.start))) return token.start;
   }
@@ -379,8 +420,8 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
   if (!authorizesPrivateRead(original)) return null;
   if (writeRoute === 'planner' || isMultiClauseRequest(original)) return null;
   if (writeRoute) return { intent: 'unsupported', pendingOnly: false };
-  const text = readRoutingText(original);
-  // Keywords that only appeared inside a negated write do not authorize a private read.
+  const text = textWithoutQuotedSpans(readRoutingText(original));
+  // Keywords that only appeared inside a negated write or a quotation do not authorize a private read.
   if (!TRONCLASS_KEYWORD.test(text)) return null;
   if (/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i.test(text)) {
     return { intent: 'capabilities', pendingOnly: false };

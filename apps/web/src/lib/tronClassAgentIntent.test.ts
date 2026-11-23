@@ -522,6 +522,7 @@ describe('write occurrences in TronClass requests', () => {
     '查玩課雲交通資訊作業說明',
     '查玩課雲交響樂課程',
     '查玩課雲交換生課程',
+    '查玩課雲外交課程',
   ])('keeps the course or notice read in %s', question => {
     const parsed = parseTronClassAgentIntent(question);
     expect(parsed?.intent).not.toBe('unsupported');
@@ -550,5 +551,28 @@ describe('write occurrences in TronClass requests', () => {
   ])('does not authorize a private read from a quoted mention in %s', question => {
     expect(parseTronClassAgentIntent(question)).toBeNull();
     expect(canAnswerTronClassQuestion(question)).toBe(false);
+  });
+
+  it.each([
+    '不要繳交審查過的玩課雲作業，只查校園公告',
+    '不要繳交這份和交換報告以及玩課雲作業附件，只查校園公告',
+  ])('does not treat 查 or 交 inside a word as a clause or write boundary in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('keeps a later TronClass read after a negated object that contains 審查 or 交換', () => {
+    expect(tronClassCompoundClauses('不要繳交審查過的玩課雲作業，只查校園公告，查創課教材')).toEqual(['查創課教材']);
+    expect(tronClassCompoundClauses('不要繳交這份和交換報告以及玩課雲作業附件，只查校園公告，查創課教材')).toEqual(['查創課教材']);
+  });
+
+  it.each([
+    '查玩課雲標題含「作業」的公告',
+    '查玩課雲標題含『作業』的公告',
+    '查玩課雲標題含“作業”的公告',
+    '查玩課雲標題含`作業`的公告',
+  ])('classifies on unquoted text so a quoted homework word does not beat a notice in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'announcements', pendingOnly: false });
   });
 });
