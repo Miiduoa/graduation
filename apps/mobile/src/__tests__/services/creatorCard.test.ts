@@ -1,6 +1,6 @@
 import { getDocFromServer, setDoc } from 'firebase/firestore';
 import { readCreatorCardFields } from '@campus/shared/src/creatorCard';
-import { isCreatorCardAccessDenied, readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
+import { readCreatorCard, saveCreatorCard } from '../../services/creatorCard';
 
 jest.mock('../../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('firebase/firestore', () => ({
@@ -20,16 +20,6 @@ const snap = (value: Record<string, unknown>) => ({
   data: () => value,
 });
 beforeEach(() => jest.clearAllMocks());
-
-test.each([
-  [{ code: 'permission-denied' }, true],
-  [{ code: 'firestore/unauthenticated' }, true],
-  [new Error('Missing or insufficient permissions.'), true],
-  [{ code: 'unavailable' }, false],
-  [new Error('offline'), false],
-])('classifies card read error %p', (error, denied) => {
-  expect(isCreatorCardAccessDenied(error)).toBe(denied);
-});
 
 test('reads only a school-scoped published card', async () => {
   jest.mocked(getDocFromServer).mockResolvedValue(snap({ ...card, phone: 'private' }) as never);

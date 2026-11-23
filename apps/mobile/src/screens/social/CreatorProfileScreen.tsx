@@ -18,6 +18,7 @@ import {
 } from '../../services/creatorProfile';
 import type { CampusPostDoc } from '../../services/feed';
 import { readCreatorPin, saveCreatorPin, type CreatorPin } from '../../services/creatorPin';
+import { readCreatorCard } from '../../services/creatorCard';
 import { CreatorCardPanel } from './CreatorCardPanel';
 import { CreatorHighlight } from './CreatorHighlight';
 
@@ -93,6 +94,23 @@ function ScopedCreatorProfile({
 }) {
   const styles = useThemeStyleSheet(createStyles);
   const own = viewerUid === memberUid;
+  const firstCardRead = useRef<ReturnType<typeof readCreatorCard> | null | undefined>(undefined);
+  const readIntro = useCallback(() => {
+    const first = firstCardRead.current;
+    const read = readCreatorCard(schoolId, memberUid);
+    // Only a still-pending first read of one's own card can back up a failed reload.
+    if (first === null) return read;
+    const clearFirst = () => { firstCardRead.current = null; };
+    if (first === undefined) {
+      firstCardRead.current = read;
+      void read.then(clearFirst, clearFirst);
+      return read;
+    }
+    return read.then((value) => {
+      clearFirst();
+      return value;
+    }, () => first);
+  }, [schoolId, memberUid]);
   const [tab, setTab] = useState<ProfileTab>('posts');
   const [identity, setIdentity] = useState<ReadState<CreatorIdentity | null>>({ status: 'loading' });
   const [posts, setPosts] = useState<ReadState<PostsPage>>({ status: 'loading' });
@@ -305,8 +323,9 @@ function ScopedCreatorProfile({
                 <Action label="重試名片" onPress={() => setRefreshRevision((n) => n + 1)} />
               </View>
             )}
-            <CreatorCardPanel schoolId={schoolId} ownerUid={memberUid} own={own}
-              refreshKey={`${tab}:${refreshRevision}:${savedRevision}:${focusRevision}`} />
+            <CreatorCardPanel key={tab} schoolId={schoolId} ownerUid={memberUid} own={own}
+              readIntro={own ? readIntro : undefined}
+              reloadRevision={`${refreshRevision}:${savedRevision}:${focusRevision}`} />
             <CreatorHighlight key={schoolId + ':' + memberUid}
               schoolId={schoolId} memberUid={memberUid} own={own} candidates={postRows}
               openPost={(postId) => navigation?.navigate?.('PostDetail', { postId })} />

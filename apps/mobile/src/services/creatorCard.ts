@@ -16,14 +16,6 @@ export function creatorCardFieldMatches(card: CreatorCard, field: keyof CreatorC
   return card[field] === expected;
 }
 
-export function isCreatorCardAccessDenied(error: unknown): boolean {
-  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
-  const denied = /^(?:firestore\/)?(?:permission-denied|unauthenticated)$/;
-  return (typeof code === 'string' && denied.test(code)) ||
-    (typeof message === 'string' &&
-      (denied.test(message) || message === 'Missing or insufficient permissions.'));
-}
-
 function cardRef(schoolId: string, ownerUid: string) {
   if (!schoolId || !ownerUid || schoolId.includes('/') || ownerUid.includes('/')) {
     throw new Error('Invalid creator card scope');

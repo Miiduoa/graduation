@@ -1467,7 +1467,7 @@ test('a pending refresh replaces the previously committed card on display', asyn
   expect(await view.findByText(card.bio)).toBeTruthy();
   expect(view.queryByText('社群簡介暫時無法讀取。')).toBeNull();
   expect(view.getByLabelText('查看作品連結')).toBeTruthy();
-  view.rerender(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} refreshKey="media" />);
+  view.rerender(<CreatorCardPanel schoolId="pu" ownerUid="bob" own={false} reloadRevision="1" />);
   expect(await view.findByText(refreshed.bio)).toBeTruthy();
 });
 
