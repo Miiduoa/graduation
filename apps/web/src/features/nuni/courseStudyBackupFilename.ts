@@ -36,6 +36,19 @@ function fallbackFilenameBoundary(value: string, requestedEnd = MAX_FILENAME_COD
       (nextPoint >= 0xd7cb && nextPoint <= 0xd7fb);
     const previousT = (previousPoint >= 0x11a8 && previousPoint <= 0x11ff) ||
       (previousPoint >= 0xd7cb && previousPoint <= 0xd7fb);
+    // UAX #29 GB9b: a Prepend code point belongs to the following grapheme.
+    // A 48-point cut between it and the next character leaves a dangling mark
+    // on WebViews without a working Intl.Segmenter.
+    const previousPrepend = (previousPoint >= 0x0600 && previousPoint <= 0x0605) ||
+      previousPoint === 0x06dd || previousPoint === 0x070f ||
+      (previousPoint >= 0x0890 && previousPoint <= 0x0891) ||
+      previousPoint === 0x08e2 || previousPoint === 0x110bd ||
+      previousPoint === 0x110cd ||
+      (previousPoint >= 0x111c2 && previousPoint <= 0x111c3) ||
+      previousPoint === 0x1193f || previousPoint === 0x11941 ||
+      previousPoint === 0x11a3a ||
+      (previousPoint >= 0x11a84 && previousPoint <= 0x11a89) ||
+      previousPoint === 0x11d46;
     if (next && (
       /^\p{Mark}$/u.test(next) || next === '\u200c' || next === '\u200d' ||
       previous === '\u200c' || previous === '\u200d' ||
@@ -43,7 +56,7 @@ function fallbackFilenameBoundary(value: string, requestedEnd = MAX_FILENAME_COD
       (nextPoint >= 0xe0020 && nextPoint <= 0xe007f) ||
       (previous === '\r' && next === '\n') ||
       (nextV && (previousL || previousV)) ||
-      (nextT && (previousV || previousT))
+      (nextT && (previousV || previousT)) || previousPrepend
     )) {
       end -= 1;
       continue;

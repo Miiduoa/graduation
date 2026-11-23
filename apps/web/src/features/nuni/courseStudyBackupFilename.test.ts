@@ -130,6 +130,44 @@ describe('mobile backup filename grapheme boundaries', () => {
     }
   });
 
+
+  it('keeps Unicode Prepend marks attached in filenames on older mobile WebViews', () => {
+    // GB9b: each code point is joined to the following glyph in one grapheme.
+    const prepends = [
+      0x0600, 0x0605, 0x06dd, 0x070f, 0x0890, 0x08e2, 0x110bd,
+      0x110cd, 0x111c2, 0x1193f, 0x11a3a, 0x11a84, 0x11d46,
+    ].map((point) => String.fromCodePoint(point));
+    const prefix = '課'.repeat(47);
+    const titles = prepends.map((prepend) => prefix + prepend + 'ع後續.md');
+    const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
+    const assertNames = () => {
+      for (const title of titles) {
+        expect(courseStudyBackupFilenameStem(title)).toBe(prefix);
+        expect(courseStudyNotesFilename(title)).toBe(prefix + '-學習筆記.txt');
+        expect(courseStudyProgressFilename(title)).toBe(prefix + '-閱讀進度.campus-study.json');
+        expect(courseStudyPracticeCheckpointFilename(title)).toBe(prefix + '-逐題練習.campus-practice.json');
+      }
+      // A whole Prepend+letter grapheme still fits exactly after 46 letters.
+      expect(courseStudyBackupFilenameStem('課'.repeat(46) + String.fromCodePoint(0x0600) + 'ع後續.md'))
+        .toBe('課'.repeat(46) + String.fromCodePoint(0x0600) + 'ع');
+    };
+    try {
+      Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: undefined });
+      assertNames();
+      // A broken WebView may report each code point as a complete grapheme.
+      Object.defineProperty(Intl, 'Segmenter', {
+        configurable: true,
+        value: class {
+          segment(value: string) { return Array.from(value, (segment) => ({ segment })); }
+        },
+      });
+      assertNames();
+    } finally {
+      if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor);
+      else Reflect.deleteProperty(Intl, 'Segmenter');
+    }
+  });
+
   it('falls back when a WebView splits an emoji into UTF-16 surrogate halves', () => {
     const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
     Object.defineProperty(Intl, 'Segmenter', {

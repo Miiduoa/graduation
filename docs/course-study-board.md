@@ -2415,3 +2415,10 @@ Markdown 教材可用反斜線跳脫反引號。當原文包含這樣的字面�
 - 修補來源表格的複製成功回饋：原本內嵌 WebView 的 `clipboard.writeText()` 若回傳 `Promise.resolve(true)`，介面會標示「瀏覽器已接受複製指令」，但標準 Clipboard API 是 `Promise<void>`，`true` 並不能證實真的寫入。現在只有 `undefined` 的標準履約可顯示瀏覽器已接受指令；`true`、`{ success: true }`、字串與其他非標準回覆一律保留原文與手動長按／鍵盤選取路徑，顯示「未確認複製」，不誤導學生以為資料已備份。
 - React DOM 回歸涵蓋錯誤 `true` 回覆、假陽性物件／文字訊息、正常標準回覆，以及原文與選取範圍不遺失；保持逾時、切換列使舊回覆失效、精確 CRLF 與 TXT 下載原行為。不修改授權教材、v1/v2 閱讀進度、v1 逐題 checkpoint；不增套件／付費 API／私人教材外傳。
 - 這是程式與模擬 DOM 修補，不代表 iOS／Android／VoiceOver／TalkBack 真機確認；完整 GitHub CI／CodeQL、指定 App 5504170 APPROVED、Maestro、WebGPU 與 Ahaboard 同教材同題同機驗收仍須以此新 head 另行取得。PR 保持 Draft、不合併、不部署、不宣稱超越競品。
+
+
+### 2026-11-23：舊版手機瀏覽器儲存名稱避免截斷 Unicode 前置連字記號
+
+- 檔名最多保留 48 個 Unicode code points。舊版 iOS WebView／Android 內嵌瀏覽器若缺少或錯誤實作 `Intl.Segmenter`，原有備援可能在 UAX #29 GB9b Prepend（例如阿拉伯文 U+0600／U+06DD、敘利亞文 U+070F、Kaithi U+110BD）後方切斷，留下孤立記號。現在備援辨識這些前置記號並退回完整字素；正常中文、合法阿拉伯文、完整 Emoji 與檔名上限保持不變。
+- 回歸測試涵蓋 13 種 Prepend、Segmenter 不存在與逐字元錯誤分段、完整字素保留，檢查筆記 TXT、閱讀 JSON、逐題 JSON。無套件新增、備份格式變更、付費 API 或私人教材傳輸。
+- 程式與模擬 WebView 測試不代表真實 iOS Safari／Android Chrome／VoiceOver／TalkBack 驗收；需按新 SHA 核對 CI、CodeQL、App 5504170 審查、Maestro 與 Ahaboard 同條件比較。PR 保持 Draft、不合併、不部署。
