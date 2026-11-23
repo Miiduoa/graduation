@@ -362,18 +362,19 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // remain available; the visitor can explicitly opt into 3D at any time.
     const saveData = requestsReducedData();
     let visibility: 'unknown' | 'visible' | 'hidden' = 'unknown';
+    let lastViewportBounds: string | undefined;
+    let geometrySuspended = false;
     let scene: CampusSpatialScene | null = null;
     // Safari can fire pagehide before visibilitychange when entering bfcache.
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended.current || document.hidden;
-    const isOffscreen = () => {
-      const geometry = measureHostViewport();
+    const isOffscreen = (geometry = measureHostViewport()) => {
       const override = manualGeometry.current;
       const matchesManualBounds = override?.host === host && override.bounds === geometry?.bounds;
       if (override?.bounds !== undefined && !matchesManualBounds) manualGeometry.current = null;
       // A fresh positive observer entry can outlive stale keyboard bounds.
       return visibility === 'hidden' ||
-        (visibility !== 'visible' && geometry?.visible === false && !matchesManualBounds);
+        ((visibility !== 'visible' || geometrySuspended) && geometry?.visible === false && !matchesManualBounds);
     };
     const isDeferred = () => isOffscreen() || isBackgrounded() || (saveData && !hasDataConsent);
     const defer = () => {
@@ -381,9 +382,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         saveData && !hasDataConsent ? 'data-saver' : 'offscreen');
       setStatus('deferred');
     };
-    const updateVisibility = () => {
+    const updateVisibility = (geometry = measureHostViewport()) => {
       if (!scene) return;
-      const shouldRender = !isOffscreen() && !isBackgrounded();
+      const shouldRender = !isOffscreen(geometry) && !isBackgrounded();
       scene.setActive(shouldRender);
       setRenderSuspended(!shouldRender);
     };
@@ -549,12 +550,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
     const syncViewport = (event?: Event) => {
       if (!active) return;
-      // Only a geometry event confirming that the host is offscreen can
-      // invalidate a positive observation without a new observer entry.
-      if (event && event.type !== 'focus' && visibility === 'visible' &&
-          measureHostViewport()?.visible === false) visibility = 'unknown';
+      const geometry = measureHostViewport();
+      // A changed boundary can temporarily clip a layout-visible canvas.
+      // A repeated boundary can be stale after the keyboard closes.
+      geometrySuspended = Boolean(event && geometry?.visible === false && geometry.bounds !== lastViewportBounds);
+      lastViewportBounds = geometry?.bounds;
       refreshVisualViewportListeners();
-      updateVisibility();
+      updateVisibility(geometry);
       if (!started && !isDeferred()) startWhenVisible();
       else syncPendingStartup();
     };
