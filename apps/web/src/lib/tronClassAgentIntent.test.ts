@@ -188,6 +188,9 @@ describe('TronClass clauses inside a multi-clause request', () => {
 
 describe('write occurrences in TronClass requests', () => {
   it.each([
+    '查玩課雲作業，也上傳狀態，以及校園公告',
+    '查玩課雲作業，也上傳狀態和附件，以及校園公告',
+    '查玩課雲作業，也上傳狀態：截圖，以及校園公告',
     '查玩課雲作業，也上傳狀態截圖，以及校園公告',
     '查玩課雲作業，繳交狀態表給老師',
     '查玩課雲作業繳交狀態後記得上傳狀態報告，查校園公告',
@@ -198,7 +201,15 @@ describe('write occurrences in TronClass requests', () => {
     expect(tronClassCompoundClauses(question)).toEqual([]);
   });
 
+  it('keeps an unpunctuated additive write in the planner', () => {
+    const question = '查玩課雲作業也上傳狀態';
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+  });
+
   it.each([
+    '查玩課雲作業上傳狀態：截圖',
+    '查玩課雲作業顯示完成後上傳狀態',
     '準備玩課雲作業後把附件上傳',
     '玩課雲可以做什麼：立即上傳狀態',
     '查玩課雲作業上載狀態文件',
@@ -211,6 +222,39 @@ describe('write occurrences in TronClass requests', () => {
   const cues = ['記得', '立即', '馬上', '再', '然後', '接著', '接下來', '之後', '後', '請', '幫我'];
   const verbs = ['繳交', '提交', '送出', '交出', '上傳', '上載', 'submit ', 'upload '];
   const objects = ['報告', '檔', '文件', '版', '附件', '作業內容'];
+
+  const additiveCues = ['也', '還', '並', '並且', '順便', '同時', '再', '另外', '以及', '和', '跟'];
+  const statusNouns = ['狀態', '紀錄', '情況', '進度'];
+  const endings = [
+    '', '？', '?', '。', '！', '!', '嗎', '呢', '如何', '怎樣', '怎麼樣', '了沒', '有沒有',
+    '和附件', '與附件', '及附件', '：截圖', '，截圖', '；截圖',
+  ];
+
+  it.each(additiveCues.flatMap(cue => verbs.flatMap(verb => statusNouns.flatMap(noun =>
+    endings.map(ending => `下載玩課雲講義，查作業${cue}${verb}${noun}${ending}`),
+  ))))('keeps the additive write in the planner in %s', question => {
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '查作業繳交狀態',
+    '查玩課雲作業繳交狀態？',
+    '作業交了沒',
+    '查作業交了沒',
+    '作業交過了嗎',
+    '我的作業上傳狀態如何',
+    '查作業提交進度怎麼樣',
+    '查這週資料庫課程的作業上傳進度',
+    '不要繳交只要查玩課雲作業狀態',
+  ])('keeps the governed status read %s', question => {
+    const scoped = question.includes('玩課雲') ? question : `玩課雲${question}`;
+    expect(parseTronClassAgentIntent(scoped)).toEqual({ intent: 'homework', pendingOnly: false });
+  });
+
+  it.each(['和附件', '與附件', '及附件', '：截圖', '，截圖', '；截圖'])(
+    'does not end a governed status query before %s',
+    ending => expect(tronClassCompoundClauses(`下載玩課雲講義，查作業上傳狀態${ending}`)).toEqual([]),
+  );
 
   it.each(cues.flatMap(cue => verbs.flatMap(verb => objects.map(object =>
     `查玩課雲作業繳交狀態${cue}${verb}狀態${object}，查校園公告`,

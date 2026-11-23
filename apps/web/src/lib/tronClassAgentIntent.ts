@@ -54,7 +54,7 @@ const NEGATION_SOURCE = "不要|別|勿|不准|禁止|無須|不用|不需要|\\
 const NEGATED = new RegExp(NEGATION_SOURCE, 'i');
 const NEGATIONS = new RegExp(NEGATION_SOURCE, 'gi');
 const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
-const SUBMIT_VERB_SOURCE = '繳交|提交|送出|交出|交作業|上傳|上載|\\b(?:submit|upload)\\b|[交繳](?=了沒)';
+const SUBMIT_VERB_SOURCE = '繳交|提交|送出|交出|交作業|上傳|上載|\\b(?:submit|upload)\\b|[交繳](?=了[沒嗎]|沒|過了嗎)';
 const OTHER_WRITE_VERB_SOURCE = '發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名|退選|選課|\\b(?:delete|post|reply|withdraw)\\b';
 const WRITE_VERB = new RegExp(`(${SUBMIT_VERB_SOURCE})|${OTHER_WRITE_VERB_SOURCE}`, 'giu');
 const WRITE_NEGATION_SOURCE = `(?:${NEGATION_SOURCE})\\s*(?:(?:幫我|替我|代我|自動|直接)\\s*)*`;
@@ -78,36 +78,76 @@ function readRoutingText(text: string): string {
   }
   return result + text.slice(start);
 }
-const WRITE_CUE = /(?:記得|立即|馬上|再|然後|接著|接下來|之後|後|請|幫我|替我|代我|直接|自動|順便|同時|並|\b(?:please|then|immediately))\s*$/iu;
+const ADDITIVE_CUE = /(?:也|還|並|並且|順便|同時|再|另外|以及|和|跟|與|及)\s*$/u;
+const WRITE_CUE = /(?:記得|立即|馬上|然後|接著|接下來|之後|後|請|幫我|替我|代我|直接|自動|\b(?:please|then|immediately))\s*$/iu;
 const STATUS_PREFIX = /(?:(?:是否|有沒有|有無|有哪些|哪些)\s*(?:已經|已|有)?\s*|尚未|還沒|未|沒|待|已經|已)$/u;
 const STATUS_NOUN_SOURCE = '(?:過的?|了的?|的|之)?\\s*(?:狀態|紀錄|記錄|情況|進度|歷史)';
-const STATUS_PREDICATE_SOURCE = '(?:嗎|呢|了沒|如何|怎樣|是什麼|有沒有|查詢|一下|給我看)';
-// 和／與 can start a follow-up clause or be part of the write object's name.
-const STATUS_FOLLOWUP_SOURCE = `[和與]\\s*(?:查|看|顯示|列出|確認|下載|公告|通知|${TRONCLASS_CONTINUATION.source}|${OTHER_SERVICE_OR_SCHEDULE.source})`;
-const STATUS_END_SOURCE = `\\s*(?=$|\\p{P}|${STATUS_FOLLOWUP_SOURCE})`;
-const STATUS_SUFFIX = new RegExp(`^(?:了沒|${STATUS_NOUN_SOURCE}(?:\\s*${STATUS_PREDICATE_SOURCE})?)${STATUS_END_SOURCE}`, 'u');
-const HOMEWORK_STATUS_SUFFIX = new RegExp(
-  `^\\s*(?:的?作業)?\\s*(?:的?有哪些)?(?:${STATUS_END_SOURCE}|\\s*(?=${NEGATED_WRITE_SOURCE}))`, 'iu',
+const STATUS_NOUN = new RegExp(`^${STATUS_NOUN_SOURCE}`, 'u');
+const STATUS_QUESTION_SOURCE = '(?:嗎|呢|了沒|如何|怎樣|怎麼樣|是什麼|有沒有)';
+const STATUS_END_SOURCE = '\\s*(?=$|[?。!])';
+// Preserve the existing compound read when the next clause names campus announcements.
+const CAMPUS_ANNOUNCEMENT_BOUNDARY = '\\s*(?=(?:,\\s*和?|和)\\s*(?:查)?校園公告\\s*[?。!.]*$)';
+const STATUS_BOUNDARY_SOURCE = `(?:${STATUS_END_SOURCE}|${CAMPUS_ANNOUNCEMENT_BOUNDARY})`;
+const GOVERNED_STATUS = new RegExp(
+  `^${STATUS_NOUN_SOURCE}(?:\\s*(?:${STATUS_QUESTION_SOURCE}|查詢|一下|給我看))?${STATUS_BOUNDARY_SOURCE}`, 'u',
 );
-const STATUS_HOW = new RegExp(`((?:${SUBMIT_VERB_SOURCE})${STATUS_NOUN_SOURCE})\\s*如何${STATUS_END_SOURCE}`, 'giu');
+const SUBMISSION_QUESTION = new RegExp(`^(?:了沒|了嗎|沒|過了嗎)${STATUS_BOUNDARY_SOURCE}`, 'u');
+const HOMEWORK_STATUS_SUFFIX = new RegExp(
+  `^\\s*(?:的?作業)?\\s*(?:的?有哪些)?(?:${STATUS_BOUNDARY_SOURCE}|\\s*(?=${CLAUSE_SEPARATOR.source}|${NEGATED_WRITE_SOURCE}))`, 'iu',
+);
+const STATUS_EXPLANATION = new RegExp(
+  `((?:${SUBMIT_VERB_SOURCE})${STATUS_NOUN_SOURCE})\\s*(?:如何|怎麼樣)${STATUS_BOUNDARY_SOURCE}`, 'giu',
+);
+
+const LMS_SOURCE = '(?:玩課雲|創課|tron\\s*class)';
+const HOMEWORK_SUBJECT = new RegExp(`^(?:${LMS_SOURCE}\\s*(?:的\\s*)?)?(?:我的\\s*)?作業\\s*的?\\s*$`, 'iu');
+const READ_STATUS_PREFIX = new RegExp(
+  `^(?:${LMS_SOURCE}\\s*(?:作業\\s*)?)?(?:(?:請|麻煩|幫我|替我|只要|只)\\s*)*` +
+  `(?:查詢|查看|確認|顯示|列出|告訴我|查|看)\\s*`, 'iu',
+);
+const STATUS_FILLER = new RegExp(`^(?:(?:我的|這週|本週|${LMS_SOURCE}|作業|的|一下)\\s*)*$`, 'iu');
+const NAMED_COURSE = /[\p{L}\p{N} ]{1,40}課程/u;
+const AMBIGUOUS_COURSE_NAME = /也|還|並|順便|同時|再|另外|以及|和|跟|與|及|後|查|看|確認|顯示|列出|告訴我|狀態|紀錄|情況|進度/u;
+
+function readGovernsStatus(segment: string): boolean {
+  const read = segment.match(READ_STATUS_PREFIX);
+  if (!read) return false;
+  const filler = segment.slice(read[0].length);
+  if (STATUS_FILLER.test(filler)) return true;
+
+  const course = NAMED_COURSE.exec(filler);
+  if (!course) return false;
+  return !AMBIGUOUS_COURSE_NAME.test(course[0]) &&
+    STATUS_FILLER.test(filler.slice(0, course.index)) &&
+    STATUS_FILLER.test(filler.slice(course.index + course[0].length));
+}
 
 // An ASCII apostrophe between letters is an English contraction, not a quote.
 const QUOTE = /[「」『』“”‘’"`]|(?<![A-Za-z])'|'(?![A-Za-z])/u;
 
 /** Classify each occurrence using its own context in the original request. */
-function hasWriteCommand(text: string): boolean {
+function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
   for (const match of text.matchAll(WRITE_VERB)) {
     const before = text.slice(0, match.index);
     if (WRITE_NEGATION.test(before)) continue;
-    if (!match[1] || WRITE_CUE.test(before)) return true;
+    if (!match[1]) return 'unsupported';
 
-    const after = text.slice(match.index + match[0].length);
-    // Keep the established homework filters such as「尚未提交的作業」.
+    const after = text.slice(match.index + match[0].length).trimStart();
+    if (ADDITIVE_CUE.test(before)) return STATUS_NOUN.test(after) ? 'planner' : 'unsupported';
+    if (WRITE_CUE.test(before)) return 'unsupported';
+    const segment = before.split(/[,;。?!、:\r\n]/u).at(-1)!.trimStart();
+    if ((GOVERNED_STATUS.test(after) || SUBMISSION_QUESTION.test(after)) &&
+      (readGovernsStatus(segment) || HOMEWORK_SUBJECT.test(segment))) continue;
+
+    // Preserve homework filters such as「尚未提交的作業」.
     const statusPrefix = before.match(STATUS_PREFIX);
-    if (statusPrefix && WRITE_CUE.test(before.slice(0, statusPrefix.index))) return true;
-    if (!STATUS_SUFFIX.test(after) && !(statusPrefix && HOMEWORK_STATUS_SUFFIX.test(after))) return true;
+    if (statusPrefix && HOMEWORK_STATUS_SUFFIX.test(after)) {
+      const filterContext = before.slice(0, statusPrefix.index);
+      if (!ADDITIVE_CUE.test(filterContext) && !WRITE_CUE.test(filterContext)) continue;
+    }
+    return 'unsupported';
   }
-  return false;
+  return null;
 }
 
 /** Examples, translations, quotes, general explanations and negated reads do not authorize a private read. */
@@ -117,8 +157,8 @@ function authorizesPrivateRead(original: string): boolean {
     if (!STARTS_NEGATED_WRITE.test(rest) &&
       /^.{0,80}(?:讀取|查詢|查看|查|列出|下載|準備|代理|read|fetch|download)/i.test(rest)) return false;
   }
-  // A terminal「如何」in a status query asks for the current state.
-  const explanationText = original.replace(STATUS_HOW, '$1');
+  // Terminal status questions ask for the current state.
+  const explanationText = original.replace(STATUS_EXPLANATION, '$1');
   return !(/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(explanationText) ||
     /^[「『“"'][\s\S]*[」』”"']$/.test(original));
 }
@@ -132,7 +172,7 @@ function authorizesPrivateRead(original: string): boolean {
 function wholeRequestAllowsCompoundRead(question: string): boolean {
   const original = question.normalize('NFKC').trim();
   // Quoted text anywhere may be split apart, so no clause can be trusted as a command.
-  return !QUOTE.test(original) && !hasWriteCommand(original) &&
+  return !QUOTE.test(original) && !writeCommandRoute(original) &&
     authorizesPrivateRead(original);
 }
 
@@ -190,10 +230,10 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
     !TRONCLASS_KEYWORD.test(question)) return null;
   const original = question.normalize('NFKC').trim();
   if (isExistingTronClassNavigation(original)) return null;
-  const hasWrite = hasWriteCommand(original);
+  const writeRoute = writeCommandRoute(original);
   if (!authorizesPrivateRead(original)) return null;
-  if (isMultiClauseRequest(original)) return null;
-  if (hasWrite) return { intent: 'unsupported', pendingOnly: false };
+  if (writeRoute === 'planner' || isMultiClauseRequest(original)) return null;
+  if (writeRoute) return { intent: 'unsupported', pendingOnly: false };
   const text = readRoutingText(original);
   if (/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i.test(text)) {
     return { intent: 'capabilities', pendingOnly: false };
