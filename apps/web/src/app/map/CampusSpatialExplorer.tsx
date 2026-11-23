@@ -342,6 +342,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const [renderSuspended, setRenderSuspended] = useState(false);
   const [deferredCause, setDeferredCause] = useState<'background' | 'offscreen' | 'data-saver'>('background');
   const pageSuspended = useRef(false);
+  const manualGeometry = useRef<{ host: HTMLDivElement; bounds?: string } | null>(null);
   const helpId = useId();
   const runtime = useRef<CampusSpatialScene | null>(null);
   const view = useMemo(() => ({
@@ -372,7 +373,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Safari can fire pagehide before visibilitychange when entering bfcache.
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended.current || document.hidden;
-    const isOffscreen = () => visibility === 'hidden' || hostViewportVisibility() === false;
+    const isOffscreen = () => {
+      const geometry = measureHostViewport();
+      const override = manualGeometry.current;
+      const matchesManualBounds = override?.host === host && override.bounds === geometry?.bounds;
+      if (override?.bounds !== undefined && !matchesManualBounds) manualGeometry.current = null;
+      return visibility === 'hidden' || (geometry?.visible === false && !matchesManualBounds);
+    };
     const isDeferred = () => isBackgrounded() || (saveData && !hasDataConsent) || isOffscreen();
     const defer = () => {
       setDeferredCause(isBackgrounded() ? 'background' :
@@ -455,7 +462,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     let scrollDialog: Element | null | undefined;
     try { scrollDialog = host.closest?.('dialog'); }
     catch { /* Dialog clipping is optional when this API is unavailable. */ }
-    const hostViewportVisibility = (): boolean | null => {
+    const measureHostViewport = (): { visible: boolean; layoutVisible: boolean; bounds: string } | null => {
       let visualBounds: { left: number; top: number; width: number; height: number } | null = null;
       try {
         const viewport = window.visualViewport;
@@ -504,11 +511,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
             clippedBottom = Math.min(clippedBottom, contentBottom);
           }
         }
-        if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) return false;
-        if (clippedBottom <= top || clippedTop >= bottom || clippedRight <= left || clippedLeft >= right) {
-          return false;
-        }
-        return true;
+        return {
+          layoutVisible: clippedRight > clippedLeft && clippedBottom > clippedTop,
+          visible: Math.min(clippedRight, right) > Math.max(clippedLeft, left) &&
+            Math.min(clippedBottom, bottom) > Math.max(clippedTop, top),
+          bounds: [rect.left, rect.top, rect.right, rect.bottom,
+            clippedLeft, clippedTop, clippedRight, clippedBottom, left, top, right, bottom].join(','),
+        };
       } catch {
         // A broken host/layout measurement is not evidence of an offscreen
         // canvas; keep the observer and keyboard recovery available.
@@ -641,6 +650,15 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       syncPageVisibility(true);
     };
     resetObserver();
+    const override = manualGeometry.current;
+    if (override?.host === host && override.bounds === undefined) {
+      // Sample after the manual scroll and focus. Stale WebView bounds can
+      // persist across resize events and scene rebuilds. The layout viewport
+      // and dialog must have visible pixels before overriding VisualViewport.
+      const geometry = measureHostViewport();
+      manualGeometry.current = geometry?.layoutVisible && !geometry.visible
+        ? { host, bounds: geometry.bounds } : null;
+    }
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
@@ -679,12 +697,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
   const startManually = () => {
     // A recovery button may be visible while the canvas is below the modal
     // scrollport. Focus alone does not scroll in some mobile WebViews.
-    // Bring the host into view first; viewport guards still decide whether
-    // WebGL is allowed to allocate a context.
+    // Bring the host into view before the new scene measures its bounds.
     try { host?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'auto' }); }
     catch { /* Legacy WebViews may not implement scrolling. */ }
     // Keep focus inside the map when its start control disappears.
     try { host?.focus(); } catch { /* Focus is advisory. */ }
+    if (host) manualGeometry.current = { host };
     onManualStart();
   };
   return (

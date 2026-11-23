@@ -919,7 +919,7 @@ it('scrolls an offscreen 3D host into the modal before manual recovery', async (
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
 });
 
-it('lets a student manually start 3D if a WebView never reports canvas visibility', async () => {
+it.each(['outside the viewport', 'clipped by the dialog'])('scrolls before restarting 3D when %s', async (clipping) => {
   // The API exists and observe() succeeds, but the WebView never invokes its
   // callback. Avoid an infinite offscreen wait without eagerly allocating GPU.
   let top = window.innerHeight + 10;
@@ -959,17 +959,71 @@ it('lets a student manually start 3D if a WebView never reports canvas visibilit
   await act(async () => fireEvent.click(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })));
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  top = window.innerHeight + 10;
+  if (clipping === 'clipped by the dialog') {
+    vi.spyOn(dialog, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 600, 250));
+    Object.defineProperties(dialog, {
+      clientWidth: { value: 600 },
+      clientHeight: { value: 250 },
+    });
+  }
+  top = clipping === 'clipped by the dialog' ? 300 : window.innerHeight + 10;
   fireEvent.resize(window);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  const scrollToCanvas = vi.fn(() => {
+    expect(scene.create).toHaveBeenCalledTimes(2);
+    top = 40;
+  });
+  Object.defineProperty(graphics, 'scrollIntoView', { configurable: true, value: scrollToCanvas });
   await act(async () => fireEvent.click(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })));
-  expect(scene.create).toHaveBeenCalledTimes(2);
-  expect(graphics.parentElement?.dataset.spatialState).toBe('deferred');
-  top = 40;
-  await act(async () => fireEvent.resize(window));
+  expect(scrollToCanvas).toHaveBeenCalledOnce();
   expect(scene.create).toHaveBeenCalledTimes(3);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('remeasures on manual restart and resumes despite unchanged stale VisualViewport bounds', async () => {
+  let height = 700;
+  let top = 400;
+  const readHeight = vi.fn(() => height);
+  const viewport = Object.assign(new EventTarget(), { width: 800, offsetLeft: 0, offsetTop: 0 });
+  Object.defineProperty(viewport, 'height', { get: readHeight });
+  vi.stubGlobal('visualViewport', viewport);
+  const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return this.getAttribute('aria-label') === '校園地點空間圖' ? new DOMRect(0, top, 320, 180) : new DOMRect();
+  });
+
+  try {
+    render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    const restart = () => fireEvent.click(within(dialog).getByRole('button', { name: '重新啟動立體畫面' }));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    height = 200;
+    act(() => { viewport.dispatchEvent(new Event('resize')); });
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    bounds.mockClear();
+    readHeight.mockClear();
+    await act(async () => restart());
+    expect(bounds.mock.contexts).toContain(graphics);
+    expect(readHeight).toHaveBeenCalled();
+    expect(scene.create).toHaveBeenCalledTimes(2);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    act(() => { viewport.dispatchEvent(new Event('resize')); });
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    act(() => intersection?.([observerEntry(graphics, false)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    await act(async () => restart());
+    expect(scene.create).toHaveBeenCalledTimes(3);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    top = window.innerHeight + 40;
+    fireEvent.scroll(dialog);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+  } finally {
+    bounds.mockRestore();
+  }
 });
 
 // Some embedded WebViews report a window-root intersection for pixels that
@@ -2353,7 +2407,10 @@ it.each(
       const mergeBaseAllocations = phase === 'rebuild' ? 2 : 1;
       const observerAllowsRendering = event === 'positive' || event === 'visibilitychange' ||
         (event !== 'negative' && initial !== 'negative');
-      const shouldRender = inView && observerAllowsRendering;
+      // A manual open can override unchanged VisualViewport bounds when the
+      // host still overlaps the layout viewport.
+      const manualOverride = startup === 'manual' && phase === 'first';
+      const shouldRender = (inView || manualOverride) && observerAllowsRendering;
       expect(scene.create).toHaveBeenCalledTimes(shouldRender ? mergeBaseAllocations : existingAllocations);
       if (shouldRender || phase === 'paused') expect(scene.setActive).toHaveBeenLastCalledWith(shouldRender);
       expect(host.parentElement?.getAttribute('data-spatial-state')).toBe(shouldRender || phase === 'paused' ? 'ready' : 'deferred');
