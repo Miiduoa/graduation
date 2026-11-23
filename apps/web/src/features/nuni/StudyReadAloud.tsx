@@ -186,6 +186,25 @@ function splitStudySpeech(text: string): string[] {
 }
 
 /** Use an installed voice so reading a private course does not require a speech service. */
+export function localeRank(lang: string): number {
+  // The voice filter has already checked the primary language.
+  const [core] = lang.toLowerCase().replace(/_/g, '-').split(/-[a-z0-9](?:-|$)/u, 1);
+  const subtags = core.split('-').slice(1);
+  let index = 0;
+  while (index < 3 && /^[a-z]{3}$/u.test(subtags[index] ?? '')) index += 1;
+  const script = /^[a-z]{4}$/u.test(subtags[index] ?? '') ? subtags[index] : undefined;
+  if (script) index += 1;
+  const regionSubtag = subtags[index] ?? '';
+  const region = /^(?:[a-z]{2}|[0-9]{3})$/u.test(regionSubtag) ? regionSubtag : undefined;
+  // Preserve the legacy ranking for device tags with Hans outside the script
+  // position in the core. Extension and private-use subtags cannot affect rank.
+  if ((script && script !== 'hant') || subtags.includes('hans')) return 4;
+  if (region === 'tw') return 0;
+  if (script === 'hant') return 1;
+  if (region === 'hk' || region === 'mo') return 2;
+  return 3;
+}
+
 export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChange, rate: selectedRate, onRateChange }: {
   text: string;
   label?: string;
@@ -235,18 +254,6 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
       // Some mobile engines list zh-CN first even when an installed
       // Traditional/Taiwanese voice is available later. Match BCP 47 subtags
       // rather than list order; never switch to a network-backed voice.
-      const localeRank = (lang: string) => {
-        const subtags = lang.toLowerCase().replace(/_/g, '-').split('-').slice(1);
-        // Script subtags outrank a contradictory region. A Taiwanese
-        // Latin-transliteration voice (zh-Latn-TW) is not a Han-character
-        // reading voice and must not outrank an installed Traditional voice.
-        if (subtags.includes('hans')) return 4;
-        if (subtags.some((tag) => /^[a-z]{4}$/u.test(tag) && tag !== 'hant' && tag !== 'hans')) return 4;
-        if (subtags.includes('tw')) return 0;
-        if (subtags.includes('hant')) return 1;
-        if (subtags.includes('hk') || subtags.includes('mo')) return 2;
-        return 3;
-      };
       voice.current = voices.reduce<SpeechSynthesisVoice | null>((best, candidate) =>
         !best || localeRank(candidate.lang) < localeRank(best.lang) ? candidate : best, null);
       setAvailable(!!voice.current);
