@@ -203,7 +203,10 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
   // while response-body streaming is still pending. Abort the *reader* as well
   // as fetch, so background tabs stop consuming OSM data on WebViews whose
   // fetch signal does not automatically cancel a handed-off body.
+  let readerCancelRequested = false;
   const cancelReader = () => {
+    if (readerCancelRequested) return;
+    readerCancelRequested = true;
     try {
       void Promise.resolve(reader.cancel()).catch(() => {});
     } catch {
@@ -216,6 +219,7 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
   let bytes = new Uint8Array(16_384);
   let total = 0;
   let chunks = 0;
+  let completed = false;
   try {
     if (signal?.aborted) {
       cancelReader();
@@ -224,7 +228,7 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
     while (true) {
       const { done, value } = await reader.read();
       if (signal?.aborted) throw new Error('Building outline read aborted');
-      if (done) break;
+      if (done) { completed = true; break; }
       // Count even empty chunks: a stream can otherwise loop forever while
       // retaining zero bytes, and microtasks can starve the 15s timeout.
       if (++chunks > MAX_FOOTPRINT_STREAM_CHUNKS ||
@@ -257,6 +261,10 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       }
     }
   } finally {
+    // A network/bridge reader may throw after some bytes. Release the source
+    // instead of leaving a partially consumed mobile stream alive; EOF needs
+    // no cancellation, and abort/size guards must not cancel twice.
+    if (!completed) cancelReader();
     signal?.removeEventListener('abort', cancelReader);
     try { reader.releaseLock(); } catch { /* Partially implemented reader. */ }
   }
