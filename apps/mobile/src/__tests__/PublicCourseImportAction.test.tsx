@@ -281,32 +281,19 @@ test.each([
 });
 
 
-test.each(['nthu', 'ncnu'] as const)('changed official %s credits block a silent duplicate and keep the original ledger', async (schoolId) => {
-  mockScope = { owner: scope.owner, schoolId };
-  const course = schoolId === 'nthu' ? nthu : ncnu;
-  const oldPreview = preparePublicCourseTimetableImport(schoolId, { ...course, credits: '2' })!;
-  const currentPreview = preparePublicCourseTimetableImport(schoolId, course)!;
-  expect(oldPreview.rows[0].credits).toBe(2);
-  expect(currentPreview.rows[0].credits).toBe(3);
-  await ledger.appendPersonalImports(mockScope, oldPreview.rows);
-  const key = ledger.personalImportStorageKey(mockScope);
-  const before = await AsyncStorage.getItem(key);
-  jest.clearAllMocks();
+test.each([undefined, 2])('official credits complete a partial timetable with saved credits %s', async (credits) => {
+  const preview = preparePublicCourseTimetableImport('nthu', nthu)!;
+  const firstSlot = { ...preview.rows[0], credits };
+  const { ledger: original } = await ledger.appendPersonalImports(scope, [firstSlot]);
 
-  const view = render(<PublicCourseImportAction schoolId={schoolId} course={course} navigation={navigation} />);
+  const view = render(<PublicCourseImportAction schoolId="nthu" course={nthu} navigation={navigation} />);
   review(view);
   confirm(view);
-  await view.findByText(/相同課號、班別與時段的學分與原有個人紀錄不同/);
-  expect(view.getByText('查看原有個人課表')).toBeTruthy();
-  expect(view.queryByText('仍要加入（保留兩門課）')).toBeNull();
-  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-  expect(await AsyncStorage.getItem(key)).toBe(before);
-  // UI preflight and the write-lock guard must agree. A caller cannot bypass
-  // the warning by calling the ledger API directly with the official rows.
-  await expect(ledger.appendPersonalImports(mockScope, currentPreview.rows, () => true, {
-    protectCatalogTimetableSlots: true,
-  })).rejects.toThrow(/不同學分/);
-  expect(await AsyncStorage.getItem(key)).toBe(before);
+  await view.findByText(/已加入 1 個上課時段。另有 1 個重複時段未新增。/);
+
+  const { records } = await ledger.loadPersonalImports(scope);
+  expect(records[0]).toEqual(original.records[0]);
+  expect(records[1]).toMatchObject({ dayOfWeek: preview.rows[1].dayOfWeek, credits: 3 });
 });
 
 test.each(['nthu', 'ncnu'] as const)('equivalent numeric %s credits do not falsely reject a duplicate', async (schoolId) => {

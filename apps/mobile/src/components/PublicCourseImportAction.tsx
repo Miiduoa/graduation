@@ -101,9 +101,7 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
           '相同課號、班別與時段已有不同教室的個人紀錄；請先核對原有資料。'
           ? 'room' : error instanceof Error && error.message ===
           '相同課號、班別與時段已有不同課名的個人紀錄；請先核對原有資料。'
-          ? 'title' : error instanceof Error && error.message ===
-          '相同課號、班別與時段已有不同學分的個人紀錄；請先核對原有資料。'
-          ? 'credits' : undefined,
+          ? 'title' : undefined,
       });
     } finally {
       if (active(run)) pending.current = false;
@@ -130,7 +128,7 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
   }
   const changedTime = outcome.status === 'error' && outcome.reason === 'time';
   const changedField = outcome.status === 'error' && outcome.reason && outcome.reason !== 'time'
-    ? { teacher: '教師', room: '教室', title: '課名', credits: '學分' }[outcome.reason] : null;
+    ? { teacher: '教師', room: '教室', title: '課名' }[outcome.reason] : null;
   const body = { color: theme.colors.textSecondary, lineHeight: 22 };
   return <View style={{ gap: 10, padding: 12, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10 }}>
     <Text accessibilityRole="header" style={{ color: theme.colors.text, fontWeight: '600' }}>加入前核對</Text>
