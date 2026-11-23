@@ -108,6 +108,7 @@ describe('TronClass clauses inside a multi-clause request', () => {
     ['玩課雲作業，下載講義', ['玩課雲下載講義']],
     ['TronClass 查未交作業，不要繳交', ['TronClass 查未交作業']],
     ['查玩課雲未交作業和校園公告', ['查玩課雲未交作業']],
+    ['查玩課雲未交作業，查交通資訊', ['查玩課雲未交作業']],
     ['幫我查 TronClass 未交作業，然後查公車', ['幫我查 TronClass 未交作業']],
     ['TronClass 未交作業，還沒交的作業', ['TronClass 未交作業']],
   ])('answers the TronClass part of %s with the Agent', (question, expected) => {
@@ -237,10 +238,46 @@ describe('write occurrences in TronClass requests', () => {
 
   it.each([
     '玩課雲作業交了嗎', '查玩課雲交作業期限', '玩課雲交作業截止日',
+    '查玩課雲作業繳交期限', '玩課雲作業上傳截止日是哪天',
+    '查玩課雲繳交截止日期', '查玩課雲上傳期限', '玩課雲繳交截止時間',
+    '查玩課雲作業上傳 deadline', '查玩課雲作業已交的',
     '不要補交附件只要查玩課雲作業狀態', '不要繳作業只查玩課雲作業狀態',
     'TronClass homework turnaround time', 'TronClass homework hand index',
   ])('keeps the homework read %s', question => {
     expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'homework', pendingOnly: false });
+  });
+
+  it.each(
+    ['交', '繳', '上傳'].flatMap(verb =>
+      ['', '掉', '出去', '上去', '了', '一下', '給老師', '完'].flatMap(complement =>
+        ['附件', '這份報告', '修訂稿'].map(object => `把${object}${verb}${complement}`),
+      ),
+    ),
+  )('blocks %s in direct and compound requests', command => {
+    expect(parseTronClassAgentIntent(`玩課雲請幫我${command}`))
+      .toEqual({ intent: 'unsupported', pendingOnly: false });
+    expect(parseTronClassAgentIntent(`查玩課雲作業再${command}`))
+      .toEqual({ intent: 'unsupported', pendingOnly: false });
+    expect(tronClassCompoundClauses(`查玩課雲作業，請幫我${command}`)).toEqual([]);
+    expect(tronClassCompoundClauses(`查玩課雲作業順便${command}，查校園公告`)).toEqual([]);
+  });
+
+  it.each([
+    '交', '繳了', '交一下', '交完', '繳修訂稿', '交出去', '交交通資訊',
+    '把附件交了嗎', '把附件繳交狀態', '把附件上傳截止日',
+  ])('blocks the ungoverned submission %s', command => {
+    expect(parseTronClassAgentIntent(`玩課雲作業${command}`))
+      .toEqual({ intent: 'unsupported', pendingOnly: false });
+    expect(tronClassCompoundClauses(`查玩課雲作業，${command}`)).toEqual([]);
+  });
+
+  it.each([
+    '查玩課雲作業繳交期限', '玩課雲作業上傳截止日是哪天', '查玩課雲交作業期限',
+  ])('preserves the deadline read %s and checks added commands independently', question => {
+    expect(tronClassCompoundClauses(`${question}，校園公告`)).toEqual([question]);
+    expect(parseTronClassAgentIntent(`${question}前幫我上傳`))
+      .toEqual({ intent: 'unsupported', pendingOnly: false });
+    expect(tronClassCompoundClauses(`${question}，校園公告，幫我把附件交掉`)).toEqual([]);
   });
 
   it.each([

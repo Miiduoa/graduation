@@ -55,16 +55,13 @@ const NEGATION_SOURCE = "不要|別|勿|不准|禁止|無須|不用|不需要|\\
 const NEGATED = new RegExp(NEGATION_SOURCE, 'i');
 const NEGATIONS = new RegExp(NEGATION_SOURCE, 'gi');
 const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
-const SUBMISSION_OBJECT_SOURCE = `(?:作業|報告|附件|檔案?|文件|作品|心得|講義|考卷|表單|新版|舊版|出去|上去|給|${LMS_SOURCE}|\\b(?:homework|assignments?|files?|attachments?)\\b)`;
-// Keep the object in the suffix so the same verb match can serve commands and homework filters.
-const SHORT_SUBMIT_SOURCE = `[交繳](?=\\s*(?:(?:(?:這|那|一)[份個]|我的|這週|本週)\\s*)*${SUBMISSION_OBJECT_SOURCE}|了[沒嗎]|沒|過了嗎)`;
 const SUBMIT_VERB_SOURCE = [
   '重新(?:繳交|提交|上傳|上載)|繳交|提交|送出|交出|上傳|上載',
   '補交|補繳|遲交|重交|重繳|上繳|遞交|呈交|交付|繳回|交回|附上|夾帶|送件|寄出',
   '回傳(?=\\s*(?:附件|檔案?|文件))',
   '\\b(?:submit|upload|resubmit|hand\\s+in|turn\\s+in)\\b',
-  SHORT_SUBMIT_SOURCE,
-  '(?<=[未沒待已])[交繳](?=\\s*(?:的|有哪些|$|[,;。?!、和與]))',
+  // Short verbs also form commands with a preceding object or no object.
+  '[交繳]',
 ].join('|');
 const OTHER_WRITE_VERB_SOURCE = '發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名|退選|選課|\\b(?:delete|post|reply|withdraw)\\b';
 const WRITE_VERB = new RegExp(`(${SUBMIT_VERB_SOURCE})|${OTHER_WRITE_VERB_SOURCE}`, 'giu');
@@ -103,9 +100,11 @@ const GOVERNED_STATUS = new RegExp(
   `^${STATUS_NOUN_SOURCE}(?:\\s*(?:${STATUS_QUESTION_SOURCE}|查詢|一下|給我看))?${STATUS_BOUNDARY_SOURCE}`, 'u',
 );
 const SUBMISSION_QUESTION = new RegExp(`^(?:了沒|了嗎|沒|過了嗎)${STATUS_BOUNDARY_SOURCE}`, 'u');
-const SUBMISSION_DEADLINE = new RegExp(`^作業\\s*(?:的\\s*)?(?:期限|截止(?:日(?:期)?|時間)?)(?:\\s*(?:是)?(?:什麼時候|哪一天|哪天|嗎|呢))?${STATUS_BOUNDARY_SOURCE}`, 'u');
+const DEADLINE_SUFFIX_SOURCE = `(?:作業\\s*(?:的\\s*)?)?(?:期限|截止(?:日(?:期)?|時間)?|deadline\\b)(?:\\s*(?:是)?(?:什麼時候|哪一天|哪天|嗎|呢))?${STATUS_BOUNDARY_SOURCE}`;
+const SUBMISSION_DEADLINE = new RegExp(`^${DEADLINE_SUFFIX_SOURCE}`, 'iu');
+const SUBMISSION_DEADLINE_QUERY = new RegExp(`(?:${SUBMIT_VERB_SOURCE})\\s*${DEADLINE_SUFFIX_SOURCE}`, 'iu');
 const HOMEWORK_STATUS_SUFFIX = new RegExp(
-  `^\\s*(?:的?作業)?\\s*(?:的?有哪些)?(?:${STATUS_BOUNDARY_SOURCE}|\\s*(?=${CLAUSE_SEPARATOR.source}|${NEGATED_WRITE_SOURCE}))`, 'iu',
+  `^\\s*(?:的?作業)?\\s*的?(?:有哪些)?(?:${STATUS_BOUNDARY_SOURCE}|\\s*(?=${CLAUSE_SEPARATOR.source}|${NEGATED_WRITE_SOURCE}))`, 'iu',
 );
 const STATUS_EXPLANATION = new RegExp(
   `((?:${SUBMIT_VERB_SOURCE})${STATUS_NOUN_SOURCE})\\s*(?:如何|怎麼樣)${STATUS_BOUNDARY_SOURCE}`, 'giu',
@@ -145,12 +144,17 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
     if (!match[1]) return 'unsupported';
 
     const after = text.slice(match.index + match[0].length).trimStart();
+    const segment = before.split(/[,;。?!、:\r\n]/u).at(-1)!.trimStart();
+    // In a standalone transit query, 「交」 is part of the noun 「交通」.
+    if (match[0] === '交' && /^(?:(?:查詢|查看|查|看)\s*)?$/u.test(segment) &&
+      /^通(?:資訊)?\s*(?=$|[,;。?!、])/u.test(text.slice(match.index + 1))) continue;
     if (ADDITIVE_CUE.test(before)) return STATUS_NOUN.test(after) ? 'planner' : 'unsupported';
     if (WRITE_CUE.test(before)) return 'unsupported';
-    const segment = before.split(/[,;。?!、:\r\n]/u).at(-1)!.trimStart();
+    if (segment.includes('把')) return 'unsupported';
     if ((GOVERNED_STATUS.test(after) || SUBMISSION_QUESTION.test(after)) &&
       (readGovernsStatus(segment) || HOMEWORK_SUBJECT.test(segment))) continue;
-    if (SUBMISSION_DEADLINE.test(after) && (readGovernsStatus(segment) || LMS_SUBJECT.test(segment))) continue;
+    if (SUBMISSION_DEADLINE.test(after) &&
+      (readGovernsStatus(segment) || HOMEWORK_SUBJECT.test(segment) || LMS_SUBJECT.test(segment))) continue;
 
     // Preserve homework filters such as「尚未提交的作業」.
     const statusPrefix = before.match(STATUS_PREFIX);
@@ -258,7 +262,7 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
   if (/(?:測驗|考試|問卷)/.test(text)) return { intent: 'unsupported', pendingOnly: false };
   if (/(?:下載|download)/i.test(text)) return { intent: 'download', pendingOnly: false };
   if (pendingOnly) return { intent: 'homework', pendingOnly: true };
-  if (/(?:作業|homework|assignments?)/i.test(text)) return { intent: 'homework', pendingOnly: false };
+  if (/(?:作業|homework|assignments?)/i.test(text) || SUBMISSION_DEADLINE_QUERY.test(text)) return { intent: 'homework', pendingOnly: false };
   if (/(?:公告|通知|announcements?|notices?)/i.test(text)) return { intent: 'announcements', pendingOnly: false };
   if (/(?:教材|講義|檔案|附件|materials?|handouts?|files?)/i.test(text)) return { intent: 'materials', pendingOnly: false };
   if (/(?:課程|修課|課表|courses?|classes)/i.test(text)) return { intent: 'courses', pendingOnly: false };
