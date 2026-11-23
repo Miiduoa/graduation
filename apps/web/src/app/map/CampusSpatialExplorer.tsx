@@ -388,7 +388,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended.current || document.hidden;
     const isOffscreen = () => visibility === 'hidden' ||
-      (visibility === 'unknown' && measureLayoutVisibility() === false) ||
+      // A positive IntersectionObserver entry can become stale after a nested
+      // modal scroll (especially in embedded WebViews). Recheck the host against
+      // both the window and the dialog scrollport on every visibility event.
+      // Unknown/non-finite geometry is not evidence that the host is hidden.
+      measureLayoutVisibility() === false ||
       // IntersectionObserver checks layout intersection, not whether a mobile
       // keyboard has reduced the *visual* viewport over the 3D canvas.
       // A positive observer entry must never reactivate an obscured WebGL scene.
