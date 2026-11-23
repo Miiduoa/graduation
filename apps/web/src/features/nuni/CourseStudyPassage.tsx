@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import {
   prepareStudyTutorHistory,
@@ -25,30 +25,14 @@ import { CourseStudySteps } from './CourseStudySteps';
 import { locateStudyEvidence } from './studyEvidence';
 import styles from './CourseStudyPanel.module.css';
 
-export type StudyTimingSample = {
-  // A measured attempt retains the mode in effect when the worker ran.
-  mode: StudyMode;
-  timing: StudyTutorTiming;
-  downloadProgressObserved: boolean;
-};
-
-export type StudyTimingEntry = StudyTimingSample & { run: number };
-
 type Props = {
   passage: StudyPassage;
   mode: StudyMode;
   memory: StudyPassageMemory;
-  timingLog: readonly StudyTimingEntry[];
-  onTiming: (sample: StudyTimingSample) => void;
   onChange: (update: (previous: StudyPassageMemory) => StudyPassageMemory) => void;
 };
 
-// Keep writes ordered even when the reader unmounts. A submitted clipboard
-// write cannot be cancelled, including after its UI acknowledgement times out.
-let timingClipboardWritePending = false;
-let nextTimingClipboardWrite: (() => void) | undefined;
-
-export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming, onChange }: Props) {
+export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const [availability, setAvailability] = useState<ReturnType<typeof getStudyTutorAvailability> | null>(null);
   const [busy, setBusy] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -60,36 +44,6 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [timing, setTiming] = useState<StudyTutorTiming | null>(null);
-  const [timingExportMessage, setTimingExportMessage] = useState('');
-  const timingExportInput = useRef<HTMLTextAreaElement>(null);
-  // In-app WebViews may leave a clipboard Promise unresolved or settle it late.
-  const timingCopyRequest = useRef(0);
-  const timingCopyTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stopWatchingTimingCopyFocus = useRef<(() => void) | null>(null);
-  const invalidateTimingCopy = useCallback(() => {
-    timingCopyRequest.current += 1;
-    stopWatchingTimingCopyFocus.current?.();
-    stopWatchingTimingCopyFocus.current = null;
-    if (timingCopyTimeout.current !== null) {
-      clearTimeout(timingCopyTimeout.current);
-      timingCopyTimeout.current = null;
-    }
-  }, []);
-  const latestRun = timingLog.at(-1)?.run;
-  // The downloadable file and manually selectable field must contain exactly
-  // the same privacy-scoped measurements, never lesson or student text.
-  const timingExportText = useMemo(() => JSON.stringify({
-    format: 'nuni-study-tutor-timing', version: 1,
-    measurements: timingLog.map((entry) => ({
-      run: entry.run,
-      mode: entry.mode,
-      outcome: entry.timing.outcome,
-      downloadProgressObserved: entry.downloadProgressObserved,
-      preparationMs: Math.round(entry.timing.preparationMs),
-      generationMs: entry.timing.generationMs === null ? null : Math.round(entry.timing.generationMs),
-      totalMs: Math.round(entry.timing.totalMs),
-    })),
-  }, null, 2), [timingLog]);
   const [stepSelection, setStepSelection] = useState<{ lessonId: number; index: number } | null>(null);
   // A citation position belongs to its mode, lesson and teaching step. Reusing
   // an index for another quote can incorrectly report that an exact quote is absent.
@@ -141,12 +95,8 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
     // Preserve focus on the mode/page select when a keyed passage remounts.
     // Explicit passage navigation and practice return focus the source in the parent.
     if (document.activeElement === document.body) passageHeading.current?.focus();
-    return () => {
-      current.current?.abort();
-      current.current = null;
-      invalidateTimingCopy();
-    };
-  }, [invalidateTimingCopy]);
+    return () => { current.current?.abort(); current.current = null; };
+  }, []);
 
   function changeQuestion(value: string) {
     onChange((previous) => updateStudyMode(previous, mode, (state) => ({ ...state, question: value })));
@@ -179,141 +129,11 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
       : '重新檢查後仍無法使用裝置端 AI；原文、筆記與自行練習不受影響。');
   }
 
-  function selectTimingExport() {
-    invalidateTimingCopy();
-    const field = timingExportInput.current;
-    if (!field) return;
-    try { field.focus(); } catch { /* Manual selection remains available. */ }
-    try { field.select(); } catch { /* Try the explicit range. */ }
-    try { field.setSelectionRange(0, field.value.length); } catch { /* Try long-press or keyboard. */ }
-    let selected = false;
-    try {
-      selected = document.activeElement === field && field.value.length > 0 &&
-        field.selectionStart === 0 && field.selectionEnd === field.value.length;
-    } catch { /* A broken selection API must not claim success. */ }
-    setTimingExportMessage(selected
-      ? '已全選這份量測 JSON；請使用裝置的複製功能，再貼到私人純文字檔。尚未確認寫入剪貼簿。'
-      : '瀏覽器未確認全選；完整 JSON 仍在下方，可長按或用鍵盤自行選取。');
-  }
-
-  function copyTimingExport(button: HTMLButtonElement) {
-    invalidateTimingCopy();
-    const request = timingCopyRequest.current;
-    const isLatest = () => timingCopyRequest.current === request;
-    const focusIsUnclaimed = () => document.activeElement === document.body || document.activeElement === null;
-    let focusedElsewhere = document.activeElement !== button && !focusIsUnclaimed();
-    // A pending WebView clipboard request must not refocus a hidden tab or a
-    // page the student has left, even when its copy button kept DOM focus.
-    let pageWasBackgrounded = document.visibilityState !== 'visible';
-    const trackFocus = (event: FocusEvent) => {
-      if (event.target !== button && event.target !== document.body) focusedElsewhere = true;
-    };
-    const trackPageBlur = () => { pageWasBackgrounded = true; };
-    const trackVisibility = () => {
-      if (document.visibilityState !== 'visible') pageWasBackgrounded = true;
-    };
-    const manual = () => {
-      if (!isLatest()) return;
-      if (!pageWasBackgrounded && document.visibilityState === 'visible' &&
-        (document.activeElement === button || (focusIsUnclaimed() && !focusedElsewhere))) {
-        selectTimingExport();
-      } else {
-        invalidateTimingCopy();
-        setTimingExportMessage('瀏覽器未確認複製；完整 JSON 仍在下方，可按「全選量測 JSON」手動保存。');
-      }
-    };
-    const write = async () => {
-      if (!isLatest()) return;
-      timingClipboardWritePending = true;
-      try {
-        const clipboard = navigator.clipboard;
-        if (typeof clipboard?.writeText !== 'function') { manual(); return; }
-        if (!isLatest()) return;
-        const result: unknown = clipboard.writeText(timingExportText);
-        // Some WebView bridges return true despite never copying anything.
-        if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
-          manual();
-          return;
-        }
-        if (isLatest()) timingCopyTimeout.current = setTimeout(manual, 5000);
-        const acknowledged: unknown = await result;
-        if (!isLatest()) return;
-        if (acknowledged !== undefined) { manual(); return; }
-        invalidateTimingCopy();
-        setTimingExportMessage('瀏覽器已接受複製指令；請貼上確認內容。若無法貼上，可全選下方 JSON。');
-      } catch {
-        manual();
-      } finally {
-        timingClipboardWritePending = false;
-        const next = nextTimingClipboardWrite;
-        nextTimingClipboardWrite = undefined;
-        next?.();
-      }
-    };
-
-    setTimingExportMessage('正在等待瀏覽器確認複製；仍可全選下方 JSON 手動保存。');
-    document.addEventListener('focusin', trackFocus);
-    window.addEventListener('blur', trackPageBlur);
-    document.addEventListener('visibilitychange', trackVisibility);
-    stopWatchingTimingCopyFocus.current = () => {
-      document.removeEventListener('focusin', trackFocus);
-      window.removeEventListener('blur', trackPageBlur);
-      document.removeEventListener('visibilitychange', trackVisibility);
-    };
-    if (timingClipboardWritePending) {
-      const queuedWrite = () => { void write(); };
-      nextTimingClipboardWrite = queuedWrite;
-      const stopWatching = stopWatchingTimingCopyFocus.current;
-      stopWatchingTimingCopyFocus.current = () => {
-        stopWatching();
-        if (nextTimingClipboardWrite === queuedWrite) nextTimingClipboardWrite = undefined;
-      };
-    } else {
-      void write();
-    }
-  }
-
-  function downloadTimingExport() {
-    invalidateTimingCopy();
-    const request = timingCopyRequest.current;
-    const anchor = document.createElement('a');
-    let url: string | null = null;
-    try {
-      const created: unknown = URL.createObjectURL(new Blob([timingExportText], { type: 'application/json;charset=utf-8' }));
-      if (typeof created !== 'string' || !created.startsWith('blob:') || created.length <= 5)
-        throw new Error('Local Blob URL unavailable');
-      url = created;
-      anchor.href = url;
-      anchor.download = 'nuni-study-tutor-timing.json';
-      anchor.hidden = true;
-      document.body.append(anchor);
-      if (timingCopyRequest.current !== request) return;
-      anchor.click();
-      if (timingCopyRequest.current !== request) return;
-      setTimingExportMessage('已交給瀏覽器下載量測 JSON，但無法確認檔案是否已儲存；若沒有檔案，請改用「全選量測 JSON」。');
-    } catch {
-      if (timingCopyRequest.current !== request) return;
-      setTimingExportMessage('瀏覽器未接受量測 JSON 下載；完整紀錄仍保留，可按「全選量測 JSON」手動保存。');
-    } finally {
-      anchor.remove();
-      if (url !== null) {
-        // Mobile download managers can consume the Blob after the reader unmounts.
-        const downloadUrl = url;
-        setTimeout(() => {
-          try { URL.revokeObjectURL(downloadUrl); } catch { /* Best effort only. */ }
-        }, 60_000);
-      }
-    }
-  }
-
   async function explain(withHistory = true) {
     if (current.current || !availability?.available || !passage.text.trim()) return;
     const controller = new AbortController();
     current.current = controller;
     const question = modeMemory.question.trim();
-    // Only observed local worker progress counts. Missing progress is not proof
-    // of a cached model or a warm start; keep this flag scoped to one attempt.
-    let downloadProgressObserved = false;
     setBusy(true);
     setError('');
     setTiming(null);
@@ -325,18 +145,10 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
       const explanation = await runStudyTutor({ passage, mode, question: question || undefined, history,
         signal: controller.signal,
         onProgress: (message) => {
-          if (current.current === controller && !controller.signal.aborted) {
-            if (message.startsWith('正在下載講解模型（已接收 ')) downloadProgressObserved = true;
-            setProgress(message);
-          }
+          if (current.current === controller && !controller.signal.aborted) setProgress(message);
         },
         onTiming: (measurement) => {
-          if (current.current === controller) {
-            setTiming(measurement);
-            invalidateTimingCopy();
-            onTiming({ mode, timing: measurement, downloadProgressObserved });
-            setTimingExportMessage('');
-          }
+          if (current.current === controller) setTiming(measurement);
         },
       });
       if (current.current !== controller || controller.signal.aborted) return;
@@ -445,30 +257,11 @@ export function CourseStudyPassage({ passage, mode, memory, timingLog, onTiming,
         {speaking && <p className={styles.note}>停止朗讀後，就能用語音提問。</p>}
         <p className={styles.status} role="status" aria-live="polite">{progress}</p>
         {timing && <p className={styles.note}>
-          {latestRun !== undefined && `第 ${latestRun} 次量測。`}
           本次裝置端講解{timing.outcome === 'success' ? '完成' : timing.outcome === 'cancelled' ? '已停止' : '未完成'}：
           準備 {Math.round(timing.preparationMs)} 毫秒，
           {timing.generationMs === null ? '尚未收到生成階段訊號' : `生成 ${Math.round(timing.generationMs)} 毫秒`}，
           合計 {Math.round(timing.totalMs)} 毫秒。僅為本次瀏覽器量測，不能據此認定冷啟、暖啟或回答正確。
         </p>}
-        {timingLog.length > 0 && <details>
-          <summary>本段裝置端 AI 耗時紀錄（最近 10 次，編號持續累加）</summary>
-          <p className={styles.note}>超過 10 次時會移除本段最早的紀錄。關閉白板、切換課程或重新匯入後會清除所有段落的紀錄。</p>
-          <p className={styles.note}>可長按或鍵盤選取下方 JSON，逐次保存當次閱讀方式、成功、失敗與取消的瀏覽器量測。
-            不包含教材、問題或個人筆記，也不是可還原的閱讀進度。downloadProgressObserved 僅表示本次收到模型下載進度；false 不代表快取命中或暖啟。冷啟／暖啟、實際裝置與網路條件仍需另外註記；
-            不代表已驗證回答正確或優於其他產品。</p>
-          <label className={styles.field}>本段裝置端 AI 耗時紀錄 JSON
-            <textarea ref={timingExportInput} readOnly spellCheck={false} rows={8}
-              aria-label="本段裝置端 AI 耗時紀錄 JSON"
-              value={timingExportText} />
-          </label>
-          <div className={styles.actions}>
-            <button type="button" className={styles.button} onClick={(event) => copyTimingExport(event.currentTarget)}>複製量測 JSON</button>
-            <button type="button" className={styles.button} onClick={downloadTimingExport}>下載量測 JSON</button>
-            <button type="button" className={styles.button} onClick={selectTimingExport}>全選量測 JSON</button>
-          </div>
-          <p className={styles.note} role="status" aria-live="polite">{timingExportMessage}</p>
-        </details>}
         {error && <p className={styles.error} role="alert">{error}</p>}
         {selected && result && <section className={styles.explanation} aria-label="本段 AI 講解">
           <h4>{result.title}</h4>

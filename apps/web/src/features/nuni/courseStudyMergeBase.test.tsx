@@ -372,7 +372,7 @@ it('preserves merge-base reading and practice fields, checkpoints and reveal con
     const reading = { passage, mode: 'understand' as const, onChange: callbacks.onChange };
     const examples = [
       { before: <BaselinePassage {...reading} memory={baseline.progress.passages['0:0']} />,
-        after: <CourseStudyPassage {...reading} timingLog={[]} onTiming={vi.fn()} memory={restored.progress.passages['0:0']} /> },
+        after: <CourseStudyPassage {...reading} memory={restored.progress.passages['0:0']} /> },
       { before: <BaselinePractice {...callbacks} round={baseline.round} />,
         after: <CourseStudyPractice {...callbacks} round={restored.round} /> },
       { before: <BaselinePractice {...callbacks} round={withRevealedAnswer(baseline.round)} />,
