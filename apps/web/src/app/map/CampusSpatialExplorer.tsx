@@ -73,6 +73,20 @@ const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 // cannot exhaust mobile memory even without a reliable Content-Length.
 // A JSON-only response cannot expose the original byte count.
 async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
+  // Browser fetch exposes decoded body bytes, while a compressed response's
+  // Content-Length describes the wire representation. Compare exact lengths
+  // only when the response explicitly uses identity encoding (or no coding).
+  // The outer fetch gate already rejects invalid/oversized declared lengths.
+  const declaredHeader = response.headers?.get('content-length') ?? null;
+  const codingHeader = response.headers?.get('content-encoding');
+  const declaredIdentityBytes = declaredHeader !== null &&
+    (codingHeader === null || codingHeader.trim().toLowerCase() === 'identity')
+      ? Number(declaredHeader) : null;
+  const checkIdentityLength = (actualBytes: number) => {
+    if (declaredIdentityBytes !== null && actualBytes !== declaredIdentityBytes) {
+      throw new Error('Building outline response length mismatch');
+    }
+  };
   let decoder: TextDecoder | undefined;
   try {
     const candidate = new TextDecoder('utf-8', { fatal: true });
@@ -111,6 +125,7 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       } else bytes += 3;
       checkSize(bytes);
     }
+    return bytes;
   };
 
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -133,6 +148,7 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
     }
     if (bytes && (Object.prototype.toString.call(bytes) === '[object ArrayBuffer]' || ArrayBuffer.isView(bytes))) {
       checkSize(bytes.byteLength);
+      checkIdentityLength(bytes.byteLength);
       return parseBytes(bytes);
     }
     // text() can expose an unparsed body even if TextEncoder is missing.
@@ -145,7 +161,7 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
       }
       if (typeof raw === 'string') {
         if (signal?.aborted) throw new Error('Building outline read aborted');
-        checkTextSize(raw);
+        checkIdentityLength(checkTextSize(raw));
         return JSON.parse(raw) as unknown;
       }
     }
@@ -186,6 +202,12 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
         throw new Error('Building outline response exceeded byte/chunk limit');
       }
       const end = total + value.byteLength;
+      if (declaredIdentityBytes !== null && end > declaredIdentityBytes) {
+        // A misframed identity body is already invalid. Cancel immediately,
+        // rather than waiting for EOF from an uncooperative mobile proxy.
+        cancelReader();
+        throw new Error('Building outline response length mismatch');
+      }
       if (end > bytes.byteLength) {
         const larger = new Uint8Array(Math.min(MAX_DECLARED_FOOTPRINT_BYTES,
           Math.max(bytes.byteLength * 2, end)));
@@ -207,6 +229,7 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
     try { reader.releaseLock(); } catch { /* Partially implemented reader. */ }
   }
   if (signal?.aborted) throw new Error('Building outline read aborted');
+  checkIdentityLength(total);
   return parseBytes(bytes.subarray(0, total));
 }
 const OSM_COOLDOWN_STORAGE_KEY = 'nuni:pu:osm-footprint-cooldown-until';
