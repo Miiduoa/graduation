@@ -475,116 +475,16 @@ it('does not allocate offscreen WebGL or start its deadline until the canvas ent
   }
 });
 
-it('does not start or resume WebGL when the canvas only touches the viewport edge', async () => {
-  // IntersectionObserver may report isIntersecting=true on an edge-adjacent
-  // target even when its intersection rectangle has zero visible area.
-  // This synthetic case checks GPU activation boundaries, not phone FPS.
-  let observedHost: Element | null = null;
+it('uses the observer flag at viewport boundaries and keeps rendering without a later entry', async () => {
   let options: IntersectionObserverInit | undefined;
+  const offscreen = new DOMRect(0, window.innerHeight, 320, 180);
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback, init?: IntersectionObserverInit) {
       intersection = callback;
       options = init;
     }
-    observe(target: Element) { observedHost = target; }
-    disconnect = disconnect;
-  });
-  render(<CampusSpatialExplorer school="other-school" locations={places}
-    selected={places[0]} onSelect={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
-  const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
-  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
-  expect(observedHost).toBe(graphics);
-  // Edge-touch and positive-area transitions can both have isIntersecting=true.
-  // A second threshold is needed to receive the later visible-area callback.
-  expect(options?.threshold).toEqual([0, 1e-9, 0.01]);
-  expect(scene.create).not.toHaveBeenCalled();
-
-  const notify = (time: number, width: number, height: number, coordinates: Record<string, number | undefined> = {}) => {
-    const entries = [{
-      isIntersecting: true, target: graphics, time,
-      intersectionRect: { width, height, ...coordinates },
-    }] as unknown as IntersectionObserverEntry[];
-    act(() => intersection?.(entries, {} as IntersectionObserver));
-  };
-  const notifyThrowingRect = (time: number) => {
-    const entries = [{
-      isIntersecting: true, target: graphics, time,
-      intersectionRect: {
-        width: 280, height: 160,
-        get left() { throw new Error('WebView DOMRect coordinate unavailable'); },
-      },
-    }] as unknown as IntersectionObserverEntry[];
-    act(() => intersection?.(entries, {} as IntersectionObserver));
-  };
-  notify(100, 0, 160);
-  expect(scene.create).not.toHaveBeenCalled();
-  expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
-
-  // A broken rectangle getter leaves the legacy positive flag usable.
-  notifyThrowingRect(101);
-  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
-  expect(scene.setActive).toHaveBeenLastCalledWith(true);
-
-  notify(120, 280, 0);
-  expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  for (const [index, width] of [Number.NaN, Number.POSITIVE_INFINITY, -2].entries()) {
-    notify(121 + index, width, 160);
-    expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  }
-  for (const [index, coordinate] of [
-    { x: Number.NaN }, { y: Number.POSITIVE_INFINITY },
-    { left: Number.NaN }, { top: Number.POSITIVE_INFINITY },
-    { right: Number.NEGATIVE_INFINITY }, { bottom: Number.NaN },
-  ].entries()) {
-    notify(124 + index, 280, 160, coordinate);
-    expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  }
-  notify(129.1, 280, 160, { left: 20, right: 20 });
-  expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  notify(129.2, 280, 160, { top: 30, bottom: 10 });
-  expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  notify(130, 280, 160);
-  expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  expect(scene.create).toHaveBeenCalledTimes(1);
-  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-});
-
-it('requests a callback between an edge touch and any visible sliver of the canvas', async () => {
-  // IntersectionObserver only notifies when isIntersecting or the threshold
-  // index changes. Edge touch (ratio 0) and a 0.5% sliver are both
-  // intersecting, so the thresholds must place them at different indexes in
-  // both directions. Mirrors the spec's threshold-index rule (W3C IO §3.2.8).
-  let options: IntersectionObserverInit | undefined;
-  vi.stubGlobal('IntersectionObserver', class {
-    constructor(_callback: IntersectionObserverCallback, init?: IntersectionObserverInit) { options = init; }
-    observe() {}
-    disconnect = disconnect;
-  });
-  render(<CampusSpatialExplorer school="other-school" locations={places}
-    selected={places[0]} onSelect={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
-  const thresholds = options?.threshold as number[];
-  const index = (ratio: number) => {
-    const found = thresholds.findIndex((value) => value > ratio);
-    return found === -1 ? thresholds.length : found;
-  };
-  // One CSS pixel row of a 2000×2000 canvas is still a visible sliver.
-  for (const sliver of [0.005, 1 / (2000 * 2000), 0.009]) {
-    expect(index(sliver)).not.toBe(index(0));
-  }
-  // float32 storage in browser engines must not round the tiny step to 0.
-  expect(Math.fround(thresholds[1])).toBeGreaterThan(0);
-});
-
-it('uses the latest viewport state when a fast mobile scroll batches observer entries', async () => {
-  // A queued offscreen state followed by onscreen in one callback must start
-  // WebGL once. The inverse order must suspend it, not keep rendering offscreen.
-  // These are synthetic browser callbacks, not measurements from a phone.
-  vi.stubGlobal('IntersectionObserver', class {
-    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
     observe(target: Element) {
-      vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, window.innerHeight + 10, 320, 180));
+      vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(offscreen);
     }
     disconnect = disconnect;
   });
@@ -592,66 +492,51 @@ it('uses the latest viewport state when a fast mobile scroll batches observer en
     selected={places[0]} onSelect={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
   const dialog = screen.getByRole('dialog', { name: '校園空間導覽' });
-  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
-  expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
-  expect(scene.create).not.toHaveBeenCalled();
+  const host = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.mocked(host.getBoundingClientRect);
+  expect(options).toBeUndefined();
+  expect(host.parentElement?.getAttribute('data-spatial-state')).toBe('deferred');
 
-  vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 40, 320, 180));
+  const notify = (...entries: IntersectionObserverEntry[]) => act(() =>
+    intersection?.(entries, {} as IntersectionObserver));
+  const edgeTouch = { ...observerEntry(host, true, new DOMRect(0, offscreen.top, 320, 0)),
+    intersectionRatio: 0 };
+  notify(edgeTouch);
+  await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
 
-  act(() => intersection?.([
-    { isIntersecting: false }, { isIntersecting: true },
-  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
-  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
-  expect(graphics.parentElement?.getAttribute('data-spatial-state')).toBe('ready');
+  const sliver = { ...observerEntry(host, true, new DOMRect(0, offscreen.top, 320, 0.001)),
+    intersectionRatio: 0.001 / 180, rootBounds: new DOMRect() };
+  notify(sliver);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  notify({
+    ...edgeTouch,
+    get intersectionRect(): DOMRectReadOnly { throw new Error('intersection rectangle unavailable'); },
+  });
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
 
-  act(() => intersection?.([
-    { isIntersecting: true }, { isIntersecting: false },
-  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
-  expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  // An empty callback is not evidence that the canvas became visible.
-  const callsBeforeEmpty = scene.setActive.mock.calls.length;
-  act(() => intersection?.([] as IntersectionObserverEntry[], {} as IntersectionObserver));
-  expect(scene.setActive.mock.calls.length).toBe(callsBeforeEmpty);
-
-  act(() => intersection?.([
-    { isIntersecting: false }, { isIntersecting: true },
-  ] as IntersectionObserverEntry[], {} as IntersectionObserver));
+  notify(edgeTouch);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  bounds.mockReturnValue(new DOMRect(0, 40, 320, 180));
+  fireEvent.scroll(dialog);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  fireEvent.resize(window);
+  expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
   expect(scene.create).toHaveBeenCalledTimes(1);
 
-  // A WebView may round two transitions within one callback to the same
-  // timestamp. Prefer the final queued transition, not the first one.
-  const tiedOffscreen = [
-    { isIntersecting: true, time: 300 },
-    { isIntersecting: false, time: 300 },
-  ] as unknown as IntersectionObserverEntry[];
-  act(() => intersection?.(tiedOffscreen, {} as IntersectionObserver));
+  const offscreenEntry = observerEntry(host, false);
+  notify(offscreenEntry, sliver);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
-
-  const tiedOnscreen = [
-    { isIntersecting: false, time: 310 },
-    { isIntersecting: true, time: 310 },
-  ] as unknown as IntersectionObserverEntry[];
-  act(() => intersection?.(tiedOnscreen, {} as IntersectionObserver));
-  expect(scene.setActive).toHaveBeenLastCalledWith(true);
-
-  // Separate callbacks can share a rounded timestamp in either direction.
-  const notify = (isIntersecting: boolean) => act(() =>
-    intersection?.([observerEntry(graphics, isIntersecting, new DOMRect(0, 40, 320, 180), 310)], {} as IntersectionObserver));
-  notify(false);
+  fireEvent.scroll(dialog);
+  fireEvent.resize(window);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  notify(true);
+  notify(sliver, offscreenEntry);
   expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  notify(false);
+  notify();
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  notify(true);
-  expect(scene.setActive).toHaveBeenLastCalledWith(true);
-  expect(scene.create).toHaveBeenCalledTimes(1);
-  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-it('honors the latest host entry across layout changes and ignores foreign targets', async () => {
+it('honors host entries across layout changes and ignores foreign targets', async () => {
   let observedHost: Element | null = null;
   let top = window.innerHeight + 10;
   vi.stubGlobal('IntersectionObserver', class {
@@ -766,7 +651,7 @@ it('offers an accessible way to recover a suspended scene when mobile visibility
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-it('uses queue order when a batch mixes timed and untimed entries', async () => {
+it('uses the first entry when a batch mixes timed and untimed entries', async () => {
   let observedHost: Element | null = null;
   vi.stubGlobal('IntersectionObserver', class {
     constructor(callback: IntersectionObserverCallback) { intersection = callback; }
@@ -786,12 +671,12 @@ it('uses queue order when a batch mixes timed and untimed entries', async () => 
     act(() => intersection?.(entries, {} as IntersectionObserver));
   };
   notify([{ isIntersecting: false, time: 100 }, { isIntersecting: true }]);
-  await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+  expect(scene.create).not.toHaveBeenCalled();
 
   notify([{ isIntersecting: true, time: 300 }, { isIntersecting: false }]);
+  await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+  notify([{ isIntersecting: false }]);
   expect(scene.setActive).toHaveBeenLastCalledWith(false);
-  notify([{ isIntersecting: true }]);
-  expect(scene.setActive).toHaveBeenLastCalledWith(true);
   expect(scene.create).toHaveBeenCalledTimes(1);
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
@@ -1069,7 +954,8 @@ it('keeps automatic WebGL deferred when the canvas is clipped and the observer i
 it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'zero-area', 'positive'] as const)(
   'checks dialog clipping after manual startup with a %s observer',
   async (mode) => {
-    const blocksVisibility = mode === 'negative' || mode === 'zero-area';
+    const blocksVisibility = mode === 'negative';
+    const reportsVisibility = mode === 'positive' || mode === 'zero-area' || blocksVisibility;
     const viewport = Object.assign(new EventTarget(), {
       width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0,
     });
@@ -1121,16 +1007,14 @@ it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'zero-area',
       const notify = (visible: boolean) => act(() =>
         intersection?.([observerEntry(host, visible || mode === 'zero-area',
           !visible && mode === 'zero-area' ? new DOMRect(0, 110, 320, 0) : undefined)], {} as IntersectionObserver));
-      if (mode === 'positive' || blocksVisibility) notify(true);
+      if (reportsVisibility) notify(true);
 
       top = 59;
       fireEvent.scroll(dialog);
-      if (blocksVisibility) notify(false);
-      expect(scene.setActive).toHaveBeenLastCalledWith(mode === 'positive');
+      if (mode === 'zero-area' || blocksVisibility) notify(false);
+      expect(scene.setActive).toHaveBeenLastCalledWith(reportsVisibility && !blocksVisibility);
       top = 120;
       fireEvent.resize(window);
-      // The merge-base pauses on exit. A zero-area edge touch is treated
-      // more conservatively, and moving into the scrollport cannot clear either.
       expect(scene.setActive).toHaveBeenLastCalledWith(!blocksVisibility);
       top = 59;
       await act(async () => view.rerender(<CampusSpatialExplorer {...props} locations={places.slice(0, -1)} />));
@@ -1148,7 +1032,7 @@ it.each(['silent', 'missing', 'constructor', 'observe', 'negative', 'zero-area',
       const updates = scene.setActive.mock.calls.length;
       top = 120;
       fireEvent.scroll(window);
-      if (mode === 'positive' || blocksVisibility) notify(true);
+      if (reportsVisibility) notify(true);
       expect(scene.setActive).toHaveBeenCalledTimes(updates);
       expect(scene.create).toHaveBeenCalledTimes(2);
       expect(scene.dispose).toHaveBeenCalledTimes(2);
@@ -1897,6 +1781,7 @@ const visibilityStates = ['unknown', 'visible', 'hidden'] as const;
 const visibilityTransitions = [
   { event: 'observer visible', startup: ['start', 'start', 'start'], running: ['unchanged', 'unchanged', 'start'] },
   { event: 'observer hidden', startup: ['unchanged', 'unchanged', 'unchanged'], running: ['pause', 'pause', 'unchanged'] },
+  { event: 'observer empty', startup: ['unchanged', 'unchanged', 'unchanged'], running: ['pause', 'pause', 'unchanged'] },
   { event: 'observer silent', startup: ['unchanged', 'start', 'unchanged'], running: ['unchanged', 'unchanged', 'unchanged'] },
   { event: 'layout visible', startup: ['start', 'start', 'unchanged'], running: ['unchanged', 'unchanged', 'unchanged'] },
   { event: 'layout offscreen', startup: ['unchanged', 'start', 'unchanged'], running: ['pause', 'unchanged', 'unchanged'] },
@@ -1967,7 +1852,8 @@ it.each(visibilityTransitions.flatMap(({ event, startup, running }) =>
       switch (event) {
         case 'observer visible': notify(true); break;
         case 'observer hidden': notify(false); break;
-        case 'observer silent': intersection?.([], {} as IntersectionObserver); break;
+        case 'observer empty': intersection?.([], {} as IntersectionObserver); break;
+        case 'observer silent': break;
         case 'layout visible':
         case 'layout offscreen':
         case 'layout invalid':

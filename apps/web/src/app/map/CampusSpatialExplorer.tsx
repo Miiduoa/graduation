@@ -30,10 +30,6 @@ type Props = {
   onSelect: (location: MapLocation) => void;
 };
 
-// 0: enter/leave viewport; 1e-9: zero-area edge touch <-> any visible
-// pixel (still representable as float32 in browser engines); 0.01: legacy
-// coarse visibility step.
-const VIEWPORT_THRESHOLDS = [0, 1e-9, 0.01];
 // Reuse a single empty array to avoid recreating a WebGL context whenever
 // the footprint status or the visible map selection changes.
 const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
@@ -512,56 +508,18 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // target is never proof that our map entered the viewport.
           // A throwing target getter is not an omitted target: a broken or
           // foreign callback must never wake an offscreen WebGL context.
-          const hostEntries = entries.filter((entry) => {
+          const entry = entries.find((candidate) => {
             try {
-              const target = entry.target;
+              const target = candidate.target;
               return !target || target === host;
             } catch {
               return false;
             }
           });
-          // Observer entries are queued in transition order. Use the last
-          // host entry even when timestamps are rounded, missing or repeated.
-          const latest = hostEntries[hostEntries.length - 1];
-          if (!latest) return;
-          // Fall back to the original boolean when the optional rectangle
-          // is unavailable. A valid zero-area intersection is an edge touch.
-          const readIntersection = (entry: IntersectionObserverEntry) => {
-            let intersects: boolean;
-            try {
-              const intersecting = entry.isIntersecting;
-              if (typeof intersecting !== 'boolean') return undefined;
-              intersects = intersecting;
-            } catch { return undefined; }
-            if (intersects) {
-              try {
-                const rect = entry.intersectionRect;
-                if (rect) {
-                  const { width, height, x, y, left, top, right, bottom } = rect;
-                  if (Number.isFinite(width) && Number.isFinite(height) &&
-                      width >= 0 && height >= 0 &&
-                      [x, y, left, top, right, bottom].every((value) => value === undefined || Number.isFinite(value)) &&
-                      !(left !== undefined && right !== undefined && right < left) &&
-                      !(top !== undefined && bottom !== undefined && bottom < top)) {
-                    intersects = width > 0 && height > 0 &&
-                      (left === undefined || right === undefined || right > left) &&
-                      (top === undefined || bottom === undefined || bottom > top);
-                  }
-                }
-              } catch { /* Legacy observer boolean still applies. */ }
-            }
-            return intersects;
-          };
-          const intersects = readIntersection(latest);
-          if (intersects === undefined) return;
-          visibility = intersects ? 'visible' : 'hidden';
+          if (entries.length && !entry) return;
+          visibility = (entry?.isIntersecting ?? false) ? 'visible' : 'hidden';
           if (observing) syncVisibility();
-        }, { threshold: VIEWPORT_THRESHOLDS });
-        // An edge-touch (isIntersecting=true, zero area) and a sliver of
-        // visible area (for example 0.5%) are both intersecting. A tiny
-        // positive threshold guarantees a callback across that boundary in
-        // both directions, so WebGL starts once any pixel shows and pauses
-        // again when only the edge touches.
+        });
         intersection = current;
         current.observe(host);
         observing = true;
