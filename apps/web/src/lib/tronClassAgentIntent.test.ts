@@ -185,3 +185,63 @@ describe('TronClass clauses inside a multi-clause request', () => {
     expect(tronClassCompoundClauses('查玩課雲作業的繳交紀錄和校園公告')).toEqual(['查玩課雲作業的繳交紀錄']);
   });
 });
+
+describe('write occurrences in TronClass requests', () => {
+  it.each([
+    '查玩課雲作業繳交狀態後記得上傳狀態報告，查校園公告',
+    '查玩課雲作業後立即上傳狀態報告，以及校園公告',
+    '查玩課雲作業，不要繳交舊版接下來上傳新版',
+  ])('suppresses private compound reads for %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '準備玩課雲作業後把附件上傳',
+    '玩課雲可以做什麼：立即上傳狀態',
+    '查玩課雲作業上載狀態文件',
+    '查玩課雲作業不要繳交舊版上傳新版',
+    '查玩課雲作業後上傳狀態',
+  ])('routes %s as unsupported', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+  });
+
+  const cues = ['記得', '立即', '馬上', '再', '然後', '接著', '接下來', '之後', '後', '請', '幫我'];
+  const verbs = ['繳交', '提交', '送出', '交出', '上傳', '上載', 'submit ', 'upload '];
+  const objects = ['報告', '檔', '文件', '版', '附件', '作業內容'];
+
+  it.each(cues.flatMap(cue => verbs.flatMap(verb => objects.map(object =>
+    `查玩課雲作業繳交狀態${cue}${verb}狀態${object}，查校園公告`,
+  ))))('suppresses compound reads for a command with a status-like object in %s', question => {
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each(verbs.flatMap(verb => objects.map(object =>
+    `查玩課雲作業${verb}狀態${object}，查校園公告`,
+  )))('recognizes the object without a command cue in %s', question => {
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each(['不要', '別', '勿', '不用'].flatMap(negation =>
+    ['', '接下來', '後立即', '，'].flatMap(separator => verbs.map(verb =>
+      `查玩課雲作業，${negation}繳交舊版${separator}${verb}新版`,
+    )),
+  ))('limits negation to its own action in %s', question => {
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each(['查玩課雲作業繳交狀態', '玩課雲我的作業交了沒', '查玩課雲上傳紀錄', '查玩課雲作業不要上傳附件'])(
+    'preserves the read-only request %s',
+    question => {
+      expect(parseTronClassAgentIntent(question)?.intent).toBe(question.includes('作業') ? 'homework' : 'capabilities');
+    },
+  );
+
+  it('distinguishes negated writes, status reads and translations', () => {
+    expect(tronClassCompoundClauses('不要繳交，只要查玩課雲作業狀態')).toEqual(['只要查玩課雲作業狀態']);
+    expect(tronClassCompoundClauses('玩課雲我的作業交了沒，查校園公告')).toEqual(['玩課雲我的作業交了沒']);
+    expect(parseTronClassAgentIntent('玩課雲 翻譯 submit 這個字')).toBeNull();
+    expect(tronClassCompoundClauses('翻譯 submit 這個字，查玩課雲作業')).toEqual([]);
+    expect(parseTronClassAgentIntent('玩課雲不要上傳附件')?.intent).toBe('capabilities');
+  });
+});

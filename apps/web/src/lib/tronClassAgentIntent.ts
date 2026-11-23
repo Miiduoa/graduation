@@ -50,63 +50,68 @@ const TRONCLASS_KEYWORD = /(?:\btron\s*class\b|創課|玩課雲)/i;
 // when it names TronClass data and nothing that belongs to another service.
 const TRONCLASS_CONTINUATION = /(?:作業|教材|講義|附件|檔案|未交|未繳|待交|待繳|還沒交|還沒繳|沒交|沒繳|homework|assignments?|materials?|handouts?)/i;
 const OTHER_SERVICE_OR_SCHEDULE = /(?:頁面|畫面|入口|校園|學校|系上|社團|公車|交通|課表|成績|行事曆|日曆|空堂|時段|安排|排程|提醒|設定|失物|餐|活動|地圖|教室|今天|明天|後天|早上|上午|中午|下午|晚上|分鐘|小時|\d{1,2}\s*[:：點])/u;
-const NEGATED = /(?:不要|別|不准|禁止|無須|不用|不需要|do\s+not|don't|never)/i;
+const NEGATION_SOURCE = "不要|別|勿|不准|禁止|無須|不用|不需要|\\b(?:do\\s+not|don't|never)\\b";
+const NEGATED = new RegExp(NEGATION_SOURCE, 'i');
+const NEGATIONS = new RegExp(NEGATION_SOURCE, 'gi');
 const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
-const WRITE_VERB_SOURCE = '繳交|提交|送出|交出|交作業|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名|退選|選課|\\b(?:submit|upload|delete|post|reply|withdraw)\\b';
-// 子句內的細切點：除了拆句分隔詞，冒號與接在「後／之後」之後的寫入動詞也開啟新的一段，
-// 讓否定清除與寫入檢查都不會跨過它們。
-const ACTION_BOUNDARY = [
-  '然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|而且|並|再|和|與|、|\\band\\b|\\bthen\\b|\\balso\\b',
-  '[，,；;。！!？?：:\\r\\n]',
-  `(?:之後|後)\\s*(?:再|並|請|幫我|替我|代我|直接|自動|把|將)*\\s*(?=(?:${WRITE_VERB_SOURCE}))`,
-].join('|');
-const ACTION_SEGMENT_SEPARATOR = new RegExp(`(?:${ACTION_BOUNDARY})+`, 'iu');
-const NEGATED_WRITE = new RegExp(
-  "(?:不要|別|不准|禁止|無須|不用|不需要|do\\s+not|don't|never)\\s*(?:幫我|替我|代我|自動|直接)?\\s*" +
-  "(?:繳交|提交|送出|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|submit|upload|delete|post|reply)" +
-  `(?:(?!${ACTION_BOUNDARY})[\\s\\S])*`, 'gi');
+const SUBMIT_VERB_SOURCE = '繳交|提交|送出|交出|交作業|上傳|上載|\\b(?:submit|upload)\\b|[交繳](?=了沒)';
+const OTHER_WRITE_VERB_SOURCE = '發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名|退選|選課|\\b(?:delete|post|reply|withdraw)\\b';
+const WRITE_VERB = new RegExp(`(${SUBMIT_VERB_SOURCE})|${OTHER_WRITE_VERB_SOURCE}`, 'giu');
+const WRITE_NEGATION_SOURCE = `(?:${NEGATION_SOURCE})\\s*(?:(?:幫我|替我|代我|自動|直接)\\s*)*`;
+const WRITE_NEGATION = new RegExp(`${WRITE_NEGATION_SOURCE}$`, 'iu');
+const NEGATED_WRITE_SOURCE = `${WRITE_NEGATION_SOURCE}(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})`;
+const NEGATED_WRITE_START = new RegExp(NEGATED_WRITE_SOURCE, 'giu');
+const STARTS_NEGATED_WRITE = new RegExp(`^${NEGATED_WRITE_SOURCE}`, 'iu');
+// Read routing excludes the object of a negated write so it cannot select a read tool.
+const READ_ACTION_BOUNDARY = new RegExp(
+  `${CLAUSE_SEPARATOR.source}|並|再|而且|[:：\\r\\n]|\\b(?:and|then|also)\\b`, 'iu',
+);
+function readRoutingText(text: string): string {
+  let result = '';
+  let start = 0;
+  for (const match of text.matchAll(NEGATED_WRITE_START)) {
+    if (match.index < start) continue;
+    const end = match.index + match[0].length;
+    const boundary = text.slice(end).search(READ_ACTION_BOUNDARY);
+    result += text.slice(start, match.index) + ' ';
+    start = boundary < 0 ? text.length : end + boundary;
+  }
+  return result + text.slice(start);
+}
+const WRITE_CUE = /(?:記得|立即|馬上|再|然後|接著|接下來|之後|後|請|幫我|替我|代我|直接|自動|順便|同時|並|\b(?:please|then|immediately))\s*$/iu;
+const STATUS_PREFIX = /(?:(?:是否|有沒有|有無|有哪些|哪些)\s*(?:已經|已|有)?\s*|尚未|還沒|未|沒|待|已經|已)$/u;
+const STATUS_SUFFIX = /^(?:了沒|(?:過的?|了的?|的|之)?\s*(?:狀態|紀錄|記錄|情況|歷史|有哪些))/u;
+const WRITE_OBJECT = /^\s*(?:報告|檔|文件|版|附件|作業|report\b|files?\b|documents?\b|versions?\b|attachments?\b|assignments?\b|homework\b)/iu;
 
 // An ASCII apostrophe between letters is an English contraction, not a quote.
 const QUOTE = /[「」『』“”‘’"`]|(?<![A-Za-z])'|'(?![A-Za-z])/u;
-const WRITE_VERB = new RegExp(`(?:${WRITE_VERB_SOURCE})`, 'i');
-// Only asking about the state of a submission may mention submitting; any other
-// write verb in a clause is a command, whatever else the clause says.
-const SUBMIT_VERB = /(?:繳交|提交|送出|交出|交作業|上傳|\b(?:submit|upload)\b)/i;
-const WRITE_VERB_OTHER_THAN_SUBMIT = /(?:發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名|退選|選課|\b(?:delete|post|reply|withdraw)\b)/i;
-// The clause itself must open as a read request ("查…繳交狀態"); a clause that opens with
-// the write verb ("繳交…狀態報告") is a command whatever nouns follow it.
-const READ_STATUS_QUESTION = /^(?:請|麻煩|幫我|替我)*\s*(?:查詢|查看|查|看|列出|顯示|確認|check|show|list)/i;
-// 只有「繳交狀態／繳交紀錄」「是否已繳交」這種名詞片語才是在問狀態；片語以外
-// 若還剩繳交類動詞（例如「查作業狀態後把附件上傳」），那個動詞就是要求。
-const SUBMISSION_STATUS_PHRASE = new RegExp(
-  `(?:${SUBMIT_VERB.source})(?:過的?|了的?|的|之)?\\s*(?:狀態|紀錄|記錄|情況|歷史|有哪些)|` +
-  `(?:是否|有沒有|有無|有哪些|哪些)\\s*(?:已經|已|有)?\\s*(?:${SUBMIT_VERB.source})`, 'giu');
-/** True when a submit-type verb remains after removing submission-status noun phrases. */
-function hasSubmitCommand(text: string): boolean {
-  return SUBMIT_VERB.test(toOperationText(text).replace(SUBMISSION_STATUS_PHRASE, ' '));
+
+/** Classify each occurrence using its own context in the original request. */
+function hasWriteCommand(text: string): boolean {
+  for (const match of text.matchAll(WRITE_VERB)) {
+    const before = text.slice(0, match.index);
+    if (WRITE_NEGATION.test(before)) continue;
+    if (!match[1] || WRITE_CUE.test(before)) return true;
+
+    const after = text.slice(match.index + match[0].length);
+    const statusSuffix = after.match(STATUS_SUFFIX);
+    const statusPrefix = before.match(STATUS_PREFIX);
+    const object = after.slice(statusSuffix?.[0].length ?? 0);
+    if ((!statusPrefix && !statusSuffix) || WRITE_OBJECT.test(object) ||
+      (statusPrefix && WRITE_CUE.test(before.slice(0, statusPrefix.index)))) return true;
+  }
+  return false;
 }
-const CHAINED_WRITE = /(?:並|再|然後|直接|自動|順便|同時|and|then).{0,25}(?:繳交|提交|送出|上傳|submit|upload)/i;
-const EXPLICIT_WRITE = /(?:幫我|替我|代我|請|直接|自動)\s*(?:把|將)?\s*(?:繳交|提交|送出|交出|交作業|上傳|發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名)|(?:submit|upload|delete|post|reply|withdraw)\b/i;
 
 /** Examples, translations, quotes, general explanations and negated reads do not authorize a private read. */
 function authorizesPrivateRead(original: string): boolean {
+  for (const match of original.matchAll(NEGATIONS)) {
+    const rest = original.slice(match.index);
+    if (!STARTS_NEGATED_WRITE.test(rest) &&
+      /^.{0,80}(?:讀取|查詢|查看|查|列出|下載|準備|代理|read|fetch|download)/i.test(rest)) return false;
+  }
   return !(/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(original) ||
-    /^[「『“"'][\s\S]*[」』”"']$/.test(original) ||
-    /(?:不要|別|不准|禁止|無須|不用|不需要|do\s+not|don't|never)\s*.{0,80}(?:讀取|查詢|查看|查|列出|下載|準備|代理|read|fetch|download)/i.test(original));
-}
-
-/**
- * "查未交作業，不要繳交" authorizes a read, not a write. Strip only
- * explicitly negated write clauses before evaluating the positive command.
- */
-function withoutNegatedWrites(original: string): string {
-  // A negation only covers its own write phrase: it stops at any word the clause
-  // splitter or the planner treats as starting another action.
-  return original.replace(NEGATED_WRITE, '');
-}
-
-function toOperationText(text: string): string {
-  return text.replace(/(?:尚未|還沒|未|沒|待|已)(?:繳交|提交|交|繳)|not\s+submitted|unsubmitted/gi, '待辦');
+    /^[「『“"'][\s\S]*[」』”"']$/.test(original));
 }
 
 /**
@@ -118,16 +123,8 @@ function toOperationText(text: string): string {
 function wholeRequestAllowsCompoundRead(question: string): boolean {
   const original = question.normalize('NFKC').trim();
   // Quoted text anywhere may be split apart, so no clause can be trusted as a command.
-  if (QUOTE.test(original) || !authorizesPrivateRead(original)) return false;
-  const positive = withoutNegatedWrites(original);
-  const operationText = toOperationText(positive);
-  if (CHAINED_WRITE.test(operationText) || EXPLICIT_WRITE.test(operationText)) return false;
-  // A bare write clause such as "繳交附件" is still a write request; only a
-  // status question about submissions stays a read.
-  return !positive.split(ACTION_SEGMENT_SEPARATOR).some(clause =>
-    WRITE_VERB.test(toOperationText(clause)) &&
-    !(READ_STATUS_QUESTION.test(clause) && !hasSubmitCommand(clause) &&
-      !WRITE_VERB_OTHER_THAN_SUBMIT.test(clause)));
+  return !QUOTE.test(original) && !hasWriteCommand(original) &&
+    authorizesPrivateRead(original);
 }
 
 /**
@@ -182,27 +179,21 @@ export type TronClassAgentQueryIntent = {
 export function parseTronClassAgentIntent(question: string): TronClassAgentQueryIntent | null {
   if (typeof question !== 'string' || !question.trim() || question.length > 1000 ||
     !TRONCLASS_KEYWORD.test(question)) return null;
-  const original = question.trim();
+  const original = question.normalize('NFKC').trim();
   if (isExistingTronClassNavigation(original)) return null;
-  if (isMultiClauseRequest(original)) return null;
+  const hasWrite = hasWriteCommand(original);
   if (!authorizesPrivateRead(original)) return null;
-  const text = withoutNegatedWrites(original);
+  if (isMultiClauseRequest(original)) return null;
+  if (hasWrite) return { intent: 'unsupported', pendingOnly: false };
+  const text = readRoutingText(original);
   if (/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i.test(text)) {
     return { intent: 'capabilities', pendingOnly: false };
   }
   const pendingOnly = /(?:未交|未繳|待交|待繳|待提交|尚未(?:交|繳|提交)|還沒(?:交|繳|提交)|沒(?:交|繳)|pending|unsubmitted|not\s+submitted)/i.test(text);
-  const operationText = toOperationText(text);
   const preparation = /(?:準備|預覽|草稿|起草|prepare|draft)/i.test(text) && /(?:作業|homework|assignment)/i.test(text);
   if (preparation && /(?:下載|download)/i.test(text)) return { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' };
-  const chainedWrite = CHAINED_WRITE.test(operationText);
-  if (preparation && !chainedWrite) return { intent: 'prepare', pendingOnly };
-  const explicitWrite = EXPLICIT_WRITE.test(operationText);
-  if (explicitWrite || chainedWrite || /(?:發[佈布文]|回[覆復]|留言|刪除|撤回|退選|選課|填答|評分|測驗|考試|問卷|簽到|簽退|點名)/.test(text)) {
-    return { intent: 'unsupported', pendingOnly: false };
-  }
-  if (hasSubmitCommand(operationText)) {
-    return { intent: 'unsupported', pendingOnly: false };
-  }
+  if (preparation) return { intent: 'prepare', pendingOnly };
+  if (/(?:測驗|考試|問卷)/.test(text)) return { intent: 'unsupported', pendingOnly: false };
   if (/(?:下載|download)/i.test(text)) return { intent: 'download', pendingOnly: false };
   if (pendingOnly) return { intent: 'homework', pendingOnly: true };
   if (/(?:作業|homework|assignments?)/i.test(text)) return { intent: 'homework', pendingOnly: false };
