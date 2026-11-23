@@ -1019,6 +1019,14 @@ function spatialDestinationIdentity(place: MapLocation): string {
   ]);
 }
 
+// Existing map-record context is easier to recognize than raw coordinates,
+// but is not a verified room, entrance or indoor route.
+function spatialPlaceContext(place: MapLocation): string {
+  const building = place.building?.trim();
+  const floor = place.floor?.trim();
+  return [building, floor ? `樓層：${floor}` : null].filter(Boolean).join(' · ');
+}
+
 function SpatialDialog({ school, locations, selected, onSelect, onClose, manualStart, onManualStart }: Props & {
   onClose: () => void;
   manualStart: number;
@@ -1044,7 +1052,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
       const detail = sameCategory
         ? ` · 地圖座標 ${point.location.lat}, ${point.location.lng} · 清單第 ${index + 1} 項`
         : '';
-      return [point.id, `${point.name}（${point.category || '未分類'}${detail}）`] as const;
+      const context = spatialPlaceContext(point.location);
+      const contextLabel = context ? ` · 地點資料：${context}` : '';
+      return [point.id, `${point.name}（${point.category || '未分類'}${contextLabel}${detail}）`] as const;
     }));
     return { optionLabels, repeatedNames };
   }, [model.points]);
@@ -1763,7 +1773,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
                 {/* A changing live status distinguishes same-name scene markers even when the heading stays identical. */}
                 {repeatedNames.has(place.name) && (
                   <p className={styles.note} role="status" aria-live="polite" aria-atomic="true">
-                    同名地點：目前選擇「{place.category || '未分類'}」，地圖標記座標 {place.lat}, {place.lng}，清單第 {index + 1} 項。
+                    同名地點：目前選擇「{place.category || '未分類'}」
+                    {spatialPlaceContext(place) ? `，地點資料：${spatialPlaceContext(place)}` : ''}，地圖標記座標 {place.lat}, {place.lng}，清單第 {index + 1} 項。
                     這是地點標記，不代表已核實的建築入口；請核對位置再開啟導航。
                   </p>
                 )}
