@@ -17,7 +17,7 @@ import type { CampusSpatialScene } from './campusSpatialScene';
 import { appleWalkingDirectionsUrl, walkingDirectionsUrl, type MapLocation } from './mapService';
 import { isProvidencePendingVerification, providencePlaceSourceUrl } from './providenceCampus';
 import { PROVIDENCE_CAMPUS_PLACES, PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
-import { parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
+import { MAX_VERTICES, MAX_WAYS, parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
 import { reuseUnchangedProvidenceFootprints } from './footprintSnapshotEquality';
 import { isSupportedUtf8JsonMediaType } from './jsonMediaType';
 import BuildingPlanPreview from './buildingPlans/BuildingPlanPreview';
@@ -68,10 +68,6 @@ const MAX_DECLARED_FOOTPRINT_BYTES = 2_000_000;
 // The public endpoint's 500 KB ceiling makes this generous for real responses.
 const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 
-// Response.json() buffers the entire document before our snapshot validator
-// runs. Bound the *actual decoded bytes* so untrusted downstream responses
-// cannot exhaust mobile memory even without a reliable Content-Length.
-// A JSON-only response cannot expose the original byte count.
 function isWellFormedUtf8(bytes: Uint8Array): boolean {
   for (let i = 0; i < bytes.length;) {
     const b = bytes[i];
@@ -91,6 +87,96 @@ function isWellFormedUtf8(bytes: Uint8Array): boolean {
     i += need + 1;
   }
   return true;
+}
+
+function isPlainFootprintObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function validateParsedFootprintJson(payload: unknown): void {
+  const invalidShape = () => new Error('Invalid parsed building outline response');
+  const maxOutlineVertices = MAX_VERTICES + 1;
+  const maxTotalVertices = MAX_WAYS * maxOutlineVertices;
+  // An outline contributes three nodes per vertex. Leave room for building
+  // fields and snapshot metadata, and bound recursion to the snapshot depth.
+  const maxNodes = maxTotalVertices * 4;
+  const maxDepth = 5;
+  let nodes = 0;
+  let bytes = 0;
+  const addBytes = (count: number) => {
+    bytes += count;
+    if (bytes > MAX_DECLARED_FOOTPRINT_BYTES) {
+      throw new Error('Building outline response exceeded byte limit');
+    }
+  };
+  const countString = (value: string) => {
+    addBytes(2); // Quotes.
+    for (let i = 0; i < value.length; i += 1) {
+      const code = value.charCodeAt(i);
+      if (code === 0x22 || code === 0x5c || code === 8 || code === 9 ||
+          code === 10 || code === 12 || code === 13) addBytes(2);
+      else if (code < 0x20) addBytes(6);
+      else if (code <= 0x7f) addBytes(1);
+      else if (code <= 0x7ff) addBytes(2);
+      else if (code >= 0xd800 && code <= 0xdfff) {
+        const next = value.charCodeAt(i + 1);
+        if (code <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+          addBytes(4);
+          i += 1;
+        } else addBytes(6); // JSON.stringify escapes lone surrogates.
+      } else addBytes(3);
+    }
+  };
+  const ownValue = (container: object, key: string | number): unknown => {
+    const descriptor = Object.getOwnPropertyDescriptor(container, key);
+    if (!descriptor || !('value' in descriptor)) throw invalidShape();
+    return descriptor.value;
+  };
+  const visit = (value: unknown, depth: number): void => {
+    nodes += 1;
+    if (nodes > maxNodes || depth > maxDepth) throw invalidShape();
+    if (typeof value === 'string') {
+      countString(value);
+    } else if (value === null || typeof value === 'boolean' ||
+        (typeof value === 'number' && Number.isFinite(value))) {
+      addBytes(String(value).length);
+    } else if (Array.isArray(value)) {
+      if (Object.getPrototypeOf(value) !== Array.prototype || value.length > maxNodes - nodes) throw invalidShape();
+      addBytes(2 + Math.max(0, value.length - 1)); // Brackets and commas.
+      for (let i = 0; i < value.length; i += 1) visit(ownValue(value, i), depth + 1);
+    } else if (isPlainFootprintObject(value)) {
+      addBytes(2); // Braces.
+      let first = true;
+      for (const key in value) {
+        if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+        addBytes(first ? 1 : 2); // Colon and optional comma.
+        first = false;
+        countString(key);
+        visit(ownValue(value, key), depth + 1);
+      }
+    } else {
+      throw invalidShape();
+    }
+  };
+
+  if (!isPlainFootprintObject(payload)) throw invalidShape();
+  visit(payload, 0);
+  const { buildings } = payload;
+  if (!Array.isArray(buildings) || buildings.length > MAX_WAYS) throw invalidShape();
+  let totalVertices = 0;
+  for (const building of buildings) {
+    if (!isPlainFootprintObject(building)) throw invalidShape();
+    const { outline } = building;
+    if (!Array.isArray(outline) || outline.length < 3 || outline.length > maxOutlineVertices) throw invalidShape();
+    totalVertices += outline.length;
+    if (totalVertices > maxTotalVertices) throw invalidShape();
+    for (const pair of outline) {
+      if (!Array.isArray(pair) || pair.length !== 2 ||
+          !Number.isFinite(pair[0]) || !Number.isFinite(pair[1])) throw invalidShape();
+    }
+  }
 }
 
 async function readBoundedFootprintJson(response: Response, signal?: AbortSignal): Promise<unknown> {
@@ -197,10 +283,17 @@ async function readBoundedFootprintJson(response: Response, signal?: AbortSignal
         return JSON.parse(raw) as unknown;
       }
     }
-    // JSON-only bridges expose no raw bytes. Their body can exceed the size
-    // cap and cannot be compared to Content-Length, so json() is not a safe
-    // fallback for trusted OSM geometry. Keep POIs and external directions.
-    throw new Error('Building outline response bytes unavailable');
+    // JSON-only bridges expose the parsed value without its original bytes.
+    // The outer gate caps declared lengths. Treat the header as advisory
+    // here because re-serializing JSON cannot recover the original length.
+    if (signal?.aborted) throw new Error('Building outline read aborted');
+    if (response.bodyUsed || typeof response.json !== 'function') {
+      throw new Error('Building outline response body unavailable');
+    }
+    const payload: unknown = await response.json();
+    if (signal?.aborted) throw new Error('Building outline read aborted');
+    validateParsedFootprintJson(payload);
+    return payload;
   }
   // A mobile pagehide/unmount/timeout may arrive after the fetch headers but
   // while response-body streaming is still pending. Abort the *reader* as well

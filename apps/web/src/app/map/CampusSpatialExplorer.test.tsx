@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import CampusSpatialExplorer from './CampusSpatialExplorer';
 import type { MapLocation } from './mapService';
 import { PROVIDENCE_BUS_STOPS, PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
-import { parseProvidenceFootprintSnapshot, parseProvidenceOsmFootprints } from './providenceFootprints';
+import { MAX_VERTICES, MAX_WAYS, parseProvidenceFootprintSnapshot, parseProvidenceOsmFootprints } from './providenceFootprints';
 import { DEFAULT_SPATIAL_BEARING, MAX_SPATIAL_ZOOM, MIN_SPATIAL_ZOOM } from './campusSpatialCamera';
 
 const scene = vi.hoisted(() => ({
@@ -3536,27 +3536,59 @@ it.each(['ASCII', 'UTF-8'] as const)(
   },
 );
 
-// An OSM snapshot is optional. A JSON-only fetch bridge cannot prove the
-// decoded size or the declared Content-Length, so it must not parse and install
-// geometry even when it advertises a plausible small response.
-it.each([null, '100', '2000001'])(
-  'rejects uninspectable JSON-only OSM bodies (Content-Length %s)',
-  async (length) => {
-    const { library, body } = sourcedLibraryFootprintFixture();
-    const json = vi.fn(async () => JSON.parse(body));
-    const headers = new Headers();
-    if (length !== null) headers.set('Content-Length', length);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers, json }));
-    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
-    const dialog = await open();
-    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
-    expect(json).not.toHaveBeenCalled();
-    await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
-    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
-    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
-    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
-  },
-);
+it.each([null, '100'])('installs valid JSON-only OSM bodies (Content-Length %s)', async (length) => {
+  const { library, body, buildings } = sourcedLibraryFootprintFixture();
+  const json = vi.fn(async () => JSON.parse(body));
+  const headers = new Headers();
+  if (length !== null) headers.set('Content-Length', length);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers, json }));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(json).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
+});
+
+it.each([
+  'oversized Content-Length', 'oversized padding', 'oversized UTF-8 padding', 'oversized escaped padding',
+  'too many buildings', 'too many coordinates', 'invalid buildings', 'invalid building',
+  'non-finite coordinate', 'wrong coordinate type', 'non-object root', 'excessive nesting',
+] as const)('rejects JSON-only OSM bodies with %s', async (invalid) => {
+  const { library, body, buildings: [building] } = sourcedLibraryFootprintFixture();
+  const snapshot = JSON.parse(body) as Record<string, unknown>;
+  const invalidOutline = (outline: unknown[]) => ({
+    ...snapshot, buildings: [building, { ...building, poiId: 'unknown-building', outline }],
+  });
+  const payload = () => {
+    switch (invalid) {
+      case 'oversized padding': return { ...snapshot, padding: 'x'.repeat(2_000_001) };
+      case 'oversized UTF-8 padding': return { ...snapshot, padding: '中'.repeat(700_000) };
+      case 'oversized escaped padding': return { ...snapshot, padding: '\u0000'.repeat(350_000) };
+      case 'too many buildings': return { ...snapshot, buildings: Array(MAX_WAYS + 1).fill(building) };
+      case 'too many coordinates': return invalidOutline(Array(MAX_VERTICES + 2).fill(building.outline[0]));
+      case 'invalid buildings': return { ...snapshot, buildings: building };
+      case 'invalid building': return { ...snapshot, buildings: [building, null] };
+      case 'non-finite coordinate': return invalidOutline([[Infinity, 24], ...building.outline]);
+      case 'wrong coordinate type': return invalidOutline([[120, '24'], ...building.outline]);
+      case 'non-object root': return [snapshot];
+      case 'excessive nesting': return { ...snapshot, extra: [[[[[[]]]]]] };
+      case 'oversized Content-Length': return snapshot;
+    }
+  };
+  const json = vi.fn(async () => payload());
+  const headers = new Headers();
+  if (invalid === 'oversized Content-Length') headers.set('Content-Length', '2000001');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers, json }));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(json).toHaveBeenCalledTimes(invalid === 'oversized Content-Length' ? 0 : 1);
+  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]));
+  const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+  await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+  expect(within(dialog).getByRole('heading', { name: library.name })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
 
 // text() is still a supported legacy path, but identity framing must agree
 // with the actual re-encoded bytes before the OSM polygon can be trusted.
@@ -4069,10 +4101,9 @@ function sourcedLibraryFootprintFixture() {
   }) };
 }
 
-// 52403426 readBoundedFootprintJson falls back to response.json() without a
-// reader. Its streaming path parses the same UTF-8 JSON for these fixtures.
-// The snapshot validator is shared. Its canvas starts each foreground mount,
-// defaults to visible, and uses isIntersecting to suspend/resume rendering.
+// Compare the byte and text readers against the snapshot validator applied
+// to parsed JSON. The baseline canvas starts each foreground mount, defaults
+// to visible, and uses isIntersecting to suspend/resume rendering.
 const capabilityCases = [
   'all available', 'no TextDecoder', 'no TextEncoder', 'no body.getReader',
   'invalid viewport', 'throwing viewport', 'no IntersectionObserver',
