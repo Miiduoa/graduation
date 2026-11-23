@@ -71,15 +71,12 @@ const MAX_DECLARED_FOOTPRINT_BYTES = 2_000_000;
 // The public endpoint's 500 KB ceiling makes this generous for real responses.
 const MAX_FOOTPRINT_STREAM_CHUNKS = 8_192;
 
-// A captive-portal login page or edge proxy can return HTTP 200 with an
-// HTML/binary body or JSON-looking content under a conflicting MIME.
-// Only JSON types (plus legacy text/plain/no-header replies) may reach
-// byte-bounded parsing and the independent source/geometry verifier.
-// Do not guess on comma-joined, empty or non-UTF-8 declarations.
+// Keep this media-type rule aligned between the Overpass route and browser.
 function isSupportedFootprintMediaType(response: Response): boolean {
   const declared = response.headers?.get('content-type');
-  if (declared === null || declared === undefined) return true;
-  return /^(?:application\/(?:json|[a-z0-9][a-z0-9!#$&^_.+-]*\+json)|text\/plain)(?:\s*;\s*charset\s*=\s*(?:"utf-8"|utf-8))?$/i.test(declared.trim());
+  if (declared == null) return true;
+  const mediaType = declared.split(';', 1)[0].trim();
+  return /^application\/(?:json|[a-z0-9!#$%&'*+.^_`|~-]+\+json)$/i.test(mediaType);
 }
 
 // Response.json() buffers the entire document before our snapshot validator

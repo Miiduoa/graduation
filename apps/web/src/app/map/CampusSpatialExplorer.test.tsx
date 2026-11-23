@@ -14,6 +14,14 @@ const scene = vi.hoisted(() => ({
 }));
 vi.mock('./campusSpatialScene', () => ({ createCampusSpatialScene: scene.create }));
 
+
+// A string passed directly to Response defaults to text/plain.
+function jsonResponse(body: string, init?: ResponseInit): Response {
+  const headers = new Headers(init?.headers);
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  return new Response(body, { ...init, headers });
+}
+
 const places: MapLocation[] = [
   { id: 'library', name: '本校圖書館', category: '圖書館', description: '借書與自習', lat: 24.226, lng: 120.58 },
   { id: 'dorm', name: '本校宿舍', category: '住宿', description: '住宿區', lat: 24.228, lng: 120.582 },
@@ -1217,7 +1225,7 @@ it.each(['valid', 'invalid', 'throws'].flatMap((viewportMode) =>
     if (rebuilding) {
       transitioning = true;
       if (action === 'location rebuild') rerender(explorer([library]));
-      else await act(async () => publishFootprints(new Response(body)));
+      else await act(async () => publishFootprints(jsonResponse(body)));
     }
     if (action === 'restore') {
       fireEvent(window, new Event('pagehide'));
@@ -3421,7 +3429,7 @@ it.each([
     ],
   }] });
   expect(buildings).toHaveLength(1);
-  const response = new Response(JSON.stringify({
+  const response = jsonResponse(JSON.stringify({
     schoolId: 'pu', source: 'OpenStreetMap', buildings,
     fetchedAt: new Date().toISOString(), stale: false,
   }), {
@@ -3629,21 +3637,20 @@ it.each([
   expect(json).not.toHaveBeenCalled();
 });
 
-const footprintContentTypes = [
-  'application/json', 'text/plain', null, 'text/html', 'application/octet-stream',
-  'application/json; charset=UTF-8', 'text/plain; charset=UTF-8',
-  'application/vnd.example_campus+json', ' APPLICATION/JSON ', 'application/json, text/html', '',
-  'application/json; charset="UTF-8"', 'application/json; charset=iso-8859-1',
-  'application/+json', 'application/json; charset=UTF-8, text/html',
-];
-// Independent, explicit acceptance matrix: MIME validation must occur before
-// streaming even when a bad media body contains structurally valid JSON.
+// Match the media-type cases in the other footprint consumer's tests.
 const compatibleFootprintContentTypes = new Set<string | null>([
-  null, 'application/json', 'text/plain',
-  'application/json; charset=UTF-8', 'text/plain; charset=UTF-8',
-  'application/vnd.example_campus+json', ' APPLICATION/JSON ',
-  'application/json; charset="UTF-8"',
+  null, 'application/json', ' APPLICATION/JSON ',
+  'Application/Json ; charset = "UTF-8"', 'application/json; charset=iso-8859-1',
+  'application/custom+json', 'APPLICATION/VND.EXAMPLE_CAMPUS+JSON',
+  'application/vnd.overpass+json; profile="campus"',
+  'application/vnd.overpass+json ; profile="campus; extended view"; charset=UTF-8',
 ]);
+const footprintContentTypes = [
+  ...compatibleFootprintContentTypes,
+  'text/html', 'text/plain', 'text/plain; charset=utf-8', 'application/xml',
+  'application/octet-stream', 'application/json, text/html', 'text/custom+json',
+  '', ';', 'application/', 'application/+json', 'application/bad name+json',
+];
 
 it.each(footprintContentTypes.flatMap((contentType) =>
   (['valid', 'invalid JSON', 'unverified source', 'invalid structure'] as const)
@@ -3720,7 +3727,7 @@ it.each([null, 'application/json', 'application/octet-stream', 'text/plain', 'te
     expect(retry.hasAttribute('disabled')).toBe(baselineCooldown);
     if (explicitCooldown) expect(dialog.getByText(/約 10 分鐘冷卻/)).toBeTruthy();
     if (!baselineCooldown) {
-      fetchMock.mockResolvedValueOnce(new Response(body));
+      fetchMock.mockResolvedValueOnce(jsonResponse(body));
       fireEvent.click(retry);
       expect(await dialog.findByText(/1 棟公開建築輪廓/)).toBeTruthy();
       expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -3733,7 +3740,7 @@ it.each([null, 'application/json', 'application/octet-stream', 'text/plain', 'te
 // later after getReader() has allocated a stream on a mobile WebView.
 it.each([
   'text/html', 'application/octet-stream', 'application/json, text/html',
-  '', 'application/json; charset=iso-8859-1',
+  '', 'text/plain',
 ])('cancels a stalled 200 OSM response with incompatible MIME %s', async (contentType) => {
   const { library } = sourcedLibraryFootprintFixture();
   const cancel = vi.fn().mockResolvedValue(undefined);
@@ -3818,7 +3825,7 @@ it.each([
 
 it('reads the final successful outline response after a redirect', async () => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
-  const response = new Response(body, { headers: { 'Content-Type': 'text/plain' } });
+  const response = jsonResponse(body);
   vi.spyOn(response, 'redirected', 'get').mockReturnValue(true);
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
   render(<CampusSpatialExplorer school="pu" locations={[library]}
@@ -4086,7 +4093,7 @@ it.each([
   { length: '2000001', accepted: false },
 ])('checks declared Content-Length $length before reading', async ({ length, accepted }) => {
   const { library, buildings, body } = sourcedLibraryFootprintFixture();
-  const response = new Response(body, { headers: { 'Content-Length': length } });
+  const response = jsonResponse(body, { headers: { 'Content-Length': length } });
   if (length === ' 0040 ') {
     expect(response.headers.get('content-length')).toBe('0040');
   }

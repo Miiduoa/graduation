@@ -30,13 +30,11 @@ const OVERPASS_REQUEST_DEADLINE_MS = 12_000;
 // time. A freshly fetched HTTP response can still contain days-old map state.
 const MAX_OVERPASS_REPLICATION_LAG_MS = 48 * 60 * 60 * 1000;
 
-// Match the public campus browser's OSM media contract at the upstream edge.
-// Older Overpass instances may omit Content-Type or send UTF-8 text/plain.
-// An explicit HTML, binary, empty, multi-valued or non-UTF-8 declaration is
-// not evidence of a complete JSON map even if its body happens to parse.
+// Keep this media-type rule aligned between the Overpass route and browser.
 function supportedOverpassMediaType(declared: string | null): boolean {
   if (declared === null) return true;
-  return /^(?:application\/(?:json|[a-z0-9][a-z0-9!#$&^_.+-]*\+json)|text\/plain)(?:\s*;\s*charset\s*=\s*(?:"utf-8"|utf-8))?$/i.test(declared.trim());
+  const mediaType = declared.split(';', 1)[0].trim();
+  return /^application\/(?:json|[a-z0-9!#$%&'*+.^_`|~-]+\+json)$/i.test(mediaType);
 }
 
 function verifyOverpassReplicationTime(payload: unknown, now: number): string | null {
