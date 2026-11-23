@@ -159,10 +159,17 @@ export function parseNativeTronClassSnapshot(value: unknown): TronClassSnapshot 
   const snapshot = value as TronClassSnapshot;
   const courses = new Set(snapshot.courses.map((course) => course.id));
   const homework = new Set(snapshot.homework.map((row) => `${row.courseId}:${row.id}`));
+  // A partial course sync can list errors for a missing course, but it must not
+  // display that course's private materials or announcements as usable data.
+  // Null is reserved for school-wide items without an assigned course.
+  const outsideCourseScope = (row: { courseId: number | null }) =>
+    row.courseId !== null && !courses.has(row.courseId);
   if (
     courses.size !== snapshot.courses.length ||
     homework.size !== snapshot.homework.length ||
-    snapshot.homework.some((row) => !courses.has(row.courseId))
+    snapshot.homework.some((row) => !courses.has(row.courseId)) ||
+    snapshot.announcements.some(outsideCourseScope) ||
+    snapshot.materials.some(outsideCourseScope)
   )
     return invalid();
   return snapshot;
