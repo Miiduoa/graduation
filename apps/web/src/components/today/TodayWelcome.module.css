@@ -88,6 +88,34 @@
   font-weight: 600;
 }
 
+.courseEntry {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+  line-height: 1.7;
+}
+
+.courseEntry p {
+  margin: 0;
+}
+
+.courseEntry a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--brand);
+  font-weight: 600;
+  text-underline-offset: 3px;
+}
+
+.courseActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+}
+
 .shortcuts {
   align-self: stretch;
   padding: 0;
@@ -105,6 +133,7 @@
   margin-bottom: 8px;
 }
 
+.shortcutHeading h2,
 .shortcutHeading h3 {
   margin: 0;
   font-size: var(--font-body-size);
@@ -117,6 +146,10 @@
   gap: 10px;
 }
 
+.standalone .shortcutGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .shortcut {
   display: flex;
   align-items: center;
@@ -127,6 +160,8 @@
   border-bottom: 1px solid var(--border);
   text-decoration: none;
   color: var(--text);
+  border-radius: var(--radius-sm);
+  transition: background-color var(--motion-fast) var(--ease-out);
 }
 
 .shortcut > svg {
@@ -153,7 +188,8 @@
   line-height: 1.6;
 }
 
-.welcome a:focus-visible {
+.welcome a:focus-visible,
+.shortcuts a:focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
@@ -168,6 +204,20 @@
     border-top: 1px solid var(--border);
     padding-top: 16px;
   }
+
+  .standalone .shortcutGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shortcut {
+    transition: none;
+  }
+}
+
+:global(html[data-reduced-motion='true']) .shortcut {
+  transition: none;
 }
 
 @media (max-width: 360px) {

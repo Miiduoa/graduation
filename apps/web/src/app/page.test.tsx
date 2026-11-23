@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
   selectedSchoolId: 'pu' as string | null,
   campusLoading: false,
+  campusCatalogStatus: undefined as 'ready' | 'loading' | undefined,
   schoolRole: null as string | null,
   schoolRoleCalls: [] as Array<[string | null | undefined, string | null | undefined]>,
   session: null as null | { context: string; platformAccountId: string; isPlatformOperator?: boolean },
@@ -98,6 +99,7 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
   useOptionalSelectedSchool: () => ({
     selectedSchoolId: state.selectedSchoolId,
     loading: state.campusLoading,
+    catalogStatus: state.campusCatalogStatus,
   }),
 }));
 vi.mock('@/lib/useSchoolRole', async (original) => {
@@ -142,6 +144,7 @@ beforeEach(() => {
   state.uid = 'alice';
   state.selectedSchoolId = 'pu';
   state.campusLoading = false;
+  state.campusCatalogStatus = undefined;
   state.schoolRole = null;
   state.schoolRoleCalls = [];
   state.session = null;
@@ -386,6 +389,7 @@ it('lets a guest browse before signing in and never loads personal courses', () 
 it('keeps all-campuses navigation out of the private personal-storage namespace', () => {
   state.uid = null;
   state.selectedSchoolId = null;
+  state.campusCatalogStatus = 'ready';
   state.timetable.schoolId = 'personal';
   state.importScope = {
     loading: false,
@@ -471,18 +475,20 @@ it('looks up the school role from the selected school instead of always using pu
   expect(state.schoolRoleCalls.some((call) => call[1] === 'pu')).toBe(false);
 });
 
-it('shows the LMS-unconnected sentence instead of pretending there is no homework', async () => {
+it('offers a starting point for confirmed empty course data without claiming there is no homework', async () => {
   vi.mocked(loadHomeData).mockResolvedValue({
     courses: [],
     tasks: [],
     unreadCount: 0,
   });
   render(<HomePage />);
-  expect(await screen.findByText(/還沒有 nuni 課程資料/)).toBeTruthy();
+  expect(await screen.findByRole('link', { name: '加入 nuni 課程' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '匯入我的課表' })).toBeTruthy();
   expect(screen.queryByText('目前沒有待繳作業。')).toBeNull();
+  expect(screen.queryByRole('link', { name: '登入查看作業與通知' })).toBeNull();
 });
 
-it('does not keep weather, grade summary, recommendation or shortcut grids on today', async () => {
+it('keeps weather, grade summaries and unrelated recommendations off today', async () => {
   vi.mocked(loadHomeData).mockResolvedValue(data('資料結構', { tasks: [] }));
   render(<HomePage />);
   expect(await screen.findByTestId('student-today')).toBeTruthy();
@@ -554,9 +560,53 @@ it('offers course joining for a verified empty nuni account', async () => {
   state.session = { context: 'test', platformAccountId: 'student' };
   vi.mocked(loadNuniHomeSections).mockResolvedValue({ courses: [], tasks: [], unreadCount: 0 });
   render(<HomePage />);
-  expect(await screen.findByText(/還沒有 nuni 課程資料/)).toBeTruthy();
-  expect(screen.getByRole('link', { name: '加入課程' }).getAttribute('href')).toBe('/classroom');
+  expect((await screen.findByRole('link', { name: '加入 nuni 課程' })).getAttribute('href')).toBe('/classroom');
   expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('waits for the assignment response after courses arrive before choosing an empty-state action', async () => {
+  state.uid = null;
+  state.session = { context: 'test', platformAccountId: 'student' };
+  let finish!: (value: HomeData) => void;
+  vi.mocked(loadNuniHomeSections).mockImplementationOnce((_request, _account, onCourses) => {
+    onCourses?.(data('剛讀到的課程', { tasks: [] }));
+    return new Promise((resolve) => { finish = resolve; });
+  });
+  render(<HomePage />);
+  expect(await screen.findByText('正在確認作業與期限…')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '先把課表放進來。' })).toBeNull();
+  expect(screen.queryByText('目前沒有今日或即將到期的作業。')).toBeNull();
+  await act(async () => finish(data('剛讀到的課程')));
+  expect(screen.getByTestId('next-action').textContent).toContain('剛讀到的課程 作業');
+  expect(screen.queryByText('正在確認作業與期限…')).toBeNull();
+  expect(screen.queryByRole('region', { name: '先把課表放進來。' })).toBeNull();
+});
+
+it('keeps confirmed setup and service links focused while a complete account snapshot refreshes', async () => {
+  state.uid = null;
+  state.session = { context: 'test', platformAccountId: 'student' };
+  let finish!: (value: HomeData) => void;
+  const empty: HomeData = { courses: [], tasks: [], unreadCount: 0 };
+  vi.mocked(loadNuniHomeSections)
+    .mockResolvedValueOnce(empty)
+    .mockImplementationOnce((_request, _account, onCourses) => {
+      onCourses?.(empty);
+      return new Promise((resolve) => { finish = resolve; });
+    });
+  render(<HomePage />);
+  const join = await screen.findByRole('link', { name: '加入 nuni 課程' });
+  const calendar = screen.getByRole('link', { name: '查看行事曆' });
+  const bus = screen.getByRole('link', { name: /查公車/ });
+  calendar.focus();
+  await act(async () => window.dispatchEvent(new Event('pageshow')));
+  expect(screen.getByRole('link', { name: '加入 nuni 課程' })).toBe(join);
+  expect(screen.getByRole('link', { name: '查看行事曆' })).toBe(calendar);
+  expect(screen.getByRole('link', { name: /查公車/ })).toBe(bus);
+  expect(document.activeElement).toBe(calendar);
+  expect(screen.queryByText('目前沒有今日或即將到期的作業。')).toBeNull();
+  await act(async () => finish(empty));
+  expect(document.activeElement).toBe(calendar);
+  expect(screen.getByRole('link', { name: /查公車/ })).toBe(bus);
 });
 
 it('keeps Firebase work when nuni is also signed in and hides it on Firebase account change', async () => {

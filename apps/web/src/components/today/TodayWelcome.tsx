@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { CampusIcon, type CampusIconName } from '@/components/CampusIcon';
-import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigation';
+import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigationLinks';
 import { loginHref } from '@/lib/navigation';
 import styles from './TodayWelcome.module.css';
 
@@ -21,14 +21,21 @@ export function TodayWelcome({
   timetableHref,
   hasTimetable = false,
   needsSchool = false,
+  unsigned = true,
+  needsCourse = false,
+  campusSearch: serviceSearch,
 }: {
   importHref: string;
   timetableHref: string;
   hasTimetable?: boolean;
   needsSchool?: boolean;
+  unsigned?: boolean;
+  needsCourse?: boolean;
+  /** Public services follow the browsing campus, independently of the personal timetable. */
+  campusSearch?: string;
 }) {
   const params = new URL(timetableHref, 'https://campus.local').searchParams;
-  const campusSearch = buildCampusNavigationSearch(params);
+  const campusSearch = serviceSearch ?? buildCampusNavigationSearch(params);
   const title = needsSchool
     ? '先選擇你的校園。'
     : hasTimetable
@@ -44,7 +51,7 @@ export function TodayWelcome({
             ? '選好學校，再整理課表；也可以先使用下方公開服務。'
             : hasTimetable
               ? '查看本週的上課時間與教室。'
-              : '可匯入課表截圖、檔案，或手動新增課程。'}
+              : '匯入課表截圖或檔案，下次打開就能查看上課時間與教室。'}
         </p>
         <div className={styles.actions}>
           <Link
@@ -67,30 +74,56 @@ export function TodayWelcome({
             {needsSchool ? '先看生活服務' : hasTimetable ? '更新匯入紀錄' : '手動建立課表'}
           </Link>
         </div>
-        <p className={styles.signIn}>
-          <Link href={loginHref(campusServiceHref('/', campusSearch))}>登入查看作業與通知</Link>
-        </p>
+        {unsigned ? (
+          <p className={styles.signIn}>
+            <Link href={loginHref(campusServiceHref('/', campusSearch))}>登入查看作業與通知</Link>
+          </p>
+        ) : needsCourse ? (
+          <div className={styles.courseEntry}>
+            <p>有 nuni 課程嗎？加入後，作業期限也會出現在首頁與行事曆。</p>
+            <div className={styles.courseActions}>
+              <Link href={campusServiceHref('/classroom', campusSearch)}>加入 nuni 課程</Link>
+              <Link href={campusServiceHref('/calendar', campusSearch)}>查看行事曆</Link>
+            </div>
+          </div>
+        ) : null}
       </div>
-      <nav className={styles.shortcuts} aria-label="常用校園服務">
-        <div className={styles.shortcutHeading}>
-          <h3>校園服務</h3>
-        </div>
-        <div className={styles.shortcutGrid}>
-          {shortcuts.map((item) => (
-            <Link
-              key={item.href}
-              href={campusServiceHref(item.href, campusSearch)}
-              className={styles.shortcut}
-            >
-              <CampusIcon name={item.icon} size={22} />
-              <span>
-                <strong>{item.label}</strong>
-                <small>{item.detail}</small>
-              </span>
-            </Link>
-          ))}
-        </div>
-      </nav>
+      <TodayServiceShortcuts campusSearch={campusSearch} />
     </section>
+  );
+}
+
+export function TodayServiceShortcuts({
+  campusSearch,
+  standalone = false,
+}: {
+  campusSearch: string;
+  standalone?: boolean;
+}) {
+  const Heading = standalone ? 'h2' : 'h3';
+  return (
+    <nav
+      className={styles.shortcuts + (standalone ? ' ' + styles.standalone : '')}
+      aria-label="常用校園服務"
+    >
+      <div className={styles.shortcutHeading}>
+        <Heading>校園服務</Heading>
+      </div>
+      <div className={styles.shortcutGrid}>
+        {shortcuts.map((item) => (
+          <Link
+            key={item.href}
+            href={campusServiceHref(item.href, campusSearch)}
+            className={styles.shortcut}
+          >
+            <CampusIcon name={item.icon} size={22} />
+            <span>
+              <strong>{item.label}</strong>
+              <small>{item.detail}</small>
+            </span>
+          </Link>
+        ))}
+      </div>
+    </nav>
   );
 }

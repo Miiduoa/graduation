@@ -1,0 +1,68 @@
+.install {
+  display: grid;
+  gap: 12px;
+  padding-block: 22px;
+  border-block: 1px solid var(--border);
+  color: var(--text);
+  font-size: var(--font-body-size);
+  line-height: 1.75;
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+}
+
+.heading > div {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.heading h3 {
+  margin: 0 0 6px;
+  font-size: var(--font-body-size);
+  font-weight: 600;
+}
+
+.install p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+  overflow-wrap: anywhere;
+}
+
+.status:empty {
+  display: none;
+}
+
+.install .error {
+  color: var(--danger);
+}
+
+.help {
+  padding: 16px 20px;
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+}
+
+.help ol {
+  margin: 0 0 8px;
+  padding-inline-start: 1.5em;
+}
+
+.help li + li {
+  margin-top: 8px;
+}
+
+@media (max-width: 380px) {
+  .heading > button {
+    width: 100%;
+  }
+
+  .help {
+    padding: 12px;
+  }
+}

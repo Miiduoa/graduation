@@ -29,7 +29,7 @@ import { assignmentHref, assignmentSubmitHref, todayClassesFromSchedule } from '
 import styles from './StudentToday.module.css';
 import { TodayUnreadNotifications } from './TodayUnreadNotifications';
 import { TodayClassRows } from './TodayClassRows';
-import { TodayWelcome } from './TodayWelcome';
+import { TodayServiceShortcuts, TodayWelcome } from './TodayWelcome';
 import { CampusPersonalizationSection } from './CampusPersonalizationSection';
 
 export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigned-scope';
@@ -49,6 +49,8 @@ type Props = {
   unsigned: boolean;
   skeleton: boolean;
   refreshing?: boolean;
+  /** All current-account coursework sources have previously returned a complete response. */
+  courseDataResolved?: boolean;
   classes: TodayClass[];
   todos: TodayTodo[];
   timetableStatus: TimetableStatus;
@@ -72,6 +74,7 @@ type BoundProps = {
   unsigned: boolean;
   skeleton: boolean;
   refreshing?: boolean;
+  courseDataResolved?: boolean;
   todos: TodayTodo[];
   todosError: string;
   lmsUnconnected: boolean;
@@ -89,12 +92,22 @@ export function StudentToday(props: Props) {
   const orderedTodos = primaryTodo
     ? [primaryTodo, ...todos.filter((item) => item.id !== primaryTodo.id)]
     : todos;
+  // Course loading publishes an empty task list before assignments arrive. Only
+  // offer setup after both sources have settled, without displacing known work.
+  const showSignedInSetup =
+    !props.unsigned &&
+    (!props.refreshing || props.courseDataResolved === true) &&
+    !props.todosError &&
+    props.classes.length === 0 &&
+    props.todos.length === 0 &&
+    (props.timetableStatus === 'empty' || props.timetableStatus === 'unsigned-scope');
   const showWelcome =
     !props.skeleton &&
-    props.unsigned &&
-    (props.timetableStatus === 'empty' ||
-      props.timetableStatus === 'unsigned-scope' ||
-      (props.timetableStatus === 'ready' && action.type !== 'class'));
+    (showSignedInSetup ||
+      (props.unsigned &&
+        (props.timetableStatus === 'empty' ||
+          props.timetableStatus === 'unsigned-scope' ||
+          (props.timetableStatus === 'ready' && action.type !== 'class'))));
   const showPlanner =
     !props.unsigned || !['empty', 'unsigned-scope'].includes(props.timetableStatus);
   const returnSearch =
@@ -130,6 +143,7 @@ export function StudentToday(props: Props) {
       primaryLabel={primaryLabel}
       unsigned={props.unsigned}
       error={props.todosError}
+      refreshing={props.refreshing}
       lmsUnconnected={props.lmsUnconnected}
       leavingTodoIds={props.leavingTodoIds}
       now={now}
@@ -146,14 +160,21 @@ export function StudentToday(props: Props) {
       </header>
       {props.workspaces}
       {showWelcome && (
-        <TodayWelcome
-          importHref={props.importHref}
-          timetableHref={props.timetableHref}
-          hasTimetable={props.timetableStatus === 'ready'}
-          needsSchool={props.timetableStatus === 'unsigned-scope'}
-        />
+        <div data-testid={showSignedInSetup ? 'next-action' : undefined}>
+          <TodayWelcome
+            importHref={props.importHref}
+            timetableHref={props.timetableHref}
+            hasTimetable={props.timetableStatus === 'ready'}
+            needsSchool={props.timetableStatus === 'unsigned-scope'}
+            unsigned={props.unsigned}
+            needsCourse={props.lmsUnconnected}
+            campusSearch={returnSearch}
+          />
+        </div>
       )}
       {!props.skeleton &&
+        !showWelcome &&
+        (!props.refreshing || props.courseDataResolved === true) &&
         !props.unsigned &&
         (action.type === 'empty' || action.type === 'allDone') && (
           <div className={styles.dayStatus} data-testid={primaryTodo ? undefined : 'next-action'}>
@@ -171,7 +192,9 @@ export function StudentToday(props: Props) {
         <TodaySkeleton />
       ) : showPlanner ? (
         <div className={styles.flow + ' ' + styles.planner} data-testid="today-unified-flow">
-          {props.unsigned ? schedule : primaryTodo ? [work, schedule] : [schedule, work]}
+          {showSignedInSetup
+            ? props.lmsUnconnected ? null : work
+            : props.unsigned ? schedule : primaryTodo ? [work, schedule] : [schedule, work]}
           {!props.unsigned && <TodayUnreadNotifications unsigned={false} />}
         </div>
       ) : null}
@@ -179,6 +202,9 @@ export function StudentToday(props: Props) {
         <p className={styles.guestAccess}>
           <Link href={loginHref(campusServiceHref('/', returnSearch))}>登入查看作業與通知</Link>
         </p>
+      ) : null}
+      {!props.skeleton && !showWelcome ? (
+        <TodayServiceShortcuts campusSearch={returnSearch} standalone />
       ) : null}
       <div className={styles.assistance} data-testid="today-assistance">
         {props.agent}
@@ -332,6 +358,7 @@ function TodoList({
   primaryLabel,
   unsigned,
   error,
+  refreshing,
   lmsUnconnected,
   leavingTodoIds,
   now,
@@ -343,6 +370,7 @@ function TodoList({
   primaryLabel: string;
   unsigned: boolean;
   error: string;
+  refreshing?: boolean;
   lmsUnconnected: boolean;
   leavingTodoIds?: readonly string[];
   now: Date;
@@ -380,7 +408,9 @@ function TodoList({
           </button>
         </>
       ) : null}
-      {!unsigned && lmsUnconnected && todos.length === 0 ? (
+      {!unsigned && !error && refreshing && todos.length === 0 ? (
+        <p className={styles.empty} role="status">正在確認作業與期限…</p>
+      ) : !unsigned && !error && lmsUnconnected && todos.length === 0 ? (
         <p className={styles.empty}>
           還沒有 nuni 課程資料。
           <Link href={campusServiceHref('/classroom', campusSearch)}>加入課程</Link>
@@ -496,6 +526,7 @@ export function StudentTodayPage(props: BoundProps) {
       unsigned={props.unsigned}
       skeleton={props.skeleton}
       refreshing={props.refreshing}
+      courseDataResolved={props.courseDataResolved}
       classes={classes}
       todos={props.todos}
       timetableStatus={timetableStatus}

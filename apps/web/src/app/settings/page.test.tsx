@@ -640,3 +640,15 @@ it('separates Google actions from school permissions when both identities are si
   expect(screen.getByRole('button', { name: '儲存 AI 代辦權限' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '儲存助理權限' })).toBeTruthy();
 });
+
+it('keeps a voluntary home-screen entry in general settings after an install suggestion was dismissed', async () => {
+  state.user = null;
+  localStorage.setItem('pwa-install-dismissed', 'true');
+  render(<SettingsPage />);
+  const installation = screen.getByRole('region', { name: '把 nuni 放在主畫面' });
+  expect(installation).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '查看加入方式' }));
+  expect(screen.getByRole('button', { name: '收起加入方式' }).getAttribute('aria-expanded')).toBe('true');
+  expect(localStorage.getItem('pwa-install-dismissed')).toBe('true');
+  expect(state.saveProfile).not.toHaveBeenCalled();
+});

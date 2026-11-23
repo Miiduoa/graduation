@@ -4,6 +4,7 @@ import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvide
 import { isSchoolLmsReadonlyEnabled } from '@/lib/server/schoolLmsReadonly';
 import type { Metadata, Viewport } from 'next';
 import { ServiceWorkerRegistration } from '@/components/ServiceWorkerRegistration';
+import { PWAInstallObserver } from '@/components/PWAInstallObserver';
 import { AuthProvider } from '@/components/AuthGuard';
 import { ToastProvider } from '@/components/ui';
 import { AppearancePreferences } from '@/components/AppearancePreferences';
@@ -77,6 +78,7 @@ export default function RootLayout({
       <body>
         <AppearancePreferences />
         <ServiceWorkerRegistration />
+        <PWAInstallObserver />
         <AuthProvider>
           <ToastProvider position="top-center">
             <SchoolLmsReadonlyProvider enabled={isSchoolLmsReadonlyEnabled()}>

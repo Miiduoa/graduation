@@ -1,140 +1,71 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
+import { Suspense } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
+import {
+  dismissInstallSuggestion,
+  requestPwaInstallation,
+  usePwaInstallation,
+} from '@/lib/pwaInstallation';
 import { Button } from './ui/Button';
 import styles from './SystemNotice.module.css';
 
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
-
-const DISMISSED_KEY = 'pwa-install-dismissed';
-
-function wasDismissed() {
-  try {
-    return Boolean(localStorage.getItem(DISMISSED_KEY));
-  } catch {
-    return false;
-  }
-}
-
 export function PWAInstallBanner() {
-  // Browser-only preferences are read after hydration, including on iOS.
-  const [isIOS, setIsIOS] = useState(false);
-  const [isVisible, setIsVisible] = useState(false);
-  const [canPrompt, setCanPrompt] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const prompt = useRef<BeforeInstallPromptEvent | null>(null);
-  const mounted = useRef(false);
-  const requesting = useRef(false);
-  const dismissed = useRef(false);
+  return (
+    <Suspense fallback={null}>
+      <InstallSuggestion />
+    </Suspense>
+  );
+}
 
-  useEffect(() => {
-    mounted.current = true;
-    dismissed.current = wasDismissed();
-    const standalone = () =>
-      window.matchMedia('(display-mode: standalone)').matches ||
-      (navigator as Navigator & { standalone?: boolean }).standalone === true;
-    const ios =
-      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    setIsIOS(ios);
-    const onBus = /^\/bus(\/|$)/.test(window.location.pathname);
-    setIsVisible(ios && !standalone() && !dismissed.current && !onBus);
-
-    const handlePrompt = (event: Event) => {
-      event.preventDefault();
-      prompt.current = event as BeforeInstallPromptEvent;
-      setCanPrompt(true);
-      setError('');
-      if (!standalone() && !dismissed.current && !/^\/bus(\/|$)/.test(window.location.pathname)) setIsVisible(true);
-    };
-    const handleInstalled = () => {
-      prompt.current = null;
-      setCanPrompt(false);
-      setIsVisible(false);
-    };
-    const handleDismissed = (event: StorageEvent) => {
-      if (event.key === DISMISSED_KEY && event.newValue) {
-        dismissed.current = true;
-        setIsVisible(false);
-      }
-    };
-    window.addEventListener('beforeinstallprompt', handlePrompt);
-    window.addEventListener('appinstalled', handleInstalled);
-    window.addEventListener('storage', handleDismissed);
-    return () => {
-      mounted.current = false;
-      window.removeEventListener('beforeinstallprompt', handlePrompt);
-      window.removeEventListener('appinstalled', handleInstalled);
-      window.removeEventListener('storage', handleDismissed);
-    };
-  }, []);
-
-  async function handleInstall() {
-    const event = prompt.current;
-    if (!event || requesting.current) return;
-    requesting.current = true;
-    prompt.current = null;
-    setBusy(true);
-    setError('');
-    try {
-      await event.prompt();
-      await event.userChoice;
-      if (mounted.current) setIsVisible(false);
-    } catch {
-      if (mounted.current) setError('無法開啟安裝視窗。你可以稍後從瀏覽器選單加入主畫面。');
-    } finally {
-      requesting.current = false;
-      if (mounted.current) {
-        setBusy(false);
-        setCanPrompt(Boolean(prompt.current));
-      }
-    }
-  }
-
-  function handleDismiss() {
-    dismissed.current = true;
-    setIsVisible(false);
-    try {
-      localStorage.setItem(DISMISSED_KEY, 'true');
-    } catch {
-      // Dismissal still works for this page when browser storage is unavailable.
-    }
-  }
-
-  if (!isVisible) return null;
+function InstallSuggestion() {
+  const pathname = usePathname();
+  const campusSearch = useCampusNavigationSearch(useSearchParams());
+  const installation = usePwaInstallation();
+  // Keep the event available to Settings without interrupting a task, sign-in,
+  // map or bus journey. Route changes apply immediately to this suggestion.
+  if (
+    pathname !== '/life' ||
+    !installation.ready ||
+    installation.installed ||
+    installation.dismissed ||
+    (!installation.isIOS &&
+      !installation.canPrompt &&
+      !installation.busy &&
+      installation.result !== 'failed')
+  )
+    return null;
 
   return (
     <section className={styles.notice} aria-label="加入主畫面">
       <div className={styles.content}>
-        <h2 className={styles.title}>把 nuni 加入主畫面</h2>
-        <p className={styles.description}>
-          {isIOS
-            ? '在瀏覽器選單選擇「分享」，再選「加入主畫面」。'
-            : '下次從主畫面直接開啟。課程與個人資料仍需網路連線。'}
-        </p>
+        <h2 className={styles.title}>下次，從主畫面打開 nuni</h2>
+        <p className={styles.description}>課表、作業與校園服務，少找一次網址。</p>
       </div>
       <div className={styles.actions}>
-        {canPrompt && (
+        {installation.canPrompt || installation.busy ? (
           <Button
             type="button"
             variant="primary"
-            loading={busy}
-            onClick={() => void handleInstall()}
+            loading={installation.busy}
+            onClick={() => void requestPwaInstallation()}
           >
-            {busy ? '開啟安裝視窗…' : '加入主畫面'}
+            加入主畫面
           </Button>
+        ) : (
+          <Link href={campusServiceHref('/settings?section=general', campusSearch)} className="btn">
+            查看加入方式
+          </Link>
         )}
-        <Button type="button" disabled={busy} onClick={handleDismiss}>
+        <Button type="button" disabled={installation.busy} onClick={dismissInstallSuggestion}>
           暫時不用
         </Button>
       </div>
-      {error && (
+      {installation.result === 'failed' && (
         <p className={styles.error} role="alert">
-          {error}
+          無法開啟安裝視窗。你可以到設定查看手動加入方式。
         </p>
       )}
     </section>
