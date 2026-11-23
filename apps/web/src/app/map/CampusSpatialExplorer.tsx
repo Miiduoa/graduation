@@ -621,8 +621,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
               // A malformed/foreign target is not evidence for this host.
             }
           }
-          if (entries.length && !entry) return;
-          visibility = (entry?.isIntersecting ?? false) ? 'visible' : 'hidden';
+          // An empty callback carries no new visibility evidence. Some mobile
+          // WebView bridges invoke the observer with [] after scrolling; never
+          // turn that no-op into a hidden event that suspends an onscreen map.
+          if (!entry) return;
+          visibility = entry.isIntersecting ? 'visible' : 'hidden';
           if (observing) syncVisibility();
         });
         intersection = current;
