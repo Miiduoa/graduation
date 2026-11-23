@@ -24,6 +24,7 @@ const result = await build({
   jsx: 'automatic',
   minify: true,
   tsconfig: path.join(root, 'apps/web/tsconfig.json'),
+  alias: { '@campus/shared': path.join(root, 'packages/shared') },
   define: { 'process.env.NODE_ENV': '"production"', 'process.env': '{}' },
   loader: { '.png': 'dataurl', '.svg': 'dataurl', '.woff': 'dataurl', '.woff2': 'dataurl' },
   plugins: [
@@ -61,6 +62,7 @@ const inputs = [
     'scripts/qa/interface-design/quick_search.py',
     'scripts/qa/interface-design/navigation.py',
     'scripts/qa/interface-design/feedback.py',
+    'scripts/qa/interface-design/course_editing.py',
     'scripts/qa/browser/install-playwright.sh',
     'package.json',
     'apps/web/package.json',

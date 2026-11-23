@@ -173,6 +173,24 @@ function chooseImportEdit() {
   fireEvent.click(screen.getByRole('button', { name: '回到匯入編輯' }));
 }
 
+function activateCourseWork(link: HTMLElement, gesture: MouseEventInit = {}) {
+  const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...gesture });
+  let preventedByEditor = false;
+  const preventJsdomNavigation = (click: Event) => {
+    if (click !== event) return;
+    // Observe the real link handler before stopping jsdom's document navigation.
+    preventedByEditor = click.defaultPrevented;
+    click.preventDefault();
+  };
+  document.addEventListener('click', preventJsdomNavigation);
+  try {
+    fireEvent(link, event);
+  } finally {
+    document.removeEventListener('click', preventJsdomNavigation);
+  }
+  return preventedByEditor;
+}
+
 describe('personal timetable data retention', () => {
   it('previews the personal weekly timetable for the selected export period', async () => {
     await ready();
@@ -219,6 +237,139 @@ describe('personal timetable data retention', () => {
     expect(exit.getByRole('link', { name: '作業與教材' }).getAttribute('href')).toBe(
       '/classroom?q=%E5%8E%9F%E6%9C%AC%E8%AA%B2%E7%A8%8B&from=timetable',
     );
+  });
+
+  it('keeps a renamed draft until confirmation, then opens the original saved course', async () => {
+    await ready();
+    fireEvent.click(existingCourseButton());
+    const editor = within(screen.getByRole('region', { name: '編輯課程' }));
+    fireEvent.change(editor.getByLabelText('課名'), { target: { value: '修改後的課名' } });
+    fireEvent.change(editor.getByLabelText('教室'), { target: { value: '主顧 303' } });
+    const exit = editor.getByRole('link', { name: '作業與教材' });
+    const destination = '/classroom?q=%E5%8E%9F%E6%9C%AC%E8%AA%B2%E7%A8%8B&from=timetable';
+    expect(exit.getAttribute('href')).toBe(destination);
+
+    expect(activateCourseWork(exit)).toBe(true);
+    const confirmation = within(screen.getByRole('dialog', { name: '放棄修改並開啟課業？' }));
+    expect(document.activeElement).toBe(confirmation.getByRole('button', { name: '繼續編輯' }));
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+    fireEvent.click(confirmation.getByRole('button', { name: '繼續編輯' }));
+    expect(document.activeElement).toBe(exit);
+    expect((editor.getByLabelText('課名') as HTMLInputElement).value).toBe('修改後的課名');
+    expect((editor.getByLabelText('教室') as HTMLInputElement).value).toBe('主顧 303');
+
+    expect(activateCourseWork(exit)).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '放棄修改並開啟' }));
+    expect(mocks.push).toHaveBeenCalledExactlyOnceWith(destination);
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(screen.queryByRole('region', { name: '編輯課程' })).toBeNull();
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(false);
+  });
+
+  it.each(['', '   '])('keeps the saved course entry when its draft name is blank (%j)', async (name) => {
+    await ready();
+    fireEvent.click(existingCourseButton());
+    const editor = within(screen.getByRole('region', { name: '編輯課程' }));
+    fireEvent.change(editor.getByLabelText('課名'), { target: { value: name } });
+    const exit = editor.getByRole('link', { name: '作業與教材' });
+    const destination = '/classroom?q=%E5%8E%9F%E6%9C%AC%E8%AA%B2%E7%A8%8B&from=timetable';
+    expect(exit.getAttribute('href')).toBe(destination);
+    expect(activateCourseWork(exit)).toBe(true);
+    expect(mocks.push).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '放棄修改並開啟' }));
+    expect(mocks.push).toHaveBeenCalledExactlyOnceWith(destination);
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('uses a new unsaved course name for its search entry and hides that entry when blank', async () => {
+    await ready();
+    const editor = addCourse('新課程草稿');
+    const exit = editor.getByRole('link', { name: '作業與教材' });
+    const destination = new URL(exit.getAttribute('href')!, 'https://campus.local');
+    expect(destination.pathname).toBe('/classroom');
+    expect(destination.searchParams.get('q')).toBe('新課程草稿');
+    expect(destination.searchParams.get('from')).toBe('timetable');
+    fireEvent.change(editor.getByLabelText('課名'), { target: { value: '' } });
+    expect(editor.queryByRole('link', { name: '作業與教材' })).toBeNull();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('cancels only the coursework departure when Escape closes its confirmation', async () => {
+    await ready();
+    const editor = addCourse('保留這門新課');
+    const exit = editor.getByRole('link', { name: '作業與教材' });
+    activateCourseWork(exit);
+    fireEvent(
+      screen.getByRole('dialog', { name: '放棄修改並開啟課業？' }),
+      new Event('cancel', { cancelable: true }),
+    );
+    expect(screen.queryByRole('dialog', { name: '放棄修改並開啟課業？' })).toBeNull();
+    expect((editor.getByLabelText('課名') as HTMLInputElement).value).toBe('保留這門新課');
+    expect(document.activeElement).toBe(exit);
+    expect(mocks.push).not.toHaveBeenCalled();
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+  });
+
+  it('lets an unchanged course open coursework without a discard prompt', async () => {
+    await ready();
+    fireEvent.click(existingCourseButton());
+    expect(activateCourseWork(screen.getByRole('link', { name: '作業與教材' }))).toBe(false);
+    expect(screen.queryByRole('dialog', { name: '放棄修改並開啟課業？' })).toBeNull();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: 'Command', gesture: { metaKey: true }, target: '' },
+    { label: 'Control', gesture: { ctrlKey: true }, target: '' },
+    { label: 'Shift', gesture: { shiftKey: true }, target: '' },
+    { label: 'middle button', gesture: { button: 1 }, target: '' },
+    { label: 'new tab target', gesture: {}, target: '_blank' },
+  ])('preserves the draft and browser intent for a $label coursework link', async ({ gesture, target }) => {
+    await ready();
+    const editor = addCourse('留在原分頁的草稿');
+    const exit = editor.getByRole('link', { name: '作業與教材' });
+    if (target) exit.setAttribute('target', target);
+    expect(activateCourseWork(exit, gesture)).toBe(false);
+    expect(screen.queryByRole('dialog', { name: '放棄修改並開啟課業？' })).toBeNull();
+    expect((editor.getByLabelText('課名') as HTMLInputElement).value).toBe('留在原分頁的草稿');
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('keeps a cancelled coursework click from opening a discard confirmation', async () => {
+    await ready();
+    const editor = addCourse('不要執行取消的導覽');
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    event.preventDefault();
+    fireEvent(editor.getByRole('link', { name: '作業與教材' }), event);
+    expect(screen.queryByRole('dialog', { name: '放棄修改並開啟課業？' })).toBeNull();
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  it('blocks coursework departure during a save and restores the choice after a failed save', async () => {
+    const saving = deferred<{ stored: 'cloud' }>();
+    mocks.save.mockReturnValueOnce(saving.promise);
+    await ready();
+    const editor = addCourse('儲存中不能離開');
+    const exit = editor.getByRole('link', { name: '作業與教材' });
+    fireEvent.click(editor.getByRole('button', { name: '儲存' }));
+    expect(exit.getAttribute('aria-disabled')).toBe('true');
+    expect(activateCourseWork(exit)).toBe(true);
+    expect(screen.queryByRole('dialog', { name: '放棄修改並開啟課業？' })).toBeNull();
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.save).toHaveBeenCalledOnce();
+
+    await act(async () => { saving.reject(new Error('offline')); });
+    expect(exit.hasAttribute('aria-disabled')).toBe(false);
+    expect((editor.getByLabelText('課名') as HTMLInputElement).value).toBe('儲存中不能離開');
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(activateCourseWork(exit)).toBe(true);
+    expect(screen.getByRole('dialog', { name: '放棄修改並開啟課業？' })).toBeTruthy();
   });
 
   it('opens linked course work directly when the imported row has linkedCourseId', async () => {

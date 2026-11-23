@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
   personalImportPreviewNotice,
@@ -89,6 +89,27 @@ beforeEach(() => {
     value: { request: (_key: string, fn: () => unknown) => Promise.resolve().then(fn) },
   });
   Element.prototype.scrollIntoView = vi.fn();
+});
+afterEach(() => {
+  document.documentElement.removeAttribute('data-reduced-motion');
+});
+
+it('uses the current motion preference each time an import preview is revealed', async () => {
+  render(<PersonalImportCenter />);
+  for (const reduced of [false, true, false]) {
+    document.documentElement.dataset.reducedMotion = String(reduced);
+    vi.mocked(Element.prototype.scrollIntoView).mockClear();
+    await prepare();
+    await waitFor(() => {
+      expect(Element.prototype.scrollIntoView).toHaveBeenLastCalledWith({
+        block: 'start',
+        behavior: reduced ? 'instant' : 'smooth',
+      });
+    });
+    expect(readPersonalImports(context)).toHaveLength(0);
+    expect((screen.getByLabelText('成績') as HTMLInputElement).value).toBe('85');
+    fireEvent.click(screen.getByRole('button', { name: '取消這份草稿' }));
+  }
 });
 it('restores reviewed edits and excluded rows after returning to the same tab without importing them', async () => {
   const view = render(<PersonalImportCenter />);

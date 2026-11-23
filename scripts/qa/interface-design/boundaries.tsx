@@ -23,7 +23,7 @@ let state = {
 history.replaceState(
   { ...history.state, interfaceRoute: state },
   '',
-  state.pathname + '?' + state.search,
+  state.pathname + '?' + state.search + location.hash,
 );
 const role = query.get('role') || 'student';
 const ledger = { requests: [] as string[], navigations: [] as string[], logouts: 0 };

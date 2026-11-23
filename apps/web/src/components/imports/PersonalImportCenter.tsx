@@ -79,6 +79,7 @@ import { CourseAccessPanel } from './CourseAccessPanel';
 import { DocumentSelection } from './DocumentSelection';
 import { PersonalImportSyncPanel } from './PersonalImportSync';
 import { readPersonalImportDocumentFile } from '@/lib/personalImportDocuments';
+import { preferredScrollBehavior } from '@/lib/scrollBehavior';
 
 const KINDS: { value: PersonalImportKind; title: string; detail: string }[] = [
   { value: 'timetable', title: '課表與選課結果', detail: '上課日、時間、教室與老師' },
@@ -701,7 +702,7 @@ function ImportWorkspace({
         : `沒有整理出資料。可以修正下方文字，或手動加一筆。${warnings.join(' ')}`,
     );
     requestAnimationFrame(() =>
-      review.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      review.current?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' }),
     );
   };
   const updateDraft = (before: PersonalImportRow, next: PersonalImportRow) => {
@@ -971,7 +972,7 @@ function ImportWorkspace({
         `${result.issues.find((issue) => issue.code === 'import-provider')?.message ?? ''}已整理 ${result.rows.length} 筆草稿。${result.retry ? `另有 ${result.retry.batches.length} 段未完成模型整理，可只重試這些段落。` : ''}請對照來源，核對課名、日期、時間及數字，再確認匯入。`,
       );
       requestAnimationFrame(() =>
-        review.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+        review.current?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' }),
       );
     } catch (error) {
       if (currentRead())
@@ -1114,7 +1115,7 @@ function ImportWorkspace({
             : '這份備份沒有個人紀錄。',
         );
         requestAnimationFrame(() =>
-          review.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+          review.current?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' }),
         );
         return;
       }
@@ -1235,7 +1236,7 @@ function ImportWorkspace({
     setReviewPage(0);
     requestAnimationFrame(() => {
       const row = reviewRows.current.get(invalidRowIds[0]);
-      row?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      row?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'center' });
       (row?.querySelector('[aria-invalid="true"]') as HTMLElement | null)?.focus();
       if (!row?.querySelector('[aria-invalid="true"]')) row?.focus();
     });
@@ -2106,7 +2107,7 @@ function ImportWorkspace({
                 `${personalImportPreviewNotice(nextRows.length)}${[...new Set(issues.filter((issue) => issue.severity === 'warning').map((issue) => issue.message))].join(' ')}`,
               );
               requestAnimationFrame(() =>
-                review.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+                review.current?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' }),
               );
             }}
           />
