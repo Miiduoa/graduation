@@ -3822,6 +3822,56 @@ it.each([
   expect(fetchMock).toHaveBeenCalledOnce();
 });
 
+// Some proxies and embedded WebViews expose incompatible HTTP framing even
+// when their Fetch shim reports 200. The map must not read or cache such a
+// response; otherwise a JSON-looking fragment may be mistaken for complete OSM.
+it.each(['chunked', 'gzip, chunked', ''])(
+  'rejects HTTP 200 with conflicting Transfer-Encoding %j and Content-Length before reading',
+  async (transferEncoding) => {
+    const { library } = sourcedLibraryFootprintFixture();
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const getReader = vi.fn(() => { throw new Error('Conflicting framing must not be read'); });
+    const json = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      headers: new Headers({
+        'Content-Type': 'application/json',
+        'Content-Length': '40',
+        'Transfer-Encoding': transferEncoding,
+      }),
+      body: { cancel, getReader }, json,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<CampusSpatialExplorer school="pu" locations={[library]}
+      selected={library} onSelect={vi.fn()} />);
+    const dialog = within(await open());
+    expect(await dialog.findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(getReader).not.toHaveBeenCalled();
+    expect(json).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+    expect(dialog.getByRole('button', { name: '重新讀取建築輪廓' }).hasAttribute('disabled')).toBe(true);
+    expect(dialog.getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  },
+);
+
+it('accepts a complete chunked OSM response without a conflicting Content-Length', async () => {
+  const { library, body, buildings } = sourcedLibraryFootprintFixture();
+  const response = new Response(new TextEncoder().encode(body), {
+    headers: { 'Content-Type': 'application/json', 'Transfer-Encoding': 'chunked' },
+  });
+  const read = vi.spyOn(response.body!, 'getReader');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+  render(<CampusSpatialExplorer school="pu" locations={[library]}
+    selected={library} onSelect={vi.fn()} />);
+  const dialog = within(await open());
+  expect(await dialog.findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(read).toHaveBeenCalledOnce();
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+  expect(dialog.getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 // A 200 response that explicitly declares zero bytes can never be a complete
 // footprint snapshot, regardless of MIME, Content-Encoding or fake JSON body.
 // Prevent old WebView fallbacks from accidentally accepting this framing.
