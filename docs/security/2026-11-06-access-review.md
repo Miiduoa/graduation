@@ -1119,3 +1119,11 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 - GitHub 精確 6418245b1cf183f55439f8345057f8ee73ea113a 的 Firestore Rules workflow 45067898798 實際失敗：560 tests，557 passed、3 failed、0 skipped。失敗包括 legacy first grade、新增 transfer grading，以及原子 immutable revision；原因均為 Firestore 1000 expressions evaluated 上限，並非越權操作成功。
 - 此修補繼續強制教師目前校籍與有效教學資格，減少重複評估 group manager 角色、重複 group-school membership 及 grade helper 中已受外層 current manager 保護的 school membership。不修改稽核欄位與原子修訂相互驗證。必須在新精確 head 完成 Emulator 及 CI 才能宣稱修復。
 - 仍禁止未授權直接 pnpm/npm audit；未操作正式資料、金鑰、歷史附件 token、migration、E 校園、main 合併或部署。指定 App 5504170 審查、GCS/Supabase 已發網址撤銷、Storage 真實競態、教師備註移轉仍未結案。
+
+## 2026-11-23｜轉校後學校醫療人員不得重放私人健康紀錄讀取（隔離候選）
+
+- **基準與範圍：** 安全 PR #743 原精確 head `6eeffc2b076751c5e5a680d5aec1006f43aaefca` 的 CI Summary、CodeQL、Firestore Rules、Security Gates、Web/Mobile Build 均已成功；PR reviews 與未解決 inline threads 均為 0，指定 nuni-merge-gate App 5504170 仍未對候選核可。當時 main 為 `1a1f368630352a9c99d80fe21033b74154c5509d`，兩分支 diverged。實際合併與部署禁止條件不變。
+- **獨立發現：** 學校 `healthRecords` 與 `healthAppointments` 的管理員、health 服務角色讀取僅依舊校 active membership／serviceRoles，可在帳號伺服器校籍已轉到其他學校、舊授權收據未撤銷時繼續精確 GET 舊校其他學生的私密健康資料。這是原始 Rules 潛在授權漏洞，不代表正式資料已遭存取。
+- **最小修補：** 僅對兩個集合的教職管理員／health 服務人員讀取額外套用既有 `isConsistentRootPostSchoolMember(schoolId)`：canonical profile 必須存在、有效校籍與雙校籍欄位不得矛盾，並要求當前學校會員資格與角色仍有效。**病患本人 `userId` 讀取支線不變**（即使轉校後仍可讀本人歷史資料），原本服務端唯寫不變。不可將此視為已撤銷先前發出的外部檔案 URL。
+- **可重跑合成回歸：** `backend/tests/security-rules.test.js` 新增 `transferred campus health staff cannot replay confidential patient records`：正常 admin／health staff／病患本人、其他學生／陌生人拒絕、轉校後使用同一登入 context 並行及重複讀取、雙校籍欄位衝突、來源學校會員撤權、health 角色撤權、canonical 帳號刪除及恢復。RED 測試-only 精確 commit [`5c66a5c56100531e2f9853fcb7584734a0a56c84`](https://github.com/Miiduoa/graduation/commit/5c66a5c56100531e2f9853fcb7584734a0a56c84)；其 GitHub Actions 結果須獨立核對。GREEN 規則／文件版本仍待精確 head 真 Firebase Emulator、CI 及審查驗證，不能提前宣稱通過。
+- **發行與其他殘餘風險：** 歷史單一校籍欄位及轉校後本人病歷讀取需端到端相容驗收。PR #738 尚須納入新安全 head、完整精確 head 檢查與 App 5504170 審查；正式 GCS／Supabase 已發網址撤銷、真 Storage CAS、教師私密備註分離、minimatch 雙鎖檔及正式發布／回復驗證仍待處理。未接觸正式資料、附件 token、migration、金鑰、E 校園或執行遭拒絕的 pnpm/npm audit。

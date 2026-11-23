@@ -995,15 +995,17 @@ service cloud.firestore {
       }
 
       match /healthAppointments/{appointmentId} {
-        allow read: if hasRole(schoolId, 'admin')
-          || requesterHasServiceRoleDomain(schoolId, 'health')
+        allow read: if (isConsistentRootPostSchoolMember(schoolId)
+          && (hasRole(schoolId, 'admin')
+            || requesterHasServiceRoleDomain(schoolId, 'health')))
           || (isSignedIn() && resource.data.userId == request.auth.uid);
         allow write: if false;
       }
 
       match /healthRecords/{recordId} {
-        allow read: if hasRole(schoolId, 'admin')
-          || requesterHasServiceRoleDomain(schoolId, 'health')
+        allow read: if (isConsistentRootPostSchoolMember(schoolId)
+          && (hasRole(schoolId, 'admin')
+            || requesterHasServiceRoleDomain(schoolId, 'health')))
           || (isSignedIn() && resource.data.userId == request.auth.uid);
         allow write: if false;
       }
