@@ -1,10 +1,11 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { PersonalImportDocument } from '@campus/shared/src/imports/documents';
 import {
   STUDY_TUTOR_LIMITS,
   buildStudyTutorPrompt,
   parseTutorExplanation,
+  parseSavedTutorExplanation,
   prepareStudyTutorHistory,
   splitStudySection,
   studySourceFromDocument,
@@ -66,6 +67,181 @@ const documentFixture = (): PersonalImportDocument => ({
       rows: [{ line: 1, cells: ['一對多關聯。'] }],
     },
   ],
+});
+
+
+describe('exact source quotations in new and saved explanations', () => {
+  it.each([
+    ['combining accent', 'é', 'e'],
+    ['joined emoji', '👩‍💻', '👩'],
+    ['regional flag', '🇹🇼', '🇹'],
+    ['keycap', '2️⃣', '2'],
+  ])('accepts partial graphemes for %s in main and step citations', (_name, complete, partial) => {
+    const original = { ...passage, text: passage.text + '前' + complete + '後' };
+    expect(original.text.includes(partial)).toBe(true);
+
+    const partialMain = { ...explanation(), sourceQuote: partial };
+    expect(parseTutorExplanation(JSON.stringify(partialMain), original).sourceQuote).toBe(partial);
+    expect(parseSavedTutorExplanation(JSON.stringify(partialMain), original).sourceQuote).toBe(partial);
+
+    const partialSteps = steppedExplanation();
+    partialSteps.steps[0].sourceQuote = partial;
+    expect(parseTutorExplanation(JSON.stringify(partialSteps), original).steps?.[0].sourceQuote).toBe(partial);
+    expect(parseSavedTutorExplanation(JSON.stringify(partialSteps), original).steps?.[0].sourceQuote).toBe(partial);
+
+    const validSteps = steppedExplanation();
+    validSteps.sourceQuote = complete;
+    validSteps.steps[0].sourceQuote = complete;
+    const accepted = parseTutorExplanation(JSON.stringify(validSteps), original);
+    expect(accepted.sourceQuote).toBe(complete);
+    expect(accepted.steps?.[0].sourceQuote).toBe(complete);
+    expect(original.text).toContain(complete);
+  });
+
+  it.each([
+    ['zero-width only', '\u200b'],
+    ['braille blank', '\u2800'],
+    ['isolated combining mark', '\u0301'],
+    ['annotation marker', '\ufff9'],
+    ['isolated high surrogate', '\ud83d'],
+    ['broken surrogate suffix after a readable word', '主鍵\ud83d'],
+    ['isolated low surrogate', '\ude00'],
+  ])('accepts an exact %s quotation', (_name, quote) => {
+    const original = { ...passage, text: '前' + quote + '後' };
+    expect(original.text.includes(quote)).toBe(true);
+    expect(parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original).sourceQuote)
+      .toBe(quote);
+  });
+
+  it.each([
+    ['left-to-right embedding', '\u202a'],
+    ['right-to-left embedding', '\u202b'],
+    ['pop directional formatting', '\u202c'],
+    ['left-to-right override', '\u202d'],
+    ['override', '\u202e'],
+    ['left-to-right isolate', '\u2066'],
+    ['right-to-left isolate', '\u2067'],
+    ['first strong isolate', '\u2068'],
+    ['pop directional isolate', '\u2069'],
+  ])('accepts exact readable %s in newly generated main and step citations', (_name, mark) => {
+    const quote = '主' + mark + '鍵';
+    const original = { ...passage, text: passage.text + quote };
+    const previous = { ...turn(), response: { ...explanation(), sourceQuote: quote } };
+    expect(parseTutorExplanation(JSON.stringify(previous.response), original).sourceQuote).toBe(quote);
+    const reply = steppedExplanation();
+    reply.steps[0].sourceQuote = quote;
+    expect(parseTutorExplanation(JSON.stringify(reply), original).steps?.[0].sourceQuote).toBe(quote);
+  });
+
+  it.each([
+    ['left-to-right mark', '\u200e'],
+    ['right-to-left mark', '\u200f'],
+    ['Arabic letter mark', '\u061c'],
+  ])('accepts exact, locatable %s in new citations and retains legacy follow-ups (%#)', (_name, mark) => {
+    const quote = '主' + mark + '鍵';
+    const original = { ...passage, text: passage.text + quote };
+    const response = { ...steppedExplanation(), sourceQuote: quote };
+    response.steps[0].sourceQuote = quote;
+    expect(parseSavedTutorExplanation(JSON.stringify(response), original).sourceQuote).toBe(quote);
+    const previous = { ...turn(), response };
+    const prepared = prepareStudyTutorHistory(original, 'understand', [previous]);
+    expect(promptData(buildStudyTutorPrompt(original, 'understand', '繼續', prepared), 'HISTORY_DATA'))
+      .toEqual([previous]);
+
+    expect(parseTutorExplanation(JSON.stringify(response), original)).toEqual(response);
+    expect(() => parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), passage))
+      .toThrow('引用的句子不在這段原文');
+    const stepOnly = steppedExplanation();
+    stepOnly.steps[0].sourceQuote = quote;
+    expect(() => parseTutorExplanation(JSON.stringify(stepOnly), passage))
+      .toThrow('步驟引用的句子不在這段原文');
+    expect(parseTutorExplanation(JSON.stringify(response), {
+      ...passage, text: passage.text + quote + '\u0301',
+    })).toEqual(response);
+  });
+
+  it.each(['مرحبا \u2067שלום\u2069', '主\u202e鍵\u202c', '\u2067外鍵\u2069', '主\u202a鍵\u202c\u200b'])(
+    'keeps readable legacy directional controls in main and step follow-up citations (%#)', (quote) => {
+      const original = { ...passage, text: passage.text + quote };
+      const response = { ...steppedExplanation(), sourceQuote: quote };
+      response.steps[0].sourceQuote = quote;
+      const saved = parseSavedTutorExplanation(JSON.stringify(response), original);
+      const previous = { ...turn(), response: saved };
+      const prepared = prepareStudyTutorHistory(original, 'understand', [turn(), previous]);
+      expect(promptData(buildStudyTutorPrompt(original, 'understand', '繼續', prepared), 'HISTORY_DATA'))
+        .toEqual([turn(), previous]);
+      expect(parseTutorExplanation(JSON.stringify(response), original)).toEqual(response);
+    },
+  );
+
+  it.each(['\u200e', '\u061c\u200b', '\u2800\u2060', '\ufff9\u0301'])('accepts exact direction marks without visible characters (%#)', (quote) => {
+    const original = { ...passage, text: passage.text + quote };
+    const previous = { ...turn(), response: { ...explanation(), sourceQuote: quote } };
+    expect(parseTutorExplanation(JSON.stringify(previous.response), original).sourceQuote).toBe(quote);
+  });
+
+  it('accepts an exact zero-width step citation alongside a visible main quote', () => {
+    const original = { ...passage, text: passage.text + '\u200b' };
+    const reply = steppedExplanation();
+    reply.steps![1].sourceQuote = '\u200b';
+    expect(parseTutorExplanation(JSON.stringify(reply), original).steps?.[1].sourceQuote).toBe('\u200b');
+  });
+
+  it.each(['x²+y²', '👩‍💻', '#️⃣', 'العربية', 'שלום', 'e\u0301', '主鍵\u200b唯一'])(
+    'preserves valid visible source quotes byte-for-byte (%s)', (quote) => {
+      const original = { ...passage, text: '前' + quote + '後' };
+      const reply = parseTutorExplanation(JSON.stringify({ ...explanation(), sourceQuote: quote }), original);
+      expect(reply.sourceQuote).toBe(quote);
+      expect(original.text).toBe('前' + quote + '後');
+    },
+  );
+
+  it.each([true, false])('accepts original mixed-script citations in replies and steps (Segmenter: %s)', (native) => {
+    if (!native) vi.stubGlobal('Intl', { Segmenter: undefined });
+    try {
+      for (const quote of ['ع', 'ع\u0651\u200eက', 'ع\u200bع\u0651']) {
+        const original = { ...passage, text: passage.text + '\nက္' + quote };
+        const response = { ...steppedExplanation(), sourceQuote: quote };
+        response.steps[0].sourceQuote = quote;
+        response.steps[0].formula = undefined;
+        const parsed = parseTutorExplanation(JSON.stringify(response), original);
+        expect(parsed.sourceQuote).toBe(quote);
+        expect(parsed.steps?.[0].sourceQuote).toBe(quote);
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(['。', '，\u200f。', '（\u200b）', '主\u200d鍵', '主\u2060鍵', '主\ufff9鍵'])(
+    'uses exact visible legacy citations in the main reply and steps (%#)', (quote) => {
+      const original = { ...passage, text: passage.text + quote };
+      const response = { ...steppedExplanation(), sourceQuote: quote };
+      response.steps[0].sourceQuote = quote;
+      const previous = { ...turn(), response: parseSavedTutorExplanation(JSON.stringify(response), original) };
+      const prepared = prepareStudyTutorHistory(original, 'understand', [previous]);
+      expect(promptData(buildStudyTutorPrompt(original, 'understand', '繼續', prepared), 'HISTORY_DATA'))
+        .toEqual([previous]);
+      if (quote !== '。') {
+        expect(() => prepareStudyTutorHistory(passage, 'understand', [previous])).toThrow('先前講解無法對照');
+      }
+    },
+  );
+
+  it.each(['\u200b', '\u200b\u0301', '\u0301', '\u2060\u200f', '\u2800', '主\u200b鍵'])(
+    'keeps exact legacy main and step citations in follow-up prompts (%#)', (quote) => {
+      const original = { ...passage, text: passage.text + quote };
+      const response = { ...steppedExplanation(), sourceQuote: quote };
+      response.steps[0].sourceQuote = quote;
+      const previous = { ...turn(), response: parseSavedTutorExplanation(JSON.stringify(response), original) };
+      const prepared = prepareStudyTutorHistory(original, 'understand', [previous]);
+      expect(promptData(buildStudyTutorPrompt(original, 'understand', '繼續', prepared), 'HISTORY_DATA'))
+        .toEqual([previous]);
+      expect(() => prepareStudyTutorHistory(passage, 'understand', [previous]))
+        .toThrow('先前講解無法對照目前的原文');
+    },
+  );
+
 });
 
 describe('study source provenance', () => {
