@@ -670,13 +670,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
     const categoryCounts = new Map<string, number>();
     for (const point of model.points) {
       nameCounts.set(point.name, (nameCounts.get(point.name) ?? 0) + 1);
-      const group = JSON.stringify([point.name, point.category]);
+      const group = JSON.stringify([point.name, point.category || '未分類']);
       categoryCounts.set(group, (categoryCounts.get(group) ?? 0) + 1);
     }
     const repeatedNames = new Set([...nameCounts].filter(([, count]) => count > 1).map(([name]) => name));
     const optionLabels = new Map(model.points.map((point, index) => {
       if (!repeatedNames.has(point.name)) return [point.id, point.name] as const;
-      const sameCategory = (categoryCounts.get(JSON.stringify([point.name, point.category])) ?? 0) > 1;
+      const sameCategory = (categoryCounts.get(JSON.stringify([point.name, point.category || '未分類'])) ?? 0) > 1;
       const detail = sameCategory
         ? ` · 地圖座標 ${point.location.lat}, ${point.location.lng} · 清單第 ${index + 1} 項`
         : '';
