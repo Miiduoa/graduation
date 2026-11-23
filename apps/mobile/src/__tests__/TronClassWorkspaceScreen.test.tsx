@@ -172,7 +172,9 @@ async function defaultRequest(_path: string, _context: string, input: Record<str
       throw new Error('unexpected action');
   }
 }
+const originalNativeConnectEnabled = process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED;
 beforeEach(async () => {
+  process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED = 'true';
   await AsyncStorage.clear();
   jest.clearAllMocks();
   jest.mocked(isTronClassDataFetchEnabled).mockReturnValue(true);
@@ -215,6 +217,8 @@ beforeEach(async () => {
   }));
 });
 afterEach(() => {
+  if (originalNativeConnectEnabled === undefined) delete process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED;
+  else process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED = originalNativeConnectEnabled;
   jest.restoreAllMocks();
 });
 function actions(name: string) {
@@ -259,6 +263,33 @@ it('blocks the workspace before contacting the BFF and returns to the previous s
   } finally {
     openURL.mockRestore();
   }
+});
+
+it('offers web binding without an in-app connection form when the flag is unset', async () => {
+  delete process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED;
+  mockConnection = { ...disconnected };
+  const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  const view = render(<TronClassWorkspaceScreen />);
+
+  await view.findByText('請先到網頁版 nuni 連接 TronClass');
+  expect(view.queryByLabelText('TronClass 帳號')).toBeNull();
+  expect(view.queryByLabelText('TronClass 密碼')).toBeNull();
+  expect(view.queryByRole('button', { name: '驗證並連接 TronClass' })).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '開啟網頁版 nuni' }));
+  expect(openURL).toHaveBeenCalledWith('https://nuni.tw/tronclass');
+  expect(actions('status')).toHaveLength(1);
+  expect(actions('connect')).toHaveLength(0);
+});
+
+it('reads courses and assignments for an existing binding with native connect disabled', async () => {
+  process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED = 'false';
+  const view = render(<TronClassWorkspaceScreen />);
+
+  await openAssignment(view);
+  expect(actions('courses').length).toBeGreaterThan(0);
+  expect(actions('sync').length).toBeGreaterThan(0);
+  expect(actions('connect')).toHaveLength(0);
+  expect(view.queryByLabelText('TronClass 密碼')).toBeNull();
 });
 
 it('shows personal school windows and drafts without enabling the native writer', async () => {

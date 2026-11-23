@@ -2,6 +2,7 @@ import { NuniError } from '@campus/shared/src/nuni';
 import { withWakeRetry } from '@campus/shared/src/wakeAwareRequest';
 import { getAuthInstance } from '../firebase';
 import { validTronClassUploadQuery } from './nuniClient';
+import { assertTronClassNativeConnectAllowed } from './tronClassNativeConnectEnabled';
 import type { TronClassUploadScope } from './tronClassIntegrationTypes';
 import {
   requestNativeTronClassDownload,
@@ -88,6 +89,8 @@ export async function nativeTronClassFirebaseRequest(
     | { scope: TronClassUploadScope; bytes: Uint8Array; contentType: string },
   signal?: AbortSignal,
 ): Promise<unknown> {
+  const action = 'action' in input ? String(input.action) : 'upload';
+  assertTronClassNativeConnectAllowed(action);
   const assertCurrent = () => {
     if (!isCurrent() || signal?.aborted || getAuthInstance().currentUser?.uid !== uid)
       throw new NuniError(409, 'SESSION_CHANGED');
@@ -102,7 +105,6 @@ export async function nativeTronClassFirebaseRequest(
     'bytes' in input && input.bytes instanceof Uint8Array
       ? (input as { scope: TronClassUploadScope; bytes: Uint8Array; contentType: string })
       : null;
-  const action = 'action' in input ? String(input.action) : 'upload';
   if (
     !upload &&
     !['status', 'connect', 'disconnect', 'courses', 'sync', 'prepare', 'submit', 'reconcile', 'cancel-preparation'].includes(action)

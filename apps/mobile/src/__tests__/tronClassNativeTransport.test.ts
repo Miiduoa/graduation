@@ -9,6 +9,7 @@ import { operationId, revision } from './fixtures/tronClassIntegration';
 
 const handle = `ps_${'a'.repeat(43)}`;
 const originalFetch = global.fetch;
+const originalNativeConnectEnabled = process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED;
 const mockGetIdToken = jest.fn();
 let mockUser: { uid: string; getIdToken: typeof mockGetIdToken } | null;
 jest.mock('../firebase', () => ({ getAuthInstance: () => ({ currentUser: mockUser }) }));
@@ -19,11 +20,14 @@ jest.mock('../services/tronClassNativeDownload', () => ({
 const submissionInput = { courseId: 10, homeworkId: 20, submissionId: '30', uploadId: 40, revision };
 const downloadMock = jest.mocked(requestNativeTronClassSubmissionDownload);
 beforeEach(() => {
+  delete process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED;
   mockUser = { uid: 'school-a', getIdToken: mockGetIdToken };
   mockGetIdToken.mockReset().mockResolvedValue('fresh-token');
   downloadMock.mockReset().mockResolvedValue({ bytes: new Uint8Array([1]), filename: 'answer.pdf', contentType: 'application/pdf' });
 });
 afterEach(() => {
+  if (originalNativeConnectEnabled === undefined) delete process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED;
+  else process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED = originalNativeConnectEnabled;
   global.fetch = originalFetch;
 });
 
@@ -84,9 +88,47 @@ it.each([
   await expect(read(cancelled.signal)).rejects.toMatchObject({ code: cancellationCode });
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
+it.each([undefined, 'false', 'TRUE', ' true '])(
+  'rejects Platform and Firebase connect before network access with flag %s',
+  async (flag) => {
+    if (flag !== undefined) process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED = flag;
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    const input = { action: 'connect' };
+
+    await expect(nuniBffRequest('tronclass', handle, input)).rejects.toMatchObject({
+      code: 'TRONCLASS_NATIVE_CONNECT_DISABLED',
+    });
+    await expect(nativeTronClassFirebaseRequest('school-a', () => true, input))
+      .rejects.toMatchObject({ code: 'TRONCLASS_NATIVE_CONNECT_DISABLED' });
+    expect(mockGetIdToken).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+
+it('dispatches connect through both transports when the flag is true', async () => {
+  process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED = 'true';
+  const fetchMock = jest.fn(async () => ({ ok: true, text: async () => '{}' }));
+  global.fetch = fetchMock as unknown as typeof fetch;
+  const input = { action: 'connect' };
+
+  await expect(nuniBffRequest('tronclass', handle, input)).resolves.toEqual({});
+  await expect(nativeTronClassFirebaseRequest('school-a', () => true, input)).resolves.toEqual({});
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  for (const authorization of [`Platform ${handle}`, 'Bearer fresh-token']) {
+    expect(fetchMock).toHaveBeenCalledWith('https://nuni.tw/api/tronclass', expect.objectContaining({
+      method: 'POST',
+      redirect: 'error',
+      body: JSON.stringify(input),
+      headers: expect.objectContaining({ Authorization: authorization }),
+    }));
+  }
+});
+
 it.each(['connect', 'disconnect', 'submit', 'cancel-preparation'])(
   'never retries a %s whose reply was lost',
   async (action) => {
+    if (action === 'connect') process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED = 'true';
     const fetchMock = jest.fn().mockRejectedValue(new Error('lost reply'));
     global.fetch = fetchMock;
     await expect(nuniBffRequest('tronclass', handle, { action })).rejects.toMatchObject({
@@ -136,6 +178,7 @@ it('uses a fresh Firebase token for a verified school owner without falling back
       redirect: 'error',
     }),
   );
+  process.env.EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED = 'true';
   mockGetIdToken.mockImplementationOnce(async () => {
     mockUser = { uid: 'school-b', getIdToken: mockGetIdToken };
     return 'stale-token';

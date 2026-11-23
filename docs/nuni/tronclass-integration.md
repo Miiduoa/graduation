@@ -104,6 +104,10 @@ Production default 仍未注入經實測驗證的 tenant provider，`contractVer
 
 Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。原生 Mobile 入口為 `TronClassWorkspace`，學習首頁與 nuni 課程工作區均有入口；深連結路徑為 `/tronclass`。目前只支援靜宜大學 `https://tronclass.pu.edu.tw`。
 
+Mobile 的 App 內密碼綁定由獨立建置旗標 `EXPO_PUBLIC_TRONCLASS_NATIVE_CONNECT_ENABLED` 控制，只有字面值 `true` 才會啟用，預設關閉。關閉時，App 引導使用者到 [網頁版 nuni](https://nuni.tw/tronclass) 完成綁定，平台與 Firebase 傳輸均會在發出綁定請求前拒絕該操作。既有綁定的課程與作業讀取照常運作。
+
+React Native 全域 `fetch` 無法保證遵守 `redirect: 'error'`。收到 307 或 308 時，原生網路層可能在 App 收到回應前，把含校方密碼的請求重送到重新導向目標。須等原生 transport 能在跟隨任何重新導向前阻止憑證重送，才可開啟此旗標。
+
 | 能力 | 本分支狀態 |
 | --- | --- |
 | 使用 nuni 平台登入或 Firebase 登入綁定 TronClass | 已實作；不依賴 E-campus session |
@@ -130,7 +134,7 @@ Web 入口為 `/tronclass`，`/classroom` 的課程清單提供連接入口。�
 | 受控附件傳輸及正式版本讀回 | 已實作 metadata → binary → callback、帶附件的 final POST、精確本人版本讀回；公開 API 已接上 v2 prepare／upload／submit／reconcile 與新確認結果，正式寫入仍未啟用 |
 | 真正寫入校方 TronClass | **尚未完成契約驗證，production adapter 固定拒絕寫入** |
 | 重交、撤回、小組繳交、代替其他人繳交 | 未實作；小組歷史也回傳 `group-unsupported`，引導至原作業查看 |
-| 原生 Mobile 的新綁定／作業畫面 | 已實作獨立綁定、選課讀取、作業詳情、文字／選檔／預覽／再次確認、條件式送出與唯讀查證，使用相同 BFF；正式 writer 的停用條件相同 |
+| 原生 Mobile 的新綁定／作業畫面 | App 內密碼綁定預設關閉。已實作選課讀取、作業詳情、文字／選檔／預覽／再次確認、條件式送出與唯讀查證，使用相同 BFF；正式 writer 的停用條件相同 |
 | 原生 Mobile 教材下載 | 使用固定、已驗證本人權限的 material-download BFF；限定大小、檔名與完整 bytes，透過原生分享介面儲存，使用後清理暫存 |
 | 資料到期與關帳清理 | 已實作 Spark 可用的有上限背景清理與平台關帳 outbox worker；均需明確部署設定。TTL 另有可選設定，不默默啟用計費 |
 

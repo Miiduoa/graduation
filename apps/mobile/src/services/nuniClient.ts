@@ -2,6 +2,7 @@ import { NuniError, nuniRecord, parseNuniPrincipal } from '@campus/shared/src/nu
 import { WAKE_REQUEST_TIMEOUT_MS, withWakeRetry } from '@campus/shared/src/wakeAwareRequest';
 
 import { PERSONAL_IMPORT_SYNC_BODY_LIMIT } from '@campus/shared/src/imports/sync';
+import { assertTronClassNativeConnectAllowed } from './tronClassNativeConnectEnabled';
 
 const API = 'https://api.nuni.tw/v1/auth/platform/';
 const PUBLIC_API = 'https://api.nuni.tw/v1/public/';
@@ -166,6 +167,7 @@ export async function nuniBffRequest(
   if (!/^[a-z0-9-]+(?:\/[A-Za-z0-9_-]+)*$/.test(path) || !NUNI_HANDLE.test(handle))
     throw new NuniError(400, 'INVALID_REQUEST');
   const tronClass = path === 'tronclass';
+  if (tronClass) assertTronClassNativeConnectAllowed(String(input?.action));
   if (
     tronClass &&
     (!input || !['status', 'connect', 'disconnect', 'courses', 'sync', 'prepare', 'submit', 'reconcile', 'cancel-preparation'].includes(String(input.action)))
