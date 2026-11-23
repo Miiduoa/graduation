@@ -31,7 +31,6 @@ const OVERPASS_REQUEST_DEADLINE_MS = 12_000;
 // time. A freshly fetched HTTP response can still contain days-old map state.
 const MAX_OVERPASS_REPLICATION_LAG_MS = 48 * 60 * 60 * 1000;
 
-// Keep this media-type rule aligned between the Overpass route and browser.
 function verifyOverpassReplicationTime(payload: unknown, now: number): string | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
   const metadata = (payload as Record<string, unknown>).osm3s;
