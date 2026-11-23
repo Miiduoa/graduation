@@ -1,5 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { canAnswerTronClassQuestion, parseTronClassAgentIntent } from './tronClassAgentIntent';
+import { canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion } from './tronClassAgentIntent';
+
+describe('explicit TronClass navigation', () => {
+  it.each(['開啟玩課雲作業', '前往玩課雲作業頁', '進入 TronClass 頁面', 'open TronClass 作業'])(
+    'preserves the existing navigation command %s',
+    question => {
+      expect(tronClassExplicitNavigationQuestion(question)).toBe(question);
+      expect(canAnswerTronClassQuestion(question)).toBe(false);
+    },
+  );
+
+  it.each(['打開玩課雲', '幫我開玩課雲', 'open 玩課雲頁面'])(
+    'resolves the shortcut %s to the LMS command',
+    question => expect(tronClassExplicitNavigationQuestion(question)).toBe('開啟玩課雲作業'),
+  );
+
+  it.each([
+    '開啟玩課雲作業，有哪些還沒交',
+    '打開玩課雲看有幾份作業',
+    '前往玩課雲查作業截止',
+    '進入 TronClass 看成績',
+    'open TronClass 看有什麼作業',
+    '玩課雲作業',
+  ])('keeps %s eligible for Agent routing', question => {
+    expect(tronClassExplicitNavigationQuestion(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(true);
+  });
+});
 
 describe('explicit TronClass command routing', () => {
   it.each([

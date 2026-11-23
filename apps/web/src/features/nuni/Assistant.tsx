@@ -48,7 +48,7 @@ import { campusEventIdentity, campusEventPreviewIssue, campusEventTargetKey, par
   type AssistantCampusEventTarget } from '@/lib/assistantCampusEvent';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
-import { canAnswerTronClassQuestion, tronClassDisabledNavigationQuestion } from '@/lib/tronClassAgentIntent';
+import { canAnswerTronClassQuestion, tronClassDisabledNavigationQuestion, tronClassExplicitNavigationQuestion } from '@/lib/tronClassAgentIntent';
 import { createTronClassAgentClient, isTronClassAuthorityError, type TronClassAgentQuestion } from '@/lib/tronClassAgentClient';
 import { TronClassRequestError } from '@/lib/tronClassIntegrationClient';
 import { AssistantTronClassResult } from './assistant/AssistantTronClassResult';
@@ -699,7 +699,8 @@ function V2Conversation({
       ? `幫「${selection.target.title}」${selection.date ? '在 ' + selection.date + ' ' : ''}找 30 分鐘準備時間`
       : question.trim());
     if (!current || busy.current || ((selection || tronClassSelection) && taskProfile !== 'student')) return;
-    const tronClass = taskProfile === 'student' && !selection && (!!tronClassSelection || canAnswerTronClassQuestion(current));
+    const navigationQuestion = !selection && !tronClassSelection ? tronClassExplicitNavigationQuestion(current) : null;
+    const tronClass = taskProfile === 'student' && !selection && !navigationQuestion && (!!tronClassSelection || canAnswerTronClassQuestion(current));
     const tronClassEpoch = tronClassAuthorityEpoch.current;
     if (!tronClass && !selection && accountDemoAssistantIntent(current)) {
       busy.current = true;
@@ -804,7 +805,8 @@ function V2Conversation({
     }
     // Only the shared, complete pickup request can use the model-free server
     // planner. Its account/session still comes from the authenticated route.
-    const readRoute = !tronClass && !publicCompound && !studySelection ? assistantQuestionReadRoute(taskProfile, current) : null;
+    const localQuestion = navigationQuestion ?? current;
+    const readRoute = !tronClass && !publicCompound && !studySelection ? assistantQuestionReadRoute(taskProfile, localQuestion) : null;
     const roleGuide = readRoute?.roleGuide;
     if (roleGuide) {
       setTurns(previous => [...previous, { question: current, taskProfile,
@@ -816,7 +818,7 @@ function V2Conversation({
     }
     const foodPickup = !tronClass && !studySelection && taskProfile === 'student' && parseAssistantFoodPickupIntent(current) !== null;
     if (foodPickup && !foodPickupEnabled) return;
-    const local = !publicCompound && !studySelection && !foodPickup && readRoute?.local && answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: readRoute.preferCampusReads });
+    const local = !publicCompound && !studySelection && !foodPickup && readRoute?.local && answerAssistantLocally(localQuestion, { owner: accountId ? 'platform:' + accountId : '', schoolId }, { deferMissingSchedule: ready && consent, preferCampusReads: readRoute.preferCampusReads });
     if (local && !publicCourseIntent) {
       setTurns((previous) => [...previous, { question: current,
         reply: { answer: local.content, steps: [], cards: [], local } }]);

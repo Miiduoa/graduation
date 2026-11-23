@@ -80,7 +80,43 @@ it('answers in the existing conversation without cloud consent and keeps private
   expect(JSON.stringify(cloudBodies)).not.toMatch(/TronClass|私人|evil\.test/);
 });
 
-it.each(['玩課雲', '玩課雲作業', '開啟玩課雲作業', '幫我開玩課雲', '請幫我打開玩課雲作業與教材頁面，可以嗎？', 'open TronClass 作業'])('falls back to the school LMS link for %s when the Agent is disabled', async question => {
+it.each([
+  ['開啟玩課雲作業', '開啟玩課雲作業', '/school-lms?schoolId=pu'],
+  ['幫我開玩課雲', '開啟玩課雲作業', '/school-lms?schoolId=pu'],
+  ['請幫我打開玩課雲作業與教材頁面，可以嗎？', '開啟玩課雲作業', '/school-lms?schoolId=pu'],
+  ['open TronClass 作業', '開啟玩課雲作業', '/school-lms?schoolId=pu'],
+  ['進入 TronClass 頁面', '開啟校方課程', '/school-courses?schoolId=pu'],
+])('opens the existing page for %s with the Agent enabled', async (question, label, href) => {
+  const fetch = vi.fn(async (url: string) => {
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json(base);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  await ask(question);
+  const link = await screen.findByRole('link', { name: new RegExp('^' + label) });
+  expect(link.getAttribute('href')).toBe(href);
+  expect(fetch.mock.calls.some(([url]) => url === '/api/tronclass/agent')).toBe(false);
+});
+
+it('queries the Agent when a page-opening phrase also asks for outstanding homework', async () => {
+  const question = '開啟玩課雲作業，查一下還沒交的有哪些';
+  const fetch = vi.fn(async (url: string, _init?: RequestInit) => {
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json(base);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  await ask(question);
+  await screen.findByRole('heading', { name: '私人期中報告' });
+  const request = fetch.mock.calls.find(([url]) => url === '/api/tronclass/agent');
+  expect(body(request?.[1])).toMatchObject({ question });
+  expect(screen.queryByRole('link', { name: /^開啟玩課雲作業/ })).toBeNull();
+});
+
+it.each(['玩課雲', '玩課雲作業'])('falls back to the school LMS link for %s when the Agent is disabled', async question => {
   const fetch = vi.fn(async (url: string) => {
     if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
     if (url === '/api/tronclass/agent') return json({ error: 'TRONCLASS_DISABLED', message: '整合已停用' }, 503);

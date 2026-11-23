@@ -5,6 +5,23 @@ export function isTronClassNavigationTarget(text: string): boolean {
   return /^(?:玩課雲|tronclass)(?:作業|課程)?$/i.test(text);
 }
 
+function isExistingTronClassNavigation(question: string): boolean {
+  const intent = resolveAssistantServiceIntent(question);
+  return intent?.kind === 'open' && (intent.service.id === 'school-lms' || intent.service.id === 'school-courses');
+}
+
+export function tronClassExplicitNavigationQuestion(question: string): string | null {
+  if (isExistingTronClassNavigation(question)) return question;
+  if (question.length > 160 || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(question)) return null;
+  const text = question.normalize('NFKC').trim().replace(/[?!.。]+$/u, '').trim();
+  // Match the entire page name so a command followed by a data question stays with the Agent.
+  const shortcut = text.replace(/(?:,\s*)?(?:好嗎|可以嗎|嗎|吧|謝謝)$/u, '').trim();
+  if (/^(?:(?:請|麻煩)?\s*(?:幫我|替我|我要|我想)?\s*(?:開啟|打開|開|前往|進入)\s*|(?:please )?(?:open|go to)\s+)(?:玩課雲|tron\s*class)(?:\s*(?:作業(?:與教材)?|課程))?\s*(?:頁面|畫面|入口|頁|page|screen)?$/iu.test(shortcut)) {
+    return '開啟玩課雲作業';
+  }
+  return null;
+}
+
 export function tronClassDisabledNavigationQuestion(question: string): string | null {
   const intent = resolveAssistantServiceIntent(question);
   if (intent?.kind === 'open' && intent.service.id === 'school-lms') return question;
@@ -30,6 +47,7 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
   if (typeof question !== 'string' || !question.trim() || question.length > 1000 ||
     !/(?:\btron\s*class\b|創課|玩課雲)/i.test(question)) return null;
   const original = question.trim();
+  if (isExistingTronClassNavigation(original)) return null;
   // Examples, translations and general explanations do not authorize a private read.
   if (/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(original) ||
     /^[「『“"'][\s\S]*[」』”"']$/.test(original) ||
