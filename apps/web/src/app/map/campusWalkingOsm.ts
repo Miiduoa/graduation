@@ -71,10 +71,16 @@ function revision(value: Record<string, unknown>, baseMs: number): Revision | nu
   return { version: value.version, editedAt, tags };
 }
 
+// Keep indoor doors and underground endpoints out of outdoor routing.
+// https://wiki.openstreetmap.org/wiki/Key:indoor
+const nonOutdoor = (tags: Tags) =>
+  (tags.indoor !== undefined && tags.indoor !== 'no') ||
+  tags.location === 'indoor' || tags.location === 'underground';
+
 export const excludesWalkingWay = (tags: Tags) =>
   tags.foot === 'use_sidepath' ||
   !!(tags.area && tags.area !== 'no') ||
-  !!(tags.indoor && tags.indoor !== 'no') || tags.location === 'underground';
+  nonOutdoor(tags);
 
 // Product policy: an unrecognised or purpose-limited access value needs
 // further review, not a blanket walking approval. Retain the conservative
@@ -85,6 +91,7 @@ const hasNonPublicAccess = (value: string | undefined): boolean =>
   value !== undefined && !OPEN_ACCESS_VALUES.has(value);
 
 const restrictsWalking = (tags: Tags) =>
+  nonOutdoor(tags) ||
   hasNonPublicAccess(tags.foot) ||
   hasNonPublicAccess(tags.access) ||
   !!(tags.barrier && tags.barrier !== 'no') ||
