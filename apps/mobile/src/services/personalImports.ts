@@ -110,15 +110,15 @@ async function readLegacyCheckpoint(
 
   const pending = pendingRestorations.get(key);
   if (pending) return { ...pending, ledger: parseLedger(pending.raw, scope) };
-  return readRollbackJournal(key, scope, null);
+  return readRollbackJournal(key, scope);
 }
 
 async function readRollbackJournal(
   key: string,
   scope: PersonalImportScope,
-  webPrimary: string | null,
+  verifiedWebPrimary?: string,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
-  const journal = await readPersonalImportRollback(key);
+  const journal = await readPersonalImportRollback(key, verifiedWebPrimary);
   if (journal === undefined) return null;
   if (journal === 'null') return { raw: null, ledger: empty() };
   try {
@@ -126,8 +126,7 @@ async function readRollbackJournal(
     return { raw: journal, ledger: parseLedger(journal, scope) };
   } catch (error) {
     // A corrupt Web journal can be skipped when the primary is a verified ledger.
-    if (!webPrimary) throw error;
-    parseLedger(webPrimary, scope);
+    if (verifiedWebPrimary === undefined) throw error;
     return null;
   }
 }

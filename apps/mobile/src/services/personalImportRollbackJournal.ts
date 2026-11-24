@@ -17,13 +17,6 @@ const legacyStagePattern = /^campus\.personal-imports\.rollback\.v1:([a-f0-9]{64
 const legacyCompactWebCommit = '\t';
 const compactVersionKey = '$commit';
 
-type WebRollback = {
-  id: string;
-  original: string | null;
-  before: string;
-  attempted: string;
-};
-
 const fingerprint = (raw: string | null) => sha256(raw ?? 'null');
 
 const lockStore = 'writes';
@@ -300,28 +293,28 @@ export async function withPersonalImportWriteLock<T>(
   }
 }
 
-async function readWebRollback(key: string): Promise<string | undefined> {
+async function readWebRollback(key: string, verifiedPrimary?: string): Promise<string | undefined> {
   const storage = window.localStorage;
   const backupKey = personalImportWebJournalKey(key);
   for (;;) {
     const encoded = storage.getItem(backupKey);
     if (encoded === null) return undefined;
-    let journal: WebRollback | { version: number } | null;
+    let journal: unknown;
     try {
       journal = JSON.parse(encoded);
     } catch {
-      // The ledger reader can fall back to a valid primary when these bytes are corrupt.
-      return encoded;
+      return verifiedPrimary === undefined ? encoded : undefined;
     }
-    // Older Web builds stored the ledger bytes directly.
-    if (journal === null || (typeof journal === 'object' && 'version' in journal)) return encoded;
-    if (!journal || typeof journal !== 'object' || !('id' in journal) ||
-        typeof journal.id !== 'string' || typeof journal.before !== 'string' ||
-        typeof journal.attempted !== 'string' ||
-        (journal.original !== null && typeof journal.original !== 'string')) {
-      return encoded;
+    // Unbound legacy copies cannot establish that a verified primary was interrupted.
+    if (!journal || typeof journal !== 'object' || 'version' in journal ||
+        !('id' in journal) || typeof journal.id !== 'string' ||
+        !('before' in journal) || typeof journal.before !== 'string' ||
+        !('attempted' in journal) || typeof journal.attempted !== 'string' ||
+        !('original' in journal) || (journal.original !== null && typeof journal.original !== 'string')) {
+      if (verifiedPrimary !== undefined) return undefined;
+      return typeof journal === 'string' ? journal : encoded;
     }
-    const current = fingerprint(await AsyncStorage.getItem(key));
+    const current = fingerprint(verifiedPrimary ?? await AsyncStorage.getItem(key));
     if (storage.getItem(backupKey) !== encoded) continue;
     return current === journal.before || current === journal.attempted
       ? journal.original ?? 'null'
@@ -429,7 +422,9 @@ export function commitWebPersonalImports(
       try {
         stages.setItem(stageKey, encoded);
       } catch (error) {
-        if (!isQuotaExceeded(error) || !fitsInPlace) throw error;
+        if (!isQuotaExceeded(error) || (!lease && !fitsInPlace)) throw error;
+        // The lease fallback can publish against the primary snapshot even
+        // when this tab has no room for a stage and the replacement grows.
         return publishWithQuotaRetry();
       }
       return publishWithQuotaRetry(ownsStage, discardStage);
@@ -466,9 +461,9 @@ function journalFiles(key: string) {
   return { marker, payload: new File(directory, `${name}.rollback.json`), marked: marker.info().exists };
 }
 
-export async function readPersonalImportRollback(key: string): Promise<string | undefined> {
+export async function readPersonalImportRollback(key: string, verifiedWebPrimary?: string): Promise<string | undefined> {
   // Expo's Web implementation cannot construct a Directory or File.
-  if (Platform.OS === 'web') return readWebRollback(key);
+  if (Platform.OS === 'web') return readWebRollback(key, verifiedWebPrimary);
   const { payload, marked } = journalFiles(key);
   return marked ? payload.textSync() : undefined;
 }
