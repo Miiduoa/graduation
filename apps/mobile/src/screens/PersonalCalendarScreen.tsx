@@ -94,23 +94,26 @@ export function CampusEventCalendarDraftScreen() {
       >
     >();
   const scope = usePersonalImportScope();
-  const loggingOut = !!useNuniSession().pendingLogout;
+  const platform = useNuniSession();
+  const loggingOut = !!platform.pendingLogout;
+  const sessionRejected = !platform.session && !!platform.error;
   const { school, schoolId, selectionReady } = useSchool();
   const campusEvent = params?.campusEvent;
   const knownSchoolId = school?.id || schoolId || '';
+  const schoolCleared = !!selectionReady && !knownSchoolId;
   const schoolChanged =
     !!campusEvent && !!selectionReady && !!knownSchoolId && knownSchoolId !== campusEvent.schoolId;
   const matches =
     !!scope && scope.owner === campusEvent?.owner && scope.schoolId === campusEvent.schoolId;
   const expired = useRef(false);
   useLayoutEffect(() => {
-    if ((scope && !matches) || schoolChanged) expired.current = true;
-  }, [scope, matches, schoolChanged]);
-  if (!campusEvent?.draft || (scope && !matches) || expired.current || loggingOut || schoolChanged) {
+    if ((scope && !matches) || schoolChanged || sessionRejected || schoolCleared) expired.current = true;
+  }, [scope, matches, schoolChanged, sessionRejected, schoolCleared]);
+  if (!campusEvent?.draft || (scope && !matches) || expired.current || loggingOut || schoolChanged || sessionRejected || schoolCleared) {
     return (
       <Screen>
         <Text style={{ color: theme.colors.text }}>
-          {loggingOut || (scope && !matches) || expired.current || schoolChanged
+          {loggingOut || sessionRejected || (scope && !matches) || expired.current || schoolChanged || schoolCleared
             ? '請回到目前校園的活動頁重新開啟草稿。'
             : '正在確認帳號與校園…'}
         </Text>
@@ -154,18 +157,20 @@ export default function PersonalCalendarScreen() {
   const platform = useNuniSession();
   const legacy = useAuth();
   const loggingOut = !!platform.pendingLogout;
+  const sessionRejected = !platform.session && !!platform.error;
   const { school, schoolId, selectionReady } = useSchool();
   const route = useRoute();
   const key = scope ? personalImportStorageKey(scope) : '';
   const lastReadyKey = useRef(key);
   const knownOwner = platform.session
     ? `nuni:${platform.session.platformAccountId}`
-    : legacy.user?.uid
+    : !sessionRejected && legacy.user?.uid
       ? `firebase:${legacy.user.uid}`
       : null;
   const knownSchoolId = school?.id || schoolId || '';
+  const schoolCleared = !!selectionReady && !knownSchoolId;
   const staleSticky = (() => {
-    if (loggingOut) return true;
+    if (loggingOut || sessionRejected || schoolCleared) return true;
     const previous = parsePersonalImportKey(lastReadyKey.current);
     if (!previous) return false;
     if (knownOwner && previous.owner !== knownOwner) return true;
@@ -203,7 +208,8 @@ function PersonalCalendarWorkspace({
 }) {
   const navigation = useNavigation();
   const scope = usePersonalImportScope();
-  const loggingOut = !!useNuniSession().pendingLogout;
+  const platformSession = useNuniSession();
+  const loggingOut = !!platformSession.pendingLogout || (!platformSession.session && !!platformSession.error);
   const active = useRef(true);
   const requestId = useRef(0);
   const scopeSnapshot = useRef(scopeKey);

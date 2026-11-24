@@ -40,12 +40,20 @@ let mockScope: { owner: string; schoolId: string } | null = {
 const mockNavigate = jest.fn();
 
 let mockPendingLogout = false;
+let mockSession: { platformAccountId: string } | null = {
+  platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
+};
+let mockSessionError = '';
 
 jest.mock('../state/personalImportScope', () => ({
   usePersonalImportScope: () => mockScope,
 }));
 jest.mock('../state/nuniSession', () => ({
-  useNuniSession: () => ({ pendingLogout: mockPendingLogout }),
+  useNuniSession: () => ({
+    pendingLogout: mockPendingLogout,
+    session: mockSession,
+    error: mockSessionError,
+  }),
 }));
 let mockSchool = { id: 'pu', name: '靜宜大學' };
 jest.mock('../state/school', () => ({
@@ -124,6 +132,11 @@ beforeEach(async () => {
     schoolId: 'pu',
   };
   mockPendingLogout = false;
+  mockSession = {
+    platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
+  };
+  mockSessionError = '';
+  mockSchool = { id: 'pu', name: '靜宜大學' };
   mockNavigate.mockReset();
   mockEnableTimed.mockReset();
   mockEnableAllDay.mockReset();
@@ -531,4 +544,23 @@ it('hides the previous campus calendar when the school changes during revalidati
   mockScope = null;
   view.rerender(<PersonalCalendarScreen />);
   expect(view.queryByText('原校園行程')).toBeNull();
+});
+
+it('hides the previous calendar after a rejected Nuni session', async () => {
+  const view = await fillAndSave('已失效的行程');
+  expect(view.getByText('已失效的行程')).toBeTruthy();
+  mockSession = null;
+  mockSessionError = '無法確認登入狀態，請重新連線後再試。';
+  mockScope = null;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(view.queryByText('已失效的行程')).toBeNull();
+});
+
+it('hides the previous calendar when the confirmed school is cleared', async () => {
+  const view = await fillAndSave('已清空校園的行程');
+  expect(view.getByText('已清空校園的行程')).toBeTruthy();
+  mockSchool = { id: '', name: '' };
+  mockScope = null;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(view.queryByText('已清空校園的行程')).toBeNull();
 });
