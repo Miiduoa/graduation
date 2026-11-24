@@ -1228,6 +1228,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
   const previousPoint = model.points[index - 1];
   const nextPoint = model.points[index + 1];
   const [destinationQuery, setDestinationQuery] = useState('');
+  // When the map narrows to one or zero valid POIs, the search controls disappear.
+  // Discard their hidden query so expanding the map cannot restore an invisible stale filter.
+  if (model.points.length <= 1 && destinationQuery !== '') setDestinationQuery('');
   const destinationSearchRef = useRef<HTMLInputElement>(null);
   const searchId = useId();
   const searchStatusId = useId();

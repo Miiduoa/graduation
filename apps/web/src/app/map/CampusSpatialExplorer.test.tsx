@@ -227,6 +227,17 @@ it('filters visible destinations without silently replacing the selected navigat
   expect(dialog.queryByRole('searchbox', { name: '搜尋導覽地點' })).toBeNull();
   expect(values()).toEqual(['', 'c']);
   expect(dialog.queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+
+  // Expanding the filtered map must not resurrect the hidden search or a revoked destination.
+  view.rerender(<CampusSpatialExplorer {...props} locations={classrooms} />);
+  const restoredSearch = dialog.getByRole('searchbox', { name: '搜尋導覽地點' }) as HTMLInputElement;
+  expect(restoredSearch.value).toBe('');
+  expect((dialog.getByRole('button', { name: '清除地點搜尋' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(values()).toEqual(['', 'a', 'b', 'c']);
+  expect(picker.value).toBe('');
+  expect(dialog.queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  fireEvent.change(picker, { target: { value: 'c' } });
+  expect(destination()).toBe('24.229,120.58');
 });
 
 it('requires an explicit selection even when destination search finds a single result', async () => {
