@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence } from './tronClassAgentIntent';
+import { canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs } from './tronClassAgentIntent';
 
 /** Unknown leftover tokens now make a sentence ambiguous (confirmation), which is acceptable. */
 function expectAuthorizedOrAmbiguous(
@@ -1493,6 +1493,42 @@ describe('three-way sentence classification', () => {
       });
     },
   );
+
+  it.each([
+    '下載玩課雲教材的紀錄',
+    '準備 TronClass 作業的老師',
+    '繳交玩課雲作業的老師',
+    '請把玩課雲教材的紀錄下載',
+    '幫我上傳玩課雲作業的情況',
+  ])('requires confirmation when an action object has a trailing modifier: %s', question => {
+    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('requires confirmation for verb + object + 的 + noun on every auto-executing action verb within the 200 ms budget', () => {
+    const objects = ['玩課雲教材', 'TronClass 作業', '玩課雲講義'];
+    const nouns = ['紀錄', '老師', '時間', '情況'];
+    const questions: string[] = [];
+    for (const verb of tronClassAutoExecuteActionVerbs()) {
+      const latin = /[A-Za-z]/.test(verb);
+      for (const object of objects) {
+        for (const noun of nouns) {
+          questions.push(latin
+            ? `please ${verb} ${object}的${noun}`
+            : `幫我${verb}${object}的${noun}`);
+        }
+      }
+    }
+    expect(questions.length).toBeGreaterThan(200);
+    expect(Math.max(...questions.map(question => question.length))).toBeLessThanOrEqual(1000);
+    const started = performance.now();
+    const results = questions.map(question => classifyTronClassSentence(question)?.outcome ?? null);
+    const elapsed = performance.now() - started;
+    expect(results).toEqual(questions.map(() => 'ambiguous'));
+    expect(elapsed).toBeLessThan(200);
+  });
 
   it.each([
     ['查玩課雲作業', false],
