@@ -3,12 +3,13 @@ import {
   type loadMerchantOverview,
   type NuniMerchantApplication,
   type NuniMerchantWorkspace,
+  type NuniMerchantWorkspaceListRow,
 } from '@campus/shared/src/nuniMerchant';
 import type { NuniMerchantWorkspaceDetail } from '@campus/shared/src/nuniMerchantOperations';
 
 export type MerchantOverview = Awaited<ReturnType<typeof loadMerchantOverview>>;
 
-type Observation<T = NuniMerchantWorkspace> = { value: T; revision: number; version?: number };
+type Observation<T = NuniMerchantWorkspaceListRow> = { value: T; revision: number; version?: number };
 export type DetailConfirmation = { detail: NuniMerchantWorkspaceDetail; won: boolean };
 
 type WorkspaceObservations = {
@@ -16,23 +17,48 @@ type WorkspaceObservations = {
   versionedRow?: Observation;
   detail?: Observation<NuniMerchantWorkspaceDetail>;
 };
-function withOperatingState<T extends NuniMerchantWorkspace>(
-  row: T,
-  { activated, merchantStatus, locationStatus, publicAccess }: NuniMerchantWorkspace,
-): T {
-  return { ...row, activated, merchantStatus, locationStatus, publicAccess };
-}
 
-function workspaceSummary(entry: WorkspaceObservations | undefined) {
+function workspaceSummary(entry: WorkspaceObservations | undefined): NuniMerchantWorkspace | undefined {
   const row = entry?.row?.value;
-  const versioned = entry?.versionedRow?.value;
-  // Legacy rows still supply list metadata and requirements in request order.
-  return row && row.readinessVersion === undefined && versioned
-    ? withOperatingState(row, versioned)
-    : row;
+  if (!row) return;
+  return summarizeRow(row, entry?.versionedRow?.value);
 }
 
-function latestObservation<T extends NuniMerchantWorkspace>(
+function summarizeRow(
+  row: NuniMerchantWorkspaceListRow,
+  versioned?: NuniMerchantWorkspaceListRow,
+): NuniMerchantWorkspace {
+  const operating = row.readinessVersion === undefined && versioned ? versioned : row;
+  return {
+    ...row,
+    activated: operating.activated ?? false,
+    merchantStatus: operating.merchantStatus,
+    locationStatus: operating.locationStatus,
+    publicAccess: operating.publicAccess,
+    missingRequirements: row.missingRequirements ?? versioned?.missingRequirements ?? [],
+  };
+}
+
+function mergeReadiness(
+  winner: NuniMerchantWorkspaceListRow,
+  other: NuniMerchantWorkspaceListRow,
+): NuniMerchantWorkspaceListRow {
+  if (winner.readinessVersion !== other.readinessVersion) return winner;
+  const activated = winner.activated ?? other.activated;
+  const missingRequirements = winner.missingRequirements ?? other.missingRequirements;
+  return activated === winner.activated && missingRequirements === winner.missingRequirements
+    ? winner
+    : { ...winner, activated, missingRequirements };
+}
+
+function latestRow(current: Observation | undefined, next: NuniMerchantWorkspaceListRow, revision: number) {
+  const winner = latestObservation(current, next, revision);
+  if (!current) return winner;
+  const other = winner.revision === revision ? current.value : next;
+  return { ...winner, value: mergeReadiness(winner.value, other) };
+}
+
+function latestObservation<T extends NuniMerchantWorkspaceListRow>(
   current: Observation<T> | undefined,
   value: T,
   revision: number,
@@ -109,8 +135,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
 
   function revoke(key: string, revision: number) {
     const entry = entries.get(key);
-    // Legacy metadata can advance independently of the confirmed operating state.
-    const confirmation = entry?.versionedRow ?? entry?.row;
+    // An unversioned list can update metadata without superseding a detail denial.
+    const confirmation = entry?.versionedRow;
     if (revision <= Math.max(revokedThrough(key), confirmation?.revision ?? 0)) return;
     revocations.set(key, revision);
     discardWorkspace(key, revision);
@@ -122,7 +148,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     if (listedRevision > listRevocation || listedWorkspaces?.size === 0) return listedWorkspaces;
   }
 
-  function merge(next: NuniMerchantWorkspace, revision: number) {
+  function merge(next: NuniMerchantWorkspaceListRow, revision: number) {
     const key = workspaceKey(next);
     if (revision <= Math.max(listRevocation, revokedThrough(key))) return;
     const entry = entries.get(key) ?? {};
@@ -131,16 +157,17 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     if (floor !== undefined && next.readinessVersion !== undefined && next.readinessVersion < floor) {
       return;
     }
-    const observation = latestObservation(entry.row, next, revision);
+    const observation = latestRow(entry.row, next, revision);
     const row = { ...observation, version: observation.version ?? floor };
     if (next.readinessVersion !== undefined) {
       // Versioned operating state keeps its own order when legacy rows update the list.
       const previous = entry.versionedRow;
-      const versioned = latestObservation(previous, next, revision);
+      const versioned = latestRow(previous, next, revision);
       if (
         versioned.revision === revision &&
         previous &&
-        merchantWorkspaceStateLabel(previous.value) !== merchantWorkspaceStateLabel(next)
+        merchantWorkspaceStateLabel(summarizeRow(previous.value)) !==
+          merchantWorkspaceStateLabel(summarizeRow(versioned.value))
       ) {
         // A same-version change supersedes receipts through that version. An
         // earlier write can still confirm a higher version and show its receipt.
@@ -156,7 +183,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     }
     // A versioned response can confirm menu requirements even when legacy metadata wins.
     const requirementsObservation = next.readinessVersion === undefined ? row : entry.versionedRow;
-    if (requirementsObservation?.revision === revision && next.missingRequirements.includes('menu')) {
+    if (requirementsObservation?.revision === revision && next.missingRequirements?.includes('menu')) {
       discardMenuReceipt(key);
     }
     entry.row = row;
@@ -195,26 +222,31 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     if (detail.readinessVersion !== entry.row.version) return null;
     // Legacy list metadata is rendered separately. Project the matching
     // versioned row's operating state and requirements together onto the detail.
-    const row = entry.row.value.readinessVersion === detail.readinessVersion
-      ? entry.row.value
-      : entry.versionedRow?.value;
+    const row = entry.versionedRow?.value;
     if (row?.readinessVersion !== detail.readinessVersion) return detail;
+    const missingRequirements = row.missingRequirements ?? detail.missingRequirements;
     return {
       ...detail,
       ...row,
+      activated: row.activated ?? detail.activated,
+      missingRequirements,
       readinessVersion: detail.readinessVersion,
-      publishedMenuItems: row.missingRequirements.includes('menu') ? 0 : detail.publishedMenuItems,
+      publishedMenuItems: missingRequirements.includes('menu') ? 0 : detail.publishedMenuItems,
     };
   }
 
   function confirmMenu(key: string, revision: number, createdItems: number) {
     const draft = drafts.get(key);
-    const row = entries.get(key)?.row;
-    if (!draft || !row || revision <= (receiptFloors.get(key) ?? 0)) return false;
+    const entry = entries.get(key);
+    const row = entry?.row;
+    if (!draft || !entry || !row || revision <= (receiptFloors.get(key) ?? 0)) return false;
     // The receipt has no readiness version. Apply it to the known row in request order.
     const next = {
       ...row.value,
-      missingRequirements: row.value.missingRequirements.filter((item) => item !== 'menu'),
+      missingRequirements: summarizeRow(
+        row.value,
+        entry.versionedRow?.value,
+      ).missingRequirements.filter((item) => item !== 'menu'),
     };
     if (merge(next, revision)?.row?.value !== next) return false;
     draft.menuReceipt = createdItems;
@@ -266,7 +298,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       if (programs) lists.programs = programs;
       else delete lists.programs;
     },
-    mergeWorkspaceList(rows: NuniMerchantWorkspace[], revision: number) {
+    mergeWorkspaceList(rows: NuniMerchantWorkspaceListRow[], revision: number) {
       if (revision <= listRevocation) return;
       if (revision > listedRevision) {
         listedRevision = revision;

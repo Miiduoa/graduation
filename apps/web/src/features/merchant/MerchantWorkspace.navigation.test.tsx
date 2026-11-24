@@ -2196,3 +2196,38 @@ it.each([403, 404])('ignores a retired application list denial (%s) after a newe
   expect(screen.getByRole('heading', { name: '測試餐坊／餐廳櫃位' })).toBeTruthy();
   expect(screen.getByText('審核說明：已開始審核')).toBeTruthy();
 });
+
+it.each([403, 404])('revokes the first detail denied with %s after a newer legacy list and a background 503', async (status) => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const unavailable = new NuniError(503, 'UNAVAILABLE');
+  const legacy = { ...detail(), readinessVersion: undefined };
+  let denyFirst!: (error: NuniError) => void;
+  const first = new Promise<never>((_, reject) => {
+    denyFirst = reject;
+  });
+  const readDetail = vi.fn().mockReturnValueOnce(first).mockRejectedValue(unavailable);
+  const readApplications = vi.fn()
+    .mockResolvedValueOnce({ applications: [] })
+    .mockRejectedValue(unavailable);
+  const readList = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [legacy] })
+    .mockResolvedValue({ workspaces: [{ ...legacy, merchantName: '更新店名' }] });
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === 'merchant-applications') return readApplications();
+    if (resource === path) return readDetail();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(1));
+  await act(async () => window.history.back());
+  await screen.findByRole('heading', { name: '更新店名／一樓' });
+  await screen.findByText('目前無法確認店家資料，請重新載入。');
+  expect(readDetail).toHaveBeenCalledTimes(2);
+
+  await act(async () => denyFirst(new NuniError(status, 'DENIED')));
+  expect(screen.queryByRole('heading', { name: '更新店名／一樓' })).toBeNull();
+  expect(screen.queryByRole('link', { name: /管理門市：一樓/ })).toBeNull();
+});

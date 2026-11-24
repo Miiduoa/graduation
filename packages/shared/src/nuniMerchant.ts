@@ -36,6 +36,10 @@ export type NuniMerchantWorkspace = {
   missingRequirements: string[];
   readinessVersion?: number;
 };
+export type NuniMerchantWorkspaceListRow =
+  Omit<NuniMerchantWorkspace, 'activated' | 'missingRequirements'> &
+  Partial<Pick<NuniMerchantWorkspace, 'activated' | 'missingRequirements'>>;
+
 export type NuniMerchantApplicationInput = {
   tenantId: string;
   campusId: string;
@@ -109,7 +113,15 @@ export function parseMerchantOverview(value: unknown): {
     applications: rows(row.applications, parseMerchantApplication),
   };
 }
-export function parseMerchantWorkspaces(value: unknown): NuniMerchantWorkspace[] {
+export function parseMerchantWorkspaces(value: unknown): NuniMerchantWorkspace[];
+export function parseMerchantWorkspaces(
+  value: unknown,
+  options: { preserveMissingReadiness: true },
+): NuniMerchantWorkspaceListRow[];
+export function parseMerchantWorkspaces(
+  value: unknown,
+  options?: { preserveMissingReadiness: true },
+): NuniMerchantWorkspaceListRow[] {
   return rows(nuniRecord(value).workspaces, (value) => {
     const row = nuniRecord(value);
     const readinessVersion = row.readinessVersion;
@@ -128,8 +140,10 @@ export function parseMerchantWorkspaces(value: unknown): NuniMerchantWorkspace[]
       merchantStatus: text(row.merchantStatus, 40),
       locationStatus: text(row.locationStatus, 40),
       publicAccess: boolean(row.publicAccess),
-      activated: boolean(row.activated),
-      missingRequirements: rows(row.missingRequirements, (value) => text(value, 100)),
+      ...(!options || row.activated !== undefined ? { activated: boolean(row.activated) } : {}),
+      ...(!options || row.missingRequirements !== undefined
+        ? { missingRequirements: rows(row.missingRequirements, (value) => text(value, 100)) }
+        : {}),
     };
   });
 }

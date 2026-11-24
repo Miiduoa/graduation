@@ -102,6 +102,19 @@ it('preserves the workspace readiness version on the authenticated list', async 
   expect(result.status).toBe(200);
   expect(await result.json()).toMatchObject({ workspaces: [{ ...identity, readinessVersion: 2 }] });
 });
+it('preserves omitted readiness fields on legacy list rows and validates detail fields', async () => {
+  const legacy = { ...workspace, activated: undefined, missingRequirements: undefined };
+  respond({ workspaces: [legacy] });
+  const result = await call('merchant-workspaces');
+  expect(result.status).toBe(200);
+  const { workspaces: [row] } = await result.json();
+  expect(row).toMatchObject({ ...identity, readinessVersion: workspace.readinessVersion });
+  expect(row).not.toHaveProperty('activated');
+  expect(row).not.toHaveProperty('missingRequirements');
+
+  respond(legacy);
+  expect((await call()).status).toBe(502);
+});
 it('keeps PUT settings behind same-origin and captured-session checks', async () => {
   expect((await call(`${root}/settings`, 'PUT', settings, 'stale')).status).toBe(409);
   expect(

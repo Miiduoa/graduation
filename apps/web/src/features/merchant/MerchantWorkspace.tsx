@@ -392,7 +392,9 @@ function AccountWorkspace({
         observeFailure(
           (view === 'apply'
             ? Promise.resolve([])
-            : browserRequest('merchant-workspaces', context).then(parseMerchantWorkspaces)
+            : browserRequest('merchant-workspaces', context).then((value) =>
+                parseMerchantWorkspaces(value, { preserveMissingReadiness: true }),
+              )
           ).then((rows) => {
             if (isSameSession()) {
               confirmed.mergeWorkspaceList(rows, listRevision);

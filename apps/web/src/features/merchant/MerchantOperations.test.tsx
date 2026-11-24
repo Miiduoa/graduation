@@ -1,12 +1,16 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
+import { parseMerchantWorkspaces } from '@campus/shared/src/nuniMerchant';
 import type { NuniMerchantWorkspaceDetail } from '@campus/shared/src/nuniMerchantOperations';
 import { MerchantOperations, type MerchantOperationDrafts } from './MerchantOperations';
 import { createMerchantConfirmations, workspaceKey } from './merchantConfirmation';
 
 const request = vi.hoisted(() => vi.fn());
-vi.mock('@/features/nuni/Session', () => ({ browserRequest: request }));
+vi.mock('@/features/nuni/Session', () => ({
+  browserRequest: request,
+  useNuniSession: () => ({ session: { platformAccountId: 'account-a' } }),
+}));
 const onChanged = vi.fn();
 const onExpired = vi.fn();
 const base = 'merchant-workspaces/campus-one/location-1';
@@ -321,6 +325,87 @@ it.each(['legacy list first', 'versioned suspension first'])(
     expect(screen.getByRole('heading', { name: '這間門市尚未開放訂單工作台' })).toBeTruthy();
     expect(screen.queryByRole('region', { name: '門市訂單工作台' })).toBeNull();
     if (order === 'legacy list first') expect(request.mock.calls.map(([path]) => path)).toEqual([base]);
+  },
+);
+
+it.each([true, false])(
+  'keeps confirmed readiness when a same-version list omits fields and detail refresh returns 503 (activated: %s)',
+  async (activated) => {
+    const confirmed = createMerchantConfirmations(drafts);
+    ready();
+    current = {
+      ...current,
+      readinessVersion: 7,
+      activated,
+      merchantStatus: activated ? 'active' : 'suspended',
+      locationStatus: activated ? 'open' : 'suspended',
+      publicAccess: activated,
+      missingRequirements: activated ? [] : ['menu'],
+    };
+    if (activated) {
+      request.mockImplementation((path, context, input) => {
+        if (path.endsWith('/orders')) return Promise.resolve({ orders: [] });
+        if (path.endsWith('/shift')) {
+          return Promise.reject(new NuniError(404, 'FOOD_SHIFT_NOT_FOUND'));
+        }
+        return response(path, context, input);
+      });
+    }
+    const key = workspaceKey(current);
+    const workspace = () => (
+      <MerchantOperations
+        context="account-a"
+        tenantId={current.tenantId}
+        locationId={current.locationId}
+        suspended={false}
+        drafts={drafts}
+        beginRequest={confirmed.beginRequest}
+        onChanged={(detail, verifiedAccess, revision) =>
+          confirmed.confirmDetail(detail, revision, verifiedAccess)
+        }
+        onExpired={onExpired}
+        confirmedDetail={confirmed.verifiedDetails().get(key) ?? null}
+        navigation={{
+          section: activated ? 'orders' : 'overview',
+          queue: 'active',
+          backHref: '/merchant/workspace',
+          onNavigate: vi.fn(),
+        }}
+      />
+    );
+    const mounted = render(workspace());
+    await waitFor(() => expect(confirmed.verifiedDetails().has(key)).toBe(true));
+    mounted.rerender(workspace());
+
+    const rows = parseMerchantWorkspaces(
+      {
+        workspaces: [
+          { ...current, merchantName: '更新店名', activated: undefined, missingRequirements: undefined },
+        ],
+      },
+      { preserveMissingReadiness: true },
+    );
+    confirmed.mergeWorkspaceList(rows, confirmed.beginRequest());
+    mounted.rerender(workspace());
+    if (activated) expect(screen.getByRole('region', { name: '門市訂單工作台' })).toBeTruthy();
+    request.mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
+    fireEvent.click(button('重新讀取門市狀態'));
+    await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+
+    expect(confirmed.overview()?.workspaces[0]).toMatchObject({ merchantName: '更新店名', activated });
+    expect(confirmed.verifiedDetails().get(key)).toMatchObject({
+      merchantName: '更新店名',
+      activated,
+      missingRequirements: current.missingRequirements,
+      publishedMenuItems: activated ? 1 : 0,
+    });
+    if (activated) {
+      expect(screen.getByText('營業中')).toBeTruthy();
+      expect(screen.queryByRole('heading', { name: '這間門市尚未開放訂單工作台' })).toBeNull();
+    } else {
+      expect(screen.getByText('待完成：建立有庫存的首次菜單')).toBeTruthy();
+      expect(button('確認啟用門市').disabled).toBe(true);
+    }
   },
 );
 
