@@ -1,25 +1,27 @@
 .directory {
+  container: service-directory / inline-size;
   display: grid;
-  gap: 24px;
-  min-width: 0;
-}
-.introduction {
-  margin: 0;
-  max-width: 62em;
-  color: var(--muted);
-  font-size: var(--font-body-sm-size);
-  line-height: 1.75;
-}
-.finder {
-  container: service-directory-finder / inline-size;
-  display: grid;
-  gap: 14px;
+  gap: 20px;
   min-width: 0;
   font-size: var(--font-body-size);
 }
+.introduction {
+  margin: 0;
+  max-width: 46em;
+  color: var(--muted);
+  font-size: var(--font-label-size);
+  line-height: 1.65;
+}
+.finder {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-width: 44rem;
+}
+
 .searchLabel {
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   color: var(--text);
   font-size: var(--font-label-size);
   font-weight: 600;
@@ -27,50 +29,33 @@
 .searchRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
   min-width: 0;
-}
-.searchField {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  min-height: 52px;
-  padding-left: 16px;
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   color: var(--muted);
 }
-.searchSubmit {
-  min-height: 44px;
-  padding: 12px 18px;
-  color: var(--on-brand);
-  background: var(--brand);
-  border: 1px solid var(--brand);
-  border-radius: var(--radius);
-  font: inherit;
-  font-size: var(--font-label-size);
-  font-weight: 600;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-  cursor: pointer;
-  touch-action: manipulation;
-  transition: background-color var(--motion-fast) var(--ease-out);
+.searchRow:focus-within {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+.searchField {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 48px;
+  padding-left: 14px;
 }
 .searchField > svg {
   flex-shrink: 0;
 }
-.searchField:focus-within {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 3px;
-}
-/* The enclosing field owns the surface and rounded corners. */
+/* The enclosing row owns the surface and rounded corners. */
 .directory .searchField input[type='search'] {
   flex: 1;
   min-width: 0;
   width: 100%;
-  padding: 13px 10px 13px 0;
+  padding: 12px 8px 12px 0;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -87,10 +72,10 @@
 }
 .clearSearch {
   flex-shrink: 0;
-  min-width: 52px;
+  min-width: 44px;
   min-height: 44px;
-  margin-right: 4px;
-  padding: 10px;
+  margin-right: 2px;
+  padding: 0 10px;
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -100,59 +85,62 @@
     background-color var(--motion-fast) var(--ease-out),
     color var(--motion-fast) var(--ease-out);
 }
+.searchSubmit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 16px;
+  color: var(--brand);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0;
+  font-size: var(--font-label-size);
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  touch-action: manipulation;
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+
 .filterBar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px 20px;
+  gap: 0 20px;
 }
 .categories {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  min-width: 0;
 }
 .categories button {
   min-height: 44px;
-  padding: 9px 13px;
+  padding: 0 12px;
   color: var(--muted);
   background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border: 0;
+  border-radius: 0;
+  box-shadow: inset 0 -1px 0 var(--border);
   font-size: var(--font-label-size);
-  line-height: 1.5;
+  line-height: 1.4;
   transition:
-    background-color var(--motion-fast) var(--ease-out),
-    border-color var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
+    color var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out);
 }
 .categories button[aria-pressed='true'] {
   color: var(--text);
-  background: var(--surface-strong);
-  border-color: var(--text);
   font-weight: 600;
+  box-shadow: inset 0 -3px 0 var(--brand);
 }
-.resultCount {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--font-label-sm-size);
-  line-height: 1.5;
-}
-.resultsSummary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 12px;
-  min-width: 0;
-}
-.resultsTitle {
-  scroll-margin-block: 16px;
-  border-radius: 4px;
-  overflow-wrap: anywhere;
-}
-.resultsTitle:focus {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 4px;
+@media (forced-colors: active) {
+  .categories button[aria-pressed='true'] {
+    text-decoration: underline;
+    text-underline-offset: 0.3em;
+  }
 }
 .publicFilter {
   display: inline-flex;
@@ -163,167 +151,59 @@
   font-size: var(--font-label-size);
   cursor: pointer;
 }
+.publicFilter:has(input:checked) {
+  color: var(--text);
+}
 .publicFilter input {
   width: 18px;
   height: 18px;
+  margin: 0;
   accent-color: var(--brand);
 }
-.groups {
-  display: grid;
-  gap: 30px;
+
+.results {
+  --glyph: 22px;
+  --lead: 14px;
+  min-width: 0;
 }
-.sectionHeading {
+.resultsHeader {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px 20px;
-  margin-bottom: 12px;
+  gap: 2px 16px;
+  margin-bottom: 10px;
 }
-.sectionHeading :is(h2, h3) {
-  margin: 0;
-  font-size: var(--font-h3-size);
-  font-weight: 650;
-}
-.sectionHeading .resultCount {
-  margin: 0;
-  font-size: var(--font-label-sm-size);
-}
-.sectionHeading p {
-  margin: 6px 0 0;
-  color: var(--muted);
-  font-size: var(--font-body-sm-size);
-  line-height: 1.6;
-}
-.serviceList {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.serviceRow {
-  min-width: 0;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.serviceRow[data-recommended] {
-  border-color: var(--border-strong);
-}
-.service {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 14px;
-  min-height: 116px;
-  padding: 18px;
-  border-radius: var(--radius);
-  transition: background-color var(--motion-fast) var(--ease-out);
-}
-.service > svg {
-  margin-top: 10px;
-  color: var(--muted);
-  flex-shrink: 0;
-}
-.icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  color: var(--brand);
-  background: var(--accent-soft);
-  border-radius: var(--radius-sm);
-}
-.serviceBody {
-  min-width: 0;
-}
-.serviceTitle {
+.resultsSummary {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 5px 10px;
+  align-items: baseline;
+  gap: 2px 12px;
+  min-width: 0;
 }
-.serviceTitle :is(h3, h4) {
+.resultsTitle {
   margin: 0;
-  color: var(--text);
-  font-size: var(--font-body-size);
-  line-height: 1.5;
+  font-size: var(--font-h2-size);
+  line-height: var(--font-h2-line-height);
+  letter-spacing: var(--font-h2-letter-spacing);
   font-weight: 650;
-}
-.serviceBody p {
-  margin: 5px 0 8px;
-  color: var(--muted);
-  font-size: var(--font-body-sm-size);
-  line-height: 1.65;
+  scroll-margin-block: 16px;
+  border-radius: var(--radius-xs);
   overflow-wrap: anywhere;
 }
-.access {
-  display: block;
-  color: var(--muted);
-  font-size: var(--font-label-sm-size);
-  line-height: 1.5;
-}
-.recommended {
-  color: var(--brand);
-  font-size: var(--font-label-sm-size);
-  line-height: 1.5;
-}
-.related {
-  margin: 0 18px;
-  border-top: 1px solid var(--border);
-}
-.related summary {
-  min-height: 44px;
-  padding: 12px 0;
-  color: var(--muted);
-  font-size: var(--font-label-size);
-  line-height: 1.5;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-  border-radius: var(--radius-sm);
-  transition:
-    background-color var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
-}
-.related ul {
-  list-style: none;
-  padding: 0 0 8px;
-  margin: 0;
-}
-.related a {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  min-height: 44px;
-  padding: 10px 0;
-  color: var(--text);
-  font-size: var(--font-label-size);
-  border-radius: var(--radius-sm);
-  transition:
-    background-color var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
-}
-.related small {
-  color: var(--muted);
-  font-size: var(--font-label-sm-size);
-}
-.related svg {
-  margin-left: auto;
-  color: var(--muted);
-}
-.directory a:focus-visible,
-.directory button:focus-visible,
-.directory summary:focus-visible {
+.resultsTitle:focus {
   outline: 3px solid var(--focus-ring);
-  outline-offset: 3px;
+  outline-offset: 4px;
+}
+.resultCount {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-label-size);
+  line-height: 1.5;
 }
 .resetFilters {
   min-height: 44px;
-  padding: 8px 0;
+  padding: 0;
   color: var(--brand);
   background: transparent;
   border: 0;
@@ -331,112 +211,305 @@
   text-decoration: underline;
   text-underline-offset: 4px;
 }
-.emptyResults {
-  padding: 28px 22px;
+
+.groups {
+  display: grid;
+  gap: 24px;
+}
+.group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  padding-top: 12px;
+  border-top: 1px solid var(--border-strong);
+}
+.groupTitle {
+  margin: 0 0 2px;
+  font-size: var(--font-h3-size);
+  line-height: var(--font-h3-line-height);
+  letter-spacing: var(--font-h3-letter-spacing);
+  font-weight: 650;
+}
+
+.serviceList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.flatList {
+  border-top: 1px solid var(--border-strong);
+}
+.serviceRow {
+  min-width: 0;
+}
+.serviceRow + .serviceRow {
+  border-top: 1px solid var(--border);
+}
+.service {
+  display: grid;
+  grid-template-columns: var(--glyph) minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: var(--lead);
+  min-height: 64px;
+  margin-inline: -8px;
+  padding: 14px 8px;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+.service > svg {
+  margin-top: 3px;
   color: var(--muted);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  transition: color var(--motion-fast) var(--ease-out);
+}
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--glyph);
+  height: 1.5em;
+  color: var(--brand);
+}
+.serviceBody {
+  min-width: 0;
+}
+.serviceTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+}
+.serviceTitle :is(h3, h4) {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-body-size);
+  line-height: 1.5;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.recommended {
+  color: var(--brand);
+  font-size: var(--font-label-size);
+  font-weight: 600;
+  line-height: 1.5;
+}
+.serviceBody p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.access {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: var(--font-label-size);
+  line-height: 1.5;
+}
+
+.related {
+  margin: 0 0 6px calc(var(--glyph) + var(--lead));
+}
+.related summary {
+  min-height: 44px;
+  padding: 10px 0;
+  color: var(--muted);
+  font-size: var(--font-label-size);
+  line-height: 1.5;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  border-radius: var(--radius-sm);
+  transition: color var(--motion-fast) var(--ease-out);
+}
+.related ul {
+  list-style: none;
+  max-width: 32rem;
+  padding: 0 0 4px;
+  margin: 0;
+}
+.related li + li {
+  border-top: 1px solid var(--border);
+}
+.related a {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  min-height: 44px;
+  padding: 8px 0;
+  color: var(--text);
+  font-size: var(--font-label-size);
+  border-radius: var(--radius-sm);
+  transition: color var(--motion-fast) var(--ease-out);
+}
+.related small {
+  color: var(--muted);
+  font-size: var(--font-label-size);
+}
+.related svg {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.emptyResults {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding: 24px 0;
+  color: var(--muted);
+  border-top: 1px solid var(--border-strong);
 }
 .emptyResults h3 {
-  margin: 12px 0 8px;
+  margin: 6px 0 0;
   color: var(--text);
   font-size: var(--font-h3-size);
-  font-weight: 600;
+  font-weight: 650;
 }
 .emptyResults p {
   margin: 0;
   font-size: var(--font-body-sm-size);
-  line-height: 1.75;
+  line-height: 1.7;
 }
+
+.directory a:focus-visible,
+.directory button:focus-visible,
+.directory summary:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+.directory .categories button:focus-visible {
+  outline-offset: -3px;
+}
+.directory .service:focus-visible {
+  outline-offset: -3px;
+}
+
 @media (hover: hover) and (pointer: fine) {
-  .searchSubmit:hover {
-    background: var(--brand2);
+  .service:hover {
+    background: var(--panel);
   }
-  .service:hover,
-  .categories button:hover,
+  .service:hover > svg {
+    color: var(--text);
+  }
+  .categories button:not([aria-pressed='true']):hover {
+    color: var(--text);
+    box-shadow: inset 0 -2px 0 var(--border-strong);
+  }
+  .searchSubmit:hover,
   .clearSearch:hover {
-    background: var(--bg-soft);
+    background: var(--panel);
+  }
+  .clearSearch:hover,
+  .publicFilter:hover {
+    color: var(--text);
   }
   .related a:hover,
   .related summary:hover {
     color: var(--brand);
   }
 }
-.searchSubmit:active {
-  background: var(--brand2);
-}
 .service:active,
-.categories button:active,
-.clearSearch:active,
-.resetFilters:active,
-.related a:active,
-.related summary:active {
+.searchSubmit:active,
+.clearSearch:active {
   background: var(--panel2);
 }
 .related a:active,
 .related summary:active {
   color: var(--brand);
 }
-.categories button[aria-pressed='true']:is(:hover, :active) {
-  color: var(--text);
-  background: var(--surface-strong);
-  border-color: var(--text);
-}
-@media (max-width: 700px) {
-  .serviceList {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-  .service {
-    min-height: 96px;
-    gap: 12px;
-    padding: 16px;
-  }
-  .related {
-    margin-inline: 16px;
-  }
-  .groups {
-    gap: 26px;
-  }
-}
-@media (max-width: 380px) {
-  .service {
-    gap: 10px;
-    padding: 14px;
-  }
-  .icon {
-    width: 32px;
-    height: 32px;
-  }
-  .categories button {
-    padding-inline: 10px;
-  }
-}
-/* Follow the available content width and current text size, so the search
-   field keeps a complete row on phones and with enlarged text. */
-@container service-directory-finder (max-width: 32em) {
+
+/* A phone-width finder keeps a full-width field and puts submit on its own
+   bottom edge. Em follows the container's text size, so enlarged type stacks
+   earlier. */
+@container service-directory (max-width: 21em) {
   .searchRow {
     grid-template-columns: minmax(0, 1fr);
   }
-}
-@container service-directory-finder (max-width: 20em) {
-  .searchField {
-    gap: 8px;
-    padding-left: 12px;
-  }
-  .searchField > svg {
-    display: none;
+  .searchSubmit {
+    justify-content: space-between;
+    padding-inline: 14px;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px);
   }
 }
+
+/* Access becomes its own aligned column once the list has room. */
+@container service-directory (min-width: 38em) {
+  .results {
+    --lead: 20px;
+  }
+  .service {
+    grid-template-columns: var(--glyph) minmax(0, 1fr) minmax(7.5rem, 11rem) 16px;
+    padding-block: 16px;
+  }
+  .serviceBody {
+    display: contents;
+  }
+  .serviceTitle {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .serviceBody p {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .access {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    margin-top: 2px;
+  }
+  .icon {
+    grid-row: 1 / span 2;
+  }
+  .service > svg {
+    grid-column: 4;
+    grid-row: 1 / span 2;
+  }
+}
+
+/* Chapter headings sit to the left of one continuous list. */
+@container service-directory (min-width: 56em) {
+  .groups {
+    gap: 28px;
+  }
+  .group {
+    grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr);
+    column-gap: 32px;
+    padding-top: 0;
+  }
+  .groupTitle {
+    margin: 0;
+    padding-top: 16px;
+  }
+  .related ul {
+    max-width: 36rem;
+  }
+}
+
 :global([data-reduced-motion='true'])
   .directory
-  :is(.service, .categories button, .clearSearch, .searchSubmit, .related a, .related summary) {
+  :is(
+    .service,
+    .service > svg,
+    .categories button,
+    .clearSearch,
+    .searchSubmit,
+    .related a,
+    .related summary
+  ) {
   transition: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .directory
-    :is(.service, .categories button, .clearSearch, .searchSubmit, .related a, .related summary) {
+    :is(
+      .service,
+      .service > svg,
+      .categories button,
+      .clearSearch,
+      .searchSubmit,
+      .related a,
+      .related summary
+    ) {
     transition: none;
   }
 }

@@ -105,7 +105,7 @@ function ServiceRow({
       )
     : [];
   return (
-    <li className={styles.serviceRow} data-recommended={recommended || undefined}>
+    <li className={styles.serviceRow}>
       <Link
         className={styles.service}
         href={campusServiceHref(service.href, scope)}
@@ -127,7 +127,7 @@ function ServiceRow({
             {SERVICE_ACCESS[service.access]}
           </span>
         </div>
-        <CampusIcon name="arrow" size={18} />
+        <CampusIcon name="arrow" size={16} />
       </Link>
       {children.length > 0 && (
         <details className={styles.related}>
@@ -330,7 +330,7 @@ export function ServiceDirectory({
   }
 
   const renderServices = (services: readonly CampusService[], grouped = false) => (
-    <ul className={styles.serviceList}>
+    <ul className={grouped ? styles.serviceList : `${styles.serviceList} ${styles.flatList}`}>
       {services.map((service) => (
         <ServiceRow
           key={service.href}
@@ -414,6 +414,7 @@ export function ServiceDirectory({
             </div>
             <button type="submit" className={styles.searchSubmit} aria-controls={resultsId}>
               查看結果
+              <CampusIcon name="arrow" size={16} />
             </button>
           </div>
         </form>
@@ -443,8 +444,8 @@ export function ServiceDirectory({
         </div>
       </div>
 
-      <section id={resultsId} aria-label="服務搜尋結果">
-        <div className={styles.sectionHeading}>
+      <section id={resultsId} className={styles.results} aria-label="服務搜尋結果">
+        <div className={styles.resultsHeader}>
           <div className={styles.resultsSummary}>
             <h2
               ref={resultsHeading}
@@ -491,13 +492,14 @@ export function ServiceDirectory({
               );
               if (services.length === 0) return null;
               return (
-                <section key={group.id} aria-labelledby={`${id}-${group.id}`}>
-                  <div className={styles.sectionHeading}>
-                    <div>
-                      <h3 id={`${id}-${group.id}`}>{group.label}</h3>
-                      <p>{group.description}</p>
-                    </div>
-                  </div>
+                <section
+                  key={group.id}
+                  className={styles.group}
+                  aria-labelledby={`${id}-${group.id}`}
+                >
+                  <h3 id={`${id}-${group.id}`} className={styles.groupTitle}>
+                    {group.label}
+                  </h3>
                   {renderServices(services, true)}
                 </section>
               );
