@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, expect, it, vi, type Mock } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi, type Mock } from 'vitest';
 import {
   emptyPersonalEventDraft,
   personalImportSavedNotice,
@@ -104,6 +104,8 @@ vi.mock('@/lib/usePersonalImports', async (actual) => ({
   }),
 }));
 
+const originalBounds = Element.prototype.getBoundingClientRect;
+
 beforeEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
@@ -122,6 +124,15 @@ beforeEach(() => {
   URL.createObjectURL = vi.fn(() => 'blob:calendar');
   URL.revokeObjectURL = vi.fn();
   window.confirm = vi.fn(() => true);
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    // JSDOM does not lay out the linked agenda row.
+    if (this.matches('li[aria-current="true"]')) return new DOMRect(20, 100, 150, 60);
+    return originalBounds.call(this);
+  });
+});
+
+afterEach(() => {
+  Reflect.deleteProperty(window, 'visualViewport');
 });
 
 async function createTimedEvent(title = '期中考') {
@@ -682,6 +693,46 @@ it('locates only a stored event by ID, selects its actual date and month, and fo
   expect(screen.queryByText('URL假資料')).toBeNull();
   expect(screen.queryByRole('heading', { name: '另一日' })).toBeNull();
   expect(localStorage.getItem(personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId }))).toBe(before);
+});
+
+it('放大並平移後開啟行程深連結，確認行程列在雙軸皆可見才聚焦', async () => {
+  const target = focusEvent();
+  seedFocusedEvents([target, focusEvent('same-title', { date: target.date })]);
+  context.search = `eventId=${target.id}`;
+  const viewport = Object.assign(new EventTarget(), {
+    offsetLeft: 260, offsetTop: 80, width: 180, height: 240,
+  });
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+
+  let rowLeft = 40;
+  let rowTop = 420;
+  let canScroll = false;
+  vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+    if (this.matches('li[aria-current="true"]')) return new DOMRect(rowLeft, rowTop, 140, 60);
+    return originalBounds.call(this);
+  });
+  const scroll = vi.spyOn(window, 'scrollBy').mockImplementation((options?: ScrollToOptions) => {
+    expect(document.activeElement).toBe(document.body);
+    if (canScroll) {
+      rowLeft -= options?.left ?? 0;
+      rowTop -= options?.top ?? 0;
+    }
+  });
+
+  render(<PersonalCalendar />);
+  const list = await screen.findByRole('list', { name: '個人行程列表' });
+  expect(within(list).getAllByRole('heading', { name: target.title })).toHaveLength(2);
+  const row = list.querySelector('li[aria-current="true"]');
+  expect(row).toBeTruthy();
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ left: -220, top: 160, behavior: 'instant' });
+  expect(document.activeElement).toBe(document.body);
+
+  canScroll = true;
+  viewport.dispatchEvent(new Event('scroll'));
+  expect(row?.getBoundingClientRect()).toMatchObject({ left: 260, right: 400, top: 260, bottom: 320 });
+  expect(document.activeElement).toBe(row);
+  viewport.dispatchEvent(new Event('scroll'));
+  expect(scroll).toHaveBeenCalledTimes(2);
 });
 
 it.each([

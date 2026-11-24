@@ -281,16 +281,21 @@ it.each([
   }
 });
 
-it('手勢放大時七欄沒有水平溢位，End 先平移可視視窗再聚焦週六', () => {
-  const visualViewport = { offsetLeft: 120, offsetTop: 30, width: 300, height: 640 };
+it.each([
+  ['部分重疊', 120, 616, 0, 'nearest'],
+  ['完全錯開', 700, 616, 0, 'start'],
+  ['完全錯開且七欄溢位', 700, 320, 292, 'start'],
+])('放大後可視視窗與月格%s，End 先平移再聚焦週六', (_case, offsetLeft, width, expectedScroll, inline) => {
+  const visualViewport = { offsetLeft, offsetTop: 30, width: 300, height: 640 };
   Object.defineProperty(window, 'visualViewport', { configurable: true, value: visualViewport });
-  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(616);
+  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(width);
   vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(616);
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-    if (this.classList.contains(styles.viewport)) return new DOMRect(40, 0, 616, 500);
+    if (this.classList.contains(styles.viewport)) return new DOMRect(40, 0, width, 500);
     if (this.classList.contains(styles.date)) {
       const column = new Date(this.getAttribute('aria-label')!).getUTCDay();
-      return new DOMRect(44 + column * 88, 100, 80, 40);
+      const container = this.closest(`.${styles.viewport}`)!;
+      return new DOMRect(44 + column * 88 - container.scrollLeft, 100, 80, 40);
     }
     return originalBounds.call(this);
   });
@@ -303,23 +308,26 @@ it('手勢放大時七欄沒有水平溢位，End 先平移可視視窗再聚焦
   const viewport = screen.getByRole('region', { name: '2028-01 月格，週日起始' });
   const origin = focusDate('2028-01-12');
   const target = within(viewport).getByRole('button', { name: '2028-01-15' });
-  const targetRight = target.getBoundingClientRect().right;
-  expect(targetRight).toBeGreaterThan(visualViewport.offsetLeft + visualViewport.width);
-  const pan = vi.fn(() => {
+  const initialBounds = target.getBoundingClientRect();
+  expect(initialBounds.right > offsetLeft + visualViewport.width || initialBounds.right <= offsetLeft).toBe(true);
+  const pan = vi.fn((options: ScrollIntoViewOptions) => {
     expect(document.activeElement).toBe(origin);
-    visualViewport.offsetLeft = targetRight - visualViewport.width;
+    expect(viewport.scrollLeft).toBe(expectedScroll);
+    const bounds = target.getBoundingClientRect();
+    if (options.inline === 'start') visualViewport.offsetLeft = bounds.left;
+    else if (inline === 'nearest') visualViewport.offsetLeft = bounds.right - visualViewport.width;
   });
   Object.defineProperty(target, 'scrollIntoView', { value: pan });
 
   fireEvent.keyDown(origin, { key: 'End' });
 
   expect(pan).toHaveBeenCalledExactlyOnceWith({
-    block: 'nearest', inline: 'nearest', behavior: 'instant',
+    block: 'nearest', inline, behavior: 'instant',
   });
-  expect(viewport.scrollLeft).toBe(0);
+  expect(viewport.scrollLeft).toBe(expectedScroll);
   expect(document.activeElement).toBe(target);
   expect(target.getBoundingClientRect().left).toBeGreaterThanOrEqual(visualViewport.offsetLeft);
-  expect(targetRight).toBeLessThanOrEqual(visualViewport.offsetLeft + visualViewport.width);
+  expect(target.getBoundingClientRect().right).toBeLessThanOrEqual(visualViewport.offsetLeft + visualViewport.width);
 });
 
 it('外部月份或日期更新不搶走目前控制的焦點', () => {

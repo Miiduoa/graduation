@@ -71,10 +71,9 @@ export function measureStickyInsets() {
   return { top: stickyHeaderOffset(), bottom: stickyFooterOffset() };
 }
 
-function horizontalVisibleBounds(element: HTMLElement) {
-  const visible = visibleViewport();
-  let left = visible.left;
-  let right = visible.right;
+function horizontalClipBounds(element: HTMLElement) {
+  let left = -Infinity;
+  let right = Infinity;
   for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
     const { overflowX } = getComputedStyle(ancestor);
     if (!CLIPPING_OVERFLOWS.includes(overflowX)) continue;
@@ -83,6 +82,12 @@ function horizontalVisibleBounds(element: HTMLElement) {
     right = Math.min(right, clipLeft + ancestor.clientWidth);
   }
   return { left, right };
+}
+
+function horizontalVisibleBounds(element: HTMLElement) {
+  const visible = visibleViewport();
+  const clip = horizontalClipBounds(element);
+  return { left: Math.max(visible.left, clip.left), right: Math.min(visible.right, clip.right) };
 }
 
 function fitsVisibleAxis(start: number, end: number, min: number, max: number) {
@@ -116,8 +121,7 @@ function nearestScrollDistance(start: number, end: number, min: number, max: num
   return Math.max(0, Math.ceil(end - max));
 }
 
-function horizontalScrollDistance(element: HTMLElement) {
-  const { left, right } = horizontalVisibleBounds(element);
+function horizontalScrollDistance(element: HTMLElement, { left, right }: { left: number; right: number }) {
   const rect = element.getBoundingClientRect();
   return nearestScrollDistance(rect.left, rect.right, left, right);
 }
@@ -127,15 +131,20 @@ export function revealForFocus(element: HTMLElement, horizontalContainer?: HTMLE
     ? horizontalContainer.scrollWidth - horizontalContainer.clientWidth
     : 0;
   if (horizontalContainer && maxScroll > 0) {
+    const bounds = horizontalVisibleBounds(element);
+    // Bring the target inside its scrollport first when the visual viewport is disjoint.
+    const scrollBounds = bounds.right > bounds.left ? bounds : horizontalClipBounds(element);
     const target = Math.max(0, Math.min(
-      maxScroll, horizontalContainer.scrollLeft + horizontalScrollDistance(element),
+      maxScroll, horizontalContainer.scrollLeft + horizontalScrollDistance(element, scrollBounds),
     ));
     if (target !== horizontalContainer.scrollLeft) horizontalContainer.scrollLeft = target;
   }
 
   const insets = measureStickyInsets();
   applyScrollMargins(element, insets);
-  const needsHorizontalReveal = horizontalScrollDistance(element) !== 0;
+  const bounds = horizontalVisibleBounds(element);
+  const needsHorizontalReveal =
+    bounds.right <= bounds.left || horizontalScrollDistance(element, bounds) !== 0;
   const nativeScroll = () => {
     // Native scrolling can pan the visual viewport even when the layout viewport cannot scroll.
     const rect = element.getBoundingClientRect();
@@ -151,7 +160,12 @@ export function revealForFocus(element: HTMLElement, horizontalContainer?: HTMLE
 
   const { top, bottom } = verticalVisibleBounds(needsHorizontalReveal ? measureStickyInsets() : insets);
   const rect = element.getBoundingClientRect();
-  const x = horizontalScrollDistance(element);
+  const horizontalBounds = horizontalVisibleBounds(element);
+  // Page scrolling can move a disjoint scrollport into view along with its target.
+  const x = horizontalScrollDistance(
+    element,
+    horizontalBounds.right > horizontalBounds.left ? horizontalBounds : visibleViewport(),
+  );
   const y = nearestScrollDistance(rect.top, rect.bottom, top, bottom);
   if (x || y) window.scrollBy({ left: x, top: y, behavior: 'instant' });
 

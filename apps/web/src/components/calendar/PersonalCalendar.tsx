@@ -474,14 +474,23 @@ function PersonalCalendarWorkspace({
       !requestedEventId ||
       focusedRequest.current === requestedEventId ||
       calendarView !== 'list' ||
-      selectedDate !== linkedEventDate ||
-      !linkedEventElement.current
+      selectedDate !== linkedEventDate
     )
       return;
-    focusedRequest.current = requestedEventId;
-    linkedEventElement.current.focus({ preventScroll: true });
-    scrollVerticallyIntoView(linkedEventElement.current);
-  }, [paused, requestedEventId, linkedEventDate, calendarView, selectedDate]);
+    const row = linkedEventElement.current;
+    if (!row) return;
+
+    const revealLinkedEvent = () => {
+      if (focusedRequest.current === requestedEventId || !row.isConnected || !revealForFocus(row))
+        return;
+      row.focus({ preventScroll: true });
+      focusedRequest.current = requestedEventId;
+    };
+    revealLinkedEvent();
+    if (focusedRequest.current !== requestedEventId) {
+      return onVisibleViewportChange(revealLinkedEvent);
+    }
+  }, [paused, ledger.loading, requestedEventId, linkedEventDate, calendarView, selectedDate]);
 
   useLayoutEffect(() => {
     active.current = true;
