@@ -854,3 +854,65 @@ it.each([
     expect(screen.getByRole('link', { name: '管理門市：第一門市' })).toBeTruthy();
   },
 );
+
+it.each([
+  { source: 'merchant-applications', status: 401, code: 'UNAUTHORIZED', forward: false },
+  { source: 'merchant-onboarding-programs', status: 409, code: 'SESSION_CHANGED', forward: false },
+  { source: 'merchant-applications', status: 409, code: 'SESSION_CHANGED', forward: true },
+  { source: 'merchant-onboarding-programs', status: 401, code: 'UNAUTHORIZED', forward: true },
+])('expires the session immediately on $source $code (Forward first: $forward)', async ({
+  source,
+  status,
+  code,
+  forward,
+}) => {
+  let rejectExpired!: (error: NuniError) => void;
+  const expiredResponse = new Promise<never>((_, reject) => {
+    rejectExpired = reject;
+  });
+  let finishStores!: (value: { workspaces: typeof continuityStore[] }) => void;
+  const pendingStores = new Promise<{ workspaces: typeof continuityStore[] }>((resolve) => {
+    finishStores = resolve;
+  });
+  const readExpired = vi.fn(() => expiredResponse);
+  let returning = false;
+  mocks.request.mockImplementation((path) => {
+    if (returning && path === source) return readExpired();
+    if (path === 'merchant-applications')
+      return Promise.resolve({ applications: [{ ...application, reviewerNote: '請補營業登記資料' }] });
+    if (path === 'merchant-workspaces')
+      return returning ? pendingStores : Promise.resolve({ workspaces: [continuityStore] });
+    if (path === 'merchant-workspaces/campus-one/location-1') return Promise.resolve(continuityStore);
+    return respond(path);
+  });
+
+  window.history.replaceState(null, '', '/merchant');
+  render(<MerchantWorkspace />);
+  await screen.findByText('審核說明：請補營業登記資料');
+  fireEvent.click(screen.getByRole('link', { name: '管理門市：第一門市' }));
+  await screen.findByRole('heading', { name: '餐坊／第一門市' });
+  returning = true;
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readExpired).toHaveBeenCalledTimes(1));
+  expect(screen.getByText('審核說明：請補營業登記資料')).toBeTruthy();
+
+  if (forward) {
+    await act(async () => window.history.forward());
+    await screen.findByRole('heading', { name: '餐坊／第一門市' });
+  }
+  await act(async () => rejectExpired(new NuniError(status, code)));
+  await screen.findByText('登入或帳號已變更，這次店家資料與草稿已清除。');
+  expect(screen.queryByText('審核說明：請補營業登記資料')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: '餐坊／第一門市' })).toBeNull();
+  expect(mocks.auth.refresh).toHaveBeenCalledTimes(1);
+
+  if (!forward) {
+    await act(async () => window.history.forward());
+    await waitFor(() => expect(window.location.pathname).toBe('/merchant/workspace'));
+    expect(screen.getByText('登入或帳號已變更，這次店家資料與草稿已清除。')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '餐坊／第一門市' })).toBeNull();
+  }
+  await act(async () => finishStores({ workspaces: [continuityStore] }));
+  expect(screen.queryByRole('link', { name: '管理門市：第一門市' })).toBeNull();
+});

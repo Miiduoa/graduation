@@ -137,7 +137,14 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
 
   function confirmMenu(key: string, revision: number, createdItems: number) {
     const draft = drafts.get(key);
-    if (!draft || revision <= revokedThrough(key)) return false;
+    const row = entries.get(key)?.row;
+    if (!draft || !row) return false;
+    // The receipt has no readiness version. Apply it to the known row in request order.
+    const next = {
+      ...row.value,
+      missingRequirements: row.value.missingRequirements.filter((item) => item !== 'menu'),
+    };
+    if (merge(next, revision)?.row?.value !== next) return false;
     draft.menuReceipt = createdItems;
     return true;
   }

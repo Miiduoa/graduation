@@ -338,15 +338,27 @@ function AccountWorkspace({
     const addTargets = (items: Iterable<Pick<NuniMerchantWorkspaceDetail, 'tenantId' | 'locationId'>>) => {
       for (const item of items) targets.set(workspaceKey(item), item);
     };
+    function observeFailure<T>(request: Promise<T>, onFailure?: (error: unknown) => void) {
+      return request.catch((error: unknown) => {
+        if (isSameSession()) {
+          if (expired(error)) expire();
+          else onFailure?.(error);
+        }
+        throw error;
+      });
+    }
+
     try {
       const [programs, submitted, stores] = await Promise.allSettled([
-        view === 'workspace'
-          ? Promise.resolve([])
-          : browserRequest('merchant-onboarding-programs', context).then(
-              (value) => parseMerchantOverview({ ...nuniRecord(value), applications: [] }).programs,
-            ),
-        browserRequest('merchant-applications', context).then(
-          (value) => {
+        observeFailure(
+          view === 'workspace'
+            ? Promise.resolve([])
+            : browserRequest('merchant-onboarding-programs', context).then(
+                (value) => parseMerchantOverview({ ...nuniRecord(value), applications: [] }).programs,
+              ),
+        ),
+        observeFailure(
+          browserRequest('merchant-applications', context).then((value) => {
             if (isSameSession()) {
               confirmed.mergeApplications(
                 parseMerchantOverview({ ...nuniRecord(value), programs: [] }).applications,
@@ -354,48 +366,34 @@ function AccountWorkspace({
               );
               publishOverview();
             }
-          },
-          (error: unknown) => {
-            if (isSameSession() && denied(error)) {
+          }),
+          (error) => {
+            if (denied(error)) {
               confirmed.rejectApplications();
               setNotice('');
               publishOverview();
             }
-            throw error;
           },
         ),
         // Confirm the list as soon as it settles, independently of application progress.
-        (view === 'apply'
-          ? Promise.resolve([])
-          : browserRequest('merchant-workspaces', context).then(parseMerchantWorkspaces)
-        ).then(
-          (rows) => {
+        observeFailure(
+          (view === 'apply'
+            ? Promise.resolve([])
+            : browserRequest('merchant-workspaces', context).then(parseMerchantWorkspaces)
+          ).then((rows) => {
             if (isSameSession()) {
               confirmed.mergeWorkspaceList(rows, listRevision);
               publishOverview();
             }
-            return rows;
-          },
-          (error: unknown) => {
-            if (isSameSession()) {
-              if (expired(error)) expire();
-              else {
-                addTargets(confirmed.knownWorkspaces());
-                confirmed.rejectWorkspaceList(denied(error), listRevision);
-                publishOverview();
-              }
-            }
-            throw error;
+          }),
+          (error) => {
+            addTargets(confirmed.knownWorkspaces());
+            confirmed.rejectWorkspaceList(denied(error), listRevision);
+            publishOverview();
           },
         ),
       ]);
       if (!isCurrent()) return;
-      for (const result of [programs, submitted, stores]) {
-        if (result.status === 'rejected' && expired(result.reason)) {
-          expire();
-          return;
-        }
-      }
       if (programs.status === 'fulfilled') confirmed.setPrograms(programs.value);
       else if (denied(programs.reason)) confirmed.setPrograms();
 

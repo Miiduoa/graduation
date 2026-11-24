@@ -1472,3 +1472,63 @@ it.each([
   expect(screen.getByRole<HTMLButtonElement>('button', { name: '確認建立並上架菜單' }).disabled)
     .toBe(true);
 });
+
+it('keeps the newer same-version list when an earlier first-menu receipt arrives', async () => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const missingMenu = { ...detail(), missingRequirements: ['menu'] };
+  type MenuReceipt = { menuVersionId: string; createdItems: number };
+  let finishMenu!: (receipt: MenuReceipt) => void;
+  const receipt = new Promise<MenuReceipt>((resolve) => {
+    finishMenu = resolve;
+  });
+  let finishApplications!: (value: { applications: [] }) => void;
+  const applications = new Promise<{ applications: [] }>((resolve) => {
+    finishApplications = resolve;
+  });
+  const readApplications = vi.fn()
+    .mockResolvedValueOnce({ applications: [] })
+    .mockReturnValue(applications);
+  const readStores = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [detail()] })
+    .mockResolvedValue({ workspaces: [missingMenu] });
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(detail())
+    .mockResolvedValue(missingMenu);
+  const writeMenu = vi.fn(() => receipt);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readStores();
+    if (resource === 'merchant-applications') return readApplications();
+    if (resource === path) return readDetail();
+    if (resource === `${path}/initial-menu`) return writeMenu();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  fireEvent.change(await screen.findByLabelText('品項 1 名稱'), { target: { value: '蔬菜便當' } });
+  fireEvent.change(screen.getByLabelText('品項 1 售價（元）'), { target: { value: '85' } });
+  fireEvent.change(screen.getByLabelText('品項 1 初始庫存'), { target: { value: '20' } });
+  fireEvent.click(screen.getByLabelText(/我已確認品項、元售價/));
+  fireEvent.click(screen.getByRole('button', { name: '確認建立並上架菜單' }));
+  expect(writeMenu).toHaveBeenCalledTimes(1);
+
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readApplications).toHaveBeenCalledTimes(2));
+  const link = await screen.findByRole('link', { name: '管理門市：一樓' });
+  const row = within(link.closest('li')!);
+  expect(row.queryByText(/確認營運設定與條款/)).toBeNull();
+  expect(row.getByText('待完成：建立菜單')).toBeTruthy();
+  await act(async () =>
+    finishMenu({
+      menuVersionId: 'food-menu_12345678-1234-1234-1234-123456789abc',
+      createdItems: 1,
+    }),
+  );
+  expect(row.getByText('待完成：建立菜單')).toBeTruthy();
+
+  await act(async () => window.history.forward());
+  await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+  expect(screen.getByText('待完成：建立有庫存的首次菜單')).toBeTruthy();
+  expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
+  await act(async () => finishApplications({ applications: [] }));
+});
