@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findCampusWalkingRoute, type CampusWalkingGraph } from './campusWalkingGraph';
+import { findCampusWalkingRoute, isCampusWalkingRouteCurrent, type CampusWalkingGraph } from './campusWalkingGraph';
 
 // Synthetic topology and IDs only: these are NOT Providence paths or coordinates.
 const bounds = { south: 10, north: 11, west: 20, east: 21 };
@@ -99,6 +99,48 @@ describe('audited outdoor campus walking graph', () => {
     expect(route(oneWay, 1, 1)?.distanceMeters).toBe(0);
     expect(route(oneWay, 2, 2)?.distanceMeters).toBe(0);
     expect(route(oneWay, 2, 1)).toBeNull();
+  });
+
+
+  it('exposes chosen path expiry rather than expiry of unrelated edges', () => {
+    const expires = '2026-11-25T08:00:00Z';
+    const unrelated = '2026-11-24T09:00:00Z';
+    const changed = { ...graph, edges: graph.edges.map((edge, i) => ({
+      ...edge, validUntil: i === 1 ? expires : i >= 2 ? unrelated : edge.validUntil,
+    })) };
+    const result = route(changed)!;
+    expect(result.nodes.map(n => n.id)).toEqual([1, 2, 3]);
+    expect(result.schoolId).toBe('fixture');
+    expect(result.osmBaseAt).toBe(graph.osmBaseAt);
+    expect(result.reviewExpiresAtMs).toBe(Date.parse(expires));
+    expect(route(changed, 3, 1)?.reviewExpiresAtMs).toBe(Date.parse(expires));
+    expect(isCampusWalkingRouteCurrent(result, 'fixture', Date.parse(expires) - 1)).toBe(true);
+    expect(isCampusWalkingRouteCurrent(result, 'fixture', Date.parse(expires))).toBe(false);
+    expect(isCampusWalkingRouteCurrent(result, 'other', now)).toBe(false);
+  });
+
+  it('invalidates cached routes when the snapshot expires or clock is invalid', () => {
+    const result = route(graph)!;
+    const deadline = Date.parse(graph.osmBaseAt) + 48 * 60 * 60 * 1000;
+    expect(isCampusWalkingRouteCurrent(result, 'fixture', deadline)).toBe(true);
+    expect(isCampusWalkingRouteCurrent(result, 'fixture', deadline + 1)).toBe(false);
+    expect(isCampusWalkingRouteCurrent(result, 'fixture', NaN)).toBe(false);
+    expect(isCampusWalkingRouteCurrent({ ...result, reviewExpiresAtMs: NaN }, 'fixture', now)).toBe(false);
+  });
+
+  it('uses latest eligible incident expiry for same-node routes, excluding blocked edges', () => {
+    const early = '2026-11-24T09:00:00Z';
+    const late = '2026-11-25T08:00:00Z';
+    const changed = { ...graph, edges: [
+      { ...graph.edges[0], validUntil: early },
+      { ...graph.edges[2], validUntil: late },
+      { ...graph.edges[4], from: 1, access: 'restricted' as const },
+    ] };
+    const result = route(changed, 1, 1)!;
+    expect(result.reviewExpiresAtMs).toBe(Date.parse(late));
+    expect(isCampusWalkingRouteCurrent(result, 'fixture', Date.parse(early))).toBe(true);
+    expect(isCampusWalkingRouteCurrent(result, 'fixture', Date.parse(late))).toBe(false);
+    expect(route(changed, 1, 1, Date.parse(late))).toBeNull();
   });
 
   it('does not route reviewed-open segments after their review expires', () => {
