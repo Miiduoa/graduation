@@ -1,0 +1,11 @@
+diff --git a/android/build.gradle b/android/build.gradle
+--- a/android/build.gradle
++++ b/android/build.gradle
+@@ -50,6 +50,7 @@ android {
+     buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
+     externalNativeBuild {
+       cmake {
++        arguments "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+         abiFilters (*reactNativeArchitectures())
+       }
+     }
