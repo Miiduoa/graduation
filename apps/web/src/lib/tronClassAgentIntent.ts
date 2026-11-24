@@ -371,18 +371,38 @@ function isClauseBoundaryToken(token: Token): boolean {
   return CLAUSE_BOUNDARY_WORDS.has(token.value) || CLAUSE_PUNCT.test(token.value);
 }
 
+const REQUEST_CONNECTORS = new Set(['也幫我', '再幫我', '並幫我']);
+
+function separatesClause(token: Token, hasContent: boolean, hasPredicate: boolean): boolean {
+  return CLAUSE_PUNCT.test(token.value) || (hasContent && CLAUSE_BOUNDARY_WORDS.has(token.value) &&
+    (!REQUEST_CONNECTORS.has(token.value) || hasPredicate));
+}
+
+function isAllowedRequestPrefix(token: Token): boolean {
+  return isWhitespaceToken(token) || token.kind === 'punct' || /^\p{P}+$/u.test(token.value) ||
+    CLAUSE_REQUEST_HELPERS.has(token.value.toLowerCase());
+}
+
 function splitClauses(text: string): string[] {
-  const tokens = tokensFor(text);
   const clauses: string[] = [];
   let start = 0;
-  for (const token of tokens) {
-    if (!isClauseBoundaryToken(token)) continue;
-    const part = text.slice(start, token.start).trim();
-    if (part) clauses.push(token.value === '?' ? part + token.value : part);
+  let hasContent = false;
+  let hasPredicate = false;
+  for (const token of tokensFor(text)) {
+    if (!separatesClause(token, hasContent, hasPredicate)) {
+      hasContent ||= !isAllowedRequestPrefix(token);
+      hasPredicate ||= predicateKindOf(token) !== null;
+      continue;
+    }
+    if (hasContent) {
+      const part = text.slice(start, token.start).trim();
+      clauses.push(token.value === '?' ? part + token.value : part);
+    }
     start = token.end;
+    hasContent = false;
+    hasPredicate = false;
   }
-  const tail = text.slice(start).trim();
-  if (tail) clauses.push(tail);
+  if (hasContent) clauses.push(text.slice(start).trim());
   return clauses;
 }
 
@@ -1149,11 +1169,11 @@ function negatedWriteTargets(tokens: Token[]): Array<number | undefined> {
   return targets;
 }
 
-function textWithoutQuotedSpans(text: string): string {
+function textWithoutQuotedSpans(text: string, replacement = ' '): string {
   const parts: string[] = [];
   let start = 0;
   for (const span of typographicQuoteSpans(text)) {
-    parts.push(text.slice(start, span.open), ' ');
+    parts.push(text.slice(start, span.open), replacement);
     start = span.end;
   }
   parts.push(text.slice(start));
@@ -1239,7 +1259,7 @@ function tokenIsProtected(token: Token, mask: readonly boolean[]): boolean {
 }
 
 function isKnownReadToken(token: Token, mask: readonly boolean[]): boolean {
-  if (isWhitespaceToken(token) || token.kind === 'punct' || token.kind === 'filename') return true;
+  if (isAllowedRequestPrefix(token) || token.kind === 'filename') return true;
   if (isWriteVerbToken(token)) return true;
   if (token.kind === 'unknown') return tokenIsProtected(token, mask);
   return true;
@@ -1279,16 +1299,11 @@ const ACTION_COMPLETION_MARKERS = new Set([
 ]);
 const DESCRIPTIVE_ACTION_PREFIXES = new Set(['尚未', '還沒', '未', '沒', '待', '正在', '正']);
 
-const ACTION_SUBJECTS = new Set(['我', '我們', '你', '您', '你們', '他', '她', '它', '他們', '她們']);
-
 function hasDescriptiveAction(text: string): boolean {
   const tokens = visibleCommandTokens(text).filter(token => !isWhitespaceToken(token));
   let descriptivePrefix = false;
   let experiencePrefix = false;
   let submissionStatus = false;
-  let subject: string | undefined;
-  let request = false;
-  let declarativeModal = false;
   let readOnlyStatus: boolean | undefined;
   let sawQuery = false;
   let declarativeComplement = false;
@@ -1304,9 +1319,6 @@ function hasDescriptiveAction(text: string): boolean {
       descriptivePrefix = false;
       experiencePrefix = false;
       submissionStatus = false;
-      subject = undefined;
-      request = false;
-      declarativeModal = false;
       continue;
     }
     const value = token.value.toLowerCase();
@@ -1338,7 +1350,7 @@ function hasDescriptiveAction(text: string): boolean {
       continue;
     }
     if (action) {
-      if (experiencePrefix || (!request && (subject !== undefined || declarativeModal))) return true;
+      if (experiencePrefix) return true;
       if (descriptivePrefix) {
         if (!write || !isSubmitWriteToken(token)) return true;
         readOnlyStatus ??= writeCommandRoute(text) === null;
@@ -1346,10 +1358,6 @@ function hasDescriptiveAction(text: string): boolean {
         descriptivePrefix = false;
       }
     }
-    if (ACTION_SUBJECTS.has(token.value)) subject = token.value;
-    if (WRITE_HELPERS.has(token.value) || PREPARE_REQUEST_CUES.has(token.value) ||
-      ((token.value === '要' || token.value === '想') && (subject === '我' || subject === undefined))) request = true;
-    if (token.value === '會') declarativeModal = true;
     if (DESCRIPTIVE_ACTION_PREFIXES.has(token.value)) descriptivePrefix = true;
     // 有沒有 and 有哪些 are atomic. Standalone 有 is only evidence of
     // experience if an action follows in the clause, regardless of interveners.
@@ -1360,19 +1368,16 @@ function hasDescriptiveAction(text: string): boolean {
   return declarativeComplement && !questionComplement && !terminalQuestion;
 }
 
-const PREPARE_REQUEST_CUES = new Set([
-  '記得', '立即', '馬上', '接下來', '幫忙', '務必', '趕緊', '立刻', '盡快',
-]);
-const READ_REQUEST_PREFIX = new Set([
-  ...LMS_NAMES, ...WRITE_HELPERS, ...PREPARE_REQUEST_CUES, ...ACTION_CUES,
-  'please', '我', '想', '要', '現在', '就', '再', '先', '只', '只要', '能', '可以', '可',
-  '開啟', '打開', '開', '前往', '進入', 'open', 'go to',
-]);
 const COPULAS = new Set(['是', '就是', '才是', '不是', '只是', 'is', 'are']);
 const READ_QUESTION_WORDS = new Set([
   '有沒有', '有無', '有哪些', '哪些', '是否', '有什麼', '有幾份',
   '什麼時候', '哪一天', '哪天', '是什麼', '是不是', '什麼', '如何', '怎樣', '怎麼樣', '過了嗎', '了沒', '了嗎',
   '可以做什麼', '能做什麼', '有哪些功能', '支援什麼', '支援哪些', '做什麼', 'what can',
+]);
+
+const QUESTION_PREDICATES = new Set([
+  '有沒有', '有無', '有哪些', '有什麼', '有幾份', '是什麼', '是不是', '什麼時候', '哪一天', '哪天',
+  '可以做什麼', '能做什麼', '有哪些功能', '支援什麼', '支援哪些', 'what can',
 ]);
 
 const OBJECT_SPECIFIERS = new Set([
@@ -1395,32 +1400,24 @@ const READ_OBJECT_HEADS = new Set([
 const VERBAL_PARTICLES = new Set(['一下', '出去', '上去', '掉', '給老師', '給我']);
 
 const CLAUSE_REQUEST_HELPERS = new Set(['請', '幫我', '替我', '代我', '麻煩', 'please']);
-const FIRST_PERSON_PREFIX = new Set(['我', '我們']);
-const REQUEST_CONTINUATIONS = new Set([
-  '想', '要', '現在', '就', '再', '先', '只', '只要', '能', '可以', '可',
-  '立即', '馬上', '記得', '務必', '趕緊', '立刻', '盡快',
-]);
-const DESCRIPTIVE_SUBJECT_PRONOUNS = new Set(['他', '她', '它', '他們', '她們']);
-const SUBJECT_NOUNS = new Set(['老師', '同學', '學生', '助教', '教授']);
-
 type PredicateKind = 'read' | 'prepare' | 'download' | 'write';
 type ClausePredicate = {
   index: number;
   kind: PredicateKind;
-  subjectBefore: boolean;
+  blockedPrefix: boolean;
   objectEndsClause: boolean;
   residueCopula: boolean;
   residueAspect: boolean;
   residueUnknown: boolean;
 };
 type ClauseAnalysis = {
-  start: number;
-  end: number;
+  hasLmsName: boolean;
+  hasQuestionPredicate: boolean;
+  hasExistentialPredicate: boolean;
+  hasBlockedPredicate: boolean;
   predicates: ClausePredicate[];
   trailingQuestion: boolean;
-  hasCopula: boolean;
   hasQuestionCopula: boolean;
-  hasCompletedAspect: boolean;
   hasUnknown: boolean;
 };
 
@@ -1434,70 +1431,57 @@ function predicateKindOf(token: Token): PredicateKind | null {
   return null;
 }
 
-function isLmsSpecifier(token: Token): boolean {
-  const value = token.value.toLowerCase();
-  return LMS_NAMES.includes(value) || LMS_NAMES.includes(token.value);
+type StatusSuffix = { homework: boolean; governed: boolean; question: boolean; deadline: boolean };
+
+function matchesStatusSuffix(text: string, start: number): StatusSuffix | undefined {
+  // Status grammar is local to the verb. Bound lookahead and prevent a
+  // truncated window from matching a pattern anchored at the end of input.
+  const end = start + PREFIX_ANCHOR_WINDOW;
+  const suffix = text.slice(start, end) + (end < text.length ? '\u0000' : '');
+  const homework = HOMEWORK_STATUS_SUFFIX.test(suffix);
+  const governed = GOVERNED_STATUS.test(suffix);
+  const question = SUBMISSION_QUESTION.test(suffix);
+  const deadline = SUBMISSION_DEADLINE.test(suffix);
+  if (homework || governed || question || deadline) return { homework, governed, question, deadline };
+  return undefined;
 }
 
-function isDescriptiveSubjectToken(token: Token): boolean {
-  if (token.value === '你' || token.value === '您' || token.value === '你們') return false;
-  return DESCRIPTIVE_SUBJECT_PRONOUNS.has(token.value) || SUBJECT_NOUNS.has(token.value);
-}
-
-function tokensText(tokens: Token[], start = 0, end = tokens.length): string {
-  return tokens.slice(start, end).map(token => token.value).join('');
-}
-
-function isPrenominalPredicate(tokens: Token[], index: number): boolean {
-  const prev = previousSignificantToken(tokens, index);
-  const next = nextSignificantToken(tokens, index);
-  return prev?.value === '的' || prev?.value === '之' || next?.value === '的' || next?.value === '之';
-}
-
-function clauseSegmentStart(tokens: Token[], index: number): number {
-  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-    if (isClauseBoundaryToken(tokens[cursor]!)) return cursor + 1;
+function clauseTokenContext(tokens: Token[]) {
+  const offsets: number[] = [];
+  const parts: string[] = [];
+  let offset = 0;
+  for (const token of tokens) {
+    offsets.push(offset);
+    const value = /[\r\n]/u.test(token.value) && isWhitespaceToken(token)
+      ? '\n'
+      : token.value.replace(/\s+/gu, ' ');
+    parts.push(value);
+    offset += value.length;
   }
-  return 0;
-}
-
-function isStatusFilterUse(tokens: Token[], index: number, readGoverns = false): boolean {
-  const token = tokens[index]!;
-  if (!isWriteVerbToken(token) || !isSubmitWriteToken(token)) return false;
-  const after = tokensText(tokens, index + 1).trimStart();
-  const segment = tokensText(tokens, clauseSegmentStart(tokens, index), index).trimStart();
-  if (ADDITIVE_CUE.test(suffixForEndAnchor(segment)) || WRITE_CUE.test(suffixForEndAnchor(segment))) {
-    return false;
+  offsets.push(offset);
+  const text = parts.join('');
+  const next: number[] = [];
+  const previous: number[] = [];
+  const statusSuffixes: (StatusSuffix | undefined)[] = [];
+  let significant = tokens.length;
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    next[index] = significant;
+    if (!isWhitespaceToken(tokens[index]!)) significant = index;
   }
-  const prev = previousSignificantToken(tokens, index);
-  const statusPrefix = !!prev && (
-    DESCRIPTIVE_ACTION_PREFIXES.has(prev.value) || ACTION_COMPLETION_MARKERS.has(prev.value) ||
-    prev.value === '是否' || READ_QUESTION_WORDS.has(prev.value));
-  if (statusPrefix && HOMEWORK_STATUS_SUFFIX.test(after)) return true;
-  if (GOVERNED_STATUS.test(after) || SUBMISSION_QUESTION.test(after) || SUBMISSION_DEADLINE.test(after)) {
-    return readGoverns || readGovernsStatus(segment) || HOMEWORK_SUBJECT.test(segment) || LMS_SUBJECT.test(segment);
+  significant = -1;
+  for (const [index, token] of tokens.entries()) {
+    previous[index] = significant;
+    if (!isWhitespaceToken(token)) significant = index;
+    if (!isWriteVerbToken(token) || !isSubmitWriteToken(token)) continue;
+    statusSuffixes[index] = matchesStatusSuffix(text, offsets[next[index]!]!);
   }
-  return false;
-}
-
-function isStatusAspectToken(tokens: Token[], index: number): boolean {
-  const next = nextSignificantToken(tokens, index);
-  if (!next || !isWriteVerbToken(next) || !isSubmitWriteToken(next)) return false;
-  const nextIndex = tokens.indexOf(next, index + 1);
-  const after = tokensText(tokens, nextIndex >= 0 ? nextIndex + 1 : index + 1).trimStart();
-  return GOVERNED_STATUS.test(after) || SUBMISSION_QUESTION.test(after) ||
-    SUBMISSION_DEADLINE.test(after) || HOMEWORK_STATUS_SUFFIX.test(after);
-}
-
-function clauseHasLmsName(tokens: Token[], start: number, end: number): boolean {
-  return tokens.slice(start, end).some(isLmsSpecifier);
+  return { offsets, text, next, previous, statusSuffixes };
 }
 
 /**
- * One left-to-right pass over the token list. Each clause records its
- * clause-initial predicate, whether a subject preceded it, whether the object
- * ends the clause, and trailing question particles. Used by both read and
- * write/action routing so no path rescans the same clause per candidate.
+ * Record predicate prefixes and object boundaries in one pass. Adjacent
+ * significant tokens and submission suffixes are indexed before the pass,
+ * so a clause with many write candidates still takes linear time.
  */
 const clauseAnalysisByTokens = new WeakMap<Token[], ClauseAnalysis[]>();
 
@@ -1505,13 +1489,14 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
   const cached = clauseAnalysisByTokens.get(tokens);
   if (cached) return cached;
   const clauses: ClauseAnalysis[] = [];
+  const { offsets, text, next, previous, statusSuffixes } = clauseTokenContext(tokens);
   let predicates: ClausePredicate[] = [];
   let trailingQuestion = false;
   let hasCopula = false;
   let hasQuestionCopula = false;
-  let hasCompletedAspect = false;
   let hasUnknown = false;
-  let seenSubject = false;
+  let blockedPrefix = false;
+  let hasContent = false;
   let predicate: ClausePredicate | null = null;
   let baAt = -1;
   let objectHead = false;
@@ -1520,16 +1505,20 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
   let objectEnds = true;
   let readGoverns = false;
   let clauseStart = 0;
+  let hasLmsName = false;
+  let questionTopicAt = -1;
+  let hasQuestionPredicate = false;
+  let hasExistentialPredicate = false;
+  let hasBlockedPredicate = false;
 
-  const flush = (end: number): void => {
+  const flush = (): void => {
     if (predicate) {
       predicate.objectEndsClause = objectEnds;
       predicates.push(predicate);
     }
     clauses.push({
-      start: clauseStart,
-      end,
-      predicates, trailingQuestion, hasCopula, hasQuestionCopula, hasCompletedAspect, hasUnknown,
+      hasLmsName, hasQuestionPredicate, hasExistentialPredicate, hasBlockedPredicate,
+      predicates, trailingQuestion, hasQuestionCopula, hasUnknown,
     });
   };
   const reset = (): void => {
@@ -1537,9 +1526,9 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
     trailingQuestion = false;
     hasCopula = false;
     hasQuestionCopula = false;
-    hasCompletedAspect = false;
     hasUnknown = false;
-    seenSubject = false;
+    blockedPrefix = false;
+    hasContent = false;
     predicate = null;
     baAt = -1;
     objectHead = false;
@@ -1547,8 +1536,14 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
     pendingStatusWrite = false;
     objectEnds = true;
     readGoverns = false;
+    hasLmsName = false;
+    questionTopicAt = -1;
+    hasQuestionPredicate = false;
+    hasExistentialPredicate = false;
+    hasBlockedPredicate = false;
   };
 
+  const isStatusAspect = (index: number): boolean => !!statusSuffixes[next[index]!];
   const noteObjectToken = (token: Token, index: number, afterBaVerb = false): void => {
     const value = token.value.toLowerCase();
     if (isWhitespaceToken(token) || isTrailingClausePunct(token) || token.kind === 'filename') return;
@@ -1565,8 +1560,7 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
       if (predicate) predicate.residueCopula = true;
       return;
     }
-    if (ACTION_COMPLETION_MARKERS.has(token.value) && !isStatusAspectToken(tokens, index)) {
-      hasCompletedAspect = true;
+    if (ACTION_COMPLETION_MARKERS.has(token.value) && !isStatusAspect(index)) {
       if (predicate) predicate.residueAspect = true;
       return;
     }
@@ -1610,64 +1604,80 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]!;
-    if (isClauseBoundaryToken(token)) {
+    if (separatesClause(token, hasContent, predicate !== null)) {
       if (token.value === '?' || token.value === '？') trailingQuestion = true;
-      flush(index);
+      flush();
       reset();
       clauseStart = index + 1;
       continue;
     }
-    if (isWhitespaceToken(token) || isTrailingClausePunct(token)) continue;
+    if (isWhitespaceToken(token) || token.kind === 'punct' || /^\p{P}+$/u.test(token.value)) continue;
+    hasContent ||= !isAllowedRequestPrefix(token);
     const value = token.value.toLowerCase();
     if (READ_QUESTION_WORDS.has(value) || READ_QUESTION_WORDS.has(token.value)) {
       if (hasCopula) hasQuestionCopula = true;
     }
     if (token.kind === 'unknown') hasUnknown = true;
     if (COPULAS.has(value)) hasCopula = true;
-    if (ACTION_COMPLETION_MARKERS.has(token.value) &&
-      !READ_QUESTION_WORDS.has(token.value) && !READ_QUESTION_WORDS.has(value) &&
-      !isStatusAspectToken(tokens, index)) {
-      hasCompletedAspect = true;
-    }
     if (value === '嗎' || value === '呢' || token.value === '?') trailingQuestion = true;
 
-    if (BA_MARKERS.has(token.value) && !predicate) {
+    const isLms = LMS_NAMES.includes(value);
+    if (isLms && !blockedPrefix && !predicate && baAt < 0) questionTopicAt = index;
+    hasLmsName ||= isLms;
+    hasQuestionPredicate ||= QUESTION_PREDICATES.has(value);
+    hasExistentialPredicate ||= value === '有' && questionTopicAt >= 0 &&
+      previous[index] === questionTopicAt && tokens[next[index]!]?.value !== '的';
+
+    if (BA_MARKERS.has(token.value) && !predicate && baAt < 0) {
       baAt = index;
       continue;
     }
 
     const kind = predicateKindOf(token);
-    if (kind === 'write' && isStatusFilterUse(tokens, index, readGoverns)) {
+    const prev = tokens[previous[index]!];
+    const following = tokens[next[index]!];
+    const suffix = statusSuffixes[index];
+    if (kind === 'write' && suffix && baAt < 0) {
+      const start = offsets[clauseStart]!;
+      const end = prev && previous[index]! >= clauseStart ? offsets[previous[index]! + 1]! : start;
+      const tail = text.slice(Math.max(start, end - PREFIX_ANCHOR_WINDOW), end);
+      const shortPrefix = end - start <= PREFIX_ANCHOR_WINDOW ? text.slice(start, end).trimStart() : '';
+      const statusPrefix = prev && (DESCRIPTIVE_ACTION_PREFIXES.has(prev.value) ||
+        ACTION_COMPLETION_MARKERS.has(prev.value) || READ_QUESTION_WORDS.has(prev.value));
+      if (!ADDITIVE_CUE.test(tail) && !WRITE_CUE.test(tail) &&
+        ((suffix.homework && statusPrefix) || ((suffix.governed || suffix.question || suffix.deadline) &&
+          (readGoverns || HOMEWORK_SUBJECT.test(shortPrefix) || LMS_SUBJECT.test(shortPrefix))))) {
+        const beforeStatus = tokens[previous[previous[index]!]!];
+        hasQuestionPredicate ||= suffix.question || prev?.value === '是否' ||
+          ((prev?.value === '已' || prev?.value === '已經') && beforeStatus?.value === '是否');
+        if (!predicate) blockedPrefix = true;
+        noteObjectToken(token, index);
+        continue;
+      }
+    }
+    if (kind && kind !== 'write' &&
+      (prev?.value === '的' || prev?.value === '之' || following?.value === '的' || following?.value === '之')) {
+      hasBlockedPredicate = true;
+      if (!predicate && baAt < 0) blockedPrefix = true;
       noteObjectToken(token, index);
       continue;
     }
-    if (kind && isPrenominalPredicate(tokens, index) && kind !== 'write') {
-      noteObjectToken(token, index);
-      continue;
-    }
-    if (kind && !predicate) {
+    if (kind) {
+      const followsPredicate = predicate !== null;
+      if (predicate) {
+        predicate.objectEndsClause = objectEnds;
+        predicates.push(predicate);
+      }
       predicate = {
-        index, kind, subjectBefore: seenSubject, objectEndsClause: true,
-        residueCopula: false, residueAspect: false, residueUnknown: false,
+        index, kind,
+        blockedPrefix: blockedPrefix || followsPredicate || (baAt >= 0 && !objectEnds),
+        objectEndsClause: true, residueCopula: false, residueAspect: false, residueUnknown: false,
       };
       objectHead = false;
       pendingDe = false;
       pendingStatusWrite = false;
       objectEnds = true;
-      if (kind === 'read') readGoverns = true;
-      continue;
-    } else if (kind && predicate) {
-      predicate.objectEndsClause = objectEnds;
-      predicates.push(predicate);
-      predicate = {
-        index, kind, subjectBefore: seenSubject, objectEndsClause: true,
-        residueCopula: false, residueAspect: false, residueUnknown: false,
-      };
-      objectHead = false;
-      pendingDe = false;
-      pendingStatusWrite = false;
-      objectEnds = true;
-      if (kind === 'read') readGoverns = true;
+      readGoverns ||= kind === 'read';
       continue;
     }
 
@@ -1679,13 +1689,9 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
       noteObjectToken(token, index);
       continue;
     }
-    if (isWhitespaceToken(token)) continue;
-    if (CLAUSE_REQUEST_HELPERS.has(value) || CLAUSE_REQUEST_HELPERS.has(token.value)) continue;
-    if (FIRST_PERSON_PREFIX.has(token.value) || REQUEST_CONTINUATIONS.has(value)) continue;
-    if (WRITE_HELPERS.has(token.value) || PREPARE_REQUEST_CUES.has(token.value)) continue;
-    if (isDescriptiveSubjectToken(token)) seenSubject = true;
+    if (!CLAUSE_REQUEST_HELPERS.has(value)) blockedPrefix = true;
   }
-  flush(tokens.length);
+  flush();
   clauseAnalysisByTokens.set(tokens, clauses);
   return clauses;
 }
@@ -1695,7 +1701,7 @@ function clauseAllowsQuestionCopula(clause: ClauseAnalysis): boolean {
 }
 
 function isProvenPredicate(clause: ClauseAnalysis, predicate: ClausePredicate): boolean {
-  if (predicate.subjectBefore || !predicate.objectEndsClause || predicate.residueUnknown) return false;
+  if (predicate.blockedPrefix || !predicate.objectEndsClause || predicate.residueUnknown) return false;
   if (predicate.kind === 'read') {
     return !predicate.residueAspect && !clause.hasUnknown &&
       (!predicate.residueCopula || clauseAllowsQuestionCopula(clause));
@@ -1708,13 +1714,23 @@ function hasSkippedAction(clause: ClauseAnalysis): boolean {
     predicate.kind !== 'read' && !isProvenPredicate(clause, predicate));
 }
 
+const provenIndexesByTokens = new WeakMap<Token[], Map<PredicateKind, Set<number>>>();
+
 function provenPredicateIndexes(tokens: Token[], kind: PredicateKind): Set<number> {
+  let byKind = provenIndexesByTokens.get(tokens);
+  if (!byKind) {
+    byKind = new Map();
+    provenIndexesByTokens.set(tokens, byKind);
+  }
+  const cached = byKind.get(kind);
+  if (cached) return cached;
   const proven = new Set<number>();
   for (const clause of analyzeClauses(tokens)) {
     for (const predicate of clause.predicates) {
       if (predicate.kind === kind && isProvenPredicate(clause, predicate)) proven.add(predicate.index);
     }
   }
+  byKind.set(kind, proven);
   return proven;
 }
 
@@ -1736,65 +1752,17 @@ export function tronClassAutoExecuteActionVerbs(): string[] {
 function isDownloadCommand(tokens: Token[], index: number): boolean {
   if (!provenPredicateIndexes(tokens, 'download').has(index)) return false;
   const next = nextSignificantToken(tokens, index);
-  if (next?.value === '的' || next?.value === '之' || (next && STATUS_NOUN.test(next.value))) return false;
-
-  let hasObject = false;
-  let needsBa = false;
-  let sawRequestPrefix = false;
-  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-    const token = tokens[cursor]!;
-    if (isWhitespaceToken(token)) continue;
-    const value = token.value.toLowerCase();
-    if (needsBa) {
-      if (hasObject && BA_MARKERS.has(value)) {
-        needsBa = false;
-        continue;
-      }
-      if (token.kind !== 'noun' && value !== '的' && value !== '全部') return false;
-      hasObject ||= token.kind === 'noun';
-      continue;
-    }
-    if (isClauseBoundaryToken(token) || value === '並') break;
-    if (READ_REQUEST_PREFIX.has(value)) {
-      sawRequestPrefix = true;
-      continue;
-    }
-    if (hasObject || (token.kind !== 'noun' && value !== '的' && value !== '全部')) return false;
-    needsBa = true;
-    hasObject = token.kind === 'noun';
-  }
-  return !needsBa && (hasObject || sawRequestPrefix || (next !== undefined && !isClauseBoundaryToken(next)));
+  return !next || (next.value !== '的' && next.value !== '之' && !STATUS_NOUN.test(next.value));
 }
 
 function hasPositiveReadForm(text: string): boolean {
   const tokens = visibleCommandTokens(text);
-  const clauses = analyzeClauses(tokens);
-  let offset = 0;
-  for (const clause of clauses) {
-    const provenReadOrDownload = clause.predicates.some(predicate =>
-      (predicate.kind === 'read' || predicate.kind === 'download') &&
-      isProvenPredicate(clause, predicate));
-    if (provenReadOrDownload && clauseHasLmsName(tokens, clause.start, clause.end)) return true;
-    const unprovenRead = clause.predicates.some(predicate =>
-      predicate.kind === 'read' && !isProvenPredicate(clause, predicate));
-    if (hasSkippedAction(clause) || unprovenRead) {
-      // A skipped action or unproven read never falls through to a read just
-      // because the clause ends with 嗎／？ or a question word.
-      const last = clause.predicates[clause.predicates.length - 1];
-      offset = last ? last.index + 1 : offset;
-      continue;
-    }
-    if (clause.trailingQuestion) return true;
-    for (let index = offset; index < tokens.length; index += 1) {
-      const token = tokens[index]!;
-      if (isClauseBoundaryToken(token)) {
-        offset = index + 1;
-        break;
-      }
-      if (READ_QUESTION_WORDS.has(token.value.toLowerCase()) || token.value === '改查') return true;
-    }
-  }
-  return false;
+  return analyzeClauses(tokens).some(clause => {
+    if (!clause.hasLmsName || clause.hasBlockedPredicate || hasSkippedAction(clause)) return false;
+    const reads = clause.predicates.filter(predicate => predicate.kind === 'read' || predicate.kind === 'download');
+    if (reads.length) return reads.every(predicate => isProvenPredicate(clause, predicate));
+    return clause.hasQuestionPredicate || (clause.hasExistentialPredicate && clause.trailingQuestion);
+  });
 }
 
 /** A clearly-read clause needs visible request or question syntax and a safe token scan. */
@@ -1842,12 +1810,20 @@ function clauseAllowsCompoundCompanion(clause: string): boolean {
   return negation === 'negated-write';
 }
 
+function hasUnprovenWrite(text: string): boolean {
+  const tokens = tokensFor(text);
+  return analyzeClauses(tokens).some(clause => clause.predicates.some(predicate =>
+    predicate.kind === 'write' && !isProvenPredicate(clause, predicate) &&
+    !isWriteNegatedAt(tokens, predicate.index)));
+}
+
 function wholeRequestAllowsCompoundRead(question: string): boolean {
   const original = question.normalize('NFKC').trim();
   if (hasReadBlockingDecoration(original)) return false;
   if (hasHonoredPrepareCommand(original)) return false;
   if (!allTokensKnown(original)) return false;
   if (classifyTronClassSentence(question)?.outcome === 'clearly-write') return false;
+  if (hasUnprovenWrite(textWithoutQuotedSpans(original))) return false;
   const routingText = readRoutingText(textWithoutQuotedSpans(original));
   if (hasDescriptiveAction(routingText)) return false;
   const clauses = splitClauses(routingText);
@@ -1882,7 +1858,11 @@ export function tronClassCompoundClauses(question: string): string[] {
       context = true;
       candidate = clause;
     } else if (context && TRONCLASS_CONTINUATION.test(clause) && !OTHER_SERVICE_OR_SCHEDULE.test(clause) && !tokensFor(clause).some(isNegatorToken)) {
-      candidate = `玩課雲${clause}`;
+      const predicates = analyzeClauses(visibleCommandTokens(clause))[0]?.predicates ?? [];
+      const questionMark = clause.endsWith('?') ? '?' : '';
+      candidate = predicates.some(predicate => predicate.kind === 'read' || predicate.kind === 'download')
+        ? `${clause.slice(0, clause.length - questionMark.length)} 玩課雲${questionMark}`
+        : `玩課雲${clause}`;
     }
     if (!candidate || OTHER_SERVICE_OR_SCHEDULE.test(candidate.replace(TRONCLASS_KEYWORD, ''))) continue;
     const bare = candidate.replace(/[?!.。]+$/u, '').trim();
@@ -1958,11 +1938,7 @@ function prepareWordRole(tokens: Token[], index: number): 'command' | 'modifier'
   const prev = previousSignificantToken(tokens, index);
   if (next && (next.value === '的' || next.value === '之')) return 'modifier';
   if (prev && (prev.value === '的' || prev.value === '之')) return 'modifier';
-  if (!prev || isClauseBoundaryToken(prev) || prev.value === '並' ||
-    WRITE_HELPERS.has(prev.value) || PREPARE_REQUEST_CUES.has(prev.value)) {
-    return provenPredicateIndexes(tokens, 'prepare').has(index) ? 'command' : 'doubt';
-  }
-  return 'doubt';
+  return provenPredicateIndexes(tokens, 'prepare').has(index) ? 'command' : 'doubt';
 }
 
 function visiblePrepareRole(text: string, role: 'command' | 'modifier' | 'doubt'): boolean {
@@ -2024,6 +2000,8 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   const original = question.normalize('NFKC').trim();
   if (isExistingTronClassNavigation(original)) return null;
   if (hasUnclosedQuote(original)) return { outcome: 'ambiguous' };
+  if (typographicQuoteSpans(original).length && analyzeClauses(tokensFor(textWithoutQuotedSpans(original, ' \uFFFC ')))
+    .some(clause => clause.predicates.some(predicate => predicate.blockedPrefix))) return { outcome: 'ambiguous' };
   const unquotedText = textWithoutQuotedSpans(original);
   if (hasDescriptiveAction(unquotedText)) return { outcome: 'ambiguous' };
   const text = textWithoutQuotedSpans(readRoutingText(original));
@@ -2035,7 +2013,7 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   if (baConstructionState(unquoted) === 'unresolved') return { outcome: 'ambiguous' };
   if (writeLexiconAndRegexDisagree(unquoted)) return { outcome: 'ambiguous' };
   const writeRoute = writeCommandRoute(unquoted);
-  if (writeRoute === 'ambiguous') return { outcome: 'ambiguous' };
+  if (writeRoute === 'ambiguous' || hasUnprovenWrite(unquoted)) return { outcome: 'ambiguous' };
   if (!authorizesPrivateRead(original)) {
     // Translation, quotation, explanation, or a negated query is not a write
     // command, even if a write-verb token appears as an example word.
