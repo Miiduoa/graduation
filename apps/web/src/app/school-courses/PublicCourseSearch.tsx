@@ -446,9 +446,11 @@ function PublicCourseSearchForm({
   useEffect(() => {
     const update = () => setNow(Date.now());
     update();
+    const timer = window.setInterval(update, 60_000);
     window.addEventListener('focus', update);
     document.addEventListener('visibilitychange', update);
     return () => {
+      window.clearInterval(timer);
       window.removeEventListener('focus', update);
       document.removeEventListener('visibilitychange', update);
     };
