@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { initializeApp, deleteApp } = require('firebase-admin/app');
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const { createNotificationService } = require('./lib/notificationService');
+const { createSchoolAnnouncementNotifyHandler } = require('./lib/coherenceNotify');
 
 const match = /^(?:127\.0\.0\.1|localhost|0\.0\.0\.0):([0-9]{1,5})$/.exec(
   process.env.FIRESTORE_EMULATOR_HOST || '',
@@ -39,6 +40,43 @@ beforeEach(async () => {
 after(async () => {
   await db.terminate();
   await deleteApp(app);
+});
+
+test('staff announcement retry preserves its read time order and reaches only local staff', async () => {
+  const seed = db.batch();
+  for (const [uid, schoolId, role] of [
+    ['alice', 'pu', 'teacher'], ['bob', 'pu', 'student'], ['chris', 'other', 'teacher'],
+  ]) {
+    seed.set(db.doc(`schools/pu/members/${uid}`), { status: 'active', role: 'member' });
+    seed.set(db.doc(`users/${uid}`), { schoolId, role });
+  }
+  await seed.commit();
+  const attempts = [];
+  const handler = createSchoolAnnouncementNotifyHandler({
+    db,
+    sendPushToUser: async (uid) => {
+      attempts.push(uid);
+      if (attempts.length === 1) throw new Error('provider unavailable');
+    },
+    log: { error() {} },
+  });
+  const event = {
+    params: { schoolId: 'pu', announcementId: 'staff' },
+    data: { data: () => ({ title: '教師會議', audience: 'staff', studentFeed: false }) },
+  };
+  await assert.rejects(handler(event), /provider unavailable/);
+  const inbox = db.collectionGroup('notifications');
+  const first = await inbox.get();
+  assert.equal(first.size, 1);
+  const [original] = first.docs;
+  assert.equal(original.ref.parent.parent.id, 'alice');
+  await original.ref.update({ read: true });
+  await handler(event);
+  const retry = await inbox.get();
+  assert.equal(retry.size, 1);
+  assert.equal(retry.docs[0].get('read'), true);
+  assert.ok(original.get('createdAt').isEqual(retry.docs[0].get('createdAt')));
+  assert.deepEqual(attempts, ['alice', 'alice']);
 });
 
 test('accepted provider response cannot recreate token receipt after deletion starts', async () => {
