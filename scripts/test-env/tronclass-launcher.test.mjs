@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { lstatSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -109,6 +109,69 @@ process.exit(0);
     assert.equal(info.mode & 0o777, 0o700);
     assert.equal(info.isDirectory(), true);
     assert.equal(lstatSync(observed.dir).isSymbolicLink(), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launcher rejects a trailing slash on a symbolic link runtime directory', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-link-'));
+  const target = path.join(dir, 'real');
+  const link = path.join(dir, 'link');
+  mkdirSync(target);
+  symlinkSync(target, link);
+  try {
+    writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
+if (process.argv.includes('-e')) process.exit(0);
+process.exit(0);
+`, { mode: 0o700 });
+    writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
+process.exit(0);
+`, { mode: 0o700 });
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        TMPDIR: dir,
+        HOME: dir,
+        TRONCLASS_RUNTIME_DIR: `${link}/`,
+      },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /symbolic link/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launcher refuses a symbolic link session key file', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-key-'));
+  const runtime = path.join(dir, 'runtime');
+  mkdirSync(runtime, { mode: 0o700 });
+  writeFileSync(path.join(dir, 'outside.key'), 'x'.repeat(64));
+  symlinkSync(path.join(dir, 'outside.key'), path.join(runtime, 'bff-session.key'));
+  try {
+    writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
+const args = process.argv;
+if (args.includes('-e')) process.exit(0);
+const dash = args.indexOf('-');
+if (dash < 0) process.exit(1);
+require('node:child_process').execFileSync(${JSON.stringify(process.execPath)}, args.slice(dash), { stdio: 'inherit' });
+`, { mode: 0o700 });
+    writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
+process.exit(0);
+`, { mode: 0o700 });
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        TMPDIR: dir,
+        HOME: dir,
+        TRONCLASS_RUNTIME_DIR: runtime,
+      },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stderr}\n${result.stdout}`, /symbolic link/i);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
