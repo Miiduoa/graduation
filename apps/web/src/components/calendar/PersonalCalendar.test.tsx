@@ -616,6 +616,14 @@ it('does not describe an acknowledged server event as device-only when device sy
   expect(screen.queryByText(/目前只存在這台裝置，換裝置或清除資料就會不見/)).toBeNull();
 });
 
+it('locates a restored event with a 300-character identifier', async () => {
+  const id = 'e'.repeat(300);
+  seedFocusedEvents([focusEvent(id)]);
+  context.search = new URLSearchParams({ eventId: id }).toString();
+  render(<PersonalCalendar />);
+  expect(await screen.findByText('已定位到「已核對的複習安排」。')).toBeTruthy();
+});
+
 it('locates only a stored event by ID, selects its actual date and month, and focuses its list row without opening an edit form', async () => {
   const target = focusEvent();
   seedFocusedEvents([target, focusEvent('other-day', { title: '另一日', date: '2027-03-15' })]);

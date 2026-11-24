@@ -78,6 +78,34 @@
   color: var(--brand);
 }
 
+.conflict {
+  display: grid;
+  gap: 6px;
+  padding: 16px 20px;
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  font-size: var(--font-body-size);
+}
+
+.conflict p {
+  margin: 0;
+}
+
+.conflictSource {
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+}
+
+.conflictLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
 .flow {
   display: flex;
   flex-direction: column;

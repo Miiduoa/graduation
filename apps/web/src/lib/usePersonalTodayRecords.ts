@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { withClassExceptions, type ClassException, type PersonalImportRecord } from '@campus/shared';
+import type { ClassException, PersonalImportRecord } from '@campus/shared';
+import { withScopedClassExceptions } from '@campus/shared/src/timetable/scopedClassExceptions';
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import { useAuth } from '@/components/AuthGuard';
 import { loadPersonalTimetable, type StoredTimetable } from '@/lib/timetable/store';
@@ -49,7 +50,7 @@ export function usePersonalTodayRecords() {
       try {
         const data = await loadPersonalTimetable(uid, schoolId, owner);
         if (active && request === generation) {
-          setManualState({ key: scopeKey, records: withClassExceptions(manualRecords(data), data.classExceptions), exceptions: data.classExceptions, error: '' });
+          setManualState({ key: scopeKey, records: withScopedClassExceptions(manualRecords(data), data.classExceptions ?? [], schoolId), exceptions: data.classExceptions, error: '' });
         }
       } catch {
         if (active && request === generation) {
@@ -79,5 +80,5 @@ export function usePersonalTodayRecords() {
   const manual = visible?.records ?? null;
   const loaded = !imported.loading && visible !== null;
   const error = imported.error || visible?.error || '';
-  return { context, imported: { ...imported, records: withClassExceptions(imported.records, visible?.exceptions) }, manual, retry, loaded, error, schoolId, scopeKey };
+  return { context, imported: { ...imported, records: withScopedClassExceptions(imported.records, visible?.exceptions ?? [], schoolId) }, manual, retry, loaded, error, schoolId, scopeKey };
 }

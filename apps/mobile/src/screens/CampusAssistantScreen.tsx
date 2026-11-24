@@ -1,5 +1,6 @@
 import { AssignmentReplyActions } from './AssignmentReplyActions';
 import { LegacyAssignmentReminders } from './LegacyAssignmentReminders';
+import { TODAY_CONFLICT_QUESTION } from '@campus/shared/src/classCalendarOverlapQuestion';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Linking, ScrollView, Text, TextInput, View, type LayoutChangeEvent } from 'react-native';
 import { AssistantConversationLayout, type AssistantPanel } from './AssistantConversationLayout';
@@ -520,6 +521,7 @@ function AssistantConversation({
             route: reply.route,
             serviceSelection: reply.serviceSelection,
             academicRead: reply.academicRead,
+            classCalendarEvent: reply.classCalendarEvent,
             calendarTask: reply.calendarTask,
             calendarBatch: reply.calendarBatch,
             plan: reply.plan,
@@ -708,7 +710,7 @@ function AssistantConversation({
           ? { sessionId: campusSessionId.current }
           : {}),
       });
-      const anchor = reply.classGapRead ?? (platformTimetable ? reply.savedClassRead ?? reply.courseworkRead?.anchor : undefined);
+      const anchor = reply.classCalendarEvent ?? reply.classGapRead ?? (platformTimetable ? reply.savedClassRead ?? reply.courseworkRead?.anchor : undefined);
       if (anchor && (anchor.owner !== timetableOwner || anchor.schoolId !== schoolId)) {
         if (current()) setError('無法核對這筆課表，請再查一次。');
         return;
@@ -761,6 +763,7 @@ function AssistantConversation({
             route: reply.route,
             serviceSelection: reply.serviceSelection,
             academicRead: reply.academicRead,
+            classCalendarEvent: reply.classCalendarEvent,
             calendarTask: reply.calendarTask,
             calendarBatch: reply.calendarBatch,
             plan: reply.plan,
@@ -1067,6 +1070,7 @@ function AssistantConversation({
           <Text style={{ color: aiTokens.textSecondary, fontSize: 15, lineHeight: 23 }}>
             輸入明確日期、時間與名稱，例如「幫我明天 19:00 到 20:00 安排英文讀書」。先核對草稿，再確認加入個人行事曆。
           </Text>
+          <AIButton label="查今天有沒有行程撞課" variant="ghost" onPress={() => editDraft(TODAY_CONFLICT_QUESTION)} />
           <AIButton label="填寫行程範例" variant="ghost" onPress={() => editDraft('幫我明天 19:00 到 20:00 安排英文讀書')} />
           <AIButton label="填寫多筆行程範例" variant="ghost" onPress={() => editDraft('幫我安排以下行程：\n明天 19:00 到 20:00 英文讀書\n後天 18:00 到 19:00 資料庫複習')} />
         </AICard>
@@ -1149,6 +1153,7 @@ function AssistantConversation({
       ) : (
         <View key={index} onLayout={(event) => revealReply(index, event)}>
           <AICard title={message.courseworkStudy ? '作業準備行程' : message.calendarBatch ? '多筆個人行程' : message.tool === 'calendar-action' ? '個人行程'
+            : message.tool === 'class-calendar' ? '今天的課表與行程'
             : message.tool === 'saved-academics' ? '成績與學分紀錄'
             : message.serviceSelection ? '功能入口'
             : message.courseworkRead ? courseworkReplyTitle(message.courseworkRead)
@@ -1397,11 +1402,21 @@ function AssistantConversation({
             {!platformTimetable && message.tool === 'public-course-catalog' && <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
               公開開課查詢需連網，不需下載 AI 模型或使用付費 AI。
             </Text>}
+            {message.classCalendarEvent && navigation?.navigate && (
+              <AIButton label={`查看行程「${message.classCalendarEvent.title}」`} disabled={busy || syncBusy}
+                onPress={() => {
+                  const event = message.classCalendarEvent;
+                  if (!current() || !event || event.owner !== timetableOwner || event.schoolId !== schoolId) return;
+                  safeNavigate(navigation, 'PersonalCalendar', {
+                    eventId: event.eventId, eventScope: JSON.stringify({ owner: event.owner, schoolId }),
+                  });
+                }} />
+            )}
             {message.tool === 'saved-academics' && message.academicRead ? (
               <Text style={{ color: aiTokens.muted, fontSize: 13, lineHeight: 21, marginTop: 10 }}>
                 來源是這台手機的個人匯入紀錄，沒有重新查詢校方成績。
               </Text>
-            ) : !platformTimetable && message.source === 'device' && message.tool !== 'school-directory' && message.tool !== 'public-course-catalog' && !message.savedClassRead && !message.serviceSelection && message.tool !== 'calendar-action' && (
+            ) : !platformTimetable && message.source === 'device' && message.tool !== 'school-directory' && message.tool !== 'public-course-catalog' && !message.savedClassRead && !message.serviceSelection && message.tool !== 'calendar-action' && message.tool !== 'class-calendar' && (
               <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
                 {message.tool === 'local-agent'
                   ? '手機模型理解需求 · 本機工具核對資料 · 僅執行唯讀查詢'

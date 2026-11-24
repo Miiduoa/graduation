@@ -22,6 +22,7 @@ let mockScope: { owner: string; schoolId: string } | null = {
 };
 
 const mockNavigate = jest.fn();
+let mockFocusParams: { eventId: string; eventScope: string } | undefined;
 
 jest.mock('../state/personalImportScope', () => ({
   usePersonalImportScope: () => mockScope,
@@ -33,7 +34,7 @@ jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void | (() => void)) =>
     require('react').useEffect(() => callback(), [callback]),
   useNavigation: () => ({ navigate: mockNavigate }),
-  useRoute: () => ({ params: undefined }),
+  useRoute: () => ({ params: mockFocusParams }),
 }));
 jest.mock('../utils/safeNavigate', () => ({
   safeNavigate: (_nav: unknown, route: string, params?: unknown) => mockNavigate(route, params),
@@ -99,6 +100,7 @@ beforeEach(async () => {
     schoolId: 'pu',
   };
   mockNavigate.mockReset();
+  mockFocusParams = undefined;
   mockEnableTimed.mockReset();
   mockEnableAllDay.mockReset();
   mockDisableReminder.mockReset();
@@ -417,4 +419,24 @@ it('選取單日後仍匯出所選整月，包含跨月活動並保留原始起�
   expect(content).toContain('DTEND;VALUE=DATE:20261002');
   expect(content).toContain('SUMMARY:月內合成');
   expect(content).not.toContain('SUMMARY:其他月份');
+});
+
+
+it('a Today handoff cannot open a colliding event id after an account switch', async () => {
+  const scope = mockScope!;
+  const row = {
+    id: 'same-device-id', batchId: 'events', importedAt: '2026-10-19T01:00:00Z',
+    kind: 'events', schoolId: 'pu', academicYear: '', semester: '', title: '目前帳號的私事',
+    allDay: false, date: '2026-10-20', startTime: '09:00', endTime: '11:00',
+    source: { type: 'paste', line: 1, rawText: '' },
+  };
+  await AsyncStorage.setItem(personalImportStorageKey(scope), JSON.stringify({ version: 1, records: [row], batches: [] }));
+  mockFocusParams = { eventId: row.id, eventScope: JSON.stringify({ ...scope, owner: 'nuni:another-account' }) };
+  const screen = renderCalendar();
+  await waitUntilEditable(screen);
+  expect(screen.queryByLabelText('標題')).toBeNull();
+  mockFocusParams = { eventId: row.id, eventScope: JSON.stringify(scope) };
+  screen.rerender(<PersonalCalendarScreen />);
+  await screen.findByDisplayValue('目前帳號的私事');
+  expect((await loadPersonalImports(scope)).records).toEqual([row]);
 });

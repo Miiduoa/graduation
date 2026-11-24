@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -10,6 +11,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { QuickCampusEntry } from '../components/QuickCampusEntry';
+import { TodayClassCalendarOverlap } from '../components/TodayClassCalendarOverlap';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { CampusPersonalization } from '../components/CampusPersonalization';
 import type { MobileQuickAction } from '../services/quickCampusActions';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -109,6 +112,7 @@ export default function StudentTodayScreen() {
     status: timetableStatus,
     classes,
     termKey,
+    personalSchedule,
     retry: retryTimetable,
   } = useTodayTimetableData(now);
 
@@ -157,12 +161,18 @@ export default function StudentTodayScreen() {
       };
     }, [load]),
   );
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     const tick = () => setNow(new Date());
     tick();
     const timer = setInterval(tick, 60_000);
-    return () => clearInterval(timer);
-  }, []);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') tick();
+    });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, []));
 
   const todos = useMemo(() => todosFromInbox(data?.tasks ?? []), [data?.tasks]);
   useEffect(() => {
@@ -300,6 +310,19 @@ export default function StudentTodayScreen() {
             </Pressable>
           )}
         </View>
+        {uid && schoolId && !auth.loading && !auth.profileLoading && !auth.tokenExpired && !auth.tokenError && !auth.error &&
+          profile?.role === 'student' &&
+          personalSchedule?.scope.owner === `firebase:${uid}` &&
+          toPublicSchoolId(personalSchedule.scope.schoolId) === toPublicSchoolId(schoolId) && (
+          <TodayClassCalendarOverlap
+            records={personalSchedule.records}
+            schoolId={personalSchedule.scope.schoolId}
+            now={now}
+            onOpenEvent={(eventId) => rootNavigateNested('學習', 'PersonalCalendar', {
+              eventId, eventScope: JSON.stringify(personalSchedule.scope),
+            })}
+          />
+        )}
         {firstLoad ? (
           <TodaySkeleton styles={s} />
         ) : (

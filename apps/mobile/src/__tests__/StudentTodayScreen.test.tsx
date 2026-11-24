@@ -1,6 +1,7 @@
 import React from 'react';
+import type { PersonalImportRecord } from '@campus/shared';
 import { act, fireEvent, render } from '@testing-library/react-native';
-import { RefreshControl } from 'react-native';
+import { AppState, RefreshControl } from 'react-native';
 import { askCampusAssistant } from '../features/campusAssistant';
 import StudentTodayScreen from '../screens/StudentTodayScreen';
 import { loadStudentHome } from '../data/studentHome';
@@ -26,6 +27,7 @@ const mockTimetable = {
   status: 'ready' as 'loading' | 'ready' | 'error' | 'empty',
   classes: [] as TodayClass[],
   termKey: '115-1',
+  personalSchedule: null as { scope: { owner: string; schoolId: string }; records: PersonalImportRecord[] } | null,
   retry: jest.fn(),
 };
 
@@ -108,6 +110,7 @@ beforeEach(() => {
   mockPersonalizationScope = null;
   mockTimetable.status = 'ready';
   mockTimetable.classes = [];
+  mockTimetable.personalSchedule = null;
   mockTimetable.termKey = '115-1';
   mockTimetable.retry.mockReset().mockResolvedValue(undefined);
   clearSchoolTheme();
@@ -797,4 +800,41 @@ test.each(['pending', 'empty', 'error'])('opens the calendar from %s coursework'
     params: undefined,
   });
   if (state === 'pending') expect(await view.findByText('繳交期末報告')).toBeTruthy();
+});
+
+
+test('school Today offers the exact event only while the student, school and personal data agree', async () => {
+  const scope = { owner: 'firebase:student-a', schoolId: 'school-a' };
+  const row = {
+    batchId: 'saved', importedAt: '2026-11-01T01:00:00Z', academicYear: '115', semester: '1',
+    schoolId: 'school-a', source: { type: 'paste' as const, line: 1, rawText: '' },
+  };
+  const records: PersonalImportRecord[] = [
+    { ...row, id: 'course', kind: 'timetable', title: '程式設計', dayOfWeek: 2, startTime: '09:00', endTime: '11:00' },
+    { ...row, id: 'meeting', kind: 'events', title: '面談', date: '2026-11-03', startTime: '09:30', endTime: '10:30' },
+  ];
+  mockTimetable.personalSchedule = { scope, records };
+  let resume: ((state: 'active') => void) | undefined;
+  const appState = jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+    resume = listener;
+    return { remove: jest.fn() };
+  });
+  const screen = render(<StudentTodayScreen />);
+  const action = '查看個人行程「面談」';
+  fireEvent.press(await screen.findByRole('button', { name: action }));
+  expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalCalendar', {
+    eventId: 'meeting', eventScope: JSON.stringify(scope),
+  });
+  for (const stale of [{ ...scope, owner: 'nuni:student-a' }, { ...scope, schoolId: 'different-school' }]) {
+    mockTimetable.personalSchedule = { scope: stale, records };
+    screen.rerender(<StudentTodayScreen />);
+    expect(screen.queryByRole('button', { name: action })).toBeNull();
+  }
+  mockTimetable.personalSchedule = { scope, records };
+  screen.rerender(<StudentTodayScreen />);
+  expect(screen.getByRole('button', { name: action })).toBeTruthy();
+  jest.setSystemTime(new Date('2026-11-04T08:00:00+08:00'));
+  act(() => resume?.('active'));
+  expect(screen.queryByRole('button', { name: action })).toBeNull();
+  appState.mockRestore();
 });

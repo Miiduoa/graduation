@@ -23,7 +23,8 @@ import { isAssistantTaskRetryQuestion, type AssistantTaskRetry } from '@campus/s
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { accountDemoAssistantIntent, type AccountDemoAssistantScope } from '@/lib/accountDemoAssistant';
 import { AccountDemoAssistantCard } from './AccountDemoAssistantCard';
-import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
+import { AssistantServiceLinks, LocalAssistantLinks } from '@/components/AssistantServiceLinks';
+import { TODAY_CONFLICT_QUESTION } from '@campus/shared/src/classCalendarOverlapQuestion';
 import { parseLocalScheduleIntent } from '@/lib/assistantLocalSchedule';
 import { personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
 import { courseworkStudyFollowup, parseAssistantCourseworkTargets, type AssistantCourseworkTarget } from '@/lib/assistantCoursework';
@@ -250,8 +251,10 @@ export function AssistantThread({
   const foodPickup = taskProfile === 'student' && parseAssistantFoodPickupIntent(question) !== null;
   const readRoute = assistantQuestionReadRoute(taskProfile, question);
   const useProfileExamples = taskProfile !== 'student' && workContext === assistantWorkContextForTaskProfile(taskProfile);
+  const studentContext = taskProfile === 'student' && workContext === 'student';
   const suggestions = useProfileExamples ? profile.examples.map(example => example.prompt)
-    : foodPickupEnabled && taskProfile === 'student' ? [...workflow.suggestions, PICKUP_SUGGESTION] : workflow.suggestions;
+    : [...workflow.suggestions, ...(studentContext ? [TODAY_CONFLICT_QUESTION] : []),
+      ...(foodPickupEnabled && taskProfile === 'student' ? [PICKUP_SUGGESTION] : [])];
   const canSubmit = !pending && !onStop && !!question.trim() &&
     ((!!demoScope && !!accountDemoAssistantIntent(question)) || readRoute.roleGuide || (foodPickup ? foodPickupEnabled
       : parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) ||
@@ -380,7 +383,7 @@ export function AssistantThread({
                   pending={pending || !!onStop} blockedReason={eventBlockedReason}
                   sourceOnly={turn.reply.campusEventPreview === true}
                   onSelect={onEventTarget ? target => onEventTarget(turn, target) : undefined} />
-                {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
+                {turn.reply.local && <LocalAssistantLinks result={turn.reply.local} schoolId={schoolId} audience="platform" />}
                 {turn.reply.demo ? <p className={styles.sim}>本人帳號展示資料</p> : null}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 <AssistantTaskPlan plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states}
@@ -556,9 +559,9 @@ export function AssistantThread({
         <p id={`${fieldId}-hint`} className={styles.composerHint}>
           {pending ? '正在處理上一個問題，可以先輸入下一句。' : 'Enter 送出 · Shift + Enter 換行'}
         </p>
-        {inline && (ready || foodPickupEnabled) && !turns.length && !question && !pending && (
+        {inline && (ready || foodPickupEnabled || studentContext) && !turns.length && !question && !pending && (
           <div className={styles.chips} aria-label="試著問">
-            {(taskProfile === 'student' && workContext === 'student' ? ['下一堂課在哪裡？', '這週有哪些作業要交？', ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
+            {(studentContext ? ['下一堂課在哪裡？', '這週有哪些作業要交？', TODAY_CONFLICT_QUESTION, ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
               <button type="button" key={phrase} className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>

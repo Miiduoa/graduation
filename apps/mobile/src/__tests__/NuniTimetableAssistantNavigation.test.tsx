@@ -12,7 +12,7 @@ import { NuniSessionProvider } from '../state/nuniSession';
 import { PreAuthStack } from '../screens/PreAuthStack';
 import { MeStack } from '../screens/MeStack';
 import type { PreAuthStackParamList } from '../screens/preAuthTypes';
-import { personalImportStorageKey } from '../services/personalImports';
+import { loadPersonalImports, personalImportStorageKey } from '../services/personalImports';
 import { NuniError, type NuniAssignment, type NuniQuiz } from '@campus/shared/src/nuni';
 import * as assignmentFileSubmit from '../screens/nuni/assignmentFileSubmit';
 import * as nuniPlanAssignmentTarget from '../services/nuniPlanAssignmentTarget';
@@ -83,7 +83,12 @@ jest.mock('../state/theme', () => ({
 }));
 jest.mock('../components/SchoolBrowsingControl', () => ({ SchoolBrowsingControl: () => null }));
 jest.mock('../components/SchoolPortalImport', () => ({ SchoolPortalImportEntry: () => null }));
-jest.mock('../components/TodayTimetablePanel', () => ({ TodayTimetablePanel: () => null }));
+let mockShowTodayPanel = false;
+jest.mock('../components/TodayTimetablePanel', () => ({
+  TodayTimetablePanel: (props: object) => mockShowTodayPanel
+    ? require('react').createElement(jest.requireActual('../components/TodayTimetablePanel').TodayTimetablePanel, props)
+    : null,
+}));
 jest.mock('../services/schoolLoginAvailability', () => ({
   isSchoolLoginEntryAvailable: () => false, loadSchoolLoginProviderKinds: async () => [],
 }));
@@ -129,6 +134,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await cleanupAsync();
   mockSchoolSelectionReady = true;
+  mockShowTodayPanel = false;
   mockAuthUser = null;
   jest.restoreAllMocks();
   jest.useRealTimers();
@@ -1224,4 +1230,84 @@ test('campus me stack requires a verified nuni session for the timetable assista
   act(() => navigation.navigate('NuniTimetableAssistant' as never));
   await screen.findByRole('button', { name: '前往 nuni 帳號' });
   expect(screen.queryByText('資料庫管理')).toBeNull();
+});
+
+
+test('a signed-in student can resolve a real saved event conflict from the landing page without asking nuni', async () => {
+  mockShowTodayPanel = true;
+  const scope = { owner: 'nuni:' + account, schoolId: 'pu' };
+  const event = {
+    kind: 'events', title: '專題討論', schoolId: 'pu', academicYear: '', semester: '',
+    batchId: 'events', date: '2026-11-05', allDay: false, importedAt: '2026-11-04T05:00:00Z',
+    source: { type: 'paste', line: 1, rawText: '' },
+  };
+  const records = [
+    { ...event, id: 'other-meeting', startTime: '13:00', endTime: '14:00' },
+    { ...event, id: 'overlap-meeting', startTime: '09:40', endTime: '10:30' },
+  ];
+  await AsyncStorage.setItem(personalImportStorageKey(scope), JSON.stringify({ version: 1, batches: [], records }));
+  const navigation = createNavigationContainerRef<PreAuthStackParamList>();
+  const screen = await renderAsync(
+    <NuniSessionProvider><NavigationContainer ref={navigation}><PreAuthStack /></NavigationContainer></NuniSessionProvider>,
+  );
+  await screen.findByText('09:40–10:00，你的「專題討論」和「資料庫管理」上課時間重疊。');
+  await fireEventAsync.press(screen.getByRole('button', { name: '查看個人行程「專題討論」' }));
+  await screen.findByText('編輯 專題討論');
+  expect(navigation.getCurrentRoute()).toMatchObject({
+    name: 'PersonalCalendar', params: { eventId: 'overlap-meeting', eventScope: JSON.stringify(scope) },
+  });
+  expect((await loadPersonalImports(scope)).records).toEqual(records);
+  await fireEventAsync.changeText(screen.getByLabelText('開始時間（HH:MM）'), '10:00');
+  await fireEventAsync.press(screen.getByText('儲存修改'));
+  await screen.findByText('個人行程已更新。');
+  act(() => navigation.goBack());
+  await screen.findByText('資料庫管理');
+  expect(screen.queryByText('nuni 發現今天有行程重疊')).toBeNull();
+  const updated = (await loadPersonalImports(scope)).records;
+  expect(updated.find((row) => row.id === 'other-meeting')).toEqual(records[0]);
+  expect(updated.find((row) => row.id === 'overlap-meeting')?.startTime).toBe('10:00');
+});
+
+test('asking about class and calendar overlap opens only the matching personal event from the chat', async () => {
+  const scope = { owner: 'nuni:' + account, schoolId: 'pu' };
+  const event = {
+    kind: 'events', title: '讀書會', schoolId: 'pu', academicYear: '', semester: '',
+    batchId: 'events', date: '2026-11-05', allDay: false, importedAt: '2026-11-04T05:00:00Z',
+    source: { type: 'paste', line: 1, rawText: '' },
+  };
+  const actual = [
+    { ...event, id: 'afternoon', startTime: '14:00', endTime: '15:00' },
+    { ...event, id: 'morning', startTime: '09:30', endTime: '11:00' },
+  ];
+  const otherSchool = { ...scope, schoolId: 'nthu' };
+  const otherUser = { ...scope, owner: 'nuni:another-account' };
+  const records = (items: typeof actual) => JSON.stringify({ version: 1, batches: [], records: items });
+  await AsyncStorage.multiSet([
+    [personalImportStorageKey(scope), records(actual)],
+    [personalImportStorageKey(otherSchool), records([{ ...actual[1], schoolId: 'nthu', title: '別校日程' }])],
+    [personalImportStorageKey(otherUser), records([{ ...actual[1], title: '別人日程' }])],
+  ]);
+  const navigation = createNavigationContainerRef<PreAuthStackParamList>();
+  const screen = await renderAsync(
+    <NuniSessionProvider><NavigationContainer ref={navigation}><PreAuthStack /></NavigationContainer></NuniSessionProvider>,
+  );
+  await fireEventAsync.press(await screen.findByRole('button', { name: '開啟課表助理' }));
+  await fireEventAsync.changeText(await screen.findByLabelText('詢問校園助理'), '今天的課表和行程有衝突嗎？');
+  await fireEventAsync.press(screen.getByRole('button', { name: '送出問題' }));
+  const open = await screen.findByRole('button', { name: '查看行程「讀書會」' });
+  expect(screen.getByText(/09:30.*10:00/)).toBeTruthy();
+  expect(screen.queryByText(/別校日程|別人日程/)).toBeNull();
+  await fireEventAsync.press(open);
+  await screen.findByText('編輯 讀書會');
+  expect(screen.getByDisplayValue('09:30')).toBeTruthy();
+  expect(navigation.getCurrentRoute()).toMatchObject({
+    name: 'PersonalCalendar', params: { eventId: 'morning', eventScope: JSON.stringify(scope) },
+  });
+  expect((await loadPersonalImports(scope)).records).toEqual(actual);
+  const reads = jest.mocked(AsyncStorage.getItem).mock.calls.map(([key]) => key);
+  expect(reads).not.toContain(personalImportStorageKey(otherSchool));
+  expect(reads).not.toContain(personalImportStorageKey(otherUser));
+  expect(jest.requireMock('../firebase').getDb).not.toHaveBeenCalled();
+  expect(mockRequest.mock.calls.map(([path]) => path)).toEqual(['sessions/current']);
+  expect(mockAssignmentBff).not.toHaveBeenCalled();
 });

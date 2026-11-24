@@ -20,7 +20,7 @@ export type PreAuthStackParamList = {
   NuniTimetableAssistant: undefined;
   PersonalImport: { kind?: 'timetable' | 'grades' | 'events' } | undefined;
   PersonalTimetable: { term?: string; courseId?: string; schoolId?: string; date?: string; startAt?: number; reminderScope?: string } | undefined;
-  PersonalCalendar: { eventId?: string } | undefined;
+  PersonalCalendar: { eventId?: string; eventScope?: string } | undefined;
   OralExamDemo: undefined;
   NuniWorkspace: {
     tab?: 'courses' | 'food' | 'merchant' | 'account';

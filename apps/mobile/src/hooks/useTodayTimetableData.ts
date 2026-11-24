@@ -3,9 +3,10 @@ import { AppState } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { buildPersonalToday, type PersonalImportRecord } from '@campus/shared';
 import { type TodayClass } from '@campus/shared/src/pickNextAction';
+import { subscribeTodayTimetableSources } from './subscribeTodayTimetableSources';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { loadPersonalImports } from '../services/personalImports';
-import { loadPersonalTimetable, personalTimetableRecords } from '../services/personalTimetable';
+import { loadPersonalTimetable, scopedPersonalTimetableRecords } from '../services/personalTimetable';
 import {
   resolveTimetableClassroomNav,
   type TimetableClassroomDestination,
@@ -22,6 +23,7 @@ type Snapshot = {
   scope: string;
   status: 'loading' | 'ready' | 'error';
   records: PersonalImportRecord[];
+  refreshing?: boolean;
 };
 
 export function useTodayTimetableData(now: Date) {
@@ -37,7 +39,7 @@ export function useTodayTimetableData(now: Date) {
     if (!scopeKey) return;
     setSnapshot((previous) =>
       previous?.scope === scopeKey && previous.status === 'ready'
-        ? previous
+        ? { ...previous, refreshing: true }
         : { scope: scopeKey, status: 'loading', records: [] },
     );
     try {
@@ -54,7 +56,7 @@ export function useTodayTimetableData(now: Date) {
         setSnapshot({
           scope: scopeKey,
           status: 'ready',
-          records: personalTimetableRecords(timetable, ledger.records),
+          records: scopedPersonalTimetableRecords(timetable, ledger.records, current.schoolId),
         });
     } catch {
       if (run === generation.current && currentScope.current === scopeKey)
@@ -64,14 +66,16 @@ export function useTodayTimetableData(now: Date) {
   useFocusEffect(
     useCallback(() => {
       void load();
+      const unsubscribe = scopeKey ? subscribeTodayTimetableSources(JSON.parse(scopeKey), load) : undefined;
       const subscription = AppState.addEventListener('change', (state) => {
         if (state === 'active') void load();
       });
       return () => {
         generation.current += 1;
         subscription.remove();
+        unsubscribe?.();
       };
-    }, [load]),
+    }, [load, scopeKey]),
   );
   const plan = useMemo(
     () =>
@@ -113,5 +117,8 @@ export function useTodayTimetableData(now: Date) {
         : plan.terms.length === 0
           ? 'empty'
           : 'ready';
-  return { status, classes, termKey: plan.termKey, retry: load };
+  const personalSchedule = scope && visible?.status === 'ready' && !visible.refreshing
+    ? { scope, records: visible.records }
+    : null;
+  return { status, classes, termKey: plan.termKey, retry: load, personalSchedule };
 }

@@ -4,13 +4,20 @@ import { useFocusEffect } from '@react-navigation/native';
 import { buildPersonalToday, type PersonalImportRecord } from '@campus/shared';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { loadPersonalImports } from '../services/personalImports';
-import { loadPersonalTimetable, personalTimetableRecords } from '../services/personalTimetable';
+import { loadPersonalTimetable, scopedPersonalTimetableRecords } from '../services/personalTimetable';
 import { theme } from '../ui/theme';
+import { TodayClassCalendarOverlap } from './TodayClassCalendarOverlap';
+import { subscribeTodayTimetableSources } from '../hooks/subscribeTodayTimetableSources';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 
 type Props = {
   onOpenImport(): void;
   onOpenTimetable(termKey?: string): void;
+  eventAction?: {
+    accountId: string;
+    expiresAt: number;
+    open(eventId: string, eventScope: string): void;
+  };
   refreshKey?: number;
 };
 type Snapshot = {
@@ -20,7 +27,7 @@ type Snapshot = {
 };
 
 /** An imported weekly plan is useful without granting school-account access. */
-export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey = 0 }: Props) {
+export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, eventAction, refreshKey = 0 }: Props) {
   const s = useThemeStyleSheet(createStyles);
   const scope = usePersonalImportScope();
   const scopeKey = scope ? JSON.stringify(scope) : '';
@@ -51,7 +58,7 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
         setSnapshot({
           scope: scopeKey,
           status: 'ready',
-          records: personalTimetableRecords(timetable, ledger.records),
+          records: scopedPersonalTimetableRecords(timetable, ledger.records, current.schoolId),
         });
     } catch {
       if (run === generation.current && currentScope.current === scopeKey)
@@ -61,6 +68,7 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
   useFocusEffect(
     useCallback(() => {
       void load();
+      const unsubscribe = scopeKey ? subscribeTodayTimetableSources(JSON.parse(scopeKey), load) : undefined;
       const timer = setInterval(() => setNow(new Date(Date.now())), 30_000);
       const subscription = AppState.addEventListener('change', (state) => {
         if (state === 'active') void load();
@@ -68,9 +76,10 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
       return () => {
         generation.current += 1;
         clearInterval(timer);
+        unsubscribe?.();
         subscription.remove();
       };
-    }, [load, refreshKey]),
+    }, [load, refreshKey, scopeKey]),
   );
   const plan = useMemo(
     () =>
@@ -155,6 +164,15 @@ export function TodayTimetablePanel({ onOpenImport, onOpenTimetable, refreshKey 
         </>
       ) : plan.terms.length ? (
         <>
+          {eventAction && scope?.owner === `nuni:${eventAction.accountId}` && eventAction.expiresAt > now.getTime() && (
+            <TodayClassCalendarOverlap
+              records={visible.records}
+              schoolId={scope.schoolId}
+              selectedTerm={selection.scope === scopeKey && selection.term === plan.termKey ? selection.term : undefined}
+              now={now}
+              onOpenEvent={(eventId) => eventAction.open(eventId, scopeKey)}
+            />
+          )}
           <Text style={s.detail}>
             目前課表：{selectedTerm?.academicYear}／{selectedTerm?.semester} · 個人課表
           </Text>

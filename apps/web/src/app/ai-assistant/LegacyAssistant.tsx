@@ -20,7 +20,8 @@ import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCou
 import { answerPublicCourseQuestion, type PublicCourseAssistantRead } from '@campus/shared/src/publicCourseAssistantClient';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { SpokenReply, stopSpokenReply } from '@/components/SpokenReply';
-import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
+import { TODAY_CONFLICT_QUESTION } from '@campus/shared/src/classCalendarOverlapQuestion';
+import { LocalAssistantLinks } from '@/components/AssistantServiceLinks';
 import {
   answerAssistantLocally,
   canAnswerAssistantLocally,
@@ -282,7 +283,7 @@ export function AssistantConversation({
           </p>
           {(
             <div className={styles.exampleQuestions} aria-label="常用問題">
-              {(functionsReady ? ['這週有哪些作業要交？', '如何前往圖書館？', '校園裡有哪些餐廳？'] : ['你能做什麼？', '查看我的匯入成績', '開啟圖書館']).map((question) => (
+              {(functionsReady ? ['這週有哪些作業要交？', TODAY_CONFLICT_QUESTION, '如何前往圖書館？', '校園裡有哪些餐廳？'] : ['你能做什麼？', TODAY_CONFLICT_QUESTION, '查看我的匯入成績', '開啟圖書館']).map((question) => (
                 <button
                   key={question}
                   type="button"
@@ -322,7 +323,7 @@ export function AssistantConversation({
               <>
                 {message.publicCourse?.read && <PublicCourseAssistantResult read={message.publicCourse.read} />}
                 {inline && <SpokenReply text={visibleMessage(message)} disabled={pending} />}
-                {message.local && <AssistantServiceLinks serviceIds={message.local.serviceIds} schoolId={schoolId} />}
+                {message.local && <LocalAssistantLinks result={message.local} schoolId={schoolId} />}
                 {index === latestCloudReply && assistantWriteProposals(message.response).map((proposal, proposalIndex) => (
                   <AgentWritePanel
                     key={proposal.agentRunId + ':' + proposal.toolName + ':' + proposalIndex}

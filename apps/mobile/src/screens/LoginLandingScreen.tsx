@@ -191,6 +191,15 @@ export default function LoginLandingScreen() {
         {platformReady && hasSchool ? (
           <View style={s.todayTasks}>
             <TodayTimetablePanel
+              eventAction={auth.session ? {
+                accountId: auth.session.platformAccountId,
+                expiresAt: auth.session.expiresAt,
+                open: (eventId, eventScope) => {
+                  const session = auth.session;
+                  if (session && auth.isSessionCurrent(session.platformAccountId, session.context))
+                    safeNavigate(navigation, 'PersonalCalendar', { eventId, eventScope });
+                },
+              } : undefined}
               onOpenImport={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
               onOpenTimetable={(term) =>
                 safeNavigate(navigation, 'PersonalTimetable', term ? { term } : undefined)

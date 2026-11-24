@@ -1,3 +1,4 @@
+import { isTodayClassCalendarOverlapQuestion } from '@campus/shared/src/classCalendarOverlapQuestion';
 import { getSchoolContactAnswer } from '@campus/shared/src/schoolContactAnswer';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { answerPublicCourseQuestion, type PublicCourseAssistantRead } from '@campus/shared/src/publicCourseAssistantClient';
@@ -40,13 +41,16 @@ export type ImportedAcademicRead = { owner: string; schoolId: string; checkedAt:
 
 type ClassGapRead = SavedClassGapQuery & { owner: string; schoolId: string; checkedAt: string };
 
+type ClassCalendarEvent = { owner: string; schoolId: string; eventId: string; title: string };
+
 export type CampusAssistantMessage = {
   role: 'user' | 'assistant';
   content: string;
-  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'saved-academics' | 'calendar-action' | 'school-directory' | 'public-course-catalog' | 'platform-data';
+  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'saved-academics' | 'calendar-action' | 'school-directory' | 'public-course-catalog' | 'platform-data' | 'class-calendar';
   route?: string;
   serviceSelection?: AssistantServiceSelection;
   academicRead?: ImportedAcademicRead;
+  classCalendarEvent?: ClassCalendarEvent;
   calendarTask?: AssistantCalendarTask;
   calendarBatch?: AssistantCalendarBatchView;
   assignmentRead?: AssignmentRead;
@@ -141,6 +145,7 @@ export async function askCampusAssistant(input: {
   tool?: CampusAssistantMessage['tool'];
   serviceSelection?: AssistantServiceSelection;
   academicRead?: ImportedAcademicRead;
+  classCalendarEvent?: ClassCalendarEvent;
   calendarTask?: AssistantCalendarTask;
   calendarBatch?: AssistantCalendarBatchView;
   plan?: CampusEvidencePlan;
@@ -179,7 +184,7 @@ export async function askCampusAssistant(input: {
     // forwarded, together with their preceding question, to a later model.
     .filter((message, index, history) => {
       const privateRead = (item?: CampusAssistantMessage) => !!item &&
-        (!!item.courseworkRead || !!item.courseworkList || !!item.courseworkStudy || !!item.classGapRead || ['campus-plan', 'saved-academics', 'calendar-action', 'platform-data'].includes(item.tool ?? ''));
+        (!!item.courseworkRead || !!item.courseworkList || !!item.courseworkStudy || !!item.classGapRead || ['campus-plan', 'saved-academics', 'calendar-action', 'platform-data', 'class-calendar'].includes(item.tool ?? ''));
       return !privateRead(message) && !(message.role === 'user' && privateRead(history[index + 1]));
     })
     .map((message) => ({
@@ -192,6 +197,29 @@ export async function askCampusAssistant(input: {
   }
 
   const question = messages[messages.length - 1].content;
+  if (isTodayClassCalendarOverlapQuestion(question)) {
+    const current = () => input.isCurrent() && !input.signal?.aborted;
+    const context = { ...input.scope, platformTimetable: input.platformTimetable, isCurrent: current };
+    const owner = assistantCalendarOwner(context);
+    const base = { source: 'device', tool: 'class-calendar', hasActions: false } as const;
+    if (!owner) return { ...base, content: '請先登入並選擇校園，才能核對自己的課表和行程。',
+      serviceSelection: { kind: 'open', serviceIds: ['account'] } };
+    const scope = { owner, schoolId: input.scope.schoolId };
+    const { readAssistantClassCalendar } = require('../services/assistantClassCalendar') as typeof import('../services/assistantClassCalendar');
+    try {
+      const answer = await abortableCampusRead(() => readAssistantClassCalendar(scope, input.scope.uid, current), input.signal);
+      scopeCheck(input, false);
+      assertNotCancelled();
+      const first = answer.overlaps[0];
+      if (first) return { ...base, content: answer.content,
+        classCalendarEvent: { ...scope, eventId: first.eventId, title: first.eventTitle } };
+      return { ...base, content: answer.content, serviceSelection: { kind: 'open', serviceIds: ['timetable', 'calendar'] } };
+    } catch {
+      scopeCheck(input, false);
+      assertNotCancelled();
+      return { ...base, content: '這次無法完整讀取手機上保存的課表和個人行程，請稍後重試。' };
+    }
+  }
   const prior = input.messages[input.messages.length - 2];
   const sourceReply = prior?.role === 'assistant' ? prior : undefined;
   const study = answerCourseworkStudyIntent({

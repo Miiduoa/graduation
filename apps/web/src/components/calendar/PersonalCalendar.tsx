@@ -1,5 +1,6 @@
 'use client';
 
+import { PERSONAL_IMPORT_MAX_ID_LENGTH } from '@campus/shared/src/imports/types';
 import { MonthCalendar } from './MonthCalendar';
 
 import Link from 'next/link';
@@ -366,7 +367,7 @@ function PersonalCalendarWorkspace({
   const linkedEventElement = useRef<HTMLLIElement | null>(null);
   // The URL selects an existing row in this owner's ledger. It never supplies event contents.
   const linkedEvent =
-    !paused && ledger.ready && requestedEventId && requestedEventId.length <= 200
+    !paused && ledger.ready && requestedEventId && requestedEventId.length <= PERSONAL_IMPORT_MAX_ID_LENGTH
       ? ledger.records.find(
           (row) =>
             row.id === requestedEventId && row.kind === 'events' && row.schoolId === scope.schoolId,

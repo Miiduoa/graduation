@@ -1,14 +1,14 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { AppState } from 'react-native';
-import type { PersonalImportRecord } from '@campus/shared';
+import { classMeetingKey, type PersonalImportRecord } from '@campus/shared';
 import { TodayTimetablePanel } from '../components/TodayTimetablePanel';
-import { loadPersonalImports, type PersonalImportScope } from '../services/personalImports';
+import { loadPersonalImports, subscribePersonalImports, type PersonalImportScope } from '../services/personalImports';
 import { loadPersonalTimetable } from '../services/personalTimetable';
 
 let mockScope: PersonalImportScope | null = { owner: 'nuni:account-a', schoolId: 'pu' };
 jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => mockScope }));
-jest.mock('../services/personalImports', () => ({ loadPersonalImports: jest.fn() }));
+jest.mock('../services/personalImports', () => ({ loadPersonalImports: jest.fn(), subscribePersonalImports: jest.fn(() => () => {}) }));
 jest.mock('../firebase', () => ({ getDb: jest.fn(), getFunctionsInstance: jest.fn() }));
 jest.mock('../services/personalTimetable', () => ({
   ...jest.requireActual('../services/personalTimetable'),
@@ -18,6 +18,7 @@ jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
 }));
 
+const onOpenEvent = jest.fn();
 const onOpenImport = jest.fn();
 const onOpenTimetable = jest.fn();
 let nowMs = Date.parse('2026-10-19T00:50:00Z');
@@ -25,6 +26,7 @@ const panel = (refreshKey = 0) => (
   <TodayTimetablePanel
     onOpenImport={onOpenImport}
     onOpenTimetable={onOpenTimetable}
+    eventAction={{ accountId: 'account-a', expiresAt: Date.parse('2026-10-19T12:00:00Z'), open: onOpenEvent }}
     refreshKey={refreshKey}
   />
 );
@@ -232,4 +234,79 @@ test('finishing the last class preserves access to its details instead of claimi
   expect(view.getByText('主顧 303 · 林老師')).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '查看整週課表' }));
   expect(onOpenTimetable).toHaveBeenCalledWith('115|1');
+});
+
+
+test('only the signed-in current term produces overlap guidance; ledger edits remove it while Today stays open', async () => {
+  const records = [
+    record(), record({ id: 'old', academicYear: '114', title: '去年的課' }),
+    record({ id: 'event', kind: 'events', title: '面談', date: '2026-10-19', startTime: '09:20', endTime: '10:30' }),
+  ];
+  jest.mocked(loadPersonalImports).mockResolvedValue(ledger(records));
+  const view = render(panel());
+  const heading = 'nuni 發現今天有行程重疊';
+  await view.findByText(heading);
+  fireEvent.press(view.getByRole('button', { name: '查看個人行程「面談」' }));
+  expect(onOpenEvent).toHaveBeenCalledWith('event', JSON.stringify(mockScope));
+  fireEvent.press(view.getByRole('button', { name: '查看 114／1 課表' }));
+  expect(view.queryByText(heading)).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '查看 115／1 課表' }));
+  expect(view.getByText(heading)).toBeTruthy();
+  jest.mocked(loadPersonalImports).mockResolvedValue(ledger([record()]));
+  const [changed] = jest.mocked(subscribePersonalImports).mock.calls[0];
+  await act(async () => changed({ scope: mockScope!, source: 'sync' }));
+  expect(view.queryByText(heading)).toBeNull();
+  jest.mocked(loadPersonalImports).mockResolvedValue(ledger(records));
+  mockScope = { owner: 'guest:device', schoolId: 'pu' };
+  view.rerender(panel());
+  await view.findByText('資料結構');
+  expect(view.queryByText(heading)).toBeNull();
+});
+
+
+test('a newer saved term and either spelling of the current term keep the current collision visible', async () => {
+  const heading = 'nuni 發現今天有行程重疊';
+  const records = [
+    record({ id: 'roc', startTime: '12:00', endTime: '13:00' }),
+    record({ id: 'ad', academicYear: '2026', semester: '第一學期', title: '有衝突的課' }),
+    record({ id: 'next', academicYear: '116', title: '未來的課' }),
+    record({ id: 'private', kind: 'events', title: '看牙', date: '2026-10-19', startTime: '09:20', endTime: '09:50' }),
+  ];
+  jest.mocked(loadPersonalImports).mockResolvedValue(ledger(records));
+  const view = render(panel());
+  await view.findByText('未來的課');
+  expect(view.getByText(heading)).toBeTruthy();
+  for (const name of ['查看 115／1 課表', '查看 2026／第一學期 課表']) {
+    fireEvent.press(view.getByRole('button', { name }));
+    expect(view.getByText('09:20–09:50，你的「看牙」和「有衝突的課」上課時間重疊。')).toBeTruthy();
+  }
+  fireEvent.press(view.getByRole('button', { name: '查看 116／1 課表' }));
+  expect(view.queryByText(heading)).toBeNull();
+});
+
+test('a canonical pu manual class and a tw-pu calendar meet under the source account, including a cancelled duplicate', async () => {
+  const heading = 'nuni 發現今天有行程重疊';
+  mockScope = { owner: 'nuni:account-a', schoolId: 'tw-pu' };
+  const event = record({ schoolId: 'tw-pu', id: 'event', kind: 'events', title: '家庭聚餐',
+    date: '2026-10-19', startTime: '09:20', endTime: '10:30' });
+  const manual = { schoolId: 'pu', shareWithFriends: false, updatedAt: '2026-10-18T01:00:00Z',
+    meta: { year: '115', semester: '1', school: '', className: '', credits: 0, title: '' },
+    courses: [{ id: 'm', name: '統計學', teacher: '', room: '', color: 'blue', day: 1, start: 1, end: 2 }],
+  };
+  jest.mocked(loadPersonalImports).mockResolvedValue(ledger([event]));
+  jest.mocked(loadPersonalTimetable).mockResolvedValue(manual);
+  const view = render(panel());
+  await view.findByText('09:20–10:00，你的「家庭聚餐」和「統計學」上課時間重疊。');
+  fireEvent.press(view.getByRole('button', { name: '查看個人行程「家庭聚餐」' }));
+  expect(onOpenEvent).toHaveBeenCalledWith('event', JSON.stringify(mockScope));
+  const imported = record({ id: 'imported', schoolId: 'tw-pu', title: '統計學', teacher: '', location: '',
+    academicYear: '2026', semester: '上學期', startTime: '08:10', endTime: '10:00' });
+  jest.mocked(loadPersonalImports).mockResolvedValue(ledger([event, imported]));
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({ ...manual, classExceptions: [{
+    id: 'cancel', courseKey: classMeetingKey(imported), original: imported, originalDate: '2026-10-19',
+    kind: 'cancel', createdAt: '2026-10-19T00:00:00Z',
+  }] });
+  await act(async () => view.rerender(panel(1)));
+  await view.findByText('這份課表今天沒有排課。');
+  expect(view.queryByText(heading)).toBeNull();
 });

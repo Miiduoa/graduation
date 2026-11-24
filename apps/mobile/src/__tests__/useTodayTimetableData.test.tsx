@@ -7,10 +7,11 @@ import { loadPersonalTimetable } from '../services/personalTimetable';
 
 let mockScope = { owner: 'nuni:account-a', schoolId: 'pu' };
 jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => mockScope }));
-jest.mock('../services/personalImports', () => ({ loadPersonalImports: jest.fn() }));
+jest.mock('../services/personalImports', () => ({ loadPersonalImports: jest.fn(), subscribePersonalImports: jest.fn(() => () => {}) }));
+jest.mock('../firebase', () => ({ getDb: jest.fn(), getFunctionsInstance: jest.fn() }));
 jest.mock('../services/personalTimetable', () => ({
   loadPersonalTimetable: jest.fn(),
-  personalTimetableRecords: (timetable: { classExceptions?: unknown[] }, imported: PersonalImportRecord[] = []) => require('@campus/shared').withClassExceptions(imported, timetable.classExceptions),
+  scopedPersonalTimetableRecords: jest.requireActual('../services/personalTimetable').scopedPersonalTimetableRecords,
 }));
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void) => require('react').useEffect(callback, [callback]),
@@ -88,9 +89,11 @@ test('refreshing the same timetable keeps the current classes visible until the 
     void view.result.current.retry();
   });
   expect(view.result.current.status).toBe('ready');
+  expect(view.result.current.personalSchedule).toBeNull();
   expect(view.result.current.classes[0]?.title).toBe('資料結構');
   await act(async () => next.resolve(ledger([{ ...record, title: '更新的課程' }])));
   expect(view.result.current.classes[0]?.title).toBe('更新的課程');
+  expect(view.result.current.personalSchedule?.records[0]?.title).toBe('更新的課程');
 });
 
 test('switching the account masks the previous timetable and ignores its late refresh', async () => {
@@ -134,4 +137,22 @@ test('the today hook consumes a dated room change from the same timetable as the
   const view = renderHook(() => useTodayTimetableData(now));
   await waitFor(() => expect(view.result.current.classes[0]?.location).toBe('單次教室'));
   expect(view.result.current.classes[0].startAt).toBe(Date.parse('2026-10-19T09:00:00+08:00'));
+});
+
+
+test('school Today projects canonical manual records alongside calendar records from the selected legacy PU scope', async () => {
+  mockScope = { owner: 'firebase:student-a', schoolId: 'tw-pu' };
+  const event = { ...record, schoolId: 'tw-pu', kind: 'events' as const, id: 'event', date: '2026-10-19' };
+  jest.mocked(loadPersonalImports).mockResolvedValue(ledger([event]));
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({
+    schoolId: 'pu', shareWithFriends: false, updatedAt: '2026-10-18T01:00:00Z',
+    meta: { year: '115', semester: '1', school: '', className: '', credits: 0, title: '' },
+    courses: [{ id: 'manual-pu', name: '統計學', teacher: '', room: '', color: 'blue', day: 1, start: 1, end: 2 }],
+  });
+  const view = renderHook(() => useTodayTimetableData(now));
+  await waitFor(() => expect(view.result.current.classes[0]?.title).toBe('統計學'));
+  expect(view.result.current.personalSchedule?.scope).toEqual(mockScope);
+  expect(view.result.current.personalSchedule?.records.map((item) => [item.id, item.schoolId])).toEqual([
+    ['manual:manual-pu', 'tw-pu'], ['event', 'tw-pu'],
+  ]);
 });

@@ -79,14 +79,17 @@ type LoadState =
   | { status: 'error'; message: string }
   | { status: 'ready'; records: PersonalImportRecord[]; syncEnabled: boolean };
 
-type FocusParams = { eventId?: string } | undefined;
+type FocusParams = { eventId?: string; eventScope?: string } | undefined;
 
 export default function PersonalCalendarScreen() {
   const scope = usePersonalImportScope();
   const { school } = useSchool();
   const route = useRoute();
   const key = scope ? personalImportStorageKey(scope) : '';
-  const focusEventId = (route.params as FocusParams)?.eventId;
+  const params = route.params as FocusParams;
+  const focusEventId = params?.eventScope === undefined || (scope && params.eventScope === JSON.stringify(scope))
+    ? params?.eventId
+    : undefined;
   return (
     <PersonalCalendarWorkspace
       key={key || 'pending'}
