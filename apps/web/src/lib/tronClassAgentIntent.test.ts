@@ -807,4 +807,27 @@ describe('r28 structural regressions and function-word variants', () => {
     expect(tronClassCompoundClauses(question)).toEqual([]);
     expect(Date.now() - started).toBeLessThan(200);
   });
+
+  it.each([
+    '查玩課雲作業務必速交 PDF',
+    '查玩課雲作業務必先行交 PDF',
+  ])('resets query context after an urgency cue so the later write is visible in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('does not close 正在…中 at 中文, and keeps the later 中的 span', () => {
+    const question = '不要繳交我正在用中文確認玩課雲作業中的筆記，只查校園公告';
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('scans many overlapping 供 spans and two negated writes in linear time', () => {
+    const question = `不要繳交${'供老師確認'.repeat(40)}玩課雲作業用的資料，也不要繳交供助教確認玩課雲教材用的附件，只查校園公告`;
+    expect(question.length).toBeLessThanOrEqual(1000);
+    const started = Date.now();
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(200);
+  });
 });

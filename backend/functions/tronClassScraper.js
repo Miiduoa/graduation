@@ -1045,10 +1045,10 @@ async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize =
   // merge-base behaviour. School page_size is never used as the length limit.
   const pageLimit = requestedPageSize ?? pageSize;
   // Compare numerically so a legacy string page still matches a numeric school page.
-  if ((sourcePage !== null && requestedPage !== null && sourcePage !== requestedPage) ||
+  if ((strict && sourcePage !== null && requestedPage !== null && sourcePage !== requestedPage) ||
     (strict && sourcePageSize !== null && requestedPageSize !== null && sourcePageSize !== requestedPageSize) ||
     data.homework_activities.length > pageLimit ||
-    (total !== null && data.homework_activities.length > total)) {
+    (strict && total !== null && data.homework_activities.length > total)) {
     throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
   }
   return {
