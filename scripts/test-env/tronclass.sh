@@ -138,6 +138,9 @@ export TRONCLASS_RUN_ID
 web_log="$TRONCLASS_RUNTIME_DIR/web.log.$TRONCLASS_RUN_ID"
 emulator_log="$TRONCLASS_RUNTIME_DIR/emulators.log.$TRONCLASS_RUN_ID"
 selftest_log="$TRONCLASS_RUNTIME_DIR/selftest.log.$TRONCLASS_RUN_ID"
+seed_log="$TRONCLASS_RUNTIME_DIR/seed.log.$TRONCLASS_RUN_ID"
+acceptance_log="$TRONCLASS_RUNTIME_DIR/acceptance.log.$TRONCLASS_RUN_ID"
+health_log="$TRONCLASS_RUNTIME_DIR/health.log.$TRONCLASS_RUN_ID"
 echo "RUN_ID=$TRONCLASS_RUN_ID"
 # Install signal traps before any leftover sidecar is opened. Full cleanup
 # replaces these once the process-group helpers are defined.
@@ -176,14 +179,10 @@ function assertNoSymlinkComponent(targetPath, missingOk) {
 }
 
 assertNoSymlinkComponent(path.dirname(target), false);
-let existing;
-try { existing = fs.lstatSync(target); }
-catch (error) {
-  if (!error || error.code !== 'ENOENT') throw error;
-  existing = null;
-}
-if (existing) {
+
+function validateExistingKey() {
   assertNoSymlinkComponent(target, false);
+  const existing = fs.lstatSync(target);
   if (existing.isSymbolicLink() || !existing.isFile()) {
     throw new Error('Refusing a non-regular session key file.');
   }
@@ -196,17 +195,43 @@ if (existing) {
   if ((existing.mode & 0o777) !== 0o600) {
     throw new Error('Refusing a session key file that is not mode 0600.');
   }
-} else {
-  fs.writeFileSync(target, randomBytes(48).toString('base64url'), { mode: 0o600, flag: 'wx' });
+  const resolvedKey = fs.realpathSync(target);
+  const resolvedDir = fs.realpathSync(runtimeDir);
+  const prefix = resolvedDir.endsWith(path.sep) ? resolvedDir : resolvedDir + path.sep;
+  if (!resolvedKey.startsWith(prefix)) {
+    throw new Error('Refusing a session key path outside the runtime directory.');
+  }
+  const body = fs.readFileSync(resolvedKey, 'utf8');
+  if (!/^[A-Za-z0-9_-]{64}$/.test(body)) {
+    const err = new Error('Invalid local session key file.');
+    err.code = 'TRONCLASS_KEY_INCOMPLETE';
+    throw err;
+  }
 }
-assertNoSymlinkComponent(target, false);
-const resolvedKey = fs.realpathSync(target);
-const resolvedDir = fs.realpathSync(runtimeDir);
-const prefix = resolvedDir.endsWith(path.sep) ? resolvedDir : resolvedDir + path.sep;
-if (!resolvedKey.startsWith(prefix)) {
-  throw new Error('Refusing a session key path outside the runtime directory.');
+
+const keyDeadline = Date.now() + 1000;
+for (;;) {
+  let existing;
+  try { existing = fs.lstatSync(target); }
+  catch (error) {
+    if (!error || error.code !== 'ENOENT') throw error;
+    existing = null;
+  }
+  try {
+    if (existing) {
+      validateExistingKey();
+      break;
+    }
+    fs.writeFileSync(target, randomBytes(48).toString('base64url'), { mode: 0o600, flag: 'wx' });
+    validateExistingKey();
+    break;
+  } catch (error) {
+    const retry = error && (error.code === 'EEXIST' || error.code === 'ENOENT' ||
+      error.code === 'TRONCLASS_KEY_INCOMPLETE');
+    if (!retry || Date.now() >= keyDeadline) throw error;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  }
 }
-if (!/^[A-Za-z0-9_-]{64}$/.test(fs.readFileSync(resolvedKey, 'utf8'))) throw new Error('Invalid local session key file.');
 NODE
 done
 export BFF_SESSION_SECRET="$(<"$TRONCLASS_RUNTIME_DIR/bff-session.key")"
@@ -215,6 +240,9 @@ export TRONCLASS_SESSION_SECRET="$(<"$TRONCLASS_RUNTIME_DIR/tronclass-session.ke
 TRONCLASS_EMULATOR_PID=''
 TRONCLASS_WEB_PID=''
 TRONCLASS_SELFTEST_WRAPPER=''
+TRONCLASS_SEED_PID=''
+TRONCLASS_ACCEPTANCE_PID=''
+TRONCLASS_HEALTH_PID=''
 unset TRONCLASS_LAUNCHING_LOG
 tronclass_proc_starttime() {
   local pid="$1"
@@ -420,7 +448,7 @@ cleanup() {
     # point only one launch is in flight. Exclude the already recorded jobs.
     for child in $(exec pgrep -P "$$"); do
       case "$child" in
-        "$TRONCLASS_WEB_PID"|"$TRONCLASS_EMULATOR_PID"|"$TRONCLASS_SELFTEST_WRAPPER") continue ;;
+        "$TRONCLASS_WEB_PID"|"$TRONCLASS_EMULATOR_PID"|"$TRONCLASS_SELFTEST_WRAPPER"|"$TRONCLASS_SEED_PID"|"$TRONCLASS_ACCEPTANCE_PID"|"$TRONCLASS_HEALTH_PID") continue ;;
       esac
       tronclass_stop_logged "$child" "$TRONCLASS_LAUNCHING_LOG" "$launch_signal" ""
       pending_cleaned="$TRONCLASS_LAUNCHING_LOG"
@@ -429,6 +457,9 @@ cleanup() {
   [ "$pending_cleaned" = "$web_log" ] || tronclass_stop_logged "$TRONCLASS_WEB_PID" "$web_log" TERM "${TRONCLASS_WEB_RECORD:-}"
   [ "$pending_cleaned" = "$emulator_log" ] || tronclass_stop_logged "$TRONCLASS_EMULATOR_PID" "$emulator_log" INT "${TRONCLASS_EMULATOR_RECORD:-}"
   [ "$pending_cleaned" = "$selftest_log" ] || tronclass_stop_logged "$TRONCLASS_SELFTEST_WRAPPER" "$selftest_log" TERM "${TRONCLASS_SELFTEST_RECORD:-}"
+  [ "$pending_cleaned" = "$seed_log" ] || tronclass_stop_logged "$TRONCLASS_SEED_PID" "$seed_log" TERM "${TRONCLASS_SEED_RECORD:-}"
+  [ "$pending_cleaned" = "$acceptance_log" ] || tronclass_stop_logged "$TRONCLASS_ACCEPTANCE_PID" "$acceptance_log" TERM "${TRONCLASS_ACCEPTANCE_RECORD:-}"
+  [ "$pending_cleaned" = "$health_log" ] || tronclass_stop_logged "$TRONCLASS_HEALTH_PID" "$health_log" TERM "${TRONCLASS_HEALTH_RECORD:-}"
   if [ "$sig" = INT ]; then exit 130; fi
   if [ "$sig" = TERM ]; then exit 143; fi
 }
@@ -743,7 +774,15 @@ if [ "$TRONCLASS_EMULATOR_READY" != true ]; then
   exit 1
 fi
 
-tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/seed.log.$TRONCLASS_RUN_ID" node scripts/test-env/seed.cjs --missing-only
+TRONCLASS_LAUNCHING_LOG="$seed_log"
+TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$seed_log" node scripts/test-env/seed.cjs --missing-only &
+TRONCLASS_SEED_PID=$!
+unset TRONCLASS_LAUNCHING_LOG
+unset TRONCLASS_RUN_LOGGED_EXEC
+TRONCLASS_SEED_RECORD="$(tronclass_capture_child_record "$TRONCLASS_SEED_PID" || true)"
+wait "$TRONCLASS_SEED_PID"
+TRONCLASS_SEED_PID=''
+unset TRONCLASS_SEED_RECORD
 node scripts/build-functions-shared.cjs
 node scripts/import-ai/prepare-assets.mjs
 echo "Full Web: $WEB_PUBLIC_ORIGIN/login?returnUrl=%2Ftronclass&schoolId=pu&reconnect=school"
@@ -764,12 +803,28 @@ unset TRONCLASS_RUN_LOGGED_EXEC
 TRONCLASS_WEB_RECORD="$(tronclass_capture_child_record "$TRONCLASS_WEB_PID" || true)"
 if [ "${TRONCLASS_VERIFY_RUNTIME:-}" = '1' ] && [ "$TRONCLASS_INTEGRATION_ENABLED" = true ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
-  tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/acceptance.log.$TRONCLASS_RUN_ID" node scripts/test-env/verify-tronclass.cjs
+  TRONCLASS_LAUNCHING_LOG="$acceptance_log"
+  TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$acceptance_log" node scripts/test-env/verify-tronclass.cjs &
+  TRONCLASS_ACCEPTANCE_PID=$!
+  unset TRONCLASS_LAUNCHING_LOG
+  unset TRONCLASS_RUN_LOGGED_EXEC
+  TRONCLASS_ACCEPTANCE_RECORD="$(tronclass_capture_child_record "$TRONCLASS_ACCEPTANCE_PID" || true)"
+  wait "$TRONCLASS_ACCEPTANCE_PID"
+  TRONCLASS_ACCEPTANCE_PID=''
+  unset TRONCLASS_ACCEPTANCE_RECORD
   echo "Verified real emulator authentication and Firestore persistence; see $TRONCLASS_RUNTIME_DIR/acceptance.json."
 fi
 if [ "${TRONCLASS_CHECK_HEALTH:-}" = '1' ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
-  tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/health.log.$TRONCLASS_RUN_ID" node scripts/test-env/health-tronclass.cjs
+  TRONCLASS_LAUNCHING_LOG="$health_log"
+  TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$health_log" node scripts/test-env/health-tronclass.cjs &
+  TRONCLASS_HEALTH_PID=$!
+  unset TRONCLASS_LAUNCHING_LOG
+  unset TRONCLASS_RUN_LOGGED_EXEC
+  TRONCLASS_HEALTH_RECORD="$(tronclass_capture_child_record "$TRONCLASS_HEALTH_PID" || true)"
+  wait "$TRONCLASS_HEALTH_PID"
+  TRONCLASS_HEALTH_PID=''
+  unset TRONCLASS_HEALTH_RECORD
   echo "Verified read-only health and login page requests; see $TRONCLASS_RUNTIME_DIR/health.json."
 fi
 wait "$TRONCLASS_WEB_PID"
