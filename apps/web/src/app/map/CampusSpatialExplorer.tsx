@@ -704,6 +704,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // an intersection begins so later focus/viewport checks stay honest.
         if (keyboardOverlayIntersectsCanvas()) {
           ignoredViewportRef.current = null;
+          keyboardOccludedCanvas = true;
           if (!clipToDialog) return false;
         }
         // The visitor explicitly restarted 3D while the viewport read this
@@ -727,7 +728,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // keyboard rectangle, a grace timer, or leftover shrunken bounds.
         // Only a visual viewport that once again includes the visible canvas
         // (dialog-clipped, same rect as the virtualKeyboard path) may resume.
-        if (visible === false) return false;
+        if (visible === false) {
+          keyboardOccludedCanvas = true;
+          return false;
+        }
         return null;
       } catch {
         return keyboardOverlayIntersectsCanvas() ? false : null;
@@ -838,6 +842,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       catch { /* Observer and page events still report visibility. */ }
     }
     // Keyboard transitions can move the host without a window event.
+    // Only a keyboard that actually occluded the canvas may unstick a hidden
+    // observer. A later focus move to the restart control is not keyboard close.
+    let keyboardOccludedCanvas = false;
+    const keyboardStillCovering = () =>
+      isTextEntryTarget(host.ownerDocument.activeElement) || keyboardOverlayIntersectsCanvas();
+    const releaseStaleHiddenObserverOnKeyboardClose = () => {
+      if (keyboardStillCovering()) return;
+      if (visibility === 'hidden' && keyboardOccludedCanvas) visibility = 'unknown';
+      keyboardOccludedCanvas = false;
+    };
     const onVisualViewportChange = () => {
       if (visibility === 'hidden' && measureVisualViewportVisibility(true) === true) {
         // Recover from a stale hidden observer entry after the keyboard moves.
@@ -845,6 +859,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // has returned, even if this WebView emits no new observer callback.
         visibility = 'unknown';
       }
+      releaseStaleHiddenObserverOnKeyboardClose();
       // Also run when the observer last said "visible": a shrinking mobile
       // viewport can cover the canvas while its layout intersection stays true.
       // Invalid/missing visual geometry is not proof that the host is hidden.
@@ -867,7 +882,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       for (const delay of [0, 350]) {
         const id = window.setTimeout(() => {
           focusTimers.delete(id);
-          if (active) syncVisibility();
+          if (active) {
+            releaseStaleHiddenObserverOnKeyboardClose();
+            syncVisibility();
+          }
         }, delay);
         focusTimers.add(id);
       }
@@ -876,15 +894,17 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       document.addEventListener('focusin', onFocusChange, true);
       document.addEventListener('focusout', onFocusChange, true);
     } catch { /* Window events still recheck layout in partial WebViews. */ }
-    // The overlay receives input while the canvas host is inert. A touch in
-    // the scene can disprove stale viewport bounds after keyboard dismissal.
+    // The overlay receives input while the canvas host is inert. A tap there
+    // can disprove stale viewport bounds after keyboard dismissal. Ordinary
+    // canvas touch or scroll must never write that cache.
     const onSceneTouched = (event: Event) => {
       const target = event.target;
       const restart = restartButton.current;
       if (!(target instanceof Node)) return;
       // Keep the button mounted through its click so manual restart can run.
       if (restart?.contains(target)) return;
-      if (!restart && !host.contains(target)) return;
+      const overlay = restart?.closest('[role="status"]');
+      if (!overlay?.contains(target)) return;
       try {
         const viewport = window.visualViewport;
         if (viewport) {
@@ -906,7 +926,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       visualViewport?.addEventListener('resize', onVisualViewportChange);
       visualViewport?.addEventListener('scroll', onVisualViewportChange);
     } catch { /* Window events still recheck layout in partial WebViews. */ }
-    try { virtualKeyboard?.addEventListener('geometrychange', syncVisibility); }
+    const onKeyboardGeometryChange = () => {
+      releaseStaleHiddenObserverOnKeyboardClose();
+      syncVisibility();
+    };
+    try { virtualKeyboard?.addEventListener('geometrychange', onKeyboardGeometryChange); }
     catch { /* Visual viewport and observer events still report visibility. */ }
     syncVisibility();
     return () => {
@@ -936,7 +960,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         visualViewport?.removeEventListener('resize', onVisualViewportChange);
         visualViewport?.removeEventListener('scroll', onVisualViewportChange);
       } catch { /* Complete scene cleanup even in partial WebViews. */ }
-      try { virtualKeyboard?.removeEventListener('geometrychange', syncVisibility); }
+      try { virtualKeyboard?.removeEventListener('geometrychange', onKeyboardGeometryChange); }
       catch { /* Complete scene cleanup even in partial WebViews. */ }
       pendingCreate = null;
       scene?.dispose();
@@ -1171,11 +1195,22 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
   const buildingPlanPlace = model.points.find((point) => point.id === buildingPlanId)?.location ??
     locations.find((location) => location.id === buildingPlanId);
   if (buildingPlanId !== null && !buildingPlanPlace) setBuildingPlanId(null);
+  // A temporarily unloadable model (empty points from an oversized area)
+  // is not a destination change. Keep the choice pending and restore
+  // details plus walking navigation when the same place is projectable again.
+  // Only a real removal or a changed identity revokes the destination.
+  const destinationStillInMap = !!(chosen && locations.some((location) =>
+    location.id === chosen.id && spatialDestinationIdentity(location) === chosen.identity));
   if (chosen && (!selectedPoint ||
       (chosen.inherited && inheritedIdentity !== chosen.identity))) {
-    setSelection('revoked');
-    setOverview(true);
-    setCamera((previous) => ({ ...previous, zoom: 1 }));
+    const inheritedChanged = !!(chosen.inherited && inheritedIdentity !== chosen.identity);
+    if (!inheritedChanged && model.unavailableReason === 'area-too-large' && destinationStillInMap) {
+      // Leave the selection pending while the model cannot be built.
+    } else {
+      setSelection('revoked');
+      setOverview(true);
+      setCamera((previous) => ({ ...previous, zoom: 1 }));
+    }
   }
   const showOverview = overview || !selectedPoint;
   const place = selectedPoint?.location;
