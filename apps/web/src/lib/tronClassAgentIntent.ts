@@ -87,14 +87,13 @@ const NOUN_COMPOUNDS = [
   '外交',
   '交界', '交替', '交錯', '交叉', '交會', '交織', '交情', '交遊', '交涉', '交戰',
   '交鋒', '交口', '交加', '交匯', '交管', '交白',
-  '調查',
+  '調查', '檢查', '審查',
 ];
 const QUERY_VERBS = [
   '告訴我', '查詢', '查看', '顯示', '列出', '確認', '查一下', '看一下', '讀一下',
   '讀取', '調閱', '瀏覽', '檢視', '下載', '準備', '代理', '查', '看', '讀', '閱',
   'read', 'fetch', 'download', 'prepare',
 ];
-const QUERY_COMPOUNDS = QUERY_VERBS.filter(value => value.length > 1);
 const QUERY_START = new Set(QUERY_VERBS);
 const ACTION_CUES = ['只要', '只', '改成', '改查', '而是'];
 const CLAUSE_CUES = ['然後', '接著', '順便', '並且', '另外', '同時', '也幫我', '再幫我', '並幫我'];
@@ -123,16 +122,37 @@ const STATUS_WRITE_COMPOUNDS = [
   '待提交', '待繳交', '待繳', '待交',
 ];
 const STATUS_PARTICLES = ['有沒有', '有無', '過了嗎', '了沒', '了嗎'];
+const LMS_NAMES = ['玩課雲', '創課', 'tron class', 'tronclass'];
+const READ_PARTICLES = [
+  '有哪些', '哪些', '是否', '一下', '我的', '這週', '本週', '什麼時候', '哪一天',
+  '給我看', '是什麼', '怎麼樣', '怎樣', '如何', '什麼', '哪天', '時候', '有什麼', '有幾份',
+  '狀態', '紀錄', '記錄', '情況', '進度', '歷史', '期限', '截止', '截止日期', '截止日', '截止時間',
+  'deadline', '日期', '時間',
+  '校園', '學校', '老師', '資料', '筆記', '說明', '標題', '關於', '含', '成績',
+  'PDF', 'pdf',
+  '可以做什麼', '能做什麼', '有哪些功能', '支援什麼', '支援哪些', '功能範圍', '代理權限', '做什麼',
+  'what can', 'capabilities',
+  '開啟', '打開', '前往', '進入', 'open', 'go to',
+  '的', '之', '嗎', '呢', '吧', '有', '這', '那', '個', '份', '些', '本', '幾', '日',
+  '全部', '是', '給', '出', '用', '用的', '掉', '完', '到', '至', '上去', '出去', '最', '前',
+  'the', 'a', 'an', 'of', 'for', 'to', 'from', 'with', 'my', 'your',
+  'this', 'that', 'please', 'me', 'it', 'is', 'are', 'be', 'and', 'or',
+  'on', 'at', 'by', 'as', 'into', 'onto', 'agent',
+];
 
 const DOMAIN_NOUNS = [
   '作業', '報告', '附件', '檔案', '作品', '心得', '講義', '考卷', '表單',
   '學習單', '課堂報告', '課堂', '學習',
   '公告', '通知', '教材', '課程', '課表', '修訂稿', '舊版', '新版', '這份', '那份',
+  '討論', '問卷', '測驗', '考試', '截圖', '文件', '草稿',
   '發布時間', '發佈時間', '發文時間', '發布日期', '發佈日期', '發文日期',
-  '作業準備區', '作業準備', '準備區', '下載區', '下載說明',
+  '作業準備區', '作業準備', '作業區', '準備區', '下載區', '下載說明', '交流區',
   '後面', '後來', '後續', '後方', '後段', '後期', '後天', '後台', '後端', '後排', '後座',
   '及時', '及格', '及第', '及至', '及早', '及其',
   '中文', '中文版', '中間', '中午', '中心', '中央', '中等', '中級', '中學', '中部',
+  'homework', 'assignment', 'assignments', 'attachment', 'attachments',
+  'materials', 'handouts', 'files',
+  'announcements', 'notices', 'courses', 'classes', 'pending', 'unsubmitted',
 ];
 const CONJ_CUES = ['以及', '和', '與', '及', '、'];
 const WRITE_COMPOUNDS = [
@@ -142,6 +162,7 @@ const WRITE_COMPOUNDS = [
   '傳送', '傳去', '送給', '送到', '寄給', '寄到', '遞給', '遞到', '轉給', '轉到', '轉寄',
   '放入', '放到', '放進', '放上', '貼上', '貼到', '貼入', '丟到', '丟給', '丟入',
   '塞入', '塞進', '塞到', '投入', '投進', '投到', '搬到', '搬去',
+  '交給', '繳給', '交出去', '繳出去', '交上去', '繳上去',
 ];
 const OTHER_WRITE_VERBS = [
   '發布', '發佈', '發文', '回覆', '回復', '留言', '刪除', '撤回', '填答', '評分',
@@ -172,17 +193,21 @@ const PREPARE_ACTIONS = new Set(['準備', '預覽', '草稿', '起草', 'prepar
 const DOWNLOAD_ACTIONS = new Set(['下載', 'download']);
 const HAN_CHAR = /[\p{Script=Han}]/u;
 
-type TokenKind = 'noun' | 'query' | 'cue' | 'conj' | 'punct' | 'neg' | 'write' | 'other';
+type TokenKind = 'noun' | 'query' | 'cue' | 'conj' | 'punct' | 'neg' | 'write' | 'other' | 'unknown';
 type Token = { value: string; start: number; end: number; kind: TokenKind };
 
 const LEXICON: { value: string; kind: TokenKind }[] = [
   ...WRITE_COMPOUNDS.map(value => ({ value, kind: 'write' as const })),
+  { value: '交', kind: 'write' as const },
+  { value: '繳', kind: 'write' as const },
   ...STATUS_WRITE_COMPOUNDS.map(value => ({ value, kind: 'other' as const })),
   ...STATUS_PARTICLES.map(value => ({ value, kind: 'other' as const })),
+  ...LMS_NAMES.map(value => ({ value, kind: 'noun' as const })),
+  ...READ_PARTICLES.map(value => ({ value, kind: 'other' as const })),
   ...OTHER_WRITE_VERBS.map(value => ({ value, kind: 'write' as const })),
   ...DOMAIN_NOUNS.map(value => ({ value, kind: 'noun' as const })),
   ...NOUN_COMPOUNDS.map(value => ({ value, kind: 'noun' as const })),
-  ...QUERY_COMPOUNDS.map(value => ({ value, kind: 'query' as const })),
+  ...QUERY_VERBS.map(value => ({ value, kind: 'query' as const })),
   ...[...TRONCLASS_NEGATORS].map(value => ({ value, kind: 'neg' as const })),
   ...ACTION_CUES.map(value => ({ value, kind: 'cue' as const })),
   ...CLAUSE_CUES.map(value => ({ value, kind: 'cue' as const })),
@@ -191,7 +216,7 @@ const LEXICON: { value: string; kind: TokenKind }[] = [
 ].sort((a, b) => b.value.length - a.value.length);
 
 function startsKnownQuery(text: string, index: number): boolean {
-  return QUERY_COMPOUNDS.some(value => text.startsWith(value, index));
+  return QUERY_VERBS.some(value => text.startsWith(value, index));
 }
 
 function startsKnownWrite(text: string, index: number): boolean {
@@ -200,8 +225,10 @@ function startsKnownWrite(text: string, index: number): boolean {
 
 const CLAUSE_BOUNDARY_WORDS = new Set<string>([...CLAUSE_CUES, '以及', '和', '與', '及', '後', '、']);
 
+const CLAUSE_PUNCT = /[，,；;。！!？?\r\n]/u;
+
 function isClauseBoundaryToken(token: Token): boolean {
-  return token.kind === 'punct' || CLAUSE_BOUNDARY_WORDS.has(token.value);
+  return CLAUSE_BOUNDARY_WORDS.has(token.value) || CLAUSE_PUNCT.test(token.value);
 }
 
 function splitClauses(text: string): string[] {
@@ -261,12 +288,26 @@ function isWriteNegatedAt(tokens: Token[], writeAt: number): boolean {
   return false;
 }
 
+const FILE_NAME_AT = /^\S+\.[A-Za-z][A-Za-z0-9]{0,7}(?![A-Za-z0-9])/u;
+const PUNCT_CHAR = /[，,；;。！!？?\r\n：:()（）\[\]【】《》〈〉「」『』“”‘’"'·…]/u;
+
+function filenameMatchLength(text: string, index: number): number {
+  const matched = FILE_NAME_AT.exec(text.slice(index));
+  return matched ? matched[0].length : 0;
+}
+
 function tokenize(text: string): Token[] {
   const tokens: Token[] = [];
   const state = { clauseHasQuery: false };
   let index = 0;
   while (index < text.length) {
     const from = index;
+    const fileLength = filenameMatchLength(text, index);
+    if (fileLength > 0) {
+      noteToken(tokens, { value: text.slice(from, from + fileLength), start: from, end: from + fileLength, kind: 'noun' }, state);
+      index += fileLength;
+      continue;
+    }
     let matchedLength = 0;
     const entry = LEXICON.find(item => {
       matchedLength = lexiconMatchLength(text, index, item.value);
@@ -275,6 +316,12 @@ function tokenize(text: string): Token[] {
     if (entry) {
       noteToken(tokens, { value: entry.value, start: from, end: from + matchedLength, kind: entry.kind }, state);
       index += matchedLength;
+      continue;
+    }
+    const latin = /^[A-Za-z]+/.exec(text.slice(index));
+    if (latin) {
+      noteToken(tokens, { value: latin[0], start: from, end: from + latin[0].length, kind: 'unknown' }, state);
+      index += latin[0].length;
       continue;
     }
     const ch = text[index]!;
@@ -294,8 +341,8 @@ function tokenize(text: string): Token[] {
       continue;
     }
     const kind: TokenKind = ch === '查' || ch === '看' ? 'query'
-      : /[，,；;。！!？?\r\n]/.test(ch) ? 'punct'
-      : 'other';
+      : PUNCT_CHAR.test(ch) ? 'punct'
+      : 'unknown';
     noteToken(tokens, { value: ch, start: from, end: from + 1, kind }, state);
     index += 1;
   }
@@ -655,7 +702,6 @@ function isClauseScanBoundary(token: Token): boolean {
 function scanNegation(tokens: Token[], interior: boolean[]): NegationScan {
   let result: NegationScan = 'clear';
   let pending: 'open' | 'ba' | null = null;
-  let lastNegator: string | null = null;
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]!;
     if (isClauseScanBoundary(token)) {
@@ -665,7 +711,6 @@ function scanNegation(tokens: Token[], interior: boolean[]): NegationScan {
     if (isNegatorToken(token)) {
       if (pending === 'open') return 'unresolved';
       pending = pending ?? 'open';
-      lastNegator = token.value;
       continue;
     }
     if (!pending) continue;
@@ -692,12 +737,8 @@ function scanNegation(tokens: Token[], interior: boolean[]): NegationScan {
       continue;
     }
     if (pending === 'ba') continue;
-    // A lone 不／未／沒 inside a file or title (不存在.pdf) is not a speech-act negator.
-    if (pending === 'open' && (lastNegator === '不' || lastNegator === '未' || lastNegator === '沒')) {
-      pending = null;
-      lastNegator = null;
-      continue;
-    }
+    // 不／未／沒 plus an unknown token is a negator span, never a filename,
+    // unless that span was already consumed as a file name or sits in quotes.
     return 'unresolved';
   }
   if (pending) return 'unresolved';
@@ -769,8 +810,116 @@ function authorizesPrivateRead(original: string): boolean {
  * out of the private read, and a requested write anywhere keeps the request with
  * the original planner instead of reading beside an unhandled write.
  */
+const QUOTE_OR_BRACKET_PAIRS: Array<readonly [string, string]> = [
+  ['「', '」'], ['『', '』'], ['“', '”'], ['‘', '’'], ['"', '"'], ["'", "'"], ['`', '`'],
+  ['（', '）'], ['(', ')'], ['【', '】'], ['[', ']'], ['《', '》'], ['〈', '〉'],
+];
+
+function protectedSpanMask(text: string): boolean[] {
+  const mask = Array.from({ length: text.length }, () => false);
+  const mark = (start: number, end: number) => {
+    for (let index = start; index < end && index < mask.length; index += 1) mask[index] = true;
+  };
+  for (const [open, close] of QUOTE_OR_BRACKET_PAIRS) {
+    let from = 0;
+    while (from < text.length) {
+      const start = text.indexOf(open, from);
+      if (start < 0) break;
+      const end = text.indexOf(close, start + open.length);
+      if (end < 0) break;
+      mark(start, end + close.length);
+      from = end + close.length;
+    }
+  }
+  const file = new RegExp(FILE_NAME_AT.source, 'gu');
+  for (const match of text.matchAll(file)) {
+    if (match.index == null) continue;
+    mark(match.index, match.index + match[0].length);
+  }
+  return mask;
+}
+
+function tokenIsProtected(token: Token, mask: boolean[]): boolean {
+  if (token.start >= token.end) return false;
+  for (let index = token.start; index < token.end; index += 1) {
+    if (!mask[index]) return false;
+  }
+  return true;
+}
+
+function isKnownReadToken(token: Token, mask: boolean[]): boolean {
+  if (isWhitespaceToken(token) || token.kind === 'punct') return true;
+  if (isWriteVerbToken(token)) return true;
+  if (token.kind === 'unknown') return tokenIsProtected(token, mask);
+  return true;
+}
+
+function allTokensKnown(text: string): boolean {
+  const mask = protectedSpanMask(text);
+  return tokensFor(text).every(token => isKnownReadToken(token, mask));
+}
+
+function hasReadOrStatusPredicate(text: string): boolean {
+  const tokens = tokensFor(text);
+  if (tokens.some(token => token.kind === 'query' || QUERY_START.has(token.value))) return true;
+  const statusWords = new Set<string>([
+    ...STATUS_PARTICLES,
+    ...STATUS_WRITE_COMPOUNDS,
+    '狀態', '期限', '截止', '截止日期', '截止日', '截止時間', 'deadline',
+    '進度', '紀錄', '記錄', '情況', '歷史', '有哪些', '哪些', '有什麼', '是否', '有沒有',
+  ]);
+  if (tokens.some(token => statusWords.has(token.value))) return true;
+  return writeCommandRoute(textWithoutQuotedSpans(text)) === null &&
+    tokens.some(isWriteVerbToken);
+}
+
+function hasDomainOrLmsSubstance(text: string): boolean {
+  const lms = new Set(LMS_NAMES.map(value => value.toLowerCase()));
+  return tokensFor(text).some(token => {
+    if (token.kind === 'noun') return true;
+    if (token.kind === 'query') return true;
+    return lms.has(token.value.toLowerCase());
+  });
+}
+
+/** A clearly-read clause must be fully known, with domain substance, and no command write or negator. */
+function isPositivelyProvenRead(text: string): boolean {
+  const original = text.normalize('NFKC').trim();
+  if (!original || !TRONCLASS_KEYWORD.test(original)) return false;
+  if (!allTokensKnown(original)) return false;
+  if (tokensFor(original).some(token => isNegatorToken(token) && !tokenIsProtected(token, protectedSpanMask(original)))) return false;
+  if (writeCommandRoute(textWithoutQuotedSpans(original)) !== null) return false;
+  if (scanNegation(tokensFor(original), modifierInteriorIndex(tokensFor(original))) !== 'clear') return false;
+  return hasReadOrStatusPredicate(original) || hasDomainOrLmsSubstance(original);
+}
+
+function clauseAllowsCompoundCompanion(clause: string): boolean {
+  const text = clause.normalize('NFKC').trim();
+  if (!text) return true;
+  if (isPositivelyProvenRead(text)) return true;
+  if (OTHER_SERVICE_OR_SCHEDULE.test(text) && !TRONCLASS_KEYWORD.test(text)) return true;
+  const bare = text.replace(/[?!.。]+$/u, '').trim();
+  if (tronClassExplicitNavigationQuestion(text) || isTronClassNavigationTarget(bare) ||
+    isTronClassNavigationTarget(bare.replace(/^(?:(?:請|麻煩)?(?:幫我|替我)?(?:開啟|打開|開|前往|進入))\s*/u, ''))) {
+    return allTokensKnown(text);
+  }
+  if (!allTokensKnown(text)) return false;
+  const unquoted = textWithoutQuotedSpans(text);
+  const negation = scanNegation(tokensFor(text), modifierInteriorIndex(tokensFor(text)));
+  if (negation === 'unresolved') return false;
+  if (writeCommandRoute(unquoted) !== null) return false;
+  if (tokensFor(text).some(isWriteVerbToken) && negation !== 'negated-write') return false;
+  return negation === 'negated-write' || negation === 'clear';
+}
+
 function wholeRequestAllowsCompoundRead(question: string): boolean {
-  return classifyTronClassSentence(question)?.outcome === 'clearly-read';
+  if (classifyTronClassSentence(question)?.outcome === 'clearly-read') return true;
+  if (classifyTronClassSentence(question)?.outcome === 'clearly-write') return false;
+  const original = question.normalize('NFKC').trim();
+  const clauses = splitClauses(readRoutingText(textWithoutQuotedSpans(original)));
+  if (clauses.length === 0) return false;
+  if (!clauses.every(clauseAllowsCompoundCompanion)) return false;
+  return clauses.some(clause => isPositivelyProvenRead(clause));
 }
 
 /**
@@ -882,7 +1031,8 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   const unquoted = textWithoutQuotedSpans(original);
   const tokens = tokensFor(original);
   const interior = modifierInteriorIndex(tokens);
-  if (scanNegation(tokens, interior) === 'unresolved') return { outcome: 'ambiguous' };
+  const negation = scanNegation(tokens, interior);
+  if (negation === 'unresolved') return { outcome: 'ambiguous' };
   if (baConstructionState(unquoted) === 'unresolved') return { outcome: 'ambiguous' };
   if (writeLexiconAndRegexDisagree(unquoted)) return { outcome: 'ambiguous' };
   const writeRoute = writeCommandRoute(unquoted);
@@ -892,6 +1042,7 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
     // command, even if a write-verb token appears as an example word.
     return { outcome: 'ambiguous' };
   }
+  if (!allTokensKnown(original) && !allTokensKnown(unquoted)) return { outcome: 'ambiguous' };
   if (writeRoute === 'planner') return { outcome: 'clearly-write', intent: null };
   if (writeRoute === 'unsupported') return { outcome: 'clearly-write', intent: { intent: 'unsupported', pendingOnly: false } };
   const text = textWithoutQuotedSpans(readRoutingText(original));
@@ -900,6 +1051,9 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   if (intent.intent === 'unsupported' || intent.intent === 'prepare') {
     return { outcome: 'clearly-write', intent };
   }
+  // clearly-read must be positively proven: every token is known, and the
+  // sentence has no negator and no command write or transfer verb.
+  if (!isPositivelyProvenRead(original) && !isPositivelyProvenRead(text)) return { outcome: 'ambiguous' };
   return { outcome: 'clearly-read', intent };
 }
 
