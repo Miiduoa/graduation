@@ -6,6 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
+const python = spawnSync('bash', ['-c', 'command -v python3'], { encoding: 'utf8' }).stdout.trim();
+
 function assertLauncherEnvironment(scenario) {
   const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-'));
   const capture = path.join(dir, 'captured.json');
@@ -144,6 +146,53 @@ process.exit(0);
     });
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, /symbolic link/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launcher rejects a runtime directory replaced during fchmod', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-runtime-swap-'));
+  const runtime = path.join(dir, 'runtime');
+  const moved = path.join(dir, 'moved');
+  const replacement = path.join(dir, 'replacement');
+  try {
+    mkdirSync(runtime, { mode: 0o755 });
+    mkdirSync(replacement, { mode: 0o755 });
+    // Run the real verifier with a deterministic rename at the fchmod boundary.
+    writeFileSync(path.join(dir, 'python3'), `#!${python}
+import os
+import sys
+
+target = sys.argv[-1]
+sys.argv = ["-", target]
+real_fchmod = os.fchmod
+
+def swap_and_chmod(fd, mode):
+    os.rename(target, ${JSON.stringify(moved)})
+    os.rename(${JSON.stringify(replacement)}, target)
+    real_fchmod(fd, mode)
+
+os.fchmod = swap_and_chmod
+exec(compile(sys.stdin.read(), "runtime verifier", "exec"))
+`, { mode: 0o700 });
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      timeout: 5000,
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH}`,
+        TRONCLASS_RUNTIME_DIR: runtime,
+        TRONCLASS_SIGNAL_SELFTEST: '1',
+      },
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /replaced directory/);
+    assert.doesNotMatch(result.stdout, /RUN_ID=/);
+    assert.equal(statSync(moved).mode & 0o777, 0o700);
+    assert.equal(statSync(runtime).mode & 0o777, 0o755);
+    assert.deepEqual(readdirSync(runtime), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -349,44 +398,6 @@ test('launcher reuses an existing session key only when it is a private regular 
     assert.equal(readFileSync(path.join(runtime, 'bff-session.key'), 'utf8'), 'x'.repeat(64));
     assert.equal(statSync(path.join(runtime, 'bff-session.key')).mode & 0o777, 0o600);
     assert.equal(lstatSync(path.join(runtime, 'bff-session.key')).nlink, 1);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('launcher leaves both directory modes unchanged when the runtime path is replaced', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-runtime-replacement-'));
-  const runtime = path.join(dir, 'runtime');
-  const original = path.join(dir, 'original');
-  const replacement = path.join(dir, 'replacement');
-  mkdirSync(runtime, { mode: 0o755 });
-  mkdirSync(replacement, { mode: 0o755 });
-  try {
-    const preload = path.join(dir, 'replace-directory.cjs');
-    writeFileSync(preload, `
-const fs = require('node:fs');
-const fstat = fs.fstatSync;
-fs.fstatSync = (fd, ...args) => {
-  const info = fstat(fd, ...args);
-  if (process.argv[2] === ${JSON.stringify(runtime)} &&
-    fs.readlinkSync('/proc/self/fd/' + fd) === ${JSON.stringify(runtime)}) {
-    fs.renameSync(${JSON.stringify(runtime)}, ${JSON.stringify(original)});
-    fs.renameSync(${JSON.stringify(replacement)}, ${JSON.stringify(runtime)});
-  }
-  return info;
-};
-`);
-    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
-      encoding: 'utf8',
-      timeout: 5000,
-      env: { ...process.env, TRONCLASS_SIGNAL_SELFTEST: '1', TRONCLASS_RUNTIME_DIR: runtime,
-        NODE_OPTIONS: `--require=${preload}` },
-    });
-    assert.equal(result.error, undefined);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /replaced directory/);
-    assert.equal(statSync(original).mode & 0o777, 0o755);
-    assert.equal(statSync(runtime).mode & 0o777, 0o755);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -824,7 +835,7 @@ test('launcher cleans up marked descendants when the leader exits before capture
   const { setTimeout: delay } = await import('node:timers/promises');
   const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
 
-  for (const recordKind of ['current run', 'reused group', 'concurrent run', 'old run', 'mismatched starttime', 'publication failure']) {
+  for (const recordKind of ['current run', 'reused group', 'concurrent run', 'unreadable leader environ', 'old run', 'mismatched starttime', 'publication failure']) {
     await t.test(recordKind, { timeout: 14000 }, async () => {
       const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-orphan-sidecar-'));
       const childFile = path.join(dir, 'child.pid');
@@ -835,6 +846,7 @@ test('launcher cleans up marked descendants when the leader exits before capture
       let launcher;
       let launcherExited;
       let descendant;
+      let leader;
       let concurrent;
       let concurrentExited;
       try {
@@ -847,6 +859,7 @@ exec /bin/ps "$@"
         const failedPublication = path.join(dir, 'publication-failed');
         if (recordKind === 'publication failure') {
           writeFileSync(path.join(dir, 'python3'), `#!/bin/bash
+if [[ "$2" != -c ]]; then exec ${JSON.stringify(python)} "$@"; fi
 touch ${JSON.stringify(failedPublication)}
 exit 1
 `, { mode: 0o755 });
@@ -894,18 +907,19 @@ kill() {
         assert.ok(published());
         descendant = Number(readFileSync(descendantFile, 'utf8'));
         process.kill(descendant, 0);
-        const leader = readFileSync(childFile, 'utf8');
+        leader = readFileSync(childFile, 'utf8');
         let sidecar, run, start;
         if (recordKind === 'publication failure') {
           assert.equal(findSidecar(), undefined);
         } else {
           sidecar = path.join(dir, findSidecar());
-          const [recordRun, recordedLeader, recordStart] = readFileSync(sidecar, 'utf8').trim().split(' ');
+          const [recordRun, recordedLeader, recordStart, recordedGroup] = readFileSync(sidecar, 'utf8').trim().split(' ');
           run = recordRun;
           start = recordStart;
           assert.match(run, /^[a-f0-9]{32}$/);
           assert.match(start, /^\d+$/);
           assert.equal(recordedLeader, leader);
+          assert.equal(recordedGroup, leader);
         }
         const victimStat = readFileSync(`/proc/${victim.pid}/stat`, 'utf8');
         const victimStart = victimStat.slice(victimStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
@@ -916,15 +930,18 @@ kill() {
         if (recordKind === 'mismatched starttime') {
           writeFileSync(sidecar, `${run} ${victim.pid} ${BigInt(victimStart) + 1n}\n`);
         }
-        if (recordKind === 'concurrent run') {
+        if (recordKind === 'concurrent run' || recordKind === 'unreadable leader environ') {
           launcher.kill('SIGSTOP');
-          // The concurrent launcher sees a live leader at its first stat read.
-          // End it while checking its marker, before the follow-up stat read.
+          // Model either a leader exiting during the marker check or a read
+          // error while both the leader and its member remain alive.
           writeFileSync(path.join(dir, 'grep'), `#!/bin/bash
 if [[ "\${@: -1}" == /proc/${leader}/environ ]]; then
-  kill -TERM ${leader}
+  ${recordKind === 'concurrent run' ? `kill -TERM ${leader}
   while [[ -d /proc/${leader} ]]; do sleep 0.01; done
-  exit 1
+  exit 1` : 'exit 2'}
+fi
+if [[ "\${@: -1}" == /proc/${descendant}/environ ]]; then
+  touch ${JSON.stringify(path.join(dir, 'member-checked'))}
 fi
 exec /bin/grep "$@"
 `, { mode: 0o755 });
@@ -945,10 +962,14 @@ exec /bin/grep "$@"
           const concurrentDeadline = Date.now() + 4000;
           while (!findConcurrentRecord() && Date.now() < concurrentDeadline) await delay(15);
           assert.ok(findConcurrentRecord());
-          assert.equal(readFileSync(sidecar, 'utf8').trim(), `${run} ${leader} ${start}`);
+          assert.equal(readFileSync(sidecar, 'utf8').trim(), `${run} ${leader} ${start} ${leader}`);
           concurrent.kill('SIGTERM');
           assert.deepEqual(await concurrentExited, [143, null]);
           process.kill(descendant, 0);
+          if (recordKind === 'unreadable leader environ') {
+            assert.ok(existsSync(path.join(dir, 'member-checked')));
+            process.kill(Number(leader), 'SIGTERM');
+          }
           launcher.kill('SIGCONT');
         } else {
           process.kill(Number(leader), 'SIGTERM');
@@ -963,7 +984,7 @@ exec /bin/grep "$@"
         while (existsSync(`/proc/${descendant}`) && Date.now() < reapDeadline) await delay(15);
         assert.throws(() => process.kill(descendant, 0), { code: 'ESRCH' });
       } finally {
-        for (const pid of [descendant, victim.pid]) {
+        for (const pid of [descendant, Number(leader), victim.pid]) {
           if (pid && existsSync(`/proc/${pid}`)) process.kill(pid, 'SIGKILL');
         }
         if (launcher && launcher.exitCode === null && launcher.signalCode === null) {
