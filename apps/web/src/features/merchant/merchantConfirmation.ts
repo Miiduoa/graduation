@@ -120,7 +120,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         previous &&
         merchantWorkspaceStateLabel(previous.value) !== merchantWorkspaceStateLabel(next)
       ) {
-        // A same-version change only supersedes receipts for that version. An
+        // A same-version change supersedes receipts through that version. An
         // earlier write can still confirm a higher version and show its receipt.
         if (next.readinessVersion === previous.version) {
           const floors = statusReceiptFloors.get(key) ?? new Map<number, number>();
@@ -270,10 +270,13 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       }
     },
     workspaceReceiptFloor(key: string, readinessVersion?: number) {
-      return Math.max(
-        receiptFloors.get(key) ?? 0,
-        readinessVersion === undefined ? 0 : statusReceiptFloors.get(key)?.get(readinessVersion) ?? 0,
-      );
+      let floor = receiptFloors.get(key) ?? 0;
+      if (readinessVersion !== undefined) {
+        for (const [version, revision] of statusReceiptFloors.get(key) ?? []) {
+          if (version >= readinessVersion) floor = Math.max(floor, revision);
+        }
+      }
+      return floor;
     },
     workspaceRevocations: () => ({ list: listRevocation, details: new Map(revocations) }),
     mergeApplications,

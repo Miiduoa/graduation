@@ -980,13 +980,15 @@ it.each([403, 404])('does not restore a pause notice after list denial %s and re
 });
 
 it.each([
-  { versionedList: true, readinessVersion: 8 },
-  { versionedList: false, readinessVersion: 8 },
-  { versionedList: true, readinessVersion: 7 },
-  { versionedList: false, readinessVersion: 7 },
+  { versionedList: true, readinessVersion: 8, confirmsNewerPause: false },
+  { versionedList: false, readinessVersion: 8, confirmsNewerPause: false },
+  { versionedList: true, readinessVersion: 7, confirmsNewerPause: false },
+  { versionedList: false, readinessVersion: 7, confirmsNewerPause: false },
+  { versionedList: true, readinessVersion: 8, confirmsNewerPause: true },
+  { versionedList: false, readinessVersion: 8, confirmsNewerPause: true },
 ])(
-  'discards a displayed pause notice after list and detail confirm reopening at version $readinessVersion (versioned list: $versionedList)',
-  async ({ versionedList, readinessVersion: reopenedVersion }) => {
+  'discards a displayed pause notice after reopening at version $readinessVersion (versioned list: $versionedList, newer pause confirmed: $confirmsNewerPause)',
+  async ({ versionedList, readinessVersion: reopenedVersion, confirmsNewerPause }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const open = { ...detail('store-a', true), readinessVersion: 6 };
     const paused = { ...open, readinessVersion: 7, locationStatus: 'closed', publicAccess: false };
@@ -1008,14 +1010,24 @@ it.each([
     fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
     await screen.findByText('門市狀態已更新：暫停接單。');
 
+    if (confirmsNewerPause) {
+      current = { ...paused, readinessVersion: reopenedVersion };
+      await act(async () => window.history.back());
+      await screen.findByText('暫停接單');
+      await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+      await act(async () => window.history.forward());
+      await screen.findByRole('button', { name: '恢復接單' });
+      expect(readDetail).toHaveBeenCalledTimes(3);
+    }
+
     current = reopened;
     await act(async () => window.history.back());
     await screen.findByText('營業中');
-    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(confirmsNewerPause ? 4 : 2));
 
     await act(async () => window.history.forward());
     await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
-    expect(readDetail).toHaveBeenCalledTimes(3);
+    expect(readDetail).toHaveBeenCalledTimes(confirmsNewerPause ? 5 : 3);
     expect(screen.getByText('營業中')).toBeTruthy();
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
     expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
