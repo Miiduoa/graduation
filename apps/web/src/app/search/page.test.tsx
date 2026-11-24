@@ -1449,6 +1449,38 @@ describe('continuing a search after opening a service', () => {
     },
   );
 
+  it('keeps an IME draft through a fragment replacement and restores the saved search on the next Back', async () => {
+    const entry = leaveLibrary();
+    await go(-1);
+    const returned = renderAfterFrame();
+    const search = screen.getByRole<HTMLInputElement>('searchbox');
+    expect(search.value).toBe('借書');
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+
+    fireEvent.compositionStart(search);
+    fireEvent.change(search, { target: { value: '公' } });
+    act(() => move('#results', new Map([['view', 'compact']])));
+    expect(window.location.hash).toBe('#results');
+    expect(new URLSearchParams(window.location.search).get('q')).toBe('借書');
+    expect(search.value).toBe('公');
+    expect(window.history.state).toMatchObject({
+      __campusSearchHistoryEntry: entry.__campusSearchHistoryEntry,
+      __campusSearchResultReturn: entry.__campusSearchResultReturn,
+    });
+
+    fireEvent.compositionEnd(search);
+    expect(new URLSearchParams(window.location.search).get('q')).toBe('公');
+    expect(window.location.hash).toBe('#results');
+    returned.unmount();
+
+    await go(1);
+    expect(window.location.pathname).toBe('/library');
+    await go(-1);
+    renderAfterFrame();
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+  });
+
   it.each(['map', 'array'] as const)(
     'restores focus after a same-page replace with a fresh %s',
     async (shape) => {

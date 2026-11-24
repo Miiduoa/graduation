@@ -126,6 +126,7 @@ function installHistoryTracking() {
       const previousKey = readEntryKey(previousState);
       const searchEntry = readSearchEntry(previousState);
       const previousPath = window.location.pathname;
+      const previousHref = window.location.href;
       const push = method === 'pushState';
       const routerCommit = push && isRouterHistoryWrite(data, APP_ROUTER_HISTORY_PUSH);
       const changesPage = url != null && new URL(url, window.location.href).pathname !== previousPath;
@@ -178,8 +179,18 @@ function installHistoryTracking() {
         // Bind the new URL only after the browser accepts the same-page replacement.
         searchEntry.entries.searchUrl = currentUrl();
         const { arrival, pending } = returnState;
-        if (url != null && previousKey && !isRouterHistoryWrite(data, APP_ROUTER_HISTORY_REPLACE)) {
-          // An explicit URL replacement supersedes the traversal even when the query is identical.
+        const nextHref = window.location.href;
+        const changesOnlyFragment =
+          previousHref !== nextHref &&
+          previousHref.split('#', 1)[0] === nextHref.split('#', 1)[0];
+        if (
+          url != null &&
+          previousKey &&
+          !changesOnlyFragment &&
+          !isRouterHistoryWrite(data, APP_ROUTER_HISTORY_REPLACE)
+        ) {
+          // A fragment-only write leaves the current filters alone. Replacing the full URL
+          // can explicitly reapply its filters even when the URL is identical.
           publishReturn(null, {
             entryKey: previousKey,
             queryString: currentQueryString(),
