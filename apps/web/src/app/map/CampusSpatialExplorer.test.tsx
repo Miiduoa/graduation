@@ -3088,6 +3088,87 @@ it('keeps confirmed keyboard occlusion paused and resumes when keyboard geometry
   }
 });
 
+it('keeps 3D paused after a manual restart once the search field is focused again and the keyboard rectangle clears', async () => {
+  const keyboard = Object.assign(new EventTarget(), { boundingRect: new DOMRect() });
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: keyboard } }));
+  const { viewport, dialog, bounds } = await openKeyboardCoveredScene();
+  try {
+    const restart = within(dialog).getByRole('button', { name: '重新啟動立體畫面' });
+    fireEvent.pointerDown(restart);
+    fireEvent.click(restart);
+    await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    const rebuilt = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+    const rebuiltBounds = vi.spyOn(rebuilt, 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(0, 400, 320, 150));
+    try {
+      const search = within(dialog).getByRole('searchbox', { name: '搜尋導覽地點' });
+      act(() => search.focus());
+      keyboard.boundingRect = new DOMRect(0, 200, 320, 400);
+      act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+      keyboard.boundingRect = new DOMRect();
+      act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+      act(() => intersection?.([observerEntry(rebuilt, true)], {} as IntersectionObserver));
+      expect(document.activeElement).toBe(search);
+      expect(viewport.height).toBe(200);
+      expect(scene.setActive).toHaveBeenLastCalledWith(false);
+      expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+    } finally {
+      rebuiltBounds.mockRestore();
+    }
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+it('pauses when a focused field shrinks the visual viewport over only the dialog-clipped canvas', async () => {
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: undefined } }));
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0, scale: 1,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const hostBounds = vi.spyOn(graphics, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 100, 320, 400));
+  const dialogBounds = vi.spyOn(dialog, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 300, 320, 400));
+  Object.defineProperties(dialog, {
+    clientLeft: { configurable: true, value: 0 },
+    clientTop: { configurable: true, value: 0 },
+    clientWidth: { configurable: true, value: 320 },
+    clientHeight: { configurable: true, value: 400 },
+  });
+  try {
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    const field = within(dialog).getByRole('searchbox', { name: '搜尋導覽地點' });
+    act(() => field.focus());
+    // Unclipped canvas (y=100–500) still overlaps this 250px viewport;
+    // the dialog-visible canvas (y=300–500) does not.
+    viewport.height = 250;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    expect(document.activeElement).toBe(field);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+  } finally {
+    hostBounds.mockRestore();
+    dialogBounds.mockRestore();
+  }
+});
+
 it('resumes 3D when the visitor touches the paused scene overlay while a stale viewport and a focused field remain', async () => {
   const { viewport, dialog, graphics, bounds } = await openKeyboardCoveredScene();
   try {
