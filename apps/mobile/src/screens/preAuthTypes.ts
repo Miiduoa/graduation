@@ -11,6 +11,8 @@ export type PreAuthStackParamList = {
   BusSchedule: undefined;
   公告總覽: undefined;
   公告詳情: { id: string };
+  活動總覽: { saved?: string } | undefined;
+  活動詳情: { id: string; source?: string; schoolId?: string };
   CourseCatalog: { publicSchoolId?: 'ncnu' | 'nthu'; filter?: { keyword?: string } & PublicCourseFilters; autoSearch?: boolean } | undefined;
   Health: undefined;
   Dormitory: undefined;

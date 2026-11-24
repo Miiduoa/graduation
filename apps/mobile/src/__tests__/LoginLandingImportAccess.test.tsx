@@ -82,8 +82,9 @@ it('prioritizes the Google account entry before school import and public service
   expect(importIndex).toBeGreaterThan(accountIndex);
   expect(servicesIndex).toBeGreaterThan(importIndex);
   expect(servicesIndex).toBeGreaterThan(accountIndex);
-  expect(view.getAllByTestId(/^public-/)).toHaveLength(11);
+  expect(view.getAllByTestId(/^public-/)).toHaveLength(12);
   expect(view.getByTestId('public-StudentCard').props.accessibilityLabel).toBe('數位學生證');
+  expect(view.getByTestId('public-活動總覽').props.accessibilityLabel).toBe('校園活動');
   expect(safeNavigate).not.toHaveBeenCalled();
 });
 

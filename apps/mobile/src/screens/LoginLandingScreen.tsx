@@ -279,6 +279,7 @@ export default function LoginLandingScreen() {
                    ['StudentCard', '數位學生證', '出示學生證，或核對對方的校園身分'],
                   ['BusSchedule', '公車查詢', '查看站點與官方到站資訊'],
                   ['公告總覽', '公開公告', `查看${school.name}發布的消息`],
+                  ['活動總覽', '校園活動', '瀏覽活動與講座，查看已收藏的場次'],
                   ['CourseCatalog', '課綱查詢', `查看${school.name}課綱或校方課程查詢入口`],
                   ['Health', '校園健康', `查看${school.name}諮商、就醫與健康檢查資訊`],
                   ['Dormitory', '宿舍服務', `查看${school.name}報修管道與入住事項；設備問題只存成個人備忘`],

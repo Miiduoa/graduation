@@ -1,5 +1,7 @@
 import { resolveNotificationDestination } from '../utils/notificationDestination';
 import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { campusEventShortlistKey, campusEventShortlistOwner } from '@campus/shared/src/campusEventShortlist';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import {
   AppState,
@@ -24,15 +26,20 @@ import {
 } from '../services/publicCampusContent';
 import { exportAndShareICalFile } from '../services/ical';
 import { safeNavigate } from '../utils/safeNavigate';
+import * as eventRegistration from '../services/eventRegistration';
 import { getRawAppEnv } from '../services/release';
 
 let mockUid: string | null = 'student-a';
 let mockSchool = { id: 'pu' };
+let mockAuthLoading = false;
+let mockSelectionReady = true;
+let mockPlatform: { loading?: boolean; error?: string; pendingLogout?: boolean; session?: { platformAccountId: string } } | null = null;
 const navigation = { navigate: jest.fn(), goBack: jest.fn() };
 jest.mock('../state/auth', () => ({
-  useAuth: () => ({ user: mockUid ? { uid: mockUid } : null }),
+  useAuth: () => ({ user: mockUid ? { uid: mockUid } : null, loading: mockAuthLoading }),
 }));
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool, selectionReady: mockSelectionReady }) }));
+jest.mock('../state/nuniSession', () => ({ useOptionalNuniSession: () => mockPlatform }));
 jest.mock('../services/publicCampusContent', () => ({
   loadCampusAnnouncements: jest.fn(),
   loadCampusAnnouncementFeed: jest.fn(),
@@ -77,6 +84,9 @@ beforeEach(() => {
   applyTheme('light');
   mockUid = 'student-a';
   mockSchool = { id: 'pu' };
+  mockAuthLoading = false;
+  mockSelectionReady = true;
+  mockPlatform = null;
   jest.mocked(getRawAppEnv).mockReturnValue('development');
   jest.mocked(loadCampusAnnouncements).mockResolvedValue([announcement]);
   jest.mocked(loadCampusAnnouncementFeed).mockResolvedValue({
@@ -603,6 +613,7 @@ test('event date filters work and list navigation uses the actual event ID', asy
   expect(safeNavigate).toHaveBeenCalledWith(navigation, '活動詳情', {
     id: 'e1',
     source: event.source,
+    schoolId: 'pu',
   });
   expect(view.queryByText(/黑客松|32\/50|AI 為你推薦|我報名的/)).toBeNull();
 });
@@ -1197,4 +1208,186 @@ test('opening a school announcement notification shows its original content and 
   await view.findByText('找不到這則公告，可能已移除或不屬於目前學校。');
   expect(view.queryByText('公告全文')).toBeNull();
   expect(loadCampusAnnouncement).toHaveBeenCalledTimes(1);
+});
+
+test('saved events survive a failed first page and reopen the exact school and source; removal needs no live record', async () => {
+  mockUid = 'commute-student';
+  const later = { ...event, id: 'later', title: '職涯分享', source: 'school-events' as const };
+  jest
+    .mocked(loadCampusEventPage)
+    .mockResolvedValueOnce(eventPage([event], eventCursor))
+    .mockResolvedValueOnce({ items: [later], source: later.source, nextCursor: null });
+  const view = render(<EventsScreen navigation={navigation} />);
+  await view.findByText('載入更多活動');
+  await act(async () => fireEvent.press(view.getByText('載入更多活動')));
+  const save = await view.findByRole('button', { name: '收藏活動：職涯分享' });
+  await act(async () => fireEvent.press(save));
+  expect(view.getByRole('button', { name: '取消收藏：職涯分享' })).toBeSelected();
+  view.unmount();
+
+  jest.mocked(loadCampusEventPage).mockRejectedValueOnce(new Error('offline'));
+  const revisit = render(<EventsScreen navigation={navigation} />);
+  await revisit.findByText('無法更新活動，請確認網路連線後重試。');
+  fireEvent.press(revisit.getByRole('tab', { name: '已收藏' }));
+  fireEvent.press(await revisit.findByRole('button', { name: '查看活動：職涯分享' }));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, '活動詳情', {
+    id: later.id,
+    source: later.source,
+    schoolId: 'pu',
+  });
+  expect(revisit.queryByText(later.location)).toBeNull();
+  revisit.unmount();
+  jest.mocked(loadCampusEvent).mockResolvedValueOnce(null);
+  const detail = render(
+    <EventScreen route={{ params: { schoolId: 'pu', id: later.id, source: later.source } }} />,
+  );
+  await detail.findByText('找不到這場活動，可能已移除或不屬於目前學校。');
+  expect(loadCampusEvent).toHaveBeenCalledWith('pu', later.id, later.source);
+  expect(detail.queryByText('職涯分享')).toBeNull();
+  detail.unmount();
+  const returned = render(
+    <EventsScreen navigation={navigation} route={{ params: { saved: '1' } }} />,
+  );
+  const remove = await returned.findByRole('button', { name: '取消收藏：職涯分享' });
+  await act(async () => fireEvent.press(remove));
+  expect(await returned.findByText('還沒有收藏活動')).toBeTruthy();
+});
+
+test('detail and list share the same saved state and only read the linked school when it is still selected', async () => {
+  mockUid = 'detail-student';
+  const detailRoute = { params: { id: event.id, schoolId: event.schoolId, source: event.source } };
+  const list = render(<EventsScreen navigation={navigation} />);
+  const detail = render(<EventScreen route={detailRoute} />);
+  const save = await detail.findByRole('button', { name: '收藏活動：校方的新活動' });
+  await act(async () => fireEvent.press(save));
+  expect(list.getByRole('button', { name: '取消收藏：校方的新活動' })).toBeSelected();
+  mockSchool = { id: 'ntu' };
+  detail.rerender(<EventScreen route={detailRoute} />);
+  expect(detail.queryByText('校方的新活動')).toBeNull();
+  await detail.findByText('找不到這場活動，可能已移除或不屬於目前學校。');
+  expect(loadCampusEvent).toHaveBeenCalledTimes(1);
+});
+
+test('the profile return link opens saved events again after a mounted screen switches back to discovery', async () => {
+  const registered = { ...event, appRegistrationConfigured: true };
+  jest.mocked(loadCampusEventPage).mockResolvedValueOnce(eventPage([registered]));
+  const check = jest.spyOn(eventRegistration, 'loadEventRegistrationStates').mockResolvedValue([]);
+  const nav = { ...navigation, setParams: jest.fn() };
+  const saved = { params: { saved: '1' } };
+  const list = render(<EventsScreen navigation={nav} route={saved} />);
+  await list.findByText('還沒有收藏活動');
+  expect(nav.setParams).toHaveBeenCalledWith({ saved: undefined });
+  expect(loadCampusEventPage).not.toHaveBeenCalled();
+  expect(check).not.toHaveBeenCalled();
+  list.rerender(<EventsScreen navigation={nav} route={{ params: {} }} />);
+  fireEvent.press(list.getByRole('tab', { name: '探索活動' }));
+  await list.findByText('校方的新活動');
+  list.rerender(<EventsScreen navigation={nav} route={saved} />);
+  expect(list.getByRole('tab', { name: '已收藏' })).toBeSelected();
+  fireEvent.press(list.getByRole('tab', { name: '探索活動' }));
+  expect(list.getByText('校方的新活動')).toBeTruthy();
+  expect(loadCampusEventPage).toHaveBeenCalledTimes(1);
+  expect(check).toHaveBeenCalledTimes(1);
+});
+
+test('resolved guest, Google accounts and campuses have independent saved events; pending auth never falls back to guest', async () => {
+  mockUid = null;
+  const entry = { schoolId: 'pu', id: event.id, source: event.source, title: '我的社團場次' };
+  const key = campusEventShortlistKey('pu', campusEventShortlistOwner(null, 'platform-a'));
+  await AsyncStorage.setItem(key, JSON.stringify({ version: 1, items: [entry] }));
+  mockPlatform = { session: { platformAccountId: 'platform-a' } };
+  const screen = <EventsScreen route={{ params: { saved: '1' } }} />;
+  const list = render(screen);
+  await list.findByText(entry.title);
+  mockPlatform = { loading: true };
+  list.rerender(<EventsScreen route={{ params: { saved: '1' } }} />);
+  expect(list.queryByText(entry.title)).toBeNull();
+  expect(list.getByText('正在確認帳號與校園')).toBeTruthy();
+  mockPlatform = { session: { platformAccountId: 'platform-b' } };
+  list.rerender(<EventsScreen route={{ params: { saved: '1' } }} />);
+  await list.findByText('還沒有收藏活動');
+  mockPlatform = { session: { platformAccountId: 'platform-a' }, pendingLogout: true };
+  list.rerender(<EventsScreen route={{ params: { saved: '1' } }} />);
+  expect(list.queryByText(entry.title)).toBeNull();
+  expect(list.getByText('完成登出後即可查看收藏')).toBeTruthy();
+  mockPlatform = { error: '無法確認登入' };
+  mockUid = 'school-only';
+  list.rerender(<EventsScreen route={{ params: { saved: '1' } }} />);
+  expect(list.getByText('請重新確認登入狀態後查看收藏')).toBeTruthy();
+  expect(list.getByText('瀏覽校園活動')).toBeTruthy();
+  mockUid = null;
+  mockPlatform = null;
+  list.rerender(<EventsScreen route={{ params: { saved: '1' } }} />);
+  await list.findByText('還沒有收藏活動');
+  mockPlatform = { session: { platformAccountId: 'platform-a' } };
+  mockSchool = { id: 'nthu' };
+  list.rerender(<EventsScreen route={{ params: { saved: '1' } }} />);
+  await list.findByText('還沒有收藏活動');
+  mockSchool = { id: 'pu' };
+  mockAuthLoading = true;
+  list.rerender(<EventsScreen route={{ params: { saved: '1' } }} />);
+  expect(list.queryByText(entry.title)).toBeNull();
+  mockAuthLoading = false;
+  mockSelectionReady = false;
+  list.rerender(<EventsScreen route={{ params: { saved: '1' } }} />);
+  expect(list.queryByText(entry.title)).toBeNull();
+  mockSelectionReady = true;
+  list.rerender(<EventsScreen route={{ params: { saved: '1' } }} />);
+  await list.findByText(entry.title);
+});
+
+test('failed storage writes leave the event available to save again', async () => {
+  mockUid = 'storage-student';
+  const view = render(<EventsScreen navigation={navigation} />);
+  const save = await view.findByRole('button', { name: '收藏活動：校方的新活動' });
+  jest.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('disk full'));
+  await act(async () => fireEvent.press(save));
+  expect(view.getByRole('alert')).toHaveTextContent(/無法儲存變更/);
+  await act(async () => fireEvent.press(save));
+  expect(view.getByRole('button', { name: '取消收藏：校方的新活動' })).toBeSelected();
+  expect(view.queryByRole('alert')).toBeNull();
+});
+
+test('public browsing keeps registration behind the school-account boundary even when a Firebase UID exists', async () => {
+  mockUid = 'other-campus';
+  const registered = { ...event, appRegistrationConfigured: true };
+  jest.mocked(loadCampusEventPage).mockResolvedValueOnce(eventPage([registered]));
+  jest.mocked(loadCampusEvent).mockResolvedValueOnce(registered);
+  const check = jest.spyOn(eventRegistration, 'loadEventRegistrationStates');
+  const list = render(<EventsScreen publicBrowse navigation={navigation} />);
+  await list.findByText('登入確認報名');
+  const detail = render(
+    <EventScreen publicBrowse route={{ params: { id: event.id, source: event.source } }} />,
+  );
+  await detail.findByText('請登入目前學校的帳號，再確認報名資格與狀態。');
+  expect(check).not.toHaveBeenCalled();
+});
+
+test('a local read failure offers retry and identical titles reopen their own source', async () => {
+  mockUid = 'saved-read-retry';
+  const common = { schoolId: 'pu', id: 'same-document-id', title: '迎新活動' };
+  const club = { ...common, source: 'school-club-events' };
+  const campus = { ...common, source: 'school-events' };
+  const key = campusEventShortlistKey('pu', campusEventShortlistOwner(mockUid, null));
+  await AsyncStorage.setItem(key, JSON.stringify({ version: 1, items: [club, campus] }));
+  jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('storage unavailable'));
+  const list = render(<EventsScreen navigation={navigation} route={{ params: { saved: '1' } }} />);
+  await list.findByText('重新讀取收藏');
+  expect(list.queryByText('還沒有收藏活動')).toBeNull();
+  await act(async () => fireEvent.press(list.getByText('重新讀取收藏')));
+  fireEvent.press(list.getByRole('button', { name: '查看活動：迎新活動，學校活動，第 2 場' }));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, '活動詳情', {
+    id: campus.id,
+    schoolId: campus.schoolId,
+    source: campus.source,
+  });
+  await act(async () =>
+    fireEvent.press(list.getByRole('button', { name: '取消收藏：迎新活動，社團活動，第 1 場' })),
+  );
+  fireEvent.press(list.getByRole('button', { name: '查看活動：迎新活動' }));
+  expect(safeNavigate).toHaveBeenLastCalledWith(navigation, '活動詳情', {
+    id: campus.id,
+    schoolId: campus.schoolId,
+    source: campus.source,
+  });
 });

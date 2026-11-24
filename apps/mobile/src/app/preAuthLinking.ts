@@ -22,6 +22,8 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
       BusSchedule: 'bus',
       公告總覽: 'announcements',
       公告詳情: 'announcement/:id',
+      活動總覽: 'events',
+      活動詳情: 'event/:id',
       NuniWorkspace: 'campus-one',
       SSOLogin: 'sso-login',
       TronClassWorkspace: 'tronclass',

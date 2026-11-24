@@ -9,7 +9,9 @@ import BusAiFirstScreen from './BusAiFirstScreen';
 import LibraryAiFirstScreen from './LibraryAiFirstScreen';
 import LibraryCatalogScreen from './LibraryCatalogScreen';
 import SchoolInfoScreen from './SchoolInfoScreen';
-import { CampusAnnouncementsScreen, CampusAnnouncementDetailScreen } from './CampusContentScreens';
+import {
+  CampusAnnouncementsScreen, CampusAnnouncementDetailScreen, CampusEventsScreen, CampusEventDetailScreen,
+} from './CampusContentScreens';
 import { SSOLoginScreen } from './SSOLoginScreen';
 import { NuniWorkspaceScreen } from './NuniWorkspaceScreen';
 import PersonalImportScreen from './PersonalImportScreen';
@@ -101,6 +103,12 @@ export function PreAuthStack() {
         component={CampusAnnouncementDetailScreen}
         options={{ headerShown: false }}
       />
+      <Stack.Screen name="活動總覽" options={{ headerShown: false }}>
+        {(props) => <CampusEventsScreen {...props} publicBrowse />}
+      </Stack.Screen>
+      <Stack.Screen name="活動詳情" options={{ headerShown: false }}>
+        {(props) => <CampusEventDetailScreen {...props} publicBrowse />}
+      </Stack.Screen>
       <Stack.Screen
         name="CourseCatalog"
         component={CourseCatalogScreen}

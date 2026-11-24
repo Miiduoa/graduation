@@ -83,6 +83,11 @@ export default function MeAiFirstScreen() {
       </AISection>
       <AISection title="我的內容">
         <AIRow
+          title="收藏的活動"
+          subtitle="回到想參加的活動，確認時間與報名方式"
+          onPress={() => safeNavigate(navigation, '活動總覽', { saved: '1' })}
+        />
+        <AIRow
           title="個人社群首頁"
           subtitle="整理署名貼文、圖文作品與發表新內容"
           onPress={go('MySocialProfile')}

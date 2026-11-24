@@ -7,6 +7,7 @@ import { SchoolSessionBoundary, hasReadySchoolSession } from '../app/SchoolSessi
 import { preAuthLinking } from '../app/preAuthLinking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { dormStorageKey } from '@campus/shared/src/dormitory';
+import { loadCampusEvent, loadCampusEventPage, type CampusEvent } from '../services/publicCampusContent';
 import {
   resetSchoolLoginProviderCache,
   setSchoolLoginProviderKinds,
@@ -177,13 +178,88 @@ jest.mock('../screens/StudentCardScreen', () => {
     default: () => <Text testID="public-student-card-screen">數位學生證</Text>,
   };
 });
+jest.mock('../services/publicCampusContent', () => ({
+  ...jest.requireActual('../services/publicCampusContent'),
+  loadCampusEvent: jest.fn(),
+  loadCampusEventPage: jest.fn(),
+}));
 jest.mock('../screens/CampusContentScreens', () => {
   const { Text } = require('react-native');
   return {
+    ...jest.requireActual('../screens/CampusContentScreens'),
     CampusAnnouncementsScreen: () => <Text testID="public-announcements-screen">公开公告</Text>,
     CampusAnnouncementDetailScreen: () => <Text testID="public-announcement-screen">公告詳情</Text>,
   };
 });
+
+const publicEvent: CampusEvent = {
+  id: 'open-day', schoolId: 'pu', source: 'school-club-events', title: '天文觀測夜',
+  description: '活動當晚請到科學館集合。', startsAt: '2027-01-02T10:00:00Z', appRegistrationConfigured: true,
+};
+
+test.each([null, { platformAccountId: 'google-only' }])(
+  'opens, saves, and revisits an event through public navigation with account %j',
+  async (session) => {
+    mockPlatformSession = session;
+    jest.mocked(loadCampusEventPage).mockResolvedValue({ items: [publicEvent], nextCursor: null, source: publicEvent.source });
+    jest.mocked(loadCampusEvent).mockResolvedValue(publicEvent);
+    const navigation = createNavigationContainerRef();
+    const unhandled = jest.fn();
+    const view = render(
+      <NavigationContainer ref={navigation} onUnhandledAction={unhandled}>
+        <PreAuthStack />
+      </NavigationContainer>,
+    );
+    fireEvent.press(await view.findByRole('button', { name: '校園活動' }));
+    fireEvent.press(await view.findByRole('button', { name: /^天文觀測夜/ }));
+    expect(await view.findByText('活動介紹')).toBeTruthy();
+    expect(navigation.getCurrentRoute()).toMatchObject({
+      name: '活動詳情', params: { id: publicEvent.id, schoolId: 'pu', source: publicEvent.source },
+    });
+    expect(await view.findByText('請登入目前學校的帳號，再確認報名資格與狀態。')).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name: '收藏活動：天文觀測夜' }));
+    await view.findByRole('button', { name: '取消收藏：天文觀測夜' });
+    act(() => navigation.goBack());
+    fireEvent.press(await view.findByRole('tab', { name: '已收藏' }));
+    fireEvent.press(await view.findByRole('button', { name: '查看活動：天文觀測夜' }));
+    expect(await view.findByText('活動介紹')).toBeTruthy();
+    expect(loadCampusEvent).toHaveBeenCalledWith('pu', publicEvent.id, publicEvent.source);
+    fireEvent.press(view.getByRole('button', { name: '取消收藏：天文觀測夜' }));
+    await view.findByRole('button', { name: '收藏活動：天文觀測夜' });
+    expect(unhandled).not.toHaveBeenCalled();
+  },
+);
+
+test.each([
+  ['pu', 'pu', 'school-club-events', true],
+  ['pu', 'tw-pu', 'school-club-events', true],
+  ['pu', 'tw-pu', undefined, true],
+  ['nthu', 'pu', 'school-club-events', false],
+  ['nthu', 'tw-pu', undefined, false],
+] as const)(
+  'a public event link with selected campus %s, school hint %s and source %s respects campus identity',
+  async (school, hint, source, matches) => {
+    mockBrowsingSchoolId = school;
+    mockInitialUrl = `campus://event/open-day?schoolId=${hint}${source ? `&source=${source}` : ''}`;
+    jest.mocked(loadCampusEvent).mockClear().mockResolvedValue(publicEvent);
+    const navigation = createNavigationContainerRef();
+    const view = render(
+      <NavigationContainer ref={navigation} linking={preAuthLinking}>
+        <PreAuthStack />
+      </NavigationContainer>,
+    );
+    if (matches) {
+      await view.findByText('活動介紹');
+      expect(loadCampusEvent).toHaveBeenCalledWith(school, publicEvent.id, source);
+    } else {
+      await view.findByText('找不到這場活動，可能已移除或不屬於目前學校。');
+      expect(loadCampusEvent).not.toHaveBeenCalled();
+    }
+    expect(navigation.canGoBack()).toBe(true);
+    act(() => navigation.goBack());
+    await view.findByTestId('login-landing');
+  },
+);
 
 test('the signed-out stack opens school login through the real navigation helper', async () => {
   const onUnhandledAction = jest.fn();

@@ -18,6 +18,11 @@ import { useAuth } from '../state/auth';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { useCampusEvents } from '../hooks/useCampusEvents';
+import { useCampusEventShortlist } from '../state/campusEventShortlist';
+import {
+  EventSaveButton, EventShortlistError, EventShortlistTabs, SavedEventList,
+} from '../components/CampusEventShortlist';
+import type { SavedCampusEvent } from '@campus/shared/src/campusEventShortlist';
 import {
   type CampusAnnouncementFeed,
   loadCampusAnnouncementFeed,
@@ -57,11 +62,13 @@ import {
 } from '@campus/shared/src/campusEventTime';
 
 type Props = {
+  publicBrowse?: boolean;
   navigation?: {
     goBack?: () => void;
+    setParams?: (params: { saved?: string }) => void;
     navigate?: (screen: string, params?: Record<string, unknown>) => void;
   };
-  route?: { params?: { id?: string; announcementId?: string; eventId?: string; source?: string; sourceKind?: string; schoolId?: string } };
+  route?: { params?: { id?: string; announcementId?: string; eventId?: string; source?: string; sourceKind?: string; schoolId?: string; saved?: string } };
 };
 
 function useContent<T>(
@@ -821,12 +828,35 @@ export function CampusEventsScreen(props: Props) {
   return <CampusEventsContent key={JSON.stringify([user?.uid, school.id])} {...props} />;
 }
 
-function CampusEventsContent({ navigation }: Props) {
-  const content = useCampusEvents();
+function CampusEventsContent({ navigation, route, publicBrowse }: Props) {
+  const { school } = useSchool();
+  const shortlist = useCampusEventShortlist();
+  const requestedSaved = route?.params?.saved === '1';
+  const [savedView, setSavedView] = useState(requestedSaved);
+  const [browseOpened, setBrowseOpened] = useState(!requestedSaved);
+  const content = useCampusEvents(browseOpened);
+  const selectView = (saved: boolean) => {
+    Keyboard.dismiss();
+    if (!saved) setBrowseOpened(true);
+    setSavedView(saved);
+  };
+  useEffect(() => {
+    if (requestedSaved) {
+      setSavedView(true);
+      navigation?.setParams?.({ saved: undefined });
+    }
+  }, [requestedSaved, navigation]);
+  const openEvent = ({ id, source, schoolId }: SavedCampusEvent) => {
+    if (content.current()) safeNavigate(navigation, '活動詳情', { id, source, schoolId });
+  };
   const registrations = useEventRegistrations(
-    content.items
-      .filter((event) => event.source === 'school-club-events' && event.appRegistrationConfigured)
-      .map((event) => event.id),
+    publicBrowse
+      ? []
+      : content.items
+          .filter(
+            (event) => event.source === 'school-club-events' && event.appRegistrationConfigured,
+          )
+          .map((event) => event.id),
   );
   const [period, setPeriod] = useState<'all' | 'ongoing' | 'upcoming' | 'past' | 'undated'>('all');
   const [search, setSearch] = useState('');
@@ -870,7 +900,19 @@ function CampusEventsContent({ navigation }: Props) {
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
     >
-      {!content.loaded && !content.items.length ? (
+      <EventShortlistTabs
+        saved={savedView}
+        count={shortlist.items.length}
+        onChange={selectView}
+      />
+      <EventShortlistError shortlist={shortlist} />
+      {savedView ? (
+        <SavedEventList
+          shortlist={shortlist}
+          onOpen={openEvent}
+          onExplore={() => selectView(false)}
+        />
+      ) : !content.loaded && !content.items.length ? (
         <ReadState
           loading={content.loading}
           error={content.error}
@@ -925,32 +967,52 @@ function CampusEventsContent({ navigation }: Props) {
             subtitle={`已載入 ${content.items.length} 場；篩選與日期排序僅適用已載入的活動。`}
           >
             {visible.length ? (
-              visible.map((row, index) => (
-                <ContentRow
-                  key={`${row.source}:${row.id}`}
-                  first={index === 0}
-                  kind="活動"
-                  labels={[
-                    campusEventPhaseLabel(campusEventPhase(row, now)),
-                    row.source === 'school-club-events' && row.appRegistrationConfigured
-                      ? registrations.uid
-                        ? eventRegistrationLabel(
-                            registrations.states.find((state) => state.eventId === row.id),
-                          )
-                        : '登入確認報名'
-                      : undefined,
-                  ]}
-                  title={row.title}
-                  subtitle={[dateLabel(row.startsAt), row.location, row.organizer]
-                    .filter(Boolean)
-                    .join(' · ')}
-                  preview={row.description}
-                  onPress={() => {
-                    if (content.current())
-                      safeNavigate(navigation, '活動詳情', { id: row.id, source: row.source });
-                  }}
-                />
-              ))
+              visible.map((row, index) => {
+                const entry = {
+                  schoolId: school.id,
+                  id: row.id,
+                  source: row.source,
+                  title: row.title,
+                };
+                return (
+                  <View
+                    key={`${row.source}:${row.id}`}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'flex-start',
+                      paddingRight: 8,
+                      borderTopWidth: index ? StyleSheet.hairlineWidth : 0,
+                      borderTopColor: aiTokens.border,
+                    }}
+                  >
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <ContentRow
+                        first
+                        kind="活動"
+                        labels={[
+                          campusEventPhaseLabel(campusEventPhase(row, now)),
+                          row.source === 'school-club-events' && row.appRegistrationConfigured
+                            ? !publicBrowse && registrations.uid
+                              ? eventRegistrationLabel(
+                                  registrations.states.find((state) => state.eventId === row.id),
+                                )
+                              : '登入確認報名'
+                            : undefined,
+                        ]}
+                        title={row.title}
+                        subtitle={[dateLabel(row.startsAt), row.location, row.organizer]
+                          .filter(Boolean)
+                          .join(' · ')}
+                        preview={row.description}
+                        onPress={() => openEvent(entry)}
+                      />
+                    </View>
+                    <View style={{ paddingTop: 4 }}>
+                      <EventSaveButton event={entry} shortlist={shortlist} />
+                    </View>
+                  </View>
+                );
+              })
             ) : (
               <AICard
                 title={content.items.length ? '已載入的活動中沒有符合項目' : '目前沒有活動資訊'}
@@ -1006,14 +1068,19 @@ function CampusEventsContent({ navigation }: Props) {
   );
 }
 
-export function CampusEventDetailScreen({ navigation, route }: Props) {
+export function CampusEventDetailScreen({ navigation, route, publicBrowse }: Props) {
   const id = route?.params?.id ?? route?.params?.eventId ?? '';
-  const source = route?.params?.source;
+  const { source, schoolId: routeSchool } = route?.params ?? {};
+  const { school } = useSchool();
+  const shortlist = useCampusEventShortlist();
   const loader = useCallback(
-    (schoolId: string, eventId: string) => loadCampusEvent(schoolId, eventId, source),
-    [source],
+    async (schoolId: string, eventId: string) => {
+      if (routeSchool !== undefined && toPublicSchoolId(routeSchool) !== toPublicSchoolId(schoolId)) return null;
+      return loadCampusEvent(schoolId, eventId, source);
+    },
+    [source, routeSchool],
   );
-  const content = useContent(loader, id, source);
+  const content = useContent(loader, id, JSON.stringify([source, routeSchool]));
   const event = content.value;
   const actionLock = useRef(false);
   const [busyScope, setBusyScope] = useState<string | null>(null);
@@ -1099,15 +1166,34 @@ export function CampusEventDetailScreen({ navigation, route }: Props) {
                   費用：{event.fee === 0 ? '免費' : `NT$ ${event.fee}`}
                 </Text>
               ) : null}
+              <EventSaveButton
+                event={{
+                  schoolId: school.id,
+                  id: event.id,
+                  source: event.source,
+                  title: event.title,
+                }}
+                shortlist={shortlist}
+                showLabel
+              />
             </View>
           </AICard>
+          <EventShortlistError shortlist={shortlist} />
           <AICard title="活動介紹">
             <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
               {event.description || '主辦單位尚未提供活動介紹。'}
             </Text>
           </AICard>
           {event.source === 'school-club-events' && event.appRegistrationConfigured ? (
-            <EventRegistrationPanel eventId={event.id} />
+            publicBrowse ? (
+              <AICard title="App 報名">
+                <Text style={{ color: aiTokens.text, lineHeight: 22 }}>
+                  請登入目前學校的帳號，再確認報名資格與狀態。
+                </Text>
+              </AICard>
+            ) : (
+              <EventRegistrationPanel eventId={event.id} />
+            )
           ) : (
             <AICard title="報名方式">
               <View style={{ gap: 8 }}>
