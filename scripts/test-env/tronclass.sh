@@ -63,8 +63,10 @@ export WEB_PUBLIC_ORIGIN="http://$TEST_HOST:$TEST_WEB_PORT"
 export NEXT_PUBLIC_SITE_URL="$WEB_PUBLIC_ORIGIN"
 export NO_PROXY="${NO_PROXY:-},127.0.0.1,localhost"
 
-node -e 'if (!process.versions.node.startsWith("22.")) throw new Error("Use the repository Node 22 runtime.")'
-command -v java >/dev/null || { echo 'Java 21 is required for the Firestore emulator.' >&2; exit 1; }
+if [ "${TRONCLASS_SIGNAL_SELFTEST:-}" != '1' ]; then
+  node -e 'if (!process.versions.node.startsWith("22.")) throw new Error("Use the repository Node 22 runtime.")'
+  command -v java >/dev/null || { echo 'Java 21 is required for the Firestore emulator.' >&2; exit 1; }
+fi
 
 tronclass_runtime_dir="${TRONCLASS_RUNTIME_DIR:-}"
 while [ -n "$tronclass_runtime_dir" ] && [ "$tronclass_runtime_dir" != "/" ] && [ "${tronclass_runtime_dir%/}" != "$tronclass_runtime_dir" ]; do
@@ -187,19 +189,91 @@ export TRONCLASS_SESSION_SECRET="$(<"$TRONCLASS_RUNTIME_DIR/tronclass-session.ke
 
 TRONCLASS_EMULATOR_PID=''
 TRONCLASS_WEB_PID=''
+tronclass_signal_tree() {
+  local pid="$1"
+  local sig="$2"
+  [ -n "$pid" ] || return 0
+  # The logged wrapper keeps a detached child in its own process group.
+  # Signal that group first, while /proc still names the wrapper as parent.
+  local child
+  for child in $(ps -o pid= --ppid "$pid" 2>/dev/null); do
+    kill "-$sig" -- "-$child" 2>/dev/null || kill "-$sig" "$child" 2>/dev/null || true
+  done
+  kill "-$sig" "$pid" 2>/dev/null || true
+}
+
+tronclass_stop_pid() {
+  local pid="$1"
+  local sig="${2:-TERM}"
+  [ -n "$pid" ] || return 0
+  tronclass_signal_tree "$pid" "$sig"
+  local i
+  for i in $(seq 1 20); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  tronclass_signal_tree "$pid" KILL
+  wait "$pid" 2>/dev/null || true
+}
+
 cleanup() {
   trap - EXIT INT TERM
-  if [ -n "$TRONCLASS_WEB_PID" ]; then kill "$TRONCLASS_WEB_PID" 2>/dev/null || true; fi
-  if [ -n "$TRONCLASS_EMULATOR_PID" ]; then
-    kill -INT "$TRONCLASS_EMULATOR_PID" 2>/dev/null || true
-    wait "$TRONCLASS_EMULATOR_PID" 2>/dev/null || true
-  fi
+  tronclass_stop_pid "$TRONCLASS_WEB_PID" TERM
+  tronclass_stop_pid "$TRONCLASS_EMULATOR_PID" INT
 }
 trap cleanup EXIT INT TERM
 
 tronclass_run_logged() {
   local log="$1"
   shift
+  # Backgrounded calls exec so $! is this Node wrapper, not a Bash function
+  # subshell that can ignore INT and leave the child holding the port.
+  if [ "${TRONCLASS_RUN_LOGGED_EXEC:-}" = '1' ]; then
+    exec node - "$log" "$@" <<'NODE'
+const fs = require('node:fs');
+const { spawn } = require('node:child_process');
+const logPath = process.argv[2];
+const argv = process.argv.slice(3);
+function refuseLog() {
+  process.stderr.write('Refusing a symbolic link or unusable log file.\n');
+  process.exit(1);
+}
+try {
+  const existing = fs.lstatSync(logPath);
+  if (!existing.isFile() || existing.nlink !== 1 || existing.uid !== process.getuid()) refuseLog();
+} catch (error) {
+  if (error && error.code !== 'ENOENT') refuseLog();
+}
+const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW;
+let fd;
+try {
+  fd = fs.openSync(logPath, flags, 0o600);
+} catch (error) {
+  refuseLog();
+}
+const info = fs.fstatSync(fd);
+if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
+  fs.closeSync(fd);
+  refuseLog();
+}
+fs.ftruncateSync(fd, 0);
+const child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd], detached: true });
+fs.closeSync(fd);
+const stop = (signal) => {
+  try { process.kill(-child.pid, signal); } catch (error) { /* the group may already have exited */ }
+  try { child.kill(signal); } catch (error) { /* the child may have already exited */ }
+};
+process.on('SIGINT', () => stop('SIGINT'));
+process.on('SIGTERM', () => stop('SIGTERM'));
+child.on('exit', (code, signal) => {
+  if (signal) {
+    try { process.kill(process.pid, signal); } catch (error) { process.exit(1); }
+    return;
+  }
+  process.exit(code ?? 1);
+});
+NODE
+  fi
   node - "$log" "$@" <<'NODE'
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
@@ -228,9 +302,10 @@ if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
   refuseLog();
 }
 fs.ftruncateSync(fd, 0);
-const child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd] });
+const child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd], detached: true });
 fs.closeSync(fd);
 const stop = (signal) => {
+  try { process.kill(-child.pid, signal); } catch (error) { /* the group may already have exited */ }
   try { child.kill(signal); } catch (error) { /* the child may have already exited */ }
 };
 process.on('SIGINT', () => stop('SIGINT'));
@@ -245,12 +320,22 @@ child.on('exit', (code, signal) => {
 NODE
 }
 
+if [ "${TRONCLASS_SIGNAL_SELFTEST:-}" = '1' ]; then
+  TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/selftest.log" \
+    node -e "const fs=require('node:fs'); fs.writeFileSync(process.env.TRONCLASS_SELFTEST_CHILD, String(process.pid)); setInterval(()=>{}, 1000);" &
+  echo "WRAPPER_PID=$!"
+  unset TRONCLASS_RUN_LOGGED_EXEC
+  wait
+  exit 0
+fi
+
 # Keep Firebase data in the running emulator; restarting Next retains it.
 # Do not automatically export school sessions after a live binding test.
-tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/emulators.log" \
+TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/emulators.log" \
   node node_modules/firebase-tools/lib/bin/firebase.js emulators:start \
   --project "$TEST_PROJECT_ID" --config firebase.test.json --only auth,firestore &
 TRONCLASS_EMULATOR_PID=$!
+unset TRONCLASS_RUN_LOGGED_EXEC
 TRONCLASS_EMULATOR_READY=false
 for _ in $(seq 1 90); do
   if ! kill -0 "$TRONCLASS_EMULATOR_PID" 2>/dev/null; then
@@ -280,9 +365,10 @@ else
   echo 'School binding is disabled. Use synthetic fixtures only.'
 fi
 cd apps/web
-tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/web.log" \
+TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/web.log" \
   node ../../node_modules/next/dist/bin/next dev --webpack -p "$TEST_WEB_PORT" -H "$TEST_HOST" &
 TRONCLASS_WEB_PID=$!
+unset TRONCLASS_RUN_LOGGED_EXEC
 if [ "${TRONCLASS_VERIFY_RUNTIME:-}" = '1' ] && [ "$TRONCLASS_INTEGRATION_ENABLED" = true ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
   tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/acceptance.log" node scripts/test-env/verify-tronclass.cjs

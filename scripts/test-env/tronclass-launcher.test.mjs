@@ -451,3 +451,52 @@ test('launcher refuses a hard-linked log file without truncating the other link'
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('launcher signal stops the logged child, not only the wrapper', async () => {
+  const { spawn } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-signal-'));
+  const childPidFile = path.join(dir, 'child.pid');
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+  try {
+    const proc = spawn('bash', [script], {
+      env: {
+        ...process.env,
+        TRONCLASS_RUNTIME_DIR: dir,
+        TRONCLASS_SIGNAL_SELFTEST: '1',
+        TRONCLASS_SELFTEST_CHILD: childPidFile,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    proc.stdout.setEncoding('utf8');
+    proc.stdout.on('data', chunk => { stdout += chunk; });
+    const started = Date.now();
+    let childPid;
+    while (Date.now() - started < 5000) {
+      if (existsSync(childPidFile)) {
+        childPid = Number(readFileSync(childPidFile, 'utf8').trim());
+        if (Number.isInteger(childPid) && childPid > 0) break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    const wrap = /WRAPPER_PID=(\d+)/.exec(stdout);
+    assert.ok(wrap, stdout);
+    const wrapperPid = Number(wrap[1]);
+    assert.ok(childPid && childPid !== wrapperPid, `child=${childPid} wrapper=${wrapperPid}`);
+    try { process.kill(wrapperPid, 'SIGTERM'); } catch (error) { assert.fail(String(error)); }
+    const exited = await new Promise(resolve => {
+      const timer = setTimeout(() => resolve('timeout'), 3000);
+      proc.on('exit', (code, signal) => {
+        clearTimeout(timer);
+        resolve({ code, signal });
+      });
+    });
+    assert.notEqual(exited, 'timeout');
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.throws(() => process.kill(childPid, 0));
+    assert.throws(() => process.kill(wrapperPid, 0));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
