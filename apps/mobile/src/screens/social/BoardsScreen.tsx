@@ -95,6 +95,9 @@ function BoardsContent() {
   // their local state; every other board still takes the server snapshot.
   const subscriptionRevision = useRef(0);
   const boardWriteRevision = useRef(new Map<string, number>());
+  // A list can span a failed write and its entire confirmation. Keep the
+  // failure's settlement revision even after the confirmation is complete.
+  const boardWriteFailureRevision = useRef(new Map<string, number>());
   // Last server read that applied membership for this board.
   const boardServerAppliedRevision = useRef(new Map<string, number>());
   // Completion order is separate from dispatch order: a confirmation can
@@ -149,6 +152,7 @@ function BoardsContent() {
     pendingServerConfirmCounts.current = new Map();
     pendingSubscriptionCounts.current.clear();
     boardWriteRevision.current.clear();
+    boardWriteFailureRevision.current.clear();
     lastSettledWriteSucceeded.current.clear();
     lastSuccessfulUnsubscribeRevision.current.clear();
     latestIntent.current.clear();
@@ -170,7 +174,7 @@ function BoardsContent() {
   const load = useCallback(async () => {
     const version = ++loadVersion.current;
     const subscriptionRevisionAtStart = subscriptionRevision.current;
-    const overlappingConfirmations = new Set([
+    const overlappingReconciliations = new Set([
       ...awaitingServerConfirm.current.keys(),
       ...pendingServerConfirmCounts.current.keys(),
     ]);
@@ -198,11 +202,14 @@ function BoardsContent() {
         if (revision > subscriptionRevisionAtStart) keepLocal.add(id);
       }
       const { subscribedIds } = membership;
-      for (const id of awaitingServerConfirm.current.keys()) overlappingConfirmations.add(id);
-      for (const id of pendingServerConfirmCounts.current.keys()) overlappingConfirmations.add(id);
+      for (const id of awaitingServerConfirm.current.keys()) overlappingReconciliations.add(id);
+      for (const id of pendingServerConfirmCounts.current.keys()) overlappingReconciliations.add(id);
+      for (const [id, revision] of boardWriteFailureRevision.current) {
+        if (revision > subscriptionRevisionAtStart) overlappingReconciliations.add(id);
+      }
       // Keep the entire overlap out of list sequencing, including omissions
       // that agree with a rollback while a server confirmation is in flight.
-      for (const id of overlappingConfirmations) keepLocal.add(id);
+      for (const id of overlappingReconciliations) keepLocal.add(id);
       for (const [id, appliedAt] of boardConfirmationAppliedAt.current) {
         if (appliedAt > serverRevisionAtDispatch) keepLocal.add(id);
       }
@@ -251,7 +258,7 @@ function BoardsContent() {
         // agrees with the first confirmation. An omission alone leaves a
         // subscription established by a single-board read in place.
         const listed = subscribedIds.has(id);
-        const listedDuringOverlap = listed && overlappingConfirmations.has(id);
+        const listedDuringOverlap = listed && overlappingReconciliations.has(id);
         const listClaimsUnkeptSubscription = listed && !nextConfirmed.has(id);
         const listOmitsConfirmed = !listed && confirmedByBoardRead.current.has(id);
         if (
@@ -462,6 +469,7 @@ function BoardsContent() {
       // after that write settles, including when a newer tap settled first.
       const settledRevision = ++subscriptionRevision.current;
       boardWriteRevision.current.set(b.id, settledRevision);
+      if (failed) boardWriteFailureRevision.current.set(b.id, settledRevision);
       if (latestBoardIntent === intent) {
         if (failed) {
           lastSettledWriteSucceeded.current.delete(b.id);

@@ -476,37 +476,61 @@ test('a list started after a failed subscribe cannot omit a subscription confirm
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
-test('an overlapping list that includes the board rechecks after the first confirmation succeeds', async () => {
-  jest.mocked(listBoards).mockResolvedValue([board]);
-  const view = render(<BoardsScreen />);
-  await view.findByText('讀書會');
+test.each(['during confirmation', 'during write, IDs last', 'during write, rows last'])(
+  'a list started %s rechecks listed membership after the first confirmation succeeds',
+  async (timing) => {
+    jest.mocked(listBoards).mockResolvedValue([board]);
+    const view = render(<BoardsScreen />);
+    await view.findByText('讀書會');
 
-  const firstConfirm = deferred<boolean>();
-  const secondConfirm = deferred<boolean>();
-  jest.mocked(isSubscribedToBoard)
-    .mockImplementationOnce(() => firstConfirm.promise)
-    .mockImplementationOnce(() => secondConfirm.promise);
-  jest.mocked(subscribeToBoard).mockRejectedValueOnce(new Error('offline'));
-  await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
-  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+    const firstConfirm = deferred<boolean>();
+    const secondConfirm = deferred<boolean>();
+    jest.mocked(isSubscribedToBoard)
+      .mockImplementationOnce(() => firstConfirm.promise)
+      .mockImplementationOnce(() => secondConfirm.promise);
+    const write = deferred();
+    jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
+    fireEvent.press(view.getByLabelText('訂閱讀書會'));
 
-  const subs = deferred<string[]>();
-  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
-  let refreshPromise!: Promise<void>;
-  act(() => { refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+    const rows = deferred<typeof board[]>();
+    const subs = deferred<string[]>();
+    jest.mocked(listBoards).mockImplementationOnce(() => rows.promise);
+    jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
+    let refreshPromise!: Promise<void>;
+    const refresh = () => view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+    const failWrite = async () => {
+      await act(async () => { write.reject(new Error('offline')); });
+      expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+      expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    };
+    if (timing === 'during confirmation') await failWrite();
+    await act(async () => {
+      refreshPromise = refresh();
+      if (timing === 'during write, rows last') subs.resolve(['board']);
+      else rows.resolve([board]);
+    });
+    if (timing !== 'during confirmation') {
+      expect(isSubscribedToBoard).not.toHaveBeenCalled();
+      await failWrite();
+    }
 
-  await act(async () => { firstConfirm.resolve(true); });
-  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+    await act(async () => { firstConfirm.resolve(true); });
+    expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 
-  // Another device cancels after the first read, but the list still includes the board.
-  await act(async () => { subs.resolve(['board']); await refreshPromise; });
-  expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
-  expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
-  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+    // Another device cancels after the first read, but the list still includes the board.
+    await act(async () => {
+      if (timing === 'during write, rows last') rows.resolve([board]);
+      else subs.resolve(['board']);
+      await refreshPromise;
+    });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+    expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
+    expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 
-  await act(async () => { secondConfirm.resolve(false); });
-  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
-});
+    await act(async () => { secondConfirm.resolve(false); });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+  },
+);
 
 test('a later overlapping list that omits a board does not overwrite the first successful confirm', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
