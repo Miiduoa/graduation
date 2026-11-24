@@ -1,8 +1,8 @@
 import { classMeetingKey } from '@campus/shared';
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import type { PersonalImportRecord } from '@campus/shared';
-import PersonalTimetableScreen from '../screens/PersonalTimetableScreen';
+import PersonalTimetableScreen, { PublicPersonalTimetable, StackTitledPersonalTimetable } from '../screens/PersonalTimetableScreen';
 import type { PreAuthStackParamList } from '../screens/preAuthTypes';
 import { loadPersonalTimetable, loadPersonalTimetableDraft, savePersonalTimetable } from '../services/personalTimetable';
 import { loadPersonalImports } from '../services/personalImports';
@@ -107,7 +107,8 @@ test('the full timetable and editor use NCKU period labels and times, without in
   fireEvent.changeText(view.getByLabelText('匯出開始日期'), '2026-11-02');
   fireEvent.changeText(view.getByLabelText('匯出結束日期'), '2026-11-08');
   expect(view.getByText('將匯出 1 堂課；略過 0 門時間未確認的課程。')).toBeTruthy();
-  expect(view.getByText('星期一 · 08:00–09:50')).toBeTruthy();
+  expect(view.getByRole('header', { name: '星期一' })).toBeTruthy();
+  expect(view.getByText('08:00–09:50')).toBeTruthy();
   expect(view.queryByText(/09:10–11:00/)).toBeNull();
   expect(loadPersonalTimetable).toHaveBeenCalledWith(null, 'ncku', 'nuni:account-a');
   fireEvent.press(view.getByText('新增'));
@@ -185,7 +186,12 @@ test.each([
   const view = render(<PersonalTimetableScreen />);
   await view.findByText('週末課程');
   expect(view.queryByText('開啟課前提醒')).toBeNull();
-  expect(view.getByText(new RegExp(`週六 · ${expected}`))).toBeTruthy();
+  expect(view.getByRole('header', { name: '星期六' })).toBeTruthy();
+  expect(view.getByText(expected)).toBeTruthy();
+  expect(view.getByText('原始匯入，未放入節次')).toBeTruthy();
+  // The original import keeps its tap action and never invents a period time.
+  fireEvent.press(view.getByText('週末課程'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'PersonalImport', { kind: 'timetable' });
   expect(view.getByRole('button', { name: '格子' })).toBeDisabled();
   expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();
 });
@@ -203,19 +209,23 @@ test('verified weekend imports appear in week, day and scrollable grid without c
   });
   const view = render(<PersonalTimetableScreen />);
   await view.findByText('週六實驗課');
-  expect(view.getByText('星期六 · 08:00–09:50')).toBeTruthy();
-  expect(view.getByText('星期日 · 08:00–09:50')).toBeTruthy();
+  expect(view.getByRole('header', { name: '星期六' })).toBeTruthy();
+  expect(view.getByRole('header', { name: '星期日' })).toBeTruthy();
   expect(view.getByRole('button', { name: '排讀書時間' })).not.toBeDisabled();
   // The clock is pinned to Sunday. The day view must not jump to Monday.
   fireEvent.press(view.getByText('單日'));
-  expect(view.getByText('星期日 · 08:00–09:50')).toBeTruthy();
-  expect(view.queryByText('週六實驗課')).toBeNull();
-  fireEvent.press(view.getByText('星期六'));
-  expect(view.getByText('星期六 · 08:00–09:50')).toBeTruthy();
-  // The separate today's exceptions summary still includes Sunday's class.
-  expect(view.queryByText('星期日 · 08:00–09:50')).toBeNull();
-  fireEvent.press(view.getByText('星期日'));
-  expect(view.getByText('星期日 · 08:00–09:50')).toBeTruthy();
+  expect(view.getByRole('button', { name: '星期日' }).props.accessibilityState.selected).toBe(true);
+  expect(view.getByRole('header', { name: '星期日' })).toBeTruthy();
+  const body = () => within(view.getByTestId('timetable-body'));
+  expect(body().getByText('週日實作課')).toBeTruthy();
+  expect(body().queryByText('週六實驗課')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '星期六' }));
+  expect(view.getByRole('button', { name: '星期六' }).props.accessibilityState.selected).toBe(true);
+  expect(view.getByRole('header', { name: '星期六' })).toBeTruthy();
+  expect(body().getByText('週六實驗課')).toBeTruthy();
+  expect(body().queryByText('週日實作課')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '星期日' }));
+  expect(view.getByRole('header', { name: '星期日' })).toBeTruthy();
   fireEvent.press(view.getByText('格子'));
   expect(view.getAllByText('週日實作課').length).toBeGreaterThan(1);
   expect(view.getByText('六')).toBeTruthy();
@@ -235,8 +245,10 @@ test('Saturday classes are the default single-day view on Saturday', async () =>
   const view = render(<PersonalTimetableScreen />);
   await view.findAllByText('週六實驗課');
   fireEvent.press(view.getByText('單日'));
-  expect(view.getByText('星期六 · 08:00–09:50')).toBeTruthy();
-  expect(view.queryByText('週日實作課')).toBeNull();
+  const body = within(view.getByTestId('timetable-body'));
+  expect(body.getByRole('header', { name: '星期六' })).toBeTruthy();
+  expect(body.getByText('週六實驗課')).toBeTruthy();
+  expect(body.queryByText('週日實作課')).toBeNull();
 });
 
 test('unresolved logout never loads a guest or account timetable', () => {
@@ -257,7 +269,8 @@ test('a manual course without a semester opens the same manual timetable from To
   const view = render(<PersonalTimetableScreen />);
   await view.findByText('手排課程');
   expect(view.queryByText('成大課程')).toBeNull();
-  expect(view.getByText('星期一 · 08:00–09:50')).toBeTruthy();
+  expect(view.getByRole('header', { name: '星期一' })).toBeTruthy();
+  expect(view.getByText('08:00–09:50')).toBeTruthy();
 });
 
 test('a failed import read cannot be treated as free time and can be retried in place', async () => {
@@ -266,6 +279,10 @@ test('a failed import read cannot be treated as free time and can be retried in 
   await view.findByText('匯入課表暫時讀不到，目前不能確認空堂，請重新讀取。');
   expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();
   expect(view.getByRole('button', { name: '排讀書時間' })).toBeDisabled();
+  fireEvent.press(view.getByRole('button', { name: '單日' }));
+  expect(view.getByText('課表尚未完整讀取。')).toBeTruthy();
+  expect(view.queryByText('這天沒有排課。')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '一週' }));
   fireEvent.press(view.getByRole('button', { name: '重試匯入課表' }));
   await view.findByText('成大課程');
   expect(view.getByRole('button', { name: '今天空堂' })).not.toBeDisabled();
@@ -505,6 +522,169 @@ test.each([
   });
   const view = render(<PersonalTimetableScreen />);
   await view.findByText(title);
-  expect(view.getByText(new RegExp(`週一 · ${startTime}–${endTime}`))).toBeTruthy();
+  expect(view.getByRole('header', { name: '星期一' })).toBeTruthy();
+  expect(view.getByText(`${startTime}–${endTime}`)).toBeTruthy();
   expect(loadPersonalTimetable).toHaveBeenCalledWith(null, schoolId, undefined);
+});
+
+// Flattens the rendered tree into text and testID tokens so section order can be asserted.
+function renderedTokens(node: unknown, out: string[] = []): string[] {
+  if (node == null) return out;
+  if (typeof node === 'string') { out.push(node); return out; }
+  if (Array.isArray(node)) { node.forEach((child) => renderedTokens(child, out)); return out; }
+  const element = node as { props?: Record<string, unknown>; children?: unknown };
+  if (typeof element.props?.testID === 'string') out.push(`#${element.props.testID}`);
+  renderedTokens(element.children, out);
+  return out;
+}
+
+const scopedRecords = () => [
+  record(),
+  record({ id: 'mon-late', title: '週一午後課', startPeriod: 6, endPeriod: 7 }),
+  record({ id: 'mon-unresolved', title: '週一待確認課', startPeriod: undefined, endPeriod: undefined, periodLabel: '未知節', location: '' }),
+  record({ id: 'tue', title: '週二課', dayOfWeek: 2, startPeriod: 1, endPeriod: 1 }),
+  record({ id: 'no-day', title: '尚未指定星期課', dayOfWeek: undefined, startPeriod: undefined, endPeriod: undefined }),
+];
+
+test('the selected timetable renders before management, which keeps reminders, export, exceptions, import summary and save in order', async () => {
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('成大課程');
+  const tokens = renderedTokens(view.toJSON());
+  const at = (token: string) => tokens.indexOf(token);
+  expect(at('#timetable-body')).toBeGreaterThan(-1);
+  expect(at('#timetable-body')).toBeLessThan(at('指定日期課程安排'));
+  expect(at('指定日期課程安排')).toBeLessThan(at('儲存每週基準課表'));
+  expect(at('#timetable-body')).toBeLessThan(at('儲存每週基準課表'));
+  expect(at('#timetable-body')).toBeLessThan(at('幫我安排'));
+});
+
+test('a dated link keeps its occurrence and dated adjustments ahead of the timetable', async () => {
+  mockRoute = { params: { term: '115|1', courseId: 'course-a', schoolId: 'ncku', date: '2026-11-02' } };
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('2026-11-02 · 08:00–09:50 · 教室 303');
+  const tokens = renderedTokens(view.toJSON());
+  expect(tokens.indexOf('指定日期課程安排')).toBeGreaterThan(-1);
+  expect(tokens.indexOf('指定日期課程安排')).toBeLessThan(tokens.indexOf('#timetable-body'));
+  expect(view.getByLabelText('查看日期').props.value).toBe('2026-11-02');
+});
+
+test('weekly view groups rows by weekday, orders them, and keeps unresolved and day-less imports visible without invented times', async () => {
+  jest.mocked(loadPersonalImports).mockResolvedValue({ version: 1, records: scopedRecords(), batches: [] });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('週一午後課');
+  const body = within(view.getByTestId('timetable-body'));
+  const all = renderedTokens(view.toJSON());
+  const tokens = all.slice(all.indexOf('#timetable-body'));
+  const at = (token: string) => tokens.indexOf(token);
+  expect(at('星期一')).toBeLessThan(at('成大課程'));
+  expect(at('成大課程')).toBeLessThan(at('週一午後課'));
+  expect(at('週一午後課')).toBeLessThan(at('週一待確認課'));
+  expect(at('週一待確認課')).toBeLessThan(at('星期二'));
+  expect(at('星期二')).toBeLessThan(at('週二課'));
+  expect(at('週二課')).toBeLessThan(at('未排定星期'));
+  expect(at('未排定星期')).toBeLessThan(at('尚未指定星期課'));
+  expect(body.getAllByTestId('timetable-row')).toHaveLength(5);
+  // Placed rows use verified school periods; unresolved originals keep their own label.
+  expect(body.getByText('08:00–09:50')).toBeTruthy();
+  expect(body.getByText('校方節次 未知節')).toBeTruthy();
+  expect(body.getAllByText('原始匯入，未放入節次')).toHaveLength(2);
+  // Only placed courses offer 作業與教材, and original imports keep their import action.
+  expect(body.getAllByText('作業與教材')).toHaveLength(3);
+  fireEvent.press(body.getByText('週一待確認課'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'PersonalImport', { kind: 'timetable' });
+});
+
+test('day filter shows only the selected weekday, including its unresolved imports, with selected state on day and mode', async () => {
+  jest.mocked(loadPersonalImports).mockResolvedValue({ version: 1, records: scopedRecords(), batches: [] });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('週一午後課');
+  expect(view.getByRole('button', { name: '一週' }).props.accessibilityState.selected).toBe(true);
+  fireEvent.press(view.getByRole('button', { name: '單日' }));
+  expect(view.getByRole('button', { name: '單日' }).props.accessibilityState.selected).toBe(true);
+  expect(view.getByRole('button', { name: '一週' }).props.accessibilityState.selected).toBe(false);
+  fireEvent.press(view.getByRole('button', { name: '星期一' }));
+  const body = () => within(view.getByTestId('timetable-body'));
+  expect(view.getByRole('button', { name: '星期一' }).props.accessibilityState.selected).toBe(true);
+  expect(body().getAllByTestId('timetable-row').map((row) => within(row).getAllByText(/課/)[0].props.children))
+    .toEqual(['成大課程', '週一午後課', '週一待確認課']);
+  expect(body().queryByText('週二課')).toBeNull();
+  expect(body().queryByText('尚未指定星期課')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '星期三' }));
+  expect(body().getByText('這天沒有已排定的課程，另有課程的星期待確認。')).toBeTruthy();
+  expect(body().queryAllByTestId('timetable-row')).toHaveLength(0);
+});
+
+test('a linked course is the only selected row and keeps its import action', async () => {
+  jest.mocked(loadPersonalImports).mockResolvedValue({ version: 1, records: scopedRecords(), batches: [] });
+  mockRoute = { params: { term: '115|1', courseId: 'course-a', schoolId: 'ncku' } };
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('週一午後課');
+  const body = within(view.getByTestId('timetable-body'));
+  const selected = body.getAllByRole('button').filter((node) => node.props.accessibilityState?.selected === true);
+  expect(selected).toHaveLength(1);
+  expect(selected[0].props.accessibilityLabel).toContain('成大課程');
+  fireEvent.press(body.getByText('成大課程'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'PersonalImport', { kind: 'timetable' });
+});
+
+test('the grid keeps unresolved and day-less original imports listed beneath it', async () => {
+  jest.mocked(loadPersonalImports).mockResolvedValue({ version: 1, records: scopedRecords(), batches: [] });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('週一午後課');
+  fireEvent.press(view.getByRole('button', { name: '格子' }));
+  expect(view.getByRole('button', { name: '格子' }).props.accessibilityState.selected).toBe(true);
+  const body = within(view.getByTestId('timetable-body'));
+  expect(body.getByText('以下原始匯入保留原始時間，未放入節次格子。')).toBeTruthy();
+  expect(body.getByText('週一待確認課')).toBeTruthy();
+  expect(body.getByText('尚未指定星期課')).toBeTruthy();
+  expect(body.getAllByTestId('timetable-row')).toHaveLength(2);
+});
+
+test('opening a manual course from the agenda scrolls and focuses its editor only on request', async () => {
+  const { AccessibilityInfo, ScrollView } = require('react-native');
+  const current = await jest.mocked(loadPersonalTimetable)(null, 'ncku', 'nuni:account-a');
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({
+    ...current, meta: { ...current.meta, year: '115', semester: '1' },
+    courses: [{ id: 'manual', name: '星期五專題', teacher: '', room: '工學院', day: 5, start: 2, end: 3, color: 'gray' }],
+  });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('星期五專題');
+  const scrollTo = jest.spyOn(view.UNSAFE_getByType(ScrollView).instance, 'scrollTo');
+  const focus = jest.spyOn(AccessibilityInfo, 'sendAccessibilityEvent').mockImplementation(() => {});
+  try {
+    fireEvent.press(view.getByRole('button', { name: /^星期五專題/ }));
+    const heading = view.getByRole('header', { name: '編輯課程' });
+    fireEvent(heading, 'layout', { nativeEvent: { layout: { y: 160 } } });
+    expect(scrollTo).toHaveBeenCalledWith({ y: 160, animated: false });
+    expect(focus).toHaveBeenCalledWith(expect.anything(), 'focus');
+    fireEvent(heading, 'layout', { nativeEvent: { layout: { y: 164 } } });
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+  } finally {
+    focus.mockRestore();
+    scrollTo.mockRestore();
+  }
+});
+
+test('the native stack owns the title in guest and account routes; standalone screens supply their title', async () => {
+  const view = render(<StackTitledPersonalTimetable />);
+  expect(view.queryByText('我的課表')).toBeNull();
+  await view.findByText('成大課程');
+  expect(view.queryByText('我的課表')).toBeNull();
+  view.unmount();
+  const standalone = render(<PersonalTimetableScreen />);
+  await standalone.findByText('成大課程');
+  expect(standalone.getByText('我的課表')).toBeTruthy();
+});
+
+test('the public stack keeps editable courses and leaves out unavailable classroom destinations', async () => {
+  const view = render(<PublicPersonalTimetable />);
+  const course = await view.findByText('成大課程');
+  expect(view.queryByRole('button', { name: /作業與教材/ })).toBeNull();
+  fireEvent.press(course);
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'PersonalImport', { kind: 'timetable' });
+  fireEvent.press(view.getByRole('button', { name: '新增' }));
+  fireEvent.changeText(view.getByLabelText('課名'), '公開課表課程');
+  expect(view.queryByRole('button', { name: /作業與教材/ })).toBeNull();
+  expect(view.getByRole('button', { name: '儲存' })).toBeTruthy();
 });

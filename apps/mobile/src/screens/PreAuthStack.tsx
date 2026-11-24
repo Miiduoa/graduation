@@ -15,7 +15,7 @@ import { CampusAnnouncementsScreen, CampusAnnouncementDetailScreen } from './Cam
 import { SSOLoginScreen } from './SSOLoginScreen';
 import { NuniWorkspaceScreen } from './NuniWorkspaceScreen';
 import PersonalImportScreen from './PersonalImportScreen';
-import PersonalTimetableScreen from './PersonalTimetableScreen';
+import { PublicPersonalTimetable } from './PersonalTimetableScreen';
 import PersonalCalendarScreen from './PersonalCalendarScreen';
 import { CourseCatalogScreen } from './CourseCatalogScreen';
 import { HealthScreen } from './HealthScreen';
@@ -156,7 +156,7 @@ export function PreAuthStack() {
         options={{ title: '課表助理', headerShown: false }}
       />
       <Stack.Screen name="PersonalImport" component={PersonalImportScreen} options={{ title: '匯入我的資料' }} />
-      <Stack.Screen name="PersonalTimetable" component={PersonalTimetableScreen} options={{ title: '我的課表' }} />
+      <Stack.Screen name="PersonalTimetable" component={PublicPersonalTimetable} options={{ title: '我的課表' }} />
       <Stack.Screen
         name="PersonalCalendar"
         component={PersonalCalendarScreen}
