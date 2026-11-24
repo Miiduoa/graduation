@@ -1365,10 +1365,28 @@ describe('continuing a search after opening a service', () => {
     expect(destinationKey).toEqual(expect.any(String));
     move('/life', window.history.state);
     expect(window.location.pathname).toBe('/life');
-    expect(window.history.state.__campusSearchHistoryEntry).toBe(destinationKey);
+    expect(window.history.state.__campusSearchHistoryEntry).not.toBe(destinationKey);
 
     await go(-1);
     expect(window.location.pathname).toBe('/search');
+    renderAfterFrame();
+    expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it('invalidates the search entry when replacing it with another page and back', async () => {
+    const entry = leaveLibrary();
+    await go(-1);
+    move('/life', window.history.state);
+    expect(window.history.state.__campusSearchHistoryEntry).not.toBe(entry.__campusSearchHistoryEntry);
+    expect(window.history.state).not.toHaveProperty('__campusSearchResultReturn');
+    move(librarySearch, window.history.state);
+    expect(window.history.state.__campusSearchHistoryEntry).not.toBe(entry.__campusSearchHistoryEntry);
+    expect(window.history.state).not.toHaveProperty('__campusSearchResultReturn');
+
+    await go(1);
+    expect(window.location.pathname).toBe('/library');
+    await go(-1);
     renderAfterFrame();
     expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
     expect(scroll).not.toHaveBeenCalled();
@@ -1552,6 +1570,30 @@ describe('continuing a search after opening a service', () => {
     expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
     expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
     expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores the earlier entry filters when jumping back from a different service', async () => {
+    move('/');
+    commitNavigation('/search');
+    leaveLibrary('/search');
+
+    commitNavigation('/search');
+    const later = renderAfterFrame();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '公車' } });
+    const bus = screen.getByRole('link', { name: /^公車/ });
+    const destination = bus.getAttribute('href')!;
+    fireEvent.click(bus);
+    expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toContain('公車');
+    later.unmount();
+    commitNavigation(destination);
+
+    await go(-3);
+    expect(window.location.pathname).toBe('/search');
+    expect(window.location.search).toBe('');
+    renderAfterFrame();
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    expect(scroll).not.toHaveBeenCalled();
   });
 
   it('opens both enclosing disclosures and resumes the exact secondary service', () => {

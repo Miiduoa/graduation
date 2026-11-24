@@ -110,7 +110,7 @@ function ServiceDirectory() {
       ? filters
       : { query: '', category: 'all' as const };
   const returnScope = JSON.stringify([account.ownerScope, schoolSearch, campusId]);
-  const returningFilters = useSearchResultReturn({
+  const entryFilters = useSearchResultReturn({
     directory,
     resultsHeading,
     scope: returnScope,
@@ -168,11 +168,11 @@ function ServiceDirectory() {
     // A real Back/Forward traversal wins over queued acknowledgements of earlier typing.
     if (isHistoryArrival && queryString !== restoring.queryString) return;
     historyRestoration.current = null;
-    if (returningFilters) {
-      // A result return uses this entry’s filters even when a later search changed the session draft.
+    if (entryFilters) {
+      // A history traversal can restore this entry’s filters independently of result focus.
       restoredFilters.current = { scope: draftScope, queryString };
       editedFilters.current = null;
-      setFilters({ scope: draftScope, ...returningFilters });
+      setFilters({ scope: draftScope, ...entryFilters });
       setRestoredExpanded(
         restoreDirectorySearch('search', '/search', storageScope)?.expanded ?? [],
       );
@@ -211,7 +211,7 @@ function ServiceDirectory() {
     confirmedScope,
     draftScope,
     queryString,
-    returningFilters,
+    entryFilters,
     storageScope,
   ]);
   const term = query.trim();

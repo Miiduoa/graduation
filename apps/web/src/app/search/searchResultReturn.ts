@@ -24,13 +24,18 @@ type SearchReturn = {
 };
 
 let observedWindow: Window | undefined;
-let pendingReturn: SearchReturn | null = null;
+const emptyReturnState: { pending: SearchReturn | null; arrival: SearchReturn | null } = {
+  pending: null,
+  arrival: null,
+};
+let returnState = emptyReturnState;
 let returnSequence = 0;
 const listeners = new Set<() => void>();
 // popstate exposes the arriving entry. Keep its predecessor across router writes and traversals.
 let trackedEntryKey: string | null = null;
 let historyEntrySequence = 0;
-const armedReturnByToken = new Map<string, { searchKey: string; destinationKey: string | null }>();
+// The source key binds the saved filters to the entry even after its destination is unpaired.
+const entriesByReturnToken = new Map<string, { searchKey: string; destinationKey: string | null }>();
 
 function currentUrl() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -65,14 +70,14 @@ function onHistoryPush(
 ) {
   const navigationToken = consumeSearchResultNavigation();
   // Only a traversal between the linked entries can start another restore.
-  publishReturn(null);
+  publishReturn(null, null);
   const leaving = readReturn(previousState);
-  const armed = leaving && armedReturnByToken.get(leaving.token);
+  const armed = leaving && entriesByReturnToken.get(leaving.token);
   if (leaving && armed?.searchKey === readEntryKey(previousState) && previousPath === '/search') {
     if (routerCommit && leaving.token === navigationToken && appUrl(leaving.href) === currentUrl()) {
       armed.destinationKey = entryKey;
     } else if (window.location.pathname !== '/search') {
-      armedReturnByToken.delete(leaving.token);
+      armed.destinationKey = null;
     }
   }
 }
@@ -118,6 +123,8 @@ function installHistoryTracking() {
       const previousPath = window.location.pathname;
       const push = method === 'pushState';
       const routerCommit = push && isRouterPush(data);
+      const replacesPage =
+        !push && url != null && new URL(url, window.location.href).pathname !== previousPath;
       // Normalize copies and replacements of keyed entries before serialization.
       const cloned = data != null && !isHistoryRecord(data) &&
         ((!push && previousKey !== null) || hasSearchHistoryFields(data));
@@ -126,10 +133,10 @@ function installHistoryTracking() {
         const current = state as Record<string, unknown> | null | undefined;
         if (push || previousKey || current?.[SEARCH_RETURN_STATE] || current?.[HISTORY_ENTRY_KEY]) {
           const fields = cloned && current ? current : { ...current };
-          if (push) delete fields[SEARCH_RETURN_STATE];
-          // Replace retains the current entry's identity. Push always creates a new one.
+          if (push || replacesPage) delete fields[SEARCH_RETURN_STATE];
+          // Query and fragment replacements keep the page's entry identity.
           fields[HISTORY_ENTRY_KEY] =
-            (push ? null : previousKey) ?? `${Date.now()}-${++historyEntrySequence}`;
+            (push || replacesPage ? null : previousKey) ?? `${Date.now()}-${++historyEntrySequence}`;
           state = fields;
         }
       }
@@ -139,12 +146,12 @@ function installHistoryTracking() {
       if (push || previousKey === trackedEntryKey) trackedEntryKey = readEntryKey(this.state);
       if (push) {
         onHistoryPush(previousState, previousPath, trackedEntryKey, routerCommit);
-      } else if (previousKey && previousPath !== window.location.pathname) {
-        // A replace can repurpose the destination while retaining its entry key.
-        // Query and fragment updates within the page still belong to that entry.
-        for (const [token, armed] of armedReturnByToken) {
-          if (armed.destinationKey === previousKey) armedReturnByToken.delete(token);
+      } else if (replacesPage && previousKey) {
+        for (const [token, armed] of entriesByReturnToken) {
+          if (armed.searchKey === previousKey) entriesByReturnToken.delete(token);
+          else if (armed.destinationKey === previousKey) armed.destinationKey = null;
         }
+        publishReturn(null, null);
       }
     };
   }
@@ -170,9 +177,9 @@ function readReturn(state: unknown): SearchReturn | null {
 function readCurrentReturn(expected: SearchReturn) {
   const state = window.history.state;
   const current = readReturn(state);
-  const armed = armedReturnByToken.get(expected.token);
-  return armed &&
-    readEntryKey(state) === armed.searchKey &&
+  const entries = entriesByReturnToken.get(expected.token);
+  return entries &&
+    readEntryKey(state) === entries.searchKey &&
     current?.token === expected.token &&
     current.url === expected.url &&
     current.url === currentUrl()
@@ -184,9 +191,9 @@ function matchesRouterUrl(saved: SearchReturn, queryString: string) {
   return new URL(saved.url, window.location.origin).searchParams.toString() === queryString;
 }
 
-function publishReturn(value: SearchReturn | null) {
-  if (pendingReturn === value) return;
-  pendingReturn = value;
+function publishReturn(pending: SearchReturn | null, arrival = returnState.arrival) {
+  if (returnState.pending === pending && returnState.arrival === arrival) return;
+  returnState = { pending, arrival };
   listeners.forEach((listener) => listener());
 }
 
@@ -196,17 +203,18 @@ function captureReturn(event: PopStateEvent) {
   const departedKey = trackedEntryKey;
   trackedEntryKey = entryKey;
   consumeSearchResultNavigation();
-  const armed = saved && armedReturnByToken.get(saved.token);
-  publishReturn(
+  const entries = saved && entriesByReturnToken.get(saved.token);
+  const arrival =
     saved &&
-      armed &&
-      entryKey === armed.searchKey &&
-      departedKey !== null &&
-      departedKey === armed.destinationKey &&
-      window.location.pathname === '/search' &&
-      saved.url === currentUrl()
+    entries &&
+    entryKey === entries.searchKey &&
+    window.location.pathname === '/search' &&
+    saved.url === currentUrl()
       ? saved
-      : null,
+      : null;
+  publishReturn(
+    departedKey !== null && departedKey === entries?.destinationKey ? arrival : null,
+    arrival,
   );
 }
 
@@ -224,7 +232,7 @@ function subscribeReturn(listener: () => void) {
       observedWindow?.removeEventListener(event, cancelPendingReturn, true);
     }
     observedWindow = window;
-    pendingReturn = null;
+    returnState = emptyReturnState;
     // The search page is absent while its destination is open. One session
     // observer records a real history traversal; mounting alone never opts in.
     // Capture the departing key before router listeners can rewrite the arriving state.
@@ -237,11 +245,11 @@ function subscribeReturn(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-const getReturn = () => pendingReturn;
-const getServerReturn = () => null;
+const getReturnState = () => returnState;
+const getServerReturnState = () => emptyReturnState;
 
 export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token' | 'url'>) {
-  publishReturn(null);
+  publishReturn(null, null);
   if (window.location.pathname !== '/search') return;
   const token = `${Date.now()}-${++returnSequence}`;
   const previousState = window.history.state;
@@ -260,10 +268,10 @@ export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token' | '
     const searchKey = readEntryKey(window.history.state);
     if (searchKey) {
       const previous = readReturn(previousState);
-      if (previous && armedReturnByToken.get(previous.token)?.searchKey === searchKey) {
-        armedReturnByToken.delete(previous.token);
+      if (previous && entriesByReturnToken.get(previous.token)?.searchKey === searchKey) {
+        entriesByReturnToken.delete(previous.token);
       }
-      armedReturnByToken.set(token, { searchKey, destinationKey: null });
+      entriesByReturnToken.set(token, { searchKey, destinationKey: null });
       markSearchResultNavigation(token);
     }
   } catch {
@@ -272,11 +280,11 @@ export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token' | '
 }
 
 export function clearSearchResultReturn() {
-  publishReturn(null);
+  publishReturn(null, null);
   const saved = readReturn(window.history.state);
   if (!saved) return;
-  if (armedReturnByToken.get(saved.token)?.searchKey === readEntryKey(window.history.state)) {
-    armedReturnByToken.delete(saved.token);
+  if (entriesByReturnToken.get(saved.token)?.searchKey === readEntryKey(window.history.state)) {
+    entriesByReturnToken.delete(saved.token);
   }
   try {
     const state = { ...window.history.state };
@@ -306,24 +314,28 @@ export function useSearchResultReturn({
   query: string;
   category: ServiceCategory | 'all';
 }) {
-  const historyReturn = useSyncExternalStore(subscribeReturn, getReturn, getServerReturn);
+  const { pending: historyReturn, arrival } = useSyncExternalStore(
+    subscribeReturn,
+    getReturnState,
+    getServerReturnState,
+  );
   const liveState = useRef({ scope, ready, blocked, queryString, query, category });
   useLayoutEffect(() => {
     liveState.current = { scope, ready, blocked, queryString, query, category };
   }, [blocked, category, query, queryString, ready, scope]);
 
   const matchingFilters =
-    historyReturn &&
+    arrival &&
     ready &&
     !blocked &&
-    historyReturn.scope === scope &&
-    readCurrentReturn(historyReturn) &&
-    matchesRouterUrl(historyReturn, queryString)
-      ? historyReturn.filters
+    arrival.scope === scope &&
+    readCurrentReturn(arrival) &&
+    matchesRouterUrl(arrival, queryString)
+      ? arrival.filters
       : null;
 
   useEffect(() => {
-    if (!historyReturn || getReturn() !== historyReturn) return;
+    if (!historyReturn || returnState.pending !== historyReturn) return;
     const current = readCurrentReturn(historyReturn);
     if (blocked || !current) {
       publishReturn(null);
@@ -371,7 +383,7 @@ export function useSearchResultReturn({
     // scroll after this effect. Resume on the next frame, before paint, without
     // changing the browser's global history.scrollRestoration preference.
     const frame = window.requestAnimationFrame(() => {
-      if (getReturn() !== historyReturn) return;
+      if (returnState.pending !== historyReturn) return;
       const latest = readCurrentReturn(historyReturn);
       const live = liveState.current;
       const focus = document.activeElement;
