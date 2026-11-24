@@ -97,6 +97,7 @@ export function findCampusWalkingRoute(
     adjacency.set(from, arcs);
   };
   const seen = new Set<string>();
+  let sameNodeReviewed = false;
   for (const edge of graph.edges) {
     const a = nodes.get(edge.from);
     const b = nodes.get(edge.to);
@@ -111,9 +112,14 @@ export function findCampusWalkingRoute(
     const meters = segmentMeters(a, b);
     if (!Number.isFinite(meters) || meters <= 0) return null;
     if (!reviewedOpenAt(edge, now)) continue;
+    if (start === end && (edge.from === start || edge.to === start)) sameNodeReviewed = true;
     if (edge.direction !== 'reverse') add(a.id, { to: b.id, way: edge.osmWayId, meters });
     if (edge.direction !== 'forward') add(b.id, { to: a.id, way: edge.osmWayId, meters });
   }
+
+  // A zero-distance result still represents a location on the reviewed network.
+  // A discovered but isolated, restricted or expired node is not a verified arrival.
+  if (start === end && !sameNodeReviewed) return null;
 
   // Bounded Dijkstra; only positive, sourced graph edges can be traversed.
   const distance = new Map<number, number>([[start, 0]]);
