@@ -72,6 +72,49 @@ describe('TronClass client response boundary', () => {
     expect(result.courses[0].teachers).not.toBe(value.courses[0].teachers);
   });
 
+  const snapshot = {
+    revision: courseIndex.revision,
+    fetchedAt: courseIndex.fetchedAt,
+    courses: courseIndex.courses,
+    homework: [{
+      id: 201, courseId: 101, courseName: '程式設計', title: '作業', deadline: null,
+      deadlineLabel: '', submitted: null, description: '', href: courseIndex.courses[0].href,
+    }],
+    announcements: [{
+      id: 301, courseId: 101, courseName: '程式設計', title: '公告', content: '',
+      publishedAt: null, source: 'course', href: courseIndex.courses[0].href,
+    }],
+    materials: [{
+      id: 401, courseId: 101, courseName: '程式設計', title: '教材',
+      type: 'material', files: [], href: courseIndex.courses[0].href,
+    }],
+    errors: [],
+    partial: false,
+  };
+
+  it.each([
+    { courses: [...snapshot.courses, ...snapshot.courses] },
+    { homework: [...snapshot.homework, ...snapshot.homework] },
+    { homework: [{ ...snapshot.homework[0], courseId: 999 }] },
+    { announcements: [{ ...snapshot.announcements[0], courseId: 999 }] },
+    { materials: [{ ...snapshot.materials[0], courseId: 999 }] },
+    { errors: [{ courseId: 101, area: ['homework'], message: '未完成' }], partial: true },
+  ])('rejects inconsistent or malformed sync scope: %j', change => {
+    expect(() => parseTronClassResult('sync', { ...snapshot, ...change }, {}))
+      .toThrowError('尚未收到可確認的回覆');
+  });
+
+  it('keeps school-wide rows and missing-course errors in a legitimate partial sync', () => {
+    const value = {
+      ...snapshot,
+      announcements: [...snapshot.announcements, { ...snapshot.announcements[0], id: 302, courseId: null }],
+      materials: [...snapshot.materials, { ...snapshot.materials[0], id: 402, courseId: null }],
+      errors: [{ courseId: 999, area: 'homework', message: '未完成' }],
+      partial: true,
+    };
+    expect(parseTronClassResult('sync', value, {})).toEqual(value);
+  });
+
   it('does not start a cancelled course read after waiting for a Firebase token', async () => {
     let finish!: (value: string) => void;
     const token = new Promise<string>(resolve => { finish = resolve; });
