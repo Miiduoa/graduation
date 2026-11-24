@@ -1,7 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { withCampusEventShortlistLock } from './campusEventShortlistLock';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 it('never mutates storage without a cross-tab lock, including when IndexedDB is denied', async () => {
   const action = vi.fn(async () => 'saved');
@@ -76,4 +79,68 @@ it('closes an open connection on a version change and preserves transaction erro
   expect(close).toHaveBeenCalledOnce();
   await rejected;
   expect(operation).not.toHaveBeenCalled();
+});
+
+function stalledDatabase() {
+  vi.useFakeTimers();
+  const first: { onsuccess?: () => void } = {};
+  const tx = {
+    objectStore: () => ({ get: () => first }),
+    abort: vi.fn(),
+    oncomplete: undefined as (() => void) | undefined,
+    onabort: undefined as (() => void) | undefined,
+  };
+  const db = { transaction: vi.fn(() => tx), close: vi.fn() };
+  const request: { result: typeof db; onsuccess?: () => void } = { result: db };
+  vi.stubGlobal('navigator', {});
+  vi.stubGlobal('indexedDB', { open: () => request });
+  return { first, tx, db, request };
+}
+
+it('rejects a stalled database open and closes any late connection without writing', async () => {
+  const { request, db } = stalledDatabase();
+  const operation = vi.fn(async () => 'saved');
+  const pending = withCampusEventShortlistLock('events', operation);
+  const rejected = expect(pending).rejects.toThrow('database open timed out');
+  await vi.advanceTimersByTimeAsync(10_000);
+  await rejected;
+  request.onsuccess?.();
+  expect(db.close).toHaveBeenCalledOnce();
+  expect(db.transaction).not.toHaveBeenCalled();
+  expect(operation).not.toHaveBeenCalled();
+});
+
+it('aborts a stalled transaction and never starts a late mutation', async () => {
+  const { request, db, tx, first } = stalledDatabase();
+  const operation = vi.fn(async () => 'saved');
+  const pending = withCampusEventShortlistLock('events', operation);
+  const rejected = expect(pending).rejects.toThrow('lock acquisition timed out');
+  request.onsuccess?.();
+  await Promise.resolve();
+  await vi.advanceTimersByTimeAsync(10_000);
+  await rejected;
+  first.onsuccess?.();
+  await Promise.resolve();
+  expect(tx.abort).toHaveBeenCalledOnce();
+  expect(db.close).toHaveBeenCalledOnce();
+  expect(operation).not.toHaveBeenCalled();
+});
+
+it('does not time out a mutation after it has acquired the transaction', async () => {
+  const { request, db, tx, first } = stalledDatabase();
+  let finish!: (value: string) => void;
+  const operation = vi.fn(() => new Promise<string>((resolve) => { finish = resolve; }));
+  const pending = withCampusEventShortlistLock('events', operation);
+  request.onsuccess?.();
+  await Promise.resolve();
+  first.onsuccess?.();
+  await Promise.resolve();
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(tx.abort).not.toHaveBeenCalled();
+  expect(operation).toHaveBeenCalledOnce();
+  finish('saved');
+  await vi.advanceTimersByTimeAsync(0);
+  tx.oncomplete?.();
+  await expect(pending).resolves.toBe('saved');
+  expect(db.close).toHaveBeenCalledOnce();
 });
