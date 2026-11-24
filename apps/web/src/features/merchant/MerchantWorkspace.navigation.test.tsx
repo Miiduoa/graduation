@@ -1105,15 +1105,16 @@ it.each([
 });
 
 it.each([
-  { entryFirst: true, refreshStatus: 200 },
-  { entryFirst: false, refreshStatus: 200 },
-  { entryFirst: true, refreshStatus: 403 },
-  { entryFirst: true, refreshStatus: 404 },
-  { entryFirst: true, refreshStatus: 503 },
-  { entryFirst: false, refreshStatus: 503 },
+  { entryArrival: 'before', refreshStatus: 200 },
+  { entryArrival: 'during', refreshStatus: 200 },
+  { entryArrival: 'before', refreshStatus: 403 },
+  { entryArrival: 'before', refreshStatus: 404 },
+  { entryArrival: 'before', refreshStatus: 503 },
+  { entryArrival: 'during', refreshStatus: 503 },
+  { entryArrival: 'after', refreshStatus: 503 },
 ])(
-  'rechecks access after returning during a pause (entry detail first: $entryFirst, refresh status: $refreshStatus)',
-  async ({ entryFirst, refreshStatus }) => {
+  'rechecks access after returning during a pause (entry detail arrival: $entryArrival, refresh status: $refreshStatus)',
+  async ({ entryArrival, refreshStatus }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const open = { ...detail('store-a', true), readinessVersion: 6 };
     const paused = { ...open, readinessVersion: 7, locationStatus: 'closed', publicAccess: false };
@@ -1152,21 +1153,38 @@ it.each([
     await act(async () => window.history.forward());
     await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
 
-    if (entryFirst) await act(async () => finishEntry(reopened));
+    if (entryArrival === 'before') await act(async () => finishEntry(reopened));
     await act(async () => finishPause(paused));
     await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
-    if (!entryFirst && refreshStatus === 200) await act(async () => finishEntry(reopened));
+    if (entryArrival === 'during') await act(async () => finishEntry(reopened));
     const pendingPause = screen.queryByRole<HTMLButtonElement>('button', { name: '暫停接單' });
     expect(pendingPause?.disabled ?? true).toBe(true);
     if (refreshStatus !== 200) {
       await act(async () => failRefresh(new NuniError(refreshStatus, 'DETAIL_FAILED')));
-      if (!entryFirst) await act(async () => finishEntry(reopened));
+      if (entryArrival === 'after') await act(async () => finishEntry(reopened));
       expect(screen.getByRole('alert')).toBeTruthy();
       expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
       expect(screen.queryByRole('button', { name: '恢復接單' })).toBeNull();
       expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
+      expect(screen.queryByRole('link', { name: '訂單與收銀' })).toBeNull();
+      expect(screen.queryByText('正在重新確認門市，確認後會接回訂單工作台。')).toBeNull();
       expect(screen.queryByRole('region', { name: '門市訂單工作台' })).toBeNull();
-      if (!entryFirst) {
+      if (entryArrival === 'during') {
+        await act(async () => {
+          window.history.replaceState(window.history.state, '', href('store-a', 'orders'));
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        });
+        expect(window.location.search).toContain('section=orders');
+        expect(screen.getByRole('alert')).toBeTruthy();
+        expect(screen.queryByText('正在重新確認門市，確認後會接回訂單工作台。')).toBeNull();
+        expect(screen.queryByRole('region', { name: '門市訂單工作台' })).toBeNull();
+        expect(mocks.request.mock.calls.some(([resource]) => resource.endsWith('/orders'))).toBe(false);
+        await act(async () => {
+          window.history.replaceState(window.history.state, '', href());
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        });
+      }
+      if (refreshStatus === 503) {
         expect(readDetail).toHaveBeenCalledTimes(4);
         readDetail.mockResolvedValueOnce(reopened);
         fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));

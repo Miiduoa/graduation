@@ -241,9 +241,9 @@ export function MerchantOperations({
   const accept = (next: Detail, revision: number) => {
     const confirmation = confirmDetail(next, false, revision);
     // Receipts update the detail and notices. Only a GET can establish entry freshness.
-    if (!confirmation) return null;
+    if (!confirmation?.won) return null;
     showDetail(confirmation.detail);
-    return confirmation.won ? confirmation.detail : null;
+    return confirmation.detail;
   };
 
   const revokeDetail = useCallback(
@@ -317,7 +317,9 @@ export function MerchantOperations({
         if (!active.current || session !== sessionRun.current) return;
         const merged = confirmDetail(next, true, revision)?.detail ?? null;
         if (merged && verifiesEntry && current()) {
-          confirmEntry(merged, revision, !readAfterWrite.current);
+          // Keep the confirmed revision for a stale refresh fallback, while
+          // the write or its pending refresh still controls entry access.
+          confirmEntry(merged, revision, !readAfterWrite.current && !pendingAccessRead.current);
         }
       } catch (failure) {
         if (!active.current || session !== sessionRun.current || !(failure instanceof NuniError)) return;
@@ -380,6 +382,7 @@ export function MerchantOperations({
           // entry access after this read failed.
           failedReadRevision.current = revision;
           entryAccessRevision.current = 0;
+          if (afterWrite) setEntryVerified(false);
           setFresh(false);
           setReadUnavailable(true);
           setError(detailReadError);
@@ -597,13 +600,19 @@ export function MerchantOperations({
               >
                 門市概況
               </Link>
-              <Link
-                href={sectionHref('orders')}
-                aria-current={ordersOpen ? 'page' : undefined}
-                onClick={navigation.onNavigate}
-              >
-                訂單與收銀
-              </Link>
+              {locked ? (
+                <span aria-disabled="true" aria-current={ordersOpen ? 'page' : undefined}>
+                  訂單與收銀
+                </span>
+              ) : (
+                <Link
+                  href={sectionHref('orders')}
+                  aria-current={ordersOpen ? 'page' : undefined}
+                  onClick={navigation.onNavigate}
+                >
+                  訂單與收銀
+                </Link>
+              )}
             </nav>
           )}
 
@@ -611,7 +620,7 @@ export function MerchantOperations({
             <section className={styles.panel} aria-labelledby="merchant-daily-work-title">
               <h3 id="merchant-daily-work-title">門市工作台</h3>
               <p>開班、確認收款、準備餐點與核對取餐憑證。暫停新訂單時，仍可處理已收到的訂單。</p>
-              {navigation ? (
+              {navigation && !locked ? (
                 <Link
                   className="btn primary"
                   href={sectionHref('orders')}
@@ -648,7 +657,11 @@ export function MerchantOperations({
             ordersOpen &&
             (operational ? (
               locked ? (
-                <p role="status">正在重新確認門市，確認後會接回訂單工作台。</p>
+                <p role="status">
+                  {loading || busy
+                    ? '正在重新確認門市，確認後會接回訂單工作台。'
+                    : '請重新讀取門市狀態，再開啟訂單工作台。'}
+                </p>
               ) : (
                 <MerchantOrderDesk
                   key={`${context}:${tenantId}:${locationId}`}
