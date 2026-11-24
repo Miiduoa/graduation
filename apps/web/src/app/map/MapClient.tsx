@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalNuniSession } from '@/features/nuni/Session';
@@ -18,6 +18,7 @@ import {
   loadMapLocations,
   setMapFavorite,
   walkingDirectionsUrl,
+  appleWalkingDirectionsUrl,
   distanceMeters,
   formatDistance,
   type MapCoordinate,
@@ -160,6 +161,8 @@ function MapContent({
   const initialQuery = normalizeCampusClassroomQuery(query);
   const [search, setSearch] = useState(initialQuery);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const routeNoteId = useId();
+  const detailNoteId = useId();
   const [selection, setSelection] = useState<string | null>(null);
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [nearbyOnly, setNearbyOnly] = useState(false);
@@ -444,15 +447,26 @@ function MapContent({
               兩地直線距離約 {formatDistance(distanceMeters(routeLocations[0], routeLocations[1]))}；
               實際步行路線與時間以地圖服務為準。
             </p>
+            <p id={routeNoteId}>起點與終點均為地點標記，不代表已核實的建築入口、可通行道路或無障礙動線。</p>
           </div>
           <div className={styles.actions}>
             <a
               className="btn primary"
               href={walkingDirectionsUrl(routeLocations[1], routeLocations[0])}
+              aria-describedby={routeNoteId}
               target="_blank"
               rel="noopener noreferrer"
             >
               開啟步行導航
+            </a>
+            <a
+              className="btn"
+              href={appleWalkingDirectionsUrl(routeLocations[1], routeLocations[0])}
+              aria-describedby={routeNoteId}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              使用 Apple 地圖規劃路線
             </a>
             <button className="btn" onClick={() => setRouteDraft({ from: null, to: null })}>
               清除路線
@@ -667,14 +681,25 @@ function MapContent({
             {isProvidencePendingVerification(school, selected) && (
               <p role="status">這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。</p>
             )}
+            <p id={detailNoteId}>導航目的地為地點標記，並非已核實的校舍入口或室內教室；請依現場指標確認。</p>
             <div className={styles.actions}>
               <a
                 className="btn"
+                aria-describedby={detailNoteId}
                 href={walkingDirectionsUrl(selected, myLocation ?? undefined)}
                 target="_blank"
                 rel="noopener noreferrer"
               >
                 從目前位置導航
+              </a>
+              <a
+                className="btn"
+                aria-describedby={detailNoteId}
+                href={appleWalkingDirectionsUrl(selected, myLocation ?? undefined)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                使用 Apple 地圖從目前位置導航
               </a>
               {isBusStopLocation(selected) && (
                 <Link className="btn primary" href={`/bus?schoolId=${encodeURIComponent(school)}`}>
