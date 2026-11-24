@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
-import { Animated, Text } from 'react-native';
-import { AnimatedCard, Button, Card } from '../../ui/components';
+import { Animated, StyleSheet, Text, View } from 'react-native';
+import { AnimatedCard, Button, Card, SegmentedControl } from '../../ui/components';
 
 let mockReducedMotion = false;
 jest.mock('../../hooks/useReducedMotion', () => ({
@@ -142,4 +142,41 @@ test('a card remains operable when press movement is disabled', () => {
   const view = render(<Card title="查看課程" onPress={press} />);
   fireEvent.press(view.getByText('查看課程'));
   expect(press).toHaveBeenCalledTimes(1);
+});
+
+test('tab selection updates immediately and switching to reduced motion stops its crossfade', () => {
+  const stop = jest.fn();
+  const timing = jest.spyOn(Animated, 'timing').mockReturnValue({
+    start: jest.fn(),
+    stop,
+    reset: jest.fn(),
+  });
+  const tabs = ['學期', '統計'];
+  const view = render(<SegmentedControl options={tabs} selected="學期" />);
+  expect(timing).not.toHaveBeenCalled();
+
+  view.rerender(<SegmentedControl options={tabs} selected="統計" />);
+  expect(view.getByRole('tab', { name: '統計' })).toHaveAccessibilityState({ selected: true });
+  expect(timing.mock.calls.map(([, config]) => config.toValue)).toEqual([0, 1]);
+  mockReducedMotion = true;
+  view.rerender(<SegmentedControl options={tabs} selected="統計" />);
+  expect(stop).toHaveBeenCalledTimes(2);
+
+  view.rerender(<SegmentedControl options={tabs} selected="學期" />);
+  expect(view.getByRole('tab', { name: '學期' })).toHaveAccessibilityState({ selected: true });
+  expect(timing).toHaveBeenCalledTimes(2);
+});
+
+test('enlarging text gives each segment room to wrap without truncating labels', () => {
+  const sizes = jest.spyOn(require('react-native'), 'useWindowDimensions');
+  sizes.mockReturnValue({ width: 320, height: 640, scale: 2, fontScale: 1 });
+  const options = ['本學期', '歷史成績', '統計分析'];
+  const view = render(<SegmentedControl options={options} />);
+  const first = view.getByRole('tab', { name: '本學期' });
+  const basis = StyleSheet.flatten(first.props.style).flexBasis;
+  sizes.mockReturnValue({ width: 320, height: 640, scale: 2, fontScale: 2 });
+  view.rerender(<SegmentedControl options={options} />);
+  expect(StyleSheet.flatten(view.UNSAFE_getAllByType(View)[0].props.style).flexWrap).toBe('wrap');
+  expect(first).toHaveStyle({ minHeight: 44, flexBasis: basis * 2 });
+  expect(view.getByText('歷史成績').props.numberOfLines).toBeUndefined();
 });

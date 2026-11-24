@@ -45,6 +45,7 @@ import { formatCountdown } from '../utils/format';
 export { LoadingOverlay } from './feedback/LoadingOverlay';
 export { PuWebView, type PuWebViewProps } from './PuWebView';
 export { ToggleSwitch } from './interactive/ToggleSwitch';
+export { SegmentedControl } from './interactive/SegmentedControl';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -1518,75 +1519,6 @@ export function FilterChip(props: { label: string; selected?: boolean; onPress?:
         {props.label}
       </Text>
     </Pressable>
-  );
-}
-
-export function SegmentedControl(props: {
-  options: any[];
-  selected?: any;
-  disabled?: boolean;
-  onSelect?: (id: any) => void;
-  onChange?: (id: any) => void;
-}) {
-  useVisualTheme();
-  const getOptionId = (opt: any) => (opt && typeof opt === 'object' ? (opt.id ?? opt.key) : opt);
-  const getOptionLabel = (opt: any) => (opt && typeof opt === 'object' ? opt.label : opt);
-  const selected = props.selected ?? getOptionId(props.options[0]);
-  const handleChange = props.onSelect || props.onChange || (() => {});
-
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        padding: 3,
-        borderRadius: theme.radius.xl,
-        backgroundColor: theme.colors.surface2,
-        gap: 2,
-      }}
-    >
-      {props.options.map((option: any) => {
-        const optionId = getOptionId(option);
-        const optionLabel = getOptionLabel(option);
-        const isSelected = optionId === selected;
-        const isDisabled = Boolean(
-          props.disabled || (option && typeof option === 'object' && option.disabled),
-        );
-        return (
-          <Pressable
-            key={optionId}
-            onPress={() => {
-              if (!isDisabled) handleChange(optionId);
-            }}
-            disabled={isDisabled}
-            accessibilityRole="tab"
-            accessibilityLabel={String(optionLabel)}
-            accessibilityState={{ selected: isSelected, disabled: isDisabled }}
-            style={{
-              flex: 1,
-              minHeight: 44,
-              paddingVertical: theme.space.sm,
-              paddingHorizontal: theme.space.md,
-              borderRadius: theme.radius.lg,
-              backgroundColor: isSelected ? theme.colors.surface : 'transparent',
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: isDisabled ? 0.5 : 1,
-              ...(isSelected ? softShadowStyle(theme.shadows.inset) : {}),
-            }}
-          >
-            <Text
-              style={{
-                fontSize: 13,
-                fontWeight: isSelected ? '700' : '500',
-                color: isSelected ? theme.colors.accent : theme.colors.muted,
-              }}
-            >
-              {optionLabel}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
   );
 }
 

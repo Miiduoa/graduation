@@ -16,6 +16,7 @@ import {
   Spinner,
 } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { useTabPanelScroll } from '../hooks/useTabPanelScroll';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 import { useAuth } from '../state/auth';
@@ -264,6 +265,12 @@ function GradeCard({ course }: { course: Grade }) {
   );
 }
 
+const GRADE_TABS = [
+  { id: 'current', label: '本學期' },
+  { id: 'history', label: '歷史成績' },
+  { id: 'statistics', label: '統計分析' },
+] as const;
+
 export function GradesScreen(props: Record<string, unknown>) {
   useThemeMode();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -271,7 +278,8 @@ export function GradesScreen(props: Record<string, unknown>) {
   const auth = useAuth();
   const { school } = useSchool();
 
-  const [selectedTab, setSelectedTab] = useState(0);
+  const [selectedTab, setSelectedTab] = useState<(typeof GRADE_TABS)[number]['id']>('current');
+  const panelScroll = useTabPanelScroll(selectedTab);
   const [selectedSemester, setSelectedSemester] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -281,8 +289,6 @@ export function GradesScreen(props: Record<string, unknown>) {
     totalCredits: number;
     totalPoints: number;
   } | null>(null);
-
-  const TABS = ['本學期', '歷史成績', '統計分析'];
 
   useEffect(() => {
     analytics.logScreenView('Grades');
@@ -468,9 +474,10 @@ export function GradesScreen(props: Record<string, unknown>) {
       <PersonalImportSummary kind="grades" />
       <Text style={{ color: theme.colors.muted }}>參考 GPA＝已知績點乘學分的總和 ÷ 有績點的學分總和；待評與未取得不當成零分，無可計算資料顯示未知。</Text>
       <View style={{ flex: 1 }}>
-        <SegmentedControl options={TABS} selected={selectedTab} onChange={setSelectedTab} />
+        <SegmentedControl options={GRADE_TABS} selected={selectedTab} onChange={setSelectedTab} />
 
         <ScrollView
+          ref={panelScroll}
           style={{ flex: 1, marginTop: 12 }}
           contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
           showsVerticalScrollIndicator={false}
@@ -482,7 +489,7 @@ export function GradesScreen(props: Record<string, unknown>) {
             />
           }
         >
-          {selectedTab === 0 && (
+          {selectedTab === 'current' && (
             <View style={{ gap: 12 }}>
               {currentSemester ? (
                 <>
@@ -560,7 +567,7 @@ export function GradesScreen(props: Record<string, unknown>) {
             </View>
           )}
 
-          {selectedTab === 1 && (
+          {selectedTab === 'history' && (
             <View style={{ gap: 12 }}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -651,7 +658,7 @@ export function GradesScreen(props: Record<string, unknown>) {
             </View>
           )}
 
-          {selectedTab === 2 && (
+          {selectedTab === 'statistics' && (
             <View style={{ gap: 12 }}>
               <AnimatedCard title="成績總覽" subtitle="累積表現">
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20 }}>

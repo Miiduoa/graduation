@@ -4,7 +4,7 @@ import { Screen, AnimatedCard, Button, Pill, SegmentedControl } from '../ui/comp
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
-import type { LostFoundCategory } from '../data/types';
+import type { LostFoundCategory, LostFoundItem } from '../data/types';
 import { formatDateTime } from '../utils/format';
 import { LoginRequiredLostFoundComments } from '../components/LoginRequiredLostFoundComments';
 import {
@@ -28,12 +28,12 @@ export function LostFoundScreen({ navigation }: Props) {
   const { state, refresh } = useLostFoundLoad(scope, loader, isCurrent, Boolean(uid));
   const [filters, setFilters] = useState<{
     scope: string;
-    type: string;
+    type: 'all' | LostFoundItem['type'];
     search: string;
     category: LostFoundCategory | null;
     open: boolean;
   }>({ scope, type: 'all', search: '', category: null, open: true });
-  const current =
+  const current: typeof filters =
     filters.scope === scope
       ? filters
       : { scope, type: 'all', search: '', category: null, open: true };
@@ -102,7 +102,7 @@ export function LostFoundScreen({ navigation }: Props) {
                 { id: 'found', label: '拾獲' },
               ]}
               selected={current.type}
-              onSelect={(type: string) => update({ type })}
+              onSelect={(type) => update({ type })}
             />
             <TextInput
               accessibilityLabel="搜尋物品"

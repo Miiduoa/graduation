@@ -5,6 +5,7 @@ import { View, Text, Pressable, ScrollView, Alert, Dimensions, Platform } from '
 import { Ionicons } from '@expo/vector-icons';
 import { Screen, AnimatedCard, SegmentedControl } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { useTabPanelScroll } from '../hooks/useTabPanelScroll';
 import { isFeatureEnabled } from '../services/release';
 import { theme } from '../ui/theme';
 
@@ -596,9 +597,15 @@ function LargeWidget({ widget }: { widget: Widget }) {
   );
 }
 
+const WIDGET_TABS = [
+  { id: 'preview', label: '預覽' },
+  { id: 'instructions', label: '設定說明' },
+] as const;
+
 export function WidgetPreviewScreen() {
   const widgetsEnabled = isFeatureEnabled('widgets');
-  const [selectedTab, setSelectedTab] = useState(0);
+  const [selectedTab, setSelectedTab] = useState<(typeof WIDGET_TABS)[number]['id']>('preview');
+  const panelScroll = useTabPanelScroll(selectedTab);
   const [selectedSize, setSelectedSize] = useState<WidgetSize>('medium');
 
   const filteredWidgets = useMemo(
@@ -652,14 +659,18 @@ export function WidgetPreviewScreen() {
     <Screen>
       <View style={{ flex: 1 }}>
         <SegmentedControl
-          options={['預覽', '設定說明']}
+          options={WIDGET_TABS}
           selected={selectedTab}
           onChange={setSelectedTab}
         />
 
-        <ScrollView style={{ flex: 1, marginTop: 12 }} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          ref={panelScroll}
+          style={{ flex: 1, marginTop: 12 }}
+          showsVerticalScrollIndicator={false}
+        >
           <NextClassLiveActivitySetting />
-          {selectedTab === 0 ? (
+          {selectedTab === 'preview' ? (
             <View style={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
               <AnimatedCard title="小工具尺寸">
                 <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -729,7 +740,7 @@ export function WidgetPreviewScreen() {
             </View>
           ) : null}
 
-          {selectedTab === 1 ? (
+          {selectedTab === 'instructions' ? (
             <View style={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
               <AnimatedCard title="什麼是小工具？">
                 <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>

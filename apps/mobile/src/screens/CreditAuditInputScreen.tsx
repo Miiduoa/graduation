@@ -25,6 +25,7 @@ import {
   SegmentedControl,
 } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { useTabPanelScroll } from '../hooks/useTabPanelScroll';
 import { theme } from '../ui/theme';
 import {
   calculateDetailedCredits,
@@ -92,12 +93,20 @@ function categoryToDetailedKey(cat: CreditCategory): string {
   }
 }
 
+const AUDIT_TABS = [
+  { id: 'add', label: '新增課程' },
+  { id: 'overview', label: '修課概覽' },
+  { id: 'saved', label: '已儲存' },
+  { id: 'transfer', label: '匯入/匯出' },
+] as const;
+
 export function CreditAuditInputScreen(props: any) {
   const onAdded: ((x: any) => void) | undefined = props?.route?.params?.onAdded;
   const auth = useAuth();
   const { school } = useSchool();
 
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState<(typeof AUDIT_TABS)[number]['id']>('add');
+  const panelScroll = useTabPanelScroll(tab);
   const [name, setName] = useState('');
   const [credits, setCredits] = useState('3');
   const [category, setCategory] = useState<CreditCategory>('elective');
@@ -506,8 +515,6 @@ export function CreditAuditInputScreen(props: any) {
 
   const unsyncedCount = savedCourses.filter((c) => !c.syncedToCloud).length;
 
-  const TABS = ['新增課程', '修課概覽', '已儲存', '匯入/匯出'];
-
   if (loading || loadedScope !== storageKey) {
     return (
       <Screen title="學分試算">
@@ -533,9 +540,10 @@ export function CreditAuditInputScreen(props: any) {
 
   return (
     <Screen title="學分試算" subtitle="管理您的修課紀錄並追蹤畢業學分進度">
-      <SegmentedControl options={TABS} selected={tab} onChange={setTab} />
+      <SegmentedControl options={AUDIT_TABS} selected={tab} onChange={setTab} />
 
       <ScrollView
+        ref={panelScroll}
         contentContainerStyle={{
           gap: 12,
           paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
@@ -543,7 +551,7 @@ export function CreditAuditInputScreen(props: any) {
         }}
         showsVerticalScrollIndicator={false}
       >
-        {tab === 0 && (
+        {tab === 'add' && (
           <>
             <AnimatedCard title="新增課程" subtitle="手動輸入修課資訊">
               <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>課程名稱 *</Text>
@@ -979,7 +987,7 @@ export function CreditAuditInputScreen(props: any) {
           </>
         )}
 
-        {tab === 1 && (
+        {tab === 'overview' && (
           <>
             <AnimatedCard title="個人修課總覽" subtitle="根據手動記錄整理，不代替正式畢業審查">
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -1307,7 +1315,7 @@ export function CreditAuditInputScreen(props: any) {
           </>
         )}
 
-        {tab === 2 && (
+        {tab === 'saved' && (
           <>
             <AnimatedCard
               title={`已儲存課程（${savedCourses.length}）`}
@@ -1319,7 +1327,7 @@ export function CreditAuditInputScreen(props: any) {
                   <Text style={{ color: theme.colors.muted, marginTop: 12 }}>尚未新增任何課程</Text>
                   <Button
                     text="新增第一門課程"
-                    onPress={() => setTab(0)}
+                    onPress={() => setTab('add')}
                     style={{ marginTop: 12 }}
                   />
                 </View>
@@ -1412,7 +1420,7 @@ export function CreditAuditInputScreen(props: any) {
           </>
         )}
 
-        {tab === 3 && (
+        {tab === 'transfer' && (
           <>
             <AnimatedCard title="匯入課程" subtitle="先預覽、再確認寫入這台手機">
               <Text style={{ color: theme.colors.muted, lineHeight: 20, marginBottom: 12 }}>

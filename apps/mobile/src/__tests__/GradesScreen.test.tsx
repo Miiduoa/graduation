@@ -1,4 +1,5 @@
 import React from 'react';
+import { ScrollView } from 'react-native';
 import { fireEvent, render } from '@testing-library/react-native';
 import { GradesScreen } from '../screens/GradesScreen';
 const mockListGrades = jest.fn();
@@ -11,13 +12,13 @@ jest.mock('../services/analytics', () => ({ analytics: { logScreenView: jest.fn(
 jest.mock('../components/PersonalImportSummary', () => ({ PersonalImportSummary: () => null }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../ui/components', () => {
-  const { Text, View, Pressable } = require('react-native');
+  const { Text, View } = require('react-native');
   const Container = ({ children, title, subtitle }: { children?: React.ReactNode; title?: string; subtitle?: string }) => <View><Text>{title}</Text><Text>{subtitle}</Text>{children}</View>;
   return {
     Screen: Container, Card: Container, AnimatedCard: Container,
     Pill: ({ text }: { text: string }) => <Text>{text}</Text>,
     SectionTitle: ({ text }: { text: string }) => <Text>{text}</Text>,
-    SegmentedControl: ({ options, onChange }: { options: string[]; onChange(index: number): void }) => <View>{options.map((text: string, index: number) => <Pressable key={text} onPress={() => onChange(index)}><Text>{text}</Text></Pressable>)}</View>,
+    SegmentedControl: jest.requireActual('../ui/components').SegmentedControl,
     ProgressRing: () => null, Spinner: () => null,
     Button: ({ text }: { text: string }) => <Text>{text}</Text>,
   };
@@ -29,7 +30,11 @@ test('missing grade points stay visible and are excluded from the reference GPA'
   ]);
   const view = render(<GradesScreen />);
   await view.findByText('GPA: 3.00');
-  fireEvent.press(view.getByText('歷史成績'));
+  const scrollTo = jest.spyOn(view.UNSAFE_getByType(ScrollView).instance, 'scrollTo');
+  expect(view.getByRole('tab', { name: '本學期' })).toHaveAccessibilityState({ selected: true });
+  fireEvent.press(view.getByRole('tab', { name: '歷史成績' }));
+  expect(view.getByRole('tab', { name: '歷史成績' })).toHaveAccessibilityState({ selected: true });
+  expect(scrollTo).toHaveBeenCalledWith({ y: 0, animated: false });
   await view.findByText('未提供績點');
   expect(view.queryByText('GPA: 1.50')).toBeNull();
   expect(view.getAllByText(/來源：校方正式/).length).toBe(2);
