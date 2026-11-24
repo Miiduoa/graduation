@@ -92,19 +92,16 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
   const firebaseUid = legacy.user?.uid;
   const firebaseSignedOut = !legacy.loading && !firebaseUid;
   const lastFirebaseUid = useRef(firebaseUid);
-  const firebaseWasSignedIn = useRef(!!firebaseUid);
   // Firebase and Nuni can resolve independently during an account transition.
   const firebaseChanged =
     !!firebaseUid && !!lastFirebaseUid.current &&
     firebaseUid !== lastFirebaseUid.current;
-  const firebaseSessionLost =
-    firebaseSignedOut && firebaseWasSignedIn.current && !scope;
+  // Nuni may still resolve the old scope on the first Firebase sign-out render.
+  const firebaseSessionLost = firebaseSignedOut && !!lastFirebaseUid.current && !scope;
   const workspaceUid = (scope && firebaseUid) || lastFirebaseUid.current;
   useLayoutEffect(() => {
     if (firebaseUid && (scope || !lastFirebaseUid.current)) lastFirebaseUid.current = firebaseUid;
-    if (firebaseUid) firebaseWasSignedIn.current = true;
-    else if (firebaseSignedOut && scope) firebaseWasSignedIn.current = false;
-  }, [firebaseUid, firebaseSignedOut, scope]);
+  }, [firebaseUid, scope]);
   const loggingOut = !!platform.pendingLogout;
   const sessionRejected = !platform.session && !!platform.error;
   const observedOwner = platform.session

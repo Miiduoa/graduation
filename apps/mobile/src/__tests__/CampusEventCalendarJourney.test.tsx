@@ -172,6 +172,7 @@ test.each([
   ['firebase:student', '登出'],
   ['nuni:account-a', '登出'],
   ['nuni:account-a', '先於 Nuni 登出'],
+  ['nuni:account-a', '範圍失效前登出'],
 ])('範圍未解析時，卸載 %s 的舊草稿並撤銷 Firebase %s 時未完成的寫入', async (owner, transition) => {
   if (owner === 'firebase:student') mockPlatformSession = null;
   const original = { owner, schoolId: 'pu' };
@@ -194,6 +195,10 @@ test.each([
   mockAuth = transition !== '切換'
     ? { user: null, loading: false }
     : { user: { uid: 'another-student' }, loading: true };
+  if (transition === '範圍失效前登出') {
+    view.rerender(<Journey />);
+    expect(view.getByLabelText('標題')).toBeTruthy();
+  }
   mockVerifying = true;
   view.rerender(<Journey />);
   await view.findByText('請回到目前校園的活動頁重新開啟草稿。');

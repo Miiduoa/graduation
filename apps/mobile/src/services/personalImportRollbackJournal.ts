@@ -7,6 +7,11 @@ import { Platform } from 'react-native';
 const markerSuffix = '.rollback.pending';
 const journalPrefix = 'campus.personal-imports.rollback.v1:';
 const legacyStagePattern = /^campus\.personal-imports\.rollback\.v1:([a-f0-9]{64}):stage:\d+:[^:]+$/;
+// Legacy ledger writers use JSON.stringify with no trailing whitespace.
+// Reserve one JSON whitespace character for a commit that only fits in place.
+const compactWebCommit = '\t';
+
+export const personalImportCheckpointKey = (key: string) => `${key}:checkpoint`;
 
 // One atomic browser storage entry contains both the recovery marker and the payload.
 function webJournalKey(key: string) {
@@ -307,7 +312,10 @@ export function hasWebPersonalImportCommit(raw: string | null): boolean {
   if (!raw) return false;
   try {
     const value = JSON.parse(raw);
-    return value?.version === 1 && typeof value.webCommit === 'string';
+    return value?.version === 1 && (
+      typeof value.webCommit === 'string' ||
+      (raw.endsWith(compactWebCommit) && raw === JSON.stringify(value) + compactWebCommit)
+    );
   } catch {
     // The ledger parser reports invalid primary data if there is no recovery copy.
     return false;
@@ -346,11 +354,12 @@ export function commitWebPersonalImports(
       // generation also retires legacy recovery data without clearing shared keys.
       return replace(committed);
     } catch (error) {
-      if (!isQuotaExceeded(error) || !shrinking ||
-          storage.getItem(webJournalKey(key)) !== null) throw error;
-      // Pre-generation ledgers may only have room for the replacement bytes.
-      // With no legacy journal the plain ledger is already authoritative.
-      return replace(attempted);
+      if (!isQuotaExceeded(error) || !shrinking) throw error;
+      // Publish the marker with the ledger in one write so both legacy recovery
+      // formats are superseded even when there is no room for a new field.
+      const hasLegacyRecovery = storage.getItem(webJournalKey(key)) !== null ||
+        storage.getItem(personalImportCheckpointKey(key)) !== null;
+      return replace(hasLegacyRecovery ? attempted + compactWebCommit : attempted);
     }
   };
   if (!recovery && !leaseQuotaError) return publish();

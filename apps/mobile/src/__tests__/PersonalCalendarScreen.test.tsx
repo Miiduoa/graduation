@@ -646,6 +646,8 @@ it.each([
   ['edit', 'sign out', 'nuni'],
   ['create', 'sign out before Nuni', 'nuni'],
   ['edit', 'sign out before Nuni', 'nuni'],
+  ['create', 'sign out before scope loss', 'nuni'],
+  ['edit', 'sign out before scope loss', 'nuni'],
 ] as const)('unmounts the old calendar and rejects a queued %s on Firebase %s with unresolved scope for a %s ledger', async (mode, transition, owner) => {
   mockAuth = { user: { uid: 'student-a' }, loading: false };
   if (owner === 'firebase') {
@@ -675,8 +677,14 @@ it.each([
     ? jest.mocked(editPersonalImport).mock.results[0].value
     : jest.mocked(appendPersonalImports).mock.results[0].value;
 
-  mockScope = null;
-  if (transition !== 'switch') {
+  if (transition === 'sign out before scope loss') {
+    mockAuth = { user: null, loading: false };
+    view.rerender(<PersonalCalendarScreen />);
+    expect(view.getByLabelText('標題')).toBeTruthy();
+    mockScope = null;
+    mockNuniLoading = true;
+  } else if (transition !== 'switch') {
+    mockScope = null;
     if (transition === 'sign out') mockSession = null;
     mockNuniLoading = true;
     mockAuth = { user: null, loading: true };
@@ -684,6 +692,7 @@ it.each([
     expect(view.getByLabelText('標題')).toBeTruthy();
     mockAuth = { user: null, loading: false };
   } else {
+    mockScope = null;
     mockAuth = { user: { uid: 'student-b' }, loading: true };
   }
   view.rerender(<PersonalCalendarScreen />);

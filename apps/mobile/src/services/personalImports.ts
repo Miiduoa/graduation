@@ -5,6 +5,7 @@ import {
   clearPersonalImportRollback,
   commitWebPersonalImports,
   hasWebPersonalImportCommit,
+  personalImportCheckpointKey,
   preparePersonalImportRollback,
   readPersonalImportRollback,
   withPersonalImportWriteLock,
@@ -44,7 +45,6 @@ const pendingWrites = new Map<string, Promise<void>>();
 type Recovery = { raw: string | null };
 const pendingRestorations = new Map<string, Recovery>();
 let writeSequence = 0;
-const recoveryKey = (key: string) => `${key}:checkpoint`;
 
 function isStorageRowTooLarge(error: unknown): boolean {
   // Android AsyncStorage forwards the SQLite exception message without its class.
@@ -58,7 +58,7 @@ async function readRecovery(
   key: string,
   scope: PersonalImportScope,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
-  const checkpoint = recoveryKey(key);
+  const checkpoint = personalImportCheckpointKey(key);
   let encoded: string | null;
   try {
     [[, encoded]] = await AsyncStorage.multiGet([checkpoint]);
@@ -100,7 +100,7 @@ async function readRecovery(
 async function restoreLedger(key: string, { raw }: Recovery) {
   if (raw === null) await AsyncStorage.removeItem(key);
   else await AsyncStorage.setItem(key, raw);
-  await AsyncStorage.multiRemove([recoveryKey(key)]);
+  await AsyncStorage.multiRemove([personalImportCheckpointKey(key)]);
   clearPersonalImportRollback(key);
   pendingRestorations.delete(key);
 }
@@ -110,7 +110,7 @@ async function rollbackLedger(key: string, raw: string | null) {
   pendingRestorations.set(key, recovery);
   try {
     // Preserve the AsyncStorage checkpoint format without JSON string escaping.
-    await AsyncStorage.multiSet([[recoveryKey(key), raw ?? 'null']]);
+    await AsyncStorage.multiSet([[personalImportCheckpointKey(key), raw ?? 'null']]);
   } catch {
     // Try restoring the primary anyway. The journal still holds the verified bytes.
   }
@@ -294,7 +294,7 @@ export function mutatePersonalImportLedger<T>(
             try {
               await AsyncStorage.setItem(key, raw);
               assertWritable();
-              await AsyncStorage.multiRemove([recoveryKey(key)]);
+              await AsyncStorage.multiRemove([personalImportCheckpointKey(key)]);
               assertWritable();
               commit();
               pendingRestorations.delete(key);

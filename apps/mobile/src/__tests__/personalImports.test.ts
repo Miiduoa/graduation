@@ -366,6 +366,67 @@ test.each([
   }
 });
 
+test.each(['journal', 'checkpoint', 'both'] as const)(
+  'Web at quota publishes a one-character edit over legacy recovery (%s)',
+  async (recovery) => {
+    const cleanup = useWebStorage();
+    const restoreLocks = withoutWebWriteLocks();
+    const storage = window.localStorage;
+    const key = personalImportStorageKey(scope);
+    const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+    const checkpoint = key + ':checkpoint';
+    const setItem = Storage.prototype.setItem;
+    const multiGet = jest.mocked(AsyncStorage.multiGet);
+    const nativeMultiGet = multiGet.getMockImplementation()!;
+    let quota: jest.SpyInstance | undefined;
+    try {
+      const { ledger } = await appendPersonalImports(scope, [row('original', '原本標題')]);
+      const original = JSON.stringify(ledger);
+      // Recovery must win before the edit. Equal-length titles keep the quota boundary exact.
+      const primary = original.replace('原本標題', '中斷寫入');
+      storage.setItem(key, primary);
+      if (recovery !== 'checkpoint') storage.setItem(journal, original);
+      if (recovery !== 'journal') storage.setItem(checkpoint, original);
+      multiGet.mockImplementation(async (keys) =>
+        keys.map((entry) => [entry, storage.getItem(entry)]));
+      await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+
+      let primaryCapacity = primary.length - 2;
+      quota = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+        this: Storage, entry, value,
+      ) {
+        if (this === storage && (entry !== key || value.length > primaryCapacity)) {
+          throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        }
+        setItem.call(this, entry, value);
+      });
+      const guard = { canContinue: () => true };
+      const edit = () => mutatePersonalImportLedger(scope, guard, (current) => {
+        // Keep revision metadata fixed to exercise exactly one character of headroom.
+        const edited = { ...current, records: [{ ...current.records[0], title: '原本標' }] };
+        return { ledger: edited, result: edited };
+      });
+      await expect(edit()).rejects.toMatchObject({ name: 'QuotaExceededError' });
+      expect(storage.getItem(key)).toBe(primary);
+      await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+
+      primaryCapacity = primary.length;
+      const edited = await edit();
+      expect(edited.records[0].title).toBe('原本標');
+      expect(storage.getItem(key)).toHaveLength(primaryCapacity);
+      await expect(loadPersonalImports(scope)).resolves.toEqual(edited);
+      expect(storage.getItem(journal)).toBe(recovery === 'checkpoint' ? null : original);
+      expect(storage.getItem(checkpoint)).toBe(recovery === 'journal' ? null : original);
+      expect(Object.keys(window.sessionStorage)).toEqual([]);
+    } finally {
+      quota?.mockRestore();
+      multiGet.mockImplementation(nativeMultiGet);
+      restoreLocks();
+      cleanup();
+    }
+  },
+);
+
 test.each([false, true])('Web without locks reclaims legacy localStorage stages at quota (other ledger: %s)', async (foreign) => {
   const cleanup = useWebStorage();
   const restoreLocks = withoutWebWriteLocks();
