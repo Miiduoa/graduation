@@ -12,7 +12,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { QuickCampusEntry } from '../components/QuickCampusEntry';
 import { CampusPersonalization } from '../components/CampusPersonalization';
-import type { MobileQuickAction } from '../services/quickCampusActions';
+import { getMobileActionsForDestinations, type MobileQuickAction } from '../services/quickCampusActions';
+import { TODAY_SERVICE_SHORTCUTS, TODAY_TIMETABLE_SETUP_DETAIL } from '@campus/shared/src/todayServiceShortcuts';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../state/auth';
 import { loadStudentHome } from '../data/studentHome';
@@ -60,6 +61,16 @@ type HomeState =
     };
 
 type TodoRow = TodayTodo & { task?: InboxTask };
+
+const shortcutIcons: Record<
+  (typeof TODAY_SERVICE_SHORTCUTS)[number]['destination'],
+  React.ComponentProps<typeof Ionicons>['name']
+> = {
+  '/map': 'map-outline',
+  '/bus': 'bus-outline',
+  '/cafeteria': 'restaurant-outline',
+  '/library': 'library-outline',
+};
 
 function todosFromInbox(tasks: InboxTask[]): TodoRow[] {
   return tasks.flatMap((task) => {
@@ -362,6 +373,27 @@ export default function StudentTodayScreen() {
             {!urgentWorkFirst && todoSection}
           </>
         )}
+        <View style={s.section} testID="today-service-shortcuts">
+          <Text accessibilityRole="header" style={s.sectionTitle}>校園服務</Text>
+          <View style={s.shortcutGrid}>
+            {TODAY_SERVICE_SHORTCUTS.map(item => (
+              <Pressable
+                key={item.destination}
+                accessibilityRole="button"
+                accessibilityLabel={`校園服務：${item.label}`}
+                accessibilityHint={item.detail}
+                onPress={() => openQuickAction(getMobileActionsForDestinations([item.destination])[0])}
+                style={({ pressed }) => [s.shortcut, pressed && s.pressed]}
+              >
+                <Ionicons name={shortcutIcons[item.destination]} size={22} color={theme.colors.accent} />
+                <View style={s.rowBody}>
+                  <Text style={s.rowTitle}>{item.label}</Text>
+                  <Text style={s.rowMeta}>{item.detail}</Text>
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        </View>
         <QuickCampusEntry
           key={scope}
           uid={uid}
@@ -430,7 +462,8 @@ function TodayClassList({
         </>
       ) : status === 'empty' ? (
         <>
-          <Text style={s.empty}>{TODAY_COPY.noTimetable}</Text>
+          <Text style={s.rowTitle}>{TODAY_COPY.noTimetable}</Text>
+          <Text style={s.rowMeta}>{TODAY_TIMETABLE_SETUP_DETAIL}</Text>
           <Pressable accessibilityRole="button" onPress={onImport} style={s.textButton}>
             <Text style={s.link}>{TODAY_COPY.importTimetable}</Text>
           </Pressable>
@@ -646,6 +679,13 @@ const createStyles = () => {
       fontVariant: ['tabular-nums'],
     },
     section: { gap: 2 },
+    shortcutGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 8 },
+    shortcut: {
+      flexBasis: '46%', flexGrow: 1, minHeight: 64, minWidth: 0,
+      flexDirection: 'row', alignItems: 'center', gap: 8,
+      padding: 10, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth,
+      borderColor: border, backgroundColor: theme.colors.surface,
+    },
     reminder: {
       gap: 4, padding: 14, borderRadius: 14, borderColor: border, borderWidth: 1,
       backgroundColor: theme.colors.surface,
