@@ -1216,6 +1216,44 @@ it('preserves the newly selected day when a completed write is acknowledged duri
   expect(readPersonalImports(scope())).toHaveLength(1);
 });
 
+it('儲存改期的新增行程期間重選同一天，完成後保留最後選日', async () => {
+  let release: (() => void) | undefined;
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: {
+      request: (_key: string, action: () => unknown) =>
+        new Promise((resolve, reject) => {
+          release = () => {
+            void Promise.resolve().then(action).then(resolve, reject);
+          };
+        }),
+    },
+  });
+  render(<PersonalCalendar />);
+  await ready();
+  const dateControl = screen.getByRole('button', { name: '2026-11-14' });
+  activate(dateControl);
+  activate(screen.getByRole('button', { name: '新增行程' }));
+  fireEvent.change(titleField(), { target: { value: '改期後儲存的合成安排' } });
+  fireEvent.change(formDate(), { target: { value: '2026-11-15' } });
+  activate(screen.getByRole('button', { name: '儲存行程' }));
+  await waitFor(() => expect(release).toBeTypeOf('function'));
+
+  activate(dateControl);
+  dateControl.blur();
+  expect(document.activeElement).toBe(document.body);
+  await act(async () => {
+    release?.();
+  });
+
+  await screen.findByText(personalImportSavedNotice(1));
+  expect(dayHeading('2026-11-14')).toBeTruthy();
+  expect(dateControl.getAttribute('aria-pressed')).toBe('true');
+  expect(document.activeElement).toBe(document.body);
+  expect(screen.queryByRole('textbox', { name: '標題' })).toBeNull();
+  expect(readPersonalImports(scope())).toMatchObject([{ date: '2026-11-15' }]);
+});
+
 it.each(['selected date', 'document.body'])(
   'preserves the newly selected month and date when an earlier day finishes saving with focus on %s',
   async (focusTarget) => {

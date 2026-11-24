@@ -492,6 +492,8 @@ function PersonalCalendarWorkspace({
 
   const selectDate = (date: string) => {
     cancelLinkedFocus();
+    // Reselecting the current day also supersedes navigation after a pending save.
+    viewRevision.current += 1;
     setSelectedDate(date);
     setDateSelectionRevision((revision) => revision + 1);
   };
@@ -517,11 +519,11 @@ function PersonalCalendarWorkspace({
     };
     const recordBlur = (event: FocusEvent) => {
       const origin = linkedFocusOrigin.current;
-      if (
-        origin?.state === 'focused' &&
-        event.target === origin.element &&
-        !(workspaceBoundary.current?.hidden && workspaceBoundary.current.contains(origin.element))
-      ) {
+      if (origin?.state !== 'focused' || event.target !== origin.element) return;
+      const boundary = workspaceBoundary.current;
+      if (boundary?.hidden && boundary.contains(origin.element)) {
+        origin.state = 'unavailable';
+      } else {
         // End the request before a later unmount can make body a fallback.
         cancelLinkedFocus();
       }
@@ -606,15 +608,16 @@ function PersonalCalendarWorkspace({
     const origin = linkedFocusOrigin.current;
     if (!origin) return;
     // Revalidation can hide the workspace or remove the focused list control.
-    if (
+    if (document.activeElement === origin.element) {
+      origin.state = 'focused';
+    } else if (
       paused &&
       (origin.state === 'detaching' || workspaceBoundary.current?.contains(origin.element)) &&
-      (document.activeElement === origin.element || document.activeElement === document.body)
+      document.activeElement === document.body
     ) {
       origin.state = 'unavailable';
     } else if (origin.state === 'detaching') {
-      if (document.activeElement === origin.element) origin.state = 'focused';
-      else cancelLinkedFocus();
+      cancelLinkedFocus();
     }
   });
 

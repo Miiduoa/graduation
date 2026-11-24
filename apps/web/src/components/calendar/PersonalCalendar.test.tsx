@@ -764,6 +764,7 @@ it.each([
   ['日列表編輯按鈕', '因工作區卸載而失焦'],
   ['日列表編輯按鈕', '隱藏前主動離開'],
   ['月份欄位', '因工作區隱藏而失焦', 'offsetLeft'],
+  ['月份欄位', '恢復後主動離開', 'offsetLeft'],
   ['日列表編輯按鈕', '因工作區卸載而失焦', 'offsetTop'],
 ] as const)('深連結從%s等待揭露時，重新驗證前後%s（恢復時裁切軸：%s）', async (origin, action, clippedAxis?) => {
   const target = focusEvent();
@@ -836,8 +837,9 @@ it.each([
   expect(originControl.isConnected).toBe(!startsInDayList);
   expect(monthControl.closest('[hidden]')).toBeTruthy();
   // JSDOM does not reset focus when an ancestor becomes hidden.
-  if (document.activeElement === monthControl) monthControl.blur();
-  expect(document.activeElement).toBe(document.body);
+  const blursAfterResume = action === '恢復後主動離開';
+  if (!blursAfterResume && document.activeElement === monthControl) monthControl.blur();
+  expect(document.activeElement).toBe(blursAfterResume ? monthControl : document.body);
   if (action.includes('移到其他控制項')) outside.focus();
   if (action === '移到其他控制項後離開' || action === '隱藏後移到其他控制項又回到頁面本體') {
     outside.blur();
@@ -871,9 +873,14 @@ it.each([
     expect(scroll).not.toHaveBeenCalled();
     expect(scrollIntoView).not.toHaveBeenCalled();
 
+    if (blursAfterResume) {
+      expect(monthControl.closest('[hidden]')).toBeNull();
+      monthControl.blur();
+      expect(document.activeElement).toBe(document.body);
+    }
     viewport[clippedAxis] = 0;
     viewport.dispatchEvent(new Event(clippedAxis === 'offsetLeft' ? 'scroll' : 'resize'));
-    expect(document.activeElement).toBe(row);
+    expect(document.activeElement).toBe(blursAfterResume ? document.body : row);
     expect(scroll).not.toHaveBeenCalled();
     expect(scrollIntoView).not.toHaveBeenCalled();
   }
