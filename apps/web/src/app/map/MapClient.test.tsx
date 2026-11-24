@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import MapClient from './MapClient';
+import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
 import { loadMapFavorites, loadMapLocations, setMapFavorite, type MapLocation } from './mapService';
 
 const state = vi.hoisted(() => ({
@@ -71,6 +72,47 @@ beforeEach(() => {
   vi.mocked(loadMapFavorites).mockResolvedValue([]);
   vi.mocked(setMapFavorite).mockResolvedValue(undefined);
   window.history.replaceState({}, '', '/map');
+});
+
+it('requires a new spatial choice when a live map source reuses the focused ID', async () => {
+  const original = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  const replacement = { ...original, lat: original.lat + 0.002 };
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
+  const showModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+  const close = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true, value(this: HTMLDialogElement) { this.open = true; },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+    configurable: true, value(this: HTMLDialogElement) { this.open = false; },
+  });
+
+  const view = render(<MapClient school="pu" focus={original.id} />);
+  try {
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = within(screen.getByRole('dialog', { name: '校園空間導覽' }));
+    const appleDestination = () => new URL(dialog.getByRole('link', {
+      name: '開啟 Apple 地圖步行導航',
+    }).getAttribute('href')!).searchParams.get('daddr');
+    expect(appleDestination()).toBe(`${original.lat},${original.lng}`);
+
+    await act(async () => source.resolve([replacement]));
+    expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.lat).toBe(replacement.lat);
+    expect(dialog.queryByRole('link', { name: '開啟 Apple 地圖步行導航' })).toBeNull();
+    expect(dialog.queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+
+    fireEvent.change(dialog.getByRole('combobox'), { target: { value: original.id } });
+    expect(appleDestination()).toBe(`${replacement.lat},${replacement.lng}`);
+  } finally {
+    view.unmount();
+    fetch.mockRestore();
+    for (const [name, descriptor] of [['showModal', showModal], ['close', close]] as const) {
+      if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
+      else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
+    }
+  }
 });
 
 it('resolves classroom deep links to a unique real building while retaining the original room wording', async () => {
@@ -168,17 +210,120 @@ it('honors explicit focus over a resolved classroom and resets the request when 
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
 });
 
-it('reconsiders an automatic classroom when a later source introduces ambiguity', async () => {
+it('waits for the source before automatically selecting a classroom that may be ambiguous', async () => {
   const source = deferred<MapLocation[]>();
   vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
   render(<MapClient school="pu" query="主顧303" />);
-  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-zhugu');
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
   await act(async () => source.resolve([
     { ...library, id: 'east-zhugu', name: '主顧樓', lat: 24.22, lng: 120.59 },
     { ...library, id: 'west-zhugu', name: '主顧樓', lat: 24.22, lng: 120.58 },
   ]));
   expect(screen.getByText(/有多個相符地點/)).toBeTruthy();
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
+});
+
+it.each(['Bishop Kupfer Hall 303', 'Ｂｉｓｈｏｐ  Ｋｕｐｆｅｒ Ｈａｌｌ ３０３'])(
+  'keeps the bus stop %s searchable without automatically opening the classroom alias',
+  async (name) => {
+    const hall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-wenxing')!;
+    const source = deferred<MapLocation[]>();
+    vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+    render(<MapClient school="pu" query="Bishop Kupfer Hall 303" />);
+    const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+    expect(mapState().selected).toBeNull();
+
+    const stop = { ...gate, id: 'synthetic-bus-stop', name, category: '公車站' };
+    await act(async () => source.resolve([hall, stop]));
+    const map = mapState();
+    expect(map.selected).toBeNull();
+    expect(map.locations).toContainEqual(expect.objectContaining({ id: stop.id, name }));
+    expect(screen.getByRole('button', { name: `查看${name.replace(/\s+/g, ' ')}` })).toBeTruthy();
+  },
+);
+
+it.each([
+  ['AK303', 'AK303'],
+  ['AK303', 'ＡＫ３０３'],
+  ['Anthony Kuo Hall 303', 'Anthony Kuo Hall 303'],
+])(
+  'leaves %s unselected and keeps a bus stop named %s searchable',
+  async (query, name) => {
+    state.user = null;
+    const hall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-renyuan')!;
+    const source = deferred<MapLocation[]>();
+    vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+    render(<MapClient school="pu" query={query} />);
+    const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+    expect(mapState().selected).toBeNull();
+    expect(screen.queryByRole('region', { name: '地點詳情' })).toBeNull();
+    const login = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
+    const back = new URL(login.searchParams.get('returnUrl')!, window.location.origin);
+    expect(back.searchParams.has('focus')).toBe(false);
+    expect(back.searchParams.get('query')).toBe(query);
+
+    const stop = { ...gate, id: 'synthetic-ak-bus-stop', name, category: '公車站' };
+    await act(async () => source.resolve([hall, stop]));
+    const map = mapState();
+    expect(map.selected).toBeNull();
+    expect(map.locations).toContainEqual(expect.objectContaining({ id: stop.id, name }));
+    expect(screen.getByRole('button', { name: `查看${name.replace(/\s+/g, ' ')}` })).toBeTruthy();
+  },
+);
+
+it.each(['AK303', 'Anthony Kuo Hall 303'])(
+  'automatically opens Renyuan Hall for %s after the source settles without a name conflict',
+  async (query) => {
+    const source = deferred<MapLocation[]>();
+    vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+    render(<MapClient school="pu" query={query} />);
+    const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+    expect(mapState().selected).toBeNull();
+    await act(async () => source.resolve([]));
+    expect(mapState().selected.id).toBe('pu-renyuan');
+  },
+);
+
+it.each([
+  ['任垣樓', 'teaching-hall'],
+  ['Anthony Kuo Hall', null],
+])('uses the public classroom matches when Renyuan Hall is named %s', async (name, selectedId) => {
+  const hall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-renyuan')!;
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" query="Anthony Kuo Hall 303" />);
+
+  await act(async () => source.resolve([
+    { ...hall, name },
+    { ...hall, id: 'teaching-hall', name: '教學館', building: 'Anthony Kuo Hall' },
+  ]));
+
+  const map = JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(map.selected?.id ?? null).toBe(selectedId);
+  if (selectedId) {
+    expect(map.locations.map((place: MapLocation) => place.id)).toEqual([selectedId]);
+  } else {
+    expect(screen.getByText(/有多個相符地點/)).toBeTruthy();
+  }
+});
+
+it('clears an automatic classroom when a source retry brings in a conflicting public name', async () => {
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations)
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" query="AK303" />);
+  const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  const retry = await screen.findByRole('button', { name: '重新讀取地點資料' });
+  expect(mapState().selected.id).toBe('pu-renyuan');
+
+  fireEvent.click(retry);
+  expect(mapState().selected).toBeNull();
+  await act(async () => source.resolve([
+    { ...gate, id: 'synthetic-ak-bus-stop', name: 'AK303', category: '公車站' },
+  ]));
+  expect(mapState().selected).toBeNull();
+  expect(screen.getByRole('button', { name: '查看AK303' })).toBeTruthy();
 });
 
 it('never replaces a missing explicit focus with the classroom guess, including after a source update', async () => {
