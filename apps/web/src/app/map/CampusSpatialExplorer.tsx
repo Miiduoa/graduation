@@ -97,8 +97,7 @@ function isPlainFootprintObject(value: unknown): value is Record<string, unknown
 
 function validateParsedFootprintJson(payload: unknown): void {
   const invalidShape = () => new Error('Invalid parsed building outline response');
-  const maxOutlineVertices = MAX_VERTICES + 1;
-  const maxTotalVertices = MAX_WAYS * maxOutlineVertices;
+  const maxTotalVertices = MAX_WAYS * MAX_VERTICES;
   // An outline contributes three nodes per vertex. Leave room for building
   // fields and snapshot metadata, and bound recursion to the snapshot depth.
   const maxNodes = maxTotalVertices * 4;
@@ -169,7 +168,7 @@ function validateParsedFootprintJson(payload: unknown): void {
   for (const building of buildings) {
     if (!isPlainFootprintObject(building)) throw invalidShape();
     const { outline } = building;
-    if (!Array.isArray(outline) || outline.length < 3 || outline.length > maxOutlineVertices) throw invalidShape();
+    if (!Array.isArray(outline) || outline.length < 3 || outline.length > MAX_VERTICES) throw invalidShape();
     totalVertices += outline.length;
     if (totalVertices > maxTotalVertices) throw invalidShape();
     for (const pair of outline) {
@@ -721,7 +720,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       Number.isFinite(viewport.scale) && viewport.scale > 1.01;
     // Manual restart always wins over a visual viewport that may be stale.
     let ignoredViewport: string | null = null;
-    let expiredViewport: string | null = null;
     if (manualStart > 0) {
       try {
         const viewport = window.visualViewport;
@@ -768,10 +766,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         if (!clipToDialog && !visualViewportMayObscureCanvas(viewport)) return null;
         const keyboardOpen = measureKeyboardOpen();
         if (!clipToDialog && !isPinchZoomed(viewport) && keyboardOpen === false) return null;
-        if (expiredViewport !== null) {
-          if (viewportSignature(viewport) !== expiredViewport) expiredViewport = null;
-          else if (!clipToDialog && keyboardOpen === null) return null;
-        }
         // The visitor explicitly restarted 3D while the viewport read this
         // way. Ignore that exact (possibly stale) geometry until it changes.
         if (ignoredViewport !== null) {
@@ -783,44 +777,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         return null;
       }
     };
-    let observerConfirmedVisible = false;
-    let viewportRecheck: number | null = null;
-    const cancelViewportRecheck = () => {
-      if (viewportRecheck !== null) window.clearTimeout(viewportRecheck);
-      viewportRecheck = null;
-    };
-    const getUnconfirmedOcclusion = (): string | null => {
-      if (!observerConfirmedVisible || visibility !== 'visible' || isBackgrounded() ||
-          measureDialogScrollportVisibility() === false || measureKeyboardOpen() !== null) return null;
-      try {
-        const viewport = window.visualViewport;
-        if (!viewport || isPinchZoomed(viewport) || measureVisualViewportVisibility() !== false) return null;
-        return viewportSignature(viewport);
-      } catch {
-        return null;
-      }
-    };
-    const scheduleViewportRecheck = () => {
-      const signature = getUnconfirmedOcclusion();
-      if (signature === null) {
-        cancelViewportRecheck();
-        return;
-      }
-      if (viewportRecheck !== null) return;
-      // Without keyboard geometry, a silent open keyboard and a stale
-      // viewport can look identical. Only expire visual-only occlusion after
-      // a fresh positive IO entry and four quiet seconds. Viewport events
-      // reset that evidence, and confirmed keyboard or dialog clipping wins.
-      viewportRecheck = window.setTimeout(() => {
-        viewportRecheck = null;
-        if (!active) return;
-        if (getUnconfirmedOcclusion() === signature) expiredViewport = signature;
-        syncVisibility();
-      }, 4_000);
-    };
     const syncVisibility = () => {
       if (!active) return;
-      scheduleViewportRecheck();
       updateVisibility();
       if (!started && !isDeferred()) startWhenVisible();
       else syncPendingStartup();
@@ -867,7 +825,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           // turn that no-op into a hidden event that suspends an onscreen map.
           if (!entry) return;
           visibility = entry.isIntersecting ? 'visible' : 'hidden';
-          observerConfirmedVisible = observing && entry.isIntersecting;
           if (observing) syncVisibility();
         });
         intersection = current;
@@ -899,9 +856,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     }
     // Keyboard transitions can move the host without a window event.
     const onVisualViewportChange = () => {
-      observerConfirmedVisible = false;
-      expiredViewport = null;
-      cancelViewportRecheck();
       if (visibility === 'hidden' && measureVisualViewportVisibility(true) === true) {
         // Recover from a stale hidden observer entry after the keyboard moves.
         // A valid intersection with the visual viewport is evidence the host
@@ -965,7 +919,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     syncVisibility();
     return () => {
       active = false;
-      cancelViewportRecheck();
       if (timeout !== null) window.clearTimeout(timeout);
       for (const id of focusTimers) window.clearTimeout(id);
       focusTimers.clear();

@@ -2565,30 +2565,45 @@ it('resumes 3D after the keyboard closes even when the WebView keeps the shrunke
   }
 });
 
-it('automatically expires silent viewport occlusion after a fresh visible observer entry', async () => {
-  const { viewport, dialog, graphics, bounds, field } = await openKeyboardCoveredScene();
+it.each(['startup', 'resume'])('keeps WebGL blocked during %s while the keyboard covers the canvas', async (phase) => {
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: undefined } }));
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0, scale: 1,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe(target: Element) {
+      if (phase === 'startup') intersection?.([observerEntry(target, false)], {} as IntersectionObserver);
+    }
+    disconnect() {}
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  if (phase === 'resume') await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  const dialog = within(screen.getByRole('dialog', { name: '校園空間導覽' }));
+  const graphics = dialog.getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 400, 320, 150));
+  const field = dialog.getByRole('searchbox', { name: '搜尋導覽地點' });
   vi.useFakeTimers();
   try {
-    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
-    act(() => vi.advanceTimersByTime(3_999));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
-
-    // A real keyboard transition renews the evidence, even with the same bounds.
-    act(() => viewport.dispatchEvent(new Event('scroll')));
-    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
-    act(() => vi.advanceTimersByTime(3_999));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
-
-    // The keyboard can disappear without a blur or any further event.
-    act(() => vi.advanceTimersByTime(1));
-    expect(document.activeElement).toBe(field);
-    expect(viewport.height).toBe(200);
-    expect(scene.setActive).toHaveBeenLastCalledWith(true);
-    expect(scene.create).toHaveBeenCalledTimes(1);
-    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
-
+    act(() => field.focus());
+    viewport.height = 200;
     act(() => viewport.dispatchEvent(new Event('resize')));
-    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    expect(document.activeElement).toBe(field);
+    scene.setActive.mockClear();
+
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    expect(scene.create).toHaveBeenCalledTimes(phase === 'startup' ? 0 : 1);
+    expect(scene.setActive).not.toHaveBeenCalledWith(true);
+
+    viewport.height = window.innerHeight;
+    await act(async () => { viewport.dispatchEvent(new Event('resize')); });
+    expect(document.activeElement).toBe(field);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
   } finally {
     vi.useRealTimers();
     bounds.mockRestore();
@@ -3560,6 +3575,26 @@ it.each([null, '100'])('installs valid JSON-only OSM bodies (Content-Length %s)'
   await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
 });
 
+it('accepts a JSON-only OSM outline with 160 coordinate pairs', async () => {
+  const { library, body, buildings: [building] } = sourcedLibraryFootprintFixture();
+  const segmentsPerEdge = MAX_VERTICES / building.outline.length;
+  const outline = building.outline.flatMap(([lon, lat], index) => {
+    const [nextLon, nextLat] = building.outline[(index + 1) % building.outline.length];
+    return Array.from({ length: segmentsPerEdge }, (_, segment) => {
+      const fraction = segment / segmentsPerEdge;
+      return [lon + (nextLon - lon) * fraction, lat + (nextLat - lat) * fraction];
+    });
+  });
+  expect(outline).toHaveLength(160);
+  const buildings = [{ ...building, outline }];
+  const json = vi.fn(async () => ({ ...JSON.parse(body), buildings }));
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, headers: new Headers(), json }));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  await waitFor(() => expect(scene.create.mock.lastCall?.[2].footprints).toEqual(buildings));
+});
+
 it.each([
   'oversized Content-Length', 'oversized padding', 'oversized UTF-8 padding', 'oversized escaped padding',
   'too many buildings', 'too many coordinates', 'invalid buildings', 'invalid building',
@@ -3576,7 +3611,7 @@ it.each([
       case 'oversized UTF-8 padding': return { ...snapshot, padding: '中'.repeat(700_000) };
       case 'oversized escaped padding': return { ...snapshot, padding: '\u0000'.repeat(350_000) };
       case 'too many buildings': return { ...snapshot, buildings: Array(MAX_WAYS + 1).fill(building) };
-      case 'too many coordinates': return invalidOutline(Array(MAX_VERTICES + 2).fill(building.outline[0]));
+      case 'too many coordinates': return invalidOutline(Array(MAX_VERTICES + 1).fill(building.outline[0]));
       case 'invalid buildings': return { ...snapshot, buildings: building };
       case 'invalid building': return { ...snapshot, buildings: [building, null] };
       case 'non-finite coordinate': return invalidOutline([[Infinity, 24], ...building.outline]);
