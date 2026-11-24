@@ -683,8 +683,12 @@ function PersonalCalendarWorkspace({
           editorRef.current?.contains(document.activeElement) ||
           document.activeElement === document.body);
       if (continueEditingContext) {
-        setMonth(draft.date.slice(0, 7));
-        if (!preserveMonthList) setSelectedDate(draft.date);
+        // A month-list edit must keep the month currently being viewed, even
+        // when the event starts in a previous month.
+        if (!preserveMonthList) {
+          setMonth(draft.date.slice(0, 7));
+          setSelectedDate(draft.date);
+        }
         if (!suspended.current) pendingFocus.current = preserveMonthList ? 'return' : 'saved';
       }
       setInitialDraft(null);

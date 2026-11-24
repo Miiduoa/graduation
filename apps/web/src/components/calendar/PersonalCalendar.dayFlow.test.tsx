@@ -414,6 +414,24 @@ it('編輯並儲存既有行程後保留整月列表與其他日期的行程及�
   );
 });
 
+it('在整月列表儲存跨月行程後仍留在目前查看的月份', async () => {
+  const stored = { ...event('crossing', '跨月行程', '2026-10-31'), endDate: '2026-11-02' };
+  seed([stored, event('november-only', '十一月行程', '2026-11-15')]);
+  render(<PersonalCalendar />);
+  await ready();
+  activate(screen.getByRole('button', { name: '列表' }));
+  await screen.findByRole('heading', { name: '十一月行程' });
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-11');
+  activate(editEvent(stored.title));
+  fireEvent.change(titleField(), { target: { value: '已修改跨月行程' } });
+  activate(screen.getByRole('button', { name: '儲存修改' }));
+  await screen.findByText('個人行程已更新。');
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-11');
+  expect(screen.getByRole('button', { name: '列表' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('heading', { name: '十一月行程' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '已修改跨月行程' })).toBeTruthy();
+});
+
 it.each([
   ['黏性頁首', 60, -20],
   ['固定底部導覽', 580, 52],
