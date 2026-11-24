@@ -1868,6 +1868,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
                     {matchingPoints.length === 0 ? '沒有符合的地點，請調整關鍵字。' : `找到 ${matchingPoints.length} 個地點。`}
                     {currentOutsideSearch ? ' 目前選擇仍保留，搜尋不會變更導航目的地。' : ''}
                   </small>}
+                  {searchTerms.length > 0 && matchingPoints.length === 1 && (
+                    <button className="btn" type="button"
+                      onClick={() => selectPlace(matchingPoints[0].id)}>
+                      選擇：{optionLabels.get(matchingPoints[0].id) ?? matchingPoints[0].name}
+                    </button>
+                  )}
                 </>}
                 <label htmlFor={selectId}>想去哪裡</label>
                 <select id={selectId} value={place?.id ?? ''} onChange={(event) => selectPlace(event.target.value)}>
