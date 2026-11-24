@@ -299,44 +299,132 @@ function isWriteNegatedAt(tokens: Token[], writeAt: number): boolean {
 
 const PUNCT_CHAR = /[，,；;。！!？?\r\n：:()（）\[\]【】《》〈〉「」『』“”‘’"'·…]/u;
 const FILE_EXTENSION = /\.[A-Za-z][A-Za-z0-9]{0,7}$/u;
-// Bare filenames are a single run of letters/digits plus -/_ , then an extension.
-// Any other punctuation or symbol, including / and ／ after NFKC, is not a filename.
 const BARE_FILENAME_AT = /^(?:[\p{L}\p{N}_-]+)\.[A-Za-z][A-Za-z0-9]{0,7}(?![A-Za-z0-9])/u;
+const BARE_FILENAME_ANYWHERE = /[\p{L}\p{N}_-]+\.[A-Za-z][A-Za-z0-9]{0,7}(?![A-Za-z0-9])/u;
 const BARE_FILENAME_BODY = /^[\p{L}\p{N}_-]+$/u;
-const QUOTE_OR_BRACKET_PAIRS: Array<readonly [string, string]> = [
-  ['「', '」'], ['『', '』'], ['“', '”'], ['‘', '’'], ['"', '"'], ["'", "'"], ['`', '`'],
+const NESTED_BRACKET_PAIRS: Array<readonly [string, string]> = [
   ['（', '）'], ['(', ')'], ['【', '】'], ['[', ']'], ['《', '》'], ['〈', '〉'],
 ];
-
+const TYPOGRAPHIC_QUOTE_PAIRS: Array<readonly [string, string]> = [
+  ['「', '」'], ['『', '』'], ['“', '”'], ['‘', '’'], ['"', '"'], ["'", "'"], ['`', '`'],
+];
 function containsLexiconVerb(value: string): boolean {
   return [...WRITE_VERB_SET, ...QUERY_VERBS, ...PREPARE_ACTIONS].some(verb => verb.length > 0 && value.includes(verb));
 }
 
 function isValidFilenameValue(value: string, allowQuoted: boolean): boolean {
   if (!value || !FILE_EXTENSION.test(value)) return false;
-  // Quoted or bracketed inner text may contain spaces, punctuation, or lexicon verbs.
   if (allowQuoted) return true;
   const body = value.replace(FILE_EXTENSION, '');
   return BARE_FILENAME_BODY.test(body) && !containsLexiconVerb(value);
 }
 
-function quotedFilenameSpan(text: string, index: number): { open: number; inner: number; close: number; end: number } | null {
-  for (const [open, close] of QUOTE_OR_BRACKET_PAIRS) {
+type BracketScan =
+  | { balanced: false; firstOpen: number }
+  | { balanced: true; spans: { start: number; end: number; innerStart: number; innerEnd: number }[] };
+
+function delimiterAt(text: string, index: number, pairs: Array<readonly [string, string]>, side: 'open' | 'close'): string | null {
+  let found: string | null = null;
+  for (const pair of pairs) {
+    const token = side === 'open' ? pair[0] : pair[1];
+    if (text.startsWith(token, index) && (found === null || token.length > found.length)) found = token;
+  }
+  return found;
+}
+
+function scanNestedBrackets(text: string): BracketScan {
+  const stack: { open: string; close: string; start: number; innerStart: number }[] = [];
+  const spans: { start: number; end: number; innerStart: number; innerEnd: number }[] = [];
+  let index = 0;
+  let firstOpen = -1;
+  while (index < text.length) {
+    const opened = delimiterAt(text, index, NESTED_BRACKET_PAIRS, 'open');
+    const closed = delimiterAt(text, index, NESTED_BRACKET_PAIRS, 'close');
+    if (opened) {
+      const pair = NESTED_BRACKET_PAIRS.find(item => item[0] === opened)!;
+      if (firstOpen < 0) firstOpen = index;
+      stack.push({ open: opened, close: pair[1], start: index, innerStart: index + opened.length });
+      index += opened.length;
+      continue;
+    }
+    if (closed) {
+      const frame = stack[stack.length - 1];
+      if (!frame || frame.close !== closed) return { balanced: false, firstOpen: firstOpen < 0 ? index : firstOpen };
+      stack.pop();
+      spans.push({ start: frame.start, end: index + closed.length, innerStart: frame.innerStart, innerEnd: index });
+      index += closed.length;
+      continue;
+    }
+    index += 1;
+  }
+  if (stack.length > 0) return { balanced: false, firstOpen: firstOpen < 0 ? 0 : firstOpen };
+  return { balanced: true, spans };
+}
+
+function typographicQuoteSpan(text: string, index: number): { open: number; inner: number; close: number; end: number } | null {
+  for (const [open, close] of TYPOGRAPHIC_QUOTE_PAIRS) {
     if (!text.startsWith(open, index)) continue;
     const innerStart = index + open.length;
     const closeAt = text.indexOf(close, innerStart);
     if (closeAt < 0) continue;
-    if (isValidFilenameValue(text.slice(innerStart, closeAt), true)) {
-      return { open: index, inner: innerStart, close: closeAt, end: closeAt + close.length };
-    }
+    return { open: index, inner: innerStart, close: closeAt, end: closeAt + close.length };
   }
   return null;
+}
+
+function quotedFilenameSpan(text: string, index: number): { open: number; inner: number; close: number; end: number } | null {
+  const quoted = typographicQuoteSpan(text, index);
+  if (quoted && isValidFilenameValue(text.slice(quoted.inner, quoted.close), true)) return quoted;
+  const scan = scanNestedBrackets(text);
+  if (!scan.balanced) return null;
+  const span = scan.spans.find(item => item.start === index);
+  if (!span) return null;
+  if (!isValidFilenameValue(text.slice(span.innerStart, span.innerEnd), true)) return null;
+  return { open: span.start, inner: span.innerStart, close: span.innerEnd, end: span.end };
 }
 
 function filenameMatchLength(text: string, index: number): number {
   const matched = BARE_FILENAME_AT.exec(text.slice(index));
   if (!matched || !isValidFilenameValue(matched[0], false)) return 0;
   return matched[0].length;
+}
+
+function isLexiconReadInner(inner: string): boolean {
+  if (!inner.trim()) return false;
+  return tokensFor(inner).every(token => {
+    if (isWhitespaceToken(token) || token.kind === 'punct') return true;
+    if (token.kind === 'unknown' || token.kind === 'filename') return false;
+    if (isWriteVerbToken(token)) return false;
+    return true;
+  });
+}
+
+function hasFilenameCandidate(text: string): boolean {
+  if (BARE_FILENAME_ANYWHERE.test(text)) return true;
+  if (tokensFor(text).some(token => token.kind === 'filename')) return true;
+  let index = 0;
+  while (index < text.length) {
+    const quoted = typographicQuoteSpan(text, index);
+    if (quoted) {
+      if (FILE_EXTENSION.test(text.slice(quoted.inner, quoted.close))) return true;
+      index = quoted.end;
+      continue;
+    }
+    index += 1;
+  }
+  const scan = scanNestedBrackets(text);
+  if (scan.balanced && scan.spans.some(span => FILE_EXTENSION.test(text.slice(span.innerStart, span.innerEnd)))) {
+    return true;
+  }
+  return false;
+}
+
+/** File mentions, unbalanced brackets, or bracket inners that are not known read tokens block clearly-read. */
+function hasReadBlockingDecoration(text: string): boolean {
+  if (hasFilenameCandidate(text)) return true;
+  const scan = scanNestedBrackets(text);
+  if (!scan.balanced) return true;
+  return scan.spans.some(span => !isLexiconReadInner(text.slice(span.innerStart, span.innerEnd)));
 }
 
 function tokenize(text: string): Token[] {
@@ -861,26 +949,46 @@ function authorizesPrivateRead(original: string): boolean {
  * out of the private read, and a requested write anywhere keeps the request with
  * the original planner instead of reading beside an unhandled write.
  */
-function protectedSpanMask(text: string): boolean[] {
+function typographicQuoteMask(text: string): boolean[] {
   const mask = Array.from({ length: text.length }, () => false);
   const mark = (start: number, end: number) => {
     for (let index = start; index < end && index < mask.length; index += 1) mask[index] = true;
   };
-  for (const [open, close] of QUOTE_OR_BRACKET_PAIRS) {
-    let from = 0;
-    while (from < text.length) {
-      const start = text.indexOf(open, from);
-      if (start < 0) break;
-      const end = text.indexOf(close, start + open.length);
-      if (end < 0) break;
-      mark(start, end + close.length);
-      from = end + close.length;
+  let from = 0;
+  while (from < text.length) {
+    const quoted = typographicQuoteSpan(text, from);
+    if (!quoted) {
+      from += 1;
+      continue;
     }
+    mark(quoted.open, quoted.end);
+    from = quoted.end;
   }
+  return mask;
+}
+
+function dataTypeMask(text: string): boolean[] {
+  const mask = typographicQuoteMask(text);
+  const mark = (start: number, end: number) => {
+    for (let index = start; index < end && index < mask.length; index += 1) mask[index] = true;
+  };
   for (const token of tokensFor(text)) {
     if (token.kind === 'filename') mark(token.start, token.end);
   }
+  const scan = scanNestedBrackets(text);
+  if (!scan.balanced) {
+    mark(scan.firstOpen, text.length);
+    return mask;
+  }
+  for (const span of scan.spans) {
+    const inner = text.slice(span.innerStart, span.innerEnd);
+    if (FILE_EXTENSION.test(inner) || !isLexiconReadInner(inner)) mark(span.start, span.end);
+  }
   return mask;
+}
+
+function protectedSpanMask(text: string): boolean[] {
+  return typographicQuoteMask(text);
 }
 
 function tokenIsProtected(token: Token, mask: boolean[]): boolean {
@@ -899,7 +1007,7 @@ function isKnownReadToken(token: Token, mask: boolean[]): boolean {
 }
 
 function allTokensKnown(text: string): boolean {
-  const mask = protectedSpanMask(text);
+  const mask = typographicQuoteMask(text);
   return tokensFor(text).every(token => isKnownReadToken(token, mask));
 }
 
@@ -930,6 +1038,7 @@ function hasDomainOrLmsSubstance(text: string): boolean {
 function isPositivelyProvenRead(text: string): boolean {
   const original = text.normalize('NFKC').trim();
   if (!original || !TRONCLASS_KEYWORD.test(original)) return false;
+  if (hasReadBlockingDecoration(original)) return false;
   if (!allTokensKnown(original)) return false;
   if (tokensFor(original).some(token => isNegatorToken(token) && !tokenIsProtected(token, protectedSpanMask(original)))) return false;
   if (writeCommandRoute(textWithoutQuotedSpans(original)) !== null) return false;
@@ -969,6 +1078,7 @@ function clauseAllowsCompoundCompanion(clause: string): boolean {
 
 function wholeRequestAllowsCompoundRead(question: string): boolean {
   const original = question.normalize('NFKC').trim();
+  if (hasReadBlockingDecoration(original)) return false;
   if (!allTokensKnown(original)) return false;
   if (classifyTronClassSentence(question)?.outcome === 'clearly-write') return false;
   const clauses = splitClauses(readRoutingText(textWithoutQuotedSpans(original)));
@@ -1022,10 +1132,10 @@ export function tronClassCompoundClauses(question: string): string[] {
 }
 
 function textWithoutFilenameTokens(text: string): string {
+  const mask = dataTypeMask(text);
   const chars = text.split('');
-  for (const token of tokensFor(text)) {
-    if (token.kind !== 'filename') continue;
-    for (let index = token.start; index < token.end && index < chars.length; index += 1) chars[index] = ' ';
+  for (let index = 0; index < chars.length; index += 1) {
+    if (mask[index]) chars[index] = ' ';
   }
   return chars.join('');
 }
@@ -1038,8 +1148,10 @@ function lastDataTypeIntent(text: string): TronClassAgentIntent | null {
     { intent: 'courses', pattern: /課程|修課|課表|courses?|classes/iu },
   ];
   let found: { intent: TronClassAgentIntent; index: number } | null = null;
+  const mask = dataTypeMask(text);
   for (const token of tokensFor(text)) {
     if (token.kind === 'filename' || isWhitespaceToken(token) || token.kind === 'punct') continue;
+    if (tokenIsProtected(token, mask)) continue;
     for (const type of types) {
       if (type.pattern.test(token.value) && (!found || token.start >= found.index)) {
         found = { intent: type.intent, index: token.start };
@@ -1118,8 +1230,9 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   if (intent.intent === 'unsupported' || intent.intent === 'prepare') {
     return { outcome: 'clearly-write', intent };
   }
-  // clearly-read must be positively proven: every token is known, and the
-  // sentence has no negator and no command write or transfer verb.
+  // clearly-read must be positively proven on the original sentence. A
+  // quote-stripped routing view must not hide a file mention or bad brackets.
+  if (hasReadBlockingDecoration(original)) return { outcome: 'ambiguous' };
   if (!isPositivelyProvenRead(original) && !isPositivelyProvenRead(text)) return { outcome: 'ambiguous' };
   return { outcome: 'clearly-read', intent };
 }
