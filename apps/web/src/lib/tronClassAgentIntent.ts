@@ -833,17 +833,6 @@ function modifierInteriorIndex(tokens: Token[]): boolean[] {
   return interior;
 }
 
-function firstTokenAtOrAfter(tokens: Token[], from: number): number {
-  let low = 0;
-  let high = tokens.length;
-  while (low < high) {
-    const mid = (low + high) >> 1;
-    if (tokens[mid]!.end <= from) low = mid + 1;
-    else high = mid;
-  }
-  return low;
-}
-
 function isRelativeQuery(tokens: Token[], token: Token, at: number, interior: boolean[]): boolean {
   if (at < 0) return false;
   if (interior[at]) return true;
@@ -854,18 +843,14 @@ function isRelativeQuery(tokens: Token[], token: Token, at: number, interior: bo
     prev === '曾經' || prev === '正在' || prev === '正' || prev === '供';
 }
 
-function nextNegatedWriteStop(text: string, from: number): number {
-  const tokens = tokensFor(text);
-  const interior = modifierInteriorIndex(tokens);
-  for (let i = firstTokenAtOrAfter(tokens, from); i < tokens.length; i++) {
+function nextNegatedWriteStop(tokens: Token[], interior: boolean[], from: number): number {
+  for (let i = from; i < tokens.length; i++) {
     const token = tokens[i]!;
-    if (token.start < from) continue;
-    const offset = token.start - from;
     if (interior[i]) continue;
-    if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) return offset;
-    if (token.kind === 'cue' && ACTION_CUES.includes(token.value)) return offset;
+    if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) return i;
+    if (token.kind === 'cue' && ACTION_CUES.includes(token.value)) return i;
     if (token.kind === 'query' && QUERY_START.has(token.value) && !isRelativeQuery(tokens, token, i, interior)) {
-      return offset;
+      return i;
     }
     if (token.kind === 'conj') {
       let next = i + 1;
@@ -874,34 +859,32 @@ function nextNegatedWriteStop(text: string, from: number): number {
         next += 1;
       }
       const following = tokens[next];
-      if (following && isWriteVerbToken(following)) return offset;
+      if (following && isWriteVerbToken(following)) return i;
     }
     const word = token.value.toLowerCase();
-    if (word === 'and' || word === 'then' || word === 'also') return offset;
+    if (word === 'and' || word === 'then' || word === 'also') return i;
   }
-  return -1;
+  return tokens.length;
 }
 
 function readRoutingText(text: string): string {
   const tokens = tokensFor(text);
-  let result = '';
+  const writeTargets = negatedWriteTargets(tokens);
+  const interior = modifierInteriorIndex(tokens);
+  const parts: string[] = [];
   let start = 0;
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index]!;
-    if (token.start < start) continue;
-    if (!isNegatorToken(token) || !isNegatedWriteFrom(tokens, index)) continue;
-    let writeEnd = token.end;
-    for (let next = index + 1; next < tokens.length; next += 1) {
-      if (isWriteVerbToken(tokens[next]!)) {
-        writeEnd = tokens[next]!.end;
-        break;
-      }
+  for (let index = 0; index < tokens.length;) {
+    const writeAt = writeTargets[index];
+    if (writeAt === undefined) {
+      index += 1;
+      continue;
     }
-    const boundary = nextNegatedWriteStop(text, writeEnd);
-    result += text.slice(start, token.start) + ' ';
-    start = boundary < 0 ? text.length : writeEnd + boundary;
+    parts.push(text.slice(start, tokens[index]!.start), ' ');
+    index = nextNegatedWriteStop(tokens, interior, writeAt + 1);
+    start = tokens[index]?.start ?? text.length;
   }
-  return result + text.slice(start);
+  parts.push(text.slice(start));
+  return parts.join('');
 }
 
 const ADDITIVE_CUE = /(?:也|還|並|並且|順便|同時|再|另外|以及|和|跟|與|及)\s*$/u;
@@ -1138,25 +1121,29 @@ function writeLexiconAndRegexDisagree(text: string): boolean {
   return false;
 }
 
-function isNegatedWriteFrom(tokens: Token[], negAt: number): boolean {
-  let seenBa = false;
-  for (let index = negAt + 1; index < tokens.length; index += 1) {
+function negatedWriteTargets(tokens: Token[]): Array<number | undefined> {
+  const targets: Array<number | undefined> = new Array(tokens.length);
+  // Track both suffix states so negators sharing a 把／將 span reuse its write target.
+  let directWrite: number | undefined;
+  let baWrite: number | undefined;
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
     const token = tokens[index]!;
+    if (isNegatorToken(token)) targets[index] = directWrite;
     if (isWhitespaceToken(token)) continue;
-    if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) return false;
-    if (WRITE_HELPERS.has(token.value)) continue;
-    if (BA_MARKERS.has(token.value)) {
-      seenBa = true;
+    if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) {
+      directWrite = baWrite = undefined;
+    } else if (WRITE_HELPERS.has(token.value)) {
       continue;
+    } else if (BA_MARKERS.has(token.value)) {
+      directWrite = baWrite;
+    } else if (isWriteVerbToken(token)) {
+      directWrite = baWrite = index;
+    } else {
+      directWrite = undefined;
     }
-    if (isWriteVerbToken(token)) return true;
-    if (!seenBa) return false;
   }
-  return false;
+  return targets;
 }
-
-
-
 
 function textWithoutQuotedSpans(text: string): string {
   const parts: string[] = [];
@@ -1278,22 +1265,27 @@ function hasDomainOrLmsSubstance(text: string): boolean {
 const ACTION_STATUS_PREFIXES = new Set([
   '已', '已經', '尚未', '還沒', '未', '沒', '待', '剛', '剛才', '剛剛', '曾經', '過', '正在', '正',
 ]);
-const ACTION_STATUS_SUFFIXES = new Set(['過', '了', '完', '過了嗎', '了嗎']);
+const ACTION_STATUS_SUFFIXES = new Set(['過', '了', '完', '過了嗎', '了嗎', '了沒']);
 
 function hasDescriptiveAction(text: string): boolean {
   let statusPrefix = false;
-  const tokens = visibleCommandTokens(text);
-  for (const [index, token] of tokens.entries()) {
+  let sawAction = false;
+  for (const token of visibleCommandTokens(text)) {
     if (token.kind === 'punct' && CLAUSE_PUNCT.test(token.value)) {
       statusPrefix = false;
+      sawAction = false;
       continue;
     }
+    // A submission/status predicate owns its following particles, as in
+    // 「查作業交了沒」. Its command or status role is decided by writeCommandRoute.
+    if (isWriteVerbToken(token)) sawAction = false;
+    if (sawAction && ACTION_STATUS_SUFFIXES.has(token.value)) return true;
     if (ACTION_STATUS_PREFIXES.has(token.value)) statusPrefix = true;
-    if (token.kind === 'noun') continue;
-    if (token.kind !== 'query' && !isPrepareActionValue(token.value) &&
-      !DOWNLOAD_ACTIONS.has(token.value.toLowerCase())) continue;
-    const next = nextSignificantToken(tokens, index);
-    if (statusPrefix || (next && ACTION_STATUS_SUFFIXES.has(next.value))) return true;
+    if (token.kind !== 'noun' && (token.kind === 'query' || isPrepareActionValue(token.value) ||
+      DOWNLOAD_ACTIONS.has(token.value.toLowerCase()))) {
+      if (statusPrefix) return true;
+      sawAction = true;
+    }
   }
   return false;
 }
@@ -1348,7 +1340,9 @@ function wholeRequestAllowsCompoundRead(question: string): boolean {
   if (hasHonoredPrepareCommand(original)) return false;
   if (!allTokensKnown(original)) return false;
   if (classifyTronClassSentence(question)?.outcome === 'clearly-write') return false;
-  const clauses = splitClauses(readRoutingText(textWithoutQuotedSpans(original)));
+  const routingText = readRoutingText(textWithoutQuotedSpans(original));
+  if (hasDescriptiveAction(routingText)) return false;
+  const clauses = splitClauses(routingText);
   if (clauses.length === 0) return false;
   if (!clauses.every(clauseAllowsCompoundCompanion)) return false;
   return clauses.some(clause => isPositivelyProvenRead(clause));
