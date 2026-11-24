@@ -51,6 +51,73 @@ test('append is durable, duplicate-safe, and isolated by account and school', as
   expect((await loadPersonalImports({ ...scope, schoolId: 'ntu' })).records).toHaveLength(0);
 });
 
+test.each(['append', 'edit', 'delete'] as const)(
+  'guarded %s succeeds when only the primary ledger fits in storage',
+  async (operation) => {
+    const key = personalImportStorageKey(scope);
+    const initial = row('original');
+    initial.source.rawText = '原始紀錄'.repeat(1_024);
+    const { ledger: { records: [original] } } = await appendPersonalImports(scope, [initial]);
+    const before = (await AsyncStorage.getItem(key))!;
+    const capacity = before.length + 1_024;
+    expect(JSON.stringify(before).length + before.length).toBeGreaterThan(capacity);
+
+    const multiSet = jest.mocked(AsyncStorage.multiSet);
+    const nativeMultiSet = multiSet.getMockImplementation()!;
+    multiSet.mockClear();
+    multiSet.mockImplementation(async (entries, callback) => {
+      const values = new Map(await AsyncStorage.multiGet([key, key + ':checkpoint']));
+      for (const [storageKey, value] of entries) values.set(storageKey, value);
+      const used = [...values.values()].reduce((size, value) => size + (value?.length ?? 0), 0);
+      if (used > capacity) throw new Error('SQLiteFullException');
+      await nativeMultiSet(entries, callback);
+    });
+    const guard = { canContinue: () => true, canCommitFirstWrite: () => true };
+    try {
+      if (operation === 'append') await appendPersonalImports(scope, [row('new', '統計')], guard);
+      if (operation === 'edit') await editPersonalImport(scope, original, { ...original, title: '統計' }, guard);
+      if (operation === 'delete') await deletePersonalImport(scope, original, guard);
+      const expected = { append: ['微積分', '統計'], edit: ['統計'], delete: [] };
+      expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(expected[operation]);
+      expect(multiSet.mock.calls.map(([entries]) => entries.map(([storageKey]) => storageKey))).toEqual([[key]]);
+    } finally {
+      multiSet.mockImplementation(nativeMultiSet);
+    }
+  },
+);
+
+test('reads the primary ledger when a legacy checkpoint exceeds the Android row limit', async () => {
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  const limit = 2 * 1024 * 1024;
+  const original = row('original');
+  original.source.rawText = String.fromCharCode(92).repeat(600_000);
+  const { ledger } = await appendPersonalImports(scope, [original]);
+  const primary = (await AsyncStorage.getItem(key))!;
+  const encoded = JSON.stringify(primary);
+  const byteLength = (value: string) => Buffer.byteLength(value, 'utf8');
+  expect(byteLength(primary)).toBeLessThan(limit);
+  expect(byteLength(encoded)).toBeGreaterThan(limit);
+  await AsyncStorage.setItem(checkpoint, encoded);
+
+  const nativeMultiGet = jest.mocked(AsyncStorage.multiGet).getMockImplementation()!;
+  const multiGet = jest.mocked(AsyncStorage.multiGet).mockImplementation(async (keys) => {
+    const entries = await nativeMultiGet(keys);
+    if (entries.some(([, value]) => value !== null && byteLength(value) > limit)) {
+      throw new Error('SQLiteBlobTooBigException');
+    }
+    return entries;
+  });
+  try {
+    expect(await loadPersonalImports(scope)).toEqual(ledger);
+    await deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
+    expect((await loadPersonalImports(scope)).records).toEqual([]);
+    expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
+  } finally {
+    multiGet.mockImplementation(nativeMultiGet);
+  }
+});
+
 const creditStates = [
   { label: 'missing', fields: {} },
   { label: 'undefined', fields: { credits: undefined } },

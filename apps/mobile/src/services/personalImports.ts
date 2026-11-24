@@ -31,29 +31,55 @@ export const personalImportStorageKey = (scope: PersonalImportScope) =>
   `campus.personal-imports.v1:${encodeURIComponent(scope.owner)}:${encodeURIComponent(scope.schoolId)}`;
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
 const locks = new Map<string, Promise<unknown>>();
-const pendingCheckpoints = new Map<string, Promise<void>>();
-// Keep verified bytes available if storage cannot recreate a cleared checkpoint.
-const rollbackCheckpoints = new Map<string, { raw: string | null }>();
-let checkpointSequence = 0;
+const pendingWrites = new Map<string, Promise<void>>();
+type Recovery = { raw: string | null };
+const pendingRestorations = new Map<string, Recovery>();
+let writeSequence = 0;
 const recoveryKey = (key: string) => `${key}:checkpoint`;
 
-async function readCheckpoint(key: string): Promise<{ raw: string | null } | null> {
-  const rollback = rollbackCheckpoints.get(key);
-  if (rollback) return rollback;
-  const [[, encoded]] = await AsyncStorage.multiGet([recoveryKey(key)]);
-  if (encoded === null) return null;
-  const raw: unknown = JSON.parse(encoded);
-  if (typeof raw === 'string') return { raw };
-  if (raw === null) return { raw: null };
-  throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
+async function readRecovery(key: string): Promise<Recovery | null> {
+  const pending = pendingRestorations.get(key);
+  if (pending) return pending;
+  try {
+    const [[, encoded]] = await AsyncStorage.multiGet([recoveryKey(key)]);
+    if (encoded === null) return null;
+    if (encoded.trimStart()[0] === '{') return { raw: encoded };
+    // Older builds wrapped the original ledger in a second layer of JSON.
+    const raw: unknown = JSON.parse(encoded);
+    if (typeof raw === 'string' || raw === null) return { raw };
+  } catch {
+    // An oversized legacy checkpoint can fail Android's per-row read even
+    // when the primary ledger still fits. Let the caller read the primary.
+  }
+  return null;
 }
 
-async function restoreCheckpoint(key: string, raw: string | null) {
+async function restoreLedger(key: string, { raw }: Recovery) {
   if (raw === null) await AsyncStorage.removeItem(key);
   else await AsyncStorage.setItem(key, raw);
-  checkpointSequence += 1;
   await AsyncStorage.multiRemove([recoveryKey(key)]);
-  rollbackCheckpoints.delete(key);
+  pendingRestorations.delete(key);
+}
+
+async function rollbackLedger(key: string, raw: string | null) {
+  const recovery = { raw };
+  pendingRestorations.set(key, recovery);
+  try {
+    // Only a revoked write needs a durable recovery record. Store the original
+    // bytes directly to avoid growing the row through JSON string escaping.
+    await AsyncStorage.multiSet([[recoveryKey(key), raw ?? 'null']]);
+  } catch {
+    // Restoration still has a chance to succeed. Readers have the original
+    // bytes in memory if the primary write fails too.
+  }
+  await restoreLedger(key, recovery);
+}
+
+async function trackWrite(key: string, write: () => Promise<void>) {
+  writeSequence += 1;
+  const operation = Promise.resolve().then(write).finally(() => pendingWrites.delete(key));
+  pendingWrites.set(key, operation.then(() => undefined, () => undefined));
+  await operation;
 }
 type ImportChange = { scope: PersonalImportScope; source: 'local' | 'sync' };
 const listeners = new Set<(change: ImportChange) => void>();
@@ -89,20 +115,18 @@ export async function loadPersonalImports(
 ): Promise<PersonalImportLedger> {
   const key = personalImportStorageKey(scope);
   for (;;) {
-    const pending = pendingCheckpoints.get(key);
+    const pending = pendingWrites.get(key);
     if (pending) {
       await pending;
       continue;
     }
-    const sequence = checkpointSequence;
-    const [stored, recovery] = await Promise.allSettled([
-      AsyncStorage.getItem(key),
-      readCheckpoint(key),
-    ]);
+    const sequence = writeSequence;
+    const recovery = await readRecovery(key);
+    if (sequence !== writeSequence) continue;
+    if (recovery) return parseLedger(recovery.raw, scope);
+    const [stored] = await Promise.allSettled([AsyncStorage.getItem(key)]);
     // A guarded write or a recovery may have changed the authoritative bytes during these reads.
-    if (sequence !== checkpointSequence) continue;
-    if (recovery.status === 'rejected') throw recovery.reason;
-    if (recovery.value) return parseLedger(recovery.value.raw, scope);
+    if (sequence !== writeSequence) continue;
     if (stored.status === 'rejected') throw stored.reason;
     return parseLedger(stored.value, scope);
   }
@@ -192,52 +216,31 @@ export function mutatePersonalImportLedger<T>(
         }
       };
       assertWritable();
-      const stored = await AsyncStorage.getItem(key);
-      const recovery = await readCheckpoint(key);
-      let persistedRaw = recovery ? recovery.raw : stored;
+      const recovery = await readRecovery(key);
+      let persistedRaw = recovery ? recovery.raw : await AsyncStorage.getItem(key);
       const current = parseLedger(persistedRaw, scope);
       assertWritable();
       if (recovery) {
-        await restoreCheckpoint(key, recovery.raw);
+        await trackWrite(key, () => restoreLedger(key, recovery));
         assertWritable();
       }
       let persisted = current;
       const checkpoint = async (ledger: PersonalImportLedger) => {
         assertWritable();
-        if (JSON.stringify(persisted) === JSON.stringify(ledger)) return;
         const raw = JSON.stringify(ledger);
+        if (raw === JSON.stringify(persisted)) return;
         const write = async () => {
           if (typeof guard === 'function') {
             await AsyncStorage.setItem(key, raw);
           } else {
-            const recoveryEntry: [string, string] = [recoveryKey(key), JSON.stringify(persistedRaw)];
-            // Persist the last verified bytes before dispatching the uncancellable native write.
-            await AsyncStorage.multiSet([recoveryEntry]);
-            let dispatched = false;
-            let clearingCheckpoint = false;
+            assertWritable();
             try {
-              assertWritable();
-              dispatched = true;
               await AsyncStorage.setItem(key, raw);
               assertWritable();
-              clearingCheckpoint = true;
               await AsyncStorage.multiRemove([recoveryKey(key)]);
               assertWritable();
             } catch (error) {
-              if (dispatched) {
-                // Cleanup may have removed the backup. Put it back before attempting restoration
-                // so readers still see the last verified ledger if restoration fails.
-                if (clearingCheckpoint) {
-                  try {
-                    await AsyncStorage.multiSet([recoveryEntry]);
-                  } catch {
-                    rollbackCheckpoints.set(key, { raw: persistedRaw });
-                  }
-                }
-                await restoreCheckpoint(key, persistedRaw);
-              } else {
-                await AsyncStorage.multiRemove([recoveryKey(key)]);
-              }
+              await rollbackLedger(key, persistedRaw);
               throw error;
             }
           }
@@ -253,11 +256,8 @@ export function mutatePersonalImportLedger<T>(
           }
         };
         if (typeof guard === 'function') return write();
-        checkpointSequence += 1;
-        const checkpointWrite = write().finally(() => pendingCheckpoints.delete(key));
-        // Readers wait until the write commits or rollback has established the verified ledger.
-        pendingCheckpoints.set(key, checkpointWrite.then(() => undefined, () => undefined));
-        await checkpointWrite;
+        // Readers wait until the write commits or rollback establishes the verified ledger.
+        await trackWrite(key, write);
       };
       const { ledger, result } = await update(current, checkpoint);
       await checkpoint(ledger);

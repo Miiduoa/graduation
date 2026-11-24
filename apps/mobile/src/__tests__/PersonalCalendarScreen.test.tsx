@@ -705,10 +705,11 @@ it.each([
     expect((await read).records.map((row) => row.title)).toEqual(['寫入途中重驗']);
     expect(setItem.mock.calls).toEqual([[key, expect.any(String)], [key, stored]]);
     if (rebuildFails) {
-      expect(rejectRebuild).toHaveBeenCalledWith([[key + ':checkpoint', JSON.stringify(stored)]]);
+      expect(rejectRebuild).toHaveBeenCalledWith([[key + ':checkpoint', stored]]);
     }
     if (restoreFails) {
       expect(JSON.parse((await AsyncStorage.getItem(key))!).records).toEqual([]);
+      expect(await AsyncStorage.getItem(key + ':checkpoint')).toBe(rebuildFails ? null : stored);
       expect((await loadPersonalImports(scope)).records.map((row) => row.title)).toEqual(['寫入途中重驗']);
       const { mutatePersonalImportLedger } = jest.requireActual<typeof import('../services/personalImports')>(
         '../services/personalImports',
