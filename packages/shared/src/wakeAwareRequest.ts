@@ -39,19 +39,44 @@ export function isWakeRetryableFailure(error: unknown, callerAborted = false): b
   return name === 'AbortError' || name === 'TimeoutError';
 }
 
-function combineSignals(left?: AbortSignal, right?: AbortSignal): AbortSignal | undefined {
-  if (!left) return right;
-  if (!right) return left;
-  if (typeof AbortSignal.any === 'function') return AbortSignal.any([left, right]);
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  if (left.aborted || right.aborted) {
-    controller.abort();
-    return controller.signal;
+function combineSignals(
+  left: AbortSignal | undefined,
+  right: AbortSignal,
+): { signal: AbortSignal; dispose(): void } {
+  if (!left) return { signal: right, dispose() {} };
+  if (typeof AbortSignal.any === 'function') {
+    return { signal: AbortSignal.any([left, right]), dispose() {} };
   }
-  left.addEventListener('abort', abort);
-  right.addEventListener('abort', abort);
-  return controller.signal;
+
+  // Older React Native / browser runtimes need explicit listener disposal.
+  const controller = new AbortController();
+  if (left.aborted || right.aborted) {
+    controller.abort((left.aborted ? left : right).reason);
+    return { signal: controller.signal, dispose() {} };
+  }
+
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    left.removeEventListener('abort', abortLeft);
+    right.removeEventListener('abort', abortRight);
+  };
+  const abortLeft = () => {
+    dispose();
+    controller.abort(left.reason);
+  };
+  const abortRight = () => {
+    dispose();
+    controller.abort(right.reason);
+  };
+
+  left.addEventListener('abort', abortLeft, { once: true });
+  right.addEventListener('abort', abortRight, { once: true });
+  // Handle signals that become aborted during listener registration.
+  if (left.aborted) abortLeft();
+  else if (right.aborted) abortRight();
+  return { signal: controller.signal, dispose };
 }
 
 function createTimeoutSignal(ms: number): { signal: AbortSignal; cancel(): void } {
@@ -80,8 +105,12 @@ export async function withWakeRetry<T>(
     }
     const timeout = createTimeoutSignal(timeoutMs);
     try {
-      const signal = combineSignals(options.externalSignal, timeout.signal) ?? timeout.signal;
-      return await run(signal);
+      const combined = combineSignals(options.externalSignal, timeout.signal);
+      try {
+        return await run(combined.signal);
+      } finally {
+        combined.dispose();
+      }
     } finally {
       timeout.cancel();
     }
