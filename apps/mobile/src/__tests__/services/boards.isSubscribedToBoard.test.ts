@@ -1,6 +1,11 @@
 import { getDocs, getDocsFromServer } from 'firebase/firestore';
 import { isSubscribedToBoard } from '../../services/boards';
 
+beforeEach(() => {
+  jest.mocked(getDocs).mockReset();
+  jest.mocked(getDocsFromServer).mockReset();
+});
+
 jest.mock('../../firebase', () => ({ getDb: () => ({}) }));
 jest.mock('firebase/firestore', () => ({
   addDoc: jest.fn(),
@@ -18,9 +23,16 @@ jest.mock('firebase/firestore', () => ({
   where: jest.fn((...args: unknown[]) => args),
 }));
 
-test('reads subscription status from the server so a cache miss cannot look unsubscribed', async () => {
+test('ordinary reads may use the cache so an offline board detail can still open', async () => {
+  jest.mocked(getDocs).mockResolvedValue({ empty: true } as never);
+  await expect(isSubscribedToBoard('alice', 'pu', 'board')).resolves.toBe(false);
+  expect(getDocs).toHaveBeenCalled();
+  expect(getDocsFromServer).not.toHaveBeenCalled();
+});
+
+test('failed-write reconciliation reads from the server so a cache miss cannot look unsubscribed', async () => {
   jest.mocked(getDocsFromServer).mockResolvedValue({ empty: false } as never);
-  await expect(isSubscribedToBoard('alice', 'pu', 'board')).resolves.toBe(true);
+  await expect(isSubscribedToBoard('alice', 'pu', 'board', { fromServer: true })).resolves.toBe(true);
   expect(getDocsFromServer).toHaveBeenCalled();
   expect(getDocs).not.toHaveBeenCalled();
 });
@@ -29,6 +41,6 @@ test('propagates a server-read failure so the caller can keep the rollback', asy
   jest.mocked(getDocsFromServer).mockRejectedValue(
     Object.assign(new Error('offline'), { code: 'unavailable' }),
   );
-  await expect(isSubscribedToBoard('alice', 'pu', 'board')).rejects.toThrow('offline');
+  await expect(isSubscribedToBoard('alice', 'pu', 'board', { fromServer: true })).rejects.toThrow('offline');
   expect(getDocs).not.toHaveBeenCalled();
 });

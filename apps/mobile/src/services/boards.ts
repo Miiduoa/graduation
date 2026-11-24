@@ -83,11 +83,13 @@ export async function isSubscribedToBoard(
   uid: string,
   schoolId: string,
   boardId: string,
+  options: { fromServer?: boolean } = {},
 ): Promise<boolean> {
   const db = getDb();
-  // Must hit the server. A cache miss would look like "not subscribed" and
-  // overwrite the rollback after a failed unsubscribe.
-  const snap = await getDocsFromServer(
+  const read = options.fromServer ? getDocsFromServer : getDocs;
+  // Failed-write reconciliation must hit the server. A cache miss would look
+  // like "not subscribed" and overwrite the rollback after a failed unsubscribe.
+  const snap = await read(
     query(
       collection(db, 'schools', schoolId, 'boardSubs'),
       where('userId', '==', uid),

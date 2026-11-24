@@ -340,7 +340,7 @@ test('a failed write never trusts a snapshot that may contain its own unconfirme
   jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(false);
   await act(async () => { write.reject(new Error('permission-denied')); });
   expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'permission-denied');
-  expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board');
+  expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
   expect(view.getByLabelText('訂閱讀書會').props.accessibilityState.busy).toBe(false);
 });
 
@@ -355,7 +355,7 @@ test('a failed write re-reads the server so another device\'s subscription is sh
   jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
   await act(async () => { write.reject(new Error('offline')); });
   expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
-  expect(isSubscribedToBoard).toHaveBeenCalledWith('alice', 'pu', 'board');
+  expect(isSubscribedToBoard).toHaveBeenCalledWith('alice', 'pu', 'board', { fromServer: true });
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
@@ -398,7 +398,7 @@ test('a batch whose last settled write succeeded still re-reads after an earlier
   await act(async () => { second.reject(new Error('offline')); });
   await act(async () => { first.resolve(); });
   expect(jest.mocked(isSubscribedToBoard).mock.calls.length).toBe(readsBefore + 1);
-  expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board');
+  expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
@@ -422,7 +422,7 @@ test('a refresh older than a confirmed write cannot hide it after the next write
   jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
   await act(async () => { unsubscribe.reject(new Error('offline')); });
   expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
-  expect(isSubscribedToBoard).toHaveBeenCalledWith('alice', 'pu', 'board');
+  expect(isSubscribedToBoard).toHaveBeenCalledWith('alice', 'pu', 'board', { fromServer: true });
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
@@ -467,7 +467,7 @@ test('a failed unsubscribe re-read keeps the subscription even when the list omi
   jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
   await act(async () => { write.reject(new Error('offline')); });
   expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
-  expect(isSubscribedToBoard).toHaveBeenCalledWith('alice', 'pu', 'board');
+  expect(isSubscribedToBoard).toHaveBeenCalledWith('alice', 'pu', 'board', { fromServer: true });
   expect(jest.mocked(listSubscribedBoardIds).mock.calls.length).toBe(listCallsBefore);
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });

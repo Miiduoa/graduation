@@ -181,7 +181,7 @@ function BoardsContent() {
     try {
       // Read this board only. listSubscribedBoardIds is capped at 100 and
       // must not treat a missing id as "unsubscribed".
-      const serverSubscribed = await isSubscribedToBoard(uid, sid, boardId);
+      const serverSubscribed = await isSubscribedToBoard(uid, sid, boardId, { fromServer: true });
       if (!mounted.current) return;
       if (pendingSubscriptionCounts.current.has(boardId)) return;
       if ((boardWriteRevision.current.get(boardId) ?? -1) > revisionAtRead) return;
