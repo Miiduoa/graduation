@@ -134,11 +134,17 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     discardWorkspaceReceipts(key, revision);
   }
 
+  function accessConfirmationRevision(key: string) {
+    return verified.get(key) ?? 0;
+  }
+
   function revoke(key: string, revision: number) {
     const entry = entries.get(key);
     // An unversioned list can update metadata without superseding a detail denial.
     const confirmation = entry?.versionedRow;
-    if (revision <= Math.max(revokedThrough(key), confirmation?.revision ?? 0)) return;
+    if (revision <= Math.max(
+      revokedThrough(key), confirmation?.revision ?? 0, accessConfirmationRevision(key),
+    )) return;
     revocations.set(key, revision);
     workspaceKeysAwaitingConfirmation.add(key);
     discardWorkspace(key, revision);
@@ -213,7 +219,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const entry = merge(next, revision);
     if (!entry || next.readinessVersion !== entry.row?.version) return null;
     entry.detail = latestObservation(entry.detail, next, revision);
-    if (verifiesAccess && revision > (verified.get(key) ?? 0)) verified.set(key, revision);
+    // A receipt can win on readiness version even when its request predates
+    // the GET that verified access. Keep that GET's revision independently.
+    if (verifiesAccess && revision > accessConfirmationRevision(key)) verified.set(key, revision);
     const detail = detailFor(key);
     return detail && {
       detail,
@@ -222,7 +230,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   }
 
   function hasVerifiedAccess(key: string) {
-    return (verified.get(key) ?? 0) > revokedThrough(key);
+    return accessConfirmationRevision(key) > revokedThrough(key);
   }
 
   function detailFor(key: string) {
@@ -250,7 +258,10 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const row = entry?.row;
     if (
       !draft || !entry || !row ||
-      revision <= Math.max(row.revision, entry.versionedRow?.revision ?? 0, receiptFloors.get(key) ?? 0)
+      revision <= Math.max(
+        row.revision, entry.versionedRow?.revision ?? 0, receiptFloors.get(key) ?? 0,
+        accessConfirmationRevision(key),
+      )
     ) return false;
     // The receipt has no readiness version. Apply it to the known row in request order.
     const versioned = entry.versionedRow?.value;
@@ -336,7 +347,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         if (revision <= Math.max(listedRevision, listRevocation)) return;
         for (const key of new Set([...entries.keys(), ...revocations.keys(), ...drafts.keys()])) {
           // Preserve a newer confirmation and its existing access state.
-          if ((entries.get(key)?.row?.revision ?? 0) > revision) {
+          if (Math.max(entries.get(key)?.row?.revision ?? 0, accessConfirmationRevision(key)) > revision) {
             revocations.set(key, revokedThrough(key));
             if (listedMembership()?.has(key) || (includeVerifiedWorkspaces && hasVerifiedAccess(key))) {
               retainedWorkspaceKeys.add(key);

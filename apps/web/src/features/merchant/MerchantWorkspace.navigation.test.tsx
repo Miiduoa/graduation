@@ -1106,6 +1106,8 @@ it.each([
 
 it.each([
   { entryArrival: 'before', refreshStatus: 200 },
+  { entryArrival: 'before', refreshStatus: 200, backgroundDenial: 403 },
+  { entryArrival: 'before', refreshStatus: 200, backgroundDenial: 404 },
   { entryArrival: 'before', refreshStatus: 200, conflict: true },
   { entryArrival: 'during', refreshStatus: 200, conflict: true },
   { entryArrival: 'before', refreshStatus: 200, listArrival: 'before' },
@@ -1117,12 +1119,16 @@ it.each([
   { entryArrival: 'during', refreshStatus: 503 },
   { entryArrival: 'after', refreshStatus: 503 },
 ])(
-  'rechecks access after returning during a pause (entry detail arrival: $entryArrival, refresh status: $refreshStatus, conflict: $conflict, list arrival: $listArrival)',
-  async ({ entryArrival, refreshStatus, conflict, listArrival }) => {
+  'rechecks access after returning during a pause (entry detail arrival: $entryArrival, refresh status: $refreshStatus, conflict: $conflict, list arrival: $listArrival, background denial: $backgroundDenial)',
+  async ({ entryArrival, refreshStatus, conflict, listArrival, backgroundDenial }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const open = { ...detail('store-a', true), readinessVersion: 6 };
     const paused = { ...open, readinessVersion: 7, locationStatus: 'closed', publicAccess: false };
     const reopened = { ...open, readinessVersion: 8 };
+    const latestPause = { ...paused, readinessVersion: 9 };
+    const latestReopen = { ...reopened, readinessVersion: 10 };
+    let denyBackground!: (error: NuniError) => void;
+    const background = new Promise<typeof reopened>((_resolve, reject) => { denyBackground = reject; });
     let finishEntry!: (value: typeof reopened) => void;
     const entry = new Promise<typeof reopened>((resolve) => { finishEntry = resolve; });
     let finishPause!: (value: typeof paused) => void;
@@ -1146,13 +1152,16 @@ it.each([
     });
     const readDetail = vi.fn()
       .mockResolvedValueOnce(open);
-    if (!listArrival) readDetail.mockResolvedValueOnce(open);
+    if (backgroundDenial) readDetail.mockReturnValueOnce(background);
+    else if (!listArrival) readDetail.mockResolvedValueOnce(open);
     readDetail.mockReturnValueOnce(entry)
       .mockReturnValueOnce(refresh);
-    mocks.request.mockImplementation((resource) => {
+    mocks.request.mockImplementation((resource, _context, input) => {
       if (resource === 'merchant-workspaces') return readList();
       if (resource === path) return readDetail();
-      if (resource === `${path}/availability`) return pause;
+      if (resource === `${path}/availability`) {
+        return input?.acceptingOrders ? Promise.resolve(latestReopen) : pause;
+      }
       return respond(resource);
     });
 
@@ -1173,7 +1182,7 @@ it.each([
     if (entryArrival === 'before') await act(async () => finishEntry(reopened));
     await act(async () => {
       if (conflict) failPause(new NuniError(409, 'FOOD_MERCHANT_WORKSPACE_CHANGED'));
-      else finishPause(paused);
+      else finishPause(backgroundDenial ? latestPause : paused);
     });
     await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(refreshReadCount));
     if (entryArrival === 'during') await act(async () => finishEntry(reopened));
@@ -1217,6 +1226,9 @@ it.each([
       }
       return;
     }
+    if (backgroundDenial) {
+      await act(async () => denyBackground(new NuniError(backgroundDenial, 'DETAIL_FAILED')));
+    }
     if (listArrival === 'before') await act(async () => finishList(latestList));
     await act(async () => finishRefresh(paused));
     if (listArrival === 'after') {
@@ -1240,6 +1252,15 @@ it.each([
       await screen.findByRole('region', { name: '門市訂單工作台' });
       expect(screen.queryByText('無法確認門市目前的資料。草稿已保留，請重新讀取。')).toBeNull();
       return;
+    }
+
+    if (backgroundDenial) {
+      expect(screen.getByText('門市狀態已更新：暫停接單。')).toBeTruthy();
+      const resume = screen.getByRole<HTMLButtonElement>('button', { name: '恢復接單' });
+      expect(resume.disabled).toBe(false);
+      expect(screen.queryByRole('alert')).toBeNull();
+      fireEvent.click(resume);
+      await screen.findByText('營業中');
     }
 
     expect(screen.getByText('營業中')).toBeTruthy();

@@ -253,7 +253,7 @@ export function MerchantOperations({
       const revoked = beginRequest
         ? onDenied?.(tenantId, locationId, revision)
         : localConfirmations.revoke(draftKey, revision);
-      if (revoked === undefined) return;
+      if (revoked === undefined) return false;
       if (!beginRequest) {
         setDetail(null);
         setNotice((current) => current && current.revision > revoked ? current : null);
@@ -264,6 +264,7 @@ export function MerchantOperations({
         setFresh(false);
         setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
       }
+      return true;
     },
     [beginRequest, draftKey, localConfirmations, locationId, onDenied, tenantId],
   );
@@ -365,6 +366,8 @@ export function MerchantOperations({
           ) {
             setEntryVerified(true);
             setFresh(true);
+            setReadUnavailable(false);
+            setError((current) => current === detailReadError ? '' : current);
             return;
           }
           if (afterWrite) setEntryVerified(false);
@@ -386,8 +389,9 @@ export function MerchantOperations({
         if (!active.current || session !== sessionRun.current) return;
         if (expireSession(failure)) return;
         if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-          revokeDetail(revision, current());
-        } else if (current()) {
+          if (revokeDetail(revision, current())) return;
+        }
+        if (current()) {
           // Earlier reads may still update shared detail, but cannot verify
           // entry access after this read failed.
           failedReadRevision.current = revision;

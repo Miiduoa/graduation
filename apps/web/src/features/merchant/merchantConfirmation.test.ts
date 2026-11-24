@@ -27,7 +27,7 @@ it('renders the newer menu requirement after a list previously confirmed the men
   expect(confirmed.overview()?.workspaces).toEqual([missingMenu]);
 });
 
-it('combines legacy list metadata with the operating state of a delayed versioned detail', () => {
+it.each(['merge', 'denial'] as const)('reconciles legacy lists and versioned detail ($0)', (scenario) => {
   const confirmed = createMerchantConfirmations(new Map());
   const legacyRow: NuniMerchantWorkspace = {
     tenantId: 'campus-one',
@@ -65,6 +65,26 @@ it('combines legacy list metadata with the operating state of a delayed versione
     sourceUpdatedAt: null,
     sourceLine: null,
   };
+  if (scenario === 'denial') {
+    const key = 'campus-one:store-a';
+    confirmed.mergeWorkspaceList([detail], confirmed.beginRequest());
+    const writeRevision = confirmed.beginRequest();
+    const deniedListRevision = confirmed.beginRequest();
+    const readRevision = confirmed.beginRequest();
+    confirmed.confirmDetail(detail, readRevision, true);
+
+    const receipt = { ...detail, readinessVersion: 8 };
+    expect(confirmed.confirmDetail(receipt, writeRevision, false)?.won).toBe(true);
+    confirmed.rejectWorkspaceList(true, deniedListRevision);
+    expect(confirmed.overview()?.workspaces).toMatchObject([receipt]);
+    expect(confirmed.detailFor(key)).toEqual(receipt);
+
+    confirmed.rejectWorkspaceList(true, confirmed.beginRequest());
+    expect(confirmed.detailFor(key)).toBeNull();
+    expect(confirmed.overview()?.workspaces ?? []).toEqual([]);
+    return;
+  }
+
   const detailRevision = confirmed.beginRequest();
   confirmed.mergeWorkspaceList([legacyRow], confirmed.beginRequest());
 
