@@ -87,6 +87,34 @@ describe('audited outdoor campus walking graph', () => {
     expect(route(missingExpiry)).toBeNull();
   });
 
+  it('requires a snapshot even when the graph arrives without its timestamp', () => {
+    const { osmBaseAt: _osmBaseAt, ...missing } = graph;
+    expect(route(missing as CampusWalkingGraph)).toBeNull();
+  });
+
+  it.each([
+    '2026-11-24', '2026-11-24T08:00:00', '2026-11-24T08:00:00+00:00',
+    '2026-11-24T08:00:00.000Z', '2026-11-24T08:00:00Z ',
+  ])('rejects noncanonical snapshot timestamp %s', osmBaseAt => {
+    expect(route({ ...graph, osmBaseAt })).toBeNull();
+  });
+
+  it.each([
+    '2026-12-01', '2026-12-01T00:00:00', '2026-12-01T00:00:00+00:00',
+    '2026-11-31T00:00:00Z', '2026-12-01T00:00:00.000Z', '2026-12-01T00:00:00Z ',
+  ])('rejects noncanonical or impossible review expiry %s', validUntil => {
+    expect(route({ ...graph, edges: graph.edges.map(edge => ({ ...edge, validUntil })) })).toBeNull();
+  });
+
+  it.each([
+    ['2026-11-22T08:01:00Z', true],
+    ['2026-11-22T08:00:59Z', false],
+    ['2026-11-24T08:06:00Z', true],
+    ['2026-11-24T08:06:01Z', false],
+  ] as const)('preserves the snapshot freshness boundary for %s', (osmBaseAt, usable) => {
+    expect(!!route({ ...graph, osmBaseAt })).toBe(usable);
+  });
+
   it('does not route a graph whose OSM snapshot is no longer fresh', () => {
     expect(route(graph, 1, 3, Date.parse('2026-11-27T08:00:01Z'))).toBeNull();
   });
