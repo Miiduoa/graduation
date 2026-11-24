@@ -15,7 +15,8 @@ cleanup() {
   rm -rf "$mock_dir"
 }
 trap cleanup EXIT
-mkdir -p "$mock_dir/bin"
+mkdir -p "$mock_dir/bin" "$mock_dir/scripts/qa/browser"
+cp "$script_dir/../../process-identity.sh" "$mock_dir/scripts/"
 export REAL_TIMEOUT="$(command -v timeout)"
 
 cat > "$mock_dir/bin/python" <<'MOCK'
@@ -51,14 +52,37 @@ MOCK
 cat > "$mock_dir/bin/sudo" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "$1" == timeout || "$1" == kill ]]
+[[ "$1" == timeout || ( "$1" == bash && "$4" == signal-process-group ) ]]
 export MOCK_ROOT=1
-printf 'sudo:%s\n' "$*" >> "$MOCK_LOG"
-if [[ "$1" == kill ]]; then
-  # Only the installer's own survivor cleanup may signal a process group.
-  [[ "$2" == -KILL && "$3" == -- && "$4" =~ ^-[1-9][0-9]*$ && $# == 4 ]]
-  exec "$@"
+if [[ "$1" == bash ]]; then
+  # Model an unrelated member of a reused numeric group at the stat
+  # boundary. A positive PID signal still reaches the real test process.
+  code="$3"
+  if [[ "${MOCK_MODEL_REUSE:-0}" == 1 ]]; then
+    /bin/sleep 30 &
+    export MOCK_REUSED_MEMBER_PID="$!"
+    printf '%s\n' "$MOCK_REUSED_MEMBER_PID" > "$MOCK_LOCK.unrelated.child-pid"
+    injection='
+    eval "$(declare -f proc_identity | sed "1s/proc_identity/real_proc_identity/")"
+    proc_identity() {
+      real_proc_identity "$1" || return 1
+      if [[ "$1" == "$MOCK_REUSED_MEMBER_PID" ]]; then proc_group="$mock_group"; fi
+    }
+    mock_group="$1"
+    proc_signal_group "$@"'
+    code="${code/'proc_signal_group "$@"'/$injection}"
+  fi
+  exec bash -c '
+    kill() { printf "sudo:kill:%s\n" "$*" >> "$MOCK_LOG"; builtin kill "$@"; }
+    code="$1"
+    shift
+    eval "$code"
+  ' signal-test "$code" "${@:5}"
 fi
+args=("$@")
+if [[ "${args[6]:-}" == record-process-group ]]; then args[8]=attempt-id; fi
+line="${args[*]}"
+printf 'sudo:%s\n' "${line//$'\n'/ }" >> "$MOCK_LOG"
 # Model sudo's session boundary without requiring root or touching system apt.
 if [[ "${MOCK_PROCESS_TEST:-0}" == 1 ]]; then
   exec setsid --wait "$@"
@@ -140,10 +164,13 @@ set -euo pipefail
 shift
 limit="$1"; shift
 printf 'timeout:%s\n' "$limit" >> "$MOCK_LOG"
-printf 'timeout-command:%s:%s\n' "$limit" "$*" >> "$MOCK_LOG"
+args=("$@")
+if [[ "${args[3]:-}" == record-process-group ]]; then args[5]=attempt-id; fi
+line="${args[*]}"
+printf 'timeout-command:%s:%s\n' "$limit" "${line//$'\n'/ }" >> "$MOCK_LOG"
 # Privileged attempts run through the installer's process-group recorder.
 inner="$1"
-if [[ "$1" == bash && "${4:-}" == record-process-group ]]; then inner="${6:-}"; fi
+if [[ "$1" == bash && "${4:-}" == record-process-group ]]; then inner="${7:-}"; fi
 if [[ "${MOCK_SLOW_FONT:-0}" == 1 && "$inner" == apt-get ]]; then
   # Scale one minute to one second: a 90-second font transfer outlasts the
   # former 60-second deadline but fits within the 180-second deadline.
@@ -168,7 +195,7 @@ export PATH="$mock_dir/bin:$PATH" MOCK_LOG="$mock_dir/install.log"
 
 assert_recovery_deadlines() {
   local expected="$1" line deadline
-  local pattern='^sudo:timeout --kill-after=5s ([0-9]+)s bash -c .* record-process-group [^ ]*/process-group dpkg --configure -a$'
+  local pattern='^sudo:timeout --kill-after=5s ([0-9]+)s bash -c .* record-process-group [^ ]*/process-group [^ ]* dpkg --configure -a$'
   local -a commands=()
   mapfile -t commands < <(grep '^sudo:.* dpkg --configure -a$' "$MOCK_LOG")
   (( ${#commands[@]} == expected ))
@@ -192,8 +219,8 @@ bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1
 [[ "$(grep -c '^dpkg:--configure -a$' "$MOCK_LOG")" -eq 2 ]]
 assert_recovery_deadlines 2
 # Both privileged commands must place timeout inside sudo, preserving Python's path.
-[[ "$(grep -c "^sudo:timeout --kill-after=5s 180s bash -c .* record-process-group [^ ]*/process-group $mock_dir/bin/python -m playwright install-deps chromium\$" "$MOCK_LOG")" -eq 2 ]]
-[[ "$(grep -c '^sudo:timeout --kill-after=5s 180s bash -c .* record-process-group [^ ]*/process-group apt-get ' "$MOCK_LOG")" -eq 2 ]]
+[[ "$(grep -c "^sudo:timeout --kill-after=5s 180s bash -c .* record-process-group [^ ]*/process-group [^ ]* $mock_dir/bin/python -m playwright install-deps chromium\$" "$MOCK_LOG")" -eq 2 ]]
+[[ "$(grep -c '^sudo:timeout --kill-after=5s 180s bash -c .* record-process-group [^ ]*/process-group [^ ]* apt-get ' "$MOCK_LOG")" -eq 2 ]]
 # Ordinary failures never signal any process group.
 [[ "$(grep -c '^sudo:kill' "$MOCK_LOG" || true)" -eq 0 ]]
 
@@ -287,7 +314,7 @@ fi
 # Run with the host's timeout and with a modelled child-only timeout, so the
 # result does not depend on which timeout implementation the runner ships.
 for child_only in 0 1; do
-export MOCK_APT_FAILS=0 MOCK_PROCESS_TEST=1 MOCK_CHILD_ONLY_TIMEOUT="$child_only" MOCK_LOCK="$mock_dir/apt-$child_only.lock"
+export MOCK_APT_FAILS=0 MOCK_PROCESS_TEST=1 MOCK_CHILD_ONLY_TIMEOUT="$child_only" MOCK_MODEL_REUSE="$child_only" MOCK_LOCK="$mock_dir/apt-$child_only.lock"
 : > "$MOCK_LOG"
 if ! bash "$script_dir/install-playwright.sh" --fonts-noto-cjk > "$mock_dir/process-output.log" 2>&1; then
   cat "$mock_dir/process-output.log" "$MOCK_LOG" >&2
@@ -301,9 +328,19 @@ recovery_attempts="$(grep -c '^dpkg:--configure -a$' "$MOCK_LOG")"
 assert_recovery_deadlines "$recovery_attempts"
 [[ ! -e "$MOCK_LOCK.interrupted" ]]
 flock -n "$MOCK_LOCK" true
-[[ "$(grep -c '^sudo:kill -KILL -- -[1-9][0-9]*$' "$MOCK_LOG")" -eq 1 ]]
+if [[ "$child_only" == 1 ]]; then
+  grep -qx "sudo:kill:-KILL -- $(cat "$MOCK_LOCK.child-pid")" "$MOCK_LOG"
+  ! grep -q '^sudo:kill:-KILL -- -' "$MOCK_LOG"
+  unrelated_pid="$(cat "$MOCK_LOCK.unrelated.child-pid")"
+  kill -0 "$unrelated_pid"
+  ! grep -qx "sudo:kill:-KILL -- $unrelated_pid" "$MOCK_LOG"
+  kill "$unrelated_pid"
+  rm -f "$MOCK_LOCK.unrelated.child-pid"
+else
+  ! grep -q '^sudo:kill:' "$MOCK_LOG"
+fi
 done
-export MOCK_CHILD_ONLY_TIMEOUT=0
+export MOCK_CHILD_ONLY_TIMEOUT=0 MOCK_MODEL_REUSE=0
 
 # The dpkg recovery command is bounded like an install attempt: when its own
 # timeout only kills the direct child, the installer must remove the lock-holding
@@ -318,7 +355,7 @@ grep -q '^dpkg-hung$' "$MOCK_LOG"
 [[ "$(grep -c '^dpkg:--configure -a$' "$MOCK_LOG")" -eq 2 ]]
 assert_recovery_deadlines 2
 # One cleanup for the timed-out install attempt and one for the timed-out recovery.
-[[ "$(grep -c '^sudo:kill -KILL -- -[1-9][0-9]*$' "$MOCK_LOG")" -eq 2 ]]
+(( $(grep -c '^sudo:kill:-KILL -- [1-9][0-9]*$' "$MOCK_LOG") >= 2 ))
 flock -n "$MOCK_LOCK" true
 
 # Without the recovery cleanup, the surviving dpkg helper keeps the lock and
@@ -326,9 +363,9 @@ flock -n "$MOCK_LOCK" true
 export MOCK_LOCK="$mock_dir/dpkg-hang-no-cleanup.lock"
 grep -q '^          kill_timed_out_group "${elevation\[@\]}"$' "$script_dir/install-playwright.sh"
 sed 's/^          kill_timed_out_group "${elevation\[@\]}"$/          :/' \
-  "$script_dir/install-playwright.sh" > "$mock_dir/no-recovery-cleanup.sh"
+  "$script_dir/install-playwright.sh" > "$mock_dir/scripts/qa/browser/no-recovery-cleanup.sh"
 : > "$MOCK_LOG"
-if bash "$mock_dir/no-recovery-cleanup.sh" --fonts-noto-cjk > "$mock_dir/no-recovery-cleanup-output.log" 2>&1; then
+if bash "$mock_dir/scripts/qa/browser/no-recovery-cleanup.sh" --fonts-noto-cjk > "$mock_dir/no-recovery-cleanup-output.log" 2>&1; then
   echo 'A timed-out dpkg recovery without survivor cleanup incorrectly passed' >&2
   exit 1
 fi
@@ -348,7 +385,7 @@ export MOCK_PROCESS_TEST=0 MOCK_TIMEOUT_FAILS=1 MOCK_DELAY_LOCK_RELEASE=1 MOCK_L
 bash "$script_dir/install-playwright.sh" --fonts-noto-cjk > "$mock_dir/delayed-output.log" 2>&1
 [[ "$(grep -c '^dpkg:--configure -a$' "$MOCK_LOG")" -eq 2 ]]
 assert_recovery_deadlines 2
-mapfile -t repair_limits < <(sed -n 's/^sudo:timeout --kill-after=5s \([0-9]*\)s bash -c .* record-process-group [^ ]*\/process-group dpkg --configure -a$/\1/p' "$MOCK_LOG")
+mapfile -t repair_limits < <(sed -n 's/^sudo:timeout --kill-after=5s \([0-9]*\)s bash -c .* record-process-group [^ ]*\/process-group [^ ]* dpkg --configure -a$/\1/p' "$MOCK_LOG")
 (( repair_limits[1] < repair_limits[0] ))
 [[ "$(grep -c '^sleep:1$' "$MOCK_LOG")" -eq 1 ]]
 flock -n "$MOCK_LOCK" true
@@ -360,9 +397,9 @@ export MOCK_DELAY_LOCK_RELEASE=0 MOCK_TIMEOUT_FAILS=0
 export MOCK_PROCESS_TEST=1 MOCK_CHILD_ONLY_TIMEOUT=1 MOCK_LOCK="$mock_dir/no-cleanup.lock"
 grep -q '^      kill_timed_out_group "${elevation\[@\]}"$' "$script_dir/install-playwright.sh"
 sed 's/^      kill_timed_out_group "${elevation\[@\]}"$/      :/' \
-  "$script_dir/install-playwright.sh" > "$mock_dir/no-cleanup.sh"
+  "$script_dir/install-playwright.sh" > "$mock_dir/scripts/qa/browser/no-cleanup.sh"
 : > "$MOCK_LOG"
-if bash "$mock_dir/no-cleanup.sh" --fonts-noto-cjk > "$mock_dir/no-cleanup-output.log" 2>&1; then
+if bash "$mock_dir/scripts/qa/browser/no-cleanup.sh" --fonts-noto-cjk > "$mock_dir/no-cleanup-output.log" 2>&1; then
   echo 'Child-only timeout without survivor cleanup incorrectly passed live lock recovery' >&2
   exit 1
 fi

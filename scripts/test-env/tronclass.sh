@@ -22,6 +22,7 @@ if [[ -n "${CI:-}${TRONCLASS_MANAGED_PREVIEW:-}${VERCEL:-}${NETLIFY:-}${CODESPAC
   TRONCLASS_LOCAL_BINDING=false
 fi
 source scripts/test-env/env.sh
+source scripts/process-identity.sh
 
 for TRONCLASS_ENV_FILE in .env .env.local .env.development .env.development.local \
   apps/web/.env apps/web/.env.local apps/web/.env.development apps/web/.env.development.local; do
@@ -246,12 +247,9 @@ TRONCLASS_HEALTH_PID=''
 unset TRONCLASS_LAUNCHING_LOG
 tronclass_proc_starttime() {
   local pid="$1"
-  local stat fields
-  stat="$(<"/proc/$pid/stat")" || return 1
-  # The comm field may contain spaces or closing parentheses.
-  read -ra fields <<< "${stat##*) }"
-  [[ "${fields[19]:-}" =~ ^[0-9]+$ ]] || return 1
-  printf '%s' "${fields[19]}"
+  local proc_group proc_start proc_state
+  proc_identity "$pid" || return 1
+  printf '%s' "$proc_start"
 }
 
 tronclass_parse_record() {
@@ -269,19 +267,6 @@ tronclass_record_matches() {
   [[ "$pid" =~ ^([2-9]|[1-9][0-9]+)$ && "$start" =~ ^[0-9]+$ ]] || return 1
   local live
   live="$(tronclass_proc_starttime "$pid" 2>/dev/null)" && [ "$live" = "$start" ]
-}
-
-tronclass_group_matches() {
-  local pid="$1" start="$2"
-  [[ "$pid" =~ ^([2-9]|[1-9][0-9]+)$ && "$start" =~ ^[0-9]+$ ]] || return 1
-  local live
-  if live="$(tronclass_proc_starttime "$pid" 2>/dev/null)"; then
-    [ "$live" = "$start" ]
-  else
-    # A living group keeps its PGID reserved even after its recorded leader
-    # exits. In that case only the group may be signalled.
-    [ ! -e "/proc/$pid" ]
-  fi
 }
 
 tronclass_signal_wrapper() {
@@ -325,8 +310,7 @@ tronclass_signal_record() {
   [ -n "$parsed" ] || return 0
   read -r run pid start <<< "$parsed"
   [ "$run" = "${TRONCLASS_RUN_ID:-}" ] || return 0
-  tronclass_group_matches "$pid" "$start" || return 0
-  kill "-$sig" -- "-$pid" 2>/dev/null || tronclass_signal_wrapper "$pid" "$start" "$sig"
+  proc_signal_group "$pid" "$start" "TRONCLASS_LAUNCHED_RUN=$run" "$sig"
 }
 
 tronclass_group_alive_record() {
@@ -335,11 +319,8 @@ tronclass_group_alive_record() {
   parsed="$(tronclass_parse_record "$record" "$TRONCLASS_RUN_ID" 2>/dev/null || true)"
   [ -n "$parsed" ] || return 1
   read -r run pid start <<< "$parsed"
-  tronclass_group_matches "$pid" "$start" || return 1
-  if [ -e "/proc/$pid" ]; then
-    return 0
-  fi
-  kill -0 -- "-$pid" 2>/dev/null
+  proc_group_leader_matches "$pid" "$start" ||
+    proc_group_members "$pid" "$start" "TRONCLASS_LAUNCHED_RUN=$run"
 }
 
 tronclass_stop_logged() {
@@ -363,14 +344,13 @@ tronclass_stop_logged() {
   read -r launcher_pgid < <(ps -o pgid= -p "$$")
   [ -n "$launcher_pgid" ] || return 1
   tronclass_discover_groups() {
-    local child pgid group_start child_record existing run pid start
+    local child pgid group_start child_record existing
     local parents=() walk_pid
     # A detached leader can exit before ps sees it. Its wrapper recorded the
     # identity at spawn, and the group may still contain descendants.
     if [ -z "$sidecar_record" ] && [ -n "$log" ] &&
       child_record="$(tronclass_read_record_file "$log.pgid.$TRONCLASS_RUN_ID" 2>/dev/null)"; then
-      read -r run pid start <<< "$child_record"
-      if tronclass_group_matches "$pid" "$start" && kill -0 -- "-$pid" 2>/dev/null; then
+      if tronclass_group_alive_record "$child_record"; then
         sidecar_record="$child_record"
         if [[ " ${records[*]} " != *" $sidecar_record "* ]]; then
           tronclass_remember_group "$sidecar_record"
@@ -435,7 +415,7 @@ tronclass_stop_logged() {
       if tronclass_group_alive_record "$record"; then
         group_alive=1
         read -r run pid start <<< "$record"
-        [ ! -e "/proc/$pid" ] || leader_alive=1
+        if proc_group_leader_matches "$pid" "$start"; then leader_alive=1; fi
       fi
     done
     if [ "$wrapper_alive" -eq 0 ] && [ "$group_alive" -eq 0 ]; then
@@ -603,7 +583,8 @@ for stale_sidecar in "$TRONCLASS_RUNTIME_DIR"/*.log.pgid "$TRONCLASS_RUNTIME_DIR
     continue
   fi
   if [ "$stale_run" = "$TRONCLASS_RUN_ID" ] ||
-    { tronclass_group_matches "$stale_pid" "$stale_start" && kill -0 -- "-$stale_pid" 2>/dev/null; }; then
+    proc_group_leader_matches "$stale_pid" "$stale_start" ||
+    proc_group_members "$stale_pid" "$stale_start" "TRONCLASS_LAUNCHED_RUN=$stale_run"; then
     continue
   fi
   rm -f -- "$stale_sidecar" 2>/dev/null || true
@@ -644,11 +625,16 @@ if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
 }
 fs.ftruncateSync(fd, 0);
 let child = null;
+let childIdentity;
 let pendingSignal = null;
 const stop = (signal) => {
   if (!child) { pendingSignal = signal; return; }
-  try { process.kill(-child.pid, signal); } catch (error) { /* the group may already have exited */ }
-  try { child.kill(signal); } catch (error) { /* the child may have already exited */ }
+  try {
+    const live = readIdentity(child.pid);
+    if (live.group === String(child.pid) && live.start === childIdentity?.start) {
+      process.kill(-child.pid, signal);
+    }
+  } catch (error) { /* cleanup also checks for surviving group members */ }
 };
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGTERM', () => stop('SIGTERM'));
@@ -656,20 +642,24 @@ const delayMs = Number(process.env.TRONCLASS_TEST_DELAY_SPAWN_MS || 0);
 if (Number.isFinite(delayMs) && delayMs > 0) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
 }
-child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd], detached: true });
+const runId = process.env.TRONCLASS_RUN_ID || '';
+child = spawn(argv[0], argv.slice(1), {
+  stdio: ['inherit', fd, fd], detached: true,
+  env: { ...process.env, TRONCLASS_LAUNCHED_RUN: runId },
+});
 fs.closeSync(fd);
 const path = require('node:path');
 const crypto = require('node:crypto');
-function readStartTime(pid) {
+function readIdentity(pid) {
   const raw = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
   const rest = raw.slice(raw.lastIndexOf(')') + 1).trim().split(/\s+/);
-  return rest[19];
+  return { group: rest[2], start: rest[19] };
 }
-const runId = process.env.TRONCLASS_RUN_ID || '';
 const pgidPath = `${logPath}.pgid.${runId}`;
 try {
-  const startTime = readStartTime(child.pid);
-  if (!startTime) throw new Error('starttime');
+  childIdentity = readIdentity(child.pid);
+  const startTime = childIdentity.start;
+  if (!startTime || childIdentity.group !== String(child.pid)) throw new Error('group identity');
   if (!/^[0-9a-fA-F]{32}$/.test(runId)) throw new Error('run-id');
   try {
     if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('symlink target');
@@ -741,11 +731,16 @@ if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
 }
 fs.ftruncateSync(fd, 0);
 let child = null;
+let childIdentity;
 let pendingSignal = null;
 const stop = (signal) => {
   if (!child) { pendingSignal = signal; return; }
-  try { process.kill(-child.pid, signal); } catch (error) { /* the group may already have exited */ }
-  try { child.kill(signal); } catch (error) { /* the child may have already exited */ }
+  try {
+    const live = readIdentity(child.pid);
+    if (live.group === String(child.pid) && live.start === childIdentity?.start) {
+      process.kill(-child.pid, signal);
+    }
+  } catch (error) { /* cleanup also checks for surviving group members */ }
 };
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGTERM', () => stop('SIGTERM'));
@@ -753,20 +748,24 @@ const delayMs = Number(process.env.TRONCLASS_TEST_DELAY_SPAWN_MS || 0);
 if (Number.isFinite(delayMs) && delayMs > 0) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
 }
-child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd], detached: true });
+const runId = process.env.TRONCLASS_RUN_ID || '';
+child = spawn(argv[0], argv.slice(1), {
+  stdio: ['inherit', fd, fd], detached: true,
+  env: { ...process.env, TRONCLASS_LAUNCHED_RUN: runId },
+});
 fs.closeSync(fd);
 const path = require('node:path');
 const crypto = require('node:crypto');
-function readStartTime(pid) {
+function readIdentity(pid) {
   const raw = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
   const rest = raw.slice(raw.lastIndexOf(')') + 1).trim().split(/\s+/);
-  return rest[19];
+  return { group: rest[2], start: rest[19] };
 }
-const runId = process.env.TRONCLASS_RUN_ID || '';
 const pgidPath = `${logPath}.pgid.${runId}`;
 try {
-  const startTime = readStartTime(child.pid);
-  if (!startTime) throw new Error('starttime');
+  childIdentity = readIdentity(child.pid);
+  const startTime = childIdentity.start;
+  if (!startTime || childIdentity.group !== String(child.pid)) throw new Error('group identity');
   if (!/^[0-9a-fA-F]{32}$/.test(runId)) throw new Error('run-id');
   try {
     if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('symlink target');

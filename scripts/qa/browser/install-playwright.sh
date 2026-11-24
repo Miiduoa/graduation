@@ -10,23 +10,37 @@ if [[ $# -gt 1 || ( $# -eq 1 && "$1" != "--fonts-noto-cjk" ) ]]; then
   exit 2
 fi
 
-# Record the process group that timeout gives each privileged attempt. GNU
-# timeout sends its final SIGKILL to that whole group, but other timeout
-# implementations (for example uutils on newer Ubuntu runners) kill only the
-# direct child, leaving TERM-ignoring package helpers that still hold the
-# dpkg/apt lock. The installer therefore removes survivors itself.
+source "$(dirname "${BASH_SOURCE[0]}")/../../process-identity.sh"
+
+# Record the timeout group before exec. Its PGID is the leader PID. Some timeout implementations only
+# kill their direct child, leaving package helpers holding the dpkg/apt lock.
 attempt_dir="$(mktemp -d)"
 trap 'rm -rf "$attempt_dir"' EXIT
 attempt_group_file="$attempt_dir/process-group"
-record_group=(bash -c 'read -r _ _ _ _ pgid _ < "/proc/$$/stat" && printf "%s\n" "$pgid" > "$1"; shift; exec "$@"' record-process-group "$attempt_group_file")
-read -r _ _ _ _ installer_group _ < "/proc/$$/stat"
+proc_identity "$$"
+installer_group="$proc_group"
+
+record_attempt() {
+  IFS= read -r attempt_id < /proc/sys/kernel/random/uuid
+  : > "$attempt_group_file"
+  record_group=(bash -c "$(declare -f proc_identity)
+    proc_identity \$\$ || exit 1
+    group=\$proc_group
+    proc_identity \$group && [[ \$group == \$proc_group ]] || exit 1
+    printf '%s %s\\n' \"\$group\" \"\$proc_start\" > \"\$1\" || exit 1
+    export PLAYWRIGHT_INSTALL_ATTEMPT=\"\$2\"
+    shift 2
+    exec \"\$@\"" record-process-group "$attempt_group_file" "$attempt_id")
+}
 
 kill_timed_out_group() {
-  local group=""
-  [[ -s "$attempt_group_file" ]] && read -r group < "$attempt_group_file"
-  # Never signal an unrecorded or invalid group, nor the installer's own group.
-  if [[ ! "$group" =~ ^[1-9][0-9]*$ || "$group" == "$installer_group" ]]; then return 0; fi
-  "$@" kill -KILL -- "-$group" 2>/dev/null || true
+  local group start extra
+  read -r group start extra < "$attempt_group_file" || return 0
+  [[ "$group" =~ ^([2-9]|[1-9][0-9]+)$ && "$start" =~ ^[0-9]+$ &&
+    "$group" != "$installer_group" && -z "$extra" ]] || return 0
+  # Read privileged /proc environments and recheck identity after elevation.
+  "$@" bash -c "$(declare -f proc_identity proc_group_leader_matches proc_group_members proc_signal_group)
+    proc_signal_group \"\$@\"" signal-process-group "$group" "$start" "PLAYWRIGHT_INSTALL_ATTEMPT=$attempt_id" KILL || true
 }
 
 retry_install() {
@@ -38,14 +52,15 @@ retry_install() {
     elevation=(sudo)
     shift
   fi
+  local attempt_id record_group=()
   local attempt install_status recovery_attempt recovery_deadline recovery_status remaining recovered
   for attempt in 1 2 3; do
     # sudo can start a separate session. Run timeout *after* elevation so it
     # owns and can signal the entire privileged apt process group on expiry.
     local -a probe=()
     if (( ${#elevation[@]} )); then
+      record_attempt
       probe=("${record_group[@]}")
-      : > "$attempt_group_file"
     fi
     if "${elevation[@]}" timeout --kill-after=5s "$deadline" "${probe[@]}" "$@"; then
       return 0
@@ -71,7 +86,7 @@ retry_install() {
         # The recovery command is bounded the same way as an install attempt:
         # record its process group so a timeout implementation that kills only
         # the direct child cannot leave dpkg helpers holding the package lock.
-        : > "$attempt_group_file"
+        record_attempt
         if "${elevation[@]}" timeout --kill-after=5s "${remaining}s" "${record_group[@]}" dpkg --configure -a; then
           recovered=1
           break

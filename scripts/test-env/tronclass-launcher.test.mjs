@@ -729,7 +729,7 @@ test('launcher recovers a current-run sidecar after the leader exits before capt
   const { setTimeout: delay } = await import('node:timers/promises');
   const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
 
-  for (const recordKind of ['current run', 'concurrent run', 'old run', 'mismatched starttime']) {
+  for (const recordKind of ['current run', 'reused group', 'concurrent run', 'old run', 'mismatched starttime']) {
     await t.test(recordKind, { timeout: 14000 }, async () => {
       const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-orphan-sidecar-'));
       const childFile = path.join(dir, 'child.pid');
@@ -749,7 +749,30 @@ test('launcher recovers a current-run sidecar after the leader exits before capt
 if [[ "$*" == *--ppid* ]]; then exit 1; fi
 exec /bin/ps "$@"
 `, { mode: 0o755 });
-        launcher = spawn('bash', [script], {
+        let args = [script];
+        if (recordKind === 'reused group') {
+          // Model a reused group number at the /proc boundary. The victim is
+          // a real, unrelated process and any positive signal reaches it.
+          const fixture = readFileSync(script, 'utf8').replace('source scripts/process-identity.sh', `$&
+eval "$(declare -f proc_identity | sed '1s/proc_identity/real_proc_identity/')"
+proc_identity() {
+  real_proc_identity "$1" || return 1
+  if [ "$1" = "${victim.pid}" ]; then
+    real_proc_identity "$(cat "$TRONCLASS_SELFTEST_GRANDCHILD")" || return 1
+    # Use the current member's group and start time to isolate provenance.
+    [[ "$proc_state" != Z ]] || return 1
+  fi
+}
+kill() {
+  if [[ "\${1:-}" == -KILL && "\${3:-}" == "-$(cat "$TRONCLASS_SELFTEST_CHILD")" ]]; then
+    touch "$TRONCLASS_RUNTIME_DIR/unverified-group-kill"
+  fi
+  builtin kill "$@"
+}
+`);
+          args = ['-c', fixture, script];
+        }
+        launcher = spawn('bash', args, {
           env: {
             ...process.env,
             PATH: `${dir}:${process.env.PATH}`,
@@ -812,7 +835,8 @@ exec /bin/ps "$@"
         assert.equal(code, 0);
         assert.equal(signal, null);
         process.kill(victim.pid, 0);
-        if (recordKind === 'current run' || recordKind === 'concurrent run') {
+        if (['current run', 'concurrent run', 'reused group'].includes(recordKind)) {
+          assert.equal(existsSync(path.join(dir, 'unverified-group-kill')), false);
           const reapDeadline = Date.now() + 1000;
           while (existsSync(`/proc/${descendant}`) && Date.now() < reapDeadline) await delay(15);
           assert.throws(() => process.kill(descendant, 0), { code: 'ESRCH' });
