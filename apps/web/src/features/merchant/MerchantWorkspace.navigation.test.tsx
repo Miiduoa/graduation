@@ -1104,6 +1104,44 @@ it.each([
   expect(readDetail).toHaveBeenCalledTimes(3);
 });
 
+it.each([200, 403, 404, 503])(
+  'rechecks a pause conflict without leaving the store (refresh status: %s)',
+  async (status) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const open = { ...detail('store-a', true), readinessVersion: 8 };
+    const stale = { ...open, readinessVersion: 7, locationStatus: 'closed', publicAccess: false };
+    const readDetail = vi.fn().mockResolvedValueOnce(open);
+    if (status === 200) readDetail.mockResolvedValueOnce(stale);
+    else readDetail.mockRejectedValueOnce(new NuniError(status, 'DETAIL_FAILED'));
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
+      if (resource === path) return readDetail();
+      if (resource === `${path}/availability`) {
+        return Promise.reject(new NuniError(409, 'FOOD_MERCHANT_WORKSPACE_CHANGED'));
+      }
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+    await screen.findByRole('alert');
+    expect(readDetail).toHaveBeenCalledTimes(2);
+    if (status === 200) {
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
+      expect(screen.queryByRole('button', { name: '恢復接單' })).toBeNull();
+      fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
+      await screen.findByRole('region', { name: '門市訂單工作台' });
+      expect(readDetail).toHaveBeenCalledTimes(2);
+    } else {
+      expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '恢復接單' })).toBeNull();
+      expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
+      expect(screen.queryByRole('link', { name: '訂單與收銀' })).toBeNull();
+    }
+  },
+);
+
 it.each([
   { entryArrival: 'before', refreshStatus: 200 },
   { entryArrival: 'before', refreshStatus: 200, backgroundDenial: 403 },

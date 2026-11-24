@@ -522,7 +522,8 @@ export function MerchantOperations({
         revokeDetail(revision, true);
       } else if (failure instanceof NuniError && failure.status === 409) {
         if (action === 'menu') setMenuBlocked(true);
-        await read(true, readAfterWrite.current);
+        // A conflict always requires post-write reconciliation, even on the same entry.
+        await read(true, true);
         if (active.current && session === sessionRun.current)
           setError((current) =>
             current || '門市資料已變更。請確認重新讀取的狀態，再決定下一步；草稿仍保留。',
