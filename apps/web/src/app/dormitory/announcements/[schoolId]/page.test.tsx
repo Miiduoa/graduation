@@ -25,7 +25,7 @@ vi.mock('@/lib/useCampusBrowseContext', () => ({ useCampusBrowseContext: () => (
 }) }));
 vi.mock('@/lib/signInOptions', () => ({ useSignInOptions: () => ({ studentId: true, loading: false }) }));
 
-const self = { id: 'a1', building: '甲棟', title: '宿舍供水時間', body: '僅對現行名冊開放的內文' };
+const self = { id: 'a1', building: '甲棟', title: '宿舍供水時間', body: '僅對現行名冊開放的內文', publishedAt: Date.UTC(2026, 10, 23, 18, 0) };
 const other = { id: 'a2', building: '乙棟', title: '其他公告', body: '其他公告全文' };
 const rows = (...announcements: Array<typeof self>) => Response.json({ result: { announcements } });
 beforeEach(() => {
@@ -49,6 +49,7 @@ it('only shows the identified resident announcement from mine and uses the exact
   await mount('tw-pu');
   expect(await screen.findByRole('heading', { name: self.title })).toBeTruthy();
   expect(screen.getByText(self.body)).toBeTruthy();
+  expect(screen.getByText(/發布於 2026\/11\/24 02:00/)).toBeTruthy();
   expect(screen.queryByText(other.title)).toBeNull();
   const [endpoint, init] = state.fetch.mock.calls[0];
   expect(endpoint).toBe('/api/fn/dormWorkflow');

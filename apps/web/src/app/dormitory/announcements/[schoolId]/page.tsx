@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { DormWorkflowRows } from '@campus/shared/src/dormWorkflow';
+import { dormAnnouncementPublishedTime, type DormWorkflowRows } from '@campus/shared/src/dormWorkflow';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { useAuth } from '@/components/AuthGuard';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
@@ -82,8 +82,9 @@ function ResidentAnnouncements({ uid, schoolId, id }: { uid: string; schoolId: s
     return (
       <section className={styles.panel}>
         {announcement ? <>
-          <p>{announcement.building}</p>
+          <p>棟別 {announcement.building}</p>
           <h2>{announcement.title}</h2>
+          <p>{dormAnnouncementPublishedTime(announcement.publishedAt)}</p>
           <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{announcement.body}</p>
         </> : <>
           <h2>查無這則本棟公告</h2>
@@ -99,6 +100,7 @@ function ResidentAnnouncements({ uid, schoolId, id }: { uid: string; schoolId: s
       {feed.rows.length ? <ul>
         {feed.rows.map((row) => <li key={row.id}>
           <Link href={dormAnnouncementHref(schoolId, row.id)}>{row.title}</Link> · {row.building}
+          <div>{dormAnnouncementPublishedTime(row.publishedAt)}</div>
         </li>)}
       </ul> : <p>目前沒有可查看的本棟公告。</p>}
       <button type="button" onClick={retry}>更新公告</button>

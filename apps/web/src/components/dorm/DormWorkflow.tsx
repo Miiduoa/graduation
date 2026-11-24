@@ -9,6 +9,7 @@ import {
   formatDormWorkflowTime,
   deliverDormAnnouncementBatches,
   dormAnnouncementDraftError,
+  dormAnnouncementPublishedTime,
   dormAnnouncementReceipt,
   dormRequestKey,
   parseDormResidentsCsv,
@@ -696,6 +697,7 @@ export function DormWorkflow({
                   <Label strong>
                     {a.title} · {a.building}
                   </Label>
+                  <Label>{dormAnnouncementPublishedTime(a.publishedAt)}</Label>
                   <Label>{a.body}</Label>
                 </Box>
               ))}

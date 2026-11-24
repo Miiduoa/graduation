@@ -8,6 +8,7 @@ import {
   formatDormWorkflowTime,
   deliverDormAnnouncementBatches,
   dormAnnouncementDraftError,
+  dormAnnouncementPublishedTime,
   dormAnnouncementReceipt,
   dormRequestKey,
   parseDormResidentsCsv,
@@ -590,6 +591,7 @@ export function DormWorkflow({
   const announcements = rows.announcements?.filter((a) => targetAnnouncementId === undefined || a.id === targetAnnouncementId).map((a) => (
     <Box key={a.id}>
       <Label strong>{a.title} · {a.building}</Label>
+      <Label>{dormAnnouncementPublishedTime(a.publishedAt)}</Label>
       <Label>{a.body}</Label>
     </Box>
   ));

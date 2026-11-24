@@ -65,7 +65,7 @@ export type DormStaffParcel = {
 };
 export type DormWorkflowRows = {
   nextCursors?: Record<string, string | null>;
-  announcements?: Array<{ id: string; building: string; title: string; body: string }>;
+  announcements?: Array<{ id: string; building: string; title: string; body: string; publishedAt?: number }>;
   repairs: DormTicket[];
   leaves: DormLeave[];
   packages: DormStaffParcel[];
@@ -121,6 +121,10 @@ export function dormAnnouncementReceipt(result: DormAnnouncementReceipt): string
 }
 export function formatDormWorkflowTime(at: number): string {
   return new Date(at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+}
+export function dormAnnouncementPublishedTime(at?: number): string {
+  if (!at || at < 0 || !Number.isFinite(new Date(at).getTime())) return '發布時間未提供';
+  return `發布於 ${formatDormWorkflowTime(at)}`;
 }
 export function dormWorkdaysSince(at: number, now = Date.now()): number {
   let days = 0;
