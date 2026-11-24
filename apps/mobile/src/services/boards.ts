@@ -6,6 +6,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  getDocsFromServer,
   limit,
   query,
   serverTimestamp,
@@ -84,7 +85,9 @@ export async function isSubscribedToBoard(
   boardId: string,
 ): Promise<boolean> {
   const db = getDb();
-  const snap = await getDocs(
+  // Must hit the server. A cache miss would look like "not subscribed" and
+  // overwrite the rollback after a failed unsubscribe.
+  const snap = await getDocsFromServer(
     query(
       collection(db, 'schools', schoolId, 'boardSubs'),
       where('userId', '==', uid),
