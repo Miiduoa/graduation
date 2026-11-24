@@ -24,6 +24,7 @@ import { CampusIcon } from '@/components/CampusIcon';
 import { resolveCampusActions, getQuickCampusActions } from '@/lib/quickCampusActions';
 import {
   clearSearchResultReturn,
+  getSearchHistoryEntryKey,
   rememberSearchResultReturn,
   useSearchResultReturn,
 } from './searchResultReturn';
@@ -88,15 +89,18 @@ function ServiceDirectory() {
         : legacySchool;
   const storageScope = JSON.stringify([account.ownerScope, schoolSearch]);
   const draftScope = useCampusFinderDraftScope(account.ownerScope, campusReady ? campusId : null);
-  const [confirmedScope, setConfirmedScope] = useState<string | null>(
-    account.canRemember ? draftScope : null,
+  const [confirmedScope, setConfirmedScope] = useState(
+    account.canRemember ? { draftScope, ownerScope: account.ownerScope } : null,
   );
   const restoredFilters = useRef<{ scope: string; queryString: string } | null>(null);
   const editedFilters = useRef<{
     scope: string;
     queryString: string;
   } | null>(null);
-  const historyRestoration = useRef<{ scope: string; queryString: string } | null>(null);
+  const historyRestoration = useRef<{
+    queryString: string;
+    entryKey: string | null;
+  } | null>(null);
   const [filters, setFilters] = useState(() => ({
     scope: draftScope,
     ...readCampusServiceFilters(new URLSearchParams(queryString)),
@@ -121,7 +125,13 @@ function ServiceDirectory() {
   });
   useLayoutEffect(() => {
     if (!account.canRemember) return;
-    const changedOwner = confirmedScope !== null && confirmedScope !== draftScope;
+    const changedScope = confirmedScope !== null && confirmedScope.draftScope !== draftScope;
+    const changedOwner = confirmedScope !== null && confirmedScope.ownerScope !== account.ownerScope;
+    const restoring = historyRestoration.current;
+    const isHistoryArrival =
+      restoring !== null &&
+      restoring.entryKey === getSearchHistoryEntryKey() &&
+      restoring.queryString === new URLSearchParams(window.location.search).toString();
     if (confirmedScope === null) {
       // Bind edits made during initial account resolution without treating them as an account switch.
       if (editedFilters.current) editedFilters.current.scope = draftScope;
@@ -131,8 +141,12 @@ function ServiceDirectory() {
         current.scope === draftScope ? current : { ...current, scope: draftScope },
       );
     }
-    setConfirmedScope(draftScope);
-    if (changedOwner) {
+    if (confirmedScope === null || changedScope) {
+      setConfirmedScope({ draftScope, ownerScope: account.ownerScope });
+    }
+    // On a campus traversal the browser already selected the arriving entry.
+    // Keep its saved return and restore its URL filters under the new draft scope.
+    if (changedScope && (changedOwner || !isHistoryArrival)) {
       clearSearchResultReturn();
       editedFilters.current = null;
       historyRestoration.current = null;
@@ -151,16 +165,9 @@ function ServiceDirectory() {
       return;
     }
     if (!campusReady) return;
-    const restoring = historyRestoration.current;
-    if (restoring?.scope === draftScope) {
-      // A real Back/Forward traversal wins over queued acknowledgements of earlier typing.
-      if (
-        new URLSearchParams(window.location.search).toString() === restoring.queryString &&
-        queryString !== restoring.queryString
-      )
-        return;
-      historyRestoration.current = null;
-    }
+    // A real Back/Forward traversal wins over queued acknowledgements of earlier typing.
+    if (isHistoryArrival && queryString !== restoring.queryString) return;
+    historyRestoration.current = null;
     if (returningFilters) {
       // A result return uses this entry’s filters even when a later search changed the session draft.
       restoredFilters.current = { scope: draftScope, queryString };
@@ -188,11 +195,10 @@ function ServiceDirectory() {
       return;
     editedFilters.current = null;
     // First arrival keeps an explicitly shared URL; later returns require the same account/campus.
-    const next = filtersFromUrlOrSession(
-      new URLSearchParams(queryString),
-      window.location.pathname || '/search',
-      storageScope,
-    );
+    const urlParams = new URLSearchParams(queryString);
+    const next = isHistoryArrival
+      ? readCampusServiceFilters(urlParams)
+      : filtersFromUrlOrSession(urlParams, window.location.pathname || '/search', storageScope);
     setFilters({ scope: draftScope, ...next });
     setRestoredExpanded(
       restoreDirectorySearch('search', window.location.pathname || '/search', storageScope)
@@ -200,6 +206,7 @@ function ServiceDirectory() {
     );
   }, [
     account.canRemember,
+    account.ownerScope,
     campusReady,
     confirmedScope,
     draftScope,
@@ -242,7 +249,10 @@ function ServiceDirectory() {
       compositionScope.current = null;
       setAnalysis(null);
       // An empty history entry is intentionally empty, even if a session draft exists.
-      historyRestoration.current = { scope: draftScope, queryString: source };
+      historyRestoration.current = {
+        queryString: source,
+        entryKey: getSearchHistoryEntryKey(),
+      };
       editedFilters.current = { scope: draftScope, queryString: source };
       setFilters({ scope: draftScope, ...next });
       setRestoredExpanded(expanded);

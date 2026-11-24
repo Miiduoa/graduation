@@ -1277,26 +1277,60 @@ describe('continuing a search after opening a service', () => {
     expect(scroll).not.toHaveBeenCalled();
   });
 
-  it('removes the original search identity from a class instance on a Back/Forward traversal', async () => {
-    class CopiedHistoryState {
-      constructor(fields: object) {
-        Object.assign(this, fields);
-      }
-    }
-    const entry = leaveLibrary();
-    const destination = window.history.state;
-    window.history.pushState(new CopiedHistoryState(entry), '', librarySearch);
-    await go(-1);
-    expect(window.location.pathname).toBe('/library');
-    expect(window.history.state).toEqual(destination);
-    await go(1);
+  it.each(['object', 'array'] as const)(
+    'removes the original search identity from a subclass of %s on Back/Forward',
+    async (shape) => {
+      class CopiedHistoryState {}
+      class CopiedArrayHistoryState extends Array<string> {}
+      const entry = leaveLibrary();
+      const destination = window.history.state;
+      const copy = Object.assign(
+        shape === 'array' ? new CopiedArrayHistoryState('payload') : new CopiedHistoryState(),
+        entry,
+      );
+      window.history.pushState(copy, '', librarySearch);
+      await go(-1);
+      expect(window.location.pathname).toBe('/library');
+      expect(window.history.state).toEqual(destination);
+      await go(1);
 
-    expect(window.history.state.unrelated).toBe(7);
-    expect(window.history.state.__campusSearchHistoryEntry).not.toBe(entry.__campusSearchHistoryEntry);
-    expect(window.history.state).not.toHaveProperty('__campusSearchResultReturn');
-    renderAfterFrame();
+      renderAfterFrame();
+      expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+      expect(scroll).not.toHaveBeenCalled();
+      expect(window.history.state.unrelated).toBe(7);
+      expect(window.history.state.__campusSearchHistoryEntry).not.toBe(entry.__campusSearchHistoryEntry);
+      expect(window.history.state).not.toHaveProperty('__campusSearchResultReturn');
+      if (shape === 'array') {
+        expect(Array.isArray(window.history.state)).toBe(true);
+        expect(window.history.state[0]).toBe('payload');
+      }
+    },
+  );
+
+  it('keeps an earlier campus return armed after an unrelated cross-campus traversal', async () => {
+    const entry = leaveLibrary();
+    window.history.pushState(nextState, '', '/search?campus=nthu&q=公車');
+    router.search = window.location.search;
+    const later = renderAfterFrame();
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('公車');
+
+    await go(-2);
+    expect(scroll).not.toHaveBeenCalled();
+    router.search = null;
+    later.rerender(<SearchPage />);
+    expect(window.location.search).toBe(new URL(librarySearch, window.location.origin).search);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
     expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
     expect(scroll).not.toHaveBeenCalled();
+    expect(window.history.state).toEqual(entry);
+    later.unmount();
+
+    await go(1);
+    expect(window.location.pathname).toBe('/library');
+    await go(-1);
+    renderAfterFrame();
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    expect(scroll).toHaveBeenCalledTimes(1);
   });
 
   it('still restores an earlier search entry after a later search has been resumed', () => {

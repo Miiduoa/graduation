@@ -42,6 +42,16 @@ function readEntryKey(state: unknown) {
   return typeof key === 'string' ? key : null;
 }
 
+export function getSearchHistoryEntryKey() {
+  return readEntryKey(window.history.state);
+}
+
+function hasSearchHistoryFields(state: unknown): state is Record<string, unknown> {
+  return state !== null &&
+    typeof state === 'object' &&
+    (HISTORY_ENTRY_KEY in state || SEARCH_RETURN_STATE in state);
+}
+
 function onHistoryPush(
   previousState: unknown,
   previousPath: string,
@@ -82,20 +92,13 @@ function installHistoryTracking() {
       const previousKey = readEntryKey(previousState);
       const previousPath = window.location.pathname;
       const push = method === 'pushState';
-      let state = data;
-      if (
-        data &&
-        typeof data === 'object' &&
-        !isHistoryRecord(data) &&
-        (HISTORY_ENTRY_KEY in data || SEARCH_RETURN_STATE in data)
-      ) {
-        // History serializes class instances as records and drops custom fields on
-        // built-ins such as Map. Normalize those copies before applying entry identity.
-        state = structuredClone(data);
-      }
-      if (state == null || isHistoryRecord(state)) {
-        const fields = { ...(state as Record<string, unknown> | null | undefined) };
-        if (push || previousKey || fields[SEARCH_RETURN_STATE] || fields[HISTORY_ENTRY_KEY]) {
+      // Use the shape History will serialize, including arrays with custom fields.
+      const cloned = !isHistoryRecord(data) && hasSearchHistoryFields(data);
+      let state = cloned ? structuredClone(data) : data;
+      if (state == null || isHistoryRecord(state) || hasSearchHistoryFields(state)) {
+        const current = state as Record<string, unknown> | null | undefined;
+        if (push || previousKey || current?.[SEARCH_RETURN_STATE] || current?.[HISTORY_ENTRY_KEY]) {
+          const fields = cloned && current ? current : { ...current };
           if (push) delete fields[SEARCH_RETURN_STATE];
           // Replace retains the current entry's identity. Push always creates a new one.
           fields[HISTORY_ENTRY_KEY] =
