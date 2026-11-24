@@ -984,6 +984,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       if (visibility === 'hidden') visibility = 'unknown';
       try { ignoreObserverBefore = performance.now(); }
       catch { ignoreObserverBefore = 0; }
+      // The visitor explicitly resumed. A later blur must not treat a fresh
+      // post-resume hidden observer entry as leftover keyboard occlusion.
+      keyboardOccludedCanvas = false;
       // Drop queued reports and request a fresh intersection measurement.
       try {
         intersection?.unobserve(host);

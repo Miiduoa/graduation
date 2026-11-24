@@ -3284,6 +3284,67 @@ it('keeps 3D running when a stale queued hidden observer arrives after an overla
 });
 
 
+it('keeps 3D paused after a fresh hidden report if the search field blurs, and re-observes on overlay resume', async () => {
+  const keyboard = Object.assign(new EventTarget(), { boundingRect: new DOMRect() });
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: keyboard } }));
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0, scale: 1,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  const observe = vi.fn();
+  const unobserve = vi.fn();
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe = observe;
+    unobserve = unobserve;
+    disconnect() {}
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 400, 320, 150));
+  try {
+    act(() => intersection?.([observerEntry(graphics, true, undefined, 10)], {} as IntersectionObserver));
+    await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+    const search = within(dialog).getByRole('searchbox', { name: '搜尋導覽地點' });
+    act(() => search.focus());
+    viewport.height = 200;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    keyboard.boundingRect = new DOMRect(0, 200, 320, 400);
+    act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    act(() => intersection?.([observerEntry(graphics, false, undefined, 50)], {} as IntersectionObserver));
+    keyboard.boundingRect = new DOMRect();
+    act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+    expect(document.activeElement).toBe(search);
+
+    const observedBeforeResume = observe.mock.calls.length;
+    const overlay = within(dialog).getByText(/立體畫面已暫停/);
+    fireEvent.pointerDown(overlay);
+    expect(unobserve).toHaveBeenCalledWith(graphics);
+    expect(observe.mock.calls.length).toBeGreaterThan(observedBeforeResume);
+    expect(observe).toHaveBeenLastCalledWith(graphics);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    act(() => intersection?.([observerEntry(graphics, false, undefined, 50)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    act(() => intersection?.([observerEntry(graphics, false, undefined, performance.now() + 1)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    // Blurring the search field must not treat this post-resume hidden report
+    // as leftover keyboard occlusion and auto-resume 3D.
+    act(() => search.blur());
+    await waitFor(() => expect(document.activeElement).not.toBe(search));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+
 it('always resumes with the manual restart button while the visual viewport is stale', async () => {
   const { viewport, dialog, bounds } = await openKeyboardCoveredScene();
   try {
