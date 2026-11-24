@@ -979,6 +979,44 @@ it.each([403, 404])('does not restore a pause notice after list denial %s and re
   expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
 });
 
+it.each([true, false])(
+  'discards a pause notice when the list and detail confirm a newer open store (versioned list: %s)',
+  async (versionedList) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const open = { ...detail('store-a', true), readinessVersion: 6 };
+    const paused = { ...open, readinessVersion: 7, locationStatus: 'closed', publicAccess: false };
+    const reopened = { ...open, readinessVersion: 8 };
+    let current = open;
+    const readDetail = vi.fn(() => Promise.resolve(current));
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') {
+        const readinessVersion = versionedList ? current.readinessVersion : undefined;
+        return Promise.resolve({ workspaces: [{ ...current, readinessVersion }] });
+      }
+      if (resource === path) return readDetail();
+      if (resource === `${path}/availability`) return Promise.resolve(paused);
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+    await screen.findByText('門市狀態已更新：暫停接單。');
+
+    current = reopened;
+    await act(async () => window.history.back());
+    await screen.findByText('營業中');
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+
+    await act(async () => window.history.forward());
+    await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+    expect(readDetail).toHaveBeenCalledTimes(3);
+    expect(screen.getByText('營業中')).toBeTruthy();
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
+    expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
+  },
+);
+
 it.each([403, 404])('revokes access and the pause notice after stale detail precedes list denial %s', async (status) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const open = { ...detail('store-a', true), readinessVersion: 6 };
@@ -990,10 +1028,13 @@ it.each([403, 404])('revokes access and the pause notice after stale detail prec
   const readList = vi.fn()
     .mockResolvedValueOnce({ workspaces: [open] })
     .mockReturnValueOnce(pendingList);
+  const reopened = { ...open, readinessVersion: 7 };
+  let finishRetry!: (value: typeof reopened) => void;
+  const retry = new Promise<typeof reopened>((resolve) => { finishRetry = resolve; });
   const readDetail = vi.fn()
     .mockResolvedValueOnce(open)
     .mockResolvedValueOnce(open)
-    .mockResolvedValue({ ...open, readinessVersion: 7 });
+    .mockReturnValueOnce(retry);
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') return readList();
     if (resource === path) return readDetail();
@@ -1010,12 +1051,16 @@ it.each([403, 404])('revokes access and the pause notice after stale detail prec
   await waitFor(() => expect(readList).toHaveBeenCalledTimes(2));
   await act(async () => window.history.forward());
   await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
-  await screen.findByText('暫停接單');
+  await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+  expect(screen.queryByRole('button', { name: '恢復接單' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '訂單與收銀' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: '門市工作台' })).toBeNull();
 
   await act(async () => denyList(new NuniError(status, 'DENIED')));
   expect(screen.queryByRole('heading', { name: '餐坊／一樓', level: 2 })).toBeNull();
   expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+  await act(async () => finishRetry(reopened));
   await screen.findByText('營業中');
   expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
   expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
@@ -1768,9 +1813,13 @@ it.each([
     expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
     await act(async () => finishApplications({ applications: [] }));
     expect(screen.queryByText(/目前有 \d+ 項有庫存的上架品項/)).toBeNull();
-    if (listVersion === 7) {
+    if (listVersion !== detailVersion) {
       expect(screen.queryByLabelText('品項 1 名稱')).toBeNull();
-      readDetail.mockResolvedValue({ ...initial, ...missingMenu, readinessVersion: listVersion });
+      readDetail.mockResolvedValue({
+        ...initial,
+        ...missingMenu,
+        readinessVersion: listVersion ?? detailVersion,
+      });
       fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
     }
     const menuName = await screen.findByLabelText<HTMLInputElement>('品項 1 名稱');

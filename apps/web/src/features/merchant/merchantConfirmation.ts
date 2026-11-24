@@ -1,4 +1,5 @@
 import {
+  merchantWorkspaceStateLabel,
   type loadMerchantOverview,
   type NuniMerchantApplication,
   type NuniMerchantWorkspace,
@@ -63,10 +64,14 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     return revocations.get(key) ?? listRevocation;
   }
 
+  function advanceReceiptFloor(key: string, revision: number) {
+    receiptFloors.set(key, Math.max(receiptFloors.get(key) ?? 0, revision));
+  }
+
   function discardWorkspaceReceipts(key: string, revision: number) {
     const draft = drafts.get(key);
     if (draft) draft.menuReceipt = null;
-    receiptFloors.set(key, Math.max(receiptFloors.get(key) ?? 0, revision));
+    advanceReceiptFloor(key, revision);
   }
 
   function discardWorkspace(key: string, revision: number) {
@@ -105,6 +110,19 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       const draft = drafts.get(key);
       if (draft) draft.menuReceipt = null;
     }
+    // A legacy list can change the displayed status before a versioned detail arrives.
+    const previous = entry.row?.value.readinessVersion === undefined ? entry.detail : entry.row;
+    if (
+      row.value === next &&
+      row.version !== undefined &&
+      previous?.version !== undefined &&
+      row.version > previous.version &&
+      merchantWorkspaceStateLabel(previous.value) !== merchantWorkspaceStateLabel(next)
+    ) {
+      // Supersede earlier status receipts, including across navigation. A write
+      // that confirmed this state can still display its own receipt.
+      advanceReceiptFloor(key, revision - 1);
+    }
     entry.row = row;
     entries.set(key, entry);
     return entry;
@@ -114,14 +132,11 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const key = workspaceKey(next);
     const version = entries.get(key)?.row?.version;
     // A stale detail must not confirm access or supersede an outstanding denial.
-    if (version !== undefined && next.readinessVersion < version) return detailFor(key);
+    if (version !== undefined && next.readinessVersion < version) return null;
     const entry = merge(next, revision);
-    if (entry) {
-      if (next.readinessVersion === entry.row?.version) {
-        entry.detail = latestObservation(entry.detail, next, revision);
-      }
-      if (verifiesAccess && revision > (verified.get(key) ?? 0)) verified.set(key, revision);
-    }
+    if (!entry || next.readinessVersion !== entry.row?.version) return null;
+    entry.detail = latestObservation(entry.detail, next, revision);
+    if (verifiesAccess && revision > (verified.get(key) ?? 0)) verified.set(key, revision);
     return detailFor(key);
   }
 

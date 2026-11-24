@@ -78,10 +78,8 @@ it('learns the version floor from an older request without replacing the winning
   expect(confirmed.overview()?.workspaces).toEqual([legacyRow]);
 
   const lowerVersion = { ...detail, readinessVersion: 6 };
-  expect(confirmed.confirmDetail(lowerVersion, confirmed.beginRequest(), true))
-    .toMatchObject(expectedDetail);
-  expect(confirmed.confirmDetail(lowerVersion, confirmed.beginRequest(), true))
-    .toMatchObject(expectedDetail);
+  expect(confirmed.confirmDetail(lowerVersion, confirmed.beginRequest(), true)).toBeNull();
+  expect(confirmed.verifiedDetails().get('campus-one:store-a')).toMatchObject(expectedDetail);
   expect(confirmed.overview()?.workspaces).toEqual([legacyRow]);
 
   const sameVersion = { ...detail, missingRequirements: ['settings'] };

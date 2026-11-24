@@ -136,7 +136,6 @@ export function MerchantOperations({
   const [busy, setBusy] = useState<Action | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState<{ value: string | number; revision: number } | null>(null);
-  const visibleNotice = detail && notice && notice.revision > receiptFloor ? notice.value : null;
   const [uncertain, setUncertain] = useState<Action | null>(saved?.uncertain ?? null);
   const [settings, setSettings] = useState<SettingDraft | null>(saved?.settings ?? null);
   const [menu, setMenu] = useState<MenuDraft[]>(saved?.menu ?? [newItem()]);
@@ -144,6 +143,8 @@ export function MerchantOperations({
   const menuReceipt = saved?.menuReceipt ?? null;
   const [localConfirmations] = useState(() => createMerchantConfirmations(drafts));
   const nextRevision = beginRequest ?? localConfirmations.beginRequest;
+  const noticeFloor = beginRequest ? receiptFloor : localConfirmations.workspaceReceiptFloor(draftKey);
+  const visibleNotice = detail && notice && notice.revision > noticeFloor ? notice.value : null;
   const [menuBlocked, setMenuBlocked] = useState(saved?.menuBlocked ?? false);
   const [activationConfirmed, setActivationConfirmed] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
@@ -158,6 +159,7 @@ export function MerchantOperations({
   const lock = useRef(false);
   const run = useRef(0);
   const accessRevision = useRef(0);
+  const pendingAccessRead = useRef(0);
   const observedRevocation = useRef(accessRevocation);
   useLayoutEffect(() => {
     observedRevocation.current = accessRevocation;
@@ -177,6 +179,7 @@ export function MerchantOperations({
     ++sessionRun.current;
     ++run.current;
     ++mutationRun.current;
+    pendingAccessRead.current = 0;
   }, []);
   useLayoutEffect(() => {
     drafts.set(draftKey, {
@@ -204,7 +207,7 @@ export function MerchantOperations({
 
   const showDetail = useCallback(
     (merged: Detail | null) => {
-      if (!beginRequest) setDetail(merged);
+      if (!beginRequest && merged) setDetail(merged);
       setFresh(!!merged);
       setMenuConfirmed(false);
       setActivationConfirmed(false);
@@ -257,10 +260,16 @@ export function MerchantOperations({
     async (current: () => boolean, verifiesEntry = false) => {
       const session = sessionRun.current;
       const revision = nextRevision();
-      if (verifiesEntry) accessRevision.current = revision;
+      if (verifiesEntry) {
+        accessRevision.current = Math.max(accessRevision.current, observedRevocation.current);
+      }
       try {
         const next = await operations.get(tenantId, locationId);
-        if (active.current && session === sessionRun.current) confirmDetail(next, true, revision);
+        if (!active.current || session !== sessionRun.current) return;
+        const merged = confirmDetail(next, true, revision);
+        if (merged && verifiesEntry && current()) {
+          accessRevision.current = Math.max(accessRevision.current, revision);
+        }
       } catch (failure) {
         if (!active.current || session !== sessionRun.current || !(failure instanceof NuniError)) return;
         if (expireSession(failure)) return;
@@ -279,8 +288,10 @@ export function MerchantOperations({
       const version = ++run.current;
       const current = () => active.current && version === run.current;
       const revision = nextRevision();
-      const revocationAtStart = observedRevocation.current;
-      accessRevision.current = revision;
+      // A pending read may reconcile an intervening denial. Only an accepted
+      // response can advance access past the revocation already being handled.
+      pendingAccessRead.current = revision;
+      accessRevision.current = Math.max(accessRevision.current, observedRevocation.current);
       setReadUnavailable(false);
       setLoading(true);
       setFresh(false);
@@ -295,6 +306,7 @@ export function MerchantOperations({
           setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
           return;
         }
+        accessRevision.current = Math.max(accessRevision.current, revision);
         if (!readAfterWrite.current) setEntryVerified(true);
         // A count of zero cannot prove a non-idempotent menu request failed:
         // an existing menu may have no remaining sellable stock.
@@ -311,12 +323,11 @@ export function MerchantOperations({
         if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
           revokeDetail(revision, current());
         } else if (current()) {
-          // A failed read cannot reconcile a revocation that arrived while it was pending.
-          accessRevision.current = revocationAtStart;
           setReadUnavailable(true);
           setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
         }
       } finally {
+        if (pendingAccessRead.current === revision) pendingAccessRead.current = 0;
         if (current()) setLoading(false);
       }
     },
@@ -369,10 +380,13 @@ export function MerchantOperations({
   // A retired read or the list can revoke data after the visible entry started verifying.
   // The entry's own denial already displays an error and allows a manual retry.
   useLayoutEffect(() => {
-    if (visible && !suspended && accessRevocation > accessRevision.current) {
+    if (
+      visible && !suspended &&
+      accessRevocation > Math.max(accessRevision.current, pendingAccessRead.current)
+    ) {
       return verifyEntry();
     }
-  }, [accessRevocation, readUnavailable, suspended, visible, verifyEntry]);
+  }, [accessRevocation, loading, readUnavailable, suspended, visible, verifyEntry]);
 
   async function mutate(
     action: Action,
