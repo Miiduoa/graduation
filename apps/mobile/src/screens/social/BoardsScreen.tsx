@@ -95,13 +95,15 @@ function BoardsContent() {
   const boardWriteRevision = useRef(new Map<string, number>());
   // Last server read that applied membership for this board.
   const boardServerAppliedRevision = useRef(new Map<string, number>());
+  // Subscriptions whose current membership came from a single-board server read.
+  const confirmedByBoardRead = useRef(new Set<string>());
   // A list started before this board's last successful write used keepLocal.
   // After that write settles, re-check so a later server change is not dropped.
   const keepLocalFromStaleList = useRef(new Set<string>());
   const lastSettledWriteSucceeded = useRef(new Set<string>());
-  // After a failed write, keep the rollback until a from-server re-check lands.
-  // A later list may still be served from cache and omit the board.
-  const awaitingServerConfirm = useRef(new Set<string>());
+  // Track the failed intent behind each rollback until a from-server re-check
+  // lands. A later list may still be served from cache and omit the board.
+  const awaitingServerConfirm = useRef(new Map<string, number>());
   const pendingServerConfirmCounts = useRef(new Map<string, number>());
   // List membership skipped by keepLocal after a successful write. If the
   // follow-up from-server re-check fails, a list that already included a newer
@@ -139,7 +141,7 @@ function BoardsContent() {
     const version = ++loadVersion.current;
     const subscriptionRevisionAtStart = subscriptionRevision.current;
     const overlappingConfirmations = new Set([
-      ...awaitingServerConfirm.current,
+      ...awaitingServerConfirm.current.keys(),
       ...pendingServerConfirmCounts.current.keys(),
     ]);
     setLoadError('');
@@ -147,6 +149,7 @@ function BoardsContent() {
       if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
         setBoards([]);
         confirmedSubscribedRef.current = new Set();
+        confirmedByBoardRead.current.clear();
         applySubscribed(() => new Set());
         return;
       }
@@ -166,7 +169,7 @@ function BoardsContent() {
         if (revision > subscriptionRevisionAtStart) keepLocal.add(id);
       }
       const { subscribedIds } = membership;
-      for (const id of awaitingServerConfirm.current) overlappingConfirmations.add(id);
+      for (const id of awaitingServerConfirm.current.keys()) overlappingConfirmations.add(id);
       for (const id of pendingServerConfirmCounts.current.keys()) overlappingConfirmations.add(id);
       for (const id of overlappingConfirmations) {
         // Cache-backed membership cannot replace a rollback or a single-board
@@ -191,6 +194,7 @@ function BoardsContent() {
       for (const id of tracked) {
         if (!keepLocal.has(id)) {
           boardServerAppliedRevision.current.set(id, applied);
+          confirmedByBoardRead.current.delete(id);
           deferredListMembership.current.delete(id);
         }
       }
@@ -213,10 +217,10 @@ function BoardsContent() {
           !subscribedIds.has(id);
         // A list that includes a subscription kept locally as unsubscribed
         // (for example after a failed write) may be newer than the rollback.
-        // A list that omits a still-confirmed subscription is a cache gap and
-        // must not by itself trigger another re-read after the first confirm.
+        // An omission alone must not trigger another re-read when a
+        // single-board read already confirmed the current subscription.
         const listClaimsUnkeptSubscription = subscribedIds.has(id) && !nextConfirmed.has(id);
-        const listOmitsConfirmed = !subscribedIds.has(id) && nextConfirmed.has(id);
+        const listOmitsConfirmed = !subscribedIds.has(id) && confirmedByBoardRead.current.has(id);
         if (
           !pendingSubscriptionCounts.current.has(id) &&
           (keptRollback ||
@@ -235,6 +239,7 @@ function BoardsContent() {
       if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
         setBoards([]);
         confirmedSubscribedRef.current = new Set();
+        confirmedByBoardRead.current.clear();
         applySubscribed(() => new Set());
       }
       setLoadError('暫時無法更新看板。請確認網路與登入狀態，再試一次。');
@@ -273,8 +278,13 @@ function BoardsContent() {
       if (!canApply()) return;
       boardServerAppliedRevision.current.set(boardId, readRevision);
       const nextConfirmed = new Set(confirmedSubscribedRef.current);
-      if (serverSubscribed) nextConfirmed.add(boardId);
-      else nextConfirmed.delete(boardId);
+      if (serverSubscribed) {
+        nextConfirmed.add(boardId);
+        confirmedByBoardRead.current.add(boardId);
+      } else {
+        nextConfirmed.delete(boardId);
+        confirmedByBoardRead.current.delete(boardId);
+      }
       confirmedSubscribedRef.current = nextConfirmed;
       awaitingServerConfirm.current.delete(boardId);
       if (deferredListMembership.current.get(boardId) === deferredMembership) {
@@ -405,6 +415,7 @@ function BoardsContent() {
           Alert.alert('訂閱失敗', error?.message ?? String(error));
         }
       } finally {
+        const latestBoardIntent = latestIntent.current.get(b.id);
         const remaining = (pendingSubscriptionCounts.current.get(b.id) ?? 1) - 1;
         if (remaining > 0) pendingSubscriptionCounts.current.set(b.id, remaining);
         else pendingSubscriptionCounts.current.delete(b.id);
@@ -412,10 +423,10 @@ function BoardsContent() {
         // after that write settles, including when a newer tap settled first.
         const settledRevision = ++subscriptionRevision.current;
         boardWriteRevision.current.set(b.id, settledRevision);
-        if (latestIntent.current.get(b.id) === intent) {
+        if (latestBoardIntent === intent) {
           if (failed) {
             lastSettledWriteSucceeded.current.delete(b.id);
-            awaitingServerConfirm.current.add(b.id);
+            awaitingServerConfirm.current.set(b.id, intent);
           } else {
             lastSettledWriteSucceeded.current.add(b.id);
             awaitingServerConfirm.current.delete(b.id);
@@ -423,6 +434,7 @@ function BoardsContent() {
         }
         if (!failed && (lastConfirmedIntent.current.get(b.id) ?? 0) < intent) {
           lastConfirmedIntent.current.set(b.id, intent);
+          confirmedByBoardRead.current.delete(b.id);
           const nextConfirmed = new Set(confirmedSubscribedRef.current);
           if (target) nextConfirmed.add(b.id);
           else {
@@ -430,6 +442,17 @@ function BoardsContent() {
             lastSuccessfulUnsubscribeRevision.current.set(b.id, settledRevision);
           }
           confirmedSubscribedRef.current = nextConfirmed;
+          // Once the latest tap has failed, its rollback follows the newest
+          // successful write, including earlier writes that settle afterward.
+          const failedIntent = awaitingServerConfirm.current.get(b.id);
+          if (mounted.current && failedIntent !== undefined && failedIntent === latestBoardIntent) {
+            applySubscribed((previous) => {
+              const next = new Set(previous);
+              if (target) next.add(b.id);
+              else next.delete(b.id);
+              return next;
+            });
+          }
         }
         if (mounted.current) setPendingSubscriptions(new Set(pendingSubscriptionCounts.current.keys()));
       }
