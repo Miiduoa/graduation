@@ -96,6 +96,20 @@ export function applyCampusWalkingSegmentAudits(
         node.lat !== source.lat || node.lng !== source.lng) return null;
     graphNodeIds.add(node.id);
   }
+  // Reapply the parser's retained-segment budget at the cache/audit boundary.
+  // Index ordered adjacency once, rather than scanning the whole way per audit.
+  let segmentCount = 0;
+  for (const way of ways.values()) {
+    if (way.nodes.length < 2) return null;
+    segmentCount += way.nodes.length - 1;
+    if (segmentCount > 4000) return null;
+  }
+  const adjacentSegments = new Set<string>();
+  for (const way of ways.values()) {
+    for (let i = 1; i < way.nodes.length; i += 1) {
+      adjacentSegments.add(key(way.id, way.nodes[i - 1], way.nodes[i]));
+    }
+  }
   const reviews = new Map<string, CampusWalkingSegmentAudit>();
   const duplicates = new Set<string>();
   for (const audit of audits) {
@@ -126,7 +140,7 @@ export function applyCampusWalkingSegmentAudits(
     if (!audit || duplicates.has(segment)) return blocked;
     if (!matchesNode(audit.from, from) || !matchesNode(audit.to, to) ||
         audit.wayVersion !== way.version ||
-        !way.nodes.some((id, i) => id === edge.from && way.nodes[i + 1] === edge.to) ||
+        !adjacentSegments.has(segment) ||
         !['both', 'forward', 'reverse'].includes(audit.direction) ||
         !evidenceLink(audit.evidenceUrl) ||
         !permitsAuditedDirection(way.tags, audit.direction) ||
