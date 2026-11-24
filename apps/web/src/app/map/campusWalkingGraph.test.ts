@@ -3,8 +3,11 @@ import { findCampusWalkingRoute, type CampusWalkingGraph } from './campusWalking
 
 // Synthetic topology and IDs only: these are NOT Providence paths or coordinates.
 const bounds = { south: 10, north: 11, west: 20, east: 21 };
+const now = Date.parse('2026-11-24T08:01:00Z');
+const open = { validUntil: '2026-12-01T00:00:00Z' } as const;
 const graph: CampusWalkingGraph = {
   schoolId: 'fixture',
+  osmBaseAt: '2026-11-24T08:00:00Z',
   nodes: [
     { id: 1, lat: 10.1, lng: 20.1 },
     { id: 2, lat: 10.1, lng: 20.101 },
@@ -14,15 +17,15 @@ const graph: CampusWalkingGraph = {
     { id: 6, lat: 10.099, lng: 20.101 },
   ],
   edges: [
-    { from: 1, to: 2, osmWayId: 101, access: 'reviewed-open', direction: 'both' },
-    { from: 2, to: 3, osmWayId: 101, access: 'reviewed-open', direction: 'both' },
-    { from: 1, to: 4, osmWayId: 102, access: 'reviewed-open', direction: 'both' },
-    { from: 4, to: 3, osmWayId: 102, access: 'reviewed-open', direction: 'both' },
-    { from: 5, to: 6, osmWayId: 103, access: 'reviewed-open', direction: 'both' },
+    { from: 1, to: 2, osmWayId: 101, access: 'reviewed-open', direction: 'both', ...open },
+    { from: 2, to: 3, osmWayId: 101, access: 'reviewed-open', direction: 'both', ...open },
+    { from: 1, to: 4, osmWayId: 102, access: 'reviewed-open', direction: 'both', ...open },
+    { from: 4, to: 3, osmWayId: 102, access: 'reviewed-open', direction: 'both', ...open },
+    { from: 5, to: 6, osmWayId: 103, access: 'reviewed-open', direction: 'both', ...open },
   ],
 };
-const route = (g: CampusWalkingGraph, start = 1, end = 3) =>
-  findCampusWalkingRoute(g, 'fixture', bounds, start, end);
+const route = (g: CampusWalkingGraph, start = 1, end = 3, at = now) =>
+  findCampusWalkingRoute(g, 'fixture', bounds, start, end, at);
 
 describe('audited outdoor campus walking graph', () => {
   it('uses the shortest connected route with per-segment sources and attribution', () => {
@@ -76,5 +79,15 @@ describe('audited outdoor campus walking graph', () => {
     expect(result?.distanceMeters).toBe(0);
     expect(result?.osmWayIds).toEqual([]);
     expect(result?.nodes[0]).not.toBe(graph.nodes[0]);
+  });
+
+  it('does not route reviewed-open segments after their review expires', () => {
+    expect(route(graph, 1, 3, Date.parse('2026-12-01T00:00:00Z'))).toBeNull();
+    const missingExpiry = { ...graph, edges: graph.edges.map(({ validUntil: _validUntil, ...edge }) => edge) };
+    expect(route(missingExpiry)).toBeNull();
+  });
+
+  it('does not route a graph whose OSM snapshot is no longer fresh', () => {
+    expect(route(graph, 1, 3, Date.parse('2026-11-27T08:00:01Z'))).toBeNull();
   });
 });

@@ -56,6 +56,21 @@ describe('OSM campus walking discovery (not routing approval)', () => {
     expect(result.graph.edges.some(e => e.from === 2 && e.to === 4)).toBe(false);
   });
 
+  it('keeps in-bounds ways when an out-of-bounds way has coincident or duplicate nodes', () => {
+    const outsideA = node(6, 10.015, 20.002);
+    const outsideB = node(7, 10.015, 20.002);
+    const input = {
+      ...payload(),
+      elements: [...payload().elements, outsideA, outsideB, way(103, [6, 7, 6])],
+    };
+    const result = parse(input)!;
+    expect(result.graph.edges.map(e => [e.from, e.to, e.osmWayId])).toEqual([
+      [1, 2, 101], [2, 3, 101], [4, 5, 102],
+    ]);
+    expect(result.osmBaseAt).toBe(base);
+    expect(result.graph.osmBaseAt).toBe(base);
+  });
+
   it('excludes highway areas and indoor ways and flags tagged restrictions', () => {
     const input = { ...payload(), elements: [...payload().elements,
       way(103, [1, 2, 1], { area: 'yes' }),

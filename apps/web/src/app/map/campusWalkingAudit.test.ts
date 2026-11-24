@@ -41,6 +41,16 @@ describe('trusted OSM walking segment audit bridge', () => {
     expect(findCampusWalkingRoute(apply([]), 'fixture', bounds, 1, 2)).toBeNull();
   });
 
+  it('retains review expiry and OSM snapshot freshness so later routing cannot use an expired graph', () => {
+    const graph = apply([audit(), audit(2, 3, { direction: 'forward' })]);
+    expect(graph.osmBaseAt).toBe('2026-11-24T08:00:00Z');
+    expect(graph.edges.filter(e => e.access === 'reviewed-open').map(e => e.validUntil))
+      .toEqual(['2026-12-01T00:00:00Z', '2026-12-01T00:00:00Z']);
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 3, now)?.nodes.map(n => n.id)).toEqual([1, 2, 3]);
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 3, Date.parse('2026-12-01T00:00:00Z'))).toBeNull();
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 3, Date.parse('2026-11-27T08:00:01Z'))).toBeNull();
+  });
+
   it('keeps other-school, changed node, changed way and wrong order audits closed', () => {
     for (const bad of [
       audit(1, 2, { schoolId: 'other' }),

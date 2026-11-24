@@ -138,10 +138,11 @@ export function applyCampusWalkingSegmentAudits(
     if (![reviewed, expiry, edited].every(Number.isFinite) ||
         reviewed < edited || reviewed > now || expiry <= now ||
         expiry - reviewed > MAX_AUDIT_AGE_MS) return blocked;
-    return { ...edge, access: 'reviewed-open', direction: audit.direction };
+    return { ...edge, access: 'reviewed-open', direction: audit.direction, validUntil: audit.validUntil };
   });
   return {
     schoolId,
+    osmBaseAt: candidates.osmBaseAt,
     nodes: candidates.graph.nodes.map(n => ({ ...n })),
     edges,
   };

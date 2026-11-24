@@ -142,10 +142,12 @@ export function parseCampusWalkingOsmCandidates(
     for (let i = 1; i < way.nodes.length; i += 1) {
       const a = nodes.get(way.nodes[i - 1])!;
       const b = nodes.get(way.nodes[i])!;
+      // Out-of-bounds segments are not candidates; do not fail the whole batch
+      // because a skipped way has duplicate or coincident nodes.
+      if (!inBounds(a, bounds) || !inBounds(b, bounds)) continue;
       const key = [way.id, Math.min(a.id, b.id), Math.max(a.id, b.id)].join(':');
       if (a.id === b.id || seen.has(key) || (a.lat === b.lat && a.lng === b.lng)) return null;
       seen.add(key);
-      if (!inBounds(a, bounds) || !inBounds(b, bounds)) continue;
       // "both" is a placeholder on a non-routable edge, not a direction audit.
       // Preserve all tags/revisions above for explicit review before promotion.
       edges.push({ from: a.id, to: b.id, osmWayId: way.id, direction: 'both',
@@ -155,6 +157,6 @@ export function parseCampusWalkingOsmCandidates(
   const inside = [...nodes.values()].filter(n => inBounds(n, bounds));
   return {
     osmBaseAt, attribution: ATTRIBUTION, nodes: inside, ways: [...ways.values()],
-    graph: { schoolId, nodes: inside.map(({ id, lat, lng }) => ({ id, lat, lng })), edges },
+    graph: { schoolId, osmBaseAt, nodes: inside.map(({ id, lat, lng }) => ({ id, lat, lng })), edges },
   };
 }

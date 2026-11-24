@@ -8,9 +8,11 @@ export type WalkingEdge = {
   from: number; to: number; osmWayId: number;
   access: 'reviewed-open' | 'unknown' | 'restricted';
   direction: 'both' | 'forward' | 'reverse';
+  validUntil?: string;
 };
 export type CampusWalkingGraph = {
   schoolId: string;
+  osmBaseAt?: string;
   nodes: readonly WalkingNode[];
   edges: readonly WalkingEdge[];
 };
@@ -42,12 +44,35 @@ function segmentMeters(a: WalkingNode, b: WalkingNode): number {
  * Bounds must come from trusted campus configuration, not the graph payload.
  * Unknown/restricted edges are deliberately excluded; no straight-line fallback.
  */
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_OSM_LAG_MS = 2 * DAY_MS;
+const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+function utcMillis(value: string | undefined) {
+  if (!value) return NaN;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+export function osmSnapshotIsFresh(osmBaseAt: string | undefined, now: number) {
+  const base = utcMillis(osmBaseAt);
+  return Number.isFinite(base) && base <= now + MAX_CLOCK_SKEW_MS && now - base <= MAX_OSM_LAG_MS;
+}
+
+function reviewedOpenAt(edge: WalkingEdge, now: number) {
+  if (edge.access !== 'reviewed-open') return false;
+  const expiry = utcMillis(edge.validUntil);
+  return Number.isFinite(expiry) && expiry > now;
+}
+
 export function findCampusWalkingRoute(
   graph: CampusWalkingGraph, schoolId: string, bounds: CampusWalkingBounds,
-  start: number, end: number,
+  start: number, end: number, now: number = Date.now(),
 ): CampusWalkingRoute | null {
   if (!schoolId || graph.schoolId !== schoolId || !validId(start) || !validId(end) ||
       graph.nodes.length > 2000 || graph.edges.length > 4000 ||
+      !Number.isFinite(now) ||
+      (graph.osmBaseAt !== undefined && !osmSnapshotIsFresh(graph.osmBaseAt, now)) ||
       ![bounds.south, bounds.north, bounds.west, bounds.east].every(Number.isFinite) ||
       bounds.south < -90 || bounds.north > 90 || bounds.west < -180 || bounds.east > 180 ||
       bounds.south >= bounds.north || bounds.west >= bounds.east) return null;
@@ -83,7 +108,7 @@ export function findCampusWalkingRoute(
     seen.add(key);
     const meters = segmentMeters(a, b);
     if (!Number.isFinite(meters) || meters <= 0) return null;
-    if (edge.access !== 'reviewed-open') continue;
+    if (!reviewedOpenAt(edge, now)) continue;
     if (edge.direction !== 'reverse') add(a.id, { to: b.id, way: edge.osmWayId, meters });
     if (edge.direction !== 'forward') add(b.id, { to: a.id, way: edge.osmWayId, meters });
   }
