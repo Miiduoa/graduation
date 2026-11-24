@@ -305,6 +305,7 @@ export default ({ config, projectRoot = __dirname }: any) => {
         faceIDPermission: '使用 Face ID 進行安全驗證',
       },
     ],
+    './scripts/with-android-splash.cjs',
     './src/widgets/expo-widget-plugin.js',
   ];
   const configuredAiProvider = process.env.EXPO_PUBLIC_AI_PROVIDER ?? 'gemini';
@@ -336,6 +337,16 @@ export default ({ config, projectRoot = __dirname }: any) => {
       : []),
   ];
 
+  const splash = {
+    image: config.splash?.image ?? './assets/splash-icon.png',
+    resizeMode: 'contain' as const,
+    backgroundColor: '#FAF8F2',
+  };
+  const platformSplash = {
+    ...splash,
+    dark: { image: './assets/splash-icon-dark.png', backgroundColor: '#000000' },
+  };
+
   return {
     ...config,
     name: config.name ?? 'nuni',
@@ -345,14 +356,11 @@ export default ({ config, projectRoot = __dirname }: any) => {
     scheme: 'campus',
     userInterfaceStyle: 'automatic',
     icon: config.icon ?? './assets/icon.png',
-    splash: {
-      image: config.splash?.image ?? './assets/splash-icon.png',
-      resizeMode: 'contain',
-      backgroundColor: '#FAF8F2',
-    },
+    splash,
     assetBundlePatterns: ['**/*'],
     ios: {
       ...(config.ios ?? {}),
+      splash: platformSplash,
       supportsTablet: true,
       bundleIdentifier,
       buildNumber,
@@ -378,6 +386,7 @@ export default ({ config, projectRoot = __dirname }: any) => {
     },
     android: {
       ...(config.android ?? {}),
+      splash: platformSplash,
       ...(googleServicesFile ? { googleServicesFile } : {}),
       adaptiveIcon: {
         foregroundImage:
