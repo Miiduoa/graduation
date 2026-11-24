@@ -1219,7 +1219,7 @@ describe('continuing a search after opening a service', () => {
     const source = `${librarySearch}#results`;
     move(source);
     const view = renderAfterFrame();
-    const link = screen.getByRole('link', { name: /^圖書館/ });
+    const link = screen.getByRole<HTMLAnchorElement>('link', { name: /^圖書館/ });
     const target = new URL(link.href);
     expect(target.hash).toBe('');
     fireEvent.click(link);
@@ -1247,7 +1247,7 @@ describe('continuing a search after opening a service', () => {
   ])('pairs a commit with %s against the fragment at navigation start after a copied array push', (hash, restoresFocus) => {
     move(`${librarySearch}#results`);
     const view = renderAfterFrame();
-    const result = screen.getByRole('link', { name: /^圖書館/ });
+    const result = screen.getByRole<HTMLAnchorElement>('link', { name: /^圖書館/ });
     const target = new URL(result.href);
     expect(target.hash).toBe('');
     fireEvent.click(result);
