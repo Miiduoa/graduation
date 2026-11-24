@@ -185,6 +185,57 @@ test('a restart recovers a revoked deletion after both AsyncStorage rollback wri
   expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['統計']);
 });
 
+test('a recovered deletion can retry when storage only fits the smaller result', async () => {
+  const { key, ledger, originalRaw, deletedRaw } = await failedDeletionRollback(true);
+  const capacity = Buffer.byteLength(deletedRaw);
+  expect(Buffer.byteLength(originalRaw!)).toBeGreaterThan(capacity);
+  const multiSet = jest.mocked(AsyncStorage.multiSet);
+  const nativeMultiSet = multiSet.getMockImplementation()!;
+  const writes = jest.fn(async (entries: Parameters<typeof nativeMultiSet>[0]) => {
+    const values = new Map(await AsyncStorage.multiGet([key, key + ':checkpoint']));
+    for (const [storageKey, value] of entries) values.set(storageKey, value);
+    const used = [...values.values()].reduce((size, value) => size + Buffer.byteLength(value ?? ''), 0);
+    if (used > capacity) throw new Error('SQLiteFullException');
+    await nativeMultiSet(entries);
+  });
+  multiSet.mockImplementation(writes);
+
+  try {
+    let restarted!: typeof import('../services/personalImports');
+    jest.isolateModules(() => {
+      restarted = require('../services/personalImports');
+    });
+    await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+
+    let verified = true;
+    const multiRemove = jest.mocked(AsyncStorage.multiRemove);
+    const nativeMultiRemove = multiRemove.getMockImplementation()!;
+    multiRemove.mockImplementationOnce(async (keys) => {
+      await nativeMultiRemove(keys);
+      verified = false;
+    });
+    await expect(restarted.deletePersonalImport(scope, ledger.records[0], {
+      canContinue: () => true,
+      canCommitFirstWrite: () => verified,
+    })).rejects.toThrow('SQLiteFullException');
+    expect(await restarted.loadPersonalImports(scope)).toEqual(ledger);
+
+    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+    writes.mockClear();
+    await deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
+    expect(writes).toHaveBeenCalledTimes(1);
+    expect(writes).toHaveBeenCalledWith([[key, deletedRaw]], undefined);
+
+    let loadAfterRestart!: typeof loadPersonalImports;
+    jest.isolateModules(() => {
+      loadAfterRestart = require('../services/personalImports').loadPersonalImports;
+    });
+    await expect(loadAfterRestart(scope)).resolves.toEqual(JSON.parse(deletedRaw));
+  } finally {
+    multiSet.mockImplementation(nativeMultiSet);
+  }
+});
+
 test('a temporary rollback journal read failure blocks reads and writes after restart', async () => {
   const { key, ledger, deletedRaw } = await failedDeletionRollback(true);
   const failure = new Error('disk I/O error');
@@ -217,6 +268,31 @@ test('a failed journal preparation leaves the verified ledger intact', async () 
     expect(await loadPersonalImports(scope)).toEqual(ledger);
     await deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
     expect((await loadPersonalImports(scope)).records).toEqual([]);
+  } finally {
+    publish.mockRestore();
+  }
+});
+
+test('a native create that returns without creating the marker blocks deletion before any AsyncStorage write', async () => {
+  const { ledger } = await appendPersonalImports(scope, [row('original')]);
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  const multiSet = jest.mocked(AsyncStorage.multiSet);
+  setItem.mockClear();
+  multiSet.mockClear();
+  const publish = jest.spyOn(File.prototype, 'create').mockImplementationOnce(() => undefined);
+  try {
+    await expect(deletePersonalImport(scope, ledger.records[0], {
+      canContinue: () => true,
+    })).rejects.toThrow('無法建立匯入資料的還原標記。');
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(setItem).not.toHaveBeenCalled();
+    expect(multiSet).not.toHaveBeenCalled();
+
+    let loadAfterRestart!: typeof loadPersonalImports;
+    jest.isolateModules(() => {
+      loadAfterRestart = require('../services/personalImports').loadPersonalImports;
+    });
+    await expect(loadAfterRestart(scope)).resolves.toEqual(ledger);
   } finally {
     publish.mockRestore();
   }

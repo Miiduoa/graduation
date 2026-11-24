@@ -38,6 +38,7 @@ const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [
 const locks = new Map<string, Promise<unknown>>();
 const pendingWrites = new Map<string, Promise<void>>();
 type Recovery = { raw: string | null };
+const pendingRestorations = new Map<string, Recovery>();
 let writeSequence = 0;
 const recoveryKey = (key: string) => `${key}:checkpoint`;
 
@@ -82,6 +83,8 @@ async function readRecovery(
     }
   }
 
+  const pending = pendingRestorations.get(key);
+  if (pending) return { ...pending, ledger: parseLedger(pending.raw, scope) };
   const journal = readPersonalImportRollback(key);
   if (journal === undefined) return null;
   if (journal === 'null') return { raw: null, ledger: empty() };
@@ -95,16 +98,19 @@ async function restoreLedger(key: string, { raw }: Recovery) {
   else await AsyncStorage.setItem(key, raw);
   await AsyncStorage.multiRemove([recoveryKey(key)]);
   clearPersonalImportRollback(key);
+  pendingRestorations.delete(key);
 }
 
 async function rollbackLedger(key: string, raw: string | null) {
+  const recovery = { raw };
+  pendingRestorations.set(key, recovery);
   try {
     // Preserve the AsyncStorage checkpoint format without JSON string escaping.
     await AsyncStorage.multiSet([[recoveryKey(key), raw ?? 'null']]);
   } catch {
     // Try restoring the primary anyway. The journal still holds the verified bytes.
   }
-  await restoreLedger(key, { raw });
+  await restoreLedger(key, recovery);
 }
 
 async function trackWrite(key: string, write: () => Promise<void>) {
@@ -252,17 +258,16 @@ export function mutatePersonalImportLedger<T>(
       let persistedRaw = recovery ? recovery.raw : await AsyncStorage.getItem(key);
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
       assertWritable();
-      if (recovery) {
-        await trackWrite(key, () => restoreLedger(key, recovery));
-        assertWritable();
-      }
       let persisted = current;
       const checkpoint = async (ledger: PersonalImportLedger) => {
         assertWritable();
         const raw = JSON.stringify(ledger);
         if (raw === JSON.stringify(persisted)) return;
+        // Keep the recovery copy authoritative until the replacement commits,
+        // even if the recovered version no longer fits in AsyncStorage.
+        const needsJournal = typeof guard !== 'function' || (recovery !== null && !hasPersisted);
         const write = async () => {
-          if (typeof guard === 'function') {
+          if (!needsJournal) {
             await AsyncStorage.setItem(key, raw);
           } else {
             assertWritable();
@@ -273,6 +278,7 @@ export function mutatePersonalImportLedger<T>(
               await AsyncStorage.multiRemove([recoveryKey(key)]);
               assertWritable();
               commit();
+              pendingRestorations.delete(key);
             } catch (error) {
               await rollbackLedger(key, persistedRaw);
               throw error;
@@ -289,7 +295,7 @@ export function mutatePersonalImportLedger<T>(
             }
           }
         };
-        if (typeof guard === 'function') return write();
+        if (!needsJournal) return write();
         // Readers wait until the write commits or rollback establishes the verified ledger.
         await trackWrite(key, write);
       };

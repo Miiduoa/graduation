@@ -759,6 +759,8 @@ it.each([
     if (rebuildFails) {
       expect(rejectRebuild).toHaveBeenCalledWith([[key + ':checkpoint', stored]]);
     }
+    expect(listener).not.toHaveBeenCalled();
+    expect(view.queryByText('已刪除這筆個人行程。')).toBeNull();
     if (restoreFails) {
       expect(JSON.parse((await AsyncStorage.getItem(key))!).records).toEqual([]);
       expect(await AsyncStorage.getItem(key + ':checkpoint')).toBe(rebuildFails ? null : stored);
@@ -767,15 +769,16 @@ it.each([
       jest.isolateModules(() => {
         restarted = jest.requireActual('../services/personalImports');
       });
-      expect((await restarted.loadPersonalImports(scope)).records.map((row) => row.title)).toEqual(['寫入途中重驗']);
-      await restarted.mutatePersonalImportLedger(scope, { canContinue: () => true }, (ledger) => ({
-        ledger,
-        result: undefined,
-      }));
+      const recovered = await restarted.loadPersonalImports(scope);
+      expect(recovered.records.map((row) => row.title)).toEqual(['寫入途中重驗']);
+      // A verified retry commits directly from the recovered ledger.
+      view.unmount();
+      await deletePersonalImport(scope, recovered.records[0], { canContinue: () => true });
+      expect(JSON.parse((await AsyncStorage.getItem(key))!).records).toEqual([]);
+      expect(await AsyncStorage.getItem(key + ':checkpoint')).toBeNull();
+    } else {
+      expect(await AsyncStorage.getItem(key)).toBe(stored);
     }
-    expect(await AsyncStorage.getItem(key)).toBe(stored);
-    expect(listener).not.toHaveBeenCalled();
-    expect(view.queryByText('已刪除這筆個人行程。')).toBeNull();
   } finally {
     pending.resolve();
     unsubscribe();

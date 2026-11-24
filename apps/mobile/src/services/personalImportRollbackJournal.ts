@@ -17,13 +17,19 @@ export function readPersonalImportRollback(key: string): string | undefined {
 export function preparePersonalImportRollback(key: string, raw: string | null): () => void {
   const { payload, marker } = journalFiles(key);
   // The document directory survives process restarts and is outside AsyncStorage's quota.
-  // Publish the marker only after the payload is complete.
-  try {
-    payload.write(raw ?? 'null');
+  const encoded = raw ?? 'null';
+  const marked = marker.info().exists;
+  // A retry can reuse the verified copy without rewriting it.
+  if (!marked || payload.textSync() !== encoded) {
+    payload.write(encoded);
+    if (payload.textSync() !== encoded) {
+      throw new Error('無法確認匯入資料的還原副本已寫入。');
+    }
+  }
+  if (!marked) {
     marker.create();
-  } catch (error) {
-    discardPayload(payload);
-    throw error;
+    // On iOS, create() can return normally even if FileManager did not create the file.
+    if (!marker.info().exists) throw new Error('無法建立匯入資料的還原標記。');
   }
   return () => {
     // Commit synchronously so verification and commit cannot be separated by another JS event.
