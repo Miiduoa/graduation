@@ -122,8 +122,8 @@ describe('Providence OSM building outlines', () => {
         schoolId: 'pu', buildings: parsed,
       })).toEqual(parsed);
     }
-    // Do not interpret non-metric values, ranges or out-of-bound measurements.
-    for (const height of ['18,125 m', '18-20 m', '59 yd', '2.499 m', '100.001 m']) {
+    // Do not interpret malformed values, ranges or out-of-bound measurements.
+    for (const height of ['18,125 m', '18-20 m', '59 cubits', '2.499 m', '100.001 m']) {
       expect(parseProvidenceOsmFootprints({
         elements: [way(255784049, library, { building: 'yes', height })],
       }), height).toEqual([]);
@@ -153,6 +153,40 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('converts OSM-standard km, mi, nmi and yd heights without inventing metres', () => {
+    // These are synthetic tags, not claims about any current campus building.
+    // OSM documents kilometre, mile, nautical mile and yard as explicit height units;
+    // convert the measured tag instead of substituting a 12 m illustration.
+    const valid: Array<[string, number]> = [
+      ['0.018 km', 18],
+      ['0.012 mi', 19.312128],
+      ['0.010 nmi', 18.52],
+      ['0.050 nmi', 92.6],
+      ['20 yd', 18.288],
+    ];
+    for (const [height, expected] of valid) {
+      const buildings = parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', height })],
+      });
+      expect(buildings, height).toHaveLength(1);
+      expect(buildings[0].heightMeters, height).toBeCloseTo(expected, 6);
+      expect(buildings[0].heightBasis, height).toBe('osm-tag');
+      expect(parseProvidenceFootprintResponse({
+        schoolId: 'pu', buildings,
+      }), height).toEqual(buildings);
+    }
+    // Do not assume an unstated unit, accept concatenated/ambiguous notation,
+    // or extrude a value outside the bounded 2.5–100 metre scene contract.
+    for (const height of [
+      '0.018km', '0.012 MI', '20 yards', '20 cm', '0.0001 km',
+      '0.010nmi', '0.060 nmi', '0.2 km', '200 mi', '12 yd; 10 ft', '1e-2 km',
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', height })],
+      }), height).toEqual([]);
+    }
+  });
+
   it('converts unambiguous OSM feet and inches without inventing a height', () => {
     // OSM's ft/in convention: 1 foot is exactly 0.3048 metres;
     // 1 inch is exactly 0.0254 metres. No levels-based estimates.
@@ -172,7 +206,7 @@ describe('Providence OSM building outlines', () => {
       }), height).toEqual(parsed);
     }
     for (const height of ["50' 6\"", "50'12\"", '50 ft; 60 ft',
-      '1,000 ft', '333 ft', '50 foot', '50 yd', "5'99\"", '12 inch', "7'4\""]) {
+      '1,000 ft', '333 ft', '50 foot', '50 furlongs', "5'99\"", '12 inch', "7'4\""]) {
       expect(parseProvidenceOsmFootprints({
         elements: [way(255784049, library, { building: 'yes', height })],
       }), height).toEqual([]);
