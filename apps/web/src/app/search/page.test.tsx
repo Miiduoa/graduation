@@ -8,6 +8,7 @@ import { onRouterTransitionStart } from '@/instrumentation-client';
 import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SearchPage from './page';
+import { APP_ROUTER_HISTORY_PUSH } from './searchResultNavigation';
 import { visibleCampusServices } from '@/lib/campusServices';
 import { DIRECTORY_SEARCH_STORAGE_KEY } from '@/lib/campusDirectorySearch';
 
@@ -1107,14 +1108,9 @@ describe('continuing a search after opening a service', () => {
   }
 
   function commitNavigation(url: string) {
-    window.history.pushState(
-      {
-        ...nextState,
-        __PRIVATE_NEXTJS_INTERNALS_TREE: { ...nextState.__PRIVATE_NEXTJS_INTERNALS_TREE },
-      },
-      '',
-      url,
-    );
+    const entry = structuredClone(nextState);
+    Object.defineProperty(entry, APP_ROUTER_HISTORY_PUSH, { value: true });
+    window.history.pushState(entry, '', url);
   }
 
   function traverse(url: string, state: unknown) {
@@ -1292,36 +1288,50 @@ describe('continuing a search after opening a service', () => {
     expect(scroll).not.toHaveBeenCalled();
   });
 
-  it('does not pair a result with an application push enriched by the outer App Router wrapper', async () => {
-    move(librarySearch);
-    const view = renderAfterFrame();
-    const trackedPush = window.history.pushState.bind(window.history);
-    const appRouterPush = vi.spyOn(window.history, 'pushState').mockImplementation((data, unused, url) => {
-      // On direct load the router can wrap the tracker and fill in its metadata first.
-      const nextData = data ?? {
-        __NA: window.history.state.__NA,
-        __PRIVATE_NEXTJS_INTERNALS_TREE: window.history.state.__PRIVATE_NEXTJS_INTERNALS_TREE,
-      };
-      trackedPush(nextData, unused, url);
-    });
-    try {
-      const result = screen.getByRole('link', { name: /^圖書館/ });
-      fireEvent.click(result);
-      expect(window.history.state).toHaveProperty('__campusSearchResultReturn');
-      const href = result.getAttribute('href')!;
-      window.history.pushState(null, '', href);
-      expect(window.location.pathname).toBe('/library');
-    } finally {
-      appRouterPush.mockRestore();
-    }
-    view.unmount();
+  it.each(['router wrapper', 'deep clone'] as const)(
+    'does not pair a result with an application push using router metadata from %s',
+    async (source) => {
+      move(librarySearch);
+      const view = renderAfterFrame();
+      const trackedPush = window.history.pushState.bind(window.history);
+      const appRouterPush = vi
+        .spyOn(window.history, 'pushState')
+        .mockImplementation((data, unused, url) => {
+          // On direct load the router can wrap the tracker and fill in its metadata first.
+          const nextData = data ?? {
+            __NA: window.history.state.__NA,
+            __PRIVATE_NEXTJS_INTERNALS_TREE: window.history.state.__PRIVATE_NEXTJS_INTERNALS_TREE,
+          };
+          trackedPush(nextData, unused, url);
+        });
+      try {
+        const result = screen.getByRole('link', { name: /^圖書館/ });
+        fireEvent.click(result);
+        expect(window.history.state).toHaveProperty('__campusSearchResultReturn');
+        const href = result.getAttribute('href')!;
+        const data =
+          source === 'deep clone'
+            ? {
+                __NA: true,
+                __PRIVATE_NEXTJS_INTERNALS_TREE: structuredClone(
+                  window.history.state.__PRIVATE_NEXTJS_INTERNALS_TREE,
+                ),
+              }
+            : null;
+        window.history.pushState(data, '', href);
+        expect(window.location.pathname).toBe('/library');
+      } finally {
+        appRouterPush.mockRestore();
+      }
+      view.unmount();
 
-    await go(-1);
-    expect(window.location.pathname).toBe('/search');
-    renderAfterFrame();
-    expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
-    expect(scroll).not.toHaveBeenCalled();
-  });
+      await go(-1);
+      expect(window.location.pathname).toBe('/search');
+      renderAfterFrame();
+      expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+      expect(scroll).not.toHaveBeenCalled();
+    },
+  );
 
   it('does not restore from a destination entry replaced with an unrelated page', async () => {
     leaveLibrary();
@@ -1338,17 +1348,20 @@ describe('continuing a search after opening a service', () => {
     expect(scroll).not.toHaveBeenCalled();
   });
 
-  it.each(['object', 'array'] as const)(
+  it.each(['object', 'array', 'map'] as const)(
     'removes the original search identity from a subclass of %s on Back/Forward',
     async (shape) => {
       class CopiedHistoryState {}
       class CopiedArrayHistoryState extends Array<string> {}
+      class CopiedMapHistoryState extends Map<string, number> {}
       const entry = leaveLibrary();
       const destination = window.history.state;
-      const copy = Object.assign(
-        shape === 'array' ? new CopiedArrayHistoryState('payload') : new CopiedHistoryState(),
-        entry,
-      );
+      const payload = {
+        object: new CopiedHistoryState(),
+        array: new CopiedArrayHistoryState('payload'),
+        map: new CopiedMapHistoryState([['payload', 1]]),
+      };
+      const copy = Object.assign(payload[shape], entry);
       window.history.pushState(copy, '', librarySearch);
       await go(-1);
       expect(window.location.pathname).toBe('/library');
@@ -1358,8 +1371,18 @@ describe('continuing a search after opening a service', () => {
       renderAfterFrame();
       expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
       expect(scroll).not.toHaveBeenCalled();
-      expect(window.history.state.unrelated).toBe(7);
-      expect(window.history.state.__campusSearchHistoryEntry).not.toBe(entry.__campusSearchHistoryEntry);
+      if (shape === 'map') {
+        expect(window.history.state.__campusSearchHistoryPayload).toEqual(new Map([['payload', 1]]));
+        expect(window.history.state.__PRIVATE_NEXTJS_INTERNALS_TREE).toEqual(
+          entry.__PRIVATE_NEXTJS_INTERNALS_TREE,
+        );
+      } else {
+        expect(window.history.state.unrelated).toBe(7);
+      }
+      expect(window.history.state.__campusSearchHistoryEntry).toEqual(expect.any(String));
+      expect(window.history.state.__campusSearchHistoryEntry).not.toBe(
+        entry.__campusSearchHistoryEntry,
+      );
       expect(window.history.state).not.toHaveProperty('__campusSearchResultReturn');
       if (shape === 'array') {
         expect(Array.isArray(window.history.state)).toBe(true);

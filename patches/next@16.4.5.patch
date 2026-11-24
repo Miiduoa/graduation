@@ -1,0 +1,24 @@
+diff --git a/dist/client/components/app-router.js b/dist/client/components/app-router.js
+--- a/dist/client/components/app-router.js
++++ b/dist/client/components/app-router.js
+@@ -105,6 +105,8 @@
+         (0, _createhreffromurl.createHrefFromUrl)(new URL(window.location.href)) !== canonicalUrl) {
+             // This intentionally mutates React state, pushRef is overwritten to ensure additional push/replace calls do not trigger an additional history entry.
+             pushRef.pendingPush = false;
++            // Identify this exact HistoryUpdater write to the search history observer.
++            Object.defineProperty(historyState, Symbol.for('nuni.app-router.history-push'), { value: true });
+             window.history.pushState(historyState, '', canonicalUrl);
+         } else {
+             window.history.replaceState(historyState, '', canonicalUrl);
+diff --git a/dist/esm/client/components/app-router.js b/dist/esm/client/components/app-router.js
+--- a/dist/esm/client/components/app-router.js
++++ b/dist/esm/client/components/app-router.js
+@@ -93,6 +93,8 @@
+         createHrefFromUrl(new URL(window.location.href)) !== canonicalUrl) {
+             // This intentionally mutates React state, pushRef is overwritten to ensure additional push/replace calls do not trigger an additional history entry.
+             pushRef.pendingPush = false;
++            // Identify this exact HistoryUpdater write to the search history observer.
++            Object.defineProperty(historyState, Symbol.for('nuni.app-router.history-push'), { value: true });
+             window.history.pushState(historyState, '', canonicalUrl);
+         } else {
+             window.history.replaceState(historyState, '', canonicalUrl);

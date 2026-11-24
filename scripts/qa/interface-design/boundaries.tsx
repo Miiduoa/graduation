@@ -1,6 +1,7 @@
 import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent } from 'react';
 import type { LinkProps } from 'next/link';
 
+import { APP_ROUTER_HISTORY_PUSH } from '../../../apps/web/src/app/search/searchResultNavigation';
 import { onRouterTransitionStart } from '../../../apps/web/src/instrumentation-client';
 
 // Only data providers, Next routing and network boundaries are replaced. Product
@@ -42,7 +43,6 @@ function useFixture() {
 }
 
 function routerState(route: typeof state) {
-  // Like App Router's HistoryUpdater, each commit supplies fresh router internals.
   return {
     __NA: true,
     __PRIVATE_NEXTJS_INTERNALS_TREE: {
@@ -61,7 +61,13 @@ export function navigate(href: string, type: 'push' | 'replace' = 'push') {
   onRouterTransitionStart(destinationUrl, type);
   const currentUrl = location.pathname + location.search + location.hash;
   const push = type === 'push' && destinationUrl !== currentUrl;
-  history[push ? 'pushState' : 'replaceState'](routerState(destination), '', destinationUrl);
+  const entry = routerState(destination);
+  if (push) {
+    Object.defineProperty(entry, APP_ROUTER_HISTORY_PUSH, { value: true });
+    history.pushState(entry, '', destinationUrl);
+  } else {
+    history.replaceState(entry, '', destinationUrl);
+  }
   update(destination);
 }
 window.addEventListener('popstate', () => {

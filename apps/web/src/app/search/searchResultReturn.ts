@@ -4,10 +4,15 @@ import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type RefObjec
 
 import { SERVICE_CATEGORIES, type ServiceCategory } from '@/lib/campusServices';
 
-import { consumeSearchResultNavigation, markSearchResultNavigation } from './searchResultNavigation';
+import {
+  APP_ROUTER_HISTORY_PUSH,
+  consumeSearchResultNavigation,
+  markSearchResultNavigation,
+} from './searchResultNavigation';
 
 const HISTORY_ENTRY_KEY = '__campusSearchHistoryEntry';
 const SEARCH_RETURN_STATE = '__campusSearchResultReturn';
+const HISTORY_STATE_PAYLOAD = '__campusSearchHistoryPayload';
 type ResultKind = 'service' | 'suggested' | 'assistant';
 type SearchReturn = {
   token: string;
@@ -78,17 +83,21 @@ function isHistoryRecord(data: unknown) {
   return prototype === Object.prototype || prototype === null;
 }
 
-function isRouterPush(data: unknown, previousState: unknown) {
-  if (!isHistoryRecord(data) || readEntryKey(data) || readReturn(data)) return false;
-  const state = data as Record<string, unknown>;
-  const previous = previousState as Record<string, unknown> | null;
-  // App Router commits create a fresh router state. Its History wrapper can also
-  // add __NA to app writes, but it copies the current entry's router state by reference.
-  const routerState = state.__PRIVATE_NEXTJS_INTERNALS_TREE;
-  return state.__NA === true &&
-    routerState !== null &&
-    typeof routerState === 'object' &&
-    routerState !== previous?.__PRIVATE_NEXTJS_INTERNALS_TREE;
+function isRouterPush(data: unknown) {
+  return isHistoryRecord(data) &&
+    Object.getOwnPropertyDescriptor(data, APP_ROUTER_HISTORY_PUSH)?.value === true;
+}
+
+function cloneHistoryState(data: Record<string, unknown>) {
+  const cloned = structuredClone(data);
+  if (isHistoryRecord(cloned) || Array.isArray(cloned)) return cloned;
+  // Branded values such as Map serialize their payload but drop own properties.
+  // Keep the payload intact in a record that can also carry the entry metadata.
+  const record: Record<string, unknown> = { [HISTORY_STATE_PAYLOAD]: cloned };
+  for (const key of ['__NA', '__PRIVATE_NEXTJS_INTERNALS_TREE']) {
+    if (key in data) record[key] = data[key];
+  }
+  return record;
 }
 
 function installHistoryTracking() {
@@ -105,11 +114,11 @@ function installHistoryTracking() {
       const previousKey = readEntryKey(previousState);
       const previousPath = window.location.pathname;
       const push = method === 'pushState';
-      const routerCommit = push && isRouterPush(data, previousState);
-      // Use the shape History will serialize, including arrays with custom fields.
+      const routerCommit = push && isRouterPush(data);
+      // Normalize copied metadata before the browser serializes the new entry.
       const cloned = !isHistoryRecord(data) && hasSearchHistoryFields(data);
-      let state = cloned ? structuredClone(data) : data;
-      if (state == null || isHistoryRecord(state) || hasSearchHistoryFields(state)) {
+      let state = cloned ? cloneHistoryState(data) : data;
+      if (cloned || state == null || isHistoryRecord(state)) {
         const current = state as Record<string, unknown> | null | undefined;
         if (push || previousKey || current?.[SEARCH_RETURN_STATE] || current?.[HISTORY_ENTRY_KEY]) {
           const fields = cloned && current ? current : { ...current };
