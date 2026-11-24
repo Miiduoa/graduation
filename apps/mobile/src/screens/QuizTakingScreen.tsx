@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../state/auth';
+import { useSchool } from '../state/school';
+import { useUnsavedQuizExit } from '../hooks/useUnsavedQuizExit';
 import { useDataSource } from '../hooks/useDataSource';
 import type { Question, Quiz, Submission } from '../data/types';
 import { publishedAssignmentGrade } from '../data/assignmentGrade';
@@ -34,25 +36,54 @@ function asText(value: unknown, fallback = ''): string {
 }
 
 export function QuizTakingScreen(props: RouteProps) {
-  const navigation = useNavigation<any>();
   const auth = useAuth();
-  const ds = useDataSource();
+  const { school } = useSchool();
   const params = props.route?.params ?? {};
   const groupId = asText(params.groupId || params.courseSpaceId || params.courseId);
   const quizId = asText(params.quizId || params.assignmentId || params.hwId);
   const uid = auth.user?.uid ?? '';
   const schoolId = auth.profile?.schoolId;
+  return (
+    <QuizAttempt
+      key={JSON.stringify([uid, school.id, schoolId, groupId, quizId])}
+      uid={uid}
+      schoolId={schoolId}
+      groupId={groupId}
+      quizId={quizId}
+    />
+  );
+}
+
+function QuizAttempt({ uid, schoolId, groupId, quizId }: {
+  uid: string;
+  schoolId?: string;
+  groupId: string;
+  quizId: string;
+}) {
+  const navigation = useNavigation();
+  const ds = useDataSource();
+  const mounted = useRef(false);
+  const readVersion = useRef(0);
+  const sending = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [quiz, setQuiz] = useState<Quiz | null>(null);
-  const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
-  const [freeText, setFreeText] = useState('');
+  const [savedAnswers, setSavedAnswers] = useState<Record<string, string | string[]>>({});
+  const [savedText, setSavedText] = useState('');
+  const [edits, setEdits] = useState<Record<string, string>>({});
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [grade, setGrade] = useState(publishedAssignmentGrade(null));
 
   const load = useCallback(async () => {
+    if (sending.current) return;
+    const version = ++readVersion.current;
+    const current = () => mounted.current && version === readVersion.current;
     setLoading(true);
     setError('');
     try {
@@ -62,69 +93,97 @@ export function QuizTakingScreen(props: RouteProps) {
         ds.getQuiz(quizId, uid, groupId, schoolId),
         ds.getSubmission(quizId, uid, groupId) as Promise<Submission | null>,
       ]);
+      if (!current()) return;
       if (!row) throw new Error('找不到這份評量，或你尚未加入這門課。');
       setQuiz(row);
       const already = asText(submission?.submittedAt) || null;
       setSubmittedAt(already);
       setGrade(publishedAssignmentGrade(submission as unknown as Record<string, unknown>));
-      const savedAnswers = (submission as { answers?: Record<string, string | string[]> } | null)
+      const recordedAnswers = (submission as { answers?: Record<string, string | string[]> } | null)
         ?.answers;
-      setAnswers(savedAnswers && typeof savedAnswers === 'object' ? savedAnswers : {});
-      setFreeText(already ? asText(submission?.content) : '');
+      setSavedAnswers(recordedAnswers && typeof recordedAnswers === 'object' ? recordedAnswers : {});
+      setSavedText(asText(submission?.content));
+      if (already) setEdits({});
     } catch (e) {
-      setError(String((e as Error)?.message ?? e));
+      if (current()) setError(String((e as Error)?.message ?? e));
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [ds, groupId, quizId, schoolId, uid]);
 
   useFocusEffect(
     useCallback(() => {
       void load();
+      return () => { readVersion.current++; };
     }, [load]),
   );
 
   const questions = quiz?.questions ?? [];
+  const answers: Record<string, string | string[]> = {};
+  for (const { id } of questions) {
+    const value = edits[id] ?? savedAnswers[id];
+    if (Array.isArray(value) ? value.length : value?.trim()) answers[id] = value;
+  }
+  const freeText = edits.response ?? savedText;
+  const dirty = questions.length
+    ? questions.some(({ id }) => edits[id] !== undefined && edits[id] !== (savedAnswers[id] ?? ''))
+    : freeText !== savedText;
+  useUnsavedQuizExit(!submittedAt && dirty, submitting, edits);
   const overdue = useMemo(() => {
     if (!quiz?.dueAt) return false;
     const due = quiz.dueAt instanceof Date ? quiz.dueAt : new Date(quiz.dueAt);
     return Number.isFinite(due.getTime()) && due.getTime() < Date.now();
   }, [quiz]);
 
-  const setSingle = (questionId: string, value: string) => {
-    setAnswers((current) => ({ ...current, [questionId]: value }));
+  const editAnswer = (questionId: string, value: string) => {
+    if (sending.current) return;
+    const original = questions.length ? savedAnswers[questionId] ?? '' : savedText;
+    setEdits((current) => {
+      if (value !== original) return { ...current, [questionId]: value };
+      const next = { ...current };
+      delete next[questionId];
+      return next;
+    });
   };
 
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = async () => {
+    if (sending.current || submittedAt || loading || error) return;
     const payload =
       questions.length > 0
         ? answers
         : freeText.trim()
           ? { response: freeText.trim() }
           : {};
-    if (questions.length === 0 && !freeText.trim()) {
+    if (Object.keys(payload).length === 0) {
       Alert.alert('請先作答', '請輸入作答內容再送出。');
       return;
     }
+    sending.current = true;
     setSubmitting(true);
     try {
-      await ds.submitQuiz({
+      const receipt = await ds.submitQuiz({
         courseSpaceId: groupId,
         quizId,
         userId: uid,
         content: questions.length > 0 ? '' : freeText.trim(),
         answers: payload,
       });
-      setSubmittedAt(new Date().toISOString());
-      Alert.alert('已繳交', '這份評量已寫入與作業相同的繳交紀錄。', [
-        { text: '返回', onPress: () => navigation.goBack() },
-      ]);
+      if (!mounted.current) return;
+      setSubmittedAt(receipt.submittedAt);
+      if (navigation.isFocused()) {
+        Alert.alert('已繳交', '這份評量已寫入與作業相同的繳交紀錄。', [
+          { text: '返回', onPress: () => {
+            if (mounted.current && navigation.isFocused()) navigation.goBack();
+          } },
+        ]);
+      }
     } catch (e) {
-      Alert.alert('送出失敗', String((e as Error)?.message ?? e));
+      if (mounted.current && navigation.isFocused()) Alert.alert('送出失敗', String((e as Error)?.message ?? e));
     } finally {
-      setSubmitting(false);
+      sending.current = false;
+      if (mounted.current) setSubmitting(false);
     }
-  }, [answers, ds, freeText, groupId, navigation, questions.length, quizId, uid]);
+  };
 
   return (
     <KeyboardAvoidingView
@@ -188,8 +247,9 @@ export function QuizTakingScreen(props: RouteProps) {
                 <QuestionField
                   key={question.id}
                   question={question}
-                  value={answers[question.id]}
-                  onChange={(value) => setSingle(question.id, value)}
+                  value={edits[question.id] ?? savedAnswers[question.id]}
+                  disabled={submitting}
+                  onChange={(value) => editAnswer(question.id, value)}
                 />
               ))
             ) : (
@@ -197,7 +257,8 @@ export function QuizTakingScreen(props: RouteProps) {
                 <Text style={{ fontSize: 14, fontWeight: '600', marginBottom: 6 }}>作答內容</Text>
                 <TextInput
                   value={freeText}
-                  onChangeText={setFreeText}
+                  editable={!submitting}
+                  onChangeText={(value) => editAnswer('response', value)}
                   placeholder="依教師說明作答"
                   multiline
                   accessibilityLabel="作答內容"
@@ -247,10 +308,12 @@ function formatAnswer(value: string | string[] | undefined) {
 function QuestionField({
   question,
   value,
+  disabled,
   onChange,
 }: {
   question: Question;
   value: string | string[] | undefined;
+  disabled: boolean;
   onChange: (value: string) => void;
 }) {
   const selected = typeof value === 'string' ? value : '';
@@ -259,6 +322,7 @@ function QuestionField({
       <View>
         <Text style={{ fontWeight: '600', marginBottom: 6 }}>{question.prompt}</Text>
         <TextInput
+          editable={!disabled}
           value={selected}
           onChangeText={onChange}
           multiline={question.type === 'essay'}
@@ -284,6 +348,8 @@ function QuestionField({
         return (
           <Pressable
             key={option.id}
+            disabled={disabled}
+            accessibilityState={{ disabled, selected: active }}
             onPress={() => onChange(option.value)}
             accessibilityRole="button"
             accessibilityLabel={option.label}

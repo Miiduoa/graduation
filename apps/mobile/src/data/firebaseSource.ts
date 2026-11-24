@@ -1,5 +1,5 @@
 import { postNuniWebFn } from '../services/nuniWebFn';
-import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
+import { assertPrivateFileNamespace, privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import type { DataSource } from './source';
 import { lostFoundSource } from './lostFoundSource';
@@ -7,6 +7,7 @@ import { createOrderThroughServer } from './orderSource';
 import { toPublicSchoolId } from './schoolIds';
 import type {
   Announcement,
+  Attachment,
   ActionQueueItem,
   Assignment,
   BusArrival,
@@ -923,6 +924,22 @@ export function asFirebaseCourseGrades(rows: Grade[]): Grade[] {
 }
 
 // ===== Firebase DataSource 實作 =====
+
+// Older drafts store URLs directly. Reject unreadable entries rather than silently
+// dropping them when the student confirms the attachment list.
+function matchesReviewedAttachments(raw: unknown, expected: readonly unknown[]): boolean {
+  if (raw == null) return expected.length === 0;
+  if (!Array.isArray(raw) || raw.length !== expected.length) return false;
+  const metadata = ['id', 'name', 'type', 'size', 'mimeType'] as const;
+  return raw.every((entry, index) => {
+    const previous = expected[index];
+    const [path] = privateAttachmentPaths([entry]);
+    if (!path || path !== privateAttachmentPaths([previous])[0]) return false;
+    if (typeof entry === 'string' || typeof previous === 'string') return entry === previous;
+    const reviewed = previous as Partial<Attachment>;
+    return metadata.every(key => entry[key] === reviewed[key]);
+  });
+}
 
 export const firebaseSource: DataSource = {
   // ===== 公告 =====
@@ -2044,12 +2061,14 @@ export const firebaseSource: DataSource = {
     return submissions[0] ?? null;
   },
 
-  async submitAssignment(data) {
+  async submitAssignment(data, reviewedDraftAttachments) {
     const userId = data.userId;
     const assignmentId = data.assignmentId;
     const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
     const content = data.content?.trim() ?? '';
-    for (const attachment of data.attachments ?? [])
+    const reviewed = reviewedDraftAttachments !== undefined;
+    const attachments = data.attachments ?? [];
+    for (const attachment of attachments)
       assertPrivateFileNamespace(attachment.url, `groups/${groupId}/assignments/${assignmentId}/submissions/${userId}`);
     if (!userId || (!content && !data.attachments?.length) || content.length > 20000) {
       throw new Error('請輸入 1 至 20,000 字的作業內容。');
@@ -2106,6 +2125,9 @@ export const firebaseSource: DataSource = {
       if (existing.exists() && existing.data()?.submittedAt) {
         throw new Error('這份作業已有繳交紀錄，請重新整理確認。');
       }
+      if (reviewed && !matchesReviewedAttachments(existing.data()?.attachments, reviewedDraftAttachments)) {
+        throw new Error('草稿附件已變更或無法辨識，請重新核對後再繳交。');
+      }
       if (getAuthInstance().currentUser?.uid !== userId) {
         throw new Error('登入身分已變更，請重新開啟課程。');
       }
@@ -2116,7 +2138,7 @@ export const firebaseSource: DataSource = {
           groupId,
           assignmentId,
           content,
-          ...(data.attachments?.length ? { attachments: data.attachments } : {}),
+          ...(reviewed || attachments.length ? { attachments } : {}),
           status: 'submitted',
           submittedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -2132,6 +2154,7 @@ export const firebaseSource: DataSource = {
     if (!receipt || receipt.userId !== userId || receipt.groupId !== groupId
       || receipt.assignmentId !== assignmentId || receipt.content !== content
       || receipt.status !== 'submitted' || !receipt.submittedAt
+      || (reviewed && !matchesReviewedAttachments(receipt.attachments, attachments))
       || parseTaipeiInstant(receipt.submittedAt) === null) {
       throw new Error('繳交結果尚未確認，請重新讀取紀錄，內容仍會保留。');
     }

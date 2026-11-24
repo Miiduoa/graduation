@@ -316,6 +316,7 @@ export type DataSource = {
   ) => Promise<Submission | null>;
   submitAssignment: (
     data: Omit<Submission, 'id' | 'submittedAt' | 'status'>,
+    reviewedDraftAttachments?: readonly (string | Attachment)[],
   ) => Promise<Submission>;
   gradeSubmission: (
     id: string,
