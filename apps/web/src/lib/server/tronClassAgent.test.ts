@@ -4,6 +4,7 @@ import { NuniError } from '@campus/shared/src/nuni';
 import type { TronClassRequiredAgentGrant } from '@campus/shared/src/tronClassAgentPermissions';
 import type { TronClassPreparation, TronClassSnapshot } from '../tronClassIntegrationTypes';
 import type { TronClassSnapshotReadOptions } from './tronClassIntegrationSource';
+import { tronClassCompoundClauses } from '../tronClassAgentIntent';
 import { createTronClassAgentService } from './tronClassAgent';
 
 const owner = 'firebase:agent-fixture';
@@ -70,6 +71,55 @@ describe('scoped deterministic TronClass Agent tools', () => {
       expect(result.snapshot?.homework).toEqual([{ ...homework, courseName: '外交' }]);
     },
   );
+
+  it.each([
+    '查玩課雲『外交』未交作業和校園公告',
+    '查玩課雲《外交》未交作業和校園公告',
+    '查玩課雲『外交』課程，查未交作業，查校園公告',
+    '查玩課雲未交作業，查玩課雲『外交』課程，查校園公告',
+    '查玩課雲外交教材，查未交作業',
+    '查『外交』作業，查玩課雲未交作業和校園公告',
+  ])('uses the original compound course scope for %s', async (compoundQuestion) => {
+    const f = fixture();
+    const courses = [{ ...course, name: '外交' }, snapshot.courses[1]];
+    const privateHomework = { ...homework, courseName: '外交' };
+    f.read.mockImplementation(async (_owner, options) => ({ ...snapshot, courses,
+      homework: options?.include?.homework ? [privateHomework, { ...homework, courseId: 102 }] : [],
+    }));
+    const clauses = tronClassCompoundClauses(compoundQuestion).filter(clause => clause.includes('未交作業'));
+    expect(clauses).toHaveLength(1);
+    const result = await f.service.ask(owner, { question: clauses[0]!, compoundQuestion });
+    expect(f.read.mock.calls).toEqual([
+      [owner, { include: { homework: false, announcements: false, materials: false } }],
+      [owner, { courseId: 101, include: { homework: true, announcements: false, materials: false } }],
+    ]);
+    expect(result.snapshot?.homework).toEqual([privateHomework]);
+  });
+
+  it.each([
+    '查玩課雲未交作業和校園公告',
+    '查玩課雲「資料庫」未交作業，查玩課雲「計算機概論」未交作業',
+    '查玩課雲「資料庫」外交未交作業和校園公告',
+    '查玩課雲「外交」未交作業和校園公告',
+  ])('requests confirmation without a private read for %s', async (compoundQuestion) => {
+    const f = fixture();
+    const clauses = tronClassCompoundClauses(compoundQuestion);
+    expect(clauses).toHaveLength(1);
+    const result = await f.service.ask(owner, { question: clauses[0]!, compoundQuestion });
+    expect(result.selection).toBe('course');
+    expect(result.snapshot?.homework).toEqual([]);
+    expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
+      include: { homework: false, announcements: false, materials: false },
+    });
+  });
+
+  it('rejects a supplemental clause that dropped its quoted target', async () => {
+    const f = fixture();
+    await expect(f.service.ask(owner, { question: '查玩課雲未交作業',
+      compoundQuestion: '查玩課雲『外交』未交作業和校園公告',
+    })).rejects.toMatchObject({ status: 422 });
+    expect(f.read).not.toHaveBeenCalled();
+  });
 
   it.each([
     '查玩課雲『外交』作業',

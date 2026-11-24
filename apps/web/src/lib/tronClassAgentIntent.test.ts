@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchesTronClassHomeworkCourse, isTronClassHomeworkOverview, isTronClassCompoundDownloadAndPrepare, canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs, tronClassReadRequestVerbs } from './tronClassAgentIntent';
+import { tronClassQuotedTargets, matchesTronClassHomeworkCourse, isTronClassHomeworkOverview, isTronClassCompoundDownloadAndPrepare, canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs, tronClassReadRequestVerbs } from './tronClassAgentIntent';
 
 /** Unknown leftover tokens now make a sentence ambiguous (confirmation), which is acceptable. */
 function expectAuthorizedOrAmbiguous(
@@ -44,6 +44,19 @@ describe('TronClass homework overview scope', () => {
     'preserves target text in %s', question => {
       expect(parseTronClassAgentIntent(question)?.intent).toBe('homework');
       expect(isTronClassHomeworkOverview(question)).toBe(false);
+    },
+  );
+
+  it.each(['『外交』', '《外交》', '〈外交〉', '「外交和歷史」'])(
+    'retains the literal course target through compound splitting for %s', target => {
+      const clause = `查玩課雲${target}未交作業`;
+      const question = `${clause}和校園公告`;
+      expect(tronClassCompoundClauses(question)).toEqual([clause]);
+      expect(tronClassQuotedTargets(clause)).toEqual([target.slice(1, -1)]);
+      expect(isTronClassHomeworkOverview(clause)).toBe(false);
+      expect(isTronClassHomeworkOverview(question)).toBe(false);
+      expect(matchesTronClassHomeworkCourse(clause, target.slice(1, -1))).toBe(true);
+      expect(matchesTronClassHomeworkCourse(clause, '資料庫')).toBe(false);
     },
   );
 

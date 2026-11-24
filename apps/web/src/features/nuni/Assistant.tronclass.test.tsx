@@ -106,6 +106,7 @@ it.each([
   ['玩課雲作業，查校園公告', []],
   ['開啟玩課雲作業，安排今天下午作業準備30分鐘', []],
   ['開啟玩課雲作業，查一下還沒交的有哪些', ['查一下還沒交的有哪些 玩課雲']],
+  ['查玩課雲『外交』未交作業和校園公告', ['查玩課雲『外交』未交作業']],
   ['查玩課雲未交作業和校園公告', ['查玩課雲未交作業']],
   ['幫我查 TronClass 未交作業，然後查公車', ['幫我查 TronClass 未交作業']],
 ])('keeps the whole multi-clause request %s on the existing cross-service plan and adds its TronClass clauses %j', async (question, clauses) => {
@@ -124,9 +125,35 @@ it.each([
   expect(planned).toEqual([question]);
   if (clauses.length) await screen.findByRole('heading', { name: '私人期中報告' });
   await waitFor(() => expect(fetch.mock.calls.filter(([url]) => url === '/api/tronclass/agent')
-    .map(([, init]) => body(init).question)).toEqual(clauses));
+    .map(([, init]) => body(init))).toEqual(clauses.map(clause => ({
+    action: 'ask', question: clause, compoundQuestion: question,
+  }))));
   // The planner's reply comes first and stays in the thread beside the TronClass answer.
   expect(screen.getByText('跨服務規劃結果')).toBeTruthy();
+});
+
+it('retains the original compound request when retrying a homework supplement', async () => {
+  const question = '查玩課雲未交作業和校園公告';
+  const calls: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/nuni/assistant/ask') return json({ answer: '校園公告結果', steps: [], cards: [] });
+    if (url === '/api/tronclass/agent') {
+      calls.push(body(init));
+      return json({ ...base, requestId: `compound-scope-${calls.length}`, selection: 'course',
+        answer: '請確認要查詢哪一門課的作業。', actions: [], snapshot: { ...base.snapshot!, homework: [] } });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }));
+  render(<Assistant />);
+  fireEvent.click(await screen.findByRole('checkbox'));
+  await ask(question);
+  fireEvent.click(await screen.findByRole('button', { name: '重新查詢 TronClass' }));
+  await waitFor(() => expect(calls).toEqual(Array.from({ length: 2 }, () => ({
+    action: 'ask', question: '查玩課雲未交作業', compoundQuestion: question,
+  }))));
+  expect(screen.getByText('校園公告結果')).toBeTruthy();
+  expect(screen.queryByText('私人期中報告')).toBeNull();
 });
 
 it('keeps the planner coursework as follow-up context after its TronClass supplement', async () => {

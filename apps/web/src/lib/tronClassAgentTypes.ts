@@ -69,6 +69,7 @@ export type TronClassAgentReply = {
 
 export type TronClassAgentAskInput = {
   question: string;
+  compoundQuestion?: string;
   courseId?: number;
   homeworkId?: number;
 };

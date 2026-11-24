@@ -10,11 +10,11 @@ import {
   type TronClassIdentity,
 } from './tronClassIntegrationClient';
 import type { TronClassPreparation, TronClassSnapshot } from './tronClassIntegrationTypes';
-import type { TronClassAgentCapabilities, TronClassAgentReply } from './tronClassAgentTypes';
+import type { TronClassAgentAskInput, TronClassAgentCapabilities, TronClassAgentReply } from './tronClassAgentTypes';
 import { TRONCLASS_AGENT_MAX_ACTIONS } from './tronClassAgentTypes';
 import { parseTronClassAgentIntent } from './tronClassAgentIntent';
 
-export type TronClassAgentQuestion = { question: string; courseId?: number; homeworkId?: number };
+export type TronClassAgentQuestion = TronClassAgentAskInput;
 
 export function isTronClassAuthorityError(reason: unknown): boolean {
   return reason instanceof TronClassRequestError && (reason.status === 401 || [

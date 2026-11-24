@@ -68,10 +68,13 @@ export async function handleTronClassAgent(request: NextRequest, dependencies: T
         result = await service.capability(actor.ownerKey);
         break;
       case 'ask': {
-        only(input, ['action', 'question', 'courseId', 'homeworkId']);
+        only(input, ['action', 'question', 'compoundQuestion', 'courseId', 'homeworkId']);
         if (typeof input.question !== 'string' || !input.question.trim() || input.question.length > 1000) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
+        const compoundQuestion = input.compoundQuestion;
+        if (compoundQuestion !== undefined && (typeof compoundQuestion !== 'string' ||
+          !compoundQuestion.trim() || compoundQuestion.length > 1000)) throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
         if (!dependencies.rateLimit) readLimiter.check(actor.ownerKey);
-        result = await service.ask(actor.ownerKey, { question: input.question,
+        result = await service.ask(actor.ownerKey, { question: input.question, ...(compoundQuestion === undefined ? {} : { compoundQuestion }),
           ...(input.courseId === undefined ? {} : { courseId: id(input.courseId) }),
           ...(input.homeworkId === undefined ? {} : { homeworkId: id(input.homeworkId) }),
         });

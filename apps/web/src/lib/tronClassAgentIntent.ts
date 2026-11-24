@@ -41,7 +41,7 @@ const CLAUSE_SEPARATOR = /(?:然後|接著|順便|並且|另外|同時|以及|�
  * 跨服務規劃，其中的玩課雲子句另由 tronClassCompoundClauses 交給 Agent 補充回答。
  */
 function isMultiClauseRequest(question: string): boolean {
-  return splitClauses(textWithoutQuotedSpans(question.normalize('NFKC'))).length >= 2;
+  return splitClauses(question.normalize('NFKC')).length >= 2;
 }
 
 const TRONCLASS_KEYWORD = /(?:\btron\s*class\b|創課|玩課雲)/i;
@@ -390,7 +390,15 @@ function splitClauses(text: string): string[] {
   let start = 0;
   let hasContent = false;
   let hasPredicate = false;
+  const quotes = typographicQuoteSpans(text);
+  let quoteIndex = 0;
   for (const token of tokensFor(text)) {
+    while (quotes[quoteIndex] && quotes[quoteIndex]!.end <= token.start) quoteIndex++;
+    const quote = quotes[quoteIndex];
+    if (quote && token.start >= quote.open) {
+      hasContent = true;
+      continue;
+    }
     if (!separatesClause(token, hasContent, hasPredicate)) {
       hasContent ||= !isAllowedRequestPrefix(token);
       hasPredicate ||= predicateKindOf(token) !== null;
@@ -449,10 +457,10 @@ const PUNCT_CHAR = /[，,；;。！!？?\r\n：:()（）\[\]【】《》〈〉�
 const FILE_EXTENSION = /\.[A-Za-z][A-Za-z0-9]{0,7}$/u;
 const BARE_FILENAME_BODY = /^[\p{L}\p{N}_-]+$/u;
 const NESTED_BRACKET_PAIRS: Array<readonly [string, string]> = [
-  ['（', '）'], ['(', ')'], ['【', '】'], ['[', ']'], ['《', '》'], ['〈', '〉'],
+  ['（', '）'], ['(', ')'], ['【', '】'], ['[', ']'],
 ];
 const TYPOGRAPHIC_QUOTE_PAIRS: Array<readonly [string, string]> = [
-  ['「', '」'], ['『', '』'], ['“', '”'], ['‘', '’'], ['"', '"'], ["'", "'"], ['`', '`'],
+  ['「', '」'], ['『', '』'], ['“', '”'], ['‘', '’'], ['"', '"'], ["'", "'"], ['`', '`'], ['《', '》'], ['〈', '〉'],
 ];
 function containsLexiconVerb(value: string): boolean {
   return [...WRITE_VERB_SET, ...QUERY_VERBS, ...PREPARE_ACTIONS].some(verb => verb.length > 0 && value.includes(verb));
@@ -890,7 +898,8 @@ function nextNegatedWriteStop(tokens: Token[], interior: boolean[], from: number
 }
 
 function readRoutingText(text: string): string {
-  const tokens = tokensFor(text);
+  const mask = typographicQuoteMask(text);
+  const tokens = tokensFor(text).filter(token => !tokenIsProtected(token, mask));
   const writeTargets = negatedWriteTargets(tokens);
   const interior = modifierInteriorIndex(tokens);
   const parts: string[] = [];
@@ -1183,7 +1192,7 @@ function textWithoutQuotedSpans(text: string, replacement = ' '): string {
 }
 
 function keywordOnlyInsideQuotes(text: string): boolean {
-  return TRONCLASS_KEYWORD.test(text) && !TRONCLASS_KEYWORD.test(textWithoutQuotedSpans(text));
+  return TRONCLASS_KEYWORD.test(text) && !parseReadRequest(text).hasOutsideQuotes(TRONCLASS_KEYWORD);
 }
 
 /** Examples, translations, quotes, general explanations and negated reads do not authorize a private read. */
@@ -1242,7 +1251,7 @@ function dataTypeMask(text: string, includeQuotes = true): readonly boolean[] {
     add(scan.firstOpen, text.length);
   } else {
     for (const span of scan.spans) {
-      if (includeQuotes || !isBookTitleSpan(text, span.start)) add(span.start, span.end);
+      add(span.start, span.end);
     }
   }
   let depth = 0;
@@ -1834,8 +1843,8 @@ function wholeRequestAllowsCompoundRead(question: string): boolean {
   if (!allTokensKnown(original)) return false;
   if (classifyTronClassSentence(question)?.outcome === 'clearly-write') return false;
   if (hasUnprovenWrite(textWithoutQuotedSpans(original))) return false;
-  const routingText = readRoutingText(textWithoutQuotedSpans(original));
-  if (hasDescriptiveAction(routingText) ||
+  const routingText = readRoutingText(original);
+  if (hasDescriptiveAction(textWithoutQuotedSpans(routingText)) ||
     analyzeClauses(visibleCommandTokens(routingText)).some(clause => clause.hasUnsupportedOwner)) return false;
   const clauses = splitClauses(routingText);
   if (clauses.length === 0) return false;
@@ -1850,44 +1859,70 @@ function wholeRequestAllowsCompoundRead(question: string): boolean {
  * Explicit navigation stays with the planner, and a clause is never rewritten
  * into a write or a schedule.
  */
-export function tronClassCompoundClauses(question: string): string[] {
-  const original = question.normalize('NFKC').trim();
+function parseTronClassCompound(question: string) {
   if (typeof question !== 'string' || !question.trim() || question.length > 1000 ||
     !TRONCLASS_KEYWORD.test(question) || !isMultiClauseRequest(question) ||
-    tronClassExplicitNavigationQuestion(question) || !wholeRequestAllowsCompoundRead(question) ||
-    !TRONCLASS_KEYWORD.test(readRoutingText(original))) return [];
-  // Split the text after negated writes are removed, so 和／與 inside a
-  // negated object cannot become their own private-read clauses.
-  const clauses = splitClauses(readRoutingText(textWithoutQuotedSpans(original)));
+    tronClassExplicitNavigationQuestion(question) || !wholeRequestAllowsCompoundRead(question)) return null;
+  const original = question.normalize('NFKC').trim();
+  const routed = readRoutingText(original);
+  if (!parseReadRequest(routed).hasOutsideQuotes(TRONCLASS_KEYWORD)) return null;
+  // Keep the original target spans in every clause, including clauses that
+  // deduplication will omit from the set of supplemental answers.
+  const clauses = splitClauses(routed);
+  const courseScopes: ReturnType<typeof readCourseScope>[] = [];
   const result: string[] = [];
   const seen = new Set<string>();
   let context = false;
   for (const clause of clauses) {
     let candidate: string | null = null;
-    if (TRONCLASS_KEYWORD.test(clause)) {
-      if (!TRONCLASS_KEYWORD.test(readRoutingText(clause))) continue;
+    const target = parseReadRequest(clause);
+    const continuation = target.hasOutsideQuotes(TRONCLASS_CONTINUATION) &&
+      !tokensFor(clause).some(isNegatorToken);
+    if (target.hasOutsideQuotes(OTHER_SERVICE_OR_SCHEDULE)) continue;
+    if (target.hasOutsideQuotes(TRONCLASS_KEYWORD)) {
       context = true;
       candidate = clause;
-    } else if (context && TRONCLASS_CONTINUATION.test(clause) && !OTHER_SERVICE_OR_SCHEDULE.test(clause) && !tokensFor(clause).some(isNegatorToken)) {
+    } else if (continuation) {
+      // A companion can constrain the course before the LMS is named.
+      // Only clauses with established LMS context are answered separately.
+      if (!context) {
+        courseScopes.push(target.courseScope());
+        continue;
+      }
       const predicates = analyzeClauses(visibleCommandTokens(clause))[0]?.predicates ?? [];
       const questionMark = clause.endsWith('?') ? '?' : '';
       candidate = predicates.some(predicate => predicate.kind === 'read' || predicate.kind === 'download')
         ? `${clause.slice(0, clause.length - questionMark.length)} 玩課雲${questionMark}`
         : `玩課雲${clause}`;
     }
-    if (!candidate || OTHER_SERVICE_OR_SCHEDULE.test(candidate.replace(TRONCLASS_KEYWORD, ''))) continue;
+    if (!candidate) continue;
     const bare = candidate.replace(/[?!.。]+$/u, '').trim();
     if (tronClassExplicitNavigationQuestion(candidate) || isTronClassNavigationTarget(bare) ||
       isTronClassNavigationTarget(bare.replace(/^(?:(?:請|麻煩)?(?:幫我|替我)?(?:開啟|打開|開|前往|進入))\s*/u, ''))) continue;
+    courseScopes.push(target.courseScope());
     const parsed = parseTronClassAgentIntent(candidate);
     if (!parsed || parsed.intent === 'capabilities') continue;
     const key = `${parsed.intent}:${parsed.pendingOnly}:${parsed.unsupportedReason ?? ''}`;
-    if (seen.has(key)) continue;
+    if (seen.has(key) || result.length >= MAX_COMPOUND_TRONCLASS_CLAUSES) continue;
     seen.add(key);
     result.push(candidate);
-    if (result.length >= MAX_COMPOUND_TRONCLASS_CLAUSES) break;
   }
-  return result;
+  return { clauses: result, courseScopes };
+}
+
+export function tronClassCompoundClauses(question: string): string[] {
+  return parseTronClassCompound(question)?.clauses ?? [];
+}
+
+export function tronClassAgentHomeworkScope(question: string, compoundQuestion?: string) {
+  const compound = compoundQuestion === undefined ? null : parseTronClassCompound(compoundQuestion);
+  if (compoundQuestion !== undefined && !compound?.clauses.includes(question)) return null;
+  const scopes = (compound?.courseScopes ?? [parseReadRequest(question).courseScope()]).filter(scope => !scope.overview);
+  return {
+    overview: !compound && scopes.length === 0 && !isMultiClauseRequest(question),
+    matches: (name: string, code: string) => scopes.length > 0 &&
+      scopes.every(scope => scope.matches(name, code)),
+  };
 }
 
 function textWithoutFilenameTokens(text: string): string {
@@ -1908,40 +1943,30 @@ const DATA_TYPES = [
   { intent: 'unsupported', pattern: /問卷/u },
 ] as const;
 
-function isBookTitleSpan(text: string, start: number): boolean {
-  return text[start] === '《' || text[start] === '〈';
-}
-
-function readObjectTarget(text: string, inspectRawClauses = false) {
-  const mask = dataTypeMask(text, !inspectRawClauses);
-  // Only the syntax of the question comes from outside quotes. Data-type
-  // labels on either side of the question marker are read from the raw tokens.
+function parseReadRequest(question: string) {
+  const text = question.normalize('NFKC').trim();
+  const quotes = typographicQuoteSpans(text);
+  const mask = dataTypeMask(text, false);
   const quoteEnds: number[] = [];
-  if (inspectRawClauses) {
-    for (const span of typographicQuoteSpans(text)) quoteEnds[span.open] = span.end;
-    const brackets = bracketsFor(text);
-    if (brackets.balanced) {
-      for (const span of brackets.spans) {
-        if (isBookTitleSpan(text, span.start)) quoteEnds[span.start] = span.end;
-      }
-    }
-  }
+  for (const span of quotes) quoteEnds[span.open] = span.end;
   let quoteEnd = 0;
   let scanned = 0;
   const objectTypes = new Set<(typeof DATA_TYPES)[number]>();
   let hasContent = false;
   let directType: (typeof DATA_TYPES)[number] | undefined;
+  let namedType: (typeof DATA_TYPES)[number] | undefined;
   let complementAt = text.length;
   let sawRead = false;
   let conflict = false;
   for (const token of tokensFor(text)) {
-    while (inspectRawClauses && scanned <= token.start) {
+    while (scanned <= token.start) {
       quoteEnd = Math.max(quoteEnd, quoteEnds[scanned++] ?? 0);
     }
-    const quoted = inspectRawClauses && token.start < quoteEnd;
-    if (inspectRawClauses && !quoted && !tokenIsProtected(token, mask) &&
+    const quoted = token.start < quoteEnd;
+    if (!quoted && !tokenIsProtected(token, mask) &&
       separatesClause(token, hasContent, sawRead)) {
-      directType = undefined;
+      if (/^[?!.。]$/u.test(token.value) && !text.slice(token.end).trim()) break;
+      directType = namedType = undefined;
       objectTypes.clear();
       complementAt = text.length;
       sawRead = false;
@@ -1965,18 +1990,32 @@ function readObjectTarget(text: string, inspectRawClauses = false) {
       if (!type.pattern.test(token.value)) continue;
       if (token.start < complementAt) {
         directType = type;
-        if (inspectRawClauses) objectTypes.add(type);
-      } else if (type !== directType || (inspectRawClauses && objectTypes.size > 1)) {
+        if (!quoted) namedType = type;
+        objectTypes.add(type);
+      } else if (type !== directType || objectTypes.size > 1) {
         conflict = true;
       }
     }
   }
-  return { intent: directType?.intent, complementAt, conflict };
+  const intent = namedType?.intent;
+  return {
+    intent, complementAt, conflict,
+    courseScope: () => readCourseScope(text, quotes, intent, conflict),
+    hasOutsideQuotes(pattern: RegExp, end = text.length): boolean {
+      let start = 0;
+      for (const quote of quotes) {
+        if (quote.open >= end) break;
+        if (pattern.test(text.slice(start, quote.open))) return true;
+        start = quote.end;
+      }
+      return start < end && pattern.test(text.slice(start, end));
+    },
+  };
 }
 
 export function hasTronClassReadTargetConflict(question: string): boolean {
   if (typeof question !== 'string' || question.length > 1000 || !TRONCLASS_KEYWORD.test(question)) return false;
-  return readObjectTarget(question.normalize('NFKC').trim(), true).conflict;
+  return parseReadRequest(question).conflict;
 }
 
 const HOMEWORK_OVERVIEW_WORDS = new Set([
@@ -1989,29 +2028,57 @@ const HOMEWORK_OVERVIEW_WORDS = new Set([
   '我想', '我要', '我', '想', '要', '可以', '能不能', '把', '將', 'my', 'the', 'all',
 ]);
 
-/** A cross-course read requires a question with no unresolved target text. */
-export function isTronClassHomeworkOverview(question: string): boolean {
-  const text = question.normalize('NFKC').trim().replace(/所有/g, '全部');
-  return typographicQuoteSpans(text).length === 0 && tokensFor(text).every(token => {
+function isCourseReadFrame(text: string, intent?: TronClassAgentIntent, targetSpans: readonly QuoteSpan[] = []): boolean {
+  let index = 0;
+  return tokensFor(text).every(token => {
+    while (targetSpans[index] && targetSpans[index]!.end <= token.start) index++;
+    const target = targetSpans[index];
+    if (target && token.start >= target.open && token.end <= target.end) return true;
     const predicate = predicateKindOf(token);
     return !token.value.trim() || token.kind === 'punct' || predicate === 'read' || predicate === 'prepare' ||
       HOMEWORK_OVERVIEW_WORDS.has(token.value.toLowerCase()) ||
+      (intent !== 'homework' && DATA_TYPES.some(type => type.intent === intent && type.pattern.test(token.value))) ||
       (predicate === 'write' && matchesStatusSuffix(text, token.end) !== undefined);
   });
 }
 
-/** Resolve an unquoted course only when its full name accounts for the target text. */
+function readCourseScope(text: string, spans: readonly QuoteSpan[], intent: TronClassAgentIntent | undefined, conflict: boolean) {
+  const quoted = spans.map(span => text.slice(span.inner, span.close));
+  const normalizeTarget = (name: string) => name.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, '');
+  const targets = quoted.map(normalizeTarget);
+  const complete = !conflict && !hasReadBlockingDecoration(text);
+  const onlyQuotedTargets = spans.length > 0 && isCourseReadFrame(text, intent, spans);
+  return {
+    quoted,
+    overview: complete && spans.length === 0 && isCourseReadFrame(text.replace(/所有/g, '全部'), intent),
+    matches(...names: string[]): boolean {
+      if (!complete) return false;
+      const aliases = names.map(normalizeTarget).filter(Boolean);
+      if (targets.length) return onlyQuotedTargets && targets.every(value => aliases.includes(value));
+      return aliases.some(target => {
+        if (target.length < 2) return false;
+        const literal = new RegExp(Array.from(target, escapeRegex).join('\\s*'), 'u');
+        const match = literal.exec(text.toLocaleLowerCase());
+        // Retokenize the request frame at the boundary of an unquoted literal.
+        return !!match && isCourseReadFrame(
+          (text.slice(0, match.index) + ' ' + text.slice(match.index + match[0].length)).replace(/所有/g, '全部'), intent);
+      });
+    },
+  };
+}
+
+export function isTronClassHomeworkOverview(question: string): boolean {
+  const target = parseReadRequest(question);
+  return (target.intent === 'homework' || target.intent === undefined) &&
+    !isMultiClauseRequest(question) && target.courseScope().overview;
+}
+
 export function matchesTronClassHomeworkCourse(question: string, name: string): boolean {
-  const target = name.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, '');
-  const text = question.normalize('NFKC').toLocaleLowerCase();
-  if (target.length < 2 || !text.replace(/\s+/g, '').includes(target)) return false;
-  const literal = new RegExp(Array.from(target, escapeRegex).join('\\s*'), 'u');
-  return isTronClassHomeworkOverview(text.replace(literal, ' '));
+  return parseReadRequest(question).courseScope().matches(name);
 }
 
 export function tronClassQuotedTargets(question: string): string[] {
-  const text = question.normalize('NFKC');
-  return typographicQuoteSpans(text).map(span => text.slice(span.inner, span.close));
+  return parseReadRequest(question).courseScope().quoted;
 }
 
 export type TronClassAgentQueryIntent = {
@@ -2067,23 +2134,23 @@ function hasNonPrepareQueryCommand(text: string): boolean {
     !isPrepareActionValue(token.value) && (token.kind === 'query' || QUERY_START.has(token.value)));
 }
 
-function readIntentOf(text: string, target = readObjectTarget(text)): TronClassAgentQueryIntent {
-  const withoutFilenames = textWithoutFilenameTokens(text);
-  const visible = withoutFilenames.slice(0, target.complementAt);
-  if (/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i.test(visible)) {
+function readIntentOf(text: string, target: ReturnType<typeof parseReadRequest>): TronClassAgentQueryIntent {
+  const at = target.complementAt;
+  if (target.hasOutsideQuotes(/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i, at)) {
     return { intent: 'capabilities', pendingOnly: false };
   }
   const dataIntent = target.intent;
-  const statusText = dataIntent === 'homework' ? withoutFilenames : visible;
-  const pendingOnly = /(?:未交|未繳|待交|待繳|待提交|尚未(?:交|繳|提交)|還沒(?:交|繳|提交)|沒(?:交|繳)|pending|unsubmitted|not\s+submitted)/i.test(statusText);
+  const pendingOnly = target.hasOutsideQuotes(
+    /(?:未交|未繳|待交|待繳|待提交|尚未(?:交|繳|提交)|還沒(?:交|繳|提交)|沒(?:交|繳)|pending|unsubmitted|not\s+submitted)/i,
+    dataIntent === 'homework' ? text.length : at);
   if (dataIntent === 'announcements') return { intent: 'announcements', pendingOnly: false };
   const tokens = visibleCommandTokens(text);
-  const preparationRequested = hasHonoredPrepareCommand(text) && /(?:作業|homework|assignment)/i.test(visible);
+  const preparationRequested = hasHonoredPrepareCommand(text) && target.hasOutsideQuotes(/(?:作業|homework|assignment)/i, at);
   const preparation = preparationRequested && !hasNonPrepareQueryCommand(text);
   const downloading = tokens.some((token, index) =>
     DOWNLOAD_ACTIONS.has(token.value.toLowerCase()) && isDownloadCommand(tokens, index));
   if (preparationRequested && downloading) return { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' };
-  if (dataIntent === 'unsupported' || /測驗|考試|問卷/u.test(visible)) {
+  if (dataIntent === 'unsupported' || target.hasOutsideQuotes(/測驗|考試|問卷/u, at)) {
     return { intent: 'unsupported', pendingOnly: false };
   }
   if (downloading) return { intent: 'download', pendingOnly: false };
@@ -2092,7 +2159,7 @@ function readIntentOf(text: string, target = readObjectTarget(text)): TronClassA
   }
   if (preparation) return { intent: 'prepare', pendingOnly };
   if (pendingOnly) return { intent: 'homework', pendingOnly: true };
-  if (SUBMISSION_DEADLINE_QUERY.test(visible)) return { intent: 'homework', pendingOnly: false };
+  if (target.hasOutsideQuotes(SUBMISSION_DEADLINE_QUERY, at)) return { intent: 'homework', pendingOnly: false };
   if (dataIntent) return { intent: dataIntent, pendingOnly: false };
   return { intent: 'capabilities', pendingOnly: false };
 }
@@ -2127,12 +2194,16 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
     !TRONCLASS_KEYWORD.test(question)) return null;
   const original = question.normalize('NFKC').trim();
   if (isExistingTronClassNavigation(original)) return null;
-  if (hasUnclosedQuote(original) || hasTronClassReadTargetConflict(original)) return { outcome: 'ambiguous' };
+  const originalTarget = parseReadRequest(original);
+  if (hasUnclosedQuote(original) || originalTarget.conflict || originalTarget.hasOutsideQuotes(/[《》〈〉]/u)) {
+    return { outcome: 'ambiguous' };
+  }
   if (typographicQuoteSpans(original).length && analyzeClauses(tokensFor(textWithoutQuotedSpans(original, ' \uFFFC ')))
     .some(clause => clause.predicates.some(predicate => predicate.blockedPrefix))) return { outcome: 'ambiguous' };
   const unquotedText = textWithoutQuotedSpans(original);
   if (hasDescriptiveAction(unquotedText)) return { outcome: 'ambiguous' };
-  const text = textWithoutQuotedSpans(readRoutingText(original));
+  const text = readRoutingText(original);
+  const commandText = textWithoutQuotedSpans(text);
   const unquoted = textWithoutFilenameTokens(unquotedText);
   const tokens = tokensFor(original);
   const interior = modifierInteriorIndex(tokens);
@@ -2148,17 +2219,20 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
     return { outcome: 'ambiguous' };
   }
   if (!allTokensKnown(original) && !allTokensKnown(unquoted)) return { outcome: 'ambiguous' };
+  const hasBookTitle = /[《》〈〉]/u.test(original);
+  if (hasBookTitle && (writeRoute || hasHonoredPrepareCommand(original))) return { outcome: 'ambiguous' };
   if (writeRoute === 'planner') return { outcome: 'clearly-write', intent: null };
   if (writeRoute === 'unsupported') return { outcome: 'clearly-write', intent: { intent: 'unsupported', pendingOnly: false } };
   if (!TRONCLASS_KEYWORD.test(text)) return { outcome: 'ambiguous' };
-  const target = readObjectTarget(text);
+  const target = text === original ? originalTarget : parseReadRequest(text);
   if (target.conflict || analyzeClauses(visibleCommandTokens(text)).some(clause => clause.hasUnsupportedOwner)) {
     return { outcome: 'ambiguous' };
   }
   const intent = readIntentOf(text, target);
-  if (hasReadBlockingDecoration(original)) return { outcome: 'ambiguous' };
+  if (hasReadBlockingDecoration(original) ||
+    (hasBookTitle && intent.intent !== 'homework' && intent.intent !== 'courses')) return { outcome: 'ambiguous' };
   if (intent.intent === 'unsupported') {
-    return hasPositiveReadForm(text) || hasHonoredPrepareCommand(text)
+    return hasPositiveReadForm(commandText) || hasHonoredPrepareCommand(commandText)
       ? { outcome: 'clearly-write', intent }
       : { outcome: 'ambiguous' };
   }
@@ -2175,7 +2249,7 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
     if (isTronClassCompoundDownloadAndPrepare(original)) return { outcome: 'ambiguous' };
     return { outcome: intent.intent === 'prepare' ? 'clearly-write' : 'clearly-read', intent };
   }
-  if (!isPositivelyProvenRead(original) && !isPositivelyProvenRead(text)) return { outcome: 'ambiguous' };
+  if (!isPositivelyProvenRead(original) && !isPositivelyProvenRead(commandText)) return { outcome: 'ambiguous' };
   return { outcome: 'clearly-read', intent };
 }
 

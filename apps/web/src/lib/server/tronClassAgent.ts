@@ -7,8 +7,7 @@ import type {
 } from '../tronClassAgentTypes';
 import { TRONCLASS_AGENT_MAX_ACTIONS } from '../tronClassAgentTypes';
 import {
-  hasTronClassReadTargetConflict, isTronClassCompoundDownloadAndPrepare, isTronClassHomeworkOverview,
-  matchesTronClassHomeworkCourse, parseTronClassAgentIntent, tronClassQuotedTargets,
+  hasTronClassReadTargetConflict, isTronClassCompoundDownloadAndPrepare, parseTronClassAgentIntent, tronClassAgentHomeworkScope,
 } from '../tronClassAgentIntent';
 import type { TronClassHomeworkItem, TronClassPreparation, TronClassSnapshot } from '../tronClassIntegrationTypes';
 import { tronClassUploadKey } from '../tronClassIntegrationClient';
@@ -168,7 +167,8 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         : isTronClassCompoundDownloadAndPrepare(input.question) ? 'multiple_actions' : null;
       const query = unsupportedReason ? { intent: 'unsupported', pendingOnly: false, unsupportedReason } as const
         : parseTronClassAgentIntent(input.question);
-      if (!query || (input.courseId !== undefined && !positiveId(input.courseId)) ||
+      const homeworkScope = tronClassAgentHomeworkScope(input.question, input.compoundQuestion);
+      if (!query || !homeworkScope || (input.courseId !== undefined && !positiveId(input.courseId)) ||
         (input.homeworkId !== undefined && (!positiveId(input.homeworkId) || !input.courseId || query.intent !== 'prepare'))) {
         throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
       }
@@ -224,14 +224,9 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
 
       let courseId = input.courseId;
       if (!courseId) {
-        const quoted = readsHomework ? tronClassQuotedTargets(input.question).map(normalize) : [];
-        const matchesName = readsHomework ? matchesTronClassHomeworkCourse : containsName;
-        const matches = snapshot.courses.filter((course) => {
-          if (quoted.length) {
-            return quoted.every(target => target && (target === normalize(course.name) || target === normalize(course.code)));
-          }
-          return matchesName(input.question, course.name) || (course.code.length > 1 && matchesName(input.question, course.code));
-        });
+        const matches = snapshot.courses.filter(course => readsHomework
+          ? homeworkScope.matches(course.name, course.code)
+          : containsName(input.question, course.name) || (course.code.length > 1 && containsName(input.question, course.code)));
         const canResolveCourse = !readsHomework || !snapshot.errors.some(error => error.area === 'courses');
         if (matches.length === 1 && canResolveCourse) courseId = matches[0].id;
         else if (['materials', 'announcements', 'download'].includes(query.intent) && snapshot.courses.length === 1 &&
@@ -240,7 +235,7 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         }
         if (courseId) snapshot = await guardedRead(courseId, readsHomework);
         else if (readsHomework) {
-          if (matches.length === 0 && isTronClassHomeworkOverview(input.question)) {
+          if (matches.length === 0 && homeworkScope.overview) {
             snapshot = await guardedRead(undefined, true);
           } else {
             steps.push({ id: 'choose-course', tool: 'select_target', status: 'blocked', message: '尚未選定唯一課程。' });
