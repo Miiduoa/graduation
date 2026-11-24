@@ -17,9 +17,10 @@ import { NuniSignIn } from '@/components/NuniSignIn';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
-import { NuniError } from '@campus/shared/src/nuni';
+import { NuniError, nuniRecord } from '@campus/shared/src/nuni';
 import {
-  loadMerchantOverview,
+  parseMerchantOverview,
+  parseMerchantWorkspaces,
   merchantApplicationStateLabel,
   merchantWorkspaceStateLabel,
   parseMerchantApplication,
@@ -27,7 +28,10 @@ import {
   type MerchantOverviewView,
   type NuniMerchantApplicationInput,
 } from '@campus/shared/src/nuniMerchant';
-import { createMerchantOperations } from '@campus/shared/src/nuniMerchantOperations';
+import {
+  createMerchantOperations,
+  type NuniMerchantWorkspaceDetail,
+} from '@campus/shared/src/nuniMerchantOperations';
 import {
   merchantApplicationNextStep,
   merchantOverviewNextStep,
@@ -44,26 +48,11 @@ import {
 } from '@/lib/merchantWorkspaceNavigation';
 import { useMerchantWorkspaceRoute } from '@/lib/useMerchantWorkspaceRoute';
 
-type Overview = Awaited<ReturnType<typeof loadMerchantOverview>>;
-type ConfirmedWorkspace = {
-  detail?: Overview['workspaces'][number];
-  denied?: boolean;
-};
-type ConfirmedMerchantData = {
-  workspaces: Map<string, ConfirmedWorkspace>;
-  applications: Map<
-    string,
-    { receipt: Overview['applications'][number]; reviewed?: Overview['applications'][number] }
-  >;
-};
-const workspaceKey = ({ tenantId, locationId }: Pick<Overview['workspaces'][number], 'tenantId' | 'locationId'>) =>
-  `${tenantId}:${locationId}`;
-function preferConfirmedMenu<T extends { missingRequirements: string[] }>(previous: T | undefined, next: T): T {
-  if (previous && !previous.missingRequirements.includes('menu') && next.missingRequirements.includes('menu')) {
-    return { ...next, missingRequirements: next.missingRequirements.filter((item) => item !== 'menu') };
-  }
-  return next;
-}
+import {
+  createMerchantConfirmations,
+  workspaceKey,
+  type MerchantOverview,
+} from './merchantConfirmation';
 type Draft = Omit<NuniMerchantApplicationInput, 'idempotencyKey'>;
 const emptyDraft = (): Draft => ({
   tenantId: '',
@@ -251,7 +240,7 @@ function AccountWorkspace({
   onExpired: () => Promise<void>;
   onSwitchAccount: () => Promise<void>;
 }) {
-  const [overview, setOverview] = useState<Overview | null>(null);
+  const [overview, setOverview] = useState<MerchantOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [invalidSession, setInvalidSession] = useState(false);
@@ -288,11 +277,8 @@ function AccountWorkspace({
     if (href !== listHref) setListHref(href);
   }
   const generation = useRef(0);
-  const listed = useRef<Overview | null>(null);
-  const confirmed = useRef<ConfirmedMerchantData>({
-    workspaces: new Map(),
-    applications: new Map(),
-  });
+  const [confirmed] = useState(createMerchantConfirmations);
+  const [applicationsKnown, setApplicationsKnown] = useState(false);
   const mounted = useRef(true);
   const busyRef = useRef(false);
   const enabled = useRef(false);
@@ -306,28 +292,13 @@ function AccountWorkspace({
     ++generation.current;
   }, []);
   const publishOverview = useCallback(() => {
-    const data = listed.current;
-    const { applications, workspaces } = confirmed.current;
-    setOverview(
-      data && {
-        ...data,
-        workspaces: data.workspaces.flatMap((item) => {
-          const entry = workspaces.get(workspaceKey(item));
-          return entry?.denied ? [] : [entry?.detail ?? item];
-        }),
-        applications: [
-          ...[...applications.values()].reverse().map(({ receipt, reviewed }) => reviewed ?? receipt),
-          ...data.applications.filter((item) => !applications.has(item.applicationId)),
-        ],
-      },
-    );
-  }, []);
+    setApplicationsKnown(confirmed.hasApplicationList());
+    setOverview(confirmed.overview());
+  }, [confirmed]);
   const clearOverview = useCallback(() => {
-    listed.current = null;
-    confirmed.current.workspaces.clear();
-    confirmed.current.applications.clear();
-    setOverview(null);
-  }, []);
+    confirmed.clear();
+    publishOverview();
+  }, [confirmed, publishOverview]);
   const expire = useCallback(() => {
     enabled.current = false;
     invalidate();
@@ -339,110 +310,103 @@ function AccountWorkspace({
   }, [clearOverview, invalidate, onExpired]);
   const load = useCallback(async () => {
     const run = ++generation.current;
-    const { workspaces, applications } = confirmed.current;
-    const initialWorkspaces = new Map(workspaces);
-    const initialApplications = new Map(applications);
+    const listRevision = confirmed.beginRead();
     const isCurrent = () => mounted.current && enabled.current && run === generation.current;
     setLoading(true);
     setLoadError('');
     try {
-      let programsUnavailable = false;
-      let applicationsUnavailable = false;
-      const data = await loadMerchantOverview(async (path, input) => {
-        try {
-          return await browserRequest(path, context, input);
-        } catch (error) {
-          if (
-            path === 'merchant-onboarding-programs' &&
-            error instanceof NuniError &&
-            !expired(error) &&
-            [403, 404].includes(error.status)
-          ) {
-            // The store and application requests still determine access to their records.
-            programsUnavailable = true;
-            return { programs: [] };
-          }
-          if (
-            path === 'merchant-applications' &&
-            !expired(error) &&
-            !(error instanceof NuniError && [401, 403, 404].includes(error.status))
-          ) {
-            // Still re-check store access; do not treat a failed list as a blank applications page.
-            applicationsUnavailable = true;
-            return { applications: [] };
-          }
-          throw error;
-        }
-      }, view);
+      const [programs, submitted, stores] = await Promise.allSettled([
+        view === 'workspace'
+          ? Promise.resolve([])
+          : browserRequest('merchant-onboarding-programs', context).then(
+              (value) => parseMerchantOverview({ ...nuniRecord(value), applications: [] }).programs,
+            ),
+        browserRequest('merchant-applications', context).then(
+          (value) => parseMerchantOverview({ ...nuniRecord(value), programs: [] }).applications,
+        ),
+        view === 'apply'
+          ? Promise.resolve([])
+          : browserRequest('merchant-workspaces', context).then(parseMerchantWorkspaces),
+      ]);
       if (!isCurrent()) return;
-      const operations = createMerchantOperations((path, input, method) =>
-        browserRequest(path, context, input, method),
-      );
-      const refreshed = new Map<string, Overview['workspaces'][number] | null>();
-      await Promise.all(
-        data.workspaces.map(async (item) => {
-          const key = workspaceKey(item);
-          const snapshot = initialWorkspaces.get(key);
-          if (!snapshot || workspaces.get(key) !== snapshot) return;
-          // The operation owns reconciliation while a write is pending or uncertain.
-          if (operationDrafts.get(JSON.stringify([item.tenantId, item.locationId]))?.uncertain)
-            return;
-          try {
-            refreshed.set(key, await operations.get(item.tenantId, item.locationId));
-          } catch (error) {
-            if (expired(error)) throw error;
-            if (error instanceof NuniError && [403, 404].includes(error.status))
-              refreshed.set(key, null);
-          }
-        }),
-      );
-      if (isCurrent()) {
-        let accessDenied = false;
-        for (const [key, detail] of refreshed) {
-          const entry = workspaces.get(key);
-          if (!detail) {
-            // A denial controls visibility even if a write was confirmed in the meantime.
-            workspaces.set(key, { ...entry, denied: true });
-            accessDenied = true;
-          } else if (entry === initialWorkspaces.get(key)) {
-            workspaces.set(key, { detail });
-          }
+      const denied = (error: unknown) =>
+        error instanceof NuniError && [403, 404].includes(error.status);
+      for (const result of [programs, submitted, stores]) {
+        if (result.status === 'rejected' && expired(result.reason)) {
+          expire();
+          return;
         }
-        for (const row of data.applications) {
-          const entry = initialApplications.get(row.applicationId);
-          if (!entry || applications.get(row.applicationId) !== entry) continue;
-          const { receipt } = entry;
-          // The application API exposes the submission time, not a review revision.
-          // Review progress for this submission can follow a submitted receipt.
-          if (
-            receipt.state === 'submitted' &&
-            row.state !== 'submitted' &&
-            row.tenantId === receipt.tenantId &&
-            Date.parse(row.submittedAt) === Date.parse(receipt.submittedAt)
-          )
-            applications.set(row.applicationId, { receipt, reviewed: row });
-        }
-        listed.current = data;
-        publishOverview();
-        if (programsUnavailable || applicationsUnavailable) setLoadError('目前無法確認店家資料，請重新載入。');
-        else if (accessDenied)
-          setLoadError('目前無法取得部分門市的管理權限，請重新載入。');
       }
+      if (programs.status === 'fulfilled') confirmed.setPrograms(programs.value);
+      else if (denied(programs.reason)) confirmed.setPrograms();
+      if (submitted.status === 'fulfilled') confirmed.mergeApplications(submitted.value);
+      else if (denied(submitted.reason)) confirmed.hideApplications();
+
+      let accessDenied = false;
+      let detailUnavailable = false;
+      if (stores.status === 'rejected' && denied(stores.reason)) {
+        confirmed.hideLists();
+      } else {
+        const operations = createMerchantOperations((path, input, method) =>
+          browserRequest(path, context, input, method),
+        );
+        const targets = new Map(
+          stores.status === 'fulfilled'
+            ? stores.value.map((item) => [workspaceKey(item), item])
+            : [],
+        );
+        const pendingTargets = [...visitedLocations.values()].filter(
+          ({ tenantId, locationId }) =>
+            operationDrafts.get(JSON.stringify([tenantId, locationId]))?.uncertain,
+        );
+        const refreshed = await Promise.all(
+          [
+            ...targets.values(),
+            ...pendingTargets.filter((item) => !targets.has(workspaceKey(item))),
+          ].map(async (item) => {
+            const key = workspaceKey(item);
+            if (
+              !confirmed.needsAccessRefresh(key) &&
+              submitted.status === 'fulfilled' &&
+              !operationDrafts.get(JSON.stringify([item.tenantId, item.locationId]))?.uncertain
+            )
+              return;
+            const revision = confirmed.beginRead();
+            try {
+              const detail = await operations.get(item.tenantId, item.locationId);
+              return { key, revision, detail };
+            } catch (error) {
+              if (expired(error)) throw error;
+              if (denied(error)) return { key, revision, detail: null };
+              detailUnavailable = true;
+            }
+          }),
+        );
+        if (!isCurrent()) return;
+        if (stores.status === 'fulfilled') confirmed.mergeWorkspaceList(stores.value, listRevision);
+        for (const result of refreshed) {
+          if (!result) continue;
+          confirmed.verify(result.key, result.revision, !result.detail);
+          if (result.detail) confirmed.merge(result.detail, 'read', result.revision);
+          else accessDenied = true;
+        }
+      }
+      publishOverview();
+      if (
+        [programs, submitted, stores].some((result) => result.status === 'rejected') ||
+        detailUnavailable
+      )
+        setLoadError('目前無法確認店家資料，請重新載入。');
+      else if (accessDenied) setLoadError('目前無法取得部分門市的管理權限，請重新載入。');
     } catch (error) {
       if (isCurrent()) {
         if (expired(error)) expire();
-        else {
-          if (error instanceof NuniError && [403, 404].includes(error.status)) {
-            listed.current = null;
-            publishOverview();
-          }
-          setLoadError('目前無法確認店家資料，請重新載入。');
-        }
+        else setLoadError('目前無法確認店家資料，請重新載入。');
       }
     } finally {
-      if (run === generation.current && mounted.current) setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [context, expire, operationDrafts, publishOverview, view]);
+  }, [context, expire, operationDrafts, publishOverview, view, confirmed, visitedLocations]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -512,7 +476,7 @@ function AccountWorkspace({
         await browserRequest('merchant-applications', context, payload),
       );
       if (!mounted.current || !enabled.current) return;
-      confirmed.current.applications.set(application.applicationId, { receipt: application });
+      confirmed.confirmApplication(application);
       publishOverview();
       setPending(null);
       setDraft(emptyDraft());
@@ -541,30 +505,35 @@ function AccountWorkspace({
   }
 
   const onWorkspaceChanged = useCallback(
-    (detail: Overview['workspaces'][number], verifiedAccess: boolean) => {
-      if (!mounted.current || !enabled.current) return;
-      setHasVerifiedLocation(true);
+    (detail: NuniMerchantWorkspaceDetail, verifiedAccess: boolean, revision?: number) => {
+      if (!mounted.current || !enabled.current) return null;
       const key = workspaceKey(detail);
-      const { workspaces } = confirmed.current;
-      const current = workspaces.get(key);
-      workspaces.set(key, {
-        detail: preferConfirmedMenu(current?.detail, detail),
-        denied: !verifiedAccess && current?.denied,
-      });
+      if (verifiedAccess && revision !== undefined) confirmed.verify(key, revision, false);
+      const merged = confirmed.merge(detail, verifiedAccess ? 'read' : 'write', revision);
+      const allowed = !confirmed.denied(key);
+      if (allowed) setHasVerifiedLocation(true);
       publishOverview();
+      return allowed ? (merged.detail ?? null) : null;
     },
-    [publishOverview],
+    [publishOverview, confirmed],
   );
 
   const onWorkspaceDenied = useCallback(
-    (tenantId: string, locationId: string) => {
+    (tenantId: string, locationId: string, revision = confirmed.beginRead()) => {
       if (!mounted.current || !enabled.current) return;
-      const key = workspaceKey({ tenantId, locationId });
-      const { workspaces } = confirmed.current;
-      workspaces.set(key, { ...workspaces.get(key), denied: true });
+      confirmed.verify(workspaceKey({ tenantId, locationId }), revision, true);
       publishOverview();
     },
-    [publishOverview],
+    [publishOverview, confirmed],
+  );
+
+  const onMenuConfirmed = useCallback(
+    (detail: NuniMerchantWorkspaceDetail) => {
+      if (!mounted.current || !enabled.current) return;
+      confirmed.confirmMenu(workspaceKey(detail));
+      publishOverview();
+    },
+    [confirmed, publishOverview],
   );
 
   const withOperations = (content?: ReactNode) => (
@@ -590,7 +559,9 @@ function AccountWorkspace({
               : undefined
           }
           onExpired={expire}
+          beginRead={confirmed.beginRead}
           onChanged={onWorkspaceChanged}
+          onMenuConfirmed={onMenuConfirmed}
           onDenied={onWorkspaceDenied}
         />
       ))}
@@ -657,10 +628,12 @@ function AccountWorkspace({
     draft.businessKind !== 'company' ||
     draft.serviceModes.length !== 1 ||
     draft.serviceModes[0] !== 'pickup';
-  const nextStep = overview ? merchantOverviewNextStep(overview) : null;
+  const nextStep =
+    overview && (!loadError || hasMerchantRecords) ? merchantOverviewNextStep(overview) : null;
   const list = (
     <div className={styles.stack}>
-      {(view === 'apply' || (view === 'overview' && overview && !hasMerchantRecords)) && (
+      {(view === 'apply' ||
+        (view === 'overview' && overview && !loadError && !hasMerchantRecords)) && (
         <section className={styles.intro}>
           <h2>店家如何進駐</h2>
           <p>請準備店名、營業地點及聯絡方式。已經申請過的店家可以直接查看審核進度。</p>
@@ -704,9 +677,11 @@ function AccountWorkspace({
               </h3>
               {overview.workspaces.length === 0 ? (
                 <>
-                  <p>
-                    這個帳號目前沒有已核准的門市。如果你是店員，請向門市負責人確認工作帳號與接單方式。
-                  </p>
+                  {!loadError && (
+                    <p>
+                      這個帳號目前沒有已核准的門市。如果你是店員，請向門市負責人確認工作帳號與接單方式。
+                    </p>
+                  )}
                   {view === 'workspace' && (
                     <Button onClick={() => void onSwitchAccount()}>登出並切換店家帳號</Button>
                   )}
@@ -760,7 +735,7 @@ function AccountWorkspace({
                 申請進度
               </h3>
               {overview.applications.length === 0 ? (
-                <p>你還沒有送出進駐申請。</p>
+                applicationsKnown && !loading && !loadError && <p>你還沒有送出進駐申請。</p>
               ) : (
                 <ul className={styles.list}>
                   {overview.applications.map((item) => (
@@ -821,7 +796,7 @@ function AccountWorkspace({
             <div className={styles.entryActions}>
               <Link href="/merchant/apply">申請新門市</Link>
             </div>
-          ) : (
+          ) : loadError && !pending && !hasApplicationDraft ? null : (
             <section className={styles.panel} aria-labelledby="merchant-apply-title">
               <h3 id="merchant-apply-title">申請進駐</h3>
               {!pending && overview.programs.length === 0 ? (
@@ -861,8 +836,10 @@ function AccountWorkspace({
                       disabled={!selected}
                       placeholder="請選擇營運區域"
                       options={
-                        selected?.campuses.map((item) => ({ value: item.id, label: item.name })) ??
-                        []
+                        selected?.campuses.map((item) => ({
+                          value: item.id,
+                          label: item.name,
+                        })) ?? []
                       }
                     />
                   </fieldset>

@@ -449,7 +449,7 @@ it.each(['before returning', 'during the return read'])(
   async (receiptTiming) => {
     active = true;
     const open = detail('store-a', true);
-    const paused = { ...open, locationStatus: 'closed', publicAccess: false };
+    const paused = { ...open, locationStatus: 'closed', publicAccess: false, readinessVersion: 2 };
     let finishWrite!: (receipt: typeof paused) => void;
     let finishList!: (response: { workspaces: NuniMerchantWorkspaceDetail[] }) => void;
     const write = new Promise<typeof paused>((resolve) => {
@@ -504,16 +504,17 @@ it.each(['before returning', 'during the return read'])(
       path === 'merchant-workspaces' ? Promise.resolve({ workspaces: [open] }) : respond(path),
     );
     fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
-    await screen.findByText('營業中');
-    expect(screen.queryByText('暫停接單')).toBeNull();
+    await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
+    expect(screen.getByText('暫停接單')).toBeTruthy();
+    expect(screen.queryByText('營業中')).toBeNull();
   },
 );
 
 it.each(['success', 'failure'] as const)(
-  'reconciles a confirmed pause on manual reload when the detail read ends in %s',
+  'keeps a confirmed pause on manual reload with a stale detail or a read %s',
   async (result) => {
     const open = detail('store-a', true);
-    const paused = { ...open, locationStatus: 'closed', publicAccess: false };
+    const paused = { ...open, locationStatus: 'closed', publicAccess: false, readinessVersion: 2 };
     let detailRead = () => Promise.resolve(open);
     mocks.request.mockImplementation((path) => {
       if (path === 'merchant-workspaces/campus-one/store-a') return detailRead();
@@ -537,15 +538,15 @@ it.each(['success', 'failure'] as const)(
     detailRead = readLatest;
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
     expect(readLatest).toHaveBeenCalledOnce();
-    expect(screen.getByText(result === 'success' ? '營業中' : '暫停接單')).toBeTruthy();
-    expect(screen.queryByText(result === 'success' ? '暫停接單' : '營業中')).toBeNull();
+    expect(screen.getByText('暫停接單')).toBeTruthy();
+    expect(screen.queryByText('營業中')).toBeNull();
   },
 );
 
 it('lets a later successful store read replace a confirmed paused snapshot on the list', async () => {
   active = true;
   const open = detail('store-a', true);
-  const paused = { ...open, locationStatus: 'closed', publicAccess: false };
+  const paused = { ...open, locationStatus: 'closed', publicAccess: false, readinessVersion: 2 };
   mocks.request.mockImplementation((path) =>
     path === 'merchant-workspaces' ? Promise.resolve({ workspaces: [open] }) : respond(path),
   );
@@ -566,7 +567,8 @@ it('lets a later successful store read replace a confirmed paused snapshot on th
   expect(screen.queryByText('營業中')).toBeNull();
 
   mocks.request.mockImplementation((path) => {
-    if (path === 'merchant-workspaces/campus-one/store-a') return Promise.resolve(open);
+    if (path === 'merchant-workspaces/campus-one/store-a')
+      return Promise.resolve({ ...open, readinessVersion: 3 });
     if (path === 'merchant-workspaces') return Promise.resolve({ workspaces: [paused] });
     return respond(path);
   });
@@ -590,7 +592,12 @@ it.each(['receipt', 'unknown', 'unknown while on the list'] as const)(
   async (result) => {
     active = true;
     const path = 'merchant-workspaces/campus-one/store-a';
-    const paused = { ...detail('store-a', true), locationStatus: 'closed', publicAccess: false };
+    const paused = {
+      ...detail('store-a', true),
+      locationStatus: 'closed',
+      publicAccess: false,
+      readinessVersion: 2,
+    };
     let finish!: (receipt: typeof paused) => void;
     let fail!: (failure: Error) => void;
     const write = new Promise<typeof paused>((resolve, reject) => {
@@ -631,9 +638,9 @@ it.each(['receipt', 'unknown', 'unknown while on the list'] as const)(
       expect(
         screen.getByRole('button', { name: '重新讀取門市狀態' }).hasAttribute('disabled'),
       ).toBe(true);
-      // Every GET would still report "open". Defer the return read until the pending write settles.
+      // The list and Forward each recheck access while the write stays locked.
       expect(mocks.request.mock.calls.filter(([requestPath]) => requestPath === path)).toHaveLength(
-        1,
+        3,
       );
     }
     expect(
@@ -712,5 +719,98 @@ it.each(['browser Back', 'return link from application progress'])(
     const applications = screen.getByRole('region', { name: '申請進度' });
     expect(within(applications).getByRole('heading', { name: '測試餐坊／餐廳櫃位' })).toBeTruthy();
     expect(within(applications).getByText(/審核中/)).toBeTruthy();
+  },
+);
+
+it('keeps a newer paused list row when a successful detail returns an older open version', async () => {
+  const open = detail('store-a', true);
+  const paused = { ...open, readinessVersion: 2, locationStatus: 'closed', publicAccess: false };
+  let row = open;
+  const path = 'merchant-workspaces/campus-one/store-a';
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [row] });
+    if (resource === path) return Promise.resolve(open);
+    return respond(resource);
+  });
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByRole('button', { name: '暫停接單' });
+  row = paused;
+  fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+  await screen.findByText('暫停接單');
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+  expect(screen.getByText('暫停接單')).toBeTruthy();
+  expect(screen.queryByText('營業中')).toBeNull();
+  expect(mocks.request.mock.calls.filter(([resource]) => resource === path)).toHaveLength(3);
+});
+
+it.each([
+  { status: 403, beforeReceipt: true },
+  { status: 404, beforeReceipt: true },
+  { status: 403, beforeReceipt: false },
+  { status: 404, beforeReceipt: false },
+])(
+  'hides a store when detail returns $status (denied while pending: $beforeReceipt)',
+  async ({ status, beforeReceipt }) => {
+    const open = detail('store-a', true);
+    const paused = { ...open, locationStatus: 'closed', publicAccess: false };
+    const path = 'merchant-workspaces/campus-one/store-a';
+    let finish!: (value: typeof paused) => void;
+    const write = new Promise<typeof paused>((resolve) => {
+      finish = resolve;
+    });
+    let denied = false;
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
+      if (resource === path)
+        return denied ? Promise.reject(new NuniError(status, 'DENIED')) : Promise.resolve(open);
+      if (resource === `${path}/availability`) return write;
+      return respond(resource);
+    });
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+    denied = beforeReceipt;
+    await act(async () => window.history.back());
+    if (beforeReceipt) {
+      await screen.findByText(/目前無法取得部分門市的管理權限/);
+      expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+    } else {
+      await screen.findByRole('link', { name: '管理門市：一樓' });
+      await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
+    }
+    expect(mocks.request.mock.calls.filter(([resource]) => resource === path)).toHaveLength(2);
+    denied = true;
+    await act(async () => finish(paused));
+    expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+    expect(mocks.request.mock.calls.filter(([resource]) => resource === path)).toHaveLength(3);
+  },
+);
+
+it.each([403, 404])(
+  'automatically checks an uncertain write and keeps a denied store off the list (%s)',
+  async (status) => {
+    const open = detail('store-a', true);
+    const path = 'merchant-workspaces/campus-one/store-a';
+    let lostAccess = false;
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
+      if (resource === path)
+        return lostAccess ? Promise.reject(new NuniError(status, 'DENIED')) : Promise.resolve(open);
+      if (resource === `${path}/availability`) {
+        lostAccess = true;
+        return Promise.reject(new NuniError(503, 'UNAVAILABLE'));
+      }
+      return respond(resource);
+    });
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+    await screen.findByText(/目前無法取得這間門市的管理權限/);
+    expect(mocks.request.mock.calls.filter(([resource]) => resource === path)).toHaveLength(2);
+    await act(async () => window.history.back());
+    await screen.findByText(/目前無法取得部分門市的管理權限/);
+    expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+    expect(mocks.request.mock.calls.filter(([resource]) => resource === path)).toHaveLength(3);
   },
 );

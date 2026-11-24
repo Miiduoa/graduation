@@ -34,6 +34,7 @@ export type NuniMerchantWorkspace = {
   publicAccess: boolean;
   activated: boolean;
   missingRequirements: string[];
+  readinessVersion?: number;
 };
 export type NuniMerchantApplicationInput = {
   tenantId: string;
@@ -111,7 +112,16 @@ export function parseMerchantOverview(value: unknown): {
 export function parseMerchantWorkspaces(value: unknown): NuniMerchantWorkspace[] {
   return rows(nuniRecord(value).workspaces, (value) => {
     const row = nuniRecord(value);
+    const readinessVersion = row.readinessVersion;
+    if (
+      readinessVersion !== undefined &&
+      (typeof readinessVersion !== 'number' ||
+        !Number.isSafeInteger(readinessVersion) ||
+        readinessVersion < 1)
+    )
+      throw invalid();
     return {
+      ...(readinessVersion === undefined ? {} : { readinessVersion }),
       tenantId: text(row.tenantId, 200),
       tenantName: text(row.tenantName, 200),
       merchantName: text(row.merchantName, 200),

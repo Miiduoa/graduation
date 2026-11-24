@@ -96,6 +96,12 @@ it('loads one authorized location and rejects a response for another tenant or l
     expect((await call()).status).toBe(502);
   }
 });
+it('preserves the workspace readiness version on the authenticated list', async () => {
+  respond({ workspaces: [{ ...workspace, readinessVersion: 2 }] });
+  const result = await call('merchant-workspaces');
+  expect(result.status).toBe(200);
+  expect(await result.json()).toMatchObject({ workspaces: [{ ...identity, readinessVersion: 2 }] });
+});
 it('keeps PUT settings behind same-origin and captured-session checks', async () => {
   expect((await call(`${root}/settings`, 'PUT', settings, 'stale')).status).toBe(409);
   expect(

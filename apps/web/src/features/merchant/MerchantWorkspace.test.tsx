@@ -760,3 +760,31 @@ it.each([
     expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
   },
 );
+
+it.each([false, true])(
+  'reports a 503 application list failure and rechecks store access (prior list: %s)',
+  async (previous) => {
+    let unavailable = !previous;
+    const detailPath = 'merchant-workspaces/campus-one/location-1';
+    mocks.request.mockImplementation((path, context, input) => {
+      if (path === 'merchant-applications')
+        return unavailable
+          ? Promise.reject(new NuniError(503, 'UNAVAILABLE'))
+          : Promise.resolve({ applications: [application] });
+      if (path === 'merchant-workspaces') return Promise.resolve({ workspaces: [continuityStore] });
+      if (path === detailPath) return Promise.resolve(continuityStore);
+      return respond(path, context, input);
+    });
+    render(<MerchantWorkspace view="workspace" />);
+    if (previous) {
+      await screen.findByRole('heading', { name: '測試餐坊／學生餐廳' });
+      unavailable = true;
+      fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+    }
+    await screen.findByRole('alert');
+    expect(screen.queryByText('你還沒有送出進駐申請。')).toBeNull();
+    expect(!!screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBe(previous);
+    expect(mocks.request.mock.calls.filter(([path]) => path === detailPath)).toHaveLength(1);
+    expect(screen.getByRole('link', { name: '管理門市：第一門市' })).toBeTruthy();
+  },
+);
