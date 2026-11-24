@@ -122,6 +122,7 @@ function ScopedQuickCampusEntry({
     const utterance = raw.trim().slice(0, 160);
     if (!uid || !utterance) return;
     const requested = ++sequence.current;
+    setSubmittedSearch(null);
     setAnalysis({ query: utterance, status: 'loading' });
     try {
       const result = await interpretMobileCampusRequest({
@@ -180,7 +181,14 @@ function ScopedQuickCampusEntry({
     }
     if (!phrase) return;
     Keyboard.dismiss();
+    sequence.current += 1;
+    setAnalysis(null);
     setSubmittedSearch(phrase);
+  }
+
+  function cancelAnalysis() {
+    sequence.current += 1;
+    setAnalysis(null);
   }
 
   function stop() {
@@ -325,10 +333,12 @@ function ScopedQuickCampusEntry({
       {!!phrase && signedIn && !asking && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="用雲端 AI 找相關服務"
-          accessibilityState={{ disabled: modelBusy }}
-          disabled={modelBusy}
+          accessibilityLabel={modelBusy ? '停止雲端搜尋' : '用雲端 AI 找相關服務'}
           onPress={() => {
+            if (modelBusy) {
+              cancelAnalysis();
+              return;
+            }
             Keyboard.dismiss();
             void analyze(phrase);
           }}
@@ -339,11 +349,10 @@ function ScopedQuickCampusEntry({
             paddingHorizontal: 15,
             borderRadius: 11,
             backgroundColor: colors.surface2,
-            opacity: modelBusy ? 0.55 : 1,
-          }}
+           }}
         >
           <Text style={{ color: textColor, ...typography.bodySmall, fontWeight: '600' }}>
-            {modelBusy ? 'AI 正在理解…' : '用雲端 AI 找相關服務'}
+            {modelBusy ? '停止雲端搜尋' : '用雲端 AI 找相關服務'}
           </Text>
         </Pressable>
       )}
@@ -354,7 +363,7 @@ function ScopedQuickCampusEntry({
       )}
       {modelBusy && (
         <Text accessibilityLiveRegion="polite" style={{ color: mutedColor, ...typography.bodySmall }}>
-          正在理解你的目標；不會自動執行任何操作。
+          正在理解你的目標；可停止等待並繼續使用基本捷徑。
         </Text>
       )}
 
@@ -457,7 +466,7 @@ function ScopedQuickCampusEntry({
                 </Pressable>
               ))}
             </>
-          ) : semantic?.status !== 'clarify' ? (
+          ) : semantic?.status !== 'clarify' && !(submittedSearch === phrase && !canAsk) ? (
             <Text style={{ ...typography.bodySmall, color: mutedColor }}>
               {canAsk ? '尚未找到對應服務，可以補充需求或詢問助理。' : '尚未找到對應服務，試試其他關鍵字。'}
             </Text>
