@@ -1017,9 +1017,12 @@ async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize =
   const total = homeworkPaginationNumber(data.total, strict);
   const sourcePage = homeworkPaginationNumber(data.page, strict);
   const sourcePageSize = homeworkPaginationNumber(data.page_size, strict);
-  const pageLimit = !strict && sourcePageSize !== null ? sourcePageSize : pageSize;
-  if ((sourcePage !== null && sourcePage !== page) ||
-    (strict && sourcePageSize !== null && sourcePageSize !== pageSize) ||
+  const requestedPage = homeworkPaginationNumber(page, false);
+  const requestedPageSize = homeworkPaginationNumber(pageSize, false);
+  const pageLimit = !strict && sourcePageSize !== null ? sourcePageSize : (requestedPageSize ?? pageSize);
+  // Compare numerically so a legacy string page still matches a numeric school page.
+  if ((sourcePage !== null && requestedPage !== null && sourcePage !== requestedPage) ||
+    (strict && sourcePageSize !== null && requestedPageSize !== null && sourcePageSize !== requestedPageSize) ||
     data.homework_activities.length > pageLimit ||
     (total !== null && data.homework_activities.length > total)) {
     throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
@@ -1027,8 +1030,8 @@ async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize =
   return {
     homework_activities: data.homework_activities,
     total,
-    page: sourcePage ?? page,
-    page_size: sourcePageSize ?? pageSize,
+    page: sourcePage ?? requestedPage ?? page,
+    page_size: sourcePageSize ?? requestedPageSize ?? pageSize,
   };
 }
 

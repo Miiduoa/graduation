@@ -752,10 +752,35 @@ describe('r28 structural regressions and function-word variants', () => {
   });
 
   it('tokenizes a long mixed write string in linear time with a cached pass', () => {
-    const question = `查玩課雲${'必交必繳發布時間務必交'.repeat(200)}作業`;
+    // Stay within the 1,000-character router limit so this actually exercises tokenize.
+    const question = `查玩課雲${'必交必繳發布時間務必轉交'.repeat(80)}作業`;
+    expect(question.length).toBeLessThanOrEqual(1000);
     const started = Date.now();
     parseTronClassAgentIntent(question);
     parseTronClassAgentIntent(question);
     expect(Date.now() - started).toBeLessThan(200);
+  });
+
+  it.each([
+    '查玩課雲作業，記得轉交 PDF',
+    '查玩課雲作業及記得交 PDF',
+  ])('treats a write compound or 及-clause write as a write in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('keeps negation around a 供…用的 span that contains 和', () => {
+    const question = '不要繳交供老師和助教確認玩課雲作業用的資料，只查校園公告';
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('classifies a preparation-area or download-area read by the last data type', () => {
+    expect(parseTronClassAgentIntent('查玩課雲作業準備區下載說明教材')).toEqual({
+      intent: 'materials', pendingOnly: false,
+    });
+    expect(parseTronClassAgentIntent('查玩課雲課程下載區教材')).toEqual({
+      intent: 'materials', pendingOnly: false,
+    });
   });
 });

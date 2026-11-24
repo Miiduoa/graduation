@@ -464,6 +464,16 @@ describe('tronClassScraper', () => {
   });
 
 
+  test('legacy homework page accepts a numeric school page when the caller passed a decimal string', async () => {
+    const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: homework, total: 1, page: 1, page_size: 50 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, '1')).resolves.toEqual({
+      homework_activities: homework, total: 1, page: 1, page_size: 50,
+    });
+  });
+
   test('legacy homework page accepts a school page_size below the requested size when the array is valid', async () => {
     const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
     mockHttpsResponse({

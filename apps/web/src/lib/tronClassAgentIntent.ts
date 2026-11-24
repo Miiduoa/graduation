@@ -105,7 +105,9 @@ const DOMAIN_NOUNS = [
   '作業', '報告', '附件', '檔案', '作品', '心得', '講義', '考卷', '表單',
   '公告', '通知', '教材', '課程', '課表', '修訂稿', '舊版', '新版', '這份', '那份',
   '發布時間', '發佈時間', '發文時間', '發布日期', '發佈日期', '發文日期',
+  '作業準備區', '作業準備', '準備區', '下載區', '下載說明',
   '後面', '後來', '後續', '後方', '後段', '後期', '後天', '後台', '後端', '後排', '後座',
+  '及時', '及格', '及第', '及至', '及早', '及其',
 ];
 const CONJ_CUES = ['以及', '和', '與', '及', '、'];
 const WRITE_COMPOUNDS = [
@@ -115,6 +117,9 @@ const WRITE_COMPOUNDS = [
   '傳送', '傳去', '送給', '送到', '寄給', '寄到', '遞給', '遞到', '轉給', '轉到', '轉寄',
   '放入', '放到', '放進', '放上', '貼上', '貼到', '丟到', '塞進', '投入', '搬到',
 ];
+const WRITE_COMPOUND_SET = new Set(WRITE_COMPOUNDS);
+const PREPARE_ACTIONS = new Set(['準備', '預覽', '草稿', '起草', 'prepare', 'draft']);
+const DOWNLOAD_ACTIONS = new Set(['下載', 'download']);
 const HAN_CHAR = /[\p{Script=Han}]/u;
 
 type TokenKind = 'noun' | 'query' | 'cue' | 'conj' | 'punct' | 'other';
@@ -139,7 +144,7 @@ function startsKnownWrite(text: string, index: number): boolean {
   return WRITE_COMPOUNDS.some(value => text.startsWith(value, index));
 }
 
-const CLAUSE_BOUNDARY_WORDS = new Set<string>([...CLAUSE_CUES, '以及', '和', '與', '後', '、']);
+const CLAUSE_BOUNDARY_WORDS = new Set<string>([...CLAUSE_CUES, '以及', '和', '與', '及', '後', '、']);
 
 function isClauseBoundaryToken(token: Token): boolean {
   return token.kind === 'punct' || CLAUSE_BOUNDARY_WORDS.has(token.value);
@@ -160,31 +165,29 @@ function splitClauses(text: string): string[] {
   return clauses;
 }
 
-function currentClauseHasQuery(tokens: Token[]): boolean {
-  let start = 0;
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i]!;
-    if (isClauseBoundaryToken(token)) start = i + 1;
-  }
-  return tokens.slice(start).some(token => token.kind === 'query' || QUERY_START.has(token.value));
-}
-
-function isInWordWriteMorpheme(text: string, from: number, tokens: Token[]): boolean {
+function isInWordWriteMorpheme(text: string, from: number, clauseHasQuery: boolean): boolean {
   const after = text.slice(from + 2);
   // A leftover content character plus 交／繳 is in-word when this clause is a
   // query (外交作業／外交課程). A new clause must not inherit a previous 查.
-  if (!currentClauseHasQuery(tokens) && !/^(?:課|程|生|系|部|際|學|官)/u.test(after)) return false;
+  if (!clauseHasQuery && !/^(?:課|程|生|系|部|際|學|官)/u.test(after)) return false;
   return true;
+}
+
+function noteToken(tokens: Token[], token: Token, state: { clauseHasQuery: boolean }): void {
+  tokens.push(token);
+  if (isClauseBoundaryToken(token)) state.clauseHasQuery = false;
+  else if (token.kind === 'query' || QUERY_START.has(token.value)) state.clauseHasQuery = true;
 }
 
 function tokenize(text: string): Token[] {
   const tokens: Token[] = [];
+  const state = { clauseHasQuery: false };
   let index = 0;
   while (index < text.length) {
     const from = index;
     const entry = LEXICON.find(item => text.startsWith(item.value, index));
     if (entry) {
-      tokens.push({ value: entry.value, start: from, end: from + entry.value.length, kind: entry.kind });
+      noteToken(tokens, { value: entry.value, start: from, end: from + entry.value.length, kind: entry.kind }, state);
       index += entry.value.length;
       continue;
     }
@@ -196,39 +199,63 @@ function tokenize(text: string): Token[] {
     if (HAN_CHAR.test(ch) && HAN_CHAR.test(next) && /[查看交繳]/.test(next) &&
       !/[查看交繳]/.test(ch) &&
       !startsKnownQuery(text, from) && !startsKnownWrite(text, from) &&
-      ( /[查看]/.test(next) || isInWordWriteMorpheme(text, from, tokens) )) {
-      tokens.push({ value: ch + next, start: from, end: from + 2, kind: 'noun' });
+      ( /[查看]/.test(next) || isInWordWriteMorpheme(text, from, state.clauseHasQuery) )) {
+      noteToken(tokens, { value: ch + next, start: from, end: from + 2, kind: 'noun' }, state);
       index += 2;
       continue;
     }
     const kind: TokenKind = ch === '查' || ch === '看' ? 'query'
       : /[，,；;。！!？?\r\n]/.test(ch) ? 'punct'
       : 'other';
-    tokens.push({ value: ch, start: from, end: from + 1, kind });
+    noteToken(tokens, { value: ch, start: from, end: from + 1, kind }, state);
     index += 1;
   }
   return tokens;
 }
 
-let cachedTokenText: string | undefined;
-let cachedTokens: Token[] | undefined;
+const TOKEN_CACHE_LIMIT = 8;
+const tokenCache = new Map<string, Token[]>();
 
 function tokensFor(text: string): Token[] {
-  if (cachedTokenText === text && cachedTokens) return cachedTokens;
-  cachedTokenText = text;
-  cachedTokens = tokenize(text);
-  return cachedTokens;
+  const hit = tokenCache.get(text);
+  if (hit) {
+    tokenCache.delete(text);
+    tokenCache.set(text, hit);
+    return hit;
+  }
+  const tokens = tokenize(text);
+  tokenCache.set(text, tokens);
+  if (tokenCache.size > TOKEN_CACHE_LIMIT) {
+    const oldest = tokenCache.keys().next().value;
+    if (oldest !== undefined) tokenCache.delete(oldest);
+  }
+  return tokens;
 }
 
 function tokenCovering(text: string, index: number): Token | undefined {
-  return tokensFor(text).find(token => token.start <= index && index < token.end);
+  const tokens = tokensFor(text);
+  let low = 0;
+  let high = tokens.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const token = tokens[mid]!;
+    if (index < token.start) high = mid - 1;
+    else if (index >= token.end) low = mid + 1;
+    else return token;
+  }
+  return undefined;
+}
+
+function isModifierBoundaryToken(token: Token): boolean {
+  return token.kind === 'punct' || CLAUSE_CUES.includes(token.value);
 }
 
 function clauseRange(tokens: Token[], at: number): { start: number; end: number } {
   let start = at;
   let end = at;
-  while (start > 0 && !isClauseBoundaryToken(tokens[start - 1]!)) start -= 1;
-  while (end + 1 < tokens.length && !isClauseBoundaryToken(tokens[end + 1]!)) end += 1;
+  // Modifier spans such as「供老師和助教確認…用的」may contain 和／與／以及.
+  while (start > 0 && !isModifierBoundaryToken(tokens[start - 1]!)) start -= 1;
+  while (end + 1 < tokens.length && !isModifierBoundaryToken(tokens[end + 1]!)) end += 1;
   return { start, end };
 }
 
@@ -249,8 +276,7 @@ function isModifierSpanInterior(tokens: Token[], at: number): boolean {
   return progressive >= 0 && progressiveEnd > progressive && at > progressive && at <= progressiveEnd;
 }
 
-function isRelativeQuery(tokens: Token[], token: Token): boolean {
-  const at = tokens.indexOf(token);
+function isRelativeQuery(tokens: Token[], token: Token, at = tokens.indexOf(token)): boolean {
   if (at < 0) return false;
   if (isModifierSpanInterior(tokens, at)) return true;
   const next = tokens[at + 1]?.value;
@@ -269,7 +295,7 @@ function nextNegatedWriteStop(text: string, from: number): number {
     const offset = token.start - from;
     if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) return offset;
     if (token.kind === 'cue' && ACTION_CUES.includes(token.value)) return offset;
-    if (token.kind === 'query' && QUERY_START.has(token.value) && !isRelativeQuery(tokens, token)) {
+    if (token.kind === 'query' && QUERY_START.has(token.value) && !isRelativeQuery(tokens, token, i)) {
       return offset;
     }
     if (token.kind === 'conj') {
@@ -353,8 +379,10 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
     const before = text.slice(0, match.index);
     if (WRITE_NEGATION.test(before)) continue;
     // Writes hold only at a word boundary. Field nouns such as「發布時間」stay reads.
+    // A write compound such as「轉交」is the word, even if the regex matched only「交」.
     const covering = tokenCovering(text, match.index);
-    if (!covering || covering.start !== match.index || covering.kind === 'noun') continue;
+    if (!covering || covering.kind === 'noun') continue;
+    if (covering.start !== match.index && !WRITE_COMPOUND_SET.has(covering.value)) continue;
     if (!match[1]) return 'unsupported';
 
     const after = text.slice(match.index + match[0].length).trimStart();
@@ -537,10 +565,12 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
   const pendingOnly = /(?:未交|未繳|待交|待繳|待提交|尚未(?:交|繳|提交)|還沒(?:交|繳|提交)|沒(?:交|繳)|pending|unsubmitted|not\s+submitted)/i.test(text);
   const dataIntent = lastDataTypeIntent(text);
   if (dataIntent === 'announcements') return { intent: 'announcements', pendingOnly: false };
-  const preparation = /(?:準備|預覽|草稿|起草|prepare|draft)/i.test(text) && /(?:作業|homework|assignment)/i.test(text);
-  if (preparation && /(?:下載|download)/i.test(text)) return { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' };
+  const tokens = tokensFor(text);
+  const preparation = tokens.some(token => PREPARE_ACTIONS.has(token.value)) && /(?:作業|homework|assignment)/i.test(text);
+  const downloading = tokens.some(token => DOWNLOAD_ACTIONS.has(token.value) || DOWNLOAD_ACTIONS.has(token.value.toLowerCase()));
+  if (preparation && downloading) return { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' };
   if (/(?:測驗|考試|問卷)/.test(text)) return { intent: 'unsupported', pendingOnly: false };
-  if (/(?:下載|download)/i.test(text)) return { intent: 'download', pendingOnly: false };
+  if (downloading) return { intent: 'download', pendingOnly: false };
   if (dataIntent === 'materials' || dataIntent === 'courses') {
     return { intent: dataIntent, pendingOnly: false };
   }
