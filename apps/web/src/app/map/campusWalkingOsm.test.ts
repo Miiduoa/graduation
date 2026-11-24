@@ -132,11 +132,21 @@ describe('OSM campus walking discovery (not routing approval)', () => {
       ...input.elements,
       node(6, 10.015, 20.002), node(7, 10.016, 20.002),
     ];
-    for (const references of [[6, 0, 7], [6, 999, 7]]) {
-      expect(parse({ ...input, elements: [...elements, way(103, references)] })).toEqual(parse(input));
+    for (const id of [0, 103]) {
+      for (const references of [[6, 0, 7], [6, 999, 7]]) {
+        expect(parse({ ...input, elements: [...elements, way(id, references)] })).toEqual(parse(input));
+      }
     }
     for (const references of [[1, 2, 0], [7, 0, 1], [1, 999, 7], [0, 999]]) {
       expect(parse({ ...input, elements: [...elements, way(103, references)] })).toBeNull();
+    }
+  });
+
+  it.each([0, 103])('rejects way %i when a missing endpoint leaves its scope unknown', id => {
+    const input = payload();
+    const elements = [...input.elements, node(6, 10.015, 20.002)];
+    for (const references of [[6, 999], [999, 6], [6, 0], [0, 6]]) {
+      expect(parse({ ...input, elements: [...elements, way(id, references)] })).toBeNull();
     }
   });
 

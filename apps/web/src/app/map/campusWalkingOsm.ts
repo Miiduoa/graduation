@@ -153,19 +153,22 @@ export function parseCampusWalkingOsmCandidates(
     if (!Array.isArray(item.nodes)) return null;
     const ids: unknown[] = item.nodes;
     let hasCampusNode = false;
-    let hasOutsideNode = false;
     let hasMissingNode = false;
-    for (const id of ids) {
+    let hasMissingEndpoint = false;
+    for (const [index, id] of ids.entries()) {
       const scope = positiveId(id) ? nodeScopes.get(id) :
         invalidOutsideNodeIds.has(id) ? false : undefined;
       if (scope === true) hasCampusNode = true;
-      if (scope === false) hasOutsideNode = true;
-      if (scope === undefined) hasMissingNode = true;
+      if (scope === undefined) {
+        hasMissingNode = true;
+        if (index === 0 || index === ids.length - 1) hasMissingEndpoint = true;
+      }
     }
 
-    // Use all known members to determine scope before handling incomplete ways.
+    // Discard incomplete ways only when both endpoints are known outside
+    // (or the sole node is known outside) and no member is known inside.
     const incomplete = ids.length < 2 || hasMissingNode;
-    if (incomplete && (hasCampusNode || !hasOutsideNode)) return null;
+    if (incomplete && (hasCampusNode || hasMissingEndpoint || ids.length === 0)) return null;
     const validReferences = ids.every(positiveId);
     if (!validReferences && hasCampusNode) return null;
     if (!positiveId(item.id)) {
