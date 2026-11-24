@@ -5,6 +5,7 @@ import hashlib
 import http.server
 import json
 import os
+import re
 import threading
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
@@ -20,6 +21,8 @@ SCENARIOS = [
     {'name': 'small-large-text', 'width': 320, 'height': 740, 'theme': 'light', 'text': '200'},
     {'name': 'phone-reduced-motion', 'width': 390, 'height': 844, 'theme': 'dark', 'motion': 'reduce'},
     {'name': 'phone-app-reduced-motion', 'width': 390, 'height': 844, 'theme': 'light', 'appMotion': 'reduce'},
+    {'name': 'coursework-desktop', 'width': 1440, 'height': 1000, 'theme': 'light', 'coursework': 'normal'},
+    {'name': 'coursework-phone-read-retry', 'width': 390, 'height': 844, 'theme': 'dark', 'coursework': 'read-failure'},
 ]
 
 
@@ -44,8 +47,19 @@ def validate_sources():
         assert json.loads(manifest)['version'] == runtime['expected'], runtime
     for product in ('AssistantWorkspaceProvider.tsx', 'AppHeader.tsx', 'TodayCampusEntry.tsx',
                     'StudentToday.tsx', 'Assistant.tsx', 'AssistantThread.tsx',
-                    'QuickCampusEntry.tsx', 'AssistantWorkspace.module.css'):
+                    'QuickCampusEntry.tsx', 'AssistantWorkspace.module.css',
+                    'TodayAgent.tsx', 'TodayAgentPanel.tsx', 'assistantCourseworkTracking.ts',
+                    'todayAgentFollowups.ts', 'assistantExecutionJournal.ts', 'assistantCalendarExecution.ts'):
         assert any(item['path'].endswith('/' + product) for item in evidence['files']), product
+    required_contracts = {
+        'apps/web/src/features/nuni/assistant/types.ts',
+        'apps/web/src/lib/nuni/assistantV2/actions.ts',
+        'apps/web/src/lib/nuni/assistantV2/contracts.ts',
+        '.github/workflows/ai-workspace-browser.yml',
+    }
+    assert set(evidence['contractSources']) == required_contracts, evidence['contractSources']
+    assert required_contracts | {'apps/web/src/features/nuni/assistant/execution.ts'} <= {
+        item['path'] for item in evidence['files']}, 'Missing execution or contract source fingerprint'
     return evidence
 
 
@@ -102,6 +116,134 @@ async def inspect_layout(page, report, stage):
     report['geometry'].append({'stage': stage, **geometry})
 
 
+async def check_coursework(page, report):
+    home = page.get_by_role('region', name='首頁安排工作', exact=True)
+    await expect(home.get_by_role('button', name='確認', exact=True)).to_be_visible()
+    await expect(home.get_by_role('list', name='代辦步驟', exact=True)).to_be_visible()
+    # The initial Today proposal is real and remains unconfirmed. The chat's
+    # different signed proposal must become the only durable arrangement.
+    await page.evaluate('''() => {
+      window.__courseworkMountedHome = document.querySelector('[data-coursework-home]').firstElementChild;
+      window.__courseworkTimeOrigin = performance.timeOrigin;
+    }''')
+    report['courseworkStages'] = []
+
+    async def snapshot(stage):
+        value = await page.evaluate('window.__aiWorkspaceQA.snapshot()')
+        report['courseworkStages'].append({'stage': stage, 'snapshot': value})
+        return value
+
+    def actions(value):
+        return [row['path'].rsplit('/', 1)[-1] for row in value['requests']]
+
+    before = await snapshot('mounted-home-preview')
+    assert actions(before).count('plan') == 2, before
+    assert not before['coursework']['writes'] and not before['coursework']['proofs'], before
+    assert not before['coursework']['journal'] and before['coursework']['nativeLocks'], before
+    report['checks'].append('Actual Today is already mounted with an unsent preview and native Web Locks')
+
+    await page.get_by_role('textbox', name='想完成的事', exact=True).fill('幫我規劃資料模型的準備時間')
+    await page.get_by_role('button', name='開啟任務', exact=True).click()
+    panel = page.get_by_role('region', name='校園助理', exact=True)
+    await expect(panel.get_by_role('textbox', name='問題', exact=True)).to_have_value('幫我規劃資料模型的準備時間')
+    unconsented = await snapshot('draft-before-consent')
+    assert actions(unconsented).count('ask') == 0 and not unconsented['coursework']['writes'], unconsented
+    await panel.get_by_role('checkbox').check()
+    await panel.get_by_role('button', name='送出', exact=True).click()
+    confirm = panel.get_by_role('button', name='確認', exact=True)
+    await expect(confirm).to_be_visible()
+    preview = await snapshot('chat-preview')
+    assert actions(preview).count('ask') == 2 and actions(preview).count('confirm') == 0, preview
+    assert not preview['coursework']['writes'] and not preview['coursework']['proofs'], preview
+    report['checks'].append('Home draft and explicit consent reach the actual chat; previews do not write records or tracking proofs')
+    await confirm.click()
+
+    failed = report['config']['coursework'] == 'read-failure'
+    if failed:
+        await expect(panel.get_by_text(re.compile('行程已核對，但安排追蹤尚未接續'))).to_be_visible()
+        stalled = await snapshot('classification-read-failed')
+        proof = stalled['coursework']
+        assert len(proof['writes']) == len(proof['records']) == len(proof['imports']) == 1, stalled
+        assert len(proof['journal']) == 1 and not proof['proofs'] and not proof['journalRemovals'], stalled
+        assert actions(stalled).count('confirm') == 1 and actions(stalled).count('followup') == 1, stalled
+        await expect(confirm).to_have_count(0)
+        await inspect_layout(page, report, 'tracking-read-failed')
+        report['checks'].append('A failed tracking read retains the verified event and recovery journal without claiming completion or offering confirmation again')
+        await page.evaluate('window.__aiWorkspaceQA.setFollowupFailure(false)')
+        await panel.get_by_role('button', name='重新核對結果', exact=True).click()
+
+    tracked = home.get_by_role('group', name='「合成資料模型作業」的安排追蹤', exact=True)
+    await expect(tracked).to_contain_text('已安排')
+    expected_reads = 3 if failed else 2
+    await page.wait_for_function('''expected => {
+      const value = window.__aiWorkspaceQA.snapshot();
+      return value.coursework.journal.length === 0 && value.coursework.proofs.length === 1 &&
+        value.requests.filter(row => row.path.endsWith('/followup')).length >= expected;
+    }''', arg=expected_reads)
+    verified = await snapshot('chat-to-mounted-today')
+    data = verified['coursework']
+    assert actions(verified).count('confirm') == 1 and actions(verified).count('plan') == 2, verified
+    assert actions(verified).count('ask') == 2 and actions(verified).count('followup') == expected_reads, verified
+    assert actions(verified).count('reconcile') == int(failed), verified
+    assert len(data['writes']) == len(data['records']) == len(data['imports']) == len(data['proofs']) == 1, verified
+    assert data['writes'][0] == data['records'][0], verified
+    assert data['records'][0]['id'] == data['imports'][0]['id'] == 'qa-chat-coursework-001', verified
+    assert data['readbacks'] == 1 + int(failed) and not data['journal'], verified
+    await expect(panel.get_by_text(re.compile('行程已核對，但安排追蹤尚未接續'))).to_have_count(0)
+    assert not data['otherAccountProofs'] and not data['otherSchoolProofs'], verified
+    proof = data['proofs'][0]
+    assert proof['issuedContext'] == 'a' * 43 and proof['conversationId'] == 'qa-chat-coursework-conversation', proof
+    assert proof['card']['mutationId'] == 'qa-chat-coursework-001', proof
+    assert len(data['journalAtConfirm']) == 1 and data['journalAtConfirm'][0]['card']['coursework'] is True, data
+    assert data['journalRemovals'] and all(row['proofs'] == data['proofs'] for row in data['journalRemovals']), data
+    reads = [row for row in verified['requests'] if row['path'].endswith('/followup')]
+    assert [row['proofPhase'] for row in reads] == (['journal', 'journal', 'durable'] if failed else ['journal', 'durable']), reads
+    assert all(row['body']['issuedContext'] == 'a' * 43 and
+               row['body']['token'] == proof['card']['token'] and
+               row['body']['args'] == proof['card']['args'] and
+               row['body']['conversationId'] == proof['conversationId'] for row in reads), reads
+    assert await page.evaluate('''() => window.__courseworkMountedHome.isConnected &&
+      document.querySelector('[data-coursework-home]').firstElementChild === window.__courseworkMountedHome &&
+      performance.timeOrigin === window.__courseworkTimeOrigin'''), 'Today was remounted or the document reloaded'
+    await expect(home.get_by_role('button', name='確認', exact=True)).to_have_count(0)
+    await expect(home.get_by_role('button', name='替「合成資料模型作業」找 30 分鐘準備時間', exact=True)).to_have_count(0)
+    await expect(home.get_by_role('list', name='代辦步驟', exact=True)).to_have_count(0)
+    report['checks'].append('One explicit chat confirmation produces one verified record; a durable scoped proof precedes journal removal')
+    report['checks'].append('The already mounted Today reads the same signed proof immediately and retires its unsent duplicate preview without reload')
+    if failed:
+        report['checks'].append('Chat recovery issues reconcile and followup reads only, with no second ask, plan or confirmation')
+
+    await panel.get_by_role('button', name='收合', exact=True).click()
+    await expect(panel).not_to_be_visible()
+    await tracked.scroll_into_view_if_needed()
+    await expect(tracked.get_by_role('link', name='查看「合成資料模型作業」的作業', exact=True)).to_have_attribute(
+        'href', '/classroom/course/qa-course#assignment-qa-work')
+    await expect(tracked.get_by_role('link', name='查看「合成資料模型作業」的行程', exact=True)).to_have_attribute(
+        'href', '/calendar?schoolId=pu&eventId=qa-chat-coursework-001')
+    await inspect_layout(page, report, 'today-tracking')
+    report['checks'].append('Minimizing exposes the actual Today tracking card with source-bound coursework and calendar links')
+
+    if failed:
+        await page.evaluate('window.__aiWorkspaceQA.setFollowupFailure(true)')
+        await home.get_by_role('button', name='更新安排狀態', exact=True).click()
+        await expect(home.get_by_role('alert')).to_contain_text('原紀錄仍保留')
+        await expect(home.get_by_role('button', name='重新確認資料', exact=True)).to_be_enabled()
+        unavailable = await snapshot('today-read-failed')
+        assert unavailable['coursework']['proofs'] == data['proofs'], unavailable
+        await page.evaluate('window.__aiWorkspaceQA.setFollowupFailure(false)')
+        await home.get_by_role('button', name='重新確認資料', exact=True).click()
+        await expect(tracked).to_contain_text('已安排')
+        await expect(home.get_by_role('alert')).to_have_count(0)
+        retried = await snapshot('today-read-only-retry')
+        assert [row for row in retried['requests'] if not row['path'].endswith('/followup')] == [
+            row for row in verified['requests'] if not row['path'].endswith('/followup')], retried
+        for key in ('records', 'writes', 'imports', 'proofs', 'journal', 'readbacks'):
+            assert retried['coursework'][key] == data[key], (key, retried)
+        assert actions(retried).count('followup') == expected_reads + 2, retried
+        await inspect_layout(page, report, 'today-read-recovered')
+        report['checks'].append('Today retry re-reads the original proof after failure while records, imports, proof and mutation counts remain unchanged')
+
+
 async def run_scenario(browser, origin, config):
     report = {'config': config, 'status': 'running', 'checks': [], 'screenshots': [], 'geometry': []}
     context = await browser.new_context(viewport={'width': config['width'], 'height': config['height']},
@@ -126,8 +268,15 @@ async def run_scenario(browser, origin, config):
 
     await context.route('**/*', isolate)
     try:
-        query = urlencode({key: config[key] for key in ('theme', 'text', 'motion', 'appMotion') if key in config})
+        query = urlencode({key: config[key] for key in ('theme', 'text', 'motion', 'appMotion', 'coursework') if key in config})
         await page.goto(origin + '/?' + query)
+        if config.get('coursework'):
+            await check_coursework(page, report)
+            ledger = await page.evaluate('window.__aiWorkspaceQA.snapshot()')
+            assert not ledger['unexpected'] and not ledger['navigations'], ledger
+            assert not errors and not console_messages and not external and not unexpected_assets, (errors, console_messages, external, unexpected_assets)
+            report.update({'status': 'passed', 'ledger': ledger})
+            return report
         home_input = page.get_by_role('textbox', name='想完成的事', exact=True)
         await expect(home_input).to_be_visible()
         box = await home_input.bounding_box()

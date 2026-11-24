@@ -6,15 +6,19 @@ import { AssistantEnabledProvider } from '@/components/AssistantEnabledProvider'
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { TodayAssistantDisclosure, type TodayAssistantHandle } from '@/components/TodayCampusEntry';
 import { StudentToday } from '@/components/today/StudentToday';
+import { TodayAgent } from '@/features/nuni/TodayAgent';
 import home from '@/app/home.module.css';
 import '@/app/globals.css';
 import Link, {
   fixtureOptions,
+  courseworkScenario,
+  courseworkTask,
   selectCampus,
   setChecking,
   setGuest,
   switchAccount,
   useFixture,
+  useNuniSession,
 } from './boundaries';
 
 document.documentElement.dataset.theme = fixtureOptions.get('theme') === 'dark' ? 'dark' : 'light';
@@ -25,6 +29,7 @@ const now = new Date('2026-11-24T08:30:00+08:00');
 
 function ProductPages() {
   const current = useFixture();
+  const { session } = useNuniSession();
   const assistant = useRef<TodayAssistantHandle>(null);
   const [expanded, setExpanded] = useState(false);
   const campusSearch = '?' + current.search;
@@ -77,6 +82,18 @@ function ProductPages() {
             weekHref={'/timetable' + campusSearch}
             timetableHref={'/timetable' + campusSearch}
             assistant={<TodayAssistantDisclosure ref={assistant} onOpenChange={setExpanded} />}
+            agent={
+              courseworkScenario && session ? (
+                <section aria-label="首頁安排工作" data-coursework-home>
+                  <TodayAgent
+                    context={session.context}
+                    accountId={session.platformAccountId}
+                    now={now}
+                    tasks={[courseworkTask]}
+                  />
+                </section>
+              ) : undefined
+            }
           />
         ) : (
           <section className="fixture-destination" aria-label="合成目的地頁面">

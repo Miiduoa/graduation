@@ -11,11 +11,20 @@ on:
       - 'apps/web/src/components/CampusProviders*'
       - 'apps/web/src/components/today/**'
       - 'apps/web/src/features/nuni/Assistant*'
+      - 'apps/web/src/features/nuni/TodayAgent*'
       - 'apps/web/src/features/nuni/assistant/**'
       - 'apps/web/src/features/nuni/Session*'
       - 'apps/web/src/app/ai-assistant/**'
       - 'apps/web/src/app/globals.css'
       - 'apps/web/src/app/home.module.css'
+      - 'apps/web/src/lib/assistantCourseworkTracking*'
+      - 'apps/web/src/lib/assistantExecutionJournal*'
+      - 'apps/web/src/lib/assistantCalendarExecution*'
+      - 'apps/web/src/lib/todayAgentFollowups*'
+      - 'apps/web/src/lib/nuni/assistantV2/actions*'
+      - 'apps/web/src/lib/nuni/assistantV2/contracts*'
+      - 'packages/shared/src/assistantExecution*'
+      - 'packages/shared/src/assistantCourseworkFollowup*'
       - 'scripts/qa/ai-workspace/**'
       - 'scripts/qa/browser/**'
       - 'package.json'
@@ -63,6 +72,7 @@ jobs:
             src/components/AssistantWorkspaceProvider.test.tsx \
             src/components/AssistantWorkspace.integration.test.tsx \
             src/components/TodayCampusEntry.test.tsx \
+            src/features/nuni/Assistant.courseworkTracking.test.tsx \
             src/features/nuni/assistant/AssistantThread.inlineWorkspace.test.tsx \
             src/app/ai-assistant/LegacyAssistant.workspaceDraft.test.tsx \
             --reporter=default --reporter=json \

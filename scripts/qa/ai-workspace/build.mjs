@@ -13,6 +13,14 @@ const output = path.join(root, 'artifacts/ai-workspace');
 const webRequire = createRequire(path.join(root, 'apps/web/package.json'));
 const rootManifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const webManifest = JSON.parse(await readFile(path.join(root, 'apps/web/package.json'), 'utf8'));
+// These files bind the evidence to the current protocol and CI gate. Type-only
+// imports/server handlers are not browser runtime inputs or executed auth checks.
+const contractSources = [
+  'apps/web/src/features/nuni/assistant/types.ts',
+  'apps/web/src/lib/nuni/assistantV2/actions.ts',
+  'apps/web/src/lib/nuni/assistantV2/contracts.ts',
+  '.github/workflows/ai-workspace-browser.yml',
+];
 const runtime = await Promise.all(
   ['react', 'react-dom'].map(async (name) => {
     const declared = webManifest.dependencies[name];
@@ -93,6 +101,7 @@ const inputs = [
     'apps/web/package.json',
     'apps/web/tsconfig.json',
     'pnpm-lock.yaml',
+    ...contractSources,
   ]),
 ].sort();
 const files = await Promise.all(
@@ -109,13 +118,18 @@ await writeFile(
   JSON.stringify(
     {
       gitHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
+      gitStatus: execFileSync('git', ['status', '--porcelain=v1'], {
+        cwd: root,
+        encoding: 'utf8',
+      }).trim(),
       synthetic: true,
       nodeVersion: process.version,
       runtime,
+      contractSources,
       replacedImportBoundaries: [...replaced].sort(),
       files,
       scope:
-        'Actual AssistantWorkspaceProvider, AppHeader, TodayAssistantDisclosure, StudentToday, QuickCampusEntry, Conversation, AssistantThread and product CSS. Synthetic auth/session/campus/routing, home records and capability/ask responses. No production backend, real identity, provider quality, writes, native runtime or deployment claim.',
+        'Actual AssistantWorkspaceProvider, AppHeader, TodayAssistantDisclosure, StudentToday, TodayAgent/Panel, QuickCampusEntry, Conversation, AssistantThread, journal, calendar mirroring, tracking storage and product CSS. Synthetic auth/session/campus/routing, home records and an isolated capability/ask/plan/confirm/reconcile/followup ledger. Coursework cases use real browser storage and native Web Locks, with one synthetic backend write after explicit confirmation. contractSources are fingerprinted for version binding only; server signing/authentication and CI workflow execution are not performed by this browser fixture. No production backend, real identity, provider quality, remote authorization/write, native runtime or deployment claim.',
     },
     null,
     2,

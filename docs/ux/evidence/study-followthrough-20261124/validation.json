@@ -1,0 +1,186 @@
+{
+  "scope": "Local source and component validation; no production identity, deployment, or remote gate claim.",
+  "baseHead": "299947d1b74b8daac3899d2f388329b93dbf8602",
+  "publishedPredecessor": "d14d20a089ea8421ae8c792433d6bc1d94cca3f5",
+  "integratedMain": "ca73d802600c5e14bf1572b6f08a09c943080083",
+  "node": "22.23.5",
+  "vitest": "4.1.12",
+  "runs": [
+    {
+      "file": "followthrough-final-regression-results.json",
+      "sha256": "87f29589750faa1a7c6405b35368e69a288bf1dc2446bda5566e01e868c8d201",
+      "files": 148,
+      "passed": 6350,
+      "failed": 1,
+      "skipped": 0,
+      "startTime": 1795535481448,
+      "success": false
+    },
+    {
+      "file": "followthrough-final-panel-results.json",
+      "sha256": "29c9ba9e9d7bbcb4dcbceb474929bfe52cc5189792fea9d3a45c2fa83db1dd68",
+      "files": 3,
+      "passed": 132,
+      "failed": 0,
+      "skipped": 0,
+      "startTime": 1795535539563,
+      "success": true
+    },
+    {
+      "file": "followthrough-recovery-budget-results.json",
+      "sha256": "c641226e9c31370d1c258eb13a89f5a3438c6668ea6147e4e9961784d1979683",
+      "files": 1,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "startTime": 1795535622172,
+      "success": true
+    }
+  ],
+  "latestPerFile": {
+    "files": 148,
+    "passed": 6351,
+    "failed": 0,
+    "skipped": 0,
+    "counting": "Latest passing result per file, without adding overlapping reruns. The 148-file batch had one 5000ms timeout; its unmodified 3-test suite passed on an isolated rerun, first case 3366ms. The final presentation adjustment was rechecked in the 132-test subset."
+  },
+  "staticChecks": {
+    "webTypeScript": "exit 0",
+    "changedWebESLint": {
+      "files": 23,
+      "errors": 0,
+      "warnings": 0
+    },
+    "qaESLint": "0 errors, 0 warnings; two actual TSX files",
+    "diffWhitespace": "pass"
+  },
+  "browser": {
+    "scenarios": 8,
+    "workflowChecks": 49,
+    "screenshots": 34,
+    "sourceFiles": 365,
+    "manifestSha256": "43fb98439b8088e772e95debc8a5001e2b5a295f03a43019ba909add643f6fa5",
+    "reportSha256": "86ca218ae80b1261dd267bb21d1e8e240642c1108ee4ee6cdafb96a008c90002",
+    "playwright": "1.56.0",
+    "chromium": "141.0.7390.37",
+    "data": "synthetic; actual product components, browser storage and Web Locks"
+  },
+  "changedCode": [
+    {
+      "path": ".github/workflows/ai-workspace-browser.yml",
+      "sha256": "e2142f6ca0e5eda85cc627985e45ef8bb21e79f5aa4bde8d7ab56d17d6d6d82a"
+    },
+    {
+      "path": "apps/web/src/components/today/TodayAgentPanel.test.tsx",
+      "sha256": "4cfac73b0344ab6e52814e04333a8fe5e009d299955f8f2c8539c34373055990"
+    },
+    {
+      "path": "apps/web/src/components/today/TodayAgentPanel.tsx",
+      "sha256": "e220503e7745ef4406d8a7516c37fef6872ea4ec5d4e359a1ea1816bccd38862"
+    },
+    {
+      "path": "apps/web/src/features/nuni/Assistant.courseworkTracking.test.tsx",
+      "sha256": "f9e10b6850de360710ac3139e10eb7f6a76c042aa7e7e99a8ce82d9e2a0d75a2"
+    },
+    {
+      "path": "apps/web/src/features/nuni/Assistant.test.tsx",
+      "sha256": "5c321f9c24b1eb6fbe5c0a19b3577e4dc4328cbb044391103a9cddbef10880f8"
+    },
+    {
+      "path": "apps/web/src/features/nuni/Assistant.tsx",
+      "sha256": "ee4a36358dab5fd338098433321f5e5bd18a6b75ca46b3876995bb57308aec9d"
+    },
+    {
+      "path": "apps/web/src/features/nuni/AssistantCampusEventFlow.test.tsx",
+      "sha256": "402acedd42272f9d6555283e70160a4305d570df85243ddbee3ddf3747ee50e1"
+    },
+    {
+      "path": "apps/web/src/features/nuni/TodayAgent.test.tsx",
+      "sha256": "7133095f18df7d339579dbe8e6fb08be221d50d65780da1cffa9a7472b1ce73c"
+    },
+    {
+      "path": "apps/web/src/features/nuni/TodayAgent.tsx",
+      "sha256": "8754c288f2c240c9c6beb8e66e418dcf54ba8831c79dea0f08351faeacdb746f"
+    },
+    {
+      "path": "apps/web/src/features/nuni/assistant/AssistantCards.tsx",
+      "sha256": "4782b1b93db1d63e56dceed052b422c1cd2125ceb01b4b154ef55fa59922e5fc"
+    },
+    {
+      "path": "apps/web/src/features/nuni/assistant/execution.test.ts",
+      "sha256": "78553e2609175f208e77314ba0ffc444cb4234d9700ab57f6a828049b210e236"
+    },
+    {
+      "path": "apps/web/src/features/nuni/assistant/execution.ts",
+      "sha256": "59ee83efd25565387e2264ddc9719212effe6937902170cb5b26e72a13d9166f"
+    },
+    {
+      "path": "apps/web/src/features/nuni/assistant/planRevision.test.ts",
+      "sha256": "1e98bbdd2d16f8e3a8dad2cdf32f7c2eaa773e279145e82ed0c0402ffd6f632e"
+    },
+    {
+      "path": "apps/web/src/features/nuni/assistant/planRevision.ts",
+      "sha256": "f51f8752027192ef9a4c1d7e03ba1adc54dfe02fd5c55f2b054a02f59c727316"
+    },
+    {
+      "path": "apps/web/src/features/nuni/assistant/types.ts",
+      "sha256": "a021ccaa3775cf3d413831636d17f507ac582cd62dd90329807a3a592669c582"
+    },
+    {
+      "path": "apps/web/src/lib/assistantCourseworkTracking.test.ts",
+      "sha256": "c2052946b24726b8e9de36f287407da0506a5f6acd863003e506975f2fe67421"
+    },
+    {
+      "path": "apps/web/src/lib/assistantCourseworkTracking.ts",
+      "sha256": "f4e700db797f4405cd04d7c445476f9545650ad2d51b491d7fbe7082af159862"
+    },
+    {
+      "path": "apps/web/src/lib/assistantExecutionJournal.test.ts",
+      "sha256": "3afd5058c36c36a3975416c69e22382fd9b3070cfe395cd1913df05b34022dfd"
+    },
+    {
+      "path": "apps/web/src/lib/assistantExecutionJournal.ts",
+      "sha256": "bccebd110c0b2902365fd4455f02c482a427368f2c1941821ac13e9eba57dbc1"
+    },
+    {
+      "path": "apps/web/src/lib/nuni/assistantV2/actions.ts",
+      "sha256": "73aa4b29f55942241057371e81997aba2d94c3fc8a6041eee87d3307d2e5b91b"
+    },
+    {
+      "path": "apps/web/src/lib/nuni/assistantV2/contracts.ts",
+      "sha256": "72ae96f745b9ec9d3fc9c52816f5fd18cc042caa0bc0ebca830e24505ecf3fbd"
+    },
+    {
+      "path": "apps/web/src/lib/nuni/assistantV2/planRevisionStudyGuard.test.ts",
+      "sha256": "14fbd337baebbb98ad4660ac74eb98c906af450b927abe4eb722b1ca96164b97"
+    },
+    {
+      "path": "apps/web/src/lib/todayAgentFollowups.test.ts",
+      "sha256": "998af526d45d44008e370d9cb526d9e954e7cdfec09df8ecef2af26d73498d7d"
+    },
+    {
+      "path": "apps/web/src/lib/todayAgentFollowups.ts",
+      "sha256": "92f427a91b0ecf45d853217893385d4e2fa25cec26b256876eb3b14ac2789d74"
+    },
+    {
+      "path": "scripts/qa/ai-workspace/README.md",
+      "sha256": "f11e79489e4796c86a255c3a3d25732a1315754b310286697c703f57cb289f50"
+    },
+    {
+      "path": "scripts/qa/ai-workspace/boundaries.tsx",
+      "sha256": "778089a28ee70cca6a22e180e3efd02b3893b2e9d822a3c004f4b09a0d7bba6c"
+    },
+    {
+      "path": "scripts/qa/ai-workspace/build.mjs",
+      "sha256": "d31de147e34997a7472f92d20457f16728097075cad0fbc1a566d9d325d80c62"
+    },
+    {
+      "path": "scripts/qa/ai-workspace/check.py",
+      "sha256": "5833f56a9487d682b6e586260876a5dd011dba6fe5fa1892d32c732e9ffc9cd8"
+    },
+    {
+      "path": "scripts/qa/ai-workspace/fixture.tsx",
+      "sha256": "791e612fc32602aa46cf931ac2e2f5248df2b03e8eec6829534121655f3da03d"
+    }
+  ]
+}

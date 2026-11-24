@@ -165,7 +165,7 @@ export function AssistantCard({
   const prerequisiteState = prerequisite && states[prerequisite.mutationId];
   const prerequisiteHint = priorCalendarActionHint(cards, index, states);
   const canRecheckPrerequisite = prerequisite && onReconcile &&
-    ['unknown', 'absent', 'conflict'].includes(prerequisiteState?.status ?? '');
+    ['unknown', 'absent', 'conflict', 'verified'].includes(prerequisiteState?.status ?? '');
   if (!supportedCard(card)) {
     return <article className={styles.card} aria-label="無法確認的任務">
       <p className={styles.eyebrow}>無法確認</p>
