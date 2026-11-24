@@ -294,6 +294,7 @@ test('a server refresh started before a write cannot erase the later confirmed s
   await act(async () => { write.resolve(); });
   expect(view.getByLabelText('取消訂閱讀書會').props.accessibilityState.busy).toBe(false);
 
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
   await act(async () => { refresh.resolve([]); await refreshPromise; });
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
   expect(subscribeToBoard).toHaveBeenCalledTimes(1);
@@ -317,6 +318,7 @@ test('a refresh overlapping one board write still applies server state for other
   await act(async () => { refresh.resolve(['board-b']); await refreshPromise; });
   expect(view.getByLabelText('取消訂閱攝影社')).toBeTruthy();
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
   await act(async () => { write.resolve(); });
   expect(view.getByLabelText('取消訂閱攝影社')).toBeTruthy();
   expect(view.getByLabelText('取消訂閱讀書會').props.accessibilityState.busy).toBe(false);
@@ -602,6 +604,57 @@ test('a pull-to-refresh started during a failed write cannot apply a cache gap o
     subs.resolve([]);
     await refreshPromise;
   });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
+test('a newer server list that omits the board beats an older failed-write re-read', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  const write = deferred();
+  jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+
+  const reRead = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => reRead.promise);
+  await act(async () => { write.reject(new Error('offline')); });
+  expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  // Other device subscribed then left; the newer list confirms it is gone.
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([]);
+  await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  await act(async () => { reRead.resolve(true); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+});
+
+test('a successful write still applies a later server subscription after a stale in-flight list', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  const write = deferred();
+  jest.mocked(unsubscribeFromBoard).mockImplementationOnce(() => write.promise);
+  fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
+
+  const subs = deferred<string[]>();
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
+  let refreshPromise!: Promise<void>;
+  await act(async () => {
+    refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+  });
+
+  await act(async () => { write.resolve(); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  // Another device re-subscribed after this write; the in-flight list sees it.
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
+  await act(async () => { subs.resolve(['board']); await refreshPromise; });
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 

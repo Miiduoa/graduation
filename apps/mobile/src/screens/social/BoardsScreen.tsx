@@ -91,6 +91,11 @@ function BoardsContent() {
   const boardWriteRevision = useRef(new Map<string, number>());
   // Last list revision that applied this board from the server (not keepLocal).
   const boardServerAppliedRevision = useRef(new Map<string, number>());
+  // A list started before this board's last successful write used keepLocal.
+  // After that write settles, re-check so a later server change is not dropped.
+  const keepLocalFromStaleList = useRef(new Set<string>());
+  const lastSettledWriteSucceeded = useRef(new Set<string>());
+  const reconcileBoardSubscriptionRef = useRef<(boardId: string, uid: string, sid: string) => void>(() => {});
   // Latest tap per board; only its outcome may roll back or alert.
   const latestIntent = useRef(new Map<string, number>());
   const intentCounter = useRef(0);
@@ -138,6 +143,13 @@ function BoardsContent() {
       for (const [id, revision] of boardWriteRevision.current) {
         if (revision > subscriptionRevisionAtRead) keepLocal.add(id);
       }
+      const tracked = new Set([
+        ...subs,
+        ...keepLocal,
+        ...subscribedRef.current,
+        ...confirmedSubscribedRef.current,
+        ...boardWriteRevision.current.keys(),
+      ]);
       const nextConfirmed = new Set(subs);
       for (const id of keepLocal) {
         if (confirmedSubscribedRef.current.has(id)) nextConfirmed.add(id);
@@ -146,7 +158,7 @@ function BoardsContent() {
       confirmedSubscribedRef.current = nextConfirmed;
       appliedReadRevision.current += 1;
       const applied = appliedReadRevision.current;
-      for (const id of new Set([...subs, ...keepLocal, ...subscribedRef.current])) {
+      for (const id of tracked) {
         if (!keepLocal.has(id)) boardServerAppliedRevision.current.set(id, applied);
       }
       applySubscribed((previous) => {
@@ -157,6 +169,18 @@ function BoardsContent() {
         }
         return next;
       });
+      for (const id of keepLocal) {
+        keepLocalFromStaleList.current.add(id);
+        if (
+          !pendingSubscriptionCounts.current.has(id) &&
+          lastSettledWriteSucceeded.current.has(id) &&
+          auth.user?.uid &&
+          school?.id
+        ) {
+          keepLocalFromStaleList.current.delete(id);
+          void reconcileBoardSubscriptionRef.current(id, auth.user.uid, school.id);
+        }
+      }
     } catch (cause) {
       if (loadVersion.current !== version) return;
       const code = (cause as { code?: string })?.code ?? '';
@@ -210,6 +234,7 @@ function BoardsContent() {
       // Keep the pre-tap rollback; the next refresh will reconcile.
     }
   }, [applySubscribed]);
+  reconcileBoardSubscriptionRef.current = reconcileBoardSubscription;
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -308,7 +333,11 @@ function BoardsContent() {
         // Advance this board's write generation on success or failure so a
         // pull-to-refresh that started during the write cannot apply a cache
         // gap over the rollback. Only a newer write supersedes this generation.
-        if (isLatest) boardWriteRevision.current.set(b.id, subscriptionRevision.current);
+        if (isLatest) {
+          boardWriteRevision.current.set(b.id, subscriptionRevision.current);
+          if (failed) lastSettledWriteSucceeded.current.delete(b.id);
+          else lastSettledWriteSucceeded.current.add(b.id);
+        }
         if (!failed && (lastConfirmedIntent.current.get(b.id) ?? 0) < intent) {
           lastConfirmedIntent.current.set(b.id, intent);
           const nextConfirmed = new Set(confirmedSubscribedRef.current);
@@ -322,8 +351,15 @@ function BoardsContent() {
       // the write may have included the unconfirmed local change. Re-read the
       // server once this board has no writes left in flight, even if the last
       // write to settle succeeded but an earlier one in the batch failed.
-      if (!pendingSubscriptionCounts.current.has(b.id) && failedSinceIdle.current.delete(b.id) && mounted.current) {
-        void reconcileBoardSubscription(b.id, uid, sid);
+      if (!pendingSubscriptionCounts.current.has(b.id) && mounted.current) {
+        if (failedSinceIdle.current.delete(b.id)) {
+          void reconcileBoardSubscription(b.id, uid, sid);
+        } else if (!failed && keepLocalFromStaleList.current.delete(b.id)) {
+          // The in-flight list kept the pre-write local state. Re-read so a
+          // later server change (for example another device re-subscribing)
+          // is not dropped after this successful write.
+          void reconcileBoardSubscription(b.id, uid, sid);
+        }
       }
     },
     [auth.user?.uid, school?.id, applySubscribed, reconcileBoardSubscription],
