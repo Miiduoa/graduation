@@ -1,4 +1,5 @@
 import React from 'react';
+import Constants from 'expo-constants';
 import { Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -17,6 +18,10 @@ import {
 import type { PreAuthStackParamList } from '../screens/preAuthTypes';
 jest.mock('@react-navigation/native', () => jest.requireActual('@react-navigation/native'));
 let mockRealNavigation = false;
+let mockSsoEnabled = true;
+let mockActualReleaseGate = false;
+let mockProviderAvailable = true;
+const mockLoadProviders = jest.fn();
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { DormNotificationHandoff } from '../app/DormNotificationHandoff';
 import { getLastNotificationResponseAsync } from '../services/notifications';
@@ -47,7 +52,7 @@ let mockStored: Tap | null;
 let mockListener: ((event: Tap) => void) | null;
 let mockReady: boolean;
 let mockUid: string | null;
-let mockSchool: string;
+let mockSchool: string | null;
 let mockFirebaseUid: string | null;
 let mockLoading: boolean;
 const mockReadyListeners = new Set<() => void>();
@@ -69,7 +74,13 @@ jest.mock('../state/auth', () => ({
   }),
 }));
 jest.mock('../services/schoolLoginAvailability', () => ({
-  isStudentIdLoginAvailable: (school: string) => school === 'pu',
+  isStudentIdLoginAvailable: (school: string) =>
+    mockActualReleaseGate
+      ? jest.requireActual('../services/schoolLoginAvailability').isStudentIdLoginAvailable(school)
+      : mockSsoEnabled && school === 'pu',
+  isSchoolLoginEntryAvailable: (school: string) =>
+    mockSsoEnabled && school === 'pu' && mockProviderAvailable,
+  loadSchoolLoginProviderKinds: (...args: unknown[]) => mockLoadProviders(...args),
 }));
 jest.mock('../app/rootNavigation', () => {
   const actual = jest.requireActual('../app/rootNavigation');
@@ -90,7 +101,8 @@ jest.mock('../app/publicNavigation', () => {
   const actual = jest.requireActual('../app/publicNavigation');
   return {
     ...actual,
-    publicNavigateSchoolLogin: () => mockRealNavigation ? actual.publicNavigateSchoolLogin() : mockPublicNavigate('SSOLogin'),
+    publicNavigateSchoolLogin: () =>
+      mockRealNavigation ? actual.publicNavigateSchoolLogin() : mockPublicNavigate('SSOLogin'),
     isPublicNavigationReady: () => (mockRealNavigation ? actual.isPublicNavigationReady() : true),
     subscribePublicNavigationReady: (cb: () => void) =>
       mockRealNavigation ? actual.subscribePublicNavigationReady(cb) : () => {},
@@ -140,6 +152,10 @@ function account(uid: string | null) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockRealNavigation = false;
+  mockSsoEnabled = true;
+  mockActualReleaseGate = false;
+  mockProviderAvailable = true;
+  mockLoadProviders.mockReset().mockResolvedValue([]);
   mockSchool = 'pu';
   account('alice');
   mockLoading = false;
@@ -380,6 +396,7 @@ function SchoolRoutes() {
 }
 test('the public and authenticated navigation containers hand off from SSOLogin into the nested dorm detail', async () => {
   mockRealNavigation = true;
+  mockSchool = 'nthu';
   account(null);
   const app = () => (
     <DormNotificationHandoff publicContent={<PublicRoutes />}>
@@ -388,6 +405,17 @@ test('the public and authenticated navigation containers hand off from SSOLogin 
   );
   const view = render(app());
   try {
+    await waitFor(() => expect(publicNavigationRef.getCurrentRoute()?.name).toBe('LoginLanding'));
+    fireEvent.press(await view.findByText('切換至靜宜大學'));
+    expect(mockSelection).toHaveBeenCalledWith({
+      schoolId: 'pu',
+      code: '',
+      schoolName: '靜宜大學',
+    });
+    expect(mockClear).not.toHaveBeenCalled();
+    expect(mockRead).not.toHaveBeenCalled();
+    mockSchool = 'pu';
+    view.rerender(app());
     fireEvent.press(await view.findByText('登入學校帳號'));
     await waitFor(() => expect(publicNavigationRef.getCurrentRoute()?.name).toBe('SSOLogin'));
     account('alice');
@@ -402,10 +430,134 @@ test('the public and authenticated navigation containers hand off from SSOLogin 
       rootNavigationRef.getRootState().routes[rootNavigationRef.getRootState().index].name,
     ).toBe('校園');
     expect(mockRead).toHaveBeenCalledWith('users/alice/notifications/' + mockReceiptId);
+    expect(mockRead).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockClear).toHaveBeenCalledTimes(1));
   } finally {
     view.unmount();
     markSchoolNavigationUnready();
     markPublicNavigationUnready();
     mockRealNavigation = false;
+  }
+});
+
+test.each(['pu', 'nthu', null])(
+  'a disabled production school never offers unavailable sign-in or selection from %s',
+  async (selected) => {
+    mockSsoEnabled = false;
+    mockSchool = selected;
+    account(null);
+    const view = render(root());
+    expect(
+      await view.findByText('靜宜大學目前尚未開放學校帳號登入，暫時無法在 App 查看這則宿舍公告。'),
+    ).toBeTruthy();
+    expect(view.queryByText('登入學校帳號')).toBeNull();
+    expect(view.queryByText('切換至靜宜大學')).toBeNull();
+    expect(view.queryByText('選擇靜宜大學')).toBeNull();
+    expect(mockClear).not.toHaveBeenCalled();
+    fireEvent.press(view.getByText('關閉提示'));
+    await waitFor(() => expect(mockClear).toHaveBeenCalledTimes(1));
+    expect(mockRead).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  },
+);
+test.each([
+  ['nthu', '國立清華大學目前尚未開放學校帳號登入，暫時無法在 App 查看這則宿舍公告。'],
+  ['unregistered-school', '無法確認這則宿舍通知的來源校園。'],
+  [undefined, '無法確認這則宿舍通知的來源校園。'],
+])(
+  'an unsupported or missing source has an explicit dismissible status (%s)',
+  async (schoolId, message) => {
+    account(null);
+    mockSchool = null;
+    mockStored = tap({ ...mockEnvelope, schoolId });
+    const view = render(root());
+    expect(await view.findByText(String(message))).toBeTruthy();
+    expect(view.queryByText('登入學校帳號')).toBeNull();
+    fireEvent.press(view.getByText('關閉提示'));
+    await waitFor(() => expect(mockClear).toHaveBeenCalledTimes(1));
+    expect(mockSelection).not.toHaveBeenCalled();
+    expect(mockRead).not.toHaveBeenCalled();
+  },
+);
+test('a guest without a selected campus can explicitly choose the available source before sign-in', async () => {
+  account(null);
+  mockSchool = null;
+  const view = render(root());
+  expect(await view.findByText('尚未選擇校園。這則宿舍通知來自靜宜大學。')).toBeTruthy();
+  fireEvent.press(view.getByText('選擇靜宜大學'));
+  expect(mockSelection).toHaveBeenCalledWith({ schoolId: 'pu', code: '', schoolName: '靜宜大學' });
+  expect(mockClear).not.toHaveBeenCalled();
+  expect(mockPublicNavigate).not.toHaveBeenCalled();
+});
+
+test.each(['pu', 'nthu', null])(
+  'a release-enabled campus without a usable login provider shows a close action (%s)',
+  async (selected) => {
+    mockSchool = selected;
+    account(null);
+    mockProviderAvailable = false;
+    const view = render(root());
+    await view.findByText('靜宜大學的學校登入服務目前無法使用，暫時無法在 App 查看這則宿舍公告。');
+    expect(view.queryByText('登入學校帳號')).toBeNull();
+    expect(view.queryByText('切換至靜宜大學')).toBeNull();
+    expect(view.queryByText('選擇靜宜大學')).toBeNull();
+    expect(mockLoadProviders).toHaveBeenCalledTimes(1);
+    fireEvent.press(view.getByText('關閉提示'));
+    await waitFor(() => expect(mockClear).toHaveBeenCalledTimes(1));
+    expect(mockRead).not.toHaveBeenCalled();
+    expect(mockPublicNavigate).not.toHaveBeenCalled();
+  },
+);
+test('a guest can retry a temporary provider outage and sign in without losing the tap', async () => {
+  account(null);
+  mockProviderAvailable = false;
+  const view = render(root());
+  const retry = await view.findByText('重新確認登入服務');
+  expect(view.queryByText('登入學校帳號')).toBeNull();
+  mockLoadProviders.mockImplementationOnce(async () => {
+    mockProviderAvailable = true;
+    return ['school-issued'];
+  });
+  fireEvent.press(retry);
+  fireEvent.press(await view.findByText('登入學校帳號'));
+  expect(mockPublicNavigate).toHaveBeenCalledWith('SSOLogin');
+  expect(mockLoadProviders).toHaveBeenCalledTimes(2);
+  expect(mockLoadProviders).toHaveBeenLastCalledWith({ recheckUnavailable: true });
+  expect(mockRead).not.toHaveBeenCalled();
+  expect(mockClear).not.toHaveBeenCalled();
+});
+
+test('a valid session for the source campus can return to it without starting a fresh login', async () => {
+  mockSchool = 'nthu';
+  account('alice');
+  mockProviderAvailable = false;
+  const view = render(root());
+  fireEvent.press(await view.findByText('切換至靜宜大學'));
+  expect(mockLoadProviders).not.toHaveBeenCalled();
+  mockSchool = 'pu';
+  view.rerender(root());
+  await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith(...detail));
+});
+
+test('the production release gate suppresses SSO before provider lookup or private reads', async () => {
+  mockActualReleaseGate = true;
+  const previous = Constants.expoConfig!.extra;
+  Object.assign(Constants.expoConfig!, {
+    extra: {
+      appEnv: 'production',
+      release: { releasedSchoolIds: ['pu'], features: { enabled: true, sso: false } },
+    },
+  });
+  const view = render(root());
+  try {
+    await view.findByText('靜宜大學目前尚未開放學校帳號登入，暫時無法在 App 查看這則宿舍公告。');
+    expect(view.getByText('公開導覽')).toBeTruthy();
+    expect(view.getByText('關閉提示')).toBeTruthy();
+    expect(view.queryByText('登入學校帳號')).toBeNull();
+    expect(mockLoadProviders).not.toHaveBeenCalled();
+    expect(mockRead).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    Object.assign(Constants.expoConfig!, { extra: previous });
   }
 });

@@ -11,7 +11,11 @@ import {
   clearLastNotificationResponseAsync,
 } from '../services/notifications';
 import { ownsDormAnnouncementTap, isDormTapAccountCurrent } from '../services/dormAnnouncementTap';
-import { isStudentIdLoginAvailable } from '../services/schoolLoginAvailability';
+import {
+  isSchoolLoginEntryAvailable,
+  isStudentIdLoginAvailable,
+  loadSchoolLoginProviderKinds,
+} from '../services/schoolLoginAvailability';
 import {
   isDormAnnouncementData,
   parseDormAnnouncementTap,
@@ -69,6 +73,8 @@ export function DormNotificationHandoff({
   const handled = useRef<string | null>(null);
   const eventEpoch = useRef(0);
   const [readError, setReadError] = useState(false);
+  const [, navigationChanged] = useReducer((previous: number) => previous + 1, 0);
+  const schoolNavigationReady = isSchoolNavigationReady();
   const [revision, retry] = useReducer((previous: number) => previous + 1, 0);
   const onTap = useCallback((response: NotificationResponseLike | null) => {
     const key = response && getNotificationResponseKey(response);
@@ -84,8 +90,8 @@ export function DormNotificationHandoff({
   }, []);
   usePushNotifications(rootNavigationRef, uid, auth.profile?.role, school.id, onTap);
   useEffect(() => {
-    const school = subscribeSchoolNavigationReady(retry);
-    const guest = subscribePublicNavigationReady(retry);
+    const school = subscribeSchoolNavigationReady(navigationChanged);
+    const guest = subscribePublicNavigationReady(navigationChanged);
     return () => {
       school();
       guest();
@@ -113,6 +119,36 @@ export function DormNotificationHandoff({
   }, []);
   const destinationSchool = toPublicSchoolId(pending?.data.schoolId);
   const wrongSchool = !!destinationSchool && destinationSchool !== toPublicSchoolId(schoolId);
+  const loginSchool =
+    selectionReady &&
+    !auth.loading &&
+    !auth.profileLoading &&
+    destinationSchool &&
+    isStudentIdLoginAvailable(destinationSchool) &&
+    !hasReadySchoolSession(auth, destinationSchool)
+      ? destinationSchool
+      : null;
+  const [entry, setEntry] = useState<{ school: string; available: boolean } | null>(null);
+  const [providerAttempt, retryProvider] = useReducer((previous: number) => previous + 1, 0);
+  useEffect(() => {
+    if (!loginSchool || isSchoolLoginEntryAvailable(loginSchool)) return;
+    let active = true;
+    setEntry(null);
+    void loadSchoolLoginProviderKinds({ recheckUnavailable: true }).then(() => {
+      if (active)
+        setEntry({ school: loginSchool, available: isSchoolLoginEntryAvailable(loginSchool) });
+    });
+    return () => {
+      active = false;
+    };
+  }, [loginSchool, pending, providerAttempt]);
+  const entryAvailable =
+    !loginSchool || isSchoolLoginEntryAvailable(loginSchool)
+      ? true
+      : entry?.school === loginSchool
+        ? entry.available
+        : null;
+
   const openInbox = (item: Pending) => {
     if (
       !uid ||
@@ -125,7 +161,7 @@ export function DormNotificationHandoff({
   };
   useEffect(() => {
     setReadError(false);
-    if (!pending || !uid || wrongSchool || !isSchoolNavigationReady()) return;
+    if (!pending || !uid || wrongSchool || !schoolNavigationReady) return;
     let active = true;
     const stillCurrent = () =>
       active && current.current === pending && currentScope.current === scope;
@@ -152,37 +188,58 @@ export function DormNotificationHandoff({
     return () => {
       active = false;
     };
-  }, [pending, uid, wrongSchool, scope, revision, finish]);
+  }, [pending, uid, wrongSchool, scope, revision, finish, schoolNavigationReady]);
 
   let prompt: React.ReactNode = null;
+  let dismissLabel = '取消開啟';
   if (pending && selectionReady && !auth.loading && !auth.profileLoading) {
     const source = getPublicSchoolInfo(destinationSchool);
-    const name = source?.name ?? '原校園';
-    if (wrongSchool) {
+    if ((!destinationSchool && !uid) || (destinationSchool && !source)) {
+      prompt = <Text style={styles.copy}>無法確認這則宿舍通知的來源校園。</Text>;
+      dismissLabel = '關閉提示';
+    } else if (source && destinationSchool && !isStudentIdLoginAvailable(destinationSchool)) {
+      prompt = (
+        <Text style={styles.copy}>
+          {source.name}目前尚未開放學校帳號登入，暫時無法在 App 查看這則宿舍公告。
+        </Text>
+      );
+      dismissLabel = '關閉提示';
+    } else if (source && entryAvailable === null) {
+      prompt = <Text style={styles.copy}>正在確認{source.name}的學校登入服務…</Text>;
+    } else if (source && !entryAvailable) {
       prompt = (
         <>
-          <Text style={styles.copy}>這則宿舍通知屬於{name}。請切換校園後查看。</Text>
-          {source && destinationSchool && isStudentIdLoginAvailable(destinationSchool) && (
-            <Action
-              title={'切換至' + name}
-              onPress={() =>
-                setSelection({ schoolId: destinationSchool, code: '', schoolName: name })
-              }
-            />
-          )}
+          <Text style={styles.copy}>
+            {source.name}的學校登入服務目前無法使用，暫時無法在 App 查看這則宿舍公告。
+          </Text>
+          <Action title="重新確認登入服務" onPress={retryProvider} />
+        </>
+      );
+      dismissLabel = '關閉提示';
+    } else if (wrongSchool && source && destinationSchool) {
+      const label = schoolId ? '切換至' + source.name : '選擇' + source.name;
+      prompt = (
+        <>
+          <Text style={styles.copy}>
+            {schoolId
+              ? '這則宿舍通知屬於' + source.name + '。請切換校園後查看。'
+              : '尚未選擇校園。這則宿舍通知來自' + source.name + '。'}
+          </Text>
+          <Action
+            title={label}
+            onPress={() =>
+              setSelection({ schoolId: destinationSchool, code: '', schoolName: source.name })
+            }
+          />
         </>
       );
     } else if (!uid) {
       prompt = (
         <>
           <Text style={styles.copy}>登入收到通知的學校帳號，即可查看本棟公告。</Text>
-          {isPublicNavigationReady() &&
-            isStudentIdLoginAvailable(toPublicSchoolId(schoolId) || '') && (
-              <Action
-                title="登入學校帳號"
-                onPress={publicNavigateSchoolLogin}
-              />
-            )}
+          {isPublicNavigationReady() && (
+            <Action title="登入學校帳號" onPress={publicNavigateSchoolLogin} />
+          )}
         </>
       );
     } else if (readError) {
@@ -204,7 +261,7 @@ export function DormNotificationHandoff({
         <SafeAreaView edges={['bottom']} style={styles.card}>
           <View style={styles.actions}>
             {prompt}
-            <Action title="取消開啟" onPress={() => finish(pending)} />
+            <Action title={dismissLabel} onPress={() => finish(pending)} />
           </View>
         </SafeAreaView>
       )}
