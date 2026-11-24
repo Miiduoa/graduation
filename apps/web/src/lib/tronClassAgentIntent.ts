@@ -1041,6 +1041,7 @@ function clauseAllowsCompoundCompanion(clause: string): boolean {
   const text = clause.normalize('NFKC').trim();
   if (!text) return true;
   if (hasReadBlockingDecoration(text)) return false;
+  if (hasHonoredPrepareCommand(text)) return false;
   if (isPositivelyProvenRead(text)) return true;
   if (OTHER_SERVICE_OR_SCHEDULE.test(text) && !TRONCLASS_KEYWORD.test(text)) {
     if (!allTokensKnown(text)) return false;
@@ -1071,6 +1072,7 @@ function clauseAllowsCompoundCompanion(clause: string): boolean {
 function wholeRequestAllowsCompoundRead(question: string): boolean {
   const original = question.normalize('NFKC').trim();
   if (hasReadBlockingDecoration(original)) return false;
+  if (hasHonoredPrepareCommand(original)) return false;
   if (!allTokensKnown(original)) return false;
   if (classifyTronClassSentence(question)?.outcome === 'clearly-write') return false;
   const clauses = splitClauses(readRoutingText(textWithoutQuotedSpans(original)));
@@ -1164,6 +1166,26 @@ export type TronClassSentenceClass =
   | { outcome: 'clearly-write'; intent: TronClassAgentQueryIntent | null }
   | { outcome: 'ambiguous' };
 
+
+function isPrepareActionValue(value: string): boolean {
+  return PREPARE_ACTIONS.has(value) || PREPARE_ACTIONS.has(value.toLowerCase());
+}
+
+function visibleCommandTokens(text: string): Token[] {
+  const mask = dataTypeMask(text);
+  return tokensFor(text).filter(token => token.kind !== 'filename' && !tokenIsProtected(token, mask));
+}
+
+/** Prepare/draft words are honored only as commands, never as a noun such as 作業草稿. */
+function hasHonoredPrepareCommand(text: string): boolean {
+  return visibleCommandTokens(text).some(token => isPrepareActionValue(token.value) && token.kind !== 'noun');
+}
+
+function hasNonPrepareQueryCommand(text: string): boolean {
+  return visibleCommandTokens(text).some(token =>
+    !isPrepareActionValue(token.value) && (token.kind === 'query' || QUERY_START.has(token.value)));
+}
+
 function readIntentOf(text: string): TronClassAgentQueryIntent {
   const visible = textWithoutFilenameTokens(text);
   const mask = dataTypeMask(text);
@@ -1174,9 +1196,10 @@ function readIntentOf(text: string): TronClassAgentQueryIntent {
   const dataIntent = lastDataTypeIntent(text);
   if (dataIntent === 'announcements') return { intent: 'announcements', pendingOnly: false };
   const tokens = tokensFor(text).filter(token => token.kind !== 'filename' && !tokenIsProtected(token, mask));
-  const preparation = tokens.some(token => PREPARE_ACTIONS.has(token.value)) && /(?:作業|homework|assignment)/i.test(visible);
+  const preparationRequested = hasHonoredPrepareCommand(text) && /(?:作業|homework|assignment)/i.test(visible);
+  const preparation = preparationRequested && !hasNonPrepareQueryCommand(text);
   const downloading = tokens.some(token => DOWNLOAD_ACTIONS.has(token.value) || DOWNLOAD_ACTIONS.has(token.value.toLowerCase()));
-  if (preparation && downloading) return { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' };
+  if (preparationRequested && downloading) return { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' };
   if (/(?:測驗|考試|問卷)/.test(visible)) return { intent: 'unsupported', pendingOnly: false };
   if (downloading) return { intent: 'download', pendingOnly: false };
   if (dataIntent === 'materials' || dataIntent === 'courses') {
@@ -1221,7 +1244,15 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   if (!TRONCLASS_KEYWORD.test(text)) return { outcome: 'ambiguous' };
   const intent = readIntentOf(text);
   if (hasReadBlockingDecoration(original)) return { outcome: 'ambiguous' };
-  if (intent.intent === 'unsupported' || intent.intent === 'prepare') {
+  if (intent.intent === 'unsupported') {
+    return { outcome: 'clearly-write', intent };
+  }
+  // A query verb plus a prepare command in the same sentence is not a proven
+  // read or a proven prepare; confirmation must run before either action.
+  if (hasHonoredPrepareCommand(original) && hasNonPrepareQueryCommand(original)) {
+    return { outcome: 'ambiguous' };
+  }
+  if (intent.intent === 'prepare') {
     return { outcome: 'clearly-write', intent };
   }
   if (!isPositivelyProvenRead(original) && !isPositivelyProvenRead(text)) return { outcome: 'ambiguous' };
