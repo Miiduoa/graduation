@@ -4,7 +4,6 @@ import {
   notificationCampusLabel,
   type NotificationListMode,
 } from '@campus/shared/src/notificationListFilter';
-import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Text, View, Pressable, ScrollView } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -149,18 +148,6 @@ export default function NotificationsAiFirstScreen() {
       mounted.current &&
       currentSession.current === session &&
       focusGeneration.current === generation;
-    const sourceSchool = row.data?.schoolId;
-    if (
-      typeof sourceSchool === 'string' &&
-      sourceSchool.trim() &&
-      toPublicSchoolId(sourceSchool.trim()) !== toPublicSchoolId(schoolId)
-    ) {
-      setBlockedNotice({
-        id,
-        reason: '這則通知屬於其他學校，請切換到對應學校後再開啟。未讀狀態已保留。',
-      });
-      return;
-    }
     const destination = resolveNotificationRow(row, { schoolId, role: auth.profile?.role });
     if (destination.ok === false) {
       setBlockedNotice({ id, reason: destination.reason });
@@ -327,6 +314,7 @@ export default function NotificationsAiFirstScreen() {
           ) : null}
           {filteredRows.map((row) => {
             const when = createdLabel(row.createdAt);
+            const campusLabel = notificationCampusLabel({ schoolId: row.data?.schoolId || row.schoolId });
             const result = reads.get(row.id);
             const pending = !!result?.pending;
             return (
@@ -339,7 +327,7 @@ export default function NotificationsAiFirstScreen() {
                   accessibilityLabel={[
                     row.title || '通知',
                     notificationTypeLabel(row.type),
-                    notificationCampusLabel(row.data),
+                    campusLabel,
                     row.body,
                     when,
                     row.read && !result?.unconfirmed ? '已讀' : '未讀',
@@ -357,7 +345,7 @@ export default function NotificationsAiFirstScreen() {
                       {notificationTypeLabel(row.type)}
                     </Text>
                     <Text style={{ color: aiTokens.text, maxWidth: '100%' }}>
-                      {notificationCampusLabel(row.data)}
+                      {campusLabel}
                     </Text>
                     {row.read && !result?.unconfirmed ? null : (
                       <Text style={{ color: aiTokens.text }}>未讀</Text>

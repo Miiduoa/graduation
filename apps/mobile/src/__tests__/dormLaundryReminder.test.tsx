@@ -190,6 +190,20 @@ function DormApp() {
   return <DormitoryScreen />;
 }
 
+test('another dorm notification selects its section even when the dorm screen is already open', async () => {
+  const screen = render(<DormitoryScreen route={{ params: { notificationView: 'parcels' } }} />);
+  await screen.findByText('校方登錄包裹');
+  fireEvent.press(screen.getByText('查看宿舍總覽'));
+  fireEvent.press(screen.getByText('洗衣計時'));
+  expect(await screen.findByText('尚未開始')).toBeTruthy();
+  screen.rerender(<DormitoryScreen route={{ params: { notificationView: 'parcels' } }} />);
+  await screen.findByText('校方登錄包裹');
+  screen.rerender(<DormitoryScreen route={{ params: { notificationView: 'repairs' } }} />);
+  await screen.findByText('雲端報修備忘');
+  fireEvent.press(screen.getByText('查看宿舍總覽'));
+  await screen.findByText('我的住宿備忘');
+});
+
 test('a resident can start a timer after denying notifications, turn reminders on later, extend and clear it', async () => {
   jest.mocked(Notifications.getPermissionsAsync).mockResolvedValue(permission(false, true));
   jest.mocked(Notifications.requestPermissionsAsync).mockResolvedValue(permission(false));

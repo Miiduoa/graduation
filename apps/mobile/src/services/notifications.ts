@@ -132,6 +132,28 @@ function assertNotificationOwner(uid: string, isCurrent: () => boolean = () => t
   }
 }
 
+async function ensureAndroidPushChannels(): Promise<void> {
+  const { DEFAULT, HIGH, MAX } = Notifications.AndroidImportance;
+  const channels: Record<string, Notifications.NotificationChannelInput> = {
+    default: { name: '預設', importance: MAX, vibrationPattern: [0, 250, 250, 250], lightColor: '#164C40' },
+    announcements: { name: '公告通知', description: '學校公告、系所公告', importance: HIGH },
+    events: { name: '活動通知', description: '活動提醒、報名通知', importance: DEFAULT },
+    groups: { name: '群組通知', description: '群組貼文、作業、成績', importance: HIGH },
+    messages: { name: '訊息通知', description: '私人訊息', importance: MAX },
+    'ai-agent': { name: '校園提醒', description: '課表、作業與重要校園事件提醒', importance: HIGH },
+    assignments: { name: '作業通知', importance: DEFAULT },
+    grades: { name: '成績與課業回饋', importance: DEFAULT },
+    orders: { name: '訂單與取餐', importance: HIGH },
+    print: { name: '列印通知', importance: DEFAULT },
+    bus: { name: '公車到站提醒', importance: HIGH },
+    dormitory: { name: '宿舍通知', description: '本棟公告、包裹與住宿紀錄更新', importance: DEFAULT },
+  };
+  const installed = new Set((await Notifications.getNotificationChannelsAsync()).map((channel) => channel.id));
+  await Promise.all(Object.entries(channels)
+    .filter(([id]) => !installed.has(id))
+    .map(([id, options]) => Notifications.setNotificationChannelAsync(id, options)));
+}
+
 async function requestPushToken(
   isCurrent: () => boolean = () => true,
 ): Promise<PushRegistrationResult> {
@@ -139,42 +161,8 @@ async function requestPushToken(
   const projectId = getExpoProjectId();
   if (!projectId) return { status: 'unconfigured' };
   try {
-    if (Platform.OS === 'android') {
-      // Android 13 requires a channel before the system permission prompt.
-      await Promise.all([
-        Notifications.setNotificationChannelAsync('default', {
-          name: '預設',
-          importance: Notifications.AndroidImportance.MAX,
-          vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#164C40',
-        }),
-        Notifications.setNotificationChannelAsync('announcements', {
-          name: '公告通知',
-          description: '學校公告、系所公告',
-          importance: Notifications.AndroidImportance.HIGH,
-        }),
-        Notifications.setNotificationChannelAsync('events', {
-          name: '活動通知',
-          description: '活動提醒、報名通知',
-          importance: Notifications.AndroidImportance.DEFAULT,
-        }),
-        Notifications.setNotificationChannelAsync('groups', {
-          name: '群組通知',
-          description: '群組貼文、作業、成績',
-          importance: Notifications.AndroidImportance.HIGH,
-        }),
-        Notifications.setNotificationChannelAsync('messages', {
-          name: '訊息通知',
-          description: '私人訊息',
-          importance: Notifications.AndroidImportance.MAX,
-        }),
-        Notifications.setNotificationChannelAsync('ai-agent', {
-          name: '校園提醒',
-          description: '課表、作業與重要校園事件提醒',
-          importance: Notifications.AndroidImportance.HIGH,
-        }),
-      ]);
-    }
+    // Android 13 needs a channel before the system permission prompt.
+    if (Platform.OS === 'android') await ensureAndroidPushChannels();
 
     if (!isCurrent()) throw new Error('Notification account changed');
     const permission = await checkPushPermission();

@@ -72,6 +72,53 @@ export type DormWorkflowRows = {
   residents: DormResident[];
 };
 export type DormWorkflowCall = <T>(data: Record<string, unknown>) => Promise<T>;
+export function dormAnnouncementDraftError(building: string, title: string, body: string): string | null {
+  if (!building.trim()) return '請填寫要發布公告的棟別。';
+  if (building.trim().length > 70) return '棟別最多可輸入 70 個字。';
+  if (!title.trim()) return '請填寫公告標題。';
+  if (title.trim().length > 120) return '公告標題最多可輸入 120 個字。';
+  if (!body.trim()) return '請填寫公告內容。';
+  if (body.trim().length > 2000) return '公告內容最多可輸入 2,000 個字。';
+  return null;
+}
+export type DormAnnouncementReceipt = {
+  recipients?: number;
+  acceptedRecipients?: number;
+  pendingRecipients?: number;
+  unconfirmedRecipients?: number;
+};
+/** Continue a confirmed publication while its saved audience is making progress. */
+export async function deliverDormAnnouncementBatches<T extends DormAnnouncementReceipt>(
+  send: () => Promise<T>,
+  isCurrent: () => boolean,
+  onProgress: (receipt: T) => void,
+): Promise<T> {
+  let receipt = await send();
+  let lastPending = Infinity;
+  while (isCurrent() && receipt.pendingRecipients !== undefined && receipt.pendingRecipients > 0) {
+    onProgress(receipt);
+    const pending = receipt.pendingRecipients;
+    if (pending >= lastPending) break;
+    lastPending = pending;
+    receipt = await send();
+  }
+  return receipt;
+}
+export function dormAnnouncementReceipt(result: DormAnnouncementReceipt): string {
+  const { recipients, acceptedRecipients, pendingRecipients = 0, unconfirmedRecipients = 0 } = result;
+  // Earlier servers counted resolved push calls, including skipped deliveries.
+  if (recipients === undefined || acceptedRecipients === undefined)
+    return '公告已發布，可在宿舍頁查看。推播結果尚未確認。';
+  if (recipients === 0) return '公告已發布，目前本棟名冊沒有可通知的住宿生。';
+  if (pendingRecipients || unconfirmedRecipients) {
+    const parts = [`公告已發布。名冊共 ${recipients} 人，推播服務已受理 ${acceptedRecipients} 人。`];
+    if (pendingRecipients) parts.push(`還有 ${pendingRecipients} 人待處理。`);
+    if (unconfirmedRecipients) parts.push(`另有 ${unconfirmedRecipients} 人的推播結果尚未確認。`);
+    return parts.join('');
+  }
+  if (acceptedRecipients === 0) return '公告已發布，目前沒有推播受理紀錄。';
+  return `公告已發布。名冊共 ${recipients} 人，推播服務已受理其中 ${acceptedRecipients} 人的通知。`;
+}
 export function formatDormWorkflowTime(at: number): string {
   return new Date(at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
 }

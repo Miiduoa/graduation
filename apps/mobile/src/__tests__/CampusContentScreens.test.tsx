@@ -1182,7 +1182,11 @@ test('invalid event dates disable calendar export instead of leaving a silent ac
 });
 
 test('opening a school announcement notification shows its original content and does not follow a school switch', async () => {
-  const destination = resolveNotificationDestination({ type: 'announcement', data: { announcementId: 'a1', schoolId: 'pu' } });
+  mockSchool = { id: 'tw-pu' };
+  const destination = resolveNotificationDestination(
+    { type: 'announcement', data: { announcementId: 'a1', schoolId: 'pu' } },
+    { schoolId: mockSchool.id },
+  );
   if (!destination.ok || destination.mode !== 'nested') throw new Error('Expected announcement route');
   const route = { params: destination.params };
   const view = render(<AnnouncementScreen route={route} />);
