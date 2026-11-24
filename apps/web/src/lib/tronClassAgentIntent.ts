@@ -378,7 +378,7 @@ function splitClauses(text: string): string[] {
   for (const token of tokens) {
     if (!isClauseBoundaryToken(token)) continue;
     const part = text.slice(start, token.start).trim();
-    if (part) clauses.push(part);
+    if (part) clauses.push(token.value === '?' ? part + token.value : part);
     start = token.end;
   }
   const tail = text.slice(start).trim();
@@ -1336,7 +1336,51 @@ function hasDescriptiveAction(text: string): boolean {
   return false;
 }
 
-/** A clearly-read clause must be fully known, with domain substance, and no command write or negator. */
+const PREPARE_REQUEST_CUES = new Set([
+  '記得', '立即', '馬上', '接下來', '幫忙', '務必', '趕緊', '立刻', '盡快',
+]);
+const READ_REQUEST_PREFIX = new Set([
+  ...LMS_NAMES, ...WRITE_HELPERS, ...PREPARE_REQUEST_CUES, ...ACTION_CUES,
+  'please', '我', '想', '要', '現在', '就', '再', '先', '只', '只要', '能', '可以', '可',
+  '開啟', '打開', '開', '前往', '進入', 'open', 'go to',
+]);
+const READ_QUESTION_WORDS = new Set([
+  '有沒有', '有無', '有哪些', '哪些', '是否', '有什麼', '有幾份',
+  '什麼時候', '哪一天', '哪天', '是什麼', '什麼', '如何', '怎樣', '怎麼樣', '過了嗎', '了沒', '了嗎',
+  '可以做什麼', '能做什麼', '有哪些功能', '支援什麼', '支援哪些', '做什麼', 'what can',
+]);
+
+function hasPositiveReadForm(text: string): boolean {
+  const tokens = visibleCommandTokens(text);
+  let requestPrefix = true;
+  let objectPrefix = false;
+  let topicPrefix = true;
+  for (const [index, token] of tokens.entries()) {
+    if (isWhitespaceToken(token)) continue;
+    const value = token.value.toLowerCase();
+    if (READ_QUESTION_WORDS.has(value)) return true;
+    if (requestPrefix && value === '改查') return true;
+    if ((requestPrefix || objectPrefix || (topicPrefix && value === '查一下')) &&
+      token.kind === 'query' && !isPrepareActionValue(value)) {
+      const next = nextSignificantToken(tokens, index);
+      if (next?.value !== '的' && next?.value !== '之') return true;
+    }
+    // The 把／將 construction puts its object before the command verb.
+    objectPrefix = (requestPrefix && BA_MARKERS.has(value)) ||
+      (objectPrefix && (token.kind === 'noun' || value === '的' || value === '全部'));
+    requestPrefix = requestPrefix && READ_REQUEST_PREFIX.has(value);
+    topicPrefix = topicPrefix && (token.kind === 'noun' || value === '的');
+  }
+  // Only visible terminal particles or punctuation can mark a yes/no question.
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    const token = tokens[index]!;
+    if (token.value === '?' || token.value === '嗎' || token.value === '呢') return true;
+    if (token.kind !== 'punct' && !isWhitespaceToken(token)) break;
+  }
+  return false;
+}
+
+/** A clearly-read clause needs visible request or question syntax and a safe token scan. */
 function isPositivelyProvenRead(text: string): boolean {
   const original = text.normalize('NFKC').trim();
   if (!original || !TRONCLASS_KEYWORD.test(original)) return false;
@@ -1346,7 +1390,7 @@ function isPositivelyProvenRead(text: string): boolean {
   if (tokensFor(original).some(token => isNegatorToken(token) && !tokenIsProtected(token, quoteMask))) return false;
   if (writeCommandRoute(textWithoutQuotedSpans(original)) !== null) return false;
   if (scanNegation(tokensFor(original), modifierInteriorIndex(tokensFor(original))) !== 'clear') return false;
-  return hasReadOrStatusPredicate(original) || hasDomainOrLmsSubstance(original);
+  return hasPositiveReadForm(original);
 }
 
 function clauseAllowsCompoundCompanion(clause: string): boolean {
@@ -1391,8 +1435,7 @@ function wholeRequestAllowsCompoundRead(question: string): boolean {
   if (hasDescriptiveAction(routingText)) return false;
   const clauses = splitClauses(routingText);
   if (clauses.length === 0) return false;
-  if (!clauses.every(clauseAllowsCompoundCompanion)) return false;
-  return clauses.some(clause => isPositivelyProvenRead(clause));
+  return clauses.every(clauseAllowsCompoundCompanion);
 }
 
 /**
@@ -1489,10 +1532,6 @@ function visibleCommandTokens(text: string): Token[] {
   const mask = dataTypeMask(text);
   return tokensFor(text).filter(token => token.kind !== 'filename' && !tokenIsProtected(token, mask));
 }
-
-const PREPARE_REQUEST_CUES = new Set([
-  '記得', '立即', '馬上', '接下來', '幫忙', '務必', '趕緊', '立刻', '盡快',
-]);
 
 function prepareWordRole(tokens: Token[], index: number): 'command' | 'modifier' | 'doubt' | 'none' {
   const token = tokens[index]!;
@@ -1592,7 +1631,9 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   const intent = readIntentOf(text);
   if (hasReadBlockingDecoration(original)) return { outcome: 'ambiguous' };
   if (intent.intent === 'unsupported') {
-    return { outcome: 'clearly-write', intent };
+    return hasPositiveReadForm(text) || hasHonoredPrepareCommand(text)
+      ? { outcome: 'clearly-write', intent }
+      : { outcome: 'ambiguous' };
   }
   // A query verb plus a prepare command in the same sentence is not a proven
   // read or a proven prepare; confirmation must run before either action.
