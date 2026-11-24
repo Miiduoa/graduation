@@ -23,8 +23,9 @@ let state = {
   pathname: query.get('path') || (location.pathname === '/index.html' ? '/' : location.pathname),
   search: routeQuery.toString(),
   schoolId: 'pu' as string | null,
+  identityLoading: false,
 };
-history.replaceState(routerState(state), '', state.pathname + '?' + state.search);
+history.replaceState(routerState(state), '', state.pathname + '?' + state.search + location.hash);
 const role = query.get('role') || 'student';
 const ledger = { requests: [] as string[], navigations: [] as string[], logouts: 0 };
 const subscribe = (listener: () => void) => {
@@ -122,14 +123,25 @@ export const useRouter = () => ({
   push: (href: string) => navigate(href),
   replace: (href: string) => navigate(href, 'replace'),
 });
-export const useAuth = () => ({
-  user: null,
-  loading: false,
-  error: null,
-  signOutUser: async () => {
-    ledger.logouts += 1;
-  },
-});
+export function useAuth() {
+  const current = useFixture();
+  return {
+    user: null,
+    loading: current.identityLoading,
+    error: null,
+    signOutUser: async () => {
+      ledger.logouts += 1;
+    },
+  };
+}
+
+/** Simulates identity revalidation at the provider boundary, never a UI handler. */
+export function setRecordFixtureIdentityLoading(identityLoading: boolean) {
+  if (state.pathname !== '/interface-record-editing') {
+    throw new Error('Identity controls belong only to the isolated record fixture');
+  }
+  update({ ...state, identityLoading });
+}
 export const useNuniSession = () => ({
   session:
     role === 'guest'
