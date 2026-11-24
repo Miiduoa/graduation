@@ -49,7 +49,13 @@ const LMS_SOURCE = '(?:玩課雲|創課|tron\\s*class)';
 // A clause without its own TronClass keyword continues the TronClass request only
 // when it names TronClass data and nothing that belongs to another service.
 const TRONCLASS_CONTINUATION = /(?:作業|教材|講義|附件|檔案|未交|未繳|待交|待繳|還沒交|還沒繳|沒交|沒繳|homework|assignments?|materials?|handouts?)/i;
-const OTHER_SERVICE_OR_SCHEDULE = /(?:頁面|畫面|入口|校園|學校|系上|社團|公車|交通|課表|成績|行事曆|日曆|空堂|時段|安排|排程|提醒|設定|失物|餐|活動|地圖|教室|今天|明天|後天|早上|上午|中午|下午|晚上|分鐘|小時|\d{1,2}\s*[:：點])/u;
+const OTHER_SERVICE_WORDS = [
+  '頁面', '畫面', '入口', '校園', '學校', '系上', '社團', '公車', '交通', '課表', '成績',
+  '行事曆', '日曆', '空堂', '時段', '安排', '排程', '提醒', '設定', '失物', '餐', '活動',
+  '地圖', '教室', '今天', '明天', '後天', '早上', '上午', '中午', '下午', '晚上', '分鐘', '小時',
+  '近期',
+];
+const OTHER_SERVICE_OR_SCHEDULE = new RegExp(`(?:${OTHER_SERVICE_WORDS.join('|')}|\d{1,2}\s*[:：點])`, 'u');
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -140,6 +146,7 @@ const READ_PARTICLES = [
   'the', 'a', 'an', 'of', 'for', 'to', 'from', 'with', 'my', 'your',
   'this', 'that', 'please', 'me', 'it', 'is', 'are', 'be', 'and', 'or',
   'on', 'at', 'by', 'as', 'into', 'onto', 'agent',
+  ...OTHER_SERVICE_WORDS,
 ];
 
 const DOMAIN_NOUNS = [
@@ -195,7 +202,7 @@ const PREPARE_ACTIONS = new Set(['準備', '預覽', '草稿', '起草', 'prepar
 const DOWNLOAD_ACTIONS = new Set(['下載', 'download']);
 const HAN_CHAR = /[\p{Script=Han}]/u;
 
-type TokenKind = 'noun' | 'query' | 'cue' | 'conj' | 'punct' | 'neg' | 'write' | 'other' | 'unknown';
+type TokenKind = 'noun' | 'query' | 'cue' | 'conj' | 'punct' | 'neg' | 'write' | 'other' | 'unknown' | 'filename';
 type Token = { value: string; start: number; end: number; kind: TokenKind };
 
 const LEXICON: { value: string; kind: TokenKind }[] = [
@@ -273,7 +280,7 @@ function isWhitespaceToken(token: Token): boolean {
 }
 
 function isWriteVerbToken(token: Token): boolean {
-  return token.kind !== 'noun' && (token.kind === 'write' || WRITE_VERB_SET.has(token.value));
+  return token.kind !== 'noun' && token.kind !== 'filename' && (token.kind === 'write' || WRITE_VERB_SET.has(token.value));
 }
 
 function isNegatorToken(token: Token): boolean {
@@ -290,12 +297,41 @@ function isWriteNegatedAt(tokens: Token[], writeAt: number): boolean {
   return false;
 }
 
-const FILE_NAME_AT = /^[^\s，,；;。！!？?\r\n]+\.[A-Za-z][A-Za-z0-9]{0,7}(?![A-Za-z0-9])/u;
 const PUNCT_CHAR = /[，,；;。！!？?\r\n：:()（）\[\]【】《》〈〉「」『』“”‘’"'·…]/u;
+const FILENAME_BREAK = /[\s：:，,、；;。！!？?\r\n()（）\[\]【】《》〈〉「」『』“”‘’"'`·…]/u;
+const FILE_EXTENSION = /\.[A-Za-z][A-Za-z0-9]{0,7}$/u;
+const BARE_FILENAME_AT = /^(?:[^\s：:，,、；;。！!？?\r\n()（）\[\]【】《》〈〉「」『』“”‘’"'`·…]+)\.[A-Za-z][A-Za-z0-9]{0,7}(?![A-Za-z0-9])/u;
+const QUOTE_OR_BRACKET_PAIRS: Array<readonly [string, string]> = [
+  ['「', '」'], ['『', '』'], ['“', '”'], ['‘', '’'], ['"', '"'], ["'", "'"], ['`', '`'],
+  ['（', '）'], ['(', ')'], ['【', '】'], ['[', ']'], ['《', '》'], ['〈', '〉'],
+];
+
+function containsLexiconVerb(value: string): boolean {
+  return [...WRITE_VERB_SET, ...QUERY_VERBS, ...PREPARE_ACTIONS].some(verb => verb.length > 0 && value.includes(verb));
+}
+
+function isValidFilenameValue(value: string, allowVerbs: boolean): boolean {
+  if (!value || FILENAME_BREAK.test(value) || !FILE_EXTENSION.test(value)) return false;
+  return allowVerbs || !containsLexiconVerb(value);
+}
+
+function quotedFilenameSpan(text: string, index: number): { open: number; inner: number; close: number; end: number } | null {
+  for (const [open, close] of QUOTE_OR_BRACKET_PAIRS) {
+    if (!text.startsWith(open, index)) continue;
+    const innerStart = index + open.length;
+    const closeAt = text.indexOf(close, innerStart);
+    if (closeAt < 0) continue;
+    if (isValidFilenameValue(text.slice(innerStart, closeAt), true)) {
+      return { open: index, inner: innerStart, close: closeAt, end: closeAt + close.length };
+    }
+  }
+  return null;
+}
 
 function filenameMatchLength(text: string, index: number): number {
-  const matched = FILE_NAME_AT.exec(text.slice(index));
-  return matched ? matched[0].length : 0;
+  const matched = BARE_FILENAME_AT.exec(text.slice(index));
+  if (!matched || !isValidFilenameValue(matched[0], false)) return 0;
+  return matched[0].length;
 }
 
 function tokenize(text: string): Token[] {
@@ -304,9 +340,17 @@ function tokenize(text: string): Token[] {
   let index = 0;
   while (index < text.length) {
     const from = index;
+    const quoted = quotedFilenameSpan(text, index);
+    if (quoted) {
+      noteToken(tokens, { value: text.slice(quoted.open, quoted.inner), start: quoted.open, end: quoted.inner, kind: 'punct' }, state);
+      noteToken(tokens, { value: text.slice(quoted.inner, quoted.close), start: quoted.inner, end: quoted.close, kind: 'filename' }, state);
+      noteToken(tokens, { value: text.slice(quoted.close, quoted.end), start: quoted.close, end: quoted.end, kind: 'punct' }, state);
+      index = quoted.end;
+      continue;
+    }
     const fileLength = filenameMatchLength(text, index);
     if (fileLength > 0) {
-      noteToken(tokens, { value: text.slice(from, from + fileLength), start: from, end: from + fileLength, kind: 'noun' }, state);
+      noteToken(tokens, { value: text.slice(from, from + fileLength), start: from, end: from + fileLength, kind: 'filename' }, state);
       index += fileLength;
       continue;
     }
@@ -755,7 +799,7 @@ function writeLexiconAndRegexDisagree(text: string): boolean {
     const end = start + match[0].length;
     const writeToken = tokens.some(token => token.start === start && token.end === end && isWriteVerbToken(token));
     const consumedAsNonWrite = tokens.some(token =>
-      token.start <= start && token.end >= end && (token.kind === 'noun' || token.kind === 'other'));
+      token.start <= start && token.end >= end && (token.kind === 'noun' || token.kind === 'other' || token.kind === 'filename'));
     if (!writeToken && !consumedAsNonWrite) return true;
   }
   return false;
@@ -812,11 +856,6 @@ function authorizesPrivateRead(original: string): boolean {
  * out of the private read, and a requested write anywhere keeps the request with
  * the original planner instead of reading beside an unhandled write.
  */
-const QUOTE_OR_BRACKET_PAIRS: Array<readonly [string, string]> = [
-  ['「', '」'], ['『', '』'], ['“', '”'], ['‘', '’'], ['"', '"'], ["'", "'"], ['`', '`'],
-  ['（', '）'], ['(', ')'], ['【', '】'], ['[', ']'], ['《', '》'], ['〈', '〉'],
-];
-
 function protectedSpanMask(text: string): boolean[] {
   const mask = Array.from({ length: text.length }, () => false);
   const mark = (start: number, end: number) => {
@@ -833,10 +872,8 @@ function protectedSpanMask(text: string): boolean[] {
       from = end + close.length;
     }
   }
-  const file = new RegExp(FILE_NAME_AT.source, 'gu');
-  for (const match of text.matchAll(file)) {
-    if (match.index == null) continue;
-    mark(match.index, match.index + match[0].length);
+  for (const token of tokensFor(text)) {
+    if (token.kind === 'filename') mark(token.start, token.end);
   }
   return mask;
 }
@@ -850,7 +887,7 @@ function tokenIsProtected(token: Token, mask: boolean[]): boolean {
 }
 
 function isKnownReadToken(token: Token, mask: boolean[]): boolean {
-  if (isWhitespaceToken(token) || token.kind === 'punct') return true;
+  if (isWhitespaceToken(token) || token.kind === 'punct' || token.kind === 'filename') return true;
   if (isWriteVerbToken(token)) return true;
   if (token.kind === 'unknown') return tokenIsProtected(token, mask);
   return true;
@@ -895,23 +932,21 @@ function isPositivelyProvenRead(text: string): boolean {
   return hasReadOrStatusPredicate(original) || hasDomainOrLmsSubstance(original);
 }
 
-function clauseHasUnresolvedTransfer(text: string): boolean {
-  const tokens = tokensFor(text);
-  if (tokens.some(isWriteVerbToken)) return true;
-  const mask = protectedSpanMask(text);
-  const unknown = tokens.some(token => token.kind === 'unknown' && !isWhitespaceToken(token) && !tokenIsProtected(token, mask));
-  const dative = tokens.some(token => token.value === '給' || token.value === '到' || token.value === '至');
-  if (unknown && dative) return true;
-  return tokens.some(token => token.kind === 'unknown' && !isWhitespaceToken(token) &&
-    /^(?:寄|傳|送|轉)$/.test(token.value));
-}
-
 function clauseAllowsCompoundCompanion(clause: string): boolean {
   const text = clause.normalize('NFKC').trim();
   if (!text) return true;
   if (isPositivelyProvenRead(text)) return true;
   if (OTHER_SERVICE_OR_SCHEDULE.test(text) && !TRONCLASS_KEYWORD.test(text)) {
-    return !clauseHasUnresolvedTransfer(text);
+    if (!allTokensKnown(text)) return false;
+    if (tokensFor(text).some(isWriteVerbToken)) return false;
+    return true;
+  }
+  if (!TRONCLASS_KEYWORD.test(text) && TRONCLASS_CONTINUATION.test(text) && allTokensKnown(text) &&
+    writeCommandRoute(textWithoutQuotedSpans(text)) === null &&
+    !tokensFor(text).some(isWriteVerbToken) &&
+    (hasReadOrStatusPredicate(text) || hasDomainOrLmsSubstance(text)) &&
+    scanNegation(tokensFor(text), modifierInteriorIndex(tokensFor(text))) === 'clear') {
+    return true;
   }
   const bare = text.replace(/[?!.。]+$/u, '').trim();
   if (tronClassExplicitNavigationQuestion(text) || isTronClassNavigationTarget(bare) ||
@@ -924,13 +959,13 @@ function clauseAllowsCompoundCompanion(clause: string): boolean {
   if (negation === 'unresolved') return false;
   if (writeCommandRoute(unquoted) !== null) return false;
   if (tokensFor(text).some(isWriteVerbToken) && negation !== 'negated-write') return false;
-  return negation === 'negated-write' || negation === 'clear';
+  return negation === 'negated-write';
 }
 
 function wholeRequestAllowsCompoundRead(question: string): boolean {
-  if (classifyTronClassSentence(question)?.outcome === 'clearly-read') return true;
-  if (classifyTronClassSentence(question)?.outcome === 'clearly-write') return false;
   const original = question.normalize('NFKC').trim();
+  if (!allTokensKnown(original)) return false;
+  if (classifyTronClassSentence(question)?.outcome === 'clearly-write') return false;
   const clauses = splitClauses(readRoutingText(textWithoutQuotedSpans(original)));
   if (clauses.length === 0) return false;
   if (!clauses.every(clauseAllowsCompoundCompanion)) return false;
@@ -981,18 +1016,29 @@ export function tronClassCompoundClauses(question: string): string[] {
   return result;
 }
 
+function textWithoutFilenameTokens(text: string): string {
+  const chars = text.split('');
+  for (const token of tokensFor(text)) {
+    if (token.kind !== 'filename') continue;
+    for (let index = token.start; index < token.end && index < chars.length; index += 1) chars[index] = ' ';
+  }
+  return chars.join('');
+}
+
 function lastDataTypeIntent(text: string): TronClassAgentIntent | null {
   const types: { intent: TronClassAgentIntent; pattern: RegExp }[] = [
-    { intent: 'homework', pattern: /作業|homework|assignments?/giu },
-    { intent: 'announcements', pattern: /公告|通知|announcements?|notices?/giu },
-    { intent: 'materials', pattern: /教材|講義|檔案|附件|materials?|handouts?|files?/giu },
-    { intent: 'courses', pattern: /課程|修課|課表|courses?|classes/giu },
+    { intent: 'homework', pattern: /作業|homework|assignments?/iu },
+    { intent: 'announcements', pattern: /公告|通知|announcements?|notices?/iu },
+    { intent: 'materials', pattern: /教材|講義|檔案|附件|materials?|handouts?|files?/iu },
+    { intent: 'courses', pattern: /課程|修課|課表|courses?|classes/iu },
   ];
   let found: { intent: TronClassAgentIntent; index: number } | null = null;
-  for (const type of types) {
-    for (const match of text.matchAll(type.pattern)) {
-      if (match.index == null) continue;
-      if (!found || match.index >= found.index) found = { intent: type.intent, index: match.index };
+  for (const token of tokensFor(text)) {
+    if (token.kind === 'filename' || isWhitespaceToken(token) || token.kind === 'punct') continue;
+    for (const type of types) {
+      if (type.pattern.test(token.value) && (!found || token.start >= found.index)) {
+        found = { intent: type.intent, index: token.start };
+      }
     }
   }
   return found?.intent ?? null;
@@ -1010,24 +1056,25 @@ export type TronClassSentenceClass =
   | { outcome: 'ambiguous' };
 
 function readIntentOf(text: string): TronClassAgentQueryIntent {
-  if (/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i.test(text)) {
+  const visible = textWithoutFilenameTokens(text);
+  if (/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i.test(visible)) {
     return { intent: 'capabilities', pendingOnly: false };
   }
-  const pendingOnly = /(?:未交|未繳|待交|待繳|待提交|尚未(?:交|繳|提交)|還沒(?:交|繳|提交)|沒(?:交|繳)|pending|unsubmitted|not\s+submitted)/i.test(text);
+  const pendingOnly = /(?:未交|未繳|待交|待繳|待提交|尚未(?:交|繳|提交)|還沒(?:交|繳|提交)|沒(?:交|繳)|pending|unsubmitted|not\s+submitted)/i.test(visible);
   const dataIntent = lastDataTypeIntent(text);
   if (dataIntent === 'announcements') return { intent: 'announcements', pendingOnly: false };
-  const tokens = tokensFor(text);
-  const preparation = tokens.some(token => PREPARE_ACTIONS.has(token.value)) && /(?:作業|homework|assignment)/i.test(text);
+  const tokens = tokensFor(text).filter(token => token.kind !== 'filename');
+  const preparation = tokens.some(token => PREPARE_ACTIONS.has(token.value)) && /(?:作業|homework|assignment)/i.test(visible);
   const downloading = tokens.some(token => DOWNLOAD_ACTIONS.has(token.value) || DOWNLOAD_ACTIONS.has(token.value.toLowerCase()));
   if (preparation && downloading) return { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' };
-  if (/(?:測驗|考試|問卷)/.test(text)) return { intent: 'unsupported', pendingOnly: false };
+  if (/(?:測驗|考試|問卷)/.test(visible)) return { intent: 'unsupported', pendingOnly: false };
   if (downloading) return { intent: 'download', pendingOnly: false };
   if (dataIntent === 'materials' || dataIntent === 'courses') {
     return { intent: dataIntent, pendingOnly: false };
   }
   if (preparation) return { intent: 'prepare', pendingOnly };
   if (pendingOnly) return { intent: 'homework', pendingOnly: true };
-  if (SUBMISSION_DEADLINE_QUERY.test(text)) return { intent: 'homework', pendingOnly: false };
+  if (SUBMISSION_DEADLINE_QUERY.test(visible)) return { intent: 'homework', pendingOnly: false };
   if (dataIntent) return { intent: dataIntent, pendingOnly: false };
   return { intent: 'capabilities', pendingOnly: false };
 }
@@ -1043,7 +1090,7 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
     !TRONCLASS_KEYWORD.test(question)) return null;
   const original = question.normalize('NFKC').trim();
   if (isExistingTronClassNavigation(original)) return null;
-  const unquoted = textWithoutQuotedSpans(original);
+  const unquoted = textWithoutFilenameTokens(textWithoutQuotedSpans(original));
   const tokens = tokensFor(original);
   const interior = modifierInteriorIndex(tokens);
   const negation = scanNegation(tokens, interior);
