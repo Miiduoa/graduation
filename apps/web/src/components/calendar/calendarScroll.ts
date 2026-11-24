@@ -197,26 +197,34 @@ export function retryFocusOnViewportChange(
   attempt: (mode: 'reveal' | 'visible') => void,
   cancel: () => void,
 ) {
-  const stillOwnsFocus = () =>
-    document.activeElement === origin ||
-    (origin?.isConnected === false && document.activeElement === document.body);
   const checkFocus = () => {
-    if (!stillOwnsFocus()) cancel();
+    if (!stillOwnsFocus(origin)) cancel();
   };
-  const retry = (mode: 'reveal' | 'visible') => {
-    if (stillOwnsFocus()) attempt(mode);
+  const unsubscribe = onFocusRetryOpportunity((mode) => {
+    if (stillOwnsFocus(origin)) attempt(mode);
     else cancel();
+  });
+  document.addEventListener('focusin', checkFocus);
+  return () => {
+    unsubscribe();
+    document.removeEventListener('focusin', checkFocus);
   };
+}
+
+export function stillOwnsFocus(origin: Element | null) {
+  return document.activeElement === origin ||
+    (origin?.isConnected === false && document.activeElement === document.body);
+}
+
+export function onFocusRetryOpportunity(retry: (mode: 'reveal' | 'visible') => void) {
   const unsubscribe = onVisibleViewportChange(() => retry('reveal'));
   // Element scroll events do not bubble. Capture page and nested scrolls
   // without issuing more scroll commands while the user is moving the view.
   const onScroll = () => retry('visible');
   window.addEventListener('scroll', onScroll, { capture: true, passive: true });
-  document.addEventListener('focusin', checkFocus);
   return () => {
     unsubscribe();
     window.removeEventListener('scroll', onScroll, true);
-    document.removeEventListener('focusin', checkFocus);
   };
 }
 

@@ -7,10 +7,11 @@ import {
   isHorizontallyVisible,
   isVisible,
   measureStickyInsets,
+  onFocusRetryOpportunity,
   onVisibleViewportChange,
   revealForFocus,
-  retryFocusOnViewportChange,
   scrollVerticallyIntoView,
+  stillOwnsFocus,
 } from './calendarScroll';
 
 import Link from 'next/link';
@@ -447,7 +448,8 @@ function PersonalCalendarWorkspace({
   const requestId = useRef(0);
   const viewRevision = useRef(0);
   const locatedRequest = useRef<string | null>(null);
-  const cancelLinkedFocus = useRef<(() => void) | null>(null);
+  const linkedFocusOrigin = useRef<{ element: Element | null } | null>(null);
+  const stopLinkedFocusRetry = useRef<(() => void) | null>(null);
   const settledFocusRequest = useRef<string | null>(null);
   const linkedEventElement = useRef<HTMLLIElement | null>(null);
   // The URL selects an existing row in this owner's ledger. It never supplies event contents.
@@ -460,10 +462,27 @@ function PersonalCalendarWorkspace({
       : undefined;
   const linkedEventDate = linkedEvent?.date;
 
+  const cancelLinkedFocus = useCallback(() => {
+    settledFocusRequest.current = requestedEventId;
+    linkedFocusOrigin.current = null;
+    stopLinkedFocusRetry.current?.();
+    stopLinkedFocusRetry.current = null;
+  }, [requestedEventId]);
+
   useEffect(() => {
     locatedRequest.current = null;
     settledFocusRequest.current = null;
-  }, [requestedEventId]);
+    linkedFocusOrigin.current = null;
+    if (!requestedEventId) return;
+
+    // The focus origin belongs to the URL request and survives workspace suspension.
+    const checkFocus = () => {
+      const origin = linkedFocusOrigin.current;
+      if (origin && !stillOwnsFocus(origin.element)) cancelLinkedFocus();
+    };
+    document.addEventListener('focusin', checkFocus);
+    return () => document.removeEventListener('focusin', checkFocus);
+  }, [requestedEventId, cancelLinkedFocus]);
 
   useEffect(() => {
     if (paused || !ledger.ready || !requestedEventId || !linkedEventDate) return;
@@ -486,32 +505,38 @@ function PersonalCalendarWorkspace({
     const row = linkedEventElement.current;
     if (!row) return;
 
-    let stopRetry: (() => void) | undefined;
-    const cleanup = () => {
-      stopRetry?.();
-      cancelLinkedFocus.current = null;
-    };
-    const settle = () => {
-      settledFocusRequest.current = requestedEventId;
-      cleanup();
-    };
-    const revealLinkedEvent = (mode: 'reveal' | 'visible') => {
-      const focused = mode === 'visible' ? focusWhenVisible(row) : focusWhenRevealed(row);
-      if (focused) settle();
-    };
-
     if (mode !== 'idle') {
-      settle();
+      cancelLinkedFocus();
       return;
     }
-    const origin = document.activeElement;
+    const origin = (linkedFocusOrigin.current ??= { element: document.activeElement });
+    const revealLinkedEvent = (mode: 'reveal' | 'visible') => {
+      if (suspended.current) return;
+      if (!stillOwnsFocus(origin.element)) {
+        cancelLinkedFocus();
+        return;
+      }
+      const focused = mode === 'visible' ? focusWhenVisible(row) : focusWhenRevealed(row);
+      if (focused) cancelLinkedFocus();
+    };
+
     revealLinkedEvent('reveal');
-    if (settledFocusRequest.current !== requestedEventId) {
-      stopRetry = retryFocusOnViewportChange(origin, revealLinkedEvent, settle);
-      cancelLinkedFocus.current = settle;
-    }
-    return cleanup;
-  }, [paused, ledger.loading, requestedEventId, linkedEventDate, calendarView, selectedDate, mode]);
+    if (settledFocusRequest.current === requestedEventId) return;
+    stopLinkedFocusRetry.current = onFocusRetryOpportunity(revealLinkedEvent);
+    return () => {
+      stopLinkedFocusRetry.current?.();
+      stopLinkedFocusRetry.current = null;
+    };
+  }, [
+    paused,
+    ledger.loading,
+    requestedEventId,
+    linkedEventDate,
+    calendarView,
+    selectedDate,
+    mode,
+    cancelLinkedFocus,
+  ]);
 
   useLayoutEffect(() => {
     active.current = true;
@@ -659,7 +684,7 @@ function PersonalCalendarWorkspace({
     if (!mayDiscardDraft()) return;
     const next = emptyPersonalEventDraft();
     next.date = selectedDate || (next.date.startsWith(month) ? next.date : `${month}-01`);
-    cancelLinkedFocus.current?.();
+    if (linkedFocusOrigin.current) cancelLinkedFocus();
     setInitialDraft(next);
     returnFocusRef.current = trigger ?? createButtonRef.current;
     pendingFocus.current = 'editor';
@@ -684,7 +709,7 @@ function PersonalCalendarWorkspace({
     }
     if (!mayDiscardDraft()) return;
     const next = draftFromPersonalEvent(row);
-    cancelLinkedFocus.current?.();
+    if (linkedFocusOrigin.current) cancelLinkedFocus();
     setInitialDraft(next);
     returnFocusRef.current =
       trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);

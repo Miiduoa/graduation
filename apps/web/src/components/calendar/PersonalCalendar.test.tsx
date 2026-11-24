@@ -742,6 +742,54 @@ it.each(['可視視窗平移', '頁面捲動'])('行程深連結等待%s，確�
   expect(scroll).toHaveBeenCalledTimes(source === '頁面捲動' ? 1 : 2);
 });
 
+it.each(['保留焦點', '移到其他控制項', '移到其他控制項後離開'])(
+  '深連結首次揭露失敗後，帳號重新驗證期間%s',
+  async (action) => {
+    const target = focusEvent();
+    seedFocusedEvents([target]);
+    context.search = `eventId=${target.id}`;
+    const viewport = Object.assign(new EventTarget(), {
+      offsetLeft: 260, offsetTop: 80, width: 180, height: 240,
+    });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    const scroll = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+    vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+      if (this.matches('li[aria-current="true"]')) return new DOMRect(40, 100, 140, 60);
+      return originalBounds.call(this);
+    });
+
+    function Page() {
+      return (
+        <>
+          <button type="button">其他控制項</button>
+          <PersonalCalendar />
+        </>
+      );
+    }
+    const view = render(<Page />);
+    await screen.findByText(`已定位到「${target.title}」。`);
+    expect(scroll).toHaveBeenCalledExactlyOnceWith({ left: -220, top: 0, behavior: 'instant' });
+    expect(document.activeElement).toBe(document.body);
+
+    context.loading = true;
+    view.rerender(<Page />);
+    expect(screen.queryByRole('heading', { name: target.title })).toBeNull();
+    const outside = screen.getByRole('button', { name: '其他控制項' });
+    if (action !== '保留焦點') outside.focus();
+    if (action === '移到其他控制項後離開') outside.blur();
+    const focusDuringPause = document.activeElement;
+    viewport.offsetLeft = 0;
+    viewport.dispatchEvent(new Event('resize'));
+    expect(document.activeElement).toBe(focusDuringPause);
+
+    context.loading = false;
+    view.rerender(<Page />);
+    const row = (await screen.findByRole('heading', { name: target.title })).closest('li');
+    expect(row?.getAttribute('aria-current')).toBe('true');
+    expect(document.activeElement).toBe(action === '保留焦點' ? row : focusDuringPause);
+  },
+);
+
 it.each([
   ['another owner', 'platform:two', 'pu'],
   ['another school', 'platform:one', 'ntu'],
