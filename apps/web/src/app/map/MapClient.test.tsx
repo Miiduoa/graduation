@@ -312,6 +312,38 @@ it('marks single-source places as pending and can reset to the whole campus', as
   expect(screen.queryByRole('region', { name: '地點詳情' })).toBeNull();
 });
 
+it.each([false, true])('includes pending source warnings in both providers for a two-point route (reverse=%s)', async (reverse) => {
+  const parking = PROVIDENCE_CAMPUS_PLACES.find((place) => place.name === 'P1 停車場')!;
+  vi.mocked(loadMapLocations).mockResolvedValue([parking, library]);
+  const ids = reverse ? [library.id, parking.id] : [parking.id, library.id];
+  render(<MapClient school="pu" route={ids.join(',')} focus={parking.id} />);
+  await sourceSettled();
+  const routeCard = screen.getByRole('region', { name: '步行導航' });
+  for (const name of ['開啟步行導航', '使用 Apple 地圖規劃路線']) {
+    const link = within(routeCard).getByRole('link', { name });
+    const note = document.getElementById(link.getAttribute('aria-describedby')!);
+    expect(note?.textContent).toContain('P1 停車場');
+    expect(note?.textContent).toContain('只有單一資料來源，位置待再次確認');
+    expect(note?.textContent).not.toContain('「蓋夏圖書館」');
+  }
+  const detail = screen.getByRole('region', { name: '地點詳情' });
+  for (const name of ['從目前位置導航', '使用 Apple 地圖從目前位置導航']) {
+    const link = within(detail).getByRole('link', { name });
+    expect(document.getElementById(link.getAttribute('aria-describedby')!)?.textContent)
+      .toContain('只有單一資料來源，位置待再次確認');
+  }
+  fireEvent.click(within(routeCard).getByRole('button', { name: '清除路線' }));
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+});
+
+it('does not apply Providence source warnings to an identically named marker in another campus', async () => {
+  const parking = PROVIDENCE_CAMPUS_PLACES.find((place) => place.name === 'P1 停車場')!;
+  vi.mocked(loadMapLocations).mockResolvedValue([parking, library]);
+  render(<MapClient school="remote-university-12" route={parking.id + ',' + library.id} />);
+  const routeCard = await screen.findByRole('region', { name: '步行導航' });
+  expect(routeCard.textContent).not.toContain('只有單一資料來源');
+});
+
 it('never points an empty non-Providence map back to Providence', async () => {
   vi.mocked(loadMapLocations).mockResolvedValue([]);
   render(<MapClient school="remote-university-12" />);
