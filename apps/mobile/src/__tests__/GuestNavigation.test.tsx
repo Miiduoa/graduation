@@ -648,3 +648,22 @@ test('a restored account cannot mount private navigation before school choice is
   view.rerender(content());
   expect(view.getByText('私人課務')).toBeTruthy();
 });
+
+test('a guest opens exploration before selecting a school and can return to the same entry', async () => {
+  mockBrowsingSchoolId = '';
+  const onUnhandledAction = jest.fn();
+  const navigation = createNavigationContainerRef();
+  const view = render(
+    <NavigationContainer ref={navigation} onUnhandledAction={onUnhandledAction}>
+      <PreAuthStack />
+    </NavigationContainer>,
+  );
+  fireEvent.press(await view.findByLabelText('探索更多 nuni 用法'));
+  await view.findByTestId('explore-screen');
+  expect(navigation.getCurrentRoute()?.name).toBe('Explore');
+  expect(view.getByText('從想完成的事，找到 nuni 的用法。')).toBeTruthy();
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+  await act(async () => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.name).toBe('LoginLanding');
+  await view.findByTestId('login-landing');
+});

@@ -551,7 +551,7 @@ const tabStyles = StyleSheet.create({
 });
 
 /**
- * 主導覽：今天｜課務｜生活｜交流｜我的（沿用訊息 route key）。
+ * 主導覽：今天｜探索｜課務｜交流｜我的（沿用所有既有 route key）。
  */
 function AppTabNavigator() {
   return (
@@ -565,8 +565,8 @@ function AppTabNavigator() {
       })}
     >
       <Tab.Screen name="Today" component={HomeStack} />
-      <Tab.Screen name="學習" component={LearnStack} />
       <Tab.Screen name="校園" component={MapStack} />
+      <Tab.Screen name="學習" component={LearnStack} />
       <Tab.Screen name="訊息" component={MessagesStack} />
       <Tab.Screen name="我的" component={MeStack} />
     </Tab.Navigator>

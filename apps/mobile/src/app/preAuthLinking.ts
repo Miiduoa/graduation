@@ -11,6 +11,7 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
     initialRouteName: 'LoginLanding',
     screens: {
       LoginLanding: '',
+      Explore: 'explore',
       Map: 'map',
       Library: 'library',
       LibraryCatalog: 'library/catalog',

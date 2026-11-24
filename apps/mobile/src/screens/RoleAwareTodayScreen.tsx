@@ -14,6 +14,8 @@ import { isSchoolLoginEntryAvailable } from '../services/schoolLoginAvailability
 import { roleWorkspaceFlow, ROLE_DAILY_ACTIONS, type RoleWorkspaceAction } from '../services/roleWorkspaceFlow';
 import { safeNavigate } from '../utils/safeNavigate';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+import { WorkspaceStart } from '../components/WorkspaceStart';
+import { workspaceContextForRole } from '../services/workspaceEntry';
 export { resolveDashboardRole, type ResolvedDashboardRole } from '../services/dashboardRole';
 
 function RoleWorkflow({ role, navigation, children }: ServiceScreenProps & {
@@ -21,6 +23,7 @@ function RoleWorkflow({ role, navigation, children }: ServiceScreenProps & {
   children?: React.ReactNode;
 }) {
   const s = useThemeStyleSheet(createStyles);
+  const auth = useAuth();
   const [dailyOpen, setDailyOpen] = useState(false);
   const flow = roleWorkspaceFlow(role);
   const open = (action: RoleWorkspaceAction) => safeNavigate(navigation, action.route);
@@ -42,6 +45,11 @@ function RoleWorkflow({ role, navigation, children }: ServiceScreenProps & {
       <View style={s.heading}>
         <Text accessibilityRole="header" style={s.title}>{flow.title}</Text>
         <Text style={s.description}>{flow.description}</Text>
+      </View>
+      <View style={s.start}>
+        <WorkspaceStart navigation={navigation}
+          scope={JSON.stringify([auth.user?.uid, auth.profile?.schoolId, role])}
+          workContext={workspaceContextForRole(role)} />
       </View>
       {children}
       <View style={s.section}>
@@ -113,6 +121,7 @@ export default function RoleAwareTodayScreen(props: ServiceScreenProps) {
 }
 
 const createStyles = () => StyleSheet.create({
+  start: { paddingHorizontal: 22 },
   heading: { paddingHorizontal: 22, paddingTop: 24, paddingBottom: 8, gap: 8 },
   title: { fontFamily: pageTitleFont, color: theme.colors.text, fontSize: 28, lineHeight: 36, fontWeight: '700' },
   description: { color: theme.colors.textSecondary, fontSize: 14, lineHeight: 21 },

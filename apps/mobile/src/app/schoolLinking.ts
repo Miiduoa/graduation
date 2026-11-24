@@ -53,8 +53,9 @@ export const schoolLinking: LinkingOptions<RootTabParamList> = {
         },
       },
       校園: {
-        initialRouteName: 'CampusHome',
+        initialRouteName: 'Explore',
         screens: {
+          Explore: 'explore',
           CampusHome: 'campus',
           Map: 'map',
           PoiDetail: 'poi/:id',

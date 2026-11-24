@@ -163,6 +163,7 @@ export function StudentToday(props: Props) {
         <h1 className={styles.title}>今天</h1>
         <p className={styles.date}>{props.now ? formatTodayHeaderDate(props.now) : ''}</p>
       </header>
+      {props.assistant}
       {props.workspaces}
       {showWelcome && (
         <div data-testid={showSignedInSetup ? 'next-action' : undefined}>
@@ -227,7 +228,6 @@ export function StudentToday(props: Props) {
       ) : null}
       <div className={styles.assistance} data-testid="today-assistance">
         {props.agent}
-        {props.assistant}
       </div>
       {props.personalization}
       {props.updatedAt || props.refreshing ? (

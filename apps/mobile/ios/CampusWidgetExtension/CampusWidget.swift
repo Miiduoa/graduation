@@ -156,7 +156,7 @@ struct WidgetPaper: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 17.0, *) {
             content.containerBackground(for: .widget) {
-                colorScheme == .dark ? Color.black : Color(red: 0.98, green: 0.97, blue: 0.95)
+                colorScheme == .dark ? Color.black : Color.white
             }
         } else if family == .systemSmall || family == .systemMedium {
             content.padding(12)

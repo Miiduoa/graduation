@@ -11,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { QuickCampusEntry } from '../components/QuickCampusEntry';
+import { WorkspaceStart } from '../components/WorkspaceStart';
 import { CampusPersonalization } from '../components/CampusPersonalization';
 import type { MobileQuickAction } from '../services/quickCampusActions';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -341,6 +342,7 @@ export default function StudentTodayScreen() {
             </Pressable>
           )}
         </View>
+        <WorkspaceStart navigation={navigation} scope={scope} />
         {firstLoad ? (
           <TodaySkeleton styles={s} />
         ) : (

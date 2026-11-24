@@ -13,6 +13,7 @@ import { useSchool } from '../state/school';
 import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
 import { TodayTimetablePanel } from '../components/TodayTimetablePanel';
 import { SchoolPortalImportEntry } from '../components/SchoolPortalImport';
+import { WorkspaceStart } from '../components/WorkspaceStart';
 import {
   isSchoolLoginEntryAvailable,
   loadSchoolLoginProviderKinds,
@@ -150,6 +151,9 @@ export default function LoginLandingScreen() {
                 ? '校園公開資訊免登入。'
                 : '免登入。先選服務，再選擇要瀏覽的學校。'}
           </Text>
+          <WorkspaceStart navigation={navigation}
+            scope={JSON.stringify([auth.session?.platformAccountId, auth.session?.context, auth.pendingLogout, auth.error, school.id, selectionReady])}
+            assistantRoute={platformReady ? 'NuniTimetableAssistant' : 'AIChat'} />
 
           {!platformReady && (
             <View style={s.guestIndex}>

@@ -1,7 +1,7 @@
 .screen {
   display: flex;
   flex-direction: column;
-  gap: clamp(24px, 4vw, 44px);
+  gap: clamp(20px, 3vw, 32px);
   width: 100%;
   min-width: 0;
 }
@@ -13,8 +13,8 @@
   flex-wrap: wrap;
   gap: 8px 16px;
   margin-bottom: 0;
-  padding-block: 4px clamp(18px, 2.5vw, 30px);
-  border-bottom: 1px solid var(--border-strong);
+  padding-block: 4px 14px;
+  border-bottom: 1px solid var(--border);
 }
 
 .title {

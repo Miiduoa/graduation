@@ -6,6 +6,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useGuestCampusHandoff } from '../app/guestCampusHandoff';
 import { guestCampusServices } from './guestCampusServices';
 import LoginLandingScreen from './LoginLandingScreen';
+import { ExploreScreen } from './ExploreScreen';
 import { GoogleMapsLikeScreen } from './GoogleMapsLikeScreen';
 import BusAiFirstScreen from './BusAiFirstScreen';
 import LibraryAiFirstScreen from './LibraryAiFirstScreen';
@@ -86,7 +87,7 @@ export function PreAuthStack() {
     <Stack.Navigator
       initialRouteName="LoginLanding"
       screenLayout={({ children, route, navigation }) =>
-        route.name === 'LoginLanding' || route.name === 'NuniWorkspace' || route.name === 'TronClassWorkspace' || route.name === 'OralExamDemo' ? <>{children}</> : (
+        route.name === 'LoginLanding' || route.name === 'Explore' || route.name === 'AIChat' || route.name === 'NuniWorkspace' || route.name === 'TronClassWorkspace' || route.name === 'OralExamDemo' ? <>{children}</> : (
           <PublicSchoolRoute
             route={route.name}
             onCancel={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('LoginLanding')}
@@ -102,6 +103,9 @@ export function PreAuthStack() {
         component={LoginLandingScreen}
         options={{ headerShown: false }}
       />
+      <Stack.Screen name="Explore" component={ExploreScreen} options={{ title: '探索' }} />
+      <Stack.Screen name="AIChat" getComponent={() => require('./CampusAssistantScreen').CampusAssistantScreen}
+        options={{ title: '校園助理', headerShown: false }} />
       <Stack.Screen name="Map" component={GoogleMapsLikeScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Library" component={LibraryAiFirstScreen} options={{ headerShown: false }} />
       <Stack.Screen name="LibraryCatalog" component={LibraryCatalogScreen} options={{ headerShown: false }} />

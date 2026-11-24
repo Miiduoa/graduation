@@ -320,7 +320,34 @@ it('does not tell a teacher they have no homework and opens the teacher course w
   ).toBe('/teacher/course/teach');
   expect(screen.queryByRole('heading', { name: /待繳作業/ })).toBeNull();
   expect(screen.queryByTestId('student-today')).toBeNull();
+  expect(screen.getByRole('button', { name: '查我的授課概況' })).toBeTruthy();
 });
+
+it('uses a confirmed platform operator context and drops its prepared task when that context ends', async () => {
+  state.uid = null;
+  state.session = { context: 'session-operator', platformAccountId: 'operator-a', isPlatformOperator: true };
+  vi.mocked(loadNuniHomeSections).mockResolvedValue({ courses: [], tasks: [], unreadCount: 0 });
+  const view = render(<HomePage />);
+  expect(await screen.findByRole('button', { name: '查學校資訊，查公開交流' })).toBeTruthy();
+  fireEvent.change(screen.getByRole('textbox', { name: '今天想完成的事' }), { target: { value: '管理情境的草稿' } });
+  state.session = { ...state.session, isPlatformOperator: false };
+  view.rerender(<HomePage />);
+  expect(screen.queryByRole('button', { name: '查學校資訊，查公開交流' })).toBeNull();
+  expect(screen.getByRole('button', { name: '這禮拜有什麼要交的' })).toBeTruthy();
+  expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: '今天想完成的事' }).value).toBe('');
+});
+
+it.each(['staff', 'department', 'school'])(
+  'uses confirmed %s school membership for work examples and clears them when membership is unavailable', async (role) => {
+    state.schoolRole = role;
+    const view = render(<HomePage />);
+    expect(await screen.findByRole('button', { name: '查校園公告，查學校電話' })).toBeTruthy();
+    state.schoolRole = null;
+    view.rerender(<HomePage />);
+    expect(screen.queryByRole('button', { name: '查校園公告，查學校電話' })).toBeNull();
+    expect(screen.getByRole('button', { name: '這禮拜有什麼要交的' })).toBeTruthy();
+  },
+);
 
 it('hides all previous Nuni data immediately during session revalidation and ignores a previous context response', async () => {
   state.uid = null;

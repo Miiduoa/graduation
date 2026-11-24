@@ -125,7 +125,9 @@ it('requires sign-in and does not send a query from a shared link automatically'
   expect(screen.getByRole('heading', { name: '這個功能還沒接通' })).toBeTruthy();
   expect(screen.getByText('校園資訊可先從地圖、公車和公開公告查。')).toBeTruthy();
   expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
-  expect(screen.queryByRole('textbox')).toBeNull();
+  expect((screen.getByRole('textbox', { name: '保留的問題' }) as HTMLTextAreaElement).value).toBe('問題');
+  expect((screen.getByRole('textbox', { name: '保留的問題' }) as HTMLTextAreaElement).readOnly).toBe(true);
+  expect(screen.queryByRole('form', { name: '傳送問題' })).toBeNull();
   state.uid = 'alice';
   view.rerender(<AssistantPage />);
   expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('問題');

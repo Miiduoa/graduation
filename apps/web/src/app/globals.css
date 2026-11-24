@@ -13,7 +13,7 @@ textarea::placeholder {
   --font-ui:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang TC', 'Noto Sans TC',
     'Noto Sans CJK TC', 'Microsoft JhengHei', sans-serif;
-  --font-heading: 'Songti TC', 'Noto Serif TC', 'PMingLiU', Georgia, serif;
+  --font-heading: var(--font-ui);
   --on-brand: #ffffff;
   --nuni-mark-filter: none;
   --page-width: 1264px;
@@ -23,34 +23,35 @@ textarea::placeholder {
     calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px))
   );
   --page-padding-inline: 48px;
-  --page-padding-block: 46px;
-  --page-title-size: calc(clamp(2.125rem, 3.8vw, 3.25rem) + var(--font-h1-size) - 1.5rem);
+  --page-padding-block: 34px;
+  --page-title-size: calc(clamp(1.875rem, 2.8vw, 2.375rem) + var(--font-h1-size) - 1.5rem);
   --motion-fast: 140ms;
   --motion-normal: 200ms;
   --motion-enter: 220ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   /* ── Backgrounds ── */
-  --bg: #faf8f2;
-  --bg-soft: #f1efe7;
+  --bg: #ffffff;
+  --bg-soft: #f5f6f7;
 
   /* ── Surfaces ── */
-  --surface: #fffdf8;
-  --surface-strong: #fffdf8;
+  --surface: #ffffff;
+  --surface2: var(--bg-soft);
+  --surface-strong: #ffffff;
   --surface-raised: #ffffff;
   --surface-tint: rgba(255, 255, 255, 0.6);
-  --panel: #efede4;
-  --panel2: #e6e4da;
+  --panel: #f0f2f3;
+  --panel2: #e6e8eb;
 
   /* ── Text ── */
-  --text: #24251f;
-  --muted: #5e6057;
-  --muted-light: #686b60;
+  --text: #202124;
+  --muted: #62666c;
+  --muted-light: #686e75;
 
   /* ── Borders & Separators ── */
-  --border: #dedbd0;
-  --border-strong: #a7a89b;
-  --control-border: #858779;
+  --border: #e0e3e6;
+  --border-strong: #aeb4bb;
+  --control-border: #8a9199;
 
   /* ── Brand ── */
   --brand: #214c3d;
@@ -68,7 +69,7 @@ textarea::placeholder {
   --info-soft: #e6eeee;
 
   /* ── Interaction ── */
-  --focus-ring: #bd581f;
+  --focus-ring: #237b5e;
   --overlay: rgba(0, 0, 0, 0.36);
   --disabled-bg: rgba(142, 142, 147, 0.12);
   --disabled-text: rgba(142, 142, 147, 0.55);
@@ -109,9 +110,9 @@ textarea::placeholder {
 
   /* ── Border Radius ── */
   --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius: 8px;
-  --radius-lg: 12px;
+  --radius-sm: 10px;
+  --radius: 14px;
+  --radius-lg: 20px;
   --radius-pill: 999px;
 
   /* ── Spacing ── */
@@ -135,11 +136,11 @@ textarea::placeholder {
   --font-h3-size: 1.0625rem;
   --font-h3-line-height: 1.3;
   --font-h3-letter-spacing: -0.1px;
-  --font-body-size: 0.9375rem;
+  --font-body-size: 1rem;
   --font-body-line-height: 1.6;
-  --font-body-sm-size: 0.8125rem;
+  --font-body-sm-size: 0.875rem;
   --font-body-sm-line-height: 1.4;
-  --font-label-size: 0.8125rem;
+  --font-label-size: 0.875rem;
   --font-label-line-height: 1.4;
   --font-label-letter-spacing: 0.2px;
   --font-label-sm-size: 0.6875rem;

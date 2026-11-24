@@ -5,7 +5,7 @@ import {
   Linking, ScrollView, StyleSheet, Text, TextInput, View,
   type LayoutChangeEvent,
 } from 'react-native';
-import type { AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
+import { getAssistantRoleProfile, type AssistantRoleProfileId } from '@campus/shared/src/assistantRoleProfiles';
 import { AssistantWorkContextPicker } from './AssistantWorkContextPicker';
 import { OfficialLibraryReply } from './OfficialLibraryReply';
 import { AssistantConversationLayout, type AssistantPanel } from './AssistantConversationLayout';
@@ -173,11 +173,38 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
     resolved && platformRoute && accountId && context && verifyPlatform ? {
       accountId, isCurrent: () => active.current === scope && verifyPlatform(accountId, context),
     } : undefined, [resolved, platformRoute, accountId, context, verifyPlatform, scope]);
-  const initialScope = useRef(scope);
   const prompt = typeof route?.params?.prompt === 'string' ? route.params.prompt : '';
+  const profile = platformTimetable ? getAssistantRoleProfile(route?.params?.taskProfile)?.id ?? 'student' : 'student';
+  const entryId = typeof route?.params?.draftEntryId === 'string' ? route.params.draftEntryId.slice(0, 100) : '';
+  // A mounted stack can receive a fresh entry after an account/campus change.
+  // Bind each ID once; old route params stay invalid even if that scope returns.
+  const draftIdentity = JSON.stringify([user?.uid, platform?.session?.platformAccountId,
+    platform?.session?.context, selection ? selection.schoolId ?? '' : school.id, platformRoute]);
+  const handoffs = useRef({ scope, identity: draftIdentity, seenEntryIds: new Set<string>(),
+    pendingEntryId: null as string | null, acceptedEntryId: null as string | null });
+  if (handoffs.current.scope !== scope) {
+    handoffs.current.scope = scope;
+    handoffs.current.acceptedEntryId = null;
+  }
+  if (handoffs.current.identity !== draftIdentity) {
+    handoffs.current.identity = draftIdentity;
+    handoffs.current.pendingEntryId = null;
+    handoffs.current.acceptedEntryId = null;
+  }
+  if (!handoffs.current.seenEntryIds.has(entryId)) {
+    handoffs.current.seenEntryIds.add(entryId);
+    handoffs.current.pendingEntryId = entryId;
+  }
+  // Readiness may finish without changing the identity that received the draft.
+  // A different identity discards the pending entry instead of adopting it.
+  if (resolved && handoffs.current.pendingEntryId === entryId) {
+    handoffs.current.acceptedEntryId = entryId;
+    handoffs.current.pendingEntryId = null;
+  }
+  const acceptsDraft = resolved && handoffs.current.acceptedEntryId === entryId;
   return (
     <ScopedAssistantConversation
-      key={scope}
+      key={JSON.stringify([scope, acceptsDraft ? prompt : '', acceptsDraft ? profile : 'student', acceptsDraft ? entryId : ''])}
       uid={uid}
       platformTimetable={platformTimetable}
       platformContext={context}
@@ -187,7 +214,9 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
       } : undefined}
       schoolId={schoolId}
       schoolName={schoolName}
-      initialPrompt={initialScope.current === scope ? prompt : ''}
+      initialPrompt={acceptsDraft ? prompt : ''}
+      initialTaskProfile={acceptsDraft ? profile : 'student'}
+      initialDraftBlocked={!!entryId && !!prompt.trim() && resolved && !acceptsDraft}
       isScopeCurrent={() => active.current === scope && resolved}
       navigation={navigation}
     />
@@ -211,15 +240,17 @@ type ConversationProps = {
   schoolId: string;
   schoolName: string;
   initialPrompt: string;
+  initialTaskProfile?: AssistantRoleProfileId;
+  initialDraftBlocked?: boolean;
   isScopeCurrent: () => boolean;
   navigation: ServiceScreenProps['navigation'];
 };
 
 function ScopedAssistantConversation(props: ConversationProps) {
-  const [taskProfile, setTaskProfile] = useState<AssistantRoleProfileId>('student');
+  const [taskProfile, setTaskProfile] = useState<AssistantRoleProfileId>(props.initialTaskProfile ?? 'student');
   const generation = useRef(0);
   const version = generation.current;
-  const drafts = useRef(new Map<AssistantRoleProfileId, string>([['student', props.initialPrompt]]));
+  const drafts = useRef(new Map<AssistantRoleProfileId, string>([[props.initialTaskProfile ?? 'student', props.initialPrompt]]));
   const current = () => generation.current === version && props.isScopeCurrent();
   return <AssistantConversation {...props} key={taskProfile} taskProfile={taskProfile}
     initialPrompt={drafts.current.get(taskProfile) ?? ''} isScopeCurrent={current}
@@ -241,6 +272,7 @@ function AssistantConversation({
   schoolId,
   schoolName,
   initialPrompt,
+  initialDraftBlocked,
   isScopeCurrent,
   navigation,
 }: ConversationProps & {
@@ -1112,6 +1144,14 @@ function AssistantConversation({
         </View>
       ) : null}
     >
+      {initialDraftBlocked && !draft.trim() && !messages.length ? (
+        <AssistantBlock title="請重新帶入問題">
+          <Text style={{ color: aiTokens.textSecondary, fontSize: 15, lineHeight: 23 }}>
+            帳號或學校已更新，請重新選擇用法，或直接輸入新問題。
+          </Text>
+          <AIButton label="重新探索用法" variant="ghost" onPress={() => safeNavigate(navigation, 'Explore')} />
+        </AssistantBlock>
+      ) : null}
       {platformTimetable ? (
         <AssistantWorkContextPicker profileId={taskProfile} disabled={profileLocked}
           onChange={selectProfile} onExample={editDraft}

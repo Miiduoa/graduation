@@ -340,7 +340,7 @@ export default ({ config, projectRoot = __dirname }: any) => {
   const splash = {
     image: config.splash?.image ?? './assets/splash-icon.png',
     resizeMode: 'contain' as const,
-    backgroundColor: '#FAF8F2',
+    backgroundColor: '#FFFFFF',
   };
   const platformSplash = {
     ...splash,
@@ -391,7 +391,7 @@ export default ({ config, projectRoot = __dirname }: any) => {
       adaptiveIcon: {
         foregroundImage:
           config.android?.adaptiveIcon?.foregroundImage ?? './assets/adaptive-icon.png',
-        backgroundColor: '#FAF8F2',
+        backgroundColor: '#FFFFFF',
       },
       package: androidPackage,
       versionCode,

@@ -128,7 +128,7 @@ it('shows the next class once in the timetable with a keyboard-accessible destin
   expect(screen.queryByText(/為你推薦|智慧|AI 幫你/)).toBeNull();
 });
 
-it('keeps the assistant mounted after the planner while the day finishes loading', () => {
+it('keeps the task entry before the planner and preserves its draft while the day finishes loading', () => {
   const assistant = <input aria-label="助理草稿測試" defaultValue="" />;
   const result = view({ skeleton: true, assistant });
   const draft = screen.getByRole('textbox');
@@ -137,11 +137,11 @@ it('keeps the assistant mounted after the planner while the day finishes loading
   expect(screen.getByRole('textbox')).toBe(draft);
   expect(
     draft.compareDocumentPosition(screen.getByTestId('next-action')) &
-      Node.DOCUMENT_POSITION_PRECEDING,
+      Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   expect(
     draft.compareDocumentPosition(screen.getByTestId('today-classes')) &
-      Node.DOCUMENT_POSITION_PRECEDING,
+      Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   expect((draft as HTMLInputElement).value).toBe('下一堂課在哪裡？');
 });
@@ -156,7 +156,7 @@ it('keeps the actual day before the task agent and preserves the agent while hom
   expect(button.compareDocumentPosition(planner) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
 });
 
-it('groups planning and conversation before optional suggestions without resetting either draft', () => {
+it('keeps the task entry above the planner and places planning before optional suggestions without resetting drafts', () => {
   const agent = <input aria-label="代辦測試" defaultValue="保留原本的安排" />;
   const assistant = <input aria-label="助理草稿測試" defaultValue="接著幫我找教室" />;
   const personalization = <section aria-label="個人化安排">生活與年級偏好</section>;
@@ -165,7 +165,8 @@ it('groups planning and conversation before optional suggestions without resetti
   const conversation = screen.getByRole('textbox', { name: '助理草稿測試' });
   const assistance = screen.getByTestId('today-assistance');
   expect(assistance.contains(planning)).toBe(true);
-  expect(assistance.contains(conversation)).toBe(true);
+  expect(conversation.compareDocumentPosition(screen.getByTestId('today-unified-flow')) &
+    Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(assistance.compareDocumentPosition(screen.getByRole('region', { name: '個人化安排' })) &
     Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   view.rerender(todayElement({ agent, assistant, personalization, skeleton: true }));

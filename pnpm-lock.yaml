@@ -13712,7 +13712,7 @@ snapshots:
 
   acorn-globals@7.0.1:
     dependencies:
-      acorn: 8.15.0
+      acorn: 8.19.0
       acorn-walk: 8.3.4
 
   acorn-jsx@5.3.2(acorn@8.15.0):
@@ -13725,7 +13725,7 @@ snapshots:
 
   acorn-walk@8.3.4:
     dependencies:
-      acorn: 8.15.0
+      acorn: 8.19.0
 
   acorn-walk@8.3.5:
     dependencies:

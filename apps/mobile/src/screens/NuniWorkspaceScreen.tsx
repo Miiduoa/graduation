@@ -342,6 +342,13 @@ function SignedInWorkspace({
           </Pressable>
         ))}
       </View>
+      {navigation ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="探索這個工作區的 nuni 用法"
+          onPress={() => safeNavigate(navigation, 'Explore', { workContext: tab === 'merchant' ? 'merchant' : 'student' })}
+          style={s.exploreEntry}>
+          <Text style={s.exploreEntryText}>探索更多用法</Text>
+        </Pressable>
+      ) : null}
       {tab === 'food' ? <NuniFood /> : null}
       {tab === 'courses' ? <View style={s.courseAction}>
         <Action label="連接 TronClass 與查看校方作業" onPress={() => safeNavigate(navigation, 'TronClassWorkspace')} />
@@ -585,6 +592,8 @@ export function NuniWorkspaceScreen({
 
 const createStyles = () =>
   StyleSheet.create({
+    exploreEntry: { minHeight: 44, paddingHorizontal: 20, paddingVertical: 10, alignSelf: 'flex-end', justifyContent: 'center' },
+    exploreEntryText: { color: theme.colors.accent, fontSize: 14, lineHeight: 22 },
     page: { flex: 1, backgroundColor: theme.colors.bg },
     content: { flexGrow: 1, padding: 24, gap: 18, paddingBottom: 48 },
     scopeNotice: { paddingHorizontal: 20, paddingTop: 8, color: theme.colors.text, fontSize: 14, lineHeight: 22 },

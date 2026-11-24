@@ -23,6 +23,7 @@ import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { pageTitleFont } from '../ui/styles';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+import { WorkspaceStart } from '../components/WorkspaceStart';
 
 const TEACHER_TODAY_LABEL = TEACHER_ACADEMIC_SECTIONS[0].label;
 const TEACHER_COURSES_LABEL = TEACHER_ACADEMIC_SECTIONS[1].label;
@@ -169,7 +170,7 @@ export default function TeacherTodayScreen() {
               : '尚未加入授課課程'}
           </Text>
         ) : null}
-
+        <WorkspaceStart navigation={navigation} scope={scope} workContext="teacher" />
         {loading ? <ActivityIndicator color={theme.colors.accent} style={s.spinner} /> : null}
         {current?.status === 'error' ? (
           <View accessibilityRole="alert" style={s.error}>

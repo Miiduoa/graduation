@@ -37,7 +37,7 @@ it('restores saved appearance on a direct entry without mounting settings', () =
   render(<AppearancePreferences />);
   expect(document.documentElement.dataset.theme).toBe('dark');
   expect(document.documentElement.style.getPropertyValue('--brand')).toBe('');
-  expect(document.documentElement.style.getPropertyValue('--font-body-size')).toBe('1.0625rem');
+  expect(document.documentElement.style.getPropertyValue('--font-body-size')).toBe('1.125rem');
   expect(document.documentElement.dataset.reducedMotion).toBe('true');
 });
 it('updates all open pages after another tab changes or clears preferences', () => {
@@ -53,6 +53,8 @@ it('updates all open pages after another tab changes or clears preferences', () 
   });
   expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
   expect(document.documentElement.dataset.density).toBe('comfortable');
+  expect(document.documentElement.style.getPropertyValue('--font-body-size')).toBe('1rem');
+  expect(document.documentElement.style.getPropertyValue('--font-body-sm-size')).toBe('0.875rem');
 });
 it('matches the browser chrome to the chosen theme and follows later system changes', () => {
   const metas = ['light', 'dark'].map((mode) => {
@@ -127,6 +129,22 @@ it('bootstrap applies a valid saved theme before hydration', () => {
   localStorage.setItem(webPreferencesStorageKey, 'not json');
   expect(() => new Function(appearanceBootstrap)()).not.toThrow();
   expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+});
+
+it.each([
+  { fontSize: 'small', body: '0.9375rem', secondary: '0.8125rem' },
+  { fontSize: 'medium', body: '1rem', secondary: '0.875rem' },
+  { fontSize: 'large', body: '1.125rem', secondary: '1rem' },
+  { fontSize: 'invalid', body: '1rem', secondary: '0.875rem' },
+])('keeps $fontSize text stable from first paint through hydration', ({ fontSize, body, secondary }) => {
+  setPreferences({ fontSize });
+  new Function(appearanceBootstrap)();
+  const root = document.documentElement.style;
+  expect(root.getPropertyValue('--font-body-size')).toBe(body);
+  expect(root.getPropertyValue('--font-body-sm-size')).toBe(secondary);
+  const beforeHydration = root.cssText;
+  render(<AppearancePreferences />);
+  expect(root.cssText).toBe(beforeHydration);
 });
 
 it('restores disabled animations before hydration and keeps the setting after mounting', () => {
