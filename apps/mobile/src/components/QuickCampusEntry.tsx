@@ -45,17 +45,29 @@ function classQuestions(reply?: CampusAssistantMessage, uid?: string | null, sch
   return questions;
 }
 
-export function QuickCampusEntry({
-  uid,
-  schoolId,
-  onOpen,
-  onOpenAssistantRoute,
-}: {
+type QuickCampusEntryProps = {
   uid?: string | null;
   schoolId?: string | null;
   onOpen: (action: MobileQuickAction) => void;
   onOpenAssistantRoute?: (route: string) => void;
-}) {
+};
+
+/** A new account or school must never inherit the previous conversation or draft. */
+export function QuickCampusEntry(props: QuickCampusEntryProps) {
+  return (
+    <ScopedQuickCampusEntry
+      key={JSON.stringify([props.uid ?? null, props.schoolId ?? null])}
+      {...props}
+    />
+  );
+}
+
+function ScopedQuickCampusEntry({
+  uid,
+  schoolId,
+  onOpen,
+  onOpenAssistantRoute,
+}: QuickCampusEntryProps) {
   useThemeVersion();
   const { colors, radius, typography } = theme;
   const dark = theme.mode === 'dark';
@@ -63,6 +75,7 @@ export function QuickCampusEntry({
   const mutedColor = dark ? '#A5AAA7' : '#686C70';
   const borderColor = dark ? '#292B2D' : '#E6E7E8';
   const [query, setQuery] = useState('');
+  const [submittedSearch, setSubmittedSearch] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [history, setHistory] = useState<CampusAssistantMessage[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -99,6 +112,7 @@ export function QuickCampusEntry({
 
   function update(value: string) {
     sequence.current += 1;
+    setSubmittedSearch(null);
     setAnalysis(null);
     setAskError(null);
     setQuery(value.slice(0, 160));
@@ -157,6 +171,16 @@ export function QuickCampusEntry({
         setAsking(false);
       }
     }
+  }
+
+  function submitInput() {
+    if (canAsk) {
+      void ask();
+      return;
+    }
+    if (!phrase) return;
+    Keyboard.dismiss();
+    setSubmittedSearch(phrase);
   }
 
   function stop() {
@@ -239,10 +263,10 @@ export function QuickCampusEntry({
           autoCapitalize="none"
           maxLength={160}
           editable={!asking}
-          returnKeyType="send"
+          returnKeyType={canAsk ? "send" : "search"}
           value={query}
           onChangeText={update}
-          onSubmitEditing={() => void ask()}
+          onSubmitEditing={submitInput}
           style={{ flex: 1, minWidth: 0, minHeight: 48, paddingVertical: 10, fontSize: 15, color: textColor }}
         />
         {query.length > 0 && !asking ? (
@@ -256,6 +280,22 @@ export function QuickCampusEntry({
           </Pressable>
         ) : null}
       </View>
+      {!!phrase && !canAsk && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="查看搜尋結果"
+          onPress={submitInput}
+          style={{ alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', paddingHorizontal: 12,
+            borderRadius: radius.lg, backgroundColor: colors.surface2 }}
+        >
+          <Text style={{ ...typography.bodySmall, color: textColor, fontWeight: '600' }}>查看搜尋結果</Text>
+        </Pressable>
+      )}
+      {submittedSearch === phrase && !!phrase && !canAsk && (
+        <Text accessibilityLiveRegion="polite" style={{ ...typography.bodySmall, color: mutedColor }}>
+          {suggestions.length ? `找到 ${suggestions.length} 個服務，請選擇要開啟的項目。` : '沒有相符的服務，試試課表、公車或圖書館。'}
+        </Text>
+      )}
       {!!phrase && canAsk && (
         <Pressable
           accessibilityRole="button"
@@ -419,7 +459,7 @@ export function QuickCampusEntry({
             </>
           ) : semantic?.status !== 'clarify' ? (
             <Text style={{ ...typography.bodySmall, color: mutedColor }}>
-              尚未找到對應服務，可以補充需求或詢問助理。
+              {canAsk ? '尚未找到對應服務，可以補充需求或詢問助理。' : '尚未找到對應服務，試試其他關鍵字。'}
             </Text>
           ) : null}
         </View>
