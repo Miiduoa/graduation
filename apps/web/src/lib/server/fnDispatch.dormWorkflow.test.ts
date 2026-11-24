@@ -64,10 +64,24 @@ it('publishes to the resident workspace and reports provider acceptance for elig
   const published = await (await call(notice)).json();
   expect(published).toMatchObject({ result: { acceptedRecipients: 1, recipients: 1 } });
   expect(await (await call(notice)).json()).toEqual(published);
+  const inboxPrefix = 'users/student/notifications/';
+  const inboxRows = [...store.docs].filter(([path]) => path.startsWith(inboxPrefix));
+  expect(inboxRows).toHaveLength(1);
+  const [[path, inbox]] = inboxRows;
+  const inboxNotificationId = path.slice(inboxPrefix.length);
+  expect(inboxNotificationId).toMatch(/^dorm_[0-9a-f]{64}$/);
+  expect(inbox.data).toEqual({
+    type: 'announcement',
+    channel: 'dormitory',
+    schoolId: 'pu',
+    dormAnnouncementId: published.result.id,
+    inboxNotificationId,
+    deliveryKey: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+  });
   expect(sendEachForMulticast).toHaveBeenCalledTimes(1);
   expect(sendEachForMulticast).toHaveBeenCalledWith(expect.objectContaining({
     tokens: ['device-one', 'device-two'],
-    data: { type: 'announcement', channel: 'dormitory', schoolId: 'pu', dormAnnouncementId: published.result.id },
+    data: inbox.data,
   }));
   store.docs.set('users/student/settings/notifications', { announcements: false });
   expect(await (await call({ ...notice, key: 'next' })).json()).toMatchObject({
