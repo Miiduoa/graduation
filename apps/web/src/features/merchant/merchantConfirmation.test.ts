@@ -27,7 +27,7 @@ it('renders the newer menu requirement after a list previously confirmed the men
   expect(confirmed.overview()?.workspaces).toEqual([missingMenu]);
 });
 
-it('learns the version floor from an older request without replacing the winning legacy row', () => {
+it('keeps a newer legacy list readable without merging it into the delayed detail', () => {
   const confirmed = createMerchantConfirmations(new Map());
   const legacyRow: NuniMerchantWorkspace = {
     tenantId: 'campus-one',
@@ -37,16 +37,16 @@ it('learns the version floor from an older request without replacing the winning
     merchantName: '餐坊',
     campusName: '主校區',
     merchantStatus: 'active',
-    locationStatus: 'closed',
+    locationStatus: 'open',
     activated: true,
-    publicAccess: false,
-    missingRequirements: ['menu'],
+    publicAccess: true,
+    missingRequirements: [],
   };
   const detail: NuniMerchantWorkspaceDetail = {
     ...legacyRow,
-    locationStatus: 'open',
-    publicAccess: true,
-    missingRequirements: [],
+    merchantStatus: 'suspended',
+    locationStatus: 'suspended',
+    publicAccess: false,
     applicationId: 'application-1',
     merchantId: 'merchant-1',
     campusId: 'main-campus',
@@ -67,19 +67,12 @@ it('learns the version floor from an older request without replacing the winning
   const detailRevision = confirmed.beginRequest();
   confirmed.mergeWorkspaceList([legacyRow], confirmed.beginRequest());
 
-  const expectedDetail = {
-    locationStatus: 'closed',
-    publicAccess: false,
-    missingRequirements: ['menu'],
-    readinessVersion: 7,
-    publishedMenuItems: 0,
-  };
-  expect(confirmed.confirmDetail(detail, detailRevision, true)).toMatchObject(expectedDetail);
+  expect(confirmed.confirmDetail(detail, detailRevision, true)).toEqual(detail);
   expect(confirmed.overview()?.workspaces).toEqual([legacyRow]);
 
   const lowerVersion = { ...detail, readinessVersion: 6 };
   expect(confirmed.confirmDetail(lowerVersion, confirmed.beginRequest(), true)).toBeNull();
-  expect(confirmed.verifiedDetails().get('campus-one:store-a')).toMatchObject(expectedDetail);
+  expect(confirmed.verifiedDetails().get('campus-one:store-a')).toEqual(detail);
   expect(confirmed.overview()?.workspaces).toEqual([legacyRow]);
 
   const sameVersion = { ...detail, missingRequirements: ['settings'] };

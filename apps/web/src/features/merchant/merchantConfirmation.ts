@@ -163,7 +163,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const detail = entry.detail.value;
     if (detail.readinessVersion !== entry.row.version) return null;
     const row = entry.row.value;
-    // A legacy row may omit its version. Use the confirmed detail version for the matched snapshot.
+    // The known version floor orders responses. Only an explicitly versioned row
+    // can contribute fields to the matching detail snapshot.
+    if (row.readinessVersion !== detail.readinessVersion) return detail;
     return {
       ...detail,
       ...row,

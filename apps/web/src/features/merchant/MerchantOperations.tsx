@@ -639,8 +639,7 @@ export function MerchantOperations({
                       termsVersion: 'merchant-terms-v1',
                       expectedVersion: draft.baseVersion,
                     });
-                    if (!current()) return;
-                    accept(next, false, revision);
+                    if (!current() || !accept(next, false, revision)) return;
                     setSettings(null);
                     setNotice({ value: '營運設定已儲存。', revision });
                   });
@@ -745,8 +744,7 @@ export function MerchantOperations({
                       termsVersion: 'merchant-terms-v1',
                       expectedVersion: detail.readinessVersion,
                     });
-                    if (!current()) return;
-                    accept(next, false, revision);
+                    if (!current() || !accept(next, false, revision)) return;
                     setNotice({ value: '已改為現場櫃檯付款。', revision });
                   })
                 }

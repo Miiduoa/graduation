@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import type { NuniMerchantWorkspaceDetail } from '@campus/shared/src/nuniMerchantOperations';
 import { MerchantOperations, type MerchantOperationDrafts } from './MerchantOperations';
+import { createMerchantConfirmations, workspaceKey } from './merchantConfirmation';
 
 const request = vi.hoisted(() => vi.fn());
 vi.mock('@/features/nuni/Session', () => ({ browserRequest: request }));
@@ -130,6 +131,53 @@ function fillMenu() {
 function confirmMenu() {
   fireEvent.click(screen.getByLabelText(/我已確認品項、元售價/));
 }
+
+it('keeps the order desk closed when a newer unversioned list arrives before a suspended detail', async () => {
+  const confirmed = createMerchantConfirmations(drafts);
+  const suspended = { ...initial(), activated: true, readinessVersion: 7 };
+  const pending = deferred<NuniMerchantWorkspaceDetail>();
+  request.mockReturnValue(pending.promise);
+  const orders = () => (
+    <MerchantOperations
+      context="account-a"
+      tenantId={suspended.tenantId}
+      locationId={suspended.locationId}
+      suspended={false}
+      drafts={drafts}
+      beginRequest={confirmed.beginRequest}
+      onChanged={confirmed.confirmDetail}
+      onExpired={onExpired}
+      confirmedDetail={confirmed.verifiedDetails().get(workspaceKey(suspended)) ?? null}
+      navigation={{
+        section: 'orders',
+        queue: 'active',
+        backHref: '/merchant/workspace',
+        onNavigate: vi.fn(),
+      }}
+    />
+  );
+  const mounted = render(orders());
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  confirmed.mergeWorkspaceList(
+    [
+      {
+        ...suspended,
+        readinessVersion: undefined,
+        merchantStatus: 'active',
+        locationStatus: 'open',
+        publicAccess: true,
+        missingRequirements: [],
+      },
+    ],
+    confirmed.beginRequest(),
+  );
+  await act(async () => pending.resolve(suspended));
+  mounted.rerender(orders());
+
+  expect(screen.getByRole('heading', { name: '這間門市尚未開放訂單工作台' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '門市訂單工作台' })).toBeNull();
+  expect(request.mock.calls.map(([path]) => path)).toEqual([base]);
+});
 
 it('completes settings, one-time menu, confirmed activation and pause/resume with server receipts', async () => {
   await open();
