@@ -17,7 +17,7 @@ import BusAiFirstScreen from './BusAiFirstScreen';
 import MenuDetailAiFirstScreen from './MenuDetailAiFirstScreen';
 import LibraryAiFirstScreen from './LibraryAiFirstScreen';
 import SchoolInfoScreen from './SchoolInfoScreen';
-import { DormitoryScreen } from './DormitoryScreen';
+import { DormitoryScreen, dormNotificationView } from './DormitoryScreen';
 import { CareerScreen } from './CareerScreen';
 import { GroupsScreen } from './GroupsScreen';
 import { ClubDetailScreen } from './ClubDetailScreen';
@@ -157,6 +157,7 @@ export function MapStack() {
       <Stack.Screen
         name="Dormitory"
         component={DormitoryScreen}
+        getId={({ params }) => dormNotificationView(params?.notificationView) ? 'resident-notification' : 'workspace'}
         options={{ title: '宿舍', headerShown: false }}
       />
       <Stack.Screen

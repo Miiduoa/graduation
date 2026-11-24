@@ -144,7 +144,7 @@ async def check_service_navigation(page, config, report, capture):
     # query and disclosure alone while the link opens in another tab.
     target_url = await library.evaluate('link => link.href')
     async with page.context.expect_page() as opened:
-        await library.click(modifiers=['Control'])
+        await library.click(modifiers=['ControlOrMeta'])
     background = await opened.value
     await background.wait_for_url(target_url)
     await background.close()

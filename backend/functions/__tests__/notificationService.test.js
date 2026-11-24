@@ -365,6 +365,18 @@ test('account deletion during provider request cannot recreate private receipt d
   expect(s.fetch).toHaveBeenCalledTimes(1);
 });
 
+test.each([{ status: 'disabled' }, { accountDeletionInProgress: true }])(
+  'skips unavailable accounts before contacting a push provider (%j)', async (profile) => {
+    const s = setup();
+    token(s, 'expo', expo, 'expo');
+    s.rows.set('users/alice', profile);
+    expect(await s.service.sendPushToUser('alice', note)).toMatchObject({
+      status: 'skipped', reason: 'account_unavailable', accepted: 0,
+    });
+    expect(s.fetch).not.toHaveBeenCalled();
+  },
+);
+
 test('receipt completion after account removal does not recreate receipt history', async () => {
   const s = setup();
   s.rows.set('pendingPushReceipts/one', {

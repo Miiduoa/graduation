@@ -128,7 +128,7 @@ test('feature gate, school membership, service domain and building enforced', as
   await expect(call('student', repair)).rejects.toMatchObject({ code: 'failed-precondition' });
 });
 test('leave is owner-only, requires one staff decision and validates real dates', async () => {
-  const { call, data } = fixture();
+  const { call, data, sendPushToUser } = fixture();
   data.set('schools/pu/dormResidents/123', {
     userId: 'student',
     building: 'A',
@@ -151,6 +151,9 @@ test('leave is owner-only, requires one staff decision and validates real dates'
     call('student', { action: 'decideLeave', id, status: 'approved' }),
   ).rejects.toMatchObject({ code: 'permission-denied' });
   await call('staff', { action: 'decideLeave', id, status: 'approved' });
+  expect(sendPushToUser).toHaveBeenCalledWith('student', expect.anything(), {
+    type: 'repair', schoolId: 'pu', channel: 'dormitory', dormSection: 'leave',
+  });
   await expect(
     call('staff', { action: 'decideLeave', id, status: 'rejected' }),
   ).rejects.toMatchObject({ code: 'failed-precondition' });
@@ -2099,4 +2102,219 @@ test('announcement push failure reports zero deliveries and preserves the publis
     await call('staff', { action: 'announce', building: 'A', title: '停水', body: '明日施工' }),
   ).toMatchObject({ success: true, delivered: 0, recipients: 1 });
   expect((await call('student', { action: 'mine' })).announcements).toHaveLength(1);
+});
+
+test('announcement retries preserve one publication and count accepted recipients only once', async () => {
+  const { call, data, sendPushToUser } = fixture();
+  for (const [rowId, userId] of [
+    ['r1', 'student'], ['r2', 'student'], ['r3', 'muted'], ['r4', 'former'], ['r5', 'other-campus'],
+  ]) data.set('schools/pu/dormResidents/' + rowId, { userId, active: true, building: 'A' });
+  data.set('schools/pu/members/muted', { role: 'member' });
+  data.set('users/muted', { status: 'active' });
+  data.set('schools/pu/members/former', { status: 'inactive' });
+  data.set('schools/ntnu/members/other-campus', { status: 'active' });
+  sendPushToUser.mockImplementation(async (uid) => uid === 'student'
+    ? { status: 'partial', accepted: 2, failed: 1 }
+    : { status: 'skipped', accepted: 0 });
+  const input = { action: 'announce', building: 'A', title: '停水', body: '明日施工', key: 'same-publication' };
+  const receipt = await call('staff', input);
+  expect(receipt).toMatchObject({ acceptedRecipients: 1, delivered: 1, recipients: 4 });
+  expect(await call('staff', input)).toEqual(receipt);
+  await expect(call('staff', { ...input, title: '另一則公告' })).rejects.toMatchObject({ code: 'failed-precondition' });
+  expect(sendPushToUser.mock.calls.map(([uid]) => uid)).toEqual(['student', 'muted']);
+  expect(sendPushToUser).toHaveBeenCalledWith('student', { title: '宿舍公告', body: '開啟宿舍頁查看本棟公告。' },
+    { type: 'announcement', schoolId: 'pu', channel: 'dormitory', dormAnnouncementId: receipt.id }, 'announcements');
+  expect((await call('student', { action: 'mine' })).announcements).toHaveLength(1);
+});
+
+test('resumes only untouched original residents after failures before and after provider acceptance', async () => {
+  const { createHash } = require('node:crypto');
+  const { call, data, db, sendPushToUser } = fixture();
+  const addResident = (uid) => {
+    data.set('users/' + uid, { status: 'active' });
+    data.set('schools/pu/members/' + uid, { status: 'active' });
+    data.set('schools/pu/dormResidents/' + uid, { userId: uid, active: true, building: 'A' });
+  };
+  for (const uid of ['confirmed', 'unknown', 'pending', 'moving']) addResident(uid);
+  const input = { action: 'announce', building: 'A', body: '施工', title: '停水', key: 'recover' };
+  const digest = (values) => createHash('sha256').update(JSON.stringify(values)).digest('hex');
+  const announcementId = digest(['staff', input.key]);
+  const untouched = new Set(['pending', 'moving'].map((id) => digest([announcementId, id])));
+  const unknown = digest([announcementId, 'unknown']);
+  const transact = db.runTransaction;
+  db.runTransaction = (callback) => transact((tx) => callback({
+    ...tx,
+    get: async (ref) => {
+      if (ref.path?.includes('/attempts/') && untouched.has(ref.id)) throw new Error('claim unavailable');
+      return tx.get(ref);
+    },
+    update: (ref, changes) => {
+      if (ref.path.includes('/attempts/') && ref.id === unknown) throw new Error('lost provider receipt');
+      return tx.update(ref, changes);
+    },
+  }));
+  sendPushToUser.mockResolvedValue({ status: 'partial', accepted: 2, failed: 1 });
+
+  expect(await call('staff', input)).toMatchObject({
+    recipients: 4, delivered: 1, acceptedRecipients: 1, pendingRecipients: 2, unconfirmedRecipients: 1,
+  });
+  expect(sendPushToUser.mock.calls.map(([id]) => id).sort()).toEqual(['confirmed', 'unknown']);
+
+  db.runTransaction = transact;
+  addResident('newArrival');
+  data.get('schools/pu/dormResidents/moving').building = 'B';
+  const retry = await call('staff', input);
+  expect(retry).toMatchObject({
+    id: announcementId, recipients: 4, delivered: 2, acceptedRecipients: 2, pendingRecipients: 0, unconfirmedRecipients: 1,
+  });
+  expect(await call('staff', input)).toEqual(retry);
+  expect(sendPushToUser.mock.calls.map(([id]) => id).sort()).toEqual(['confirmed', 'pending', 'unknown']);
+  const publicRows = [...data.entries()].filter(([path]) => path.includes('/dormAnnouncements/'));
+  expect(publicRows).toHaveLength(1);
+  expect(publicRows[0][1]).not.toHaveProperty('audience');
+  for (const [path, value] of data) {
+    if (path.startsWith('_dormAnnouncementDispatch/')) {
+      expect(JSON.stringify([path, value])).not.toMatch(/"(confirmed|unknown|pending|moving|newArrival)"/);
+    }
+  }
+});
+
+test('concurrent replay cannot dispatch again while the provider is still handling an attempt', async () => {
+  const { call, data, sendPushToUser } = fixture();
+  data.set('schools/pu/dormResidents/r1', { userId: 'student', active: true, building: 'A' });
+  const input = { action: 'announce', schoolId: 'pu', building: 'A', body: '施工', title: '停水', key: 'concurrent' };
+  let signalStart, finish;
+  const started = new Promise((resolve) => { signalStart = resolve; });
+  const release = new Promise((resolve) => { finish = resolve; });
+  sendPushToUser.mockImplementation(async () => {
+    signalStart();
+    await release;
+    return { status: 'accepted', accepted: 2 };
+  });
+  const first = call('staff', input);
+  await started;
+  try {
+    const concurrent = await call('staff', input);
+    expect(concurrent).toMatchObject({ acceptedRecipients: 0, pendingRecipients: 0, unconfirmedRecipients: 1 });
+    await expect(call('staff', { ...input, body: '另一段' })).rejects.toMatchObject({ code: 'failed-precondition' });
+  } finally {
+    finish();
+  }
+  const final = await first;
+  expect(final).toMatchObject({ acceptedRecipients: 1, pendingRecipients: 0, unconfirmedRecipients: 0 });
+  expect(await call('staff', input)).toEqual(final);
+  expect(sendPushToUser).toHaveBeenCalledTimes(1);
+});
+
+test.each([true, false])('large building publication handles all original residents (keyed=%s)', async (keyed) => {
+  const { call, data, sendPushToUser } = fixture();
+  for (let i = 0; i < 65; i++) {
+    const uid = 'resident-' + i;
+    data.set('users/' + uid, { status: 'active' });
+    data.set('schools/pu/members/' + uid, { status: 'active' });
+    data.set('schools/pu/dormResidents/' + uid, { userId: uid, building: 'A', active: true });
+  }
+  sendPushToUser.mockResolvedValue({ status: 'accepted', accepted: 1 });
+  const input = {
+    action: 'announce', building: 'A', title: '檢修', body: '晚間檢修', ...(keyed ? { key: 'large' } : {}),
+  };
+  const first = await call('staff', input);
+  expect(first).toMatchObject({
+    recipients: 65, acceptedRecipients: keyed ? 60 : 65, pendingRecipients: keyed ? 5 : 0,
+  });
+  if (keyed) {
+    const final = await call('staff', input);
+    expect(final).toMatchObject({ id: first.id, recipients: 65, acceptedRecipients: 65, pendingRecipients: 0 });
+    expect(await call('staff', input)).toEqual(final);
+  }
+  expect(sendPushToUser).toHaveBeenCalledTimes(65);
+  expect(new Set(sendPushToUser.mock.calls.map(([uid]) => uid)).size).toBe(65);
+});
+
+test('existing keyed publications without a snapshot keep their original receipt and never replay push', async () => {
+  const { createHash } = require('node:crypto');
+  const { call, data, sendPushToUser } = fixture();
+  const input = { action: 'announce', building: 'A', title: '停水', body: '施工', key: 'old' };
+  const id = createHash('sha256').update(JSON.stringify(['staff', input.key])).digest('hex');
+  data.set('schools/pu/dormAnnouncements/' + id, { building: 'A', title: '停水', body: '施工', createdBy: 'staff' });
+  expect(await call('staff', input)).toEqual({ success: true, id });
+  expect(sendPushToUser).not.toHaveBeenCalled();
+});
+
+test('slow keyed delivery yields after the active batch and can resume', async () => {
+  const { call, data, sendPushToUser } = fixture();
+  let clock = 1_000_000;
+  const now = jest.spyOn(Date, 'now').mockImplementation(() => clock);
+  try {
+    for (let i = 0; i < 21; i++) {
+      const uid = 'slow-' + i;
+      data.set('users/' + uid, { status: 'active' });
+      data.set('schools/pu/members/' + uid, { status: 'active' });
+      data.set('schools/pu/dormResidents/' + uid, { userId: uid, building: 'A', active: true });
+    }
+    sendPushToUser.mockImplementation(async () => {
+      clock = 1_021_000;
+      return { status: 'accepted', accepted: 1 };
+    });
+    const input = { action: 'announce', building: 'A', title: '演習', body: '夜間演習', key: 'slow' };
+    expect(await call('staff', input)).toMatchObject({ recipients: 21, acceptedRecipients: 20, pendingRecipients: 1 });
+    expect(await call('staff', input)).toMatchObject({ recipients: 21, acceptedRecipients: 21, pendingRecipients: 0 });
+    expect(sendPushToUser).toHaveBeenCalledTimes(21);
+  } finally {
+    now.mockRestore();
+  }
+});
+
+test('eligible residents receive a private inbox link without a push token or enabled push preference', async () => {
+  const { createNotificationService } = require('./lib/notificationService');
+  const { call, data, db, sendPushToUser } = fixture();
+  const transport = jest.fn();
+  sendPushToUser.mockImplementation(createNotificationService({
+    db, fetch: transport, messaging: { sendEachForMulticast: transport },
+  }).sendPushToUser);
+  for (const uid of ['student', 'muted', 'deleting', 'disabled', 'missing', 'former', 'moved']) {
+    data.set('schools/pu/members/' + uid, { status: 'active' });
+    data.set('schools/pu/dormResidents/' + uid, { userId: uid, building: 'A', active: true });
+    if (uid !== 'missing') data.set('users/' + uid, { status: 'active' });
+  }
+  data.set('users/muted/settings/notifications', { announcements: false });
+  const transact = db.runTransaction;
+  // These changes happen after the publication captures its initial roster and
+  // before the recipient transaction reads current membership, profile and building.
+  db.runTransaction = (callback) => transact((tx) => callback({
+    ...tx,
+    getAll: (...refs) => {
+      const user = refs[0]?.id;
+      if (user === 'deleting') data.set('users/deleting', { status: 'active', accountDeletionInProgress: true });
+      if (user === 'disabled') data.set('users/disabled', { status: 'suspended' });
+      if (user === 'former') data.set('schools/pu/members/former', { status: 'inactive' });
+      if (user === 'moved') data.get('schools/pu/dormResidents/moved').building = 'B';
+      return tx.getAll(...refs);
+    },
+  }));
+  const input = { action: 'announce', building: 'A', title: '宿舍內部標題', body: '只供本棟閱讀', key: 'inbox' };
+  const result = await call('staff', input);
+  expect(result).toMatchObject({ acceptedRecipients: 0, recipients: 7, pendingRecipients: 0, unconfirmedRecipients: 0 });
+  expect(transport).not.toHaveBeenCalled();
+  const inboxItems = [...data.entries()].filter(([path]) => path.includes('/notifications/'));
+  expect(inboxItems.map(([path]) => path.split('/')[1]).sort()).toEqual(['muted', 'student']);
+  for (const [path, item] of inboxItems) {
+    expect(item).toEqual({
+      title: '宿舍公告', body: '開啟宿舍頁查看本棟公告。', type: 'announcement', schoolId: 'pu',
+      read: false, createdAt: expect.anything(),
+      data: { type: 'announcement', channel: 'dormitory', schoolId: 'pu', dormAnnouncementId: result.id },
+    });
+    const records = await call(path.split('/')[1], { action: 'mine' });
+    expect(records.announcements.find((a) => a.id === item.data.dormAnnouncementId)).toMatchObject({
+      building: 'A', title: input.title, body: input.body,
+    });
+  }
+  const [readPath, readItem] = inboxItems.find(([path]) => path.startsWith('users/student/'));
+  const [removedPath] = inboxItems.find(([path]) => path.startsWith('users/muted/'));
+  const readOriginal = { ...readItem, read: true, createdAt: new Date('2026-11-24T01:00:00Z') };
+  data.set(readPath, readOriginal);
+  data.delete(removedPath);
+  expect(await call('staff', input)).toEqual(result);
+  expect(data.get(readPath)).toEqual(readOriginal);
+  expect(data.has(removedPath)).toBe(false);
 });

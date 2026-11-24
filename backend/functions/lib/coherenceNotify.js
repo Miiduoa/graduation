@@ -2,6 +2,8 @@
 
 const { createHash } = require('node:crypto');
 const { FieldValue } = require('firebase-admin/firestore');
+const { staffAudienceOf } = require('../campusAnnouncements/quality');
+const { isClosedAccount } = require('../campusStoryAccessBinding');
 
 const CLAIM_COLLECTION = 'notificationClaims';
 const FANOUT_BATCH_SIZE = 1000;
@@ -10,8 +12,14 @@ const DEFAULT_LEASE_TTL_MS = 5 * 60 * 1000;
 const TEACHING_ROLES = new Set(['instructor', 'owner', 'teacher', 'ta', 'assistant']);
 /** 課程群組成員文件上既有的助教角色值（role）；不新增欄位。 */
 const ASSISTANT_ROLES = new Set(['ta', 'assistant']);
-/** 校園公告受眾：明確 allowlist；空 role 不推。含既有教職員代表角色。 */
-const CAMPUS_AUDIENCE_ROLES = new Set(['student', 'teacher', 'admin', 'staff', 'editor']);
+const STUDENT_AUDIENCE_ROLES = new Set(['student', 'club_officer']);
+const STAFF_AUDIENCE_ROLES = new Set([
+  'teacher', 'professor', 'faculty', 'staff', 'employee', 'department', 'department_head',
+  'principal', 'school', 'admin', 'editor',
+]);
+const CAMPUS_AUDIENCE_ROLES = new Set([
+  'member', 'ta', 'assistant', ...STUDENT_AUDIENCE_ROLES, ...STAFF_AUDIENCE_ROLES,
+]);
 
 function safeId(value) {
   return typeof value === 'string' &&
@@ -156,23 +164,25 @@ async function writeInboxNotification(db, uid, notificationId, payload) {
   if (!userId || !id) {
     throw new Error('Invalid inbox notification path');
   }
-  await db
+  const ref = db
     .collection('users')
     .doc(userId)
     .collection('notifications')
-    .doc(id)
-    .set(
-      {
-        title: payload.title,
-        body: payload.body,
-        type: payload.type,
-        read: false,
-        schoolId: payload.schoolId || null,
-        data: payload.data || {},
-        createdAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
+    .doc(id);
+  try {
+    await ref.create({
+      title: payload.title,
+      body: payload.body,
+      type: payload.type,
+      read: false,
+      schoolId: payload.schoolId || null,
+      data: payload.data || {},
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  } catch (error) {
+    // A push retry can arrive after the recipient has read the original inbox item.
+    if (error?.code !== 6 && error?.code !== 'already-exists') throw error;
+  }
 }
 
 async function deliverToUser({
@@ -438,19 +448,44 @@ function buildSubmissionNotifyRecipients(teacherUid, assistantUids, studentUid) 
   return recipients;
 }
 
-async function listSchoolAudienceUids(db, schoolId) {
+async function listSchoolAudienceUids(db, schoolId, audience, actor) {
   const snap = await db
     .collection('schools')
     .doc(schoolId)
     .collection('members')
     .where('status', '==', 'active')
     .get();
-  return snap.docs
-    .filter((doc) => {
-      const role = String(doc.data()?.role || '').toLowerCase();
-      return CAMPUS_AUDIENCE_ROLES.has(role);
-    })
-    .map((doc) => doc.id);
+  const recipients = [];
+  const memberRoles = new Map();
+  for (const member of snap.docs) {
+    const role = String(member.data()?.role || '').trim().toLowerCase();
+    if (member.id !== actor && CAMPUS_AUDIENCE_ROLES.has(role)) memberRoles.set(member.id, role);
+  }
+  const userRefs = [...memberRoles.keys()].map((uid) => db.collection('users').doc(uid));
+  for (let offset = 0; offset < userRefs.length; offset += 100) {
+    const profiles = await db.getAll(...userRefs.slice(offset, offset + 100), {
+      fieldMask: ['schoolId', 'primarySchoolId', 'role', 'status', 'accountDeletionInProgress', 'notificationDeliveryDisabled'],
+    });
+    for (const profile of profiles) {
+      const data = profile.data();
+      if (!data || isClosedAccount(data) || data.notificationDeliveryDisabled === true) continue;
+      let role = memberRoles.get(profile.id);
+      // Only this school's current profile distinguishes students and teachers with the
+      // generic membership role. A different school's profile provides no local role.
+      if (role === 'member' && (data.primarySchoolId || data.schoolId) === schoolId
+        && (!data.schoolId || data.schoolId === schoolId)) {
+        role = String(data.role || 'member').trim().toLowerCase();
+      }
+      if (
+        (audience === 'all' && CAMPUS_AUDIENCE_ROLES.has(role)) ||
+        (audience === 'student' && STUDENT_AUDIENCE_ROLES.has(role)) ||
+        (audience === 'staff' && STAFF_AUDIENCE_ROLES.has(role))
+      ) {
+        recipients.push(profile.id);
+      }
+    }
+  }
+  return recipients;
 }
 
 function createAssignmentPublishedNotifyHandler({
@@ -649,13 +684,26 @@ function createSchoolAnnouncementNotifyHandler({
     const announcementId = safeId(event.params?.announcementId);
     const announcement = event.data?.data?.() || event.data?.data();
     if (!schoolId || !announcementId || !announcement) return { status: 'ignored' };
+    if (!text(announcement.title) || (announcement.schoolId != null && announcement.schoolId !== schoolId)) {
+      return { status: 'ignored' };
+    }
+    if (announcement.visible === false) return { status: 'skipped-hidden' };
+    let audience = announcement.audience ?? 'all';
+    if (!['all', 'student', 'staff'].includes(audience)) return { status: 'skipped-audience' };
+    if (staffAudienceOf(announcement.title)) {
+      if (audience === 'student') return { status: 'skipped-audience' };
+      audience = 'staff';
+    }
+    if (announcement.studentFeed === false) {
+      if (audience === 'student') return { status: 'skipped-audience' };
+      audience = 'staff';
+    }
 
     const eventKey = `school_announcement__${schoolId}__${announcementId}`;
     const title = text(announcement.title, '校園公告');
     const body = text(announcement.body, '學校發布了一則新公告。').slice(0, 120);
-    const recipients = await listSchoolAudienceUids(db, schoolId);
     const actor = safeId(announcement.createdBy);
-    const targets = recipients.filter((uid) => uid !== actor);
+    const recipients = await listSchoolAudienceUids(db, schoolId, audience, actor);
     const data = {
       announcementId,
       schoolId,
@@ -671,7 +719,7 @@ function createSchoolAnnouncementNotifyHandler({
       completeClaim,
       eventKey,
       claimMeta: { kind: 'school_announcement', schoolId, announcementId },
-      recipients: targets,
+      recipients,
       title: '📢 校園公告',
       body: title === body ? title : `${title}：${body}`,
       type: 'announcement',

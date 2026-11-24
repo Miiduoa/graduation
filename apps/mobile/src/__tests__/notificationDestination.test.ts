@@ -150,7 +150,7 @@ describe('resolveNotificationDestination', () => {
     expect(
       resolveNotificationDestination({
         data: { type: 'order', orderId: 'ord-1', schoolId: 'pu' },
-      }),
+      }, { schoolId: 'pu' }),
     ).toMatchObject({
       ok: true,
       mode: 'nested',
@@ -178,7 +178,7 @@ describe('resolveNotificationDestination', () => {
           assignmentId: 'a1',
           schoolId: 'pu',
         },
-      }),
+      }, { schoolId: 'pu' }),
     ).toMatchObject({
       ok: true,
       screen: 'HomeworkSubmit',
@@ -250,9 +250,59 @@ test('school announcement inbox rows and pushes preserve the exact school source
     ok: true, mode: 'nested', tab: 'Today', screen: '公告詳情',
     params: { id: 'a1', schoolId: 'pu', sourceKind: 'school-announcement' },
   };
-  expect(resolveNotificationRow(row)).toMatchObject(expected);
-  expect(resolveNotificationDestination({ data: { ...data, type: 'announcement' } })).toMatchObject(expected);
-  expect(resolveNotificationRow({ ...row, data: { ...data, schoolId: '../pu' } })).toMatchObject({
+  const context = { schoolId: 'tw-pu' };
+  expect(resolveNotificationRow(row, context)).toMatchObject(expected);
+  expect(resolveNotificationDestination({ data: { ...data, type: 'announcement' } }, context)).toMatchObject(expected);
+  expect(resolveNotificationRow({ ...row, data: { ...data, schoolId: '../pu' } }, context)).toMatchObject({
+    ok: false, code: 'malformed_id',
+  });
+});
+
+test.each([
+  ['package', undefined, 'parcels'],
+  ['repair', undefined, 'repairs'],
+  ['repair', 'leave', 'leave'],
+  ['announcement', undefined, 'announcements'],
+])('routes dormitory %s (%s) to the resident view %s', (type, dormSection, notificationView) => {
+  const data = { type, dormSection, channel: 'dormitory', schoolId: 'pu' };
+  expect(resolveNotificationDestination({ data }, { schoolId: 'tw-pu' })).toMatchObject({
+    ok: true, mode: 'nested', tab: '校園', screen: 'Dormitory', params: { notificationView, sourceSchoolId: 'pu' },
+  });
+  expect(resolveNotificationDestination({ data }, { schoolId: 'nthu' })).toMatchObject({
+    ok: false, code: 'school_mismatch',
+  });
+  expect(resolveNotificationDestination({ data: { ...data, schoolId: undefined } }, { schoolId: 'pu' })).toMatchObject({
+    ok: false, code: 'missing_ids',
+  });
+});
+
+test('validates both inbox school fields and keeps the original payload collection for aliases', () => {
+  const row: Notification = {
+    id: 'n', type: 'announcement', schoolId: 'pu', title: '公告', body: '', read: false,
+    data: { announcementId: 'a' },
+  };
+  const context = { schoolId: 'pu' };
+  expect(resolveNotificationRow(row, context)).toMatchObject({
+    ok: true, params: { schoolId: 'pu', sourceKind: 'school-announcement' },
+  });
+  expect(resolveNotificationRow({ ...row, data: { ...row.data, schoolId: 'tw-pu' } }, context)).toMatchObject({
+    ok: true, params: { schoolId: 'tw-pu' },
+  });
+  for (const source of [
+    { ...row, schoolId: 'nthu' },
+    { ...row, schoolId: 'nthu', data: { ...row.data, schoolId: 'pu' } },
+    { ...row, data: { ...row.data, schoolId: 'nthu' } },
+  ]) {
+    expect(resolveNotificationRow(source, context)).toMatchObject({ ok: false, code: 'school_mismatch' });
+  }
+});
+
+test('dorm bulletin IDs stay within the resident dorm route', () => {
+  const data = { type: 'announcement', channel: 'dormitory', schoolId: 'pu', dormAnnouncementId: 'dorm_a' };
+  expect(resolveNotificationDestination({ data }, { schoolId: 'pu' })).toMatchObject({
+    ok: true, tab: '校園', screen: 'Dormitory', params: { notificationView: 'announcements', dormAnnouncementId: 'dorm_a' },
+  });
+  expect(resolveNotificationDestination({ data: { ...data, dormAnnouncementId: 'bad/path' } }, { schoolId: 'pu' })).toMatchObject({
     ok: false, code: 'malformed_id',
   });
 });

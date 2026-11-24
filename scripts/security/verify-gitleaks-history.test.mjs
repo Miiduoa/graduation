@@ -38,6 +38,28 @@ test('requires identical complete file blobs', async () => {
   assert.equal(evidence[0].identicalFileBlob, 'c'.repeat(40));
   await assert.rejects(verifyAliases(manifest().aliases, async (commit) => commit));
 });
+test('a newly reviewed fixture exempts only its observed commit and must match its pinned complete blob', async () => {
+  const fixture = {
+    reviewed: `${oldCommit}:scripts/example.test.mjs:generic-api-key:51`,
+    observed: `${newCommit}:scripts/example.test.mjs:generic-api-key:51`,
+    reviewedBlob: 'c'.repeat(40),
+  };
+  const m = { ...manifest(), reviewedTestFixtures: [fixture] };
+  const ignore = candidate + fixture.observed + '\n';
+  const pairs = validateAliases(m, baseline, ignore);
+  assert.equal((await verifyAliases(pairs, async () => fixture.reviewedBlob)).length, 2);
+  await assert.rejects(verifyAliases(pairs, async () => 'd'.repeat(40)), /pinned review/);
+  assert.throws(() => validateAliases(m, baseline, ignore + fixture.reviewed + '\n'));
+  assert.throws(() => validateAliases({ ...manifest(), aliases: [fixture] }, baseline, ignore), /no previously reviewed fingerprint/);
+  for (const change of [
+    { reviewedBlob: undefined },
+    { reviewed: fixture.reviewed.replace('.test.mjs', '.mjs') },
+    { observed: fixture.observed.replace(':51', ':52') },
+    { observed: fixture.reviewed },
+  ]) {
+    assert.throws(() => validateAliases({ ...m, reviewedTestFixtures: [{ ...fixture, ...change }] }, baseline, ignore));
+  }
+});
 test('fails closed on missing blobs or lookup failures', async () => {
   await assert.rejects(verifyAliases(manifest().aliases, async () => undefined));
   await assert.rejects(verifyAliases(manifest().aliases, async () => { throw new Error('unavailable'); }));

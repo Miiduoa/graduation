@@ -43,6 +43,7 @@ import {
   verifiedOfficialAnnouncementUrl,
 } from '@campus/shared/src/campusAnnouncements';
 import { parseCampusAnnouncementSource } from '../services/campusAnnouncementSource';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { getRawAppEnv } from '../services/release';
 import { safeNavigate } from '../utils/safeNavigate';
 import { exportAndShareICalFile } from '../services/ical';
@@ -721,11 +722,11 @@ export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
   const { sourceKind, schoolId } = route?.params ?? {};
   const exact = sourceKind !== undefined;
   const load = useCallback(async (currentSchool: string, itemId: string) => {
-    if (schoolId !== undefined && schoolId !== currentSchool) return null;
+    if (schoolId !== undefined && toPublicSchoolId(schoolId) !== toPublicSchoolId(currentSchool)) return null;
     if (!exact) return loadCampusAnnouncement(currentSchool, itemId);
     const source = parseCampusAnnouncementSource({ kind: sourceKind, id: itemId });
     if (!source || schoolId === undefined) return null;
-    return loadCampusAnnouncement(currentSchool, itemId, source.kind);
+    return loadCampusAnnouncement(schoolId, itemId, source.kind);
   }, [exact, sourceKind, schoolId]);
   const content = useContent(load, id, JSON.stringify([sourceKind, schoolId]), !exact);
   const announcement = content.value;

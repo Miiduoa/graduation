@@ -148,7 +148,7 @@ async def check_search_return(page, config, report, capture):
 
     # New-tab activation must preserve the current source, not replay a return.
     async with page.context.expect_page() as opened:
-        await library.click(modifiers=['Control'])
+        await library.click(modifiers=['ControlOrMeta'])
     other = await opened.value
     await other.wait_for_url(target_url)
     await other.close()

@@ -30,6 +30,7 @@
 !backend/functions/campusAnnouncements/
 !backend/functions/campusAnnouncements/catalog.js
 !backend/functions/lib/
+!backend/functions/lib/notificationService.js
 !backend/functions/lib/puGradeDocument.js
 !backend/functions/lib/puCreditSummary.js
 !backend/functions/lib/puCourseTime.js
