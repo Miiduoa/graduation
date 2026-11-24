@@ -763,7 +763,9 @@ it.each([
   ['月份欄位', '隱藏前主動離開'],
   ['日列表編輯按鈕', '因工作區卸載而失焦'],
   ['日列表編輯按鈕', '隱藏前主動離開'],
-])('深連結從%s等待揭露時，重新驗證前後%s', async (origin, action) => {
+  ['月份欄位', '因工作區隱藏而失焦', 'offsetLeft'],
+  ['日列表編輯按鈕', '因工作區卸載而失焦', 'offsetTop'],
+] as const)('深連結從%s等待揭露時，重新驗證前後%s（恢復時裁切軸：%s）', async (origin, action, clippedAxis?) => {
   const target = focusEvent();
   const previous = focusEvent('previous-event', { title: '同日的另一筆行程' });
   const startsInDayList = origin === '日列表編輯按鈕';
@@ -773,8 +775,12 @@ it.each([
   });
   Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
   const scroll = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  const scrollIntoView = vi.fn();
   vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
-    if (this.matches('li[aria-current="true"]')) return new DOMRect(40, 100, 140, 60);
+    if (this.matches('li[aria-current="true"]')) {
+      Object.defineProperty(this, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+      return new DOMRect(40, 100, 140, 60);
+    }
     return originalBounds.call(this);
   });
 
@@ -793,7 +799,7 @@ it.each([
   const monthControl = await screen.findByLabelText('查看月份');
   let originControl: HTMLElement = document.body;
   if (startsInDayList) {
-    const previousRow = (await screen.findByRole('heading', { name: previous.title })).closest('li')!;
+    const previousRow = await screen.findByRole('listitem', { current: true });
     originControl = within(previousRow).getByRole('button', { name: '編輯' });
     scroll.mockClear();
   } else if (origin === '月份欄位') {
@@ -837,19 +843,29 @@ it.each([
     outside.blur();
   }
   const focusDuringPause = document.activeElement;
-  viewport.offsetLeft = 0;
-  viewport.dispatchEvent(new Event('resize'));
+  viewport.offsetLeft = clippedAxis === 'offsetLeft' ? 80 : 0;
+  if (clippedAxis === 'offsetTop') viewport.offsetTop = 120;
+  scroll.mockClear();
+  scrollIntoView.mockClear();
+  viewport.dispatchEvent(new Event(clippedAxis ? 'scroll' : 'resize'));
   expect(document.activeElement).toBe(focusDuringPause);
 
   context.loading = false;
   view.rerender(<Page />);
-  const list = await screen.findByRole('list', { name: '個人行程列表' });
-  const row = list.querySelector('li[aria-current="true"]');
-  expect(row).toBeTruthy();
+  const row = await screen.findByRole('listitem', { current: true });
   expect(screen.getByLabelText('查看月份')).toBe(monthControl);
   const shouldHandoff =
     action === '保留焦點' || action === '因工作區隱藏而失焦' || action === '因工作區卸載而失焦';
-  expect(document.activeElement).toBe(shouldHandoff ? row : focusDuringPause);
+  expect(scroll).not.toHaveBeenCalled();
+  expect(scrollIntoView).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(shouldHandoff && !clippedAxis ? row : focusDuringPause);
+  if (clippedAxis) {
+    viewport[clippedAxis] = 0;
+    viewport.dispatchEvent(new Event('scroll'));
+    expect(document.activeElement).toBe(row);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  }
 });
 
 it.each(['切月後回今天', '切換檢視'])('指標操作%s時，結束仍在等待的深連結聚焦', async (navigation) => {

@@ -155,6 +155,41 @@ function editEvent(title: string) {
   return within(row).getByRole('button', { name: '編輯' });
 }
 
+it.each(['2026-11-14', '2026-11-24'])(
+  '指標點回今天會取消同月待聚焦日期（原選日 %s）',
+  async (selectedDate) => {
+    render(<PersonalCalendar />);
+    await ready();
+    activate(screen.getByRole('button', { name: selectedDate }));
+    const origin = screen.getByRole('button', { name: '2026-11-14' });
+    const target = screen.getByRole('button', { name: '2026-11-15' });
+    let targetTop = 440;
+    const viewport = Object.assign(new EventTarget(), {
+      offsetLeft: 0, offsetTop: 0, width: 320, height: 300,
+    });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    vi.spyOn(target, 'getBoundingClientRect').mockImplementation(
+      () => new DOMRect(20, targetTop, 100, 40),
+    );
+    origin.focus();
+    vi.mocked(window.scrollBy).mockClear();
+
+    fireEvent.keyDown(origin, { key: 'ArrowRight' });
+    expect(window.scrollBy).toHaveBeenCalledExactlyOnceWith({ left: 0, top: 180, behavior: 'instant' });
+    expect(document.activeElement).toBe(origin);
+
+    fireEvent.click(screen.getByRole('button', { name: '回今天' }));
+    expect(screen.getByRole('button', { name: '2026-11-24' }).getAttribute('aria-pressed')).toBe('true');
+    expect(document.activeElement).toBe(origin);
+
+    vi.mocked(window.scrollBy).mockClear();
+    targetTop = 180;
+    fireEvent.scroll(document);
+    expect(document.activeElement).toBe(origin);
+    expect(window.scrollBy).not.toHaveBeenCalled();
+  },
+);
+
 it('creates on the selected day, focuses the title and returns to its trigger when an unchanged form is cancelled', async () => {
   render(<PersonalCalendar />);
   await ready();

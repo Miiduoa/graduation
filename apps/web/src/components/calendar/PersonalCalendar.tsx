@@ -367,7 +367,7 @@ function PersonalCalendarWorkspace({
   const [month, setMonth] = useState(() => emptyPersonalEventDraft().date.slice(0, 7));
   const [calendarView, setCalendarView] = useState<'month' | 'list'>('month');
   const [selectedDate, setSelectedDate] = useState('');
-  const [dateRevealRevision, setDateRevealRevision] = useState(0);
+  const [dateSelectionRevision, setDateSelectionRevision] = useState(0);
   const [dues, setDues] = useState<{
     uid: string | null;
     items: CalendarCourseDeadline[];
@@ -490,12 +490,16 @@ function PersonalCalendarWorkspace({
     [cancelLinkedFocus],
   );
 
-  const goToday = () => {
+  const selectDate = (date: string) => {
     cancelLinkedFocus();
+    setSelectedDate(date);
+    setDateSelectionRevision((revision) => revision + 1);
+  };
+
+  const goToday = () => {
     const today = emptyPersonalEventDraft().date;
     setMonth(today.slice(0, 7));
-    setSelectedDate(today);
-    if (today === selectedDate) setDateRevealRevision((revision) => revision + 1);
+    selectDate(today);
   };
 
   useEffect(() => {
@@ -555,6 +559,7 @@ function PersonalCalendarWorkspace({
       cancelLinkedFocus();
       return;
     }
+    const previousOrigin = linkedFocusOrigin.current;
     const origin = (linkedFocusOrigin.current ??= {
       element: document.activeElement,
       state: 'focused',
@@ -569,7 +574,8 @@ function PersonalCalendarWorkspace({
       if (focused) cancelLinkedFocus();
     };
 
-    revealLinkedEvent('reveal');
+    // A resumed request must respect any panning that occurred while the row was unavailable.
+    revealLinkedEvent(previousOrigin ? 'visible' : 'reveal');
     if (settledFocusRequest.current === requestedEventId) return;
     stopLinkedFocusRetry.current = onFocusRetryOpportunity(revealLinkedEvent);
     return () => {
@@ -696,16 +702,11 @@ function PersonalCalendarWorkspace({
     if (requestedDate && requestedDate === selectedDate && !paused) {
       revealDayAgenda();
     }
-  }, [paused, revealDayAgenda, selectedDate, dateRevealRevision]);
+  }, [paused, revealDayAgenda, selectedDate, dateSelectionRevision]);
 
   const selectMonthDay = (date: string) => {
-    cancelLinkedFocus();
     pendingDayReveal.current = date;
-    if (date === selectedDate) {
-      setDateRevealRevision((revision) => revision + 1);
-    } else {
-      setSelectedDate(date);
-    }
+    selectDate(date);
   };
 
   const showMonthList = () => {
@@ -1065,7 +1066,7 @@ function PersonalCalendarWorkspace({
             records={monthEvents}
             month={month}
             selectedDate={selectedDate}
-            dateRevealRevision={dateRevealRevision}
+            dateSelectionRevision={dateSelectionRevision}
             onDate={selectMonthDay}
             onMonthChange={changeMonth}
             onEdit={openEdit}

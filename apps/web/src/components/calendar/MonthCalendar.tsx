@@ -18,7 +18,7 @@ export function MonthCalendar({
   records,
   month,
   selectedDate,
-  dateRevealRevision = 0,
+  dateSelectionRevision = 0,
   onDate,
   onEdit,
   onMonthChange,
@@ -27,7 +27,7 @@ export function MonthCalendar({
   records: readonly PersonalImportRecord[];
   month: string;
   selectedDate: string;
-  dateRevealRevision?: number;
+  dateSelectionRevision?: number;
   onDate: (date: string) => void;
   onEdit: (event: PersonalImportRecord, trigger?: HTMLButtonElement) => void;
   onMonthChange?: (month: string) => void;
@@ -68,9 +68,13 @@ export function MonthCalendar({
   }, []);
 
   useLayoutEffect(() => {
+    pendingFocus.current = null;
+  }, [dateSelectionRevision]);
+
+  useLayoutEffect(() => {
     if (pendingFocus.current?.date.startsWith(`${month}-`)) return;
     revealWeek(selectedCellIndex);
-  }, [month, selectedDate, selectedCellIndex, dateRevealRevision, revealWeek]);
+  }, [month, selectedDate, selectedCellIndex, dateSelectionRevision, revealWeek]);
 
   useLayoutEffect(() => {
     const grid = gridRef.current;
@@ -160,7 +164,7 @@ export function MonthCalendar({
     };
     document.addEventListener('keydown', continueNavigation);
     return stopWatching;
-  }, [month, focusDate, moveDate, focusRequestRevision]);
+  }, [month, focusDate, moveDate, focusRequestRevision, dateSelectionRevision]);
 
   return (
     <section className={styles.calendar} aria-label="每月行程">
