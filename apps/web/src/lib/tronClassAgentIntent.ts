@@ -371,6 +371,8 @@ function isClauseBoundaryToken(token: Token): boolean {
   return CLAUSE_BOUNDARY_WORDS.has(token.value) || CLAUSE_PUNCT.test(token.value);
 }
 
+const ADDITIVE_CONNECTORS = ['也', '還', '並', '並且', '順便', '同時', '再', '另外', '以及', '和', '跟', '與', '及'];
+const ADDITIVE_CONNECTOR_SET = new Set(ADDITIVE_CONNECTORS);
 const REQUEST_CONNECTORS = new Set(['也幫我', '再幫我', '並幫我']);
 
 function separatesClause(token: Token, hasContent: boolean, hasPredicate: boolean): boolean {
@@ -907,7 +909,7 @@ function readRoutingText(text: string): string {
   return parts.join('');
 }
 
-const ADDITIVE_CUE = /(?:也|還|並|並且|順便|同時|再|另外|以及|和|跟|與|及)\s*$/u;
+const ADDITIVE_CUE = new RegExp(`(?:${ADDITIVE_CONNECTORS.join('|')})\\s*$`, 'u');
 const WRITE_CUE = /(?:記得|立即|馬上|然後|接著|接下來|之後|後|請|幫我|替我|代我|直接|自動|\b(?:please|then|immediately))\s*$/iu;
 const STATUS_PREFIX = /(?:(?:是否|有沒有|有無|有哪些|哪些)\s*(?:已經|已|有)?\s*|尚未|還沒|未|沒|待|已經|已)$/u;
 const STATUS_NOUN_SOURCE = '(?:過的?|了的?|的|之)?\\s*(?:狀態|紀錄|記錄|情況|進度|歷史)';
@@ -1218,11 +1220,11 @@ function typographicQuoteMask(text: string): readonly boolean[] {
   return mask;
 }
 
-function dataTypeMask(text: string): readonly boolean[] {
+function dataTypeMask(text: string, includeQuotes = true): readonly boolean[] {
   const tokens = tokensFor(text);
-  const cached = dataTypeMasksByTokens.get(tokens);
+  const cached = includeQuotes && dataTypeMasksByTokens.get(tokens);
   if (cached) return cached;
-  const mask = [...typographicQuoteMask(text)];
+  const mask = includeQuotes ? [...typographicQuoteMask(text)] : new Array<boolean>(text.length).fill(false);
   const delta = new Array<number>(text.length + 1).fill(0);
   const add = (start: number, end: number) => {
     if (end <= start) return;
@@ -1239,14 +1241,16 @@ function dataTypeMask(text: string): readonly boolean[] {
   if (!scan.balanced) {
     add(scan.firstOpen, text.length);
   } else {
-    for (const span of scan.spans) add(span.start, span.end);
+    for (const span of scan.spans) {
+      if (includeQuotes || !isBookTitleSpan(text, span.start)) add(span.start, span.end);
+    }
   }
   let depth = 0;
   for (let index = 0; index < text.length; index += 1) {
     depth += delta[index]!;
     if (depth > 0) mask[index] = true;
   }
-  dataTypeMasksByTokens.set(tokens, mask);
+  if (includeQuotes) dataTypeMasksByTokens.set(tokens, mask);
   return mask;
 }
 
@@ -1406,6 +1410,7 @@ type ClausePredicate = {
   residueUnknown: boolean;
 };
 type ClauseAnalysis = {
+  hasHomework: boolean;
   hasLmsName: boolean;
   hasUnsupportedOwner: boolean;
   hasBlockedPredicate: boolean;
@@ -1479,8 +1484,8 @@ function clauseTokenContext(tokens: Token[]) {
  */
 const clauseAnalysisByTokens = new WeakMap<Token[], ClauseAnalysis[]>();
 
-function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
-  const cached = clauseAnalysisByTokens.get(tokens);
+function analyzeClauses(tokens: Token[], splitAdditive = false): ClauseAnalysis[] {
+  const cached = !splitAdditive && clauseAnalysisByTokens.get(tokens);
   if (cached) return cached;
   const clauses: ClauseAnalysis[] = [];
   const { offsets, text, next, previous, statusSuffixes } = clauseTokenContext(tokens);
@@ -1499,6 +1504,7 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
   let objectEnds = true;
   let readGoverns = false;
   let clauseStart = 0;
+  let hasHomework = false;
   let hasLmsName = false;
   let hasUnsupportedOwner = false;
   let inObjectModifier = false;
@@ -1510,7 +1516,7 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
       predicates.push(predicate);
     }
     clauses.push({
-      hasLmsName, hasUnsupportedOwner, hasBlockedPredicate,
+      hasHomework, hasLmsName, hasUnsupportedOwner, hasBlockedPredicate,
       predicates, trailingQuestion, hasQuestionCopula, hasUnknown,
     });
   };
@@ -1529,6 +1535,7 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
     pendingStatusWrite = false;
     objectEnds = true;
     readGoverns = false;
+    hasHomework = false;
     hasLmsName = false;
     hasUnsupportedOwner = false;
     inObjectModifier = false;
@@ -1596,7 +1603,8 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]!;
-    if (separatesClause(token, hasContent, predicate !== null)) {
+    if (separatesClause(token, hasContent, predicate !== null) ||
+      (splitAdditive && predicate && ADDITIVE_CONNECTOR_SET.has(token.value))) {
       if (token.value === '?' || token.value === '？') trailingQuestion = true;
       flush();
       reset();
@@ -1613,6 +1621,7 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
     if (COPULAS.has(value)) hasCopula = true;
     if (value === '嗎' || value === '呢' || token.value === '?') trailingQuestion = true;
 
+    hasHomework ||= DATA_TYPES[0].pattern.test(value);
     hasLmsName ||= LMS_NAMES.includes(value);
     const prev = tokens[previous[index]!];
     const following = tokens[next[index]!];
@@ -1689,7 +1698,7 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
     if (!CLAUSE_REQUEST_HELPERS.has(value)) blockedPrefix = true;
   }
   flush();
-  clauseAnalysisByTokens.set(tokens, clauses);
+  if (!splitAdditive) clauseAnalysisByTokens.set(tokens, clauses);
   return clauses;
 }
 
@@ -1748,6 +1757,10 @@ export function tronClassAutoExecuteActionVerbs(): string[] {
 
 function isDownloadCommand(tokens: Token[], index: number): boolean {
   if (!provenPredicateIndexes(tokens, 'download').has(index)) return false;
+  return hasDownloadCommandTail(tokens, index);
+}
+
+function hasDownloadCommandTail(tokens: Token[], index: number): boolean {
   const next = nextSignificantToken(tokens, index);
   return !next || (next.value !== '的' && next.value !== '之' && !STATUS_NOUN.test(next.value));
 }
@@ -1815,8 +1828,9 @@ function hasUnprovenWrite(text: string): boolean {
 
 function wholeRequestAllowsCompoundRead(question: string): boolean {
   const original = question.normalize('NFKC').trim();
+  if (hasTronClassReadTargetConflict(original)) return false;
   if (hasReadBlockingDecoration(original)) return false;
-  if (hasHonoredPrepareCommand(original)) return false;
+  if (hasHonoredPrepareCommand(original) || isTronClassCompoundDownloadAndPrepare(original)) return false;
   if (!allTokensKnown(original)) return false;
   if (classifyTronClassSentence(question)?.outcome === 'clearly-write') return false;
   if (hasUnprovenWrite(textWithoutQuotedSpans(original))) return false;
@@ -1894,38 +1908,81 @@ const DATA_TYPES = [
   { intent: 'unsupported', pattern: /問卷/u },
 ] as const;
 
-function readObjectTarget(text: string) {
-  const mask = dataTypeMask(text);
+function isBookTitleSpan(text: string, start: number): boolean {
+  return text[start] === '《' || text[start] === '〈';
+}
+
+function readObjectTarget(text: string, inspectRawClauses = false) {
+  const mask = dataTypeMask(text, !inspectRawClauses);
+  // Only the syntax of the question comes from outside quotes. Data-type
+  // labels on either side of the question marker are read from the raw tokens.
+  const quoteEnds: number[] = [];
+  if (inspectRawClauses) {
+    for (const span of typographicQuoteSpans(text)) quoteEnds[span.open] = span.end;
+    const brackets = bracketsFor(text);
+    if (brackets.balanced) {
+      for (const span of brackets.spans) {
+        if (isBookTitleSpan(text, span.start)) quoteEnds[span.start] = span.end;
+      }
+    }
+  }
+  let quoteEnd = 0;
+  let scanned = 0;
+  const objectTypes = new Set<(typeof DATA_TYPES)[number]>();
+  let hasContent = false;
   let directType: (typeof DATA_TYPES)[number] | undefined;
   let complementAt = text.length;
   let sawRead = false;
   let conflict = false;
   for (const token of tokensFor(text)) {
+    while (inspectRawClauses && scanned <= token.start) {
+      quoteEnd = Math.max(quoteEnd, quoteEnds[scanned++] ?? 0);
+    }
+    const quoted = inspectRawClauses && token.start < quoteEnd;
+    if (inspectRawClauses && !quoted && !tokenIsProtected(token, mask) &&
+      separatesClause(token, hasContent, sawRead)) {
+      directType = undefined;
+      objectTypes.clear();
+      complementAt = text.length;
+      sawRead = false;
+      hasContent = false;
+      continue;
+    }
     if (token.kind === 'filename' || isWhitespaceToken(token) || token.kind === 'punct') continue;
     if (tokenIsProtected(token, mask)) continue;
+    hasContent ||= !isAllowedRequestPrefix(token);
     const value = token.value.toLowerCase();
     const kind = predicateKindOf(token);
-    sawRead ||= kind === 'read' || kind === 'download';
+    sawRead ||= !quoted && (kind === 'read' || kind === 'download');
     // In 「查有沒有作業」 the question introduces the object. Once the
     // object names a data type, a following question can only qualify it.
     const copula = COPULAS.has(value) || value === '是不是' || value === '是什麼';
     const questionTail = READ_QUESTION_WORDS.has(value) || value === '有' || value === '嗎' || value === '呢';
-    if (complementAt === text.length && sawRead && (copula || (directType && questionTail))) {
+    if (!quoted && complementAt === text.length && sawRead && (copula || (directType && questionTail))) {
       complementAt = token.start;
     }
     for (const type of DATA_TYPES) {
       if (!type.pattern.test(token.value)) continue;
-      if (token.start < complementAt) directType = type;
-      else if (type !== directType) conflict = true;
+      if (token.start < complementAt) {
+        directType = type;
+        if (inspectRawClauses) objectTypes.add(type);
+      } else if (type !== directType || (inspectRawClauses && objectTypes.size > 1)) {
+        conflict = true;
+      }
     }
   }
   return { intent: directType?.intent, complementAt, conflict };
 }
 
+export function hasTronClassReadTargetConflict(question: string): boolean {
+  if (typeof question !== 'string' || question.length > 1000 || !TRONCLASS_KEYWORD.test(question)) return false;
+  return readObjectTarget(question.normalize('NFKC').trim(), true).conflict;
+}
+
 export type TronClassAgentQueryIntent = {
   intent: TronClassAgentIntent;
   pendingOnly: boolean;
-  unsupportedReason?: 'multiple_actions';
+  unsupportedReason?: 'multiple_actions' | 'read_target_conflict';
 };
 
 export type TronClassSentenceClass =
@@ -2011,15 +2068,17 @@ export function isTronClassCompoundDownloadAndPrepare(question: string): boolean
     !TRONCLASS_KEYWORD.test(question)) return false;
   const original = question.normalize('NFKC').trim();
   if (hasUnclosedQuote(original)) return false;
-  const text = textWithoutQuotedSpans(original);
-  return visibleCommandTokens(text).some(token => {
-    if (!isPrepareActionValue(token.value)) return false;
-    const prefix = text.slice(0, token.start);
-    const connector = ADDITIVE_CUE.exec(prefix);
-    return connector !== null &&
-      readIntentOf(prefix.slice(0, connector.index)).intent === 'download' &&
-      readIntentOf(text.slice(token.start)).intent === 'prepare';
-  });
+  const tokens = visibleCommandTokens(original);
+  // Use the request grammar's prefix and predicate checks at each connector.
+  let hasDownload = false;
+  for (const clause of analyzeClauses(tokens, true)) {
+    for (const predicate of clause.predicates) {
+      if (!isProvenPredicate(clause, predicate)) continue;
+      if (predicate.kind === 'prepare' && clause.hasHomework && hasDownload) return true;
+      if (predicate.kind === 'download' && hasDownloadCommandTail(tokens, predicate.index)) hasDownload = true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -2033,7 +2092,7 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
     !TRONCLASS_KEYWORD.test(question)) return null;
   const original = question.normalize('NFKC').trim();
   if (isExistingTronClassNavigation(original)) return null;
-  if (hasUnclosedQuote(original)) return { outcome: 'ambiguous' };
+  if (hasUnclosedQuote(original) || hasTronClassReadTargetConflict(original)) return { outcome: 'ambiguous' };
   if (typographicQuoteSpans(original).length && analyzeClauses(tokensFor(textWithoutQuotedSpans(original, ' \uFFFC ')))
     .some(clause => clause.predicates.some(predicate => predicate.blockedPrefix))) return { outcome: 'ambiguous' };
   const unquotedText = textWithoutQuotedSpans(original);
@@ -2078,6 +2137,7 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
     return { outcome: 'ambiguous' };
   }
   if (intent.intent === 'prepare' || intent.intent === 'download') {
+    if (isTronClassCompoundDownloadAndPrepare(original)) return { outcome: 'ambiguous' };
     return { outcome: intent.intent === 'prepare' ? 'clearly-write' : 'clearly-read', intent };
   }
   if (!isPositivelyProvenRead(original) && !isPositivelyProvenRead(text)) return { outcome: 'ambiguous' };

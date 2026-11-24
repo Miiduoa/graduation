@@ -6,7 +6,7 @@ import type {
   TronClassAgentCapabilityResult, TronClassAgentReply, TronClassAgentStep,
 } from '../tronClassAgentTypes';
 import { TRONCLASS_AGENT_MAX_ACTIONS } from '../tronClassAgentTypes';
-import { isTronClassCompoundDownloadAndPrepare, parseTronClassAgentIntent } from '../tronClassAgentIntent';
+import { hasTronClassReadTargetConflict, isTronClassCompoundDownloadAndPrepare, parseTronClassAgentIntent } from '../tronClassAgentIntent';
 import type { TronClassHomeworkItem, TronClassPreparation, TronClassSnapshot } from '../tronClassIntegrationTypes';
 import { tronClassUploadKey } from '../tronClassIntegrationClient';
 import { createTronClassAgentGrantService } from './tronClassAgentGrants';
@@ -161,10 +161,10 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
       return result;
     },
     async ask(ownerKey: string, input: TronClassAgentAskInput): Promise<TronClassAgentReply> {
-      const query = parseTronClassAgentIntent(input.question) ??
-        (isTronClassCompoundDownloadAndPrepare(input.question)
-          ? { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' } as const
-          : null);
+      const unsupportedReason = hasTronClassReadTargetConflict(input.question) ? 'read_target_conflict'
+        : isTronClassCompoundDownloadAndPrepare(input.question) ? 'multiple_actions' : null;
+      const query = unsupportedReason ? { intent: 'unsupported', pendingOnly: false, unsupportedReason } as const
+        : parseTronClassAgentIntent(input.question);
       if (!query || (input.courseId !== undefined && !positiveId(input.courseId)) ||
         (input.homeworkId !== undefined && (!positiveId(input.homeworkId) || !input.courseId || query.intent !== 'prepare'))) {
         throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
@@ -190,7 +190,9 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         return finish({ ...base, answer: query.intent === 'unsupported'
           ? query.unsupportedReason === 'multiple_actions'
             ? '請先選擇要下載教材，或要準備哪一份作業；確認一個目標後，我會完成該步驟，再處理下一項。'
-            : '這項操作目前尚未開放給 Agent。可以協助查詢課程、作業狀態與公告、下載教材，或先準備作業；目前不會送交或修改校方資料。'
+            : query.unsupportedReason === 'read_target_conflict'
+              ? '請先確認要查詢哪一種玩課雲資料。'
+              : '這項操作目前尚未開放給 Agent。可以協助查詢課程、作業狀態與公告、下載教材，或先準備作業；目前不會送交或修改校方資料。'
           : '可依你開啟的權限查詢 TronClass 課程與作業、整理公告教材、下載教材，並在對話內準備作業。送交、發文與其他校方寫入操作目前尚未開放。',
         steps: [{ id: 'capability', tool: 'select_target', status: query.intent === 'unsupported' ? 'blocked' : 'completed', message: '已核對 Agent 可用功能與授權範圍。' }] });
       }

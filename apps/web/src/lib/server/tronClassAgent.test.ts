@@ -212,14 +212,32 @@ describe('scoped deterministic TronClass Agent tools', () => {
     expect(f.prepare).not.toHaveBeenCalled();
   });
 
-  it('does not run either operation in a compound download and prepare request', async () => {
+  it.each([
+    '下載 TronClass「資料庫」教材並準備作業',
+    '下載 TronClass 教材並請幫我準備作業',
+    '幫我下載 TronClass 講義，麻煩替我準備作業',
+    '下載 TronClass 教材並 please，代我準備作業',
+  ])('does not run either operation in %s', async question => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: '下載 TronClass「資料庫」教材並準備作業' });
+    const result = await f.service.ask(owner, { question });
     expect(result).toMatchObject({
       intent: 'unsupported', snapshot: null, preparation: null, actions: [],
       steps: [expect.objectContaining({ tool: 'select_target', status: 'blocked' })],
     });
     expect(result.answer).toContain('先選擇');
+    expect(f.read).not.toHaveBeenCalled();
+    expect(f.prepare).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '查玩課雲公告是不是『作業』？',
+    '查玩課雲『公告』是不是作業？',
+    '查玩課雲教材是不是「作業」？',
+  ])('asks for clarification without reading either target in %s', async question => {
+    const f = fixture();
+    const result = await f.service.ask(owner, { question });
+    expect(result.answer).toContain('請先確認');
+    expect(result.snapshot).toBeNull();
     expect(f.read).not.toHaveBeenCalled();
     expect(f.prepare).not.toHaveBeenCalled();
   });

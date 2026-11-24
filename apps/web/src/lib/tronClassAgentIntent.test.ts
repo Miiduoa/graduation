@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs, tronClassReadRequestVerbs } from './tronClassAgentIntent';
+import { isTronClassCompoundDownloadAndPrepare, canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs, tronClassReadRequestVerbs } from './tronClassAgentIntent';
 
 /** Unknown leftover tokens now make a sentence ambiguous (confirmation), which is acceptable. */
 function expectAuthorizedOrAmbiguous(
@@ -1503,7 +1503,50 @@ describe('three-way sentence classification', () => {
     expect(tronClassCompoundClauses(`${question}，查校園公告`)).toEqual([]);
   });
 
-  it.each(['查玩課雲公告是不是通知？', '查玩課雲公告是我的公告嗎'])(
+  it('requires confirmation for every conflicting pair with quoted objects or complements', () => {
+    const quotes = [['「', '」'], ['『', '』'], ['《', '》'], ['〈', '〉'], ['"', '"']];
+    for (const object of objectTypes) {
+      for (const complement of objectTypes.filter(type => type !== object)) {
+        for (const [open, close] of quotes) {
+          const quotedObject = `${open}${object}${close}`;
+          const quotedComplement = `${open}${complement}${close}`;
+          for (const [target, tail] of [[quotedObject, complement], [object, quotedComplement], [quotedObject, quotedComplement]]) {
+            const question = `查玩課雲${target}是不是${tail}？`;
+            expect(classifyTronClassSentence(question), question).toEqual({ outcome: 'ambiguous' });
+            expect(tronClassCompoundClauses(`${question}，查校園公告`), question).toEqual([]);
+          }
+        }
+      }
+    }
+  });
+
+  it.each([
+    '下載 TronClass 教材並請幫我準備作業',
+    '幫我下載 TronClass 講義，麻煩替我準備作業',
+    '下載 TronClass 教材，please，代我準備作業',
+  ])('routes the separate download and preparation in %s to selection', question => {
+    expect(isTronClassCompoundDownloadAndPrepare(question)).toBe(true);
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '下載 TronClass 教材並老師準備作業',
+    '下載 TronClass 教材並不要準備作業',
+    '下載 TronClass 教材並已經請幫我準備作業',
+  ])('keeps the request prefix allowlist in %s', question => {
+    expect(isTronClassCompoundDownloadAndPrepare(question)).toBe(false);
+  });
+
+  it('scans long compound requests within the classification budget', () => {
+    const question = '查玩課雲作業' + '並準備作業'.repeat(198);
+    expect(question.length).toBeLessThanOrEqual(1000);
+    const started = performance.now();
+    expect(isTronClassCompoundDownloadAndPrepare(question)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  it.each(['查玩課雲公告是不是通知？', '查玩課雲公告是不是『通知』？', '查玩課雲公告是我的公告嗎'])(
     'keeps the direct announcement object in %s', question => {
       expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'announcements', pendingOnly: false });
     },
