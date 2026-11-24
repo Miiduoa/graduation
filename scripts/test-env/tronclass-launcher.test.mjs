@@ -970,6 +970,89 @@ test('launcher cleanup stops this-run descendants when the memory record is not 
   }
 });
 
+test('concurrent launchers preserve a live PGID write and remove dead-writer temporaries', { timeout: 20000 }, async () => {
+  const { spawn, execFileSync } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const { once } = await import('node:events');
+  const { env } = await import('node:process');
+  const { setTimeout: delay } = await import('node:timers/promises');
+  const { URL } = await import('node:url');
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-pgid-tmp-'));
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+  const preload = path.join(dir, 'pause.cjs');
+  const opened = path.join(dir, 'opened');
+  const resume = path.join(dir, 'resume');
+  const launchers = [];
+  const waitFor = async (condition, description) => {
+    const deadline = Date.now() + 5000;
+    while (!condition() && Date.now() < deadline) await delay(15);
+    assert.ok(condition(), description);
+  };
+  const launch = (name, extraEnv = {}) => {
+    const childFile = path.join(dir, `${name}.pid`);
+    const proc = spawn('bash', [script], {
+      env: {
+        ...env,
+        TRONCLASS_RUNTIME_DIR: dir,
+        TRONCLASS_SIGNAL_SELFTEST: '1',
+        TRONCLASS_SELFTEST_CHILD: childFile,
+        TRONCLASS_SELFTEST_GRANDCHILD: path.join(dir, `${name}-grandchild.pid`),
+        ...extraEnv,
+      },
+      stdio: 'ignore',
+    });
+    const exited = once(proc, 'exit');
+    launchers.push({ proc, exited });
+    return { childFile };
+  };
+  let exits;
+  try {
+    writeFileSync(preload, `
+const fs = require('node:fs');
+const fsync = fs.fsyncSync;
+fs.fsyncSync = fd => {
+  fsync(fd);
+  const target = fs.readlinkSync('/proc/self/fd/' + fd);
+  if (!target.includes('/.pgid-')) return;
+  fs.writeFileSync(${JSON.stringify(opened)}, target);
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  while (!fs.existsSync(${JSON.stringify(resume)})) Atomics.wait(wait, 0, 0, 15);
+};
+`);
+    const first = launch('first', {
+      NODE_OPTIONS: [env.NODE_OPTIONS, `--require=${preload}`].filter(Boolean).join(' '),
+    });
+    await waitFor(() => existsSync(opened) && readFileSync(opened, 'utf8'), 'first wrapper opened its temporary file');
+    const active = readFileSync(opened, 'utf8');
+    const [run] = readFileSync(active, 'utf8').trim().split(' ');
+    const firstRecord = path.join(dir, `selftest.log.pgid.${run}`);
+    assert.equal(existsSync(firstRecord), false);
+
+    const writer = spawn('true');
+    await once(writer, 'exit');
+    const stale = ['aa', 'bb', 'cc'].map(suffix => path.join(dir, `.pgid-${writer.pid}-${suffix}.tmp`));
+    writeFileSync(stale[0], readFileSync(active));
+    execFileSync('mkfifo', [stale[1]]);
+    symlinkSync(active, stale[2]);
+
+    const second = launch('second');
+    const records = () => readdirSync(dir).filter(name => /^selftest\.log\.pgid\.[a-f0-9]{32}$/.test(name));
+    await waitFor(() => existsSync(second.childFile) && records().length === 1, 'second launcher published its own record');
+    assert.ok(lstatSync(active).isFile());
+    assert.deepEqual(readdirSync(dir).filter(name => name.startsWith(`.pgid-${writer.pid}-`)), []);
+    writeFileSync(resume, '');
+    await waitFor(() => existsSync(firstRecord) && existsSync(first.childFile), 'first wrapper published its own record');
+    assert.equal(readFileSync(firstRecord, 'utf8').trim().split(' ')[1], readFileSync(first.childFile, 'utf8'));
+    assert.equal(records().length, 2);
+  } finally {
+    writeFileSync(resume, '');
+    for (const { proc } of launchers) proc.kill('SIGTERM');
+    exits = await Promise.all(launchers.map(({ exited }) => exited));
+    rmSync(dir, { recursive: true, force: true });
+  }
+  for (const exit of exits) assert.deepEqual(exit, [143, null]);
+});
+
 test('launcher startup unlinks a leftover FIFO pgid without blocking', async () => {
   const { spawn } = await import('node:child_process');
   const { existsSync } = await import('node:fs');

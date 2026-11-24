@@ -458,8 +458,24 @@ try {
 NODE
 }
 
-# Incomplete writes are never signal records. Remove them at startup only.
+# A wrapper can be between open and rename. Keep regular temporary files
+# while their writer PID exists, including when the PID may have been reused.
+stale_tmp_pattern='^\.pgid-([1-9][0-9]*)-[[:xdigit:]]+\.tmp$'
 for stale_tmp in "$TRONCLASS_RUNTIME_DIR"/.pgid-*.tmp; do
+  if [ ! -L "$stale_tmp" ] && [ -f "$stale_tmp" ] &&
+    [[ "${stale_tmp##*/}" =~ $stale_tmp_pattern ]]; then
+    writer_proc="/proc/${BASH_REMATCH[1]}"
+    if [ -d "$writer_proc" ]; then
+      # The state follows the final ')' even when the process name contains one.
+      if ! IFS= read -r writer_stat 2>/dev/null < "$writer_proc/stat"; then
+        continue
+      fi
+      case "${writer_stat##*) }" in
+        'Z '*|'X '*) ;;
+        *) continue ;;
+      esac
+    fi
+  fi
   rm -f -- "$stale_tmp" 2>/dev/null || true
 done
 # Other runs' records are only inspected for staleness, never for signalling.
