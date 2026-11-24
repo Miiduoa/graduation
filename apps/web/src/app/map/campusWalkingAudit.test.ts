@@ -77,6 +77,46 @@ describe('trusted OSM walking segment audit bridge', () => {
     expect(data.graph.edges[0].access).toBe('unknown');
   });
 
+  it('keeps purpose-limited or unrecognised access closed on ways and endpoints', () => {
+    const restrictions = ['agricultural', 'forestry', 'delivery', 'emergency',
+      'discouraged', 'unknown', 'yes;private', ''];
+    for (const key of ['access', 'foot']) {
+      for (const value of restrictions) {
+        for (const location of ['way', 'from', 'to']) {
+          const tags = { [key]: value };
+          const data = parseCampusWalkingOsmCandidates({
+            osm3s: { timestamp_osm_base: '2026-11-24T08:00:00Z' },
+            elements: [
+              { ...points[0], tags: location === 'from' ? tags : {} },
+              { ...points[1], tags: location === 'to' ? tags : {} },
+              { type: 'way', id: 101, nodes: [1, 2],
+                tags: { highway: 'footway', ...(location === 'way' ? tags : {}) }, ...revision },
+            ],
+          }, 'fixture', bounds, now)!;
+          expect(data.graph.edges[0].access).toBe('restricted');
+          // A stale candidate must not override source restrictions either.
+          data.graph.edges[0].access = 'unknown';
+          const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+          expect(graph.edges[0].access).toBe('restricted');
+          expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2)).toBeNull();
+          expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1)).toBeNull();
+        }
+      }
+    }
+  });
+
+  it('allows explicitly open access only after a matching audit', () => {
+    for (const value of ['yes', 'designated', 'permissive']) {
+      const data = candidates();
+      data.ways[0].tags.foot = value;
+      data.ways[0].tags.access = value;
+      expect(findCampusWalkingRoute(data.graph, 'fixture', bounds, 1, 2)).toBeNull();
+      const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2)).not.toBeNull();
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1)).not.toBeNull();
+    }
+  });
+
   it('excludes a stale candidate edge when the source way directs pedestrians to a sidepath', () => {
     const data = candidates();
     data.ways[0].tags.foot = 'use_sidepath';
