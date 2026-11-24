@@ -5,7 +5,7 @@ export type PreAuthStackParamList = {
   LoginLanding: undefined;
   Map: undefined;
   Library: undefined;
-  LibraryCatalog: { initialQuery?: string } | undefined;
+  LibraryCatalog: { initialQuery?: string; autoSearch?: boolean } | undefined;
   SchoolInfo: undefined;
   StudentCard: undefined;
   BusSchedule: undefined;

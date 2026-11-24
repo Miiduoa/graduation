@@ -15,7 +15,7 @@ import { useSchool } from '../state/school';
 
 type Navigation = {
   goBack?: () => void;
-  navigate?: (screen: string, params?: { initialQuery: string }) => void;
+  navigate?: (screen: string, params?: { initialQuery: string; autoSearch: boolean }) => void;
 };
 
 export default function LibraryAiFirstScreen({ navigation }: { navigation?: Navigation }) {
@@ -53,6 +53,7 @@ function LibraryContent({
 }) {
   const library = getOfficialLibrary(schoolId, schoolName);
   const verifiedSearch = hasVerifiedCatalogSearch(library);
+  const canSubmitSearch = library?.catalogSearch === 'pu-webpac' || verifiedSearch;
   const queryMaxLength = getOfficialLibraryCatalogQueryMaxLength(library);
   const [keyword, setKeyword] = useState('');
   const [error, setError] = useState('');
@@ -82,7 +83,7 @@ function LibraryContent({
     if (!isCurrent() || !library || !keyword.trim()) return;
     if (library.catalogSearch === 'pu-webpac') {
       if (navigation?.navigate) {
-        navigation.navigate('LibraryCatalog', { initialQuery: keyword.trim() });
+        navigation.navigate('LibraryCatalog', { initialQuery: keyword.trim(), autoSearch: true });
       } else {
         const url = buildOfficialLibraryCatalogUrl(schoolId, keyword, 'FullText', schoolName);
         if (url) await open(url);
@@ -129,6 +130,8 @@ function LibraryContent({
                 placeholder="書名、作者或 ISBN"
                 placeholderTextColor={aiTokens.muted}
                 value={keyword}
+                returnKeyType={canSubmitSearch ? 'search' : 'done'}
+                onSubmitEditing={canSubmitSearch ? () => void searchOfficialCatalog() : undefined}
                 maxLength={queryMaxLength}
                 onChangeText={(value) => { setKeyword(value); setNotice(''); }}
                 style={{
