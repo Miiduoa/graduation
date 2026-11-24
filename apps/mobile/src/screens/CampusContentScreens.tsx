@@ -1046,12 +1046,17 @@ export function CampusEventDetailScreen(props: Props) {
 function ScopedCampusEventDetail({ navigation, route }: Props) {
   const calendarScope = usePersonalImportScope();
   const { school, selectionReady } = useSchool();
+  const routeSchoolId = route?.params?.schoolId || '';
   const [boundSchool, setBoundSchool] = useState(
-    () => route?.params?.schoolId || (selectionReady ? school.id : ''),
+    () => routeSchoolId || (selectionReady ? school.id : ''),
   );
   useEffect(() => {
-    if (!boundSchool && selectionReady) setBoundSchool(school.id);
-  }, [boundSchool, school.id, selectionReady]);
+    if (routeSchoolId) {
+      setBoundSchool(routeSchoolId);
+      return;
+    }
+    if (selectionReady) setBoundSchool(school.id);
+  }, [routeSchoolId, school.id, selectionReady]);
   const id = route?.params?.id ?? route?.params?.eventId ?? '';
   const source = route?.params?.source;
   const loader = useCallback(

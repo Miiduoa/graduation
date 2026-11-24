@@ -669,7 +669,7 @@ test('a scoped event link cannot suggest a same-ID event from a different school
   expect(view.queryByText('開啟行程草稿')).toBeNull();
 });
 
-test('a legacy event link keeps its first school while a new route can select the same ID at the new school', async () => {
+test('a legacy event link follows the current school so the same ID can be read after a school switch', async () => {
   const view = render(<EventScreen route={{ key: 'search-1', params: { id: event.id } }} />);
   await view.findByText(event.title);
   mockSchool = { id: 'other' };
@@ -677,10 +677,8 @@ test('a legacy event link keeps its first school while a new route can select th
     .mocked(loadCampusEvent)
     .mockResolvedValue({ ...event, schoolId: 'other', title: '另一校的同編號活動' });
   view.rerender(<EventScreen route={{ key: 'search-1', params: { id: event.id } }} />);
-  await view.findByText('找不到這場活動，可能已移除或不屬於目前學校。');
-  expect(loadCampusEvent).not.toHaveBeenCalledWith('other', event.id, undefined);
-  view.rerender(<EventScreen route={{ key: 'search-2', params: { id: event.id } }} />);
   await view.findByText('另一校的同編號活動');
+  expect(loadCampusEvent).toHaveBeenCalledWith('other', event.id, undefined);
 });
 
 test.each(['timer', 'foreground'])(
