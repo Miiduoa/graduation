@@ -3,6 +3,7 @@
 import { MonthCalendar } from './MonthCalendar';
 import {
   focusWhenRevealed,
+  focusWhenVisible,
   isHorizontallyVisible,
   isVisible,
   measureStickyInsets,
@@ -494,8 +495,9 @@ function PersonalCalendarWorkspace({
       settledFocusRequest.current = requestedEventId;
       cleanup();
     };
-    const revealLinkedEvent = () => {
-      if (focusWhenRevealed(row)) settle();
+    const revealLinkedEvent = (mode: 'reveal' | 'visible') => {
+      const focused = mode === 'visible' ? focusWhenVisible(row) : focusWhenRevealed(row);
+      if (focused) settle();
     };
 
     if (mode !== 'idle') {
@@ -503,7 +505,7 @@ function PersonalCalendarWorkspace({
       return;
     }
     const origin = document.activeElement;
-    revealLinkedEvent();
+    revealLinkedEvent('reveal');
     if (settledFocusRequest.current !== requestedEventId) {
       stopRetry = retryFocusOnViewportChange(origin, revealLinkedEvent, settle);
       cancelLinkedFocus.current = settle;

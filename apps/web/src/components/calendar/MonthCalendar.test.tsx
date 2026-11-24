@@ -594,3 +594,47 @@ it.each(['重試原日期', '繼續按方向鍵', '從月格繼續按方向鍵',
     );
   },
 );
+
+it.each(['頁面垂直捲動', '月格水平捲動'])('手動%s露出目標日期後交接焦點', (source) => {
+  const visualViewport = Object.assign(new EventTarget(), {
+    offsetLeft: 20, offsetTop: 30, width: 240, height: 300,
+  });
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: visualViewport });
+  const pageScroll = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  render(<MonthCalendar {...baseProps} />);
+
+  const grid = screen.getByRole('region', { name: '2028-01 月格，週日起始' });
+  const origin = focusDate('2028-01-27');
+  const target = screen.getByRole('button', { name: '2028-01-28' });
+  const isPageScroll = source === '頁面垂直捲動';
+  let pageOffset = 0;
+  let gridOffset = 0;
+  grid.style.overflowX = 'auto';
+  Object.defineProperty(grid, 'clientWidth', { configurable: true, value: 300 });
+  Object.defineProperty(grid, 'scrollWidth', { configurable: true, value: 616 });
+  // The first automatic reveal cannot move either scrollport.
+  Object.defineProperty(grid, 'scrollLeft', {
+    configurable: true, get: () => gridOffset, set: () => {},
+  });
+  vi.spyOn(grid, 'getBoundingClientRect').mockImplementation(
+    () => new DOMRect(20, 50 - pageOffset, 300, 500),
+  );
+  vi.spyOn(target, 'getBoundingClientRect').mockImplementation(
+    () => new DOMRect((isPageScroll ? 80 : 340) - grid.scrollLeft, (isPageScroll ? 420 : 90) - pageOffset, 44, 40),
+  );
+
+  fireEvent.keyDown(origin, { key: 'ArrowRight' });
+  expect(document.activeElement).toBe(origin);
+  pageScroll.mockClear();
+
+  const scrollSource = isPageScroll ? document : grid;
+  fireEvent.scroll(scrollSource);
+  expect(document.activeElement).toBe(origin);
+
+  if (isPageScroll) pageOffset = 200;
+  else gridOffset = 190;
+  fireEvent.scroll(scrollSource);
+
+  expect(document.activeElement).toBe(target);
+  expect(pageScroll).not.toHaveBeenCalled();
+});

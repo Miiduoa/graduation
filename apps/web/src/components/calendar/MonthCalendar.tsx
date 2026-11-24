@@ -6,7 +6,7 @@ import {
   type PersonalImportRecord,
 } from '@campus/shared';
 import { monthCalendarKeyboardDate } from './monthCalendarNavigation';
-import { focusWhenRevealed, retryFocusOnViewportChange } from './calendarScroll';
+import { focusWhenRevealed, focusWhenVisible, retryFocusOnViewportChange } from './calendarScroll';
 import styles from './MonthCalendar.module.css';
 
 export function MonthCalendar({
@@ -54,10 +54,12 @@ export function MonthCalendar({
     if (!viewport || !sunday || !selectedColumn || viewport.clientWidth <= 0) return;
     scrollWeekIntoView(viewport, sunday, selectedColumn);
   }, []);
-  const focusDate = useCallback((date: string) => {
+  const focusDate = useCallback((date: string, mode: 'reveal' | 'visible' = 'reveal') => {
     const requested = dateButtons.current.get(date);
     const viewport = viewportRef.current;
-    return !!(requested && viewport && focusWhenRevealed(requested, viewport));
+    return !!(requested && viewport && (
+      mode === 'visible' ? focusWhenVisible(requested) : focusWhenRevealed(requested, viewport)
+    ));
   }, []);
 
   useLayoutEffect(() => {
@@ -123,8 +125,8 @@ export function MonthCalendar({
       if (pendingFocus.current === requested) pendingFocus.current = null;
       stopWatching();
     };
-    const stopRetry = retryFocusOnViewportChange(origin, () => {
-      if (pendingFocus.current === requested && focusDate(requested.date)) cancel();
+    const stopRetry = retryFocusOnViewportChange(origin, (mode) => {
+      if (pendingFocus.current === requested && focusDate(requested.date, mode)) cancel();
     }, cancel);
     const stopWatching = () => {
       stopRetry();
@@ -179,7 +181,13 @@ export function MonthCalendar({
                   aria-pressed={selectedDate === day.date}
                   aria-current={today === day.date ? 'date' : undefined}
                   onKeyDown={(event) => moveDate(event, day.date)}
-                  onClick={() => onDate(day.date)}
+                  onClick={() => {
+                    if (pendingFocus.current) {
+                      pendingFocus.current = null;
+                      setFocusRequestRevision((revision) => revision + 1);
+                    }
+                    onDate(day.date);
+                  }}
                 >
                   <span className={styles.dateNumber}>{Number(day.date.slice(-2))}</span>
                 </button>

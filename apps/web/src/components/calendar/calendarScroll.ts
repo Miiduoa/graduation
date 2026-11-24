@@ -186,9 +186,15 @@ export function focusWhenRevealed(element: HTMLElement, horizontalContainer?: HT
   return true;
 }
 
+export function focusWhenVisible(element: HTMLElement) {
+  if (!element.isConnected || !isVisible(element)) return false;
+  element.focus({ preventScroll: true });
+  return true;
+}
+
 export function retryFocusOnViewportChange(
   origin: Element | null,
-  attempt: () => void,
+  attempt: (mode: 'reveal' | 'visible') => void,
   cancel: () => void,
 ) {
   const stillOwnsFocus = () =>
@@ -197,13 +203,19 @@ export function retryFocusOnViewportChange(
   const checkFocus = () => {
     if (!stillOwnsFocus()) cancel();
   };
-  const unsubscribe = onVisibleViewportChange(() => {
-    if (stillOwnsFocus()) attempt();
+  const retry = (mode: 'reveal' | 'visible') => {
+    if (stillOwnsFocus()) attempt(mode);
     else cancel();
-  });
+  };
+  const unsubscribe = onVisibleViewportChange(() => retry('reveal'));
+  // Element scroll events do not bubble. Capture page and nested scrolls
+  // without issuing more scroll commands while the user is moving the view.
+  const onScroll = () => retry('visible');
+  window.addEventListener('scroll', onScroll, { capture: true, passive: true });
   document.addEventListener('focusin', checkFocus);
   return () => {
     unsubscribe();
+    window.removeEventListener('scroll', onScroll, true);
     document.removeEventListener('focusin', checkFocus);
   };
 }

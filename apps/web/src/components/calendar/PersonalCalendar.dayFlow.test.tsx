@@ -1224,3 +1224,35 @@ it.each([
   expect(focus).toHaveBeenCalledTimes(canReveal ? 1 : 0);
   expect(document.activeElement === heading).toBe(canReveal);
 });
+
+it('按 Enter 選取仍有焦點的日期後，先前待聚焦的日期不再接管焦點', async () => {
+  const viewport = Object.assign(new EventTarget(), {
+    offsetLeft: 0, offsetTop: 0, width: 240, height: 300,
+  });
+  Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+  render(<PersonalCalendar />);
+  await ready();
+
+  const origin = screen.getByRole('button', { name: '2026-11-27' });
+  const target = screen.getByRole('button', { name: '2026-11-28' });
+  let targetLeft = 260;
+  vi.spyOn(target, 'getBoundingClientRect').mockImplementation(
+    () => new DOMRect(targetLeft, 60, 44, 40),
+  );
+  act(() => origin.focus());
+  fireEvent.keyDown(origin, { key: 'ArrowRight' });
+  expect(window.scrollBy).toHaveBeenCalledWith({ left: 64, top: 0, behavior: 'instant' });
+  expect(document.activeElement).toBe(origin);
+
+  // JSDOM does not turn Enter into the native button click.
+  fireEvent.keyDown(origin, { key: 'Enter' });
+  fireEvent.click(origin, { detail: 0 });
+  expect(dayHeading('2026-11-27')).toBeTruthy();
+  expect(origin.getAttribute('aria-pressed')).toBe('true');
+  expect(document.activeElement).toBe(origin);
+
+  targetLeft = 100;
+  viewport.dispatchEvent(new Event('scroll'));
+  expect(document.activeElement).toBe(origin);
+  expect(dayHeading('2026-11-27')).toBeTruthy();
+});

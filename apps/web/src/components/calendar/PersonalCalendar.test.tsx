@@ -695,7 +695,7 @@ it('locates only a stored event by ID, selects its actual date and month, and fo
   expect(localStorage.getItem(personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId }))).toBe(before);
 });
 
-it('放大並平移後開啟行程深連結，確認行程列在雙軸皆可見才聚焦', async () => {
+it.each(['可視視窗平移', '頁面捲動'])('行程深連結等待%s，確認行程列在雙軸皆可見才聚焦', async (source) => {
   const target = focusEvent();
   seedFocusedEvents([target, focusEvent('same-title', { date: target.date })]);
   context.search = `eventId=${target.id}`;
@@ -728,12 +728,18 @@ it('放大並平移後開啟行程深連結，確認行程列在雙軸皆可見�
   expect(scroll).toHaveBeenCalledExactlyOnceWith({ left: -220, top: 160, behavior: 'instant' });
   expect(document.activeElement).toBe(document.body);
 
-  canScroll = true;
-  viewport.dispatchEvent(new Event('scroll'));
+  if (source === '頁面捲動') {
+    rowLeft = 260;
+    rowTop = 260;
+    fireEvent.scroll(document);
+  } else {
+    canScroll = true;
+    viewport.dispatchEvent(new Event('scroll'));
+  }
   expect(row?.getBoundingClientRect()).toMatchObject({ left: 260, right: 400, top: 260, bottom: 320 });
   expect(document.activeElement).toBe(row);
   viewport.dispatchEvent(new Event('scroll'));
-  expect(scroll).toHaveBeenCalledTimes(2);
+  expect(scroll).toHaveBeenCalledTimes(source === '頁面捲動' ? 1 : 2);
 });
 
 it.each([
