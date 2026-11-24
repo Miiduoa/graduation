@@ -584,3 +584,16 @@ it('rejects selection of more than six attachments', async () => {
     expect((region.getByRole('button', { name: '繳交作業' }) as HTMLButtonElement).disabled).toBe(true);
   } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; }
 });
+
+it('labels generated files by their submission order and keeps the filename of a named attachment', async () => {
+  vi.mocked(loadCourseWork).mockResolvedValue(coursework({ assignments: [
+    assignment('A', { submittedAt: '2026-11-23T07:24:00Z', attachments: [
+      'groups/course/assignments/A/submissions/alice/report.pdf',
+      'groups/course/assignments/A/submissions/alice/1795488100000-1-0123456789abcdef0123456789abcdef.docx',
+    ] }),
+  ] }));
+  await mount();
+  const receipt = within(screen.getByRole('region', { name: '作業 A' }));
+  expect(receipt.getByRole('button', { name: '下載 report.pdf' })).toBeTruthy();
+  expect(receipt.getByRole('button', { name: '下載 附件 2.docx' })).toBeTruthy();
+});

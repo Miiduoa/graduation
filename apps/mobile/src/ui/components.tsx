@@ -49,20 +49,85 @@ export { SegmentedControl } from './interactive/SegmentedControl';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+type SpinnerSize = number | 'small' | 'large';
+
+/** Native ActivityIndicator pixel boxes, so the reduced-motion glyph keeps the same footprint. */
+const SPINNER_PIXELS = { small: 20, large: 36 } as const;
+
+/** Props that remove purely decorative visuals from every screen-reader traversal. */
+const DECORATIVE_A11Y = {
+  accessible: false,
+  accessibilityElementsHidden: true,
+  importantForAccessibility: 'no-hide-descendants',
+} as const;
+
+/** Native spinner, or a same-size static clock glyph while reduced motion is requested. */
+function ActivityGlyph({ size, color }: { size: SpinnerSize; color: string }) {
+  const reducedMotion = useReducedMotion();
+  const pixels = typeof size === 'number' ? size : SPINNER_PIXELS[size];
+  return (
+    <View
+      {...DECORATIVE_A11Y}
+      pointerEvents="none"
+      style={{ width: pixels, height: pixels, alignItems: 'center', justifyContent: 'center' }}
+    >
+      {reducedMotion ? (
+        <Ionicons name="time-outline" size={pixels} color={color} />
+      ) : (
+        <ActivityIndicator size={size} color={color} />
+      )}
+    </View>
+  );
+}
+
+/** One named, busy progress element; callers place only their own loading content inside. */
+function BusyStatus(props: {
+  title: string;
+  detail?: string;
+  hint?: string;
+  style?: StyleProp<ViewStyle>;
+  children: React.ReactNode;
+}) {
+  return (
+    <View
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={props.title}
+      accessibilityValue={props.detail ? { text: props.detail } : undefined}
+      accessibilityHint={props.hint}
+      accessibilityState={{ busy: true }}
+      style={props.style}
+    >
+      {props.children}
+    </View>
+  );
+}
+
+/** Standalone waiting indicator with its own progress semantics. */
 export function Spinner({
   size = 24,
   color = theme.colors.accent,
+  accessibilityLabel = '載入中',
 }: {
-  size?: number;
+  size?: SpinnerSize;
   color?: string;
+  accessibilityLabel?: string;
 }) {
   useVisualTheme();
-  return <ActivityIndicator size={size} color={color} />;
+  return (
+    <BusyStatus
+      title={accessibilityLabel}
+      style={{ alignItems: 'center', justifyContent: 'center' }}
+    >
+      <ActivityGlyph size={size} color={color} />
+    </BusyStatus>
+  );
 }
 
 /** 全螢幕載入（App 根層、導覽 fallback 等共用，維持品牌色與字型階梯一致） */
 export function FullScreenLoader(props: { message?: string }) {
   useVisualTheme();
+  const message = props.message ?? '載入中';
   return (
     <View
       style={{
@@ -72,24 +137,23 @@ export function FullScreenLoader(props: { message?: string }) {
         backgroundColor: theme.colors.bg,
         paddingHorizontal: theme.layout.screenHorizontalPadding,
       }}
-      accessibilityRole="progressbar"
-      accessibilityLabel={props.message ?? '載入中'}
     >
-      <ActivityIndicator size="large" color={theme.colors.accent} />
-      {props.message ? (
+      <BusyStatus
+        title={message}
+        style={{ maxWidth: '100%', alignItems: 'center', gap: theme.space.md }}
+      >
+        <ActivityGlyph size="large" color={theme.colors.accent} />
         <Text
           style={{
-            marginTop: theme.space.md,
-            fontSize: theme.typography.bodySmall.fontSize,
-            lineHeight: theme.typography.bodySmall.lineHeight,
-            letterSpacing: theme.typography.bodySmall.letterSpacing,
+            ...theme.typography.bodySmall,
+            flexShrink: 1,
             color: theme.colors.muted,
             textAlign: 'center',
           }}
         >
-          {props.message}
+          {message}
         </Text>
-      ) : null}
+      </BusyStatus>
     </View>
   );
 }
@@ -543,6 +607,37 @@ function ButtonActivity({ color, reducedMotion }: { color: string; reducedMotion
   );
 }
 
+/** Static list-shaped hint: avatar block plus two text lines, no motion and no contrast spike. */
+const LOADING_ROW_LINES = [
+  { title: '68%', detail: '44%' },
+  { title: '54%', detail: '72%' },
+  { title: '76%', detail: '38%' },
+] as const;
+
+function LoadingRowPlaceholder({ index }: { index: number }) {
+  const lines = LOADING_ROW_LINES[index % LOADING_ROW_LINES.length];
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.space.md,
+        padding: theme.space.md,
+        borderRadius: theme.radius.lg,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.surface,
+      }}
+    >
+      <Skeleton width={40} height={40} borderRadius={theme.radius.md} />
+      <View style={{ flex: 1, minWidth: 0, gap: theme.space.sm }}>
+        <Skeleton width={lines.title} height={14} borderRadius={theme.radius.sm} />
+        <Skeleton width={lines.detail} height={10} borderRadius={theme.radius.sm} />
+      </View>
+    </View>
+  );
+}
+
 export function LoadingState(props: {
   title?: string;
   subtitle?: string;
@@ -550,22 +645,34 @@ export function LoadingState(props: {
   rows?: number;
 }) {
   useVisualTheme();
-  const rows = props.rows ?? 3;
+  const requestedRows = props.rows ?? 3;
+  const rows = Number.isFinite(requestedRows) ? Math.max(0, Math.floor(requestedRows)) : 3;
+  const title = props.title ?? '載入中';
+  const subtitle = props.subtitle ?? '正在取得資料...';
   return (
-    <View style={{ gap: theme.space.md, paddingVertical: theme.space.xl }}>
-      <View style={{ alignItems: 'center', gap: theme.space.md, paddingVertical: theme.space.lg }}>
-        <Spinner size={32} />
-        <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '600' }}>
-          {props.title ?? '載入中'}
-        </Text>
-        <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
-          {props.subtitle ?? '正在取得資料...'}
-        </Text>
+    <BusyStatus
+      title={title}
+      detail={subtitle}
+      hint={props.hint}
+      style={{ gap: theme.space.lg, paddingVertical: theme.space.xl }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
+        <ActivityGlyph size={28} color={theme.colors.accent} />
+        <View style={{ flex: 1, minWidth: 0, gap: theme.space.xs }}>
+          <Text style={{ ...theme.typography.h3, color: theme.colors.text }}>{title}</Text>
+          <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
+            {subtitle}
+          </Text>
+        </View>
       </View>
-      {Array.from({ length: rows }).map((_, i) => (
-        <Skeleton key={i} height={72} borderRadius={theme.radius.lg} />
-      ))}
-    </View>
+      {rows > 0 ? (
+        <View {...DECORATIVE_A11Y} pointerEvents="none" style={{ gap: theme.space.sm }}>
+          {Array.from({ length: rows }, (_, i) => (
+            <LoadingRowPlaceholder key={i} index={i} />
+          ))}
+        </View>
+      ) : null}
+    </BusyStatus>
   );
 }
 

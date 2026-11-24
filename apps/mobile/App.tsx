@@ -2,6 +2,7 @@ import { useDormLaundryReminder } from './src/hooks/useDormLaundryReminder';
 import { useClassReminders } from './src/hooks/useClassReminders';
 import { useNextClassWidget } from './src/widgets/useNextClassWidget';
 /* eslint-disable */
+import { useOfflineSyncToasts } from './src/app/useOfflineSyncToasts';
 import { useSubmittedAssignmentReminders } from './src/app/useSubmittedAssignmentReminders';
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -49,7 +50,6 @@ import { initOfflineModeSync } from './src/data';
 import {
   initNetworkMonitoring,
   syncEssentialData,
-  subscribeToSyncEvents,
   subscribeToConflicts,
   getPendingConflicts,
   resolveConflict,
@@ -156,44 +156,7 @@ function SyncStatusHandler() {
     return unsubscribeConflicts;
   }, []);
 
-  useEffect(() => {
-    const unsubscribe = subscribeToSyncEvents((event) => {
-      switch (event.type) {
-        case 'queued':
-          toast.show({
-            message: '目前離線，操作將在網路恢復後同步',
-            type: 'info',
-            duration: 3000,
-          });
-          break;
-        case 'sync_complete':
-          if (event.processed && event.processed > 0) {
-            toast.show({
-              message: `已同步 ${event.processed} 筆資料`,
-              type: 'success',
-              duration: 2000,
-            });
-          }
-          break;
-        case 'sync_error':
-          toast.show({
-            message: `同步失敗：${event.error?.message ?? '未知錯誤'}`,
-            type: 'error',
-            duration: 4000,
-          });
-          break;
-        case 'conflict':
-          toast.show({
-            message: '部分資料與伺服器衝突，請檢查',
-            type: 'warning',
-            duration: 4000,
-          });
-          break;
-      }
-    });
-
-    return unsubscribe;
-  }, [toast]);
+  useOfflineSyncToasts();
 
   const handleResolveConflict = async (
     actionId: string,

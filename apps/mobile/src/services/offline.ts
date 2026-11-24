@@ -138,6 +138,7 @@ export type FailedAction = QueuedAction & {
 type SyncEventListener = (event: {
   type: 'sync_start' | 'sync_progress' | 'sync_complete' | 'sync_error' | 'conflict' | 'queued';
   processed?: number;
+  success?: number;
   total?: number;
   action?: QueuedAction;
   error?: Error;
@@ -468,8 +469,8 @@ export async function processOfflineQueue(): Promise<{
         // 不移動到失敗列表，讓使用者處理衝突
         // await moveToFailedActions(action, "版本衝突：伺服器資料較新");
       } else {
-        success++;
         await removeFromOfflineQueue(action.id);
+        success++;
       }
 
       processed++;
@@ -528,7 +529,7 @@ export async function processOfflineQueue(): Promise<{
 
   isProcessingQueue = false;
   syncAbortController = null;
-  emitSyncEvent({ type: 'sync_complete', processed, total: queue.length });
+  emitSyncEvent({ type: 'sync_complete', processed, success, total: queue.length });
 
   return { success, failed, conflicts };
 }
