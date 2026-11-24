@@ -1110,6 +1110,7 @@ it.each([
   { entryFirst: true, refreshStatus: 403 },
   { entryFirst: true, refreshStatus: 404 },
   { entryFirst: true, refreshStatus: 503 },
+  { entryFirst: false, refreshStatus: 503 },
 ])(
   'rechecks access after returning during a pause (entry detail first: $entryFirst, refresh status: $refreshStatus)',
   async ({ entryFirst, refreshStatus }) => {
@@ -1154,14 +1155,28 @@ it.each([
     if (entryFirst) await act(async () => finishEntry(reopened));
     await act(async () => finishPause(paused));
     await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
-    if (!entryFirst) await act(async () => finishEntry(reopened));
+    if (!entryFirst && refreshStatus === 200) await act(async () => finishEntry(reopened));
     const pendingPause = screen.queryByRole<HTMLButtonElement>('button', { name: '暫停接單' });
     expect(pendingPause?.disabled ?? true).toBe(true);
     if (refreshStatus !== 200) {
       await act(async () => failRefresh(new NuniError(refreshStatus, 'DETAIL_FAILED')));
+      if (!entryFirst) await act(async () => finishEntry(reopened));
       expect(screen.getByRole('alert')).toBeTruthy();
       expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '恢復接單' })).toBeNull();
       expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
+      expect(screen.queryByRole('region', { name: '門市訂單工作台' })).toBeNull();
+      if (!entryFirst) {
+        expect(readDetail).toHaveBeenCalledTimes(4);
+        readDetail.mockResolvedValueOnce(reopened);
+        fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+        const pauseButton = await screen.findByRole<HTMLButtonElement>('button', { name: '暫停接單' });
+        expect(pauseButton.disabled).toBe(false);
+        expect(screen.queryByRole('alert')).toBeNull();
+        fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
+        await screen.findByRole('region', { name: '門市訂單工作台' });
+        expect(readDetail).toHaveBeenCalledTimes(5);
+      }
       return;
     }
     await act(async () => finishRefresh(paused));

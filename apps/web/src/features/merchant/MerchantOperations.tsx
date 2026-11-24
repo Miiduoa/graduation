@@ -179,6 +179,7 @@ export function MerchantOperations({
   const lock = useRef(false);
   const run = useRef(0);
   const accessRevision = useRef(0);
+  const failedReadRevision = useRef(0);
   const entryAccessRevision = useRef(0);
   const pendingAccessRead = useRef(0);
   const observedRevocation = useRef(accessRevocation);
@@ -202,6 +203,7 @@ export function MerchantOperations({
     ++mutationRun.current;
     pendingAccessRead.current = 0;
     entryAccessRevision.current = 0;
+    failedReadRevision.current = 0;
   }, []);
   useLayoutEffect(() => {
     drafts.set(draftKey, {
@@ -285,7 +287,11 @@ export function MerchantOperations({
 
   const confirmEntry = useCallback(
     (detail: Detail, revision: number, reveal: boolean) => {
-      if (revision < accessRevision.current || revision <= observedRevocation.current) return;
+      if (
+        revision < accessRevision.current ||
+        revision <= failedReadRevision.current ||
+        revision <= observedRevocation.current
+      ) return;
       accessRevision.current = revision;
       entryAccessRevision.current = revision;
       showDetail(detail);
@@ -370,6 +376,10 @@ export function MerchantOperations({
         if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
           revokeDetail(revision, current());
         } else if (current()) {
+          // Earlier reads may still update shared detail, but cannot verify
+          // entry access after this read failed.
+          failedReadRevision.current = revision;
+          entryAccessRevision.current = 0;
           setFresh(false);
           setReadUnavailable(true);
           setError(detailReadError);
