@@ -17,9 +17,51 @@ let observedWindow: Window | undefined;
 let pendingReturn: SearchReturn | null = null;
 let returnSequence = 0;
 const listeners = new Set<() => void>();
+let trackedUrl = '';
+let expectedReturnFrom: string | null = null;
+let historyTrackingInstalled = false;
 
 function currentUrl() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
+function leftSearchForUnrelatedDestination(previousUrl: string, nextUrl: string) {
+  if (!expectedReturnFrom) return;
+  if (new URL(previousUrl, window.location.origin).pathname !== '/search') return;
+  // Tests and some in-app moves only keep the pathname in common with the
+  // remembered result href; query strings can differ. Bottom navigation to
+  // another section uses a different path.
+  if (new URL(nextUrl, window.location.origin).pathname ===
+      new URL(expectedReturnFrom, window.location.origin).pathname) return;
+  // A later departure from the same search entry (for example the bottom
+  // navigation) must not reuse the previous result marker on the next Back.
+  expectedReturnFrom = null;
+}
+
+function syncTrackedUrl() {
+  const previousUrl = trackedUrl;
+  const nextUrl = currentUrl();
+  if (previousUrl && previousUrl !== nextUrl) {
+    leftSearchForUnrelatedDestination(previousUrl, nextUrl);
+  }
+  trackedUrl = nextUrl;
+}
+
+function installHistoryTracking() {
+  if (historyTrackingInstalled) return;
+  historyTrackingInstalled = true;
+  trackedUrl = currentUrl();
+  const wrap = (method: 'pushState' | 'replaceState') => {
+    const original = window.history[method];
+    window.history[method] = function (this: History, data: unknown, unused: string, url?: string | URL | null) {
+      const result = original.call(this, data, unused, url);
+      syncTrackedUrl();
+      return result;
+    };
+  };
+  wrap('pushState');
+  wrap('replaceState');
+  window.addEventListener('popstate', syncTrackedUrl);
 }
 
 function readReturn(state: unknown): SearchReturn | null {
@@ -45,9 +87,14 @@ function publishReturn(value: SearchReturn | null) {
 
 function captureReturn(event: PopStateEvent) {
   const saved = readReturn(event.state);
-  publishReturn(
-    window.location.pathname === '/search' && saved?.url === currentUrl() ? saved : null,
-  );
+  const sameSearchEntry =
+    window.location.pathname === '/search' && saved?.url === currentUrl();
+  const cameFromRememberedResult =
+    !!saved &&
+    !!expectedReturnFrom &&
+    new URL(expectedReturnFrom, window.location.origin).pathname ===
+      new URL(saved.href, window.location.origin).pathname;
+  publishReturn(sameSearchEntry && cameFromRememberedResult ? saved : null);
 }
 
 function cancelPendingReturn() {
@@ -57,6 +104,7 @@ function cancelPendingReturn() {
 }
 
 function subscribeReturn(listener: () => void) {
+  installHistoryTracking();
   if (observedWindow !== window) {
     observedWindow?.removeEventListener('popstate', captureReturn);
     for (const event of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
@@ -81,6 +129,7 @@ const getServerReturn = () => null;
 export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token' | 'url'>) {
   publishReturn(null);
   if (window.location.pathname !== '/search') return;
+  expectedReturnFrom = value.href;
   try {
     window.history.replaceState(
       {

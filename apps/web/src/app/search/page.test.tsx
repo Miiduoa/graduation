@@ -1183,6 +1183,20 @@ describe('continuing a search after opening a service', () => {
     expect(scroll).toHaveBeenCalledTimes(2);
   });
 
+  it('does not restore a previous result after an unrelated later visit from the same search entry', () => {
+    const entry = leaveLibrary();
+    traverse(librarySearch, entry);
+    const view = renderAfterFrame();
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    view.unmount();
+    // Bottom navigation away from search, then Back to the same history item.
+    move('/life');
+    traverse(librarySearch, entry);
+    renderAfterFrame();
+    expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
   it('opens both enclosing disclosures and resumes the exact secondary service', () => {
     move('/search?campus=pu');
     const view = renderAfterFrame();
