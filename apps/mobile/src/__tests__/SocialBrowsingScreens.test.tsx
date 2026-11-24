@@ -1367,6 +1367,52 @@ test('a committed subscription is displayed before board rows finish and survive
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
+test.each(['看板先失敗', '訂閱清單先回傳', '看板稍後成功'])(
+  '未經伺服器確認的清單項目須等看板查詢成功才套用（%s）',
+  async (order) => {
+    const otherBoard = { ...board, id: 'board-b', name: '攝影社' };
+    jest.mocked(listBoards).mockResolvedValue([board, otherBoard]);
+    const view = render(<BoardsScreen />);
+    await view.findByLabelText('訂閱讀書會');
+
+    const rows = deferred<typeof board[]>();
+    const membership = deferred<Awaited<ReturnType<typeof readSubscribedBoardIds>>>();
+    jest.mocked(listBoards).mockReturnValueOnce(rows.promise);
+    jest.mocked(readSubscribedBoardIds).mockReturnValueOnce(membership.promise);
+    let refresh!: Promise<void>;
+    act(() => { refresh = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+
+    const offline = Object.assign(new Error('offline'), { code: 'unavailable' });
+    if (order === '看板先失敗') {
+      await act(async () => { rows.reject(offline); });
+    }
+
+    // 讀書會可能是詳情頁尚未提交的寫入，也可能只來自快取。
+    await act(async () => {
+      membership.resolve({ ids: [board.id, otherBoard.id], serverConfirmedIds: [otherBoard.id] });
+    });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    expect(view.getByLabelText('取消訂閱攝影社')).toBeTruthy();
+
+    await act(async () => {
+      if (order === '看板稍後成功') rows.resolve([board, otherBoard]);
+      if (order === '訂閱清單先回傳') rows.reject(offline);
+      await refresh;
+    });
+    if (order === '看板稍後成功') {
+      expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+      return;
+    }
+
+    jest.mocked(subscribeToBoard).mockRejectedValueOnce(offline);
+    jest.mocked(isSubscribedToBoard).mockRejectedValueOnce(offline);
+    await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+    expect(subscribeToBoard).toHaveBeenCalledWith('alice', 'pu', board.id);
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    expect(view.getByLabelText('取消訂閱攝影社')).toBeTruthy();
+  },
+);
+
 test.each([
   ['清單確認', '看板先失敗'],
   ['清單確認', '訂閱清單先回傳'],

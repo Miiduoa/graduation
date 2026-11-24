@@ -179,9 +179,8 @@ function BoardsContent() {
     sid: string,
     boardRowsSucceeded: boolean,
   ) => {
-    const { serverRevisionAtDispatch } = membership;
+    const { serverRevisionAtDispatch, subscribedIds, serverConfirmedIds } = membership;
     const keepLocal = new Set(pendingSubscriptionCounts.current.keys());
-    const { subscribedIds } = membership;
     for (const id of awaitingServerConfirm.current.keys()) overlappingReconciliations.add(id);
     for (const id of pendingServerConfirmCounts.current.keys()) overlappingReconciliations.add(id);
     // Both successful and failed writes can settle before a list spanning
@@ -200,7 +199,7 @@ function BoardsContent() {
     // Keep the overlap out of list sequencing so an in-flight single-board
     // read can still apply.
     const keepLocalMembership = new Set(keepLocal);
-    for (const id of membership.serverConfirmedIds) {
+    for (const id of serverConfirmedIds) {
       if (
         keepLocal.has(id) &&
         !pendingSubscriptionCounts.current.has(id) &&
@@ -218,18 +217,19 @@ function BoardsContent() {
       ...confirmedSubscribedRef.current,
       ...boardWriteRevision.current.keys(),
     ]);
-    // Publish listed membership while rows are loading. Keep omissions out
-    // of both membership and sequencing until the board read succeeds.
-    const deferredOmissions = new Set<string>();
+    // Until the board read succeeds, only server-confirmed entries can
+    // update membership, the rollback baseline, or read sequencing.
+    const deferredMembership = new Set<string>();
     if (!boardRowsSucceeded) {
       for (const id of tracked) {
-        if (!subscribedIds.has(id) && !keepLocal.has(id)) {
-          deferredOmissions.add(id);
+        if (!serverConfirmedIds.has(id) && !keepLocal.has(id)) {
+          deferredMembership.add(id);
           keepLocalMembership.add(id);
         }
       }
     }
-    const nextConfirmed = new Set(subscribedIds);
+    const immediateIds = boardRowsSucceeded ? subscribedIds : serverConfirmedIds;
+    const nextConfirmed = new Set(immediateIds);
     for (const id of keepLocalMembership) {
       if (confirmedSubscribedRef.current.has(id)) nextConfirmed.add(id);
       else nextConfirmed.delete(id);
@@ -242,10 +242,10 @@ function BoardsContent() {
       deferredListMembership.current.delete(id);
     };
     for (const id of tracked) {
-      if (!keepLocal.has(id) && !deferredOmissions.has(id)) markListApplied(id);
+      if (!keepLocal.has(id) && !deferredMembership.has(id)) markListApplied(id);
     }
     applySubscribed((previous) => {
-      const next = new Set(subscribedIds);
+      const next = new Set(immediateIds);
       for (const id of keepLocalMembership) {
         if (previous.has(id)) next.add(id);
         else next.delete(id);
@@ -279,26 +279,26 @@ function BoardsContent() {
         void reconcileBoardSubscriptionRef.current(id, uid, sid);
       }
     }
-    if (deferredOmissions.size === 0) return;
+    if (deferredMembership.size === 0) return;
     return () => {
-      const omissions = [...deferredOmissions].filter((id) =>
+      const applicableIds = [...deferredMembership].filter((id) =>
         !pendingSubscriptionCounts.current.has(id) &&
         !pendingServerConfirmCounts.current.has(id) &&
         (boardWriteRevision.current.get(id) ?? 0) <= membership.writeRevisionAtDispatch &&
         (boardConfirmationAppliedAt.current.get(id) ?? 0) <= serverRevisionAtDispatch
       );
-      if (omissions.length === 0) return;
-      const confirmed = new Set(confirmedSubscribedRef.current);
-      for (const id of omissions) {
-        confirmed.delete(id);
-        markListApplied(id);
-      }
-      confirmedSubscribedRef.current = confirmed;
-      applySubscribed((previous) => {
+      if (applicableIds.length === 0) return;
+      const applyMembership = (previous: Set<string>) => {
         const next = new Set(previous);
-        for (const id of omissions) next.delete(id);
+        for (const id of applicableIds) {
+          if (subscribedIds.has(id)) next.add(id);
+          else next.delete(id);
+        }
         return next;
-      });
+      };
+      confirmedSubscribedRef.current = applyMembership(confirmedSubscribedRef.current);
+      for (const id of applicableIds) markListApplied(id);
+      applySubscribed(applyMembership);
     };
   }, [applySubscribed]);
 
@@ -337,18 +337,18 @@ function BoardsContent() {
         ...pendingServerConfirmCounts.current.keys(),
       ]);
       let boardRowsSucceeded = false;
-      let applyDeferredOmissions: (() => void) | undefined;
+      let applyDeferredMembership: (() => void) | undefined;
       // Apply each result on arrival. Either read can revoke access to both.
       await Promise.all([
         listBoards(sid, 120).then((rows) => {
           if (!isCurrent()) return;
           boardRowsSucceeded = true;
           setBoards(rows);
-          applyDeferredOmissions?.();
+          applyDeferredMembership?.();
         }).catch(handleError),
         readSubscribedBoardIds(uid, sid).then(({ ids, serverConfirmedIds }) => {
           if (!isCurrent()) return;
-          applyDeferredOmissions = applySubscriptionList({
+          applyDeferredMembership = applySubscriptionList({
             subscribedIds: new Set(ids),
             serverConfirmedIds: new Set(serverConfirmedIds),
             writeRevisionAtDispatch,
