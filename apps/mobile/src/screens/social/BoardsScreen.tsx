@@ -287,9 +287,9 @@ function BoardsContent() {
       }
       confirmedSubscribedRef.current = nextConfirmed;
       awaitingServerConfirm.current.delete(boardId);
-      if (deferredListMembership.current.get(boardId) === deferredMembership) {
-        deferredListMembership.current.delete(boardId);
-      }
+      // A successful server read supersedes any list deferred for this board,
+      // including one held by a newer confirmation that is still in flight.
+      deferredListMembership.current.delete(boardId);
       applySubscribed((previous) => {
         if (previous.has(boardId) === serverSubscribed) return previous;
         const next = new Set(previous);
