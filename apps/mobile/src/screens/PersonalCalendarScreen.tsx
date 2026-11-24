@@ -86,6 +86,19 @@ type LoadState =
 
 type FocusParams = { eventId?: string } | undefined;
 
+function useCalendarAccount() {
+  const platform = useNuniSession();
+  const legacy = useAuth();
+  const loggingOut = !!platform.pendingLogout;
+  const sessionRejected = !platform.session && !!platform.error;
+  const knownOwner = platform.session
+    ? `nuni:${platform.session.platformAccountId}`
+    : !sessionRejected && legacy.user?.uid
+      ? `firebase:${legacy.user.uid}`
+      : null;
+  return { knownOwner, loggingOut, sessionRejected };
+}
+
 /** A separate stack entry keeps a campus suggestion from replacing an open personal draft. */
 export function CampusEventCalendarDraftScreen() {
   const { params } =
@@ -96,26 +109,27 @@ export function CampusEventCalendarDraftScreen() {
       >
     >();
   const scope = usePersonalImportScope();
-  const platform = useNuniSession();
-  const loggingOut = !!platform.pendingLogout;
-  const sessionRejected = !platform.session && !!platform.error;
+  const { knownOwner, loggingOut, sessionRejected } = useCalendarAccount();
   const { school, schoolId, selectionReady } = useSchool();
   const campusEvent = params?.campusEvent;
   const knownSchoolId = school?.id || schoolId || '';
   const schoolCleared = !!selectionReady && !knownSchoolId;
   const schoolChanged =
     !!campusEvent && !!selectionReady && !!knownSchoolId && knownSchoolId !== campusEvent.schoolId;
-  const matches =
-    !!scope && scope.owner === campusEvent?.owner && scope.schoolId === campusEvent.schoolId;
+  const ownerChanged = !!knownOwner && knownOwner !== campusEvent?.owner;
+  const scopeChanged =
+    !!scope && (scope.owner !== campusEvent?.owner || scope.schoolId !== campusEvent.schoolId);
+  const invalidated = ownerChanged || scopeChanged || schoolChanged || sessionRejected || schoolCleared;
   const expired = useRef(false);
   useLayoutEffect(() => {
-    if ((scope && !matches) || schoolChanged || sessionRejected || schoolCleared) expired.current = true;
-  }, [scope, matches, schoolChanged, sessionRejected, schoolCleared]);
-  if (!campusEvent?.draft || (scope && !matches) || expired.current || loggingOut || schoolChanged || sessionRejected || schoolCleared) {
+    if (invalidated) expired.current = true;
+  }, [invalidated]);
+  const needsNewDraft = invalidated || expired.current || loggingOut;
+  if (!campusEvent?.draft || needsNewDraft) {
     return (
       <Screen>
         <Text style={{ color: theme.colors.text }}>
-          {loggingOut || sessionRejected || (scope && !matches) || expired.current || schoolChanged || schoolCleared
+          {needsNewDraft
             ? '請回到目前校園的活動頁重新開啟草稿。'
             : '正在確認帳號與校園…'}
         </Text>
@@ -156,19 +170,11 @@ function parsePersonalImportKey(key: string): { owner: string; schoolId: string 
 
 export default function PersonalCalendarScreen() {
   const scope = usePersonalImportScope();
-  const platform = useNuniSession();
-  const legacy = useAuth();
-  const loggingOut = !!platform.pendingLogout;
-  const sessionRejected = !platform.session && !!platform.error;
+  const { knownOwner, loggingOut, sessionRejected } = useCalendarAccount();
   const { school, schoolId, selectionReady } = useSchool();
   const route = useRoute();
   const key = scope ? personalImportStorageKey(scope) : '';
   const lastReadyKey = useRef(key);
-  const knownOwner = platform.session
-    ? `nuni:${platform.session.platformAccountId}`
-    : !sessionRejected && legacy.user?.uid
-      ? `firebase:${legacy.user.uid}`
-      : null;
   const knownSchoolId = school?.id || schoolId || '';
   const schoolCleared = !!selectionReady && !knownSchoolId;
   const staleSticky = (() => {
@@ -445,9 +451,12 @@ function PersonalCalendarWorkspace({
         (!latest.resolvedKey || latest.resolvedKey === expected);
     };
     // A destructive confirmation belongs to a single uninterrupted verification.
-    const guard = confirmationScope
-      ? { canContinue, canStartWrite: () => currentScope.current === confirmationScope }
-      : canContinue;
+    const guard: PersonalImportWriteGuard = {
+      canContinue,
+      canCommitFirstWrite: confirmationScope
+        ? () => currentScope.current === confirmationScope
+        : undefined,
+    };
     mutationLock.current = true;
     setSaving(true);
     setFormError('');

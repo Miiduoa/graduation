@@ -2,15 +2,17 @@ import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import EventScreen from '../screens/EventDetailAiFirstScreen';
 import EventsScreen from '../screens/EventsListAiFirstScreen';
 import { CampusEventCalendarDraftScreen } from '../screens/PersonalCalendarScreen';
 import { loadCampusEvent, loadCampusEventPage } from '../services/publicCampusContent';
-import { loadPersonalImports, type PersonalImportScope } from '../services/personalImports';
+import { loadPersonalImports, personalImportStorageKey, type PersonalImportScope } from '../services/personalImports';
 
 jest.unmock('@react-navigation/native');
-jest.mock('../state/auth', () => ({ useAuth: () => ({ user: { uid: 'student' } }) }));
+jest.mock('../state/auth', () => ({
+  useAuth: () => require('react').useContext(mockAuthContext),
+}));
 jest.mock('../state/school', () => ({
   useSchool: () => ({
     school: { id: require('react').useContext(mockScopeContext)?.schoolId ?? 'pu', name: '校園' },
@@ -21,7 +23,10 @@ jest.mock('../state/personalImportScope', () => ({
   usePersonalImportScope: () => require('react').useContext(mockScopeContext),
 }));
 jest.mock('../state/nuniSession', () => ({
-  useNuniSession: () => ({ pendingLogout: false }),
+  useNuniSession: () => ({
+    pendingLogout: false,
+    session: mockPlatformSession,
+  }),
 }));
 jest.mock('../services/publicCampusContent', () => ({
   loadCampusEvent: jest.fn(),
@@ -50,9 +55,20 @@ const activity = {
 };
 let mockScope: PersonalImportScope;
 let mockVerifying: boolean;
+let mockPlatformSession: { platformAccountId: string } | null;
+let mockAuth: { user: { uid: string }; loading: boolean };
+const mockAuthContext = React.createContext<typeof mockAuth | null>(null);
 const mockScopeContext = React.createContext<PersonalImportScope | null>(null);
 
 function Journey() {
+  return (
+    <mockAuthContext.Provider value={mockAuth}>
+      <JourneyStack />
+    </mockAuthContext.Provider>
+  );
+}
+
+function JourneyStack() {
   return (
     <mockScopeContext.Provider value={mockVerifying ? null : mockScope}>
       <NavigationContainer>
@@ -72,6 +88,8 @@ function Journey() {
 beforeEach(async () => {
   mockScope = { owner: 'nuni:account-a', schoolId: 'pu' };
   mockVerifying = false;
+  mockPlatformSession = { platformAccountId: 'account-a' };
+  mockAuth = { user: { uid: 'student' }, loading: false };
   await AsyncStorage.clear();
   jest
     .mocked(loadCampusEventPage)
@@ -130,14 +148,53 @@ test.each([
   expect(view.queryByLabelText('標題')).toBeNull();
   mockVerifying = false;
   mockScope = nextScope;
+  mockPlatformSession = { platformAccountId: nextScope.owner.slice(5) };
   view.rerender(<Journey />);
   await view.findByText('請回到目前校園的活動頁重新開啟草稿。');
   expect(view.queryByLabelText('標題')).toBeNull();
   expect((await loadPersonalImports(nextScope)).records).toHaveLength(0);
   mockScope = original;
+  mockPlatformSession = { platformAccountId: original.owner.slice(5) };
   view.rerender(<Journey />);
   expect(view.queryByLabelText('標題')).toBeNull();
   expect((await loadPersonalImports(original)).records).toHaveLength(0);
+});
+
+test('Firebase 已切換帳號但個人資料仍在載入時，卸載舊草稿並撤銷未完成的寫入', async () => {
+  mockPlatformSession = null;
+  const original = { owner: 'firebase:student', schoolId: 'pu' };
+  mockScope = original;
+  const view = await openDraft();
+  const key = personalImportStorageKey(original);
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  const nativeSetItem = setItem.getMockImplementation()!;
+  let finishWrite!: () => void;
+  const pendingWrite = new Promise<void>((resolve) => { finishWrite = resolve; });
+  setItem.mockImplementationOnce(async (storageKey, value) => {
+    await pendingWrite;
+    await nativeSetItem(storageKey, value);
+  });
+  setItem.mockClear();
+  fireEvent.press(await view.findByRole('button', { name: '儲存行程', disabled: false }));
+  await waitFor(() => expect(setItem).toHaveBeenCalledWith(key, expect.any(String)));
+
+  mockAuth = { user: { uid: 'another-student' }, loading: true };
+  mockVerifying = true;
+  view.rerender(<Journey />);
+  await view.findByText('請回到目前校園的活動頁重新開啟草稿。');
+  expect(view.queryByLabelText('標題')).toBeNull();
+
+  await act(async () => {
+    finishWrite();
+    expect((await loadPersonalImports(original)).records).toEqual([]);
+  });
+  expect(await AsyncStorage.getItem(key)).toBeNull();
+
+  mockAuth = { user: { uid: 'student' }, loading: false };
+  mockVerifying = false;
+  view.rerender(<Journey />);
+  expect(view.getByText('請回到目前校園的活動頁重新開啟草稿。')).toBeTruthy();
+  expect(view.queryByLabelText('標題')).toBeNull();
 });
 
 test('同帳校驗證期間隱藏內容，返回後保留編輯與取消狀態', async () => {

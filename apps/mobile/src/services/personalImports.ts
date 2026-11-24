@@ -31,6 +31,7 @@ export const personalImportStorageKey = (scope: PersonalImportScope) =>
   `campus.personal-imports.v1:${encodeURIComponent(scope.owner)}:${encodeURIComponent(scope.schoolId)}`;
 const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [] });
 const locks = new Map<string, Promise<unknown>>();
+const pendingCheckpoints = new Map<string, Promise<void>>();
 type ImportChange = { scope: PersonalImportScope; source: 'local' | 'sync' };
 const listeners = new Set<(change: ImportChange) => void>();
 export function subscribePersonalImports(listener: (change: ImportChange) => void) {
@@ -63,7 +64,13 @@ export async function snapshotPersonalImports(
 export async function loadPersonalImports(
   scope: PersonalImportScope,
 ): Promise<PersonalImportLedger> {
-  const raw = await AsyncStorage.getItem(personalImportStorageKey(scope));
+  const key = personalImportStorageKey(scope);
+  const pending = pendingCheckpoints.get(key);
+  if (pending) await pending;
+  return parseLedger(await AsyncStorage.getItem(key), scope);
+}
+
+function parseLedger(raw: string | null, scope: PersonalImportScope): PersonalImportLedger {
   if (!raw) return empty();
   let value: PersonalImportLedger;
   try {
@@ -114,12 +121,12 @@ export async function loadPersonalImports(
   return value;
 }
 
-/** A verified operation may require uninterrupted verification up to its first write. */
+/** A verified operation may require uninterrupted verification through its first durable write. */
 export type PersonalImportWriteGuard =
   | (() => boolean)
   | {
       canContinue: () => boolean;
-      canStartWrite: () => boolean;
+      canCommitFirstWrite?: () => boolean;
     };
 
 export function mutatePersonalImportLedger<T>(
@@ -142,26 +149,53 @@ export function mutatePersonalImportLedger<T>(
       let hasPersisted = false;
       const assertWritable = () => {
         if (!canContinue()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
-        if (!hasPersisted && typeof guard !== 'function' && !guard.canStartWrite()) {
+        if (!hasPersisted && typeof guard !== 'function' && guard.canCommitFirstWrite?.() === false) {
           throw new Error('目前無法確認行事曆可寫入，請稍後再試。');
         }
       };
       assertWritable();
-      const current = await loadPersonalImports(scope);
+      let persistedRaw = await AsyncStorage.getItem(key);
+      const current = parseLedger(persistedRaw, scope);
       assertWritable();
       let persisted = current;
       const checkpoint = async (ledger: PersonalImportLedger) => {
         assertWritable();
         if (JSON.stringify(persisted) === JSON.stringify(ledger)) return;
-        await AsyncStorage.setItem(key, JSON.stringify(ledger));
-        hasPersisted = true;
-        persisted = ledger;
-        for (const listener of listeners) {
+        const raw = JSON.stringify(ledger);
+        const write = async () => {
           try {
-            listener({ scope, source });
-          } catch {
-            /* A view cannot invalidate a durable write. */
+            await AsyncStorage.setItem(key, raw);
+          } finally {
+            if (typeof guard !== 'function') {
+              try {
+                assertWritable();
+              } catch (error) {
+                // Native writes cannot be cancelled. Restore the previous bytes
+                // before releasing readers or the next mutation.
+                if (persistedRaw === null) await AsyncStorage.removeItem(key);
+                else await AsyncStorage.setItem(key, persistedRaw);
+                throw error;
+              }
+            }
           }
+          hasPersisted = true;
+          persistedRaw = raw;
+          persisted = ledger;
+          for (const listener of listeners) {
+            try {
+              listener({ scope, source });
+            } catch {
+              /* A view cannot invalidate a durable write. */
+            }
+          }
+        };
+        if (typeof guard === 'function') return write();
+        const checkpointWrite = write();
+        pendingCheckpoints.set(key, checkpointWrite.then(() => undefined, () => undefined));
+        try {
+          await checkpointWrite;
+        } finally {
+          pendingCheckpoints.delete(key);
         }
       };
       const { ledger, result } = await update(current, checkpoint);

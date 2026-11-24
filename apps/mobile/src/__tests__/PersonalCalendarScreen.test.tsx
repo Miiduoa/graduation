@@ -18,6 +18,7 @@ import {
   deletePersonalImport,
   loadPersonalImports,
   personalImportStorageKey,
+  subscribePersonalImports,
 } from '../services/personalImports';
 
 jest.mock('../services/personalImports', () => {
@@ -594,6 +595,47 @@ it.each(['during revalidation', 'after recovery'])(
     expect(view.queryByText('已刪除這筆個人行程。')).toBeNull();
   },
 );
+
+it('preserves the event when verification changes after native deletion was dispatched', async () => {
+  const view = await fillAndSave('寫入途中重驗');
+  const scope = mockScope!;
+  const key = personalImportStorageKey(scope);
+  const stored = await AsyncStorage.getItem(key);
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  const nativeSetItem = setItem.getMockImplementation()!;
+  const write = deferred<void>();
+  setItem.mockClear();
+  setItem.mockImplementationOnce(async (storageKey, value) => {
+    await write.promise;
+    await nativeSetItem(storageKey, value);
+  });
+  const listener = jest.fn();
+  const unsubscribe = subscribePersonalImports(listener);
+  try {
+    fireEvent.press(view.getByText('寫入途中重驗'));
+    fireEvent.press(view.getByText('刪除這筆'));
+    await waitFor(() => expect(setItem).toHaveBeenCalledWith(key, expect.any(String)));
+    expect(JSON.parse(setItem.mock.calls[0][1]).records).toEqual([]);
+    const deletion = jest.mocked(deletePersonalImport).mock.results[0].value;
+
+    mockScope = null;
+    view.rerender(<PersonalCalendarScreen />);
+    mockScope = scope;
+    view.rerender(<PersonalCalendarScreen />);
+    const read = loadPersonalImports(scope);
+    await act(async () => {
+      write.resolve();
+      await expect(deletion).rejects.toThrow('目前無法確認行事曆可寫入');
+    });
+
+    expect((await read).records.map((row) => row.title)).toEqual(['寫入途中重驗']);
+    expect(await AsyncStorage.getItem(key)).toBe(stored);
+    expect(listener).not.toHaveBeenCalled();
+    expect(view.queryByText('已刪除這筆個人行程。')).toBeNull();
+  } finally {
+    unsubscribe();
+  }
+});
 
 it.each(['recovered success', 'recovered error', 'success without revalidation'])(
   'ignores an older enabled reminder read after %s',
