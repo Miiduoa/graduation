@@ -1139,3 +1139,53 @@ describe('official Providence classroom codes with cross-checked POI identities'
     }
   });
 });
+
+describe('campus archive names for the existing Providence building pins', () => {
+  it.each([
+    ['pu-zhishan', 'Zhi Shan Hall'],
+    ['pu-xijia', 'Schultz Hall'],
+    ['pu-sigao', 'St. Bosco Hall'],
+    ['pu-monastery', 'Our Lady of Providence Convent'],
+  ])('recognizes the published %s as %s without adding a new destination', (id, english) => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find((item) => item.id === id)!;
+    expect(place).toBeDefined();
+    // Name-only lookup is not a claim of room availability or public access.
+    const result = resolveCampusClassroom({
+      schoolId: 'pu', query: english, locations: PROVIDENCE_CAMPUS_PLACES,
+    });
+    expect(result.status).toBe('matched');
+    expect(result.matches).toEqual([place]);
+    expect(result.matches[0]).toBe(place);
+    const imported = { ...place, name: english };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: place.name, locations: [imported],
+    }).matches[0]).toBe(imported);
+    for (const invalid of [
+      { ...place, id: 'synthetic-unsourced-hall' },
+      { ...place, name: 'Unverified building' },
+      { ...place, lat: place.lat + 1 },
+      { ...place, category: '公車站' },
+      { ...place, schoolId: 'another-school' },
+    ]) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query: english, locations: [invalid],
+      }).status).toBe('unmatched');
+    }
+    expect(resolveCampusClassroom({
+      schoolId: 'another-school', query: english, locations: [place],
+    }).status).toBe('unmatched');
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: english, locations: [place, { ...place }],
+    }).status).toBe('unmatched');
+  });
+
+  it('supports synthetic room notation for Zhi Shan Hall but not a floor-only request', () => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find((item) => item.id === 'pu-zhishan')!;
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'Ｚｈｉ Ｓｈａｎ Ｈａｌｌ ３０３', locations: PROVIDENCE_CAMPUS_PLACES,
+    }).matches).toEqual([place]);
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: 'Zhi Shan Hall 3F', locations: [place],
+    }).status).toBe('unmatched');
+  });
+});
