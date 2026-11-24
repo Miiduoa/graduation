@@ -131,7 +131,7 @@ const STATUS_PARTICLES = ['有沒有', '有無', '過了嗎', '了沒', '了嗎'
 const LMS_NAMES = ['玩課雲', '創課', 'tron class', 'tronclass'];
 const READ_PARTICLES = [
   '有哪些', '哪些', '是否', '一下', '我的', '這週', '本週', '什麼時候', '哪一天',
-  '給我看', '是什麼', '怎麼樣', '怎樣', '如何', '什麼', '哪天', '時候', '有什麼', '有幾份',
+  '給我看', '是什麼', '是不是', '就是', '才是', '不是', '只是', '怎麼樣', '怎樣', '如何', '什麼', '哪天', '時候', '有什麼', '有幾份',
   '狀態', '紀錄', '記錄', '情況', '進度', '歷史', '期限', '截止', '截止日期', '截止日', '截止時間',
   'deadline', '日期', '時間',
   '校園', '學校', '老師', '資料', '筆記', '說明', '標題', '關於', '含', '成績',
@@ -155,7 +155,7 @@ const DOMAIN_NOUNS = [
   '公告', '通知', '教材', '課程', '課表', '修訂稿', '舊版', '新版', '這份', '那份',
   '討論', '問卷', '測驗', '考試', '截圖', '文件', '草稿',
   '發布時間', '發佈時間', '發文時間', '發布日期', '發佈日期', '發文日期',
-  '作業準備區', '作業準備', '作業區', '準備區', '下載區', '下載說明', '交流區',
+  '作業準備區', '作業準備', '作業區', '準備區', '下載區', '下載說明', '下載公告', '交流區',
   '後面', '後來', '後續', '後方', '後段', '後期', '後天', '後台', '後端', '後排', '後座',
   '及時', '及格', '及第', '及至', '及早', '及其',
   '中文', '中文版', '中間', '中午', '中心', '中央', '中等', '中級', '中學', '中部',
@@ -1286,8 +1286,17 @@ function hasDescriptiveAction(text: string): boolean {
   let request = false;
   let declarativeModal = false;
   let readOnlyStatus: boolean | undefined;
+  let sawQuery = false;
+  let declarativeComplement = false;
+  let questionComplement = false;
+  let terminalQuestion = false;
   for (const [index, token] of tokens.entries()) {
     if (token.kind === 'punct' && CLAUSE_PUNCT.test(token.value)) {
+      if (declarativeComplement && !questionComplement && !terminalQuestion && token.value !== '?') return true;
+      sawQuery = false;
+      declarativeComplement = false;
+      questionComplement = false;
+      terminalQuestion = false;
       descriptivePrefix = false;
       experiencePrefix = false;
       submissionStatus = false;
@@ -1296,6 +1305,17 @@ function hasDescriptiveAction(text: string): boolean {
       declarativeModal = false;
       continue;
     }
+    const value = token.value.toLowerCase();
+    terminalQuestion = value === '嗎' || value === '呢';
+    if (sawQuery && COPULAS.has(value)) {
+      declarativeComplement = true;
+      questionComplement = false;
+    } else if (declarativeComplement && READ_QUESTION_WORDS.has(value)) {
+      questionComplement = true;
+    }
+    // Download history and other nominal uses do not name a supported read.
+    if (DOWNLOAD_ACTIONS.has(value) && !isDownloadCommand(tokens, index)) return true;
+    sawQuery ||= token.kind === 'query' || value === '改查';
     const write = isWriteVerbToken(token);
     const action = write || (token.kind !== 'noun' && (token.kind === 'query' ||
       isPrepareActionValue(token.value) || DOWNLOAD_ACTIONS.has(token.value.toLowerCase())));
@@ -1333,7 +1353,7 @@ function hasDescriptiveAction(text: string): boolean {
     submissionStatus = (write && isSubmitWriteToken(token) && !isWriteNegatedAt(tokens, index)) ||
       (submissionStatus && STATUS_NOUN.test(token.value));
   }
-  return false;
+  return declarativeComplement && !questionComplement && !terminalQuestion;
 }
 
 const PREPARE_REQUEST_CUES = new Set([
@@ -1344,11 +1364,44 @@ const READ_REQUEST_PREFIX = new Set([
   'please', '我', '想', '要', '現在', '就', '再', '先', '只', '只要', '能', '可以', '可',
   '開啟', '打開', '開', '前往', '進入', 'open', 'go to',
 ]);
+const COPULAS = new Set(['是', '就是', '才是', '不是', '只是', 'is', 'are']);
 const READ_QUESTION_WORDS = new Set([
   '有沒有', '有無', '有哪些', '哪些', '是否', '有什麼', '有幾份',
-  '什麼時候', '哪一天', '哪天', '是什麼', '什麼', '如何', '怎樣', '怎麼樣', '過了嗎', '了沒', '了嗎',
+  '什麼時候', '哪一天', '哪天', '是什麼', '是不是', '什麼', '如何', '怎樣', '怎麼樣', '過了嗎', '了沒', '了嗎',
   '可以做什麼', '能做什麼', '有哪些功能', '支援什麼', '支援哪些', '做什麼', 'what can',
 ]);
+
+function isDownloadCommand(tokens: Token[], index: number): boolean {
+  const next = nextSignificantToken(tokens, index);
+  if (next?.value === '的' || next?.value === '之' || (next && STATUS_NOUN.test(next.value))) return false;
+
+  let hasObject = false;
+  let needsBa = false;
+  let sawRequestPrefix = false;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const token = tokens[cursor]!;
+    if (isWhitespaceToken(token)) continue;
+    const value = token.value.toLowerCase();
+    if (needsBa) {
+      if (hasObject && BA_MARKERS.has(value)) {
+        needsBa = false;
+        continue;
+      }
+      if (token.kind !== 'noun' && value !== '的' && value !== '全部') return false;
+      hasObject ||= token.kind === 'noun';
+      continue;
+    }
+    if (isClauseBoundaryToken(token) || value === '並') break;
+    if (READ_REQUEST_PREFIX.has(value)) {
+      sawRequestPrefix = true;
+      continue;
+    }
+    if (hasObject || (token.kind !== 'noun' && value !== '的' && value !== '全部')) return false;
+    needsBa = true;
+    hasObject = token.kind === 'noun';
+  }
+  return !needsBa && (hasObject || sawRequestPrefix || (next !== undefined && !isClauseBoundaryToken(next)));
+}
 
 function hasPositiveReadForm(text: string): boolean {
   const tokens = visibleCommandTokens(text);
@@ -1363,7 +1416,8 @@ function hasPositiveReadForm(text: string): boolean {
     if ((requestPrefix || objectPrefix || (topicPrefix && value === '查一下')) &&
       token.kind === 'query' && !isPrepareActionValue(value)) {
       const next = nextSignificantToken(tokens, index);
-      if (next?.value !== '的' && next?.value !== '之') return true;
+      if (next?.value !== '的' && next?.value !== '之' &&
+        (!DOWNLOAD_ACTIONS.has(value) || isDownloadCommand(tokens, index))) return true;
     }
     // The 把／將 construction puts its object before the command verb.
     objectPrefix = (requestPrefix && BA_MARKERS.has(value)) ||
@@ -1571,17 +1625,17 @@ function hasNonPrepareQueryCommand(text: string): boolean {
 
 function readIntentOf(text: string): TronClassAgentQueryIntent {
   const visible = textWithoutFilenameTokens(text);
-  const mask = dataTypeMask(text);
   if (/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i.test(visible)) {
     return { intent: 'capabilities', pendingOnly: false };
   }
   const pendingOnly = /(?:未交|未繳|待交|待繳|待提交|尚未(?:交|繳|提交)|還沒(?:交|繳|提交)|沒(?:交|繳)|pending|unsubmitted|not\s+submitted)/i.test(visible);
   const dataIntent = lastDataTypeIntent(text);
   if (dataIntent === 'announcements') return { intent: 'announcements', pendingOnly: false };
-  const tokens = tokensFor(text).filter(token => token.kind !== 'filename' && !tokenIsProtected(token, mask));
+  const tokens = visibleCommandTokens(text);
   const preparationRequested = hasHonoredPrepareCommand(text) && /(?:作業|homework|assignment)/i.test(visible);
   const preparation = preparationRequested && !hasNonPrepareQueryCommand(text);
-  const downloading = tokens.some(token => DOWNLOAD_ACTIONS.has(token.value) || DOWNLOAD_ACTIONS.has(token.value.toLowerCase()));
+  const downloading = tokens.some((token, index) =>
+    DOWNLOAD_ACTIONS.has(token.value.toLowerCase()) && isDownloadCommand(tokens, index));
   if (preparationRequested && downloading) return { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' };
   if (/(?:測驗|考試|問卷)/.test(visible)) return { intent: 'unsupported', pendingOnly: false };
   if (downloading) return { intent: 'download', pendingOnly: false };
