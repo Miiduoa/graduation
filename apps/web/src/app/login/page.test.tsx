@@ -8,6 +8,7 @@ import {
   TEACHER_LMS_UNAVAILABLE_COPY,
 } from '@/lib/schoolLoginErrorCopy';
 import {
+  isPuEcampusDataFetchEnabled,
   PU_ECAMPUS_DATA_PAUSED_CODE,
   PU_ECAMPUS_DATA_PAUSED_MESSAGE,
 } from '@campus/shared/src/puEcampusDataPolicy';
@@ -24,10 +25,15 @@ const { replace, signIn, state } = vi.hoisted(() => ({
     optionsError: false,
     retryOptions: vi.fn(),
     selectedSchoolId: null as string | null,
+    catalogStatus: 'ready',
     schoolDirectoryLoading: false,
     requestedUnavailable: false,
     selectSchool: vi.fn(),
   },
+}));
+vi.mock('@campus/shared/src/puEcampusDataPolicy', async (original) => ({
+  ...(await original<typeof import('@campus/shared/src/puEcampusDataPolicy')>()),
+  isPuEcampusDataFetchEnabled: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({
   usePathname: () => '/login',
@@ -61,15 +67,22 @@ vi.mock('@/features/auth/client', () => ({
   isFirebaseConfigured: () => true,
   signInWithPuStudentId: signIn,
 }));
+const { schools } = vi.hoisted(() => ({
+  schools: [
+    { id: 'pu', name: '靜宜大學' },
+    { id: 'ntu', name: '國立臺灣大學' },
+    { id: 'fju', name: '輔仁大學' },
+  ],
+}));
 vi.mock('@/components/SelectedSchoolProvider', () => ({
   useOptionalSelectedSchool: () => ({
     selectedSchoolId: state.selectedSchoolId,
-    selectedSchool: state.selectedSchoolId ? { id: state.selectedSchoolId, name: '校園' } : null,
+    selectedSchool: schools.find(({ id }) => id === state.selectedSchoolId) ?? null,
     loading: state.schoolDirectoryLoading,
-    catalogStatus: 'ready',
+    catalogStatus: state.catalogStatus,
     requestedUnavailable: state.requestedUnavailable,
     selectSchool: state.selectSchool,
-    schools: [{ id: 'pu', name: '靜宜大學' }, { id: 'ntu', name: '國立臺灣大學' }],
+    schools,
   }),
 }));
 vi.mock('@/lib/signInOptions', async (original) => ({
@@ -84,6 +97,7 @@ vi.mock('@/lib/signInOptions', async (original) => ({
 }));
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(isPuEcampusDataFetchEnabled).mockReturnValue(true);
   state.params = new URLSearchParams('returnUrl=%2Fgrades%3Ftab%3Dsemester');
   state.user = { uid: 'one' };
   state.studentId = false;
@@ -92,6 +106,7 @@ beforeEach(() => {
   state.optionsError = false;
   state.selectedSchoolId = null;
   state.schoolDirectoryLoading = false;
+  state.catalogStatus = 'ready';
   state.requestedUnavailable = false;
   signIn.mockResolvedValue({ uid: 'one' });
   vi.stubGlobal('location', { ...window.location, replace });
@@ -1008,6 +1023,45 @@ it('prioritizes the confirmed selected school at general login without removing 
   expect(signIn).not.toHaveBeenCalled();
 });
 
+it.each(['pu', null])('keeps Google first during the PU student pause and blocks student credentials (%s)', (schoolId) => {
+  vi.mocked(isPuEcampusDataFetchEnabled).mockReturnValue(false);
+  state.studentId = true;
+  state.selectedSchoolId = schoolId;
+  state.params = new URLSearchParams();
+  render(<LoginPage />);
+  const platform = screen.getByTestId('platform-sign-in');
+  const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+  expect(platform.compareDocumentPosition(school) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(school.open).toBe(false);
+  fireEvent.click(school.querySelector('summary')!);
+  expect(screen.getByText(/靜宜學生的 E 校園登入已暫停/)).toBeTruthy();
+  const account = screen.getByLabelText('教師帳號');
+  const password = screen.getByLabelText('密碼') as HTMLInputElement;
+  expect(screen.queryByLabelText('學號')).toBeNull();
+  for (const student of ['1110700321', 's1234567', 'S1234567@pu.edu.tw']) {
+    fireEvent.change(account, { target: { value: student } });
+    expect(password.disabled).toBe(true);
+    fireEvent.submit(account.closest('form')!);
+  }
+  expect(signIn).not.toHaveBeenCalled();
+});
+
+it('keeps teacher verification on the requested school route during the PU student pause', async () => {
+  vi.mocked(isPuEcampusDataFetchEnabled).mockReturnValue(false);
+  state.user = null;
+  state.studentId = true;
+  state.selectedSchoolId = 'pu';
+  state.params = new URLSearchParams({ reconnect: 'school', returnUrl: '/profile?schoolId=pu' });
+  render(<LoginPage />);
+  expect((screen.getByLabelText('學校帳號登入') as HTMLDetailsElement).open).toBe(true);
+  expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  fireEvent.change(screen.getByLabelText('教師帳號'), { target: { value: 'teacher.yang' } });
+  fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'test-only-password' } });
+  fireEvent.click(screen.getByRole('button', { name: '使用教師帳號登入' }));
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/profile?schoolId=pu'));
+  expect(signIn).toHaveBeenCalledWith('TEACHER.YANG', 'test-only-password', expect.any(AbortSignal), 'pu');
+});
+
 it('does not prioritize a selected school when its sign-in is unavailable', () => {
   state.params = new URLSearchParams();
   state.user = null;
@@ -1019,4 +1073,41 @@ it('does not prioritize a selected school when its sign-in is unavailable', () =
   expect(school.open).toBe(false);
   expect(google.compareDocumentPosition(school) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.queryByLabelText('學號')).toBeNull();
+});
+
+it('offers the selected school’s official LMS even when in-app school login is closed', () => {
+  state.params = new URLSearchParams();
+  state.selectedSchoolId = 'fju';
+  const view = render(<LoginPage />);
+  fireEvent.click(screen.getByLabelText('學校帳號登入').querySelector('summary')!);
+  const link = screen.getByRole('link', { name: /輔大 TronClass/ });
+  expect(link.getAttribute('href')).toBe('https://elearn2.fju.edu.tw/');
+  expect(link.getAttribute('rel')).toContain('noreferrer');
+  expect(screen.queryByLabelText('密碼')).toBeNull();
+  expect(screen.getByRole('button', { name: '使用 Google 帳號繼續' })).toBeTruthy();
+
+  state.selectedSchoolId = 'ntu';
+  view.rerender(<LoginPage />);
+  expect(screen.queryByRole('link', { name: /TronClass/ })).toBeNull();
+  expect(signIn).not.toHaveBeenCalled();
+});
+
+it('hides a previously selected LMS while the campus is unresolved or unavailable', () => {
+  state.params = new URLSearchParams();
+  state.selectedSchoolId = 'pu';
+  state.studentId = true;
+  const view = render(<LoginPage />);
+  const officialLink = 'a[href="https://tronclass.pu.edu.tw/"]';
+  expect(view.container.querySelector(officialLink)).toBeTruthy();
+  state.schoolDirectoryLoading = true;
+  view.rerender(<LoginPage />);
+  expect(view.container.querySelector(officialLink)).toBeNull();
+  state.schoolDirectoryLoading = false;
+  state.requestedUnavailable = true;
+  view.rerender(<LoginPage />);
+  expect(view.container.querySelector(officialLink)).toBeNull();
+  state.requestedUnavailable = false;
+  state.catalogStatus = 'error';
+  view.rerender(<LoginPage />);
+  expect(view.container.querySelector(officialLink)).toBeNull();
 });

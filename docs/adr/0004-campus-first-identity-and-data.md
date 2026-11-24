@@ -1,6 +1,6 @@
 # ADR 0004 — 校園優先、統一帳號與逐項授權的資料同步
 
-Status: Proposed (first entry/receipt slice only; not a deployed identity migration)
+Status: Proposed. The draft implements entry, mobile session handling and course-list receipts. Production identity migration is pending.
 Baseline: 322d42e045c4dfc23f46abe69a6da84046500e6f
 
 ## Decision
@@ -8,6 +8,12 @@ Baseline: 322d42e045c4dfc23f46abe69a6da84046500e6f
 For students, choose school once and prefer the school's approved sign-in (TronClass or its identity provider when supported). Create/resume one nuni person account only after authoritative proof. Google is an optional sign-in credential linked to that same person, not automatic proof of enrollment or a second personal data partition. Keep Google-first for public platform tasks, merchants and unverified participants; maintain guest access and existing users. Teacher and staff roles require independent school or course authority.
 
 The present PU student adapter is form-password against E campus; teacher LMS adapter uses TronClass proof. The Web runtime student-login flag and App release/provider/LMS flags are deliberately not flipped. A working LMS read adapter does not establish approval for direct student SSO or unrestricted site crawling.
+
+## Integration evidence
+
+Each school publishes its own sign-in destination. The directory identifies five official TronClass portals (PU, FJU, THU, NCUE and STU). Following one of these links opens the school site. Each tenant still needs an approved identity provider, a stable subject, and a verified data grant before nuni can import personal records. [TronClass institution login FAQ](https://support.tronclass.com/tw/question/login/) · [Higher education integration](https://www.tronclass.com/solutions-higher-education.html)
+
+Personal Google sign-in currently resolves a platform account. The pinned API also supports adding a school-configured credential to a tenant-local campus account. That endpoint requires an existing campus-account session in the same tenant. A PU Firebase school session and a consumer Google platform account still need an explicit ownership mapping, collision handling, and lookup at subsequent login. The first pilot should demonstrate that both sign-in methods return the same person and that disconnecting TronClass revokes future LMS reads. [Platform sign-in service](https://github.com/Miiduoa/nuni-prod/blob/9de47b4b3492325e430562c37bcad552867162db/apps/api/src/accounts/platform-account-service.ts#L171-L225) · [Tenant credential linking](https://github.com/Miiduoa/nuni-prod/blob/9de47b4b3492325e430562c37bcad552867162db/apps/api/src/accounts/account-service.ts#L246-L303)
 
 ## Target contract (not yet implemented)
 

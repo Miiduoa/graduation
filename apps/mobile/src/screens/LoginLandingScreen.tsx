@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -14,6 +14,11 @@ import {
   isSchoolLoginEntryAvailable,
   loadSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
+import { getSchoolTronClassEntry } from '@campus/shared/src/schoolLearningPlatforms';
+import {
+  webBrowserOpenWithPuTronClassGate,
+  webViewShouldAllowRequestUrl,
+} from '../services/tronClassWebUiGate';
 
 const workEntries = [
   { title: '店家進駐與門市管理', detail: '用 Google 帳號申請、查進度，或進入已授權的門市。', tab: 'merchant' },
@@ -42,6 +47,24 @@ export default function LoginLandingScreen() {
   const schoolEntry = hasSchool && isSchoolLoginEntryAvailable(school.id);
   const platformReady = !!auth.session && !auth.loading && !auth.error && !auth.pendingLogout;
   const schoolFirst = schoolEntry && !platformReady && !auth.loading && !auth.error && !auth.pendingLogout;
+  const catalogTronClass = hasSchool ? getSchoolTronClassEntry(school.id, school.name) : null;
+  const tronClassEntry =
+    catalogTronClass && webViewShouldAllowRequestUrl(catalogTronClass.url) ? catalogTronClass : null;
+  const tronClassOpenId = useRef(0);
+  const [tronClassOpenFailed, setTronClassOpenFailed] = useState(false);
+  useLayoutEffect(() => {
+    setTronClassOpenFailed(false);
+    return () => {
+      tronClassOpenId.current += 1;
+    };
+  }, [school.id, tronClassEntry?.url]);
+  async function openTronClass() {
+    if (!tronClassEntry) return;
+    const openId = ++tronClassOpenId.current;
+    setTronClassOpenFailed(false);
+    const opened = await webBrowserOpenWithPuTronClassGate(tronClassEntry.url);
+    if (!opened && tronClassOpenId.current === openId) setTronClassOpenFailed(true);
+  }
   useEffect(() => {
     if (!hasSchool) return;
     let active = true;
@@ -71,6 +94,27 @@ export default function LoginLandingScreen() {
         >
           <Text style={s.schoolButtonText}>使用學校帳號登入</Text>
         </Pressable>
+      ) : null}
+      {tronClassEntry ? (
+        <>
+          <Pressable
+            testID="school-tronclass-open"
+            accessibilityRole="link"
+            accessibilityLabel={`開啟學校官方 ${tronClassEntry.label}`}
+            style={({ pressed }) => [s.importButton, pressed && s.rowPressed]}
+            onPress={() => void openTronClass()}
+          >
+            <Text style={s.importButtonText}>開啟學校官方 {tronClassEntry.label} →</Text>
+          </Pressable>
+          <Text style={s.importHelp}>
+            在校方網站登入即可查看自己的課程。這個入口不會同步資料到 nuni，也不會綁定 Google 帳號。
+          </Text>
+          {tronClassOpenFailed ? (
+            <Text accessibilityRole="alert" style={s.importHelp} testID="school-tronclass-open-failed">
+              無法開啟學校網站，請稍後再試。
+            </Text>
+          ) : null}
+        </>
       ) : null}
       <SchoolPortalImportEntry
         onOpenRecords={(kind) => safeNavigate(navigation, 'PersonalImport', { kind })}

@@ -7,6 +7,9 @@ import { SiteShell } from '@/components/SiteShell';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useSearchParams } from 'next/navigation';
+import { getSchoolTronClassEntry } from '@campus/shared/src/schoolLearningPlatforms';
+import { isPuEcampusDataFetchEnabled } from '@campus/shared/src/puEcampusDataPolicy';
+import { isPuTeacherAccount } from '@/lib/server/puIdentity';
 import { useAuth } from '@/components/AuthGuard';
 import { isFirebaseConfigured, signInWithPuStudentId } from '@/features/auth/client';
 import {
@@ -87,6 +90,9 @@ function LoginForm({
   const previousSchoolId = useRef(selectedSchoolId);
   const schoolTask = reconnect || platformDestination(destination) !== destination;
   const schoolAvailable = options.studentId;
+  const puStudentPaused = schoolAvailable && (!selectedSchoolId || selectedSchoolId === 'pu') &&
+    !isPuEcampusDataFetchEnabled();
+  const acceptsAccount = !puStudentPaused || isPuTeacherAccount(studentId.trim());
   const schoolRequired = schoolTask && schoolAvailable;
   const hasSchoolIdentity = Boolean(
     user?.uid.startsWith('pu-') && (!selectedSchoolId || selectedSchoolId === 'pu'),
@@ -97,7 +103,20 @@ function LoginForm({
   // Only a selected, available school gets priority at the general entry.
   // Preserve explicit task-specific account routing and the existing server gate.
   const schoolFirst = !schoolTask && destination === '/' && Boolean(selectedSchoolId) &&
-    !options.loading && !options.error && schoolAvailable;
+    !options.loading && !options.error && schoolAvailable && !puStudentPaused;
+  const officialLms =
+    selectedSchoolId &&
+    schoolDirectoryReady &&
+    selection?.catalogStatus === 'ready' &&
+    !selection.requestedUnavailable &&
+    selection?.selectedSchool?.id === selectedSchoolId
+      ? getSchoolTronClassEntry(selectedSchoolId, selection.selectedSchool.name)
+      : null;
+  let schoolHeading = '需要校務資料時再連線';
+  if (puStudentPaused) schoolHeading = officialLms ? '校方課程平台與教師登入' : '靜宜教師登入';
+  else if (schoolTask) schoolHeading = '確認你的學校帳號';
+  else if (schoolFirst) schoolHeading = '使用學校帳號開始';
+  else if (officialLms) schoolHeading = '前往學校課程平台';
   const taskPath = new URL(destination, 'https://campus.local').pathname;
   const publicDestination = isPublicCampusPath(taskPath);
   const merchantTask =
@@ -149,7 +168,7 @@ function LoginForm({
   }, [hasSchoolIdentity, schoolLoading, destination, reconnect, schoolRequired]);
   async function login(event: FormEvent) {
     event.preventDefault();
-    if (busyRef.current || returning.current || schoolLoading || !schoolAvailable) return;
+    if (busyRef.current || returning.current || schoolLoading || !schoolAvailable || !acceptsAccount) return;
     setError('');
     if (!isFirebaseConfigured()) {
       setError('登入服務尚未連線，請稍後再試。');
@@ -226,9 +245,9 @@ function LoginForm({
         <div className={styles.methodHeading}>
           <div>
             <span className={styles.methodEyebrow}>學校帳號 · 本人授權</span>
-            <h2>{schoolTask ? '確認你的學校帳號' : schoolFirst ? '使用學校帳號開始' : '需要校務資料時再連線'}</h2>
+            <h2>{schoolHeading}</h2>
           </div>
-          <span className={styles.methodStatus}>依服務開放</span>
+          <span className={styles.methodStatus}>{puStudentPaused ? '學生校務登入暫停' : '依服務開放'}</span>
         </div>
       </summary>
       {(selection?.schools?.length ?? 0) > 0 && (
@@ -252,6 +271,20 @@ function LoginForm({
       {selection?.selectedSchool && (
         <p className={styles.selectedCampus}>目前選擇：{selection.selectedSchool.name}</p>
       )}
+      {officialLms && (
+        <p className={styles.formIntro}>
+          <a
+            href={officialLms.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            referrerPolicy="no-referrer"
+          >
+            前往 {officialLms.label} <span aria-hidden="true">↗</span>
+          </a>
+          <br />
+          在校方網站登入即可查看自己的課程。課程資料不會自動同步到 nuni。
+        </p>
+      )}
       {options.loading ? (
         <p role="status">正在確認登入方式…</p>
       ) : options.error ? (
@@ -264,7 +297,9 @@ function LoginForm({
       ) : schoolAvailable ? (
         <>
           <p>
-            使用所選學校的帳號驗證身分。課程平台與其他校務資料會依各來源的授權及連線狀態取得。
+            {puStudentPaused
+              ? '靜宜學生的 E 校園登入已暫停。你仍可匯入自己的課表與成績。教師可用校方教師帳號，透過玩課雲驗證身分。'
+              : '使用所選學校的帳號驗證身分。課程平台與其他校務資料會依各來源的授權及連線狀態取得。'}
           </p>
           {schoolRequired && (
             <p>
@@ -275,15 +310,18 @@ function LoginForm({
           )}
           <form className={styles.loginForm} onSubmit={login} aria-busy={busy}>
             <p className={styles.formIntro}>
-              輸入學號與密碼，完成後返回原本的頁面。
+              {puStudentPaused
+                ? '輸入校方教師帳號後，再輸入密碼。'
+                : '輸入學號與密碼，完成後返回原本的頁面。'}
             </p>
             <Input
               id="student-id"
               name="studentId"
-              label="學號"
+              label={puStudentPaused ? '教師帳號' : '學號'}
               value={studentId}
               onChange={(e) => {
                 setStudentId(e.target.value);
+                if (puStudentPaused && !isPuTeacherAccount(e.target.value.trim())) setPassword('');
                 setError('');
               }}
               maxLength={64}
@@ -305,11 +343,11 @@ function LoginForm({
               }}
               required
               autoComplete="current-password"
-              disabled={busy || platformBusy || schoolLoading}
+              disabled={busy || platformBusy || schoolLoading || !acceptsAccount}
             />
             {busy && (
               <p role="status" className={styles.loginProgress}>
-                正在驗證帳號與建立校務資料連線…
+                {puStudentPaused ? '正在驗證教師帳號…' : '正在驗證帳號與建立校務資料連線…'}
               </p>
             )}
             {error && (
@@ -323,16 +361,18 @@ function LoginForm({
               fullWidth
               loading={busy}
               disabled={
-                busy || platformBusy || schoolLoading || !studentId.trim() || !password
+                busy || platformBusy || schoolLoading || !acceptsAccount || !studentId.trim() || !password
               }
             >
-              {schoolLoading ? '正在確認學校帳號…' : busy ? '連線中…' : '連線學校帳號'}
+              {schoolLoading ? '正在確認學校帳號…' : busy ? '連線中…' : puStudentPaused ? '使用教師帳號登入' : '連線學校帳號'}
             </Button>
           </form>
           <details className={styles.connectionDetails}>
             <summary>連線後能看到哪些資料？</summary>
             <p>
-              依學校當次提供的資料查看個人紀錄。課程成員、教師與平台管理權限會分別確認。
+              {puStudentPaused
+                ? '教學課程依校方提供的授課紀錄顯示。學生課表、歷年成績與學分紀錄目前暫停讀取。'
+                : '依學校當次提供的資料查看個人紀錄。課程成員、教師與平台管理權限會分別確認。'}
             </p>
             <p>
               密碼會透過加密連線送至驗證服務使用；不會存成個人匯入草稿。忘記密碼請前往學校原本的帳號服務處理。

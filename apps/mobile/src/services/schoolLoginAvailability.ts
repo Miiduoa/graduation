@@ -1,10 +1,11 @@
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
+import { isPuEcampusDataFetchEnabled } from '@campus/shared/src/puEcampusDataPolicy';
 import {
   SCHOOL_LOGIN_BIND_HINT,
   hasUsableSchoolLoginProvider,
 } from '@campus/shared/src/schoolLogin';
 import { nuniPlatformRequest } from './nuniClient';
-import { getReleaseConfig, getSchoolIntegrationStatus } from './release';
+import { getRawAppEnv, getReleaseConfig, getSchoolIntegrationStatus } from './release';
 
 export { SCHOOL_LOGIN_BIND_HINT, hasUsableSchoolLoginProvider };
 
@@ -34,7 +35,10 @@ export function isStudentIdLoginAvailable(schoolId = PROVIDENCE_UNIVERSITY_SCHOO
 }
 
 export function isSchoolLoginEntryAvailable(schoolId = PROVIDENCE_UNIVERSITY_SCHOOL_ID): boolean {
-  return isStudentIdLoginAvailable(schoolId) && hasUsableSchoolLoginProvider(providerCache?.kinds);
+  // Only a development build can use the local fixture sign-in while real PU sign-in is paused.
+  const developmentEntry = typeof __DEV__ !== 'undefined' && __DEV__ && getRawAppEnv() === 'development';
+  return (isPuEcampusDataFetchEnabled() || developmentEntry) &&
+    isStudentIdLoginAvailable(schoolId) && hasUsableSchoolLoginProvider(providerCache?.kinds);
 }
 
 export async function loadSchoolLoginProviderKinds(): Promise<string[]> {

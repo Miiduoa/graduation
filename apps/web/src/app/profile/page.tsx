@@ -231,11 +231,11 @@ export default function ProfilePage() {
             {!loading && user ? (
               <section className={styles.panel}>
                 <h3>學校帳號已登入</h3>
-                <p>個人校務紀錄使用目前的學校帳號，課程與店家服務依各自資格提供。</p>
+                <p>學校帳號用來查看個人校務紀錄。Google 帳號用於平台課程與店家服務，兩個帳號目前分別管理。</p>
                 <div className={styles.connectionActions}>
                   <Link className="btn" href={href('/settings?section=account')}>管理學校帳號</Link>
                   {!nuni.loading && !nuni.error && !nuni.pendingLogout && !nuni.session && (
-                    <Link className="btn" href={href(loginHref(profileReturn))}>連線 Google 帳號</Link>
+                    <Link className="btn" href={href(loginHref(profileReturn))}>用 Google 登入平台服務</Link>
                   )}
                 </div>
               </section>

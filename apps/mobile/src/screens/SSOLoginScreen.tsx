@@ -13,6 +13,7 @@ import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navig
 
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 import {
+  isPuEcampusDataFetchEnabled,
   PU_ECAMPUS_DATA_PAUSED_CODE,
   PU_ECAMPUS_DATA_PAUSED_MESSAGE,
 } from '@campus/shared/src/puEcampusDataPolicy';
@@ -26,6 +27,7 @@ import { useSchool } from '../state/school';
 import { finishLoginReturn } from '../utils/loginReturn';
 import { safeNavigate } from '../utils/safeNavigate';
 import { signInWithStudentId, type LoginProgress } from '../services/studentIdAuth';
+import { isTronClassDataFetchEnabled } from '../services/tronClassDataEnabled';
 import type { SchoolSyncSummary } from '../services/schoolSyncSummary';
 import {
   SCHOOL_LOGIN_BIND_HINT,
@@ -326,9 +328,17 @@ function SchoolLoginContent(
                 disabled={formLocked || !studentIdInput.trim() || !studentPwInput.trim()}
               />
               <View style={styles.sourceGuide}>
-                <Text style={styles.sourceTitle}>一次連線，分別讀取你的資料</Text>
-                <Text style={styles.note}>E 校園：課表、歷年成績與學分紀錄</Text>
-                <Text style={styles.note}>玩課雲：課程、教材與作業；使用相同帳密</Text>
+                <Text style={styles.sourceTitle}>本次可讀取的資料</Text>
+                <Text style={styles.note}>
+                  {isPuEcampusDataFetchEnabled()
+                    ? 'E 校園提供課表、歷年成績與學分紀錄，讀取結果會逐項顯示。'
+                    : 'E 校園目前暫停讀取課表、歷年成績與學分紀錄。'}
+                </Text>
+                <Text style={styles.note}>
+                  {isTronClassDataFetchEnabled()
+                    ? '玩課雲連線成功後會顯示課程清單的讀取結果。作業與教材需要另外讀取。'
+                    : '此版本尚未開啟玩課雲課程連線。'}
+                </Text>
               </View>
             </View>
           </AnimatedCard>

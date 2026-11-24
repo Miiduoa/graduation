@@ -137,7 +137,7 @@ const {
   tcFetchSyllabus,
   tcFetchCourseFullData,
 } = require('./tronClassScraper');
-const { runFinalizePostLogin } = require('./postLogin/finalizePostLogin');
+const { runFinalizePostLogin, runFinalizePersonalSchoolLogin } = require('./postLogin/finalizePostLogin');
 const { buildPuSignInAcademicFields } = require('./lib/puSignInAcademicFields');
 const {
   createUserProfileChangedHandler,
@@ -2564,14 +2564,9 @@ exports.updateUserProfile = onCall(
   },
 );
 
-exports.finalizePostLogin = onCall(
-  {
-    region: REGION,
-    timeoutSeconds: 120,
-    memory: '512MiB',
-  },
-  async (request) => runFinalizePostLogin(request),
-);
+const postLoginRuntime = { region: REGION, timeoutSeconds: 120, memory: '512MiB' };
+exports.finalizePostLogin = onCall(postLoginRuntime, (request) => runFinalizePostLogin(request));
+exports.finalizePersonalSchoolLogin = onCall(postLoginRuntime, runFinalizePersonalSchoolLogin);
 
 exports.ensureCampusStoryBinding = onCall(
   { region: REGION },
