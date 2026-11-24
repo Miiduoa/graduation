@@ -1337,3 +1337,155 @@ test('launcher exits with 143 when the wrapper stalls before spawning', async ()
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('concurrent launchers initialize session keys in an empty shared runtime directory', { timeout: 20000 }, async () => {
+  const { spawn } = await import('node:child_process');
+  const { once } = await import('node:events');
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-concurrent-keys-'));
+  const runtime = path.join(dir, 'runtime');
+  mkdirSync(runtime, { mode: 0o700 });
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+  const preload = path.join(dir, 'delay-wx.cjs');
+  writeFileSync(preload, `const fs = require('node:fs');
+const orig = fs.writeFileSync;
+fs.writeFileSync = function writeFileSync(target, data, options) {
+  if (options && options.flag === 'wx') {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 40);
+  }
+  return orig.apply(this, arguments);
+};
+`);
+  writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
+const args = process.argv;
+if (args.includes('-e')) process.exit(0);
+const dash = args.indexOf('-');
+if (dash < 0) process.exit(73);
+require('node:child_process').execFileSync(${JSON.stringify(process.execPath)}, args.slice(dash), {
+  stdio: 'inherit',
+  env: { ...process.env, NODE_OPTIONS: [process.env.NODE_OPTIONS, '--require=${preload}'].filter(Boolean).join(' ') },
+});
+`, { mode: 0o700 });
+  writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
+process.exit(0);
+`, { mode: 0o700 });
+  const launch = () => {
+    const proc = spawn('bash', [script], {
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH}`,
+        TMPDIR: dir,
+        HOME: dir,
+        TRONCLASS_RUNTIME_DIR: runtime,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    for (const stream of [proc.stdout, proc.stderr]) {
+      stream.on('data', chunk => { output += chunk; });
+    }
+    return { proc, exited: once(proc, 'exit'), output: () => output };
+  };
+  try {
+    const first = launch();
+    const second = launch();
+    const [firstExit, secondExit] = await Promise.all([first.exited, second.exited]);
+    const combined = `${first.output()}\n${second.output()}`;
+    assert.equal(firstExit[1], null, first.output());
+    assert.equal(secondExit[1], null, second.output());
+    assert.doesNotMatch(combined, /EEXIST|Invalid local session key|Refusing a /i);
+    const keys = ['bff-session.key', 'tronclass-session.key'].map(name => path.join(runtime, name));
+    const bodies = [];
+    for (const file of keys) {
+      const body = readFileSync(file, 'utf8');
+      assert.match(body, /^[A-Za-z0-9_-]{64}$/);
+      assert.equal(statSync(file).mode & 0o777, 0o600);
+      assert.equal(lstatSync(file).nlink, 1);
+      bodies.push(body);
+    }
+    // The second launcher must reuse the first writer's keys, not fail with EEXIST.
+    assert.equal(new Set(bodies).size, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launcher INT/TERM during a foreground health check stops health, web, and emulators', { timeout: 20000 }, async () => {
+  const { spawn } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const { once } = await import('node:events');
+  const { setTimeout: delay } = await import('node:timers/promises');
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-health-cleanup-'));
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+  const marker = name => path.join(dir, name);
+  writeSessionKey(path.join(dir, 'bff-session.key'));
+  writeSessionKey(path.join(dir, 'tronclass-session.key'));
+  writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
+process.exit(0);
+`, { mode: 0o700 });
+  writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
+const fs = require('node:fs');
+const path = require('node:path');
+const [arg, ...args] = process.argv.slice(2);
+if (arg === '-') {
+  const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [arg, ...args], { stdio: 'inherit' });
+  process.exit(status ?? 1);
+}
+if (arg === '-e') process.exit(0);
+const dir = process.env.TRONCLASS_RUNTIME_DIR;
+const writePid = name => fs.writeFileSync(path.join(dir, name), String(process.pid));
+if (arg.endsWith('/firebase.js')) {
+  writePid('emulator.pid');
+  process.on('SIGINT', () => process.exit(0));
+  process.on('SIGTERM', () => process.exit(0));
+  console.log('All emulators ready');
+  setInterval(() => {}, 1000);
+} else if (arg.endsWith('/seed.cjs')) {
+  writePid('seed.pid');
+} else if (arg.endsWith('/next')) {
+  writePid('web.pid');
+  process.on('SIGTERM', () => process.exit(0));
+  process.on('SIGINT', () => process.exit(0));
+  setInterval(() => {}, 1000);
+} else if (arg.endsWith('/health-tronclass.cjs')) {
+  writePid('health.pid');
+  process.on('SIGTERM', () => process.exit(0));
+  process.on('SIGINT', () => process.exit(0));
+  fs.writeFileSync(path.join(dir, 'health-started'), '');
+  setInterval(() => {}, 1000);
+}
+`, { mode: 0o700 });
+  const proc = spawn('bash', [script], {
+    env: {
+      ...process.env,
+      PATH: `${dir}:${process.env.PATH}`,
+      TMPDIR: dir,
+      HOME: dir,
+      TRONCLASS_RUNTIME_DIR: dir,
+      TRONCLASS_CHECK_HEALTH: '1',
+      TRONCLASS_VERIFY_RUNTIME: '0',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const exited = once(proc, 'exit');
+  let output = '';
+  for (const stream of [proc.stdout, proc.stderr]) {
+    stream.on('data', chunk => { output += chunk; });
+  }
+  try {
+    const deadline = Date.now() + 8000;
+    while (!existsSync(marker('health-started')) && Date.now() < deadline) await delay(20);
+    assert.ok(existsSync(marker('health-started')), output);
+    const pids = ['health.pid', 'web.pid', 'emulator.pid'].map(name => Number(readFileSync(marker(name), 'utf8')));
+    for (const pid of pids) process.kill(pid, 0);
+    const started = Date.now();
+    assert.ok(proc.kill('SIGTERM'));
+    assert.deepEqual(await exited, [143, null], output);
+    assert.ok(Date.now() - started < 8000, 'cleanup should not wait for the health loop to finish on its own');
+    for (const pid of pids) {
+      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, `pid ${pid} still alive`);
+    }
+  } finally {
+    if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
