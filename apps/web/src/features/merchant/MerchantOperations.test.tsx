@@ -206,6 +206,66 @@ it('keeps a confirmed missing menu after a legacy list and an unavailable detail
   expect(button('確認啟用門市').disabled).toBe(true);
 });
 
+it('clears the initial menu success when a delayed versioned list confirms a missing menu', async () => {
+  current = { ...current, readinessVersion: 7, missingRequirements: ['menu'] };
+  const confirmed = createMerchantConfirmations(drafts);
+  const key = workspaceKey(current);
+  const workspace = () => (
+    <MerchantOperations
+      context="account-a"
+      tenantId={current.tenantId}
+      locationId={current.locationId}
+      drafts={drafts}
+      suspended={false}
+      beginRequest={confirmed.beginRequest}
+      confirmedDetail={confirmed.verifiedDetails().get(key) ?? null}
+      onBack={vi.fn()}
+      onChanged={(detail, verifiedAccess, revision) =>
+        confirmed.confirmDetail(detail, revision, verifiedAccess)
+      }
+      onMenuConfirmed={(_, revision, createdItems) => confirmed.confirmMenu(key, revision, createdItems)}
+      onExpired={onExpired}
+    />
+  );
+  const mounted = render(workspace());
+  await waitFor(() => expect(confirmed.verifiedDetails().has(key)).toBe(true));
+  mounted.rerender(workspace());
+  await screen.findByLabelText('品項 1 名稱');
+  fillMenu();
+  confirmMenu();
+  request.mockImplementation((path, context, input) =>
+    path.endsWith('/initial-menu')
+      ? response(path, context, input)
+      : Promise.reject(new NuniError(503, 'UNAVAILABLE')),
+  );
+  fireEvent.click(button('確認建立並上架菜單'));
+  const success = '已建立 1 項首次菜單。啟用前請再確認門市資料。';
+  await screen.findByText(success);
+  await screen.findByRole('alert');
+  expect(screen.getByText(/上架品項。首次菜單只能建立一次。/)).toBeTruthy();
+
+  const versionedList = confirmed.beginRequest();
+  const legacyList = confirmed.beginRequest();
+  confirmed.mergeWorkspaceList([{ ...current, readinessVersion: undefined }], legacyList);
+  mounted.rerender(workspace());
+  expect(screen.getByText(success)).toBeTruthy();
+
+  confirmed.mergeWorkspaceList([{ ...current, missingRequirements: ['menu'] }], versionedList);
+  mounted.rerender(workspace());
+  expect(confirmed.verifiedDetails().get(key)?.publishedMenuItems).toBe(0);
+  expect(screen.queryByText(success)).toBeNull();
+  expect(screen.queryByText(/上架品項。首次菜單只能建立一次。/)).toBeNull();
+  expect(drafts.get(key)?.menuReceipt).toBeNull();
+  expect(screen.getByLabelText<HTMLInputElement>('品項 1 名稱').value).toBe('蔬菜便當');
+
+  fireEvent.click(button('重新讀取門市狀態'));
+  await screen.findByRole('alert');
+  expect(screen.queryByText(success)).toBeNull();
+  expect(screen.queryByText(/上架品項。首次菜單只能建立一次。/)).toBeNull();
+  expect(screen.getByLabelText<HTMLInputElement>('品項 1 名稱').value).toBe('蔬菜便當');
+  expect(button('確認啟用門市').disabled).toBe(true);
+});
+
 it.each(['legacy list first', 'versioned suspension first'])(
   'keeps the order desk closed with a suspended v7 confirmation (%s)',
   async (order) => {

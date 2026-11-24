@@ -108,8 +108,10 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   }
 
   function revoke(key: string, revision: number) {
-    // Only the winning observation can supersede a detail denial.
-    if (revision <= Math.max(revokedThrough(key), entries.get(key)?.row?.revision ?? 0)) return;
+    const entry = entries.get(key);
+    // Legacy metadata can advance independently of the confirmed operating state.
+    const confirmation = entry?.versionedRow ?? entry?.row;
+    if (revision <= Math.max(revokedThrough(key), confirmation?.revision ?? 0)) return;
     revocations.set(key, revision);
     discardWorkspace(key, revision);
     return revision;
@@ -131,9 +133,6 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     }
     const observation = latestObservation(entry.row, next, revision);
     const row = { ...observation, version: observation.version ?? floor };
-    if (row.revision === revision && next.missingRequirements.includes('menu')) {
-      discardMenuReceipt(key);
-    }
     if (next.readinessVersion !== undefined) {
       // Versioned operating state keeps its own order when legacy rows update the list.
       const previous = entry.versionedRow;
@@ -154,6 +153,11 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         }
       }
       entry.versionedRow = versioned;
+    }
+    // A versioned response can confirm menu requirements even when legacy metadata wins.
+    const requirementsObservation = next.readinessVersion === undefined ? row : entry.versionedRow;
+    if (requirementsObservation?.revision === revision && next.missingRequirements.includes('menu')) {
+      discardMenuReceipt(key);
     }
     entry.row = row;
     entries.set(key, entry);

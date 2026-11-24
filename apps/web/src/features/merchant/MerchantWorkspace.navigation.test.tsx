@@ -1086,7 +1086,12 @@ it('discards a v7 pause notice when an earlier background read confirms v8 reope
   expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
 });
 
-it.each([403, 404])('revokes a confirmed store after a later stale list precedes detail denial %s', async (status) => {
+it.each([
+  { status: 403, legacy: false },
+  { status: 404, legacy: false },
+  { status: 403, legacy: true },
+  { status: 404, legacy: true },
+])('revokes a confirmed store after detail denial $status (legacy list: $legacy)', async ({ status, legacy }) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const open = { ...detail('store-a', true), readinessVersion: 6 };
   const paused = { ...open, readinessVersion: 7, locationStatus: 'closed', publicAccess: false };
@@ -1095,7 +1100,11 @@ it.each([403, 404])('revokes a confirmed store after a later stale list precedes
   const readList = vi.fn()
     .mockResolvedValueOnce({ workspaces: [open] })
     .mockResolvedValueOnce({ workspaces: [paused] })
-    .mockResolvedValue({ workspaces: [open] });
+    .mockResolvedValue({
+      workspaces: [legacy
+        ? { ...open, readinessVersion: undefined, merchantName: '更新名稱的餐坊' }
+        : open],
+    });
   const readDetail = vi.fn()
     .mockResolvedValueOnce(open)
     .mockResolvedValueOnce(paused)
@@ -1122,9 +1131,12 @@ it.each([403, 404])('revokes a confirmed store after a later stale list precedes
   expect(readList).toHaveBeenCalledTimes(3);
   expect(screen.getByText('暫停接單')).toBeTruthy();
 
+  if (legacy) expect(screen.getByRole('heading', { name: '更新名稱的餐坊／一樓' })).toBeTruthy();
+
   await act(async () => denyDetail(new NuniError(status, 'DENIED')));
   expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
   expect(screen.queryByText('暫停接單')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '更新名稱的餐坊／一樓' })).toBeNull();
 
   readDetail.mockResolvedValue(paused);
   await act(async () => window.history.forward());
