@@ -1069,7 +1069,11 @@ describe.each(directoryStorageFailures)('search navigation with storage %s', (fa
 const replaceHistoryForTraversal = window.history.replaceState.bind(window.history);
 
 describe('continuing a search after opening a service', () => {
-  const nextState = { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: ['search'], unrelated: 7 };
+  const nextState = {
+    __NA: true,
+    __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: ['search'], renderedSearch: '' },
+    unrelated: 7,
+  };
   const librarySearch = '/search?campus=pu&q=%E5%80%9F%E6%9B%B8&category=campus';
   const scroll = vi.fn();
   const stopScroll = vi.fn();
@@ -1102,6 +1106,17 @@ describe('continuing a search after opening a service', () => {
     window.history.replaceState(state, '', url);
   }
 
+  function commitNavigation(url: string) {
+    window.history.pushState(
+      {
+        ...nextState,
+        __PRIVATE_NEXTJS_INTERNALS_TREE: { ...nextState.__PRIVATE_NEXTJS_INTERNALS_TREE },
+      },
+      '',
+      url,
+    );
+  }
+
   function traverse(url: string, state: unknown) {
     replaceHistoryForTraversal(state, '', url);
     act(() => window.dispatchEvent(new PopStateEvent('popstate', { state })));
@@ -1123,7 +1138,7 @@ describe('continuing a search after opening a service', () => {
     fireEvent.click(link);
     const entry = window.history.state;
     view.unmount();
-    window.history.pushState(nextState, '', link.getAttribute('href')!);
+    commitNavigation(link.getAttribute('href')!);
     return entry;
   }
 
@@ -1226,7 +1241,7 @@ describe('continuing a search after opening a service', () => {
     expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
     view.unmount();
     // Bottom navigation away from search, then Back to the same history item.
-    window.history.pushState(nextState, '', '/life');
+    commitNavigation('/life');
     traverse(librarySearch, entry);
     renderAfterFrame();
     expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
@@ -1242,7 +1257,7 @@ describe('continuing a search after opening a service', () => {
     const href = library.getAttribute('href')!;
     view.unmount();
     // Bottom navigation can land on the same path as the remembered result.
-    window.history.pushState(nextState, '', href);
+    commitNavigation(href);
     traverse(librarySearch, entry);
     renderAfterFrame();
     expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
@@ -1268,12 +1283,58 @@ describe('continuing a search after opening a service', () => {
     const bottomLink = screen.getByRole('link', { name: '課務' });
     expect(bottomLink.getAttribute('href')).toBe(result.getAttribute('href'));
     fireEvent.click(bottomLink);
-    window.history.pushState(nextState, '', '/timetable');
+    commitNavigation('/timetable');
     view.unmount();
 
     await go(-1);
     renderAfterFrame();
     expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^課表/ }));
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it('does not pair a result with an application push enriched by the outer App Router wrapper', async () => {
+    move(librarySearch);
+    const view = renderAfterFrame();
+    const trackedPush = window.history.pushState.bind(window.history);
+    const appRouterPush = vi.spyOn(window.history, 'pushState').mockImplementation((data, unused, url) => {
+      // On direct load the router can wrap the tracker and fill in its metadata first.
+      const nextData = data ?? {
+        __NA: window.history.state.__NA,
+        __PRIVATE_NEXTJS_INTERNALS_TREE: window.history.state.__PRIVATE_NEXTJS_INTERNALS_TREE,
+      };
+      trackedPush(nextData, unused, url);
+    });
+    try {
+      const result = screen.getByRole('link', { name: /^圖書館/ });
+      fireEvent.click(result);
+      expect(window.history.state).toHaveProperty('__campusSearchResultReturn');
+      const href = result.getAttribute('href')!;
+      window.history.pushState(null, '', href);
+      expect(window.location.pathname).toBe('/library');
+    } finally {
+      appRouterPush.mockRestore();
+    }
+    view.unmount();
+
+    await go(-1);
+    expect(window.location.pathname).toBe('/search');
+    renderAfterFrame();
+    expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it('does not restore from a destination entry replaced with an unrelated page', async () => {
+    leaveLibrary();
+    const destinationKey = window.history.state.__campusSearchHistoryEntry;
+    expect(destinationKey).toEqual(expect.any(String));
+    move('/life', window.history.state);
+    expect(window.location.pathname).toBe('/life');
+    expect(window.history.state.__campusSearchHistoryEntry).toBe(destinationKey);
+
+    await go(-1);
+    expect(window.location.pathname).toBe('/search');
+    renderAfterFrame();
+    expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
     expect(scroll).not.toHaveBeenCalled();
   });
 
@@ -1309,7 +1370,7 @@ describe('continuing a search after opening a service', () => {
 
   it('keeps an earlier campus return armed after an unrelated cross-campus traversal', async () => {
     const entry = leaveLibrary();
-    window.history.pushState(nextState, '', '/search?campus=nthu&q=公車');
+    commitNavigation('/search?campus=nthu&q=公車');
     router.search = window.location.search;
     const later = renderAfterFrame();
     expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('公車');
@@ -1337,12 +1398,12 @@ describe('continuing a search after opening a service', () => {
     const first = leaveLibrary();
     const firstDestination = window.history.state;
     const laterSearch = '/search?campus=pu&q=%E5%9C%96%E6%9B%B8%E9%A4%A8';
-    window.history.pushState(nextState, '', laterSearch);
+    commitNavigation(laterSearch);
     const laterView = renderAfterFrame();
     fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
     const second = window.history.state;
     laterView.unmount();
-    window.history.pushState(nextState, '', '/library?campus=pu');
+    commitNavigation('/library?campus=pu');
     traverse(laterSearch, second);
     const resumed = renderAfterFrame();
     expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
@@ -1393,7 +1454,7 @@ describe('continuing a search after opening a service', () => {
     'rejects a traversal from %s into the armed search entry',
     async (origin) => {
       move('/');
-      window.history.pushState(nextState, '', librarySearch);
+      commitNavigation(librarySearch);
       leaveLibrary();
       if (origin === 'home') {
         await go(-2);
@@ -1420,15 +1481,15 @@ describe('continuing a search after opening a service', () => {
 
   it('restores an earlier unfiltered entry over the later search draft after remounting', async () => {
     move('/');
-    window.history.pushState(nextState, '', '/search');
+    commitNavigation('/search');
     const earlier = renderAfterFrame();
     const library = screen.getByRole('link', { name: /^圖書館/ });
     const destination = library.getAttribute('href')!;
     fireEvent.click(library);
     earlier.unmount();
-    window.history.pushState(nextState, '', destination);
+    commitNavigation(destination);
 
-    window.history.pushState(nextState, '', '/search');
+    commitNavigation('/search');
     const later = renderAfterFrame();
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: '公車' } });
     expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).toContain('公車');
@@ -1453,7 +1514,7 @@ describe('continuing a search after opening a service', () => {
     fireEvent.click(screen.getByRole('link', { name: /^成績回饋/ }));
     const entry = window.history.state;
     view.unmount();
-    window.history.pushState(nextState, '', '/grades?tab=feedback&campus=pu');
+    commitNavigation('/grades?tab=feedback&campus=pu');
     traverse('/search?campus=pu', entry);
     renderAfterFrame();
     const feedback = screen.getByRole('link', { name: /^成績回饋/ });
@@ -1477,7 +1538,7 @@ describe('continuing a search after opening a service', () => {
     fireEvent.click(link);
     const entry = window.history.state;
     view.unmount();
-    window.history.pushState(nextState, '', href);
+    commitNavigation(href);
     traverse(url, entry);
     renderAfterFrame();
     const resumed = within(screen.getByRole('region', { name: '根據需求推薦的服務' }))
@@ -1514,7 +1575,7 @@ describe('continuing a search after opening a service', () => {
     expect(JSON.stringify(entry)).not.toContain('個人成績摘要');
     expect(sessionStorage.getItem(DIRECTORY_SEARCH_STORAGE_KEY)).not.toContain('個人成績摘要');
     view.unmount();
-    window.history.pushState(nextState, '', '/grades?tab=semester&campus=pu');
+    commitNavigation('/grades?tab=semester&campus=pu');
     traverse(url, entry);
     renderAfterFrame();
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: '搜尋結果' }));
@@ -1531,7 +1592,7 @@ describe('continuing a search after opening a service', () => {
     fireEvent.click(link);
     const entry = window.history.state;
     view.unmount();
-    window.history.pushState(nextState, '', destination);
+    commitNavigation(destination);
     traverse(librarySearch, entry);
     renderAfterFrame();
     expect(document.activeElement).toBe(screen.getByRole('link', { name: '交給校園助理' }));
@@ -1609,7 +1670,7 @@ describe('continuing a search after opening a service', () => {
     fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
     const entry = window.history.state;
     view.unmount();
-    window.history.pushState(nextState, '', '/library?campus=pu');
+    commitNavigation('/library?campus=pu');
     selection.current = {
       selectedSchool: { id: 'nthu', code: 'NTHU' },
       loading: false,
@@ -1696,7 +1757,7 @@ describe('continuing a search after opening a service', () => {
     fireEvent.change(search, { target: { value: '借書館' } });
     const entry = window.history.state;
     view.unmount();
-    window.history.pushState(nextState, '', '/library?campus=pu');
+    commitNavigation('/library?campus=pu');
     traverse(librarySearch, entry);
     renderAfterFrame();
     expect(scroll).not.toHaveBeenCalled();

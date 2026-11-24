@@ -78,6 +78,19 @@ function isHistoryRecord(data: unknown) {
   return prototype === Object.prototype || prototype === null;
 }
 
+function isRouterPush(data: unknown, previousState: unknown) {
+  if (!isHistoryRecord(data) || readEntryKey(data) || readReturn(data)) return false;
+  const state = data as Record<string, unknown>;
+  const previous = previousState as Record<string, unknown> | null;
+  // App Router commits create a fresh router state. Its History wrapper can also
+  // add __NA to app writes, but it copies the current entry's router state by reference.
+  const routerState = state.__PRIVATE_NEXTJS_INTERNALS_TREE;
+  return state.__NA === true &&
+    routerState !== null &&
+    typeof routerState === 'object' &&
+    routerState !== previous?.__PRIVATE_NEXTJS_INTERNALS_TREE;
+}
+
 function installHistoryTracking() {
   trackedEntryKey = readEntryKey(window.history.state);
   for (const method of ['pushState', 'replaceState'] as const) {
@@ -92,6 +105,7 @@ function installHistoryTracking() {
       const previousKey = readEntryKey(previousState);
       const previousPath = window.location.pathname;
       const push = method === 'pushState';
+      const routerCommit = push && isRouterPush(data, previousState);
       // Use the shape History will serialize, including arrays with custom fields.
       const cloned = !isHistoryRecord(data) && hasSearchHistoryFields(data);
       let state = cloned ? structuredClone(data) : data;
@@ -111,14 +125,13 @@ function installHistoryTracking() {
       // Keep the departing key until that observer has compared the two entries.
       if (push || previousKey === trackedEntryKey) trackedEntryKey = readEntryKey(this.state);
       if (push) {
-        // Next's own commit supplies its router state before the native History
-        // wrapper has a chance to fill it in for application-authored writes.
-        const routerCommit =
-          isHistoryRecord(data) &&
-          (data as { __NA?: boolean }).__NA === true &&
-          readEntryKey(data) === null &&
-          !readReturn(data);
         onHistoryPush(previousState, previousPath, trackedEntryKey, routerCommit);
+      } else if (previousKey && previousPath !== window.location.pathname) {
+        // A replace can repurpose the destination while retaining its entry key.
+        // Query and fragment updates within the page still belong to that entry.
+        for (const [token, armed] of armedReturnByToken) {
+          if (armed.destinationKey === previousKey) armedReturnByToken.delete(token);
+        }
       }
     };
   }
