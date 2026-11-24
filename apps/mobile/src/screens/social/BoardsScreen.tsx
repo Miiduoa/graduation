@@ -257,18 +257,20 @@ function BoardsContent() {
           nextConfirmed.has(id) &&
           !subscribedIds.has(id);
         // A listed subscription during an overlap can be stale even when it
-        // agrees with the first confirmation. The capped list can also omit
-        // a confirmed subscription. Recheck an overlapping omission if the
-        // IDs arrived after that confirmation, even when rows arrive later.
+        // agrees with the first confirmation. For an omitted subscription,
+        // a refresh spanning a write can see a server change while the first
+        // confirmation's response is still in flight. Recheck after the
+        // write settles regardless of which response arrived first.
         const listed = subscribedIds.has(id);
         const listedDuringOverlap = listed && overlappingReconciliations.has(id);
         const listClaimsUnkeptSubscription = listed && !nextConfirmed.has(id);
         const listOmitsConfirmed = !listed && nextConfirmed.has(id) && confirmedByBoardRead.current.has(id);
+        const refreshSpansWrite = (boardWriteRevision.current.get(id) ?? 0) > subscriptionRevisionAtStart;
         const omissionArrivedAfterConfirmation =
           overlappingReconciliations.has(id) &&
           membership.serverRevisionAtDelivery > (boardConfirmationAppliedAt.current.get(id) ?? 0);
         const needsConfirmation = listOmitsConfirmed
-          ? omissionArrivedAfterConfirmation
+          ? refreshSpansWrite || omissionArrivedAfterConfirmation
           : keptRollback ||
             listedDuringOverlap ||
             listClaimsUnkeptSubscription ||

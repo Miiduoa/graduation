@@ -570,9 +570,14 @@ test.each(['during confirmation', 'during write, IDs last', 'during write, rows 
   },
 );
 
-test.each([false, 'offline'] as const)(
-  'a list crossing a successful unsubscribe rechecks an omission after the first confirmation (%s)',
-  async (result) => {
+test.each([
+  ['IDs last', false],
+  ['IDs last', 'offline'],
+  ['rows last', false],
+  ['rows last', 'offline'],
+] as const)(
+  'a list crossing a successful unsubscribe rechecks an omission with %s (second confirmation: %s)',
+  async (lastResponse, result) => {
     jest.mocked(listBoards).mockResolvedValue([board]);
     const view = render(<BoardsScreen />);
     await view.findByText('讀書會');
@@ -591,19 +596,36 @@ test.each([false, 'offline'] as const)(
     await act(async () => { firstList.resolve(['board']); await firstRefresh; });
     expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
 
+    const rows = deferred<typeof board[]>();
+    jest.mocked(listBoards).mockImplementationOnce(() => rows.promise);
     jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => secondList.promise);
     let secondRefresh!: Promise<void>;
     act(() => { secondRefresh = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
 
-    jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
+    const firstConfirm = deferred<boolean>();
+    const secondConfirm = deferred<boolean>();
+    jest.mocked(isSubscribedToBoard)
+      .mockImplementationOnce(() => firstConfirm.promise)
+      .mockImplementationOnce(() => secondConfirm.promise);
     await act(async () => { unsubscribe.resolve(); });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
     expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
+
+    // The first read saw a subscription before another device cancelled it.
+    await act(async () => {
+      if (lastResponse === 'rows last') secondList.resolve([]);
+      else rows.resolve([board]);
+    });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+
+    await act(async () => { firstConfirm.resolve(true); });
     expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 
-
-    const secondConfirm = deferred<boolean>();
-    jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => secondConfirm.promise);
-    await act(async () => { secondList.resolve([]); await secondRefresh; });
+    await act(async () => {
+      if (lastResponse === 'rows last') rows.resolve([board]);
+      else secondList.resolve([]);
+      await secondRefresh;
+    });
     expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
     expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
     expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
