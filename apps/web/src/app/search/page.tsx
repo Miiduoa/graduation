@@ -27,6 +27,7 @@ import {
   finishSearchFilterArrival,
   getSearchHistoryEntryKey,
   rememberSearchResultReturn,
+  supersedeSearchResultReturnForFilterEdit,
   useSearchResultReturn,
 } from './searchResultReturn';
 import styles from './search.module.css';
@@ -319,7 +320,7 @@ function ServiceDirectory() {
     next: { query: string; category: ServiceCategory | 'all' },
     persist = true,
   ) {
-    clearSearchResultReturn();
+    supersedeSearchResultReturnForFilterEdit();
     requestSequence.current += 1;
     setAnalysis(null);
     setFilters({ scope: draftScope, ...next });

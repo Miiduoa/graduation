@@ -265,6 +265,36 @@ async def check_search_return(page, config, report, capture):
             await assert_results_visible(page, library, report)
             report['checks'].append('Search: a same-URL replacement reapplies URL filters after the array insertion return, and Forward/Back restores the saved filters and focus again')
 
+            entry_metadata = """() => ({
+              key: history.state.__campusSearchHistoryEntry,
+              token: history.state.__campusSearchResultReturn?.token,
+            })"""
+            entry = await page.evaluate(entry_metadata)
+            assert entry.get('key') and entry.get('token'), entry
+            for composing in (False, True):
+                await field.focus()
+                if composing:
+                    await field.dispatch_event('compositionstart')
+                await field.fill('公')
+                if composing:
+                    assert page.url == pushed_url
+                else:
+                    assert page.url != pushed_url
+                    await field.fill('公車')
+                    await expect(results.get_by_role('heading', name='公車', exact=True)).to_be_visible()
+                    assert page.url == pushed_url
+                await expect(field).to_have_value('公' if composing else '公車')
+                edited_entry = await page.evaluate(entry_metadata)
+                assert edited_entry == entry, (composing, entry, edited_entry)
+                await page.go_forward()
+                await page.wait_for_url(target_url)
+                await expect(form).to_have_count(0)
+                await page.go_back()
+                assert page.url == pushed_url
+                await expect(field).to_have_value('借書')
+                await assert_results_visible(page, library, report)
+            report['checks'].append('Search: typing and unfinished IME composition preserve the array entry snapshot for the next Back and restore the library focus')
+
     await form.get_by_role('button', name='清除搜尋', exact=True).click()
     await expect(field).to_be_focused()
     related = results.locator('details[data-directory-section="service:/classroom"]')

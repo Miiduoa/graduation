@@ -2008,14 +2008,15 @@ describe('continuing a search after opening a service', () => {
     expect(window.history.state).toEqual(entry);
   });
 
-  it('editing the search invalidates its prior return even before composition is published', () => {
+  it('editing during composition cancels an uncommitted focus pairing and keeps the snapshot', () => {
     move(librarySearch);
     const view = renderAfterFrame();
     fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+    const entry = window.history.state;
     const search = screen.getByRole('searchbox');
     fireEvent.compositionStart(search);
     fireEvent.change(search, { target: { value: '借書館' } });
-    const entry = window.history.state;
+    expect(window.history.state).toEqual(entry);
     view.unmount();
     commitNavigation('/library?campus=pu');
     traverse(librarySearch, entry);

@@ -321,6 +321,16 @@ export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token'>) {
   }
 }
 
+export function supersedeSearchResultReturnForFilterEdit() {
+  // A filter edit supersedes the current traversal while keeping its saved entry.
+  publishReturn(null, null);
+  const entry = readSearchEntry(window.history.state);
+  if (entry && isSearchResultNavigationPending(entry.saved.token)) {
+    // An edit before the Router commits also cancels that navigation's focus pairing.
+    consumeSearchResultNavigation();
+  }
+}
+
 export function clearSearchResultReturn() {
   publishReturn(null, null);
   const saved = readReturn(window.history.state);
