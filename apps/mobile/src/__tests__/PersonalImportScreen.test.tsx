@@ -322,7 +322,7 @@ test('reads the ledger once per confirmed scope and ignores an earlier read fail
   });
   try {
     const view = render(<PersonalImportScreen />);
-    expect(reads).toBe(1);
+    await waitFor(() => expect(reads).toBe(1));
 
     mockScope = null;
     mockPlatform = { ...mockPlatform, loading: true };
