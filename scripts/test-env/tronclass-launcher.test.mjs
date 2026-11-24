@@ -354,7 +354,7 @@ test('launcher reuses an existing session key only when it is a private regular 
   }
 });
 
-test('launcher only changes permissions on the runtime directory it validated', () => {
+test('launcher leaves both directory modes unchanged when the runtime path is replaced', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-runtime-replacement-'));
   const runtime = path.join(dir, 'runtime');
   const original = path.join(dir, 'original');
@@ -385,7 +385,7 @@ fs.fstatSync = (fd, ...args) => {
     assert.equal(result.error, undefined);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /replaced directory/);
-    assert.equal(statSync(original).mode & 0o777, 0o700);
+    assert.equal(statSync(original).mode & 0o777, 0o755);
     assert.equal(statSync(runtime).mode & 0o777, 0o755);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -613,7 +613,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const [arg, ...args] = process.argv.slice(2);
 if (arg === '-') {
-  const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [arg, ...args], { stdio: 'inherit' });
+  const stdio = args[0]?.includes('.log.') ? [0, 1, 2, 3] : 'inherit';
+  const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [arg, ...args], { stdio });
   process.exit(status ?? 1);
 }
 const { TRONCLASS_RUNTIME_DIR: dir, TRONCLASS_LOG_TEST_LABEL: label } = process.env;
@@ -816,14 +817,14 @@ test('launcher skips a reused wrapper PID and kills its registered detached grou
   }
 });
 
-test('launcher recovers a current-run sidecar after the leader exits before capture', async (t) => {
+test('launcher cleans up marked descendants when the leader exits before capture', async (t) => {
   const { spawn } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
   const { once } = await import('node:events');
   const { setTimeout: delay } = await import('node:timers/promises');
   const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
 
-  for (const recordKind of ['current run', 'reused group', 'concurrent run', 'old run', 'mismatched starttime']) {
+  for (const recordKind of ['current run', 'reused group', 'concurrent run', 'old run', 'mismatched starttime', 'publication failure']) {
     await t.test(recordKind, { timeout: 14000 }, async () => {
       const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-orphan-sidecar-'));
       const childFile = path.join(dir, 'child.pid');
@@ -843,6 +844,13 @@ test('launcher recovers a current-run sidecar after the leader exits before capt
 if [[ "$*" == *--ppid* ]]; then exit 1; fi
 exec /bin/ps "$@"
 `, { mode: 0o755 });
+        const failedPublication = path.join(dir, 'publication-failed');
+        if (recordKind === 'publication failure') {
+          writeFileSync(path.join(dir, 'python3'), `#!/bin/bash
+touch ${JSON.stringify(failedPublication)}
+exit 1
+`, { mode: 0o755 });
+        }
         let args = [script];
         if (recordKind === 'reused group') {
           // Model a reused group number at the /proc boundary. The victim is
@@ -879,16 +887,26 @@ kill() {
         });
         launcherExited = once(launcher, 'exit');
         const deadline = Date.now() + 4000;
-        while (!(findSidecar() && existsSync(descendantFile)) && Date.now() < deadline) {
+        const published = () => recordKind === 'publication failure' ? existsSync(failedPublication) : findSidecar();
+        while (!(published() && existsSync(descendantFile) && existsSync(childFile)) && Date.now() < deadline) {
           await delay(15);
         }
-        const sidecar = path.join(dir, findSidecar());
-        const [run, leader, start] = readFileSync(sidecar, 'utf8').trim().split(' ');
-        assert.match(run, /^[a-f0-9]{32}$/);
-        assert.match(start, /^\d+$/);
-        assert.equal(leader, readFileSync(childFile, 'utf8'));
+        assert.ok(published());
         descendant = Number(readFileSync(descendantFile, 'utf8'));
         process.kill(descendant, 0);
+        const leader = readFileSync(childFile, 'utf8');
+        let sidecar, run, start;
+        if (recordKind === 'publication failure') {
+          assert.equal(findSidecar(), undefined);
+        } else {
+          sidecar = path.join(dir, findSidecar());
+          const [recordRun, recordedLeader, recordStart] = readFileSync(sidecar, 'utf8').trim().split(' ');
+          run = recordRun;
+          start = recordStart;
+          assert.match(run, /^[a-f0-9]{32}$/);
+          assert.match(start, /^\d+$/);
+          assert.equal(recordedLeader, leader);
+        }
         const victimStat = readFileSync(`/proc/${victim.pid}/stat`, 'utf8');
         const victimStart = victimStat.slice(victimStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
         if (recordKind === 'old run') {
@@ -898,14 +916,22 @@ kill() {
         if (recordKind === 'mismatched starttime') {
           writeFileSync(sidecar, `${run} ${victim.pid} ${BigInt(victimStart) + 1n}\n`);
         }
-        if (recordKind === 'concurrent run') launcher.kill('SIGSTOP');
-        process.kill(Number(leader), 'SIGTERM');
-        while (existsSync(`/proc/${leader}`) && Date.now() < deadline) await delay(15);
-        assert.equal(existsSync(`/proc/${leader}`), false);
         if (recordKind === 'concurrent run') {
+          launcher.kill('SIGSTOP');
+          // The concurrent launcher sees a live leader at its first stat read.
+          // End it while checking its marker, before the follow-up stat read.
+          writeFileSync(path.join(dir, 'grep'), `#!/bin/bash
+if [[ "\${@: -1}" == /proc/${leader}/environ ]]; then
+  kill -TERM ${leader}
+  while [[ -d /proc/${leader} ]]; do sleep 0.01; done
+  exit 1
+fi
+exec /bin/grep "$@"
+`, { mode: 0o755 });
           concurrent = spawn('bash', [script], {
             env: {
               ...process.env,
+              PATH: `${dir}:${process.env.PATH}`,
               TRONCLASS_RUNTIME_DIR: dir,
               TRONCLASS_SIGNAL_SELFTEST: '1',
               TRONCLASS_SELFTEST_CHILD: path.join(dir, 'concurrent-child.pid'),
@@ -924,19 +950,18 @@ kill() {
           assert.deepEqual(await concurrentExited, [143, null]);
           process.kill(descendant, 0);
           launcher.kill('SIGCONT');
+        } else {
+          process.kill(Number(leader), 'SIGTERM');
         }
         const [code, signal] = await launcherExited;
         assert.equal(code, 0);
         assert.equal(signal, null);
         process.kill(victim.pid, 0);
-        if (['current run', 'concurrent run', 'reused group'].includes(recordKind)) {
-          assert.equal(existsSync(path.join(dir, 'unverified-group-kill')), false);
-          const reapDeadline = Date.now() + 1000;
-          while (existsSync(`/proc/${descendant}`) && Date.now() < reapDeadline) await delay(15);
-          assert.throws(() => process.kill(descendant, 0), { code: 'ESRCH' });
-        } else {
-          process.kill(descendant, 0);
-        }
+        assert.equal(existsSync(`/proc/${leader}`), false);
+        assert.equal(existsSync(path.join(dir, 'unverified-group-kill')), false);
+        const reapDeadline = Date.now() + 1000;
+        while (existsSync(`/proc/${descendant}`) && Date.now() < reapDeadline) await delay(15);
+        assert.throws(() => process.kill(descendant, 0), { code: 'ESRCH' });
       } finally {
         for (const pid of [descendant, victim.pid]) {
           if (pid && existsSync(`/proc/${pid}`)) process.kill(pid, 'SIGKILL');
@@ -1740,7 +1765,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const [arg, ...args] = process.argv.slice(2);
 if (arg === '-') {
-  const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [arg, ...args], { stdio: 'inherit' });
+  const stdio = args[0]?.includes('.log.') ? [0, 1, 2, 3] : 'inherit';
+  const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [arg, ...args], { stdio });
   process.exit(status ?? 1);
 }
 if (arg === '-e') process.exit(0);
@@ -1852,9 +1878,10 @@ process.exit(0);
   writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
 const fs = require('node:fs');
 const path = require('node:path');
-const [arg] = process.argv.slice(2);
+const [arg, ...args] = process.argv.slice(2);
 if (arg === '-') {
-  const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, process.argv.slice(2), { stdio: 'inherit' });
+  const stdio = args[0]?.includes('.log.') ? [0, 1, 2, 3] : 'inherit';
+  const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [arg, ...args], { stdio });
   process.exit(status ?? 1);
 }
 if (arg === '-e') process.exit(0);

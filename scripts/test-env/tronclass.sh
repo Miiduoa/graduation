@@ -129,9 +129,9 @@ try {
   }
   const info = fs.fstatSync(fd);
   if (info.uid !== process.getuid()) throw new Error('owner');
-  fs.fchmodSync(fd, 0o700);
   const current = fs.lstatSync(target);
   if (!current.isDirectory() || current.dev !== info.dev || current.ino !== info.ino) throw new Error('replaced');
+  fs.fchmodSync(fd, 0o700);
 } catch {
   process.stderr.write('TRONCLASS_RUNTIME_DIR must be a directory owned by the current user, not a symbolic link or replaced directory.\n');
   process.exitCode = 1;
@@ -168,6 +168,12 @@ tronclass_early_cleanup() {
 trap 'tronclass_early_cleanup' EXIT
 trap 'tronclass_early_cleanup INT' INT
 trap 'tronclass_early_cleanup TERM' TERM
+# Keep the wrapper's spawn records available even if sidecar publication fails.
+# The launcher holds the unlinked journal open until all wrappers are reaped.
+group_journal="$(mktemp /tmp/tronclass-groups.XXXXXXXX)"
+exec {group_journal_fd}>>"$group_journal"
+rm -- "$group_journal"
+unset group_journal
 tronclass_read_session_key() {
   node - "$TRONCLASS_RUNTIME_DIR" "$1.key" <<'NODE'
 const fs = require('node:fs');
@@ -373,7 +379,7 @@ tronclass_stop_logged() {
   read -r launcher_pgid < <(ps -o pgid= -p "$$")
   [ -n "$launcher_pgid" ] || return 1
   tronclass_discover_groups() {
-    local child pgid group_start child_record existing
+    local child pgid group_start child_record existing journal_log
     local parents=() walk_pid
     # A detached leader can exit before ps sees it. Its wrapper recorded the
     # identity at spawn, and the group may still contain descendants.
@@ -386,6 +392,13 @@ tronclass_stop_logged() {
         fi
       fi
     fi
+    while read -r journal_log child_record; do
+      [ "$journal_log" = "${log##*/}" ] || continue
+      for existing in "${records[@]}"; do
+        [ "$existing" = "$child_record" ] && continue 2
+      done
+      tronclass_remember_group "$child_record"
+    done < "/proc/self/fd/$group_journal_fd"
     tronclass_record_matches "$wrapper" "$wrapper_start" || return 0
     parents+=("$wrapper")
     while [ "${#parents[@]}" -gt 0 ]; do
@@ -544,6 +557,11 @@ cleanup() {
     # visible to kill -0 after the launcher exits.
     wait "$pid" 2>/dev/null || true
   done
+  # Catch a record written after the last discovery, including during escalation.
+  local journal_log record
+  while read -r journal_log record; do
+    tronclass_signal_record "$record" KILL
+  done < "/proc/self/fd/$group_journal_fd"
   if [ "$sig" = INT ]; then exit 130; fi
   if [ "$sig" = TERM ]; then exit 143; fi
 }
@@ -645,7 +663,7 @@ tronclass_run_logged() {
   # subshell that can ignore INT and leave the child holding the port.
   local -a command=(node)
   if [ "${TRONCLASS_RUN_LOGGED_EXEC:-}" = '1' ]; then command=(exec node); fi
-  "${command[@]}" - "$log" "$TRONCLASS_PROJECT_ROOT/scripts/process-identity.sh" "$@" <<'NODE'
+  "${command[@]}" - "$log" "$TRONCLASS_PROJECT_ROOT/scripts/process-identity.sh" "$@" 3>&"$group_journal_fd" <<'NODE'
 const fs = require('node:fs');
 const { spawn, spawnSync } = require('node:child_process');
 const logPath = process.argv[2];
@@ -714,12 +732,15 @@ try {
   if (!startTime || identity.group !== String(child.pid)) throw new Error('group identity');
   if (!/^[0-9a-fA-F]{32}$/.test(runId)) throw new Error('run-id');
   childIdentity = identity;
+  const record = `${runId} ${child.pid} ${startTime}\n`;
+  // One append writes the full record before attempting filesystem publication.
+  fs.writeSync(3, `${path.basename(logPath)} ${record}`);
   const tmpPath = path.join(path.dirname(pgidPath), `.pgid-${process.pid}-${crypto.randomBytes(8).toString('hex')}.tmp`);
   const tmpFd = fs.openSync(tmpPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
   try {
     const tmpStat = fs.fstatSync(tmpFd);
     if (!tmpStat.isFile() || tmpStat.nlink !== 1 || tmpStat.uid !== process.getuid()) throw new Error('tmp');
-    fs.writeSync(tmpFd, `${runId} ${child.pid} ${startTime}\n`);
+    fs.writeSync(tmpFd, record);
     fs.fsyncSync(tmpFd);
     // Publish without replacing an existing record, including symlinks.
     const namedTmp = fs.lstatSync(tmpPath);
