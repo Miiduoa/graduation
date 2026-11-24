@@ -361,6 +361,13 @@ function AccountWorkspace({
         const key = workspaceKey(item);
         if (!targets.has(key)) targets.set(key, item);
       }
+      if (stores.status === 'fulfilled') confirmed.mergeWorkspaceList(stores.value, listRevision);
+      else {
+        const listDenied = denied(stores.reason);
+        confirmed.rejectWorkspaceList(listRevision, listDenied);
+        if (listDenied) publishOverview();
+      }
+
       const refreshed = await Promise.all(
         [...targets.values()].map(async (item) => {
           const key = workspaceKey(item);
@@ -383,8 +390,6 @@ function AccountWorkspace({
         }),
       );
       if (!isCurrent()) return;
-      if (stores.status === 'fulfilled') confirmed.mergeWorkspaceList(stores.value, listRevision);
-      else confirmed.useVerifiedWorkspacesOnListFailure(!denied(stores.reason));
       for (const result of refreshed) {
         if (!result) continue;
         confirmed.verify(result.key, result.revision, !result.detail);
@@ -522,7 +527,7 @@ function AccountWorkspace({
   );
 
   const onWorkspaceDenied = useCallback(
-    (tenantId: string, locationId: string, revision = confirmed.beginRequest()) => {
+    (tenantId: string, locationId: string, revision: number) => {
       if (!mounted.current || !enabled.current) return;
       confirmed.verify(workspaceKey({ tenantId, locationId }), revision, true);
       publishOverview();

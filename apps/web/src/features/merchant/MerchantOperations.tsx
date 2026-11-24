@@ -108,7 +108,7 @@ export function MerchantOperations({
   beginRequest?(): number;
   onChanged(detail: Detail, verifiedAccess: boolean, revision: number): Detail | null | void;
   onMenuConfirmed?(detail: Detail): void;
-  onDenied?(tenantId: string, locationId: string, revision?: number): void;
+  onDenied?(tenantId: string, locationId: string, revision: number): void;
 }) {
   const draftKey = JSON.stringify([tenantId, locationId]);
   const saved = drafts.get(draftKey);
@@ -311,8 +311,9 @@ export function MerchantOperations({
     setBusy(action);
     setError('');
     setNotice('');
+    const revision = nextRevision();
     try {
-      await task(current, nextRevision());
+      await task(current, revision);
       if (current() && !visibleRef.current) await checkAccess(current);
     } catch (failure) {
       if (!current()) return;
@@ -324,7 +325,7 @@ export function MerchantOperations({
         setFresh(false);
         expire.current();
       } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-        onDenied?.(tenantId, locationId);
+        onDenied?.(tenantId, locationId, revision);
         setDetail(null);
         setFresh(false);
         setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
