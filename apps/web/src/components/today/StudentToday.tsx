@@ -19,6 +19,8 @@ import {
   type TodayClass,
   type TodayTodo,
 } from '@campus/shared/src/pickNextAction';
+import { TodayDeadlineReminder, type ReminderSession } from './TodayDeadlineReminder';
+import { currentTimetableTermKey, isCurrentPriorityTerm } from '@campus/shared/src/todayPriority';
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
 import { TODAY_FLOW_CLASS_TITLE, TODAY_FLOW_WORK_TITLE } from '@/lib/todayCourseWork';
@@ -35,6 +37,7 @@ import { CampusPersonalizationSection } from './CampusPersonalizationSection';
 export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigned-scope';
 
 type Props = {
+  platformSession?: ReminderSession;
   assistant?: ReactNode;
   workspaces?: ReactNode;
   agent?: ReactNode;
@@ -42,6 +45,7 @@ type Props = {
   scopeKey?: string;
   /** The actual personal timetable scope, which can differ from the signed-in school. */
   timetableSchoolId?: string | null;
+  timetableTermKey?: string;
   /** Browsing context stays distinct from a timetable whose school is still resolving. */
   campusSearch?: string;
   now: Date | null;
@@ -65,6 +69,7 @@ type Props = {
 };
 
 type BoundProps = {
+  platformSession?: ReminderSession;
   assistant?: ReactNode;
   workspaces?: ReactNode;
   agent?: ReactNode;
@@ -187,6 +192,20 @@ export function StudentToday(props: Props) {
               classroomHref={campusServiceHref('/classroom', returnSearch)}
             />
           </div>
+        )}
+      {props.now && isCurrentPriorityTerm(props.timetableTermKey, props.now) &&
+        !props.skeleton && !props.refreshing && !props.unsigned &&
+        props.timetableStatus === 'ready' && !props.todosError && !props.lmsUnconnected && (
+          <TodayDeadlineReminder
+            classes={props.classes}
+            todos={props.todos}
+            now={props.now}
+            scopeKey={props.scopeKey}
+            schoolId={props.timetableSchoolId}
+            search={returnSearch}
+            leavingTodoIds={props.leavingTodoIds}
+            platformSession={props.platformSession}
+          />
         )}
       {props.skeleton ? (
         <TodaySkeleton />
@@ -498,10 +517,12 @@ export function StudentTodayPage(props: BoundProps) {
   const schedule = buildPersonalToday(timetableRecords, {
     schoolId,
     now,
+    termKey: currentTimetableTermKey(timetableRecords, schoolId, now),
   });
   const classes = todayClassesFromSchedule(schedule.today, now);
   return (
     <StudentToday
+      platformSession={props.platformSession}
       assistant={props.assistant}
       workspaces={props.workspaces}
       agent={props.agent}
@@ -520,6 +541,7 @@ export function StudentTodayPage(props: BoundProps) {
       }
       scopeKey={records.scopeKey}
       timetableSchoolId={schoolId}
+      timetableTermKey={schedule.termKey}
       campusSearch={campusSearch}
       now={props.now}
       updatedAt={props.updatedAt}

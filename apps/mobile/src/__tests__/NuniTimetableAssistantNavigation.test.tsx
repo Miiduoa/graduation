@@ -83,7 +83,12 @@ jest.mock('../state/theme', () => ({
 }));
 jest.mock('../components/SchoolBrowsingControl', () => ({ SchoolBrowsingControl: () => null }));
 jest.mock('../components/SchoolPortalImport', () => ({ SchoolPortalImportEntry: () => null }));
-jest.mock('../components/TodayTimetablePanel', () => ({ TodayTimetablePanel: () => null }));
+let mockRealTimetablePanel = false;
+jest.mock('../components/TodayTimetablePanel', () => ({
+  TodayTimetablePanel: (props: Record<string, unknown>) => mockRealTimetablePanel
+    ? require('react').createElement(jest.requireActual('../components/TodayTimetablePanel').TodayTimetablePanel, props)
+    : null,
+}));
 jest.mock('../services/schoolLoginAvailability', () => ({
   isSchoolLoginEntryAvailable: () => false, loadSchoolLoginProviderKinds: async () => [],
 }));
@@ -129,6 +134,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await cleanupAsync();
   mockSchoolSelectionReady = true;
+  mockRealTimetablePanel = false;
   mockAuthUser = null;
   jest.restoreAllMocks();
   jest.useRealTimers();
@@ -998,6 +1004,69 @@ test('the assistant opens the exact assignment in the linked workspace even when
   act(() => navigation.goBack());
   await screen.findByRole('button', { name: /查看作業.*小考報告/ });
   expect(navigation.getCurrentRoute()?.name).toBe('NuniTimetableAssistant');
+});
+
+async function savedMeetings(rows: Array<{ id: string; startTime: string; endTime: string }>, linkedCourseId: string) {
+  await AsyncStorage.setItem(personalImportStorageKey({ owner: `nuni:${account}`, schoolId: 'pu' }), JSON.stringify({
+    version: 1, batches: [], records: rows.map((row) => ({
+      id: row.id, batchId: 'batch-' + row.id, kind: 'timetable', title: '資料庫管理', location: '主顧 305',
+      schoolId: 'pu', academicYear: '115', semester: '1', dayOfWeek: 4, startTime: row.startTime, endTime: row.endTime,
+      importedAt: '2026-11-02T08:00:00Z', source: { type: 'paste', line: 1, rawText: '資料庫管理' }, linkedCourseId,
+    })),
+  }));
+}
+
+test.each([
+  { kind: 'current', label: '問 nuni 這堂課的作業', prompt: '現在這堂課有什麼作業？', start: '09:00', end: '10:30' },
+  { kind: 'next', label: '問 nuni 下一堂課的作業', prompt: '查下一堂課的作業', start: '10:10', end: '12:00' },
+] as const)('the signed-in landing %s-class entry pre-fills the assistant and reads only after the student sends it', async (row) => {
+  mockRealTimetablePanel = true;
+  const { course, other, assignment } = await linkedWorkspaceFixture();
+  await savedMeetings([{ id: 'import-db', startTime: row.start, endTime: row.end }], course.id);
+  const navigation = createNavigationContainerRef<PreAuthStackParamList>();
+  const unhandled = jest.fn();
+  const screen = render(
+    <NuniSessionProvider><NavigationContainer ref={navigation} onUnhandledAction={unhandled}>
+      <PreAuthStack />
+    </NavigationContainer></NuniSessionProvider>,
+  );
+  const entry = await screen.findByRole('button', { name: row.label });
+  expect(screen.getByRole('button', { name: '開啟課表助理' })).toBeTruthy();
+  fireEvent.press(entry);
+  expect(navigation.getCurrentRoute()).toMatchObject({ name: 'NuniTimetableAssistant', params: { prompt: row.prompt } });
+  const composer = await screen.findByLabelText('詢問校園助理');
+  expect(composer.props.value).toBe(row.prompt);
+  // Opening the assistant is not a query: nothing is sent or read until the student presses send.
+  expect(mockRequest.mock.calls.map(([path]) => path)).toEqual(['sessions/current']);
+  expect(mockAssignmentBff).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByRole('button', { name: '送出問題' }));
+  fireEvent.press(await screen.findByRole('button', { name: /查看作業.*小考報告/ }));
+  await screen.findByLabelText('作業繳交區：小考報告');
+  expect(navigation.getCurrentRoute()).toMatchObject({
+    name: 'NuniWorkspace', params: { tab: 'courses', workspaceId: course.id, assignmentId: assignment.id, assistantAccountId: account },
+  });
+  expect(mockAssignmentBff.mock.calls.map(([path]) => path)).toEqual([`class-workspaces/${course.id}/assignments`]);
+  expect([...mockRequest.mock.calls, ...mockAssignmentBff.mock.calls].some(([path]) => path.includes(other.id))).toBe(false);
+  expect(jest.mocked(AsyncStorage.getItem).mock.calls.some(([key]) => key.includes('pa_22222222'))).toBe(false);
+  expect(unhandled).not.toHaveBeenCalled();
+});
+
+test('simultaneous saved classes get no targeted landing entry, while the general assistant entry remains', async () => {
+  mockRealTimetablePanel = true;
+  const { course } = await linkedWorkspaceFixture();
+  await savedMeetings([
+    { id: 'import-db', startTime: '09:00', endTime: '10:30' },
+    { id: 'import-db-2', startTime: '09:00', endTime: '10:30' },
+  ], course.id);
+  const navigation = createNavigationContainerRef<PreAuthStackParamList>();
+  const screen = render(
+    <NuniSessionProvider><NavigationContainer ref={navigation}><PreAuthStack /></NavigationContainer></NuniSessionProvider>,
+  );
+  await screen.findAllByText('上課時間重疊，請核對課表。');
+  await screen.findByRole('button', { name: '開啟課表助理' });
+  expect(screen.queryByRole('button', { name: '問 nuni 這堂課的作業' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '問 nuni 下一堂課的作業' })).toBeNull();
+  expect(mockRequest.mock.calls.map(([path]) => path)).toEqual(['sessions/current']);
 });
 
 test('opening an assistant link from another account drops the previous course and assignment targets', async () => {

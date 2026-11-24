@@ -78,6 +78,83 @@
   color: var(--brand);
 }
 
+.reminder {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 20px;
+  border: 1px solid var(--border);
+  border-inline-start: 4px solid var(--brand);
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+  font-size: var(--font-body-size);
+}
+
+.reminderKind {
+  margin: 0;
+  color: var(--brand);
+  font-size: calc(var(--font-body-sm-size) - 0.0625rem);
+  line-height: 1.5;
+  font-weight: 650;
+}
+
+.reminderTitle,
+.reminderReason {
+  margin: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.reminderTitle {
+  color: var(--text);
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.reminderReason {
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+  line-height: 1.6;
+}
+
+.reminderLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding-block: 8px;
+  color: var(--brand);
+  font-size: var(--font-body-sm-size);
+  font-weight: 600;
+  text-underline-offset: 4px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reminderLink:hover {
+    text-decoration: underline;
+  }
+}
+
+@media (max-width: 600px) {
+  .reminder {
+    padding: 12px 18px;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .reminder {
+    border-color: var(--border-strong);
+  }
+}
+
+@media (forced-colors: active) {
+  .reminder {
+    border-color: CanvasText;
+    border-inline-start-color: Highlight;
+  }
+}
+
 .flow {
   display: flex;
   flex-direction: column;

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -30,6 +31,7 @@ import {
   type TimetableClassroomDestination,
 } from '../hooks/timetableClassroomNav';
 import { useTodayTimetableData } from '../hooks/useTodayTimetableData';
+import { isCurrentPriorityTerm, pickTodayPriority } from '@campus/shared/src/todayPriority';
 import {
   formatClock,
   formatTodayHeaderDate,
@@ -52,6 +54,7 @@ type HomeState =
       scope: string;
       status: 'ready';
       tasks: InboxTask[];
+      tasksComplete: boolean;
       updatedAt: Date | null;
       lmsConnected: boolean | null;
     };
@@ -107,6 +110,8 @@ export default function StudentTodayScreen() {
   const unsigned = !uid;
   const {
     status: timetableStatus,
+    refreshing: timetableRefreshing,
+    scope: timetableScope,
     classes,
     termKey,
     retry: retryTimetable,
@@ -115,14 +120,16 @@ export default function StudentTodayScreen() {
   const load = useCallback(
     async (silent = false) => {
       const request = ++generation.current;
-      if (!silent) setState({ scope, status: 'loading' });
+      setState(previous => silent && previous.scope === scope && previous.status === 'ready'
+        ? { ...previous, tasksComplete: false }
+        : { scope, status: 'loading' });
       try {
         if (!uid) {
           if (request === generation.current && currentScope.current === scope)
-            setState({ scope, status: 'ready', tasks: [], updatedAt: null, lmsConnected: null });
+            setState({ scope, status: 'ready', tasks: [], tasksComplete: false, updatedAt: null, lmsConnected: null });
           return;
         }
-        const [{ tasks }, connected] = await Promise.all([
+        const [{ tasks, tasksComplete }, connected] = await Promise.all([
           loadStudentHome(uid, schoolId, 'today'),
           hasTCSession().catch(() => false),
         ]);
@@ -131,6 +138,7 @@ export default function StudentTodayScreen() {
             scope,
             status: 'ready',
             tasks,
+            tasksComplete: tasksComplete === true,
             lmsConnected: connected,
             updatedAt: new Date(),
           });
@@ -149,20 +157,45 @@ export default function StudentTodayScreen() {
       const frame = requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({ y, animated: false });
       });
-      void load(true);
+      let day = new Date();
+      let foreground = AppState.currentState !== 'inactive' && AppState.currentState !== 'background';
+      setNow(day);
+      if (foreground) void load(true);
+      const subscription = AppState.addEventListener('change', state => {
+        if (state !== 'active') {
+          if (foreground) {
+            foreground = false;
+            generation.current += 1;
+            setState(previous => previous.status === 'ready' && previous.tasksComplete
+              ? { ...previous, tasksComplete: false } : previous);
+          }
+          return;
+        }
+        if (foreground) return;
+        foreground = true;
+        day = new Date();
+        setNow(day);
+        void load(true);
+      });
+      const timer = setInterval(() => {
+        if (!foreground) return;
+        const next = new Date();
+        if (!isSameTaipeiDay(day.getTime(), next.getTime())) {
+          void load(true);
+          void retryTimetable();
+        }
+        day = next;
+        setNow(next);
+      }, 60_000);
       return () => {
+        clearInterval(timer);
+        subscription.remove();
         cancelAnimationFrame(frame);
         generation.current += 1;
         refreshGeneration.current += 1;
       };
-    }, [load]),
+    }, [load, retryTimetable]),
   );
-  useEffect(() => {
-    const tick = () => setNow(new Date());
-    tick();
-    const timer = setInterval(tick, 60_000);
-    return () => clearInterval(timer);
-  }, []);
 
   const todos = useMemo(() => todosFromInbox(data?.tasks ?? []), [data?.tasks]);
   useEffect(() => {
@@ -176,6 +209,15 @@ export default function StudentTodayScreen() {
   }, [todos]);
 
   const classRows = sortTodayClasses(classes, now);
+  const pulling = refreshState?.scope === scope && refreshState.request === refreshGeneration.current;
+  const priority = !auth.loading && uid && schoolId && data?.tasksComplete && !timetableRefreshing && !pulling &&
+    timetableStatus === 'ready' && isCurrentPriorityTerm(termKey, now) &&
+    timetableScope?.owner === `firebase:${uid}` && timetableScope.schoolId === schoolId
+    ? pickTodayPriority(classes, todos, now) : null;
+  const reminder = priority?.kind === 'deadline-during-class'
+    ? todos.find(row => row.id === priority.todo.id && row.courseId === priority.todo.courseId) : undefined;
+  const activeReminder = useRef(reminder);
+  activeReminder.current = reminder;
   const workAction = pickNextAction([], todos, now);
   const nextTodo = 'todo' in workAction ? workAction.todo : null;
   const firstTodo = todos.find(item => item.id === nextTodo?.id);
@@ -274,9 +316,7 @@ export default function StudentTodayScreen() {
         scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
-            refreshing={
-              refreshState?.scope === scope && refreshState.request === refreshGeneration.current
-            }
+            refreshing={pulling}
             onRefresh={() => void refresh()}
             tintColor={theme.colors.accent}
           />
@@ -304,6 +344,19 @@ export default function StudentTodayScreen() {
           <TodaySkeleton styles={s} />
         ) : (
           <>
+            {priority && reminder?.task?.assignmentId?.trim() && reminder.task.groupId.trim() ? (
+              <View style={s.reminder}>
+                <Text accessibilityRole="header" style={s.sectionTitle}>nuni 提醒</Text>
+                <Text style={s.rowTitle}>{priority.title}</Text>
+                <Text style={s.rowMeta}>{priority.reason}</Text>
+                <Pressable accessibilityRole="button"
+                  accessibilityLabel={`查看提醒的${reminder.task.kind === 'quiz' ? '測驗' : '作業'}，${reminder.title}`}
+                  onPress={() => { if (activeReminder.current === reminder) openTodo(reminder, true); }}
+                  style={({ pressed }) => [s.textButton, pressed && s.pressed]}>
+                  <Text style={s.link}>{reminder.task.kind === 'quiz' ? '查看測驗' : '查看作業'}</Text>
+                </Pressable>
+              </View>
+            ) : null}
             {urgentWorkFirst && todoSection}
             {scheduleSection}
             {!urgentWorkFirst && todoSection}
@@ -593,6 +646,10 @@ const createStyles = () => {
       fontVariant: ['tabular-nums'],
     },
     section: { gap: 2 },
+    reminder: {
+      gap: 4, padding: 14, borderRadius: 14, borderColor: border, borderWidth: 1,
+      backgroundColor: theme.colors.surface,
+    },
     sectionHeader: {
       flexDirection: 'row',
       alignItems: 'center',

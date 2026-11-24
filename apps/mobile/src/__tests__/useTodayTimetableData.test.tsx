@@ -88,6 +88,7 @@ test('refreshing the same timetable keeps the current classes visible until the 
     void view.result.current.retry();
   });
   expect(view.result.current.status).toBe('ready');
+  expect(view.result.current.refreshing).toBe(true);
   expect(view.result.current.classes[0]?.title).toBe('資料結構');
   await act(async () => next.resolve(ledger([{ ...record, title: '更新的課程' }])));
   expect(view.result.current.classes[0]?.title).toBe('更新的課程');
@@ -134,4 +135,14 @@ test('the today hook consumes a dated room change from the same timetable as the
   const view = renderHook(() => useTodayTimetableData(now));
   await waitFor(() => expect(view.result.current.classes[0]?.location).toBe('單次教室'));
   expect(view.result.current.classes[0].startAt).toBe(Date.parse('2026-10-19T09:00:00+08:00'));
+});
+
+test('uses the current semester even when a future timetable is saved', async () => {
+  jest.mocked(loadPersonalImports).mockResolvedValue(ledger([
+    record, { ...record, id: 'future', title: '下學期的課', semester: '2' },
+  ]));
+  const view = renderHook(() => useTodayTimetableData(now));
+  await waitFor(() => expect(view.result.current.status).toBe('ready'));
+  expect(view.result.current.termKey).toBe('115|1');
+  expect(view.result.current.classes.map(row => row.title)).toEqual(['資料結構']);
 });

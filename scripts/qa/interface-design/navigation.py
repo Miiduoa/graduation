@@ -84,6 +84,28 @@ async def check_today_reading_width(page, config, report):
     report['checks'].append('Today course and task text keeps a readable width; very large text places time above and service actions below the content')
 
 
+async def check_deadline_reminder(page):
+    reminder = page.get_by_role('region', name='nuni 提醒')
+    await expect(reminder).to_be_visible()
+    for text in ('資料結構', '10:00', '12:00', '資料處理練習', '大數據分析', '11:00'):
+        await expect(reminder).to_contain_text(text)
+    work = page.get_by_role('region', name='課程待辦')
+    await expect(work.get_by_text('資料處理練習', exact=True)).to_have_count(2)
+    link = reminder.get_by_role('link')
+    expected = '/course/fixture-d?schoolId=pu&campus=pu#assignment-work-b'
+    await expect(link).to_have_attribute('href', expected)
+    destination = await link.evaluate('link => link.href')
+    assert await reminder.evaluate('''node => {
+      const rect = node.getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= innerWidth + 1 &&
+        node.scrollWidth <= node.clientWidth + 1 && document.documentElement.scrollWidth <= innerWidth + 1;
+    }'''), 'The deadline reminder or its contents overflow the viewport'
+    await link.click()
+    await expect(page).to_have_url(destination)
+    await page.go_back()
+    await expect(reminder).to_be_visible()
+
+
 async def check_service_navigation(page, config, report, capture):
     await page.get_by_role('button', name='返回今天', exact=True).click()
     trigger = page.locator('summary[aria-label="所有服務"]')

@@ -13,7 +13,7 @@ from feedback import check_action_feedback
 from loading import check_loading_feedback
 from course_editing import check_course_editing
 from record_editing import check_record_editing
-from navigation import check_navigation_geometry, check_service_navigation, check_today_reading_width
+from navigation import check_deadline_reminder, check_navigation_geometry, check_service_navigation, check_today_reading_width
 from search_continuity import check_search_continuity
 
 OUTPUT = Path(__file__).resolve().parents[3] / 'artifacts' / 'interface-design'
@@ -539,6 +539,9 @@ async def scenario(browser, origin, config, report):
         await check_navigation_geometry(page, config, report)
         await check_today_reading_width(page, config, report)
         await capture('today')
+        if config['name'] in ('desktop-light', 'mobile-dark'):
+            await check_deadline_reminder(page)
+            report['checks'].append('The nuni reminder links the class-time deadline to the exact one of two same-title assignments')
         if config['role'] == 'guest':
             await expect(page.get_by_role('link', name='匯入我的課表', exact=True)).to_be_visible()
             await expect(page.locator('summary[aria-label="帳號"]')).to_have_count(0)

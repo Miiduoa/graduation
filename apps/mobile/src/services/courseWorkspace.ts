@@ -9,6 +9,7 @@ import {
   setDoc,
   where,
   type Firestore,
+  type SnapshotMetadata,
 } from 'firebase/firestore';
 import { httpsCallable, type Functions } from 'firebase/functions';
 import { fetchSchoolDirectoryProfiles } from './memberDirectory';
@@ -254,8 +255,12 @@ export function parseDateTimeInput(raw: string) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export async function listCourseMemberships(db: Firestore, uid: string, schoolId?: string) {
+export async function listCourseMemberships(
+  db: Firestore, uid: string, schoolId?: string,
+  onSnapshot?: (metadata: SnapshotMetadata) => void,
+) {
   const snap = await getDocs(collection(db, 'users', uid, 'groups'));
+  onSnapshot?.(snap.metadata);
   const memberships = snap.docs
     .map((docSnap) => {
       const data = docSnap.data() as Record<string, unknown>;

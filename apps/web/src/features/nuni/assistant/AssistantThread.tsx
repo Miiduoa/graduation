@@ -37,6 +37,7 @@ import draftStyles from './AssistantDraft.module.css';
 import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, restoreComposerDraft, sendComposerDraft } from './composerDraft';
 import type { V2ActionStates, V2Card, V2Turn } from './types';
 
+const PRIORITY_SUGGESTION = '今天先做什麼？';
 const PICKUP_SUGGESTION = '把最近訂單的取餐時間加入行事曆';
 
 /** Classify before any reader runs; the composer and execution must use the same source boundary. */
@@ -45,7 +46,7 @@ export function assistantQuestionReadRoute(taskProfile: AssistantRoleProfileId, 
   const personal = personalAssistantReadIntent(query);
   const schedule = parseLocalScheduleIntent(query);
   const academic = parseImportedAcademicIntent(query);
-  const restricted = taskProfile !== 'student' && (personal?.kind === 'coursework' || academic !== null || canAnswerTronClassQuestion(query));
+  const restricted = taskProfile !== 'student' && (personal?.kind === 'coursework' || personal?.kind === 'today-priority' || academic !== null || canAnswerTronClassQuestion(query));
   const personalTime = schedule !== null || personal?.kind === 'schedule' || personal?.kind === 'calendar';
   // A complete read intent is more precise than work-related keywords. Restricted
   // sources receive fixed guidance even when their parser accepts unusual spacing.
@@ -254,8 +255,10 @@ export function AssistantThread({
   const foodPickup = !tronClass && taskProfile === 'student' && parseAssistantFoodPickupIntent(question) !== null;
   const readRoute = assistantQuestionReadRoute(taskProfile, question);
   const useProfileExamples = taskProfile !== 'student' && workContext === assistantWorkContextForTaskProfile(taskProfile);
+  const studentWork = taskProfile === 'student' && workContext === 'student';
   const suggestions = useProfileExamples ? profile.examples.map(example => example.prompt)
-    : foodPickupEnabled && taskProfile === 'student' ? [...workflow.suggestions, PICKUP_SUGGESTION] : workflow.suggestions;
+    : [...(studentWork ? [PRIORITY_SUGGESTION] : []), ...workflow.suggestions,
+      ...(foodPickupEnabled && taskProfile === 'student' ? [PICKUP_SUGGESTION] : [])];
   const canSubmit = !pending && !onStop && !!question.trim() &&
     ((!!demoScope && !!accountDemoAssistantIntent(question)) || readRoute.roleGuide || (foodPickup ? foodPickupEnabled
       : tronClass || parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) ||
@@ -561,9 +564,9 @@ export function AssistantThread({
         <p id={`${fieldId}-hint`} className={styles.composerHint}>
           {pending ? '正在處理上一個問題，可以先輸入下一句。' : 'Enter 送出 · Shift + Enter 換行'}
         </p>
-        {inline && (ready || foodPickupEnabled) && !turns.length && !question && !pending && (
+        {inline && (studentWork || ready || foodPickupEnabled) && !turns.length && !question && !pending && (
           <div className={styles.chips} aria-label="試著問">
-            {(taskProfile === 'student' && workContext === 'student' ? ['下一堂課在哪裡？', '這週有哪些作業要交？', ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
+            {(studentWork ? [PRIORITY_SUGGESTION, '下一堂課在哪裡？', '這週有哪些作業要交？', ...(foodPickupEnabled ? [PICKUP_SUGGESTION] : [])] : suggestions).map((phrase) => (
               <button type="button" key={phrase} className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}
               </button>

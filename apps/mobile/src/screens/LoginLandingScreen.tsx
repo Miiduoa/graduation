@@ -191,6 +191,8 @@ export default function LoginLandingScreen() {
         {platformReady && hasSchool ? (
           <View style={s.todayTasks}>
             <TodayTimetablePanel
+              assistantAccountId={auth.session?.platformAccountId}
+              onAskCoursework={(prompt) => safeNavigate(navigation, 'NuniTimetableAssistant', { prompt })}
               onOpenImport={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
               onOpenTimetable={(term) =>
                 safeNavigate(navigation, 'PersonalTimetable', term ? { term } : undefined)

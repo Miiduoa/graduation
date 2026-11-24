@@ -43,6 +43,7 @@ export function todayTodosFromHomeTasks(tasks: readonly HomeTask[]): TodayTodo[]
         id: `${task.courseId}:${task.id}`,
         title: task.title,
         courseName: task.courseName,
+        ...(task.schoolId ? { schoolId: task.schoolId } : {}),
         courseId: task.courseId,
         dueAt,
         href: courseTaskHref(task),
