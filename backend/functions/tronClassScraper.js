@@ -987,28 +987,21 @@ function httpError(status) {
   return error;
 }
 
+function isLegacyPaginationNumberInput(value) {
+  if (Array.isArray(value)) return value.every(isLegacyPaginationNumberInput);
+  return value == null || ['number', 'string', 'boolean', 'bigint'].includes(typeof value);
+}
+
 function homeworkPaginationNumber(value, required = true) {
   if (value === undefined || value === null) return null;
   if (!required) {
-    // Number() only for primitives, and for arrays whose elements are also
-    // primitives (Number([]) is 0, Number([50]) is 50). Other objects, and
-    // arrays such as [{"toString": null}], must not call Number() because
-    // stringification can throw; treat them as unusable so the legacy caller
-    // can still return the raw page field.
-    const typ = typeof value;
-    if (typ === 'number' || typ === 'string' || typ === 'boolean' || typ === 'bigint') {
+    try {
+      if (!isLegacyPaginationNumberInput(value)) return null;
       const parsed = Number(value);
       return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+    } catch {
+      return null;
     }
-    if (Array.isArray(value) && value.every((item) => {
-      const itemType = typeof item;
-      return itemType === 'number' || itemType === 'string' || itemType === 'boolean' || itemType === 'bigint' ||
-        item === null || item === undefined;
-    })) {
-      const parsed = Number(value);
-      return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
-    }
-    return null;
   }
   const parsed = typeof value === 'number' ? value
     : typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : NaN;
