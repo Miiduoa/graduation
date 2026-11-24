@@ -105,9 +105,19 @@ export function applyCampusWalkingSegmentAudits(
     if (segmentCount > 4000) return null;
   }
   const adjacentSegments = new Set<string>();
+  const undirectedSegments = new Set<string>();
   for (const way of ways.values()) {
+    if (excludesWalkingWay(way.tags)) continue;
     for (let i = 1; i < way.nodes.length; i += 1) {
-      adjacentSegments.add(key(way.id, way.nodes[i - 1], way.nodes[i]));
+      const a = nodes.get(way.nodes[i - 1]);
+      const b = nodes.get(way.nodes[i]);
+      if (!a || !b) continue;
+      // Match discovery's topology invariant even when candidates came from cache.
+      const unordered = key(way.id, Math.min(a.id, b.id), Math.max(a.id, b.id));
+      if (a.id === b.id || undirectedSegments.has(unordered) ||
+          (a.lat === b.lat && a.lng === b.lng)) return null;
+      undirectedSegments.add(unordered);
+      adjacentSegments.add(key(way.id, a.id, b.id));
     }
   }
   const reviews = new Map<string, CampusWalkingSegmentAudit>();
