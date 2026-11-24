@@ -117,23 +117,6 @@
   background: var(--brand);
 }
 
-.markers {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  gap: 0.1875rem;
-  min-height: 0.25rem;
-  margin-top: 0.25rem;
-}
-
-.markers span,
-.legend span {
-  width: 0.25rem;
-  height: 0.25rem;
-  border-radius: 50%;
-  background: currentColor;
-}
-
 .grid .event {
   display: block;
   width: 100%;
@@ -167,10 +150,6 @@
 }
 
 .footer {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 0.5rem 1rem;
   margin-top: 0.5rem;
   padding-top: 0.75rem;
   border-top: 1px solid var(--border);
@@ -179,15 +158,8 @@
   line-height: 1.6;
 }
 
-.calendar .hint,
-.calendar .legend {
+.calendar .hint {
   margin: 0;
-}
-
-.legend {
-  display: none;
-  align-items: center;
-  gap: 0.375rem;
 }
 
 .viewport:focus-visible,
@@ -245,6 +217,9 @@
     border-inline: 0;
     border-radius: 0;
   }
+  .grid {
+    grid-template-columns: repeat(7, minmax(3.5rem, 1fr));
+  }
   .day,
   .blank {
     min-height: 3.5rem;
@@ -253,15 +228,12 @@
   }
   .grid .date {
     min-height: 3rem;
-    margin-bottom: 0;
   }
-  .markers,
-  .legend {
-    display: flex;
+  .grid .event {
+    padding-inline: 0.25rem;
   }
-  .grid .event,
-  .grid .more {
-    display: none;
+  .eventTitle {
+    display: block;
   }
 }
 
@@ -277,11 +249,6 @@
   }
   .grid .event {
     border: 1px solid ButtonText;
-  }
-  .markers span,
-  .legend span {
-    background: CanvasText;
-    forced-color-adjust: none;
   }
   .viewport:focus-visible,
   .grid button:focus-visible {
