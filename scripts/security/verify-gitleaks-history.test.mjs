@@ -64,6 +64,12 @@ test('fails closed on missing blobs or lookup failures', async () => {
   await assert.rejects(verifyAliases(manifest().aliases, async () => undefined));
   await assert.rejects(verifyAliases(manifest().aliases, async () => { throw new Error('unavailable'); }));
 });
+test('requires the reviewed full lockfile before allowing its podspec checksum fingerprints', () => {
+  const finding = 'a818d9e02eb57cadd7fe0a0041a1fedba452e8a4:apps/mobile/ios/Podfile.lock:generic-api-key:2526';
+  const changed = candidate + finding + '\n';
+  assert.throws(() => validateAliases(manifest(), baseline, changed));
+  assert.throws(() => validateAliases(manifest(), baseline, changed, () => 'SPEC CHECKSUMS:\n'), /Historical lockfile differs/);
+});
 test('deduplicates blob reads without weakening per-finding verification', async () => {
   let calls = 0;
   const aliases = [...manifest().aliases, { reviewed: reviewed.replace(':17', ':18'), observed: observed.replace(':17', ':18') }];
