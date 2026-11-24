@@ -93,6 +93,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const receipts = new Map<string, Observation<NuniMerchantApplication>>();
   const entries = new Map<string, WorkspaceObservations>();
   const revokedVersionFloors = new Map<string, number>();
+  const workspaceKeysAwaitingConfirmation = new Set<string>();
   let listRevocation = 0;
   let listedRevision = 0;
   const receiptFloors = new Map<string, number>();
@@ -139,6 +140,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const confirmation = entry?.versionedRow;
     if (revision <= Math.max(revokedThrough(key), confirmation?.revision ?? 0)) return;
     revocations.set(key, revision);
+    workspaceKeysAwaitingConfirmation.add(key);
     discardWorkspace(key, revision);
     return revision;
   }
@@ -151,6 +153,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   function merge(next: NuniMerchantWorkspaceListRow, revision: number) {
     const key = workspaceKey(next);
     if (revision <= Math.max(listRevocation, revokedThrough(key))) return;
+    // A legacy list can update metadata, but only a versioned response can
+    // restore the row after a detail denial.
+    if (next.readinessVersion === undefined && workspaceKeysAwaitingConfirmation.has(key)) return;
     const entry = entries.get(key) ?? {};
     const floor = revokedVersionFloors.get(key);
     // Revocation removes the data, but a retry still needs a current readiness version.
@@ -180,6 +185,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         }
       }
       entry.versionedRow = versioned;
+      workspaceKeysAwaitingConfirmation.delete(key);
     }
     // A versioned response can confirm menu requirements even when legacy metadata wins.
     const requirementsObservation = next.readinessVersion === undefined ? row : entry.versionedRow;
@@ -446,6 +452,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       retainedWorkspaceKeys.clear();
       entries.clear();
       revokedVersionFloors.clear();
+      workspaceKeysAwaitingConfirmation.clear();
       revocations.clear();
       verified.clear();
     },
