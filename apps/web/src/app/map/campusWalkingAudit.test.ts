@@ -90,6 +90,27 @@ describe('trusted OSM walking segment audit bridge', () => {
     ], now)?.edges[0].access).toBe('reviewed-open');
   });
 
+  it('rechecks the aggregate retained segment budget before scanning cached ways', () => {
+    const data = candidates();
+    // Synthetic cache fixture, not actual campus paths.
+    const outside = Array.from({ length: 3997 }, (_, i) => i + 10000);
+    data.ways[0].nodes.push(...outside);
+    const atLimit = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+    expect(findCampusWalkingRoute(atLimit, 'fixture', bounds, 1, 2, now)).not.toBeNull();
+    data.ways[1].nodes.push(99999);
+    expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)).toBeNull();
+    data.ways[1].nodes = [];
+    expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)).toBeNull();
+  });
+
+  it('does not promote a cached edge whose ordered adjacency is missing', () => {
+    const data = candidates();
+    data.ways[0].nodes = [2, 1, 3];
+    const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+    expect(graph.edges[0].access).toBe('unknown');
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+  });
+
   it('keeps other-school, changed node, changed way and wrong order audits closed', () => {
     for (const bad of [
       audit(1, 2, { schoolId: 'other' }),
