@@ -1,25 +1,29 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { scrollVerticallyIntoView, stickyHeaderOffset } from './calendarScroll';
+import { scrollVerticallyIntoView, stickyFooterOffset, stickyHeaderOffset } from './calendarScroll';
 
 afterEach(() => {
   document.body.innerHTML = '';
   document.documentElement.style.removeProperty('--calendar-sticky-header-height');
+  document.documentElement.style.removeProperty('--calendar-sticky-footer-height');
   vi.restoreAllMocks();
 });
 
+function mockComputed(element: Element, position: string) {
+  const previous = window.getComputedStyle;
+  vi.spyOn(window, 'getComputedStyle').mockImplementation((current: Element) => {
+    if (current === element) {
+      return { position, visibility: 'visible', opacity: '1' } as CSSStyleDeclaration;
+    }
+    return previous.call(window, current);
+  });
+}
+
 it('sets scroll-margin-top to the sticky header height before scrolling', () => {
   const header = document.createElement('header');
-  header.style.position = 'sticky';
   document.body.append(header);
   const target = document.createElement('button');
   document.body.append(target);
-  const computed = (element: Element) =>
-    ({
-      position: element === header ? 'sticky' : 'static',
-      visibility: 'visible',
-      opacity: '1',
-    }) as CSSStyleDeclaration;
-  vi.spyOn(window, 'getComputedStyle').mockImplementation(computed);
+  mockComputed(header, 'sticky');
   vi.spyOn(header, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 320, 80));
   vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 8, 100, 40));
   const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
@@ -30,4 +34,24 @@ it('sets scroll-margin-top to the sticky header height before scrolling', () => 
     '80px',
   );
   expect(scrollBy).toHaveBeenCalledWith(0, 8 - 80);
+});
+
+it('keeps focus above a fixed bottom navigation bar', () => {
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(640);
+  const nav = document.createElement('nav');
+  nav.className = 'nav';
+  document.body.append(nav);
+  const target = document.createElement('button');
+  document.body.append(target);
+  mockComputed(nav, 'fixed');
+  vi.spyOn(nav, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 568, 320, 72));
+  vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 580, 100, 40));
+  const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  expect(stickyFooterOffset()).toBe(72);
+  scrollVerticallyIntoView(target);
+  expect(target.style.scrollMarginBottom).toBe('72px');
+  expect(document.documentElement.style.getPropertyValue('--calendar-sticky-footer-height')).toBe(
+    '72px',
+  );
+  expect(scrollBy).toHaveBeenCalledWith(0, 580 + 40 - (640 - 72));
 });
