@@ -514,6 +514,39 @@ it('explains how to continue when an approved application has no same-campus wor
   );
 });
 
+it.each([true, false])(
+  'waits for the workspace list before showing missing-workspace guidance (empty: %s)',
+  async (empty) => {
+    let finishStores!: (value: { workspaces: (typeof continuityStore)[] }) => void;
+    const stores = new Promise<{ workspaces: (typeof continuityStore)[] }>((resolve) => {
+      finishStores = resolve;
+    });
+    mocks.request.mockImplementation((path) => {
+      if (path === 'merchant-applications')
+        return Promise.resolve({ applications: [{ ...application, state: 'approved' }] });
+      if (path === 'merchant-workspaces') return stores;
+      return respond(path);
+    });
+    const noManageableStores = /目前還沒有可管理的門市/;
+    const campusMissing = /這個場域的門市尚未出現在清單/;
+
+    render(<MerchantLocationsPage />);
+    await screen.findByRole('heading', { name: '測試餐坊／學生餐廳' });
+    expect(screen.queryByText(noManageableStores)).toBeNull();
+    expect(screen.queryByText(campusMissing)).toBeNull();
+
+    await act(async () => finishStores({ workspaces: empty ? [] : [continuityStore] }));
+    if (empty) {
+      expect(screen.getByText(noManageableStores)).toBeTruthy();
+      expect(screen.getByText(campusMissing)).toBeTruthy();
+    } else {
+      expect(screen.getByRole('link', { name: '前往管理門市：第一門市' })).toBeTruthy();
+      expect(screen.queryByText(noManageableStores)).toBeNull();
+      expect(screen.queryByText(campusMissing)).toBeNull();
+    }
+  },
+);
+
 it.each(['submitted', 'under-review'])(
   'keeps a returning %s applicant on progress instead of reopening the enrollment form',
   async (state) => {

@@ -241,14 +241,14 @@ function AccountWorkspace({
   onSwitchAccount: () => Promise<void>;
 }) {
   const [
-    { overview, details, listedStatuses, workspacesKnown, applicationsKnown, revocations },
+    { overview, details, listedStatuses, listedWorkspaceTenants, applicationsKnown, revocations },
     setWorkspaceSnapshot,
   ] = useState({
     overview: null as MerchantOverview | null,
     details: new Map<string, NuniMerchantWorkspaceDetail>(),
     listedStatuses: new Map<string, string>(),
     revocations: { list: 0, details: new Map<string, number>() },
-    workspacesKnown: false,
+    listedWorkspaceTenants: undefined as ReadonlySet<string> | undefined,
     applicationsKnown: false,
   });
   const [loading, setLoading] = useState(true);
@@ -309,7 +309,7 @@ function AccountWorkspace({
       details: confirmed.verifiedDetails(),
       listedStatuses: confirmed.listedStatuses(),
       revocations: confirmed.workspaceRevocations(),
-      workspacesKnown: confirmed.hasWorkspaceList(),
+      listedWorkspaceTenants: confirmed.listedWorkspaceTenants(),
       applicationsKnown: confirmed.hasApplicationList(),
     });
   }, [confirmed]);
@@ -678,8 +678,10 @@ function AccountWorkspace({
       </section>
     );
   }
-  const hasMerchantRecords =
-    !!overview && (overview.workspaces.length > 0 || overview.applications.length > 0);
+  const workspaceListEmpty = listedWorkspaceTenants?.size === 0;
+  const hasMerchantRecords = !!(
+    listedWorkspaceTenants?.size || overview?.workspaces.length || overview?.applications.length
+  );
   const hasApplicationDraft =
     Object.entries(draft).some(
       ([field, value]) => field !== 'businessKind' && typeof value === 'string' && value.trim(),
@@ -688,13 +690,19 @@ function AccountWorkspace({
     draft.serviceModes.length !== 1 ||
     draft.serviceModes[0] !== 'pickup';
   const nextStep =
-    overview && (hasMerchantRecords || (workspacesKnown && !loadError))
+    overview &&
+    (overview.workspaces.length > 0 ||
+      (workspaceListEmpty && applicationsKnown && (hasMerchantRecords || !loadError)))
       ? merchantOverviewNextStep(overview)
       : null;
   const list = (
     <div className={styles.stack}>
       {(view === 'apply' ||
-        (view === 'overview' && overview && workspacesKnown && !loadError && !hasMerchantRecords)) && (
+        (view === 'overview' &&
+          workspaceListEmpty &&
+          applicationsKnown &&
+          !loadError &&
+          !hasMerchantRecords)) && (
         <section className={styles.intro}>
           <h2>店家如何進駐</h2>
           <p>請準備店名、營業地點及聯絡方式。已經申請過的店家可以直接查看審核進度。</p>
@@ -737,7 +745,7 @@ function AccountWorkspace({
                 已授權門市
               </h3>
               {overview.workspaces.length === 0 ? (
-                workspacesKnown && (
+                workspaceListEmpty && (
                   <>
                     {!loadError && (
                       <p>
@@ -837,7 +845,7 @@ function AccountWorkspace({
                                   前往管理門市：{workspace.locationName}
                                 </Link>
                               ))
-                          ) : (
+                          ) : listedWorkspaceTenants?.has(item.tenantId) === false && (
                             <p>
                               這個場域的門市尚未出現在清單，請重新載入；若仍未出現，請聯絡受理單位。
                             </p>

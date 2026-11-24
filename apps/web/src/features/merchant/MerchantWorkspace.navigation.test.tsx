@@ -1432,6 +1432,20 @@ it.each([
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [previous] });
     if (resource === path) return readDetail();
+    if (resource === 'merchant-applications')
+      return Promise.resolve({
+        applications: [
+          {
+            tenantId: previous.tenantId,
+            applicationId: previous.applicationId,
+            brandName: '核准申請',
+            locationName: '一樓',
+            state: 'approved',
+            reviewerNote: '',
+            submittedAt: '2026-10-09T02:00:00.000Z',
+          },
+        ],
+      });
     return respond(resource);
   });
 
@@ -1444,7 +1458,13 @@ it.each([
 
   await act(async () => denyRead(new NuniError(status, 'DENIED')));
   if (!pending) await act(async () => failBackground(new NuniError(503, 'UNAVAILABLE')));
+  expect(screen.getByRole('heading', { name: '核准申請／一樓' })).toBeTruthy();
   expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '前往管理門市：一樓' })).toBeNull();
+  expect(screen.queryByText(/這個帳號目前沒有已核准的門市/)).toBeNull();
+  expect(screen.queryByRole('button', { name: '登出並切換店家帳號' })).toBeNull();
+  expect(screen.queryByText(/目前還沒有可管理的門市/)).toBeNull();
+  expect(screen.queryByText(/這個場域的門市尚未出現在清單/)).toBeNull();
 
   await act(async () => window.history.forward());
   await screen.findByRole('heading', { name: '重新授權的餐坊／一樓' });

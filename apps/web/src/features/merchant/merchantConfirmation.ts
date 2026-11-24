@@ -142,7 +142,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   }
 
   return {
-    hasWorkspaceList: () => listedWorkspaces !== undefined,
+    // Undefined means no confirmed list. Detail denials only revoke renderable observations.
+    listedWorkspaceTenants: () =>
+      listedWorkspaces && new Set([...listedWorkspaces.values()].map(({ tenantId }) => tenantId)),
     hasApplicationList: () => lists.applications !== undefined,
     verifiedDetails() {
       const details = new Map<string, NuniMerchantWorkspaceDetail>();
