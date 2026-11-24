@@ -259,12 +259,15 @@ it.each([
           createdItems: 1,
         });
       }
+      if (requestPath === path && !published)
+        return Promise.resolve({ ...detail(), readinessVersion: 2 });
       if (requestPath === path && published) {
         // The return refresh only has the stale list and the last verified detail.
         return detailStatus
           ? Promise.reject(new NuniError(detailStatus, 'DETAIL_UNAVAILABLE'))
           : Promise.resolve({
               ...detail(),
+              readinessVersion: 2,
               publishedMenuItems: 1,
               missingRequirements: ['settings'],
             });
@@ -309,14 +312,21 @@ it.each([
 
       detailStatus = 503;
       await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
-      expect(storeLink()).toBeNull();
+      await screen.findByText(/目前無法更新部分門市資料/);
+      fireEvent.click(await within(locations).findByRole('link', { name: '管理門市：一樓' }));
+      await screen.findByText('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+      expect(screen.queryByRole('heading', { name: '餐坊／一樓' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '儲存營運設定' })).toBeNull();
 
       detailStatus = null;
-      await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+      fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+      await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+      fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
     }
 
-    const store = storeLink()!.closest('li')!;
-    expect(within(store).getByText('待完成：確認營運設定與條款')).toBeTruthy();
+    const link = await screen.findByRole('link', { name: '管理門市：一樓' });
+    const store = link.closest('li')!;
+    expect(await within(store).findByText('待完成：確認營運設定與條款')).toBeTruthy();
     expect(within(store).queryByText(/建立菜單/)).toBeNull();
   },
 );
@@ -1424,7 +1434,9 @@ it.each([
   const previous = { ...detail(), readinessVersion: 7 };
   const recovered = { ...detail(), readinessVersion: 6, missingRequirements: ['menu'] };
   let listDenied = false;
-  const readDetail = vi.fn().mockResolvedValue(previous);
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(previous)
+    .mockResolvedValue({ ...previous, missingRequirements: ['settings'], publishedMenuItems: 1 });
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces')
       return listDenied
@@ -1473,7 +1485,7 @@ it.each([
     .toBe(true);
 });
 
-it('keeps the newer same-version list when an earlier first-menu receipt arrives', async () => {
+it.each([true, false])('keeps the newer same-version list (receipt accepted first: %s)', async (receiptFirst) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const missingMenu = { ...detail(), missingRequirements: ['menu'] };
   type MenuReceipt = { menuVersionId: string; createdItems: number };
@@ -1512,19 +1524,30 @@ it('keeps the newer same-version list when an earlier first-menu receipt arrives
   fireEvent.click(screen.getByRole('button', { name: '確認建立並上架菜單' }));
   expect(writeMenu).toHaveBeenCalledTimes(1);
 
+  const resolveReceipt = () =>
+    act(async () =>
+      finishMenu({
+        menuVersionId: 'food-menu_12345678-1234-1234-1234-123456789abc',
+        createdItems: 1,
+      }),
+    );
+  if (receiptFirst) {
+    readDetail.mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'));
+    await resolveReceipt();
+    await screen.findByText(/已建立 1 項首次菜單/);
+    expect(screen.queryByText(/建立有庫存的首次菜單/)).toBeNull();
+  }
+
   await act(async () => window.history.back());
   await waitFor(() => expect(readApplications).toHaveBeenCalledTimes(2));
   const link = await screen.findByRole('link', { name: '管理門市：一樓' });
   const row = within(link.closest('li')!);
   expect(row.queryByText(/確認營運設定與條款/)).toBeNull();
   expect(row.getByText('待完成：建立菜單')).toBeTruthy();
-  await act(async () =>
-    finishMenu({
-      menuVersionId: 'food-menu_12345678-1234-1234-1234-123456789abc',
-      createdItems: 1,
-    }),
-  );
-  expect(row.getByText('待完成：建立菜單')).toBeTruthy();
+  if (!receiptFirst) {
+    await resolveReceipt();
+    expect(row.getByText('待完成：建立菜單')).toBeTruthy();
+  }
 
   await act(async () => window.history.forward());
   await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });

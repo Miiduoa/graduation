@@ -65,9 +65,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const entries = new Map<string, WorkspaceObservations>();
   let listRevocation = 0;
   let listRevision = 0;
+  let listedRevision = 0; // A failed refresh does not renew list membership.
   const revocations = new Map<string, number>();
   const verified = new Map<string, number>();
-  const menus = new Set<string>();
   let applicationRevocation = 0;
   let applicationListRevision = 0;
   let request = 0;
@@ -83,31 +83,28 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     if (key === undefined) {
       listRevocation = revision;
       entries.clear();
-      menus.clear();
       for (const draft of drafts.values()) draft.menuReceipt = null;
     } else {
       revocations.set(key, revision);
       entries.delete(key);
-      menus.delete(key);
       const draft = drafts.get(key);
       if (draft) draft.menuReceipt = null;
     }
     return revision;
   }
 
-  function withMenu<T extends NuniMerchantWorkspace>(key: string, row: T): T {
-    return menus.has(key) || drafts.get(key)?.menuReceipt != null
-      ? { ...row, missingRequirements: row.missingRequirements.filter((item) => item !== 'menu') }
-      : row;
-  }
-
   function merge(next: NuniMerchantWorkspace, revision: number) {
     const key = workspaceKey(next);
     if (revision <= revokedThrough(key)) return;
     const entry = entries.get(key) ?? {};
-    entry.row = latestObservation(entry.row, next, revision);
+    const row = latestObservation(entry.row, next, revision);
+    // The receipt remains usable until a winning observation reports that menu is missing.
+    if (row !== entry.row && row.value.missingRequirements.includes('menu')) {
+      const draft = drafts.get(key);
+      if (draft) draft.menuReceipt = null;
+    }
+    entry.row = row;
     entries.set(key, entry);
-    if (!entry.row.value.missingRequirements.includes('menu')) menus.add(key);
     return entry;
   }
 
@@ -128,11 +125,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   function detailFor(key: string) {
     const entry = entries.get(key);
     if (!entry?.row || !hasVerifiedAccess(key)) return null;
-    const detail = entry.detail?.value;
-    return workspaceDetail({
-      row: withMenu(key, entry.row.value),
-      detail: detail && withMenu(key, detail),
-    });
+    return workspaceDetail({ row: entry.row.value, detail: entry.detail?.value });
   }
 
   function confirmMenu(key: string, revision: number, createdItems: number) {
@@ -186,6 +179,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       if (revision <= listRevocation) return;
       if (revision > listRevision) {
         listRevision = revision;
+        listedRevision = revision;
         includeVerifiedWorkspaces = false;
         listedWorkspaces = new Map(
           rows.map(({ tenantId, locationId }) => {
@@ -254,8 +248,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         programs: lists.programs ?? [],
         workspaces: [...keys].flatMap((key) => {
           const row = entries.get(key)?.row?.value;
-          if (!row || (revocations.has(key) && !hasVerifiedAccess(key))) return [];
-          return [withMenu(key, row)];
+          const listedAfterRevocation =
+            listedWorkspaces?.has(key) && listedRevision > revokedThrough(key);
+          return row && (listedAfterRevocation || hasVerifiedAccess(key)) ? [row] : [];
         }),
         applications: [
           ...[...receipts.values()].reverse(),
@@ -285,13 +280,13 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       includeVerifiedWorkspaces = false;
       listRevocation = 0;
       listRevision = 0;
+      listedRevision = 0;
       applicationRevocation = 0;
       applicationListRevision = 0;
       receipts.clear();
       entries.clear();
       revocations.clear();
       verified.clear();
-      menus.clear();
     },
   };
 }
