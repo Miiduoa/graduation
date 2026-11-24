@@ -516,6 +516,63 @@ test.each([
   },
 );
 
+test.each([false, true])('Expo Web rejects a changed checkpoint with no primary (replacing: %s)', async (replacing) => {
+  const cleanup = useWebStorage();
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  try {
+    const { ledger: original } = await appendPersonalImports(scope, [row('original', '原有行程')]);
+    const { ledger: newer } = await appendPersonalImports(scope, [
+      { ...row('other-tab', '另一分頁的行程'), dayOfWeek: 2 },
+    ]);
+    storage.removeItem(key);
+    if (replacing) storage.setItem(checkpoint, JSON.stringify(JSON.stringify(original)));
+    const newerRaw = JSON.stringify(newer);
+    await expect(mutatePersonalImportLedger(scope, { canContinue: () => true }, (current) => {
+      expect(current.records).toEqual(replacing ? original.records : []);
+      storage.setItem(checkpoint, newerRaw);
+      const records = [{ ...original.records[0], title: '目前分頁的變更' }];
+      return { ledger: { ...current, records, batches: original.batches }, result: undefined };
+    })).rejects.toThrow('已在另一個分頁更新');
+    expect(storage.getItem(key)).toBeNull();
+    expect(storage.getItem(checkpoint)).toBe(newerRaw);
+
+    await appendPersonalImports(scope, [{ ...row('retry', '重試新增'), dayOfWeek: 3 }]);
+    expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
+      .toEqual(['原有行程', '另一分頁的行程', '重試新增']);
+    expect(storage.getItem(checkpoint)).toBeNull();
+  } finally {
+    cleanup();
+  }
+});
+
+test('Expo Web cleanup leaves a checkpoint that appeared after reading a valid primary', async () => {
+  const cleanup = useWebStorage();
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original', '原有行程')]);
+    const primary = storage.getItem(key)!;
+    const { ledger: otherTab } = await appendPersonalImports(scope, [
+      { ...row('other-tab', '另一分頁的行程'), dayOfWeek: 2 },
+    ]);
+    storage.setItem(key, primary);
+    const otherTabRaw = JSON.stringify(otherTab);
+    await mutatePersonalImportLedger(scope, () => true, (current) => {
+      expect(current).toEqual(ledger);
+      storage.setItem(checkpoint, otherTabRaw);
+      const records = [{ ...current.records[0], title: '目前分頁的變更' }];
+      return { ledger: { ...current, records }, result: undefined };
+    });
+    expect(readWebCalendarImports(scope).map(({ title }) => title)).toEqual(['目前分頁的變更']);
+    expect(storage.getItem(checkpoint)).toBe(otherTabRaw);
+  } finally {
+    cleanup();
+  }
+});
+
 test('a Web calendar save after an Expo commit cannot revive stale recovery data', async () => {
   const cleanup = useWebStorage();
   const restoreLocks = withoutWebWriteLocks();

@@ -1,6 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { personalImportCheckpointKey, unwrapPersonalImportCheckpoint } from '@campus/shared/src/imports/browserRecovery';
+import {
+  capturePersonalImportBrowserRecovery,
+  personalImportCheckpointKey,
+  unwrapPersonalImportCheckpoint,
+} from '@campus/shared/src/imports/browserRecovery';
 import { findCatalogSameSlotChange } from './publicCourseTimetableImport';
 import {
   clearPersonalImportRollback,
@@ -59,12 +63,13 @@ async function readRecovery(
   key: string,
   scope: PersonalImportScope,
   webPrimary: string | null,
+  webCheckpoint?: string | null,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
   if (Platform.OS === 'web' && webPrimary !== null) {
     try {
       parseLedger(webPrimary, scope);
     } catch {
-      return readLegacyCheckpoint(key, scope);
+      return readLegacyCheckpoint(key, scope, webCheckpoint);
     }
     if (hasWebPersonalImportCommit(webPrimary)) return null;
     // A standalone browser checkpoint cannot prove that it belongs to a
@@ -72,27 +77,29 @@ async function readRecovery(
     return readRollbackJournal(key, scope, webPrimary);
   }
 
-  return readLegacyCheckpoint(key, scope);
+  return readLegacyCheckpoint(key, scope, webCheckpoint);
 }
 
 async function readLegacyCheckpoint(
   key: string,
   scope: PersonalImportScope,
+  encoded?: string | null,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
-  const checkpoint = personalImportCheckpointKey(key);
-  let encoded: string | null;
-  try {
-    [[, encoded]] = await AsyncStorage.multiGet([checkpoint]);
-  } catch (error) {
-    if (!isStorageRowTooLarge(error)) throw error;
-    // JS multiGet coalesces requests and can report another key's error.
-    // getItem issues its own native read, so only its error identifies this row.
+  if (encoded === undefined) {
+    const checkpoint = personalImportCheckpointKey(key);
     try {
-      encoded = await AsyncStorage.getItem(checkpoint);
-    } catch (checkpointError) {
-      // A legacy wrapped ledger can exceed the row limit even when the primary fits.
-      if (!isStorageRowTooLarge(checkpointError)) throw checkpointError;
-      encoded = null;
+      [[, encoded]] = await AsyncStorage.multiGet([checkpoint]);
+    } catch (error) {
+      if (!isStorageRowTooLarge(error)) throw error;
+      // JS multiGet coalesces requests and can report another key's error.
+      // getItem issues its own native read, so only its error identifies this row.
+      try {
+        encoded = await AsyncStorage.getItem(checkpoint);
+      } catch (checkpointError) {
+        // A legacy wrapped ledger can exceed the row limit even when the primary fits.
+        if (!isStorageRowTooLarge(checkpointError)) throw checkpointError;
+        encoded = null;
+      }
     }
   }
   if (encoded !== null) {
@@ -305,7 +312,11 @@ export function mutatePersonalImportLedger<T>(
       assertWritable();
       const web = Platform.OS === 'web';
       const webPrimary = web ? await AsyncStorage.getItem(key) : null;
-      const recovery = await readRecovery(key, scope, webPrimary);
+      // Read the checkpoint from the same snapshot used to retire recovery copies.
+      const browserRecovery = web
+        ? capturePersonalImportBrowserRecovery(window.localStorage, key)
+        : undefined;
+      const recovery = await readRecovery(key, scope, webPrimary, browserRecovery?.checkpoint);
       let primaryRaw = web || recovery ? webPrimary : await AsyncStorage.getItem(key);
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
@@ -320,9 +331,10 @@ export function mutatePersonalImportLedger<T>(
         const needsJournal = typeof guard !== 'function' || (recovery !== null && !hasPersisted);
         const write = async () => {
           let writtenRaw = raw;
-          if (web) {
+          if (browserRecovery) {
             writtenRaw = commitWebPersonalImports(
-              key, primaryRaw, raw, assertWritable, needsJournal ? { raw: persistedRaw } : undefined,
+              key, primaryRaw, raw, assertWritable, browserRecovery,
+              needsJournal ? { raw: persistedRaw } : undefined,
               lease,
             );
           } else if (!needsJournal) {

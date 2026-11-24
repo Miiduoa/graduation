@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createPersonalImportId } from '@campus/shared';
 import {
-  capturePersonalImportBrowserRecovery,
+  type capturePersonalImportBrowserRecovery,
   personalImportBrowserCommitSuffix as compactWebCommitSuffix,
+  personalImportCheckpointKey,
   personalImportWebJournalKey,
   personalImportWebJournalPrefix as journalPrefix,
   serializePersonalImportBrowserCommit,
@@ -349,6 +350,7 @@ export function commitWebPersonalImports(
   before: string | null,
   attempted: string,
   assertWritable: () => void,
+  recoveryCopies: ReturnType<typeof capturePersonalImportBrowserRecovery>,
   recovery?: { raw: string | null },
   lease?: BrowserLease,
 ): string {
@@ -356,10 +358,13 @@ export function commitWebPersonalImports(
   const id = createPersonalImportId();
   const committed = JSON.stringify({ ...JSON.parse(attempted), webCommit: id });
   const conflict = () => new Error('匯入資料已在另一個分頁更新，請重新載入。');
-  const recoveryCopies = capturePersonalImportBrowserRecovery(storage, key);
+  const checkpointKey = personalImportCheckpointKey(key);
   const replace = (raw: string, ownsStage: () => boolean) => {
     assertWritable();
-    if (!ownsStage() || storage.getItem(key) !== before) throw conflict();
+    if (!ownsStage() || storage.getItem(key) !== before ||
+        (before === null && storage.getItem(checkpointKey) !== recoveryCopies.checkpoint)) {
+      throw conflict();
+    }
     storage.setItem(key, raw);
     if (storage.getItem(key) !== raw) throw conflict();
     return raw;
