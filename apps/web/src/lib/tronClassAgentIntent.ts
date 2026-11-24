@@ -670,12 +670,12 @@ function scanNegation(tokens: Token[], interior: boolean[]): NegationScan {
     }
     if (!pending) continue;
     if (isWhitespaceToken(token) || token.value === ':' || token.value === '：') continue;
-    if (WRITE_HELPERS.has(token.value)) continue;
+    if (WRITE_HELPERS.has(token.value) || token.kind === 'cue') continue;
     if (BA_MARKERS.has(token.value)) {
       pending = 'ba';
       continue;
     }
-    if (pending === 'ba' && (BA_OBJECT_WORDS.has(token.value) || token.kind === 'noun' || token.kind === 'other' || token.kind === 'cue')) {
+    if (pending === 'ba' && (BA_OBJECT_WORDS.has(token.value) || token.kind === 'noun' || token.kind === 'other')) {
       continue;
     }
     if (interior[index] && !isWriteVerbToken(token) && token.kind !== 'query' && !QUERY_START.has(token.value)) {

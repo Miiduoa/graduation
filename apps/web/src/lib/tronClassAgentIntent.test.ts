@@ -1051,6 +1051,16 @@ describe('three-way sentence classification', () => {
     }
   });
 
+  it.each(['不想查玩課雲作業', '不能查玩課雲作業', '不再查玩課雲作業'])(
+    'does not auto-read homework from a modal negation in %s',
+    question => {
+      expect(classifyTronClassSentence(question)?.outcome).not.toBe('clearly-read');
+      expect(parseTronClassAgentIntent(question)).toBeNull();
+      expect(tronClassCompoundClauses(question)).toEqual([]);
+      expect(canAnswerTronClassQuestion(question)).toBe(false);
+    },
+  );
+
   it('still auto-reads a download whose file name contains a lone 不', () => {
     expect(classifyTronClassSentence('下載 TronClass 不存在.pdf')).toEqual({
       outcome: 'clearly-read',
