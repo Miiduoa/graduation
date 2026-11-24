@@ -348,6 +348,21 @@ it('validates saved-record form submission, focuses the invalid field, and saves
   expect(document.activeElement).toBe(screen.getByRole('button', { name: '編輯 資料庫管理' }));
 });
 
+it('does not rewrite an unchanged imported record when the editor is submitted with Enter', async () => {
+  const [original] = await savedRecordsForEditing();
+  render(<PersonalImportCenter />);
+  fireEvent.click(await screen.findByRole('button', { name: '編輯 資料庫' }));
+  const dialog = screen.getByRole('dialog', { name: '編輯 資料庫' });
+  const form = within(dialog).getByRole('form', { name: '修改個人紀錄' });
+  fireEvent.submit(form);
+  expect(screen.getByRole('dialog', { name: '編輯 資料庫' })).toBe(dialog);
+  const kept = readPersonalImports(context).find((row) => row.id === original.id);
+  expect(kept).toEqual(original);
+  expect(kept?.batchId).toBe(original.batchId);
+  expect(kept?.importedAt).toBe(original.importedAt);
+  expect((within(dialog).getByRole('button', { name: '儲存修改' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
 it('keeps a failed saved-record save and its error inside the editor', async () => {
   await savedRecordsForEditing();
   render(<PersonalImportCenter />);

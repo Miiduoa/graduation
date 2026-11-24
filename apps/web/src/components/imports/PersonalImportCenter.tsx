@@ -456,6 +456,10 @@ function PersonalRecordEditor({
       control?.focus();
       return;
     }
+    // Unchanged imported records must not be rewritten: Enter (and the same
+    // submit path) would otherwise assign a new batch ID and importedAt, and a
+    // later batch undo would miss this row.
+    if (!dirty) return;
     // The form keeps the specific error visible; ConfirmModal handles rejected removals.
     void commit(row).catch(() => {});
   }
@@ -523,7 +527,7 @@ function PersonalRecordEditor({
             <button className="btn" type="button" disabled={busy} onClick={requestClose}>
               取消編輯
             </button>
-            <button className="btn primary" type="submit" disabled={busy}>
+            <button className="btn primary" type="submit" disabled={busy || !dirty}>
               {busy ? '儲存中…' : '儲存修改'}
             </button>
           </div>
