@@ -228,3 +228,27 @@ it('refreshes the saved view when another tab changes this scope', async () => {
   });
   expect(await screen.findByRole('link', { name: '另一個分頁收藏' })).toBeTruthy();
 });
+
+it('does not steal focus when a user moves to another control before a saved event is removed', async () => {
+  await seed(null, saved('first', '第一場活動'), saved('second', '第二場活動'));
+  mount(`/events?schoolId=${school}&campus=${school}&saved=1`);
+  const first = await screen.findByRole('button', { name: '取消收藏「第一場活動」' });
+  const browse = screen.getByRole('button', { name: '瀏覽活動' });
+  first.focus();
+  fireEvent.click(first);
+  browse.focus();
+  expect(await screen.findByText('已取消收藏「第一場活動」。')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '第一場活動' })).toBeNull();
+  expect(document.activeElement).toBe(browse);
+});
+
+it('does not move focus after removing an event whose button was never focused', async () => {
+  await seed(null, saved('only', '唯一活動'));
+  mount(`/events?schoolId=${school}&campus=${school}&saved=1`);
+  const remove = await screen.findByRole('button', { name: '取消收藏「唯一活動」' });
+  const browse = screen.getByRole('button', { name: '瀏覽活動' });
+  browse.focus();
+  fireEvent.click(remove);
+  expect(await screen.findByText('還沒有收藏的活動')).toBeTruthy();
+  expect(document.activeElement).toBe(browse);
+});

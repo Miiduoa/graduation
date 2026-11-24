@@ -15,7 +15,11 @@ import {
 } from './eventPresentation';
 import styles from './events.module.css';
 
-type FocusPlan = { removed: string; target: string | null };
+type FocusPlan = {
+  removed: string;
+  target: string | null;
+  origin: HTMLButtonElement;
+};
 
 /**
  * Saved events are rendered from the stored identity and title only. They stay usable while the
@@ -35,19 +39,31 @@ export function CampusEventSavedSection({ shortlist, schoolSearch, filters, onBr
 
   useEffect(() => {
     const plan = focusPlan.current;
-    if (!plan || items.some((item) => campusEventShortlistIdentity(item) === plan.removed)) return;
+    if (!plan) return;
+    if (phase !== 'ready') {
+      focusPlan.current = null;
+      return;
+    }
+    if (items.some((item) => campusEventShortlistIdentity(item) === plan.removed)) return;
     focusPlan.current = null;
-    // Keep keyboard users in the list; fall back to the section heading when it is now empty.
+    // Only restore lost focus. A user may have moved to another control
+    // while the device write was queued.
+    if (document.activeElement !== document.body && document.activeElement !== plan.origin) return;
     const next = plan.target ? removeButtons.current.get(plan.target) : undefined;
     (next ?? heading.current)?.focus();
-  }, [items]);
+  }, [items, phase]);
 
   async function remove(item: SavedCampusEvent, index: number) {
     const identity = campusEventShortlistIdentity(item);
     const neighbor = items[index + 1] ?? items[index - 1];
-    focusPlan.current = { removed: identity, target: neighbor ? campusEventShortlistIdentity(neighbor) : null };
+    const origin = removeButtons.current.get(identity);
+    // Pointer activation need not move the keyboard focus.
+    const plan = origin && document.activeElement === origin
+      ? { removed: identity, target: neighbor ? campusEventShortlistIdentity(neighbor) : null, origin }
+      : null;
+    focusPlan.current = plan;
     const result = await shortlist.toggle(item, false);
-    if (result !== 'done' && focusPlan.current?.removed === identity) focusPlan.current = null;
+    if (result !== 'done' && focusPlan.current === plan) focusPlan.current = null;
   }
 
   return (
