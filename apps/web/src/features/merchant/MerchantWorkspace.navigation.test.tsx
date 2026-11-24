@@ -669,12 +669,23 @@ it.each([2, 3])(
   },
 );
 
-it.each([1, undefined])('uses the later list (version %s) when the detail refresh fails', async (readinessVersion) => {
+it.each([
+  { listVersion: 1, suspended: false, label: '暫停接單', publicAccess: false },
+  { listVersion: undefined, suspended: false, label: '營業中', publicAccess: true },
+  { listVersion: undefined, suspended: true, label: '已停權，請聯絡場域管理者', publicAccess: false },
+])('shows $label on return when the detail refresh fails (list version $listVersion)', async ({
+  listVersion,
+  suspended,
+  label,
+  publicAccess,
+}) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const open = detail('store-a', true);
-  const paused = { ...open, readinessVersion, locationStatus: 'closed', publicAccess: false };
+  const initial = suspended
+    ? { ...open, readinessVersion: 7, merchantStatus: 'suspended', locationStatus: 'suspended', publicAccess: false }
+    : open;
   let listed: NuniMerchantWorkspace = open;
-  const readDetail = vi.fn(() => Promise.resolve(open));
+  const readDetail = vi.fn(() => Promise.resolve(initial));
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [listed] });
     if (resource === path) return readDetail();
@@ -683,17 +694,25 @@ it.each([1, undefined])('uses the later list (version %s) when the detail refres
 
   render(<MerchantWorkspace view="workspace" />);
   fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
-  await screen.findByText('營業中');
+  await screen.findByText(suspended ? label : '營業中');
 
-  listed = paused;
+  listed = {
+    ...open,
+    readinessVersion: listVersion,
+    locationStatus: suspended ? 'open' : 'closed',
+    publicAccess: suspended,
+    locationName: '一樓櫃台',
+  };
   readDetail.mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
   await act(async () => window.history.back());
-  await screen.findByText('暫停接單');
+  await screen.findByRole('link', { name: '管理門市：一樓櫃台' });
   await screen.findByText('目前無法更新部分門市資料，請重新載入。');
   expect(readDetail).toHaveBeenCalledTimes(2);
-  expect(screen.getByText('尚未公開')).toBeTruthy();
-  expect(screen.queryByText('允許公開瀏覽')).toBeNull();
-  expect(screen.queryByText('營業中')).toBeNull();
+  expect(screen.getByText(label)).toBeTruthy();
+  expect(screen.getByText(publicAccess ? '允許公開瀏覽' : '尚未公開')).toBeTruthy();
+  expect(screen.queryByText(publicAccess ? '尚未公開' : '允許公開瀏覽')).toBeNull();
+  if (label !== '營業中') expect(screen.queryByText('營業中')).toBeNull();
+  if (label !== '暫停接單') expect(screen.queryByText('暫停接單')).toBeNull();
 });
 
 it.each([

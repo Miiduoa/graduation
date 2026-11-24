@@ -17,6 +17,22 @@ type WorkspaceObservations = {
   versionedRow?: Observation;
   detail?: Observation<NuniMerchantWorkspaceDetail>;
 };
+function withOperatingState<T extends NuniMerchantWorkspace>(
+  row: T,
+  { activated, merchantStatus, locationStatus, publicAccess }: NuniMerchantWorkspace,
+): T {
+  return { ...row, activated, merchantStatus, locationStatus, publicAccess };
+}
+
+function workspaceSummary(entry: WorkspaceObservations | undefined) {
+  const row = entry?.row?.value;
+  const versioned = entry?.versionedRow?.value;
+  // Legacy rows still supply list metadata and requirements in request order.
+  return row && row.readinessVersion === undefined && versioned
+    ? withOperatingState(row, versioned)
+    : row;
+}
+
 function latestObservation<T extends NuniMerchantWorkspace>(
   current: Observation<T> | undefined,
   value: T,
@@ -183,8 +199,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       // supplies the confirmed operating state for the matching detail.
       const versioned = entry.versionedRow?.value;
       if (versioned?.readinessVersion !== detail.readinessVersion) return detail;
-      const { activated, merchantStatus, locationStatus, publicAccess } = versioned;
-      return { ...detail, activated, merchantStatus, locationStatus, publicAccess };
+      return withOperatingState(detail, versioned);
     }
     return {
       ...detail,
@@ -359,7 +374,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       return {
         programs: lists.programs ?? [],
         workspaces: [...keys].flatMap((key) => {
-          const row = entries.get(key)?.row?.value;
+          const row = workspaceSummary(entries.get(key));
           const listedAfterRevocation = membership?.has(key) && listedRevision > revokedThrough(key);
           return row && (listedAfterRevocation || hasVerifiedAccess(key)) ? [row] : [];
         }),
@@ -372,7 +387,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     verifiedListedRows() {
       const rows = new Map<string, NuniMerchantWorkspace>();
       for (const key of listedMembership()?.keys() ?? []) {
-        const row = entries.get(key)?.row?.value;
+        const row = workspaceSummary(entries.get(key));
         if (row && hasVerifiedAccess(key)) rows.set(key, row);
       }
       return rows;

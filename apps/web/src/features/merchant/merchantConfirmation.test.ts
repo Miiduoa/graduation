@@ -27,7 +27,7 @@ it('renders the newer menu requirement after a list previously confirmed the men
   expect(confirmed.overview()?.workspaces).toEqual([missingMenu]);
 });
 
-it('keeps a newer legacy list readable without merging it into the delayed detail', () => {
+it('combines legacy list metadata with the operating state of a delayed versioned detail', () => {
   const confirmed = createMerchantConfirmations(new Map());
   const legacyRow: NuniMerchantWorkspace = {
     tenantId: 'campus-one',
@@ -40,13 +40,14 @@ it('keeps a newer legacy list readable without merging it into the delayed detai
     locationStatus: 'open',
     activated: true,
     publicAccess: true,
-    missingRequirements: [],
+    missingRequirements: ['menu'],
   };
   const detail: NuniMerchantWorkspaceDetail = {
     ...legacyRow,
     merchantStatus: 'suspended',
     locationStatus: 'suspended',
     publicAccess: false,
+    missingRequirements: [],
     applicationId: 'application-1',
     merchantId: 'merchant-1',
     campusId: 'main-campus',
@@ -67,13 +68,20 @@ it('keeps a newer legacy list readable without merging it into the delayed detai
   const detailRevision = confirmed.beginRequest();
   confirmed.mergeWorkspaceList([legacyRow], confirmed.beginRequest());
 
-  expect(confirmed.confirmDetail(detail, detailRevision, true)).toEqual({ detail, won: false });
   expect(confirmed.overview()?.workspaces).toEqual([legacyRow]);
+  const suspendedRow = {
+    ...legacyRow,
+    merchantStatus: 'suspended',
+    locationStatus: 'suspended',
+    publicAccess: false,
+  };
+  expect(confirmed.confirmDetail(detail, detailRevision, true)).toEqual({ detail, won: false });
+  expect(confirmed.overview()?.workspaces).toEqual([suspendedRow]);
 
   const lowerVersion = { ...detail, readinessVersion: 6 };
   expect(confirmed.confirmDetail(lowerVersion, confirmed.beginRequest(), true)).toBeNull();
   expect(confirmed.verifiedDetails().get('campus-one:store-a')).toEqual(detail);
-  expect(confirmed.overview()?.workspaces).toEqual([legacyRow]);
+  expect(confirmed.overview()?.workspaces).toEqual([suspendedRow]);
 
   const sameVersion = { ...detail, missingRequirements: ['settings'] };
   expect(confirmed.confirmDetail(sameVersion, confirmed.beginRequest(), true))
