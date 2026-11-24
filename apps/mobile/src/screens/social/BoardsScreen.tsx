@@ -95,6 +95,9 @@ function BoardsContent() {
   // After that write settles, re-check so a later server change is not dropped.
   const keepLocalFromStaleList = useRef(new Set<string>());
   const lastSettledWriteSucceeded = useRef(new Set<string>());
+  // After a failed write, keep the rollback until a from-server re-check lands.
+  // A later list may still be served from cache and omit the board.
+  const awaitingServerConfirm = useRef(new Set<string>());
   const reconcileBoardSubscriptionRef = useRef<(boardId: string, uid: string, sid: string) => void>(() => {});
   // Latest tap per board; only its outcome may roll back or alert.
   const latestIntent = useRef(new Map<string, number>());
@@ -142,6 +145,13 @@ function BoardsContent() {
       const keepLocal = new Set(pendingSubscriptionCounts.current.keys());
       for (const [id, revision] of boardWriteRevision.current) {
         if (revision > subscriptionRevisionAtRead) keepLocal.add(id);
+      }
+      const subscribedIds = new Set(subs);
+      for (const id of awaitingServerConfirm.current) {
+        // A cache gap that omits a still-confirmed subscription must not
+        // overwrite the rollback or invalidate an in-flight from-server re-read.
+        // A list that already matches the rollback may apply and supersede a stale re-read.
+        if (confirmedSubscribedRef.current.has(id) && !subscribedIds.has(id)) keepLocal.add(id);
       }
       const tracked = new Set([
         ...subs,
@@ -223,6 +233,7 @@ function BoardsContent() {
       if (serverSubscribed) nextConfirmed.add(boardId);
       else nextConfirmed.delete(boardId);
       confirmedSubscribedRef.current = nextConfirmed;
+      awaitingServerConfirm.current.delete(boardId);
       applySubscribed((previous) => {
         if (previous.has(boardId) === serverSubscribed) return previous;
         const next = new Set(previous);
@@ -335,8 +346,12 @@ function BoardsContent() {
         // gap over the rollback. Only a newer write supersedes this generation.
         if (isLatest) {
           boardWriteRevision.current.set(b.id, subscriptionRevision.current);
-          if (failed) lastSettledWriteSucceeded.current.delete(b.id);
-          else lastSettledWriteSucceeded.current.add(b.id);
+          if (failed) {
+            lastSettledWriteSucceeded.current.delete(b.id);
+            awaitingServerConfirm.current.add(b.id);
+          } else {
+            lastSettledWriteSucceeded.current.add(b.id);
+          }
         }
         if (!failed && (lastConfirmedIntent.current.get(b.id) ?? 0) < intent) {
           lastConfirmedIntent.current.set(b.id, intent);
