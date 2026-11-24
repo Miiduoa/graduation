@@ -66,7 +66,7 @@ export const TRONCLASS_NEGATORS = [
   '不需要', '不需', '不必', '不用', '不要', '不得', '不准', '不許',
   '無需', '無須', '毋須', '毋需',
   '先不要', '先不', '暫不要', '暫不',
-  '沒有',
+  '尚未', '還沒', '沒有',
   '禁止',
   '別', '勿', '免', '甭', '莫',
   '沒', '未',
@@ -112,7 +112,7 @@ const FUNCTION_CUES = [
   '記得', '立即', '接下來',
   '幫我', '替我', '代我', '幫忙', '請', '麻煩', '直接', '自動',
   '我們', '你們', '他們', '她們', '我', '你', '您', '他', '她', '它',
-  '尚未', '還沒', '待', '已經', '已',
+  '待', '已經', '已',
   '剛才', '剛剛', '剛', '最後', '之後', '後', '曾經', '所', '過', '了',
   '正在', '正', '供',
   '把', '將',
@@ -485,31 +485,47 @@ function scanNestedBrackets(text: string): BracketScan {
   return { balanced: true, spans };
 }
 
-function typographicQuoteSpan(text: string, index: number): { open: number; inner: number; close: number; end: number } | null {
-  for (const [open, close] of TYPOGRAPHIC_QUOTE_PAIRS) {
-    if (!text.startsWith(open, index)) continue;
-    const innerStart = index + open.length;
-    const closeAt = text.indexOf(close, innerStart);
-    if (closeAt < 0) continue;
-    return { open: index, inner: innerStart, close: closeAt, end: closeAt + close.length };
+type QuoteSpan = { open: number; inner: number; close: number; end: number };
+
+const quoteSpanCache = new Map<string, QuoteSpan[]>();
+
+function typographicQuoteSpans(text: string): QuoteSpan[] {
+  const cached = quoteSpanCache.get(text);
+  if (cached) return cached;
+
+  const candidates: Array<QuoteSpan | undefined> = new Array(text.length);
+  const nextClose = new Map<string, number>();
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    for (const [open, close] of TYPOGRAPHIC_QUOTE_PAIRS) {
+      if (text[index] !== open) continue;
+      const closeAt = nextClose.get(close);
+      if (closeAt !== undefined) {
+        candidates[index] = { open: index, inner: index + 1, close: closeAt, end: closeAt + 1 };
+        break;
+      }
+    }
+    nextClose.set(text[index]!, index);
   }
-  return null;
+
+  const spans: QuoteSpan[] = [];
+  for (let index = 0; index < text.length;) {
+    const span = candidates[index];
+    if (span) spans.push(span);
+    index = span ? span.end : index + 1;
+  }
+  quoteSpanCache.set(text, spans);
+  if (quoteSpanCache.size > 8) {
+    const oldest = quoteSpanCache.keys().next().value;
+    if (oldest !== undefined) quoteSpanCache.delete(oldest);
+  }
+  return spans;
 }
-
-
 
 function hasFilenameCandidate(text: string): boolean {
   if (precomputedBareFilenames(text).size > 0) return true;
   if (tokensFor(text).some(token => token.kind === 'filename')) return true;
-  let index = 0;
-  while (index < text.length) {
-    const quoted = typographicQuoteSpan(text, index);
-    if (quoted) {
-      if (FILE_EXTENSION.test(text.slice(quoted.inner, quoted.close))) return true;
-      index = quoted.end;
-      continue;
-    }
-    index += 1;
+  for (const quoted of typographicQuoteSpans(text)) {
+    if (FILE_EXTENSION.test(text.slice(quoted.inner, quoted.close))) return true;
   }
   const scan = bracketsFor(text);
   if (scan.balanced && scan.spans.some(span => FILE_EXTENSION.test(text.slice(span.innerStart, span.innerEnd)))) {
@@ -549,17 +565,10 @@ function bracketsFor(text: string): BracketScan {
   return scan;
 }
 
-function precomputedQuotedFilenames(text: string): Map<number, { open: number; inner: number; close: number; end: number }> {
-  const found = new Map<number, { open: number; inner: number; close: number; end: number }>();
-  let index = 0;
-  while (index < text.length) {
-    const quoted = typographicQuoteSpan(text, index);
-    if (quoted) {
-      if (isValidFilenameValue(text.slice(quoted.inner, quoted.close), true)) found.set(quoted.open, quoted);
-      index = quoted.end;
-      continue;
-    }
-    index += 1;
+function precomputedQuotedFilenames(text: string): Map<number, QuoteSpan> {
+  const found = new Map<number, QuoteSpan>();
+  for (const quoted of typographicQuoteSpans(text)) {
+    if (isValidFilenameValue(text.slice(quoted.inner, quoted.close), true)) found.set(quoted.open, quoted);
   }
   const scan = bracketsFor(text);
   if (scan.balanced) {
@@ -1147,7 +1156,10 @@ function isNegatedWriteFrom(tokens: Token[], negAt: number): boolean {
 function textWithoutQuotedSpans(text: string): string {
   let result = text;
   for (const [open, close] of QUOTE_PAIRS) {
-    result = result.replace(new RegExp(`${escapeRegex(open)}[^${escapeRegex(close)}]*${escapeRegex(close)}`, 'gu'), ' ');
+    const end = result.lastIndexOf(close) + close.length;
+    if (end === 0) continue;
+    const pattern = new RegExp(`${escapeRegex(open)}[^${escapeRegex(close)}]*${escapeRegex(close)}`, 'gu');
+    result = result.slice(0, end).replace(pattern, ' ') + result.slice(end);
   }
   return result.replace(/(?<![A-Za-z])'[^']*'(?![A-Za-z])/gu, ' ');
 }
@@ -1177,18 +1189,8 @@ function authorizesPrivateRead(original: string): boolean {
  */
 function typographicQuoteMask(text: string): boolean[] {
   const mask = Array.from({ length: text.length }, () => false);
-  const mark = (start: number, end: number) => {
-    for (let index = start; index < end && index < mask.length; index += 1) mask[index] = true;
-  };
-  let from = 0;
-  while (from < text.length) {
-    const quoted = typographicQuoteSpan(text, from);
-    if (!quoted) {
-      from += 1;
-      continue;
-    }
-    mark(quoted.open, quoted.end);
-    from = quoted.end;
+  for (const quoted of typographicQuoteSpans(text)) {
+    mask.fill(true, quoted.open, quoted.end);
   }
   return mask;
 }
@@ -1419,8 +1421,8 @@ function visibleCommandTokens(text: string): Token[] {
   return tokensFor(text).filter(token => token.kind !== 'filename' && !tokenIsProtected(token, mask));
 }
 
-const PREPARE_MODIFIER_PREFIX = new Set([
-  '的', '之', '已', '已經', '剛', '剛才', '剛剛', '所', '曾', '曾經', '正', '正在', '才',
+const PREPARE_REQUEST_CUES = new Set([
+  '記得', '立即', '馬上', '接下來', '幫忙', '務必', '趕緊', '立刻', '盡快',
 ]);
 
 function prepareWordRole(tokens: Token[], index: number): 'command' | 'modifier' | 'doubt' | 'none' {
@@ -1431,10 +1433,8 @@ function prepareWordRole(tokens: Token[], index: number): 'command' | 'modifier'
   const prev = previousSignificantToken(tokens, index);
   if (next && (next.value === '的' || next.value === '之')) return 'modifier';
   if (prev && (prev.value === '的' || prev.value === '之')) return 'modifier';
-  // 已準備作業、玩課雲準備作業: a descriptive or attributive prefix is not a command.
-  if (prev && (prev.kind === 'noun' || PREPARE_MODIFIER_PREFIX.has(prev.value))) return 'doubt';
-  if (!prev || isClauseBoundaryToken(prev) || WRITE_HELPERS.has(prev.value) ||
-    prev.kind === 'cue' || prev.kind === 'conj') {
+  if (!prev || isClauseBoundaryToken(prev) || prev.value === '並' ||
+    WRITE_HELPERS.has(prev.value) || PREPARE_REQUEST_CUES.has(prev.value)) {
     return 'command';
   }
   return 'doubt';
