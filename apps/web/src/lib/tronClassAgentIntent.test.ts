@@ -873,4 +873,35 @@ describe('r28 structural regressions and function-word variants', () => {
     expect(tronClassCompoundClauses(question)).toEqual([]);
     expect(Date.now() - started).toBeLessThan(200);
   });
+
+  it.each([
+    '查玩課雲作業速交課堂報告',
+    '查玩課雲作業速交 PDF',
+  ])('does not turn an unlisted write plus an object into a noun under a query in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('keeps a 供…用的 span across 並且', () => {
+    const question = '不要繳交供老師參考並且確認玩課雲作業用的資料，只查校園公告';
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '不要繳交我正在用滑鼠確認玩課雲作業中 的筆記，只查校園公告',
+    '不要繳交供老師確認玩課雲作業用 的資料，只查校園公告',
+  ])('closes 用的／中的 even when a space sits before 的 in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('scans many status-filtered writes in a single token pass', () => {
+    const question = `查玩課雲${'未交的作業，'.repeat(90)}務必速交課堂報告`;
+    expect(question.length).toBeLessThanOrEqual(1000);
+    const started = Date.now();
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(200);
+  });
 });
