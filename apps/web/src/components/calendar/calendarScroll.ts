@@ -1,3 +1,4 @@
+const CLIPPING_OVERFLOWS = ['auto', 'scroll', 'hidden', 'clip'];
 const HEADER_SELECTORS = 'header, [role="banner"], nav, .topbar';
 const FOOTER_SELECTORS = 'footer, nav, [role="navigation"], [role="tablist"], .nav, .tabbar, .bottom-nav';
 
@@ -76,12 +77,18 @@ function horizontalVisibleBounds(element: HTMLElement) {
   let right = visible.right;
   for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
     const { overflowX } = getComputedStyle(ancestor);
-    if (!['auto', 'scroll', 'hidden', 'clip'].includes(overflowX)) continue;
+    if (!CLIPPING_OVERFLOWS.includes(overflowX)) continue;
     const clipLeft = ancestor.getBoundingClientRect().left + ancestor.clientLeft;
     left = Math.max(left, clipLeft);
     right = Math.min(right, clipLeft + ancestor.clientWidth);
   }
   return { left, right };
+}
+
+function fitsVisibleAxis(start: number, end: number, min: number, max: number) {
+  // An oversized control at high zoom can only show its leading edge.
+  return end > start && max > min && start >= min && start < max &&
+    (end <= max || end - start > max - min);
 }
 
 export function isHorizontallyVisible(element: HTMLElement) {
@@ -90,29 +97,75 @@ export function isHorizontallyVisible(element: HTMLElement) {
   return rect.width > 0 && rect.left >= left && rect.right <= right;
 }
 
-export function verticalVisibleBounds(insets: ReturnType<typeof measureStickyInsets>) {
+function verticalVisibleBounds(insets: ReturnType<typeof measureStickyInsets>) {
   const visible = visibleViewport();
   return { top: visible.top + insets.top, bottom: visible.bottom - insets.bottom };
 }
 
-export function scrollHorizontallyIntoView(element: HTMLElement, viewport: HTMLElement) {
-  const rect = element.getBoundingClientRect();
-  if (rect.width <= 0) return false;
+export function isVisible(element: HTMLElement, insets = measureStickyInsets()) {
+  const { top, bottom } = verticalVisibleBounds(insets);
   const { left, right } = horizontalVisibleBounds(element);
-  const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
-  if (right > left && maxScroll > 0) {
-    const distance =
-      rect.left < left || rect.width > right - left
-        ? Math.floor(rect.left - left)
-        : Math.max(0, Math.ceil(rect.right - right));
-    const target = Math.max(0, Math.min(maxScroll, viewport.scrollLeft + distance));
-    if (target !== viewport.scrollLeft) viewport.scrollLeft = target;
+  const rect = element.getBoundingClientRect();
+  return fitsVisibleAxis(rect.top, rect.bottom, top, bottom) &&
+    fitsVisibleAxis(rect.left, rect.right, left, right);
+}
+
+function nearestScrollDistance(start: number, end: number, min: number, max: number) {
+  if (end <= start || max <= min || fitsVisibleAxis(start, end, min, max)) return 0;
+  if (start < min || end - start > max - min) return Math.floor(start - min);
+  return Math.max(0, Math.ceil(end - max));
+}
+
+function horizontalScrollDistance(element: HTMLElement) {
+  const { left, right } = horizontalVisibleBounds(element);
+  const rect = element.getBoundingClientRect();
+  return nearestScrollDistance(rect.left, rect.right, left, right);
+}
+
+export function revealForFocus(element: HTMLElement, horizontalContainer?: HTMLElement) {
+  const maxScroll = horizontalContainer
+    ? horizontalContainer.scrollWidth - horizontalContainer.clientWidth
+    : 0;
+  if (horizontalContainer && maxScroll > 0) {
+    const target = Math.max(0, Math.min(
+      maxScroll, horizontalContainer.scrollLeft + horizontalScrollDistance(element),
+    ));
+    if (target !== horizontalContainer.scrollLeft) horizontalContainer.scrollLeft = target;
   }
 
-  if (isHorizontallyVisible(element)) return true;
-  // At pinch zoom the browser can pan the visual viewport even when the grid fits.
-  element.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
-  return isHorizontallyVisible(element);
+  const insets = measureStickyInsets();
+  applyScrollMargins(element, insets);
+  const needsHorizontalReveal = horizontalScrollDistance(element) !== 0;
+  const nativeScroll = () => {
+    // Native scrolling can pan the visual viewport even when the layout viewport cannot scroll.
+    const rect = element.getBoundingClientRect();
+    const { left, right } = horizontalVisibleBounds(element);
+    const { top, bottom } = verticalVisibleBounds(measureStickyInsets());
+    element.scrollIntoView?.({
+      block: rect.height > bottom - top ? 'start' : 'nearest',
+      inline: rect.width > right - left ? 'start' : 'nearest',
+      behavior: 'instant',
+    });
+  };
+  if (needsHorizontalReveal) nativeScroll();
+
+  const { top, bottom } = verticalVisibleBounds(needsHorizontalReveal ? measureStickyInsets() : insets);
+  const rect = element.getBoundingClientRect();
+  const x = horizontalScrollDistance(element);
+  const y = nearestScrollDistance(rect.top, rect.bottom, top, bottom);
+  if (x || y) window.scrollBy({ left: x, top: y, behavior: 'instant' });
+
+  if (isVisible(element)) return true;
+  if (needsHorizontalReveal || !window.visualViewport) return false;
+  nativeScroll();
+  return isVisible(element);
+}
+
+function applyScrollMargins(element: HTMLElement, { top, bottom }: ReturnType<typeof measureStickyInsets>) {
+  document.documentElement.style.setProperty('--calendar-sticky-header-height', `${top}px`);
+  document.documentElement.style.setProperty('--calendar-sticky-footer-height', `${bottom}px`);
+  element.style.scrollMarginTop = `${top}px`;
+  element.style.scrollMarginBottom = `${bottom}px`;
 }
 
 export function scrollVerticallyIntoView(
@@ -125,19 +178,15 @@ export function scrollVerticallyIntoView(
     insets?: ReturnType<typeof measureStickyInsets>;
   } = {},
 ) {
-  const { top, bottom } = insets;
-  document.documentElement.style.setProperty('--calendar-sticky-header-height', `${top}px`);
-  document.documentElement.style.setProperty('--calendar-sticky-footer-height', `${bottom}px`);
-  element.style.scrollMarginTop = `${top}px`;
-  element.style.scrollMarginBottom = `${bottom}px`;
+  applyScrollMargins(element, insets);
 
   const rect = element.getBoundingClientRect();
   if (rect.height <= 0) return;
   const { top: visibleTop, bottom: visibleBottom } = verticalVisibleBounds(insets);
   // Round toward visibility when the browser scrolls in whole CSS pixels.
   const distance =
-    align === 'start' || rect.top < visibleTop
+    align === 'start'
       ? Math.floor(rect.top - visibleTop)
-      : Math.max(0, Math.ceil(rect.bottom - visibleBottom));
+      : nearestScrollDistance(rect.top, rect.bottom, visibleTop, visibleBottom);
   if (distance !== 0) window.scrollBy({ left: 0, top: distance, behavior: 'instant' });
 }

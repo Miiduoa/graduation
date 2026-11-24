@@ -596,6 +596,60 @@ it.each([false, true])(
   },
 );
 
+it.each([
+  ['開啟編輯器', 140],
+  ['可視視窗平移', 280],
+  ['入場動畫結束', 140],
+])(
+  '手勢放大後，於%s時將仍聚焦的行程標題帶回可視範圍',
+  async (trigger, titleWidth) => {
+    const stored = event('existing', '放大後編輯的行程', '2026-11-14');
+    seed([stored]);
+    const viewport = Object.assign(new EventTarget(), {
+      offsetTop: 60,
+      offsetLeft: trigger === '開啟編輯器' ? 220 : 20,
+      width: 180,
+      height: 300,
+    });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    let titleLeft = 40;
+    const pan = vi.fn(() => {
+      viewport.offsetLeft = titleLeft;
+    });
+    vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+      if (this.matches('input[type="text"]')) {
+        Object.defineProperty(this, 'scrollIntoView', { configurable: true, value: pan });
+        return new DOMRect(titleLeft, 100, titleWidth, 40);
+      }
+      return new DOMRect(20, 100, 100, 40);
+    });
+    render(<PersonalCalendar />);
+    await ready();
+    activate(screen.getByRole('button', { name: stored.title }));
+    const title = titleField();
+
+    if (trigger === '可視視窗平移') {
+      viewport.offsetLeft = 220;
+      viewport.dispatchEvent(new Event('scroll'));
+    }
+    if (trigger === '入場動畫結束') {
+      viewport.offsetLeft = 45;
+      titleLeft = 30;
+      fireEvent.animationEnd(screen.getByRole('region', { name: '編輯行程' }));
+    }
+
+    expect(pan).toHaveBeenCalledExactlyOnceWith({
+      block: 'nearest',
+      inline: titleWidth > viewport.width ? 'start' : 'nearest',
+      behavior: 'instant',
+    });
+    expect(document.activeElement).toBe(title);
+    expect(title.getBoundingClientRect().left).toBeGreaterThanOrEqual(viewport.offsetLeft);
+    expect(title.getBoundingClientRect().left + Math.min(titleWidth, viewport.width))
+      .toBeLessThanOrEqual(viewport.offsetLeft + viewport.width);
+  },
+);
+
 it('remeasures the focused title after the soft keyboard shrinks the visual viewport', async () => {
   vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(640);
   const listeners = new Map<string, Set<() => void>>();
@@ -828,6 +882,7 @@ it.each([
     if (this.classList.contains(workspaceStyles.daySummary)) {
       return new DOMRect(20, 300 - pageOffset, 280, 60);
     }
+    if (this.tagName === 'H3') return new DOMRect(20, 300 - pageOffset, 100, 40);
     return new DOMRect(20, 60, 100, 40);
   });
   vi.mocked<(options: ScrollToOptions) => void>(window.scrollBy).mockImplementation((options) => {
@@ -868,6 +923,7 @@ it.each([
     if (this.classList.contains(workspaceStyles.daySummary)) {
       return new DOMRect(20, 300 - pageOffset, 280, 60);
     }
+    if (this.tagName === 'H3') return new DOMRect(20, 300 - pageOffset, 100, 40);
     return new DOMRect(20, 60, 100, 40);
   });
   vi.mocked<(options: ScrollToOptions) => void>(window.scrollBy).mockImplementation((options) => {
@@ -880,6 +936,54 @@ it.each([
   expect(window.scrollBy).toHaveBeenCalledExactlyOnceWith({ left: 0, top: 220, behavior: 'instant' });
   expect(document.activeElement).toBe(outside ? heading : date);
 });
+
+it.each(['可以平移', '無法平移'])(
+  '放大並平移至週六後選日，僅在日程標題可見時交接焦點（%s）',
+  async (panResult) => {
+    const viewport = Object.assign(new EventTarget(), {
+      offsetTop: 80,
+      offsetLeft: 460,
+      width: 180,
+      height: 320,
+    });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    render(<PersonalCalendar />);
+    await ready();
+    const date = screen.getByRole('button', { name: '2026-11-28' });
+    let pageOffset = 0;
+    const pan = vi.fn(() => {
+      expect(document.activeElement).toBe(date);
+      if (panResult === '可以平移') viewport.offsetLeft = 20;
+    });
+    vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+      if (this === date) return new DOMRect(510, 100 - pageOffset, 80, 32);
+      if (this.classList.contains(workspaceStyles.daySummary)) {
+        return new DOMRect(20, 300 - pageOffset, 600, 60);
+      }
+      if (this.tagName === 'H3') {
+        Object.defineProperty(this, 'scrollIntoView', { configurable: true, value: pan });
+        return new DOMRect(20, 300 - pageOffset, 140, 36);
+      }
+      return new DOMRect(20, 100, 100, 40);
+    });
+    vi.mocked<(options: ScrollToOptions) => void>(window.scrollBy).mockImplementation((options) => {
+      pageOffset += options.top ?? 0;
+    });
+
+    activate(date);
+
+    const heading = dayHeading('2026-11-28');
+    expect(date.getBoundingClientRect().bottom).toBeLessThan(viewport.offsetTop);
+    expect(pan).toHaveBeenCalledTimes(1);
+    if (panResult === '可以平移') {
+      expect(heading.getBoundingClientRect().left).toBeGreaterThanOrEqual(viewport.offsetLeft);
+      expect(heading.getBoundingClientRect().right).toBeLessThanOrEqual(viewport.offsetLeft + viewport.width);
+      expect(document.activeElement).toBe(heading);
+    } else {
+      expect(document.activeElement).toBe(date);
+    }
+  },
+);
 
 it.each(['列表', '下一月'])(
   '切換到「%s」後取消編輯，將焦點移到可見的新增行程按鈕',

@@ -3,10 +3,11 @@
 import { MonthCalendar } from './MonthCalendar';
 import {
   isHorizontallyVisible,
+  isVisible,
   measureStickyInsets,
   onVisibleViewportChange,
   scrollVerticallyIntoView,
-  verticalVisibleBounds,
+  revealForFocus,
 } from './calendarScroll';
 
 import Link from 'next/link';
@@ -501,7 +502,7 @@ function PersonalCalendarWorkspace({
     const title = titleRef.current;
     if (!title) return;
     title.focus({ preventScroll: true });
-    scrollVerticallyIntoView(title);
+    revealForFocus(title);
   };
 
   useEffect(() => {
@@ -509,7 +510,7 @@ function PersonalCalendarWorkspace({
     const revealFocusedEditorTitle = () => {
       const title = titleRef.current;
       if (!suspended.current && title && document.activeElement === title) {
-        scrollVerticallyIntoView(title);
+        revealForFocus(title);
       }
     };
     const editor = editorRef.current;
@@ -564,14 +565,11 @@ function PersonalCalendarWorkspace({
     const insets = measureStickyInsets();
     scrollVerticallyIntoView(summary, { align: 'start', insets });
     const focused = document.activeElement;
-    if (focused instanceof HTMLElement && focused !== document.body) {
-      const { top, bottom } = focused.getBoundingClientRect();
-      const visible = verticalVisibleBounds(insets);
-      if (top >= visible.top && bottom <= visible.bottom && isHorizontallyVisible(focused)) {
-        return;
-      }
+    if (focused instanceof HTMLElement && focused !== document.body && isVisible(focused)) {
+      return;
     }
-    dayHeadingRef.current?.focus({ preventScroll: true });
+    const heading = dayHeadingRef.current;
+    if (heading && revealForFocus(heading)) heading.focus({ preventScroll: true });
   }, []);
 
   useLayoutEffect(() => {

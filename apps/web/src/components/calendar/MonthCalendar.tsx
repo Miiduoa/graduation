@@ -7,7 +7,7 @@ import {
 } from '@campus/shared';
 import { monthCalendarKeyboardDate } from './monthCalendarNavigation';
 import {
-  scrollHorizontallyIntoView,
+  revealForFocus,
   scrollVerticallyIntoView,
 } from './calendarScroll';
 import styles from './MonthCalendar.module.css';
@@ -60,9 +60,8 @@ export function MonthCalendar({
     const requested = dateButtons.current.get(date);
     const viewport = viewportRef.current;
     if (!requested || !viewport) return;
-    if (scrollHorizontallyIntoView(requested, viewport)) {
+    if (revealForFocus(requested, viewport)) {
       requested.focus({ preventScroll: true });
-      scrollVerticallyIntoView(requested);
     } else if (document.activeElement === document.body) {
       viewport.focus({ preventScroll: true });
       scrollVerticallyIntoView(viewport, { align: 'start' });

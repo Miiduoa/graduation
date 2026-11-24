@@ -555,6 +555,33 @@ async def run_scenario(browser, server_url, config):
                 await expect(saturday).to_be_focused()
                 await assert_date_horizontally_visible(saturday)
                 report['checks'].append('End pans the pinch-zoomed viewport before focusing Saturday')
+                heading = day_heading(page, '2028-10-28')
+                assert await heading.evaluate('''element =>
+                  element.getBoundingClientRect().left < window.visualViewport.offsetLeft
+                '''), 'The selected day heading must start outside the panned viewport'
+                await page.keyboard.press('Enter')
+                await expect(heading).to_be_focused()
+                assert await heading.evaluate('''element => {
+                  const {left, right, top, bottom} = element.getBoundingClientRect();
+                  const {offsetLeft, width, offsetTop, height} = window.visualViewport;
+                  return left >= offsetLeft && right <= offsetLeft + width &&
+                    top >= offsetTop && bottom <= offsetTop + height;
+                }'''), 'Focus must land on the visible day heading'
+                report['checks'].append('Selecting Saturday pans to the day heading before focusing it')
+
+                await saturday.evaluate('button => button.scrollIntoView({block: "center", inline: "end"})')
+                # Preserve the current pan while opening the editor.
+                await page.get_by_role('button', name='新增行程', exact=True).evaluate('button => button.click()')
+                title = page.get_by_label('標題', exact=True)
+                await expect(title).to_be_focused()
+                await page.wait_for_function('''() => {
+                  const {left, top, bottom} = document.activeElement.getBoundingClientRect();
+                  const viewport = window.visualViewport;
+                  return left >= viewport.offsetLeft && left < viewport.offsetLeft + viewport.width &&
+                    top >= viewport.offsetTop && bottom <= viewport.offsetTop + viewport.height;
+                }''')
+                report['checks'].append('Opening the editor from a panned viewport reveals the focused title')
+                await page.get_by_role('button', name='取消', exact=True).evaluate('button => button.click()')
             finally:
                 await cdp.send('Emulation.setPageScaleFactor', {'pageScaleFactor': 1})
                 await cdp.detach()
