@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { tronClassQuotedTargets, matchesTronClassHomeworkCourse, isTronClassHomeworkOverview, isTronClassCompoundDownloadAndPrepare, canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs, tronClassReadRequestVerbs } from './tronClassAgentIntent';
+import { tronClassAgentHomeworkScope, tronClassQuotedTargets, matchesTronClassHomeworkCourse, isTronClassHomeworkOverview, isTronClassCompoundDownloadAndPrepare, canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs, tronClassReadRequestVerbs } from './tronClassAgentIntent';
 
 /** Unknown leftover tokens now make a sentence ambiguous (confirmation), which is acceptable. */
 function expectAuthorizedOrAmbiguous(
@@ -46,6 +46,26 @@ describe('TronClass homework overview scope', () => {
       expect(isTronClassHomeworkOverview(question)).toBe(false);
     },
   );
+
+  it.each([
+    ['查交通作業', false],
+    ['查公車作業', false],
+    ['查公車', true],
+  ])('collects only homework course qualifiers from %s', (companion, matchesDiplomacy) => {
+    const clause = '查玩課雲『外交』作業';
+    const question = `${clause}和${companion}`;
+    expect(tronClassCompoundClauses(question)).toEqual([clause]);
+    const scope = tronClassAgentHomeworkScope(clause, question);
+    expect(scope?.matches('外交', 'PS101')).toBe(matchesDiplomacy);
+    expect(scope?.matches('交通', 'TR101')).toBe(false);
+  });
+
+  it('supplements an inherited homework read when its course name is also a service word', () => {
+    const question = '查玩課雲課程，查交通作業';
+    const clauses = tronClassCompoundClauses(question);
+    expect(clauses).toEqual(['查玩課雲課程', '查交通作業 玩課雲']);
+    expect(tronClassAgentHomeworkScope(clauses[1]!, question)?.matches('交通', 'TR101')).toBe(true);
+  });
 
   it.each(['『外交』', '《外交》', '〈外交〉', '「外交和歷史」'])(
     'retains the literal course target through compound splitting for %s', target => {

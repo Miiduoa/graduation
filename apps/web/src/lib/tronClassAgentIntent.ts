@@ -1879,19 +1879,9 @@ function parseTronClassCompound(question: string) {
     const continuation = target.hasOutsideQuotes(TRONCLASS_CONTINUATION) &&
       !tokensFor(clause).some(isNegatorToken);
     const explicitSource = target.hasOutsideQuotes(TRONCLASS_KEYWORD);
-    // A service word can be part of the course name in an explicit LMS read.
-    const explicitHomeworkScope = explicitSource && target.intent === 'homework' ? target.courseScope() : undefined;
-    if (!explicitHomeworkScope && target.hasOutsideQuotes(OTHER_SERVICE_OR_SCHEDULE)) continue;
     if (explicitSource) {
-      context = true;
       candidate = clause;
     } else if (continuation) {
-      // A companion can constrain the course before the LMS is named.
-      // Only clauses with established LMS context are answered separately.
-      if (!context) {
-        courseScopes.push(target.courseScope());
-        continue;
-      }
       const predicates = analyzeClauses(visibleCommandTokens(clause))[0]?.predicates ?? [];
       const questionMark = clause.endsWith('?') ? '?' : '';
       candidate = predicates.some(predicate => predicate.kind === 'read' || predicate.kind === 'download')
@@ -1899,10 +1889,20 @@ function parseTronClassCompound(question: string) {
         : `玩課雲${clause}`;
     }
     if (!candidate) continue;
+    const courseScope = target.courseScope();
+    // A course qualifier can contain a service word, even when the source is inherited.
+    if (target.hasOutsideQuotes(OTHER_SERVICE_OR_SCHEDULE) &&
+      !(target.intent === 'homework' && (explicitSource || isPositivelyProvenRead(candidate)))) continue;
+    // Earlier companions can constrain the course. Supplemental answers still require established context.
+    if (!context && !explicitSource) {
+      courseScopes.push(courseScope);
+      continue;
+    }
+    if (explicitSource) context = true;
     const bare = candidate.replace(/[?!.。]+$/u, '').trim();
     if (tronClassExplicitNavigationQuestion(candidate) || isTronClassNavigationTarget(bare) ||
       isTronClassNavigationTarget(bare.replace(/^(?:(?:請|麻煩)?(?:幫我|替我)?(?:開啟|打開|開|前往|進入))\s*/u, ''))) continue;
-    courseScopes.push(explicitHomeworkScope ?? target.courseScope());
+    courseScopes.push(courseScope);
     const parsed = parseTronClassAgentIntent(candidate);
     if (!parsed || parsed.intent === 'capabilities') continue;
     const key = `${parsed.intent}:${parsed.pendingOnly}:${parsed.unsupportedReason ?? ''}`;

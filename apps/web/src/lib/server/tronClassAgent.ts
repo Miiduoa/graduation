@@ -200,23 +200,23 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         steps: [{ id: 'capability', tool: 'select_target', status: query.intent === 'unsupported' ? 'blocked' : 'completed', message: '已核對 Agent 可用功能與授權範圍。' }] });
       }
       const readsHomework = query.intent === 'homework' || query.intent === 'prepare';
-      const snapshotRead = (courseId?: number, homework = false) => ({
+      const snapshotRead = (courseId?: number) => ({
         ...(courseId !== undefined ? { courseId } : {}),
         include: {
-          homework,
+          homework: readsHomework && courseId !== undefined,
           announcements: query.intent === 'announcements' && courseId !== undefined,
           materials: (query.intent === 'materials' || query.intent === 'download') && courseId !== undefined,
         },
       });
-      const guardedRead = async (courseId?: number, homework = false) => {
+      const guardedRead = async (courseId?: number) => {
         await assertScopes(ownerKey, grant, scope);
-        const result = await read(ownerKey, snapshotRead(courseId, homework));
+        const result = await read(ownerKey, snapshotRead(courseId));
         if (result.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
         if (courseId && !result.courses.some((course) => course.id === courseId)) throw new NuniError(403, 'TRONCLASS_COURSE_NOT_FOUND');
         await assertScopes(ownerKey, grant, scope);
         return result;
       };
-      let snapshot = await guardedRead(input.courseId, readsHomework && input.courseId !== undefined);
+      let snapshot = await guardedRead(input.courseId);
       steps.push({ id: 'courses', tool: 'read_courses', status: snapshot.errors.some((error) => error.area === 'courses') ? 'partial' : 'completed', message: `已核對目前帳號的 ${snapshot.courses.length} 門課程。` });
       if (query.intent === 'courses') return finish({ ...base, fetchedAt: snapshot.fetchedAt,
         snapshot: selectedSnapshot(snapshot, { courseId: input.courseId }),
@@ -233,15 +233,11 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
           !snapshot.partial && isUnqualifiedRequest(input.question, ['公告', '通知', ...snapshot.courses.map((course) => course.name)])) {
           courseId = snapshot.courses[0].id;
         }
-        if (courseId) snapshot = await guardedRead(courseId, readsHomework);
+        if (courseId) snapshot = await guardedRead(courseId);
         else if (readsHomework) {
-          if (matches.length === 0 && homeworkScope.overview) {
-            snapshot = await guardedRead(undefined, true);
-          } else {
-            steps.push({ id: 'choose-course', tool: 'select_target', status: 'blocked', message: '尚未選定唯一課程。' });
-            return finish({ ...base, fetchedAt: snapshot.fetchedAt, snapshot: selectedSnapshot(snapshot), selection: 'course',
-              answer: '請確認要查詢哪一門課的作業。' });
-          }
+          steps.push({ id: 'choose-course', tool: 'select_target', status: 'blocked', message: '尚未選定唯一課程。' });
+          return finish({ ...base, fetchedAt: snapshot.fetchedAt, snapshot: selectedSnapshot(snapshot), selection: 'course',
+            answer: '請確認要查詢哪一門課的作業。' });
         }
       }
       if (['materials', 'announcements', 'download'].includes(query.intent) && !courseId) {

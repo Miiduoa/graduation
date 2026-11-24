@@ -37,14 +37,14 @@ it('authenticates and reauthenticates the same actor, returning private no-store
   expect(await response.json()).toMatchObject({ source: 'tronclass', revision, grantVersion: grant.version, intent: 'courses' });
 });
 
-it('reads homework data for a homework question', async () => {
+it('returns course selection for an unqualified homework question', async () => {
   const f = fixture();
   const response = await f.request({ action: 'ask', question: '查 TronClass 作業' });
   expect(response.status).toBe(200);
-  expect(f.read).toHaveBeenCalledWith(actor.ownerKey, {
-    include: { homework: true, announcements: false, materials: false },
+  expect(f.read).toHaveBeenCalledExactlyOnceWith(actor.ownerKey, {
+    include: { homework: false, announcements: false, materials: false },
   });
-  expect(await response.json()).toMatchObject({ source: 'tronclass', intent: 'homework' });
+  expect(await response.json()).toMatchObject({ source: 'tronclass', intent: 'homework', selection: 'course' });
 });
 
 it('rejects unauthenticated requests before grants or school access', async () => {

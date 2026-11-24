@@ -136,6 +136,7 @@ it.each([
 it.each([
   ['查玩課雲未交作業和校園公告', '查玩課雲未交作業'],
   ['查玩課雲『外交』作業和查玩課雲交通作業', '查玩課雲『外交』作業'],
+  ['查玩課雲『外交』作業和查交通作業', '查玩課雲『外交』作業'],
 ])('retains the original compound request when retrying a homework supplement for %s', async (question, clause) => {
   const calls: Record<string, unknown>[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
