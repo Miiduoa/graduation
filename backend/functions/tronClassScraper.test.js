@@ -221,6 +221,20 @@ describe('tronClassScraper', () => {
     expect(https.request).toHaveBeenCalledTimes(2);
   });
 
+  test('legacy homework page keeps HTTP 200 when the activities array is missing', async () => {
+    mockHttpsResponse({ status: 200, body: JSON.stringify({ total: 1 }) });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1)).rejects.toMatchObject({
+      status: 200,
+    });
+  });
+
+  test('integration homework page rejects a 200 body without an activities array', async () => {
+    mockHttpsResponse({ status: 200, body: JSON.stringify({ total: 1 }) });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1, 50, {})).rejects.toMatchObject({
+      code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
+    });
+  });
+
   test('reads a homework page without inventing rows', async () => {
     mockHttpsResponse({
       body: JSON.stringify({

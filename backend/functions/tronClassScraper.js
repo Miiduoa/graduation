@@ -1022,7 +1022,9 @@ async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize =
       : {},
   );
   if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.homework_activities)) {
-    throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
+    // Legacy callers (no readOptions) keep merge-base behaviour: a 200 body
+    // without an activities array is still reported as HTTP 200.
+    throw strict ? homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502) : httpError(200);
   }
   // On the integration path, invalid metadata is not an absent total: treating it
   // as null can make a short or empty response appear complete and hide remaining
