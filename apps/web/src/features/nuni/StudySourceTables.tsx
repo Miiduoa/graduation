@@ -1,11 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { extractStudySourceTables, type StudySourceTable } from './studySourceTables';
 import styles from './CourseStudyPanel.module.css';
 
-
-type SourceValueRow = { label: string; original: string; amount: number };
+type SourceValueRow = { label: string; original: string; amount: number; rowIndex: number };
 
 // A mobile WebView can leave clipboard.writeText() unresolved indefinitely.
 // After this limit, restore a clear manual-copy route without changing the source.
@@ -120,7 +119,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
   let rowFormat: 'plain' | 'credits' | null = null;
   const rows: SourceValueRow[] = [];
   const labels = new Set<string>();
-  for (const [label, original] of table.rows) {
+  for (const [rowIndex, [label, original]] of table.rows.entries()) {
     if (!label?.trim() || !original || labels.has(label.trim())) return null;
     const creditMatch = creditsColumn ? creditNumber.exec(original) : null;
     const format = plainNumber.test(original) ? 'plain' : creditMatch ? 'credits' : null;
@@ -129,7 +128,7 @@ function sourceValueRows(table: StudySourceTable): SourceValueRow[] | null {
     const amount = Number(creditMatch?.[1] ?? original);
     if (!Number.isFinite(amount)) return null;
     labels.add(label.trim());
-    rows.push({ label, original, amount });
+    rows.push({ label, original, amount, rowIndex });
   }
   return rows.some((row) => row.amount > 0) ? rows : null;
 }
@@ -144,20 +143,24 @@ function sourcePercentRows(table: StudySourceTable): SourceValueRow[] | null {
   if (!isBoundedPercentageColumn(table.headers[1])) return null;
   const rows: SourceValueRow[] = [];
   const labels = new Set<string>();
-  for (const [label, original] of table.rows) {
+  for (const [rowIndex, [label, original]] of table.rows.entries()) {
     if (!label?.trim() || !original ||
         !/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?[%％]$/u.test(original) ||
         labels.has(label.trim())) return null;
     const amount = Number(original.slice(0, -1));
     if (!Number.isFinite(amount) || amount > 100) return null;
     labels.add(label.trim());
-    rows.push({ label, original, amount });
+    rows.push({ label, original, amount, rowIndex });
   }
   return rows;
 }
 
-function StudySourcePercentComparison({ table }: { table: StudySourceTable }) {
+function StudySourcePercentComparison({ table, onJumpToSource }: {
+  table: StudySourceTable;
+  onJumpToSource: (rowIndex: number, origin: HTMLButtonElement) => void;
+}) {
   const rows = sourcePercentRows(table);
+  const sourceDescriptionPrefix = useId();
   if (!rows) return null;
   return (
     <details className={styles.sourceValueComparison}>
@@ -168,12 +171,19 @@ function StudySourcePercentComparison({ table }: { table: StudySourceTable }) {
       </p>
       <ul className={styles.sourceValueList} aria-label={table.headers[1] + ' 原文百分比'}>
         {rows.map((row) => (
-          <li key={row.label}>
+          <li key={row.rowIndex}>
             <div className={styles.sourceValueRow}>
               <span>{row.label}</span>
               <span>{row.original}</span>
             </div>
+            <button type="button" className={styles.sourceLineJump}
+              id={`${sourceDescriptionPrefix}-row-${row.rowIndex}`}
+              aria-label={`${row.label} · 回表格核對`}
+              onClick={(event) => onJumpToSource(row.rowIndex, event.currentTarget)}>
+              {row.label} · 回表格核對
+            </button>
             <meter min={0} max={100} value={row.amount}
+              aria-describedby={`${sourceDescriptionPrefix}-row-${row.rowIndex}`}
               aria-label={row.label + '：' + row.original}
               aria-valuetext={row.original + '；滿格 100%'} />
           </li>
@@ -184,8 +194,12 @@ function StudySourcePercentComparison({ table }: { table: StudySourceTable }) {
 }
 
 /** Keep the original table visible; numeric bars are an opt-in derived view. */
-function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
+function StudySourceValueComparison({ table, onJumpToSource }: {
+  table: StudySourceTable;
+  onJumpToSource: (rowIndex: number, origin: HTMLButtonElement) => void;
+}) {
   const rows = sourceValueRows(table);
+  const sourceDescriptionPrefix = useId();
   if (!rows) return null;
   const maxRow = rows.reduce((best, row) => row.amount > best.amount ? row : best);
   const max = maxRow.amount;
@@ -193,17 +207,24 @@ function StudySourceValueComparison({ table }: { table: StudySourceTable }) {
     <details className={styles.sourceValueComparison}>
       <summary>展開第 2 欄「{table.headers[1]}」的原文數值比較</summary>
       <p className={styles.note}>
-        只比較明確的非負純數字，或學分欄每列都寫出「學分」的非負數；以本欄最大值為滿格。
-        不換算單位、不混用純數字與附單位數值，也不比較日期或編號；請核對上方原文。
+        只比較格式一致的非負純數字，或學分欄每列都寫出「學分」的非負數；以本欄最大值為滿格。
+        不換算單位、不混用不同數字格式或附單位數值，也不比較日期或編號；請核對上方原文。
       </p>
       <ul className={styles.sourceValueList} aria-label={table.headers[1] + ' 原文數值比較'}>
         {rows.map((row) => (
-          <li key={row.label}>
+          <li key={row.rowIndex}>
             <div className={styles.sourceValueRow}>
               <span>{row.label}</span>
               <span>{row.original}</span>
             </div>
+            <button type="button" className={styles.sourceLineJump}
+              id={`${sourceDescriptionPrefix}-row-${row.rowIndex}`}
+              aria-label={`${row.label} · 回表格核對`}
+              onClick={(event) => onJumpToSource(row.rowIndex, event.currentTarget)}>
+              {row.label} · 回表格核對
+            </button>
             <meter min={0} max={max} value={row.amount}
+              aria-describedby={`${sourceDescriptionPrefix}-row-${row.rowIndex}`}
               aria-label={row.label + '：' + row.original}
               aria-valuetext={row.original + '；本欄最大值 ' + maxRow.original} />
           </li>
@@ -229,13 +250,20 @@ function splitOriginalSourceLines(source: string): OriginalSourceLine[] {
 }
 
 /** Select only the source's original table lines; never reserialize hidden cells. */
-function tableSourceSelection(lines: OriginalSourceLine[], table: StudySourceTable, rowIndex: number | null = null): string {
+function tableSourceSelection(lines: OriginalSourceLine[], table: StudySourceTable, rowIndex: number | null = null, includeHeader = false): string {
   const start = table.startLine - 1;
   if (rowIndex !== null) {
-    // A single data row is copied as its exact source line, without
-    // synthesizing headers, omitting a hidden cell or joining non-adjacent rows.
+    // The default remains the exact data row. Students can explicitly include
+    // its literal header and Markdown separator for a meaningful study excerpt.
+    // Take only authorized source lines, never reserialize cells or include
+    // intervening answers from another row.
     if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= table.rows.length) return '';
-    return lines[start + 2 + rowIndex]?.text ?? '';
+    const chosen = lines[start + 2 + rowIndex];
+    if (!includeHeader) return chosen?.text ?? '';
+    const header = lines[start];
+    const divider = lines[start + 1];
+    if (!header || !divider || !chosen) return '';
+    return header.text + header.separator + divider.text + divider.separator + chosen.text;
   }
   const end = start + table.rows.length + 2;
   const selected = lines.slice(start, end);
@@ -248,12 +276,20 @@ function tableSourceSelection(lines: OriginalSourceLine[], table: StudySourceTab
 // A few iOS Safari and in-app WebViews throw when select() is called on a
 // readonly textarea. Keep the original table text in place and try a precise
 // selection range too, so a failed browser selection never breaks copying.
-function selectOriginalTableText(field: HTMLTextAreaElement | null) {
-  if (!field) return;
+function selectOriginalTableText(field: HTMLTextAreaElement | null): boolean {
+  if (!field) return false;
   try { field.focus(); } catch { /* The student can still long-press the source. */ }
   try { field.select(); } catch { /* Try the explicit selection range below. */ }
   try { field.setSelectionRange(0, field.value.length); }
   catch { /* The unchanged source remains available for native selection. */ }
+  // Some in-app WebViews silently ignore both APIs. A successful method call
+  // is not evidence that text was selected. Even reported selection bounds
+  // cannot guarantee a native menu, so the message must remain cautious.
+  try {
+    return document.activeElement === field &&
+      field.selectionStart === 0 && field.selectionEnd === field.value.length &&
+      field.value.length > 0;
+  } catch { return false; }
 }
 
 /** Keep per-table selection local and reset it when the authorized source changes. */
@@ -263,9 +299,8 @@ function StudySourceSelection({ table, index, sourceLines }: {
   sourceLines: OriginalSourceLine[];
 }) {
   const [rowIndex, setRowIndex] = useState(-1);
-  // Use the authorized source, not textarea.value: textareas normalize CRLF
-  // to LF, and a stale WebView DOM value is not evidence from the lesson.
-  const selectedSource = tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex);
+  const [includeHeader, setIncludeHeader] = useState(false);
+  const selectedSource = tableSourceSelection(sourceLines, table, rowIndex < 0 ? null : rowIndex, includeHeader);
   const [copyFeedback, setCopyFeedback] = useState('');
   const originalText = useRef<HTMLTextAreaElement>(null);
   const copyRequest = useRef(0);
@@ -282,6 +317,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
   useEffect(() => {
     invalidateCopy();
     setRowIndex(-1);
+    setIncludeHeader(false);
     setCopyFeedback('');
   }, [sourceLines, invalidateCopy]);
   useEffect(() => () => { invalidateCopy(); }, [invalidateCopy]);
@@ -292,13 +328,13 @@ function StudySourceSelection({ table, index, sourceLines }: {
       setCopyFeedback('瀏覽器未確認複製；原文仍保留在下方，請長按選取或使用鍵盤複製。');
     }
   };
-  const selectSelectedOriginal = () => {
+  const selectSelectedOriginal = (): boolean => {
     const field = originalText.current;
-    if (!field) return;
+    if (!field) return false;
     // Readonly DOM values can still drift after an embedded WebView glitch.
     // Repair the long-press fallback before selection and clipboard access.
     if (field.value !== selectedSource.replace(/\r\n?/gu, '\n')) field.value = selectedSource;
-    selectOriginalTableText(field);
+    return selectOriginalTableText(field);
   };
   const copySelectedOriginal = () => {
     const field = originalText.current;
@@ -327,7 +363,11 @@ function StudySourceSelection({ table, index, sourceLines }: {
       void Promise.resolve(result as PromiseLike<unknown>).then(
         (acknowledged) => {
           if (copyRequest.current !== request) return;
-          if (acknowledged === false) manualCopy(request);
+          // Native Clipboard.writeText() is Promise<void>: only undefined
+          // is its standard fulfillment value. In-app WebView bridges may
+          // resolve true or { success: true } without copying any bytes.
+          // Keep the verbatim selectable source on every nonstandard value.
+          if (acknowledged !== undefined) manualCopy(request);
           else {
             invalidateCopy();
             setCopyFeedback('瀏覽器已接受複製指令；若無法貼上，仍可長按下方原文。');
@@ -383,12 +423,19 @@ function StudySourceSelection({ table, index, sourceLines }: {
     }
   };
 
+  const selectionAnnouncement = rowIndex < 0
+    ? `目前選取整張表格：包含欄名、分隔列與全部資料列。`
+    : includeHeader
+      ? `目前選取第 ${rowIndex + 1} 列：包含欄名、分隔列與所選資料列；不包含其他資料列。`
+      : `目前只選取第 ${rowIndex + 1} 列：未包含欄名與分隔列。`;
+
   return (
     <details className={styles.sourceTableSelection}>
       <summary>選取第 {index + 1} 張表格的原文（可複製）</summary>
       <p className={styles.note}>
         可選整張表格或單一資料列的原始 Markdown 行，不重新編造欄位內容。
-        單列不包含欄名，請對照上方表格；可以直接複製，若瀏覽器阻擋剪貼簿權限，仍可長按或鍵盤選取原文。
+        單列預設不包含欄名；可勾選附上原始欄名及分隔列。
+        若瀏覽器阻擋剪貼簿權限，仍可長按或鍵盤選取下方文字。
       </p>
       <label>
         原文範圍
@@ -400,6 +447,7 @@ function StudySourceSelection({ table, index, sourceLines }: {
               invalidateCopy();
               setCopyFeedback('');
               setRowIndex(next);
+              setIncludeHeader(false);
             }
           }}>
           <option value={-1}>整張表格（含欄名）</option>
@@ -409,7 +457,25 @@ function StudySourceSelection({ table, index, sourceLines }: {
             </option>)}
         </select>
       </label>
-      <button type="button" onClick={selectSelectedOriginal}>
+      {rowIndex >= 0 && (
+        <label>
+          <input type="checkbox" checked={includeHeader} onChange={(event) => {
+            invalidateCopy();
+            setCopyFeedback('');
+            setIncludeHeader(event.target.checked);
+          }} />
+          連同原文欄名與分隔列
+        </label>
+      )}
+      <p className={styles.note} aria-live="polite" aria-atomic="true">
+        {selectionAnnouncement}
+      </p>
+      <button type="button" onClick={() => {
+        const selected = selectSelectedOriginal();
+        setCopyFeedback(selected
+          ? '瀏覽器回報已全選下方原文；可用鍵盤複製，或長按原文使用系統複製選單。'
+          : '瀏覽器未確認全選；下方原文仍保留，請長按重新選取或使用鍵盤複製。');
+      }}>
         {rowIndex < 0
           ? `全選第 ${index + 1} 張表格原文`
           : `全選第 ${index + 1} 張表格第 ${rowIndex + 1} 列原文`}
@@ -427,10 +493,11 @@ function StudySourceSelection({ table, index, sourceLines }: {
       <p className={styles.note} role="status">{copyFeedback}</p>
       <textarea
         ref={originalText}
+        className={includeHeader ? styles.sourceExcerptWithHeader : undefined}
         aria-label={`原文表格 ${index + 1} 的可選取文字`}
         readOnly
         spellCheck={false}
-        rows={rowIndex < 0 ? Math.min(8, table.rows.length + 2) : 2}
+        rows={rowIndex < 0 ? Math.min(8, table.rows.length + 2) : includeHeader ? 4 : 2}
         value={selectedSource}
       />
     </details>
@@ -441,6 +508,58 @@ function StudySourceSelection({ table, index, sourceLines }: {
 export function StudySourceTables({ text }: { text: string }) {
   const tables = useMemo(() => extractStudySourceTables(text), [text]);
   const sourceLines = useMemo(() => splitOriginalSourceLines(text), [text]);
+  const sourceRowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const [returnTarget, setReturnTarget] = useState<{
+    sourceLines: OriginalSourceLine[];
+    startLine: number;
+    origin: HTMLButtonElement;
+  } | null>(null);
+  // A replaced lesson must never retain the previous chart's DOM button or text.
+  useEffect(() => { setReturnTarget(null); }, [sourceLines]);
+  // Focus the original row; some Safari/WebViews cannot focus table rows, so
+  // fall back to its first cell without adding a normal Tab stop.
+  const jumpToSource = (startLine: number, rowIndex: number, origin: HTMLButtonElement) => {
+    const row = sourceRowRefs.current.get(`${startLine}:${rowIndex}`);
+    if (!row) return;
+    setReturnTarget({ sourceLines, startLine, origin });
+    try { row.focus(); } catch { /* Try a focusable source cell below. */ }
+    if (document.activeElement !== row && !row.contains(document.activeElement)) {
+      try { row.querySelector<HTMLElement>('th, td')?.focus(); }
+      catch { /* Try the keyboard-focusable original table region below. */ }
+    }
+    if (document.activeElement !== row && !row.contains(document.activeElement)) {
+      // Some WebViews silently ignore focus() on both <tr> and its cells.
+      // Keep students near the original row instead of leaving focus in the
+      // comparison below the table. The source region already has tabindex=0.
+      try { row.closest<HTMLElement>('[role="region"]')?.focus(); }
+      catch { /* The source and return control must remain available. */ }
+    }
+    try { row.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }
+    catch { /* A failed scroll must not prevent keyboard focus. */ }
+  };
+  const returnToChart = () => {
+    const origin = returnTarget?.origin;
+    if (!origin?.isConnected) {
+      setReturnTarget(null);
+      return;
+    }
+    // The student may close the comparison disclosure while checking the
+    // source row. Reopen it before returning focus: a hidden chart button
+    // cannot reliably receive focus in Safari, WebView or keyboard navigation.
+    const disclosure = origin.closest('details');
+    if (disclosure && !disclosure.open) disclosure.open = true;
+    try { origin.focus(); } catch { /* Fall back to the disclosure heading. */ }
+    const summary = disclosure?.querySelector<HTMLElement>('summary');
+    if (document.activeElement !== origin) {
+      try { summary?.focus(); } catch { /* The return control must remain available. */ }
+    }
+    const destination = document.activeElement === origin ? origin : summary;
+    // Keep the retry in view if the WebView refuses both focus attempts.
+    if (!destination || document.activeElement !== destination) return;
+    try { destination.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }
+    catch { /* A failed scroll must not prevent keyboard focus. */ }
+    setReturnTarget(null);
+  };
   if (!tables.length) return null;
 
   return (
@@ -462,15 +581,27 @@ export function StudySourceTables({ text }: { text: string }) {
             </thead>
             <tbody>
               {table.rows.map((row, rowIndex) =>
-                <tr key={rowIndex}>{row.map((cell, column) =>
+                <tr key={rowIndex} tabIndex={-1}
+                  ref={(element) => {
+                    const key = `${table.startLine}:${rowIndex}`;
+                    if (element) sourceRowRefs.current.set(key, element);
+                    else sourceRowRefs.current.delete(key);
+                  }}>{row.map((cell, column) =>
                   column === 0 && cell.trim()
-                    ? <th scope="row" key={column}>{cell}</th>
-                    : <td key={column}>{cell}</td>)}</tr>)}
+                    ? <th scope="row" key={column} tabIndex={-1}>{cell}</th>
+                    : <td key={column} tabIndex={column === 0 ? -1 : undefined}>{cell}</td>)}</tr>)}
             </tbody>
           </table>
+          {returnTarget?.sourceLines === sourceLines && returnTarget.startLine === table.startLine && (
+            <button type="button" className={styles.sourceLineJump} onClick={returnToChart}>
+              返回圖表
+            </button>
+          )}
           <StudySourceSelection table={table} index={index} sourceLines={sourceLines} />
-          <StudySourceValueComparison table={table} />
-          <StudySourcePercentComparison table={table} />
+          <StudySourceValueComparison table={table}
+            onJumpToSource={(rowIndex, origin) => jumpToSource(table.startLine, rowIndex, origin)} />
+          <StudySourcePercentComparison table={table}
+            onJumpToSource={(rowIndex, origin) => jumpToSource(table.startLine, rowIndex, origin)} />
         </div>
       ))}
     </section>
