@@ -53,6 +53,7 @@ export function MonthCalendar({
     button.focus({ preventScroll: true });
     const date = button.getAttribute('aria-label') ?? '';
     revealWeek(days.findIndex((day) => day?.date === date));
+    scrollVerticallyIntoView(button);
   }, [days, revealWeek]);
 
   useLayoutEffect(() => {
@@ -196,6 +197,16 @@ export function MonthCalendar({
       </p>
     </section>
   );
+}
+
+
+function scrollVerticallyIntoView(element: HTMLElement) {
+  const rect = element.getBoundingClientRect();
+  if (rect.height <= 0) return;
+  const margin = 8;
+  if (rect.top < margin) window.scrollBy(0, rect.top - margin);
+  else if (rect.bottom > window.innerHeight - margin)
+    window.scrollBy(0, rect.bottom - (window.innerHeight - margin));
 }
 
 function scrollWeekIntoView(

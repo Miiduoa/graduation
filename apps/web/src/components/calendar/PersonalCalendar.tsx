@@ -201,6 +201,15 @@ function downloadIcs(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function scrollVerticallyIntoView(element: HTMLElement) {
+  const rect = element.getBoundingClientRect();
+  if (rect.height <= 0) return;
+  const margin = 8;
+  if (rect.top < margin) window.scrollBy(0, rect.top - margin);
+  else if (rect.bottom > window.innerHeight - margin)
+    window.scrollBy(0, rect.bottom - (window.innerHeight - margin));
+}
+
 export function PersonalCalendar() {
   const context = usePersonalImportScope();
   const auth = useAuth();
@@ -499,7 +508,7 @@ function PersonalCalendarWorkspace({
     if (mode !== 'idle') return;
     if (target === 'saved') {
       dayHeadingRef.current?.focus({ preventScroll: true });
-      dayHeadingRef.current?.scrollIntoView?.({ block: 'nearest' });
+      if (dayHeadingRef.current) scrollVerticallyIntoView(dayHeadingRef.current);
       return;
     }
     const trigger = returnFocusRef.current;
@@ -512,12 +521,12 @@ function PersonalCalendarWorkspace({
       window.getComputedStyle(trigger).display !== 'none'
     ) {
       trigger.focus({ preventScroll: true });
-      trigger.scrollIntoView?.({ block: 'nearest' });
+      scrollVerticallyIntoView(trigger);
       return;
     }
     const fallback = createButtonRef.current;
     fallback?.focus({ preventScroll: true });
-    fallback?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    if (fallback) scrollVerticallyIntoView(fallback);
   }, [paused, mode, editorRevision, month, selectedDate]);
 
   const revealDayAgenda = useCallback(() => {

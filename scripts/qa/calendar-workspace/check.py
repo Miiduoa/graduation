@@ -520,6 +520,7 @@ async def run_scenario(browser, server_url, config):
         await expect(page.get_by_role('button', name='2028-10-28', exact=True)).to_be_focused()
         await assert_weekday_columns(page, '2028-10-28', report)
         report['checks'].append('Keyboard month change onto a Saturday keeps Sunday fully visible')
+        await set_month(page, '2028-02')
         await page.get_by_role('button', name='2028-02-29', exact=True).focus()
         await page.keyboard.press('ArrowRight')
         await expect(page.get_by_label('查看月份', exact=True)).to_have_value('2028-03')
