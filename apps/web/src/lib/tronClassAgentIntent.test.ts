@@ -1111,6 +1111,7 @@ describe('three-way sentence classification', () => {
     '查玩課雲作業，投遞校園附件',
     '查玩課雲作業 槑，寄給老師.pdf',
     '查玩課雲作業 憑：寄給老師.pdf',
+    '查玩課雲作業 槑／捎附件予校園老師.pdf',
     '查玩課雲作業 槑：寄給老師.pdf',
     '查玩課雲未交作業和鎕校園公告',
   ])('does not auto-read when an unknown transfer or punctuated leftover looks like a filename in %s', question => {
@@ -1121,6 +1122,14 @@ describe('three-way sentence classification', () => {
   });
 
   it('masks words inside a filename so they cannot choose a data type or action', () => {
+    expect(classifyTronClassSentence('下載 TronClass（期末 公告 說明.pdf）')).toEqual({
+      outcome: 'clearly-read',
+      intent: { intent: 'download', pendingOnly: false },
+    });
+    expect(parseTronClassAgentIntent('下載 TronClass（期末 公告 說明.pdf）')).toEqual({
+      intent: 'download', pendingOnly: false,
+    });
+    expect(canAnswerTronClassQuestion('下載 TronClass（期末 公告 說明.pdf）')).toBe(true);
     expect(classifyTronClassSentence('下載 TronClass 不存在公告.pdf')).toEqual({
       outcome: 'clearly-read',
       intent: { intent: 'download', pendingOnly: false },
@@ -1235,7 +1244,7 @@ describe('three-way sentence classification', () => {
   it('never auto-reads when punctuation or an unknown token is inserted into or next to a filename', () => {
     const seed = '下載 TronClass 不存在.pdf';
     expect(classifyTronClassSentence(seed)?.outcome).toBe('clearly-read');
-    const probes = ['：', ':', '，', ',', '、', '；', ';', '鎕', '寄', 'foo', '槑'];
+    const probes = ['：', ':', '，', ',', '、', '；', ';', '/', '／', '\\', '鎕', '寄', 'foo', '槑'];
     for (const probe of probes) {
       for (const question of [
         `下載 TronClass 不存在${probe}.pdf`,
