@@ -289,6 +289,143 @@ test('IndexedDB reclaims an old full stage from another ledger while keeping its
   }
 });
 
+function withoutWebWriteLocks() {
+  const locks = Object.getOwnPropertyDescriptor(navigator, 'locks');
+  const database = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB');
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: undefined });
+  Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: undefined });
+  return () => {
+    if (locks) Object.defineProperty(navigator, 'locks', locks);
+    else Reflect.deleteProperty(navigator, 'locks');
+    if (database) Object.defineProperty(globalThis, 'indexedDB', database);
+    else Reflect.deleteProperty(globalThis, 'indexedDB');
+  };
+}
+
+const webLeasePrefix = (key: string) => `campus.personal-imports.write.v1:${sha256(key)}:`;
+const legacyWebStage = (key: string, id: string) =>
+  `campus.personal-imports.rollback.v1:${sha256(key)}:stage:${Date.now()}:${id}`;
+
+test.each([false, true])('Web without locks reclaims legacy localStorage stages at quota (other ledger: %s)', async (foreign) => {
+  const cleanup = useWebStorage();
+  const restoreLocks = withoutWebWriteLocks();
+  const storage = window.localStorage;
+  const setItem = Storage.prototype.setItem;
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    const oldKey = personalImportStorageKey(foreign ? { ...scope, owner: 'nuni:closed-tab' } : scope);
+    const unmarked = legacyWebStage(oldKey, 'unmarked');
+    const expired = legacyWebStage(oldKey, 'expired');
+    const expiredLease = webLeasePrefix(oldKey) + 'expired';
+    storage.setItem(unmarked, JSON.stringify({ original: JSON.stringify(ledger) }));
+    storage.setItem(expired, JSON.stringify({ original: JSON.stringify(ledger) }));
+    storage.setItem(expiredLease, String(Date.now() - 1));
+    const quota = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage, entry, value,
+    ) {
+      if (this === storage && (storage.getItem(unmarked) || storage.getItem(expired))) {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      setItem.call(this, entry, value);
+    });
+    try {
+      let reopened!: typeof import('../services/personalImports');
+      jest.isolateModules(() => { reopened = require('../services/personalImports'); });
+      await expect(reopened.editPersonalImport(scope, ledger.records[0], row('original', '重試成功'), {
+        canContinue: () => true,
+      })).resolves.toMatchObject({ records: [{ title: '重試成功' }] });
+      expect(storage.getItem(unmarked)).toBeNull();
+      expect(storage.getItem(expired)).toBeNull();
+      expect(storage.getItem(expiredLease)).toBeNull();
+      expect(Object.keys(storage).filter((entry) => entry.startsWith(webLeasePrefix(personalImportStorageKey(scope)))))
+        .toEqual([]);
+    } finally {
+      quota.mockRestore();
+    }
+  } finally {
+    restoreLocks();
+    cleanup();
+  }
+});
+
+test('Web without locks preserves another tab’s legacy stage while its write lease is renewed', async () => {
+  const cleanup = useWebStorage();
+  const restoreLocks = withoutWebWriteLocks();
+  jest.useFakeTimers();
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  const stage = legacyWebStage(key, 'active');
+  let resume!: () => void;
+  const paused = new Promise<void>((resolve) => { resume = resolve; });
+  let signalStarted!: () => void;
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  let lease: string | undefined;
+  let firstExpiration: string | null = null;
+  const writer = mutatePersonalImportLedger(scope, { canContinue: () => true }, async (ledger) => {
+    lease = Object.keys(storage).find((entry) => entry.startsWith(webLeasePrefix(key)));
+    firstExpiration = lease ? storage.getItem(lease) : null;
+    // Model a legacy-format copy in use by the write attempt.
+    storage.setItem(stage, JSON.stringify({ original: JSON.stringify(ledger) }));
+    signalStarted();
+    await paused;
+    return { ledger, result: undefined };
+  });
+  try {
+    await Promise.race([started, writer]);
+    expect(lease).toBeDefined();
+    expect(Number(firstExpiration)).toBeGreaterThan(Date.now());
+    jest.advanceTimersByTime(31_000);
+    expect(Number(firstExpiration)).toBeLessThan(Date.now());
+    expect(Number(storage.getItem(lease!))).toBeGreaterThan(Date.now());
+
+    let otherTab!: typeof import('../services/personalImports');
+    jest.isolateModules(() => { otherTab = require('../services/personalImports'); });
+    const guard = { canContinue: () => true };
+    await otherTab.mutatePersonalImportLedger(scope, guard, (ledger) => ({ ledger, result: undefined }));
+    expect(storage.getItem(stage)).not.toBeNull();
+
+    resume();
+    await writer;
+    expect(storage.getItem(lease!)).toBeNull();
+    await otherTab.appendPersonalImports(scope, [row('after')], guard);
+    expect(storage.getItem(stage)).toBeNull();
+  } finally {
+    resume();
+    try {
+      await writer;
+    } finally {
+      jest.useRealTimers();
+      restoreLocks();
+      cleanup();
+    }
+  }
+});
+
+test('Web without locks cannot publish after its page invalidates the write lease', async () => {
+  const cleanup = useWebStorage();
+  const restoreLocks = withoutWebWriteLocks();
+  const storage = window.localStorage;
+  const key = personalImportStorageKey(scope);
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    const before = storage.getItem(key);
+    await expect(mutatePersonalImportLedger(scope, { canContinue: () => true }, (current) => {
+      expect(Object.keys(storage).some((entry) => entry.startsWith(webLeasePrefix(key)))).toBe(true);
+      window.dispatchEvent(new Event('pagehide'));
+      expect(Object.keys(storage).some((entry) => entry.startsWith(webLeasePrefix(key)))).toBe(false);
+      return {
+        ledger: { ...current, records: [{ ...current.records[0], title: '不應寫入' }] },
+        result: undefined,
+      };
+    })).rejects.toThrow('寫入標記已失效');
+    expect(storage.getItem(key)).toBe(before);
+    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+  } finally {
+    restoreLocks();
+    cleanup();
+  }
+});
+
 test('an aborted IndexedDB write cannot publish after its failure is reported', async () => {
   const cleanup = useWebStorage();
   const { abort, restore } = useIndexedDBLocks();

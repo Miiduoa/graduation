@@ -25,6 +25,80 @@ const fingerprint = (raw: string | null) => sha256(raw ?? 'null');
 const lockStore = 'writes';
 const stagePrefix = 'campus.personal-imports.stage.v2:';
 const activeStages = new Set<string>();
+const leasePrefix = 'campus.personal-imports.write.v1:';
+const leaseDuration = 30_000;
+const leasePattern = /^campus\.personal-imports\.write\.v1:([a-f0-9]{64}):[^:]+$/;
+
+function isLiveLease(value: string | null): boolean {
+  if (value === null) return false;
+  const expires = Number(value);
+  const now = Date.now();
+  return Number.isSafeInteger(expires) && expires > now && expires <= now + leaseDuration;
+}
+
+function hasLiveWriter(storage: Storage, hash: string): boolean {
+  return Object.keys(storage).some((entry) =>
+    leasePattern.exec(entry)?.[1] === hash && isLiveLease(storage.getItem(entry)));
+}
+
+function sweepExpiredLeases(storage: Storage): void {
+  for (const entry of Object.keys(storage)) {
+    if (!leasePattern.test(entry)) continue;
+    const value = storage.getItem(entry);
+    if (value !== null && !isLiveLease(value) && storage.getItem(entry) === value) {
+      storage.removeItem(entry);
+    }
+  }
+}
+
+async function writeWithLease<T>(
+  ledgerHash: string,
+  write: (assertLockHeld: () => void) => Promise<T>,
+): Promise<T> {
+  const storage = window.localStorage;
+  // Reclaim existing entries before reserving even the small lease at quota.
+  await sweepLegacyStages();
+  sweepExpiredLeases(storage);
+
+  const leaseKey = leasePrefix + ledgerHash + ':' + createPersonalImportId();
+  const lostLease = new Error('匯入資料的寫入標記已失效，請稍後再試。');
+  let value = String(Date.now() + leaseDuration);
+  let stopped = false;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  const assertLease = () => {
+    if (stopped || !isLiveLease(value) || storage.getItem(leaseKey) !== value) throw lostLease;
+  };
+  const stop = () => {
+    stopped = true;
+    clearInterval(heartbeat);
+    try {
+      if (storage.getItem(leaseKey) === value) storage.removeItem(leaseKey);
+    } catch {
+      // A marker the browser won't remove still expires.
+    }
+  };
+
+  try {
+    storage.setItem(leaseKey, value);
+    assertLease();
+    window.addEventListener('pagehide', stop);
+    heartbeat = setInterval(() => {
+      try {
+        assertLease();
+        const next = String(Date.now() + leaseDuration);
+        storage.setItem(leaseKey, next);
+        value = next;
+        assertLease();
+      } catch {
+        stop();
+      }
+    }, leaseDuration / 3);
+    return await write(assertLease);
+  } finally {
+    window.removeEventListener('pagehide', stop);
+    stop();
+  }
+}
 
 async function openWriteLockDatabase(ledgerHash: string): Promise<IDBDatabase | undefined> {
   if (typeof indexedDB === 'undefined') return undefined;
@@ -41,37 +115,48 @@ async function openWriteLockDatabase(ledgerHash: string): Promise<IDBDatabase | 
   }
 }
 
-// Older builds staged in origin-wide storage. Only retire those entries
-// while holding the same per-ledger lock an older writer would hold.
-async function sweepLegacyStages(ledgerHash: string): Promise<void> {
+// Older builds staged in origin-wide storage. Respect the original per-ledger
+// locks when available and the attempt leases used by writers without a lock.
+async function sweepLegacyStages(ledgerHash?: string): Promise<void> {
   const storage = window.localStorage;
-  const foreign = new Map<string, string[]>();
+  const stages = new Map<string, Map<string, string>>();
   for (const entry of Object.keys(storage)) {
     const hash = legacyStagePattern.exec(entry)?.[1];
     if (!hash) continue;
-    if (hash === ledgerHash) {
-      storage.removeItem(entry);
-    } else {
-      const entries = foreign.get(hash) ?? [];
-      entries.push(entry);
-      foreign.set(hash, entries);
-    }
+    const value = storage.getItem(entry);
+    if (value === null) continue;
+    const entries = stages.get(hash) ?? new Map<string, string>();
+    entries.set(entry, value);
+    stages.set(hash, entries);
   }
-  await Promise.all([...foreign].map(async ([hash, entries]) => {
+  await Promise.all([...stages].map(async ([hash, entries]) => {
     const remove = () => {
-      for (const entry of entries) storage.removeItem(entry);
+      for (const [entry, value] of entries) {
+        // The legacy key has no lease ID. Any live attempt for its ledger may
+        // own it. Recheck both the captured copy and ownership before deletion.
+        if (storage.getItem(entry) === value && !hasLiveWriter(storage, hash) &&
+            storage.getItem(entry) === value) storage.removeItem(entry);
+      }
     };
+    if (hash === ledgerHash || (typeof indexedDB === 'undefined' && !navigator.locks)) {
+      remove();
+      return;
+    }
     if (navigator.locks) {
       await navigator.locks.request(journalPrefix + hash, { ifAvailable: true }, (lock) => {
         if (lock) remove();
       });
       return;
     }
-    await sweepLegacyIndexedDBStages(hash, remove);
+    await sweepLegacyIndexedDBStages(hash, remove, ledgerHash === undefined);
   }));
 }
 
-async function sweepLegacyIndexedDBStages(hash: string, remove: () => void): Promise<void> {
+async function sweepLegacyIndexedDBStages(
+  hash: string,
+  remove: () => void,
+  allowUnlockedSweep: boolean,
+): Promise<void> {
   // IndexedDB has no try-lock. Bound the probe so another ledger's active
   // transaction cannot make this ledger wait for its mutation to finish.
   let expired = false;
@@ -79,7 +164,10 @@ async function sweepLegacyIndexedDBStages(hash: string, remove: () => void): Pro
   let timer: ReturnType<typeof setTimeout> | undefined;
   const probe = async () => {
     const database = await openWriteLockDatabase(hash);
-    if (!database) return;
+    if (!database) {
+      if (!expired && allowUnlockedSweep) remove();
+      return;
+    }
     try {
       if (expired) return;
       await new Promise<void>((resolve, reject) => {
@@ -126,6 +214,7 @@ export async function withPersonalImportWriteLock<T>(
   const ledgerHash = sha256(key);
   const writeWithCleanup = async (assertLockHeld: () => void) => {
     await sweepLegacyStages(ledgerHash);
+    sweepExpiredLeases(window.localStorage);
     assertLockHeld();
     return write(assertLockHeld);
   };
@@ -136,7 +225,7 @@ export async function withPersonalImportWriteLock<T>(
   // IndexedDB serializes readwrite transactions by object store. Use a
   // database per ledger so opening a new ledger also needs no shared upgrade.
   const database = await openWriteLockDatabase(ledgerHash);
-  if (!database) return write(noLockCheck);
+  if (!database) return writeWithLease(ledgerHash, write);
   try {
     return await new Promise<T>((resolve, reject) => {
       const transaction = database.transaction(lockStore, 'readwrite');
@@ -250,6 +339,7 @@ export function commitWebPersonalImports(
     attempted: fingerprint(attempted),
   } satisfies WebRollback);
   const ownsStage = () => stages.getItem(stageKey) === encoded;
+  assertWritable();
   activeStages.add(stageKey);
   try {
     stages.setItem(stageKey, encoded);
