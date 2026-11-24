@@ -60,6 +60,20 @@ describe('TronClass homework overview scope', () => {
     expect(scope?.matches('交通', 'TR101')).toBe(false);
   });
 
+  it.each([
+    '查玩課雲全部作業和查玩課雲『外交』作業',
+    '查玩課雲「外交」作業，查所有作業',
+    '查所有作業，查玩課雲外交作業',
+  ])('preserves an explicit all-course clause in %s', question => {
+    const clauses = tronClassCompoundClauses(question);
+    expect(clauses.length).toBeGreaterThan(0);
+    for (const clause of clauses) {
+      const scope = tronClassAgentHomeworkScope(clause, question);
+      expect(scope?.requiresConfirmation).toBe(true);
+      expect(scope?.matches('外交', 'PS101')).toBe(false);
+    }
+  });
+
   it('supplements an inherited homework read when its course name is also a service word', () => {
     const question = '查玩課雲課程，查交通作業';
     const clauses = tronClassCompoundClauses(question);

@@ -147,6 +147,28 @@ describe('scoped deterministic TronClass Agent tools', () => {
     });
   });
 
+  it.each([
+    '查玩課雲全部作業和查玩課雲『外交』作業',
+    '查玩課雲「外交」作業，查所有作業',
+    '查所有作業，查玩課雲外交作業',
+    '查玩課雲所有作業',
+  ])('asks for a course before reading homework for %s', async (original) => {
+    const f = fixture();
+    const courses = [{ ...course, name: '外交' }];
+    f.read.mockImplementation(async (_owner, options) => ({
+      ...snapshot, courses, homework: options?.include?.homework ? [homework] : [],
+    }));
+    const clauses = tronClassCompoundClauses(original);
+    const input = clauses.length ? { question: clauses[0]!, compoundQuestion: original } : { question: original };
+    const result = await f.service.ask(owner, input);
+    expect(result.selection).toBe('course');
+    expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
+      include: { homework: false, announcements: false, materials: false },
+    });
+    const confirmed = await f.service.ask(owner, { ...input, courseId: course.id });
+    expect(confirmed.snapshot?.homework).toEqual([homework]);
+  });
+
   it('rejects a supplemental clause that dropped its quoted target', async () => {
     const f = fixture();
     await expect(f.service.ask(owner, { question: '查玩課雲未交作業',

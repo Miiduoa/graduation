@@ -1920,11 +1920,16 @@ export function tronClassCompoundClauses(question: string): string[] {
 export function tronClassAgentHomeworkScope(question: string, compoundQuestion?: string) {
   const compound = compoundQuestion === undefined ? null : parseTronClassCompound(compoundQuestion);
   if (compoundQuestion !== undefined && !compound?.clauses.includes(question)) return null;
-  const scopes = (compound?.courseScopes ?? [parseReadRequest(question).courseScope()]).filter(scope => !scope.overview);
+  const scopes = compound?.courseScopes ?? [parseReadRequest(question).courseScope()];
+  const qualifiers = scopes.filter(scope => !scope.overview);
+  // An unqualified clause can inherit a course, but an explicit all-course
+  // clause retains its own scope even when its supplemental answer is deduplicated.
+  const requiresConfirmation = !!compound && scopes.some(scope => scope.explicitAll);
   return {
-    overview: !compound && scopes.length === 0 && !isMultiClauseRequest(question),
-    matches: (name: string, code: string) => scopes.length > 0 &&
-      scopes.every(scope => scope.matches(name, code)),
+    overview: !compound && qualifiers.length === 0 && !isMultiClauseRequest(question),
+    requiresConfirmation,
+    matches: (name: string, code: string) => !requiresConfirmation && qualifiers.length > 0 &&
+      qualifiers.every(scope => scope.matches(name, code)),
   };
 }
 
@@ -2051,9 +2056,11 @@ function readCourseScope(text: string, spans: readonly QuoteSpan[], intent: Tron
   const targets = quoted.map(normalizeTarget);
   const complete = !conflict && !hasReadBlockingDecoration(text);
   const onlyQuotedTargets = spans.length > 0 && isCourseReadFrame(text, intent, spans);
+  const overview = complete && spans.length === 0 && isCourseReadFrame(text.replace(/所有/g, '全部'), intent);
   return {
     quoted,
-    overview: complete && spans.length === 0 && isCourseReadFrame(text.replace(/所有/g, '全部'), intent),
+    overview,
+    explicitAll: intent === 'homework' && overview && /全部|所有|\ball\b/iu.test(text),
     matches(...names: string[]): boolean {
       if (!complete) return false;
       const aliases = names.map(normalizeTarget).filter(Boolean);

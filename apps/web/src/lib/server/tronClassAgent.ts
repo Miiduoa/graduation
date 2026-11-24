@@ -216,18 +216,20 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         await assertScopes(ownerKey, grant, scope);
         return result;
       };
-      let snapshot = await guardedRead(input.courseId);
+      const requiresCourseConfirmation = readsHomework && homeworkScope.requiresConfirmation;
+      let courseId = input.courseId;
+      let snapshot = await guardedRead(courseId);
       steps.push({ id: 'courses', tool: 'read_courses', status: snapshot.errors.some((error) => error.area === 'courses') ? 'partial' : 'completed', message: `已核對目前帳號的 ${snapshot.courses.length} 門課程。` });
       if (query.intent === 'courses') return finish({ ...base, fetchedAt: snapshot.fetchedAt,
         snapshot: selectedSnapshot(snapshot, { courseId: input.courseId }),
         answer: `${snapshot.partial ? '部分課程資料尚未讀完。' : ''}已讀取 ${snapshot.courses.length} 門 TronClass 課程，可在這裡選擇課程查看作業、公告與教材。` });
 
-      let courseId = input.courseId;
       if (!courseId) {
         const matches = snapshot.courses.filter(course => readsHomework
           ? homeworkScope.matches(course.name, course.code)
           : containsName(input.question, course.name) || (course.code.length > 1 && containsName(input.question, course.code)));
-        const canResolveCourse = !readsHomework || !snapshot.errors.some(error => error.area === 'courses');
+        const canResolveCourse = !readsHomework || (!requiresCourseConfirmation &&
+          !snapshot.errors.some(error => error.area === 'courses'));
         if (matches.length === 1 && canResolveCourse) courseId = matches[0].id;
         else if (['materials', 'announcements', 'download'].includes(query.intent) && snapshot.courses.length === 1 &&
           !snapshot.partial && isUnqualifiedRequest(input.question, ['公告', '通知', ...snapshot.courses.map((course) => course.name)])) {
@@ -237,7 +239,9 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
         else if (readsHomework) {
           steps.push({ id: 'choose-course', tool: 'select_target', status: 'blocked', message: '尚未選定唯一課程。' });
           return finish({ ...base, fetchedAt: snapshot.fetchedAt, snapshot: selectedSnapshot(snapshot), selection: 'course',
-            answer: '請確認要查詢哪一門課的作業。' });
+            answer: requiresCourseConfirmation
+              ? '這個請求包含全部作業的範圍，請先確認要查詢哪一門課的作業。'
+              : '請確認要查詢哪一門課的作業。' });
         }
       }
       if (['materials', 'announcements', 'download'].includes(query.intent) && !courseId) {
