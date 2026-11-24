@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const SHA = /^[a-f0-9]{40}$/;
@@ -34,16 +34,26 @@ export function validateAliases(manifest, baseline, candidate) {
   const reviewed = ignoreEntries(baseline);
   const expected = new Set(reviewed);
   for (const alias of manifest.aliases) {
+    assert.ok(reviewed.has(alias.reviewed), 'Alias has no previously reviewed fingerprint');
+  }
+  const fixtures = manifest.reviewedTestFixtures ?? [];
+  assert.ok(Array.isArray(fixtures) && fixtures.length <= 2, 'Invalid reviewed fixture count');
+  for (const fixture of fixtures) {
+    const { path, rule } = parseFingerprint(fixture.reviewed);
+    assert.ok(path.startsWith('scripts/') && /\.test\.[cm]js$/.test(path) && rule === 'generic-api-key', 'Fixture must be an exact finding in a test script');
+    assert.match(fixture.reviewedBlob, SHA, 'A reviewed test fixture requires a pinned Git blob');
+  }
+  const pairs = [...manifest.aliases, ...fixtures];
+  for (const alias of pairs) {
     const before = parseFingerprint(alias.reviewed);
     const after = parseFingerprint(alias.observed);
-    assert.ok(reviewed.has(alias.reviewed), 'Alias has no previously reviewed fingerprint');
     assert.notEqual(before.commit, after.commit, 'Alias must identify a different commit');
     assert.deepEqual([before.path, before.rule, before.line], [after.path, after.rule, after.line], 'An alias cannot change its path, rule or line');
     assert.ok(!expected.has(alias.observed), 'Duplicate or already reviewed alias');
     expected.add(alias.observed);
   }
   assert.deepEqual(ignoreEntries(candidate), expected, 'Candidate must preserve every original entry and add only the declared exact aliases');
-  return manifest.aliases;
+  return pairs;
 }
 export async function verifyAliases(aliases, resolveBlob) {
   const cache = new Map();
@@ -58,6 +68,7 @@ export async function verifyAliases(aliases, resolveBlob) {
     const [before, after] = await Promise.all([resolve(alias.reviewed), resolve(alias.observed)]);
     assert.ok(SHA.test(before) && SHA.test(after), 'Missing or invalid Git blob identity');
     assert.equal(after, before, `Historical file differs from the reviewed blob: ${alias.observed}`);
+    if (alias.reviewedBlob !== undefined) assert.equal(before, alias.reviewedBlob, 'Historical test fixture differs from its pinned review');
     evidence.push({ ...alias, identicalFileBlob: after });
   }
   return evidence;
@@ -86,6 +97,13 @@ function positiveControl() {
     // Generated, nonfunctional test marker. Never print or upload its value.
     const marker = ['AIza', randomBytes(32).toString('base64url').slice(0, 35)].join('');
     writeFileSync(join(root, 'apps/mobile/eas.json'), ['{', ...Array(53).fill(''), `"apiKey": "${marker}"`, '}'].join('\n'));
+    const { reviewedTestFixtures } = JSON.parse(readFileSync('scripts/security/gitleaks-history-aliases.json', 'utf8'));
+    const fixturePositions = reviewedTestFixtures.map(({ observed }) => parseFingerprint(observed));
+    for (const { path, line } of fixturePositions) {
+      const file = join(root, path);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, '\n'.repeat(line - 1) + `const secret = '${randomBytes(32).toString('base64url')}';\n`);
+    }
     const git = (...args) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
     git('init', '-q'); git('config', 'user.name', 'Scanner control'); git('config', 'user.email', 'scanner@example.invalid');
     git('add', '.'); git('commit', '-qm', 'Synthetic scanner positive control');
@@ -94,7 +112,10 @@ function positiveControl() {
     assert.equal(result.status, 1, 'Scanner must reject a new marker despite the historical ignore list');
     const findings = JSON.parse(readFileSync(report, 'utf8'));
     assert.ok(findings.some((item) => item.RuleID === 'gcp-api-key' && item.File === 'apps/mobile/eas.json' && item.StartLine === 55), 'Same-path/same-line new commit must still be detected');
-    console.log('Positive control passed: the default rule detects a new marker at the previously reviewed path and line.');
+    for (const { path, rule, line } of fixturePositions) {
+      assert.ok(findings.some((item) => item.RuleID === rule && item.File === path && item.StartLine === line), 'New commit at the historical test position must still be detected');
+    }
+    console.log('Positive control passed: default rules detected new markers at all three reviewed positions.');
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
 async function main() {
@@ -111,7 +132,7 @@ async function main() {
   const evidence = await verifyAliases(aliases, githubBlob);
   mkdirSync('security-evidence', { recursive: true });
   writeFileSync('security-evidence/verified-aliases.json', `${JSON.stringify({ reviewBase: manifest.reviewBase, count: evidence.length, evidence }, null, 2)}\n`);
-  console.log(`Verified ${evidence.length} exact aliases against identical previously reviewed file blobs.`);
+  console.log(`Verified ${evidence.length} exact fingerprints against their reviewed file blobs.`);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => { console.error(`Security history verification failed: ${String(error.message).split('\n')[0]}`); process.exitCode = 1; });
