@@ -2,6 +2,10 @@ import { directoryStorageFailures, rejectDirectoryStorage } from '@/test/directo
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
+import Link from 'next/link';
+import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
+import { onRouterTransitionStart } from '@/instrumentation-client';
+import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SearchPage from './page';
 import { visibleCampusServices } from '@/lib/campusServices';
@@ -77,6 +81,22 @@ const options = { studentId: false, loading: false, error: false, retry: vi.fn()
 vi.mock('@/lib/signInOptions', () => ({ useSignInOptions: () => options }));
 
 const router = vi.hoisted(() => ({ search: null as string | null }));
+// Simulate the App Router's synchronous dispatch separately from its delayed history commit.
+vi.mock('next/link', () => ({
+  default: ({
+    onNavigate,
+    ...props
+  }: ComponentProps<'a'> & { onNavigate?: () => void }) => (
+    <a
+      {...props}
+      onClick={(event) => {
+        if (!isCurrentTabNavigationClick(event, event.currentTarget)) return;
+        onNavigate?.();
+        onRouterTransitionStart(props.href!, 'push');
+      }}
+    />
+  ),
+}));
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(router.search ?? window.location.search),
 }));
@@ -1154,7 +1174,10 @@ describe('continuing a search after opening a service', () => {
   it('Back restores the original result and search filters, once, even when received while unmounted', () => {
     const entry = leaveLibrary();
     expect(entry).toMatchObject(nextState);
-    traverse(librarySearch, entry);
+    replaceHistoryForTraversal(entry, '', librarySearch);
+    // The Router can replace the arriving state before our popstate listener runs.
+    move(librarySearch, entry);
+    act(() => window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state })));
     const view = renderAfterFrame();
     const library = screen.getByRole('link', { name: /^圖書館/ });
     expect(document.activeElement).toBe(library);
@@ -1224,6 +1247,56 @@ describe('continuing a search after opening a service', () => {
     renderAfterFrame();
     expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
     expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let bottom navigation claim an uncommitted result with the same destination', async () => {
+    move('/search?q=課表');
+    const view = render(
+      <>
+        <SearchPage />
+        <nav aria-label="主要導覽">
+          <Link href="/timetable">課務</Link>
+        </nav>
+      </>,
+    );
+    nextFrame();
+    const result = screen.getByRole('link', { name: /^課表/ });
+    expect(result.getAttribute('href')).toBe('/timetable');
+    fireEvent.click(result);
+    expect(window.location.pathname).toBe('/search');
+    expect(window.history.state).toHaveProperty('__campusSearchResultReturn.href', '/timetable');
+    const bottomLink = screen.getByRole('link', { name: '課務' });
+    expect(bottomLink.getAttribute('href')).toBe(result.getAttribute('href'));
+    fireEvent.click(bottomLink);
+    window.history.pushState(nextState, '', '/timetable');
+    view.unmount();
+
+    await go(-1);
+    renderAfterFrame();
+    expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^課表/ }));
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it('removes the original search identity from a class instance on a Back/Forward traversal', async () => {
+    class CopiedHistoryState {
+      constructor(fields: object) {
+        Object.assign(this, fields);
+      }
+    }
+    const entry = leaveLibrary();
+    const destination = window.history.state;
+    window.history.pushState(new CopiedHistoryState(entry), '', librarySearch);
+    await go(-1);
+    expect(window.location.pathname).toBe('/library');
+    expect(window.history.state).toEqual(destination);
+    await go(1);
+
+    expect(window.history.state.unrelated).toBe(7);
+    expect(window.history.state.__campusSearchHistoryEntry).not.toBe(entry.__campusSearchHistoryEntry);
+    expect(window.history.state).not.toHaveProperty('__campusSearchResultReturn');
+    renderAfterFrame();
+    expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    expect(scroll).not.toHaveBeenCalled();
   });
 
   it('still restores an earlier search entry after a later search has been resumed', () => {

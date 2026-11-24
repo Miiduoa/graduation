@@ -4,6 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type RefObjec
 
 import { SERVICE_CATEGORIES, type ServiceCategory } from '@/lib/campusServices';
 
+import { consumeSearchResultNavigation, markSearchResultNavigation } from './searchResultNavigation';
+
 const HISTORY_ENTRY_KEY = '__campusSearchHistoryEntry';
 const SEARCH_RETURN_STATE = '__campusSearchResultReturn';
 type ResultKind = 'service' | 'suggested' | 'assistant';
@@ -24,7 +26,6 @@ const listeners = new Set<() => void>();
 let trackedEntryKey: string | null = null;
 let historyEntrySequence = 0;
 const armedReturnByToken = new Map<string, { searchKey: string; destinationKey: string | null }>();
-let freshlyArmedToken: string | null = null;
 
 function currentUrl() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -41,19 +42,30 @@ function readEntryKey(state: unknown) {
   return typeof key === 'string' ? key : null;
 }
 
-function onHistoryPush(previousState: unknown, previousPath: string, entryKey: string | null) {
+function onHistoryPush(
+  previousState: unknown,
+  previousPath: string,
+  entryKey: string | null,
+  routerCommit: boolean,
+) {
+  const navigationToken = consumeSearchResultNavigation();
   // Only a traversal between the linked entries can start another restore.
   publishReturn(null);
   const leaving = readReturn(previousState);
   const armed = leaving && armedReturnByToken.get(leaving.token);
   if (leaving && armed?.searchKey === readEntryKey(previousState) && previousPath === '/search') {
-    if (leaving.token === freshlyArmedToken && appUrl(leaving.href) === currentUrl()) {
+    if (routerCommit && leaving.token === navigationToken && appUrl(leaving.href) === currentUrl()) {
       armed.destinationKey = entryKey;
-    } else if (window.location.pathname !== '/search' && leaving.token !== freshlyArmedToken) {
+    } else if (window.location.pathname !== '/search') {
       armedReturnByToken.delete(leaving.token);
     }
   }
-  freshlyArmedToken = null;
+}
+
+function isHistoryRecord(data: unknown) {
+  if (!data || typeof data !== 'object') return false;
+  const prototype = Object.getPrototypeOf(data);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function installHistoryTracking() {
@@ -67,22 +79,44 @@ function installHistoryTracking() {
       url?: string | URL | null,
     ) {
       const previousState = this.state;
+      const previousKey = readEntryKey(previousState);
       const previousPath = window.location.pathname;
       const push = method === 'pushState';
       let state = data;
-      if (data == null || Object.getPrototypeOf(data) === Object.prototype) {
-        const fields = { ...(data as Record<string, unknown> | null | undefined) };
-        const previousKey = push ? null : readEntryKey(previousState);
+      if (
+        data &&
+        typeof data === 'object' &&
+        !isHistoryRecord(data) &&
+        (HISTORY_ENTRY_KEY in data || SEARCH_RETURN_STATE in data)
+      ) {
+        // History serializes class instances as records and drops custom fields on
+        // built-ins such as Map. Normalize those copies before applying entry identity.
+        state = structuredClone(data);
+      }
+      if (state == null || isHistoryRecord(state)) {
+        const fields = { ...(state as Record<string, unknown> | null | undefined) };
         if (push || previousKey || fields[SEARCH_RETURN_STATE] || fields[HISTORY_ENTRY_KEY]) {
           if (push) delete fields[SEARCH_RETURN_STATE];
           // Replace retains the current entry's identity. Push always creates a new one.
-          fields[HISTORY_ENTRY_KEY] = previousKey ?? `${Date.now()}-${++historyEntrySequence}`;
+          fields[HISTORY_ENTRY_KEY] =
+            (push ? null : previousKey) ?? `${Date.now()}-${++historyEntrySequence}`;
           state = fields;
         }
       }
       original.call(this, state, unused, url);
-      trackedEntryKey = readEntryKey(this.state);
-      if (push) onHistoryPush(previousState, previousPath, trackedEntryKey);
+      // A router replace can run during traversal, before our popstate observer.
+      // Keep the departing key until that observer has compared the two entries.
+      if (push || previousKey === trackedEntryKey) trackedEntryKey = readEntryKey(this.state);
+      if (push) {
+        // Next's own commit supplies its router state before the native History
+        // wrapper has a chance to fill it in for application-authored writes.
+        const routerCommit =
+          isHistoryRecord(data) &&
+          (data as { __NA?: boolean }).__NA === true &&
+          readEntryKey(data) === null &&
+          !readReturn(data);
+        onHistoryPush(previousState, previousPath, trackedEntryKey, routerCommit);
+      }
     };
   }
 }
@@ -132,7 +166,7 @@ function captureReturn(event: PopStateEvent) {
   const entryKey = readEntryKey(event.state);
   const departedKey = trackedEntryKey;
   trackedEntryKey = entryKey;
-  freshlyArmedToken = null;
+  consumeSearchResultNavigation();
   const armed = saved && armedReturnByToken.get(saved.token);
   publishReturn(
     saved &&
@@ -201,7 +235,7 @@ export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token' | '
         armedReturnByToken.delete(previous.token);
       }
       armedReturnByToken.set(token, { searchKey, destinationKey: null });
-      freshlyArmedToken = token;
+      markSearchResultNavigation(token);
     }
   } catch {
     // Opening a service remains available when the browser denies History access.
