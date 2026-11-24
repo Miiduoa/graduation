@@ -125,7 +125,14 @@ if [ -L "$TRONCLASS_RUNTIME_DIR" ]; then
   exit 1
 fi
 export TRONCLASS_RUNTIME_DIR
-TRONCLASS_RUN_ID="$(openssl rand -hex 16 2>/dev/null || date +%s%N)"
+TRONCLASS_RUN_ID="$(openssl rand -hex 16 2>/dev/null || true)"
+if ! printf '%s' "$TRONCLASS_RUN_ID" | grep -Eq '^[0-9a-fA-F]{32}$'; then
+  TRONCLASS_RUN_ID="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')"
+fi
+if ! printf '%s' "$TRONCLASS_RUN_ID" | grep -Eq '^[0-9a-fA-F]{32}$'; then
+  echo 'Unable to generate a random run id.' >&2
+  exit 1
+fi
 export TRONCLASS_RUN_ID
 echo "RUN_ID=$TRONCLASS_RUN_ID"
 # Leftover sidecars from a previous run are never used to send signals.
@@ -207,6 +214,7 @@ export TRONCLASS_SESSION_SECRET="$(<"$TRONCLASS_RUNTIME_DIR/tronclass-session.ke
 
 TRONCLASS_EMULATOR_PID=''
 TRONCLASS_WEB_PID=''
+TRONCLASS_SELFTEST_WRAPPER=''
 tronclass_proc_starttime() {
   local pid="$1"
   [ -r "/proc/$pid/stat" ] || return 1
@@ -318,34 +326,43 @@ tronclass_stop_logged() {
   local memory="$4"
   # Signal only the group recorded in memory by this run. Never consult a
   # sidecar from a previous run. If the child group is not known yet, only
-  # signal this wrapper and its current children.
+  # signal this wrapper and its current children, and keep those discovered
+  # groups for the later wait and KILL rounds.
   [ -n "$wrapper" ] || [ -n "$memory" ] || return 0
   local memory_record=""
   [ -n "$memory" ] && memory_record="$(tronclass_parse_record "$memory" 2>/dev/null || true)"
-  local record="$memory_record"
-  tronclass_signal_record "$record" "$sig"
+  local records=()
+  [ -n "$memory_record" ] && records+=("$memory_record")
   if [ -n "$wrapper" ]; then
-    local child
+    local child child_start child_record
     for child in $(ps -o pid= --ppid "$wrapper" 2>/dev/null); do
-      local child_start
       child_start="$(tronclass_proc_starttime "$child" 2>/dev/null || true)"
       if [ -n "$child_start" ] && [ -n "${TRONCLASS_RUN_ID:-}" ]; then
-        tronclass_signal_record "$TRONCLASS_RUN_ID $child $child_start" "$sig"
+        child_record="$TRONCLASS_RUN_ID $child $child_start"
+        records+=("$child_record")
       fi
     done
-    kill "-$sig" "$wrapper" 2>/dev/null || true
   fi
+  local record
+  for record in "${records[@]+"${records[@]}"}"; do
+    tronclass_signal_record "$record" "$sig"
+  done
+  [ -n "$wrapper" ] && kill "-$sig" "$wrapper" 2>/dev/null || true
   local i
   for i in $(seq 1 20); do
     local wrapper_alive=0 group_alive=0
     [ -n "$wrapper" ] && kill -0 "$wrapper" 2>/dev/null && wrapper_alive=1
-    tronclass_group_alive_record "$record" && group_alive=1
+    for record in "${records[@]+"${records[@]}"}"; do
+      tronclass_group_alive_record "$record" && group_alive=1
+    done
     if [ "$wrapper_alive" -eq 0 ] && [ "$group_alive" -eq 0 ]; then
       return 0
     fi
     sleep 0.1
   done
-  tronclass_signal_record "$record" KILL
+  for record in "${records[@]+"${records[@]}"}"; do
+    tronclass_signal_record "$record" KILL
+  done
   [ -n "$wrapper" ] && kill -KILL "$wrapper" 2>/dev/null || true
   [ -n "$wrapper" ] && wait "$wrapper" 2>/dev/null || true
 }
@@ -355,7 +372,7 @@ cleanup() {
   trap - EXIT INT TERM
   tronclass_stop_logged "$TRONCLASS_WEB_PID" "$TRONCLASS_RUNTIME_DIR/web.log" TERM "${TRONCLASS_WEB_RECORD:-}"
   tronclass_stop_logged "$TRONCLASS_EMULATOR_PID" "$TRONCLASS_RUNTIME_DIR/emulators.log" INT "${TRONCLASS_EMULATOR_RECORD:-}"
-  tronclass_stop_logged "" "${TRONCLASS_RUNTIME_DIR:+$TRONCLASS_RUNTIME_DIR/selftest.log}" TERM "${TRONCLASS_SELFTEST_RECORD:-}"
+  tronclass_stop_logged "${TRONCLASS_SELFTEST_WRAPPER:-}" "${TRONCLASS_RUNTIME_DIR:+$TRONCLASS_RUNTIME_DIR/selftest.log}" TERM "${TRONCLASS_SELFTEST_RECORD:-}"
   if [ "$sig" = INT ]; then exit 130; fi
   if [ "$sig" = TERM ]; then exit 143; fi
 }
@@ -554,6 +571,9 @@ if [ "${TRONCLASS_SIGNAL_SELFTEST:-}" = '1' ]; then
   TRONCLASS_SELFTEST_WRAPPER=$!
   echo "WRAPPER_PID=$TRONCLASS_SELFTEST_WRAPPER"
   unset TRONCLASS_RUN_LOGGED_EXEC
+  if [ -n "${TRONCLASS_TEST_PAUSE_BEFORE_CAPTURE:-}" ]; then
+    sleep "$TRONCLASS_TEST_PAUSE_BEFORE_CAPTURE"
+  fi
   TRONCLASS_SELFTEST_RECORD="$(tronclass_capture_child_record "$TRONCLASS_SELFTEST_WRAPPER" || true)"
   wait "$TRONCLASS_SELFTEST_WRAPPER"
   exit 0
