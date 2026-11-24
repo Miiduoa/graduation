@@ -189,72 +189,145 @@ export TRONCLASS_SESSION_SECRET="$(<"$TRONCLASS_RUNTIME_DIR/tronclass-session.ke
 
 TRONCLASS_EMULATOR_PID=''
 TRONCLASS_WEB_PID=''
-tronclass_read_pgid() {
+tronclass_proc_starttime() {
+  local pid="$1"
+  [ -r "/proc/$pid/stat" ] || return 1
+  awk '{
+    start = index($0, "(");
+    rest = substr($0, start);
+    closepos = 0;
+    for (i = length(rest); i > 0; i--) if (substr(rest, i, 1) == ")") { closepos = i; break; }
+    n = split(substr(rest, closepos + 1), f, /[[:space:]]+/);
+    # fields after comm: 3=state ... 22=starttime => index 20 after leading empty split
+    idx = 0;
+    for (i = 1; i <= n; i++) if (f[i] != "") {
+      idx++;
+      if (idx == 20) { print f[i]; exit 0; }
+    }
+    exit 1;
+  }' "/proc/$pid/stat"
+}
+
+tronclass_parse_record() {
+  local raw="$1"
+  raw="$(printf '%s' "$raw" | tr -cd '0-9 \t')"
+  local pid start=""
+  pid="$(printf '%s' "$raw" | awk '{print $1}')"
+  start="$(printf '%s' "$raw" | awk '{print $2}')"
+  [ -n "$pid" ] || return 1
+  printf '%s %s' "$pid" "$start"
+}
+
+tronclass_record_matches() {
+  local pid="$1"
+  local start="$2"
+  [ -n "$pid" ] || return 1
+  local live
+  live="$(tronclass_proc_starttime "$pid" 2>/dev/null || true)"
+  if [ -n "$live" ]; then
+    [ -n "$start" ] && [ "$live" = "$start" ]
+    return $?
+  fi
+  # Leader is gone. Only signal the leftover group if this PID is unused
+  # (not reused by a new process).
+  [ -n "$pid" ] && [ ! -e "/proc/$pid" ]
+}
+
+tronclass_read_record_file() {
   local file="$1"
-  [ -n "$file" ] && [ -f "$file" ] || return 0
-  local pgid
-  pgid="$(tr -cd '0-9' < "$file")"
-  local self_pgid
-  self_pgid="$(ps -o pgid= -p "$$" 2>/dev/null | tr -cd '0-9')"
-  # Never signal the launcher shell's own group or PID 1.
-  if [ -z "$pgid" ] || [ "$pgid" = "1" ] || [ "$pgid" = "$self_pgid" ]; then
+  [ -n "$file" ] && [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  tronclass_parse_record "$(cat "$file")"
+}
+
+tronclass_capture_child_record() {
+  local wrapper="$1"
+  local i child start
+  for i in $(seq 1 40); do
+    child="$(ps -o pid= --ppid "$wrapper" 2>/dev/null | awk 'NF { print $1; exit }')"
+    if [ -n "$child" ]; then
+      start="$(tronclass_proc_starttime "$child" 2>/dev/null || true)"
+      if [ -n "$start" ]; then
+        printf '%s %s' "$child" "$start"
+        return 0
+      fi
+    fi
+    sleep 0.05
+  done
+  return 1
+}
+
+tronclass_signal_record() {
+  local record="$1"
+  local sig="$2"
+  local pid start
+  pid="$(printf '%s' "$record" | awk '{print $1}')"
+  start="$(printf '%s' "$record" | awk '{print $2}')"
+  tronclass_record_matches "$pid" "$start" || return 0
+  kill "-$sig" -- "-$pid" 2>/dev/null || true
+  kill "-$sig" "$pid" 2>/dev/null || true
+}
+
+tronclass_group_alive_record() {
+  local record="$1"
+  local pid start
+  pid="$(printf '%s' "$record" | awk '{print $1}')"
+  start="$(printf '%s' "$record" | awk '{print $2}')"
+  tronclass_record_matches "$pid" "$start" || return 1
+  if [ -e "/proc/$pid" ]; then
     return 0
   fi
-  printf '%s' "$pgid"
-}
-
-tronclass_group_alive() {
-  local pgid="$1"
-  [ -n "$pgid" ] || return 1
-  kill -0 -- "-$pgid" 2>/dev/null
-}
-
-tronclass_signal_logged() {
-  local pid="$1"
-  local pgid="$2"
-  local sig="$3"
-  if [ -n "$pgid" ]; then
-    kill "-$sig" -- "-$pgid" 2>/dev/null || true
-  fi
-  # Also walk any still-attached wrapper children if the sidecar is missing.
-  local child
-  if [ -n "$pid" ]; then
-    for child in $(ps -o pid= --ppid "$pid" 2>/dev/null); do
-      kill "-$sig" -- "-$child" 2>/dev/null || kill "-$sig" "$child" 2>/dev/null || true
-    done
-    kill "-$sig" "$pid" 2>/dev/null || true
-  fi
+  kill -0 -- "-$pid" 2>/dev/null
 }
 
 tronclass_stop_logged() {
-  local pid="$1"
+  local wrapper="$1"
   local log="$2"
   local sig="${3:-TERM}"
-  local pgid=""
-  [ -n "$log" ] && pgid="$(tronclass_read_pgid "${log}.pgid")"
-  [ -n "$pid" ] || [ -n "$pgid" ] || return 0
-  tronclass_signal_logged "$pid" "$pgid" "$sig"
+  local memory="$4"
+  local file_record="" memory_record=""
+  [ -n "$log" ] && file_record="$(tronclass_read_record_file "${log}.pgid" 2>/dev/null || true)"
+  [ -n "$memory" ] && memory_record="$(tronclass_parse_record "$memory" 2>/dev/null || true)"
+  local record="${memory_record:-$file_record}"
+  [ -n "$wrapper" ] || [ -n "$record" ] || return 0
+  tronclass_signal_record "$record" "$sig"
+  if [ -n "$wrapper" ]; then
+    local child
+    for child in $(ps -o pid= --ppid "$wrapper" 2>/dev/null); do
+      local child_start
+      child_start="$(tronclass_proc_starttime "$child" 2>/dev/null || true)"
+      if [ -n "$child_start" ]; then
+        tronclass_signal_record "$child $child_start" "$sig"
+      fi
+    done
+    kill "-$sig" "$wrapper" 2>/dev/null || true
+  fi
   local i
   for i in $(seq 1 20); do
     local wrapper_alive=0 group_alive=0
-    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && wrapper_alive=1
-    tronclass_group_alive "$pgid" && group_alive=1
+    [ -n "$wrapper" ] && kill -0 "$wrapper" 2>/dev/null && wrapper_alive=1
+    tronclass_group_alive_record "$record" && group_alive=1
     if [ "$wrapper_alive" -eq 0 ] && [ "$group_alive" -eq 0 ]; then
       return 0
     fi
     sleep 0.1
   done
-  tronclass_signal_logged "$pid" "$pgid" KILL
-  [ -n "$pid" ] && wait "$pid" 2>/dev/null || true
+  tronclass_signal_record "$record" KILL
+  [ -n "$wrapper" ] && kill -KILL "$wrapper" 2>/dev/null || true
+  [ -n "$wrapper" ] && wait "$wrapper" 2>/dev/null || true
 }
 
 cleanup() {
+  local sig="${1:-}"
   trap - EXIT INT TERM
-  tronclass_stop_logged "$TRONCLASS_WEB_PID" "$TRONCLASS_RUNTIME_DIR/web.log" TERM
-  tronclass_stop_logged "$TRONCLASS_EMULATOR_PID" "$TRONCLASS_RUNTIME_DIR/emulators.log" INT
-  tronclass_stop_logged "" "${TRONCLASS_RUNTIME_DIR:+$TRONCLASS_RUNTIME_DIR/selftest.log}" TERM
+  tronclass_stop_logged "$TRONCLASS_WEB_PID" "$TRONCLASS_RUNTIME_DIR/web.log" TERM "${TRONCLASS_WEB_RECORD:-}"
+  tronclass_stop_logged "$TRONCLASS_EMULATOR_PID" "$TRONCLASS_RUNTIME_DIR/emulators.log" INT "${TRONCLASS_EMULATOR_RECORD:-}"
+  tronclass_stop_logged "" "${TRONCLASS_RUNTIME_DIR:+$TRONCLASS_RUNTIME_DIR/selftest.log}" TERM "${TRONCLASS_SELFTEST_RECORD:-}"
+  if [ "$sig" = INT ]; then exit 130; fi
+  if [ "$sig" = TERM ]; then exit 143; fi
 }
-trap cleanup EXIT INT TERM
+trap 'cleanup' EXIT
+trap 'cleanup INT' INT
+trap 'cleanup TERM' TERM
 
 tronclass_run_logged() {
   local log="$1"
@@ -292,14 +365,45 @@ if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
 fs.ftruncateSync(fd, 0);
 const child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd], detached: true });
 fs.closeSync(fd);
+const path = require('node:path');
+const crypto = require('node:crypto');
+function readStartTime(pid) {
+  const raw = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+  const rest = raw.slice(raw.lastIndexOf(')') + 1).trim().split(/\s+/);
+  return rest[19];
+}
 const pgidPath = `${logPath}.pgid`;
 try {
+  const startTime = readStartTime(child.pid);
+  if (!startTime) throw new Error('starttime');
   try {
-    if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('pgid');
+    if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('symlink target');
   } catch (error) {
     if (error && error.code !== 'ENOENT') throw error;
   }
-  fs.writeFileSync(pgidPath, String(child.pid), { mode: 0o600, flag: 'w' });
+  const tmpPath = path.join(path.dirname(pgidPath), `.pgid-${process.pid}-${crypto.randomBytes(8).toString('hex')}.tmp`);
+  const tmpFd = fs.openSync(tmpPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+  try {
+    const tmpStat = fs.fstatSync(tmpFd);
+    if (!tmpStat.isFile() || tmpStat.nlink !== 1 || tmpStat.uid !== process.getuid()) throw new Error('tmp');
+    fs.writeSync(tmpFd, `${child.pid} ${startTime}\n`);
+    fs.fsyncSync(tmpFd);
+  } finally {
+    fs.closeSync(tmpFd);
+  }
+  try {
+    if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('symlink target');
+  } catch (error) {
+    if (error && error.code !== 'ENOENT') throw error;
+  }
+  fs.renameSync(tmpPath, pgidPath);
+  const verifyFd = fs.openSync(pgidPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const info = fs.fstatSync(verifyFd);
+    if (!info.isFile() || info.nlink !== 1) throw new Error('nlink');
+  } finally {
+    fs.closeSync(verifyFd);
+  }
 } catch (error) {
   process.stderr.write('Unable to record the logged child process group.\n');
 }
@@ -348,14 +452,45 @@ if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
 fs.ftruncateSync(fd, 0);
 const child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd], detached: true });
 fs.closeSync(fd);
+const path = require('node:path');
+const crypto = require('node:crypto');
+function readStartTime(pid) {
+  const raw = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+  const rest = raw.slice(raw.lastIndexOf(')') + 1).trim().split(/\s+/);
+  return rest[19];
+}
 const pgidPath = `${logPath}.pgid`;
 try {
+  const startTime = readStartTime(child.pid);
+  if (!startTime) throw new Error('starttime');
   try {
-    if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('pgid');
+    if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('symlink target');
   } catch (error) {
     if (error && error.code !== 'ENOENT') throw error;
   }
-  fs.writeFileSync(pgidPath, String(child.pid), { mode: 0o600, flag: 'w' });
+  const tmpPath = path.join(path.dirname(pgidPath), `.pgid-${process.pid}-${crypto.randomBytes(8).toString('hex')}.tmp`);
+  const tmpFd = fs.openSync(tmpPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+  try {
+    const tmpStat = fs.fstatSync(tmpFd);
+    if (!tmpStat.isFile() || tmpStat.nlink !== 1 || tmpStat.uid !== process.getuid()) throw new Error('tmp');
+    fs.writeSync(tmpFd, `${child.pid} ${startTime}\n`);
+    fs.fsyncSync(tmpFd);
+  } finally {
+    fs.closeSync(tmpFd);
+  }
+  try {
+    if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('symlink target');
+  } catch (error) {
+    if (error && error.code !== 'ENOENT') throw error;
+  }
+  fs.renameSync(tmpPath, pgidPath);
+  const verifyFd = fs.openSync(pgidPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const info = fs.fstatSync(verifyFd);
+    if (!info.isFile() || info.nlink !== 1) throw new Error('nlink');
+  } finally {
+    fs.closeSync(verifyFd);
+  }
 } catch (error) {
   process.stderr.write('Unable to record the logged child process group.\n');
 }
@@ -378,9 +513,11 @@ NODE
 if [ "${TRONCLASS_SIGNAL_SELFTEST:-}" = '1' ]; then
   TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/selftest.log" \
     node -e 'const fs=require("node:fs"); const {spawn}=require("node:child_process"); const g=spawn(process.execPath,["-e","process.on(\"SIGTERM\",()=>{});process.on(\"SIGINT\",()=>{});require(\"node:fs\").writeFileSync(process.env.TRONCLASS_SELFTEST_GRANDCHILD,String(process.pid));setInterval(()=>{},1000);"],{stdio:"ignore"}); fs.writeFileSync(process.env.TRONCLASS_SELFTEST_CHILD,String(process.pid)); process.on("SIGTERM",()=>process.exit(0)); process.on("SIGINT",()=>process.exit(0)); setInterval(()=>{},1000);' &
-  echo "WRAPPER_PID=$!"
+  TRONCLASS_SELFTEST_WRAPPER=$!
+  echo "WRAPPER_PID=$TRONCLASS_SELFTEST_WRAPPER"
   unset TRONCLASS_RUN_LOGGED_EXEC
-  wait
+  TRONCLASS_SELFTEST_RECORD="$(tronclass_capture_child_record "$TRONCLASS_SELFTEST_WRAPPER" || true)"
+  wait "$TRONCLASS_SELFTEST_WRAPPER"
   exit 0
 fi
 
@@ -391,6 +528,7 @@ TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/emulato
   --project "$TEST_PROJECT_ID" --config firebase.test.json --only auth,firestore &
 TRONCLASS_EMULATOR_PID=$!
 unset TRONCLASS_RUN_LOGGED_EXEC
+TRONCLASS_EMULATOR_RECORD="$(tronclass_capture_child_record "$TRONCLASS_EMULATOR_PID" || true)"
 TRONCLASS_EMULATOR_READY=false
 for _ in $(seq 1 90); do
   if ! kill -0 "$TRONCLASS_EMULATOR_PID" 2>/dev/null; then
@@ -424,6 +562,7 @@ TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/web.log
   node ../../node_modules/next/dist/bin/next dev --webpack -p "$TEST_WEB_PORT" -H "$TEST_HOST" &
 TRONCLASS_WEB_PID=$!
 unset TRONCLASS_RUN_LOGGED_EXEC
+TRONCLASS_WEB_RECORD="$(tronclass_capture_child_record "$TRONCLASS_WEB_PID" || true)"
 if [ "${TRONCLASS_VERIFY_RUNTIME:-}" = '1' ] && [ "$TRONCLASS_INTEGRATION_ENABLED" = true ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
   tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/acceptance.log" node scripts/test-env/verify-tronclass.cjs
