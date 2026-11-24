@@ -232,14 +232,10 @@ tronclass_proc_starttime() {
 
 tronclass_parse_record() {
   local raw="$1"
-  raw="$(printf '%s' "$raw" | tr -cd '0-9a-fA-F \t')"
-  local run pid start
-  run="$(printf '%s' "$raw" | awk '{print $1}')"
-  pid="$(printf '%s' "$raw" | awk '{print $2}')"
-  start="$(printf '%s' "$raw" | awk '{print $3}')"
-  [ -n "$run" ] && [ -n "$pid" ] && [ -n "$start" ] || return 1
-  [ "$run" = "${TRONCLASS_RUN_ID:-}" ] || return 1
-  printf '%s %s %s' "$run" "$pid" "$start"
+  local pattern='^([0-9a-fA-F]{32})[[:blank:]]+([1-9][0-9]*)[[:blank:]]+([0-9]+)$'
+  [[ "$raw" =~ $pattern ]] || return 1
+  [ "${BASH_REMATCH[1]}" = "${TRONCLASS_RUN_ID:-}" ] || return 1
+  printf '%s %s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
 }
 
 tronclass_record_matches() {
@@ -265,7 +261,9 @@ tronclass_record_matches() {
 tronclass_read_record_file() {
   local file="$1"
   [ -n "$file" ] && [ -f "$file" ] && [ ! -L "$file" ] || return 1
-  tronclass_parse_record "$(cat "$file")"
+  local raw
+  raw="$(tronclass_read_regular_file "$file")" || return 1
+  tronclass_parse_record "$raw"
 }
 
 tronclass_capture_child_record() {
@@ -326,8 +324,21 @@ tronclass_stop_logged() {
   [ -n "$memory" ] && memory_record="$(tronclass_parse_record "$memory" 2>/dev/null || true)"
   local records=()
   [ -n "$memory_record" ] && records+=("$memory_record")
-  tronclass_discover_wrapper_children() {
-    local child child_start child_record existing
+  local sidecar_record=""
+  tronclass_discover_groups() {
+    local child child_start child_record existing run pid start
+    # A detached leader can exit before ps sees it. Its wrapper recorded the
+    # identity at spawn, and the group may still contain descendants.
+    if [ -z "$memory_record" ] && [ -z "$sidecar_record" ] && [ -n "$log" ] &&
+      child_record="$(tronclass_read_record_file "$log.pgid" 2>/dev/null)"; then
+      read -r run pid start <<< "$child_record"
+      if tronclass_record_matches "$pid" "$start" && kill -0 -- "-$pid" 2>/dev/null; then
+        sidecar_record="$child_record"
+        if [[ " ${records[*]} " != *" $sidecar_record "* ]]; then
+          records+=("$sidecar_record")
+        fi
+      fi
+    fi
     [ -n "$wrapper" ] || return 0
     for child in $(ps -o pid= --ppid "$wrapper" 2>/dev/null); do
       child_start="$(tronclass_proc_starttime "$child" 2>/dev/null || true)"
@@ -342,13 +353,13 @@ tronclass_stop_logged() {
   }
   # Give a late detached child time to appear before signalling the wrapper.
   local spawn_deadline=$((SECONDS + 6))
-  tronclass_discover_wrapper_children
+  tronclass_discover_groups
   while [ "${#records[@]}" -eq 0 ] && [ -n "$wrapper" ] &&
     [ "$SECONDS" -lt "$spawn_deadline" ] && kill -0 "$wrapper" 2>/dev/null; do
     sleep 0.1
-    tronclass_discover_wrapper_children
+    tronclass_discover_groups
   done
-  tronclass_discover_wrapper_children
+  tronclass_discover_groups
   local record
   for record in "${records[@]+"${records[@]}"}"; do
     tronclass_signal_record "$record" "$sig"
@@ -356,7 +367,7 @@ tronclass_stop_logged() {
   [ -n "$wrapper" ] && kill "-$sig" "$wrapper" 2>/dev/null || true
   local i
   for i in $(seq 1 20); do
-    tronclass_discover_wrapper_children
+    tronclass_discover_groups
     local wrapper_alive=0 group_alive=0
     [ -n "$wrapper" ] && kill -0 "$wrapper" 2>/dev/null && wrapper_alive=1
     for record in "${records[@]+"${records[@]}"}"; do
@@ -367,7 +378,7 @@ tronclass_stop_logged() {
     fi
     sleep 0.1
   done
-  tronclass_discover_wrapper_children
+  tronclass_discover_groups
   for record in "${records[@]+"${records[@]}"}"; do
     tronclass_signal_record "$record" KILL
   done

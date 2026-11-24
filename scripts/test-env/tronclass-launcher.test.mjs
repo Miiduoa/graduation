@@ -510,6 +510,88 @@ test('launcher cleanup kills a process-group descendant after the wrapper exits'
   }
 });
 
+test('launcher recovers a current-run sidecar after the leader exits before capture', async (t) => {
+  const { spawn } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const { once } = await import('node:events');
+  const { setTimeout: delay } = await import('node:timers/promises');
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+
+  for (const recordKind of ['current run', 'old run', 'mismatched starttime']) {
+    await t.test(recordKind, { timeout: 14000 }, async () => {
+      const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-orphan-sidecar-'));
+      const childFile = path.join(dir, 'child.pid');
+      const descendantFile = path.join(dir, 'grandchild.pid');
+      const sidecar = path.join(dir, 'selftest.log.pgid');
+      const victim = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+      const victimExited = once(victim, 'exit');
+      let launcher;
+      let launcherExited;
+      let descendant;
+      try {
+        // Suppress child discovery until the leader has exited, including when
+        // launcher startup runs faster than the test can send TERM.
+        writeFileSync(path.join(dir, 'ps'), `#!/bin/bash
+if [[ "$*" == *--ppid* ]]; then exit 1; fi
+exec /bin/ps "$@"
+`, { mode: 0o755 });
+        launcher = spawn('bash', [script], {
+          env: {
+            ...process.env,
+            PATH: `${dir}:${process.env.PATH}`,
+            TRONCLASS_RUNTIME_DIR: dir,
+            TRONCLASS_SIGNAL_SELFTEST: '1',
+            TRONCLASS_SELFTEST_CHILD: childFile,
+            TRONCLASS_SELFTEST_GRANDCHILD: descendantFile,
+          },
+          stdio: 'ignore',
+        });
+        launcherExited = once(launcher, 'exit');
+        const deadline = Date.now() + 4000;
+        while (!(existsSync(sidecar) && existsSync(descendantFile)) && Date.now() < deadline) {
+          await delay(15);
+        }
+        const [run, leader, start] = readFileSync(sidecar, 'utf8').trim().split(' ');
+        assert.match(run, /^[a-f0-9]{32}$/);
+        assert.match(start, /^\d+$/);
+        assert.equal(leader, readFileSync(childFile, 'utf8'));
+        descendant = Number(readFileSync(descendantFile, 'utf8'));
+        process.kill(descendant, 0);
+        const victimStat = readFileSync(`/proc/${victim.pid}/stat`, 'utf8');
+        const victimStart = victimStat.slice(victimStat.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
+        if (recordKind === 'old run') {
+          const oldRun = (run[0] === 'a' ? 'b' : 'a') + run.slice(1);
+          writeFileSync(sidecar, `${oldRun} ${victim.pid} ${victimStart}\n`);
+        }
+        if (recordKind === 'mismatched starttime') {
+          writeFileSync(sidecar, `${run} ${victim.pid} ${BigInt(victimStart) + 1n}\n`);
+        }
+        process.kill(Number(leader), 'SIGTERM');
+        while (existsSync(`/proc/${leader}`) && Date.now() < deadline) await delay(15);
+        assert.equal(existsSync(`/proc/${leader}`), false);
+        const [code, signal] = await launcherExited;
+        assert.equal(code, 0);
+        assert.equal(signal, null);
+        process.kill(victim.pid, 0);
+        if (recordKind === 'current run') {
+          const reapDeadline = Date.now() + 1000;
+          while (existsSync(`/proc/${descendant}`) && Date.now() < reapDeadline) await delay(15);
+          assert.throws(() => process.kill(descendant, 0), { code: 'ESRCH' });
+        } else {
+          process.kill(descendant, 0);
+        }
+      } finally {
+        for (const pid of [descendant, victim.pid]) {
+          if (pid && existsSync(`/proc/${pid}`)) process.kill(pid, 'SIGKILL');
+        }
+        if (launcher && launcher.exitCode === null && launcher.signalCode === null) launcher.kill('SIGTERM');
+        await Promise.all([victimExited, launcherExited]);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 test('launcher INT/TERM cleanup exits with 128+signo and does not continue', async (t) => {
   for (const [signal, code] of [['SIGTERM', 143], ['SIGINT', 130]]) {
     await t.test(`${signal} exits ${code}`, async () => {
