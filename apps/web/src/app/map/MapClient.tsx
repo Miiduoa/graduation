@@ -274,6 +274,7 @@ function MapContent({
     const to = locations.find((location) => location.id === routeDraft.to);
     return from && to && from.id !== to.id ? [from, to] : null;
   }, [deepLinkRoute, routeDraft, locations]);
+  const pendingRoutePlaces = routeLocations?.filter((place) => isProvidencePendingVerification(school, place)) ?? [];
   const routeStart = routeDraft?.from
     ? locations.find((location) => location.id === routeDraft.from)
     : null;
@@ -447,7 +448,12 @@ function MapContent({
               兩地直線距離約 {formatDistance(distanceMeters(routeLocations[0], routeLocations[1]))}；
               實際步行路線與時間以地圖服務為準。
             </p>
-            <p id={routeNoteId}>起點與終點均為地點標記，不代表已核實的建築入口、可通行道路或無障礙動線。</p>
+            <p id={routeNoteId}>
+              起點與終點均為地點標記，不代表已核實的建築入口、可通行道路或無障礙動線。
+              {pendingRoutePlaces.length > 0 && (
+                <strong>「{pendingRoutePlaces.map((place) => place.name).join('」、「')}」只有單一資料來源，位置待再次確認。</strong>
+              )}
+            </p>
           </div>
           <div className={styles.actions}>
             <a
@@ -678,10 +684,12 @@ function MapContent({
                 {walkingEstimateLabel(distanceMeters(walkFrom, selected))}
               </p>
             )}
-            {isProvidencePendingVerification(school, selected) && (
-              <p role="status">這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。</p>
-            )}
-            <p id={detailNoteId}>導航目的地為地點標記，並非已核實的校舍入口或室內教室；請依現場指標確認。</p>
+            <p id={detailNoteId}>
+              導航目的地為地點標記，並非已核實的校舍入口或室內教室；請依現場指標確認。
+              {isProvidencePendingVerification(school, selected) && (
+                <strong>這個地點目前只有單一資料來源，位置待再次確認，先不要把它當成已核對的導航點。</strong>
+              )}
+            </p>
             <div className={styles.actions}>
               <a
                 className="btn"
