@@ -74,11 +74,14 @@ function revision(value: Record<string, unknown>, baseMs: number): Revision | nu
   return { version: value.version, editedAt, tags };
 }
 
-// Keep indoor doors and underground endpoints out of outdoor routing.
-// https://wiki.openstreetmap.org/wiki/Key:indoor
+// Tunnel tags can identify enclosed passages without a separate location tag.
+// https://wiki.openstreetmap.org/wiki/Key:tunnel
+const NEGATIVE_TUNNEL_VALUES = new Set(['no', 'false', '0']);
+const NON_OUTDOOR_LOCATIONS = new Set(['indoor', 'underground', 'underwater']);
 const nonOutdoor = (tags: Tags) =>
   (tags.indoor !== undefined && tags.indoor !== 'no') ||
-  tags.location === 'indoor' || tags.location === 'underground';
+  NON_OUTDOOR_LOCATIONS.has(tags.location?.trim().toLowerCase()) ||
+  (tags.tunnel !== undefined && !NEGATIVE_TUNNEL_VALUES.has(tags.tunnel.trim().toLowerCase()));
 
 export const excludesWalkingWay = (tags: Tags) =>
   tags.foot === 'use_sidepath' ||

@@ -202,10 +202,11 @@ describe('OSM campus walking discovery (not routing approval)', () => {
   });
 
 
-  it('keeps indoor endpoints restricted and excludes non-outdoor ways', () => {
+  it('keeps non-outdoor endpoints restricted and excludes non-outdoor ways', () => {
     for (const tags of [
       { indoor: 'door' }, { indoor: 'yes' }, { indoor: '' },
       { location: 'indoor' }, { location: 'underground' },
+      { location: 'underwater' }, { tunnel: 'yes' }, { tunnel: 'building_passage' },
     ]) {
       for (const endpoint of [1, 2]) {
         const input = { ...payload(), elements: [
@@ -221,8 +222,9 @@ describe('OSM campus walking discovery (not routing approval)', () => {
       ] })?.graph.edges).toEqual([]);
     }
     expect(parse({ ...payload(), elements: [
-      node(1, 10.001, 20.001, { entrance: 'main', indoor: 'no' }),
-      node(2, 10.001, 20.002), way(101, [1, 2], { indoor: 'no' }),
+      node(1, 10.001, 20.001, { entrance: 'main', indoor: 'no', tunnel: 'false' }),
+      node(2, 10.001, 20.002, { tunnel: '0' }),
+      way(101, [1, 2], { indoor: 'no', tunnel: 'no', covered: 'yes' }),
     ] })?.graph.edges[0].access).toBe('unknown');
   });
 
