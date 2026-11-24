@@ -196,14 +196,14 @@ it('offers a read retry after a detail failure without showing a made-up empty w
   await screen.findByLabelText('付款方式');
 });
 
-it('locks retained details after a failed refresh and cannot send from the stale form', async () => {
+it('hides details after a failed refresh and restores the draft on retry', async () => {
   await open();
   fireEvent.click(screen.getByLabelText(/我確認營運資訊正確/));
   request.mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'));
   fireEvent.click(button('重新讀取門市狀態'));
   await screen.findByRole('alert');
-  expect(button('儲存營運設定').disabled).toBe(true);
-  fireEvent.submit(screen.getByLabelText('付款方式').closest('form')!);
+  expect(screen.queryByRole('button', { name: '儲存營運設定' })).toBeNull();
+  expect(screen.queryByLabelText('付款方式')).toBeNull();
   expect(request.mock.calls.some(([path]) => path.endsWith('/settings'))).toBe(false);
   fireEvent.click(button('重新讀取門市狀態'));
   await waitFor(() => expect(button('儲存營運設定').disabled).toBe(false));
@@ -296,7 +296,10 @@ it('keeps a confirmed menu receipt when its following detail read fails', async 
   confirmMenu();
   let created = false;
   request.mockImplementation(async (path, context, input) => {
-    if (!input && created) throw new NuniError(503, 'UNAVAILABLE');
+    if (!input && created) {
+      created = false;
+      throw new NuniError(503, 'UNAVAILABLE');
+    }
     const result = await response(path, context, input);
     if (path.endsWith('/initial-menu')) created = true;
     return result;
@@ -305,7 +308,12 @@ it('keeps a confirmed menu receipt when its following detail read fails', async 
   await screen.findByText('已建立 1 項首次菜單。啟用前請再確認門市資料。');
   await screen.findByRole('alert');
   expect(screen.queryByRole('button', { name: '確認建立並上架菜單' })).toBeNull();
-  expect(button('確認啟用門市').disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: '確認啟用門市' })).toBeNull();
+
+  current = { ...current, publishedMenuItems: 0 }; // A published menu can be sold out.
+  fireEvent.click(button('重新讀取門市狀態'));
+  await screen.findByText(/目前有 0 項有庫存的上架品項/);
+  expect(screen.queryByRole('button', { name: '確認建立並上架菜單' })).toBeNull();
 });
 
 it('keeps one-time menu intent and drafts across returning, changing locations and renewing the session', async () => {

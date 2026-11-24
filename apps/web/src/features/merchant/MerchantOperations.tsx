@@ -111,7 +111,9 @@ export function MerchantOperations({
       ),
     [context],
   );
-  const [detail, setDetail] = useState<Detail | null>(null);
+  const [loadedDetail, setDetail] = useState<Detail | null>(null);
+  const [entryVerified, setEntryVerified] = useState(false);
+  const detail = entryVerified ? loadedDetail : null;
   const [loading, setLoading] = useState(true);
   const [fresh, setFresh] = useState(false);
   const [busy, setBusy] = useState<Action | null>(null);
@@ -136,6 +138,7 @@ export function MerchantOperations({
   const lock = useRef(false);
   const run = useRef(0);
   const opened = useRef(false);
+  const readAfterWrite = useRef(false);
   const mutationRun = useRef(0);
   const changed = useRef(onChanged);
   const expire = useRef(onExpired);
@@ -173,6 +176,7 @@ export function MerchantOperations({
 
   const read = useCallback(
     async (reconcile = true) => {
+      readAfterWrite.current = false;
       const version = ++run.current;
       setLoading(true);
       setFresh(false);
@@ -180,6 +184,7 @@ export function MerchantOperations({
         const next = await operations.get(tenantId, locationId);
         if (!active.current || version !== run.current) return;
         accept(next);
+        if (!readAfterWrite.current) setEntryVerified(true);
         // A count of zero cannot prove a non-idempotent menu request failed:
         // an existing menu may have no remaining sellable stock.
         if (reconcile) {
@@ -190,14 +195,13 @@ export function MerchantOperations({
         if (reconcile || !drafts.get(draftKey)?.uncertain) setError('');
       } catch (failure) {
         if (!active.current || version !== run.current) return;
+        setDetail(null);
         if (
           failure instanceof NuniError &&
           (failure.status === 401 || failure.code === 'SESSION_CHANGED')
         ) {
-          setDetail(null);
           expire.current();
         } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-          setDetail(null);
           setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
         } else setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
       } finally {
@@ -215,20 +219,24 @@ export function MerchantOperations({
     }
   }, [suspended, drafts, draftKey]);
   useLayoutEffect(() => {
-    // A read started before the write settles cannot reconcile that write.
+    setEntryVerified(false);
     if (!visible || suspended) return;
-    if (!lock.current) {
+    // A read started before the write settles cannot reconcile that write.
+    if (lock.current) {
+      readAfterWrite.current = true;
+    } else {
       // Returning through history does not acknowledge an unknown write.
       void read(!opened.current);
       opened.current = true;
     }
     return () => {
+      readAfterWrite.current = false;
       if (!lock.current) ++run.current;
     };
   }, [read, suspended, visible]);
 
   async function mutate(action: Action, task: (current: () => boolean) => Promise<void>) {
-    if (!active.current || lock.current || loading || uncertain || !fresh) return;
+    if (!active.current || lock.current || loading || uncertain || !fresh || !entryVerified) return;
     lock.current = true;
     const mutation = ++mutationRun.current;
     const version = ++run.current;
@@ -277,7 +285,10 @@ export function MerchantOperations({
     } finally {
       if (mutation === mutationRun.current) {
         lock.current = false;
-        if (active.current) setBusy(null);
+        if (active.current) {
+          setBusy(null);
+          if (readAfterWrite.current) void read(false);
+        }
       }
     }
   }
@@ -336,7 +347,7 @@ export function MerchantOperations({
           重新讀取門市狀態
         </Button>
       </div>
-      {loading && <p role="status">正在確認門市資料…</p>}
+      {(loading || (!entryVerified && busy)) && <p role="status">正在確認門市資料…</p>}
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
       {detail && draft && (

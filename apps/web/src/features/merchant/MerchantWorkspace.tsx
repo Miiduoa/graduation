@@ -115,11 +115,11 @@ function MerchantWorkspaceContent({ view }: { view: MerchantOverviewView }) {
     ? null
     : (auth.session?.platformAccountId ??
       (!auth.loading && !auth.error ? null : operationScope.accountId));
-  useEffect(() => {
+  useLayoutEffect(() => {
     returnLocationRef.current = null;
     previousLocationRef.current = null;
   }, [confirmedAccount]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (previousLocationRef.current && !locationKey)
       returnLocationRef.current = previousLocationRef.current;
     previousLocationRef.current = locationKey;
@@ -185,16 +185,19 @@ function MerchantWorkspaceContent({ view }: { view: MerchantOverviewView }) {
 function MerchantListLoader({
   load,
   invalidate,
+  restoreFocus,
   children,
 }: {
   load: () => Promise<void>;
   invalidate: () => void;
+  restoreFocus: () => void;
   children: ReactNode;
 }) {
   useEffect(() => {
     void load();
     return invalidate;
   }, [load, invalidate]);
+  useEffect(restoreFocus, [restoreFocus]);
   return children;
 }
 
@@ -315,30 +318,15 @@ function AccountWorkspace({
     if (revealApplications && document.activeElement === document.body)
       applicationsHeading.current?.focus();
   }, [revealApplications]);
-  useEffect(() => {
-    if (
-      locationKey ||
-      showApplications ||
-      !returnLocationRef.current ||
-      suspended ||
-      invalidSession
-    )
-      return;
+  const hasOverview = !!overview;
+  const restoreListFocus = useCallback(() => {
+    if (!hasOverview || showApplications || !returnLocationRef.current) return;
     const target = locationLinks.current.get(returnLocationRef.current) ?? locationsHeading.current;
     if (!target) return;
     returnLocationRef.current = null;
-    // A delayed read must not pull focus away from another control the person
-    // has already chosen while waiting for the list.
+    // Do not move focus away from a control the person chose while waiting for the list.
     if (document.activeElement === document.body) target.focus();
-  }, [
-    locationKey,
-    loading,
-    loadError,
-    suspended,
-    invalidSession,
-    returnLocationRef,
-    showApplications,
-  ]);
+  }, [hasOverview, returnLocationRef, showApplications]);
 
   const selected = overview?.programs.find((item) => item.tenantId === draft.tenantId);
   const update = (field: keyof Draft, value: string) =>
@@ -898,7 +886,7 @@ function AccountWorkspace({
   );
   if (view === 'apply') return list;
   const nativeList = (
-    <MerchantListLoader load={load} invalidate={invalidate}>
+    <MerchantListLoader load={load} invalidate={invalidate} restoreFocus={restoreListFocus}>
       {list}
     </MerchantListLoader>
   );
