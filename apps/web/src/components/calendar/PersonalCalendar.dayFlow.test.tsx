@@ -379,6 +379,83 @@ it('shows a saved event on its actual day and restores focus to that day after t
   expect(window.confirm).not.toHaveBeenCalled();
 });
 
+it('編輯並儲存既有行程後保留整月列表與其他日期的行程及作業', async () => {
+  const stored = event('existing', '待修改行程', '2026-11-14');
+  seed([stored, event('other-day', '隔日行程', '2026-11-15')]);
+  vi.mocked(loadNuniCalendarDeadlines).mockResolvedValue([
+    {
+      id: 'next-day',
+      title: '隔日作業',
+      dueDate: '2026-11-15',
+      courseId: 'course',
+      courseName: '合成課程',
+      href: '/classroom/course/course#assignment-next-day',
+      source: 'nuni',
+      sourceLabel: 'nuni 課程',
+    },
+  ]);
+
+  render(<PersonalCalendar />);
+  await ready();
+  activate(screen.getByRole('button', { name: '列表' }));
+  await screen.findByRole('heading', { name: '隔日作業' });
+  activate(editEvent(stored.title));
+  fireEvent.change(titleField(), { target: { value: '已修改行程' } });
+  activate(screen.getByRole('button', { name: '儲存修改' }));
+  await screen.findByText('個人行程已更新。');
+
+  expect(screen.getByRole('button', { name: '列表' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.queryByRole('heading', { name: '2026-11-14 的行程' })).toBeNull();
+  expect(screen.getByRole('heading', { name: '隔日行程' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '隔日作業' })).toBeTruthy();
+  expect(document.activeElement).toBe(editEvent('已修改行程'));
+  expect(readPersonalImports(scope()).find((record) => record.id === stored.id)?.title).toBe(
+    '已修改行程',
+  );
+});
+
+it.each([
+  ['黏性頁首', 60, -20],
+  ['固定底部導覽', 580, 52],
+])('開啟編輯器時將被%s遮住的標題欄捲入可見範圍', async (_edge, titleTop, distance) => {
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(640);
+  const stored = event('existing', '合成行程', '2026-11-14');
+  seed([stored]);
+  render(
+    <>
+      <header data-testid="sticky-header" style={{ position: 'sticky', opacity: 1 }} />
+      <PersonalCalendar />
+      <nav data-testid="fixed-navigation" style={{ position: 'fixed', opacity: 1 }} />
+    </>,
+  );
+  await ready();
+  activate(screen.getByRole('button', { name: '列表' }));
+  const header = screen.getByTestId('sticky-header');
+  const navigation = screen.getByTestId('fixed-navigation');
+  let pageOffset = 0;
+  vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+    if (this === header) return new DOMRect(0, 0, 320, 80);
+    if (this === navigation) return new DOMRect(0, 568, 320, 72);
+    if (this.matches('input[type="text"]')) return new DOMRect(20, titleTop - pageOffset, 100, 40);
+    return new DOMRect(20, 100, 100, 40);
+  });
+  vi.mocked<(options: ScrollToOptions) => void>(window.scrollBy).mockImplementation((options) => {
+    pageOffset += options.top ?? 0;
+  });
+
+  activate(editEvent(stored.title));
+
+  const title = titleField();
+  expect(document.activeElement).toBe(title);
+  expect(window.scrollBy).toHaveBeenCalledExactlyOnceWith({
+    left: 0,
+    top: distance,
+    behavior: 'instant',
+  });
+  expect(title.getBoundingClientRect().top).toBeGreaterThanOrEqual(80);
+  expect(title.getBoundingClientRect().bottom).toBeLessThanOrEqual(568);
+});
+
 it('follows a rescheduled event into its new month while preserving its identity and provenance', async () => {
   const stored = event('existing', '跨月改期的合成行程', '2026-11-14');
   seed([stored]);

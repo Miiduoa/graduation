@@ -106,8 +106,17 @@ export function MonthCalendar({
     )
       return;
     event.preventDefault();
-    const target = monthCalendarKeyboardDate(date, event.key);
+    let target = monthCalendarKeyboardDate(date, event.key);
     if (!target || target === date) return;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      // Skip clipped columns in date order so arrows keep their direction over week boundaries.
+      while (target?.startsWith(`${month}-`)) {
+        const button = dateButtons.current.get(target);
+        if (button && isHorizontallyVisible(button)) break;
+        target = monthCalendarKeyboardDate(target, event.key);
+      }
+      if (!target) return;
+    }
     if (target.startsWith(`${month}-`)) {
       focusVisibleDate(target);
     } else if (onMonthChange) {

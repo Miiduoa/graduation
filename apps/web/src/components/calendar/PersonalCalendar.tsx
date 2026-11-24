@@ -476,7 +476,7 @@ function PersonalCalendarWorkspace({
       return;
     focusedRequest.current = requestedEventId;
     linkedEventElement.current.focus({ preventScroll: true });
-    linkedEventElement.current.scrollIntoView?.({ block: 'nearest' });
+    scrollVerticallyIntoView(linkedEventElement.current);
   }, [paused, requestedEventId, linkedEventDate, calendarView, selectedDate]);
 
   useLayoutEffect(() => {
@@ -494,12 +494,19 @@ function PersonalCalendarWorkspace({
     viewRevision.current += 1;
   }, [month, selectedDate, calendarView]);
 
+  const focusEditorTitle = () => {
+    const title = titleRef.current;
+    if (!title) return;
+    title.focus({ preventScroll: true });
+    scrollVerticallyIntoView(title);
+  };
+
   useLayoutEffect(() => {
     if (paused || !pendingFocus.current) return;
     const target = pendingFocus.current;
     pendingFocus.current = null;
     if (target === 'editor' && mode !== 'idle') {
-      titleRef.current?.focus();
+      focusEditorTitle();
       return;
     }
     if (mode !== 'idle') return;
@@ -622,7 +629,7 @@ function PersonalCalendarWorkspace({
       baseline?.id === row.id &&
       JSON.stringify(baseline) === JSON.stringify(row)
     ) {
-      titleRef.current?.focus();
+      focusEditorTitle();
       return;
     }
     if (!mayDiscardDraft()) return;
@@ -660,6 +667,7 @@ function PersonalCalendarWorkspace({
     const ticket = ++requestId.current;
     const scoped = { ...scope };
     const savedFromView = viewRevision.current;
+    const preserveMonthList = mode === 'edit' && calendarView === 'list' && !selectedDate;
     writing.current = true;
     setSaving(true);
     setFormError('');
@@ -676,8 +684,8 @@ function PersonalCalendarWorkspace({
           document.activeElement === document.body);
       if (continueEditingContext) {
         setMonth(draft.date.slice(0, 7));
-        setSelectedDate(draft.date);
-        if (!suspended.current) pendingFocus.current = 'saved';
+        if (!preserveMonthList) setSelectedDate(draft.date);
+        if (!suspended.current) pendingFocus.current = preserveMonthList ? 'return' : 'saved';
       }
       setInitialDraft(null);
       setNotice(success);

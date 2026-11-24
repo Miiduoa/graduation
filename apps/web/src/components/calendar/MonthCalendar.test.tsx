@@ -183,16 +183,18 @@ it('PageDown 跨到閏年短月保留焦點，只有選取後才改當日內容'
 });
 
 it.each([
-  { origin: '2028-09-28', key: 'PageDown', requested: '2028-10-28' },
-  { origin: '2028-10-26', key: 'ArrowRight', requested: '2028-10-27' },
-])('541px、文字放大至兩倍時從 $origin 按 $key，焦點仍完整可見', ({ origin, key, requested }) => {
-  vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(541);
+  { origin: '2028-09-28', key: 'PageDown', requested: '2028-10-28', expected: '2028-10-26', width: 541 },
+  { origin: '2028-10-27', key: 'ArrowRight', requested: '2028-10-28', expected: '2028-10-29', width: 609 },
+  { origin: '2028-10-29', key: 'ArrowLeft', requested: '2028-10-28', expected: '2028-10-27', width: 609 },
+])('$width px、文字放大至兩倍時從 $origin 按 $key，焦點仍完整可見', ({ origin, key, requested, expected, width }) => {
+  const viewportWidth = width - 80;
+  vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(width);
   vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(640);
-  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(461);
+  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(viewportWidth);
   vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(616);
   let scrollY = 0;
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-    if (this.getAttribute('role') === 'region') return new DOMRect(40, 500 - scrollY, 461, 400);
+    if (this.getAttribute('role') === 'region') return new DOMRect(40, 500 - scrollY, viewportWidth, 400);
     if (this.classList.contains(styles.weekday)) {
       const index = Array.from(this.parentElement!.children).indexOf(this);
       const viewport = this.closest('[role="region"]')!;
@@ -240,7 +242,7 @@ it.each([
   const bounds = viewport.getBoundingClientRect();
   const requestedButton = within(viewport).getByRole('button', { name: requested });
   expect(requestedButton.getBoundingClientRect().right).toBeGreaterThan(bounds.right);
-  const focused = within(viewport).getByRole('button', { name: '2028-10-26' });
+  const focused = within(viewport).getByRole('button', { name: expected });
   expect(document.activeElement).toBe(focused);
   const focusedBounds = focused.getBoundingClientRect();
   expect(focusedBounds.left).toBeGreaterThanOrEqual(bounds.left);
@@ -252,6 +254,14 @@ it.each([
   expect(viewport.scrollLeft).toBe(0);
   expect(sunday.getBoundingClientRect().left).toBeGreaterThanOrEqual(bounds.left);
   expect(sunday.getBoundingClientRect().right).toBeLessThanOrEqual(bounds.right);
+
+  if (key !== 'PageDown') {
+    fireEvent.keyDown(focused, { key });
+    const next = key === 'ArrowRight' ? '2028-10-30' : '2028-10-26';
+    expect(document.activeElement).toBe(within(viewport).getByRole('button', { name: next }));
+    expect(horizontalScroll).not.toHaveBeenCalled();
+    expect(onDate).not.toHaveBeenCalled();
+  }
 });
 
 it('外部月份或日期更新不搶走目前控制的焦點', () => {
