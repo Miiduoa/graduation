@@ -283,7 +283,7 @@ function nameMatchesRoom(query: string, suppliedName: unknown): boolean {
 }
 
 /**
- * The sole building-code entry is from the University's 2026-05-06 table
+ * The legacy PH building-code entry is from the University's 2026-05-06 table
  * (https://dorac.pu.edu.tw/p/16-1059-71708.php?Lang=zh-tw)
  * and OITS bilingual building name
  * (https://oits.pu.edu.tw/p/406-1002-2655,r207.php?Lang=zh-tw).
@@ -364,14 +364,40 @@ const VERIFIED_CODE_ROOM_SUFFIX = /^[\s:：-]*\d{1,5}[a-z]?(?:\s*(?:教室|室))
 const VERIFIED_CODE_FLOOR_ROOM_SUFFIX =
   /^[\s:：-]*(?:b?\d{1,2}\s*f|(?:地下|地上)?(?:\d{1,2}|[一二三四五六七八九十]{1,3})樓)(?:[\s,，:：·/\-]+)?\d{1,5}[a-z]?(?:\s*(?:教室|室))?$/u;
 
+/**
+ * 2026-05-06 official summer-course building abbreviation table:
+ * https://dorac.pu.edu.tw/p/16-1059-71708.php?Lang=zh-tw
+ * These six additional codes map only to the existing cross-checked POI IDs.
+ * C, 1R and 2R are intentionally not mapped without a separately verified pin.
+ */
+const VERIFIED_PROVIDENCE_CODE_BY_PLACE_ID = new Map<string, string>([
+  ['pu-renyuan', 'ak'],
+  ['pu-boduo', 'sp'],
+  ['pu-jingan', 'ja'],
+  ['pu-fangji', 'sf'],
+  ['pu-siyuan', 'sy'],
+  ['pu-gelun', 'tg'],
+]);
+
+function matchesVerifiedCodeRoomSuffix(suffix: string): boolean {
+  return !VERIFIED_CODE_FLOOR_ONLY_SUFFIX.test(suffix) &&
+    (VERIFIED_CODE_ROOM_SUFFIX.test(suffix) || VERIFIED_CODE_FLOOR_ROOM_SUFFIX.test(suffix));
+}
+
+function matchesSourcedProvidenceCode(query: string, published: CampusMapPlaceLike | undefined): boolean {
+  if (!published) return false;
+  const code = VERIFIED_PROVIDENCE_CODE_BY_PLACE_ID.get(published.id);
+  return code !== undefined && query.startsWith(code) &&
+    matchesVerifiedCodeRoomSuffix(query.slice(code.length));
+}
+
 function nameMatchesVerifiedCode(school: string, query: string, suppliedName: unknown): boolean {
   const name = comparisonText(suppliedName);
   if (!name) return false;
   return VERIFIED_CLASSROOM_BUILDING_CODES.some((entry) => {
     if (entry.schoolId !== school || !query.startsWith(entry.code)) return false;
     const suffix = query.slice(entry.code.length);
-    if (VERIFIED_CODE_FLOOR_ONLY_SUFFIX.test(suffix)) return false;
-    return (VERIFIED_CODE_ROOM_SUFFIX.test(suffix) || VERIFIED_CODE_FLOOR_ROOM_SUFFIX.test(suffix)) &&
+    return matchesVerifiedCodeRoomSuffix(suffix) &&
       entry.buildingNames.some((building) => comparisonText(building) === name);
   });
 }
@@ -455,6 +481,7 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
       // coordinates and non-building checks above passed. A bilingual timetable
       // can refer to the same POI without changing its stored name or position.
       (published !== undefined && officialSourcedNames(published).some((name) => nameMatchesRoom(comparable, name))) ||
+      matchesSourcedProvidenceCode(comparable, published) ||
       nameMatchesVerifiedCode(school, comparable, location.name) ||
       nameMatchesVerifiedCode(school, comparable, building)
     );
