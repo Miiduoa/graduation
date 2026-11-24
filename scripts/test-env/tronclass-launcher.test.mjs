@@ -239,10 +239,10 @@ process.exit(0);
 
 test('launcher resolves a relative runtime directory against the repository root', () => {
   const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-  const relative = `.r35-tronclass-runtime-${process.pid}`;
-  const expected = path.resolve(repoRoot, relative);
-  mkdirSync(expected, { mode: 0o700 });
   const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-rel-'));
+  const expected = path.join(dir, 'runtime');
+  mkdirSync(expected, { mode: 0o700 });
+  const relative = path.relative(repoRoot, expected);
   const capture = path.join(dir, 'captured.json');
   try {
     writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
@@ -269,9 +269,9 @@ process.exit(0);
     const observed = JSON.parse(readFileSync(capture, 'utf8'));
     assert.equal(observed.dir, expected);
     assert.equal(path.isAbsolute(observed.dir), true);
+    assert.equal(path.isAbsolute(relative), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
-    rmSync(expected, { recursive: true, force: true });
   }
 });
 

@@ -197,26 +197,50 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-tronclass_open_log() {
-  node - "$1" <<'NODE'
+tronclass_run_logged() {
+  local log="$1"
+  shift
+  node - "$log" "$@" <<'NODE'
 const fs = require('node:fs');
+const { spawn } = require('node:child_process');
 const logPath = process.argv[2];
+const argv = process.argv.slice(3);
 const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW;
+let fd;
 try {
-  const fd = fs.openSync(logPath, flags, 0o600);
-  fs.closeSync(fd);
+  fd = fs.openSync(logPath, flags, 0o600);
 } catch (error) {
-  throw new Error('Refusing a symbolic link or unusable log file.');
+  process.stderr.write('Refusing a symbolic link or unusable log file.\n');
+  process.exit(1);
 }
+const info = fs.fstatSync(fd);
+if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
+  fs.closeSync(fd);
+  process.stderr.write('Refusing a symbolic link or unusable log file.\n');
+  process.exit(1);
+}
+const child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd] });
+fs.closeSync(fd);
+const stop = (signal) => {
+  try { child.kill(signal); } catch (error) { /* the child may have already exited */ }
+};
+process.on('SIGINT', () => stop('SIGINT'));
+process.on('SIGTERM', () => stop('SIGTERM'));
+child.on('exit', (code, signal) => {
+  if (signal) {
+    try { process.kill(process.pid, signal); } catch (error) { process.exit(1); }
+    return;
+  }
+  process.exit(code ?? 1);
+});
 NODE
 }
 
 # Keep Firebase data in the running emulator; restarting Next retains it.
 # Do not automatically export school sessions after a live binding test.
-tronclass_open_log "$TRONCLASS_RUNTIME_DIR/emulators.log"
-node node_modules/firebase-tools/lib/bin/firebase.js emulators:start \
-  --project "$TEST_PROJECT_ID" --config firebase.test.json --only auth,firestore \
-  >"$TRONCLASS_RUNTIME_DIR/emulators.log" 2>&1 &
+tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/emulators.log" \
+  node node_modules/firebase-tools/lib/bin/firebase.js emulators:start \
+  --project "$TEST_PROJECT_ID" --config firebase.test.json --only auth,firestore &
 TRONCLASS_EMULATOR_PID=$!
 TRONCLASS_EMULATOR_READY=false
 for _ in $(seq 1 90); do
@@ -235,8 +259,7 @@ if [ "$TRONCLASS_EMULATOR_READY" != true ]; then
   exit 1
 fi
 
-tronclass_open_log "$TRONCLASS_RUNTIME_DIR/seed.log"
-node scripts/test-env/seed.cjs --missing-only >"$TRONCLASS_RUNTIME_DIR/seed.log" 2>&1
+tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/seed.log" node scripts/test-env/seed.cjs --missing-only
 node scripts/build-functions-shared.cjs
 node scripts/import-ai/prepare-assets.mjs
 echo "Full Web: $WEB_PUBLIC_ORIGIN/login?returnUrl=%2Ftronclass&schoolId=pu&reconnect=school"
@@ -248,20 +271,17 @@ else
   echo 'School binding is disabled. Use synthetic fixtures only.'
 fi
 cd apps/web
-tronclass_open_log "$TRONCLASS_RUNTIME_DIR/web.log"
-node ../../node_modules/next/dist/bin/next dev --webpack -p "$TEST_WEB_PORT" -H "$TEST_HOST" \
-  >"$TRONCLASS_RUNTIME_DIR/web.log" 2>&1 &
+tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/web.log" \
+  node ../../node_modules/next/dist/bin/next dev --webpack -p "$TEST_WEB_PORT" -H "$TEST_HOST" &
 TRONCLASS_WEB_PID=$!
 if [ "${TRONCLASS_VERIFY_RUNTIME:-}" = '1' ] && [ "$TRONCLASS_INTEGRATION_ENABLED" = true ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
-  tronclass_open_log "$TRONCLASS_RUNTIME_DIR/acceptance.log"
-  node scripts/test-env/verify-tronclass.cjs >"$TRONCLASS_RUNTIME_DIR/acceptance.log" 2>&1
+  tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/acceptance.log" node scripts/test-env/verify-tronclass.cjs
   echo "Verified real emulator authentication and Firestore persistence; see $TRONCLASS_RUNTIME_DIR/acceptance.json."
 fi
 if [ "${TRONCLASS_CHECK_HEALTH:-}" = '1' ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
-  tronclass_open_log "$TRONCLASS_RUNTIME_DIR/health.log"
-  node scripts/test-env/health-tronclass.cjs >"$TRONCLASS_RUNTIME_DIR/health.log" 2>&1
+  tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/health.log" node scripts/test-env/health-tronclass.cjs
   echo "Verified read-only health and login page requests; see $TRONCLASS_RUNTIME_DIR/health.json."
 fi
 wait "$TRONCLASS_WEB_PID"
