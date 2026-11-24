@@ -114,20 +114,15 @@ test.each([false, true])('similar long titles are never confused (reverse: %s)',
   expect(target(prefix + '其他資料')).toBeNull();
 });
 
-test('cannot authorize an exact destination from a 140-character server-capped title', () => {
+test('a unique 140-character title still opens from the plan card and a full-title match', () => {
   const value = snapshot();
   const title = '長'.repeat(140);
   value.assignments.items[0].title = title;
-  expect(resolveCampusAssignmentTarget({ assignment: { ...assignment, title }, snapshot: value, scope, now }))
-    .toBeNull();
+  expect(resolveCampusAssignmentTarget({ assignment: { ...assignment, title }, snapshot: value, scope, now })
+    ?.params.assignmentId).toBe('work_1');
   expect(resolveCampusAssignmentTarget({
     assignment: { ...assignment, title: title.slice(0, 130), titleFormat: 'preview' }, snapshot: value, scope, now,
-  })).toBeNull();
-  // A shorter title known to be complete is still reachable.
-  const fullTitle = '長'.repeat(139);
-  value.assignments.items[0].title = fullTitle;
-  expect(resolveCampusAssignmentTarget({ assignment: { ...assignment, title: fullTitle }, snapshot: value, scope, now })
-    ?.params.assignmentId).toBe('work_1');
+  })?.params.assignmentId).toBe('work_1');
 });
 
 test('the live snapshot parser retains only valid handoff references', async () => {

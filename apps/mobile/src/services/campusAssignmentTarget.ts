@@ -52,8 +52,10 @@ export function resolveCampusAssignmentTarget(input: {
   const snapshot = validCampusSenseSnapshot(input.snapshot, input.scope, now);
   if (!snapshot || snapshot.assignments.status !== 'available') return null;
   const row = findUniqueCampusAssignment(input.assignment, snapshot.assignments.items);
-  // A server-capped row can contribute to ambiguity, but cannot authorize a handoff.
-  if (!row || row.title.length >= 140) return null;
+  // A unique match is enough to open, including a 140-character title. A
+  // server-capped row may still contribute to ambiguity, in which case
+  // findUniqueCampusAssignment already returns null.
+  if (!row) return null;
   const source = parseCampusAssignmentSource(row.source);
   if (!source) return null;
   return {
