@@ -71,7 +71,7 @@ it('lets the school picker handle the first result tap while its keyboard is ope
   expect(view.UNSAFE_getByType(ScrollView).props.keyboardShouldPersistTaps).toBe('handled');
 });
 
-it('prioritizes the Google account entry before school import and public services', async () => {
+it('prioritizes the Google account entry, then exposes public shortcuts before school import', async () => {
   const view = await landing();
   const tree = JSON.stringify(view.toJSON());
   const importIndex = tree.indexOf('"testID":"school-import-start"');
@@ -80,7 +80,11 @@ it('prioritizes the Google account entry before school import and public service
   expect(importIndex).toBeGreaterThanOrEqual(0);
   expect(accountIndex).toBeGreaterThanOrEqual(0);
   expect(importIndex).toBeGreaterThan(accountIndex);
-  expect(servicesIndex).toBeGreaterThan(importIndex);
+  expect(servicesIndex).toBeLessThan(importIndex);
+  expect(view.getByTestId('landing-public-shortcuts')).toBeTruthy();
+  expect(view.getAllByTestId('public-Map')).toHaveLength(1);
+  expect(view.getAllByTestId('public-BusSchedule')).toHaveLength(1);
+  expect(view.getAllByTestId('public-Library')).toHaveLength(1);
   expect(servicesIndex).toBeGreaterThan(accountIndex);
   expect(view.getAllByTestId(/^public-/)).toHaveLength(11);
   expect(view.getByTestId('public-StudentCard').props.accessibilityLabel).toBe('數位學生證');
