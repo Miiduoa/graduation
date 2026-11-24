@@ -218,3 +218,29 @@ it('does not resume a failed save if the account changes while retrying the read
     read.mockRestore();
   }
 });
+
+it('reopens an idle shortlist without briefly displaying the previous device copy', async () => {
+  const schoolId = 'pu';
+  const item: SavedCampusEvent = {
+    schoolId,
+    id: 'idle-lecture',
+    title: '講座',
+    source: 'school-events',
+  };
+  const key = campusEventShortlistKey(schoolId, null);
+  localStorage.setItem(key, JSON.stringify({ version: 1, items: [item] }));
+  const first = renderHook(() => useCampusEventShortlist(schoolId));
+  await waitFor(() => expect(first.result.current.items).toEqual([item]));
+  first.unmount();
+  localStorage.setItem(key, JSON.stringify({ version: 1, items: [] }));
+
+  const renders: Array<{ ready: boolean; items: SavedCampusEvent[] }> = [];
+  const second = renderHook(() => {
+    const result = useCampusEventShortlist(schoolId);
+    renders.push({ ready: result.ready, items: result.items });
+    return result;
+  });
+  expect(renders[0]).toEqual({ ready: false, items: [] });
+  await waitFor(() => expect(second.result.current.ready).toBe(true));
+  expect(second.result.current.items).toEqual([]);
+});

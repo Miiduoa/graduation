@@ -12,7 +12,7 @@ import { useSchool } from './school';
 import { useOptionalNuniSession } from './nuniSession';
 import { useAssistantSessionExpiry } from './useAssistantSessionExpiry';
 
-const store = createCampusEventShortlistStore(AsyncStorage);
+const store = createCampusEventShortlistStore(AsyncStorage, { evictIdleSnapshots: true });
 const noop = () => {};
 
 export function useCampusEventShortlist() {

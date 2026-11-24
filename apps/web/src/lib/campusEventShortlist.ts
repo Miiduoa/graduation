@@ -39,11 +39,14 @@ export type CampusEventShortlistResult = 'done' | 'failed' | 'ignored';
 
 const GENERIC_WRITE_ERROR = '無法儲存變更，請確認裝置儲存空間後再試一次。';
 
-const store = createCampusEventShortlistStore({
-  getItem: (key) => window.localStorage.getItem(key),
-  setItem: (key, value) => window.localStorage.setItem(key, value),
-  withLock: withCampusEventShortlistLock,
-});
+const store = createCampusEventShortlistStore(
+  {
+    getItem: (key) => window.localStorage.getItem(key),
+    setItem: (key, value) => window.localStorage.setItem(key, value),
+    withLock: withCampusEventShortlistLock,
+  },
+  { evictIdleSnapshots: true },
+);
 
 /** Persist only the identity and label needed to reopen the live event. */
 export function toSavedCampusEvent(

@@ -79,15 +79,24 @@ type ShortlistStorage = {
   withLock?<T>(key: string, operation: () => Promise<T>): Promise<T>;
 };
 
-export function createCampusEventShortlistStore(storage: ShortlistStorage) {
+export function createCampusEventShortlistStore(
+  storage: ShortlistStorage,
+  { evictIdleSnapshots = false }: { evictIdleSnapshots?: boolean } = {},
+) {
   const snapshots = new Map<string, CampusEventShortlistSnapshot>();
   const listeners = new Map<string, Set<() => void>>();
   const queues = new Map<string, Promise<void>>();
   const getSnapshot = (key: string) => snapshots.get(key) ?? EMPTY_CAMPUS_EVENT_SHORTLIST;
 
-  function publish(key: string, snapshot: CampusEventShortlistSnapshot) {
-    snapshots.set(key, snapshot);
-    listeners.get(key)?.forEach((listener) => listener());
+  function publisher(key: string) {
+    const group = listeners.get(key);
+    return (snapshot: CampusEventShortlistSnapshot) => {
+      // A late operation must not restore a cache after its last observer left,
+      // even when the same account/campus has since been mounted again.
+      if (evictIdleSnapshots && (!group?.size || listeners.get(key) !== group)) return;
+      snapshots.set(key, snapshot);
+      listeners.get(key)?.forEach((listener) => listener());
+    };
   }
 
   function enqueue<T>(key: string, operation: () => Promise<T>) {
@@ -98,11 +107,15 @@ export function createCampusEventShortlistStore(storage: ShortlistStorage) {
     return current;
   }
 
-  async function read(key: string, schoolId: string): Promise<SavedCampusEvent[] | null> {
+  async function read(
+    key: string,
+    schoolId: string,
+    publish: (snapshot: CampusEventShortlistSnapshot) => void,
+  ): Promise<SavedCampusEvent[] | null> {
     try {
       return readEvents(await storage.getItem(key), schoolId);
     } catch {
-      publish(key, { items: [], ready: false, error: READ_ERROR });
+      publish({ items: [], ready: false, error: READ_ERROR });
       return null;
     }
   }
@@ -110,48 +123,50 @@ export function createCampusEventShortlistStore(storage: ShortlistStorage) {
   async function load(key: string): Promise<void> {
     const schoolId = schoolFromKey(key);
     if (!schoolId) return;
+    const publish = publisher(key);
     await enqueue(key, async () => {
-      const items = await read(key, schoolId);
-      if (items) publish(key, { items, ready: true, error: null });
+      const items = await read(key, schoolId, publish);
+      if (items) publish({ items, ready: true, error: null });
     });
   }
 
   async function setSaved(key: string, event: SavedCampusEvent, saved: boolean): Promise<boolean> {
     const schoolId = schoolFromKey(key);
     if (!schoolId) return false;
+    const publish = publisher(key);
     const item = publicEvent(event, schoolId);
     if (!item) {
-      publish(key, { ...getSnapshot(key), error: '活動資料無法確認，請重新開啟活動。' });
+      publish({ ...getSnapshot(key), error: '活動資料無法確認，請重新開啟活動。' });
       return false;
     }
     return enqueue(key, async () => {
       const update = async () => {
         // Re-read under the device lock so another tab's newly saved events survive this write.
-        const previous = await read(key, schoolId);
+        const previous = await read(key, schoolId, publish);
         if (!previous) return false;
         const matches = (row: SavedCampusEvent) => row.source === item.source && row.id === item.id;
         if (previous.some(matches) === saved) {
-          publish(key, { items: previous, ready: true, error: null });
+          publish({ items: previous, ready: true, error: null });
           return true;
         }
         if (saved && previous.length >= CAMPUS_EVENT_SHORTLIST_LIMIT) {
-          publish(key, { items: previous, ready: true, error: `已收藏 ${CAMPUS_EVENT_SHORTLIST_LIMIT} 場活動，請先移除一場。` });
+          publish({ items: previous, ready: true, error: `已收藏 ${CAMPUS_EVENT_SHORTLIST_LIMIT} 場活動，請先移除一場。` });
           return false;
         }
         const items = saved ? [item, ...previous] : previous.filter((row) => !matches(row));
         try {
           await storage.setItem(key, JSON.stringify({ version: 1, items }));
         } catch {
-          publish(key, { items: previous, ready: true, error: WRITE_ERROR });
+          publish({ items: previous, ready: true, error: WRITE_ERROR });
           return false;
         }
-        publish(key, { items, ready: true, error: null });
+        publish({ items, ready: true, error: null });
         return true;
       };
       try {
         return await (storage.withLock ? storage.withLock(key, update) : update());
       } catch {
-        publish(key, { ...getSnapshot(key), error: WRITE_ERROR });
+        publish({ ...getSnapshot(key), error: WRITE_ERROR });
         return false;
       }
     });
@@ -163,7 +178,10 @@ export function createCampusEventShortlistStore(storage: ShortlistStorage) {
     listeners.set(key, group);
     return () => {
       group.delete(listener);
-      if (!group.size) listeners.delete(key);
+      if (!group.size && listeners.get(key) === group) {
+        listeners.delete(key);
+        if (evictIdleSnapshots) snapshots.delete(key);
+      }
     };
   }
 
