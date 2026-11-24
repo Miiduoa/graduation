@@ -4,6 +4,7 @@
   flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
+  max-width: 100%;
 }
 .button,
 .listening {
@@ -19,7 +20,7 @@
   border: 1px solid var(--border-strong);
   border-radius: 11px;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--font-body-sm-size);
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
@@ -40,15 +41,27 @@
 }
 .status,
 .error {
-  font-size: 12px;
+  font-size: var(--font-body-sm-size);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
-.status { color: var(--brand); }
-.error { color: var(--danger); }
+.status {
+  color: var(--brand);
+}
+.error {
+  color: var(--danger);
+}
 @media (max-width: 520px) {
   .button,
-  .listening { width: 46px; padding: 10px; }
+  .listening {
+    width: 46px;
+    padding: 10px;
+  }
   .button span,
-  .listening span { display: none; }
-  .status { max-width: 160px; }
+  .listening span {
+    display: none;
+  }
+  .status {
+    max-width: 160px;
+  }
 }

@@ -37,6 +37,21 @@ const subscribeToHydration = () => () => {};
 const clientSnapshot = () => true;
 const serverSnapshot = () => false;
 
+// Subscribe once per provider, so a stack of notifications shares the same
+// reading window. Hidden tabs and unfocused windows should not consume it.
+const subscribeToPageActivity = (onChange: () => void) => {
+  document.addEventListener('visibilitychange', onChange);
+  window.addEventListener('blur', onChange);
+  window.addEventListener('focus', onChange);
+  return () => {
+    document.removeEventListener('visibilitychange', onChange);
+    window.removeEventListener('blur', onChange);
+    window.removeEventListener('focus', onChange);
+  };
+};
+const pageIsInactive = () => document.visibilityState !== 'visible' || !document.hasFocus();
+const serverPageIsInactive = () => true;
+
 const ToastContext = createContext<ToastContextType | null>(null);
 
 export function useToast() {
@@ -65,6 +80,11 @@ export function ToastProvider({
   maxToasts = 5,
 }: ToastProviderProps) {
   const mounted = useSyncExternalStore(subscribeToHydration, clientSnapshot, serverSnapshot);
+  const pageInactive = useSyncExternalStore(
+    subscribeToPageActivity,
+    pageIsInactive,
+    serverPageIsInactive,
+  );
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const dismiss = useCallback((id: string) => {
@@ -118,7 +138,12 @@ export function ToastProvider({
         createPortal(
           <div className={styles.region} data-position={position}>
             {toasts.map((toast) => (
-              <ToastItem key={toast.id} toast={toast} onDismiss={dismiss} />
+              <ToastItem
+                key={toast.id}
+                toast={toast}
+                onDismiss={dismiss}
+                pageInactive={pageInactive}
+              />
             ))}
           </div>,
           document.body,
@@ -130,9 +155,10 @@ export function ToastProvider({
 interface ToastItemProps {
   toast: Toast;
   onDismiss: (id: string) => void;
+  pageInactive: boolean;
 }
 
-function ToastItem({ toast, onDismiss }: ToastItemProps) {
+function ToastItem({ toast, onDismiss, pageInactive }: ToastItemProps) {
   const icons: Record<ToastType, string> = {
     success: '✓',
     error: '✕',
@@ -143,7 +169,7 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
   const remaining = useRef(duration);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const paused = hovered || focused;
+  const paused = pageInactive || hovered || focused;
 
   useEffect(() => {
     if (duration <= 0 || paused) return;

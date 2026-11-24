@@ -8,6 +8,7 @@ export type CampusMapRecord = {
   building?: string;
   floor?: string;
   facilities: string[];
+  transitStopIds?: unknown;
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -120,5 +121,9 @@ export function parseCampusMapRecord(
     building,
     floor,
     facilities,
+    // Preserve malformed markers so classroom lookup can reject those POIs.
+    ...(Object.prototype.propertyIsEnumerable.call(data, 'transitStopIds')
+      ? { transitStopIds: data.transitStopIds }
+      : {}),
   };
 }

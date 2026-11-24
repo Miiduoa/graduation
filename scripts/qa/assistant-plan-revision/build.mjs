@@ -8,7 +8,7 @@ const root = path.resolve(directory, '../../..');
 const output = path.join(root, 'artifacts/assistant-plan-revision');
 await mkdir(output, { recursive: true });
 const modules = {
-  session: `import {useSyncExternalStore} from 'react'; const subscribe=callback=>{window.addEventListener('qa-account',callback);return()=>window.removeEventListener('qa-account',callback)}; export function useNuniSession(){const account=useSyncExternalStore(subscribe,()=>window.__agentQA.account);return {loading:false,pendingLogout:false,error:null,session:{context:(account==='qa-agent'?'a':'b').repeat(43),platformAccountId:account}};}`,
+  session: `import {useSyncExternalStore} from 'react'; const subscribe=callback=>{window.addEventListener('qa-account',callback);return()=>window.removeEventListener('qa-account',callback)}; export function useNuniSession(){const account=useSyncExternalStore(subscribe,()=>window.__agentQA.account);return {loading:false,pendingLogout:false,error:null,session:{context:(account==='qa-agent'?'a':'b').repeat(43),platformAccountId:account}};} export const useOptionalNuniSession=useNuniSession;`,
   campus: `import {useSyncExternalStore} from 'react'; const subscribe=callback=>{window.addEventListener('qa-school',callback);return()=>window.removeEventListener('qa-school',callback)}; export const useCampusBrowseContext=()=>({status:'ready',schoolId:useSyncExternalStore(subscribe,()=>window.__agentQA.school)});`,
   navigation: `export const useSearchParams=()=>new URLSearchParams(location.search);`,
   link: `import {createElement} from 'react'; export default function Link({children,prefetch,replace,scroll,...props}){return createElement('a',props,children)}`,

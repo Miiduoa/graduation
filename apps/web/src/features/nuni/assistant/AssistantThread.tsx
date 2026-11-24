@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import type { ReactNode } from 'react';
 import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { publicCourseCompoundRequest } from '@campus/shared/src/publicCourseCompound';
@@ -21,6 +21,8 @@ import { parseCampusMapCommand } from '@/lib/nuni/assistantV2/campusMapRequest';
 import { parseAssistantTaskPlan } from '@campus/shared/src/assistantTaskPlan';
 import { isAssistantTaskRetryQuestion, type AssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
 import { AssistantMarkdown } from './AssistantMarkdown';
+import { accountDemoAssistantIntent, type AccountDemoAssistantScope } from '@/lib/accountDemoAssistant';
+import { AccountDemoAssistantCard } from './AccountDemoAssistantCard';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { parseLocalScheduleIntent } from '@/lib/assistantLocalSchedule';
 import { personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
@@ -103,6 +105,7 @@ export function AssistantThread({
   onConfirm,
   onCancel,
   onReconcile,
+  demoScope,
   renderPlanRevision,
   renderPlanComparison,
   allowBatchConfirmation,
@@ -139,6 +142,7 @@ export function AssistantThread({
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
   onReconcile?: (card: V2Card) => void;
+  demoScope?: AccountDemoAssistantScope;
   renderPlanRevision?: (turn: V2Turn) => ReactNode;
   renderPlanComparison?: (turn: V2Turn) => ReactNode;
   allowBatchConfirmation?: (turn: V2Turn) => boolean;
@@ -249,7 +253,7 @@ export function AssistantThread({
   const suggestions = useProfileExamples ? profile.examples.map(example => example.prompt)
     : foodPickupEnabled && taskProfile === 'student' ? [...workflow.suggestions, PICKUP_SUGGESTION] : workflow.suggestions;
   const canSubmit = !pending && !onStop && !!question.trim() &&
-    (readRoute.roleGuide || (foodPickup ? foodPickupEnabled
+    ((!!demoScope && !!accountDemoAssistantIntent(question)) || readRoute.roleGuide || (foodPickup ? foodPickupEnabled
       : parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) ||
         (onTaskRetry && isAssistantTaskRetryQuestion(question)) ||
         (!publicCompound && (!!publicCourseIntent || readRoute.local || readRoute.personal ||
@@ -303,9 +307,9 @@ export function AssistantThread({
             ? '直接查課程、時間、教室與未交作業，也可查個人行程；雲端查詢涵蓋已同步資料。安排事情時會先列出內容，確認後再處理。建立個人事件不會發送推播提醒。'
             : '查詢自己的行程與公開校園資訊，或接續目前的工作。個人時間安排會先預覽，確認後才儲存。'}</p>
           <nav className={styles.services} aria-label="校園服務入口">
-            <Link href={'/map' + schoolQuery}>校園地圖</Link>
-            <Link href={'/bus' + schoolQuery}>公車資訊</Link>
-            <Link href={'/cafeteria' + schoolQuery}>餐廳資訊</Link>
+            <AssistantReplyLink href={'/map' + schoolQuery}>校園地圖</AssistantReplyLink>
+            <AssistantReplyLink href={'/bus' + schoolQuery}>公車資訊</AssistantReplyLink>
+            <AssistantReplyLink href={'/cafeteria' + schoolQuery}>餐廳資訊</AssistantReplyLink>
           </nav>
         </>
       )}
@@ -377,6 +381,7 @@ export function AssistantThread({
                   sourceOnly={turn.reply.campusEventPreview === true}
                   onSelect={onEventTarget ? target => onEventTarget(turn, target) : undefined} />
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
+                {turn.reply.demo ? <p className={styles.sim}>本人帳號展示資料</p> : null}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 <AssistantTaskPlan plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states}
                   retry={taskRetryForTurn ? taskRetryForTurn(turn) : turn.reply.taskRetry}
@@ -407,6 +412,11 @@ export function AssistantThread({
               onCancel={(index) => onCancel(turn, index)}
               onReconcile={onReconcile}
             />
+            {demoScope && turn.reply.demo?.proposal && <AccountDemoAssistantCard
+              key={JSON.stringify([demoScope.context, demoScope.accountId, demoScope.schoolId, turn.reply.demo.proposal.id])}
+              proposal={turn.reply.demo.proposal}
+              scope={demoScope}
+            />}
             {!turn.reply.campusEventPreview && renderPlanRevision?.(turn)}
           </article>
         ))}
@@ -429,7 +439,7 @@ export function AssistantThread({
           <p className={styles.alert} role="alert">
             {error}
             {assistantPermissionSettingsHref(error) && <>
-              {' '}<Link href={assistantPermissionSettingsHref(error)!}>設定 AI 代辦權限</Link>
+              {' '}<AssistantReplyLink href={assistantPermissionSettingsHref(error)!}>設定 AI 代辦權限</AssistantReplyLink>
             </>}
           </p>
         ) : null}

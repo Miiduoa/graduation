@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { useId } from 'react';
 import { assistantServiceHref, type AssistantServiceId } from '@campus/shared/src/assistantServices';
 import {
@@ -37,7 +37,7 @@ export function AssistantRoleTasks({ context, onContext, schoolId, compact = fal
         <nav className={styles.links} aria-label={`${workflow.label}工作入口`}>
           {services.map(service => {
             const href = assistantServiceHref(service.id, schoolId, 'platform');
-            return href ? <Link key={service.id} href={href}>{service.label}<span aria-hidden="true"> →</span></Link> : null;
+            return href ? <AssistantReplyLink key={service.id} href={href}>{service.label}<span aria-hidden="true"> →</span></AssistantReplyLink> : null;
           })}
         </nav>
       )}
