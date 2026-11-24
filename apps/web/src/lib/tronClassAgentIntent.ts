@@ -394,7 +394,7 @@ function isLexiconReadInner(inner: string): boolean {
   return tokensFor(inner).every(token => {
     if (isWhitespaceToken(token) || token.kind === 'punct') return true;
     if (token.kind === 'unknown' || token.kind === 'filename') return false;
-    if (isWriteVerbToken(token)) return false;
+    if (isWriteVerbToken(token) || isNegatorToken(token)) return false;
     return true;
   });
 }
@@ -1049,6 +1049,7 @@ function isPositivelyProvenRead(text: string): boolean {
 function clauseAllowsCompoundCompanion(clause: string): boolean {
   const text = clause.normalize('NFKC').trim();
   if (!text) return true;
+  if (hasReadBlockingDecoration(text)) return false;
   if (isPositivelyProvenRead(text)) return true;
   if (OTHER_SERVICE_OR_SCHEDULE.test(text) && !TRONCLASS_KEYWORD.test(text)) {
     if (!allTokensKnown(text)) return false;
@@ -1174,13 +1175,14 @@ export type TronClassSentenceClass =
 
 function readIntentOf(text: string): TronClassAgentQueryIntent {
   const visible = textWithoutFilenameTokens(text);
+  const mask = dataTypeMask(text);
   if (/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i.test(visible)) {
     return { intent: 'capabilities', pendingOnly: false };
   }
   const pendingOnly = /(?:未交|未繳|待交|待繳|待提交|尚未(?:交|繳|提交)|還沒(?:交|繳|提交)|沒(?:交|繳)|pending|unsubmitted|not\s+submitted)/i.test(visible);
   const dataIntent = lastDataTypeIntent(text);
   if (dataIntent === 'announcements') return { intent: 'announcements', pendingOnly: false };
-  const tokens = tokensFor(text).filter(token => token.kind !== 'filename');
+  const tokens = tokensFor(text).filter(token => token.kind !== 'filename' && !tokenIsProtected(token, mask));
   const preparation = tokens.some(token => PREPARE_ACTIONS.has(token.value)) && /(?:作業|homework|assignment)/i.test(visible);
   const downloading = tokens.some(token => DOWNLOAD_ACTIONS.has(token.value) || DOWNLOAD_ACTIONS.has(token.value.toLowerCase()));
   if (preparation && downloading) return { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' };
@@ -1227,12 +1229,10 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   const text = textWithoutQuotedSpans(readRoutingText(original));
   if (!TRONCLASS_KEYWORD.test(text)) return { outcome: 'ambiguous' };
   const intent = readIntentOf(text);
+  if (hasReadBlockingDecoration(original)) return { outcome: 'ambiguous' };
   if (intent.intent === 'unsupported' || intent.intent === 'prepare') {
     return { outcome: 'clearly-write', intent };
   }
-  // clearly-read must be positively proven on the original sentence. A
-  // quote-stripped routing view must not hide a file mention or bad brackets.
-  if (hasReadBlockingDecoration(original)) return { outcome: 'ambiguous' };
   if (!isPositivelyProvenRead(original) && !isPositivelyProvenRead(text)) return { outcome: 'ambiguous' };
   return { outcome: 'clearly-read', intent };
 }
