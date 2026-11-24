@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses } from './tronClassAgentIntent';
+import { canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS } from './tronClassAgentIntent';
 
 describe('explicit TronClass navigation', () => {
   it.each(['開啟玩課雲作業', '前往玩課雲作業頁', '進入 TronClass 頁面', 'open TronClass 作業'])(
@@ -902,6 +902,61 @@ describe('r28 structural regressions and function-word variants', () => {
     const started = Date.now();
     expect(parseTronClassAgentIntent(question)).toBeNull();
     expect(tronClassCompoundClauses(question)).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(200);
+  });
+});
+
+describe('lexicon negators and token-only write checks', () => {
+  it.each([...TRONCLASS_NEGATORS])('does not authorize a private read after the lexicon negator %s', negation => {
+    const question = /[A-Za-z']/.test(negation) ? `${negation} 查玩課雲作業` : `${negation}查玩課雲作業`;
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(`${question}，只查校園公告`)).toEqual([]);
+  });
+
+  it.each([
+    '不必查玩課雲作業',
+    '無需查玩課雲作業，只查校園公告',
+    '不需查玩課雲作業',
+    '不得查玩課雲作業',
+    '毋須查玩課雲作業',
+    '先不查玩課雲作業',
+    '暫不查玩課雲作業',
+    '沒有查玩課雲作業',
+  ])('does not authorize a private read from the speech-act negation in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question.includes('只查') ? question : `${question}，只查校園公告`)).toEqual([]);
+  });
+
+  it('still treats 未 and 沒 as homework status filters under a query', () => {
+    expect(parseTronClassAgentIntent('幫我查 TronClass 未繳作業')).toEqual({ intent: 'homework', pendingOnly: true });
+    expect(parseTronClassAgentIntent('查玩課雲沒交的作業')).toEqual({ intent: 'homework', pendingOnly: true });
+    expect(parseTronClassAgentIntent('查玩課雲未交的作業')).toEqual({ intent: 'homework', pendingOnly: true });
+  });
+
+  it.each([
+    '把玩課雲外交作業列出',
+    '將玩課雲外交作業列出',
+    '請將玩課雲外交作業列出',
+  ])('does not treat 交 inside 外交 as a write after 把／將 in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'homework', pendingOnly: false });
+  });
+
+  it.each([
+    '把玩課雲附件回傳',
+    '將玩課雲作業繳交',
+    '把附件：放到玩課雲作業區',
+  ])('still blocks a 把／將 write in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('scans many 把／將 read clauses in a single token pass', () => {
+    const question = `把玩課雲外交作業列出${'並把玩課雲外交作業列出'.repeat(30)}`;
+    expect(question.length).toBeLessThanOrEqual(1000);
+    const started = Date.now();
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'homework', pendingOnly: false });
     expect(Date.now() - started).toBeLessThan(200);
   });
 });
