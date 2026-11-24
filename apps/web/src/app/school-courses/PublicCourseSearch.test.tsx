@@ -139,8 +139,8 @@ it.each(['focus', 'visibilitychange'])('rechecks displayed freshness on %s witho
   try {
     vi.stubGlobal('fetch', fetcher);
     render(<PublicCourseSearch {...props} />);
-    submit('005076');
-    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    await act(async () => { submit('005076'); });
+    expect(screen.getByRole('heading', { name: course.title })).toBeTruthy();
     expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
     now.mockReturnValue(Date.parse('2026-11-23T04:02:00.000Z'));
     await act(async () => {
@@ -165,11 +165,35 @@ it('refreshes freshness while the result stays open and releases its clock when 
   expect(screen.getByRole('heading', { name: course.title })).toBeTruthy();
   expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
   expect(vi.getTimerCount()).toBe(1);
+  fireEvent.click(screen.getByRole('checkbox', { name: /選入批次核對/ }));
   await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
   expect(screen.getByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeTruthy();
+  expect(screen.getByRole('status', { name: '選取課程' }).textContent).toContain('已選 1 門課');
   expect(fetcher).toHaveBeenCalledTimes(1);
-  view.unmount();
+  fireEvent.click(screen.getByRole('button', { name: '帶入課表核對' }));
+  const draft = readPersonalImportDraft(importContext.scope);
+  expect(draft?.source.name).toContain('來源：https://ccweb6.ncnu.edu.tw/');
+  expect(draft?.source.name).toContain('資料擷取：2026-11-22 12:00（台灣時間；非校方更新時間）');
+  // jsdom schedules the draft storage event separately; settle only that
+  // immediate task, leaving the next freshness interval pending.
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(vi.getTimerCount()).toBe(1);
+  await act(async () => { view.unmount(); });
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it('uses the newly accepted response time before the next minute tick', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  try {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-23T04:05:58.000Z' })));
+    render(<PublicCourseSearch {...props} />);
+    now.mockReturnValue(Date.parse('2026-11-23T04:00:59.000Z'));
+    submit('005076');
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(/伺服器提供的擷取時間比此裝置時間晚超過 5 分鐘/)).toBeNull();
+  } finally {
+    now.mockRestore();
+  }
 });
 
 it('carries linked weekday and credits into a verified search and imports every meeting of a matching course', async () => {

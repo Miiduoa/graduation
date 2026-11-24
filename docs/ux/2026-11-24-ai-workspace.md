@@ -11,12 +11,17 @@
 | 版本依據 | 精確版本與用途 |
 | --- | --- |
 | 開始查核時的 main | `7232919a8cc68ce01a2eaba9704268ddf3924bc0` |
-| 最後納入的 main | `7953ae4400295998a7d69dd2e017d53ef97e6160`；含 #746 依賴修正 |
+| 工作區候選原先納入的 main | `7953ae4400295998a7d69dd2e017d53ef97e6160`；含 #746 依賴修正 |
 | 既有整合基底 #768 | `fd9fd408f08177b59fb9c9c2954f61fdaab1a329`；含既有跨功能、角色與安全邊界 |
 | 本輪納入 #783 | `e664a72ee80472a3d1d85598c895f89de0638b28`；含雙語服務搜尋與訪客／身分隔離修正 |
-| 同步最後 main 的整合基底 | `f74d799998b265e4d185af30dfd4b222e0c6676b`；保留 #768、#783 原始祖先，檔案樹與本機已驗證的整合結果一致 |
+| 本輪工作區增量的整合基底 | `f74d799998b265e4d185af30dfd4b222e0c6676b`；同步上述 `7953ae44`，保留 #768、#783 原始祖先，仍作為本輪工作區變更的比較基準 |
+| 追加 main 前的已驗證工作區候選 | `5514729b5a246fc38dbbe25f69c19ceb107ffcbf`；檔案樹 `3ee34cc1f21aeb57a1d35c7f051826c4cdc37d1b` |
+| 驗證期間追加納入的 main | `5e82f068d9804baaede6e9d5ce59dedd418dd2f4`；#749 官方課程資料時效提醒，是 `7953ae44` 的直接後繼，僅改 `PublicCourseSearch.tsx` 與其測試 |
+| 後續採用的外部整合 | `3ceb81d17b5c7255a3ebbf61a9d50ecedd2b0dc1`；雙親為 `5514729b` 與 `5e82f068`，檔案樹 `fbaec6cac84fa827595646c29f39f3233f0a65a9`；保留其僅在有效結果存在時運作的時效時鐘 |
 
-本文件記錄上述整合提交上的工作區變更。瀏覽器證據記錄驗收當下的 Git 基底；產品與 fixture 的實際驗證版本以 355 份來源 SHA-256 為準，包含未提交工作樹的修正，已逐一核對最後內容一致。最終提交、CI、合併與部署狀態應以後續 PR 的精確 head 與檢查結果為準；文件中的本機驗證不表示已發布。
+本文件記錄 `f74d7999` 基底上的工作區變更，以及其後透過 `3ceb81d1` 納入 #749 的整合。保留外部整合的產品實作：已接受回覆立即記錄比較時間，只有帶擷取時間的 ready 結果才啟用每分鐘、focus 與 visibility 重新評估，結果離開或元件卸載時清理。勾選課程不改寫擷取時間或匯入來源，也不額外發送查詢。本次後續增量僅補測試與版本文件，不替換外部產品。原工作區瀏覽器證據記錄驗收當下的 Git 基底；實際驗證版本以 355 份來源 SHA-256 為準，包含當時未提交工作樹的修正。
+
+`5514729b` 的 GitHub 檢查測試的是合成合併 `13bc9e8b423e1c9d902195a318dd0bbea22518cb`（`5514729b` ＋ `7953ae44`），其檔案樹與候選完全相同。main 後來前進到 `5e82f068`；舊檢查不能視為新整合提交已通過 CI。最終提交、CI、合併與部署狀態應以 PR 的精確 head 與檢查結果為準；本機驗證不表示已發布。
 
 ## 全產品設計原則
 
@@ -160,7 +165,7 @@ fixture 使用實際 Provider、首頁、頁首、TodayCampusEntry、Conversatio
 
 ### 本輪驗證紀錄
 
-以下為最後整合工作樹的本機驗證。Web 478 項是一次執行的去重結果；Provider 與真實 Conversation 的最後重跑都是其中子集，不另加總。地圖是另一個回歸批次，亦不與其他批次相加宣稱整個產品的測試總數。提交後的 GitHub CI 與審查仍須對應最後 head。
+以下為追加 #749 前、最終成為 `5514729b` 工作區候選的本機驗證。Web 478 項是一次執行的去重結果；Provider 與真實 Conversation 的最後重跑都是其中子集，不另加總。地圖是另一個回歸批次，亦不與其他批次相加宣稱整個產品的測試總數。這些紀錄保留原驗證範圍，後續整合提交的 GitHub CI 與審查仍須對應該提交的精確 head。
 
 | 批次 | 已回報結果 | 證據限制 |
 | --- | --- | --- |
@@ -179,6 +184,31 @@ fixture 使用實際 Provider、首頁、頁首、TodayCampusEntry、Conversatio
 完整產物為 `artifacts/ai-workspace/results.json`、`source-sha256.json` 及 30 張截圖。來源 manifest SHA-256：`638d4a92a14b3220b1a8d696f8949e6d5b5d0b812e1df978d247d4d282e2c57d`；結果 SHA-256：`476134a0c68d3f105712bb7979322655b557096cf0fdf6c8b491615a00404831`。
 
 可隨原始碼審閱的畫面：[桌面首頁](evidence/ai-workspace-20261124/desktop-home.png)、[手機回答與草稿](evidence/ai-workspace-20261124/phone-answer.png)、[320px 深色訪客服務搜尋](evidence/ai-workspace-20261124/small-dark-guest-search.png)。畫面保留合成資料與未連正式服務的標示。
+
+### 追加 main 前的 GitHub 驗證
+
+`5514729b` 的 [中央 CI 45393845135](https://github.com/Miiduoa/graduation/actions/runs/45393845135) 已通過九項驗證／建置與 CI Summary；Firebase backend 部署為條件性 skipped。[CodeQL 45393845223](https://github.com/Miiduoa/graduation/actions/runs/45393845223) 亦通過。[Web Tests job](https://github.com/Miiduoa/graduation/actions/runs/45393845135/job/138450051932) 在 2026-11-24 13:12:58 UTC 完成：950 test files passed、15 skipped；37,828 tests passed、146 skipped、0 failed。這是一次 Web coverage 執行的結果，不與前置 PostgreSQL 回歸或本機批次相加。
+
+Web job 的 checkout 日誌明確使用 `refs/pull/788/merge` 的 `13bc9e8b`；其 parents 是 `7953ae44` 與 `5514729b`，tree 為 `3ee34cc1`。這段驗證保留為追加 #749 前的證據，沒有把結果移轉到新 head。
+
+### 追加 #749 的整合驗證
+
+遠端 `3ceb81d1` 已以 `5514729b` 與 `5e82f068` 為雙親完成兩個 PublicCourseSearch 檔的整合。本次隔離工作樹直接採用該外部提交，再以它為單一 parent 追加必要測試與本文件。`PublicCourseSearch.tsx` 與外部版本完全相同，保留時效提醒、官方目錄連結、來源紀錄與帳號／校園草稿邊界；比較時鐘僅於有效結果存在期間運作，原始 `fetchedAt`、來源網址、已選課程與網路請求均不因重新判時而改寫。
+
+以下結果來自採用 `3ceb81d1` 產品並補足測試後的實際重跑，沒有沿用先前本機合併預演的通過數。本機定向驗證使用 Node 22.23.5：`PublicCourseSearch.test.tsx` 與 `school-courses/page.test.tsx` 共 2 檔、128 tests 通過、0 skipped，`maxWorkers=2`；兩個相關程式檔 ESLint exit 0，Web TypeScript exit 0。案例覆蓋 focus、visibility、60 秒間隔跨越 24 小時、新回覆在下一次間隔前的 5 分鐘容許邊界，以及重新判時後的選取／來源保留與卸載清理。focus／visibility 案例以 `await act` 涵蓋已解析查詢到 ready 的 React 更新與 effects，補足測試的非同步生命週期邊界，再送出原本的頁面事件。測試只推進 0ms 以完成 jsdom 的 storage event 排程，之後確認產品 interval 仍有 1 個、卸載後為 0，未清空所有 timers 來掩蓋清理問題。
+
+```bash
+cd apps/web
+node ../../node_modules/vitest/vitest.mjs run \
+  src/app/school-courses/PublicCourseSearch.test.tsx \
+  src/app/school-courses/page.test.tsx --maxWorkers=2
+node ../../node_modules/eslint/bin/eslint.js -c eslint.config.mjs \
+  src/app/school-courses/PublicCourseSearch.tsx \
+  src/app/school-courses/PublicCourseSearch.test.tsx
+node --max-old-space-size=6144 ../../node_modules/typescript/bin/tsc --noEmit --pretty false
+```
+
+新整合提交的瀏覽器重建、遠端 CI、審查與合併狀態仍須依該提交另行記錄；上述 `5514729b` 的遠端綠燈不代表已驗證新 main 的合併結果。
 
 ## PR 與合併驗收
 
