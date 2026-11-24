@@ -454,8 +454,16 @@ function PersonalCalendarWorkspace({
   const locatedRequest = useRef<string | null>(null);
   const linkedFocusOrigin = useRef<{
     element: Element | null;
-    state: 'focused' | 'blurred' | 'hidden';
+    state: 'focused' | 'unavailable';
   } | null>(null);
+  const attachMonthList = useCallback((list: HTMLUListElement | null) => {
+    const origin = linkedFocusOrigin.current;
+    // React detaches the ref before the browser can emit focusout during removal.
+    if (!list && origin?.element && monthListRef.current?.contains(origin.element)) {
+      origin.state = 'unavailable';
+    }
+    monthListRef.current = list;
+  }, []);
   const stopLinkedFocusRetry = useRef<(() => void) | null>(null);
   const settledFocusRequest = useRef<string | null>(null);
   const linkedEventElement = useRef<HTMLLIElement | null>(null);
@@ -487,12 +495,17 @@ function PersonalCalendarWorkspace({
       const origin = linkedFocusOrigin.current;
       if (!origin) return;
       if (document.activeElement === origin.element) origin.state = 'focused';
-      else if (!stillOwnsFocus(origin.element, origin.state === 'hidden')) cancelLinkedFocus();
+      else if (!stillOwnsFocus(origin.element, origin.state === 'unavailable')) cancelLinkedFocus();
     };
     const recordBlur = (event: FocusEvent) => {
       const origin = linkedFocusOrigin.current;
-      if (origin && event.target === origin.element && !workspaceBoundary.current?.hidden) {
-        origin.state = 'blurred';
+      if (
+        origin?.state === 'focused' &&
+        event.target === origin.element &&
+        !workspaceBoundary.current?.hidden
+      ) {
+        // End the request before a later unmount can make body a fallback.
+        cancelLinkedFocus();
       }
     };
     document.addEventListener('focusin', checkFocus, true);
@@ -534,7 +547,7 @@ function PersonalCalendarWorkspace({
     });
     const revealLinkedEvent = (mode: 'reveal' | 'visible') => {
       if (suspended.current) return;
-      if (!stillOwnsFocus(origin.element, origin.state === 'hidden')) {
+      if (!stillOwnsFocus(origin.element, origin.state === 'unavailable')) {
         cancelLinkedFocus();
         return;
       }
@@ -577,7 +590,7 @@ function PersonalCalendarWorkspace({
       workspaceBoundary.current?.contains(origin.element) &&
       stillOwnsFocus(origin.element, true)
     ) {
-      origin.state = 'hidden';
+      origin.state = 'unavailable';
     }
   }, [paused, workspaceBoundary]);
 
@@ -1164,7 +1177,7 @@ function PersonalCalendarWorkspace({
             </p>
           ) : calendarView === 'list' || selectedDate ? (
             <ul
-              ref={monthListRef}
+              ref={attachMonthList}
               tabIndex={-1}
               className={`${styles.saved} ${workspaceStyles.agenda}`}
               aria-label="個人行程列表"

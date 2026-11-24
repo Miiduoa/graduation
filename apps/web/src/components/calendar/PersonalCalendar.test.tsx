@@ -750,9 +750,13 @@ it.each([
   ['月份欄位', '隱藏後移到其他控制項'],
   ['月份欄位', '隱藏後移到其他控制項又回到頁面本體'],
   ['月份欄位', '隱藏前主動離開'],
+  ['日列表編輯按鈕', '因工作區卸載而失焦'],
+  ['日列表編輯按鈕', '隱藏前主動離開'],
 ])('深連結從%s等待揭露時，重新驗證前後%s', async (origin, action) => {
   const target = focusEvent();
-  seedFocusedEvents([target]);
+  const previous = focusEvent('previous-event', { title: '同日的另一筆行程' });
+  const startsInDayList = origin === '日列表編輯按鈕';
+  seedFocusedEvents(startsInDayList ? [previous, target] : [target]);
   const viewport = Object.assign(new EventTarget(), {
     offsetLeft: 260, offsetTop: 80, width: 180, height: 240,
   });
@@ -773,23 +777,46 @@ it.each([
   }
   const search = `eventId=${target.id}`;
   if (origin === '頁面本體') context.search = search;
+  if (startsInDayList) context.search = `eventId=${previous.id}`;
   const view = render(<Page />);
   const monthControl = await screen.findByLabelText('查看月份');
-  if (origin === '月份欄位') {
-    monthControl.focus();
+  let originControl: HTMLElement = document.body;
+  if (startsInDayList) {
+    const previousRow = (await screen.findByRole('heading', { name: previous.title })).closest('li')!;
+    originControl = within(previousRow).getByRole('button', { name: '編輯' });
+    scroll.mockClear();
+  } else if (origin === '月份欄位') {
+    originControl = monthControl;
+  }
+  if (originControl !== document.body) {
+    originControl.focus();
     context.search = search;
     view.rerender(<Page />);
   }
   await screen.findByText(`已定位到「${target.title}」。`);
   expect(scroll).toHaveBeenCalledExactlyOnceWith({ left: -220, top: 0, behavior: 'instant' });
-  expect(document.activeElement).toBe(origin === '月份欄位' ? monthControl : document.body);
+  expect(document.activeElement).toBe(originControl);
 
-  if (action === '隱藏前主動離開') monthControl.blur();
+  if (action === '因工作區卸載而失焦') {
+    const list = screen.getByRole('list', { name: '個人行程列表' });
+    const parent = list.parentNode!;
+    const removeChild = parent.removeChild.bind(parent);
+    vi.spyOn(parent, 'removeChild').mockImplementation((child) => {
+      // Chromium emits focusout while the removed control is still connected.
+      if (child === list && document.activeElement === originControl) originControl.blur();
+      return removeChild(child);
+    });
+  }
+  if (action === '隱藏前主動離開') {
+    originControl.blur();
+    expect(document.activeElement).toBe(document.body);
+    expect(originControl.isConnected).toBe(true);
+  }
   context.loading = true;
   view.rerender(<Page />);
   expect(screen.queryByRole('heading', { name: target.title })).toBeNull();
   const outside = screen.getByRole('button', { name: '其他控制項' });
-  expect(monthControl.isConnected).toBe(true);
+  expect(originControl.isConnected).toBe(!startsInDayList);
   expect(monthControl.closest('[hidden]')).toBeTruthy();
   // JSDOM does not reset focus when an ancestor becomes hidden.
   if (document.activeElement === monthControl) monthControl.blur();
@@ -809,7 +836,8 @@ it.each([
   const row = list.querySelector('li[aria-current="true"]');
   expect(row).toBeTruthy();
   expect(screen.getByLabelText('查看月份')).toBe(monthControl);
-  const shouldHandoff = action === '保留焦點' || action === '因工作區隱藏而失焦';
+  const shouldHandoff =
+    action === '保留焦點' || action === '因工作區隱藏而失焦' || action === '因工作區卸載而失焦';
   expect(document.activeElement).toBe(shouldHandoff ? row : focusDuringPause);
 });
 
