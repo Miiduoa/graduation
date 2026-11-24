@@ -471,7 +471,8 @@ function AccountWorkspace({
           onExpired={expire}
           onChanged={(detail, confirmedWrite) => {
             if (!mounted.current || !enabled.current) return;
-            if (confirmedWrite) confirmedWorkspaces.current.set(key, detail);
+            if (confirmedWrite || confirmedWorkspaces.current.has(key))
+              confirmedWorkspaces.current.set(key, detail);
             listUpdates.current?.workspaces.set(key, detail);
             setOverview((current) =>
               current
