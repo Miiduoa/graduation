@@ -1006,23 +1006,24 @@ test('the assistant opens the exact assignment in the linked workspace even when
   expect(navigation.getCurrentRoute()?.name).toBe('NuniTimetableAssistant');
 });
 
-async function savedMeetings(rows: Array<{ id: string; startTime: string; endTime: string }>, linkedCourseId: string) {
+async function savedMeetings(rows: Array<{ id: string; startPeriod: number; endPeriod: number }>, linkedCourseId: string) {
   await AsyncStorage.setItem(personalImportStorageKey({ owner: `nuni:${account}`, schoolId: 'pu' }), JSON.stringify({
     version: 1, batches: [], records: rows.map((row) => ({
       id: row.id, batchId: 'batch-' + row.id, kind: 'timetable', title: '資料庫管理', location: '主顧 305',
-      schoolId: 'pu', academicYear: '115', semester: '1', dayOfWeek: 4, startTime: row.startTime, endTime: row.endTime,
+      schoolId: 'pu', academicYear: '115', semester: '1', dayOfWeek: 4, startPeriod: row.startPeriod, endPeriod: row.endPeriod,
       importedAt: '2026-11-02T08:00:00Z', source: { type: 'paste', line: 1, rawText: '資料庫管理' }, linkedCourseId,
     })),
   }));
 }
 
 test.each([
-  { kind: 'current', label: '問 nuni 這堂課的作業', prompt: '現在這堂課有什麼作業？', start: '09:00', end: '10:30' },
-  { kind: 'next', label: '問 nuni 下一堂課的作業', prompt: '查下一堂課的作業', start: '10:10', end: '12:00' },
-] as const)('the signed-in landing %s-class entry pre-fills the assistant and reads only after the student sends it', async (row) => {
+  { kind: 'current', label: '問 nuni 這堂課的作業', prompt: '現在這堂課有什麼作業？', startPeriod: 1, endPeriod: 2 },
+  { kind: 'next', label: '問 nuni 下一堂課的作業', prompt: '查下一堂課的作業', startPeriod: 3, endPeriod: 4 },
+] as const)('the signed-in landing $kind-class entry pre-fills the assistant and reads only after the student sends it', async (row) => {
   mockRealTimetablePanel = true;
   const { course, other, assignment } = await linkedWorkspaceFixture();
-  await savedMeetings([{ id: 'import-db', startTime: row.start, endTime: row.end }], course.id);
+  await savedMeetings([{ id: 'import-db', startPeriod: row.startPeriod, endPeriod: row.endPeriod }], course.id);
+  jest.mocked(AsyncStorage.getItem).mockClear();
   const navigation = createNavigationContainerRef<PreAuthStackParamList>();
   const unhandled = jest.fn();
   const screen = render(
@@ -1040,12 +1041,16 @@ test.each([
   expect(mockRequest.mock.calls.map(([path]) => path)).toEqual(['sessions/current']);
   expect(mockAssignmentBff).not.toHaveBeenCalled();
   fireEvent.press(screen.getByRole('button', { name: '送出問題' }));
-  fireEvent.press(await screen.findByRole('button', { name: /查看作業.*小考報告/ }));
+  const open = await screen.findByRole('button', { name: /查看作業.*小考報告/ });
+  const assignmentsPath = `class-workspaces/${course.id}/assignments`;
+  expect(mockAssignmentBff.mock.calls.map(([path]) => path)).toEqual([assignmentsPath]);
+  fireEvent.press(open);
   await screen.findByLabelText('作業繳交區：小考報告');
   expect(navigation.getCurrentRoute()).toMatchObject({
     name: 'NuniWorkspace', params: { tab: 'courses', workspaceId: course.id, assignmentId: assignment.id, assistantAccountId: account },
   });
-  expect(mockAssignmentBff.mock.calls.map(([path]) => path)).toEqual([`class-workspaces/${course.id}/assignments`]);
+  // Opening the work rechecks the target and loads its workspace; every read must stay on this course.
+  expect(new Set(mockAssignmentBff.mock.calls.map(([path]) => path))).toEqual(new Set([assignmentsPath]));
   expect([...mockRequest.mock.calls, ...mockAssignmentBff.mock.calls].some(([path]) => path.includes(other.id))).toBe(false);
   expect(jest.mocked(AsyncStorage.getItem).mock.calls.some(([key]) => key.includes('pa_22222222'))).toBe(false);
   expect(unhandled).not.toHaveBeenCalled();
@@ -1055,8 +1060,8 @@ test('simultaneous saved classes get no targeted landing entry, while the genera
   mockRealTimetablePanel = true;
   const { course } = await linkedWorkspaceFixture();
   await savedMeetings([
-    { id: 'import-db', startTime: '09:00', endTime: '10:30' },
-    { id: 'import-db-2', startTime: '09:00', endTime: '10:30' },
+    { id: 'import-db', startPeriod: 1, endPeriod: 2 },
+    { id: 'import-db-2', startPeriod: 1, endPeriod: 2 },
   ], course.id);
   const navigation = createNavigationContainerRef<PreAuthStackParamList>();
   const screen = render(
