@@ -24,7 +24,12 @@ function latestObservation<T extends NuniMerchantWorkspace>(
     const order = version !== undefined && current.version !== undefined
       ? version - current.version
       : 0;
-    if ((order || revision - current.revision) <= 0) return current;
+    if ((order || revision - current.revision) <= 0) {
+      // An older response can establish the version floor of a winning legacy row.
+      return current.version === undefined && version !== undefined
+        ? { ...current, version }
+        : current;
+    }
   }
   return { value, revision, version };
 }
@@ -77,7 +82,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const entry = entries.get(key) ?? {};
     const row = latestObservation(entry.row, next, revision);
     // The receipt remains usable until a winning observation reports that menu is missing.
-    if (row !== entry.row && row.value.missingRequirements.includes('menu')) {
+    if (row.value !== entry.row?.value && row.value.missingRequirements.includes('menu')) {
       const draft = drafts.get(key);
       if (draft) draft.menuReceipt = null;
     }
@@ -104,8 +109,14 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const entry = entries.get(key);
     if (!entry?.row || !entry.detail || !hasVerifiedAccess(key)) return null;
     const detail = entry.detail.value;
-    // Use the winning workspace observation for all shared fields. Settings use the detail version.
-    return { ...detail, ...entry.row.value, readinessVersion: detail.readinessVersion };
+    const row = entry.row.value;
+    // The winning requirements also govern the menu count. Settings use the detail version.
+    return {
+      ...detail,
+      ...row,
+      readinessVersion: detail.readinessVersion,
+      publishedMenuItems: row.missingRequirements.includes('menu') ? 0 : detail.publishedMenuItems,
+    };
   }
 
   function confirmMenu(key: string, revision: number, createdItems: number) {

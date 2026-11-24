@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import type { NuniMerchantWorkspace } from '@campus/shared/src/nuniMerchant';
+import type { NuniMerchantWorkspaceDetail } from '@campus/shared/src/nuniMerchantOperations';
 import { createMerchantConfirmations } from './merchantConfirmation';
 
 it('renders the newer menu requirement after a list previously confirmed the menu', () => {
@@ -24,4 +25,67 @@ it('renders the newer menu requirement after a list previously confirmed the men
   const missingMenu = { ...row, missingRequirements: ['menu'] };
   confirmed.mergeWorkspaceList([missingMenu], confirmed.beginRequest());
   expect(confirmed.overview()?.workspaces).toEqual([missingMenu]);
+});
+
+it('learns the version floor from an older request without replacing the winning legacy row', () => {
+  const confirmed = createMerchantConfirmations(new Map());
+  const legacyRow: NuniMerchantWorkspace = {
+    tenantId: 'campus-one',
+    tenantName: '第一校園',
+    locationId: 'store-a',
+    locationName: '一樓',
+    merchantName: '餐坊',
+    campusName: '主校區',
+    merchantStatus: 'active',
+    locationStatus: 'closed',
+    activated: true,
+    publicAccess: false,
+    missingRequirements: ['menu'],
+  };
+  const detail: NuniMerchantWorkspaceDetail = {
+    ...legacyRow,
+    locationStatus: 'open',
+    publicAccess: true,
+    missingRequirements: [],
+    applicationId: 'application-1',
+    merchantId: 'merchant-1',
+    campusId: 'main-campus',
+    serviceModes: ['pickup'],
+    paymentMode: 'counter-only',
+    onlinePaymentAvailable: false,
+    paymentCapabilityState: 'not-requested',
+    managerConfirmed: true,
+    termsVersion: 'merchant-terms-v1',
+    readinessVersion: 7,
+    publishedMenuItems: 3,
+    merchantMode: 'full',
+    merchantModeLabel: '接單服務',
+    sourceLabel: '',
+    sourceUpdatedAt: null,
+    sourceLine: null,
+  };
+  const detailRevision = confirmed.beginRequest();
+  confirmed.mergeWorkspaceList([legacyRow], confirmed.beginRequest());
+
+  const expectedDetail = {
+    locationStatus: 'closed',
+    publicAccess: false,
+    missingRequirements: ['menu'],
+    readinessVersion: 7,
+    publishedMenuItems: 0,
+  };
+  expect(confirmed.confirmDetail(detail, detailRevision, true)).toMatchObject(expectedDetail);
+  expect(confirmed.overview()?.workspaces).toEqual([legacyRow]);
+
+  const lowerVersion = { ...detail, readinessVersion: 6 };
+  expect(confirmed.confirmDetail(lowerVersion, confirmed.beginRequest(), true))
+    .toMatchObject(expectedDetail);
+  expect(confirmed.confirmDetail(lowerVersion, confirmed.beginRequest(), true))
+    .toMatchObject(expectedDetail);
+  expect(confirmed.overview()?.workspaces).toEqual([legacyRow]);
+
+  const sameVersion = { ...detail, missingRequirements: ['settings'] };
+  expect(confirmed.confirmDetail(sameVersion, confirmed.beginRequest(), true))
+    .toMatchObject(sameVersion);
+  expect(confirmed.overview()?.workspaces).toMatchObject([sameVersion]);
 });

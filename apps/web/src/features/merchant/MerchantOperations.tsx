@@ -412,7 +412,7 @@ export function MerchantOperations({
   const settingsChanged =
     !!settings && !!detail && settings.baseVersion !== detail.readinessVersion;
   const locked = !!busy || loading || !!uncertain || !fresh;
-  const menuExists = menuReceipt !== null || !!detail?.publishedMenuItems;
+  const menuExists = menuReceipt !== null || (!!detail && !detail.missingRequirements.includes('menu'));
   const operational = !!detail && isMerchantWorkspaceOperational(detail);
   const canActivate =
     detail &&

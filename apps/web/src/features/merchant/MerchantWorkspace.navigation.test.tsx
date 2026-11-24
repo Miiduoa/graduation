@@ -1535,13 +1535,14 @@ it.each([
 });
 
 it.each([
-  { receiptFirst: true, listVersion: 6, detailVersion: 6 },
-  { receiptFirst: false, listVersion: 6, detailVersion: 6 },
-  { receiptFirst: true, listVersion: 7, detailVersion: 6 },
-  { receiptFirst: true, listVersion: undefined, detailVersion: 6 },
+  { receiptFirst: true, listVersion: 6, detailVersion: 6, publishedMenuItems: 0 },
+  { receiptFirst: false, listVersion: 6, detailVersion: 6, publishedMenuItems: 0 },
+  { receiptFirst: true, listVersion: 7, detailVersion: 6, publishedMenuItems: 0 },
+  { receiptFirst: true, listVersion: 7, detailVersion: 6, publishedMenuItems: 3 },
+  { receiptFirst: true, listVersion: undefined, detailVersion: 6, publishedMenuItems: 0 },
 ])(
-  'uses the winning list requirements in the detail (list: $listVersion, detail: $detailVersion, receipt first: $receiptFirst)',
-  async ({ receiptFirst, listVersion, detailVersion }) => {
+  'uses the winning list requirements in the detail (list: $listVersion, detail: $detailVersion, receipt first: $receiptFirst, published items: $publishedMenuItems)',
+  async ({ receiptFirst, listVersion, detailVersion, publishedMenuItems }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const initial = { ...detail(), readinessVersion: detailVersion };
     const missingMenu = { ...initial, readinessVersion: listVersion, missingRequirements: ['menu'] };
@@ -1549,6 +1550,7 @@ it.each([
       ...initial,
       readinessVersion: listVersion === undefined ? detailVersion - 1 : detailVersion,
       missingRequirements: listVersion === detailVersion ? ['menu'] : [],
+      publishedMenuItems,
     };
     type MenuReceipt = { menuVersionId: string; createdItems: number };
     let finishMenu!: (receipt: MenuReceipt) => void;
@@ -1618,5 +1620,7 @@ it.each([
     expect(screen.getByText('待完成：建立有庫存的首次菜單')).toBeTruthy();
     expect(screen.queryByText(/已建立 1 項首次菜單/)).toBeNull();
     await act(async () => finishApplications({ applications: [] }));
+    expect(screen.queryByText(/目前有 \d+ 項有庫存的上架品項/)).toBeNull();
+    expect(screen.getByLabelText('品項 1 名稱')).toBeTruthy();
   },
 );
