@@ -323,20 +323,6 @@ function tokensFor(text: string): Token[] {
   return tokens;
 }
 
-function tokenCovering(text: string, index: number): Token | undefined {
-  const tokens = tokensFor(text);
-  let low = 0;
-  let high = tokens.length - 1;
-  while (low <= high) {
-    const mid = (low + high) >> 1;
-    const token = tokens[mid]!;
-    if (index < token.start) high = mid - 1;
-    else if (index >= token.end) low = mid + 1;
-    else return token;
-  }
-  return undefined;
-}
-
 function isModifierBoundaryToken(token: Token): boolean {
   return token.kind === 'punct';
 }
@@ -461,10 +447,13 @@ function nextNegatedWriteStop(text: string, from: number): number {
       return offset;
     }
     if (token.kind === 'conj') {
-      const skipped = text.slice(token.end).match(/^(?:(?:請|幫我|替我|代我|直接|自動)\s*)*/u)?.[0].length ?? 0;
-      const at = token.end + skipped;
-      const write = new RegExp(`^(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})`, 'iu').exec(text.slice(at));
-      if (write && tokenCovering(text, at)?.kind !== 'noun') return offset;
+      let next = i + 1;
+      while (next < tokens.length &&
+        (isWhitespaceToken(tokens[next]!) || WRITE_HELPERS.has(tokens[next]!.value))) {
+        next += 1;
+      }
+      const following = tokens[next];
+      if (following && isWriteVerbToken(following)) return offset;
     }
     if (/^(?:and|then|also)\b/i.test(text.slice(token.start))) return offset;
   }
@@ -658,15 +647,37 @@ function isNegatedWriteFrom(tokens: Token[], negAt: number): boolean {
 }
 
 function isNegatedQueryFrom(tokens: Token[], negAt: number, interior: boolean[]): boolean {
+  let seenBa = false;
   for (let index = negAt + 1; index < tokens.length; index += 1) {
     const token = tokens[index]!;
-    if (isWhitespaceToken(token)) continue;
+    if (isWhitespaceToken(token) || token.value === ':' || token.value === '：') continue;
     if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) return false;
     if (token.kind === 'cue' && ACTION_CUES.includes(token.value)) return false;
+    if (BA_MARKERS.has(token.value)) {
+      seenBa = true;
+      continue;
+    }
     if (WRITE_HELPERS.has(token.value) || token.kind === 'cue') continue;
     if (interior[index]) continue;
+    if (isWriteVerbToken(token)) return false;
     if (token.kind === 'query' || QUERY_START.has(token.value)) return true;
+    if (seenBa) continue;
     return false;
+  }
+  return false;
+}
+
+function clauseHasNegatedQuery(tokens: Token[], interior: boolean[]): boolean {
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (!isNegatorToken(tokens[index]!)) continue;
+    if (isNegatedWriteFrom(tokens, index)) continue;
+    if (isNegatedQueryFrom(tokens, index, interior)) return true;
+    // Skip to the next clause so repeated 不要把… without a write is linear.
+    while (index + 1 < tokens.length &&
+      tokens[index + 1]!.kind !== 'punct' &&
+      !(tokens[index + 1]!.kind === 'cue' && CLAUSE_CUES.includes(tokens[index + 1]!.value))) {
+      index += 1;
+    }
   }
   return false;
 }
@@ -689,11 +700,7 @@ function authorizesPrivateRead(original: string): boolean {
   if (keywordOnlyInsideQuotes(original)) return false;
   const tokens = tokensFor(original);
   const interior = modifierInteriorIndex(tokens);
-  for (let index = 0; index < tokens.length; index += 1) {
-    if (!isNegatorToken(tokens[index]!)) continue;
-    if (isNegatedWriteFrom(tokens, index)) continue;
-    if (isNegatedQueryFrom(tokens, index, interior)) return false;
-  }
+  if (clauseHasNegatedQuery(tokens, interior)) return false;
   // Terminal status questions ask for the current state.
   const explanationText = original.replace(STATUS_EXPLANATION, '$1');
   return !(/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|解釋|釋義|備註|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(explanationText) ||

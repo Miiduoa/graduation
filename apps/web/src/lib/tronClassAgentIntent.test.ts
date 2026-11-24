@@ -959,4 +959,23 @@ describe('lexicon negators and token-only write checks', () => {
     expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'homework', pendingOnly: false });
     expect(Date.now() - started).toBeLessThan(200);
   });
+
+  it.each([
+    '不要把玩課雲外交作業列出',
+    '無需將玩課雲作業列出',
+    '不必把玩課雲作業列出，只查校園公告',
+  ])('does not authorize a negated 把／將 query in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question.includes('只查') ? question : `${question}，只查校園公告`)).toEqual([]);
+  });
+
+  it('scans repeated negated 把／將 phrases in linear time', () => {
+    const question = `${'不要把玩課雲外交作業列出，'.repeat(25)}只查校園公告`;
+    expect(question.length).toBeLessThanOrEqual(1000);
+    const started = Date.now();
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(200);
+  });
 });
