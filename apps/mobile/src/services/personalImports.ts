@@ -46,7 +46,8 @@ async function readRecovery(key: string): Promise<Recovery | null> {
     if (encoded.trimStart()[0] === '{') return { raw: encoded };
     // Older builds wrapped the original ledger in a second layer of JSON.
     const raw: unknown = JSON.parse(encoded);
-    if (typeof raw === 'string' || raw === null) return { raw };
+    if (typeof raw === 'string') return { raw };
+    if (raw === null) return { raw: null };
   } catch {
     // An oversized legacy checkpoint can fail Android's per-row read even
     // when the primary ledger still fits. Let the caller read the primary.
