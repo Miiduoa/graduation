@@ -85,16 +85,15 @@ function BoardsContent() {
   const [composeOpen, setComposeOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const loadVersion = useRef(0);
-  // Incremented when a list refresh actually applies a subscription snapshot,
-  // so a late single-board re-read cannot clobber a newer pull-to-refresh.
-  const appliedReadRevision = useRef(0);
+  // Order single-board queries at dispatch and list snapshots when applied.
+  const serverReadRevision = useRef(0);
   // Writes still in flight per board (several may be queued while offline).
   const pendingSubscriptionCounts = useRef(new Map<string, number>());
   // Per-board write revision: only boards written after a read started keep
   // their local state; every other board still takes the server snapshot.
   const subscriptionRevision = useRef(0);
   const boardWriteRevision = useRef(new Map<string, number>());
-  // Last list revision that applied this board from the server (not keepLocal).
+  // Last server read that applied membership for this board.
   const boardServerAppliedRevision = useRef(new Map<string, number>());
   // A list started before this board's last successful write used keepLocal.
   // After that write settles, re-check so a later server change is not dropped.
@@ -103,7 +102,7 @@ function BoardsContent() {
   // After a failed write, keep the rollback until a from-server re-check lands.
   // A later list may still be served from cache and omit the board.
   const awaitingServerConfirm = useRef(new Set<string>());
-  const pendingRollbackConfirmations = useRef(new Map<string, () => boolean>());
+  const latestRollbackConfirmationRevision = useRef(new Map<string, number>());
   // List membership skipped by keepLocal after a successful write. If the
   // follow-up from-server re-check fails, a list that already included a newer
   // subscription must still be applied.
@@ -165,8 +164,8 @@ function BoardsContent() {
       const { subscribedIds } = membership;
       for (const id of awaitingServerConfirm.current) {
         // A cache gap that omits a still-confirmed subscription must not
-        // overwrite the rollback or invalidate an in-flight from-server re-read.
-        // A list that already matches the rollback may apply and supersede a stale re-read.
+        // overwrite the rollback. Confirm again from the server because this
+        // refresh may have observed a change after the previous confirmation started.
         if (confirmedSubscribedRef.current.has(id) && !subscribedIds.has(id)) keepLocal.add(id);
       }
       const tracked = new Set([
@@ -182,8 +181,7 @@ function BoardsContent() {
         else nextConfirmed.delete(id);
       }
       confirmedSubscribedRef.current = nextConfirmed;
-      appliedReadRevision.current += 1;
-      const applied = appliedReadRevision.current;
+      const applied = ++serverReadRevision.current;
       for (const id of tracked) {
         if (!keepLocal.has(id)) {
           boardServerAppliedRevision.current.set(id, applied);
@@ -223,7 +221,6 @@ function BoardsContent() {
       if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
         setBoards([]);
         confirmedSubscribedRef.current = new Set();
-        appliedReadRevision.current += 1;
         applySubscribed(() => new Set());
       }
       setLoadError('暫時無法更新看板。請確認網路與登入狀態，再試一次。');
@@ -240,7 +237,9 @@ function BoardsContent() {
   // pull-to-refresh is never discarded. Best effort: errors keep the rollback.
   const reconcileBoardSubscription = useCallback(async (boardId: string, uid: string, sid: string) => {
     const revisionAtRead = subscriptionRevision.current;
-    const boardServerAppliedAtStart = boardServerAppliedRevision.current.get(boardId) ?? 0;
+    const readRevision = ++serverReadRevision.current;
+    const confirmingRollback = awaitingServerConfirm.current.has(boardId);
+    if (confirmingRollback) latestRollbackConfirmationRevision.current.set(boardId, readRevision);
     // latestIntent only moves forward and is never restored after a failed
     // write, so an older re-read cannot clobber a newer one for this board.
     const intentAtStart = latestIntent.current.get(boardId);
@@ -249,25 +248,25 @@ function BoardsContent() {
       mounted.current &&
       !pendingSubscriptionCounts.current.has(boardId) &&
       (boardWriteRevision.current.get(boardId) ?? -1) <= revisionAtRead &&
-      // A list supersedes this re-read only if it applied this board from the server.
-      (boardServerAppliedRevision.current.get(boardId) ?? 0) <= boardServerAppliedAtStart &&
+      (boardServerAppliedRevision.current.get(boardId) ?? 0) < readRevision &&
+      // A fresh rollback confirmation owns the decision even if it fails.
+      // An older response must leave rollback protection in place for the next refresh.
+      (!confirmingRollback || latestRollbackConfirmationRevision.current.get(boardId) === readRevision) &&
       latestIntent.current.get(boardId) === intentAtStart;
-    if (awaitingServerConfirm.current.has(boardId)) {
-      // Reuse a pending confirmation only while it can still apply to this board.
-      if (pendingRollbackConfirmations.current.get(boardId)?.()) return;
-      pendingRollbackConfirmations.current.set(boardId, canApply);
-    }
     try {
       // Read this board only. listSubscribedBoardIds is capped at 100 and
       // must not treat a missing id as "unsubscribed".
       const serverSubscribed = await isSubscribedToBoard(uid, sid, boardId, { fromServer: true });
       if (!canApply()) return;
+      boardServerAppliedRevision.current.set(boardId, readRevision);
       const nextConfirmed = new Set(confirmedSubscribedRef.current);
       if (serverSubscribed) nextConfirmed.add(boardId);
       else nextConfirmed.delete(boardId);
       confirmedSubscribedRef.current = nextConfirmed;
       awaitingServerConfirm.current.delete(boardId);
-      deferredListMembership.current.delete(boardId);
+      if (deferredListMembership.current.get(boardId) === deferredMembership) {
+        deferredListMembership.current.delete(boardId);
+      }
       applySubscribed((previous) => {
         if (previous.has(boardId) === serverSubscribed) return previous;
         const next = new Set(previous);
@@ -296,10 +295,6 @@ function BoardsContent() {
         return;
       }
       // Keep the pre-tap rollback or confirmed write; the next refresh will reconcile.
-    } finally {
-      if (pendingRollbackConfirmations.current.get(boardId) === canApply) {
-        pendingRollbackConfirmations.current.delete(boardId);
-      }
     }
   }, [applySubscribed]);
   reconcileBoardSubscriptionRef.current = reconcileBoardSubscription;

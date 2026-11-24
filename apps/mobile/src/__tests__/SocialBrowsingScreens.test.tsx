@@ -139,7 +139,7 @@ beforeEach(async () => {
   jest.mocked(fetchRecentCampusPosts).mockResolvedValue([]);
   jest.mocked(listBoards).mockResolvedValue([]);
   jest.mocked(listSubscribedBoardIds).mockResolvedValue([]);
-  jest.mocked(isSubscribedToBoard).mockResolvedValue(false);
+  jest.mocked(isSubscribedToBoard).mockReset().mockResolvedValue(false);
   jest.mocked(listActiveStoriesForSchool).mockResolvedValue([]);
   jest.mocked(listFollowingIds).mockResolvedValue([]);
   jest.mocked(followUser).mockResolvedValue(undefined);
@@ -738,7 +738,7 @@ test('a successful write clears rollback protection from an earlier failed write
   expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
 });
 
-test('a cache-gap list started after a failed write cannot drop the rollback or the in-flight re-read', async () => {
+test.each([true, false])('a cache-gap refresh after failed unsubscribe confirms membership %s despite an in-flight read', async (serverSubscribed) => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
   const view = render(<BoardsScreen />);
@@ -755,14 +755,20 @@ test('a cache-gap list started after a failed write cannot drop the rollback or 
   expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 
-  // A later pull can still be served from a cache that omits this board.
+  // The list might omit a subscribed board, or another device might have unsubscribed.
+  const refreshRead = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => refreshRead.promise);
   jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([]);
   await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
-  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 
+  await act(async () => { refreshRead.resolve(serverSubscribed); });
+  const expectedLabel = serverSubscribed ? '取消訂閱讀書會' : '訂閱讀書會';
+  expect(view.getByLabelText(expectedLabel)).toBeTruthy();
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+
   await act(async () => { reRead.resolve(true); });
-  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+  expect(view.getByLabelText(expectedLabel)).toBeTruthy();
 });
 
 test.each([false, true])('a refresh retries failed rollback confirmation and applies server membership %s', async (serverSubscribed) => {
@@ -816,6 +822,48 @@ test('a successful write still applies a later server subscription after a stale
   // Another device re-subscribed after this write; the in-flight list sees it.
   jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
   await act(async () => { subs.resolve(['board']); await refreshPromise; });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
+test.each([true, false])('a newer confirmation after successful unsubscribe wins in the same write generation (newer responds first: %s)', async (newerFirst) => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  const write = deferred();
+  jest.mocked(unsubscribeFromBoard).mockImplementationOnce(() => write.promise);
+  fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
+
+  const refresh = () => view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+  await act(async () => { await refresh(); });
+
+  const subs = deferred<string[]>();
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
+  let refreshPromise!: Promise<void>;
+  await act(async () => { refreshPromise = refresh(); });
+
+  const firstRead = deferred<boolean>();
+  const secondRead = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard)
+    .mockImplementationOnce(() => firstRead.promise)
+    .mockImplementationOnce(() => secondRead.promise);
+  await act(async () => { write.resolve(); });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  // Another device subscribes between the two single-board reads.
+  await act(async () => { subs.resolve(['board']); await refreshPromise; });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+  if (newerFirst) {
+    await act(async () => { secondRead.resolve(true); });
+    expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+    await act(async () => { firstRead.resolve(false); });
+  } else {
+    await act(async () => { firstRead.resolve(false); });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    await act(async () => { secondRead.resolve(true); });
+  }
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
