@@ -1048,3 +1048,38 @@ describe('bilingual timetable lookup uses the existing sourced building identity
     expect(result.matches).toEqual([location, collision]);
   });
 });
+
+describe('official Providence English building-name variants', () => {
+  it.each([
+    ['pu-wenxing', 'Bishop Kupfer Hall', 'Wen Xing Hall'],
+    ['pu-library', 'Luking Library', 'Gaesia Library'],
+    ['pu-gym', 'John Paul II Stadium', 'John Paul II Sports Hall'],
+  ])('resolves official and legacy names for %s without changing the pin', (id, official, legacy) => {
+    const location = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === id)!;
+    expect(location).toBeDefined();
+    // Names are sourced; 303 is synthetic and does not establish a classroom.
+    for (const name of [official, legacy]) {
+      const result = resolveCampusClassroom({
+        schoolId: 'pu', query: name + ' 303', locations: PROVIDENCE_CAMPUS_PLACES,
+      });
+      expect(result.status, name).toBe('matched');
+      expect(result.matches[0], name).toBe(location);
+    }
+    const imported = { ...location, name: official };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: location.name + '303', locations: [imported],
+    }).matches[0]).toBe(imported);
+    expect(resolveCampusClassroom({
+      schoolId: 'another-school', query: official + ' 303', locations: [location],
+    }).status).toBe('unmatched');
+    for (const invalid of [
+      { ...location, name: 'Unverified building' },
+      { ...location, lat: location.lat + 1 },
+      { ...location, category: '公車站' },
+    ]) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query: official + ' 303', locations: [invalid],
+      }).status).toBe('unmatched');
+    }
+  });
+});
