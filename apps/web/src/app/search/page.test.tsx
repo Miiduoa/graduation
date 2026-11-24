@@ -1372,6 +1372,7 @@ describe('continuing a search after opening a service', () => {
     ['?campus=pu&q=公車', 'record'],
     ['#results', 'record'],
     ['?campus=pu&q=公車', 'array'],
+    ['?campus=pu&q=公車', 'copied array'],
   ])(
     'restores the clicked result when a same-page application push (%s, %s) precedes the Router commit',
     async (url, shape) => {
@@ -1382,18 +1383,22 @@ describe('continuing a search after opening a service', () => {
       fireEvent.click(result);
       const original = window.history.state;
 
-      const data = Object.assign(shape === 'array' ? ['compact'] : {}, {
-        __NA: true,
-        __PRIVATE_NEXTJS_INTERNALS_TREE: structuredClone(original.__PRIVATE_NEXTJS_INTERNALS_TREE),
-      });
+      const isArray = shape !== 'record';
+      const data = shape === 'copied array'
+        ? Object.assign([], original)
+        : Object.assign(isArray ? ['compact'] : {}, {
+            __NA: true,
+            __PRIVATE_NEXTJS_INTERNALS_TREE: structuredClone(original.__PRIVATE_NEXTJS_INTERNALS_TREE),
+          });
       window.history.pushState(data, '', url);
       const intervening = window.history.state;
       expect(intervening.__campusSearchHistoryEntry).toEqual(expect.any(String));
       expect(intervening.__campusSearchHistoryEntry).not.toBe(original.__campusSearchHistoryEntry);
       expect(intervening.__campusSearchResultReturn).toEqual(original.__campusSearchResultReturn);
-      if (shape === 'array') {
+      if (isArray) {
         expect(Array.isArray(intervening)).toBe(true);
-        expect(intervening[0]).toBe('compact');
+        expect(intervening).toHaveLength(shape === 'copied array' ? 0 : 1);
+        if (shape === 'array') expect(intervening[0]).toBe('compact');
       }
       expect(scroll).not.toHaveBeenCalled();
       const pushedUrl = window.location.href;
@@ -1410,7 +1415,7 @@ describe('continuing a search after opening a service', () => {
       expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
       expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
       expect(scroll).toHaveBeenCalledTimes(1);
-      if (shape === 'array') {
+      if (isArray) {
         router.search = window.location.search;
         const routerEntry = structuredClone(nextState);
         Object.defineProperty(routerEntry, APP_ROUTER_HISTORY_REPLACE, { value: true });
@@ -1429,7 +1434,7 @@ describe('continuing a search after opening a service', () => {
       }
       returned.unmount();
 
-      if (shape === 'array') {
+      if (isArray) {
         await go(1);
         expect(window.location.pathname).toBe('/library');
         await go(-1);
@@ -1445,7 +1450,7 @@ describe('continuing a search after opening a service', () => {
       renderAfterFrame();
       expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
       expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
-      expect(scroll).toHaveBeenCalledTimes(shape === 'array' ? 2 : 1);
+      expect(scroll).toHaveBeenCalledTimes(isArray ? 2 : 1);
     },
   );
 
@@ -1633,6 +1638,52 @@ describe('continuing a search after opening a service', () => {
         expect(Array.isArray(window.history.state)).toBe(true);
         expect(window.history.state[0]).toBe('payload');
       }
+    },
+  );
+
+  it.each(['map', 'array'] as const)(
+    'preserves the same entry’s return through mounted campus replacements with a fresh %s',
+    async (shape) => {
+      selection.current = {
+        selectedSchool: { id: 'pu', code: 'PU' },
+        loading: false,
+        catalogStatus: 'ready',
+      };
+      const entry = leaveLibrary();
+      await go(-1);
+      const view = renderAfterFrame();
+      expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+      expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+
+      for (const campus of ['nthu', 'pu']) {
+        selection.current.loading = true;
+        const state = shape === 'map' ? new Map([['campus', campus]]) : [campus];
+        act(() => move(`?campus=${campus}&q=公車&category=campus`, state));
+        view.rerender(<SearchPage />);
+        selection.current.selectedSchool = { id: campus, code: campus.toUpperCase() };
+        selection.current.loading = false;
+        view.rerender(<SearchPage />);
+        expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('');
+        expect(window.location.search).toBe(`?campus=${campus}`);
+        expect(window.history.state).toMatchObject({
+          __campusSearchHistoryEntry: entry.__campusSearchHistoryEntry,
+          __campusSearchResultReturn: entry.__campusSearchResultReturn,
+        });
+        expect(scroll).toHaveBeenCalledTimes(1);
+      }
+      view.unmount();
+
+      await go(1);
+      expect(window.location.pathname).toBe('/library');
+      await go(-1);
+      expect(window.location.search).toBe('?campus=pu');
+      renderAfterFrame();
+      expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+      expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe(
+        'true',
+      );
+      expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+      expect(scroll).toHaveBeenCalledTimes(2);
     },
   );
 

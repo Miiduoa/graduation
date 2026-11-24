@@ -134,10 +134,10 @@ function installHistoryTracking() {
       const record = isHistoryRecord(data);
       const copiedState = !record && hasSearchHistoryFields(data);
       // A same-page application push can become the entry immediately behind
-      // the pending result. Bind the current snapshot to its new key after the write succeeds.
+      // the pending result. Use the active entry to authorize the snapshot, then bind
+      // it to the new key after the write succeeds.
       const carriesReturn =
         push && !routerCommit && !changesPage &&
-        !copiedState &&
         searchEntry && isSearchResultNavigationPending(searchEntry.saved.token);
       // Normalize any payload that needs entry metadata before serialization.
       const cloned = data != null && !record &&
@@ -332,8 +332,8 @@ export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token'>) {
   }
 }
 
-export function supersedeSearchResultReturnForFilterEdit() {
-  // A filter edit supersedes the current traversal while keeping its saved entry.
+export function supersedeSearchResultReturn() {
+  // Reset the active return while keeping the entry's saved filters and destination pairing.
   publishReturn(null, null);
   const entry = readSearchEntry(window.history.state);
   if (entry && isSearchResultNavigationPending(entry.saved.token)) {
@@ -343,7 +343,7 @@ export function supersedeSearchResultReturnForFilterEdit() {
 }
 
 export function clearSearchResultReturn() {
-  publishReturn(null, null);
+  supersedeSearchResultReturn();
   const saved = readReturn(window.history.state);
   if (!saved) return;
   const key = readEntryKey(window.history.state);

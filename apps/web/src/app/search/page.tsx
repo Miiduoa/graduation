@@ -27,7 +27,7 @@ import {
   finishSearchFilterArrival,
   getSearchHistoryEntryKey,
   rememberSearchResultReturn,
-  supersedeSearchResultReturnForFilterEdit,
+  supersedeSearchResultReturn,
   useSearchResultReturn,
 } from './searchResultReturn';
 import styles from './search.module.css';
@@ -149,7 +149,8 @@ function ServiceDirectory() {
     // On a campus traversal the browser already selected the arriving entry.
     // Keep its saved return and restore its URL filters under the new draft scope.
     if (changedScope && (changedOwner || !isHistoryArrival)) {
-      clearSearchResultReturn();
+      if (changedOwner) clearSearchResultReturn();
+      else supersedeSearchResultReturn();
       editedFilters.current = null;
       historyRestoration.current = null;
       compositionScope.current = null;
@@ -320,7 +321,7 @@ function ServiceDirectory() {
     next: { query: string; category: ServiceCategory | 'all' },
     persist = true,
   ) {
-    supersedeSearchResultReturnForFilterEdit();
+    supersedeSearchResultReturn();
     requestSequence.current += 1;
     setAnalysis(null);
     setFilters({ scope: draftScope, ...next });
