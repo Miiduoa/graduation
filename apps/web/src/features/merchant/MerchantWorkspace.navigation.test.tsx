@@ -1105,6 +1105,79 @@ it.each([
 });
 
 it.each([
+  { entryFirst: true, refreshStatus: 200 },
+  { entryFirst: false, refreshStatus: 200 },
+  { entryFirst: true, refreshStatus: 403 },
+  { entryFirst: true, refreshStatus: 404 },
+  { entryFirst: true, refreshStatus: 503 },
+])(
+  'rechecks access after returning during a pause (entry detail first: $entryFirst, refresh status: $refreshStatus)',
+  async ({ entryFirst, refreshStatus }) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const open = { ...detail('store-a', true), readinessVersion: 6 };
+    const paused = { ...open, readinessVersion: 7, locationStatus: 'closed', publicAccess: false };
+    const reopened = { ...open, readinessVersion: 8 };
+    let finishEntry!: (value: typeof reopened) => void;
+    const entry = new Promise<typeof reopened>((resolve) => { finishEntry = resolve; });
+    let finishPause!: (value: typeof paused) => void;
+    const pause = new Promise<typeof paused>((resolve) => { finishPause = resolve; });
+    let finishRefresh!: (value: typeof paused) => void;
+    let failRefresh!: (error: NuniError) => void;
+    const refresh = new Promise<typeof paused>((resolve, reject) => {
+      finishRefresh = resolve;
+      failRefresh = reject;
+    });
+    const readDetail = vi.fn()
+      .mockResolvedValueOnce(open)
+      .mockResolvedValueOnce(open)
+      .mockReturnValueOnce(entry)
+      .mockReturnValueOnce(refresh);
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
+      if (resource === path) return readDetail();
+      if (resource === `${path}/availability`) return pause;
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+    expect(mocks.request).toHaveBeenCalledWith(
+      `${path}/availability`, 'context-a', { acceptingOrders: false }, undefined,
+    );
+    await act(async () => window.history.back());
+    await screen.findByRole('link', { name: '管理門市：一樓' });
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+    await act(async () => window.history.forward());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+
+    if (entryFirst) await act(async () => finishEntry(reopened));
+    await act(async () => finishPause(paused));
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
+    if (!entryFirst) await act(async () => finishEntry(reopened));
+    const pendingPause = screen.queryByRole<HTMLButtonElement>('button', { name: '暫停接單' });
+    expect(pendingPause?.disabled ?? true).toBe(true);
+    if (refreshStatus !== 200) {
+      await act(async () => failRefresh(new NuniError(refreshStatus, 'DETAIL_FAILED')));
+      expect(screen.getByRole('alert')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
+      expect(screen.queryByRole('link', { name: '處理訂單與收銀' })).toBeNull();
+      return;
+    }
+    await act(async () => finishRefresh(paused));
+
+    expect(screen.getByText('營業中')).toBeTruthy();
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
+    expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    fireEvent.click(screen.getByRole('link', { name: '處理訂單與收銀' }));
+    await screen.findByRole('region', { name: '門市訂單工作台' });
+    expect(readDetail).toHaveBeenCalledTimes(4);
+  },
+);
+
+it.each([
   { status: 403, legacy: false },
   { status: 404, legacy: false },
   { status: 403, legacy: true },

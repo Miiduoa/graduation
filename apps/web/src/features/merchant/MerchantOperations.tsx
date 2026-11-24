@@ -78,6 +78,8 @@ const isUnknown = (failure: unknown) =>
   failure.status === 408 ||
   failure.status >= 500;
 
+const detailReadError = '無法確認門市目前的資料。草稿已保留，請重新讀取。';
+
 export function MerchantOperations({
   context,
   tenantId,
@@ -177,6 +179,7 @@ export function MerchantOperations({
   const lock = useRef(false);
   const run = useRef(0);
   const accessRevision = useRef(0);
+  const entryAccessRevision = useRef(0);
   const pendingAccessRead = useRef(0);
   const observedRevocation = useRef(accessRevocation);
   useLayoutEffect(() => {
@@ -198,6 +201,7 @@ export function MerchantOperations({
     ++run.current;
     ++mutationRun.current;
     pendingAccessRead.current = 0;
+    entryAccessRevision.current = 0;
   }, []);
   useLayoutEffect(() => {
     drafts.set(draftKey, {
@@ -224,19 +228,17 @@ export function MerchantOperations({
   );
 
   const showDetail = useCallback(
-    (merged: Detail | null) => {
-      if (!beginRequest && merged) setDetail(merged);
-      setFresh(!!merged);
+    (merged: Detail) => {
+      if (!beginRequest) setDetail(merged);
       setMenuConfirmed(false);
       setActivationConfirmed(false);
-      return merged;
     },
     [beginRequest],
   );
 
   const accept = (next: Detail, revision: number) => {
     const confirmation = confirmDetail(next, false, revision);
-    // A rejected write receipt leaves the current freshness and access checks in effect.
+    // Receipts update the detail and notices. Only a GET can establish entry freshness.
     if (!confirmation) return null;
     showDetail(confirmation.detail);
     return confirmation.won ? confirmation.detail : null;
@@ -254,6 +256,7 @@ export function MerchantOperations({
       }
       if (updateView) {
         accessRevision.current = Math.max(accessRevision.current, revoked);
+        entryAccessRevision.current = 0;
         setFresh(false);
         setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
       }
@@ -269,6 +272,7 @@ export function MerchantOperations({
       )
         return false;
       // Session invalidation applies even after navigation retires the request's view.
+      entryAccessRevision.current = 0;
       localConfirmations.clear();
       setNotice(null);
       setDetail(null);
@@ -277,6 +281,22 @@ export function MerchantOperations({
       return true;
     },
     [localConfirmations],
+  );
+
+  const confirmEntry = useCallback(
+    (detail: Detail, revision: number, reveal: boolean) => {
+      if (revision < accessRevision.current || revision <= observedRevocation.current) return;
+      accessRevision.current = revision;
+      entryAccessRevision.current = revision;
+      showDetail(detail);
+      if (reveal) {
+        setFresh(true);
+        setEntryVerified(true);
+        setReadUnavailable(false);
+        setError((current) => current === detailReadError ? '' : current);
+      }
+    },
+    [showDetail],
   );
 
   const checkAccess = useCallback(
@@ -291,7 +311,7 @@ export function MerchantOperations({
         if (!active.current || session !== sessionRun.current) return;
         const merged = confirmDetail(next, true, revision)?.detail ?? null;
         if (merged && verifiesEntry && current()) {
-          accessRevision.current = Math.max(accessRevision.current, revision);
+          confirmEntry(merged, revision, !readAfterWrite.current);
         }
       } catch (failure) {
         if (!active.current || session !== sessionRun.current || !(failure instanceof NuniError)) return;
@@ -301,11 +321,11 @@ export function MerchantOperations({
         }
       }
     },
-    [confirmDetail, expireSession, nextRevision, locationId, operations, revokeDetail, tenantId],
+    [confirmDetail, confirmEntry, expireSession, nextRevision, locationId, operations, revokeDetail, tenantId],
   );
 
   const read = useCallback(
-    async (reconcile = true) => {
+    async (reconcile = true, afterWrite = false) => {
       readAfterWrite.current = false;
       const session = sessionRun.current;
       const version = ++run.current;
@@ -323,14 +343,18 @@ export function MerchantOperations({
         if (!active.current || session !== sessionRun.current) return;
         const merged = confirmDetail(next, true, revision)?.detail ?? null;
         if (!current()) return;
-        showDetail(merged);
         if (!merged) {
+          // A rejected refresh cannot replace a successful GET for this entry.
+          if (afterWrite && entryAccessRevision.current > observedRevocation.current) {
+            setEntryVerified(true);
+            setFresh(true);
+            return;
+          }
           setReadUnavailable(true);
-          setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+          setError(detailReadError);
           return;
         }
-        accessRevision.current = Math.max(accessRevision.current, revision);
-        if (!readAfterWrite.current) setEntryVerified(true);
+        confirmEntry(merged, revision, !readAfterWrite.current);
         // A count of zero cannot prove a non-idempotent menu request failed:
         // an existing menu may have no remaining sellable stock.
         if (reconcile) {
@@ -346,8 +370,9 @@ export function MerchantOperations({
         if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
           revokeDetail(revision, current());
         } else if (current()) {
+          setFresh(false);
           setReadUnavailable(true);
-          setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
+          setError(detailReadError);
         }
       } finally {
         if (pendingAccessRead.current === revision) pendingAccessRead.current = 0;
@@ -355,7 +380,7 @@ export function MerchantOperations({
       }
     },
     [
-      operations, tenantId, locationId, confirmDetail, showDetail, drafts, draftKey,
+      operations, tenantId, locationId, confirmDetail, confirmEntry, drafts, draftKey,
       expireSession, revokeDetail, nextRevision,
     ],
   );
@@ -368,6 +393,7 @@ export function MerchantOperations({
     }
   }, [suspended, drafts, draftKey]);
   const verifyEntry = useCallback(() => {
+    entryAccessRevision.current = 0;
     setEntryVerified(false);
     setReadUnavailable(false);
     let checkingAccess = true;
@@ -462,7 +488,7 @@ export function MerchantOperations({
         lock.current = false;
         if (active.current) {
           setBusy(null);
-          if (readAfterWrite.current) void read(false);
+          if (readAfterWrite.current) void read(false, true);
         }
       }
     }
