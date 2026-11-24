@@ -867,6 +867,27 @@ test.each([true, false])('a newer confirmation after successful unsubscribe wins
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
+test('an older successful confirmation still applies when a newer confirmation fails', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  const firstRead = deferred<boolean>();
+  jest.mocked(unsubscribeFromBoard).mockRejectedValueOnce(new Error('offline'));
+  jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => firstRead.promise);
+  await act(async () => { fireEvent.press(view.getByLabelText('取消訂閱讀書會')); });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([]);
+  jest.mocked(isSubscribedToBoard).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  await act(async () => { firstRead.resolve(false); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+});
+
 test('two native presses before a rerender toggle from the newest choice', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const view = render(<BoardsScreen />);

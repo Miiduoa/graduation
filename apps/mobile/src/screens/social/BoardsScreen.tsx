@@ -102,7 +102,6 @@ function BoardsContent() {
   // After a failed write, keep the rollback until a from-server re-check lands.
   // A later list may still be served from cache and omit the board.
   const awaitingServerConfirm = useRef(new Set<string>());
-  const latestRollbackConfirmationRevision = useRef(new Map<string, number>());
   // List membership skipped by keepLocal after a successful write. If the
   // follow-up from-server re-check fails, a list that already included a newer
   // subscription must still be applied.
@@ -238,20 +237,17 @@ function BoardsContent() {
   const reconcileBoardSubscription = useCallback(async (boardId: string, uid: string, sid: string) => {
     const revisionAtRead = subscriptionRevision.current;
     const readRevision = ++serverReadRevision.current;
-    const confirmingRollback = awaitingServerConfirm.current.has(boardId);
-    if (confirmingRollback) latestRollbackConfirmationRevision.current.set(boardId, readRevision);
     // latestIntent only moves forward and is never restored after a failed
     // write, so an older re-read cannot clobber a newer one for this board.
     const intentAtStart = latestIntent.current.get(boardId);
     const deferredMembership = deferredListMembership.current.get(boardId);
+    // Only a successful confirmation occupies the sequence. A newer query that
+    // fails must not discard an older successful result.
     const canApply = () =>
       mounted.current &&
       !pendingSubscriptionCounts.current.has(boardId) &&
       (boardWriteRevision.current.get(boardId) ?? -1) <= revisionAtRead &&
       (boardServerAppliedRevision.current.get(boardId) ?? 0) < readRevision &&
-      // A fresh rollback confirmation owns the decision even if it fails.
-      // An older response must leave rollback protection in place for the next refresh.
-      (!confirmingRollback || latestRollbackConfirmationRevision.current.get(boardId) === readRevision) &&
       latestIntent.current.get(boardId) === intentAtStart;
     try {
       // Read this board only. listSubscribedBoardIds is capped at 100 and
