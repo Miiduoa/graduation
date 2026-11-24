@@ -252,3 +252,31 @@ it('does not move focus after removing an event whose button was never focused',
   expect(await screen.findByText('還沒有收藏的活動')).toBeTruthy();
   expect(document.activeElement).toBe(browse);
 });
+
+it.each(['moved', 'pointer', 'keyboard'] as const)(
+  'restores retry focus only when needed (%s)',
+  async (mode) => {
+    loadCampusEventPage.mockResolvedValue(page([event('retry-talk', '重試講座')]));
+    const storage = Object.hasOwn(localStorage, 'setItem') ? localStorage : Storage.prototype;
+    const write = vi.spyOn(storage, 'setItem').mockImplementationOnce(() => {
+      throw new Error('quota');
+    });
+    mount(`/events?schoolId=${school}&campus=${school}`);
+    const save = await screen.findByRole('button', { name: '收藏「重試講座」' });
+    await waitFor(() => expect(save.getAttribute('aria-disabled')).toBeNull());
+    fireEvent.click(save);
+    const alert = await screen.findByRole('alert');
+    const retry = within(alert).getByRole('button', { name: '重試' });
+    const browse = screen.getByRole('button', { name: '瀏覽活動' });
+    const feedback = alert.parentElement;
+    write.mockRestore();
+
+    if (mode === 'pointer') browse.focus();
+    else retry.focus();
+    fireEvent.click(retry);
+    if (mode === 'moved') browse.focus();
+    expect(await screen.findByText('已收藏「重試講座」。')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(document.activeElement).toBe(mode === 'keyboard' ? feedback : browse);
+  },
+);

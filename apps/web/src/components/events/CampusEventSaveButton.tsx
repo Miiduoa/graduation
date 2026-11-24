@@ -60,17 +60,28 @@ export function CampusEventSaveButton({ event, shortlist, showHint = false }: {
 
 /**
  * One persistent live region for save/remove results and a persistent-failure alert with retry.
- * Retry restores focus to this container because the retry button disappears on success.
+ * Retry restores lost keyboard focus to this container when its button disappears on success.
  */
 export function CampusEventShortlistFeedback({ shortlist }: { shortlist: CampusEventShortlistController }) {
   const container = useRef<HTMLDivElement>(null);
   const [retrying, setRetrying] = useState(false);
-  async function retry() {
-    if (retrying) return;
+  const retryInFlight = useRef(false);
+  async function retry(origin: HTMLButtonElement) {
+    if (retryInFlight.current) return;
+    retryInFlight.current = true;
+    const hadFocus = document.activeElement === origin;
     setRetrying(true);
     try {
-      if (await shortlist.retry()) container.current?.focus();
+      if (await shortlist.retry()) {
+        // Restore lost keyboard focus only; a background retry must not pull
+        // the user away from another control or steal pointer focus.
+        const active = document.activeElement;
+        if (hadFocus && (active === origin || active === document.body)) {
+          container.current?.focus();
+        }
+      }
     } finally {
+      retryInFlight.current = false;
       setRetrying(false);
     }
   }
@@ -82,7 +93,7 @@ export function CampusEventShortlistFeedback({ shortlist }: { shortlist: CampusE
       {shortlist.error ? (
         <div role="alert" className={styles.shortlistError}>
           <p>{shortlist.error}</p>
-          <button type="button" className="btn" aria-disabled={retrying ? 'true' : undefined} onClick={() => void retry()}>
+          <button type="button" className="btn" aria-disabled={retrying ? 'true' : undefined} onClick={(event) => void retry(event.currentTarget)}>
             {retrying ? '重試中…' : '重試'}
           </button>
         </div>
