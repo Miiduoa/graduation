@@ -25,7 +25,7 @@ proc_group_leader_matches() {
 
 proc_group_members() {
   local group="$1" start="$2" marker="$3" signal="${4:-}"
-  local entry pid member_start proc_group proc_start proc_state
+  local entry pid member_start proc_group proc_start proc_state failed=0
   [[ "$group" =~ ^([2-9]|[1-9][0-9]+)$ && "$start" =~ ^[0-9]+$ && -n "$marker" ]] || return 1
   for entry in /proc/[0-9]*; do
     pid="${entry##*/}"
@@ -37,9 +37,13 @@ proc_group_members() {
     grep -zFxq -- "$marker" "$entry/environ" 2>/dev/null || continue
     proc_identity "$pid" && [[ "$proc_group" == "$group" && "$proc_start" == "$member_start" ]] || continue
     [[ -n "$signal" ]] || return 0
-    kill "-$signal" -- "$pid" 2>/dev/null || true
+    if ! kill "-$signal" -- "$pid" 2>/dev/null &&
+      proc_identity "$pid" && [[ "$proc_group" == "$group" && "$proc_start" == "$member_start" &&
+        "$proc_state" != Z && "$proc_state" != X ]]; then
+      failed=1
+    fi
   done
-  [[ -n "$signal" ]]
+  [[ -n "$signal" && "$failed" -eq 0 ]]
 }
 
 # A live leader must belong to this run before any member is signalled.

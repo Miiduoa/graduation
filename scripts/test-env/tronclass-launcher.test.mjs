@@ -349,6 +349,57 @@ test('launcher reuses an existing session key only when it is a private regular 
   }
 });
 
+test('launcher exports the validated descriptor when the runtime path is replaced', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-key-replacement-'));
+  const runtime = path.join(dir, 'runtime');
+  const replacement = path.join(dir, 'replacement');
+  mkdirSync(runtime, { mode: 0o700 });
+  mkdirSync(replacement, { mode: 0o700 });
+  writeSessionKey(path.join(runtime, 'bff-session.key'));
+  writeSessionKey(path.join(replacement, 'tronclass-session.key'));
+  writeFileSync(path.join(replacement, 'bff-session.key'), 'y'.repeat(64), { mode: 0o644 });
+  try {
+    const preload = path.join(dir, 'replace.cjs');
+    writeFileSync(preload, `
+const fs = require('node:fs');
+const runtime = process.env.TRONCLASS_RUNTIME_DIR;
+if (process.argv[3] === 'bff-session.key') {
+  const readSync = fs.readSync;
+  fs.readSync = function (fd, ...args) {
+    if (fs.readlinkSync('/proc/self/fd/' + fd) === runtime + '/bff-session.key') {
+      fs.renameSync(runtime, runtime + '-original');
+      fs.renameSync(${JSON.stringify(replacement)}, runtime);
+    }
+    return readSync.call(this, fd, ...args);
+  };
+}
+`);
+    writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args[0] === '-e') process.exit(0);
+if (args[0].endsWith('/firebase.js')) {
+  require('node:fs').writeFileSync(${JSON.stringify(path.join(dir, 'observed'))},
+    String(process.env.BFF_SESSION_SECRET === 'x'.repeat(64)));
+  process.exit(73);
+}
+const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, args, { stdio: 'inherit' });
+process.exit(status ?? 1);
+`, { mode: 0o700 });
+    writeFileSync(path.join(dir, 'java'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      timeout: 10000,
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, TRONCLASS_RUNTIME_DIR: runtime,
+        NODE_OPTIONS: `--require=${preload}` },
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(statSync(path.join(runtime, 'bff-session.key')).mode & 0o777, 0o644);
+    assert.equal(readFileSync(path.join(dir, 'observed'), 'utf8'), 'true');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('launcher refuses a reused session key that is not mode 0600', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-mode-'));
   const runtime = path.join(dir, 'runtime');
@@ -1575,7 +1626,7 @@ process.exit(0);
   }
 });
 
-test('launcher INT/TERM during a foreground health check stops health, web, and emulators', { timeout: 20000 }, async () => {
+async function assertServiceCleanup(signal, helperFailure = false) {
   const { spawn } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
   const { once } = await import('node:events');
@@ -1583,6 +1634,14 @@ test('launcher INT/TERM during a foreground health check stops health, web, and 
   const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-health-cleanup-'));
   const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
   const marker = name => path.join(dir, name);
+  if (helperFailure) {
+    writeFileSync(marker('bash-env'), `
+source() {
+  if [[ "$0" = signal-process-group ]]; then return 1; fi
+  builtin source "$@"
+}
+`);
+  }
   writeSessionKey(path.join(dir, 'bff-session.key'));
   writeSessionKey(path.join(dir, 'tronclass-session.key'));
   writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
@@ -1608,10 +1667,16 @@ if (arg.endsWith('/firebase.js')) {
 } else if (arg.endsWith('/seed.cjs')) {
   writePid('seed.pid');
 } else if (arg.endsWith('/next')) {
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.on(signal, () => {
+      fs.writeFileSync(path.join(dir, 'web-signal'), signal);
+      process.exit();
+    });
+  }
   writePid('web.pid');
-  process.on('SIGTERM', () => process.exit(0));
-  process.on('SIGINT', () => process.exit(0));
-  setInterval(() => {}, 1000);
+  require('node:net').createServer().listen(0, '127.0.0.1', function () {
+    fs.writeFileSync(path.join(dir, 'web-port'), String(this.address().port));
+  });
 } else if (arg.endsWith('/health-tronclass.cjs')) {
   writePid('health.pid');
   process.on('SIGTERM', () => process.exit(0));
@@ -1627,8 +1692,9 @@ if (arg.endsWith('/firebase.js')) {
       TMPDIR: dir,
       HOME: dir,
       TRONCLASS_RUNTIME_DIR: dir,
-      TRONCLASS_CHECK_HEALTH: '1',
+      TRONCLASS_CHECK_HEALTH: signal === 'health cleanup' ? '1' : '0',
       TRONCLASS_VERIFY_RUNTIME: '0',
+      ...(helperFailure ? { BASH_ENV: marker('bash-env') } : {}),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -1639,22 +1705,48 @@ if (arg.endsWith('/firebase.js')) {
   }
   try {
     const deadline = Date.now() + 8000;
-    while (!existsSync(marker('health-started')) && Date.now() < deadline) await delay(20);
-    assert.ok(existsSync(marker('health-started')), output);
-    const pids = ['health.pid', 'web.pid', 'emulator.pid'].map(name => Number(readFileSync(marker(name), 'utf8')));
+    const health = signal === 'health cleanup';
+    const ready = marker(health ? 'health-started' : 'web-port');
+    while (!existsSync(ready) && Date.now() < deadline) await delay(20);
+    assert.ok(existsSync(ready), output);
+    const pids = ['web.pid', 'emulator.pid', ...(health ? ['health.pid'] : [])]
+      .map(name => Number(readFileSync(marker(name), 'utf8')));
     for (const pid of pids) process.kill(pid, 0);
     const started = Date.now();
-    assert.ok(proc.kill('SIGTERM'));
-    assert.deepEqual(await exited, [143, null], output);
+    if (health) {
+      assert.ok(proc.kill('SIGTERM'));
+    } else {
+      const wrapperPid = Number(readFileSync(`/proc/${pids[0]}/status`, 'utf8').match(/^PPid:\s+(\d+)/m)?.[1]);
+      assert.ok(wrapperPid > 1);
+      process.kill(wrapperPid, signal);
+      const signalDeadline = Date.now() + 4000;
+      while (!existsSync(marker('web-signal')) && Date.now() < signalDeadline) await delay(20);
+      assert.ok(existsSync(marker('web-signal')), output);
+    }
+    assert.deepEqual(await exited, [health ? 143 : helperFailure ? 1 : 0, null], output);
+    if (helperFailure) assert.match(output, /Unable to forward the signal/);
+    assert.equal(readFileSync(marker('web-signal'), 'utf8'), health ? 'SIGTERM' : signal);
     assert.ok(Date.now() - started < 8000, 'cleanup should not wait for the health loop to finish on its own');
     for (const pid of pids) {
       assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, `pid ${pid} still alive`);
     }
   } finally {
-    if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+    if (proc.exitCode === null && proc.signalCode === null) {
+      proc.kill('SIGTERM');
+      await exited;
+    }
     rmSync(dir, { recursive: true, force: true });
   }
-});
+}
+
+test('launcher TERM during a foreground health check stops health, web, and emulators', { timeout: 20000 },
+  () => assertServiceCleanup('health cleanup'));
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  test(`launcher forwards ${signal} sent directly to the Next wrapper`, { timeout: 20000 },
+    () => assertServiceCleanup(signal));
+}
+test('launcher cleans up the verified Next group if the wrapper cannot load the identity helper', { timeout: 20000 },
+  () => assertServiceCleanup('SIGTERM', true));
 
 test('launcher cleanup stops web, emulator, and health in parallel under a shared 6-second deadline', { timeout: 20000 }, async () => {
   const { spawn } = await import('node:child_process');

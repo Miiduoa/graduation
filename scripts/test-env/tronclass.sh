@@ -154,8 +154,8 @@ tronclass_early_cleanup() {
 trap 'tronclass_early_cleanup' EXIT
 trap 'tronclass_early_cleanup INT' INT
 trap 'tronclass_early_cleanup TERM' TERM
-for TRONCLASS_KEY_NAME in bff-session tronclass-session; do
-  node - "$TRONCLASS_RUNTIME_DIR" "$TRONCLASS_KEY_NAME.key" <<'NODE'
+tronclass_read_session_key() {
+  node - "$TRONCLASS_RUNTIME_DIR" "$1.key" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomBytes } = require('node:crypto');
@@ -181,32 +181,48 @@ function assertNoSymlinkComponent(targetPath, missingOk) {
 
 assertNoSymlinkComponent(path.dirname(target), false);
 
-function validateExistingKey() {
+function readExistingKey() {
   assertNoSymlinkComponent(target, false);
-  const existing = fs.lstatSync(target);
+  const resolvedDir = fs.realpathSync(runtimeDir);
+  const named = fs.lstatSync(target, { bigint: true });
+  const fd = fs.openSync(target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+  try {
+    const existing = fs.fstatSync(fd, { bigint: true });
+    if (existing.dev !== named.dev || existing.ino !== named.ino) {
+      throw new Error('Session key file changed while opening it.');
+    }
+    validateKeyIdentity(existing);
+    const resolvedKey = fs.readlinkSync(`/proc/self/fd/${fd}`);
+    const prefix = resolvedDir.endsWith(path.sep) ? resolvedDir : resolvedDir + path.sep;
+    if (!resolvedKey.startsWith(prefix)) {
+      throw new Error('Refusing a session key path outside the runtime directory.');
+    }
+    const buffer = Buffer.alloc(65);
+    const length = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    const body = buffer.toString('utf8', 0, length);
+    if (length !== 64 || !/^[A-Za-z0-9_-]{64}$/.test(body)) {
+      const err = new Error('Invalid local session key file.');
+      err.code = 'TRONCLASS_KEY_INCOMPLETE';
+      throw err;
+    }
+    return body;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function validateKeyIdentity(existing) {
   if (existing.isSymbolicLink() || !existing.isFile()) {
     throw new Error('Refusing a non-regular session key file.');
   }
-  if (existing.uid !== process.getuid()) {
+  if (existing.uid !== BigInt(process.getuid())) {
     throw new Error('Refusing a session key file owned by another user.');
   }
-  if (existing.nlink !== 1) {
+  if (existing.nlink !== 1n) {
     throw new Error('Refusing a hard-linked session key file.');
   }
-  if ((existing.mode & 0o777) !== 0o600) {
+  if ((existing.mode & 0o777n) !== 0o600n) {
     throw new Error('Refusing a session key file that is not mode 0600.');
-  }
-  const resolvedKey = fs.realpathSync(target);
-  const resolvedDir = fs.realpathSync(runtimeDir);
-  const prefix = resolvedDir.endsWith(path.sep) ? resolvedDir : resolvedDir + path.sep;
-  if (!resolvedKey.startsWith(prefix)) {
-    throw new Error('Refusing a session key path outside the runtime directory.');
-  }
-  const body = fs.readFileSync(resolvedKey, 'utf8');
-  if (!/^[A-Za-z0-9_-]{64}$/.test(body)) {
-    const err = new Error('Invalid local session key file.');
-    err.code = 'TRONCLASS_KEY_INCOMPLETE';
-    throw err;
   }
 }
 
@@ -219,12 +235,10 @@ for (;;) {
     existing = null;
   }
   try {
-    if (existing) {
-      validateExistingKey();
-      break;
+    if (!existing) {
+      fs.writeFileSync(target, randomBytes(48).toString('base64url'), { mode: 0o600, flag: 'wx' });
     }
-    fs.writeFileSync(target, randomBytes(48).toString('base64url'), { mode: 0o600, flag: 'wx' });
-    validateExistingKey();
+    process.stdout.write(readExistingKey());
     break;
   } catch (error) {
     const retry = error && (error.code === 'EEXIST' || error.code === 'ENOENT' ||
@@ -234,9 +248,11 @@ for (;;) {
   }
 }
 NODE
-done
-export BFF_SESSION_SECRET="$(<"$TRONCLASS_RUNTIME_DIR/bff-session.key")"
-export TRONCLASS_SESSION_SECRET="$(<"$TRONCLASS_RUNTIME_DIR/tronclass-session.key")"
+}
+# Capture the bytes from the verified descriptor before exporting them.
+BFF_SESSION_SECRET="$(tronclass_read_session_key bff-session)"
+TRONCLASS_SESSION_SECRET="$(tronclass_read_session_key tronclass-session)"
+export BFF_SESSION_SECRET TRONCLASS_SESSION_SECRET
 
 TRONCLASS_EMULATOR_PID=''
 TRONCLASS_WEB_PID=''
@@ -615,11 +631,12 @@ tronclass_run_logged() {
   # subshell that can ignore INT and leave the child holding the port.
   local -a command=(node)
   if [ "${TRONCLASS_RUN_LOGGED_EXEC:-}" = '1' ]; then command=(exec node); fi
-  "${command[@]}" - "$log" "$@" <<'NODE'
+  "${command[@]}" - "$log" "$TRONCLASS_PROJECT_ROOT/scripts/process-identity.sh" "$@" <<'NODE'
 const fs = require('node:fs');
 const { spawn, spawnSync } = require('node:child_process');
 const logPath = process.argv[2];
-const argv = process.argv.slice(3);
+const identityHelper = process.argv[3];
+const argv = process.argv.slice(4);
 function refuseLog() {
   process.stderr.write('Refusing a symbolic link or unusable log file.\n');
   process.exit(1);
@@ -648,9 +665,14 @@ let childIdentity;
 let pendingSignal = null;
 const stop = (signal) => {
   if (!child) { pendingSignal = signal; return; }
-  if (!childIdentity) return;
-  spawnSync('bash', ['-c', 'source scripts/process-identity.sh && proc_signal_marked_group "$@"',
-    'signal-process-group', String(child.pid), childIdentity.start, `TRONCLASS_LAUNCHED_RUN=${runId}`, signal.slice(3)]);
+  const result = childIdentity && spawnSync('bash', ['-c', 'source "$1" && shift && proc_signal_marked_group "$@"',
+    'signal-process-group', identityHelper, String(child.pid), childIdentity.start,
+    `TRONCLASS_LAUNCHED_RUN=${runId}`, signal.slice(3)], { stdio: ['ignore', 'ignore', 'inherit'] });
+  if (result?.status !== 0) {
+    process.stderr.write('Unable to forward the signal to the verified child process group.\n');
+    // Let the launcher's cleanup retry using its verified group record.
+    process.exit(1);
+  }
 };
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGTERM', () => stop('SIGTERM'));
@@ -673,10 +695,11 @@ function readIdentity(pid) {
 }
 const pgidPath = `${logPath}.pgid.${runId}`;
 try {
-  childIdentity = readIdentity(child.pid);
-  const startTime = childIdentity.start;
-  if (!startTime || childIdentity.group !== String(child.pid)) throw new Error('group identity');
+  const identity = readIdentity(child.pid);
+  const startTime = identity.start;
+  if (!startTime || identity.group !== String(child.pid)) throw new Error('group identity');
   if (!/^[0-9a-fA-F]{32}$/.test(runId)) throw new Error('run-id');
+  childIdentity = identity;
   const tmpPath = path.join(path.dirname(pgidPath), `.pgid-${process.pid}-${crypto.randomBytes(8).toString('hex')}.tmp`);
   const tmpFd = fs.openSync(tmpPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
   try {
@@ -698,8 +721,8 @@ try {
 if (pendingSignal) stop(pendingSignal);
 child.on('exit', (code, signal) => {
   if (signal) {
-    try { process.kill(process.pid, signal); } catch (error) { process.exit(1); }
-    return;
+    const signalNumber = require('node:os').constants.signals[signal];
+    process.exit(signalNumber ? 128 + signalNumber : 1);
   }
   process.exit(code ?? 1);
 });
