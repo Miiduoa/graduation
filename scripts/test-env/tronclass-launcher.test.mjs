@@ -87,7 +87,7 @@ const fs = require('node:fs');
 if (process.argv.includes('-e')) process.exit(0);
 if (process.argv.length === 4 && process.argv[2] === '-' &&
   process.argv[3].startsWith(process.env.TMPDIR + '/campus-tronclass-emulator.')) {
-  const { status } = require('node:child_process').spawnSync(process.execPath, process.argv.slice(2), { stdio: 'inherit' });
+  const { status } = require('node:child_process').spawnSync(process.execPath, process.argv.slice(2), { stdio: [0, 1, 2, 'ignore', 4] });
   process.exit(status ?? 1);
 }
 fs.writeFileSync(process.env.TRONCLASS_LAUNCHER_CAPTURE,
@@ -152,7 +152,7 @@ process.exit(0);
 });
 
 for (const component of ['child', 'runtime', 'parent']) {
-  const phases = component === 'child' ? ['during open', 'after open'] : ['during creation', 'during descriptor handoff'];
+  const phases = component === 'child' ? ['before open with a symbolic link', 'after open'] : ['during creation', 'during descriptor handoff'];
   for (const phase of phases) {
     test(`launcher rejects a replaced ${component} ${phase} of the private child`, () => {
       const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-runtime-swap-'));
@@ -180,11 +180,19 @@ real_fstat = os.fstat
 real_open = os.open
 real_mkdir = os.mkdir
 real_read = os.read
+real_stat = os.stat
+
+def stat_child(name, *args, **kwargs):
+    if isinstance(name, str) and name.startswith("run-"):
+        with open(${JSON.stringify(path.join(dir, 'stat-before-open'))}, "w"):
+            pass
+    return real_stat(name, *args, **kwargs)
 
 def open_child(name, flags, *, dir_fd=None):
     if name.startswith("run-"):
         parent = os.readlink(f"/proc/self/fd/{dir_fd}")
         swap(os.path.join(parent, name))
+        os.stat = real_stat
     return real_open(name, flags, dir_fd=dir_fd)
 
 def mkdir(name, mode, *, dir_fd=None):
@@ -196,7 +204,10 @@ def mkdir(name, mode, *, dir_fd=None):
 def swap(child):
     target = child if ${JSON.stringify(component)} == "child" else ${JSON.stringify(target)}
     os.rename(target, ${JSON.stringify(moved)})
-    os.rename(${JSON.stringify(replacement)}, target)
+    if phase == "before open with a symbolic link":
+        os.symlink(${JSON.stringify(replacement)}, target)
+    else:
+        os.rename(${JSON.stringify(replacement)}, target)
 
 def fstat(fd):
     result = real_fstat(fd)
@@ -214,8 +225,9 @@ def read_handoff(fd, size):
 phase = ${JSON.stringify(phase)}
 if phase == "after open":
     os.fstat = fstat
-elif phase == "during open":
+elif phase == "before open with a symbolic link":
     os.open = open_child
+    os.stat = stat_child
 elif phase == "during creation":
     os.mkdir = mkdir
 else:
@@ -243,6 +255,8 @@ exec(compile(sys.stdin.read(), "runtime verifier", "exec"))
           const children = readdirSync(runtime);
           assert.equal(children.length, 1);
           const replacementChild = path.join(runtime, children[0]);
+          assert.equal(lstatSync(replacementChild).isSymbolicLink(), phase === 'before open with a symbolic link');
+          assert.equal(readdirSync(dir).includes('stat-before-open'), false);
           assert.equal(mode(replacementChild), replacementModes[0]);
           assert.deepEqual(readdirSync(replacementChild), []);
         } else {
@@ -257,19 +271,19 @@ exec(compile(sys.stdin.read(), "runtime verifier", "exec"))
   }
 }
 
-for (const mode of [0o700, 0o755, 0o2750]) {
+for (const mode of [0o300, 0o700, 0o755, 0o2700, 0o2750]) {
   test(`launcher preserves an existing ${mode.toString(8)} runtime directory`, () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-runtime-mode-'));
     const runtime = path.join(dir, 'runtime');
     try {
       mkdirSync(runtime);
       chmodSync(runtime, mode);
-      writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
-const args = process.argv.slice(2);
-if (args[1].includes('/selftest.log.')) process.exit(0);
-require('node:child_process').execFileSync(process.execPath, args, { stdio: 'inherit' });
-  `, { mode: 0o700 });
-      const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      const script = fileURLToPath(import.meta.resolve('./tronclass.sh'));
+      const fixture = readFileSync(script, 'utf8')
+        .replace(/    node -e 'const fs=require[^\n]+ &/, () => `    node -e 'console.log("started")' &`)
+        .replace('  echo "WRAPPER_PID=$TRONCLASS_SELFTEST_WRAPPER"', () =>
+          '  echo "WRAPPER_PID=$TRONCLASS_SELFTEST_WRAPPER"\n  echo "RUNTIME=$TRONCLASS_RUNTIME_DIR"');
+      const result = spawnSync('bash', ['-c', fixture, script], {
         encoding: 'utf8',
         timeout: 5000,
         env: {
@@ -283,13 +297,18 @@ require('node:child_process').execFileSync(process.execPath, args, { stdio: 'inh
       assert.equal(result.status, 0, result.stderr);
       assert.match(result.stdout, /WRAPPER_PID=/);
       assert.equal(statSync(runtime).mode & 0o7777, mode);
-      const children = readdirSync(runtime).filter(name => name.startsWith('run-'));
-      assert.equal(children.length, mode === 0o700 ? 0 : 1);
-      const child = mode === 0o700 ? runtime : path.join(runtime, children[0]);
+      const shared = mode === 0o700 || mode === 0o2700;
+      const child = result.stdout.match(/^RUNTIME=(.+)$/m)?.[1];
+      assert.ok(child);
+      assert.equal(shared ? child : path.dirname(child), runtime);
+      if (!shared) assert.match(path.basename(child), /^run-[a-f0-9]{32}$/);
       assert.equal(statSync(child).mode & 0o7777, 0o700 | (mode & 0o2000));
       assert.equal(statSync(path.join(child, 'bff-session.key')).mode & 0o777, 0o600);
       assert.equal(statSync(path.join(child, 'tronclass-session.key')).mode & 0o777, 0o600);
+      const run = result.stdout.match(/^RUN_ID=([a-f0-9]{32})$/m)?.[1];
+      assert.equal(readFileSync(path.join(child, `selftest.log.${run}`), 'utf8'), 'started\n');
     } finally {
+      if (mode === 0o300) chmodSync(runtime, 0o700); // Allow fixture cleanup after checking the mode.
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -307,7 +326,7 @@ const args = process.argv;
 if (args.includes('-e')) process.exit(0);
 const dash = args.indexOf('-');
 if (dash < 0) process.exit(1);
-require('node:child_process').execFileSync(${JSON.stringify(process.execPath)}, args.slice(dash), { stdio: 'inherit' });
+require('node:child_process').execFileSync(${JSON.stringify(process.execPath)}, args.slice(dash), { stdio: args[dash + 2]?.endsWith('/process-identity.sh') ? [0, 1, 2, 3, 4] : [0, 1, 2, 'ignore', 4] });
 `, { mode: 0o700 });
     writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
 process.exit(0);
@@ -432,7 +451,7 @@ const args = process.argv;
 if (args.includes('-e')) process.exit(0);
 const dash = args.indexOf('-');
 if (dash < 0) process.exit(73);
-require('node:child_process').execFileSync(${JSON.stringify(process.execPath)}, args.slice(dash), { stdio: 'inherit' });
+require('node:child_process').execFileSync(${JSON.stringify(process.execPath)}, args.slice(dash), { stdio: args[dash + 2]?.endsWith('/process-identity.sh') ? [0, 1, 2, 3, 4] : [0, 1, 2, 'ignore', 4] });
 `, { mode: 0o700 });
   writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
 process.exit(0);
@@ -533,7 +552,7 @@ if (args[0].endsWith('/firebase.js')) {
     String(process.env.BFF_SESSION_SECRET === 'x'.repeat(64)));
   process.exit(73);
 }
-const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, args, { stdio: 'inherit' });
+const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, args, { stdio: args[2]?.endsWith('/process-identity.sh') ? [0, 1, 2, 3, 4] : [0, 1, 2, 'ignore', 4] });
 process.exit(status ?? 1);
 `, { mode: 0o700 });
     writeFileSync(path.join(dir, 'java'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
@@ -683,7 +702,6 @@ test('concurrent launchers keep their logs and emulator readiness isolated', { t
       env: {
         ...process.env,
         PATH: `${dir}:${process.env.PATH}`,
-        BASH_ENV: path.join(dir, 'bash-env'),
         TRONCLASS_RUNTIME_DIR: dir,
         TRONCLASS_LOG_TEST_LABEL: label,
         TRONCLASS_SIGNAL_SELFTEST: '0',
@@ -706,22 +724,21 @@ test('concurrent launchers keep their logs and emulator readiness isolated', { t
     writeForwardingNodeStub(dir);
     writeSessionKey(path.join(dir, 'bff-session.key'));
     writeSessionKey(path.join(dir, 'tronclass-session.key'));
-    writeFileSync(marker('bash-env'), `
-grep() {
-  command grep "$@"
-  local status=$?
-  if [[ "$TRONCLASS_LOG_TEST_LABEL" = second && "\${2:-}" = 'All emulators ready' && "$status" = 1 ]]; then
-    touch "$TRONCLASS_RUNTIME_DIR/second-unready"
-  fi
-  return "$status"
-}
-`);
+    const grep = spawnSync('bash', ['-c', 'command -v grep'], { encoding: 'utf8' }).stdout.trim();
+    writeFileSync(marker('grep'), `#!/bin/bash
+"${grep}" "$@"
+status=$?
+if [[ "$TRONCLASS_LOG_TEST_LABEL" = second && "\${2:-}" = 'All emulators ready' && "$status" = 1 ]]; then
+  touch "$TRONCLASS_RUNTIME_DIR/second-unready"
+fi
+exit "$status"
+`, { mode: 0o700 });
     writeFileSync(marker('node'), `#!${process.execPath}
 const fs = require('node:fs');
 const path = require('node:path');
 const [arg, ...args] = process.argv.slice(2);
 if (arg === '-') {
-  const stdio = args[0]?.includes('.log.') ? [0, 1, 2, 3, 4] : 'inherit';
+  const stdio = args[1]?.endsWith('/process-identity.sh') ? [0, 1, 2, 3, 4] : [0, 1, 2, 'ignore', 4];
   const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [arg, ...args], { stdio });
   process.exit(status ?? 1);
 }
@@ -956,7 +973,7 @@ exec /bin/ps "$@"
         const failedPublication = path.join(dir, 'publication-failed');
         if (recordKind === 'publication failure') {
           writeFileSync(path.join(dir, 'python3'), `#!/bin/bash
-if [[ "$2" != -c ]]; then exec ${JSON.stringify(python)} "$@"; fi
+if [[ "$2" != -c || "$3" != *renameat2* ]]; then exec ${JSON.stringify(python)} "$@"; fi
 touch ${JSON.stringify(failedPublication)}
 exit 1
 `, { mode: 0o755 });
@@ -1555,7 +1572,7 @@ childProcess.spawnSync = (command, args, options) => {
   const record = args.at(-1);
   if (command === 'python3' && record?.includes('.pgid.')) {
     if (process.env.TEST_PGID_COLLISION) {
-      fs.writeFileSync(${JSON.stringify(collision)}, JSON.stringify({ record, status: result.status }));
+      fs.writeFileSync(${JSON.stringify(collision)}, JSON.stringify({ record: ${JSON.stringify(dir)} + '/' + record, status: result.status }));
     } else if (result.status === 0) {
       pauseAfterPublish(record);
     }
@@ -1681,14 +1698,27 @@ test('launcher cleanup tracks a group spawned after the initial two-second polli
   const grandchildPidFile = path.join(dir, 'grandchild.pid');
   const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
   try {
-    // Let the fixture finish installing its signal handlers before discovery.
+    // Exercise late discovery with a real descendant, even though the journal
+    // can expose the leader before the workload installs its signal handlers.
     writeFileSync(path.join(dir, 'ps'), `#!/bin/bash
 if [[ "$*" == *--ppid* && ! -s "$TRONCLASS_SELFTEST_GRANDCHILD" ]]; then
   exit 1
 fi
 exec /bin/ps "$@"
 `, { mode: 0o755 });
-    const proc = spawn('bash', [script], {
+    const fixture = readFileSync(script, 'utf8').replace('source scripts/process-identity.sh', `$&
+eval "$(declare -f proc_signal_marked_group | sed '1s/proc_signal_marked_group/signal_verified_group/')"
+proc_signal_marked_group() {
+  if [ "\${5:-}" = TERM ]; then
+    local deadline=$((\${EPOCHREALTIME/./} + 1000000))
+    until [ -s "$TRONCLASS_SELFTEST_GRANDCHILD" ] || [ "\${EPOCHREALTIME/./}" -ge "$deadline" ]; do
+      sleep 0.01
+    done
+  fi
+  signal_verified_group "$@"
+}
+`);
+    const proc = spawn('bash', ['-c', fixture, script], {
       env: {
         ...process.env,
         PATH: `${dir}:${process.env.PATH}`,
@@ -1797,7 +1827,7 @@ test('concurrent launchers initialize session keys in an empty shared runtime di
   writeFileSync(preload, `const fs = require('node:fs');
 const orig = fs.writeFileSync;
 fs.writeFileSync = function writeFileSync(target, data, options) {
-  if (options && options.flag === 'wx') {
+  if (options && (options.flag & fs.constants.O_EXCL) !== 0) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 40);
   }
   return orig.apply(this, arguments);
@@ -1809,7 +1839,7 @@ if (args.includes('-e')) process.exit(0);
 const dash = args.indexOf('-');
 if (dash < 0) process.exit(73);
 require('node:child_process').execFileSync(${JSON.stringify(process.execPath)}, args.slice(dash), {
-  stdio: 'inherit',
+  stdio: args[dash + 2]?.endsWith('/process-identity.sh') ? [0, 1, 2, 3, 4] : [0, 1, 2, 'ignore', 4],
   env: { ...process.env, NODE_OPTIONS: [process.env.NODE_OPTIONS, '--require=${preload}'].filter(Boolean).join(' ') },
 });
 `, { mode: 0o700 });
@@ -1883,7 +1913,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const [arg, ...args] = process.argv.slice(2);
 if (arg === '-') {
-  const stdio = args[0]?.includes('.log.') ? [0, 1, 2, 3, 4] : 'inherit';
+  const stdio = args[1]?.endsWith('/process-identity.sh') ? [0, 1, 2, 3, 4] : [0, 1, 2, 'ignore', 4];
   const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [arg, ...args], { stdio });
   process.exit(status ?? 1);
 }
@@ -2000,7 +2030,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const [arg, ...args] = process.argv.slice(2);
 if (arg === '-') {
-  const stdio = args[0]?.includes('.log.') ? [0, 1, 2, 3, 4] : 'inherit';
+  const stdio = args[1]?.endsWith('/process-identity.sh') ? [0, 1, 2, 3, 4] : [0, 1, 2, 'ignore', 4];
   const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [arg, ...args], { stdio });
   process.exit(status ?? 1);
 }
@@ -2110,6 +2140,172 @@ if (arg && arg.endsWith('/firebase.js')) {
         try { process.kill(-pid, 'SIGKILL'); } catch (error) {
           if (error.code !== 'ESRCH') throw error;
         }
+      }
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runtime files stay on the opened inode after its path is replaced following handoff', async (t) => {
+  const script = fileURLToPath(import.meta.resolve('./tronclass.sh'));
+  const source = readFileSync(script, 'utf8');
+  const handoff = 'wait "$runtime_setup_pid"';
+  for (const replacement of ['private directory', 'runtime symlink', 'ancestor symlink']) {
+    await t.test(replacement, () => {
+      const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-pinned-runtime-'));
+      const parent = path.join(dir, 'parent');
+      const runtime = path.join(parent, 'runtime');
+      const outside = path.join(dir, 'outside');
+      const moved = path.join(dir, 'moved');
+      mkdirSync(runtime, { recursive: true });
+      chmodSync(runtime, 0o755);
+      mkdirSync(outside, { mode: 0o700 });
+      const run = 'a'.repeat(32);
+      const log = `selftest.log.${run}`;
+      const sidecar = `${log}.pgid.${run}`;
+      const sentinels = [log, sidecar, 'stale.log.pgid', 'acceptance.json', 'health.json'];
+      try {
+        const decoyRoot = replacement === 'ancestor symlink' ? path.join(outside, 'decoy') : outside;
+        if (decoyRoot !== outside) mkdirSync(decoyRoot, { mode: 0o700 });
+        for (const name of sentinels) writeFileSync(path.join(decoyRoot, name), 'untouched', { mode: 0o600 });
+        writeFileSync(path.join(dir, 'openssl'), `#!/bin/sh\nprintf '%s\\n' '${run}'\n`, { mode: 0o700 });
+        const fixture = source.replace(handoff, () => `${handoff}
+original="$TRONCLASS_RUNTIME_DIR"
+touch "$original/stale.log.pgid"
+pinned_inode="$(stat -Lc %i "/proc/$$/fd/$runtime_fd")"
+${replacement === 'ancestor symlink' ? `
+mv -- "${parent}" "${moved}"
+mkdir -p -- "${outside}/runtime"
+mv -- "${outside}/decoy" "${outside}/runtime/\${original##*/}"
+ln -s -- "${outside}" "${parent}"
+` : `
+mv -- "$original" "${moved}"
+${replacement === 'runtime symlink' ? `ln -s -- "${outside}" "$original"` : `mv -- "${outside}" "$original"`}
+`}
+printf 'PINNED_INODE=%s\\n' "$pinned_inode"
+printf 'ORIGINAL=%s\\n' "$original"
+`).replace(
+          /    node -e 'const fs=require[^\n]+ &/,
+          () => `    node -e 'const { writeRuntimeReport } = require("./scripts/test-env/write-runtime-report.cjs"); for (const name of ["acceptance.json", "health.json"]) writeRuntimeReport(Number(process.env.TRONCLASS_REPORT_DIR_FD), name, "pinned"); console.log("pinned");' &`,
+        ).replace('  TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$selftest_log"',
+          '  TRONCLASS_WRITE_RUNTIME_REPORT=1 TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$selftest_log"');
+        assert.notEqual(fixture, source);
+        const result = spawnSync('bash', ['-c', fixture, script], {
+          encoding: 'utf8',
+          timeout: 6000,
+          env: { ...process.env, PATH: `${dir}:${process.env.PATH}`,
+            TRONCLASS_RUNTIME_DIR: runtime, TRONCLASS_SIGNAL_SELFTEST: '1' },
+        });
+        assert.equal(result.error, undefined);
+        assert.equal(result.status, 0, result.stderr);
+        const original = result.stdout.match(/^ORIGINAL=(.+)$/m)?.[1];
+        assert.ok(original);
+        const pinned = replacement === 'ancestor symlink' ? path.join(moved, 'runtime', path.basename(original)) : moved;
+        const decoy = replacement === 'ancestor symlink' ? path.join(outside, 'runtime', path.basename(original)) : original;
+        assert.equal(String(statSync(pinned, { bigint: true }).ino), result.stdout.match(/^PINNED_INODE=(\d+)$/m)?.[1]);
+        assert.equal(statSync(pinned).mode & 0o7777, 0o700);
+        assert.equal(statSync(replacement === 'ancestor symlink' ? path.join(moved, 'runtime') : runtime).mode & 0o7777, 0o755);
+        assert.deepEqual(readdirSync(pinned).sort(), [
+          'acceptance.json', 'bff-session.key', 'health.json', log, sidecar, 'tronclass-session.key',
+        ].sort());
+        for (const name of ['bff-session.key', 'tronclass-session.key']) {
+          assert.equal(statSync(path.join(pinned, name)).size, 64);
+        }
+        assert.equal(readFileSync(path.join(pinned, log), 'utf8'), 'pinned\n');
+        assert.equal(readFileSync(path.join(pinned, 'acceptance.json'), 'utf8'), 'pinned');
+        assert.equal(readFileSync(path.join(pinned, 'health.json'), 'utf8'), 'pinned');
+        assert.match(readFileSync(path.join(pinned, sidecar), 'utf8'), new RegExp(`^${run} \\d+ \\d+ \\d+\\n$`));
+        assert.equal(statSync(path.join(pinned, sidecar)).nlink, 1);
+        assert.equal(statSync(decoy).mode & 0o7777, 0o700);
+        assert.deepEqual(readdirSync(decoy).sort(), [...sentinels].sort());
+        for (const name of sentinels) {
+          assert.equal(readFileSync(path.join(decoy, name), 'utf8'), 'untouched');
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test('an immediately exiting leader cannot start before its identity is journaled', { timeout: 10000 }, async () => {
+  const { existsSync } = await import('node:fs');
+  const { createServer } = await import('node:net');
+  const { once } = await import('node:events');
+  const script = fileURLToPath(import.meta.resolve('./tronclass.sh'));
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-gated-leader-'));
+  const leader = path.join(dir, 'leader.cjs');
+  const member = path.join(dir, 'member.cjs');
+  const portFile = path.join(dir, 'port');
+  const preload = path.join(dir, 'first-stat.cjs');
+  const firstStat = path.join(dir, 'first-stat');
+  const journal = path.join(dir, 'journal');
+  try {
+    writeFileSync(member, `
+const { createServer } = require('node:net');
+const { writeFileSync } = require('node:fs');
+createServer().listen(0, '127.0.0.1', function () {
+  process.on('SIGTERM', () => {});
+  writeFileSync(${JSON.stringify(portFile)}, process.pid + ' ' + this.address().port);
+});
+`);
+    writeFileSync(leader, `
+const fs = require('node:fs');
+const { spawn } = require('node:child_process');
+spawn(process.execPath, [${JSON.stringify(member)}], { stdio: 'ignore' });
+const deadline = Date.now() + 3000;
+while (!fs.existsSync(${JSON.stringify(portFile)}) && Date.now() < deadline) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+}
+process.exit(fs.existsSync(${JSON.stringify(portFile)}) ? 0 : 1);
+`);
+    writeFileSync(preload, `
+const fs = require('node:fs');
+const cp = require('node:child_process');
+if (process.argv[2]?.includes('/selftest.log.')) {
+  const spawn = cp.spawn, read = fs.readFileSync, write = fs.writeSync, spawnSync = cp.spawnSync;
+  let leader;
+  cp.spawn = (...args) => {
+    const child = spawn(...args);
+    if (args[2]?.detached) leader = child.pid;
+    return child;
+  };
+  fs.readFileSync = (name, ...args) => {
+    if (name === '/proc/' + leader + '/stat') {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 600);
+      fs.writeFileSync(${JSON.stringify(firstStat)}, String(fs.existsSync(${JSON.stringify(portFile)})));
+    }
+    return read(name, ...args);
+  };
+  fs.writeSync = (fd, ...args) => {
+    const written = write(fd, ...args);
+    if (fd === 3) fs.writeFileSync(${JSON.stringify(journal)}, args[0]);
+    return written;
+  };
+  cp.spawnSync = (...args) => args[1]?.[2]?.includes('renameat2') ? { status: 1 } : spawnSync(...args);
+}
+`);
+    const fixture = readFileSync(script, 'utf8').replace(/    node -e 'const fs=require[^\n]+ &/,
+      () => `    node "${leader}" &`);
+    const result = spawnSync('bash', ['-c', fixture, script], {
+      encoding: 'utf8', timeout: 8500,
+      env: { ...process.env, NODE_OPTIONS: `--require=${preload}`,
+        TRONCLASS_RUNTIME_DIR: dir, TRONCLASS_SIGNAL_SELFTEST: '1' },
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stderr);
+    const [, port] = readFileSync(portFile, 'utf8').split(' ').map(Number);
+    assert.equal(readFileSync(firstStat, 'utf8'), 'false');
+    assert.match(readFileSync(journal, 'utf8'), /^selftest\.log\.[a-f0-9]{32} [a-f0-9]{32} (\d+) \d+ \1\n$/);
+    assert.equal(readdirSync(dir).some(name => name.includes('.pgid.')), false);
+    const rebound = createServer().listen(port, '127.0.0.1');
+    await once(rebound, 'listening');
+    await new Promise(resolve => rebound.close(resolve));
+  } finally {
+    if (existsSync(portFile)) {
+      const [memberPid] = readFileSync(portFile, 'utf8').split(' ').map(Number);
+      if (memberPid > 1) {
+        try { process.kill(memberPid, 'SIGKILL'); } catch { /* already exited */ }
       }
     }
     rmSync(dir, { recursive: true, force: true });
