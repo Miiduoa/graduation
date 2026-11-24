@@ -436,9 +436,8 @@ function containsLexiconVerb(value: string): boolean {
   return [...WRITE_VERB_SET, ...QUERY_VERBS, ...PREPARE_ACTIONS].some(verb => verb.length > 0 && value.includes(verb));
 }
 
-function isValidFilenameValue(value: string, allowQuoted: boolean): boolean {
+function isValidBareFilename(value: string): boolean {
   if (!value || !FILE_EXTENSION.test(value)) return false;
-  if (allowQuoted) return true;
   const body = value.replace(FILE_EXTENSION, '');
   return BARE_FILENAME_BODY.test(body) && !containsLexiconVerb(value);
 }
@@ -493,25 +492,26 @@ function typographicQuoteSpans(text: string): QuoteSpan[] {
   const cached = quoteSpanCache.get(text);
   if (cached) return cached;
 
-  const candidates: Array<QuoteSpan | undefined> = new Array(text.length);
-  const nextClose = new Map<string, number>();
-  for (let index = text.length - 1; index >= 0; index -= 1) {
-    for (const [open, close] of TYPOGRAPHIC_QUOTE_PAIRS) {
-      if (text[index] !== open) continue;
-      const closeAt = nextClose.get(close);
-      if (closeAt !== undefined) {
-        candidates[index] = { open: index, inner: index + 1, close: closeAt, end: closeAt + 1 };
-        break;
+  const spans: QuoteSpan[] = [];
+  const stack: { open: number; closer: string }[] = [];
+  for (let index = 0; index < text.length; index += 1) {
+    const ch = text[index];
+    const frame = stack[stack.length - 1];
+    if (frame && ch === frame.closer && (ch !== "'" || !/[A-Za-z]/.test(text[index + 1] ?? ''))) {
+      stack.pop();
+      if (stack.length === 0) {
+        spans.push({ open: frame.open, inner: frame.open + 1, close: index, end: index + 1 });
+      }
+    } else {
+      const pair = TYPOGRAPHIC_QUOTE_PAIRS.find(([open]) => open === ch);
+      if (pair && (ch !== "'" || !/[A-Za-z]/.test(text[index - 1] ?? ''))) {
+        stack.push({ open: index, closer: pair[1] });
       }
     }
-    nextClose.set(text[index]!, index);
   }
-
-  const spans: QuoteSpan[] = [];
-  for (let index = 0; index < text.length;) {
-    const span = candidates[index];
-    if (span) spans.push(span);
-    index = span ? span.end : index + 1;
+  const unclosed = stack[0];
+  if (unclosed) {
+    spans.push({ open: unclosed.open, inner: unclosed.open + 1, close: text.length, end: text.length });
   }
   quoteSpanCache.set(text, spans);
   if (quoteSpanCache.size > 8) {
@@ -521,16 +521,13 @@ function typographicQuoteSpans(text: string): QuoteSpan[] {
   return spans;
 }
 
+function hasUnclosedQuote(text: string): boolean {
+  return typographicQuoteSpans(text).some(span => span.close === span.end);
+}
+
 function hasFilenameCandidate(text: string): boolean {
   if (precomputedBareFilenames(text).size > 0) return true;
   if (tokensFor(text).some(token => token.kind === 'filename')) return true;
-  for (const quoted of typographicQuoteSpans(text)) {
-    if (FILE_EXTENSION.test(text.slice(quoted.inner, quoted.close))) return true;
-  }
-  const scan = bracketsFor(text);
-  if (scan.balanced && scan.spans.some(span => FILE_EXTENSION.test(text.slice(span.innerStart, span.innerEnd)))) {
-    return true;
-  }
   return false;
 }
 
@@ -543,7 +540,7 @@ function hasBracketContent(text: string): boolean {
 
 /** File mentions or any bracket/parenthesis content block clearly-read. */
 function hasReadBlockingDecoration(text: string): boolean {
-  return hasFilenameCandidate(text) || hasBracketContent(text);
+  return hasUnclosedQuote(text) || hasBracketContent(text) || hasFilenameCandidate(text);
 }
 
 const BRACKET_SCAN_LIMIT = 8;
@@ -565,15 +562,22 @@ function bracketsFor(text: string): BracketScan {
   return scan;
 }
 
+function hasFilenameExtensionAt(text: string, start: number, end: number): boolean {
+  // The extension is at most nine characters, even for overlapping bracket spans.
+  return FILE_EXTENSION.test(text.slice(Math.max(start, end - 9), end));
+}
+
 function precomputedQuotedFilenames(text: string): Map<number, QuoteSpan> {
   const found = new Map<number, QuoteSpan>();
   for (const quoted of typographicQuoteSpans(text)) {
-    if (isValidFilenameValue(text.slice(quoted.inner, quoted.close), true)) found.set(quoted.open, quoted);
+    if (quoted.close < quoted.end && hasFilenameExtensionAt(text, quoted.inner, quoted.close)) {
+      found.set(quoted.open, quoted);
+    }
   }
   const scan = bracketsFor(text);
   if (scan.balanced) {
     for (const span of scan.spans) {
-      if (!isValidFilenameValue(text.slice(span.innerStart, span.innerEnd), true)) continue;
+      if (!hasFilenameExtensionAt(text, span.innerStart, span.innerEnd)) continue;
       found.set(span.start, { open: span.start, inner: span.innerStart, close: span.innerEnd, end: span.end });
     }
   }
@@ -620,7 +624,7 @@ function precomputedBareFilenames(text: string): Map<number, number> {
       continue;
     }
     const value = text.slice(start, extEnd);
-    if (isValidFilenameValue(value, false)) found.set(start, extEnd - start);
+    if (isValidBareFilename(value)) found.set(start, extEnd - start);
     index = extEnd;
   }
   return found;
@@ -631,11 +635,16 @@ function tokenize(text: string): Token[] {
   const state = { clauseHasQuery: false };
   const quotedFiles = precomputedQuotedFilenames(text);
   const bareFiles = precomputedBareFilenames(text);
+  const unclosedQuote = typographicQuoteSpans(text).find(span => span.close === span.end);
   let index = 0;
   while (index < text.length) {
     const from = index;
+    if (index === unclosedQuote?.open) {
+      noteToken(tokens, { value: text.slice(index), start: index, end: text.length, kind: 'punct' }, state);
+      break;
+    }
     const quoted = quotedFiles.get(index);
-    if (quoted) {
+    if (quoted && (!unclosedQuote || quoted.end <= unclosedQuote.open)) {
       noteToken(tokens, { value: text.slice(quoted.open, quoted.inner), start: quoted.open, end: quoted.inner, kind: 'punct' }, state);
       noteToken(tokens, { value: text.slice(quoted.inner, quoted.close), start: quoted.inner, end: quoted.close, kind: 'filename' }, state);
       noteToken(tokens, { value: text.slice(quoted.close, quoted.end), start: quoted.close, end: quoted.end, kind: 'punct' }, state);
@@ -872,10 +881,6 @@ function nextNegatedWriteStop(text: string, from: number): number {
   }
   return -1;
 }
-
-const QUOTE_PAIRS: Array<readonly [string, string]> = [
-  ['「', '」'], ['『', '』'], ['“', '”'], ['‘', '’'], ['"', '"'], ['`', '`'],
-];
 
 function readRoutingText(text: string): string {
   const tokens = tokensFor(text);
@@ -1154,14 +1159,14 @@ function isNegatedWriteFrom(tokens: Token[], negAt: number): boolean {
 
 
 function textWithoutQuotedSpans(text: string): string {
-  let result = text;
-  for (const [open, close] of QUOTE_PAIRS) {
-    const end = result.lastIndexOf(close) + close.length;
-    if (end === 0) continue;
-    const pattern = new RegExp(`${escapeRegex(open)}[^${escapeRegex(close)}]*${escapeRegex(close)}`, 'gu');
-    result = result.slice(0, end).replace(pattern, ' ') + result.slice(end);
+  const parts: string[] = [];
+  let start = 0;
+  for (const span of typographicQuoteSpans(text)) {
+    parts.push(text.slice(start, span.open), ' ');
+    start = span.end;
   }
-  return result.replace(/(?<![A-Za-z])'[^']*'(?![A-Za-z])/gu, ' ');
+  parts.push(text.slice(start));
+  return parts.join('');
 }
 
 function keywordOnlyInsideQuotes(text: string): boolean {
@@ -1270,11 +1275,34 @@ function hasDomainOrLmsSubstance(text: string): boolean {
   });
 }
 
+const ACTION_STATUS_PREFIXES = new Set([
+  '已', '已經', '尚未', '還沒', '未', '沒', '待', '剛', '剛才', '剛剛', '曾經', '過', '正在', '正',
+]);
+const ACTION_STATUS_SUFFIXES = new Set(['過', '了', '完', '過了嗎', '了嗎']);
+
+function hasDescriptiveAction(text: string): boolean {
+  let statusPrefix = false;
+  const tokens = visibleCommandTokens(text);
+  for (const [index, token] of tokens.entries()) {
+    if (token.kind === 'punct' && CLAUSE_PUNCT.test(token.value)) {
+      statusPrefix = false;
+      continue;
+    }
+    if (ACTION_STATUS_PREFIXES.has(token.value)) statusPrefix = true;
+    if (token.kind === 'noun') continue;
+    if (token.kind !== 'query' && !isPrepareActionValue(token.value) &&
+      !DOWNLOAD_ACTIONS.has(token.value.toLowerCase())) continue;
+    const next = nextSignificantToken(tokens, index);
+    if (statusPrefix || (next && ACTION_STATUS_SUFFIXES.has(next.value))) return true;
+  }
+  return false;
+}
+
 /** A clearly-read clause must be fully known, with domain substance, and no command write or negator. */
 function isPositivelyProvenRead(text: string): boolean {
   const original = text.normalize('NFKC').trim();
   if (!original || !TRONCLASS_KEYWORD.test(original)) return false;
-  if (hasReadBlockingDecoration(original)) return false;
+  if (hasReadBlockingDecoration(original) || hasDescriptiveAction(original)) return false;
   if (!allTokensKnown(original)) return false;
   if (tokensFor(original).some(token => isNegatorToken(token) && !tokenIsProtected(token, protectedSpanMask(original)))) return false;
   if (writeCommandRoute(textWithoutQuotedSpans(original)) !== null) return false;
@@ -1285,7 +1313,7 @@ function isPositivelyProvenRead(text: string): boolean {
 function clauseAllowsCompoundCompanion(clause: string): boolean {
   const text = clause.normalize('NFKC').trim();
   if (!text) return true;
-  if (hasReadBlockingDecoration(text)) return false;
+  if (hasReadBlockingDecoration(text) || hasDescriptiveAction(text)) return false;
   if (hasHonoredPrepareCommand(text)) return false;
   if (isPositivelyProvenRead(text)) return true;
   if (OTHER_SERVICE_OR_SCHEDULE.test(text) && !TRONCLASS_KEYWORD.test(text)) {
@@ -1498,6 +1526,9 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
     !TRONCLASS_KEYWORD.test(question)) return null;
   const original = question.normalize('NFKC').trim();
   if (isExistingTronClassNavigation(original)) return null;
+  if (hasUnclosedQuote(original)) return { outcome: 'ambiguous' };
+  const text = textWithoutQuotedSpans(readRoutingText(original));
+  if (hasDescriptiveAction(text)) return { outcome: 'ambiguous' };
   const unquoted = textWithoutFilenameTokens(textWithoutQuotedSpans(original));
   const tokens = tokensFor(original);
   const interior = modifierInteriorIndex(tokens);
@@ -1515,7 +1546,6 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   if (!allTokensKnown(original) && !allTokensKnown(unquoted)) return { outcome: 'ambiguous' };
   if (writeRoute === 'planner') return { outcome: 'clearly-write', intent: null };
   if (writeRoute === 'unsupported') return { outcome: 'clearly-write', intent: { intent: 'unsupported', pendingOnly: false } };
-  const text = textWithoutQuotedSpans(readRoutingText(original));
   if (!TRONCLASS_KEYWORD.test(text)) return { outcome: 'ambiguous' };
   const intent = readIntentOf(text);
   if (hasReadBlockingDecoration(original)) return { outcome: 'ambiguous' };
