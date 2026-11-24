@@ -1376,6 +1376,11 @@ describe('three-way sentence classification', () => {
     '玩課雲尚未幫我準備作業',
     '玩課雲已下載教材',
     '玩課雲剛才幫我下載教材',
+    '我有看玩課雲作業',
+    '我有查玩課雲作業',
+    '我有準備玩課雲作業',
+    '我有也幫你查玩課雲作業',
+    '我有幫我下載玩課雲教材',
     '我已經查過玩課雲作業',
     '我查過玩課雲作業',
     '我查玩課雲作業了',
@@ -1409,6 +1414,9 @@ describe('three-way sentence classification', () => {
   it.each([
     ['查玩課雲作業', false],
     ['查玩課雲作業草稿', false],
+    ['玩課雲有作業嗎', false],
+    ['查玩課雲有沒有作業', false],
+    ['玩課雲有哪些作業', false],
     ['查玩課雲尚未繳交的作業', true],
   ])('keeps the current homework query %s', (question, pendingOnly) => {
     expect(classifyTronClassSentence(question)).toEqual({
@@ -1424,6 +1432,23 @@ describe('three-way sentence classification', () => {
     expect(canAnswerTronClassQuestion(question)).toBe(false);
     expect(tronClassCompoundClauses(question)).toEqual([]);
     expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  it.each([
+    ['one quote with 240 full phrases', '不要繳交'.repeat(240)],
+    ['one quote with 300 別繳交 phrases', '別繳交'.repeat(300)],
+    ['165 separate quotes', '「不要繳交」'.repeat(165)],
+  ])('scans %s within the 200 ms budget', (description, quoted) => {
+    const question = '查玩課雲作業' + (quoted.startsWith('「') ? quoted : `「${quoted}」`);
+    expect(question.length).toBeLessThanOrEqual(1000);
+    const started = performance.now();
+    const result = classifyTronClassSentence(question);
+    const elapsed = performance.now() - started;
+    expect(result).toEqual({
+      outcome: 'clearly-read',
+      intent: { intent: 'homework', pendingOnly: false },
+    });
+    expect(elapsed, description).toBeLessThan(200);
   });
 
   it('scans nested brackets within the 200 ms budget', () => {
