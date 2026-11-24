@@ -945,6 +945,7 @@ function isBaClausePunct(token: Token): boolean {
 /** Classify each occurrence using its own context in the original request. */
 function writeCommandRoute(text: string): 'planner' | 'unsupported' | 'ambiguous' | null {
   const tokens = tokensFor(text);
+  const provenWrites = provenPredicateIndexes(tokens, 'write');
   let lastPunctEnd = 0;
   let clauseHasBa = false;
   for (let index = 0; index < tokens.length; index += 1) {
@@ -960,7 +961,7 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | 'ambiguous
     }
     if (token.kind === 'noun' || !isWriteVerbToken(token)) continue;
     if (isWriteNegatedAt(tokens, index)) continue;
-    if (!actionObjectPhraseEndsClause(tokens, index)) continue;
+    if (!provenWrites.has(index)) continue;
     // Field nouns such as「發布時間」are consumed as nouns and never reach here.
     // Other writes such as「刪除」are never status filters.
     if (!isSubmitWriteToken(token)) return 'unsupported';
@@ -988,10 +989,7 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | 'ambiguous
   const ba = baConstructionState(text);
   if (ba === 'unresolved') return 'ambiguous';
   if (ba === 'write') {
-    const writeIndex = tokens.findIndex((token, index) =>
-      token.kind !== 'noun' && isWriteVerbToken(token) && !isWriteNegatedAt(tokens, index) &&
-      baMarkerIndexInClause(tokens, index) >= 0 && actionObjectPhraseEndsClause(tokens, index));
-    return writeIndex >= 0 ? 'unsupported' : 'ambiguous';
+    return provenWrites.size > 0 ? 'unsupported' : 'ambiguous';
   }
   return null;
 }
@@ -1387,87 +1385,348 @@ const OBJECT_ADJUNCTS = new Set([
   ...STATUS_WRITE_COMPOUNDS,
   '我的', '這週', '本週', '最新', '舊版', '新版', '全部',
   'pending', 'unsubmitted',
+  '最後', '之後', '後面', '前面', '之前', '以前', '以後', '裡面', '中間',
 ]);
+const OBJECT_PREPOSITIONS = new Set(['關於', '含', '和', '與', '跟', '及', '以及', '標題']);
+const READ_OBJECT_HEADS = new Set([
+  '作業', '教材', '講義', '附件', '公告', '課程', '討論', '功課', '檔案', '資料',
+  'homework', 'assignment', 'materials', 'announcement', 'course',
+]);
+const VERBAL_PARTICLES = new Set(['一下', '出去', '上去', '掉', '給老師', '給我']);
 
-function isTrailingClausePunct(token: Token): boolean {
-  return token.kind === 'punct' && /[?。！!]+/u.test(token.value);
+const CLAUSE_REQUEST_HELPERS = new Set(['請', '幫我', '替我', '代我', '麻煩', 'please']);
+const FIRST_PERSON_PREFIX = new Set(['我', '我們']);
+const REQUEST_CONTINUATIONS = new Set([
+  '想', '要', '現在', '就', '再', '先', '只', '只要', '能', '可以', '可',
+  '立即', '馬上', '記得', '務必', '趕緊', '立刻', '盡快',
+]);
+const DESCRIPTIVE_SUBJECT_PRONOUNS = new Set(['他', '她', '它', '他們', '她們']);
+const SUBJECT_NOUNS = new Set(['老師', '同學', '學生', '助教', '教授']);
+
+type PredicateKind = 'read' | 'prepare' | 'download' | 'write';
+type ClausePredicate = {
+  index: number;
+  kind: PredicateKind;
+  subjectBefore: boolean;
+  objectEndsClause: boolean;
+  residueCopula: boolean;
+  residueAspect: boolean;
+  residueUnknown: boolean;
+};
+type ClauseAnalysis = {
+  start: number;
+  end: number;
+  predicates: ClausePredicate[];
+  trailingQuestion: boolean;
+  hasCopula: boolean;
+  hasQuestionCopula: boolean;
+  hasCompletedAspect: boolean;
+  hasUnknown: boolean;
+};
+
+function predicateKindOf(token: Token): PredicateKind | null {
+  const value = token.value.toLowerCase();
+  if (token.kind === 'noun') return null;
+  if (DOWNLOAD_ACTIONS.has(value)) return 'download';
+  if (isPrepareActionValue(token.value)) return 'prepare';
+  if (isWriteVerbToken(token)) return 'write';
+  if (token.kind === 'query' || QUERY_START.has(token.value)) return 'read';
+  return null;
 }
 
-function clauseLimitAfter(tokens: Token[], index: number): number {
-  for (let cursor = index + 1; cursor < tokens.length; cursor += 1) {
-    if (isClauseBoundaryToken(tokens[cursor]!)) return cursor;
-  }
-  return tokens.length;
+function isLmsSpecifier(token: Token): boolean {
+  const value = token.value.toLowerCase();
+  return LMS_NAMES.includes(value) || LMS_NAMES.includes(token.value);
 }
 
-function clauseStartBefore(tokens: Token[], index: number): number {
+function isDescriptiveSubjectToken(token: Token): boolean {
+  if (token.value === '你' || token.value === '您' || token.value === '你們') return false;
+  return DESCRIPTIVE_SUBJECT_PRONOUNS.has(token.value) || SUBJECT_NOUNS.has(token.value);
+}
+
+function tokensText(tokens: Token[], start = 0, end = tokens.length): string {
+  return tokens.slice(start, end).map(token => token.value).join('');
+}
+
+function isPrenominalPredicate(tokens: Token[], index: number): boolean {
+  const prev = previousSignificantToken(tokens, index);
+  const next = nextSignificantToken(tokens, index);
+  return prev?.value === '的' || prev?.value === '之' || next?.value === '的' || next?.value === '之';
+}
+
+function clauseSegmentStart(tokens: Token[], index: number): number {
   for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
     if (isClauseBoundaryToken(tokens[cursor]!)) return cursor + 1;
   }
   return 0;
 }
 
-function baMarkerIndexInClause(tokens: Token[], verbIndex: number): number {
-  const start = clauseStartBefore(tokens, verbIndex);
-  for (let cursor = verbIndex - 1; cursor >= start; cursor -= 1) {
-    if (BA_MARKERS.has(tokens[cursor]!.value)) return cursor;
+function isStatusFilterUse(tokens: Token[], index: number, readGoverns = false): boolean {
+  const token = tokens[index]!;
+  if (!isWriteVerbToken(token) || !isSubmitWriteToken(token)) return false;
+  const after = tokensText(tokens, index + 1).trimStart();
+  const segment = tokensText(tokens, clauseSegmentStart(tokens, index), index).trimStart();
+  if (ADDITIVE_CUE.test(suffixForEndAnchor(segment)) || WRITE_CUE.test(suffixForEndAnchor(segment))) {
+    return false;
   }
-  return -1;
-}
-
-/**
- * A proven imperative's object must end the clause. A specifier such as an LMS
- * name may use 的/之 to attach a head noun, but a head followed by 的/之 plus
- * more words is a trailing modifier or relative clause, not the object itself.
- * Copulas, completion markers, and unknown tokens also disprove the imperative.
- */
-function complementHasDisallowedResidue(tokens: Token[], start: number, end: number): boolean {
-  let seenHead = false;
-  let pendingDe = false;
-  for (let cursor = start; cursor < end; cursor += 1) {
-    const token = tokens[cursor]!;
-    if (isWhitespaceToken(token) || isTrailingClausePunct(token)) continue;
-    const value = token.value.toLowerCase();
-    if (value === '嗎' || value === '呢' || value === '吧') continue;
-    if (COPULAS.has(value) || ACTION_COMPLETION_MARKERS.has(token.value) || token.kind === 'unknown') {
-      return true;
-    }
-    if (value === '的' || value === '之') {
-      if (seenHead) pendingDe = true;
-      continue;
-    }
-    if (pendingDe) return true;
-    if (OBJECT_SPECIFIERS.has(value) || OBJECT_ADJUNCTS.has(value) || OBJECT_ADJUNCTS.has(token.value)) continue;
-    if (token.kind === 'neg' || DESCRIPTIVE_ACTION_PREFIXES.has(token.value)) continue;
-    // Any other visible word can complete a bare object (教材, 作業, 附件…).
-    seenHead = true;
-  }
-  return pendingDe;
-}
-
-function postVerbalResidueIsRelative(tokens: Token[], start: number, end: number): boolean {
-  for (let cursor = start; cursor < end; cursor += 1) {
-    const token = tokens[cursor]!;
-    if (isWhitespaceToken(token) || isTrailingClausePunct(token)) continue;
-    const value = token.value.toLowerCase();
-    if (value === '嗎' || value === '呢' || value === '吧') continue;
-    if (COPULAS.has(value) || ACTION_COMPLETION_MARKERS.has(token.value) || token.kind === 'unknown') {
-      return true;
-    }
-    // 的/之 after the verb starts a relative clause or trailing modifier, not a verbal particle.
-    if (value === '的' || value === '之') return true;
+  const prev = previousSignificantToken(tokens, index);
+  const statusPrefix = !!prev && (
+    DESCRIPTIVE_ACTION_PREFIXES.has(prev.value) || ACTION_COMPLETION_MARKERS.has(prev.value) ||
+    prev.value === '是否' || READ_QUESTION_WORDS.has(prev.value));
+  if (statusPrefix && HOMEWORK_STATUS_SUFFIX.test(after)) return true;
+  if (GOVERNED_STATUS.test(after) || SUBMISSION_QUESTION.test(after) || SUBMISSION_DEADLINE.test(after)) {
+    return readGoverns || readGovernsStatus(segment) || HOMEWORK_SUBJECT.test(segment) || LMS_SUBJECT.test(segment);
   }
   return false;
 }
 
-function actionObjectPhraseEndsClause(tokens: Token[], index: number): boolean {
-  const baAt = baMarkerIndexInClause(tokens, index);
-  const clauseEnd = clauseLimitAfter(tokens, index);
-  if (baAt >= 0) {
-    return !complementHasDisallowedResidue(tokens, baAt + 1, index) &&
-      !postVerbalResidueIsRelative(tokens, index + 1, clauseEnd);
+function isStatusAspectToken(tokens: Token[], index: number): boolean {
+  const next = nextSignificantToken(tokens, index);
+  if (!next || !isWriteVerbToken(next) || !isSubmitWriteToken(next)) return false;
+  const nextIndex = tokens.indexOf(next, index + 1);
+  const after = tokensText(tokens, nextIndex >= 0 ? nextIndex + 1 : index + 1).trimStart();
+  return GOVERNED_STATUS.test(after) || SUBMISSION_QUESTION.test(after) ||
+    SUBMISSION_DEADLINE.test(after) || HOMEWORK_STATUS_SUFFIX.test(after);
+}
+
+function clauseHasLmsName(tokens: Token[], start: number, end: number): boolean {
+  return tokens.slice(start, end).some(isLmsSpecifier);
+}
+
+/**
+ * One left-to-right pass over the token list. Each clause records its
+ * clause-initial predicate, whether a subject preceded it, whether the object
+ * ends the clause, and trailing question particles. Used by both read and
+ * write/action routing so no path rescans the same clause per candidate.
+ */
+const clauseAnalysisByTokens = new WeakMap<Token[], ClauseAnalysis[]>();
+
+function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
+  const cached = clauseAnalysisByTokens.get(tokens);
+  if (cached) return cached;
+  const clauses: ClauseAnalysis[] = [];
+  let predicates: ClausePredicate[] = [];
+  let trailingQuestion = false;
+  let hasCopula = false;
+  let hasQuestionCopula = false;
+  let hasCompletedAspect = false;
+  let hasUnknown = false;
+  let seenSubject = false;
+  let predicate: ClausePredicate | null = null;
+  let baAt = -1;
+  let objectHead = false;
+  let pendingDe = false;
+  let pendingStatusWrite = false;
+  let objectEnds = true;
+  let readGoverns = false;
+  let clauseStart = 0;
+
+  const flush = (end: number): void => {
+    if (predicate) {
+      predicate.objectEndsClause = objectEnds;
+      predicates.push(predicate);
+    }
+    clauses.push({
+      start: clauseStart,
+      end,
+      predicates, trailingQuestion, hasCopula, hasQuestionCopula, hasCompletedAspect, hasUnknown,
+    });
+  };
+  const reset = (): void => {
+    predicates = [];
+    trailingQuestion = false;
+    hasCopula = false;
+    hasQuestionCopula = false;
+    hasCompletedAspect = false;
+    hasUnknown = false;
+    seenSubject = false;
+    predicate = null;
+    baAt = -1;
+    objectHead = false;
+    pendingDe = false;
+    pendingStatusWrite = false;
+    objectEnds = true;
+    readGoverns = false;
+  };
+
+  const noteObjectToken = (token: Token, index: number, afterBaVerb = false): void => {
+    const value = token.value.toLowerCase();
+    if (isWhitespaceToken(token) || isTrailingClausePunct(token) || token.kind === 'filename') return;
+    if (value === '嗎' || value === '呢' || value === '吧') {
+      trailingQuestion = true;
+      return;
+    }
+    if (READ_QUESTION_WORDS.has(value) || READ_QUESTION_WORDS.has(token.value)) {
+      if (hasCopula) hasQuestionCopula = true;
+      return;
+    }
+    if (COPULAS.has(value)) {
+      hasCopula = true;
+      if (predicate) predicate.residueCopula = true;
+      return;
+    }
+    if (ACTION_COMPLETION_MARKERS.has(token.value) && !isStatusAspectToken(tokens, index)) {
+      hasCompletedAspect = true;
+      if (predicate) predicate.residueAspect = true;
+      return;
+    }
+    if (token.kind === 'unknown') {
+      hasUnknown = true;
+      if (predicate) predicate.residueUnknown = true;
+      return;
+    }
+    if (value === '的' || value === '之') {
+      if (objectHead || afterBaVerb) pendingDe = true;
+      return;
+    }
+    if (pendingDe) {
+      const allowRead = predicate?.kind === 'read' || readGoverns;
+      if (allowRead && isSubmitWriteToken(token)) {
+        pendingStatusWrite = true;
+        return;
+      }
+      if (allowRead && pendingStatusWrite && STATUS_NOUN.test(token.value)) {
+        pendingDe = false;
+        pendingStatusWrite = false;
+        objectHead = true;
+        return;
+      }
+      if (allowRead && (READ_OBJECT_HEADS.has(value) || READ_OBJECT_HEADS.has(token.value))) {
+        pendingDe = false;
+        pendingStatusWrite = false;
+        objectHead = true;
+        return;
+      }
+      objectEnds = false;
+      pendingDe = false;
+      pendingStatusWrite = false;
+      return;
+    }
+    if (OBJECT_SPECIFIERS.has(value) || OBJECT_ADJUNCTS.has(value) || OBJECT_ADJUNCTS.has(token.value)) return;
+    if (OBJECT_PREPOSITIONS.has(token.value) || OBJECT_PREPOSITIONS.has(value) || VERBAL_PARTICLES.has(token.value)) return;
+    if (token.kind === 'neg' || DESCRIPTIVE_ACTION_PREFIXES.has(token.value)) return;
+    objectHead = true;
+  };
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (isClauseBoundaryToken(token)) {
+      if (token.value === '?' || token.value === '？') trailingQuestion = true;
+      flush(index);
+      reset();
+      clauseStart = index + 1;
+      continue;
+    }
+    if (isWhitespaceToken(token) || isTrailingClausePunct(token)) continue;
+    const value = token.value.toLowerCase();
+    if (READ_QUESTION_WORDS.has(value) || READ_QUESTION_WORDS.has(token.value)) {
+      if (hasCopula) hasQuestionCopula = true;
+    }
+    if (token.kind === 'unknown') hasUnknown = true;
+    if (COPULAS.has(value)) hasCopula = true;
+    if (ACTION_COMPLETION_MARKERS.has(token.value) &&
+      !READ_QUESTION_WORDS.has(token.value) && !READ_QUESTION_WORDS.has(value) &&
+      !isStatusAspectToken(tokens, index)) {
+      hasCompletedAspect = true;
+    }
+    if (value === '嗎' || value === '呢' || token.value === '?') trailingQuestion = true;
+
+    if (BA_MARKERS.has(token.value) && !predicate) {
+      baAt = index;
+      continue;
+    }
+
+    const kind = predicateKindOf(token);
+    if (kind === 'write' && isStatusFilterUse(tokens, index, readGoverns)) {
+      noteObjectToken(token, index);
+      continue;
+    }
+    if (kind && isPrenominalPredicate(tokens, index) && kind !== 'write') {
+      noteObjectToken(token, index);
+      continue;
+    }
+    if (kind && !predicate) {
+      predicate = {
+        index, kind, subjectBefore: seenSubject, objectEndsClause: true,
+        residueCopula: false, residueAspect: false, residueUnknown: false,
+      };
+      objectHead = false;
+      pendingDe = false;
+      pendingStatusWrite = false;
+      objectEnds = true;
+      if (kind === 'read') readGoverns = true;
+      continue;
+    } else if (kind && predicate) {
+      predicate.objectEndsClause = objectEnds;
+      predicates.push(predicate);
+      predicate = {
+        index, kind, subjectBefore: seenSubject, objectEndsClause: true,
+        residueCopula: false, residueAspect: false, residueUnknown: false,
+      };
+      objectHead = false;
+      pendingDe = false;
+      pendingStatusWrite = false;
+      objectEnds = true;
+      if (kind === 'read') readGoverns = true;
+      continue;
+    }
+
+    if (predicate) {
+      noteObjectToken(token, index, baAt >= 0);
+      continue;
+    }
+    if (baAt >= 0) {
+      noteObjectToken(token, index);
+      continue;
+    }
+    if (isWhitespaceToken(token)) continue;
+    if (CLAUSE_REQUEST_HELPERS.has(value) || CLAUSE_REQUEST_HELPERS.has(token.value)) continue;
+    if (FIRST_PERSON_PREFIX.has(token.value) || REQUEST_CONTINUATIONS.has(value)) continue;
+    if (WRITE_HELPERS.has(token.value) || PREPARE_REQUEST_CUES.has(token.value)) continue;
+    if (isDescriptiveSubjectToken(token)) seenSubject = true;
   }
-  return !complementHasDisallowedResidue(tokens, index + 1, clauseEnd);
+  flush(tokens.length);
+  clauseAnalysisByTokens.set(tokens, clauses);
+  return clauses;
+}
+
+function clauseAllowsQuestionCopula(clause: ClauseAnalysis): boolean {
+  return clause.hasQuestionCopula || clause.trailingQuestion;
+}
+
+function isProvenPredicate(clause: ClauseAnalysis, predicate: ClausePredicate): boolean {
+  if (predicate.subjectBefore || !predicate.objectEndsClause || predicate.residueUnknown) return false;
+  if (predicate.kind === 'read') {
+    return !predicate.residueAspect && !clause.hasUnknown &&
+      (!predicate.residueCopula || clauseAllowsQuestionCopula(clause));
+  }
+  return !predicate.residueCopula && !predicate.residueAspect;
+}
+
+function hasSkippedAction(clause: ClauseAnalysis): boolean {
+  return clause.predicates.some(predicate =>
+    predicate.kind !== 'read' && !isProvenPredicate(clause, predicate));
+}
+
+function provenPredicateIndexes(tokens: Token[], kind: PredicateKind): Set<number> {
+  const proven = new Set<number>();
+  for (const clause of analyzeClauses(tokens)) {
+    for (const predicate of clause.predicates) {
+      if (predicate.kind === kind && isProvenPredicate(clause, predicate)) proven.add(predicate.index);
+    }
+  }
+  return proven;
+}
+
+export function tronClassReadRequestVerbs(): string[] {
+  return QUERY_VERBS.filter(value =>
+    !DOWNLOAD_ACTIONS.has(value) && !DOWNLOAD_ACTIONS.has(value.toLowerCase()) &&
+    !isPrepareActionValue(value));
+}
+
+
+function isTrailingClausePunct(token: Token): boolean {
+  return token.kind === 'punct' && /[?。！!]+/u.test(token.value);
 }
 
 export function tronClassAutoExecuteActionVerbs(): string[] {
@@ -1475,7 +1734,7 @@ export function tronClassAutoExecuteActionVerbs(): string[] {
 }
 
 function isDownloadCommand(tokens: Token[], index: number): boolean {
-  if (!actionObjectPhraseEndsClause(tokens, index)) return false;
+  if (!provenPredicateIndexes(tokens, 'download').has(index)) return false;
   const next = nextSignificantToken(tokens, index);
   if (next?.value === '的' || next?.value === '之' || (next && STATUS_NOUN.test(next.value))) return false;
 
@@ -1509,31 +1768,31 @@ function isDownloadCommand(tokens: Token[], index: number): boolean {
 
 function hasPositiveReadForm(text: string): boolean {
   const tokens = visibleCommandTokens(text);
-  let requestPrefix = true;
-  let objectPrefix = false;
-  let topicPrefix = true;
-  for (const [index, token] of tokens.entries()) {
-    if (isWhitespaceToken(token)) continue;
-    const value = token.value.toLowerCase();
-    if (READ_QUESTION_WORDS.has(value)) return true;
-    if (requestPrefix && value === '改查') return true;
-    if ((requestPrefix || objectPrefix || (topicPrefix && value === '查一下')) &&
-      token.kind === 'query' && !isPrepareActionValue(value)) {
-      const next = nextSignificantToken(tokens, index);
-      if (next?.value !== '的' && next?.value !== '之' &&
-        (!DOWNLOAD_ACTIONS.has(value) || isDownloadCommand(tokens, index))) return true;
+  const clauses = analyzeClauses(tokens);
+  let offset = 0;
+  for (const clause of clauses) {
+    const provenReadOrDownload = clause.predicates.some(predicate =>
+      (predicate.kind === 'read' || predicate.kind === 'download') &&
+      isProvenPredicate(clause, predicate));
+    if (provenReadOrDownload && clauseHasLmsName(tokens, clause.start, clause.end)) return true;
+    const unprovenRead = clause.predicates.some(predicate =>
+      predicate.kind === 'read' && !isProvenPredicate(clause, predicate));
+    if (hasSkippedAction(clause) || unprovenRead) {
+      // A skipped action or unproven read never falls through to a read just
+      // because the clause ends with 嗎／？ or a question word.
+      const last = clause.predicates[clause.predicates.length - 1];
+      offset = last ? last.index + 1 : offset;
+      continue;
     }
-    // The 把／將 construction puts its object before the command verb.
-    objectPrefix = (requestPrefix && BA_MARKERS.has(value)) ||
-      (objectPrefix && (token.kind === 'noun' || value === '的' || value === '全部'));
-    requestPrefix = requestPrefix && READ_REQUEST_PREFIX.has(value);
-    topicPrefix = topicPrefix && (token.kind === 'noun' || value === '的');
-  }
-  // Only visible terminal particles or punctuation can mark a yes/no question.
-  for (let index = tokens.length - 1; index >= 0; index -= 1) {
-    const token = tokens[index]!;
-    if (token.value === '?' || token.value === '嗎' || token.value === '呢') return true;
-    if (token.kind !== 'punct' && !isWhitespaceToken(token)) break;
+    if (clause.trailingQuestion) return true;
+    for (let index = offset; index < tokens.length; index += 1) {
+      const token = tokens[index]!;
+      if (isClauseBoundaryToken(token)) {
+        offset = index + 1;
+        break;
+      }
+      if (READ_QUESTION_WORDS.has(token.value.toLowerCase()) || token.value === '改查') return true;
+    }
   }
   return false;
 }
@@ -1701,7 +1960,7 @@ function prepareWordRole(tokens: Token[], index: number): 'command' | 'modifier'
   if (prev && (prev.value === '的' || prev.value === '之')) return 'modifier';
   if (!prev || isClauseBoundaryToken(prev) || prev.value === '並' ||
     WRITE_HELPERS.has(prev.value) || PREPARE_REQUEST_CUES.has(prev.value)) {
-    return actionObjectPhraseEndsClause(tokens, index) ? 'command' : 'doubt';
+    return provenPredicateIndexes(tokens, 'prepare').has(index) ? 'command' : 'doubt';
   }
   return 'doubt';
 }
@@ -1802,8 +2061,8 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   if (hasHonoredPrepareCommand(original) && hasNonPrepareQueryCommand(original)) {
     return { outcome: 'ambiguous' };
   }
-  if (intent.intent === 'prepare') {
-    return { outcome: 'clearly-write', intent };
+  if (intent.intent === 'prepare' || intent.intent === 'download') {
+    return { outcome: intent.intent === 'prepare' ? 'clearly-write' : 'clearly-read', intent };
   }
   if (!isPositivelyProvenRead(original) && !isPositivelyProvenRead(text)) return { outcome: 'ambiguous' };
   return { outcome: 'clearly-read', intent };
@@ -1826,3 +2085,4 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
 export function canAnswerTronClassQuestion(question: string): boolean {
   return parseTronClassAgentIntent(question) !== null;
 }
+
