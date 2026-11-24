@@ -76,7 +76,8 @@ export function applyCampusWalkingSegmentAudits(
   now: number,
 ): CampusWalkingGraph | null {
   const base = utcMillis(candidates.osmBaseAt);
-  if (!schoolId || candidates.graph.schoolId !== schoolId || !Number.isFinite(now) ||
+  if (!schoolId || candidates.graph.schoolId !== schoolId ||
+      candidates.graph.osmBaseAt !== candidates.osmBaseAt || !Number.isFinite(now) ||
       !Number.isFinite(base) || base > now + 5 * 60 * 1000 || now - base > 2 * DAY_MS ||
       candidates.graph.nodes.length > 2000 || candidates.graph.edges.length > 4000 ||
       candidates.nodes.length > 2000 || candidates.ways.length > 4000 ||
@@ -136,7 +137,7 @@ export function applyCampusWalkingSegmentAudits(
     const expiry = utcMillis(audit.validUntil);
     const edited = Math.max(utcMillis(way.editedAt), utcMillis(from.editedAt), utcMillis(to.editedAt));
     if (![reviewed, expiry, edited].every(Number.isFinite) ||
-        reviewed < edited || reviewed > now || expiry <= now ||
+        edited > base || reviewed < edited || reviewed > now || expiry <= now ||
         expiry - reviewed > MAX_AUDIT_AGE_MS) return blocked;
     return { ...edge, access: 'reviewed-open', direction: audit.direction, validUntil: audit.validUntil };
   });
