@@ -506,7 +506,13 @@ async def check_full_service_search_journey(page, results):
         await wait_for_campus_header(page, 'pu', '靜宜大學')
         await expect_search('借書')
         assert await search.evaluate('node => parseFloat(getComputedStyle(node).fontSize)') > normal_input_size, 'Search input ignored the large text preference'
-        await page.locator('html').evaluate("node => { node.style.fontSize='200%'; }")
+        # A reduced-motion reflow must finish synchronously so Enter scrolls to
+        # the final heading position, even in the same frame as a text resize.
+        assert await result_title.evaluate("""heading => {
+            const before = parseFloat(getComputedStyle(heading).fontSize);
+            document.documentElement.style.fontSize = '200%';
+            return parseFloat(getComputedStyle(heading).fontSize) === before * 2;
+        }"""), 'Reduced motion delayed the new results heading size'
         for width in (320, 390):
             await page.set_viewport_size({'width': width, 'height': 844})
             await check_oled(page)

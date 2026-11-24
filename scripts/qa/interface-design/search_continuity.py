@@ -111,8 +111,6 @@ async def check_directory_submit(page, config, report, capture):
         })''')
         assert all(row['width'] >= 43.5 and row['height'] >= 43.5 for row in sizes), sizes
         if config.get('motion') == 'reduce' or config.get('system_motion') == 'reduce':
-            # The global reduced-motion rule retains a 0.01ms duration for
-            # transition events; this control removes transition properties.
             await expect(form.get_by_role('button', name='查看結果', exact=True)).to_have_css('transition-property', 'none')
     report['checks'].append('Life and Connect: live filtering preserves input; IME Enter/Escape preserves composition; explicit search reaches visible named results for matches, empty, public-only and all services; reset returns to input; 44px controls and reduced motion stay intact')
 
