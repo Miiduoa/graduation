@@ -136,6 +136,7 @@ async def check_search_return(page, config, report, capture):
     await library.focus()
     await library.press('Enter')
     await page.wait_for_url(target_url)
+    await expect(form).to_have_count(0)
     await page.go_back()
     assert page.url == source_url
     await expect(field).to_have_value('借書')
@@ -143,6 +144,7 @@ async def check_search_return(page, config, report, capture):
     await capture('search-library-return', full_page=False)
     await page.go_forward()
     await page.wait_for_url(target_url)
+    await expect(form).to_have_count(0)
     await page.go_back()
     await assert_results_visible(page, library, report)
 

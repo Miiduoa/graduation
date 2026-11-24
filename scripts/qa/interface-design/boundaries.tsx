@@ -1,4 +1,7 @@
 import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent } from 'react';
+import type { LinkProps } from 'next/link';
+
+import { onRouterTransitionStart } from '../../../apps/web/src/instrumentation-client';
 
 // Only data providers, Next routing and network boundaries are replaced. Product
 // navigation, disclosures, controls, content components and CSS remain real.
@@ -20,11 +23,7 @@ let state = {
   search: routeQuery.toString(),
   schoolId: 'pu' as string | null,
 };
-history.replaceState(
-  { ...history.state, interfaceRoute: state },
-  '',
-  state.pathname + '?' + state.search,
-);
+history.replaceState(routerState(state), '', state.pathname + '?' + state.search);
 const role = query.get('role') || 'student';
 const ledger = { requests: [] as string[], navigations: [] as string[], logouts: 0 };
 const subscribe = (listener: () => void) => {
@@ -42,37 +41,46 @@ function useFixture() {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
-export function navigate(href: string) {
+function routerState(route: typeof state) {
+  // Like App Router's HistoryUpdater, each commit supplies fresh router internals.
+  return {
+    __NA: true,
+    __PRIVATE_NEXTJS_INTERNALS_TREE: {
+      tree: [route.pathname],
+      renderedSearch: route.search ? '?' + route.search : '',
+    },
+  };
+}
+
+export function navigate(href: string, type: 'push' | 'replace' = 'push') {
   const url = new URL(href, location.origin);
   if (url.origin !== location.origin) throw new Error('Fixture navigation must remain local');
   ledger.navigations.push(href);
-  // The routing boundary supplies synthetic route data; use actual browser
-  // history so product return-entry handling is not simulated by pathname alone.
-  // Product search publishes its filters with replaceState before the router
-  // acknowledges them. Preserve the real source URL in this routing boundary.
-  const source = { ...state, pathname: location.pathname, search: location.search.slice(1) };
-  history.replaceState({ ...history.state, interfaceRoute: source }, '');
-  const destination = { ...source, pathname: url.pathname, search: url.search.slice(1) };
+  const destination = { ...state, pathname: url.pathname, search: url.search.slice(1) };
   const destinationUrl = url.pathname + url.search + url.hash;
-  if (destinationUrl !== location.pathname + location.search + location.hash) {
-    history.pushState({ interfaceRoute: destination }, '', destinationUrl);
-  }
+  onRouterTransitionStart(destinationUrl, type);
+  const currentUrl = location.pathname + location.search + location.hash;
+  const push = type === 'push' && destinationUrl !== currentUrl;
+  history[push ? 'pushState' : 'replaceState'](routerState(destination), '', destinationUrl);
   update(destination);
 }
 window.addEventListener('popstate', () => {
-  const restored = history.state?.interfaceRoute;
+  onRouterTransitionStart(location.pathname + location.search + location.hash, 'traverse');
+  // Search can replace its query directly in browser history between router commits.
   update({
     ...state,
-    pathname: restored?.pathname ?? location.pathname,
-    search: restored?.search ?? location.search.slice(1),
+    pathname: location.pathname,
+    search: location.search.slice(1),
   });
 });
 export default function Link({
   href = '/',
   onClick,
+  onNavigate,
+  replace,
   children,
   ...props
-}: AnchorHTMLAttributes<HTMLAnchorElement>) {
+}: AnchorHTMLAttributes<HTMLAnchorElement> & Pick<LinkProps, 'onNavigate' | 'replace'>) {
   function follow(event: MouseEvent<HTMLAnchorElement>) {
     onClick?.(event);
     if (
@@ -81,11 +89,20 @@ export default function Link({
       event.metaKey ||
       event.ctrlKey ||
       event.shiftKey ||
-      event.altKey
+      event.altKey ||
+      (event.currentTarget.target && event.currentTarget.target !== '_self') ||
+      event.currentTarget.hasAttribute('download') ||
+      new URL(event.currentTarget.href).origin !== location.origin
     )
       return;
     event.preventDefault();
-    navigate(String(href));
+    let cancelled = false;
+    onNavigate?.({
+      preventDefault: () => {
+        cancelled = true;
+      },
+    });
+    if (!cancelled) navigate(String(href), replace ? 'replace' : 'push');
   }
   return (
     <a {...props} href={href} onClick={follow}>
@@ -95,7 +112,10 @@ export default function Link({
 }
 export const usePathname = () => useFixture().pathname;
 export const useSearchParams = () => new URLSearchParams(useFixture().search);
-export const useRouter = () => ({ push: navigate, replace: navigate });
+export const useRouter = () => ({
+  push: (href: string) => navigate(href),
+  replace: (href: string) => navigate(href, 'replace'),
+});
 export const useAuth = () => ({
   user: null,
   loading: false,
