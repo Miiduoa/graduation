@@ -20,6 +20,10 @@ export type CampusWalkingBounds = {
   south: number; north: number; west: number; east: number;
 };
 export type CampusWalkingRoute = {
+  schoolId: string;
+  osmBaseAt: string;
+  /** Earliest traversed audit expiry; for zero distance, latest eligible incident audit expiry. */
+  reviewExpiresAtMs: number;
   nodes: WalkingNode[];
   osmWayIds: number[];
   distanceMeters: number;
@@ -61,10 +65,21 @@ export function osmSnapshotIsFresh(osmBaseAt: string | undefined, now: number) {
   return Number.isFinite(base) && base <= now + MAX_CLOCK_SKEW_MS && now - base <= MAX_OSM_LAG_MS;
 }
 
-function reviewedOpenAt(edge: WalkingEdge, now: number) {
-  if (edge.access !== 'reviewed-open') return false;
+/** Recheck a cached route before use or after resume in a school-scoped UI.
+ * Freshness only, not a substitute for trusted source/audit validation.
+ */
+export function isCampusWalkingRouteCurrent(
+  route: CampusWalkingRoute, schoolId: string, now: number = Date.now(),
+): boolean {
+  return !!schoolId && route.schoolId === schoolId && Number.isFinite(now) &&
+    osmSnapshotIsFresh(route.osmBaseAt, now) &&
+    Number.isFinite(route.reviewExpiresAtMs) && now < route.reviewExpiresAtMs;
+}
+
+function reviewedOpenExpiry(edge: WalkingEdge, now: number): number | null {
+  if (edge.access !== 'reviewed-open') return null;
   const expiry = utcMillis(edge.validUntil);
-  return Number.isFinite(expiry) && expiry > now;
+  return Number.isFinite(expiry) && expiry > now ? expiry : null;
 }
 
 export function findCampusWalkingRoute(
@@ -89,7 +104,7 @@ export function findCampusWalkingRoute(
   }
   if (!nodes.has(start) || !nodes.has(end)) return null;
 
-  type Arc = { to: number; way: number; meters: number };
+  type Arc = { to: number; way: number; meters: number; expiresAt: number };
   const adjacency = new Map<number, Arc[]>();
   const add = (from: number, arc: Arc) => {
     const arcs = adjacency.get(from) ?? [];
@@ -97,7 +112,7 @@ export function findCampusWalkingRoute(
     adjacency.set(from, arcs);
   };
   const seen = new Set<string>();
-  let sameNodeReviewed = false;
+  let sameNodeReviewExpiry = -Infinity;
   for (const edge of graph.edges) {
     const a = nodes.get(edge.from);
     const b = nodes.get(edge.to);
@@ -111,19 +126,22 @@ export function findCampusWalkingRoute(
     seen.add(key);
     const meters = segmentMeters(a, b);
     if (!Number.isFinite(meters) || meters <= 0) return null;
-    if (!reviewedOpenAt(edge, now)) continue;
-    if (start === end && (edge.from === start || edge.to === start)) sameNodeReviewed = true;
-    if (edge.direction !== 'reverse') add(a.id, { to: b.id, way: edge.osmWayId, meters });
-    if (edge.direction !== 'forward') add(b.id, { to: a.id, way: edge.osmWayId, meters });
+    const expiresAt = reviewedOpenExpiry(edge, now);
+    if (expiresAt === null) continue;
+    if (start === end && (edge.from === start || edge.to === start)) {
+      sameNodeReviewExpiry = Math.max(sameNodeReviewExpiry, expiresAt);
+    }
+    if (edge.direction !== 'reverse') add(a.id, { to: b.id, way: edge.osmWayId, meters, expiresAt });
+    if (edge.direction !== 'forward') add(b.id, { to: a.id, way: edge.osmWayId, meters, expiresAt });
   }
 
   // A zero-distance result still represents a location on the reviewed network.
   // A discovered but isolated, restricted or expired node is not a verified arrival.
-  if (start === end && !sameNodeReviewed) return null;
+  if (start === end && !Number.isFinite(sameNodeReviewExpiry)) return null;
 
   // Bounded Dijkstra; only positive, sourced graph edges can be traversed.
   const distance = new Map<number, number>([[start, 0]]);
-  const previous = new Map<number, { from: number; way: number }>();
+  const previous = new Map<number, { from: number; way: number; expiresAt: number }>();
   const settled = new Set<number>();
   while (true) {
     let current: number | undefined;
@@ -141,13 +159,14 @@ export function findCampusWalkingRoute(
       const cost = best + arc.meters;
       if (cost < (distance.get(arc.to) ?? Infinity)) {
         distance.set(arc.to, cost);
-        previous.set(arc.to, { from: current, way: arc.way });
+        previous.set(arc.to, { from: current, way: arc.way, expiresAt: arc.expiresAt });
       }
     }
   }
 
   const routeNodes: WalkingNode[] = [];
   const osmWayIds: number[] = [];
+  let reviewExpiresAtMs = start === end ? sameNodeReviewExpiry : Infinity;
   let current = end;
   for (;;) {
     const node = nodes.get(current);
@@ -157,9 +176,11 @@ export function findCampusWalkingRoute(
     const step = previous.get(current);
     if (!step) return null;
     osmWayIds.push(step.way);
+    reviewExpiresAtMs = Math.min(reviewExpiresAtMs, step.expiresAt);
     current = step.from;
   }
   return {
+    schoolId, osmBaseAt: graph.osmBaseAt, reviewExpiresAtMs,
     nodes: routeNodes.reverse(), osmWayIds: osmWayIds.reverse(),
     distanceMeters: distance.get(end) ?? 0,
     attribution: 'https://www.openstreetmap.org/copyright',
