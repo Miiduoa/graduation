@@ -170,6 +170,64 @@ it('PageDown 跨到閏年短月保留焦點，只有選取後才改當日內容'
   expect(onDate).toHaveBeenCalledTimes(1);
 });
 
+it('鍵盤換月聚焦週六時仍完整露出週日欄', () => {
+  const originalBounds = Element.prototype.getBoundingClientRect;
+  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(216);
+  vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(616);
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this.getAttribute('role') === 'region') return new DOMRect(40, 500, 216, 400);
+    if (this.classList.contains(styles.weekday)) {
+      const index = Array.from(this.parentElement!.children).indexOf(this);
+      const viewport = this.closest('[role="region"]')!;
+      return new DOMRect(40 + index * 88 - viewport.scrollLeft, 500, 88, 24);
+    }
+    return originalBounds.call(this);
+  });
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+    configurable: true,
+    writable: true,
+    value() {},
+  });
+  vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
+    const viewport = this.closest('[role="region"]') as HTMLElement | null;
+    if (!viewport) return;
+    const bounds = this.getBoundingClientRect();
+    const visible = viewport.getBoundingClientRect();
+    if (bounds.right > visible.right) viewport.scrollLeft += bounds.right - visible.right;
+    if (bounds.left < visible.left) viewport.scrollLeft += bounds.left - visible.left;
+  });
+
+  function ControlledCalendar() {
+    const [month, setMonth] = useState('2028-09');
+    const [selectedDate, setSelectedDate] = useState('2028-09-28');
+    return (
+      <MonthCalendar
+        {...baseProps}
+        month={month}
+        selectedDate={selectedDate}
+        onMonthChange={(next) => {
+          setMonth(next);
+          setSelectedDate('');
+        }}
+      />
+    );
+  }
+  render(<ControlledCalendar />);
+  fireEvent.keyDown(focusDate('2028-09-28'), { key: 'PageDown' });
+  expect(screen.getByRole('heading', { name: '2028 / 10' })).toBeTruthy();
+  const saturday = screen.getByRole('button', { name: '2028-10-28' });
+  expect(document.activeElement).toBe(saturday);
+  const viewport = screen.getByRole('region', { name: '2028-10 月格，週日起始' });
+  const sunday = within(viewport).getByText('日', { exact: true });
+  expect(viewport.scrollLeft).toBe(0);
+  expect(sunday.getBoundingClientRect().left).toBeGreaterThanOrEqual(
+    viewport.getBoundingClientRect().left,
+  );
+  expect(sunday.getBoundingClientRect().right).toBeLessThanOrEqual(
+    viewport.getBoundingClientRect().right,
+  );
+});
+
 it('外部月份或日期更新不搶走目前控制的焦點', () => {
   const { rerender } = render(
     <>

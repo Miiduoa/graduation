@@ -41,26 +41,22 @@ export function MonthCalendar({
   const pendingFocus = useRef<{ date: string; origin: HTMLButtonElement } | null>(null);
   const days = useMemo(() => buildMonthCalendar(records, month), [records, month]);
   const selectedCellIndex = days.findIndex((day) => day?.date === selectedDate);
-  useLayoutEffect(() => {
+  const revealWeek = (columnIndex: number) => {
     const viewport = viewportRef.current;
     const weekdayColumns = gridRef.current?.children;
     const sunday = weekdayColumns?.[0];
-    const selectedColumn = weekdayColumns?.[Math.max(0, selectedCellIndex) % MONTH_WEEKDAYS.length];
+    const selectedColumn = weekdayColumns?.[Math.max(0, columnIndex) % MONTH_WEEKDAYS.length];
     if (!viewport || !sunday || !selectedColumn || viewport.clientWidth <= 0) return;
-    const maxScroll = viewport.scrollWidth - viewport.clientWidth;
-    if (maxScroll <= 0) return;
+    scrollWeekIntoView(viewport, sunday, selectedColumn);
+  };
+  const focusDateButton = (button: HTMLButtonElement) => {
+    button.focus({ preventScroll: true });
+    const date = button.getAttribute('aria-label') ?? '';
+    revealWeek(days.findIndex((day) => day?.date === date));
+  };
 
-    const viewportLeft = viewport.getBoundingClientRect().left + viewport.clientLeft;
-    const weekStart = sunday.getBoundingClientRect().left - viewportLeft + viewport.scrollLeft;
-    const columnEnd =
-      selectedColumn.getBoundingClientRect().right - viewportLeft + viewport.scrollLeft;
-    // Keep Sunday fully visible. When the span overflows, its start also gives
-    // the selected column the most space available without clipping Sunday.
-    const target = Math.min(
-      Math.max(viewport.scrollLeft, columnEnd - viewport.clientWidth),
-      weekStart,
-    );
-    viewport.scrollLeft = Math.max(0, Math.min(maxScroll, target));
+  useLayoutEffect(() => {
+    revealWeek(selectedCellIndex);
   }, [month, selectedDate, selectedCellIndex, dateRevealRevision]);
 
   useLayoutEffect(() => {
@@ -202,7 +198,22 @@ export function MonthCalendar({
   );
 }
 
-function focusDateButton(button: HTMLButtonElement) {
-  button.focus({ preventScroll: true });
-  button.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+function scrollWeekIntoView(
+  viewport: HTMLDivElement,
+  sunday: Element,
+  selectedColumn: Element,
+) {
+  const maxScroll = viewport.scrollWidth - viewport.clientWidth;
+  if (maxScroll <= 0) return;
+  const viewportLeft = viewport.getBoundingClientRect().left + viewport.clientLeft;
+  const weekStart = sunday.getBoundingClientRect().left - viewportLeft + viewport.scrollLeft;
+  const columnEnd =
+    selectedColumn.getBoundingClientRect().right - viewportLeft + viewport.scrollLeft;
+  // Keep Sunday fully visible. When the span overflows, its start also gives
+  // the selected column the most space available without clipping Sunday.
+  const target = Math.min(
+    Math.max(viewport.scrollLeft, columnEnd - viewport.clientWidth),
+    weekStart,
+  );
+  viewport.scrollLeft = Math.max(0, Math.min(maxScroll, target));
 }
