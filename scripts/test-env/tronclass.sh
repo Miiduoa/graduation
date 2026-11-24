@@ -135,21 +135,17 @@ if ! printf '%s' "$TRONCLASS_RUN_ID" | grep -Eq '^[0-9a-fA-F]{32}$'; then
 fi
 export TRONCLASS_RUN_ID
 echo "RUN_ID=$TRONCLASS_RUN_ID"
-# Leftover sidecars from a previous run are never used to send signals.
-for TRONCLASS_STALE_PGID in "$TRONCLASS_RUNTIME_DIR"/web.log.pgid "$TRONCLASS_RUNTIME_DIR"/emulators.log.pgid "$TRONCLASS_RUNTIME_DIR"/selftest.log.pgid "$TRONCLASS_RUNTIME_DIR"/seed.log.pgid "$TRONCLASS_RUNTIME_DIR"/health.log.pgid "$TRONCLASS_RUNTIME_DIR"/acceptance.log.pgid "$TRONCLASS_RUNTIME_DIR"/.pgid-*.tmp; do
-  if [ ! -e "$TRONCLASS_STALE_PGID" ] || [ -L "$TRONCLASS_STALE_PGID" ]; then
-    rm -f "$TRONCLASS_STALE_PGID" 2>/dev/null || true
-    continue
-  fi
-  TRONCLASS_STALE_RAW="$(tr -cd '0-9a-fA-F \t' < "$TRONCLASS_STALE_PGID" 2>/dev/null || true)"
-  TRONCLASS_STALE_RUN="$(printf '%s' "$TRONCLASS_STALE_RAW" | awk '{print $1}')"
-  TRONCLASS_STALE_PID="$(printf '%s' "$TRONCLASS_STALE_RAW" | awk '{print $2}')"
-  TRONCLASS_STALE_START="$(printf '%s' "$TRONCLASS_STALE_RAW" | awk '{print $3}')"
-  if [ "$TRONCLASS_STALE_RUN" = "$TRONCLASS_RUN_ID" ] && [ -n "$TRONCLASS_STALE_PID" ] && [ -n "$TRONCLASS_STALE_START" ]; then
-    continue
-  fi
-  rm -f "$TRONCLASS_STALE_PGID" 2>/dev/null || true
-done
+# Install signal traps before any leftover sidecar is opened. Full cleanup
+# replaces these once the process-group helpers are defined.
+tronclass_early_cleanup() {
+  local sig="${1:-}"
+  trap - EXIT INT TERM
+  if [ "$sig" = INT ]; then exit 130; fi
+  if [ "$sig" = TERM ]; then exit 143; fi
+}
+trap 'tronclass_early_cleanup' EXIT
+trap 'tronclass_early_cleanup INT' INT
+trap 'tronclass_early_cleanup TERM' TERM
 for TRONCLASS_KEY_NAME in bff-session tronclass-session; do
   node - "$TRONCLASS_RUNTIME_DIR" "$TRONCLASS_KEY_NAME.key" <<'NODE'
 const fs = require('node:fs');
@@ -333,16 +329,22 @@ tronclass_stop_logged() {
   [ -n "$memory" ] && memory_record="$(tronclass_parse_record "$memory" 2>/dev/null || true)"
   local records=()
   [ -n "$memory_record" ] && records+=("$memory_record")
-  if [ -n "$wrapper" ]; then
-    local child child_start child_record
+  tronclass_discover_wrapper_children() {
+    local child child_start child_record existing
+    [ -n "$wrapper" ] || return 0
     for child in $(ps -o pid= --ppid "$wrapper" 2>/dev/null); do
       child_start="$(tronclass_proc_starttime "$child" 2>/dev/null || true)"
       if [ -n "$child_start" ] && [ -n "${TRONCLASS_RUN_ID:-}" ]; then
         child_record="$TRONCLASS_RUN_ID $child $child_start"
+        for existing in "${records[@]+"${records[@]}"}"; do
+          [ "$existing" = "$child_record" ] && continue 2
+        done
         records+=("$child_record")
+        tronclass_signal_record "$child_record" "$sig"
       fi
     done
-  fi
+  }
+  tronclass_discover_wrapper_children
   local record
   for record in "${records[@]+"${records[@]}"}"; do
     tronclass_signal_record "$record" "$sig"
@@ -350,6 +352,7 @@ tronclass_stop_logged() {
   [ -n "$wrapper" ] && kill "-$sig" "$wrapper" 2>/dev/null || true
   local i
   for i in $(seq 1 20); do
+    tronclass_discover_wrapper_children
     local wrapper_alive=0 group_alive=0
     [ -n "$wrapper" ] && kill -0 "$wrapper" 2>/dev/null && wrapper_alive=1
     for record in "${records[@]+"${records[@]}"}"; do
@@ -360,6 +363,7 @@ tronclass_stop_logged() {
     fi
     sleep 0.1
   done
+  tronclass_discover_wrapper_children
   for record in "${records[@]+"${records[@]}"}"; do
     tronclass_signal_record "$record" KILL
   done
@@ -379,6 +383,46 @@ cleanup() {
 trap 'cleanup' EXIT
 trap 'cleanup INT' INT
 trap 'cleanup TERM' TERM
+
+tronclass_read_regular_file() {
+  local file="$1"
+  node - "$file" <<'NODE'
+const fs = require('node:fs');
+const path = process.argv[2];
+let fd;
+try {
+  fd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
+} catch (error) {
+  process.exit(1);
+}
+try {
+  const info = fs.fstatSync(fd);
+  if (!info.isFile() || info.nlink !== 1) process.exit(1);
+  const buf = Buffer.alloc(4096);
+  const n = fs.readSync(fd, buf, 0, buf.length, 0);
+  process.stdout.write(buf.subarray(0, n));
+} finally {
+  fs.closeSync(fd);
+}
+NODE
+}
+
+# Leftover sidecars from a previous run are never used to send signals.
+# Only regular files are opened; FIFOs and other special files are unlinked.
+for TRONCLASS_STALE_PGID in "$TRONCLASS_RUNTIME_DIR"/web.log.pgid "$TRONCLASS_RUNTIME_DIR"/emulators.log.pgid "$TRONCLASS_RUNTIME_DIR"/selftest.log.pgid "$TRONCLASS_RUNTIME_DIR"/seed.log.pgid "$TRONCLASS_RUNTIME_DIR"/health.log.pgid "$TRONCLASS_RUNTIME_DIR"/acceptance.log.pgid "$TRONCLASS_RUNTIME_DIR"/.pgid-*.tmp; do
+  if [ -L "$TRONCLASS_STALE_PGID" ] || [ ! -f "$TRONCLASS_STALE_PGID" ]; then
+    rm -f "$TRONCLASS_STALE_PGID" 2>/dev/null || true
+    continue
+  fi
+  TRONCLASS_STALE_RAW="$(tronclass_read_regular_file "$TRONCLASS_STALE_PGID" 2>/dev/null | tr -cd '0-9a-fA-F 	' || true)"
+  TRONCLASS_STALE_RUN="$(printf '%s' "$TRONCLASS_STALE_RAW" | awk '{print $1}')"
+  TRONCLASS_STALE_PID="$(printf '%s' "$TRONCLASS_STALE_RAW" | awk '{print $2}')"
+  TRONCLASS_STALE_START="$(printf '%s' "$TRONCLASS_STALE_RAW" | awk '{print $3}')"
+  if [ "$TRONCLASS_STALE_RUN" = "$TRONCLASS_RUN_ID" ] && [ -n "$TRONCLASS_STALE_PID" ] && [ -n "$TRONCLASS_STALE_START" ]; then
+    continue
+  fi
+  rm -f "$TRONCLASS_STALE_PGID" 2>/dev/null || true
+done
 
 tronclass_run_logged() {
   local log="$1"
@@ -414,7 +458,20 @@ if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
   refuseLog();
 }
 fs.ftruncateSync(fd, 0);
-const child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd], detached: true });
+let child = null;
+let pendingSignal = null;
+const stop = (signal) => {
+  if (!child) { pendingSignal = signal; return; }
+  try { process.kill(-child.pid, signal); } catch (error) { /* the group may already have exited */ }
+  try { child.kill(signal); } catch (error) { /* the child may have already exited */ }
+};
+process.on('SIGINT', () => stop('SIGINT'));
+process.on('SIGTERM', () => stop('SIGTERM'));
+const delayMs = Number(process.env.TRONCLASS_TEST_DELAY_SPAWN_MS || 0);
+if (Number.isFinite(delayMs) && delayMs > 0) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+}
+child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd], detached: true });
 fs.closeSync(fd);
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -460,12 +517,7 @@ try {
 } catch (error) {
   process.stderr.write('Unable to record the logged child process group.\n');
 }
-const stop = (signal) => {
-  try { process.kill(-child.pid, signal); } catch (error) { /* the group may already have exited */ }
-  try { child.kill(signal); } catch (error) { /* the child may have already exited */ }
-};
-process.on('SIGINT', () => stop('SIGINT'));
-process.on('SIGTERM', () => stop('SIGTERM'));
+if (pendingSignal) stop(pendingSignal);
 child.on('exit', (code, signal) => {
   if (signal) {
     try { process.kill(process.pid, signal); } catch (error) { process.exit(1); }
@@ -503,7 +555,20 @@ if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
   refuseLog();
 }
 fs.ftruncateSync(fd, 0);
-const child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd], detached: true });
+let child = null;
+let pendingSignal = null;
+const stop = (signal) => {
+  if (!child) { pendingSignal = signal; return; }
+  try { process.kill(-child.pid, signal); } catch (error) { /* the group may already have exited */ }
+  try { child.kill(signal); } catch (error) { /* the child may have already exited */ }
+};
+process.on('SIGINT', () => stop('SIGINT'));
+process.on('SIGTERM', () => stop('SIGTERM'));
+const delayMs = Number(process.env.TRONCLASS_TEST_DELAY_SPAWN_MS || 0);
+if (Number.isFinite(delayMs) && delayMs > 0) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+}
+child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd], detached: true });
 fs.closeSync(fd);
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -549,12 +614,7 @@ try {
 } catch (error) {
   process.stderr.write('Unable to record the logged child process group.\n');
 }
-const stop = (signal) => {
-  try { process.kill(-child.pid, signal); } catch (error) { /* the group may already have exited */ }
-  try { child.kill(signal); } catch (error) { /* the child may have already exited */ }
-};
-process.on('SIGINT', () => stop('SIGINT'));
-process.on('SIGTERM', () => stop('SIGTERM'));
+if (pendingSignal) stop(pendingSignal);
 child.on('exit', (code, signal) => {
   if (signal) {
     try { process.kill(process.pid, signal); } catch (error) { process.exit(1); }

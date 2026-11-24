@@ -794,3 +794,99 @@ test('launcher cleanup stops this-run descendants when the memory record is not 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('launcher startup unlinks a leftover FIFO pgid without blocking', async () => {
+  const { spawn } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const { execSync } = await import('node:child_process');
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-fifo-'));
+  const childPidFile = path.join(dir, 'child.pid');
+  const grandchildPidFile = path.join(dir, 'grandchild.pid');
+  const leftover = path.join(dir, 'web.log.pgid');
+  execSync(`mkfifo "${leftover}"`);
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+  try {
+    const proc = spawn('bash', [script], {
+      env: {
+        ...process.env,
+        TRONCLASS_RUNTIME_DIR: dir,
+        TRONCLASS_SIGNAL_SELFTEST: '1',
+        TRONCLASS_SELFTEST_CHILD: childPidFile,
+        TRONCLASS_SELFTEST_GRANDCHILD: grandchildPidFile,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const started = Date.now();
+    while (Date.now() - started < 5000) {
+      if (existsSync(childPidFile) && existsSync(grandchildPidFile)) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.equal(existsSync(leftover), false);
+    assert.ok(existsSync(childPidFile) && existsSync(grandchildPidFile));
+    proc.kill('SIGTERM');
+    const exited = await new Promise(resolve => {
+      const timer = setTimeout(() => resolve('timeout'), 5000);
+      proc.on('exit', (code, signal) => {
+        clearTimeout(timer);
+        resolve({ code, signal });
+      });
+    });
+    assert.notEqual(exited, 'timeout');
+    assert.equal(exited.code, 143);
+  } finally {
+    try { rmSync(leftover, { force: true }); } catch (error) { /* already unlinked */ }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launcher cleanup tracks a group spawned after the first child scan', async () => {
+  const { spawn } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-latespawn-'));
+  const childPidFile = path.join(dir, 'child.pid');
+  const grandchildPidFile = path.join(dir, 'grandchild.pid');
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+  try {
+    const proc = spawn('bash', [script], {
+      env: {
+        ...process.env,
+        TRONCLASS_RUNTIME_DIR: dir,
+        TRONCLASS_SIGNAL_SELFTEST: '1',
+        TRONCLASS_SELFTEST_CHILD: childPidFile,
+        TRONCLASS_SELFTEST_GRANDCHILD: grandchildPidFile,
+        TRONCLASS_TEST_DELAY_SPAWN_MS: '800',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let wrapperLine = '';
+    proc.stdout.on('data', chunk => { wrapperLine += String(chunk); });
+    const started = Date.now();
+    while (Date.now() - started < 5000) {
+      if (/WRAPPER_PID=\d+/.test(wrapperLine)) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.match(wrapperLine, /WRAPPER_PID=\d+/);
+    assert.equal(existsSync(childPidFile), false);
+    proc.kill('SIGTERM');
+    const exited = await new Promise(resolve => {
+      const timer = setTimeout(() => resolve('timeout'), 6000);
+      proc.on('exit', (code, signal) => {
+        clearTimeout(timer);
+        resolve({ code, signal });
+      });
+    });
+    assert.notEqual(exited, 'timeout');
+    assert.equal(exited.code, 143);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    if (existsSync(childPidFile)) {
+      const childPid = Number(readFileSync(childPidFile, 'utf8').trim());
+      assert.throws(() => process.kill(childPid, 0));
+    }
+    if (existsSync(grandchildPidFile)) {
+      const grandchildPid = Number(readFileSync(grandchildPidFile, 'utf8').trim());
+      assert.throws(() => process.kill(grandchildPid, 0));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
