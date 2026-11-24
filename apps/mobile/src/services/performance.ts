@@ -32,13 +32,16 @@ class MockTrace implements PerformanceTrace {
   private metrics: Map<string, number> = new Map();
   private stopped: boolean = false;
 
-  constructor(name: string) {
+  constructor(
+    name: string,
+    private readonly canRecord: () => boolean,
+  ) {
     this.name = name;
   }
 
   start(): void {
     this.startTime = Date.now();
-    if (__DEV__) {
+    if (__DEV__ && this.canRecord()) {
       console.log(`[Perf] Trace started: ${this.name}`);
     }
   }
@@ -46,6 +49,7 @@ class MockTrace implements PerformanceTrace {
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
+    if (!this.canRecord()) return;
     const duration = Date.now() - this.startTime;
 
     if (__DEV__) {
@@ -138,7 +142,11 @@ class MockHttpMetric implements HttpMetric {
   private contentType: string = '';
   private attributes: Map<string, string> = new Map();
 
-  constructor(url: string, method: string) {
+  constructor(
+    url: string,
+    method: string,
+    private readonly canRecord: () => boolean,
+  ) {
     this.url = url;
     this.method = method;
   }
@@ -168,6 +176,7 @@ class MockHttpMetric implements HttpMetric {
   }
 
   async stop(measurement?: { durationMs: number }): Promise<void> {
+    if (!this.canRecord()) return;
     const duration = measurement?.durationMs ?? Date.now() - this.startTime;
 
     if (__DEV__) {
@@ -339,13 +348,23 @@ const performanceDataStore = new PerformanceDataStore();
 class PerformanceService {
   private enabled: boolean = true;
   private dataCollectionEnabled: boolean = true;
+  private collectionEpoch = 0;
 
   setPerformanceCollectionEnabled(enabled: boolean): void {
+    if (this.enabled !== enabled) this.collectionEpoch++;
     this.enabled = enabled;
   }
 
   setDataCollectionEnabled(enabled: boolean): void {
+    if (this.dataCollectionEnabled !== enabled) this.collectionEpoch++;
     this.dataCollectionEnabled = enabled;
+  }
+
+  // A pending trace must not become recordable again after collection is disabled
+  // and subsequently re-enabled. Capture only the current permission epoch.
+  private collectionPermission(): () => boolean {
+    const epoch = this.collectionEpoch;
+    return () => this.enabled && this.dataCollectionEnabled && this.collectionEpoch === epoch;
   }
 
   isPerformanceCollectionEnabled(): boolean {
@@ -356,14 +375,14 @@ class PerformanceService {
    * Create a new trace
    */
   newTrace(traceName: string): PerformanceTrace {
-    return new MockTrace(traceName);
+    return new MockTrace(traceName, this.collectionPermission());
   }
 
   /**
    * Create a new HTTP metric
    */
   newHttpMetric(url: string, httpMethod: string): HttpMetric {
-    return new MockHttpMetric(httpMetricOrigin(url), httpMethod);
+    return new MockHttpMetric(httpMetricOrigin(url), httpMethod, this.collectionPermission());
   }
 
   /**
@@ -397,7 +416,7 @@ class PerformanceService {
       return result;
     } catch (error) {
       trace.putAttribute('success', 'false');
-      trace.putAttribute('error', String(error));
+      trace.putAttribute('error_kind', httpErrorKind(error));
       throw error;
     } finally {
       trace.stop();
@@ -422,7 +441,7 @@ class PerformanceService {
       return result;
     } catch (error) {
       trace.putAttribute('success', 'false');
-      trace.putAttribute('error', String(error));
+      trace.putAttribute('error_kind', httpErrorKind(error));
       throw error;
     } finally {
       trace.stop();

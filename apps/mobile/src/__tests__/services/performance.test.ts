@@ -264,3 +264,72 @@ describe('fetchWithPerformance', () => {
     },
   );
 });
+
+describe('performance collection privacy', () => {
+  beforeEach(() => {
+    performance.setPerformanceCollectionEnabled(true);
+    performance.setDataCollectionEnabled(true);
+    performance.getDataStore().clear();
+  });
+
+  afterEach(() => {
+    performance.setPerformanceCollectionEnabled(true);
+    performance.setDataCollectionEnabled(true);
+    performance.getDataStore().clear();
+  });
+
+  it.each(['performance', 'data'] as const)(
+    'does not collect traces or HTTP metrics while %s collection is disabled',
+    async (setting) => {
+      if (setting === 'performance') performance.setPerformanceCollectionEnabled(false);
+      else performance.setDataCollectionEnabled(false);
+
+      expect(performance.measure('disabled-sync', () => 42)).toBe(42);
+      await expect(performance.measureAsync('disabled-async', async () => 43)).resolves.toBe(43);
+      const metric = performance.newHttpMetric('https://example.test/private', 'GET');
+      await metric.start();
+      await metric.stop();
+      expect(performance.getDataStore().getTraces()).toHaveLength(0);
+      expect(performance.getDataStore().getHttpMetrics()).toHaveLength(0);
+    },
+  );
+
+  it('does not revive pending metrics or traces after disabling and re-enabling collection', async () => {
+    const trace = performance.startTrace('pending');
+    const metric = performance.newHttpMetric('https://example.test/data', 'GET');
+    await metric.start();
+    performance.setDataCollectionEnabled(false);
+    performance.setDataCollectionEnabled(true);
+    trace.stop();
+    await metric.stop();
+    expect(performance.getDataStore().getTraces()).toHaveLength(0);
+    expect(performance.getDataStore().getHttpMetrics()).toHaveLength(0);
+
+    performance.measure('new-trace', () => 42);
+    const nextMetric = performance.newHttpMetric('https://example.test/data', 'GET');
+    await nextMetric.start();
+    await nextMetric.stop();
+    expect(performance.getDataStore().getTraces()).toHaveLength(1);
+    expect(performance.getDataStore().getHttpMetrics()).toHaveLength(1);
+  });
+
+  it('records only the error category while preserving the original sync and async errors', async () => {
+    const error = new TypeError('private student-123?token=secret');
+    expect(() =>
+      performance.measure('sync', () => {
+        throw error;
+      }),
+    ).toThrow(error);
+    await expect(
+      performance.measureAsync('async', async () => {
+        throw error;
+      }),
+    ).rejects.toBe(error);
+    const traces = performance.getDataStore().getTraces();
+    expect(traces).toHaveLength(2);
+    for (const trace of traces) {
+      expect(trace.attributes).toEqual({ success: 'false', error_kind: 'TypeError' });
+      expect(JSON.stringify(trace)).not.toMatch(/student-123|secret/);
+    }
+  });
+});
