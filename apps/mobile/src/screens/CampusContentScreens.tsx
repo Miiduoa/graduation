@@ -1067,7 +1067,7 @@ function ScopedCampusEventDetail({ navigation, route }: Props) {
   const content = useContent(
     loader,
     id,
-    JSON.stringify([source, boundSchool, calendarScope?.owner]),
+    JSON.stringify([source, boundSchool]),
   );
   const event = content.value;
   const now = useCampusEventClock(event?.calendarTime);
@@ -1134,7 +1134,7 @@ function ScopedCampusEventDetail({ navigation, route }: Props) {
         });
     } finally {
       actionLock.current = false;
-      if (content.current()) setBusyScope(null);
+      setBusyScope(null);
     }
   };
   return (
