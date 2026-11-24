@@ -115,39 +115,76 @@ if [ -n "$tronclass_runtime_dir" ]; then
 else
   TRONCLASS_RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/campus-tronclass-emulator.XXXXXX")"
 fi
-python3 -I - "$TRONCLASS_RUNTIME_DIR" <<'PYTHON'
+TRONCLASS_RUNTIME_DIR="$(python3 -I - "$TRONCLASS_RUNTIME_DIR" "$tronclass_runtime_dir" <<'PYTHON'
 import os
+import secrets
 import stat
 import sys
 
 target = os.path.abspath(sys.argv[1])
+specified = bool(sys.argv[2])
 flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-fd = None
-try:
-    fd = os.open("/", flags)
-    for part in target.split("/")[1:]:
-        if not part:
-            continue
-        next_fd = os.open(part, flags, dir_fd=fd)
-        os.close(fd)
-        fd = next_fd
+fds = []
+bindings = []
+
+def identity(info):
+    return info.st_dev, info.st_ino
+
+def open_directory(name):
+    parent_fd = fds[-1]
+    fd = os.open(name, flags, dir_fd=parent_fd)
+    fds.append(fd)
     opened = os.fstat(fd)
+    bindings.append((parent_fd, name, identity(opened), opened.st_uid))
+    return opened
+
+def verify_bindings():
+    # Walk back to the root so a renamed ancestor cannot hide a replacement
+    # from the check relative to the pinned parent.
+    for parent_fd, name, expected, owner in reversed(bindings):
+        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if (not stat.S_ISDIR(current.st_mode) or identity(current) != expected
+                or current.st_uid != owner):
+            raise OSError("replaced runtime directory")
+
+try:
+    fds.append(os.open("/", flags))
+    components = target.strip("/").split("/") if target != "/" else ["."]
+    for name in components:
+        opened = open_directory(name)
+
     if not stat.S_ISDIR(opened.st_mode) or opened.st_uid != os.getuid() or not opened.st_ino:
         raise OSError("invalid runtime directory")
-    os.fchmod(fd, 0o700)
-    if os.path.realpath(target) != target:
-        raise OSError("symbolic link in runtime path")
-    # Use fstatat with the absolute path, which is independent of dir_fd.
-    current = os.stat(target, dir_fd=fd, follow_symlinks=False)
-    if (not stat.S_ISDIR(current.st_mode) or current.st_uid != opened.st_uid
-            or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino)):
-        raise OSError("replaced runtime directory")
+    verify_bindings()
+    # Keep shared runtime state in an existing private directory. For other
+    # modes, create a per-launch directory relative to the verified parent.
+    created = not specified
+    if specified and stat.S_IMODE(opened.st_mode) != 0o700:
+        name = "run-" + secrets.token_hex(16)
+        os.mkdir(name, 0o700, dir_fd=fds[-1])
+        opened = open_directory(name)
+        target = os.path.join(target, name)
+        created = True
+
+    # A setgid parent can pass its setgid bit to a newly created directory.
+    if created and (opened.st_uid != os.getuid()
+                    or stat.S_IMODE(opened.st_mode) not in (0o700, 0o2700)):
+        raise OSError("invalid newly created runtime directory")
+
+    # Linux cannot make fchmod conditional on the directory entry. Restrict
+    # it to per-launch directories, with binding checks on both sides.
+    verify_bindings()
+    if created:
+        os.fchmod(fds[-1], 0o700)
+        verify_bindings()
+    print(target)
 except OSError:
     sys.exit("TRONCLASS_RUNTIME_DIR must be a directory owned by the current user, not a symbolic link or replaced directory.")
 finally:
-    if fd is not None:
+    for fd in reversed(fds):
         os.close(fd)
 PYTHON
+)"
 export TRONCLASS_RUNTIME_DIR
 TRONCLASS_RUN_ID="$(openssl rand -hex 16 2>/dev/null || true)"
 if ! printf '%s' "$TRONCLASS_RUN_ID" | grep -Eq '^[0-9a-fA-F]{32}$'; then

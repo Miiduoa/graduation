@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -151,52 +151,129 @@ process.exit(0);
   }
 });
 
-test('launcher rejects a runtime directory replaced during fchmod', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-runtime-swap-'));
-  const runtime = path.join(dir, 'runtime');
-  const moved = path.join(dir, 'moved');
-  const replacement = path.join(dir, 'replacement');
-  try {
-    mkdirSync(runtime, { mode: 0o755 });
-    mkdirSync(replacement, { mode: 0o755 });
-    // Run the real verifier with a deterministic rename at the fchmod boundary.
-    writeFileSync(path.join(dir, 'python3'), `#!${python}
+for (const component of ['child', 'runtime', 'parent']) {
+  for (const phase of ['before', 'during']) {
+    test(`launcher rejects a replaced ${component} ${phase} child permission setting`, () => {
+      const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-runtime-swap-'));
+      const parent = path.join(dir, 'parent');
+      const runtime = path.join(parent, 'runtime');
+      const target = component === 'runtime' ? runtime : parent;
+      const moved = path.join(dir, 'moved');
+      const replacement = path.join(dir, 'replacement');
+      const movedRuntime = component === 'parent' ? path.join(moved, 'runtime') : moved;
+      const replacementRuntime = component === 'parent' ? path.join(replacement, 'runtime') : replacement;
+      const mode = file => statSync(file).mode & 0o777;
+      try {
+        mkdirSync(parent, { mode: 0o750 });
+        mkdirSync(runtime, { mode: 0o755 });
+        mkdirSync(replacement, { mode: 0o751 });
+        if (component === 'parent') mkdirSync(replacementRuntime, { mode: 0o753 });
+        const originalModes = [mode(target), mode(runtime)];
+        const replacementModes = [mode(replacement), mode(replacementRuntime)];
+
+        writeFileSync(path.join(dir, 'python3'), `#!${python}
 import os
 import sys
 
-target = sys.argv[-1]
-sys.argv = ["-", target]
+real_fstat = os.fstat
 real_fchmod = os.fchmod
 
-def swap_and_chmod(fd, mode):
+def swap(child):
+    target = child if ${JSON.stringify(component)} == "child" else ${JSON.stringify(target)}
     os.rename(target, ${JSON.stringify(moved)})
     os.rename(${JSON.stringify(replacement)}, target)
+
+def fstat(fd):
+    result = real_fstat(fd)
+    child = os.readlink(f"/proc/self/fd/{fd}")
+    if child.startswith(${JSON.stringify(runtime + '/run-')}):
+        swap(child)
+    return result
+
+def fchmod(fd, mode):
+    child = os.readlink(f"/proc/self/fd/{fd}")
+    assert child.startswith(${JSON.stringify(runtime + '/run-')})
+    swap(child)
     real_fchmod(fd, mode)
 
-os.fchmod = swap_and_chmod
+if ${JSON.stringify(phase)} == "before":
+    os.fstat = fstat
+else:
+    os.fchmod = fchmod
+sys.argv = sys.argv[2:]
 exec(compile(sys.stdin.read(), "runtime verifier", "exec"))
 `, { mode: 0o700 });
-    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
-      encoding: 'utf8',
-      timeout: 5000,
-      env: {
-        ...process.env,
-        PATH: `${dir}:${process.env.PATH}`,
-        TRONCLASS_RUNTIME_DIR: runtime,
-        TRONCLASS_SIGNAL_SELFTEST: '1',
-      },
+        const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+          encoding: 'utf8',
+          timeout: 5000,
+          env: {
+            ...process.env,
+            PATH: `${dir}:${process.env.PATH}`,
+            TRONCLASS_RUNTIME_DIR: runtime,
+            TRONCLASS_SIGNAL_SELFTEST: '1',
+          },
+        });
+        assert.equal(result.error, undefined);
+        assert.equal(result.status, 1, result.stderr);
+        assert.match(result.stderr, /replaced directory/);
+        assert.doesNotMatch(result.stdout, /RUN_ID=/);
+        if (component === 'child') {
+          assert.equal(mode(moved), 0o700);
+          assert.equal(mode(runtime), originalModes[1]);
+          const children = readdirSync(runtime);
+          assert.equal(children.length, 1);
+          const replacementChild = path.join(runtime, children[0]);
+          assert.equal(mode(replacementChild), replacementModes[0]);
+          assert.deepEqual(readdirSync(replacementChild), []);
+        } else {
+          assert.deepEqual([mode(moved), mode(movedRuntime)], originalModes);
+          assert.deepEqual([mode(target), mode(runtime)], replacementModes);
+          assert.deepEqual(readdirSync(runtime), []);
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
-    assert.equal(result.error, undefined);
-    assert.equal(result.status, 1, result.stderr);
-    assert.match(result.stderr, /replaced directory/);
-    assert.doesNotMatch(result.stdout, /RUN_ID=/);
-    assert.equal(statSync(moved).mode & 0o777, 0o700);
-    assert.equal(statSync(runtime).mode & 0o777, 0o755);
-    assert.deepEqual(readdirSync(runtime), []);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
   }
-});
+}
+
+for (const mode of [0o755, 0o2750]) {
+  test(`launcher starts in a private child of an existing ${mode.toString(8)} runtime directory`, () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-runtime-mode-'));
+    const runtime = path.join(dir, 'runtime');
+    try {
+      mkdirSync(runtime);
+      chmodSync(runtime, mode);
+      writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args[1].includes('/selftest.log.')) process.exit(0);
+require('node:child_process').execFileSync(process.execPath, args, { stdio: 'inherit' });
+  `, { mode: 0o700 });
+      const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+        encoding: 'utf8',
+        timeout: 5000,
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH}`,
+          TRONCLASS_RUNTIME_DIR: runtime,
+          TRONCLASS_SIGNAL_SELFTEST: '1',
+        },
+      });
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /WRAPPER_PID=/);
+      assert.equal(statSync(runtime).mode & 0o7777, mode);
+      const children = readdirSync(runtime);
+      assert.equal(children.length, 1);
+      const child = path.join(runtime, children[0]);
+      assert.equal(statSync(child).mode & 0o7777, 0o700);
+      assert.equal(statSync(path.join(child, 'bff-session.key')).mode & 0o777, 0o600);
+      assert.equal(statSync(path.join(child, 'tronclass-session.key')).mode & 0o777, 0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 test('launcher refuses a symbolic link session key file', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-key-'));
