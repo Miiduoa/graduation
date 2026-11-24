@@ -290,7 +290,9 @@ function MapContent({
     const ids = routeLocations.map((place) => place.id);
     if (ids.every((id) => id && id.trim() === id && !id.includes(',')))
       returnParams.set('route', ids.join(','));
-  } else if (routeDraft === null && sourcePending && route) {
+  } else if (routeDraft === null && route && placeState.source !== 'ready') {
+    // Official source failure is temporary. Keep an untouched deep-link route
+    // in login return URLs so it can be restored if the source later recovers.
     returnParams.set('route', route);
   }
   const returnFocus = selection ?? focus ?? selectedId;

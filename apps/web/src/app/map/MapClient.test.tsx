@@ -715,6 +715,19 @@ it('keeps both login returns in sync with manually changed and cleared routes', 
   expect(returnRoutes()).toEqual([null, null]);
 });
 
+it('keeps an untouched deep-link route in login returns when the official source fails', async () => {
+  state.user = null;
+  vi.mocked(loadMapLocations).mockRejectedValueOnce(new Error('timeout'));
+  render(<MapClient school="pu" route="gate,library" />);
+  await sourceSettled();
+  expect(screen.getByRole('button', { name: '重新讀取地點資料' })).toBeTruthy();
+  const routes = ['用 Google 帳號收藏', '查看學校帳號的既有收藏'].map((name) => {
+    const login = new URL(screen.getByRole('link', { name }).getAttribute('href')!, window.location.origin);
+    return new URL(login.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('route');
+  });
+  expect(routes).toEqual(['gate,library', 'gate,library']);
+});
+
 it('preserves a pending untouched route link but drops it when the source cannot resolve it', async () => {
   state.user = null;
   const source = deferred<MapLocation[]>();
