@@ -1257,6 +1257,66 @@ it.each([
   },
 );
 
+it.each([
+  { status: 403, forwardFirst: true },
+  { status: 404, forwardFirst: true },
+  { status: 403, forwardFirst: false },
+  { status: 404, forwardFirst: false },
+])('rechecks the visible entry after a retired detail returns $status (Forward success first: $forwardFirst)', async ({
+  status,
+  forwardFirst,
+}) => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const previous = { ...detail('store-a', true), readinessVersion: 7 };
+  const recovered = {
+    ...detail(),
+    readinessVersion: 6,
+    merchantName: '重新確認的餐坊',
+    missingRequirements: ['menu'],
+  };
+  let denyOld!: (error: NuniError) => void;
+  let finishForward!: (value: typeof previous) => void;
+  let finishRecovery!: (value: typeof recovered) => void;
+  const oldRead = new Promise<never>((_, reject) => { denyOld = reject; });
+  const forwardRead = new Promise<typeof previous>((resolve) => { finishForward = resolve; });
+  const recovery = new Promise<typeof recovered>((resolve) => { finishRecovery = resolve; });
+  const readDetail = vi.fn()
+    .mockReturnValueOnce(oldRead)
+    .mockReturnValueOnce(forwardRead)
+    .mockReturnValueOnce(recovery);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === path) return readDetail();
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [previous] });
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(1));
+  await act(async () => window.history.back());
+  await screen.findByRole('link', { name: '管理門市：一樓' });
+  await act(async () => window.history.forward());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+
+  if (forwardFirst) {
+    await act(async () => finishForward(previous));
+    await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+    expect(screen.getByRole('button', { name: '暫停接單' })).toBeTruthy();
+  }
+  await act(async () => denyOld(new NuniError(status, 'DENIED')));
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+  if (!forwardFirst) await act(async () => finishForward(previous));
+  expect(screen.getByRole('status').textContent).toContain('正在確認門市資料');
+  expect(screen.queryByRole('heading', { name: '餐坊／一樓', level: 2 })).toBeNull();
+  expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+
+  await act(async () => finishRecovery(recovered));
+  await screen.findByRole('heading', { name: '重新確認的餐坊／一樓', level: 2 });
+  expect(screen.getByText('待完成：建立有庫存的首次菜單')).toBeTruthy();
+  expect(readDetail).toHaveBeenCalledTimes(3);
+});
+
 it.each([403, 404])('recovers with a lower-version detail after a manual read returns %s', async (status) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const previous = {

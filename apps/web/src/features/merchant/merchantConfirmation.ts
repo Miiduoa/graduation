@@ -68,6 +68,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   const revocations = new Map<string, number>();
   const verified = new Map<string, number>();
   const menus = new Set<string>();
+  let applicationRevocation = 0;
+  let applicationListRevision = 0;
   let request = 0;
   const beginRequest = () => ++request;
 
@@ -77,18 +79,20 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
 
   function revoke(key?: string) {
     // A denial invalidates data already observed and every request issued before it arrived.
+    const revision = beginRequest();
     if (key === undefined) {
-      listRevocation = request;
+      listRevocation = revision;
       entries.clear();
       menus.clear();
       for (const draft of drafts.values()) draft.menuReceipt = null;
     } else {
-      revocations.set(key, request);
+      revocations.set(key, revision);
       entries.delete(key);
       menus.delete(key);
       const draft = drafts.get(key);
       if (draft) draft.menuReceipt = null;
     }
+    return revision;
   }
 
   function withMenu<T extends NuniMerchantWorkspace>(key: string, row: T): T {
@@ -138,7 +142,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     return true;
   }
 
-  function mergeApplications(rows: NuniMerchantApplication[]) {
+  function mergeApplications(rows: NuniMerchantApplication[], revision: number) {
+    if (revision <= Math.max(applicationRevocation, applicationListRevision)) return;
+    applicationListRevision = revision;
     const previous = new Map(lists.applications?.map((row) => [row.applicationId, row]));
     lists.applications = rows.map((row) => {
       const receipt = receipts.get(row.applicationId);
@@ -193,9 +199,15 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         includeVerifiedWorkspaces = true;
       }
     },
-    workspaceListRevocation: () => listRevocation,
+    workspaceRevocations: () => ({ list: listRevocation, details: new Map(revocations) }),
     mergeApplications,
-    confirmApplication(receipt: NuniMerchantApplication) {
+    rejectApplications() {
+      applicationRevocation = beginRequest();
+      delete lists.applications;
+      receipts.clear();
+    },
+    confirmApplication(receipt: NuniMerchantApplication, revision: number) {
+      if (revision <= applicationRevocation) return false;
       const current =
         receipts.get(receipt.applicationId) ??
         lists.applications?.find((row) => row.applicationId === receipt.applicationId);
@@ -207,6 +219,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
             current.state !== 'submitted' &&
             receipt.state === 'submitted'));
       receipts.set(receipt.applicationId, useCurrent ? current : receipt);
+      return true;
     },
     knownWorkspaces(): Array<Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'> & Partial<NuniMerchantWorkspace>> {
       const found = new Map<string, Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'> & Partial<NuniMerchantWorkspace>>();
@@ -265,6 +278,8 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       includeVerifiedWorkspaces = false;
       listRevocation = 0;
       listRevision = 0;
+      applicationRevocation = 0;
+      applicationListRevision = 0;
       receipts.clear();
       entries.clear();
       revocations.clear();

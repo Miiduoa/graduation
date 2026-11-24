@@ -240,11 +240,11 @@ function AccountWorkspace({
   onExpired: () => Promise<void>;
   onSwitchAccount: () => Promise<void>;
 }) {
-  const [{ overview, details, listedStatuses, applicationsKnown, listRevocation }, setWorkspaceSnapshot] = useState({
+  const [{ overview, details, listedStatuses, applicationsKnown, revocations }, setWorkspaceSnapshot] = useState({
     overview: null as MerchantOverview | null,
     details: new Map<string, NuniMerchantWorkspaceDetail>(),
     listedStatuses: new Map<string, string>(),
-    listRevocation: 0,
+    revocations: { list: 0, details: new Map<string, number>() },
     applicationsKnown: false,
   });
   const [loading, setLoading] = useState(true);
@@ -304,7 +304,7 @@ function AccountWorkspace({
       overview: confirmed.overview(),
       details: confirmed.verifiedDetails(),
       listedStatuses: confirmed.listedStatuses(),
-      listRevocation: confirmed.workspaceListRevocation(),
+      revocations: confirmed.workspaceRevocations(),
       applicationsKnown: confirmed.hasApplicationList(),
     });
   }, [confirmed]);
@@ -346,7 +346,23 @@ function AccountWorkspace({
               (value) => parseMerchantOverview({ ...nuniRecord(value), applications: [] }).programs,
             ),
         browserRequest('merchant-applications', context).then(
-          (value) => parseMerchantOverview({ ...nuniRecord(value), programs: [] }).applications,
+          (value) => {
+            if (isSameSession()) {
+              confirmed.mergeApplications(
+                parseMerchantOverview({ ...nuniRecord(value), programs: [] }).applications,
+                listRevision,
+              );
+              publishOverview();
+            }
+          },
+          (error: unknown) => {
+            if (isSameSession() && denied(error)) {
+              confirmed.rejectApplications();
+              setNotice('');
+              publishOverview();
+            }
+            throw error;
+          },
         ),
         // Confirm the list as soon as it settles, independently of application progress.
         (view === 'apply'
@@ -382,7 +398,6 @@ function AccountWorkspace({
       }
       if (programs.status === 'fulfilled') confirmed.setPrograms(programs.value);
       else if (denied(programs.reason)) confirmed.setPrograms();
-      if (submitted.status === 'fulfilled') confirmed.mergeApplications(submitted.value);
 
       let accessDenied = false;
       let detailUnavailable = false;
@@ -506,18 +521,22 @@ function AccountWorkspace({
     busyRef.current = true;
     setBusy(true);
     setPending(payload);
+    const revision = confirmed.beginRequest();
+    const session = sessionGeneration.current;
+    const isSameSession = () =>
+      mounted.current && enabled.current && session === sessionGeneration.current;
     try {
       const application = parseMerchantApplication(
         await browserRequest('merchant-applications', context, payload),
       );
-      if (!mounted.current || !enabled.current) return;
-      confirmed.confirmApplication(application);
+      if (!isSameSession()) return;
+      const accepted = confirmed.confirmApplication(application, revision);
       publishOverview();
       setPending(null);
       setDraft(emptyDraft());
-      setNotice('申請已收件。審核通過後仍需完成營運設定，才會開放店家服務。');
+      if (accepted) setNotice('申請已收件。審核通過後仍需完成營運設定，才會開放店家服務。');
     } catch (error) {
-      if (!mounted.current || !enabled.current) return;
+      if (!isSameSession()) return;
       if (expired(error)) expire();
       else if (
         !pending &&
@@ -553,8 +572,9 @@ function AccountWorkspace({
   const onWorkspaceDenied = useCallback(
     (tenantId: string, locationId: string) => {
       if (!mounted.current || !enabled.current) return;
-      confirmed.revoke(workspaceKey({ tenantId, locationId }));
+      const revision = confirmed.revoke(workspaceKey({ tenantId, locationId }));
       publishOverview();
+      return revision;
     },
     [publishOverview, confirmed],
   );
@@ -594,7 +614,7 @@ function AccountWorkspace({
           onExpired={expire}
           confirmedDetail={details.get(key) ?? null}
           confirmedListStatus={listedStatuses.get(key)}
-          listRevocation={listRevocation}
+          accessRevocation={Math.max(revocations.list, revocations.details.get(key) ?? 0)}
           beginRequest={confirmed.beginRequest}
           onChanged={onWorkspaceChanged}
           onMenuConfirmed={onMenuConfirmed}

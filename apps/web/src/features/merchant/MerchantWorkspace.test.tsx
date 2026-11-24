@@ -660,9 +660,11 @@ it('keeps an application receipt received inside a store when a reload loses a p
   const receipt = new Promise<typeof application>((resolve) => {
     finishApplication = resolve;
   });
+  let denyApplications = false;
   mocks.request.mockImplementation((path, context, input) => {
     if (path === 'merchant-applications') {
       if (input) return receipt;
+      if (denyApplications) return Promise.reject(new NuniError(403, 'FORBIDDEN'));
       return Promise.resolve({ applications: listedApplications });
     }
     if (path === 'merchant-workspaces' && showStore)
@@ -699,6 +701,19 @@ it('keeps an application receipt received inside a store when a reload loses a p
   listedApplications = [application];
   await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
   expect(within(applications).getByText('審核說明：已開始審核')).toBeTruthy();
+
+  denyApplications = true;
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  await screen.findByRole('alert');
+  expect(screen.queryByText(/申請已收件/)).toBeNull();
+  expect(screen.queryByText('審核說明：已開始審核')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
+
+  denyApplications = false;
+  listedApplications = [];
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+  expect(screen.getByText('你還沒有送出進駐申請。')).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
 });
 
 it.each([
@@ -819,20 +834,22 @@ it.each([
       if (path === 'merchant-applications')
         return unavailable
           ? Promise.reject(new NuniError(status, code))
-          : Promise.resolve({ applications: [application] });
+          : Promise.resolve({ applications: [{ ...application, reviewerNote: '請補營業登記資料' }] });
       if (path === 'merchant-workspaces') return Promise.resolve({ workspaces: [continuityStore] });
       if (path === detailPath) return Promise.resolve(continuityStore);
       return respond(path, context, input);
     });
     render(<MerchantWorkspace view="workspace" />);
     if (previous) {
-      await screen.findByRole('heading', { name: '測試餐坊／學生餐廳' });
+      await screen.findByText('審核說明：請補營業登記資料');
       unavailable = true;
       fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
     }
     await screen.findByRole('alert');
     expect(screen.queryByText('你還沒有送出進駐申請。')).toBeNull();
-    expect(!!screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBe(previous);
+    const retainsApplication = previous && status === 503;
+    expect(!!screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBe(retainsApplication);
+    expect(!!screen.queryByText('審核說明：請補營業登記資料')).toBe(retainsApplication);
     expect(mocks.request.mock.calls.filter(([path]) => path === detailPath)).toHaveLength(1);
     expect(screen.getByRole('link', { name: '管理門市：第一門市' })).toBeTruthy();
   },

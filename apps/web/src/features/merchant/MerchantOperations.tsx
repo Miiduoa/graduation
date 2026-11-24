@@ -87,7 +87,7 @@ export function MerchantOperations({
   onExpired,
   confirmedDetail,
   confirmedListStatus,
-  listRevocation,
+  accessRevocation = 0,
   beginRequest,
   onChanged,
   onDenied,
@@ -110,11 +110,11 @@ export function MerchantOperations({
   onExpired(): void;
   confirmedDetail?: Detail | null;
   confirmedListStatus?: string;
-  listRevocation?: number;
+  accessRevocation?: number;
   beginRequest?(): number;
   onChanged(detail: Detail, verifiedAccess: boolean, revision: number): Detail | null | void;
   onMenuConfirmed?(detail: Detail, revision: number, createdItems: number): boolean;
-  onDenied?(tenantId: string, locationId: string): void;
+  onDenied?(tenantId: string, locationId: string): number | undefined;
 }) {
   const draftKey = workspaceKey({ tenantId, locationId });
   const saved = drafts.get(draftKey);
@@ -154,6 +154,7 @@ export function MerchantOperations({
   const active = useRef(false);
   const lock = useRef(false);
   const run = useRef(0);
+  const accessRevision = useRef(0);
   const sessionRun = useRef(0);
   const opened = useRef(false);
   const visibleRef = useRef(visible);
@@ -214,8 +215,9 @@ export function MerchantOperations({
         localConfirmations.revoke(draftKey);
         setDetail(null);
       }
-      onDenied?.(tenantId, locationId);
+      const revision = onDenied?.(tenantId, locationId);
       if (updateView) {
+        if (revision !== undefined) accessRevision.current = revision;
         setFresh(false);
         setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
       }
@@ -224,9 +226,10 @@ export function MerchantOperations({
   );
 
   const checkAccess = useCallback(
-    async (current: () => boolean) => {
+    async (current: () => boolean, verifiesEntry = false) => {
       const session = sessionRun.current;
       const revision = nextRevision();
+      if (verifiesEntry) accessRevision.current = revision;
       try {
         const next = await operations.get(tenantId, locationId);
         if (active.current && session === sessionRun.current) confirmDetail(next, true, revision);
@@ -235,7 +238,7 @@ export function MerchantOperations({
         if (failure.status === 401 || failure.code === 'SESSION_CHANGED') {
           if (current()) expire.current();
         } else if ([403, 404].includes(failure.status)) {
-          revokeDetail(current());
+          revokeDetail(current() && revision >= accessRevision.current);
         }
       }
     },
@@ -249,6 +252,7 @@ export function MerchantOperations({
       const version = ++run.current;
       const current = () => active.current && version === run.current;
       const revision = nextRevision();
+      accessRevision.current = revision;
       setReadUnavailable(false);
       setLoading(true);
       setFresh(false);
@@ -258,7 +262,7 @@ export function MerchantOperations({
         const merged = confirmDetail(next, true, revision);
         if (!current()) return;
         showDetail(merged);
-        if (!merged) throw new Error('Workspace detail is unavailable at the confirmed revision');
+        if (!merged) return;
         if (!readAfterWrite.current) setEntryVerified(true);
         // A count of zero cannot prove a non-idempotent menu request failed:
         // an existing menu may have no remaining sellable stock.
@@ -299,17 +303,14 @@ export function MerchantOperations({
       opened.current = false;
     }
   }, [suspended, drafts, draftKey]);
-  // A list denial can arrive after Forward has already started verifying this location.
-  useLayoutEffect(() => {
-    visibleRef.current = visible;
+  const verifyEntry = useCallback(() => {
     setEntryVerified(false);
     setReadUnavailable(false);
-    if (!visible || suspended) return;
     let checkingAccess = true;
     if (lock.current) {
       // Verify access now, and refresh controls again after the write settles.
       readAfterWrite.current = true;
-      void checkAccess(() => checkingAccess && active.current);
+      void checkAccess(() => checkingAccess && active.current, true);
     } else {
       // Returning through history does not acknowledge an unknown write.
       void read(!opened.current);
@@ -317,10 +318,31 @@ export function MerchantOperations({
     }
     return () => {
       checkingAccess = false;
+    };
+  }, [checkAccess, read]);
+
+  useLayoutEffect(() => {
+    visibleRef.current = visible;
+    if (!visible || suspended) {
+      setEntryVerified(false);
+      setReadUnavailable(false);
+      return;
+    }
+    const retire = verifyEntry();
+    return () => {
+      retire();
       readAfterWrite.current = false;
       if (!lock.current) ++run.current;
     };
-  }, [checkAccess, read, suspended, visible, listRevocation]);
+  }, [suspended, visible, verifyEntry]);
+
+  // A retired read or the list can revoke data after the visible entry started verifying.
+  // The entry's own denial already displays an error and allows a manual retry.
+  useLayoutEffect(() => {
+    if (visible && !suspended && accessRevocation > accessRevision.current) {
+      return verifyEntry();
+    }
+  }, [accessRevocation, suspended, visible, verifyEntry]);
 
   async function mutate(
     action: Action,
