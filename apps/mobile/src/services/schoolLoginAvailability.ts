@@ -12,6 +12,10 @@ type ProviderCache = { kinds: string[] };
 let providerCache: ProviderCache | undefined;
 let providerCacheGeneration = 0;
 
+function currentProviderKinds(): string[] {
+  return [...(providerCache?.kinds ?? [])];
+}
+
 export function setSchoolLoginProviderKinds(kinds: string[] | undefined) {
   providerCacheGeneration += 1;
   providerCache = kinds ? { kinds: [...kinds] } : undefined;
@@ -38,7 +42,8 @@ export async function loadSchoolLoginProviderKinds(): Promise<string[]> {
   const generation = providerCacheGeneration;
   try {
     const value = await nuniPlatformRequest('providers');
-    if (generation !== providerCacheGeneration) return [...(providerCache?.kinds ?? [])];
+    if (generation !== providerCacheGeneration) return currentProviderKinds();
+    if (providerCache) return currentProviderKinds();
     if (!value || typeof value !== 'object' || !Array.isArray((value as { kinds?: unknown }).kinds)) {
       return []; // Malformed is unknown, not a confirmed closed integration.
     }
@@ -49,6 +54,6 @@ export async function loadSchoolLoginProviderKinds(): Promise<string[]> {
     return [...kinds];
   } catch {
     // Keep unavailable fail-closed, but let the next entry retry a transient outage.
-    return [...(providerCache?.kinds ?? [])];
+    return currentProviderKinds();
   }
 }
