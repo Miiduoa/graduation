@@ -860,8 +860,19 @@ it.each([
   expect(scrollIntoView).not.toHaveBeenCalled();
   expect(document.activeElement).toBe(shouldHandoff && !clippedAxis ? row : focusDuringPause);
   if (clippedAxis) {
+    fireEvent.resize(window);
+    expect(document.activeElement).toBe(focusDuringPause);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    viewport.height = 200;
+    viewport.dispatchEvent(new Event('resize'));
+    expect(document.activeElement).toBe(focusDuringPause);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
     viewport[clippedAxis] = 0;
-    viewport.dispatchEvent(new Event('scroll'));
+    viewport.dispatchEvent(new Event(clippedAxis === 'offsetLeft' ? 'scroll' : 'resize'));
     expect(document.activeElement).toBe(row);
     expect(scroll).not.toHaveBeenCalled();
     expect(scrollIntoView).not.toHaveBeenCalled();

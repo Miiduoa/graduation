@@ -574,10 +574,11 @@ function PersonalCalendarWorkspace({
       if (focused) cancelLinkedFocus();
     };
 
-    // A resumed request must respect any panning that occurred while the row was unavailable.
-    revealLinkedEvent(previousOrigin ? 'visible' : 'reveal');
+    // A resumed request must preserve the user's pan, including on later resizes.
+    const resizeMode = previousOrigin ? 'visible' : 'reveal';
+    revealLinkedEvent(resizeMode);
     if (settledFocusRequest.current === requestedEventId) return;
-    stopLinkedFocusRetry.current = onFocusRetryOpportunity(revealLinkedEvent);
+    stopLinkedFocusRetry.current = onFocusRetryOpportunity(revealLinkedEvent, resizeMode);
     return () => {
       stopLinkedFocusRetry.current?.();
       stopLinkedFocusRetry.current = null;

@@ -206,7 +206,7 @@ export function retryFocusWhileOwned(
     if (stillOwnsFocus(origin)) attempt(mode);
     else cancel();
   };
-  const unsubscribe = onFocusRetryOpportunity(retry);
+  const unsubscribe = onFocusRetryOpportunity(retry, 'reveal');
   const onAnimationEnd = (event: Event) => {
     if (event.target === animationTarget) retry('reveal');
   };
@@ -226,11 +226,14 @@ export function stillOwnsFocus(origin: Element | null, allowBodyFallback = false
   );
 }
 
-export function onFocusRetryOpportunity(retry: (mode: 'reveal' | 'visible') => void) {
+export function onFocusRetryOpportunity(
+  retry: (mode: 'reveal' | 'visible') => void,
+  resizeMode: 'reveal' | 'visible',
+) {
   // Element scroll events do not bubble. Capture page and nested scrolls
   // without issuing more scroll commands while the user is moving the view.
   const onScroll = () => retry('visible');
-  const unsubscribe = onVisibleViewportChange(() => retry('reveal'), onScroll);
+  const unsubscribe = onVisibleViewportChange(() => retry(resizeMode), onScroll);
   window.addEventListener('scroll', onScroll, { capture: true, passive: true });
   return () => {
     unsubscribe();
