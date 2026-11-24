@@ -26,7 +26,7 @@ import { AccountDemoAssistantCard } from './AccountDemoAssistantCard';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { parseLocalScheduleIntent } from '@/lib/assistantLocalSchedule';
 import { personalAssistantReadIntent } from '@/lib/assistantPersonalReads';
-import { canAnswerTronClassQuestion } from '@/lib/tronClassAgentIntent';
+import { canAnswerTronClassQuestion, tronClassExplicitNavigationQuestion } from '@/lib/tronClassAgentIntent';
 import { courseworkStudyFollowup, parseAssistantCourseworkTargets, type AssistantCourseworkTarget } from '@/lib/assistantCoursework';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { assistantPermissionSettingsHref, stepFamily, stepStatus } from './copy';
@@ -248,6 +248,7 @@ export function AssistantThread({
     node.style.height = Math.min(node.scrollHeight, 132) + 'px';
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
+  const navigation = taskProfile === 'student' && !!tronClassExplicitNavigationQuestion(question);
   const tronClass = taskProfile === 'student' && canAnswerTronClassQuestion(question);
   const publicCompound = !tronClass && publicCourseCompoundRequest(question, schoolId);
   const publicCourseIntent = !tronClass && !publicCompound && resolvePublicCourseAssistantIntent(question, schoolId);
@@ -261,7 +262,7 @@ export function AssistantThread({
       ...(foodPickupEnabled && taskProfile === 'student' ? [PICKUP_SUGGESTION] : [])];
   const canSubmit = !pending && !onStop && !!question.trim() &&
     ((!!demoScope && !!accountDemoAssistantIntent(question)) || readRoute.roleGuide || (foodPickup ? foodPickupEnabled
-      : tronClass || parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) ||
+      : tronClass || navigation || parseCampusMapCommand(question) !== null || (onEventTarget && parseCampusEventCommand(question) !== null) ||
         (onTaskRetry && isAssistantTaskRetryQuestion(question)) ||
         (!publicCompound && (!!publicCourseIntent || readRoute.local || readRoute.personal ||
           (onStudyTarget && taskProfile === 'student' && courseworkStudyFollowup(question) !== null))) || (consent && ready)));

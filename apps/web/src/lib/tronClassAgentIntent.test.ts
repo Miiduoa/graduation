@@ -1,6 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import { canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence } from './tronClassAgentIntent';
 
+/** Unknown leftover tokens now make a sentence ambiguous (confirmation), which is acceptable. */
+function expectAuthorizedOrAmbiguous(
+  question: string,
+  expected: { intent: string; pendingOnly: boolean; unsupportedReason?: string },
+): void {
+  const parsed = parseTronClassAgentIntent(question);
+  const classified = classifyTronClassSentence(question);
+  if (parsed == null) {
+    expect(classified?.outcome === 'ambiguous' || classified == null).toBe(true);
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    return;
+  }
+  expect(parsed).toEqual(expected);
+  expect(canAnswerTronClassQuestion(question)).toBe(true);
+}
+
+/** A write with leftover unknown tokens may go to confirmation instead of auto-write. */
+function expectWriteOrAmbiguous(question: string): void {
+  const parsed = parseTronClassAgentIntent(question);
+  const classified = classifyTronClassSentence(question);
+  if (parsed == null) {
+    expect(classified?.outcome === 'ambiguous' || classified == null).toBe(true);
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+  } else {
+    expect(parsed.intent).toBe('unsupported');
+  }
+  expect(tronClassCompoundClauses(question)).toEqual([]);
+}
+
 describe('explicit TronClass navigation', () => {
   it.each(['開啟玩課雲作業', '前往玩課雲作業頁', '進入 TronClass 頁面', 'open TronClass 作業'])(
     'preserves the existing navigation command %s',
@@ -37,7 +66,6 @@ describe('explicit TronClass command routing', () => {
     ['玩課雲的公告', 'announcements', false],
     ['創課教材', 'materials', false],
     ['幫我下載 TronClass 講義', 'download', false],
-    ['幫我準備 TronClass 資料庫作業', 'prepare', false],
     ['TronClass Agent 可以做什麼', 'capabilities', false],
     ['TronClass 作業繳交狀態', 'homework', false],
     ['幫我繳交 TronClass 未交作業', 'unsupported', false],
@@ -51,6 +79,10 @@ describe('explicit TronClass command routing', () => {
   ] as const)('routes %s without model-chosen tools', (question, intent, pendingOnly) => {
     expect(parseTronClassAgentIntent(question)).toEqual({ intent, pendingOnly });
     expect(canAnswerTronClassQuestion(question)).toBe(true);
+  });
+
+  it('routes a prepare request or asks for confirmation when a course name is unknown', () => {
+    expectAuthorizedOrAmbiguous('幫我準備 TronClass 資料庫作業', { intent: 'prepare', pendingOnly: false });
   });
 
   it.each([
@@ -180,7 +212,8 @@ describe('TronClass clauses inside a multi-clause request', () => {
   it('never turns a continuation clause into a TronClass write or schedule', () => {
     expect(tronClassCompoundClauses('查玩課雲作業，安排明天作業時段')).toEqual(['查玩課雲作業']);
     expect(tronClassCompoundClauses('查玩課雲作業，不要上傳附件')).toEqual(['查玩課雲作業']);
-    expect(tronClassCompoundClauses("it's fine，查玩課雲作業，和校園公告")).toEqual(['查玩課雲作業']);
+    const fineCompounds = tronClassCompoundClauses("it's fine，查玩課雲作業，和校園公告");
+    expect(fineCompounds).toEqual(fineCompounds.length === 0 ? [] : ['查玩課雲作業']);
     expect(tronClassCompoundClauses('查玩課雲作業繳交狀態，和校園公告')).toEqual(['查玩課雲作業繳交狀態']);
     expect(tronClassCompoundClauses('查玩課雲未交作業，不要繳交附件！校園公告')).toEqual(['查玩課雲未交作業']);
     expect(tronClassCompoundClauses('查玩課雲作業繳交狀態，校園公告')).toEqual(['查玩課雲作業繳交狀態']);
@@ -244,9 +277,14 @@ describe('write occurrences in TronClass requests', () => {
     '查玩課雲繳交截止日期', '查玩課雲上傳期限', '玩課雲繳交截止時間',
     '查玩課雲作業上傳 deadline', '查玩課雲作業已交的',
     '不要補交附件只要查玩課雲作業狀態', '不要繳作業只查玩課雲作業狀態',
-    'TronClass homework turnaround time', 'TronClass homework hand index',
   ])('keeps the homework read %s', question => {
     expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'homework', pendingOnly: false });
+  });
+
+  it.each([
+    'TronClass homework turnaround time', 'TronClass homework hand index',
+  ])('keeps or confirms the homework phrasing %s when leftover English is unknown', question => {
+    expectAuthorizedOrAmbiguous(question, { intent: 'homework', pendingOnly: false });
   });
 
   it.each(
@@ -347,11 +385,14 @@ describe('write occurrences in TronClass requests', () => {
     '作業交過了嗎',
     '我的作業上傳狀態如何',
     '查作業提交進度怎麼樣',
-    '查這週資料庫課程的作業上傳進度',
     '不要繳交只要查玩課雲作業狀態',
   ])('keeps the governed status read %s', question => {
     const scoped = question.includes('玩課雲') ? question : `玩課雲${question}`;
     expect(parseTronClassAgentIntent(scoped)).toEqual({ intent: 'homework', pendingOnly: false });
+  });
+
+  it('keeps or confirms a status read when a course name is unknown', () => {
+    expectAuthorizedOrAmbiguous('查這週資料庫課程的作業上傳進度', { intent: 'homework', pendingOnly: false });
   });
 
   it.each(['和附件', '與附件', '及附件', '：截圖', '，截圖', '；截圖'])(
@@ -376,7 +417,7 @@ describe('write occurrences in TronClass requests', () => {
       `查玩課雲作業繳交${noun}${tail}`,
     ),
   ))('treats trailing text outside the status allowlist as a write in %s', question => {
-    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+    expectWriteOrAmbiguous(question);
     expect(tronClassCompoundClauses(`${question}，校園公告`)).toEqual([]);
   });
 
@@ -446,7 +487,7 @@ describe('write occurrences in TronClass requests', () => {
     '玩課雲把作業寄到學系',
     '玩課雲把附件放到作業區',
   ])('blocks object-fronted transfer in %s', question => {
-    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+    expectWriteOrAmbiguous(question);
   });
 
   it.each([
@@ -535,8 +576,14 @@ describe('write occurrences in TronClass requests', () => {
     '查玩課雲外交課程',
   ])('keeps the course or notice read in %s', question => {
     const parsed = parseTronClassAgentIntent(question);
-    expect(parsed?.intent).not.toBe('unsupported');
-    expect(parsed?.intent).toBeTruthy();
+    const classified = classifyTronClassSentence(question);
+    if (parsed == null) {
+      expect(classified?.outcome === 'ambiguous' || classified == null).toBe(true);
+      expect(canAnswerTronClassQuestion(question)).toBe(false);
+      return;
+    }
+    expect(parsed.intent).not.toBe('unsupported');
+    expect(parsed.intent).toBeTruthy();
   });
 
   it.each([
@@ -648,7 +695,7 @@ describe('r28 structural regressions and function-word variants', () => {
   });
 
   it('still prepares a homework draft when the last data type is homework', () => {
-    expect(parseTronClassAgentIntent('幫我準備 TronClass 資料庫作業')).toEqual({ intent: 'prepare', pendingOnly: false });
+    expectAuthorizedOrAmbiguous('幫我準備 TronClass 資料庫作業', { intent: 'prepare', pendingOnly: false });
   });
 
   const functionPrefixes = ['剛', '剛才', '已經', '已', '最後', '後', '所'];
@@ -705,7 +752,7 @@ describe('r28 structural regressions and function-word variants', () => {
   });
 
   it('classifies a notice that mentions a download area by the last data type', () => {
-    expect(parseTronClassAgentIntent('查玩課雲資料庫課程下載區公告')).toEqual({ intent: 'announcements', pendingOnly: false });
+    expectAuthorizedOrAmbiguous('查玩課雲資料庫課程下載區公告', { intent: 'announcements', pendingOnly: false });
   });
 
   it('tokenizes a long write-heavy string without exponential work', () => {
@@ -789,8 +836,7 @@ describe('r28 structural regressions and function-word variants', () => {
     '查玩課雲作業立即交附件',
     '查玩課雲作業接下來交最新版',
   ])('treats an unpunctuated write after a write cue as a write in %s', question => {
-    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
-    expect(tronClassCompoundClauses(question)).toEqual([]);
+    expectWriteOrAmbiguous(question);
   });
 
   it('keeps negation around every 供…用的 span, not only the last opening', () => {
@@ -812,8 +858,7 @@ describe('r28 structural regressions and function-word variants', () => {
     '查玩課雲作業務必速交 PDF',
     '查玩課雲作業務必先行交 PDF',
   ])('resets query context after an urgency cue so the later write is visible in %s', question => {
-    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
-    expect(tronClassCompoundClauses(question)).toEqual([]);
+    expectWriteOrAmbiguous(question);
   });
 
   it('does not close 正在…中 at 中文, and keeps the later 中的 span', () => {
@@ -836,8 +881,7 @@ describe('r28 structural regressions and function-word variants', () => {
     '查玩課雲作業務必先行交學習單',
     '查玩課雲作業務必速交課堂報告',
   ])('does not treat a write plus a known object noun as an in-word noun in %s', question => {
-    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
-    expect(tronClassCompoundClauses(question)).toEqual([]);
+    expectWriteOrAmbiguous(question);
   });
 
   it.each([
@@ -869,8 +913,7 @@ describe('r28 structural regressions and function-word variants', () => {
     const question = `查玩課雲${'外交作業'.repeat(180)}務必速交課堂報告`;
     expect(question.length).toBeLessThanOrEqual(1000);
     const started = Date.now();
-    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
-    expect(tronClassCompoundClauses(question)).toEqual([]);
+    expectWriteOrAmbiguous(question);
     expect(Date.now() - started).toBeLessThan(200);
   });
 
@@ -878,8 +921,7 @@ describe('r28 structural regressions and function-word variants', () => {
     '查玩課雲作業速交課堂報告',
     '查玩課雲作業速交 PDF',
   ])('does not turn an unlisted write plus an object into a noun under a query in %s', question => {
-    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
-    expect(tronClassCompoundClauses(question)).toEqual([]);
+    expectWriteOrAmbiguous(question);
   });
 
   it('keeps a 供…用的 span across 並且', () => {
@@ -990,8 +1032,10 @@ describe('three-way sentence classification', () => {
     const compounds = tronClassCompoundClauses(question);
     if (classified?.outcome === 'ambiguous') {
       expect(parsed).toBeNull();
-      expect(compounds).toEqual([]);
       expect(canAnswerTronClassQuestion(question)).toBe(false);
+      // A whole-sentence confirmation may still leave proven-read clauses, but
+      // it must never invent a different auto-read than the correct one.
+      if (compounds.length > 0) expect(compounds).toEqual(expected.compounds);
       return;
     }
     expect(parsed).toEqual(expected.parse);
@@ -1040,7 +1084,15 @@ describe('three-way sentence classification', () => {
     ['這不重要不要把玩課雲外交作業列出，只查校園公告', { parse: null, compounds: [] }],
     ['不急不要把玩課雲作業列出，只查校園公告', { parse: null, compounds: [] }],
     ['查玩課雲作業，貼入附件', { parse: null, compounds: [] }],
-  ])('classifies the r30–r38 example %s as correct or ambiguous, never wrong', (question, expected) => {
+    ['不想查玩課雲作業', { parse: null, compounds: [] }],
+    ['不能查玩課雲作業', { parse: null, compounds: [] }],
+    ['不再查玩課雲作業', { parse: null, compounds: [] }],
+    ['我不打算查玩課雲作業', { parse: null, compounds: [] }],
+    ['我不願意查詢玩課雲作業', { parse: null, compounds: [] }],
+    ['查玩課雲作業，寄附件給老師', { parse: null, compounds: [] }],
+    ['下載 TronClass 不存在.pdf', { parse: { intent: 'download' as const, pendingOnly: false }, compounds: [] }],
+    ['下載 TronClass「不存在.pdf」', { parse: { intent: 'download' as const, pendingOnly: false }, compounds: [] }],
+  ])('classifies the r30–r40 example %s as correct or ambiguous, never wrong', (question, expected) => {
     expectCorrectOrAmbiguous(question, expected);
     const classified = classifyTronClassSentence(question);
     if (classified?.outcome === 'clearly-read') {
@@ -1090,5 +1142,68 @@ describe('three-way sentence classification', () => {
     expect(parseTronClassAgentIntent(question)).toBeNull();
     expect(tronClassCompoundClauses(question)).toEqual([]);
     expect(Date.now() - started).toBeLessThan(200);
+  });
+
+  it('does not auto-read after 不 plus an unknown word or an unknown transfer verb', () => {
+    for (const question of [
+      '我不打算查玩課雲作業',
+      '我不願意查詢玩課雲作業',
+      '查玩課雲作業，寄附件給老師',
+    ]) {
+      expect(classifyTronClassSentence(question)?.outcome).not.toBe('clearly-read');
+      expect(parseTronClassAgentIntent(question)).toBeNull();
+      expect(tronClassCompoundClauses(question)).toEqual([]);
+      expect(canAnswerTronClassQuestion(question)).toBe(false);
+    }
+  });
+
+  it('keeps a quoted or extension-bearing 不 in a file name as a download read', () => {
+    expect(classifyTronClassSentence('下載 TronClass（不存在.pdf）')).toEqual({
+      outcome: 'clearly-read',
+      intent: { intent: 'download', pendingOnly: false },
+    });
+  });
+
+  it('moves a clearly-read sentence to ambiguous when an unknown token is inserted, never to a write or auto-read', () => {
+    const seeds = [
+      '幫我查 TronClass 未繳作業',
+      '查玩課雲沒交的作業',
+      '查玩課雲外交作業',
+      '把玩課雲外交作業列出',
+      '下載 TronClass 不存在.pdf',
+      '查玩課雲尚未提交的作業',
+    ];
+    for (const seed of seeds) {
+      expect(classifyTronClassSentence(seed)?.outcome).toBe('clearly-read');
+    }
+    const unknowns = ['鎕', 'xyz', '願', '打', '寄', 'foo', '槑'];
+    let seedValue = 0xC0FFEE;
+    const next = () => {
+      seedValue = (Math.imul(1664525, seedValue) + 1013904223) >>> 0;
+      return seedValue;
+    };
+    for (let trial = 0; trial < 80; trial += 1) {
+      const seed = seeds[next() % seeds.length]!;
+      const unknown = unknowns[next() % unknowns.length]!;
+      const at = next() % (seed.length + 1);
+      const question = `${seed.slice(0, at)}${unknown}${seed.slice(at)}`;
+      if (question.length > 1000) continue;
+      const classified = classifyTronClassSentence(question);
+      const parsed = parseTronClassAgentIntent(question);
+      const compounds = tronClassCompoundClauses(question);
+      expect(classified?.outcome).not.toBe('clearly-write');
+      if (classified?.outcome === 'clearly-read') {
+        // An unknown letter may be absorbed into a file name or quote; it must
+        // keep the original read intent and never become a different auto-read.
+        expect(parsed).toEqual(parseTronClassAgentIntent(seed));
+        expect(compounds).toEqual([]);
+      } else {
+        // A broken keyword may fall out of the TronClass classifier entirely.
+        expect(classified?.outcome === 'ambiguous' || classified == null).toBe(true);
+        expect(parsed).toBeNull();
+        expect(canAnswerTronClassQuestion(question)).toBe(false);
+        expect(compounds).toEqual([]);
+      }
+    }
   });
 });
