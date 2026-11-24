@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   buildMonthCalendar,
   emptyPersonalEventDraft,
@@ -41,23 +41,23 @@ export function MonthCalendar({
   const pendingFocus = useRef<{ date: string; origin: HTMLButtonElement } | null>(null);
   const days = useMemo(() => buildMonthCalendar(records, month), [records, month]);
   const selectedCellIndex = days.findIndex((day) => day?.date === selectedDate);
-  const revealWeek = (columnIndex: number) => {
+  const revealWeek = useCallback((columnIndex: number) => {
     const viewport = viewportRef.current;
     const weekdayColumns = gridRef.current?.children;
     const sunday = weekdayColumns?.[0];
     const selectedColumn = weekdayColumns?.[Math.max(0, columnIndex) % MONTH_WEEKDAYS.length];
     if (!viewport || !sunday || !selectedColumn || viewport.clientWidth <= 0) return;
     scrollWeekIntoView(viewport, sunday, selectedColumn);
-  };
-  const focusDateButton = (button: HTMLButtonElement) => {
+  }, []);
+  const focusDateButton = useCallback((button: HTMLButtonElement) => {
     button.focus({ preventScroll: true });
     const date = button.getAttribute('aria-label') ?? '';
     revealWeek(days.findIndex((day) => day?.date === date));
-  };
+  }, [days, revealWeek]);
 
   useLayoutEffect(() => {
     revealWeek(selectedCellIndex);
-  }, [month, selectedDate, selectedCellIndex, dateRevealRevision]);
+  }, [month, selectedDate, selectedCellIndex, dateRevealRevision, revealWeek]);
 
   useLayoutEffect(() => {
     const requested = pendingFocus.current;
@@ -68,7 +68,7 @@ export function MonthCalendar({
     if (document.activeElement !== requested.origin && document.activeElement !== document.body)
       return;
     focusDateButton(target);
-  }, [month]);
+  }, [month, focusDateButton]);
 
   const moveDate = (event: KeyboardEvent<HTMLButtonElement>, date: string) => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
