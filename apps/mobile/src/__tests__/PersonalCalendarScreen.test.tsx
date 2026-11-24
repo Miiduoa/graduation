@@ -628,13 +628,15 @@ it('shows a save error if the write fails while the account is briefly revalidat
 });
 
 it.each([
-  ['create', 'switch'],
-  ['edit', 'switch'],
-  ['create', 'sign out'],
-  ['edit', 'sign out'],
-] as const)('unmounts the old calendar and rejects a queued %s on Firebase %s with unresolved scope', async (mode, transition) => {
+  ['create', 'switch', 'nuni'],
+  ['edit', 'switch', 'nuni'],
+  ['create', 'sign out', 'firebase'],
+  ['edit', 'sign out', 'firebase'],
+  ['create', 'sign out', 'nuni'],
+  ['edit', 'sign out', 'nuni'],
+] as const)('unmounts the old calendar and rejects a queued %s on Firebase %s with unresolved scope for a %s ledger', async (mode, transition, owner) => {
   mockAuth = { user: { uid: 'student-a' }, loading: false };
-  if (transition === 'sign out') {
+  if (owner === 'firebase') {
     mockSession = null;
     mockScope = { owner: 'firebase:student-a', schoolId: 'pu' };
   }
@@ -663,6 +665,7 @@ it.each([
 
   mockScope = null;
   if (transition === 'sign out') {
+    mockSession = null;
     mockNuniLoading = true;
     mockAuth = { user: null, loading: true };
     view.rerender(<PersonalCalendarScreen />);

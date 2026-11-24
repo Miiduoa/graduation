@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createPersonalImportId } from '@campus/shared';
 import { File, Paths } from 'expo-file-system';
 import { sha256 } from 'js-sha256';
 import { Platform } from 'react-native';
@@ -7,6 +9,137 @@ const markerSuffix = '.rollback.pending';
 // One atomic browser storage entry contains both the recovery marker and the payload.
 function webJournalKey(key: string) {
   return `campus.personal-imports.rollback.v1:${sha256(key)}`;
+}
+
+type WebRollback = {
+  id: string;
+  original: string | null;
+  before: string;
+  attempted: string;
+};
+
+const fingerprint = (raw: string | null) => sha256(raw ?? 'null');
+
+const lockStore = 'writes';
+
+async function openWriteLockDatabase(): Promise<IDBDatabase | undefined> {
+  if (typeof indexedDB === 'undefined') return undefined;
+  try {
+    return await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('campus.personal-imports.locks', 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(lockStore);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  } catch {
+    // Some browser configurations allow localStorage while disabling IndexedDB.
+    // The journal still checks ownership and the primary bytes before restoring.
+    return undefined;
+  }
+}
+
+export async function withPersonalImportWriteLock<T>(key: string, write: () => Promise<T>): Promise<T> {
+  if (Platform.OS !== 'web') return write();
+  const name = webJournalKey(key);
+  if (navigator.locks) return navigator.locks.request(name, write);
+
+  // An IndexedDB readwrite transaction serializes cooperating tabs on Web
+  // previews served over HTTP, where Web Locks may be unavailable.
+  const database = await openWriteLockDatabase();
+  if (!database) return write();
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      const transaction = database.transaction(lockStore, 'readwrite');
+      const store = transaction.objectStore(lockStore);
+      let operation: Promise<T> | undefined;
+      let finished = false;
+      const keepLock = () => {
+        if (finished) return;
+        store.get(name).onsuccess = () => {
+          if (!operation) {
+            operation = write().finally(() => { finished = true; });
+            // Observe rejection immediately. Deliver the result after releasing the lock.
+            void operation.catch(() => undefined);
+          }
+          keepLock();
+        };
+      };
+      transaction.onabort = () => reject(transaction.error);
+      transaction.oncomplete = () => {
+        if (operation) operation.then(resolve, reject);
+        else reject(new Error('無法取得匯入資料的寫入鎖定。'));
+      };
+      keepLock();
+    });
+  } finally {
+    database.close();
+  }
+}
+
+async function readWebRollback(key: string): Promise<string | undefined> {
+  const storage = window.localStorage;
+  const backupKey = webJournalKey(key);
+  for (;;) {
+    const encoded = storage.getItem(backupKey);
+    if (encoded === null) return undefined;
+    const journal = JSON.parse(encoded) as WebRollback | { version: number } | null;
+    // Older Web builds stored the ledger bytes directly.
+    if (journal === null || (typeof journal === 'object' && 'version' in journal)) return encoded;
+    if (!journal || typeof journal !== 'object' || !('id' in journal) ||
+        typeof journal.id !== 'string' || typeof journal.before !== 'string' ||
+        typeof journal.attempted !== 'string' ||
+        (journal.original !== null && typeof journal.original !== 'string')) {
+      throw new Error('儲存的匯入資料還原副本無法讀取，請稍後重試。');
+    }
+    const current = fingerprint(await AsyncStorage.getItem(key));
+    if (storage.getItem(backupKey) !== encoded) continue;
+    return current === journal.before || current === journal.attempted
+      ? journal.original ?? 'null'
+      : undefined;
+  }
+}
+
+export function prepareWebPersonalImportRollback(
+  key: string,
+  original: string | null,
+  before: string | null,
+  attempted: string,
+) {
+  const storage = window.localStorage;
+  const backupKey = webJournalKey(key);
+  const encoded = JSON.stringify({
+    id: createPersonalImportId(),
+    original,
+    before: fingerprint(before),
+    attempted: fingerprint(attempted),
+  } satisfies WebRollback);
+  storage.setItem(backupKey, encoded);
+  const ownsJournal = () => storage.getItem(backupKey) === encoded;
+  if (!ownsJournal()) throw new Error('無法確認匯入資料的還原副本已寫入。');
+
+  return {
+    async commit(assertWritable: () => void) {
+      const current = await AsyncStorage.getItem(key);
+      assertWritable();
+      if (current !== attempted || !ownsJournal()) {
+        throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
+      }
+      storage.removeItem(backupKey);
+    },
+    async rollback() {
+      if (!ownsJournal()) return;
+      const current = await AsyncStorage.getItem(key);
+      if (!ownsJournal() || (current !== before && current !== attempted)) return;
+
+      if (current !== original) {
+        if (original === null) await AsyncStorage.removeItem(key);
+        else await AsyncStorage.setItem(key, original);
+      }
+      if (await AsyncStorage.getItem(key) === original && ownsJournal()) {
+        storage.removeItem(backupKey);
+      }
+    },
+  };
 }
 
 function journalFiles(key: string) {
@@ -26,24 +159,15 @@ function journalFiles(key: string) {
   return { marker, payload: new File(directory, `${name}.rollback.json`), marked: marker.info().exists };
 }
 
-export function readPersonalImportRollback(key: string): string | undefined {
+export async function readPersonalImportRollback(key: string): Promise<string | undefined> {
   // Expo's Web implementation cannot construct a Directory or File.
-  if (Platform.OS === 'web') return window.localStorage.getItem(webJournalKey(key)) ?? undefined;
+  if (Platform.OS === 'web') return readWebRollback(key);
   const { payload, marked } = journalFiles(key);
   return marked ? payload.textSync() : undefined;
 }
 
 export function preparePersonalImportRollback(key: string, raw: string | null): () => void {
   const encoded = raw ?? 'null';
-  if (Platform.OS === 'web') {
-    const storage = window.localStorage;
-    const backupKey = webJournalKey(key);
-    if (storage.getItem(backupKey) !== encoded) storage.setItem(backupKey, encoded);
-    if (storage.getItem(backupKey) !== encoded) {
-      throw new Error('無法確認匯入資料的還原副本已寫入。');
-    }
-    return () => storage.removeItem(backupKey);
-  }
   const { payload, marker, marked } = journalFiles(key);
   // The document directory survives process restarts and is outside AsyncStorage's quota.
   // A retry can reuse the verified copy without rewriting it.
@@ -66,10 +190,6 @@ export function preparePersonalImportRollback(key: string, raw: string | null): 
 }
 
 export function clearPersonalImportRollback(key: string): void {
-  if (Platform.OS === 'web') {
-    window.localStorage.removeItem(webJournalKey(key));
-    return;
-  }
   const { payload, marker, marked } = journalFiles(key);
   if (marked) marker.delete();
   discardPayload(payload);

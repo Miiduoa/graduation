@@ -92,14 +92,19 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
   const firebaseUid = legacy.user?.uid;
   const firebaseSignedOut = !legacy.loading && !firebaseUid;
   const lastFirebaseUid = useRef(firebaseUid);
+  const firebaseWasSignedIn = useRef(!!firebaseUid);
   // Firebase and Nuni can resolve independently during an account transition.
   const firebaseChanged =
     !!firebaseUid && !!lastFirebaseUid.current &&
     firebaseUid !== lastFirebaseUid.current;
+  const firebaseSessionLost =
+    firebaseSignedOut && firebaseWasSignedIn.current && !scope && !platform.session;
   const workspaceUid = (scope && firebaseUid) || lastFirebaseUid.current;
   useLayoutEffect(() => {
     if (firebaseUid && (scope || !lastFirebaseUid.current)) lastFirebaseUid.current = firebaseUid;
-  }, [firebaseUid, scope]);
+    if (firebaseUid) firebaseWasSignedIn.current = true;
+    else if (firebaseSignedOut && scope) firebaseWasSignedIn.current = false;
+  }, [firebaseUid, firebaseSignedOut, scope]);
   const loggingOut = !!platform.pendingLogout;
   const sessionRejected = !platform.session && !!platform.error;
   const observedOwner = platform.session
@@ -110,7 +115,7 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
   const knownOwner = scope?.owner ?? (firebaseChanged ? null : observedOwner);
   const ownerSignedOut = (owner: string | undefined) =>
     firebaseSignedOut && !!owner?.startsWith('firebase:');
-  return { knownOwner, loggingOut, sessionRejected, firebaseChanged, ownerSignedOut, workspaceUid };
+  return { knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseSessionLost, ownerSignedOut, workspaceUid };
 }
 
 /** A separate stack entry keeps a campus suggestion from replacing an open personal draft. */
@@ -123,7 +128,7 @@ export function CampusEventCalendarDraftScreen() {
       >
     >();
   const scope = usePersonalImportScope();
-  const { knownOwner, loggingOut, sessionRejected, firebaseChanged, ownerSignedOut } =
+  const { knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseSessionLost, ownerSignedOut } =
     useCalendarAccount(scope);
   const { school, schoolId, selectionReady } = useSchool();
   const campusEvent = params?.campusEvent;
@@ -135,7 +140,7 @@ export function CampusEventCalendarDraftScreen() {
   const scopeChanged =
     !!scope && (scope.owner !== campusEvent?.owner || scope.schoolId !== campusEvent.schoolId);
   const invalidated =
-    firebaseChanged || ownerSignedOut(campusEvent?.owner) || ownerChanged || scopeChanged ||
+    firebaseChanged || firebaseSessionLost || ownerSignedOut(campusEvent?.owner) || ownerChanged || scopeChanged ||
     schoolChanged || sessionRejected || schoolCleared;
   const expired = useRef(false);
   useLayoutEffect(() => {
@@ -187,7 +192,7 @@ function parsePersonalImportKey(key: string): { owner: string; schoolId: string 
 
 export default function PersonalCalendarScreen() {
   const scope = usePersonalImportScope();
-  const { knownOwner, loggingOut, sessionRejected, firebaseChanged, ownerSignedOut, workspaceUid } =
+  const { knownOwner, loggingOut, sessionRejected, firebaseChanged, firebaseSessionLost, ownerSignedOut, workspaceUid } =
     useCalendarAccount(scope);
   const { school, schoolId, selectionReady } = useSchool();
   const route = useRoute();
@@ -196,7 +201,7 @@ export default function PersonalCalendarScreen() {
   const knownSchoolId = school?.id || schoolId || '';
   const schoolCleared = !!selectionReady && !knownSchoolId;
   const staleSticky = (() => {
-    if (firebaseChanged || loggingOut || sessionRejected || schoolCleared) return true;
+    if (firebaseChanged || firebaseSessionLost || loggingOut || sessionRejected || schoolCleared) return true;
     const previous = parsePersonalImportKey(lastReadyKey.current);
     if (!previous) return false;
     if (ownerSignedOut(previous.owner) || (knownOwner && previous.owner !== knownOwner)) return true;

@@ -94,6 +94,58 @@ test('Web leaves the primary ledger intact when the recovery copy cannot be stor
   }
 });
 
+test.each(['new writer', 'primary-only writer'])(
+  'Web keeps a newer commit from a %s when an older guarded write rolls back',
+  async (writer) => {
+    const key = personalImportStorageKey(scope);
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    let otherTab!: typeof import('../services/personalImports');
+    jest.isolateModules(() => {
+      otherTab = require('../services/personalImports');
+    });
+
+    const originalPlatform = Platform.OS;
+    Platform.OS = 'web';
+    const setItem = jest.mocked(AsyncStorage.setItem);
+    const write = setItem.getMockImplementation()!;
+    let resume!: () => void;
+    const paused = new Promise<void>((resolve) => { resume = resolve; });
+    let signalStaged!: () => void;
+    const staged = new Promise<void>((resolve) => { signalStaged = resolve; });
+    let verified = true;
+    setItem.mockImplementationOnce(async (storageKey, raw) => {
+      await write(storageKey, raw);
+      signalStaged();
+      await paused;
+    });
+
+    const rejected = expect(editPersonalImport(scope, ledger.records[0], row('original', '分頁 A'), {
+      canContinue: () => verified,
+    })).rejects.toThrow('帳號或學校已切換');
+    try {
+      await staged;
+      const newer = writer === 'new writer'
+        ? await otherTab.editPersonalImport(scope, ledger.records[0], row('original', '分頁 B'), {
+          canContinue: () => true,
+        })
+        : { ...ledger, records: [{ ...ledger.records[0], title: '分頁 B' }] };
+      const newerRaw = JSON.stringify(newer);
+      if (writer === 'primary-only writer') await AsyncStorage.setItem(key, newerRaw);
+
+      verified = false;
+      resume();
+      await rejected;
+      expect(await AsyncStorage.getItem(key)).toBe(newerRaw);
+      await expect(otherTab.loadPersonalImports(scope)).resolves.toEqual(newer);
+    } finally {
+      resume();
+      await rejected;
+      window.localStorage.clear();
+      Platform.OS = originalPlatform;
+    }
+  },
+);
+
 test.each(['a', '校'])('guarded calendar writes support maximum-length account and school IDs (%s)', async (character) => {
   const longScope = { owner: `nuni:${'u'.repeat(128)}`, schoolId: character.repeat(120) };
   const event = personalEventRowFromDraft({
@@ -230,6 +282,7 @@ async function failedDeletionRollback(checkpointWriteFails = false) {
   const nativeSetItem = setItem.getMockImplementation()!;
   const checkpointWriteError = new Error('檢查點寫入失敗');
   const rejectCheckpointWrite = jest.fn().mockRejectedValue(checkpointWriteError);
+  const web = Platform.OS === 'web';
   let verified = true;
 
   // Isolate the deleting process so the next instance starts with fresh service state.
@@ -240,7 +293,7 @@ async function failedDeletionRollback(checkpointWriteFails = false) {
   setItem.mockImplementationOnce(async (storageKey, value) => {
     await nativeSetItem(storageKey, value);
     verified = false;
-    if (checkpointWriteFails) {
+    if (checkpointWriteFails && !web) {
       jest.mocked(AsyncStorage.multiSet).mockImplementationOnce(rejectCheckpointWrite);
     }
   });
@@ -252,10 +305,10 @@ async function failedDeletionRollback(checkpointWriteFails = false) {
 
   const deletedRaw = (await AsyncStorage.getItem(key))!;
   expect(JSON.parse(deletedRaw).records).toEqual([]);
-  if (checkpointWriteFails) {
+  if (checkpointWriteFails && !web) {
     expect(rejectCheckpointWrite).toHaveBeenCalledWith([[checkpoint, originalRaw]]);
   }
-  expect(await AsyncStorage.getItem(checkpoint)).toBe(checkpointWriteFails ? null : originalRaw);
+  expect(await AsyncStorage.getItem(checkpoint)).toBe(checkpointWriteFails || web ? null : originalRaw);
   return { key, checkpoint, ledger, originalRaw, deletedRaw };
 }
 

@@ -1,9 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { findCatalogSameSlotChange } from './publicCourseTimetableImport';
 import {
   clearPersonalImportRollback,
   preparePersonalImportRollback,
   readPersonalImportRollback,
+  prepareWebPersonalImportRollback,
+  withPersonalImportWriteLock,
 } from './personalImportRollbackJournal';
 import {
   parsePersonalImportSyncState,
@@ -85,7 +88,7 @@ async function readRecovery(
 
   const pending = pendingRestorations.get(key);
   if (pending) return { ...pending, ledger: parseLedger(pending.raw, scope) };
-  const journal = readPersonalImportRollback(key);
+  const journal = await readPersonalImportRollback(key);
   if (journal === undefined) return null;
   if (journal === 'null') return { raw: null, ledger: empty() };
   // A marked journal can be the only verified copy. Propagate read/parse errors.
@@ -245,7 +248,7 @@ export function mutatePersonalImportLedger<T>(
   const previous = locks.get(key) || Promise.resolve();
   const task = previous
     .catch(() => undefined)
-    .then(async () => {
+    .then(() => withPersonalImportWriteLock(key, async () => {
       let hasPersisted = false;
       const assertWritable = () => {
         if (!canContinue()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
@@ -254,8 +257,11 @@ export function mutatePersonalImportLedger<T>(
         }
       };
       assertWritable();
+      const web = Platform.OS === 'web';
+      const webPrimary = web ? await AsyncStorage.getItem(key) : null;
       const recovery = await readRecovery(key, scope);
-      let persistedRaw = recovery ? recovery.raw : await AsyncStorage.getItem(key);
+      let primaryRaw = web || recovery ? webPrimary : await AsyncStorage.getItem(key);
+      let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
       assertWritable();
       let persisted = current;
@@ -267,8 +273,27 @@ export function mutatePersonalImportLedger<T>(
         // even if the recovered version no longer fits in AsyncStorage.
         const needsJournal = typeof guard !== 'function' || (recovery !== null && !hasPersisted);
         const write = async () => {
+          if (web) {
+            const currentRaw = await AsyncStorage.getItem(key);
+            assertWritable();
+            if (currentRaw !== primaryRaw) {
+              throw new Error('匯入資料已在另一個分頁更新，請重新載入。');
+            }
+          }
           if (!needsJournal) {
             await AsyncStorage.setItem(key, raw);
+          } else if (web) {
+            const journal = prepareWebPersonalImportRollback(key, persistedRaw, primaryRaw, raw);
+            try {
+              await AsyncStorage.setItem(key, raw);
+              assertWritable();
+              await AsyncStorage.multiRemove([recoveryKey(key)]);
+              assertWritable();
+              await journal.commit(assertWritable);
+            } catch (error) {
+              await journal.rollback();
+              throw error;
+            }
           } else {
             assertWritable();
             const commit = preparePersonalImportRollback(key, persistedRaw);
@@ -285,6 +310,7 @@ export function mutatePersonalImportLedger<T>(
             }
           }
           hasPersisted = true;
+          primaryRaw = raw;
           persistedRaw = raw;
           persisted = ledger;
           for (const listener of listeners) {
@@ -302,7 +328,7 @@ export function mutatePersonalImportLedger<T>(
       const { ledger, result } = await update(current, checkpoint);
       await checkpoint(ledger);
       return result;
-    });
+    }));
   locks.set(key, task);
   void task
     .finally(() => {
