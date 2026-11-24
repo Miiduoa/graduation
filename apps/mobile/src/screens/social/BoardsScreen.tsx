@@ -209,9 +209,12 @@ function BoardsContent() {
         // A list that omits a still-confirmed subscription is a cache gap and
         // must not by itself trigger another re-read after the first confirm.
         const listClaimsUnkeptSubscription = subscribedIds.has(id) && !nextConfirmed.has(id);
+        const listOmitsConfirmed = !subscribedIds.has(id) && nextConfirmed.has(id);
         if (
           !pendingSubscriptionCounts.current.has(id) &&
-          (lastSettledWriteSucceeded.current.has(id) || keptRollback || listClaimsUnkeptSubscription) &&
+          (keptRollback ||
+            listClaimsUnkeptSubscription ||
+            (lastSettledWriteSucceeded.current.has(id) && !listOmitsConfirmed)) &&
           auth.user?.uid &&
           school?.id
         ) {

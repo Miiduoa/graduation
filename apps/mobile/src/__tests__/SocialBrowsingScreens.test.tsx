@@ -393,6 +393,42 @@ test('an overlapping list after a failed write still confirms another device\'s 
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
+test('a later overlapping list that omits a board does not overwrite the first successful confirm', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+  await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  const firstList = deferred<string[]>();
+  const secondList = deferred<string[]>();
+  const unsubscribe = deferred();
+  jest.mocked(unsubscribeFromBoard).mockImplementationOnce(() => unsubscribe.promise);
+
+  fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => firstList.promise);
+  let firstRefresh!: Promise<void>;
+  act(() => { firstRefresh = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  await act(async () => { firstList.resolve(['board']); await firstRefresh; });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => secondList.promise);
+  let secondRefresh!: Promise<void>;
+  act(() => { secondRefresh = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(true);
+  await act(async () => { unsubscribe.resolve(); });
+  expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  const confirms = jest.mocked(isSubscribedToBoard).mock.calls.length;
+  jest.mocked(isSubscribedToBoard).mockResolvedValueOnce(false);
+  await act(async () => { secondList.resolve([]); await secondRefresh; });
+  await act(async () => { await Promise.resolve(); });
+  expect(jest.mocked(isSubscribedToBoard).mock.calls.length).toBe(confirms);
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
 test('a failed write never discards an in-flight pull-to-refresh, even if its re-read fails', async () => {
   const otherBoard = { id: 'board-b', name: '攝影社', type: 'topic' };
   jest.mocked(listBoards).mockResolvedValue([board, otherBoard]);
