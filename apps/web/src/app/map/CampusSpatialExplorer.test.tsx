@@ -81,7 +81,7 @@ beforeEach(() => {
   });
 });
 
-// A soft keyboard can only be covering content while a text field has focus.
+// Simulate opening the soft keyboard by focusing a text field.
 function showKeyboard() {
   const field = document.createElement('input');
   field.type = 'text';
@@ -2636,6 +2636,105 @@ it.each(['startup', 'resume'])('keeps WebGL blocked during %s while the keyboard
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
   } finally {
     vi.useRealTimers();
+    bounds.mockRestore();
+  }
+});
+
+it.each(['startup', 'resume'])('keeps WebGL blocked during %s when choosing a unique search result before the viewport rebounds', async (phase) => {
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: undefined } }));
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0, scale: 1,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback) { intersection = callback; }
+    observe(target: Element) {
+      if (phase === 'startup') intersection?.([observerEntry(target, false)], {} as IntersectionObserver);
+    }
+    disconnect() {}
+  });
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[1]} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+  if (phase === 'resume') await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  const dialog = within(screen.getByRole('dialog', { name: '校園空間導覽' }));
+  const graphics = dialog.getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 400, 320, 150));
+  const field = dialog.getByRole('searchbox', { name: '搜尋導覽地點' });
+  vi.useFakeTimers();
+  try {
+    act(() => field.focus());
+    fireEvent.change(field, { target: { value: '圖書館' } });
+    viewport.height = 200;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    expect(document.activeElement).toBe(field);
+    if (phase === 'resume') expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    scene.setActive.mockClear();
+
+    const choice = dialog.getByRole('button', { name: /^選擇：本校圖書館/ });
+    const picker = dialog.getByRole<HTMLSelectElement>('combobox', { name: '想去哪裡' });
+    expect(picker.value).toBe('dorm');
+    act(() => choice.focus());
+    fireEvent.click(choice);
+    expect(document.activeElement).toBe(choice);
+    expect(picker.value).toBe('library');
+    expect(dialog.getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(scene.create).toHaveBeenCalledTimes(phase === 'startup' ? 0 : 1);
+    expect(scene.setActive).not.toHaveBeenCalledWith(true);
+
+    await act(async () => vi.advanceTimersByTimeAsync(349));
+    if (phase === 'resume') {
+      // An event reporting continued occlusion keeps the geometry authoritative.
+      act(() => viewport.dispatchEvent(new Event('scroll')));
+      await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    }
+    expect(scene.create).toHaveBeenCalledTimes(phase === 'startup' ? 0 : 1);
+    expect(scene.setActive).not.toHaveBeenCalledWith(true);
+
+    viewport.height = window.innerHeight;
+    await act(async () => { viewport.dispatchEvent(new Event('resize')); });
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+  } finally {
+    vi.useRealTimers();
+    bounds.mockRestore();
+  }
+});
+
+it('pauses for an overlay keyboard that intersects the canvas without resizing the viewport', async () => {
+  const keyboard = Object.assign(new EventTarget(), {
+    overlaysContent: true, boundingRect: new DOMRect(),
+  });
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: keyboard } }));
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: 800, offsetLeft: 0, offsetTop: 0, scale: 1,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = within(await open());
+  const graphics = dialog.getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 400, 320, 150));
+  const field = dialog.getByRole('searchbox', { name: '搜尋導覽地點' });
+  try {
+    act(() => field.focus());
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    keyboard.boundingRect = new DOMRect(0, 390, 320, 410);
+    act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    keyboard.boundingRect = new DOMRect(320, 390, 320, 410);
+    act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(viewport.height).toBe(800);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+  } finally {
     bounds.mockRestore();
   }
 });

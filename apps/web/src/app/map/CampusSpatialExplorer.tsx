@@ -523,17 +523,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Safari can fire pagehide before visibilitychange when entering bfcache.
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended.current || document.hidden;
-    const isOffscreen = () => visibility === 'hidden' ||
+    // Measure the visual viewport even when layout already hides the canvas,
+    // so keyboard occlusion is tracked across a subsequent focus change.
+    const isOffscreen = () => measureVisualViewportVisibility() === false ||
+      keyboardOverlayIntersectsCanvas() || visibility === 'hidden' ||
       (visibility === 'unknown' && measureLayoutVisibility() === false) ||
       // A positive IntersectionObserver can be stale after nested modal
       // scrolling. Only override that signal when the dialog's *actual*
       // scrollport has valid measurements and demonstrably clips the canvas.
       // Incomplete layout geometry must not contradict a valid observer.
-      (visibility === 'visible' && measureDialogScrollportVisibility() === false) ||
-      // IntersectionObserver checks layout intersection, not whether a mobile
-      // keyboard has reduced the *visual* viewport over the 3D canvas.
-      // A positive observer entry must never reactivate an obscured WebGL scene.
-      measureVisualViewportVisibility() === false;
+      (visibility === 'visible' && measureDialogScrollportVisibility() === false);
     const isDeferred = () => isOffscreen() || isBackgrounded() || (saveData && !hasDataConsent);
     const defer = () => {
       setDeferredCause(isBackgrounded() ? 'background' :
@@ -716,6 +715,15 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         return null;
       }
     };
+    const keyboardOverlayIntersectsCanvas = (): boolean => {
+      try {
+        if (virtualKeyboard?.overlaysContent !== true) return false;
+        const { left, top, right, bottom } = virtualKeyboard.boundingRect;
+        return measureVisibilityAgainst(left, top, right, bottom, false) === true;
+      } catch {
+        return false;
+      }
+    };
     const isPinchZoomed = (viewport: VisualViewport) =>
       Number.isFinite(viewport.scale) && viewport.scale > 1.01;
     // Manual restart always wins over a visual viewport that may be stale.
@@ -737,44 +745,36 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       }
       return (element as HTMLElement).isContentEditable === true;
     };
-    const visualViewportMayObscureCanvas = (viewport: VisualViewport): boolean => {
-      // Pinch zoom legitimately leaves parts of the layout outside the visual
-      // viewport and always reports its own resize/scroll events.
-      if (isPinchZoomed(viewport)) return true;
-      try { return isTextEntryTarget(host.ownerDocument.activeElement); }
-      catch { return false; }
-    };
-    // The pause path (isOffscreen) uses the visual viewport alone: a positive
-    // observer entry already reflects dialog clipping. Only a stale hidden
-    // result must also prove the canvas is inside the dialog scrollport.
+    let keyboardViewportObscuresCanvas = false;
+    // A positive observer entry already reflects dialog clipping. Only
+    // recovery from a stale hidden entry also checks the dialog scrollport.
     const measureVisualViewportVisibility = (clipToDialog = false): boolean | null => {
       try {
         const viewport = window.visualViewport;
-        if (!viewport) return null;
-        const left = viewport.offsetLeft;
-        const top = viewport.offsetTop;
-        const width = viewport.width;
-        const height = viewport.height;
-        if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
-          return null;
-        }
-        // Some WebViews keep reporting the keyboard-shrunk height after the
-        // keyboard is dismissed and emit no further viewport event. A shrunk
-        // visual viewport is only evidence of an obscured canvas while
-        // something can actually be showing a keyboard or the page is
-        // pinch-zoomed; otherwise treat the geometry as unknown.
-        if (!clipToDialog && !visualViewportMayObscureCanvas(viewport)) return null;
-        const keyboardOpen = measureKeyboardOpen();
-        if (!clipToDialog && !isPinchZoomed(viewport) && keyboardOpen === false) return null;
+        if (!viewport) return keyboardViewportObscuresCanvas ? false : null;
+        const { offsetLeft: left, offsetTop: top, width, height } = viewport;
         // The visitor explicitly restarted 3D while the viewport read this
         // way. Ignore that exact (possibly stale) geometry until it changes.
         if (ignoredViewport !== null) {
           if (viewportSignature(viewport) === ignoredViewport) return null;
           ignoredViewport = null;
         }
-        return measureVisibilityAgainst(left, top, left + width, top + height, clipToDialog);
-      } catch {
+        const visible = measureVisibilityAgainst(left, top, left + width, top + height, clipToDialog);
+        if (clipToDialog) return visible;
+        const keyboardOpen = measureKeyboardOpen();
+        if (visible === true || keyboardOpen === false) keyboardViewportObscuresCanvas = false;
+        // Focus can move to a button before the keyboard finishes closing.
+        // Keep using viewport geometry until it shows the canvas again.
+        if (keyboardViewportObscuresCanvas) return false;
+        if (isPinchZoomed(viewport)) return visible;
+        if (visible === false && keyboardOpen !== false &&
+            (keyboardOpen === true || isTextEntryTarget(host.ownerDocument.activeElement))) {
+          keyboardViewportObscuresCanvas = true;
+          return false;
+        }
         return null;
+      } catch {
+        return keyboardViewportObscuresCanvas ? false : null;
       }
     };
     const syncVisibility = () => {
@@ -855,7 +855,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       catch { /* Observer and page events still report visibility. */ }
     }
     // Keyboard transitions can move the host without a window event.
+    let keyboardViewportRevision = 0;
     const onVisualViewportChange = () => {
+      keyboardViewportRevision += 1;
       if (visibility === 'hidden' && measureVisualViewportVisibility(true) === true) {
         // Recover from a stale hidden observer entry after the keyboard moves.
         // A valid intersection with the visual viewport is evidence the host
@@ -871,11 +873,25 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // viewport after the focus event, and some WebViews never report it.
     // Re-measure right away and again once the keyboard animation settles.
     const focusTimers = new Set<number>();
-    const onFocusChange = () => {
-      for (const delay of [0, 350]) {
+    const keyboardDismissalGraceMs = 350;
+    const onFocusChange = (event: FocusEvent) => {
+      const textEntry = event.target instanceof Element && isTextEntryTarget(event.target);
+      if (textEntry) keyboardViewportRevision += 1;
+      const revision = keyboardViewportRevision;
+      const leavingTextEntry = textEntry && event.type === 'focusout';
+      for (const delay of [0, keyboardDismissalGraceMs]) {
         const id = window.setTimeout(() => {
           focusTimers.delete(id);
-          if (active) syncVisibility();
+          if (!active) return;
+          // A silent WebView can keep its keyboard-shrunken bounds after blur.
+          // Give the viewport time to report the dismissal before dropping them.
+          if (delay === keyboardDismissalGraceMs && leavingTextEntry &&
+              revision === keyboardViewportRevision &&
+              !isTextEntryTarget(host.ownerDocument.activeElement) &&
+              measureKeyboardOpen() !== true) {
+            keyboardViewportObscuresCanvas = false;
+          }
+          syncVisibility();
         }, delay);
         focusTimers.add(id);
       }
