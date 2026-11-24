@@ -1,6 +1,6 @@
 /**
  * 課程卡 chip 進階頁共用殼層 — 對齊 LearnStack 8 chip 視覺與載入／錯誤節奏
- * （不依賴新套件；使用既有 theme／Spinner／Skeleton）
+ * （不依賴新套件；使用既有 theme／LoadingState）
  */
 import React from 'react';
 import { View, Text, Pressable } from 'react-native';
@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme } from './theme';
 import { useThemeVersion } from './useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from './navigationTheme';
-import { Spinner, Skeleton } from './components';
+import { LoadingState } from './components';
 
 export const courseChipScrollBottomInset = TAB_BAR_CONTENT_BOTTOM_PADDING;
 
@@ -21,7 +21,7 @@ export function courseChipScrollContentStyle(withBottomInset = true) {
   };
 }
 
-/** 全螢幕載入狀態：中央訊息與列表骨架 */
+/** 全螢幕載入狀態：以共用 LoadingState 呈現單一忙碌狀態與列表骨架 */
 export function CourseChipLoading(props: {
   title: string;
   subtitle?: string;
@@ -30,50 +30,20 @@ export function CourseChipLoading(props: {
   useThemeVersion();
   return (
     <View
-      style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
-      accessibilityLabel={props.title}
-      accessibilityHint={props.accessibilityHint}
+      style={{
+        flex: 1,
+        justifyContent: 'center',
+        backgroundColor: theme.colors.surfaceMuted,
+        paddingHorizontal: theme.layout.screenHorizontalPadding,
+        paddingBottom: theme.space.xxl,
+      }}
     >
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'center',
-          paddingHorizontal: theme.layout.screenHorizontalPadding,
-          paddingBottom: theme.space.xxl,
-        }}
-      >
-        <View style={{ alignItems: 'center', gap: theme.space.md, marginBottom: theme.space.xl }}>
-          <Spinner size={36} />
-          <Text
-            style={{
-              color: theme.colors.text,
-              fontSize: 17,
-              fontWeight: '600',
-              textAlign: 'center',
-              letterSpacing: -0.2,
-            }}
-          >
-            {props.title}
-          </Text>
-          {props.subtitle ? (
-            <Text
-              style={{
-                color: theme.colors.muted,
-                fontSize: 13,
-                textAlign: 'center',
-                lineHeight: 20,
-              }}
-            >
-              {props.subtitle}
-            </Text>
-          ) : null}
-        </View>
-        {[0, 1, 2].map((i) => (
-          <View key={`sk-${i}`} style={{ marginBottom: theme.space.sm }}>
-            <Skeleton height={72} borderRadius={theme.radius.lg} />
-          </View>
-        ))}
-      </View>
+      <LoadingState
+        title={props.title}
+        subtitle={props.subtitle}
+        hint={props.accessibilityHint}
+        rows={3}
+      />
     </View>
   );
 }
