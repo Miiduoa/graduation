@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 const mockCall = jest.fn();
 jest.mock('../firebase', () => ({
-  getAuthInstance: () => ({ currentUser: { uid: 'fixture' } }),
+  getAuthInstance: () => ({ currentUser: { uid: 'staff' } }),
 }));
 jest.mock('../services/nuniWebFn', () => ({
   postNuniWebFn: (_name: string, data: unknown) => mockCall(data),

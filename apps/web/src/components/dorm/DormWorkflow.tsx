@@ -24,10 +24,7 @@ import {
 import { getAuth } from '@/lib/firebase';
 import { invokeDormWorkflow } from '@/lib/dormWorkflowClient';
 type FocusTarget = HTMLInputElement;
-const invoke = <T,>(data: Record<string, unknown>) => invokeDormWorkflow<T>({
-  ...data,
-  schoolId: typeof data.schoolId === 'string' ? toPublicSchoolId(data.schoolId) : data.schoolId,
-});
+type DormRequest = <T>(data: Record<string, unknown>) => Promise<T>;
 function Box({ children }: { children: React.ReactNode }) {
   return (
     <section
@@ -136,12 +133,14 @@ function Photo({ url, label }: { url: string; label: string }) {
     </a>
   );
 }
-function TicketPhoto({ schoolId, id, index }: { schoolId: string; id: string; index: number }) {
+function TicketPhoto({ call, id, index }: { call: DormRequest; id: string; index: number }) {
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
   const open = async () => {
+    setUrl('');
+    setError('');
     try {
-      setUrl((await invoke<{ url: string }>({ schoolId, action: 'repairPhoto', id, index })).url);
+      setUrl((await call<{ url: string }>({ action: 'repairPhoto', id, index })).url);
     } catch {
       setError('無法讀取照片，請重新整理確認權限');
     }
@@ -164,7 +163,7 @@ async function exportSummary(text: string) {
   a.click();
   URL.revokeObjectURL(url);
 }
-async function pickPhotos(schoolId: string, remaining: number): Promise<string[]> {
+async function pickPhotos(remaining: number, call: DormRequest): Promise<string[]> {
   const files = await new Promise<File[]>((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -188,8 +187,7 @@ async function pickPhotos(schoolId: string, remaining: number): Promise<string[]
         reader.readAsDataURL(file);
       });
       return (
-        await invoke<{ path: string }>({
-          schoolId,
+        await call<{ path: string }>({
           action: 'uploadPhoto',
           base64,
           contentType: file.type,
@@ -220,9 +218,11 @@ export function DormWorkflow({
   draft?: { title: string; description: string; category: string; location: string };
 }) {
   const capabilityKey = JSON.stringify([uid, schoolId]);
+  const sessionMatches = Boolean(uid && getAuth()?.currentUser?.uid === uid);
   const [capability, setCapability] = useState<{ key: string; config: DormWorkflowConfig } | null>(
     null,
   );
+  const scopeReady = sessionMatches && capability?.key === capabilityKey;
   // Only a successful capability response may open official submission forms.
   const config =
     capability?.key === capabilityKey
@@ -281,9 +281,9 @@ export function DormWorkflow({
     setPreview(false);
   };
   const call = useCallback(
-    async <T,>(data: Record<string, unknown>): Promise<T> =>
-      invoke<T>({ ...data, schoolId: toPublicSchoolId(schoolId) ?? schoolId }),
-    [schoolId],
+    <T,>(data: Record<string, unknown>) =>
+      invokeDormWorkflow<T>({ ...data, schoolId: toPublicSchoolId(schoolId) ?? schoolId }, uid),
+    [schoolId, uid],
   );
   const refresh = useCallback(
     async (staff = staffMode) => {
@@ -358,10 +358,11 @@ export function DormWorkflow({
     setImages([]);
     setRequestKey(dormRequestKey());
     setAnnouncementKey(dormRequestKey());
+    setPendingAnnouncementKey(null);
     setPreview(false);
     setBusy(false);
     setStaffMode(false);
-    if (!uid) return;
+    if (!sessionMatches) return;
     void call<DormWorkflowConfig>({ action: 'config' })
       .then((c) => {
         if (!c || typeof c.enabled !== 'boolean') throw new Error('宿舍設定無法讀取');
@@ -379,9 +380,9 @@ export function DormWorkflow({
     return () => {
       generation.current++;
     };
-  }, [call, uid, initialStaff, capabilityKey, configAttempt]);
+  }, [call, sessionMatches, initialStaff, capabilityKey, configAttempt]);
   useEffect(() => {
-    if (capability?.key !== capabilityKey || submitOnly) return;
+    if (!scopeReady || submitOnly) return;
     let active = true;
     const load = () => {
       void refresh().catch(() => {
@@ -397,17 +398,21 @@ export function DormWorkflow({
       clearInterval(timer);
       rowGeneration.current++;
     };
-  }, [capability, capabilityKey, refresh, submitOnly]);
+  }, [scopeReady, refresh, submitOnly]);
   useEffect(() => {
     const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
-    onTonightLeaveChange?.(ownLeaves.some((r) => r.date === today && r.status === 'approved'));
-  }, [ownLeaves, onTonightLeaveChange]);
+    onTonightLeaveChange?.(
+      scopeReady && ownLeaves.some((r) => r.date === today && r.status === 'approved'),
+    );
+  }, [scopeReady, ownLeaves, onTonightLeaveChange]);
   useEffect(() => {
     if (!staffMode)
       onOwnRepairsChange?.(
-        rows.repairs.map((r) => projectDormRepair(r.id, { ...r, workflow: 'dorm_staff' })),
+        scopeReady
+          ? rows.repairs.map((r) => projectDormRepair(r.id, { ...r, workflow: 'dorm_staff' }))
+          : [],
       );
-  }, [rows.repairs, staffMode, onOwnRepairsChange]);
+  }, [scopeReady, rows.repairs, staffMode, onOwnRepairsChange]);
   async function act(data: Record<string, unknown>, done?: () => void) {
     if (busy) return;
     if (
@@ -426,11 +431,11 @@ export function DormWorkflow({
         updated?: number;
         skipped?: number;
       }>(data);
-      const sender = getAuth()?.currentUser?.uid;
+      const isCurrent = () => token === generation.current && getAuth()?.currentUser?.uid === uid;
       const result = data.action === 'announce'
         ? await deliverDormAnnouncementBatches(
             send,
-            () => token === generation.current && getAuth()?.currentUser?.uid === sender,
+            isCurrent,
             (receipt) => {
               publicationConfirmed = true;
               setPendingAnnouncementKey(String(data.key));
@@ -438,7 +443,7 @@ export function DormWorkflow({
             },
           )
         : await send();
-      if (token !== generation.current) return;
+      if (!isCurrent()) return;
       if (!result.pendingRecipients) done?.();
       setNotice(
         result.updated !== undefined
@@ -468,11 +473,14 @@ export function DormWorkflow({
     inputRef.current?.focus();
   };
   if (!uid) return null;
-  if (capability?.key !== capabilityKey)
+  if (!scopeReady)
     return (
       <Box>
-        <Label>{configError ? '宿舍服務暫時無法使用，請稍後再試。' : '正在確認宿舍服務…'}</Label>
-        {configError && <Btn label="重試" onPress={() => setConfigAttempt((value) => value + 1)} />}
+        <Label>
+          {!sessionMatches ? '登入帳號已變更，請重新確認宿舍服務。'
+            : configError ? '宿舍服務暫時無法使用，請稍後再試。' : '正在確認宿舍服務…'}
+        </Label>
+        {(!sessionMatches || configError) && <Btn label="重試" onPress={() => setConfigAttempt((value) => value + 1)} />}
       </Box>
     );
   if (!config.enabled && submitOnly) return null;
@@ -522,7 +530,7 @@ export function DormWorkflow({
       {!!r.vendor && staff && <Label>廠商：{r.vendor}</Label>}
       {!!r.expectedDate && <Label>預計日期：{r.expectedDate}</Label>}
       {r.images?.map((url, i) => (
-        <TicketPhoto key={url} schoolId={schoolId} id={r.id} index={i} />
+        <TicketPhoto key={url} call={call} id={r.id} index={i} />
       ))}
       {staff ? (
         <>
@@ -661,13 +669,20 @@ export function DormWorkflow({
                 onPress={() => {
                   const photoGeneration = generation.current;
                   setBusy(true);
-                  void pickPhotos(schoolId, 3 - images.length)
+                  void pickPhotos(3 - images.length, (data) => {
+                    if (photoGeneration !== generation.current) throw new Error('宿舍頁面已變更。');
+                    return call(data);
+                  })
                     .then((photos) => {
                       if (photoGeneration === generation.current)
                         setImages((old) => [...old, ...photos].slice(0, 3));
                     })
-                    .catch(() => setNotice('照片上傳失敗，請重試。'))
-                    .finally(() => setBusy(false));
+                    .catch(() => {
+                      if (photoGeneration === generation.current) setNotice('照片上傳失敗，請重試。');
+                    })
+                    .finally(() => {
+                      if (photoGeneration === generation.current) setBusy(false);
+                    });
                 }}
               />
               {button(
