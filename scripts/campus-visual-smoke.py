@@ -1665,7 +1665,7 @@ async def main():
             results.append('mobile bottom navigation leaves footer actions reachable')
             await page.set_viewport_size({'width': 390, 'height': 844})
             await check_assistant_return_journey(page)
-            results.append('nonmodal assistant preserves the directory and draft through minimize and login return, and shares the home draft in both directions')
+            results.append('nonmodal assistant retains drafts while minimized, restores the directory after login reload, and shares the home draft in both directions')
             await goto_path(page, '/life?campus=pu')
 
             search = page.get_by_role('searchbox', name='快速找服務')
