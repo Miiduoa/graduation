@@ -389,16 +389,6 @@ function filenameMatchLength(text: string, index: number): number {
   return matched[0].length;
 }
 
-function isLexiconReadInner(inner: string): boolean {
-  if (!inner.trim()) return false;
-  return tokensFor(inner).every(token => {
-    if (isWhitespaceToken(token) || token.kind === 'punct') return true;
-    if (token.kind === 'unknown' || token.kind === 'filename') return false;
-    if (isWriteVerbToken(token) || isNegatorToken(token)) return false;
-    return true;
-  });
-}
-
 function hasFilenameCandidate(text: string): boolean {
   if (BARE_FILENAME_ANYWHERE.test(text)) return true;
   if (tokensFor(text).some(token => token.kind === 'filename')) return true;
@@ -419,12 +409,16 @@ function hasFilenameCandidate(text: string): boolean {
   return false;
 }
 
-/** File mentions, unbalanced brackets, or bracket inners that are not known read tokens block clearly-read. */
-function hasReadBlockingDecoration(text: string): boolean {
-  if (hasFilenameCandidate(text)) return true;
+function hasBracketContent(text: string): boolean {
   const scan = scanNestedBrackets(text);
   if (!scan.balanced) return true;
-  return scan.spans.some(span => !isLexiconReadInner(text.slice(span.innerStart, span.innerEnd)));
+  if (scan.spans.length > 0) return true;
+  return NESTED_BRACKET_PAIRS.some(([open, close]) => text.includes(open) || text.includes(close));
+}
+
+/** File mentions or any bracket/parenthesis content block clearly-read. */
+function hasReadBlockingDecoration(text: string): boolean {
+  return hasFilenameCandidate(text) || hasBracketContent(text);
 }
 
 function tokenize(text: string): Token[] {
@@ -980,10 +974,7 @@ function dataTypeMask(text: string): boolean[] {
     mark(scan.firstOpen, text.length);
     return mask;
   }
-  for (const span of scan.spans) {
-    const inner = text.slice(span.innerStart, span.innerEnd);
-    if (FILE_EXTENSION.test(inner) || !isLexiconReadInner(inner)) mark(span.start, span.end);
-  }
+  for (const span of scan.spans) mark(span.start, span.end);
   return mask;
 }
 
