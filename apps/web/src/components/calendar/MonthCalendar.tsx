@@ -43,6 +43,7 @@ export function MonthCalendar({
     date: string;
     origin: HTMLElement;
   } | null>(null);
+  const [focusRequestRevision, setFocusRequestRevision] = useState(0);
   const days = useMemo(() => buildMonthCalendar(records, month), [records, month]);
   const selectedCellIndex = days.findIndex((day) => day?.date === selectedDate);
   const revealWeek = useCallback((columnIndex: number) => {
@@ -69,15 +70,14 @@ export function MonthCalendar({
     const target = monthCalendarKeyboardDate(date, event.key);
     if (!target) return;
     event.preventDefault();
-    if (target === date) return;
-    if (target.startsWith(`${month}-`)) {
-      if (focusDate(target)) pendingFocus.current = null;
-      else if (pendingFocus.current) pendingFocus.current.date = target;
-    } else if (onMonthChange && document.activeElement instanceof HTMLElement) {
-      pendingFocus.current = { date: target, origin: document.activeElement };
-      onMonthChange(target.slice(0, 7));
-    }
-  }, [month, focusDate, onMonthChange]);
+    const targetMonth = target.slice(0, 7);
+    const origin = document.activeElement;
+    if (target === date || !(origin instanceof HTMLElement)) return;
+    if (targetMonth !== month && !onMonthChange) return;
+    pendingFocus.current = { date: target, origin };
+    if (targetMonth === month) setFocusRequestRevision((revision) => revision + 1);
+    else onMonthChange?.(targetMonth);
+  }, [month, onMonthChange]);
 
   useLayoutEffect(() => {
     const requested = pendingFocus.current;
@@ -103,8 +103,8 @@ export function MonthCalendar({
       return;
     }
 
-    // The old date button is gone. Keep navigation available while neither the
-    // target nor its scrollport can receive focus.
+    // Keep keyboard navigation available after the originating date button
+    // unmounts, even when the scrollport is still outside the viewport.
     const origin = document.activeElement;
     if (origin instanceof HTMLElement) requested.origin = origin;
     const continueNavigation = (event: globalThis.KeyboardEvent) => {
@@ -129,7 +129,7 @@ export function MonthCalendar({
     };
     document.addEventListener('keydown', continueNavigation);
     return stopWatching;
-  }, [month, focusDate, moveDate]);
+  }, [month, focusDate, moveDate, focusRequestRevision]);
 
   return (
     <section className={styles.calendar} aria-label="每月行程">

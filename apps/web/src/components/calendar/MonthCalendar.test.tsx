@@ -282,12 +282,14 @@ it.each([
 });
 
 it.each([
-  ['部分重疊', 120, 616, 0, 'nearest'],
-  ['完全錯開', 700, 616, 0, 'start'],
-  ['完全錯開且七欄溢位', 700, 320, 292, 'start'],
-])('放大後可視視窗與月格%s，End 先平移再聚焦週六', (_case, offsetLeft, width, expectedScroll, inline) => {
-  const visualViewport = { offsetLeft, offsetTop: 30, width: 300, height: 640 };
+  ['部分重疊', 120, 616, 0, 'nearest', false],
+  ['完全錯開', 700, 616, 0, 'start', false],
+  ['完全錯開且七欄溢位', 700, 320, 292, 'start', false],
+  ['完全錯開且延後平移', 700, 320, 292, 'start', true],
+])('放大後可視視窗與月格%s，End 先平移再聚焦週六', (_case, offsetLeft, width, expectedScroll, inline, delayed) => {
+  const visualViewport = Object.assign(new EventTarget(), { offsetLeft, offsetTop: 30, width: 300, height: 640 });
   Object.defineProperty(window, 'visualViewport', { configurable: true, value: visualViewport });
+  vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
   vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(width);
   vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(616);
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
@@ -313,18 +315,26 @@ it.each([
   const pan = vi.fn((options: ScrollIntoViewOptions) => {
     expect(document.activeElement).toBe(origin);
     expect(viewport.scrollLeft).toBe(expectedScroll);
+    if (delayed) return;
     const bounds = target.getBoundingClientRect();
     if (options.inline === 'start') visualViewport.offsetLeft = bounds.left;
     else if (inline === 'nearest') visualViewport.offsetLeft = bounds.right - visualViewport.width;
   });
   Object.defineProperty(target, 'scrollIntoView', { value: pan });
 
-  fireEvent.keyDown(origin, { key: 'End' });
+  const key = new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true });
+  fireEvent(origin, key);
 
+  expect(key.defaultPrevented).toBe(true);
   expect(pan).toHaveBeenCalledExactlyOnceWith({
     block: 'nearest', inline, behavior: 'instant',
   });
   expect(viewport.scrollLeft).toBe(expectedScroll);
+  if (delayed) {
+    expect(document.activeElement).toBe(origin);
+    visualViewport.offsetLeft = target.getBoundingClientRect().left;
+    visualViewport.dispatchEvent(new Event('scroll'));
+  }
   expect(document.activeElement).toBe(target);
   expect(target.getBoundingClientRect().left).toBeGreaterThanOrEqual(visualViewport.offsetLeft);
   expect(target.getBoundingClientRect().right).toBeLessThanOrEqual(visualViewport.offsetLeft + visualViewport.width);
@@ -495,16 +505,17 @@ it('外部選日移到左側時只捲回必要距離，不搶焦點或重設已�
   expect(document.activeElement).toBe(outside);
 });
 
-it.each(['重試原日期', '繼續按方向鍵', '移走焦點'])(
-  '跨月目標與月格皆在水平畫面外時可%s',
+it.each(['重試原日期', '繼續按方向鍵', '移走焦點', '月格只露出一像素時等待交接'])(
+  '跨月目標在水平畫面外時可%s',
   (action) => {
     const viewport = Object.assign(new EventTarget(), {
-      offsetLeft: 450, offsetTop: 0, width: 240, height: 400,
+      offsetLeft: action === '月格只露出一像素時等待交接' ? -219 : 450,
+      offsetTop: 0, width: 240, height: 400,
     });
     Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
-    vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+    const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-      if (this.classList.contains(styles.viewport)) return new DOMRect(20, 50, 200, 250);
+      if (this.classList.contains(styles.viewport)) return new DOMRect(20, 50, 300, 250);
       if (this.classList.contains(styles.date)) return new DOMRect(40, 90, 44, 40);
       return originalBounds.call(this);
     });
@@ -524,6 +535,9 @@ it.each(['重試原日期', '繼續按方向鍵', '移走焦點'])(
     expect(origin.isConnected).toBe(false);
     expect(screen.getByRole('region', { name: '2028-02 月格，週日起始' })).toBeTruthy();
     expect(document.activeElement).toBe(document.body);
+    if (action === '月格只露出一像素時等待交接') {
+      expect(scrollBy).toHaveBeenCalledWith({ left: 239, top: 0, behavior: 'instant' });
+    }
 
     const outside = screen.getByRole('button', { name: '其他控制' });
     if (action === '移走焦點') outside.focus();
@@ -534,7 +548,7 @@ it.each(['重試原日期', '繼續按方向鍵', '移走焦點'])(
       expect(document.activeElement).toBe(document.body);
     }
 
-    viewport.offsetLeft = 0;
+    viewport.offsetLeft = 20;
     viewport.dispatchEvent(new Event('scroll'));
     expect(document.activeElement).toBe(
       action === '移走焦點'

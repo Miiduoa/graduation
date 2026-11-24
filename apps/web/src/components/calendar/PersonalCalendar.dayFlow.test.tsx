@@ -607,7 +607,7 @@ it.each([
     seed([stored]);
     const viewport = Object.assign(new EventTarget(), {
       offsetTop: 60,
-      offsetLeft: trigger === '開啟編輯器' ? 220 : 20,
+      offsetLeft: trigger === '開啟編輯器' ? 220 : 40,
       width: 180,
       height: 300,
     });
@@ -937,9 +937,14 @@ it.each([
   expect(document.activeElement).toBe(outside ? heading : date);
 });
 
-it.each(['可以平移', '無法平移'])(
-  '放大並平移至週六後選日，僅在日程標題可見時交接焦點（%s）',
-  async (panResult) => {
+it.each([
+  ['可以平移', 20, 140],
+  ['無法平移', 20, 140],
+  ['可以平移', 639, 240],
+  ['無法平移', 639, 240],
+])(
+  '放大並平移至週六後選日，僅在日程標題可見時交接焦點（%s，起點 %i，寬 %i）',
+  async (panResult, headingLeft, headingWidth) => {
     const viewport = Object.assign(new EventTarget(), {
       offsetTop: 80,
       offsetLeft: 460,
@@ -953,7 +958,7 @@ it.each(['可以平移', '無法平移'])(
     let pageOffset = 0;
     const pan = vi.fn(() => {
       expect(document.activeElement).toBe(date);
-      if (panResult === '可以平移') viewport.offsetLeft = 20;
+      if (panResult === '可以平移') viewport.offsetLeft = headingLeft;
     });
     vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
       if (this === date) return new DOMRect(510, 100 - pageOffset, 80, 32);
@@ -962,7 +967,7 @@ it.each(['可以平移', '無法平移'])(
       }
       if (this.tagName === 'H3') {
         Object.defineProperty(this, 'scrollIntoView', { configurable: true, value: pan });
-        return new DOMRect(20, 300 - pageOffset, 140, 36);
+        return new DOMRect(headingLeft, 300 - pageOffset, headingWidth, 36);
       }
       return new DOMRect(20, 100, 100, 40);
     });
@@ -977,7 +982,8 @@ it.each(['可以平移', '無法平移'])(
     expect(pan).toHaveBeenCalledTimes(1);
     if (panResult === '可以平移') {
       expect(heading.getBoundingClientRect().left).toBeGreaterThanOrEqual(viewport.offsetLeft);
-      expect(heading.getBoundingClientRect().right).toBeLessThanOrEqual(viewport.offsetLeft + viewport.width);
+      expect(heading.getBoundingClientRect().left + Math.min(headingWidth, viewport.width))
+        .toBeLessThanOrEqual(viewport.offsetLeft + viewport.width);
       expect(document.activeElement).toBe(heading);
     } else {
       expect(document.activeElement).toBe(date);
@@ -1163,7 +1169,12 @@ it.each(['selected date', 'document.body'])(
   },
 );
 
-it.each([true, false])('單日儲存後只在標題雙軸可見時交接焦點（可揭露=%s）', async (canReveal) => {
+it.each([
+  [true, 40, 140, -220],
+  [false, 40, 140, -220],
+  [true, 439, 240, 179],
+  [false, 439, 240, 179],
+])('單日儲存後只在標題雙軸可見時交接焦點（可揭露=%s，起點 %i，寬 %i）', async (canReveal, initialLeft, width, scrollLeft) => {
   render(<PersonalCalendar />);
   await ready();
   activate(screen.getByRole('button', { name: '2026-11-14' }));
@@ -1175,9 +1186,9 @@ it.each([true, false])('單日儲存後只在標題雙軸可見時交接焦點�
     offsetLeft: 260, offsetTop: 40, width: 180, height: 240,
   });
   Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
-  let left = 40;
+  let left = initialLeft;
   let top = 320;
-  vi.spyOn(heading, 'getBoundingClientRect').mockImplementation(() => new DOMRect(left, top, 140, 40));
+  vi.spyOn(heading, 'getBoundingClientRect').mockImplementation(() => new DOMRect(left, top, width, 40));
   const focus = vi.spyOn(heading, 'focus');
   vi.mocked<(options: ScrollToOptions) => void>(window.scrollBy).mockImplementation((options) => {
     expect(focus).not.toHaveBeenCalled();
@@ -1190,7 +1201,7 @@ it.each([true, false])('單日儲存後只在標題雙軸可見時交接焦點�
   activate(screen.getByRole('button', { name: '儲存行程' }));
   await screen.findByText(personalImportSavedNotice(1));
 
-  expect(window.scrollBy).toHaveBeenCalledWith({ left: -220, top: 80, behavior: 'instant' });
+  expect(window.scrollBy).toHaveBeenCalledWith({ left: scrollLeft, top: 80, behavior: 'instant' });
   expect(focus).toHaveBeenCalledTimes(canReveal ? 1 : 0);
   expect(document.activeElement === heading).toBe(canReveal);
 });

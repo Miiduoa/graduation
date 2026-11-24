@@ -91,9 +91,11 @@ function horizontalVisibleBounds(element: HTMLElement) {
 }
 
 function fitsVisibleAxis(start: number, end: number, min: number, max: number) {
-  // An oversized control at high zoom can only show its leading edge.
-  return end > start && max > min && start >= min && start < max &&
-    (end <= max || end - start > max - min);
+  if (end <= start || max <= min) return false;
+  // Require the full control when it fits, or the full available span at high zoom.
+  return end - start <= max - min
+    ? start >= min && end <= max
+    : start <= min && end >= max;
 }
 
 export function isHorizontallyVisible(element: HTMLElement) {
@@ -117,7 +119,10 @@ export function isVisible(element: HTMLElement, insets = measureStickyInsets()) 
 
 function nearestScrollDistance(start: number, end: number, min: number, max: number) {
   if (end <= start || max <= min || fitsVisibleAxis(start, end, min, max)) return 0;
-  if (start < min || end - start > max - min) return Math.floor(start - min);
+  if (end - start > max - min) {
+    return start > min ? Math.ceil(start - min) : Math.floor(end - max);
+  }
+  if (start < min) return Math.floor(start - min);
   return Math.max(0, Math.ceil(end - max));
 }
 
