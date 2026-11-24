@@ -2802,12 +2802,88 @@ it('does not pause for an overlay keyboard that only intersects the dialog-clipp
   }
 });
 
+it('keeps WebGL paused while the search field stays focused after a zero keyboard rectangle', async () => {
+  const keyboard = Object.assign(new EventTarget(), { boundingRect: new DOMRect() });
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: keyboard } }));
+  const { viewport, dialog, graphics, bounds, field } = await openKeyboardCoveredScene();
+  try {
+    expect(document.activeElement).toBe(field);
+    keyboard.boundingRect = new DOMRect(0, 200, 320, 400);
+    act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    keyboard.boundingRect = new DOMRect();
+    act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    expect(document.activeElement).toBe(field);
+    expect(viewport.height).toBe(200);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+it('resumes 3D after focus moves from the search field to the destination picker with a stale viewport', async () => {
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: undefined } }));
+  const { viewport, dialog, graphics, bounds } = await openKeyboardCoveredScene();
+  try {
+    const picker = within(dialog).getByRole<HTMLSelectElement>('combobox', { name: '想去哪裡' });
+    act(() => picker.focus());
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    expect(document.activeElement).toBe(picker);
+    expect(viewport.height).toBe(200);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+it('pauses when a keyboard rectangle intersects the visible canvas without overlaysContent', async () => {
+  const keyboard = Object.assign(new EventTarget(), { boundingRect: new DOMRect() });
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: keyboard } }));
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: 800, offsetLeft: 0, offsetTop: 0, scale: 1,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = within(await open());
+  const graphics = dialog.getByRole('group', { name: '校園地點空間圖' });
+  const bounds = vi.spyOn(graphics, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 400, 320, 150));
+  try {
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    act(() => dialog.getByRole('link', { name: '開啟步行導航' }).focus());
+    expect(document.activeElement?.tagName).not.toMatch(/^(INPUT|TEXTAREA)$/);
+
+    // Some WebViews report an intersecting rectangle and omit overlaysContent.
+    keyboard.boundingRect = new DOMRect(0, 390, 320, 410);
+    act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(dialog.getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+
+    keyboard.boundingRect = new DOMRect(320, 390, 320, 410);
+    act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(viewport.height).toBe(800);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
 it('keeps confirmed keyboard occlusion paused and resumes when keyboard geometry clears', async () => {
-  const keyboard = Object.assign(new EventTarget(), { boundingRect: new DOMRect(0, 200, 320, 400) });
+  const keyboard = Object.assign(new EventTarget(), { boundingRect: new DOMRect() });
   vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: keyboard } }));
   const { viewport, dialog, graphics, bounds, field } = await openKeyboardCoveredScene();
   vi.useFakeTimers();
   try {
+    keyboard.boundingRect = new DOMRect(0, 200, 320, 400);
+    act(() => keyboard.dispatchEvent(new Event('geometrychange')));
     act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
     act(() => vi.advanceTimersByTime(10_000));
     expect(scene.setActive).toHaveBeenLastCalledWith(false);
@@ -2818,7 +2894,14 @@ it('keeps confirmed keyboard occlusion paused and resumes when keyboard geometry
 
     keyboard.boundingRect = new DOMRect();
     act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+    // The field is still focused and the shrunken viewport still excludes the
+    // canvas, so clearing the rectangle must not auto-resume 3D.
     expect(document.activeElement).toBe(field);
+    expect(viewport.height).toBe(200);
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+
+    hideKeyboard(field);
+    await act(async () => vi.advanceTimersByTimeAsync(0));
     expect(viewport.height).toBe(200);
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
     expect(scene.create).toHaveBeenCalledTimes(1);

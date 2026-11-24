@@ -702,28 +702,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     try {
       virtualKeyboard = (window.navigator as Navigator & { virtualKeyboard?: VirtualKeyboard }).virtualKeyboard;
     } catch { /* Optional in embedded browsers. */ }
-    let keyboardGeometryAvailable = false;
-    const measureKeyboardOpen = (): boolean | null => {
-      try {
-        const bounds = virtualKeyboard?.boundingRect;
-        if (!bounds || ![bounds.width, bounds.height].every(Number.isFinite)) return null;
-        const open = bounds.width > 0 && bounds.height > 0;
-        // A zero rectangle can also mean the browser has never exposed geometry.
-        keyboardGeometryAvailable ||= open || virtualKeyboard?.overlaysContent === true;
-        return keyboardGeometryAvailable ? open : null;
-      } catch {
-        return null;
-      }
-    };
     const keyboardOverlayIntersectsCanvas = (): boolean => {
       try {
-        if (virtualKeyboard?.overlaysContent !== true) return false;
-        const bounds = virtualKeyboard.boundingRect;
+        const bounds = virtualKeyboard?.boundingRect;
         if (!bounds || ![bounds.left, bounds.top, bounds.right, bounds.bottom,
           bounds.width, bounds.height].every(Number.isFinite) ||
           !(bounds.width > 0 && bounds.height > 0)) return false;
         // Only the dialog-clipped, on-screen part of the canvas counts as visible.
         // Overflow hidden by the modal must not pause 3D by itself.
+        // A reported rectangle that actually overlaps is enough; do not require
+        // overlaysContent, which some WebViews omit even for overlay keyboards.
         return measureVisibilityAgainst(bounds.left, bounds.top, bounds.right, bounds.bottom) === true;
       } catch {
         return false;
@@ -742,7 +730,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     const isTextEntryTarget = (element: Element | null): boolean => {
       if (!element) return false;
       const tag = element.tagName;
-      if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+      if (tag === 'TEXTAREA') return true;
       if (tag === 'INPUT') {
         const type = ((element as HTMLInputElement).type || 'text').toLowerCase();
         return !['button', 'checkbox', 'radio', 'range', 'submit', 'reset', 'image',
@@ -769,17 +757,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         // proof that the keyboard still covers the canvas.
         if (keyboardOverlayIntersectsCanvas()) return false;
         if (isPinchZoomed(viewport)) return visible;
-        const keyboardOpen = measureKeyboardOpen();
         const textEntryFocused = isTextEntryTarget(host.ownerDocument.activeElement);
-        // virtualKeyboard reported a closed keyboard. Ignore leftover
-        // shrunken bounds even if a field stays focused.
-        if (keyboardOpen === false) return null;
-        // No editable focus and no keyboard overlap: treat the keyboard as
-        // closed. A stale resize must not keep 3D paused.
+        // No input/textarea/contenteditable focus and no keyboard overlap:
+        // treat the keyboard as closed. A stale resize must not keep 3D paused.
         if (!textEntryFocused) return null;
-        // While an editable is focused and the keyboard API does not clear
-        // it, a visual viewport that excludes the canvas is still occlusion.
-        // Never auto-resume from timers in this state.
+        // While an editable is focused, never auto-resume from a closed
+        // keyboard rectangle, a grace timer, or leftover shrunken bounds.
+        // Only a visual viewport that once again includes the canvas may resume.
         if (visible === false) return false;
         return null;
       } catch {
@@ -908,7 +892,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       try {
         const viewport = window.visualViewport;
         if (viewport) {
-          if (isPinchZoomed(viewport) || measureKeyboardOpen() === true) return;
+          if (isPinchZoomed(viewport) || keyboardOverlayIntersectsCanvas()) return;
           ignoredViewport = viewportSignature(viewport);
         }
       } catch { /* Partial WebViews: nothing to ignore. */ }
