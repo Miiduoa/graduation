@@ -118,6 +118,7 @@ export function parseCampusWalkingOsmCandidates(
       !Array.isArray(root.elements) || root.elements.length > MAX_NODES + MAX_EDGES) return null;
 
   const nodeScopes = new Map<number, boolean>();
+  const invalidOutsideNodeIds = new Set<unknown>();
   const nodes = new Map<number, CandidateNode>();
   const rawWays: Record<string, unknown>[] = [];
   for (const raw of root.elements) {
@@ -134,6 +135,7 @@ export function parseCampusWalkingOsmCandidates(
     const inside = inBounds(coordinates, bounds);
     if (!positiveId(item.id)) {
       if (inside) return null;
+      if (item.id !== undefined) invalidOutsideNodeIds.add(item.id);
       continue;
     }
     const node = { id: item.id, ...coordinates };
@@ -147,15 +149,23 @@ export function parseCampusWalkingOsmCandidates(
 
   const wayScopes = new Map<number, boolean>();
   const ways = new Map<number, CandidateWay>();
-  let references = 0;
   for (const item of rawWays) {
-    if (!Array.isArray(item.nodes) || item.nodes.length < 2 ||
-        item.nodes.length > MAX_EDGES + 1 || !item.nodes.every(positiveId)) return null;
-    if (item.nodes.some(id => !nodeScopes.has(id))) return null;
+    if (!Array.isArray(item.nodes) || item.nodes.length < 2) return null;
+    const ids: unknown[] = item.nodes;
+    let hasCampusNode = false;
+    let previousInside = false;
+    let inside = false;
+    for (const id of ids) {
+      const scope = positiveId(id) ? nodeScopes.get(id) : undefined;
+      if (scope === undefined && !invalidOutsideNodeIds.has(id)) return null;
+      // A way contributes only segments with two consecutive in-bounds nodes.
+      if (scope && previousInside) inside = true;
+      if (scope) hasCampusNode = true;
+      previousInside = scope === true;
+    }
 
-    // A way contributes only segments with two consecutive in-bounds nodes.
-    const inside = item.nodes.some((id, i, ids) =>
-      i > 0 && nodeScopes.get(ids[i - 1]) && nodeScopes.get(id));
+    const validReferences = ids.every(positiveId);
+    if (!validReferences && hasCampusNode) return null;
     if (!positiveId(item.id)) {
       if (inside) return null;
       continue;
@@ -166,17 +176,21 @@ export function parseCampusWalkingOsmCandidates(
       ways.delete(item.id);
       continue;
     }
-    // Charge each identified way once, after ruling out a duplicate occurrence.
-    references += item.nodes.length - 1;
-    if (references > MAX_EDGES) return null;
+    if (!validReferences) continue;
     const rev = revision(item, baseMs);
     if (!rev || !HIGHWAYS.includes(rev.tags.highway)) {
       if (inside) return null;
       continue;
     }
-    ways.set(item.id, { id: item.id, nodes: [...item.nodes], ...rev });
+    ways.set(item.id, { id: item.id, nodes: ids, ...rev });
   }
 
+  // Only retained ways consume the segment budget.
+  let references = 0;
+  for (const way of ways.values()) {
+    references += way.nodes.length - 1;
+    if (references > MAX_EDGES) return null;
+  }
   const edges: WalkingEdge[] = [];
   const seen = new Set<string>();
   for (const way of ways.values()) {
@@ -198,7 +212,8 @@ export function parseCampusWalkingOsmCandidates(
   }
   const inside = [...nodes.values()];
   return {
-    osmBaseAt, attribution: ATTRIBUTION, nodes: inside, ways: [...ways.values()],
+    osmBaseAt, attribution: ATTRIBUTION, nodes: inside,
+    ways: [...ways.values()].map(way => ({ ...way, nodes: [...way.nodes] })),
     graph: { schoolId, osmBaseAt, nodes: inside.map(({ id, lat, lng }) => ({ id, lat, lng })), edges },
   };
 }

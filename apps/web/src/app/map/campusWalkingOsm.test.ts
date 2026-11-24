@@ -122,7 +122,20 @@ describe('OSM campus walking discovery (not routing approval)', () => {
     }
   });
 
-  it('counts a repeated out-of-bounds way only once against the segment budget', () => {
+  it('drops ways referencing invalid outside node IDs unless they also reference campus nodes', () => {
+    const input = payload();
+    const elements = [
+      ...input.elements,
+      node(6, 10.015, 20.002), node(0, 10.017, 20.002), node(7, 10.016, 20.002),
+    ];
+    expect(parse({ ...input, elements: [...elements, way(103, [6, 0, 7])] }))
+      .toEqual(parse(input));
+    for (const references of [[1, 2, 0], [1, 0, 7]]) {
+      expect(parse({ ...input, elements: [...elements, way(103, references)] })).toBeNull();
+    }
+  });
+
+  it('charges the segment budget only for retained ways', () => {
     const input = payload();
     const outside = [node(6, 10.015, 20.002), node(7, 10.016, 20.002)];
     const longWay = way(103, Array.from({ length: 3997 }, (_, i) => 6 + i % 2));
@@ -134,6 +147,14 @@ describe('OSM campus walking discovery (not routing approval)', () => {
     expect(repeated?.graph).toEqual(baseline?.graph);
     expect(repeated?.ways.map(({ id }) => id)).toEqual([101, 102, 103]);
     expect(parse({ ...input, elements: [...atLimit, way(105, [6, 7])] })).toBeNull();
+
+    const shortDuplicate = way(105, [6, 7]);
+    const longDuplicate = way(105, Array.from({ length: 3999 }, (_, i) => 6 + i % 2));
+    for (const duplicates of [[shortDuplicate, longDuplicate], [longDuplicate, shortDuplicate]]) {
+      expect(parse({ ...input, elements: [...atLimit, ...duplicates] })).toEqual(baseline);
+    }
+    expect(parse({ ...input, elements: [...atLimit, { ...longDuplicate, version: 0 }] }))
+      .toEqual(baseline);
   });
 
   it('excludes highway areas and indoor ways and flags tagged restrictions', () => {
