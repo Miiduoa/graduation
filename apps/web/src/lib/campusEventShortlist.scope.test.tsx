@@ -244,3 +244,76 @@ it('reopens an idle shortlist without briefly displaying the previous device cop
   await waitFor(() => expect(second.result.current.ready).toBe(true));
   expect(second.result.current.items).toEqual([]);
 });
+
+it('does not revive an earlier Web save, retry or notice when returning to the same account', async () => {
+  const item: SavedCampusEvent = {
+    schoolId: 'pu', id: 'return-lecture', title: '回訪講座', source: 'school-events',
+  };
+  platform.session = { platformAccountId: 'return-a' };
+  const aKey = campusEventShortlistKey(item.schoolId, campusEventShortlistOwner(null, 'return-a'));
+  const bKey = campusEventShortlistKey(item.schoolId, campusEventShortlistOwner(null, 'return-b'));
+  const hook = renderHook(() => useCampusEventShortlist(item.schoolId));
+  await waitFor(() => expect(hook.result.current.ready).toBe(true));
+  await act(async () => {
+    expect(await hook.result.current.toggle(item, true)).toBe('done');
+  });
+  expect(hook.result.current.notice).toContain(item.title);
+  const previous = hook.result.current;
+
+  platform.session = { platformAccountId: 'return-b' };
+  hook.rerender();
+  await waitFor(() => expect(hook.result.current.ready).toBe(true));
+  platform.session = { platformAccountId: 'return-a' };
+  hook.rerender();
+  await waitFor(() => expect(hook.result.current.items).toEqual([item]));
+  expect(hook.result.current.notice).toBe('');
+  await act(async () => {
+    expect(await previous.toggle(item, false)).toBe('ignored');
+    expect(await previous.retry()).toBe(false);
+    expect(await previous.reload()).toBe(false);
+  });
+  expect(JSON.parse(localStorage.getItem(aKey)!).items).toEqual([item]);
+  expect(localStorage.getItem(bKey)).toBeNull();
+  await act(async () => {
+    expect(await hook.result.current.toggle(item, false)).toBe('done');
+  });
+  expect(hook.result.current.items).toEqual([]);
+  const last = hook.result.current;
+  hook.unmount();
+  expect(await last.toggle(item, true)).toBe('ignored');
+  expect(JSON.parse(localStorage.getItem(aKey)!).items).toEqual([]);
+});
+
+it('does not offer an earlier failed write as a retry after leaving and returning to its scope', async () => {
+  const item: SavedCampusEvent = {
+    schoolId: 'nthu', id: 'failed-return', title: '回訪工作坊', source: 'school-events',
+  };
+  const key = campusEventShortlistKey(item.schoolId, null);
+  const hook = renderHook(() => useCampusEventShortlist(item.schoolId));
+  await waitFor(() => expect(hook.result.current.ready).toBe(true));
+  const storage = Object.hasOwn(localStorage, 'setItem') ? localStorage : Storage.prototype;
+  const write = vi.spyOn(storage, 'setItem').mockImplementationOnce(() => {
+    throw new Error('storage unavailable');
+  });
+  try {
+    await act(async () => {
+      expect(await hook.result.current.toggle(item, true)).toBe('failed');
+    });
+    const staleRetry = hook.result.current.retry;
+    platform.loading = true;
+    hook.rerender();
+    expect(hook.result.current.items).toEqual([]);
+    platform.loading = false;
+    hook.rerender();
+    await waitFor(() => expect(hook.result.current.ready).toBe(true));
+    expect(hook.result.current.error).toBeNull();
+    await act(async () => {
+      expect(await staleRetry()).toBe(false);
+      expect(await hook.result.current.retry()).toBe(true);
+    });
+    expect(localStorage.getItem(key)).toBeNull();
+    expect(hook.result.current.items).toEqual([]);
+  } finally {
+    write.mockRestore();
+  }
+});

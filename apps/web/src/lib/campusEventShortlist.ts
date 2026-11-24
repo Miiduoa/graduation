@@ -83,13 +83,16 @@ export function useCampusEventShortlist(schoolId: string) {
   else if (auth.loading || platform?.loading || !schoolId) scope = 'pending';
   const key =
     scope === 'guest' || scope === 'account' ? campusEventShortlistKey(schoolId, owner) : null;
-  const keyRef = useRef(key);
+  // The same storage key can belong to a later visit after an account or campus switch.
+  // Bind callbacks and feedback to this mounted scope, not only to the persistent key.
+  const session = useMemo(() => ({ key, scope, inflight: new Set<string>() }), [key, scope]);
+  const activeSession = useRef<typeof session | null>(null);
   useLayoutEffect(() => {
-    keyRef.current = key;
+    activeSession.current = session;
     return () => {
-      keyRef.current = null;
+      activeSession.current = null;
     };
-  }, [key]);
+  }, [session]);
 
   const subscribe = useCallback(
     (listener: () => void) => (key ? store.subscribe(key, listener) : subscribeNothing()),
@@ -101,14 +104,13 @@ export function useCampusEventShortlist(schoolId: string) {
   );
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, () => EMPTY_CAMPUS_EVENT_SHORTLIST);
 
-  const [notice, setNotice] = useState<{ key: string; message: string } | null>(null);
+  const [notice, setNotice] = useState<{ session: typeof session; message: string } | null>(null);
   const [failure, setFailure] = useState<{
-    key: string;
+    session: typeof session;
     event: SavedCampusEvent;
     saved: boolean;
   } | null>(null);
-  const [busy, setBusy] = useState<readonly string[]>([]);
-  const inflight = useRef(new Set<string>());
+  const [busy, setBusy] = useState<readonly { session: typeof session; identity: string }[]>([]);
 
   useEffect(() => {
     if (!key) return undefined;
@@ -143,7 +145,7 @@ export function useCampusEventShortlist(schoolId: string) {
       key && snapshot.ready ? snapshot.items.filter((item) => item.schoolId === schoolId) : [],
     [key, schoolId, snapshot],
   );
-  const currentFailure = failure && failure.key === key ? failure : null;
+  const currentFailure = failure?.session === session ? failure : null;
   const error =
     scope === 'auth-error'
       ? campusEventShortlistScopeCopy(scope)
@@ -157,8 +159,8 @@ export function useCampusEventShortlist(schoolId: string) {
   );
   const isBusy = useCallback(
     (event: Pick<SavedCampusEvent, 'schoolId' | 'id' | 'source'>) =>
-      busy.includes(`${key}\n${campusEventShortlistIdentity(event)}`),
-    [busy, key],
+      busy.some((operation) => operation.session === session && operation.identity === campusEventShortlistIdentity(event)),
+    [busy, session],
   );
 
   async function toggle(
@@ -167,12 +169,12 @@ export function useCampusEventShortlist(schoolId: string) {
   ): Promise<CampusEventShortlistResult> {
     const scopeKey = key;
     // Never write while sign-in is unresolved or before this scope's stored copy was read.
-    if (!scopeKey || keyRef.current !== scopeKey || !store.getSnapshot(scopeKey).ready)
+    if (!scopeKey || activeSession.current !== session || !store.getSnapshot(scopeKey).ready)
       return 'ignored';
     const identity = campusEventShortlistIdentity(event);
-    const operation = `${scopeKey}\n${identity}`;
-    if (inflight.current.has(operation)) return 'ignored';
-    inflight.current.add(operation);
+    if (session.inflight.has(identity)) return 'ignored';
+    session.inflight.add(identity);
+    const operation = { session, identity };
     setBusy((current) => [...current, operation]);
     setNotice(null);
     let saveSucceeded = false;
@@ -181,40 +183,40 @@ export function useCampusEventShortlist(schoolId: string) {
     } catch {
       saveSucceeded = false;
     } finally {
-      inflight.current.delete(operation);
-      setBusy((current) => {
-        const index = current.indexOf(operation);
-        return index < 0 ? current : [...current.slice(0, index), ...current.slice(index + 1)];
-      });
+      session.inflight.delete(identity);
+      if (activeSession.current) {
+        setBusy((current) => current.filter((entry) => entry !== operation));
+      }
     }
     // The user may have switched account or school while storage was working.
-    if (keyRef.current !== scopeKey) return 'ignored';
+    if (activeSession.current !== session) return 'ignored';
     if (saveSucceeded) {
       setFailure(null);
       setNotice({
-        key: scopeKey,
+        session,
         message: saved ? `已收藏「${event.title}」。` : `已取消收藏「${event.title}」。`,
       });
       return 'done';
     }
-    setFailure({ key: scopeKey, event: toSavedCampusEvent(event), saved });
+    setFailure({ session, event: toSavedCampusEvent(event), saved });
     return 'failed';
   }
 
   async function reload() {
-    if (!key || keyRef.current !== key) return false;
+    if (!key || activeSession.current !== session) return false;
     await store.load(key);
-    return keyRef.current === key && store.getSnapshot(key).ready;
+    return activeSession.current === session && store.getSnapshot(key).ready;
   }
 
   async function retry(): Promise<boolean> {
+    if (activeSession.current !== session) return false;
     if (scope === 'auth-error') {
       if (auth.error) window.location.reload();
       else await platform?.refresh();
       return false;
     }
     const scopeKey = key;
-    if (!scopeKey || keyRef.current !== scopeKey) return false;
+    if (!scopeKey || activeSession.current !== session) return false;
     if (!currentFailure) return reload();
     if (!store.getSnapshot(scopeKey).ready && !(await reload())) return false;
     return (await toggle(currentFailure.event, currentFailure.saved)) === 'done';
@@ -226,7 +228,7 @@ export function useCampusEventShortlist(schoolId: string) {
     items,
     ready: phase === 'ready',
     error,
-    notice: notice && notice.key === key ? notice.message : '',
+    notice: notice?.session === session ? notice.message : '',
     isSaved,
     isBusy,
     toggle,
