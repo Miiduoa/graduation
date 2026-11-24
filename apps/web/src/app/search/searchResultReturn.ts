@@ -18,33 +18,51 @@ let pendingReturn: SearchReturn | null = null;
 let returnSequence = 0;
 const listeners = new Set<() => void>();
 let trackedUrl = '';
-let expectedReturnFrom: string | null = null;
+// Arm each search history entry by its token so a later search cannot
+// invalidate an earlier entry, and so same-path bottom navigation is not
+// confused with the remembered result.
+const armedReturnByToken = new Map<string, string>();
+let freshlyArmedToken: string | null = null;
 let historyTrackingInstalled = false;
 
 function currentUrl() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
 
-function leftSearchForUnrelatedDestination(previousUrl: string, nextUrl: string) {
-  if (!expectedReturnFrom) return;
-  if (new URL(previousUrl, window.location.origin).pathname !== '/search') return;
-  // Tests and some in-app moves only keep the pathname in common with the
-  // remembered result href; query strings can differ. Bottom navigation to
-  // another section uses a different path.
-  if (new URL(nextUrl, window.location.origin).pathname ===
-      new URL(expectedReturnFrom, window.location.origin).pathname) return;
-  // A later departure from the same search entry (for example the bottom
-  // navigation) must not reuse the previous result marker on the next Back.
-  expectedReturnFrom = null;
+function appUrl(href: string) {
+  const url = new URL(href, window.location.origin);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function isArmed(saved: SearchReturn) {
+  const href = armedReturnByToken.get(saved.token);
+  return !!href && appUrl(href) === appUrl(saved.href);
 }
 
 function syncTrackedUrl() {
-  const previousUrl = trackedUrl;
-  const nextUrl = currentUrl();
-  if (previousUrl && previousUrl !== nextUrl) {
-    leftSearchForUnrelatedDestination(previousUrl, nextUrl);
+  trackedUrl = currentUrl();
+}
+
+function onHistoryWrite(kind: 'pushState' | 'replaceState', previousState: unknown, previousUrl: string) {
+  if (kind === 'pushState') {
+    // A new history entry, including a copied search state, must never
+    // inherit an in-flight restore. Only popstate may resume focus.
+    publishReturn(null);
   }
-  trackedUrl = nextUrl;
+  // Only a new history entry (push) can close this search item's restore
+  // arming. replaceState is used to write the marker, for in-place URL
+  // updates, and by tests that simulate a later Back with traverse().
+  const leaving = readReturn(previousState);
+  const nextUrl = currentUrl();
+  const leftSearch =
+    !!leaving &&
+    new URL(previousUrl, window.location.origin).pathname === '/search' &&
+    previousUrl !== nextUrl;
+  if (kind === 'pushState' && leftSearch && leaving && leaving.token !== freshlyArmedToken) {
+    armedReturnByToken.delete(leaving.token);
+  }
+  if (leftSearch) freshlyArmedToken = null;
+  syncTrackedUrl();
 }
 
 function installHistoryTracking() {
@@ -54,8 +72,10 @@ function installHistoryTracking() {
   const wrap = (method: 'pushState' | 'replaceState') => {
     const original = window.history[method];
     window.history[method] = function (this: History, data: unknown, unused: string, url?: string | URL | null) {
+      const previousState = window.history.state;
+      const previousUrl = currentUrl();
       const result = original.call(this, data, unused, url);
-      syncTrackedUrl();
+      onHistoryWrite(method, previousState, previousUrl);
       return result;
     };
   };
@@ -89,12 +109,7 @@ function captureReturn(event: PopStateEvent) {
   const saved = readReturn(event.state);
   const sameSearchEntry =
     window.location.pathname === '/search' && saved?.url === currentUrl();
-  const cameFromRememberedResult =
-    !!saved &&
-    !!expectedReturnFrom &&
-    new URL(expectedReturnFrom, window.location.origin).pathname ===
-      new URL(saved.href, window.location.origin).pathname;
-  publishReturn(sameSearchEntry && cameFromRememberedResult ? saved : null);
+  publishReturn(sameSearchEntry && saved && isArmed(saved) ? saved : null);
 }
 
 function cancelPendingReturn() {
@@ -129,14 +144,16 @@ const getServerReturn = () => null;
 export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token' | 'url'>) {
   publishReturn(null);
   if (window.location.pathname !== '/search') return;
-  expectedReturnFrom = value.href;
+  const token = `${Date.now()}-${++returnSequence}`;
+  armedReturnByToken.set(token, value.href);
+  freshlyArmedToken = token;
   try {
     window.history.replaceState(
       {
         ...window.history.state,
         [SEARCH_RETURN_STATE]: {
           ...value,
-          token: `${Date.now()}-${++returnSequence}`,
+          token,
           url: currentUrl(),
         } satisfies SearchReturn,
       },

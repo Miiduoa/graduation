@@ -1190,11 +1190,60 @@ describe('continuing a search after opening a service', () => {
     expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
     view.unmount();
     // Bottom navigation away from search, then Back to the same history item.
-    move('/life');
+    window.history.pushState(nextState, '', '/life');
     traverse(librarySearch, entry);
     renderAfterFrame();
     expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
     expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not restore after a later departure that shares the remembered result path', () => {
+    const entry = leaveLibrary();
+    traverse(librarySearch, entry);
+    const view = renderAfterFrame();
+    const library = screen.getByRole('link', { name: /^圖書館/ });
+    expect(document.activeElement).toBe(library);
+    const href = library.getAttribute('href')!;
+    view.unmount();
+    // Bottom navigation can land on the same path as the remembered result.
+    window.history.pushState(nextState, '', href);
+    traverse(librarySearch, entry);
+    renderAfterFrame();
+    expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+
+  it('still restores an earlier search entry after a later search has been resumed', () => {
+    const first = leaveLibrary();
+    const laterSearch = '/search?campus=pu&q=%E5%9C%96%E6%9B%B8%E9%A4%A8';
+    move(laterSearch);
+    const laterView = renderAfterFrame();
+    fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+    const second = window.history.state;
+    laterView.unmount();
+    move('/library?campus=pu');
+    traverse(laterSearch, second);
+    const resumed = renderAfterFrame();
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    resumed.unmount();
+    traverse('/library?campus=pu', nextState);
+    traverse(librarySearch, first);
+    renderAfterFrame();
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    expect(scroll).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not restore onto a copied history state while a return is still pending', () => {
+    const entry = leaveLibrary();
+    userState.loading = true;
+    traverse(librarySearch, entry);
+    const view = renderAfterFrame();
+    expect(scroll).not.toHaveBeenCalled();
+    window.history.pushState(entry, '', librarySearch);
+    userState.loading = false;
+    view.rerender(<SearchPage />);
+    expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+    expect(scroll).not.toHaveBeenCalled();
   });
 
   it('opens both enclosing disclosures and resumes the exact secondary service', () => {
