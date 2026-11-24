@@ -243,6 +243,7 @@ function AccountWorkspace({
   const [overview, setOverview] = useState<MerchantOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [detailError, setDetailError] = useState('');
   const [invalidSession, setInvalidSession] = useState(false);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [applyingAgain, setApplyingAgain] = useState(false);
@@ -349,15 +350,16 @@ function AccountWorkspace({
       const listedStores =
         stores.status === 'fulfilled' ? stores.value : (confirmed.overview()?.workspaces ?? []);
       const targets = new Map(listedStores.map((item) => [workspaceKey(item), item]));
-      const pendingTargets = [...visitedLocations.values()].filter(
-        ({ tenantId, locationId }) =>
-          operationDrafts.get(JSON.stringify([tenantId, locationId]))?.uncertain,
-      );
+      for (const item of confirmed.knownWorkspaces()) {
+        const key = workspaceKey(item);
+        if (!targets.has(key)) targets.set(key, item);
+      }
+      for (const item of visitedLocations.values()) {
+        const key = workspaceKey(item);
+        if (!targets.has(key)) targets.set(key, item);
+      }
       const refreshed = await Promise.all(
-        [
-          ...targets.values(),
-          ...pendingTargets.filter((item) => !targets.has(workspaceKey(item))),
-        ].map(async (item) => {
+        [...targets.values()].map(async (item) => {
           const key = workspaceKey(item);
           if (
             !confirmed.needsAccessRefresh(key) &&
@@ -386,12 +388,11 @@ function AccountWorkspace({
         else accessDenied = true;
       }
       publishOverview();
-      if (
-        [programs, submitted, stores].some((result) => result.status === 'rejected') ||
-        detailUnavailable
-      )
+      if ([programs, submitted, stores].some((result) => result.status === 'rejected'))
         setLoadError('目前無法確認店家資料，請重新載入。');
       else if (accessDenied) setLoadError('目前無法取得部分門市的管理權限，請重新載入。');
+      else if (detailUnavailable)
+        setDetailError('目前無法更新部分門市資料，請重新載入。');
     } catch (error) {
       if (isCurrent()) {
         if (expired(error)) expire();
@@ -646,7 +647,7 @@ function AccountWorkspace({
         </Button>
       </div>
       {loading && <p role="status">正在載入店家資料…</p>}
-      {loadError && <p role="alert">{loadError}</p>}
+      {loadError ? <p role="alert">{loadError}</p> : detailError ? <p role="status">{detailError}</p> : null}
       {notice && <p role="status">{notice}</p>}
       {overview && (
         <div className={styles.stack} hidden={view === 'apply' && submissionBlocked}>

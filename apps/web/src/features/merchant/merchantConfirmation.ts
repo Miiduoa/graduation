@@ -46,23 +46,12 @@ export function createMerchantConfirmations() {
     const incomingDetail = 'applicationId' in next ? next : undefined;
 
     if (current && version < previousVersion) {
-      // An older successful detail must not replace a newer list or write, but
-      // it should still attach so an authorized manager can open the workspace.
+      // Keep the newer list/write row for labels, but attach the older
+      // successful detail unchanged so settings and expectedVersion stay together.
       if (incomingDetail) {
         const held = current.detail?.readinessVersion ?? -1;
         if (!current.detail || held <= version) {
-          const entry = {
-            ...current,
-            detail: {
-              ...incomingDetail,
-              activated: current.row.activated,
-              merchantStatus: current.row.merchantStatus,
-              locationStatus: current.row.locationStatus,
-              publicAccess: current.row.publicAccess,
-              missingRequirements: current.row.missingRequirements,
-              readinessVersion: current.row.readinessVersion ?? incomingDetail.readinessVersion,
-            },
-          };
+          const entry = { ...current, detail: incomingDetail };
           entries.set(key, entry);
           return entry;
         }
@@ -213,6 +202,18 @@ export function createMerchantConfirmations() {
     hideLists() {
       delete lists.workspaces;
       delete lists.programs;
+    },
+    knownWorkspaces(): Array<Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'> & Partial<NuniMerchantWorkspace>> {
+      const found = new Map<string, Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'> & Partial<NuniMerchantWorkspace>>();
+      for (const row of lists.workspaces ?? []) found.set(workspaceKey(row), row);
+      for (const [key, entry] of entries) found.set(key, entry.row);
+      for (const key of access.keys()) {
+        if (found.has(key)) continue;
+        const split = key.indexOf(':');
+        if (split <= 0) continue;
+        found.set(key, { tenantId: key.slice(0, split), locationId: key.slice(split + 1) });
+      }
+      return [...found.values()];
     },
     overview(): MerchantOverview | null {
       if (!Object.keys(lists).length) return null;
