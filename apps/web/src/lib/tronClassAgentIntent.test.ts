@@ -1105,13 +1105,27 @@ describe('three-way sentence classification', () => {
 
 
   it.each([
+    '查玩課雲作業，寄附件給老師',
     '查玩課雲作業，寄附件給校園老師',
+    '查玩課雲作業，捎附件予校園老師',
+    '查玩課雲作業，投遞校園附件',
     '查玩課雲作業 槑，寄給老師.pdf',
+    '查玩課雲作業 憑：寄給老師.pdf',
+    '查玩課雲作業 槑：寄給老師.pdf',
+    '查玩課雲未交作業和鎕校園公告',
   ])('does not auto-read when an unknown transfer or punctuated leftover looks like a filename in %s', question => {
     expect(classifyTronClassSentence(question)?.outcome).not.toBe('clearly-read');
     expect(parseTronClassAgentIntent(question)).toBeNull();
     expect(canAnswerTronClassQuestion(question)).toBe(false);
     expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('masks words inside a filename so they cannot choose a data type or action', () => {
+    expect(classifyTronClassSentence('下載 TronClass 不存在公告.pdf')).toEqual({
+      outcome: 'clearly-read',
+      intent: { intent: 'download', pendingOnly: false },
+    });
+    expect(parseTronClassAgentIntent('下載 TronClass 不存在公告.pdf')).toEqual({ intent: 'download', pendingOnly: false });
   });
 
   it.each(['不想查玩課雲作業', '不能查玩課雲作業', '不再查玩課雲作業'])(
@@ -1214,6 +1228,30 @@ describe('three-way sentence classification', () => {
         expect(parsed).toBeNull();
         expect(canAnswerTronClassQuestion(question)).toBe(false);
         expect(compounds).toEqual([]);
+      }
+    }
+  });
+
+  it('never auto-reads when punctuation or an unknown token is inserted into or next to a filename', () => {
+    const seed = '下載 TronClass 不存在.pdf';
+    expect(classifyTronClassSentence(seed)?.outcome).toBe('clearly-read');
+    const probes = ['：', ':', '，', ',', '、', '；', ';', '鎕', '寄', 'foo', '槑'];
+    for (const probe of probes) {
+      for (const question of [
+        `下載 TronClass 不存在${probe}.pdf`,
+        `下載 TronClass 不存在.pdf${probe}`,
+        `下載 TronClass ${probe}不存在.pdf`,
+        `下載 TronClass 不${probe}存在.pdf`,
+        `查玩課雲作業 ${probe}，寄給老師.pdf`,
+        `查玩課雲作業 ${probe}：寄給老師.pdf`,
+      ]) {
+        const classified = classifyTronClassSentence(question);
+        const parsed = parseTronClassAgentIntent(question);
+        expect(parsed?.intent).not.toBe('homework');
+        expect(parsed?.intent).not.toBe('announcements');
+        expect(parsed == null || parsed.intent === 'download' || parsed.intent === 'unsupported').toBe(true);
+        if (classified?.outcome === 'clearly-write') expect(question.includes('寄給')).toBe(true);
+        expect(tronClassCompoundClauses(question)).toEqual([]);
       }
     }
   });
