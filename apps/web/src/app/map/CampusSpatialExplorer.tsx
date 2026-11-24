@@ -831,6 +831,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     };
 
     let intersection: IntersectionObserver | null = null;
+    // Entries stamped before this instant were queued prior to an explicit
+    // overlay resume and must not re-pause the recovered scene.
+    let ignoreObserverBefore = 0;
     const disconnectObserver = () => {
       const previous = intersection;
       intersection = null;
@@ -857,6 +860,11 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           for (let index = entries.length - 1; index >= 0; index -= 1) {
             const candidate = entries[index];
             try {
+              // Queued reports from before an explicit overlay resume must
+              // not undo that recovery. Compare against the same time origin
+              // as IntersectionObserverEntry.time (performance.now).
+              const observedAt = candidate.time;
+              if (Number.isFinite(observedAt) && observedAt < ignoreObserverBefore) continue;
               const target = candidate.target;
               if (!target || target === host) {
                 entry = candidate;
@@ -974,6 +982,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       // An explicit overlay tap must not stay blocked by a stale hidden
       // observer entry after the keyboard has already been dismissed.
       if (visibility === 'hidden') visibility = 'unknown';
+      try { ignoreObserverBefore = performance.now(); }
+      catch { ignoreObserverBefore = 0; }
+      // Drop queued reports and request a fresh intersection measurement.
+      try {
+        intersection?.unobserve(host);
+        intersection?.observe(host);
+      } catch { /* Partial WebViews may omit unobserve. */ }
       syncVisibility();
     };
     const container = sceneContainer.current;
