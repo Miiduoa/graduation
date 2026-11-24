@@ -63,7 +63,8 @@ async function readRecovery(
   try {
     // Older builds wrapped the original ledger in a second layer of JSON.
     const raw: unknown = encoded.trimStart().startsWith('{') ? encoded : JSON.parse(encoded);
-    if (raw === null || (typeof raw === 'string' && raw.trimStart().startsWith('{'))) {
+    if (raw === null) return { raw: null, ledger: empty() };
+    if (typeof raw === 'string' && raw.trimStart().startsWith('{')) {
       return { raw, ledger: parseLedger(raw, scope) };
     }
   } catch {
