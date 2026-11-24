@@ -2,7 +2,11 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { personalImportSavedNotice, type PersonalImportRecord } from '@campus/shared';
 import { PersonalCalendar } from './PersonalCalendar';
-import { personalImportsStorageKey, readPersonalImports } from '@/lib/personalImports';
+import {
+  changePersonalImport,
+  personalImportsStorageKey,
+  readPersonalImports,
+} from '@/lib/personalImports';
 
 const state = vi.hoisted(() => ({
   accountId: 'calendar-flow-account',
@@ -248,6 +252,55 @@ it('keeps an edited draft when opening a new event is declined', async () => {
   expect(screen.getByRole('button', { name: '儲存修改' })).toBeTruthy();
   expect(readPersonalImports(scope())).toEqual([stored]);
 });
+
+it.each(['列表', '月格'])(
+  'reopens the latest version from %s after a cross-tab conflict',
+  async (view) => {
+    const stored = event('shared', '原本的合成行程', '2026-11-24');
+    seed([stored]);
+    render(<PersonalCalendar />);
+    await ready();
+    activate(screen.getByRole('button', { name: stored.date }));
+    if (view === '列表') activate(screen.getByRole('button', { name: '列表' }));
+    const edit = (title: string) =>
+      view === '列表' ? editEvent(title) : screen.getByRole('button', { name: title });
+
+    activate(edit(stored.title));
+    fireEvent.change(titleField(), { target: { value: '此分頁未儲存的修改' } });
+    activate(edit(stored.title));
+    expect(document.activeElement).toBe(titleField());
+    expect(window.confirm).not.toHaveBeenCalled();
+    expect(titleField().value).toBe('此分頁未儲存的修改');
+
+    const latestTitle = '另一分頁已儲存的修改';
+    await act(async () => {
+      await changePersonalImport(scope(), readPersonalImports(scope())[0], {
+        ...stored,
+        title: latestTitle,
+      });
+    });
+    activate(screen.getByRole('button', { name: '儲存修改' }));
+    const conflict = await screen.findByText('這筆資料已在另一個頁面變更，請重新開啟再編輯。');
+
+    vi.mocked(window.confirm).mockReturnValueOnce(false);
+    activate(edit(latestTitle));
+    expect(window.confirm).toHaveBeenLastCalledWith(DISCARD);
+    expect(titleField().value).toBe('此分頁未儲存的修改');
+    expect(conflict.isConnected).toBe(true);
+
+    activate(edit(latestTitle));
+    expect(window.confirm).toHaveBeenCalledTimes(2);
+    expect(titleField().value).toBe(latestTitle);
+    expect(document.activeElement).toBe(titleField());
+    expect(conflict.isConnected).toBe(false);
+    fireEvent.change(titleField(), { target: { value: '重新開啟後儲存的修改' } });
+    activate(screen.getByRole('button', { name: '儲存修改' }));
+    await screen.findByText('個人行程已更新。');
+    expect(readPersonalImports(scope()).map(({ id, title }) => ({ id, title }))).toEqual([
+      { id: stored.id, title: '重新開啟後儲存的修改' },
+    ]);
+  },
+);
 
 it('preserves an unfinished form while changing the visible day and view', async () => {
   render(<PersonalCalendar />);

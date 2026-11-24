@@ -561,7 +561,11 @@ function PersonalCalendarWorkspace({
 
   const openEdit = (row: PersonalImportRecord, trigger?: HTMLElement) => {
     if (suspended.current || writing.current) return;
-    if (mode === 'edit' && selectedId === row.id) {
+    if (
+      mode === 'edit' &&
+      baseline?.id === row.id &&
+      JSON.stringify(baseline) === JSON.stringify(row)
+    ) {
       titleRef.current?.focus();
       return;
     }
