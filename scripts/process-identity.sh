@@ -14,13 +14,24 @@ proc_identity() {
   proc_state="${fields[0]}"
 }
 
+# Return 2 when the leader has exited, so callers can check orphaned members.
 proc_group_leader_matches() {
-  local group="$1" start="$2" marker="$3"
+  local group="$1" start="$2" marker="$3" marked=0
   local proc_group proc_start proc_state
-  [[ "$group" != 1 && -n "$marker" ]] && proc_identity "$group" &&
-    [[ "$proc_group" == "$group" && "$proc_start" == "$start" && "$proc_state" != Z && "$proc_state" != X ]] &&
-    grep -zFxq -- "$marker" "/proc/$group/environ" 2>/dev/null &&
-    proc_identity "$group" && [[ "$proc_group" == "$group" && "$proc_start" == "$start" ]]
+  [[ "$group" =~ ^([2-9]|[1-9][0-9]+)$ && "$start" =~ ^[0-9]+$ && -n "$marker" ]] || return 1
+  if ! proc_identity "$group"; then
+    [[ -d "/proc/$group" ]] && return 1
+    return 2
+  fi
+  [[ "$proc_state" != Z && "$proc_state" != X ]] || return 2
+  [[ "$proc_group" == "$group" && "$proc_start" == "$start" ]] || return 1
+  grep -zFxq -- "$marker" "/proc/$group/environ" 2>/dev/null && marked=1
+  if ! proc_identity "$group"; then
+    [[ -d "/proc/$group" ]] && return 1
+    return 2
+  fi
+  [[ "$proc_state" != Z && "$proc_state" != X ]] || return 2
+  [[ "$proc_group" == "$group" && "$proc_start" == "$start" && "$marked" == 1 ]]
 }
 
 proc_group_members() {
@@ -50,13 +61,12 @@ proc_group_members() {
 # Signal marked members individually, including when the leader has exited.
 proc_signal_marked_group() {
   local group="$1" start="$2" marker="$3" signal="${4:-}"
-  local proc_group proc_start proc_state
-  if proc_identity "$group"; then
-    [[ "$proc_group" == "$group" && "$proc_start" == "$start" ]] || return 1
-    if [[ "$proc_state" != Z && "$proc_state" != X ]]; then
-      proc_group_leader_matches "$group" "$start" "$marker" || return 1
-      [[ -n "$signal" ]] || return 0
-    fi
-  fi
+  local status=0
+  proc_group_leader_matches "$group" "$start" "$marker" || status=$?
+  case "$status" in
+    0) [[ -n "$signal" ]] || return 0 ;;
+    2) ;; # Check surviving members below.
+    *) return 1 ;;
+  esac
   proc_group_members "$group" "$start" "$marker" "$signal"
 }

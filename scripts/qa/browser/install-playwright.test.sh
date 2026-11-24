@@ -86,8 +86,9 @@ if [[ "$1" == bash ]]; then
     # The member carries the expected nonce in every case, including when
     # its still-live leader does not.
     PLAYWRIGHT_INSTALL_ATTEMPT="$leader_marker" setsid bash -c '
-      PLAYWRIGHT_INSTALL_ATTEMPT="$1" /bin/sleep 30 &
+      PLAYWRIGHT_INSTALL_ATTEMPT="$1" flock -F "$2.record-lock" /bin/sleep 30 &
       member="$!"
+      until ! flock -n "$2.record-lock" true; do /bin/sleep 0.01; done
       until grep -zFxq "PLAYWRIGHT_INSTALL_ATTEMPT=$1" "/proc/$member/environ"; do /bin/sleep 0.01; done
       PLAYWRIGHT_INSTALL_ATTEMPT=unrelated /bin/sleep 30 &
       unmarked="$!"
@@ -110,6 +111,26 @@ if [[ "$1" == bash ]]; then
     fi
     (umask 077; printf "%s %s %s\n" "$group" "$start" "$nonce" > "$target")
     if [[ "$MOCK_RECORD_ATTACK" == replaced ]]; then chmod 666 "$record"; fi
+    if [[ "$MOCK_RECORD_ATTACK" == leader-exits ]]; then
+      export MOCK_EXITING_LEADER="$group"
+      injection='
+      grep() {
+        if [[ "${@: -1}" == "/proc/$MOCK_EXITING_LEADER/environ" ]]; then
+          command grep "$@" || return 1
+          builtin kill -KILL "$MOCK_EXITING_LEADER"
+          while [[ -d "/proc/$MOCK_EXITING_LEADER" ]]; do
+            local stat
+            read -r stat < "/proc/$MOCK_EXITING_LEADER/stat" || break
+            [[ "${stat##*) }" == Z\ * ]] && break
+            /bin/sleep 0.01
+          done
+          return 1
+        fi
+        command grep "$@"
+      }
+      read_attempt_record "$@"'
+      code="${code/'read_attempt_record "$@"'/"$injection"}"
+    fi
   fi
   exec bash -c '
     kill() { printf "sudo:kill:%s\n" "$*" >> "$MOCK_LOG"; builtin kill "$@"; }
@@ -353,7 +374,7 @@ fi
 
 # Test the elevated record reader with real, still-live process groups.
 # Each rejected record would otherwise identify a marked member correctly.
-for mode in replaced symlink marker valid; do
+for mode in replaced symlink marker valid leader-exits; do
   export MOCK_RECORD_ATTACK="$mode" MOCK_TIMEOUT_FAILS=1 MOCK_LOCK="$mock_dir/record-$mode"
   : > "$MOCK_LOG"
   bash "$script_dir/install-playwright.sh" --fonts-noto-cjk > "$mock_dir/record-output.log" 2>&1
@@ -362,6 +383,10 @@ for mode in replaced symlink marker valid; do
   if [[ "$mode" == valid ]]; then
     grep -qx "sudo:kill:-KILL -- $leader" "$MOCK_LOG"
     grep -qx "sudo:kill:-KILL -- $member" "$MOCK_LOG"
+  elif [[ "$mode" == leader-exits ]]; then
+    grep -qx "sudo:kill:-KILL -- $member" "$MOCK_LOG"
+    ! grep -qx "sudo:kill:-KILL -- $leader" "$MOCK_LOG"
+    "$REAL_TIMEOUT" 3s flock "$MOCK_LOCK.record-lock" true
   else
     [[ "$(grep -c '^sudo:kill:' "$MOCK_LOG" || true)" == 0 ]]
     kill -0 "$leader" "$member"
