@@ -34,11 +34,11 @@ describe('trusted OSM walking segment audit bridge', () => {
   it('only enables the exact audited segments and honors audited direction', () => {
     const graph = apply([audit(), audit(2, 3, { direction: 'forward' })]);
     expect(graph.edges.map(e => e.access)).toEqual(['reviewed-open', 'reviewed-open', 'restricted']);
-    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 3)?.nodes.map(n => n.id)).toEqual([1, 2, 3]);
-    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 3, 1)).toBeNull();
-    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 4)).toBeNull();
-    expect(findCampusWalkingRoute(apply([audit()]), 'fixture', bounds, 1, 3)).toBeNull();
-    expect(findCampusWalkingRoute(apply([]), 'fixture', bounds, 1, 2)).toBeNull();
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 3, now)?.nodes.map(n => n.id)).toEqual([1, 2, 3]);
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 3, 1, now)).toBeNull();
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 4, now)).toBeNull();
+    expect(findCampusWalkingRoute(apply([audit()]), 'fixture', bounds, 1, 3, now)).toBeNull();
+    expect(findCampusWalkingRoute(apply([]), 'fixture', bounds, 1, 2, now)).toBeNull();
   });
 
   it('retains review expiry and OSM snapshot freshness so later routing cannot use an expired graph', () => {
@@ -108,8 +108,8 @@ describe('trusted OSM walking segment audit bridge', () => {
           data.graph.edges[0].access = 'unknown';
           const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
           expect(graph.edges[0].access).toBe('restricted');
-          expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2)).toBeNull();
-          expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1)).toBeNull();
+          expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+          expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1, now)).toBeNull();
         }
       }
     }
@@ -120,10 +120,10 @@ describe('trusted OSM walking segment audit bridge', () => {
       const data = candidates();
       data.ways[0].tags.foot = value;
       data.ways[0].tags.access = value;
-      expect(findCampusWalkingRoute(data.graph, 'fixture', bounds, 1, 2)).toBeNull();
+      expect(findCampusWalkingRoute(data.graph, 'fixture', bounds, 1, 2, now)).toBeNull();
       const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
-      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2)).not.toBeNull();
-      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1)).not.toBeNull();
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).not.toBeNull();
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1, now)).not.toBeNull();
     }
   });
 
@@ -132,7 +132,7 @@ describe('trusted OSM walking segment audit bridge', () => {
     data.ways[0].tags.foot = 'use_sidepath';
     const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
     expect(graph.edges.map(e => e.osmWayId)).toEqual([102]);
-    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2)).toBeNull();
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
   });
 
   it.each(['way', 'from', 'to'] as const)(
@@ -149,7 +149,7 @@ describe('trusted OSM walking segment audit bridge', () => {
       edge.access = 'unknown';
       const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit(3, 4, { osmWayId: 102 })], now)!;
       expect(graph.edges[2].access).toBe('restricted');
-      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 3, 4)).toBeNull();
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 3, 4, now)).toBeNull();
     },
   );
 
@@ -171,7 +171,7 @@ describe('trusted OSM walking segment audit bridge', () => {
     // Node order is not an identity change; exact, reordered nodes still work.
     const reordered = { ...data, graph: { ...data.graph, nodes: [...data.graph.nodes].reverse() } };
     const graph = applyCampusWalkingSegmentAudits(reordered, 'fixture', [audit()], now)!;
-    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2)?.nodes).toEqual([first, second]);
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)?.nodes).toEqual([first, second]);
     expect(data.graph.nodes[0]).toEqual(first);
   });
 
@@ -204,8 +204,8 @@ describe('trusted OSM walking segment audit bridge', () => {
       }, 'fixture', bounds, now)!;
       const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit(1, 2, { direction })], now)!;
       expect(graph.edges[0].access).toBe(allowed ? 'reviewed-open' : 'unknown');
-      expect(!!findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2)).toBe(allowed && direction !== 'reverse');
-      expect(!!findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1)).toBe(allowed && direction !== 'forward');
+      expect(!!findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBe(allowed && direction !== 'reverse');
+      expect(!!findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1, now)).toBe(allowed && direction !== 'forward');
     }
   });
 

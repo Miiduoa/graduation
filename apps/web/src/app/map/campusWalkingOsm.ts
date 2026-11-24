@@ -119,11 +119,19 @@ export function parseCampusWalkingOsmCandidates(
     const rev = revision(item, baseMs);
     if (!rev) return null;
     if (item.type === 'node') {
-      if (nodes.has(item.id) || nodes.size >= MAX_NODES ||
-          typeof item.lat !== 'number' || typeof item.lon !== 'number' ||
+      if (typeof item.lat !== 'number' || typeof item.lon !== 'number' ||
           !Number.isFinite(item.lat) || !Number.isFinite(item.lon) ||
           Math.abs(item.lat) > 90 || Math.abs(item.lon) > 180) return null;
-      nodes.set(item.id, { id: item.id, lat: item.lat, lng: item.lon, ...rev });
+      const parsed = { id: item.id, lat: item.lat, lng: item.lon, ...rev };
+      if (nodes.has(item.id)) {
+        const existing = nodes.get(item.id)!;
+        // Duplicate identities outside campus are not candidates; do not drop
+        // the rest of the batch. In-bounds duplicates remain unresolvable.
+        if (inBounds(existing, bounds) || inBounds(parsed, bounds)) return null;
+        continue;
+      }
+      if (nodes.size >= MAX_NODES) return null;
+      nodes.set(item.id, parsed);
     } else if (item.type === 'way') {
       if (ways.has(item.id) || !HIGHWAYS.includes(rev.tags.highway) ||
           !Array.isArray(item.nodes) || item.nodes.length < 2 ||
