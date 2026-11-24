@@ -94,6 +94,10 @@ function LoginForm({
   const schoolUnavailable = schoolTask && !options.loading && !options.error && !schoolAvailable;
   // School destinations stay school-only; Google must not appear to fulfill them.
   const hideGoogle = schoolTask;
+  // Only a selected, available school gets priority at the general entry.
+  // Preserve explicit task-specific account routing and the existing server gate.
+  const schoolFirst = !schoolTask && destination === '/' && Boolean(selectedSchoolId) &&
+    !options.loading && !options.error && schoolAvailable;
   const taskPath = new URL(destination, 'https://campus.local').pathname;
   const publicDestination = isPublicCampusPath(taskPath);
   const merchantTask =
@@ -197,30 +201,9 @@ function LoginForm({
       </SiteShell>
     );
   }
-  return (
-    <SiteShell
-      title={
-        reconnect && user && schoolAvailable
-          ? '重新連線學校帳號'
-          : schoolTask
-            ? '連線學校帳號'
-            : '登入'
-      }
-      subtitle={
-        schoolRequired
-          ? '驗證學校帳號後，返回你原本的頁面。'
-          : schoolTask
-            ? '這個頁面要用學校帳號，Google 帳號無法代替。'
-            : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入。'
-      }
-    >
-      <div className={loginStyles.flow}>
-        {!schoolTask && destination !== '/' && (
-          <p className={loginStyles.continuation}>登入後會回到你原本的頁面，接著完成剛才的事。</p>
-        )}
-        <div className={`${styles.loginLayout} ${loginStyles.methods}`}>
-          {!hideGoogle && (
+  const platformSignIn = !hideGoogle ? (
             <NuniSignIn
+              key="platform-sign-in"
               returnUrl={destination}
               issue={issue}
               disabled={busy}
@@ -231,17 +214,19 @@ function LoginForm({
                 return true;
               }}
             />
-          )}
+  ) : null;
+  const schoolSignIn = (
           <details
+            key="school-sign-in"
             className={`${styles.loginHelp} ${styles.schoolConnection}`}
             aria-label="學校帳號登入"
-            open={schoolTask}
+            open={schoolTask || schoolFirst}
           >
             <summary>
               <div className={styles.methodHeading}>
                 <div>
                   <span className={styles.methodEyebrow}>學校帳號 · 本人授權</span>
-                  <h2>{schoolTask ? '確認你的學校帳號' : '需要校務資料時再連線'}</h2>
+                  <h2>{schoolTask ? '確認你的學校帳號' : schoolFirst ? '使用學校帳號開始' : '需要校務資料時再連線'}</h2>
                 </div>
                 <span className={styles.methodStatus}>依服務開放</span>
               </div>
@@ -279,7 +264,7 @@ function LoginForm({
             ) : schoolAvailable ? (
               <>
                 <p>
-                  使用所選學校的帳號驗證身分。課程、教師與管理權限依各服務的授權提供。
+                  使用所選學校的帳號驗證身分。課程平台與其他校務資料會依各來源的授權及連線狀態取得。
                 </p>
                 {schoolRequired && (
                   <p>
@@ -353,6 +338,32 @@ function LoginForm({
                     密碼會透過加密連線送至驗證服務使用；不會存成個人匯入草稿。忘記密碼請前往學校原本的帳號服務處理。
                   </p>
                 </details>
+  );
+  return (
+    <SiteShell
+      title={
+        reconnect && user && schoolAvailable
+          ? '重新連線學校帳號'
+          : schoolTask
+            ? '連線學校帳號'
+            : '登入'
+      }
+      subtitle={
+        schoolRequired
+          ? '驗證學校帳號後，返回你原本的頁面。'
+          : schoolTask
+            ? '這個頁面要用學校帳號，Google 帳號無法代替。'
+            : schoolFirst
+              ? '先驗證校園身分，接上可用的學校資料。Google 帳號仍可用於平台課程與交流。'
+              : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入。'
+      }
+    >
+      <div className={loginStyles.flow}>
+        {!schoolTask && destination !== '/' && (
+          <p className={loginStyles.continuation}>登入後會回到你原本的頁面，接著完成剛才的事。</p>
+        )}
+        <div className={`${styles.loginLayout} ${loginStyles.methods}`}>
+          {schoolFirst ? [schoolSignIn, platformSignIn] : [platformSignIn, schoolSignIn]}
               </>
             ) : schoolUnavailable ? (
               <p role="status">

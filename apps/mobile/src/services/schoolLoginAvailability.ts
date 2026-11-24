@@ -10,12 +10,15 @@ export { SCHOOL_LOGIN_BIND_HINT, hasUsableSchoolLoginProvider };
 
 type ProviderCache = { kinds: string[] };
 let providerCache: ProviderCache | undefined;
+let providerCacheGeneration = 0;
 
 export function setSchoolLoginProviderKinds(kinds: string[] | undefined) {
-  providerCache = kinds ? { kinds } : undefined;
+  providerCacheGeneration += 1;
+  providerCache = kinds ? { kinds: [...kinds] } : undefined;
 }
 
 export function resetSchoolLoginProviderCache() {
+  providerCacheGeneration += 1;
   providerCache = undefined;
 }
 
@@ -31,17 +34,21 @@ export function isSchoolLoginEntryAvailable(schoolId = PROVIDENCE_UNIVERSITY_SCH
 }
 
 export async function loadSchoolLoginProviderKinds(): Promise<string[]> {
-  if (providerCache) return providerCache.kinds;
+  if (providerCache) return [...providerCache.kinds];
+  const generation = providerCacheGeneration;
   try {
     const value = await nuniPlatformRequest('providers');
-    const kinds =
-      value && typeof value === 'object' && Array.isArray((value as { kinds?: unknown }).kinds)
-        ? (value as { kinds: unknown[] }).kinds.filter((kind): kind is string => typeof kind === 'string')
-        : [];
-    providerCache = { kinds };
-    return kinds;
+    if (generation !== providerCacheGeneration) return [...(providerCache?.kinds ?? [])];
+    if (!value || typeof value !== 'object' || !Array.isArray((value as { kinds?: unknown }).kinds)) {
+      return []; // Malformed is unknown, not a confirmed closed integration.
+    }
+    const kinds = (value as { kinds: unknown[] }).kinds;
+    if (!kinds.every((kind): kind is string => typeof kind === 'string')) return [];
+    // Cache confirmed responses, including an explicitly empty provider list.
+    providerCache = { kinds: [...kinds] };
+    return [...kinds];
   } catch {
-    providerCache = { kinds: [] };
-    return [];
+    // Keep unavailable fail-closed, but let the next entry retry a transient outage.
+    return [...(providerCache?.kinds ?? [])];
   }
 }

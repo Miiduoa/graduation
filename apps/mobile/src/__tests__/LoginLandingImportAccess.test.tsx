@@ -232,3 +232,15 @@ it.each([
     open.mockRestore();
   }
 });
+
+it('offers the available school first and accurately labels the school sign-in', async () => {
+  mockProviderAvailable = true;
+  const view = await landing();
+  const tree = JSON.stringify(view.toJSON());
+  expect(tree.indexOf('"testID":"school-login-start"')).toBeLessThan(tree.indexOf('"testID":"login-start"'));
+  expect(view.getByText('使用學校帳號登入')).toBeTruthy();
+  expect(view.queryByText('學號登入（尚未開放）')).toBeNull();
+  await fireEventAsync.press(view.getByTestId('school-login-start'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'SSOLogin');
+  expect(mockAuth.signIn).not.toHaveBeenCalled();
+});

@@ -18,6 +18,7 @@ export function buildSchoolSyncSummary(
   const courses = result?.courses?.courses;
   const grades = result?.grades?.grades;
   const learning = result?.tcCourses;
+  const learningList = itemForLearningList(learning);
   const item = (
     key: SchoolSyncItem['key'],
     title: string,
@@ -58,10 +59,10 @@ export function buildSchoolSyncSummary(
               : '尚無可用來試算的修課紀錄',
         },
     learningEnabled
-      ? item('learning', '課程平台', '玩課雲', learning, '門課程')
+      ? learningList
       : {
           key: 'learning',
-          title: '課程平台',
+          title: '課程清單',
           source: '玩課雲',
           state: 'disabled',
           detail: '此版本尚未開啟課程平台連線',
@@ -70,5 +71,19 @@ export function buildSchoolSyncSummary(
   return {
     items,
     incomplete: items.some((row) => row.state === 'unavailable' || row.state === 'disabled'),
+  };
+}
+
+/** Course-list receipt is not proof of assignment/material/grade coverage. */
+function itemForLearningList(rows: unknown[] | null | undefined): SchoolSyncItem {
+  const present = Array.isArray(rows);
+  return {
+    key: 'learning',
+    title: '課程清單',
+    source: '玩課雲',
+    state: !present ? 'unavailable' : rows.length ? 'received' : 'empty',
+    detail: !present
+      ? '尚未取得課程清單，請重新連線後再試'
+      : `已取得 ${rows.length} 門課程；作業、教材與課程成績需另行確認同步結果`,
   };
 }

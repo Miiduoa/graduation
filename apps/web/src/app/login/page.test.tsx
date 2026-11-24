@@ -993,3 +993,30 @@ it.each(['/merchant', '/merchant/apply', '/merchant/workspace'])(
     expect(replace).not.toHaveBeenCalled();
   },
 );
+
+it('prioritizes the confirmed selected school at general login without removing Google', () => {
+  state.params = new URLSearchParams();
+  state.user = null;
+  state.selectedSchoolId = 'pu';
+  state.studentId = true;
+  render(<LoginPage />);
+  const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+  const google = screen.getByTestId('platform-sign-in');
+  expect(school.open).toBe(true);
+  expect(school.compareDocumentPosition(google) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByRole('button', { name: '連線學校帳號' })).toBeTruthy();
+  expect(signIn).not.toHaveBeenCalled();
+});
+
+it('does not prioritize a selected school when its sign-in is unavailable', () => {
+  state.params = new URLSearchParams();
+  state.user = null;
+  state.selectedSchoolId = 'pu';
+  state.studentId = false;
+  render(<LoginPage />);
+  const school = screen.getByLabelText('學校帳號登入') as HTMLDetailsElement;
+  const google = screen.getByTestId('platform-sign-in');
+  expect(school.open).toBe(false);
+  expect(google.compareDocumentPosition(school) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByLabelText('學號')).toBeNull();
+});

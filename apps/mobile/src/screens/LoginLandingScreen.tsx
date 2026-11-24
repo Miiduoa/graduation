@@ -41,6 +41,7 @@ export default function LoginLandingScreen() {
   const hasSchool = selectionReady !== false && Boolean(school.id);
   const schoolEntry = hasSchool && isSchoolLoginEntryAvailable(school.id);
   const platformReady = !!auth.session && !auth.loading && !auth.error && !auth.pendingLogout;
+  const schoolFirst = schoolEntry && !platformReady && !auth.loading && !auth.error && !auth.pendingLogout;
   useEffect(() => {
     if (!hasSchool) return;
     let active = true;
@@ -51,6 +52,41 @@ export default function LoginLandingScreen() {
       active = false;
     };
   }, [hasSchool]);
+  const schoolPanel = hasSchool ? (
+          <View style={s.schoolPanel}>
+            <Text accessibilityRole="header" style={s.title}>
+              {schoolEntry ? '使用學校帳號開始' : '從學校資料開始'}
+            </Text>
+            <Text style={s.body} testID={schoolEntry ? undefined : 'school-login-hint'}>
+              {schoolEntry
+                ? '驗證校園身分後，依學校授權取得可用的校園與課程資料。Google 帳號仍可使用平台交流與課班服務。'
+                : '尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。'}
+            </Text>
+            {schoolEntry ? (
+              <Pressable
+                testID="school-login-start"
+                accessibilityRole="button"
+                style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
+                onPress={() => safeNavigate(navigation, 'SSOLogin')}
+              >
+                <Text style={s.schoolButtonText}>使用學校帳號登入</Text>
+              </Pressable>
+            ) : null}
+            <SchoolPortalImportEntry
+              onOpenRecords={(kind) => safeNavigate(navigation, 'PersonalImport', { kind })}
+            />
+            <Pressable
+              testID="school-import-start"
+              accessibilityRole="button"
+              accessibilityLabel="匯入課表、成績或活動"
+              style={({ pressed }) => [s.importButton, pressed && s.rowPressed]}
+              onPress={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
+            >
+              <Text style={s.importButtonText}>匯入課表、成績或活動 →</Text>
+            </Pressable>
+            <Text style={s.importHelp}>支援學校網頁 HTML 存檔、截圖、PDF、CSV；先選表格並核對內容，不需要提供校務密碼。</Text>
+          </View>
+  ) : null;
   return (
     <SafeAreaView testID="login-landing" style={s.page}>
       <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
@@ -120,6 +156,7 @@ export default function LoginLandingScreen() {
             </Pressable>
           )}
         </View>
+        {schoolFirst ? schoolPanel : null}
         <View style={s.panel}>
           <Text accessibilityRole="header" style={s.title}>
             {platformReady ? '我的 nuni' : 'Google 帳號'}
@@ -225,41 +262,7 @@ export default function LoginLandingScreen() {
             <Text style={s.schoolButtonText}>開啟失物招領 →</Text>
           </Pressable>
         </View>
-        {hasSchool && (
-          <View style={s.schoolPanel}>
-            <Text accessibilityRole="header" style={s.title}>
-              {schoolEntry ? '學校帳號（尚未開放）' : '從學校資料開始'}
-            </Text>
-            <Text style={s.body} testID={schoolEntry ? undefined : 'school-login-hint'}>
-              {schoolEntry
-                ? '尚未開放學號直接登入；你仍可匯入自己取得的課表、成績與活動，或以 Google 帳號使用平台交流與課班服務。'
-                : '尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。'}
-            </Text>
-            {schoolEntry ? (
-              <Pressable
-                testID="school-login-start"
-                accessibilityRole="button"
-                style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
-                onPress={() => safeNavigate(navigation, 'SSOLogin')}
-              >
-                <Text style={s.schoolButtonText}>學號登入（尚未開放）</Text>
-              </Pressable>
-            ) : null}
-            <SchoolPortalImportEntry
-              onOpenRecords={(kind) => safeNavigate(navigation, 'PersonalImport', { kind })}
-            />
-            <Pressable
-              testID="school-import-start"
-              accessibilityRole="button"
-              accessibilityLabel="匯入課表、成績或活動"
-              style={({ pressed }) => [s.importButton, pressed && s.rowPressed]}
-              onPress={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
-            >
-              <Text style={s.importButtonText}>匯入課表、成績或活動 →</Text>
-            </Pressable>
-            <Text style={s.importHelp}>支援學校網頁 HTML 存檔、截圖、PDF、CSV；先選表格並核對內容，不需要提供校務密碼。</Text>
-          </View>
-        )}
+        {!schoolFirst ? schoolPanel : null}
         {hasSchool && (
           <>
             <View style={s.publicPanel}>
