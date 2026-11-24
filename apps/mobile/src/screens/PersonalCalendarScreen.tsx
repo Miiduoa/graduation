@@ -30,6 +30,7 @@ import {
 import { PersonalMonthCalendar } from './PersonalMonthCalendar';
 import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
+import { useRevokedPersonalImportOwner } from '../state/personalImportAuthority';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { useNuniSession } from '../state/nuniSession';
 import { useAuth } from '../state/auth';
@@ -90,6 +91,7 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
   const platform = useNuniSession();
   const legacy = useAuth();
   const firebaseUid = legacy.user?.uid;
+  const revokedOwner = useRevokedPersonalImportOwner();
   const firebaseSignedOut = !legacy.loading && !firebaseUid;
   const lastFirebaseUid = useRef(firebaseUid);
   // Firebase and Nuni can resolve independently during an account transition.
@@ -109,12 +111,8 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
       : null;
   const nuniRevalidating = platform.loading && !platform.session && !sessionRejected;
   const knownOwner = scope?.owner ?? (firebaseChanged ? null : observedOwner);
-  // Firebase logout revokes authenticated workspaces even while Nuni still resolves
-  // the previous account. A device guest scope has no Firebase session to revoke.
   const ownerSignedOut = (owner: string | undefined) =>
-    firebaseSignedOut &&
-    (!!owner?.startsWith('firebase:') ||
-      (!!lastFirebaseUid.current && !!owner?.startsWith('nuni:')));
+    owner === revokedOwner || (firebaseSignedOut && !!owner?.startsWith('firebase:'));
   return { knownOwner, loggingOut, sessionRejected, firebaseChanged, ownerSignedOut, workspaceUid, nuniRevalidating };
 }
 

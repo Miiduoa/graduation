@@ -17,6 +17,8 @@ import {
 
 export type NativeNuniSession = NuniPrincipal & { context: string; expiresAt: number };
 export type NativeNuniState = {
+  /** Changes only after a successful interactive sign-in. */
+  signInGeneration?: number;
   session: NativeNuniSession | null;
   loading: boolean;
   error: string;
@@ -95,8 +97,10 @@ export class NuniSessionController {
     };
   };
   private update(next: NativeNuniState) {
-    this.state = next;
-    if (!this.disposed) for (const listener of this.listeners) listener(next);
+    const signInGeneration = next.signInGeneration ?? this.state.signInGeneration;
+    const state = signInGeneration === undefined ? next : { ...next, signInGeneration };
+    this.state = state;
+    if (!this.disposed) for (const listener of this.listeners) listener(state);
   }
   private invalidate() {
     ++this.generation;
@@ -393,6 +397,7 @@ export class NuniSessionController {
       this.localDraftsRevoked = false;
       this.update({
         session: { ...principal, context: `native-${this.now()}-${run}`, expiresAt: this.record.expiresAt },
+        signInGeneration: run,
         loading: false,
         error: '',
         pendingLogout: false,

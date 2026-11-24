@@ -6,6 +6,8 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import EventScreen from '../screens/EventDetailAiFirstScreen';
 import EventsScreen from '../screens/EventsListAiFirstScreen';
 import { CampusEventCalendarDraftScreen } from '../screens/PersonalCalendarScreen';
+import { PersonalImportAuthorityProvider } from '../state/personalImportAuthority';
+import { campusEventCalendarDraft } from '../services/campusEventCalendarDraft';
 import { loadCampusEvent, loadCampusEventPage } from '../services/publicCampusContent';
 import {
   loadPersonalImports,
@@ -21,11 +23,15 @@ jest.mock('../state/auth', () => ({
 jest.mock('../state/school', () => ({
   useSchool: () => ({
     school: { id: require('react').useContext(mockScopeContext)?.schoolId ?? 'pu', name: '校園' },
+    schoolId: require('react').useContext(mockScopeContext)?.schoolId ?? 'pu',
     selectionReady: true,
   }),
 }));
 jest.mock('../state/personalImportScope', () => ({
-  usePersonalImportScope: () => require('react').useContext(mockScopeContext),
+  usePersonalImportScope: () =>
+    mockUseLiveScope
+      ? jest.requireActual('../state/personalImportScope').usePersonalImportScope()
+      : require('react').useContext(mockScopeContext),
 }));
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
@@ -61,29 +67,37 @@ const activity = {
 };
 let mockScope: PersonalImportScope;
 let mockVerifying: boolean;
+let mockUseLiveScope: boolean;
 let mockPlatformSession: { platformAccountId: string } | null;
 let mockAuth: { user: { uid: string } | null; loading: boolean };
 const mockAuthContext = React.createContext<typeof mockAuth | null>(null);
 const mockScopeContext = React.createContext<PersonalImportScope | null>(null);
 
-function Journey() {
+function Journey({ openOldDraft = false }: { openOldDraft?: boolean }) {
   return (
     <mockAuthContext.Provider value={mockAuth}>
-      <JourneyStack />
+      <PersonalImportAuthorityProvider>
+        <JourneyStack key={String(openOldDraft)} openOldDraft={openOldDraft} />
+      </PersonalImportAuthorityProvider>
     </mockAuthContext.Provider>
   );
 }
 
-function JourneyStack() {
+function JourneyStack({ openOldDraft }: { openOldDraft: boolean }) {
+  const initialDraft = openOldDraft ? campusEventCalendarDraft(activity, mockScope, Date.now()) : null;
   return (
     <mockScopeContext.Provider value={mockVerifying ? null : mockScope}>
       <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
+        <Stack.Navigator
+          initialRouteName={openOldDraft ? 'CampusEventCalendarDraft' : '活動總覽'}
+          screenOptions={{ headerShown: false, animation: 'none' }}
+        >
           <Stack.Screen name="活動總覽" component={EventsScreen} />
           <Stack.Screen name="活動詳情" component={EventScreen} />
           <Stack.Screen
             name="CampusEventCalendarDraft"
             component={CampusEventCalendarDraftScreen}
+            initialParams={initialDraft ? { campusEvent: initialDraft } : undefined}
           />
         </Stack.Navigator>
       </NavigationContainer>
@@ -94,6 +108,7 @@ function JourneyStack() {
 beforeEach(async () => {
   mockScope = { owner: 'nuni:account-a', schoolId: 'pu' };
   mockVerifying = false;
+  mockUseLiveScope = false;
   mockPlatformSession = { platformAccountId: 'account-a' };
   mockAuth = { user: { uid: 'student' }, loading: false };
   await AsyncStorage.clear();
@@ -239,6 +254,23 @@ test('Firebase 先登出時，在 Nuni 仍回傳舊範圍期間撤銷排隊的�
   mockVerifying = true;
   view.rerender(<Journey />);
   expect(view.queryByLabelText('標題')).toBeNull();
+});
+
+test('Firebase 先登出時，活動詳情與新掛載的舊路由都無法開啟舊 Nuni 草稿', async () => {
+  mockUseLiveScope = true;
+  const view = render(<Journey />);
+  fireEvent.press(await view.findByText(activity.title));
+  await view.findByRole('button', { name: '開啟行程草稿' });
+
+  mockAuth = { user: null, loading: false };
+  view.rerender(<Journey />);
+  expect(view.queryByRole('button', { name: '開啟行程草稿' })).toBeNull();
+
+  // Simulate an old route payload arriving after logout, with a newly mounted draft screen.
+  view.rerender(<Journey openOldDraft />);
+  await view.findByText('請回到目前校園的活動頁重新開啟草稿。');
+  expect(view.queryByRole('button', { name: '儲存行程' })).toBeNull();
+  expect((await loadPersonalImports(mockScope)).records).toEqual([]);
 });
 
 test('清除檢查點時 Firebase 已切換，還原舊帳本且不發出變更通知', async () => {

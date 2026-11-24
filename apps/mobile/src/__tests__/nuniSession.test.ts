@@ -335,6 +335,22 @@ it('uses the same consumer transaction as Web, verifies current session, and sto
   });
   expect(JSON.parse(persisted()!)).not.toHaveProperty('customToken');
 });
+it('advances the interactive sign-in generation on login and keeps it through refresh and logout', async () => {
+  const { controller } = setup();
+  await controller.refresh();
+  expect(controller.state.signInGeneration).toBeUndefined();
+
+  await controller.signIn();
+  const firstSignIn = controller.state.signInGeneration;
+  expect(firstSignIn).toEqual(expect.any(Number));
+  await controller.refresh();
+  expect(controller.state.signInGeneration).toBe(firstSignIn);
+  await controller.logout();
+  expect(controller.state.signInGeneration).toBe(firstSignIn);
+
+  await controller.signIn();
+  expect(controller.state.signInGeneration).toBeGreaterThan(firstSignIn!);
+});
 it('prevents double login and treats credential cancellation as cancellation', async () => {
   const { controller, credential } = setup();
   await controller.refresh();

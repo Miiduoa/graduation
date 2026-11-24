@@ -9,6 +9,7 @@ import {
   personalEventRowFromDraft,
   type PersonalImportRecord,
 } from '@campus/shared';
+import { PersonalImportAuthorityProvider } from '../state/personalImportAuthority';
 import PersonalCalendarScreen from '../screens/PersonalCalendarScreen';
 import { PersonalEventReminderJournalCorruptError } from '../services/personalEventReminderJournal';
 import { reminderStatusCopy, type PersonalEventReminderEntry } from '../services/personalEventReminderModel';
@@ -52,6 +53,7 @@ let mockSession: { platformAccountId: string } | null = {
   platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
 };
 let mockNuniLoading = false;
+let mockSignInGeneration: number | undefined;
 let mockSessionError = '';
 let mockAuth: { user: { uid: string } | null; loading: boolean };
 let mockUseLiveScope = false;
@@ -66,6 +68,7 @@ jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
     pendingLogout: mockPendingLogout,
     loading: mockNuniLoading,
+    signInGeneration: mockSignInGeneration,
     session: mockSession,
     error: mockSessionError,
   }),
@@ -153,6 +156,7 @@ beforeEach(async () => {
   };
   mockSessionError = '';
   mockNuniLoading = false;
+  mockSignInGeneration = undefined;
   mockAuth = { user: null, loading: false };
   mockSchool = { id: 'pu', name: '靜宜大學' };
   mockNavigate.mockReset();
@@ -436,7 +440,7 @@ it('deliberate reminder enable and refusal recovery leave saved events intact', 
 });
 
 function renderCalendar() {
-  const view = render(<PersonalCalendarScreen />);
+  const view = render(<PersonalCalendarScreen />, { wrapper: PersonalImportAuthorityProvider });
   const today = emptyPersonalEventDraft().date;
   const offset = (Number(today.slice(0, 4)) - 2026) * 12 + Number(today.slice(5, 7)) - 10;
   for (let i = 0; i < Math.abs(offset); i += 1)
@@ -721,7 +725,7 @@ it('loads and saves the guest ledger on the same screen after Firebase and Nuni 
   await appendPersonalImports(guestScope, [
     personalEventRowFromDraft({ ...today, title: '既有訪客行程', allDay: true }, guestScope.schoolId),
   ]);
-  const view = render(<PersonalCalendarScreen />);
+  const view = render(<PersonalCalendarScreen />, { wrapper: PersonalImportAuthorityProvider });
   await fillDraft(view, '登出前的帳號草稿');
 
   // Firebase finishes first while Nuni still supplies the old account.
@@ -743,6 +747,48 @@ it('loads and saves the guest ledger on the same screen after Firebase and Nuni 
   );
   expect((await loadPersonalImports(accountScope)).records).toEqual([]);
 });
+
+it.each(['', '已登出；裝置上的 Google 帳號選擇狀態尚未清除。'])(
+  'accepts a fresh Nuni-only login for the same account after both sessions sign out (%j)',
+  async (logoutNotice) => {
+    mockUseLiveScope = true;
+    mockAuth = { user: { uid: 'student-a' }, loading: false };
+    const scope = mockScope!;
+    const accountSession = mockSession;
+    await appendPersonalImports(scope, [
+      personalEventRowFromDraft(
+        { ...emptyPersonalEventDraft(), title: '既有 Nuni 行程', allDay: true },
+        scope.schoolId,
+      ),
+    ]);
+    const view = render(<PersonalCalendarScreen />, { wrapper: PersonalImportAuthorityProvider });
+    await waitUntilEditable(view);
+
+    mockAuth = { user: null, loading: false };
+    view.rerender(<PersonalCalendarScreen />);
+    expect(view.queryByRole('button', { name: '新增行程', disabled: false })).toBeNull();
+
+    mockSession = null;
+    mockSessionError = logoutNotice;
+    view.rerender(<PersonalCalendarScreen />);
+    if (!logoutNotice) await waitUntilEditable(view);
+
+    mockSession = accountSession;
+    mockSessionError = '';
+    mockSignInGeneration = 1;
+    view.rerender(<PersonalCalendarScreen />);
+    await waitUntilEditable(view);
+    fireEvent.press(view.getByText('列表'));
+    expect(view.getByText('既有 Nuni 行程')).toBeTruthy();
+
+    await fillDraft(view, 'Nuni 重新登入後的行程');
+    fireEvent.press(view.getByRole('button', { name: '儲存行程' }));
+    await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
+    expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(
+      expect.arrayContaining(['既有 Nuni 行程', 'Nuni 重新登入後的行程']),
+    );
+  },
+);
 
 it.each(['during revalidation', 'after revalidation'])(
   'rejects a delete confirmation opened before revalidation and accepted %s',
