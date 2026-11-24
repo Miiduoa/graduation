@@ -487,8 +487,8 @@
   }
 }
 @media (max-width: 380px) {
-  .directory { gap: 8px; }
-  .resultsHeading { margin-bottom: 4px; }
+  .directory { gap: 4px; }
+  .resultsHeading { margin-block: 0; }
   .service {
     min-height: 60px;
     gap: 10px;
