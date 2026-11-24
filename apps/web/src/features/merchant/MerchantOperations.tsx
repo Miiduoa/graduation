@@ -114,7 +114,7 @@ export function MerchantOperations({
   beginRequest?(): number;
   onChanged(detail: Detail, verifiedAccess: boolean, revision: number): Detail | null | void;
   onMenuConfirmed?(detail: Detail, revision: number, createdItems: number): boolean;
-  onDenied?(tenantId: string, locationId: string): number | undefined;
+  onDenied?(tenantId: string, locationId: string, revision: number): number | undefined;
 }) {
   const draftKey = workspaceKey({ tenantId, locationId });
   const saved = drafts.get(draftKey);
@@ -155,6 +155,10 @@ export function MerchantOperations({
   const lock = useRef(false);
   const run = useRef(0);
   const accessRevision = useRef(0);
+  const observedRevocation = useRef(accessRevocation);
+  useLayoutEffect(() => {
+    observedRevocation.current = accessRevocation;
+  }, [accessRevocation]);
   const sessionRun = useRef(0);
   const opened = useRef(false);
   const visibleRef = useRef(visible);
@@ -210,14 +214,14 @@ export function MerchantOperations({
     showDetail(confirmDetail(next, verifiedAccess, revision));
 
   const revokeDetail = useCallback(
-    (updateView: boolean) => {
-      if (!beginRequest) {
-        localConfirmations.revoke(draftKey);
-        setDetail(null);
-      }
-      const revision = onDenied?.(tenantId, locationId);
+    (revision: number, updateView: boolean) => {
+      const revoked = beginRequest
+        ? onDenied?.(tenantId, locationId, revision)
+        : localConfirmations.revoke(draftKey, revision);
+      if (revoked === undefined) return;
+      if (!beginRequest) setDetail(null);
       if (updateView) {
-        if (revision !== undefined) accessRevision.current = revision;
+        accessRevision.current = Math.max(accessRevision.current, revoked);
         setFresh(false);
         setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
       }
@@ -238,7 +242,7 @@ export function MerchantOperations({
         if (failure.status === 401 || failure.code === 'SESSION_CHANGED') {
           if (current()) expire.current();
         } else if ([403, 404].includes(failure.status)) {
-          revokeDetail(current() && revision >= accessRevision.current);
+          revokeDetail(revision, current() && revision >= accessRevision.current);
         }
       }
     },
@@ -252,6 +256,7 @@ export function MerchantOperations({
       const version = ++run.current;
       const current = () => active.current && version === run.current;
       const revision = nextRevision();
+      const revocationAtStart = observedRevocation.current;
       accessRevision.current = revision;
       setReadUnavailable(false);
       setLoading(true);
@@ -284,8 +289,10 @@ export function MerchantOperations({
             expire.current();
           }
         } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-          revokeDetail(current());
+          revokeDetail(revision, current());
         } else if (current()) {
+          // A failed read cannot reconcile a revocation that arrived while it was pending.
+          accessRevision.current = revocationAtStart;
           setReadUnavailable(true);
           setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');
         }
@@ -342,7 +349,7 @@ export function MerchantOperations({
     if (visible && !suspended && accessRevocation > accessRevision.current) {
       return verifyEntry();
     }
-  }, [accessRevocation, suspended, visible, verifyEntry]);
+  }, [accessRevocation, readUnavailable, suspended, visible, verifyEntry]);
 
   async function mutate(
     action: Action,
@@ -380,7 +387,7 @@ export function MerchantOperations({
         setFresh(false);
         expire.current();
       } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
-        revokeDetail(true);
+        revokeDetail(revision, true);
       } else if (failure instanceof NuniError && failure.status === 409) {
         if (action === 'menu') setMenuBlocked(true);
         await read();

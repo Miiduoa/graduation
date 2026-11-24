@@ -1201,128 +1201,106 @@ it.each([403, 404])(
   },
 );
 
-it.each([
-  { status: 403, forwardFirst: false },
-  { status: 404, forwardFirst: false },
-  { status: 403, forwardFirst: true },
-  { status: 404, forwardFirst: true },
-])(
-  'discards a newer background detail when the earlier list request returns $status (Forward first: $forwardFirst)',
-  async ({ status, forwardFirst }) => {
+it.each([403, 404])(
+  'keeps the newer list and detail after a retired list returns %s',
+  async (status) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const open = detail('store-a', true);
-    const background = {
-      ...open,
-      readinessVersion: 7,
-      merchantName: '撤銷前的餐坊',
-      paymentMode: 'online-and-counter',
-    };
-    const recovered = {
-      ...open,
-      readinessVersion: 6,
-      merchantName: '重新授權的餐坊',
-      locationStatus: 'closed',
-      publicAccess: false,
-      serviceModes: ['pickup', 'dine-in'],
-    };
-    let finishWrite!: (receipt: NuniMerchantWorkspaceDetail) => void;
-    const write = new Promise<NuniMerchantWorkspaceDetail>((resolve) => {
-      finishWrite = resolve;
-    });
-    let denyList!: (error: NuniError) => void;
-    const list = new Promise<never>((_, reject) => {
-      denyList = reject;
-    });
+    const current = { ...open, readinessVersion: 7, merchantName: '新確認的餐坊' };
+    let denyOld!: (error: NuniError) => void;
+    const oldList = new Promise<never>((_, reject) => { denyOld = reject; });
     const readList = vi.fn()
       .mockResolvedValueOnce({ workspaces: [open] })
-      .mockReturnValueOnce(list);
-    let finishForwardRead!: (value: typeof recovered) => void;
-    const forwardRead = new Promise<typeof recovered>((resolve) => {
-      finishForwardRead = resolve;
-    });
-    let finishRecovery!: (value: typeof recovered) => void;
-    const recovery = new Promise<typeof recovered>((resolve) => {
-      finishRecovery = resolve;
-    });
+      .mockReturnValueOnce(oldList)
+      .mockResolvedValue({ workspaces: [current] });
     const readDetail = vi.fn()
       .mockResolvedValueOnce(open)
-      .mockResolvedValueOnce(background)
-      .mockImplementationOnce(() =>
-        forwardFirst ? forwardRead : Promise.reject(new NuniError(503, 'UNAVAILABLE')),
-      )
-      .mockImplementationOnce(() => forwardFirst ? recovery : Promise.resolve(recovered));
+      .mockResolvedValueOnce(current)
+      .mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
     mocks.request.mockImplementation((resource) => {
       if (resource === 'merchant-workspaces') return readList();
       if (resource === path) return readDetail();
-      if (resource === `${path}/availability`) return write;
       return respond(resource);
     });
 
     render(<MerchantWorkspace view="workspace" />);
     fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
-    fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+    await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
     await act(async () => window.history.back());
     await waitFor(() => expect(readList).toHaveBeenCalledTimes(2));
-    expect(readDetail).toHaveBeenCalledTimes(1);
+    await act(async () => window.history.forward());
+    await screen.findByRole('heading', { name: '新確認的餐坊／一樓', level: 2 });
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readList).toHaveBeenCalledTimes(3));
+    await screen.findByRole('heading', { name: '新確認的餐坊／一樓' });
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
 
-    await act(async () => finishWrite({ ...open, locationStatus: 'closed', publicAccess: false }));
-    await screen.findByRole('heading', { name: '撤銷前的餐坊／一樓' });
+    await act(async () => denyOld(new NuniError(status, 'DENIED')));
+    expect(screen.getByRole('link', { name: '管理門市：一樓' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '新確認的餐坊／一樓' })).toBeTruthy();
+    expect(readDetail).toHaveBeenCalledTimes(3);
+  },
+);
+
+it.each([403, 404])(
+  'keeps the newer verified store and revokes other stores when the list returns %s',
+  async (status) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const open = detail('store-a', true);
+    const current = { ...open, readinessVersion: 7, merchantName: '新確認的餐坊' };
+    let denyList!: (error: NuniError) => void;
+    const list = new Promise<never>((_, reject) => { denyList = reject; });
+    const readList = vi.fn()
+      .mockResolvedValueOnce({ workspaces: [open, detail('store-b')] })
+      .mockReturnValueOnce(list)
+      .mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
+    const readDetail = vi.fn().mockResolvedValueOnce(open).mockResolvedValueOnce(current)
+      .mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') return readList();
+      if (resource === path) return readDetail();
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readList).toHaveBeenCalledTimes(2));
+    await act(async () => window.history.forward());
+    await screen.findByRole('heading', { name: '新確認的餐坊／一樓', level: 2 });
+
+    await act(async () => denyList(new NuniError(status, 'DENIED')));
+    expect(screen.getByRole('heading', { name: '新確認的餐坊／一樓', level: 2 })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '暫停接單' })).toBeTruthy();
     expect(readDetail).toHaveBeenCalledTimes(2);
 
-    if (forwardFirst) {
-      await act(async () => window.history.forward());
-      await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
-      await act(async () => denyList(new NuniError(status, 'DENIED')));
-      await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
-      await act(async () => finishForwardRead(recovered));
-      expect(screen.queryByText('撤銷前的餐坊／一樓')).toBeNull();
-      expect(screen.queryByText('營業中')).toBeNull();
-      expect(screen.queryByText('服務方式')).toBeNull();
-      await act(async () => finishRecovery(recovered));
-    } else {
-      await act(async () => denyList(new NuniError(status, 'DENIED')));
-      await screen.findByText('目前無法確認店家資料，請重新載入。');
-      expect(readDetail).toHaveBeenCalledTimes(3);
-      expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
-      await act(async () => window.history.forward());
-    }
-    await screen.findByRole('heading', { name: '重新授權的餐坊／一樓' });
-    expect(readDetail).toHaveBeenCalledTimes(4);
-    expect(screen.getByText('暫停接單')).toBeTruthy();
-    expect(screen.queryByText('營業中')).toBeNull();
-    expect(screen.queryByText('撤銷前的餐坊／一樓')).toBeNull();
-    expect(screen.getByText('自取、內用')).toBeTruthy();
-    expect(screen.getByText('現場櫃檯付款')).toBeTruthy();
+    await act(async () => window.history.back());
+    await screen.findByText('目前無法確認店家資料，請重新載入。');
+    expect(screen.getByRole('link', { name: '管理門市：一樓' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: '管理門市：二樓' })).toBeNull();
   },
 );
 
 it.each([
-  { status: 403, forwardFirst: true },
-  { status: 404, forwardFirst: true },
-  { status: 403, forwardFirst: false },
-  { status: 404, forwardFirst: false },
-])('rechecks the visible entry after a retired detail returns $status (Forward success first: $forwardFirst)', async ({
+  { status: 403, background: true },
+  { status: 404, background: true },
+  { status: 403, background: false },
+  { status: 404, background: false },
+])('keeps the Forward detail after older detail denial $status (background: $background)', async ({
   status,
-  forwardFirst,
+  background,
 }) => {
   const path = 'merchant-workspaces/campus-one/store-a';
   const previous = { ...detail('store-a', true), readinessVersion: 7 };
-  const recovered = {
-    ...detail(),
-    readinessVersion: 6,
-    merchantName: '重新確認的餐坊',
-    missingRequirements: ['menu'],
-  };
+  const current = { ...previous, readinessVersion: 8, merchantName: '新確認的餐坊' };
   let denyOld!: (error: NuniError) => void;
-  let finishForward!: (value: typeof previous) => void;
-  let finishRecovery!: (value: typeof recovered) => void;
   const oldRead = new Promise<never>((_, reject) => { denyOld = reject; });
-  const forwardRead = new Promise<typeof previous>((resolve) => { finishForward = resolve; });
-  const recovery = new Promise<typeof recovered>((resolve) => { finishRecovery = resolve; });
   const readDetail = vi.fn()
-    .mockReturnValueOnce(oldRead)
-    .mockReturnValueOnce(forwardRead)
-    .mockReturnValueOnce(recovery);
+    .mockImplementationOnce(() => background ? Promise.resolve(previous) : oldRead)
+    .mockImplementationOnce(() => background ? oldRead : Promise.resolve(current));
+  if (background) readDetail.mockResolvedValueOnce(current);
+  readDetail.mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
   mocks.request.mockImplementation((resource) => {
     if (resource === path) return readDetail();
     if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [previous] });
@@ -1331,30 +1309,66 @@ it.each([
 
   render(<MerchantWorkspace view="workspace" />);
   fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
-  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(1));
+  if (background) await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+  else await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(1));
   await act(async () => window.history.back());
   await screen.findByRole('link', { name: '管理門市：一樓' });
+  const readsBeforeForward = background ? 2 : 1;
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(readsBeforeForward));
   await act(async () => window.history.forward());
-  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+  await screen.findByRole('heading', { name: '新確認的餐坊／一樓', level: 2 });
 
-  if (forwardFirst) {
-    await act(async () => finishForward(previous));
-    await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
-    expect(screen.getByRole('button', { name: '暫停接單' })).toBeTruthy();
-  }
   await act(async () => denyOld(new NuniError(status, 'DENIED')));
-  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
-  if (!forwardFirst) await act(async () => finishForward(previous));
-  expect(screen.getByRole('status').textContent).toContain('正在確認門市資料');
-  expect(screen.queryByRole('heading', { name: '餐坊／一樓', level: 2 })).toBeNull();
-  expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
+  expect(readDetail).toHaveBeenCalledTimes(readsBeforeForward + 1);
+  expect(screen.getByRole('heading', { name: '新確認的餐坊／一樓', level: 2 })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '暫停接單' })).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
 
-  await act(async () => finishRecovery(recovered));
-  await screen.findByRole('heading', { name: '重新確認的餐坊／一樓', level: 2 });
-  expect(screen.getByText('待完成：建立有庫存的首次菜單')).toBeTruthy();
-  expect(readDetail).toHaveBeenCalledTimes(3);
+  await act(async () => window.history.back());
+  await screen.findByText('目前無法更新部分門市資料，請重新載入。');
+  expect(screen.getByRole('link', { name: '管理門市：一樓' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '新確認的餐坊／一樓' })).toBeTruthy();
 });
+
+it.each([403, 404])(
+  'rechecks the visible store after an accepted list denial %s and a pending read fails',
+  async (status) => {
+    const path = 'merchant-workspaces/campus-one/store-a';
+    const previous = { ...detail('store-a', true), readinessVersion: 7 };
+    const current = { ...previous, readinessVersion: 6, merchantName: '重新授權的餐坊' };
+    let denyList!: (error: NuniError) => void;
+    let failForward!: (error: NuniError) => void;
+    const list = new Promise<never>((_, reject) => { denyList = reject; });
+    const forwardRead = new Promise<never>((_, reject) => { failForward = reject; });
+    const readList = vi.fn()
+      .mockResolvedValueOnce({ workspaces: [previous] })
+      .mockReturnValueOnce(list);
+    const readDetail = vi.fn()
+      .mockResolvedValueOnce(previous)
+      .mockReturnValueOnce(forwardRead)
+      .mockResolvedValueOnce(current);
+    mocks.request.mockImplementation((resource) => {
+      if (resource === 'merchant-workspaces') return readList();
+      if (resource === path) return readDetail();
+      return respond(resource);
+    });
+
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+    await act(async () => window.history.back());
+    await waitFor(() => expect(readList).toHaveBeenCalledTimes(2));
+    await act(async () => window.history.forward());
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+
+    await act(async () => denyList(new NuniError(status, 'DENIED')));
+    expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
+    await act(async () => failForward(new NuniError(503, 'UNAVAILABLE')));
+    await screen.findByRole('heading', { name: '重新授權的餐坊／一樓', level: 2 });
+    expect(screen.getByRole('button', { name: '暫停接單' })).toBeTruthy();
+    expect(readDetail).toHaveBeenCalledTimes(3);
+  },
+);
 
 it.each([403, 404])('recovers with a lower-version detail after a manual read returns %s', async (status) => {
   const path = 'merchant-workspaces/campus-one/store-a';
@@ -1430,7 +1444,10 @@ it.each([
     .mockReturnValueOnce(background)
     .mockResolvedValueOnce(recovered);
   mocks.request.mockImplementation((resource) => {
-    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [previous] });
+    if (resource === 'merchant-workspaces')
+      return readDetail.mock.calls.length > 0
+        ? Promise.reject(new NuniError(503, 'UNAVAILABLE'))
+        : Promise.resolve({ workspaces: [previous] });
     if (resource === path) return readDetail();
     if (resource === 'merchant-applications')
       return Promise.resolve({

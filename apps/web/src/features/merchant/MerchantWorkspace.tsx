@@ -431,9 +431,10 @@ function AccountWorkspace({
             if (expired(error)) {
               expire();
             } else if (denied(error)) {
-              accessDenied = true;
-              confirmed.revoke(key);
-              publishOverview();
+              if (confirmed.revoke(key, revision) !== undefined) {
+                accessDenied = true;
+                publishOverview();
+              }
             } else {
               detailUnavailable = true;
             }
@@ -573,11 +574,11 @@ function AccountWorkspace({
   );
 
   const onWorkspaceDenied = useCallback(
-    (tenantId: string, locationId: string) => {
+    (tenantId: string, locationId: string, revision: number) => {
       if (!mounted.current || !enabled.current) return;
-      const revision = confirmed.revoke(workspaceKey({ tenantId, locationId }));
-      publishOverview();
-      return revision;
+      const revoked = confirmed.revoke(workspaceKey({ tenantId, locationId }), revision);
+      if (revoked !== undefined) publishOverview();
+      return revoked;
     },
     [publishOverview, confirmed],
   );
@@ -617,7 +618,7 @@ function AccountWorkspace({
           onExpired={expire}
           confirmedDetail={details.get(key) ?? null}
           confirmedListStatus={listedStatuses.get(key)}
-          accessRevocation={Math.max(revocations.list, revocations.details.get(key) ?? 0)}
+          accessRevocation={revocations.details.get(key) ?? revocations.list}
           beginRequest={confirmed.beginRequest}
           onChanged={onWorkspaceChanged}
           onMenuConfirmed={onMenuConfirmed}
