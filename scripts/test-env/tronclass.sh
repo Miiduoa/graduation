@@ -403,11 +403,20 @@ tronclass_stop_logged() {
     done
   }
   # Give a late detached child time to appear before signalling the wrapper.
-  local spawn_deadline=$((SECONDS + 6))
+  # Cleanup may share one deadline across every group so they run in parallel.
+  # Leave one second to TERM/KILL the wrapper; otherwise a stalled spawn can
+  # spend the whole deadline waiting for a group that never appears.
+  local spawn_deadline="${TRONCLASS_CLEANUP_DEADLINE:-$((EPOCHSECONDS + 6))}"
+  # Wait long enough for a late detached spawn (the 3s delayed-spawn case)
+  # while still leaving time to TERM, poll, and KILL before the shared deadline.
+  local records_deadline=$((EPOCHSECONDS + 4))
+  if [ "$records_deadline" -gt $((spawn_deadline - 1)) ]; then
+    records_deadline=$((spawn_deadline - 1))
+  fi
   tronclass_discover_groups
   if [ -z "$wrapper" ] && [ "${#records[@]}" -eq 0 ]; then return 0; fi
   while [ "${#records[@]}" -eq 0 ] && [ -n "$wrapper" ] &&
-    [ "$SECONDS" -lt "$spawn_deadline" ] && kill -0 "$wrapper" 2>/dev/null; do
+    [ "$EPOCHSECONDS" -lt "$records_deadline" ] && kill -0 "$wrapper" 2>/dev/null; do
     sleep 0.1
     tronclass_discover_groups
   done
@@ -428,6 +437,7 @@ tronclass_stop_logged() {
     if [ "$wrapper_alive" -eq 0 ] && [ "$group_alive" -eq 0 ]; then
       return 0
     fi
+    [ "$EPOCHSECONDS" -lt "$spawn_deadline" ] || break
     sleep 0.1
   done
   tronclass_discover_groups
@@ -441,7 +451,8 @@ tronclass_stop_logged() {
 cleanup() {
   local sig="${1:-}"
   trap - EXIT INT TERM
-  local child launch_signal=TERM pending_cleaned=''
+  local child launch_signal=TERM pending_cleaned='' jobs=() job
+  TRONCLASS_CLEANUP_DEADLINE=$((EPOCHSECONDS + 6))
   if [ -n "${TRONCLASS_LAUNCHING_LOG:-}" ]; then
     [ "$TRONCLASS_LAUNCHING_LOG" != "$emulator_log" ] || launch_signal=INT
     # The trap can run after fork and before the assignment of $!. At this
@@ -450,16 +461,40 @@ cleanup() {
       case "$child" in
         "$TRONCLASS_WEB_PID"|"$TRONCLASS_EMULATOR_PID"|"$TRONCLASS_SELFTEST_WRAPPER"|"$TRONCLASS_SEED_PID"|"$TRONCLASS_ACCEPTANCE_PID"|"$TRONCLASS_HEALTH_PID") continue ;;
       esac
-      tronclass_stop_logged "$child" "$TRONCLASS_LAUNCHING_LOG" "$launch_signal" ""
+      tronclass_stop_logged "$child" "$TRONCLASS_LAUNCHING_LOG" "$launch_signal" "" &
+      jobs+=("$!")
       pending_cleaned="$TRONCLASS_LAUNCHING_LOG"
     done
   fi
-  [ "$pending_cleaned" = "$web_log" ] || tronclass_stop_logged "$TRONCLASS_WEB_PID" "$web_log" TERM "${TRONCLASS_WEB_RECORD:-}"
-  [ "$pending_cleaned" = "$emulator_log" ] || tronclass_stop_logged "$TRONCLASS_EMULATOR_PID" "$emulator_log" INT "${TRONCLASS_EMULATOR_RECORD:-}"
-  [ "$pending_cleaned" = "$selftest_log" ] || tronclass_stop_logged "$TRONCLASS_SELFTEST_WRAPPER" "$selftest_log" TERM "${TRONCLASS_SELFTEST_RECORD:-}"
-  [ "$pending_cleaned" = "$seed_log" ] || tronclass_stop_logged "$TRONCLASS_SEED_PID" "$seed_log" TERM "${TRONCLASS_SEED_RECORD:-}"
-  [ "$pending_cleaned" = "$acceptance_log" ] || tronclass_stop_logged "$TRONCLASS_ACCEPTANCE_PID" "$acceptance_log" TERM "${TRONCLASS_ACCEPTANCE_RECORD:-}"
-  [ "$pending_cleaned" = "$health_log" ] || tronclass_stop_logged "$TRONCLASS_HEALTH_PID" "$health_log" TERM "${TRONCLASS_HEALTH_RECORD:-}"
+  [ "$pending_cleaned" = "$web_log" ] || { tronclass_stop_logged "$TRONCLASS_WEB_PID" "$web_log" TERM "${TRONCLASS_WEB_RECORD:-}" & jobs+=("$!"); }
+  [ "$pending_cleaned" = "$emulator_log" ] || { tronclass_stop_logged "$TRONCLASS_EMULATOR_PID" "$emulator_log" INT "${TRONCLASS_EMULATOR_RECORD:-}" & jobs+=("$!"); }
+  [ "$pending_cleaned" = "$selftest_log" ] || { tronclass_stop_logged "$TRONCLASS_SELFTEST_WRAPPER" "$selftest_log" TERM "${TRONCLASS_SELFTEST_RECORD:-}" & jobs+=("$!"); }
+  [ "$pending_cleaned" = "$seed_log" ] || { tronclass_stop_logged "$TRONCLASS_SEED_PID" "$seed_log" TERM "${TRONCLASS_SEED_RECORD:-}" & jobs+=("$!"); }
+  [ "$pending_cleaned" = "$acceptance_log" ] || { tronclass_stop_logged "$TRONCLASS_ACCEPTANCE_PID" "$acceptance_log" TERM "${TRONCLASS_ACCEPTANCE_RECORD:-}" & jobs+=("$!"); }
+  [ "$pending_cleaned" = "$health_log" ] || { tronclass_stop_logged "$TRONCLASS_HEALTH_PID" "$health_log" TERM "${TRONCLASS_HEALTH_RECORD:-}" & jobs+=("$!"); }
+  for job in "${jobs[@]+"${jobs[@]}"}"; do
+    while kill -0 "$job" 2>/dev/null; do
+      if [ "$EPOCHSECONDS" -ge "$TRONCLASS_CLEANUP_DEADLINE" ]; then
+        kill -KILL "$job" 2>/dev/null || true
+        break
+      fi
+      sleep 0.05
+    done
+    wait "$job" 2>/dev/null || true
+  done
+  unset TRONCLASS_CLEANUP_DEADLINE
+  # A helper killed at the shared deadline may not have delivered SIGKILL yet.
+  # Recorded wrappers (including a spawn stalled in an uninterruptible wait)
+  # must not outlive the launcher.
+  local pid
+  for pid in "$TRONCLASS_WEB_PID" "$TRONCLASS_EMULATOR_PID" "$TRONCLASS_SELFTEST_WRAPPER"     "$TRONCLASS_SEED_PID" "$TRONCLASS_ACCEPTANCE_PID" "$TRONCLASS_HEALTH_PID"; do
+    [ -n "$pid" ] || continue
+    kill -KILL "$pid" 2>/dev/null || true
+    # Reap here: stop_logged now runs in a subshell and cannot wait(2) these
+    # children, so a just-killed wrapper would otherwise remain a zombie
+    # visible to kill -0 after the launcher exits.
+    wait "$pid" 2>/dev/null || true
+  done
   if [ "$sig" = INT ]; then exit 130; fi
   if [ "$sig" = TERM ]; then exit 143; fi
 }
@@ -523,6 +558,12 @@ for stale_sidecar in "$TRONCLASS_RUNTIME_DIR"/*.log.pgid "$TRONCLASS_RUNTIME_DIR
     continue
   fi
   read -r stale_run stale_pid stale_start <<< "$stale_record"
+  # Legacy names have no run-id suffix (web.log.pgid). Always delete those
+  # leftovers, even if the recorded group is still alive, and never signal it.
+  if [[ "$stale_sidecar" == *.log.pgid ]]; then
+    rm -f -- "$stale_sidecar" 2>/dev/null || true
+    continue
+  fi
   if [ "$stale_run" = "$TRONCLASS_RUN_ID" ] ||
     { tronclass_record_matches "$stale_pid" "$stale_start" && kill -0 -- "-$stale_pid" 2>/dev/null; }; then
     continue

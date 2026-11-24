@@ -938,7 +938,8 @@ test('launcher still stops the group when the pgid sidecar is a symbolic link', 
     }
     proc.kill('SIGTERM');
     const exited = await new Promise(resolve => {
-      const timer = setTimeout(() => resolve('timeout'), 5000);
+      // Cleanup shares a 6-second deadline across groups; wait past that.
+      const timer = setTimeout(() => resolve('timeout'), 8000);
       proc.on('exit', (code, signal) => {
         clearTimeout(timer);
         resolve({ code, signal });
@@ -993,6 +994,7 @@ test('launcher cleanup does not kill a previous run from a leftover matching web
     });
     assert.notEqual(exited, 'timeout');
     process.kill(victim.pid, 0);
+    assert.equal(existsSync(path.join(dir, 'web.log.pgid')), false);
     victim.kill('SIGKILL');
     await new Promise(resolve => setTimeout(resolve, 50));
   } finally {
@@ -1031,7 +1033,7 @@ test('launcher cleanup does not kill a previous run from a leftover three-column
       if (existsSync(childPidFile) && existsSync(grandchildPidFile)) break;
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    assert.equal(existsSync(leftover), true);
+    assert.equal(existsSync(childPidFile) && existsSync(grandchildPidFile), true);
     proc.kill('SIGTERM');
     const exited = await new Promise(resolve => {
       const timer = setTimeout(() => resolve('timeout'), 5000);
@@ -1042,6 +1044,7 @@ test('launcher cleanup does not kill a previous run from a leftover three-column
     });
     assert.notEqual(exited, 'timeout');
     process.kill(victim.pid, 0);
+    assert.equal(existsSync(leftover), false);
     victim.kill('SIGKILL');
     await new Promise(resolve => setTimeout(resolve, 50));
   } finally {
@@ -1481,6 +1484,87 @@ if (arg.endsWith('/firebase.js')) {
     assert.ok(proc.kill('SIGTERM'));
     assert.deepEqual(await exited, [143, null], output);
     assert.ok(Date.now() - started < 8000, 'cleanup should not wait for the health loop to finish on its own');
+    for (const pid of pids) {
+      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, `pid ${pid} still alive`);
+    }
+  } finally {
+    if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launcher cleanup stops web, emulator, and health in parallel under a shared 6-second deadline', { timeout: 20000 }, async () => {
+  const { spawn } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const { once } = await import('node:events');
+  const { setTimeout: delay } = await import('node:timers/promises');
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-parallel-cleanup-'));
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+  const marker = name => path.join(dir, name);
+  writeSessionKey(path.join(dir, 'bff-session.key'));
+  writeSessionKey(path.join(dir, 'tronclass-session.key'));
+  writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
+process.exit(0);
+`, { mode: 0o700 });
+  writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
+const fs = require('node:fs');
+const path = require('node:path');
+const [arg] = process.argv.slice(2);
+if (arg === '-') {
+  const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, process.argv.slice(2), { stdio: 'inherit' });
+  process.exit(status ?? 1);
+}
+if (arg === '-e') process.exit(0);
+const dir = process.env.TRONCLASS_RUNTIME_DIR;
+const writePid = name => fs.writeFileSync(path.join(dir, name), String(process.pid));
+const ignoreStop = () => {
+  process.on('SIGTERM', () => {});
+  process.on('SIGINT', () => {});
+  setInterval(() => {}, 1000);
+};
+if (arg && arg.endsWith('/firebase.js')) {
+  writePid('emulator.pid');
+  console.log('All emulators ready');
+  ignoreStop();
+} else if (arg && arg.endsWith('/seed.cjs')) {
+  writePid('seed.pid');
+} else if (arg && arg.endsWith('/next')) {
+  writePid('web.pid');
+  ignoreStop();
+} else if (arg && arg.endsWith('/health-tronclass.cjs')) {
+  writePid('health.pid');
+  fs.writeFileSync(path.join(dir, 'health-started'), '');
+  ignoreStop();
+}
+`, { mode: 0o700 });
+  const proc = spawn('bash', [script], {
+    env: {
+      ...process.env,
+      PATH: `${dir}:${process.env.PATH}`,
+      TMPDIR: dir,
+      HOME: dir,
+      TRONCLASS_RUNTIME_DIR: dir,
+      TRONCLASS_CHECK_HEALTH: '1',
+      TRONCLASS_VERIFY_RUNTIME: '0',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const exited = once(proc, 'exit');
+  let output = '';
+  for (const stream of [proc.stdout, proc.stderr]) {
+    stream.on('data', chunk => { output += chunk; });
+  }
+  try {
+    const readyDeadline = Date.now() + 8000;
+    while (!existsSync(marker('health-started')) && Date.now() < readyDeadline) await delay(20);
+    assert.ok(existsSync(marker('health-started')), output);
+    const pids = ['health.pid', 'web.pid', 'emulator.pid'].map(name => Number(readFileSync(marker(name), 'utf8')));
+    for (const pid of pids) process.kill(pid, 0);
+    const started = Date.now();
+    assert.ok(proc.kill('SIGTERM'));
+    assert.deepEqual(await exited, [143, null], output);
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed < 8000, `cleanup took ${elapsed}ms; shared deadline should finish near 6s, not 6s per group`);
     for (const pid of pids) {
       assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, `pid ${pid} still alive`);
     }
