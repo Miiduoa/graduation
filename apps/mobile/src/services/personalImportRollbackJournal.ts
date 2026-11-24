@@ -368,7 +368,6 @@ export function commitWebPersonalImports(
   const id = createPersonalImportId();
   const committed = JSON.stringify({ ...JSON.parse(attempted), webCommit: id });
   const conflict = () => new Error('匯入資料已在另一個分頁更新，請重新載入。');
-  const fitsInPlace = before !== null && attempted.length <= before.length;
   const recoveryCopies = capturePersonalImportBrowserRecovery(storage, key);
   const replace = (raw: string, ownsStage: () => boolean) => {
     assertWritable();
@@ -421,9 +420,9 @@ export function commitWebPersonalImports(
       try {
         stages.setItem(stageKey, encoded);
       } catch (error) {
-        if (!isQuotaExceeded(error) || (!lease && !fitsInPlace)) throw error;
-        // The lease fallback can publish against the primary snapshot even
-        // when this tab has no room for a stage and the replacement grows.
+        if (!isQuotaExceeded(error)) throw error;
+        // Session storage quota is independent of whether the primary can grow.
+        // Publish atomically against the primary snapshot under the current lock.
         return publishWithQuotaRetry();
       }
       return publishWithQuotaRetry(ownsStage, discardStage);

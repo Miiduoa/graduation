@@ -105,31 +105,82 @@ test('Web reads an existing ledger without touching the unsupported Expo documen
   }
 });
 
-test('Web under an IndexedDB lock leaves the primary intact when a required stage cannot be stored', async () => {
-  const cleanup = useWebStorage();
-  const { restore } = useIndexedDBLocks();
-  const { ledger } = await appendPersonalImports(scope, [row('original')]);
-  const key = personalImportStorageKey(scope);
-  const before = window.localStorage.getItem(key);
-  const setItem = Storage.prototype.setItem;
-  const storeBackup = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
-    this: Storage, entry, value,
-  ) {
-    if (this === window.sessionStorage) throw new DOMException('Quota exceeded', 'QuotaExceededError');
-    setItem.call(this, entry, value);
-  });
-  try {
-    await expect(appendPersonalImports(scope, [row('new', '統計')], {
-      canContinue: () => true,
-    })).rejects.toThrow('Quota exceeded');
-    expect(storeBackup.mock.calls.filter(([entry]) => entry === key)).toEqual([]);
-    expect(window.localStorage.getItem(key)).toBe(before);
-    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
-  } finally {
-    storeBackup.mockRestore();
-    restore();
-    cleanup();
-  }
+describe.each(['Web Locks', 'IndexedDB'])('Expo Web with %s at sessionStorage quota', (lock) => {
+  test.each(['first append', 'growing edit', 'growing edit beyond local quota'])(
+    '%s tries the primary write',
+    async (scenario) => {
+      const cleanup = useWebStorage();
+      const restoreLocks = withoutWebWriteLocks();
+      const request = jest.fn(async (_key: string, write: () => unknown) => write());
+      const database = lock === 'IndexedDB' ? useIndexedDBLocks() : undefined;
+      if (!database) {
+        Object.defineProperty(navigator, 'locks', {
+          configurable: true,
+          value: { request },
+        });
+      }
+      const storage = window.localStorage;
+      const key = personalImportStorageKey(scope);
+      const guard = { canContinue: () => true };
+      const longerTitle = '延長後的課程名稱'.repeat(24);
+      try {
+        const initial = scenario === 'first append'
+          ? undefined
+          : (await appendPersonalImports(scope, [row('original')])).ledger;
+        const before = storage.getItem(key);
+        const setItem = Storage.prototype.setItem;
+        const quotaError = new DOMException('Quota exceeded', 'QuotaExceededError');
+        const stageWrite = jest.fn();
+        const primaryWrite = jest.fn();
+        const quota = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+          this: Storage, entry, value,
+        ) {
+          if (this === window.sessionStorage) {
+            stageWrite();
+            throw new DOMException('Session quota exceeded', 'QuotaExceededError');
+          }
+          if (this === storage && entry === key) {
+            primaryWrite(value);
+            if (scenario === 'growing edit beyond local quota' && value.length > before!.length) {
+              throw quotaError;
+            }
+          }
+          setItem.call(this, entry, value);
+        });
+        try {
+          const write = initial
+            ? editPersonalImport(scope, initial.records[0], row('original', longerTitle), guard)
+            : appendPersonalImports(scope, [row('first')], guard).then(({ ledger }) => ledger);
+          if (scenario === 'growing edit beyond local quota') {
+            await expect(write).rejects.toBe(quotaError);
+            expect(storage.getItem(key)).toBe(before);
+            await expect(loadPersonalImports(scope)).resolves.toEqual(initial);
+          } else {
+            const ledger = await write;
+            const published = storage.getItem(key)!;
+            expect(published.length).toBeGreaterThan(before?.length ?? 0);
+            expect(JSON.parse(published).version).toBe(1);
+            expect(ledger.records.map(({ title }) => title)).toEqual([
+              initial ? longerTitle : '微積分',
+            ]);
+            await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+          }
+          expect(stageWrite).toHaveBeenCalledTimes(1);
+          expect(primaryWrite).toHaveBeenCalled();
+          expect(Object.keys(window.sessionStorage)).toEqual([]);
+          expect(Object.keys(storage)).toEqual([key]);
+          if (database) expect(database.open).toHaveBeenCalled();
+          else expect(request).toHaveBeenCalledWith(key, expect.any(Function));
+        } finally {
+          quota.mockRestore();
+        }
+      } finally {
+        database?.restore();
+        restoreLocks();
+        cleanup();
+      }
+    },
+  );
 });
 
 function useIndexedDBLocks() {
