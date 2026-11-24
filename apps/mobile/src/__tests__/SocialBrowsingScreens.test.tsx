@@ -770,6 +770,45 @@ test.each(['firestore/permission-denied', 'unauthenticated'])(
   },
 );
 
+test.each(['before recovery', 'after recovery'])(
+  'a failed unsubscribe started before access was cleared is ignored when it settles %s',
+  async (settlement) => {
+    jest.mocked(listBoards).mockResolvedValue([board]);
+    jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+    const view = render(<BoardsScreen />);
+    await view.findByText('讀書會');
+
+    const write = deferred();
+    const reRead = deferred<boolean>();
+    jest.mocked(unsubscribeFromBoard).mockImplementationOnce(() => write.promise);
+    jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => reRead.promise);
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
+
+    const refresh = () => view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+    jest.mocked(listSubscribedBoardIds).mockRejectedValueOnce(
+      Object.assign(new Error('revoked'), { code: 'firestore/permission-denied' }),
+    );
+    await act(async () => { await refresh(); });
+    expect(view.queryByText('讀書會')).toBeNull();
+
+    if (settlement === 'before recovery') {
+      await act(async () => { write.reject(new Error('offline')); });
+    }
+    jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([]);
+    await act(async () => { await refresh(); });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+    if (settlement === 'after recovery') {
+      await act(async () => { write.reject(new Error('offline')); });
+    }
+    await act(async () => { reRead.resolve(true); });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    expect(isSubscribedToBoard).not.toHaveBeenCalled();
+    expect(alertSpy).not.toHaveBeenCalled();
+  },
+);
+
 test('two failed presses before a rerender roll back to the last confirmed state', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const first = deferred();
@@ -1168,44 +1207,56 @@ test.each([true, false])('a failed newer confirmation preserves an older confirm
   expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
 });
 
-test('a list captured before a confirmed cancellation cannot be retained again when board rows arrive', async () => {
-  jest.mocked(listBoards).mockResolvedValue([board]);
-  const view = render(<BoardsScreen />);
-  await view.findByText('讀書會');
+test.each(['board rows', 'subscription IDs'])(
+  'a list issued before a confirmed cancellation cannot be retained when %s arrive last',
+  async (lastResult) => {
+    jest.mocked(listBoards).mockResolvedValue([board]);
+    const view = render(<BoardsScreen />);
+    await view.findByText('讀書會');
 
-  const write = deferred();
-  jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
-  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+    const write = deferred();
+    jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
+    fireEvent.press(view.getByLabelText('訂閱讀書會'));
 
-  const refresh = () => view.UNSAFE_getByType(RefreshControl).props.onRefresh();
-  await act(async () => { await refresh(); });
+    const refresh = () => view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+    await act(async () => { await refresh(); });
 
-  const firstRead = deferred<boolean>();
-  const secondRead = deferred<boolean>();
-  jest.mocked(isSubscribedToBoard)
-    .mockImplementationOnce(() => firstRead.promise)
-    .mockImplementationOnce(() => secondRead.promise);
-  await act(async () => { write.resolve(); });
-  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
-  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+    const firstRead = deferred<boolean>();
+    const secondRead = deferred<boolean>();
+    jest.mocked(isSubscribedToBoard)
+      .mockImplementationOnce(() => firstRead.promise)
+      .mockImplementationOnce(() => secondRead.promise);
+    await act(async () => { write.resolve(); });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+    expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 
-  const rows = deferred<typeof board[]>();
-  jest.mocked(listBoards).mockImplementationOnce(() => rows.promise);
-  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
-  let refreshPromise!: Promise<void>;
-  await act(async () => { refreshPromise = refresh(); });
+    const rows = deferred<typeof board[]>();
+    const subs = deferred<string[]>();
+    jest.mocked(listBoards).mockImplementationOnce(() => rows.promise);
+    jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
+    let refreshPromise!: Promise<void>;
+    await act(async () => {
+      refreshPromise = refresh();
+      if (lastResult === 'board rows') subs.resolve(['board']);
+      else rows.resolve([board]);
+    });
 
-  await act(async () => { firstRead.resolve(false); });
-  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
-  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    await act(async () => { firstRead.resolve(false); });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
 
-  await act(async () => { rows.resolve([board]); await refreshPromise; });
-  expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
-  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    await act(async () => {
+      if (lastResult === 'board rows') rows.resolve([board]);
+      else subs.resolve(['board']);
+      await refreshPromise;
+    });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
 
-  await act(async () => { secondRead.reject(new Error('offline')); });
-  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
-});
+    await act(async () => { secondRead.reject(new Error('offline')); });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+  },
+);
 
 test('two native presses before a rerender toggle from the newest choice', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
