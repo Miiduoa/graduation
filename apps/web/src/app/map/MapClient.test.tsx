@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import MapClient from './MapClient';
+import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
 import { loadMapFavorites, loadMapLocations, setMapFavorite, type MapLocation } from './mapService';
 
 const state = vi.hoisted(() => ({
@@ -71,6 +72,47 @@ beforeEach(() => {
   vi.mocked(loadMapFavorites).mockResolvedValue([]);
   vi.mocked(setMapFavorite).mockResolvedValue(undefined);
   window.history.replaceState({}, '', '/map');
+});
+
+it('requires a new spatial choice when a live map source reuses the focused ID', async () => {
+  const original = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  const replacement = { ...original, lat: original.lat + 0.002 };
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
+  const showModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+  const close = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close');
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true, value(this: HTMLDialogElement) { this.open = true; },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+    configurable: true, value(this: HTMLDialogElement) { this.open = false; },
+  });
+
+  const view = render(<MapClient school="pu" focus={original.id} />);
+  try {
+    fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
+    const dialog = within(screen.getByRole('dialog', { name: '校園空間導覽' }));
+    const appleDestination = () => new URL(dialog.getByRole('link', {
+      name: '開啟 Apple 地圖步行導航',
+    }).getAttribute('href')!).searchParams.get('daddr');
+    expect(appleDestination()).toBe(`${original.lat},${original.lng}`);
+
+    await act(async () => source.resolve([replacement]));
+    expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.lat).toBe(replacement.lat);
+    expect(dialog.queryByRole('link', { name: '開啟 Apple 地圖步行導航' })).toBeNull();
+    expect(dialog.queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+
+    fireEvent.change(dialog.getByRole('combobox'), { target: { value: original.id } });
+    expect(appleDestination()).toBe(`${replacement.lat},${replacement.lng}`);
+  } finally {
+    view.unmount();
+    fetch.mockRestore();
+    for (const [name, descriptor] of [['showModal', showModal], ['close', close]] as const) {
+      if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
+      else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
+    }
+  }
 });
 
 it('resolves classroom deep links to a unique real building while retaining the original room wording', async () => {
