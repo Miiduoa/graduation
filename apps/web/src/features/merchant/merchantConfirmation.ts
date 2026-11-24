@@ -56,8 +56,10 @@ export const workspaceKey = ({
   locationId,
 }: Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'>) => `${tenantId}:${locationId}`;
 
-export function createMerchantConfirmations() {
-  let lists: Partial<MerchantOverview> = {};
+export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuReceipt: number | null }>) {
+  let lists: Partial<Omit<MerchantOverview, 'workspaces'>> = {};
+  // Keep list membership separate from the revocable observations used to render rows.
+  let listedWorkspaces: Map<string, Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'>> | undefined;
   let includeVerifiedWorkspaces = false;
   const receipts = new Map<string, NuniMerchantApplication>();
   const entries = new Map<string, WorkspaceObservations>();
@@ -79,15 +81,18 @@ export function createMerchantConfirmations() {
       listRevocation = request;
       entries.clear();
       menus.clear();
+      for (const draft of drafts.values()) draft.menuReceipt = null;
     } else {
       revocations.set(key, request);
       entries.delete(key);
       menus.delete(key);
+      const draft = drafts.get(key);
+      if (draft) draft.menuReceipt = null;
     }
   }
 
   function withMenu<T extends NuniMerchantWorkspace>(key: string, row: T): T {
-    return menus.has(key)
+    return menus.has(key) || drafts.get(key)?.menuReceipt != null
       ? { ...row, missingRequirements: row.missingRequirements.filter((item) => item !== 'menu') }
       : row;
   }
@@ -126,8 +131,11 @@ export function createMerchantConfirmations() {
     });
   }
 
-  function confirmMenu(key: string, revision: number) {
-    if (revision > revokedThrough(key)) menus.add(key);
+  function confirmMenu(key: string, revision: number, createdItems: number) {
+    const draft = drafts.get(key);
+    if (!draft || revision <= revokedThrough(key)) return false;
+    draft.menuReceipt = createdItems;
+    return true;
   }
 
   function mergeApplications(rows: NuniMerchantApplication[]) {
@@ -166,14 +174,19 @@ export function createMerchantConfirmations() {
       if (revision > listRevision) {
         listRevision = revision;
         includeVerifiedWorkspaces = false;
-        lists.workspaces = rows;
+        listedWorkspaces = new Map(
+          rows.map(({ tenantId, locationId }) => {
+            const identity = { tenantId, locationId };
+            return [workspaceKey(identity), identity];
+          }),
+        );
       }
       for (const row of rows) merge(row, revision);
     },
     rejectWorkspaceList(denied: boolean, revision: number) {
       if (denied) {
         includeVerifiedWorkspaces = false;
-        delete lists.workspaces;
+        listedWorkspaces = undefined;
         revoke();
       } else if (revision > Math.max(listRevision, listRevocation)) {
         listRevision = revision;
@@ -197,7 +210,7 @@ export function createMerchantConfirmations() {
     },
     knownWorkspaces(): Array<Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'> & Partial<NuniMerchantWorkspace>> {
       const found = new Map<string, Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'> & Partial<NuniMerchantWorkspace>>();
-      for (const row of lists.workspaces ?? []) found.set(workspaceKey(row), row);
+      for (const [key, row] of listedWorkspaces ?? []) found.set(key, row);
       for (const [key, entry] of entries) {
         if (entry.row) found.set(key, entry.row.value);
       }
@@ -210,19 +223,19 @@ export function createMerchantConfirmations() {
       return [...found.values()];
     },
     overview(): MerchantOverview | null {
-      const workspaces = new Map((lists.workspaces ?? []).map((row) => [workspaceKey(row), row]));
+      const keys = new Set(listedWorkspaces?.keys());
       if (includeVerifiedWorkspaces) {
         for (const [key, entry] of entries) {
-          if (entry.row && hasVerifiedAccess(key)) workspaces.set(key, entry.row.value);
+          if (entry.row && hasVerifiedAccess(key)) keys.add(key);
         }
       }
-      if (!Object.keys(lists).length && !workspaces.size) return null;
+      if (!Object.keys(lists).length && !listedWorkspaces && !keys.size) return null;
       return {
         programs: lists.programs ?? [],
-        workspaces: [...workspaces].flatMap(([key, row]) => {
-          const entry = entries.get(key);
-          if (revocations.has(key) && !hasVerifiedAccess(key)) return [];
-          return [withMenu(key, entry?.row?.value ?? row)];
+        workspaces: [...keys].flatMap((key) => {
+          const row = entries.get(key)?.row?.value;
+          if (!row || (revocations.has(key) && !hasVerifiedAccess(key))) return [];
+          return [withMenu(key, row)];
         }),
         applications: [
           ...[...receipts.values()].reverse(),
@@ -232,8 +245,7 @@ export function createMerchantConfirmations() {
     },
     listedStatuses() {
       const statuses = new Map<string, string>();
-      for (const listed of lists.workspaces ?? []) {
-        const key = workspaceKey(listed);
+      for (const key of listedWorkspaces?.keys() ?? []) {
         const row = entries.get(key)?.row?.value;
         if (row && hasVerifiedAccess(key)) statuses.set(key, merchantWorkspaceStateLabel(row));
       }
@@ -249,6 +261,7 @@ export function createMerchantConfirmations() {
     },
     clear() {
       lists = {};
+      listedWorkspaces = undefined;
       includeVerifiedWorkspaces = false;
       listRevocation = 0;
       listRevision = 0;

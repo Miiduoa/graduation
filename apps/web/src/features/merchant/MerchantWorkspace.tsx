@@ -284,7 +284,7 @@ function AccountWorkspace({
     if (href !== listHref) setListHref(href);
   }
   const generation = useRef(0);
-  const [confirmed] = useState(createMerchantConfirmations);
+  const [confirmed] = useState(() => createMerchantConfirmations(operationDrafts));
   const mounted = useRef(true);
   const busyRef = useRef(false);
   const enabled = useRef(false);
@@ -399,7 +399,7 @@ function AccountWorkspace({
             !confirmed.needsAccessRefresh(key) &&
             submitted.status === 'fulfilled' &&
             stores.status === 'fulfilled' &&
-            !operationDrafts.get(JSON.stringify([item.tenantId, item.locationId]))?.uncertain
+            !operationDrafts.get(key)?.uncertain
           )
             return;
           const revision = confirmed.beginRequest();
@@ -560,10 +560,11 @@ function AccountWorkspace({
   );
 
   const onMenuConfirmed = useCallback(
-    (detail: NuniMerchantWorkspaceDetail, revision: number) => {
-      if (!mounted.current || !enabled.current) return;
-      confirmed.confirmMenu(workspaceKey(detail), revision);
-      publishOverview();
+    (detail: NuniMerchantWorkspaceDetail, revision: number, createdItems: number) => {
+      if (!mounted.current || !enabled.current) return false;
+      const accepted = confirmed.confirmMenu(workspaceKey(detail), revision, createdItems);
+      if (accepted) publishOverview();
+      return accepted;
     },
     [confirmed, publishOverview],
   );
