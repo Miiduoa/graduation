@@ -1179,16 +1179,26 @@ function authorizesPrivateRead(original: string): boolean {
  * out of the private read, and a requested write anywhere keeps the request with
  * the original planner instead of reading beside an unhandled write.
  */
-function typographicQuoteMask(text: string): boolean[] {
+const quoteMasksBySpans = new WeakMap<QuoteSpan[], readonly boolean[]>();
+const dataTypeMasksByTokens = new WeakMap<Token[], readonly boolean[]>();
+
+function typographicQuoteMask(text: string): readonly boolean[] {
+  const spans = typographicQuoteSpans(text);
+  const cached = quoteMasksBySpans.get(spans);
+  if (cached) return cached;
   const mask = Array.from({ length: text.length }, () => false);
-  for (const quoted of typographicQuoteSpans(text)) {
+  for (const quoted of spans) {
     mask.fill(true, quoted.open, quoted.end);
   }
+  quoteMasksBySpans.set(spans, mask);
   return mask;
 }
 
-function dataTypeMask(text: string): boolean[] {
-  const mask = typographicQuoteMask(text);
+function dataTypeMask(text: string): readonly boolean[] {
+  const tokens = tokensFor(text);
+  const cached = dataTypeMasksByTokens.get(tokens);
+  if (cached) return cached;
+  const mask = [...typographicQuoteMask(text)];
   const delta = new Array<number>(text.length + 1).fill(0);
   const add = (start: number, end: number) => {
     if (end <= start) return;
@@ -1198,7 +1208,7 @@ function dataTypeMask(text: string): boolean[] {
     delta[from] += 1;
     delta[to] -= 1;
   };
-  for (const token of tokensFor(text)) {
+  for (const token of tokens) {
     if (token.kind === 'filename') add(token.start, token.end);
   }
   const scan = bracketsFor(text);
@@ -1212,14 +1222,11 @@ function dataTypeMask(text: string): boolean[] {
     depth += delta[index]!;
     if (depth > 0) mask[index] = true;
   }
+  dataTypeMasksByTokens.set(tokens, mask);
   return mask;
 }
 
-function protectedSpanMask(text: string): boolean[] {
-  return typographicQuoteMask(text);
-}
-
-function tokenIsProtected(token: Token, mask: boolean[]): boolean {
+function tokenIsProtected(token: Token, mask: readonly boolean[]): boolean {
   if (token.start >= token.end) return false;
   for (let index = token.start; index < token.end; index += 1) {
     if (!mask[index]) return false;
@@ -1227,7 +1234,7 @@ function tokenIsProtected(token: Token, mask: boolean[]): boolean {
   return true;
 }
 
-function isKnownReadToken(token: Token, mask: boolean[]): boolean {
+function isKnownReadToken(token: Token, mask: readonly boolean[]): boolean {
   if (isWhitespaceToken(token) || token.kind === 'punct' || token.kind === 'filename') return true;
   if (isWriteVerbToken(token)) return true;
   if (token.kind === 'unknown') return tokenIsProtected(token, mask);
@@ -1267,12 +1274,19 @@ const ACTION_STATUS_PREFIXES = new Set([
 ]);
 const ACTION_STATUS_SUFFIXES = new Set(['過', '了', '完', '過了嗎', '了嗎', '了沒']);
 
+const EXPERIENCE_PREFIX_INTERVENERS = new Set([
+  '我', '你', '他', '她', '它', '我們', '你們', '他們', '她們',
+  '也', '又', '都', '就', '才', '還', '先', '再', ...WRITE_HELPERS,
+]);
+
 function hasDescriptiveAction(text: string): boolean {
   let statusPrefix = false;
+  let experiencePrefix = false;
   let sawAction = false;
   for (const token of visibleCommandTokens(text)) {
     if (token.kind === 'punct' && CLAUSE_PUNCT.test(token.value)) {
       statusPrefix = false;
+      experiencePrefix = false;
       sawAction = false;
       continue;
     }
@@ -1283,8 +1297,15 @@ function hasDescriptiveAction(text: string): boolean {
     if (ACTION_STATUS_PREFIXES.has(token.value)) statusPrefix = true;
     if (token.kind !== 'noun' && (token.kind === 'query' || isPrepareActionValue(token.value) ||
       DOWNLOAD_ACTIONS.has(token.value.toLowerCase()))) {
-      if (statusPrefix) return true;
+      if (statusPrefix || experiencePrefix) return true;
       sawAction = true;
+    }
+    // Standalone 有 can govern a verb across particles, while a nominal
+    // complement ends that scope. 有沒有 and 有哪些 are separate tokens.
+    if (token.value === '有') {
+      experiencePrefix = true;
+    } else if (!isWhitespaceToken(token) && !EXPERIENCE_PREFIX_INTERVENERS.has(token.value)) {
+      experiencePrefix = false;
     }
   }
   return false;
@@ -1296,7 +1317,8 @@ function isPositivelyProvenRead(text: string): boolean {
   if (!original || !TRONCLASS_KEYWORD.test(original)) return false;
   if (hasReadBlockingDecoration(original) || hasDescriptiveAction(original)) return false;
   if (!allTokensKnown(original)) return false;
-  if (tokensFor(original).some(token => isNegatorToken(token) && !tokenIsProtected(token, protectedSpanMask(original)))) return false;
+  const quoteMask = typographicQuoteMask(original);
+  if (tokensFor(original).some(token => isNegatorToken(token) && !tokenIsProtected(token, quoteMask))) return false;
   if (writeCommandRoute(textWithoutQuotedSpans(original)) !== null) return false;
   if (scanNegation(tokensFor(original), modifierInteriorIndex(tokensFor(original))) !== 'clear') return false;
   return hasReadOrStatusPredicate(original) || hasDomainOrLmsSubstance(original);
