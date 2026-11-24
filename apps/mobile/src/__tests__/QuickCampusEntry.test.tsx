@@ -274,3 +274,46 @@ test('discards a late cloud preview when switching campus with the same account'
   expect(view.queryByText('舊校園資料')).toBeNull();
   expect(view.getByLabelText('前往圖書館')).toBeTruthy();
 });
+
+test('can stop waiting for cloud analysis and still use the local service immediately', async () => {
+  let finish!: (value: Awaited<ReturnType<typeof interpretMobileCampusRequest>>) => void;
+  interpret.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const open = jest.fn();
+  const view = render(<QuickCampusEntry uid="alice" schoolId="pu" onOpen={open} />);
+  fireEvent.changeText(view.getByLabelText('說出或輸入想做的事'), 'library catalog');
+  fireEvent.press(view.getByLabelText('用雲端 AI 找相關服務'));
+  const request = interpret.mock.lastCall![0];
+  fireEvent.press(view.getByLabelText('停止雲端搜尋'));
+  expect(request.isCurrent()).toBe(false);
+  expect(view.getByLabelText('用雲端 AI 找相關服務')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('前往圖書館'));
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ route: 'Library' }));
+  await act(async () => finish({
+    status: 'understood', source: 'model', summary: '停止等待後的舊答案',
+    destinations: ['/cafeteria'], clarifyingQuestion: null,
+  }));
+  expect(view.queryByText('停止等待後的舊答案')).toBeNull();
+  expect(view.queryByLabelText('前往校園餐廳')).toBeNull();
+});
+
+test('switching back to local search ignores a cloud preview for the same query', async () => {
+  let finish!: (value: Awaited<ReturnType<typeof interpretMobileCampusRequest>>) => void;
+  interpret.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const open = jest.fn();
+  const view = render(<QuickCampusEntry uid="alice" schoolId={null} onOpen={open} />);
+  const input = view.getByLabelText('說出或輸入想做的事');
+  fireEvent.changeText(input, 'library catalog');
+  fireEvent.press(view.getByLabelText('用雲端 AI 找相關服務'));
+  const request = interpret.mock.lastCall![0];
+  fireEvent(input, 'submitEditing');
+  expect(request.isCurrent()).toBe(false);
+  expect(view.getByText('找到 1 個服務，請選擇要開啟的項目。')).toBeTruthy();
+  await act(async () => finish({
+    status: 'understood', source: 'model', summary: '過期雲端結果',
+    destinations: ['/cafeteria', '/map'], clarifyingQuestion: null,
+  }));
+  expect(view.queryByText('過期雲端結果')).toBeNull();
+  expect(view.queryByLabelText('前往校園餐廳')).toBeNull();
+  expect(view.getByLabelText('前往圖書館')).toBeTruthy();
+  expect(open).not.toHaveBeenCalled();
+});
