@@ -58,6 +58,17 @@ type MapProps = {
   query?: string;
 };
 type FavoritesState = { status: 'loading' | 'error' | 'ready'; ids: Set<string> };
+type RouteDraft = { from: MapLocation | null; to: MapLocation | null };
+
+// A manually confirmed marker must not silently move when the live source replaces it.
+function confirmedRoutePlace(locations: readonly MapLocation[], chosen: MapLocation | null) {
+  if (!chosen) return null;
+  const matches = locations.filter((place) => place.id === chosen.id);
+  if (matches.length !== 1) return null;
+  const place = matches[0];
+  return place.name === chosen.name && place.category === chosen.category &&
+    place.lat === chosen.lat && place.lng === chosen.lng ? place : null;
+}
 
 export default function MapClient(props: MapProps) {
   const { user, loading, error } = useAuth();
@@ -169,7 +180,7 @@ function MapContent({
   const [myLocation, setMyLocation] = useState<MapCoordinate | null>(null);
   const [positionStatus, setPositionStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [positionError, setPositionError] = useState('');
-  const [routeDraft, setRouteDraft] = useState<{ from: string | null; to: string | null } | null>(null);
+  const [routeDraft, setRouteDraft] = useState<RouteDraft | null>(null);
   const [favorites, setFavorites] = useState<FavoritesState>({ status: 'loading', ids: new Set() });
   const [favoriteAttempt, setFavoriteAttempt] = useState(0);
   const [pending, setPending] = useState<string | null>(null);
@@ -259,12 +270,15 @@ function MapContent({
     const to = locations.find((location) => location.id === ids[1]);
     return from && to ? [from, to] : null;
   }, [route, locations]);
+  const routeStart = confirmedRoutePlace(locations, routeDraft?.from ?? null);
+  const routeEnd = confirmedRoutePlace(locations, routeDraft?.to ?? null);
+  const routeNeedsConfirmation = Boolean(
+    (routeDraft?.from && !routeStart) || (routeDraft?.to && !routeEnd),
+  );
   const routeLocations = useMemo<[MapLocation, MapLocation] | null>(() => {
     if (routeDraft === null) return deepLinkRoute;
-    const from = locations.find((location) => location.id === routeDraft.from);
-    const to = locations.find((location) => location.id === routeDraft.to);
-    return from && to && from.id !== to.id ? [from, to] : null;
-  }, [deepLinkRoute, routeDraft, locations]);
+    return routeStart && routeEnd && routeStart.id !== routeEnd.id ? [routeStart, routeEnd] : null;
+  }, [deepLinkRoute, routeDraft, routeStart, routeEnd]);
   const returnParams = new URLSearchParams({ schoolId: school });
   // Preserve the currently confirmed route, not the original link after a manual change.
   // A pending source can still resolve an untouched deep link. Never serialize GPS.
@@ -283,18 +297,15 @@ function MapContent({
   const platformLoginHref = `/login?returnUrl=${returnUrl}`;
   const schoolLoginHref = `/login?reconnect=school&returnUrl=${returnUrl}`;
   const pendingRoutePlaces = routeLocations?.filter((place) => isProvidencePendingVerification(school, place)) ?? [];
-  const routeStart = routeDraft?.from
-    ? locations.find((location) => location.id === routeDraft.from)
-    : null;
   const selectLocation = useCallback((location: MapLocation) => setSelection(location.id), []);
   const walkFrom = myLocation ?? (school === 'pu' ? PROVIDENCE_WALK_ORIGIN : null);
   const walkFromGate = Boolean(walkFrom && !myLocation);
   const mapLocations = useMemo(() => {
     const visible = new Map(filtered.map((location) => [location.id, location]));
-    for (const location of [...(routeLocations ?? []), ...(selected ? [selected] : [])])
+    for (const location of [...(routeLocations ?? []), ...(routeStart ? [routeStart] : []), ...(selected ? [selected] : [])])
       visible.set(location.id, location);
     return [...visible.values()];
-  }, [filtered, selected, routeLocations]);
+  }, [filtered, selected, routeLocations, routeStart]);
 
   function locate() {
     const request = ++positionGeneration.current;
@@ -440,7 +451,15 @@ function MapContent({
   return (
     <div className={`pageStack ${styles.page}`} data-map-first-screen="true">
       {publicTask && publicTask.schoolId === school && <PublicNavigationTask port={publicTask} />}
-      {routeStart && !routeLocations && (
+      {routeNeedsConfirmation && (
+        <div className={styles.notice}>
+          <p role="status">原先選擇的地點已變更或無法確認，請重新選擇起點及終點。</p>
+          <button className="btn" onClick={() => setRouteDraft({ from: null, to: null })}>
+            清除待確認路線
+          </button>
+        </div>
+      )}
+      {routeStart && !routeLocations && !routeNeedsConfirmation && (
         <div className={styles.notice}>
           <p role="status">已設定「{routeStart.name}」為起點。請選擇其他地點，再按「設為終點」。</p>
           <button className="btn" onClick={() => setRouteDraft({ from: null, to: null })}>
@@ -748,17 +767,17 @@ function MapContent({
               <button
                 className="btn"
                 onClick={() => {
-                  setRouteDraft({ from: selected.id, to: null });
+                  setRouteDraft({ from: selected, to: null });
                   setNotice('');
                 }}
               >
                 設為起點
               </button>
-              {routeStart && routeStart.id !== selected.id && (
+              {routeStart && !routeNeedsConfirmation && routeStart.id !== selected.id && (
                 <button
                   className="btn"
                   onClick={() => {
-                    setRouteDraft({ from: routeStart.id, to: selected.id });
+                    setRouteDraft({ from: routeStart, to: selected });
                     setNotice('');
                   }}
                 >
