@@ -324,9 +324,7 @@ tronclass_signal_record() {
   local parsed run pid start
   parsed="$(tronclass_parse_record "$record" "$TRONCLASS_RUN_ID" 2>/dev/null || true)"
   [ -n "$parsed" ] || return 0
-  run="$(printf '%s' "$parsed" | awk '{print $1}')"
-  pid="$(printf '%s' "$parsed" | awk '{print $2}')"
-  start="$(printf '%s' "$parsed" | awk '{print $3}')"
+  read -r run pid start <<< "$parsed"
   [ "$run" = "${TRONCLASS_RUN_ID:-}" ] || return 0
   tronclass_record_matches "$pid" "$start" || return 0
   kill "-$sig" -- "-$pid" 2>/dev/null || true
@@ -335,11 +333,10 @@ tronclass_signal_record() {
 
 tronclass_group_alive_record() {
   local record="$1"
-  local parsed pid start
+  local parsed run pid start
   parsed="$(tronclass_parse_record "$record" "$TRONCLASS_RUN_ID" 2>/dev/null || true)"
   [ -n "$parsed" ] || return 1
-  pid="$(printf '%s' "$parsed" | awk '{print $2}')"
-  start="$(printf '%s' "$parsed" | awk '{print $3}')"
+  read -r run pid start <<< "$parsed"
   tronclass_record_matches "$pid" "$start" || return 1
   if [ -e "/proc/$pid" ]; then
     return 0
@@ -356,7 +353,14 @@ tronclass_stop_logged() {
   local memory_record=""
   [ -n "$memory" ] && memory_record="$(tronclass_parse_record "$memory" "$TRONCLASS_RUN_ID" 2>/dev/null || true)"
   local records=()
-  [ -n "$memory_record" ] && records+=("$memory_record")
+  tronclass_remember_group() {
+    local record="$1"
+    records+=("$record")
+    # Publish each discovery before signalling so the launcher can escalate
+    # even while this helper is still walking the wrapper's descendants.
+    [ -z "$cleanup_records" ] || printf '%s\n' "$record" >> "$cleanup_records/$BASHPID" || true
+  }
+  [ -z "$memory_record" ] || tronclass_remember_group "$memory_record"
   local sidecar_record="" launcher_pgid
   read -r launcher_pgid < <(ps -o pgid= -p "$$")
   [ -n "$launcher_pgid" ] || return 1
@@ -371,7 +375,7 @@ tronclass_stop_logged() {
       if tronclass_record_matches "$pid" "$start" && kill -0 -- "-$pid" 2>/dev/null; then
         sidecar_record="$child_record"
         if [[ " ${records[*]} " != *" $sidecar_record "* ]]; then
-          records+=("$sidecar_record")
+          tronclass_remember_group "$sidecar_record"
         fi
       fi
     fi
@@ -393,7 +397,7 @@ tronclass_stop_logged() {
         for existing in "${records[@]}"; do
           [ "$existing" = "$child_record" ] && continue 2
         done
-        records+=("$child_record")
+        tronclass_remember_group "$child_record"
       done < <(
         if [ "$walk_pid" = "$wrapper" ]; then
           ps -o pid=,pgid= -p "$wrapper" 2>/dev/null
@@ -426,18 +430,27 @@ tronclass_stop_logged() {
     tronclass_signal_record "$record" "$sig"
   done
   [ -n "$wrapper" ] && kill "-$sig" "$wrapper" 2>/dev/null || true
-  local i
-  for i in $(seq 1 20); do
+  local wrapper_exit_polls=0
+  while :; do
     tronclass_discover_groups
-    local wrapper_alive=0 group_alive=0
+    local wrapper_alive=0 group_alive=0 leader_alive=0 run pid start
     [ -n "$wrapper" ] && kill -0 "$wrapper" 2>/dev/null && wrapper_alive=1
     for record in "${records[@]+"${records[@]}"}"; do
-      tronclass_group_alive_record "$record" && group_alive=1
+      if tronclass_group_alive_record "$record"; then
+        group_alive=1
+        read -r run pid start <<< "$record"
+        [ ! -e "/proc/$pid" ] || leader_alive=1
+      fi
     done
     if [ "$wrapper_alive" -eq 0 ] && [ "$group_alive" -eq 0 ]; then
       return 0
     fi
     [ "$EPOCHSECONDS" -lt "$spawn_deadline" ] || break
+    # Preserve the short grace period for orphaned group descendants.
+    if [ "$wrapper_alive" -eq 0 ] && [ "$leader_alive" -eq 0 ]; then
+      wrapper_exit_polls=$((wrapper_exit_polls + 1))
+      [ "$wrapper_exit_polls" -lt 20 ] || break
+    fi
     sleep 0.1
   done
   tronclass_discover_groups
@@ -451,7 +464,18 @@ tronclass_stop_logged() {
 cleanup() {
   local sig="${1:-}"
   trap - EXIT INT TERM
-  local child launch_signal=TERM pending_cleaned='' jobs=() job
+  local child launch_signal=TERM pending_cleaned='' jobs=() job cleanup_records
+  cleanup_records="$(mktemp -d "$TRONCLASS_RUNTIME_DIR/.cleanup.XXXXXXXX")" || cleanup_records=""
+  tronclass_kill_discovered_groups() {
+    [ -n "$cleanup_records" ] || return 0
+    local journal record
+    for journal in "$cleanup_records"/*; do
+      [ -f "$journal" ] || continue
+      while IFS= read -r record; do
+        tronclass_signal_record "$record" KILL
+      done < "$journal"
+    done
+  }
   TRONCLASS_CLEANUP_DEADLINE=$((EPOCHSECONDS + 6))
   if [ -n "${TRONCLASS_LAUNCHING_LOG:-}" ]; then
     [ "$TRONCLASS_LAUNCHING_LOG" != "$emulator_log" ] || launch_signal=INT
@@ -472,20 +496,27 @@ cleanup() {
   [ "$pending_cleaned" = "$seed_log" ] || { tronclass_stop_logged "$TRONCLASS_SEED_PID" "$seed_log" TERM "${TRONCLASS_SEED_RECORD:-}" & jobs+=("$!"); }
   [ "$pending_cleaned" = "$acceptance_log" ] || { tronclass_stop_logged "$TRONCLASS_ACCEPTANCE_PID" "$acceptance_log" TERM "${TRONCLASS_ACCEPTANCE_RECORD:-}" & jobs+=("$!"); }
   [ "$pending_cleaned" = "$health_log" ] || { tronclass_stop_logged "$TRONCLASS_HEALTH_PID" "$health_log" TERM "${TRONCLASS_HEALTH_RECORD:-}" & jobs+=("$!"); }
-  for job in "${jobs[@]+"${jobs[@]}"}"; do
+  local deadline_reached=0
+  for job in "${jobs[@]}"; do
     while kill -0 "$job" 2>/dev/null; do
       if [ "$EPOCHSECONDS" -ge "$TRONCLASS_CLEANUP_DEADLINE" ]; then
-        kill -KILL "$job" 2>/dev/null || true
-        break
+        deadline_reached=1
+        break 2
       fi
       sleep 0.05
     done
     wait "$job" 2>/dev/null || true
   done
+  if [ "$deadline_reached" -eq 1 ] || [ "$EPOCHSECONDS" -ge "$TRONCLASS_CLEANUP_DEADLINE" ]; then
+    tronclass_kill_discovered_groups
+    # Let helpers finish discovery, including groups found during escalation.
+    for job in "${jobs[@]}"; do
+      wait "$job" 2>/dev/null || true
+    done
+    tronclass_kill_discovered_groups
+  fi
+  [ -z "$cleanup_records" ] || rm -rf -- "$cleanup_records"
   unset TRONCLASS_CLEANUP_DEADLINE
-  # A helper killed at the shared deadline may not have delivered SIGKILL yet.
-  # Recorded wrappers (including a spawn stalled in an uninterruptible wait)
-  # must not outlive the launcher.
   local pid
   for pid in "$TRONCLASS_WEB_PID" "$TRONCLASS_EMULATOR_PID" "$TRONCLASS_SELFTEST_WRAPPER"     "$TRONCLASS_SEED_PID" "$TRONCLASS_ACCEPTANCE_PID" "$TRONCLASS_HEALTH_PID"; do
     [ -n "$pid" ] || continue

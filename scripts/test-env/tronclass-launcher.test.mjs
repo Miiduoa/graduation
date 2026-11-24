@@ -1523,23 +1523,48 @@ const ignoreStop = () => {
   setInterval(() => {}, 1000);
 };
 if (arg && arg.endsWith('/firebase.js')) {
+  ignoreStop();
   writePid('emulator.pid');
   console.log('All emulators ready');
-  ignoreStop();
 } else if (arg && arg.endsWith('/seed.cjs')) {
   writePid('seed.pid');
 } else if (arg && arg.endsWith('/next')) {
+  ignoreStop();
   writePid('web.pid');
-  ignoreStop();
 } else if (arg && arg.endsWith('/health-tronclass.cjs')) {
-  writePid('health.pid');
-  fs.writeFileSync(path.join(dir, 'health-started'), '');
   ignoreStop();
+  writePid('health.pid');
+  const detached = require('node:child_process').spawn(process.execPath, ['-e', \`
+    process.on('SIGTERM', () => {});
+    process.on('SIGINT', () => {});
+    require('node:fs').writeFileSync(process.argv[1], String(process.pid));
+    setInterval(() => {}, 1000);
+  \`, path.join(dir, 'detached.pid')], { detached: true, stdio: 'ignore' });
+  detached.unref();
 }
 `, { mode: 0o700 });
+  // Pause the helpers in their final polling round so escalation is tested
+  // while discovery helpers are still running.
+  const shellHooks = marker('cleanup-hooks.bash');
+  writeFileSync(shellHooks, `kill() {
+  if [[ "$1" == -0 && -n "\${spawn_deadline:-}" && "$BASHPID" != "$$" &&
+        -n "\${records[0]:-}" && "\${wrapper:-}" == "\${2:-}" &&
+        "$EPOCHSECONDS" -ge "$((spawn_deadline - 1))" && -z "\${paused_cleanup:-}" ]]; then
+    paused_cleanup=1
+    printf '%s\\n' "$BASHPID" >> "$TRONCLASS_RUNTIME_DIR/helpers-paused"
+    sleep 1.3
+    printf '%s\\n' "$BASHPID" >> "$TRONCLASS_RUNTIME_DIR/helpers-finished"
+  fi
+  if [[ "$1" == -KILL && "$BASHPID" == "$$" ]]; then
+    printf '%s\\n' "\${*:2}" >> "$TRONCLASS_RUNTIME_DIR/launcher-kills"
+  fi
+  builtin kill "$@"
+}
+`);
   const proc = spawn('bash', [script], {
     env: {
       ...process.env,
+      BASH_ENV: shellHooks,
       PATH: `${dir}:${process.env.PATH}`,
       TMPDIR: dir,
       HOME: dir,
@@ -1556,20 +1581,36 @@ if (arg && arg.endsWith('/firebase.js')) {
   }
   try {
     const readyDeadline = Date.now() + 8000;
-    while (!existsSync(marker('health-started')) && Date.now() < readyDeadline) await delay(20);
-    assert.ok(existsSync(marker('health-started')), output);
-    const pids = ['health.pid', 'web.pid', 'emulator.pid'].map(name => Number(readFileSync(marker(name), 'utf8')));
-    for (const pid of pids) process.kill(pid, 0);
+    const pidFiles = ['health.pid', 'web.pid', 'emulator.pid', 'detached.pid'].map(marker);
+    while (!pidFiles.every(existsSync) && Date.now() < readyDeadline) await delay(20);
+    assert.ok(pidFiles.every(existsSync), output);
+    const pids = pidFiles.map(file => Number(readFileSync(file, 'utf8')));
+    for (const pid of pids) process.kill(-pid, 0);
     const started = Date.now();
     assert.ok(proc.kill('SIGTERM'));
     assert.deepEqual(await exited, [143, null], output);
     const elapsed = Date.now() - started;
     assert.ok(elapsed < 8000, `cleanup took ${elapsed}ms; shared deadline should finish near 6s, not 6s per group`);
+    const paused = readFileSync(marker('helpers-paused'), 'utf8').trim().split('\n').sort();
+    const finished = readFileSync(marker('helpers-finished'), 'utf8').trim().split('\n').sort();
+    assert.equal(paused.length, 3);
+    assert.deepEqual(finished, paused, 'cleanup helpers completed after the shared deadline');
+    const kills = readFileSync(marker('launcher-kills'), 'utf8').trim().split('\n');
     for (const pid of pids) {
-      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, `pid ${pid} still alive`);
+      assert.ok(kills.includes(`-- -${pid}`), `launcher omitted SIGKILL to group ${pid}`);
+      assert.throws(() => process.kill(-pid, 0), { code: 'ESRCH' }, `group ${pid} still alive`);
     }
   } finally {
     if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+    for (const name of ['health.pid', 'web.pid', 'emulator.pid', 'detached.pid']) {
+      if (!existsSync(marker(name))) continue;
+      const pid = Number(readFileSync(marker(name), 'utf8'));
+      if (pid > 1) {
+        try { process.kill(-pid, 'SIGKILL'); } catch (error) {
+          if (error.code !== 'ESRCH') throw error;
+        }
+      }
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 });
