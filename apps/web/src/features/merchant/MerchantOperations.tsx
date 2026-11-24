@@ -87,6 +87,7 @@ export function MerchantOperations({
   onExpired,
   confirmedDetail,
   confirmedListStatus,
+  listRevocation,
   beginRequest,
   onChanged,
   onDenied,
@@ -109,6 +110,7 @@ export function MerchantOperations({
   onExpired(): void;
   confirmedDetail?: Detail | null;
   confirmedListStatus?: string;
+  listRevocation?: number;
   beginRequest?(): number;
   onChanged(detail: Detail, verifiedAccess: boolean, revision: number): Detail | null | void;
   onMenuConfirmed?(detail: Detail, revision: number): void;
@@ -278,6 +280,7 @@ export function MerchantOperations({
       opened.current = false;
     }
   }, [suspended, drafts, draftKey]);
+  // A list denial can arrive after Forward has already started verifying this location.
   useLayoutEffect(() => {
     visibleRef.current = visible;
     setEntryVerified(false);
@@ -298,7 +301,7 @@ export function MerchantOperations({
       readAfterWrite.current = false;
       if (!lock.current) ++run.current;
     };
-  }, [checkAccess, read, suspended, visible]);
+  }, [checkAccess, read, suspended, visible, listRevocation]);
 
   async function mutate(
     action: Action,

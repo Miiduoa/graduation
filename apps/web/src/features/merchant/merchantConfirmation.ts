@@ -62,6 +62,7 @@ export function createMerchantConfirmations() {
   const receipts = new Map<string, NuniMerchantApplication>();
   const entries = new Map<string, WorkspaceObservations>();
   let listRevocation = 0;
+  let listRevision = 0;
   const revocations = new Map<string, number>();
   const verified = new Map<string, number>();
   const menus = new Set<string>();
@@ -161,17 +162,25 @@ export function createMerchantConfirmations() {
       else delete lists.programs;
     },
     mergeWorkspaceList(rows: NuniMerchantWorkspace[], revision: number) {
-      includeVerifiedWorkspaces = false;
-      lists.workspaces = rows;
+      if (revision <= listRevocation) return;
+      if (revision > listRevision) {
+        listRevision = revision;
+        includeVerifiedWorkspaces = false;
+        lists.workspaces = rows;
+      }
       for (const row of rows) merge(row, revision);
     },
-    rejectWorkspaceList(denied: boolean) {
-      includeVerifiedWorkspaces = !denied;
+    rejectWorkspaceList(denied: boolean, revision: number) {
       if (denied) {
+        includeVerifiedWorkspaces = false;
         delete lists.workspaces;
         revoke();
+      } else if (revision > Math.max(listRevision, listRevocation)) {
+        listRevision = revision;
+        includeVerifiedWorkspaces = true;
       }
     },
+    workspaceListRevocation: () => listRevocation,
     mergeApplications,
     confirmApplication(receipt: NuniMerchantApplication) {
       const current =
@@ -242,6 +251,7 @@ export function createMerchantConfirmations() {
       lists = {};
       includeVerifiedWorkspaces = false;
       listRevocation = 0;
+      listRevision = 0;
       receipts.clear();
       entries.clear();
       revocations.clear();

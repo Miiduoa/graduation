@@ -1032,9 +1032,13 @@ it.each([403, 404])(
   },
 );
 
-it.each(['on the list', 'after browser Forward'])(
-  'keeps a later list confirmation while applications are pending and a pause receipt arrives %s',
-  async (receiptTiming) => {
+it.each([
+  { receiptTiming: 'on the list', listAfterForward: false },
+  { receiptTiming: 'after browser Forward', listAfterForward: false },
+  { receiptTiming: 'after the list responds after browser Forward', listAfterForward: true },
+])(
+  'keeps a later list confirmation while applications are pending and a pause receipt arrives $receiptTiming',
+  async ({ receiptTiming, listAfterForward }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const open = detail('store-a', true);
     const paused = { ...open, locationStatus: 'closed', publicAccess: false };
@@ -1048,11 +1052,15 @@ it.each(['on the list', 'after browser Forward'])(
     });
     let returning = false;
     const readDetail = vi.fn(() => Promise.resolve(open));
-    const loadStores = vi.fn(() =>
-      Promise.resolve({
-        workspaces: [{ ...open, merchantName: returning ? '重新確認的餐坊' : open.merchantName }],
-      }),
-    );
+    const confirmedList = { workspaces: [{ ...open, merchantName: '重新確認的餐坊' }] };
+    let finishList!: (value: typeof confirmedList) => void;
+    const list = new Promise<typeof confirmedList>((resolve) => {
+      finishList = resolve;
+    });
+    const loadStores = vi.fn(() => {
+      if (!returning) return Promise.resolve({ workspaces: [open] });
+      return listAfterForward ? list : Promise.resolve(confirmedList);
+    });
     mocks.request.mockImplementation((resource) => {
       if (resource === 'merchant-workspaces') return loadStores();
       if (resource === 'merchant-applications' && returning) return applications;
@@ -1074,8 +1082,8 @@ it.each(['on the list', 'after browser Forward'])(
     returning = true;
     readDetail.mockRejectedValue(new NuniError(503, 'UNAVAILABLE'));
     await act(async () => window.history.back());
-    await screen.findByRole('heading', { name: '重新確認的餐坊／一樓' });
-    expect(loadStores).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(loadStores).toHaveBeenCalledTimes(2));
+    if (!listAfterForward) await screen.findByRole('heading', { name: '重新確認的餐坊／一樓' });
     expect(screen.getByText('正在載入店家資料…')).toBeTruthy();
     if (receiptTiming === 'on the list') {
       await act(async () => finishWrite(paused));
@@ -1084,7 +1092,8 @@ it.each(['on the list', 'after browser Forward'])(
     }
 
     await act(async () => window.history.forward());
-    if (receiptTiming === 'after browser Forward') {
+    if (listAfterForward) await act(async () => finishList(confirmedList));
+    if (receiptTiming !== 'on the list') {
       await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
       await act(async () => finishWrite(paused));
     }
@@ -1153,9 +1162,14 @@ it.each([403, 404])(
   },
 );
 
-it.each([403, 404])(
-  'discards a newer background detail when the earlier list request returns %s',
-  async (status) => {
+it.each([
+  { status: 403, forwardFirst: false },
+  { status: 404, forwardFirst: false },
+  { status: 403, forwardFirst: true },
+  { status: 404, forwardFirst: true },
+])(
+  'discards a newer background detail when the earlier list request returns $status (Forward first: $forwardFirst)',
+  async ({ status, forwardFirst }) => {
     const path = 'merchant-workspaces/campus-one/store-a';
     const open = detail('store-a', true);
     const background = {
@@ -1183,11 +1197,21 @@ it.each([403, 404])(
     const readList = vi.fn()
       .mockResolvedValueOnce({ workspaces: [open] })
       .mockReturnValueOnce(list);
+    let finishForwardRead!: (value: typeof recovered) => void;
+    const forwardRead = new Promise<typeof recovered>((resolve) => {
+      finishForwardRead = resolve;
+    });
+    let finishRecovery!: (value: typeof recovered) => void;
+    const recovery = new Promise<typeof recovered>((resolve) => {
+      finishRecovery = resolve;
+    });
     const readDetail = vi.fn()
       .mockResolvedValueOnce(open)
       .mockResolvedValueOnce(background)
-      .mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'))
-      .mockResolvedValueOnce(recovered);
+      .mockImplementationOnce(() =>
+        forwardFirst ? forwardRead : Promise.reject(new NuniError(503, 'UNAVAILABLE')),
+      )
+      .mockImplementationOnce(() => forwardFirst ? recovery : Promise.resolve(recovered));
     mocks.request.mockImplementation((resource) => {
       if (resource === 'merchant-workspaces') return readList();
       if (resource === path) return readDetail();
@@ -1206,12 +1230,23 @@ it.each([403, 404])(
     await screen.findByRole('heading', { name: '撤銷前的餐坊／一樓' });
     expect(readDetail).toHaveBeenCalledTimes(2);
 
-    await act(async () => denyList(new NuniError(status, 'DENIED')));
-    await screen.findByText('目前無法確認店家資料，請重新載入。');
-    expect(readDetail).toHaveBeenCalledTimes(3);
-    expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
-
-    await act(async () => window.history.forward());
+    if (forwardFirst) {
+      await act(async () => window.history.forward());
+      await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(3));
+      await act(async () => denyList(new NuniError(status, 'DENIED')));
+      await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(4));
+      await act(async () => finishForwardRead(recovered));
+      expect(screen.queryByText('撤銷前的餐坊／一樓')).toBeNull();
+      expect(screen.queryByText('營業中')).toBeNull();
+      expect(screen.queryByText('服務方式')).toBeNull();
+      await act(async () => finishRecovery(recovered));
+    } else {
+      await act(async () => denyList(new NuniError(status, 'DENIED')));
+      await screen.findByText('目前無法確認店家資料，請重新載入。');
+      expect(readDetail).toHaveBeenCalledTimes(3);
+      expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+      await act(async () => window.history.forward());
+    }
     await screen.findByRole('heading', { name: '重新授權的餐坊／一樓' });
     expect(readDetail).toHaveBeenCalledTimes(4);
     expect(screen.getByText('暫停接單')).toBeTruthy();

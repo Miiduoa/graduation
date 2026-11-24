@@ -240,10 +240,11 @@ function AccountWorkspace({
   onExpired: () => Promise<void>;
   onSwitchAccount: () => Promise<void>;
 }) {
-  const [{ overview, details, listedStatuses, applicationsKnown }, setWorkspaceSnapshot] = useState({
+  const [{ overview, details, listedStatuses, applicationsKnown, listRevocation }, setWorkspaceSnapshot] = useState({
     overview: null as MerchantOverview | null,
     details: new Map<string, NuniMerchantWorkspaceDetail>(),
     listedStatuses: new Map<string, string>(),
+    listRevocation: 0,
     applicationsKnown: false,
   });
   const [loading, setLoading] = useState(true);
@@ -287,10 +288,12 @@ function AccountWorkspace({
   const mounted = useRef(true);
   const busyRef = useRef(false);
   const enabled = useRef(false);
+  const sessionGeneration = useRef(0);
   useLayoutEffect(() => {
     enabled.current = !suspended && !invalidSession;
     return () => {
       enabled.current = false;
+      ++sessionGeneration.current;
     };
   }, [suspended, invalidSession]);
   const invalidate = useCallback(() => {
@@ -301,6 +304,7 @@ function AccountWorkspace({
       overview: confirmed.overview(),
       details: confirmed.verifiedDetails(),
       listedStatuses: confirmed.listedStatuses(),
+      listRevocation: confirmed.workspaceListRevocation(),
       applicationsKnown: confirmed.hasApplicationList(),
     });
   }, [confirmed]);
@@ -310,6 +314,7 @@ function AccountWorkspace({
   }, [confirmed, publishOverview]);
   const expire = useCallback(() => {
     enabled.current = false;
+    ++sessionGeneration.current;
     invalidate();
     clearOverview();
     setInvalidSession(true);
@@ -320,7 +325,11 @@ function AccountWorkspace({
   const load = useCallback(async () => {
     const run = ++generation.current;
     const listRevision = confirmed.beginRequest();
-    const isCurrent = () => mounted.current && enabled.current && run === generation.current;
+    const session = sessionGeneration.current;
+    // Navigation can retire the loader while its observations still belong to this session.
+    const isSameSession = () =>
+      mounted.current && enabled.current && session === sessionGeneration.current;
+    const isCurrent = () => isSameSession() && run === generation.current;
     setLoading(true);
     setLoadError('');
     const denied = (error: unknown) =>
@@ -345,18 +354,18 @@ function AccountWorkspace({
           : browserRequest('merchant-workspaces', context).then(parseMerchantWorkspaces)
         ).then(
           (rows) => {
-            if (isCurrent()) {
+            if (isSameSession()) {
               confirmed.mergeWorkspaceList(rows, listRevision);
               publishOverview();
             }
             return rows;
           },
           (error: unknown) => {
-            if (isCurrent()) {
+            if (isSameSession()) {
               if (expired(error)) expire();
               else {
                 addTargets(confirmed.knownWorkspaces());
-                confirmed.rejectWorkspaceList(denied(error));
+                confirmed.rejectWorkspaceList(denied(error), listRevision);
                 publishOverview();
               }
             }
@@ -396,11 +405,11 @@ function AccountWorkspace({
           const revision = confirmed.beginRequest();
           try {
             const detail = await operations.get(item.tenantId, item.locationId);
-            if (!isCurrent()) return;
+            if (!isSameSession()) return;
             confirmed.confirmDetail(detail, revision, true);
             publishOverview();
           } catch (error) {
-            if (!isCurrent()) return;
+            if (!isSameSession()) return;
             if (expired(error)) {
               expire();
             } else if (denied(error)) {
@@ -584,6 +593,7 @@ function AccountWorkspace({
           onExpired={expire}
           confirmedDetail={details.get(key) ?? null}
           confirmedListStatus={listedStatuses.get(key)}
+          listRevocation={listRevocation}
           beginRequest={confirmed.beginRequest}
           onChanged={onWorkspaceChanged}
           onMenuConfirmed={onMenuConfirmed}
