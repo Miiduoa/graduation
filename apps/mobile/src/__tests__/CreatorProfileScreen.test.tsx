@@ -1,9 +1,12 @@
 import React from 'react';
+import { RefreshControl } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
+import { getDocFromServer } from 'firebase/firestore';
 import { CreatorProfileScreen } from '../screens/social/CreatorProfileScreen';
 import { listCreatorPosts, readCreatorIdentity } from '../services/creatorProfile';
 import { loadCampusPostBookmarks } from '../services/campusPostBookmarks';
 import { followUser, listFollowingIds, unfollowUser } from '../services/follows';
+import { readCreatorCard, saveCreatorCard } from '../services/creatorCard';
 import { readCreatorPin, saveCreatorPin } from '../services/creatorPin';
 
 const mockAuth = {
@@ -20,7 +23,12 @@ jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../state/school', () => ({
   useSchool: () => ({ school: mockSchool, selectionReady: mockSelectionReady }),
 }));
-jest.mock('../firebase', () => ({ isFirebaseMockMode: () => mockFirebase }));
+jest.mock('../firebase', () => ({ getDb: jest.fn(), isFirebaseMockMode: () => mockFirebase }));
+jest.mock('firebase/firestore', () => ({
+  ...jest.requireActual('firebase/firestore'),
+  doc: jest.fn(),
+  getDocFromServer: jest.fn(),
+}));
 jest.mock('../screens/social/CreatorHighlight', () => ({ CreatorHighlight: () => null }));
 jest.mock('../services/creatorProfile', () => ({
   listCreatorPosts: jest.fn(),
@@ -31,6 +39,7 @@ jest.mock('../services/creatorPin', () => ({
   saveCreatorPin: jest.fn(),
 }));
 jest.mock('../services/creatorCard', () => ({
+  ...jest.requireActual('../services/creatorCard'),
   readCreatorCard: jest.fn(async () => null),
   saveCreatorCard: jest.fn(),
 }));
@@ -55,6 +64,9 @@ const page = (posts: typeof myPost[], hasMore = false) => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(getDocFromServer).mockReset();
+  jest.mocked(readCreatorCard).mockReset().mockResolvedValue(null);
+  jest.mocked(saveCreatorCard).mockReset();
   mockAuth.user = { uid: 'alice', displayName: 'Alice' };
   mockAuth.profile = null;
   mockAuth.loading = false;

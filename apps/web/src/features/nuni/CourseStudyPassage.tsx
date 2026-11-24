@@ -11,6 +11,8 @@ import {
 import { getStudyTutorAvailability, runStudyTutor, type StudyTutorTiming } from '@/lib/studyTutorRuntime';
 import {
   appendStudyLesson,
+  canReviewStudyAnswer,
+  hasRevealedStudyAnswer,
   studyLessonHistory,
   STUDY_SESSION_LIMITS,
   updateStudyMode,
@@ -56,6 +58,8 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const lessonId = useId();
   const modeMemory = memory.modes[mode];
   const selected = modeMemory.lessons.find((lesson) => lesson.id === modeMemory.selectedLessonId);
+  const canReviewAnswer = !!selected && canReviewStudyAnswer(selected);
+  const answerRevealed = !!selected && hasRevealedStudyAnswer(selected);
   const result = selected?.response;
   const activeStepIndex = stepSelection?.lessonId === selected?.id ? stepSelection?.index ?? 0 : 0;
   const activeStep = result?.steps?.[activeStepIndex];
@@ -303,12 +307,20 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
                 <p>{result.question}</p>
                 <label className={styles.field} htmlFor={attemptId}>先寫下你的想法
                   <textarea id={attemptId} rows={3} maxLength={STUDY_SESSION_LIMITS.attemptCharacters} value={selected.attempt}
-                    onChange={(event) => { const attempt = event.target.value; changeLesson((previous) => ({ ...previous, attempt, answerVisible: false })); }} />
+                    onChange={(event) => {
+                      const attempt = event.target.value;
+                      changeLesson((previous) => ({
+                        ...previous, attempt, answerVisible: false,
+                      }));
+                    }} />
                 </label>
-                <button type="button" className={styles.button} disabled={!selected.attempt.trim()}
-                  onClick={() => changeLesson((previous) => ({ ...previous, answerVisible: !previous.answerVisible }))}
-                  aria-expanded={selected.answerVisible}>{selected.answerVisible ? '收起參考回答' : '對照參考回答'}</button>
-                {selected.answerVisible && <p className={styles.referenceAnswer}>{result.answer}</p>}
+                <button type="button" className={styles.button} disabled={!canReviewAnswer}
+                  onClick={() => changeLesson((previous) => canReviewStudyAnswer(previous)
+                    ? { ...previous, answerVisible: !previous.answerVisible } : previous)}
+                  aria-expanded={answerRevealed}>
+                  {answerRevealed ? '收起參考回答' : '對照參考回答'}
+                </button>
+                {answerRevealed && <p className={styles.referenceAnswer}>{result.answer}</p>}
                 <p className={styles.note}>這是自我檢查，不會自動評分，也不會影響課程成績或作業繳交狀態。</p>
               </div>
             </section>
