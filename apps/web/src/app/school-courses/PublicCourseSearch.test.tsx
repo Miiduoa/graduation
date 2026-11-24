@@ -62,6 +62,62 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it.each([
+  { condition: 'missing', fetchedAt: undefined, warning: '目前沒有校方資料的擷取時間' },
+  { condition: 'older than 24 hours', fetchedAt: '2026-11-22T03:59:00.000Z', warning: '距離伺服器上次取得校方資料已超過 24 小時' },
+  { condition: 'more than 5 minutes in the future', fetchedAt: '2026-11-23T04:06:00.000Z', warning: '伺服器提供的擷取時間比此裝置時間晚超過 5 分鐘' },
+])('shows a verifiable official-catalog path when source evidence is $condition', async ({ fetchedAt, warning }) => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  try {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt })));
+    render(<PublicCourseSearch {...props} />);
+    submit('005076');
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.getByText(new RegExp(warning))).toBeTruthy();
+    expect(screen.getByRole('link', { name: '官方課程目錄' }).getAttribute('href'))
+      .toBe('https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall');
+    expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it('rechecks freshness after the device clock advances while the page stays open', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  try {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt: '2026-11-23T04:00:00.000Z' })));
+    render(<PublicCourseSearch {...props} />);
+    submit('005076');
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
+    now.mockReturnValue(Date.parse('2026-11-24T04:00:01.000Z'));
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(screen.getByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeTruthy();
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it.each([
+  '2026-11-22T04:01:00.000Z',
+  '2026-11-23T04:04:00.000Z',
+])('does not falsely flag a valid retrieval timestamp %s', async (fetchedAt) => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-23T04:00:00.000Z'));
+  try {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], { fetchedAt })));
+    render(<PublicCourseSearch {...props} />);
+    submit('005076');
+    expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+    expect(screen.queryByText(/距離伺服器上次取得校方資料已超過 24 小時|伺服器提供的擷取時間比此裝置時間晚超過 5 分鐘|目前沒有校方資料的擷取時間/)).toBeNull();
+    expect(screen.queryByRole('link', { name: '官方課程目錄' })).toBeNull();
+  } finally {
+    now.mockRestore();
+  }
+});
+
+
 it('carries linked weekday and credits into a verified search and imports every meeting of a matching course', async () => {
   const multiDay = { ...course, time: '3cd4i' };
   const fetcher = vi.fn().mockResolvedValue(filteredResponse([multiDay], { weekday: 3, credits: 3 }, { unresolvedCount: 2 }));
@@ -716,7 +772,7 @@ it.each(['fetch', 'body'])('times out a stalled %s, retries the same query and i
   await act(async () => { finish(); });
   expect(screen.queryByText(course.title)).toBeNull();
   expect(screen.getByRole('status').textContent).toContain('沒有找到「005076」課程');
-  expect(vi.getTimerCount()).toBe(0);
+  expect(vi.getTimerCount()).toBe(1);
 });
 
 it('clears the request deadline when a pending search is unmounted', async () => {
@@ -725,7 +781,7 @@ it('clears the request deadline when a pending search is unmounted', async () =>
   vi.stubGlobal('fetch', fetcher);
   const view = render(<PublicCourseSearch {...props} />);
   await act(async () => { submit('005076'); });
-  expect(vi.getTimerCount()).toBe(1);
+  expect(vi.getTimerCount()).toBe(2);
   view.unmount();
   expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
   expect(vi.getTimerCount()).toBe(0);
