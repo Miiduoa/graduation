@@ -26,10 +26,9 @@ import { getAuthInstance } from '../../firebase';
 import { postNuniWebFn } from '../../services/nuniWebFn';
 import { aiTokens } from '../../ui/aiFirst';
 type FocusTarget = TextInput;
-const invoke = async <T,>(data: Record<string, unknown>): Promise<T> => {
-  const user = getAuthInstance().currentUser;
-  if (!user) throw new Error('請先登入。');
-  return postNuniWebFn('dormWorkflow', data, user.uid);
+const invoke = async <T,>(data: Record<string, unknown>, uid: string | null | undefined): Promise<T> => {
+  if (!uid) throw new Error('請先登入。');
+  return postNuniWebFn('dormWorkflow', data, uid);
 };
 function Box({ children }: { children: React.ReactNode }) {
   return (
@@ -146,12 +145,12 @@ function Photo({ url, label }: { url: string; label: string }) {
     </Pressable>
   );
 }
-function TicketPhoto({ schoolId, id, index }: { schoolId: string; id: string; index: number }) {
+function TicketPhoto({ schoolId, uid, id, index }: { schoolId: string; uid: string; id: string; index: number }) {
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
   const open = async () => {
     try {
-      setUrl((await invoke<{ url: string }>({ schoolId, action: 'repairPhoto', id, index })).url);
+      setUrl((await invoke<{ url: string }>({ schoolId, action: 'repairPhoto', id, index }, uid)).url);
     } catch {
       setError('無法讀取照片，請重新整理確認權限');
     }
@@ -169,7 +168,7 @@ function TicketPhoto({ schoolId, id, index }: { schoolId: string; id: string; in
 async function exportSummary(text: string) {
   await Share.share({ title: '宿舍統計 CSV', message: text });
 }
-async function pickPhotos(schoolId: string, remaining: number): Promise<string[]> {
+async function pickPhotos(schoolId: string, uid: string, remaining: number): Promise<string[]> {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
     allowsMultipleSelection: true,
@@ -194,7 +193,7 @@ async function pickPhotos(schoolId: string, remaining: number): Promise<string[]
           action: 'uploadPhoto',
           base64,
           contentType: asset.mimeType || 'image/jpeg',
-        })
+        }, uid)
       ).path;
     }),
   );
@@ -286,8 +285,8 @@ export function DormWorkflow({
   };
   const call = useCallback(
     async <T,>(data: Record<string, unknown>): Promise<T> =>
-      invoke<T>({ ...data, schoolId: documentSchoolId }),
-    [documentSchoolId],
+      invoke<T>({ ...data, schoolId: documentSchoolId }, uid),
+    [documentSchoolId, uid],
   );
   const refresh = useCallback(
     async (staff = staffMode) => {
@@ -431,11 +430,10 @@ export function DormWorkflow({
         updated?: number;
         skipped?: number;
       }>(data);
-      const sender = getAuthInstance().currentUser?.uid;
       const result = data.action === 'announce'
         ? await deliverDormAnnouncementBatches(
             send,
-            () => token === generation.current && getAuthInstance().currentUser?.uid === sender,
+            () => token === generation.current && getAuthInstance().currentUser?.uid === uid,
             (receipt) => {
               publicationConfirmed = true;
               setPendingAnnouncementKey(String(data.key));
@@ -520,7 +518,7 @@ export function DormWorkflow({
       {!!r.vendor && staff && <Label>廠商：{r.vendor}</Label>}
       {!!r.expectedDate && <Label>預計日期：{r.expectedDate}</Label>}
       {r.images?.map((url, i) => (
-        <TicketPhoto key={url} schoolId={documentSchoolId} id={r.id} index={i} />
+        <TicketPhoto key={url} schoolId={documentSchoolId} uid={uid} id={r.id} index={i} />
       ))}
       {staff ? (
         <>
@@ -686,7 +684,7 @@ export function DormWorkflow({
                 onPress={() => {
                   const photoGeneration = generation.current;
                   setBusy(true);
-                  void pickPhotos(documentSchoolId, 3 - images.length)
+                  void pickPhotos(documentSchoolId, uid, 3 - images.length)
                     .then((photos) => {
                       if (photoGeneration === generation.current)
                         setImages((old) => [...old, ...photos].slice(0, 3));
