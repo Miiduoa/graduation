@@ -136,6 +136,7 @@ function installHistoryTracking() {
       const previousHref = window.location.href;
       const push = method === 'pushState';
       const routerCommit = push && isRouterHistoryWrite(data, APP_ROUTER_HISTORY_PUSH);
+      const routerReplace = !push && isRouterHistoryWrite(data, APP_ROUTER_HISTORY_REPLACE);
       const changesPage = url != null && new URL(url, window.location.href).pathname !== previousPath;
       const replacesPage = !push && changesPage;
       const record = isHistoryRecord(data);
@@ -166,6 +167,10 @@ function installHistoryTracking() {
           // Query and fragment replacements keep both pieces of entry metadata.
           fields[HISTORY_ENTRY_KEY] =
             (push || replacesPage ? null : previousKey) ?? `${Date.now()}-${++historyEntrySequence}`;
+          if (routerReplace) {
+            // Next uses this marker to distinguish its commit from an application replacement.
+            Object.defineProperty(fields, APP_ROUTER_HISTORY_REPLACE, { value: true });
+          }
           state = fields;
         }
       }
@@ -195,7 +200,7 @@ function installHistoryTracking() {
           url != null &&
           previousKey &&
           !changesOnlyFragment &&
-          !isRouterHistoryWrite(data, APP_ROUTER_HISTORY_REPLACE)
+          !routerReplace
         ) {
           // A fragment-only write leaves the current filters alone. Replacing the full URL
           // can explicitly reapply its filters even when the URL is identical.
@@ -317,7 +322,7 @@ const getServerReturnState = () => emptyReturnState;
 // Only these explicit writes can change the return data on an existing entry.
 function replaceEntryReturn(saved: SearchReturn | null) {
   const previous = window.history.state;
-  const state = Array.isArray(previous) ? structuredClone(previous) : { ...previous };
+  const state = previous == null ? {} : cloneHistoryState(previous);
   if (saved) state[SEARCH_RETURN_STATE] = saved;
   else delete state[SEARCH_RETURN_STATE];
   Object.defineProperty(state, WRITE_SEARCH_RETURN, { value: true });

@@ -1747,6 +1747,32 @@ describe('continuing a search after opening a service', () => {
     },
   );
 
+  it('preserves an unkeyed Map when writing the first return snapshot', async () => {
+    move(librarySearch);
+    const view = renderAfterFrame();
+    const payload = new Map([['view', { mode: 'compact' }]]);
+    act(() => window.history.replaceState(payload, '', librarySearch));
+    expect(window.history.state).toEqual(payload);
+    expect(window.history.state).not.toHaveProperty('__campusSearchHistoryEntry');
+
+    const link = screen.getByRole('link', { name: /^圖書館/ });
+    fireEvent.click(link);
+    const entry = window.history.state;
+    expect(entry.__campusSearchHistoryEntry).toEqual(expect.any(String));
+    expect(entry.__campusSearchHistoryPayload).toEqual(payload);
+    view.unmount();
+    commitNavigation(link.getAttribute('href')!);
+
+    await go(-1);
+    renderAfterFrame();
+    expect(window.history.state).toMatchObject(entry);
+    expect(window.history.state.__campusSearchHistoryPayload.get('view')).toEqual({
+      mode: 'compact',
+    });
+    expect(screen.getByRole<HTMLInputElement>('searchbox').value).toBe('借書');
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+  });
+
   it.each(['map', 'array'] as const)(
     'preserves the same entry’s return through mounted campus replacements with a fresh %s',
     async (shape) => {
