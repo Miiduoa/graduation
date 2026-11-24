@@ -84,6 +84,17 @@ export function applyCampusWalkingSegmentAudits(
   const nodes = new Map(candidates.nodes.map(n => [n.id, n]));
   const ways = new Map(candidates.ways.map(w => [w.id, w]));
   if (nodes.size !== candidates.nodes.length || ways.size !== candidates.ways.length) return null;
+  // The solver consumes graph.nodes, whereas the audit checks source revisions.
+  // Reject drift between these representations rather than routing over coordinates
+  // which have never been reviewed (including duplicated or missing identities).
+  if (candidates.graph.nodes.length !== nodes.size) return null;
+  const graphNodeIds = new Set<number>();
+  for (const node of candidates.graph.nodes) {
+    const source = nodes.get(node.id);
+    if (!source || graphNodeIds.has(node.id) ||
+        node.lat !== source.lat || node.lng !== source.lng) return null;
+    graphNodeIds.add(node.id);
+  }
   const reviews = new Map<string, CampusWalkingSegmentAudit>();
   const duplicates = new Set<string>();
   for (const audit of audits) {
