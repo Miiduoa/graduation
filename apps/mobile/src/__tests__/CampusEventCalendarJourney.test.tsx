@@ -30,6 +30,7 @@ jest.mock('../state/personalImportScope', () => ({
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
     pendingLogout: false,
+    loading: mockVerifying,
     session: mockPlatformSession,
   }),
 }));
@@ -61,7 +62,7 @@ const activity = {
 let mockScope: PersonalImportScope;
 let mockVerifying: boolean;
 let mockPlatformSession: { platformAccountId: string } | null;
-let mockAuth: { user: { uid: string }; loading: boolean };
+let mockAuth: { user: { uid: string } | null; loading: boolean };
 const mockAuthContext = React.createContext<typeof mockAuth | null>(null);
 const mockScopeContext = React.createContext<PersonalImportScope | null>(null);
 
@@ -165,7 +166,11 @@ test.each([
   expect((await loadPersonalImports(original)).records).toHaveLength(0);
 });
 
-test.each(['firebase:student', 'nuni:account-a'])('Firebase 已切換且範圍未解析時，卸載 %s 的舊草稿並撤銷未完成的寫入', async (owner) => {
+test.each([
+  ['firebase:student', '切換'],
+  ['nuni:account-a', '切換'],
+  ['firebase:student', '登出'],
+])('範圍未解析時，卸載 %s 的舊草稿並撤銷 Firebase %s 時未完成的寫入', async (owner, transition) => {
   if (owner === 'firebase:student') mockPlatformSession = null;
   const original = { owner, schoolId: 'pu' };
   mockScope = original;
@@ -183,7 +188,9 @@ test.each(['firebase:student', 'nuni:account-a'])('Firebase 已切換且範圍�
   fireEvent.press(await view.findByRole('button', { name: '儲存行程', disabled: false }));
   await waitFor(() => expect(setItem).toHaveBeenCalledWith(key, expect.any(String)));
 
-  mockAuth = { user: { uid: 'another-student' }, loading: true };
+  mockAuth = transition === '登出'
+    ? { user: null, loading: false }
+    : { user: { uid: 'another-student' }, loading: true };
   mockVerifying = true;
   view.rerender(<Journey />);
   await view.findByText('請回到目前校園的活動頁重新開啟草稿。');

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
+import { Paths } from 'expo-file-system';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -50,6 +51,7 @@ let mockPendingLogout = false;
 let mockSession: { platformAccountId: string } | null = {
   platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
 };
+let mockNuniLoading = false;
 let mockSessionError = '';
 let mockAuth: { user: { uid: string } | null; loading: boolean };
 
@@ -59,6 +61,7 @@ jest.mock('../state/personalImportScope', () => ({
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
     pendingLogout: mockPendingLogout,
+    loading: mockNuniLoading,
     session: mockSession,
     error: mockSessionError,
   }),
@@ -144,6 +147,7 @@ beforeEach(async () => {
     platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
   };
   mockSessionError = '';
+  mockNuniLoading = false;
   mockAuth = { user: null, loading: false };
   mockSchool = { id: 'pu', name: '靜宜大學' };
   mockNavigate.mockReset();
@@ -215,6 +219,38 @@ it('creates edits and deletes personal events on the public/platform scope', asy
   await waitFor(() => expect(view.getByText('已刪除這筆個人行程。')).toBeTruthy());
   ledger = await loadPersonalImports(scope);
   expect(ledger.records).toEqual([]);
+});
+
+it('saves new and edited events on Web with an existing AsyncStorage ledger', async () => {
+  const scope = mockScope!;
+  const { ledger: existing } = await appendPersonalImports(scope, [personalEventRowFromDraft({
+    ...emptyPersonalEventDraft(),
+    title: '既有行程',
+    date: '2026-10-20',
+    allDay: true,
+  }, scope.schoolId)]);
+  const originalPlatform = Platform.OS;
+  const document = Object.getOwnPropertyDescriptor(Paths, 'document')!;
+  Platform.OS = 'web';
+  Object.defineProperty(Paths, 'document', {
+    get: () => { throw new TypeError('Expo 網頁預覽沒有文件目錄'); },
+  });
+  try {
+    const view = await fillAndSave('網頁新增行程');
+    fireEvent.press(view.getByText('網頁新增行程'));
+    fireEvent.changeText(view.getByLabelText('標題'), '網頁修改行程');
+    fireEvent.press(view.getByRole('button', { name: '儲存修改' }));
+    await view.findByText('個人行程已更新。');
+    expect((await loadPersonalImports(scope)).records).toEqual([
+      ...existing.records,
+      expect.objectContaining({ title: '網頁修改行程' }),
+    ]);
+    expect(window.localStorage.length).toBe(0);
+  } finally {
+    window.localStorage.clear();
+    Platform.OS = originalPlatform;
+    Object.defineProperty(Paths, 'document', document);
+  }
 });
 
 it('keeps draft on validation failure and refuses destructive overwrite when load fails', async () => {
@@ -591,8 +627,17 @@ it('shows a save error if the write fails while the account is briefly revalidat
   expect(view.queryByText(personalImportSavedNotice(1))).toBeNull();
 });
 
-it.each(['create', 'edit'])('unmounts the old calendar and rejects a queued %s when Firebase changes while Nuni remains signed in', async (mode) => {
+it.each([
+  ['create', 'switch'],
+  ['edit', 'switch'],
+  ['create', 'sign out'],
+  ['edit', 'sign out'],
+] as const)('unmounts the old calendar and rejects a queued %s on Firebase %s with unresolved scope', async (mode, transition) => {
   mockAuth = { user: { uid: 'student-a' }, loading: false };
+  if (transition === 'sign out') {
+    mockSession = null;
+    mockScope = { owner: 'firebase:student-a', schoolId: 'pu' };
+  }
   const scope = mockScope!;
   const key = personalImportStorageKey(scope);
   const originalTitle = '原本的行程';
@@ -616,8 +661,16 @@ it.each(['create', 'edit'])('unmounts the old calendar and rejects a queued %s w
     ? jest.mocked(editPersonalImport).mock.results[0].value
     : jest.mocked(appendPersonalImports).mock.results[0].value;
 
-  mockAuth = { user: { uid: 'student-b' }, loading: true };
   mockScope = null;
+  if (transition === 'sign out') {
+    mockNuniLoading = true;
+    mockAuth = { user: null, loading: true };
+    view.rerender(<PersonalCalendarScreen />);
+    expect(view.getByLabelText('標題')).toBeTruthy();
+    mockAuth = { user: null, loading: false };
+  } else {
+    mockAuth = { user: { uid: 'student-b' }, loading: true };
+  }
   view.rerender(<PersonalCalendarScreen />);
   expect(view.queryByLabelText('標題')).toBeNull();
   await act(async () => {

@@ -4,6 +4,11 @@ import { Platform } from 'react-native';
 
 const markerSuffix = '.rollback.pending';
 
+// One atomic browser storage entry contains both the recovery marker and the payload.
+function webJournalKey(key: string) {
+  return `campus.personal-imports.rollback.v1:${sha256(key)}`;
+}
+
 function journalFiles(key: string) {
   const directory = Paths.document;
   // An existing legacy marker remains authoritative until its write commits.
@@ -23,16 +28,24 @@ function journalFiles(key: string) {
 
 export function readPersonalImportRollback(key: string): string | undefined {
   // Expo's Web implementation cannot construct a Directory or File.
-  if (Platform.OS === 'web') return undefined;
+  if (Platform.OS === 'web') return window.localStorage.getItem(webJournalKey(key)) ?? undefined;
   const { payload, marked } = journalFiles(key);
   return marked ? payload.textSync() : undefined;
 }
 
 export function preparePersonalImportRollback(key: string, raw: string | null): () => void {
-  if (Platform.OS === 'web') throw new Error('此平台無法建立匯入資料的還原副本。');
+  const encoded = raw ?? 'null';
+  if (Platform.OS === 'web') {
+    const storage = window.localStorage;
+    const backupKey = webJournalKey(key);
+    if (storage.getItem(backupKey) !== encoded) storage.setItem(backupKey, encoded);
+    if (storage.getItem(backupKey) !== encoded) {
+      throw new Error('無法確認匯入資料的還原副本已寫入。');
+    }
+    return () => storage.removeItem(backupKey);
+  }
   const { payload, marker, marked } = journalFiles(key);
   // The document directory survives process restarts and is outside AsyncStorage's quota.
-  const encoded = raw ?? 'null';
   // A retry can reuse the verified copy without rewriting it.
   if (!marked || payload.textSync() !== encoded) {
     payload.write(encoded);
@@ -53,7 +66,10 @@ export function preparePersonalImportRollback(key: string, raw: string | null): 
 }
 
 export function clearPersonalImportRollback(key: string): void {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web') {
+    window.localStorage.removeItem(webJournalKey(key));
+    return;
+  }
   const { payload, marker, marked } = journalFiles(key);
   if (marked) marker.delete();
   discardPayload(payload);

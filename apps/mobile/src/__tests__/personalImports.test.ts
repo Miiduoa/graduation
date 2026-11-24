@@ -66,13 +66,31 @@ test('Web reads an existing ledger without touching the unsupported Expo documen
   try {
     await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
     await expect(snapshotPersonalImports(scope)).resolves.toEqual(ledger);
-    await expect(deletePersonalImport(scope, ledger.records[0], {
-      canContinue: () => true,
-    })).rejects.toThrow('此平台無法建立匯入資料的還原副本。');
-    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
   } finally {
     Platform.OS = originalPlatform;
     Object.defineProperty(Paths, 'document', document);
+  }
+});
+
+test('Web leaves the primary ledger intact when the recovery copy cannot be stored', async () => {
+  const { ledger } = await appendPersonalImports(scope, [row('original')]);
+  const originalPlatform = Platform.OS;
+  Platform.OS = 'web';
+  const storeBackup = jest.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+    throw new DOMException('Quota exceeded', 'QuotaExceededError');
+  });
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  setItem.mockClear();
+  try {
+    await expect(editPersonalImport(scope, ledger.records[0], row('original', '統計'), {
+      canContinue: () => true,
+    })).rejects.toThrow('Quota exceeded');
+    expect(storeBackup).toHaveBeenCalledTimes(1);
+    expect(setItem).not.toHaveBeenCalled();
+    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+  } finally {
+    storeBackup.mockRestore();
+    Platform.OS = originalPlatform;
   }
 });
 
@@ -250,6 +268,30 @@ test('a restart recovers a revoked deletion after both AsyncStorage rollback wri
   expect(JSON.parse((await AsyncStorage.getItem(key))!).records[0]).toEqual(ledger.records[0]);
   await deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
   expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['統計']);
+});
+
+test('Web recovers a revoked write after restart and can retry without Expo files', async () => {
+  const originalPlatform = Platform.OS;
+  const document = Object.getOwnPropertyDescriptor(Paths, 'document')!;
+  Platform.OS = 'web';
+  Object.defineProperty(Paths, 'document', {
+    get: () => { throw new TypeError('Expo 網頁預覽沒有文件目錄'); },
+  });
+  try {
+    const { ledger } = await failedDeletionRollback(true);
+    let restarted!: typeof import('../services/personalImports');
+    jest.isolateModules(() => {
+      restarted = require('../services/personalImports');
+    });
+    await expect(restarted.loadPersonalImports(scope)).resolves.toEqual(ledger);
+    await restarted.deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
+    await expect(restarted.loadPersonalImports(scope)).resolves.toMatchObject({ records: [] });
+    expect(window.localStorage.length).toBe(0);
+  } finally {
+    window.localStorage.clear();
+    Platform.OS = originalPlatform;
+    Object.defineProperty(Paths, 'document', document);
+  }
 });
 
 test('a recovered deletion can retry when storage only fits the smaller result', async () => {
