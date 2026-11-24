@@ -1,3 +1,4 @@
+/* global console, process, structuredClone */
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -101,6 +102,51 @@ function expoRequire(projectRoot) {
   return createRequire(appRequire.resolve('expo/package.json'));
 }
 
+function verifyIosPushAndWidget(projectRoot, project, ios, application, profile, identifier) {
+  const { Target, XcodeUtils } = ios;
+  const widget = Target.getNativeTargets(project).find(
+    ([, entry]) =>
+      XcodeUtils.unquote(entry.name) === 'CampusWidgetExtension' &&
+      Target.isTargetOfType(entry, Target.TargetType.EXTENSION),
+  )?.[1];
+  if (!widget) throw new Error('The production iOS project is missing the campus widget target.');
+  const pluginRequire = createRequire(expoRequire(projectRoot).resolve('@expo/config-plugins'));
+  const plist = pluginRequire('@expo/plist').default;
+  const appGroup = `group.${identifier}`;
+  for (const entry of [application, widget]) {
+    const [, config] = XcodeUtils.getBuildConfigurationForListIdAndName(project, {
+      configurationListId: entry.buildConfigurationList,
+      buildConfiguration: profile.buildConfiguration ?? 'Release',
+    });
+    const readPlist = (setting) => {
+      const file = XcodeUtils.unquote(config.buildSettings[setting]);
+      return plist.parse(readFileSync(join(projectRoot, 'ios', file), 'utf8'));
+    };
+    const info = readPlist('INFOPLIST_FILE');
+    const entitlements = readPlist('CODE_SIGN_ENTITLEMENTS');
+    const expectedId = entry === application ? identifier : `${identifier}.widget`;
+    if (
+      XcodeUtils.unquote(config.buildSettings.PRODUCT_BUNDLE_IDENTIFIER) !== expectedId ||
+      !['$(PRODUCT_BUNDLE_IDENTIFIER)', expectedId].includes(info.CFBundleIdentifier)
+    ) {
+      throw new Error('The production iOS app or widget bundle identifier does not match its target.');
+    }
+    const groups = entitlements['com.apple.security.application-groups'];
+    if (
+      info.NextClassAppGroup !== appGroup ||
+      !Array.isArray(groups) ||
+      groups.length !== 1 ||
+      groups[0] !== appGroup
+    ) {
+      throw new Error('The production iOS app and widget must use their shared App Group.');
+    }
+    if (entry === application && entitlements['aps-environment'] !== 'production')
+      throw new Error('The production iOS app requires the production APNs entitlement.');
+    if (entry === widget && Object.hasOwn(entitlements, 'aps-environment'))
+      throw new Error('The campus widget entitlements include an unexpected APNs capability.');
+  }
+}
+
 export async function verifyNativeIdentity(
   projectRoot,
   target,
@@ -114,14 +160,17 @@ export async function verifyNativeIdentity(
   }
   const { IOSConfig, AndroidConfig } = expoRequire(projectRoot)('@expo/config-plugins');
   let identifier;
+  let iosProject;
+  let iosApplication;
   try {
     if (target.platform === 'ios') {
-      const project = IOSConfig.XcodeUtils.getPbxproj(projectRoot);
-      const applications = IOSConfig.Target.getNativeTargets(project).filter(([, entry]) =>
+      iosProject = IOSConfig.XcodeUtils.getPbxproj(projectRoot);
+      const applications = IOSConfig.Target.getNativeTargets(iosProject).filter(([, entry]) =>
         IOSConfig.Target.isTargetOfType(entry, IOSConfig.Target.TargetType.APPLICATION),
       );
       if (applications.length !== 1) throw new Error('Ambiguous native target');
-      const targetName = applications[0][1].name.replace(/^"|"$/g, '');
+      iosApplication = applications[0][1];
+      const targetName = IOSConfig.XcodeUtils.unquote(iosApplication.name);
       identifier = IOSConfig.BundleIdentifier.getBundleIdentifierFromPbxproj(projectRoot, {
         targetName,
         buildConfiguration: profile.buildConfiguration ?? 'Release',
@@ -143,6 +192,8 @@ export async function verifyNativeIdentity(
     throw new Error(
       'Native project identifier does not match the release target; app.config does not rewrite tracked native projects.',
     );
+  if (iosProject && target.profile === 'production')
+    verifyIosPushAndWidget(projectRoot, iosProject, IOSConfig, iosApplication, profile, identifier);
 }
 
 function readJson(path) {
