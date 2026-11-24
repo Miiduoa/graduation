@@ -1604,43 +1604,50 @@ test.each([true, false])('a failed newer confirmation preserves an older confirm
   expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
 });
 
-test('a list issued after a confirmed cancellation cannot restore it when overlapping confirmations fail', async () => {
-  jest.mocked(listBoards).mockResolvedValue([board]);
-  const view = render(<BoardsScreen />);
-  await view.findByText('讀書會');
+test.each([true, false])(
+  'a refresh dispatched after a failed subscribe and confirmed cancellation applies only committed membership (from server: %s)',
+  async (fromServer) => {
+    jest.mocked(listBoards).mockResolvedValue([board]);
+    const view = render(<BoardsScreen />);
+    await view.findByText('讀書會');
 
-  const write = deferred();
-  jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
-  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+    const write = deferred();
+    jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
+    fireEvent.press(view.getByLabelText('訂閱讀書會'));
 
-  const refresh = () => view.UNSAFE_getByType(RefreshControl).props.onRefresh();
-  await act(async () => { await refresh(); });
+    const refresh = () => view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+    await act(async () => { await refresh(); });
 
-  const firstRead = deferred<boolean>();
-  const secondRead = deferred<boolean>();
-  jest.mocked(isSubscribedToBoard)
-    .mockImplementationOnce(() => firstRead.promise)
-    .mockImplementationOnce(() => secondRead.promise)
-    .mockRejectedValueOnce(new Error('offline'));
-  await act(async () => { write.resolve(); });
-  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+    const firstRead = deferred<boolean>();
+    const secondRead = deferred<boolean>();
+    jest.mocked(isSubscribedToBoard)
+      .mockImplementationOnce(() => firstRead.promise)
+      .mockImplementationOnce(() => secondRead.promise)
+      .mockRejectedValueOnce(new Error('offline'));
+    await act(async () => { write.reject(new Error('offline')); });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
 
-  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
-  await act(async () => { await refresh(); });
-  expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+    jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+    await act(async () => { await refresh(); });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
 
-  await act(async () => { firstRead.resolve(false); });
-  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    await act(async () => { firstRead.resolve(false); });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
 
-  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
-  await act(async () => { await refresh(); });
-  expect(isSubscribedToBoard).toHaveBeenCalledTimes(3);
-  expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
-  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    jest.mocked(readSubscribedBoardIds).mockResolvedValueOnce({
+      ids: ['board'],
+      serverConfirmedIds: fromServer ? ['board'] : [],
+    });
+    await act(async () => { await refresh(); });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(3);
+    expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
+    const expectedLabel = fromServer ? '取消訂閱讀書會' : '訂閱讀書會';
+    expect(view.getByLabelText(expectedLabel)).toBeTruthy();
 
-  await act(async () => { secondRead.reject(new Error('offline')); });
-  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
-});
+    await act(async () => { secondRead.reject(new Error('offline')); });
+    expect(view.getByLabelText(expectedLabel)).toBeTruthy();
+  },
+);
 
 test.each(['board rows', 'subscription IDs'])(
   'a list issued before a confirmed cancellation cannot be retained when %s arrive last',

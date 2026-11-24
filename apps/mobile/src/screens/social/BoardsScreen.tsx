@@ -194,15 +194,15 @@ function BoardsContent() {
     for (const [id, appliedAt] of boardConfirmationAppliedAt.current) {
       if (appliedAt > serverRevisionAtDispatch) keepLocal.add(id);
     }
-    // Positive membership from a server list dispatched after the writes
-    // settled can update the UI during reconciliation. Keep the overlap out
-    // of list sequencing so an in-flight single-board read can still apply.
+    // A server list dispatched after the writes settled and the latest
+    // single-board confirmation applied can publish positive membership.
+    // Keep the overlap out of list sequencing so an in-flight single-board
+    // read can still apply.
     const keepLocalMembership = new Set(keepLocal);
     for (const id of membership.serverConfirmedIds) {
       if (
         keepLocal.has(id) &&
         !pendingSubscriptionCounts.current.has(id) &&
-        !confirmedByBoardRead.current.has(id) &&
         (boardWriteRevision.current.get(id) ?? 0) <= membership.writeRevisionAtDispatch &&
         (boardConfirmationAppliedAt.current.get(id) ?? 0) <= serverRevisionAtDispatch
       ) {
