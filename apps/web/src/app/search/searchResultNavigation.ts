@@ -18,6 +18,10 @@ export function startSearchResultNavigation(type: 'push' | 'replace' | 'traverse
   intent = null;
 }
 
+export function isSearchResultNavigationPending(token: string) {
+  return navigating === token;
+}
+
 export function consumeSearchResultNavigation() {
   const token = navigating;
   navigating = null;

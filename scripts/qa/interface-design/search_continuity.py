@@ -211,6 +211,33 @@ async def check_search_return(page, config, report, capture):
     await assert_results_visible(page, library, report)
     await capture('search-library-settled-return', full_page=False)
 
+    # Insert a native application push between the fixture's Router dispatch
+    # and its marked commit. Back must land on the intervening search entry.
+    await page.evaluate("""() => {
+      const trackedPush = history.pushState;
+      const routerPush = Symbol.for('nuni.app-router.history-push');
+      history.pushState = function (data, unused, url) {
+        if (data?.[routerPush]) {
+          history.pushState = trackedPush;
+          trackedPush.call(this, {
+            __NA: true,
+            __PRIVATE_NEXTJS_INTERNALS_TREE: structuredClone(
+              history.state.__PRIVATE_NEXTJS_INTERNALS_TREE
+            ),
+          }, '', '#results');
+        }
+        trackedPush.call(this, data, unused, url);
+      };
+    }""")
+    await library.press('Enter')
+    await page.wait_for_url(target_url)
+    await expect(form).to_have_count(0)
+    await page.go_back()
+    assert page.url == source_url + '#results'
+    await expect(field).to_have_value('借書')
+    await assert_results_visible(page, library, report)
+    report['checks'].append('Search: Back from a committed result restores focus after an intervening application push')
+
     await form.get_by_role('button', name='清除搜尋', exact=True).click()
     await expect(field).to_be_focused()
     related = results.locator('details[data-directory-section="service:/classroom"]')

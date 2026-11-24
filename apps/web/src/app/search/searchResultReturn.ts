@@ -7,6 +7,7 @@ import { SERVICE_CATEGORIES, type ServiceCategory } from '@/lib/campusServices';
 import {
   APP_ROUTER_HISTORY_PUSH,
   consumeSearchResultNavigation,
+  isSearchResultNavigationPending,
   markSearchResultNavigation,
 } from './searchResultNavigation';
 
@@ -36,9 +37,9 @@ const listeners = new Set<() => void>();
 let trackedEntryKey: string | null = null;
 let historyEntrySequence = 0;
 // The source key binds the saved filters to the entry even after its destination is unpaired.
-const entriesByReturnToken = new Map<
+const searchEntriesByKey = new Map<
   string,
-  { searchKey: string; searchUrl: string; destinationKey: string | null }
+  { token: string; searchUrl: string; destinationKey: string | null }
 >();
 
 function currentUrl() {
@@ -71,7 +72,7 @@ function onHistoryPush(
   entryKey: string | null,
   routerCommit: boolean,
 ) {
-  const navigationToken = consumeSearchResultNavigation();
+  const navigationToken = routerCommit ? consumeSearchResultNavigation() : null;
   // Only a traversal between the linked entries can start another restore.
   publishReturn(null, null);
   if (searchEntry) {
@@ -126,8 +127,14 @@ function installHistoryTracking() {
       const previousPath = window.location.pathname;
       const push = method === 'pushState';
       const routerCommit = push && isRouterPush(data);
-      const replacesPage =
-        !push && url != null && new URL(url, window.location.href).pathname !== previousPath;
+      const changesPage = url != null && new URL(url, window.location.href).pathname !== previousPath;
+      const replacesPage = !push && changesPage;
+      // A same-page application push can become the entry immediately behind
+      // the pending result. Give it its own snapshot binding after the write succeeds.
+      const carriesReturn =
+        push && !routerCommit && !changesPage &&
+        (data == null || isHistoryRecord(data)) &&
+        searchEntry && isSearchResultNavigationPending(searchEntry.saved.token);
       // Normalize copies and replacements of keyed entries before serialization.
       const cloned = data != null && !isHistoryRecord(data) &&
         ((!push && previousKey !== null) || hasSearchHistoryFields(data));
@@ -138,9 +145,9 @@ function installHistoryTracking() {
         const current = state as Record<string, unknown> | null | undefined;
         if (push || previousKey || hasSearchHistoryFields(current) || writesReturn) {
           const fields = cloned && current ? current : { ...current };
-          const saved = push || replacesPage
+          const saved = replacesPage || (push && !carriesReturn)
             ? null
-            : writesReturn
+            : writesReturn && !push
               ? readReturn(current)
               : searchEntry?.saved;
           if (saved) fields[SEARCH_RETURN_STATE] = saved;
@@ -156,6 +163,13 @@ function installHistoryTracking() {
       // Keep the departing key until that observer has compared the two entries.
       if (push || previousKey === trackedEntryKey) trackedEntryKey = readEntryKey(this.state);
       if (push) {
+        if (carriesReturn && trackedEntryKey) {
+          searchEntriesByKey.set(trackedEntryKey, {
+            token: searchEntry.saved.token,
+            searchUrl: currentUrl(),
+            destinationKey: null,
+          });
+        }
         onHistoryPush(searchEntry, trackedEntryKey, routerCommit);
       } else if (!replacesPage && searchEntry && !writesReturn) {
         // Bind the new URL only after the browser accepts the same-page replacement.
@@ -164,9 +178,9 @@ function installHistoryTracking() {
         // A query edit can supersede the traversal before its filters are applied.
         if (arrival && !matchesRouterUrl(arrival.queryString)) publishReturn(pending, null);
       } else if (replacesPage && previousKey) {
-        for (const [token, armed] of entriesByReturnToken) {
-          if (armed.searchKey === previousKey) entriesByReturnToken.delete(token);
-          else if (armed.destinationKey === previousKey) armed.destinationKey = null;
+        searchEntriesByKey.delete(previousKey);
+        for (const armed of searchEntriesByKey.values()) {
+          if (armed.destinationKey === previousKey) armed.destinationKey = null;
         }
         publishReturn(null, null);
       }
@@ -192,11 +206,12 @@ function readReturn(state: unknown): SearchReturn | null {
 
 function readSearchEntry(state: unknown) {
   const saved = readReturn(state);
-  const entries = saved && entriesByReturnToken.get(saved.token);
+  const key = readEntryKey(state);
+  const entries = key && searchEntriesByKey.get(key);
   return saved &&
     entries &&
     window.location.pathname === '/search' &&
-    readEntryKey(state) === entries.searchKey &&
+    saved.token === entries.token &&
     currentUrl() === entries.searchUrl
     ? { saved, entries }
     : null;
@@ -279,16 +294,11 @@ export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token'>) {
   publishReturn(null, null);
   if (window.location.pathname !== '/search') return;
   const token = `${Date.now()}-${++returnSequence}`;
-  const previousState = window.history.state;
   try {
     replaceEntryReturn({ ...value, token });
     const searchKey = readEntryKey(window.history.state);
     if (searchKey) {
-      const previous = readReturn(previousState);
-      if (previous && entriesByReturnToken.get(previous.token)?.searchKey === searchKey) {
-        entriesByReturnToken.delete(previous.token);
-      }
-      entriesByReturnToken.set(token, { searchKey, searchUrl: currentUrl(), destinationKey: null });
+      searchEntriesByKey.set(searchKey, { token, searchUrl: currentUrl(), destinationKey: null });
       markSearchResultNavigation(token);
     }
   } catch {
@@ -300,8 +310,9 @@ export function clearSearchResultReturn() {
   publishReturn(null, null);
   const saved = readReturn(window.history.state);
   if (!saved) return;
-  if (entriesByReturnToken.get(saved.token)?.searchKey === readEntryKey(window.history.state)) {
-    entriesByReturnToken.delete(saved.token);
+  const key = readEntryKey(window.history.state);
+  if (key && searchEntriesByKey.get(key)?.token === saved.token) {
+    searchEntriesByKey.delete(key);
   }
   try {
     replaceEntryReturn(null);

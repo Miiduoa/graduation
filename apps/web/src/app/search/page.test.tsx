@@ -1366,6 +1366,53 @@ describe('continuing a search after opening a service', () => {
     },
   );
 
+  it.each(['?campus=pu&q=公車', '#results'])(
+    'restores the clicked result when a same-page application push (%s) precedes the Router commit',
+    async (url) => {
+      move(librarySearch);
+      const view = renderAfterFrame();
+      const result = screen.getByRole('link', { name: /^圖書館/ });
+      const href = result.getAttribute('href')!;
+      fireEvent.click(result);
+      const original = window.history.state;
+
+      window.history.pushState(
+        {
+          __NA: true,
+          __PRIVATE_NEXTJS_INTERNALS_TREE: structuredClone(original.__PRIVATE_NEXTJS_INTERNALS_TREE),
+        },
+        '',
+        url,
+      );
+      const intervening = window.history.state;
+      expect(intervening.__campusSearchHistoryEntry).not.toBe(original.__campusSearchHistoryEntry);
+      expect(scroll).not.toHaveBeenCalled();
+      const pushedUrl = window.location.href;
+      commitNavigation(href);
+      expect(window.location.pathname).toBe('/library');
+      view.unmount();
+
+      await go(-1);
+      expect(window.location.href).toBe(pushedUrl);
+      expect(window.history.state.__campusSearchHistoryEntry).toBe(
+        intervening.__campusSearchHistoryEntry,
+      );
+      const returned = renderAfterFrame();
+      expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+      expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+      expect(scroll).toHaveBeenCalledTimes(1);
+      returned.unmount();
+
+      await go(-1);
+      expect(window.location.pathname + window.location.search).toBe(librarySearch);
+      expect(window.history.state).toEqual(original);
+      renderAfterFrame();
+      expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('借書');
+      expect(document.activeElement).not.toBe(screen.getByRole('link', { name: /^圖書館/ }));
+      expect(scroll).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it.each(['map', 'array'] as const)(
     'restores focus after a same-page replace with a fresh %s',
     async (shape) => {
