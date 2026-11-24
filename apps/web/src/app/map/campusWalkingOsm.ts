@@ -5,6 +5,9 @@ import type { CampusWalkingBounds, CampusWalkingGraph, WalkingEdge, WalkingNode 
 const HIGHWAYS = ['footway', 'path', 'pedestrian', 'steps', 'service', 'living_street', 'residential'];
 const MAX_NODES = 2000;
 const MAX_EDGES = 4000;
+// Separate work budget: discarded/duplicate outside ways still cost parser CPU.
+// Allow headroom for clipping and duplicates without unbounded member scans.
+const MAX_RAW_WAY_REFERENCES = 4 * MAX_EDGES;
 const MAX_LAG_MS = 48 * 60 * 60 * 1000;
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const ATTRIBUTION = 'https://www.openstreetmap.org/copyright' as const;
@@ -128,10 +131,14 @@ export function parseCampusWalkingOsmCandidates(
   const invalidOutsideNodeIds = new Set<unknown>();
   const nodes = new Map<number, CandidateNode>();
   const rawWays: Record<string, unknown>[] = [];
+  let rawReferences = 0;
   for (const raw of root.elements) {
     const item = record(raw);
     if (!item) return null;
     if (item.type === 'way') {
+      if (!Array.isArray(item.nodes)) return null;
+      rawReferences += item.nodes.length;
+      if (rawReferences > MAX_RAW_WAY_REFERENCES) return null;
       rawWays.push(item);
       continue;
     }

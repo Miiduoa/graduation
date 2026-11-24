@@ -252,6 +252,30 @@ describe('OSM campus walking discovery (not routing approval)', () => {
     expect(parse({ ...input, elements: [...input.elements, { ...node(6, 10.001, 20.001), timestamp: '2026-11-25T00:00:00Z' }] })).toBeNull();
   });
 
+  it('bounds raw member scans even for discarded outside duplicate ways', () => {
+    const input = payload();
+    const outside = [node(6, 10.015, 20.002), node(7, 10.016, 20.002)];
+    // The original fixture has five references. Four repeated outside ways
+    // reach the separate 16,000-reference budget without retaining their edges.
+    const outsideWays = [3998, 3998, 3998, 4001].map(length =>
+      way(103, Array.from({ length }, (_, i) => 6 + i % 2)),
+    );
+    const atLimit = [...input.elements, ...outside, ...outsideWays];
+    expect(parse({ ...input, elements: atLimit })).toEqual(parse(input));
+    expect(parse({ ...input, elements: [...atLimit, way(0, [6])] })).toBeNull();
+
+    // An oversized member list must be rejected before any member is inspected.
+    let reads = 0;
+    const oversized = new Proxy(Array<number>(16001).fill(6), {
+      get(target, property, receiver) {
+        if (typeof property === 'string' && /^\d+$/.test(property)) reads += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    expect(parse({ ...input, elements: [...input.elements, ...outside, way(0, oversized)] })).toBeNull();
+    expect(reads).toBe(0);
+  });
+
   it('bounds node and segment counts', () => {
     expect(parse({ ...payload(), elements: Array.from({ length: 2001 }, (_, i) => node(i + 1, 10.001, 20.001)) })).toBeNull();
     expect(parse({ ...payload(), elements: [...payload().elements, way(103, Array(4002).fill(1))] })).toBeNull();
