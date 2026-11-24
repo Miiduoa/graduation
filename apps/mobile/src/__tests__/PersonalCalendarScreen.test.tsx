@@ -47,8 +47,12 @@ jest.mock('../state/personalImportScope', () => ({
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({ pendingLogout: mockPendingLogout }),
 }));
+let mockSchool = { id: 'pu', name: '靜宜大學' };
 jest.mock('../state/school', () => ({
-  useSchool: () => ({ school: { id: 'pu', name: '靜宜大學' } }),
+  useSchool: () => ({ school: mockSchool, schoolId: mockSchool.id, selectionReady: true }),
+}));
+jest.mock('../state/auth', () => ({
+  useAuth: () => ({ user: null, loading: false }),
 }));
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void | (() => void)) =>
@@ -518,4 +522,13 @@ it("hides the previous owner's calendar while logout is pending", async () => {
   mockScope = null;
   view.rerender(<PersonalCalendarScreen />);
   expect(view.queryByText('即將登出的行程')).toBeNull();
+});
+
+it('hides the previous campus calendar when the school changes during revalidation', async () => {
+  const view = await fillAndSave('原校園行程');
+  expect(view.getByText('原校園行程')).toBeTruthy();
+  mockSchool = { id: 'ntu', name: '臺灣大學' };
+  mockScope = null;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(view.queryByText('原校園行程')).toBeNull();
 });

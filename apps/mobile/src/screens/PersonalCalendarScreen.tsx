@@ -32,6 +32,7 @@ import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { useNuniSession } from '../state/nuniSession';
+import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import {
   appendPersonalImports,
@@ -94,19 +95,22 @@ export function CampusEventCalendarDraftScreen() {
     >();
   const scope = usePersonalImportScope();
   const loggingOut = !!useNuniSession().pendingLogout;
-  const { school } = useSchool();
+  const { school, schoolId, selectionReady } = useSchool();
   const campusEvent = params?.campusEvent;
+  const knownSchoolId = school?.id || schoolId || '';
+  const schoolChanged =
+    !!campusEvent && !!selectionReady && !!knownSchoolId && knownSchoolId !== campusEvent.schoolId;
   const matches =
     !!scope && scope.owner === campusEvent?.owner && scope.schoolId === campusEvent.schoolId;
   const expired = useRef(false);
   useLayoutEffect(() => {
-    if (scope && !matches) expired.current = true;
-  }, [scope, matches]);
-  if (!campusEvent?.draft || (scope && !matches) || expired.current || loggingOut) {
+    if ((scope && !matches) || schoolChanged) expired.current = true;
+  }, [scope, matches, schoolChanged]);
+  if (!campusEvent?.draft || (scope && !matches) || expired.current || loggingOut || schoolChanged) {
     return (
       <Screen>
         <Text style={{ color: theme.colors.text }}>
-          {loggingOut || (scope && !matches) || expired.current
+          {loggingOut || (scope && !matches) || expired.current || schoolChanged
             ? '請回到目前校園的活動頁重新開啟草稿。'
             : '正在確認帳號與校園…'}
         </Text>
@@ -128,20 +132,53 @@ export function CampusEventCalendarDraftScreen() {
   );
 }
 
+
+function parsePersonalImportKey(key: string): { owner: string; schoolId: string } | null {
+  const prefix = 'campus.personal-imports.v1:';
+  if (!key.startsWith(prefix)) return null;
+  const rest = key.slice(prefix.length);
+  const split = rest.lastIndexOf(':');
+  if (split <= 0) return null;
+  try {
+    return {
+      owner: decodeURIComponent(rest.slice(0, split)),
+      schoolId: decodeURIComponent(rest.slice(split + 1)),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default function PersonalCalendarScreen() {
   const scope = usePersonalImportScope();
-  const loggingOut = !!useNuniSession().pendingLogout;
-  const { school } = useSchool();
+  const platform = useNuniSession();
+  const legacy = useAuth();
+  const loggingOut = !!platform.pendingLogout;
+  const { school, schoolId, selectionReady } = useSchool();
   const route = useRoute();
   const key = scope ? personalImportStorageKey(scope) : '';
   const lastReadyKey = useRef(key);
-  if (loggingOut) lastReadyKey.current = '';
-  else if (key) lastReadyKey.current = key;
+  const knownOwner = platform.session
+    ? `nuni:${platform.session.platformAccountId}`
+    : legacy.user?.uid
+      ? `firebase:${legacy.user.uid}`
+      : null;
+  const knownSchoolId = school?.id || schoolId || '';
+  const staleSticky = (() => {
+    if (loggingOut) return true;
+    const previous = parsePersonalImportKey(lastReadyKey.current);
+    if (!previous) return false;
+    if (knownOwner && previous.owner !== knownOwner) return true;
+    if (selectionReady && knownSchoolId && previous.schoolId !== knownSchoolId) return true;
+    return false;
+  })();
+  if (key) lastReadyKey.current = key;
+  else if (staleSticky) lastReadyKey.current = '';
   // Keep the same workspace through a brief revalidation so an in-flight save
   // can finish or surface an error instead of silently dropping the draft.
-  // Logout is not revalidation: drop the sticky key so the previous owner's
-  // calendar cannot reappear, and unmount in-flight reads/deletes.
-  const workspaceKey = loggingOut ? 'pending' : key || lastReadyKey.current || 'pending';
+  // Logout or a known owner/school switch is not revalidation: drop the sticky
+  // key so the previous workspace cannot reappear or accept late reads.
+  const workspaceKey = key || (!staleSticky && lastReadyKey.current) || 'pending';
   const focusEventId = (route.params as FocusParams)?.eventId;
   return (
     <PersonalCalendarWorkspace
