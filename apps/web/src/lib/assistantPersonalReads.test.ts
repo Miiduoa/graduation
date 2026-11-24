@@ -33,6 +33,10 @@ beforeEach(() => {
 });
 
 describe('direct personal reads', () => {
+  it.each(['今天先做什麼？', '我現在該做什麼', '請問今天我應該優先處理哪件事？'])('recognizes a bounded daily priority request: %s', question => {
+    expect(intent(question, now)).toMatchObject({ kind: 'today-priority', from: '2026-11-12', to: '2026-11-12' });
+  });
+
   it('answers the actual saved classes, rooms and times without a provider or a page handoff', async () => {
     save([lesson(), lesson({ id: 'tomorrow', title: '資訊安全', dayOfWeek: 5 })]);
     const result = await answer('今天有哪些課？', scope, options());
@@ -200,6 +204,7 @@ describe('direct personal reads', () => {
     '幫我安排明天的課表', '今天有哪些課然後幫我訂餐', '下週五有哪些課',
     '今天和明天有哪些課', '我今天交了哪些作業', '資料庫的作業有哪些',
     '資料模型作業交了嗎', '開啟課表', '不要查我的作業', '2026-02-30有哪些課',
+    '明天先做什麼？', '今天先做什麼，然後幫我安排時間', '不要查我現在該先做什麼', '今天先做什麼作業？',
     '今天上午、下午有哪些課', '明天現在有什麼課', '現在有什麼課，下一堂課在哪',
   ])('does not swallow a mutation, precise filter or unsupported date: %s', (question) => {
     expect(intent(question, now)).toBeNull();
@@ -243,6 +248,100 @@ describe('authenticated coursework reads', () => {
     expect(vi.mocked(browserRequest).mock.calls.every(([, context]) => context === options().context)).toBe(true);
   });
 
+  it('matches a real deadline to an ongoing class and returns just the exact open task', async () => {
+    save([lesson()]);
+    const dueAt = '2026-11-12T09:50:00+08:00';
+    vi.mocked(browserRequest).mockImplementation(async (path) => path.endsWith('/assignments')
+      ? { assignments: [
+          { ...assignment(1), dueAt }, { ...assignment(2, true), dueAt },
+          { ...assignment(3), dueAt, state: 'closed', closedAt: '2026-11-12T00:00:00Z', title: '已關閉' },
+          { ...assignment(4), title: '明天才交' },
+        ] } : transport(path));
+    const result = await answer('我現在該先做什麼？', scope, options());
+    expect(result?.content).toContain('資料庫管理');
+    expect(result?.content).toContain('資料庫期末實作');
+    expect(result?.content).toContain('09:50');
+    expect(result?.content).not.toMatch(/已完成題目|已關閉|明天才交|不應回傳/);
+    expect(result?.serviceIds).toEqual(['timetable', 'classroom']);
+    expect(result?.courseworkTargets).toEqual([{
+      workspaceId, taskId: assignment(1).id, kind: 'assignment', title: '資料庫期末實作', courseTitle: '資料庫', dueAt,
+    }]);
+  });
+
+  it('keeps verified classes when the campus coursework source is unavailable, never showing another campus or owner', async () => {
+    save([lesson()]);
+    save([lesson({ title: '不同帳號' })], { ...scope, owner: 'platform:other' });
+    vi.mocked(browserRequest).mockImplementation(async (path) => path === 'course-access/workspace-course'
+      ? { ...receipt, course: { ...receipt.course, schoolId: 'nthu' } } : transport(path));
+    const result = await answer('今天先做什麼？', scope, { ...options(), fallbackOnMissing: true });
+    expect(result?.content).toMatch(/資料庫管理/);
+    expect(result?.content).toContain('待辦尚未完整核對');
+    expect(result?.content).not.toMatch(/不同帳號|資料庫期末實作/);
+    expect(result?.courseworkTargets).toEqual([]);
+    expect(vi.mocked(browserRequest).mock.calls.some(([path]) => path.endsWith('/assignments'))).toBe(false);
+  });
+
+  it('returns an overdue task from today without offering an expired preparation slot', async () => {
+    const dueAt = '2026-11-12T09:00:00+08:00';
+    vi.mocked(browserRequest).mockImplementation(async (path) => path.endsWith('/assignments')
+      ? { assignments: [{ ...assignment(1), dueAt }] } : transport(path));
+    const result = await answer('今天先做什麼？', scope, options());
+    expect(result?.content).toContain('資料庫期末實作');
+    expect(result?.content).toContain('已截止');
+    expect(result?.content).toContain('匯入課表');
+    expect(result?.courseworkTargets).toEqual([]);
+  });
+
+  it('gives a new account a concrete starting point when both reads are empty', async () => {
+    vi.mocked(browserRequest).mockResolvedValue({ workspaces: [] });
+    const result = await answer('今天先做什麼？', scope, options());
+    expect(result?.serviceIds).toEqual(['import', 'classroom']);
+    expect(result?.content).toContain('匯入課表');
+    expect(result?.content).toContain('加入班級');
+    expect(result?.courseworkTargets).toEqual([]);
+  });
+
+  it.each([
+    ['assignments', 401, 'SIGN_IN_REQUIRED'], ['quizzes', 401, 'SIGN_IN_REQUIRED'],
+    ['assignments', 409, 'SESSION_CHANGED'], ['quizzes', 409, 'SESSION_CHANGED'],
+  ] as const)('discards the whole priority when the %s reader reports %i %s', async (resource, status, code) => {
+    save([lesson()]);
+    vi.mocked(browserRequest).mockImplementation(async path => {
+      if (path.endsWith('/' + resource)) throw new NuniError(status, code);
+      return transport(path);
+    });
+    await expect(answer('今天先做什麼？', scope, options())).rejects.toThrow('登入狀態已變更');
+  });
+
+  it('withholds both course sources when the sibling quiz read loses workspace access', async () => {
+    save([lesson()]);
+    vi.mocked(browserRequest).mockImplementation(async path => {
+      if (path.endsWith('/assignments')) return { assignments: [
+        { ...assignment(1), dueAt: '2026-11-12T01:50:00Z' },
+      ] };
+      if (path.endsWith('/quizzes')) throw new NuniError(403, 'CLASS_WORKSPACE_FORBIDDEN');
+      return transport(path);
+    });
+    const result = await answer('今天先做什麼？', scope, options());
+    expect(result?.content).toContain('資料庫管理');
+    expect(result?.content).toContain('待辦尚未完整核對');
+    expect(result?.content).not.toContain('資料庫期末實作');
+    expect(result?.courseworkTargets).toEqual([]);
+  });
+
+  it('does not read tasks for unapproved workspaces and stops the whole reply on account-level denial', async () => {
+    save([lesson()]);
+    vi.mocked(browserRequest).mockImplementation(async path => {
+      if (path === 'course-access/workspace-course') throw new NuniError(403, 'CLASS_WORKSPACE_FORBIDDEN');
+      return transport(path);
+    });
+    const scoped = await answer('今天先做什麼？', scope, options());
+    expect(scoped?.content).toContain('待辦尚未完整核對');
+    expect(vi.mocked(browserRequest).mock.calls.map(([path]) => path)).toEqual(['class-workspaces', 'course-access/workspace-course']);
+    vi.mocked(browserRequest).mockRejectedValueOnce(new NuniError(403, 'FORBIDDEN'));
+    await expect(answer('今天先做什麼？', scope, options())).rejects.toThrow('請重新確認帳號');
+  });
+
   it('does not claim no work when a campus binding cannot be verified', async () => {
     vi.mocked(browserRequest).mockImplementation(async (path) => path === 'course-access/workspace-course'
       ? { ...receipt, course: { ...receipt.course, schoolId: 'nthu' } } : transport(path));
@@ -253,13 +352,13 @@ describe('authenticated coursework reads', () => {
     expect(vi.mocked(browserRequest).mock.calls.some(([path]) => path.endsWith('/assignments'))).toBe(false);
   });
 
-  it('discards results on session expiry and stops late responses after cancellation', async () => {
+  it.each(['我有哪些未交作業？', '今天先做什麼？'])('discards results on session expiry and stops late responses after cancellation for %s', async question => {
     vi.mocked(browserRequest).mockRejectedValueOnce(new NuniError(401, 'UNAUTHENTICATED'));
-    await expect(answer('我有哪些未交作業？', scope, options())).rejects.toThrow('登入狀態已變更');
+    await expect(answer(question, scope, options())).rejects.toThrow('登入狀態已變更');
     const controller = new AbortController();
     let resolve!: (value: unknown) => void;
     vi.mocked(browserRequest).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
-    const pending = answer('我有哪些未交作業？', scope, { ...options(), signal: controller.signal });
+    const pending = answer(question, scope, { ...options(), signal: controller.signal });
     controller.abort();
     resolve(await transport('class-workspaces'));
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });

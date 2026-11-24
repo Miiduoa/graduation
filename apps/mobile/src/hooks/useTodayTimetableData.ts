@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { buildPersonalToday, type PersonalImportRecord } from '@campus/shared';
+import { currentTimetableTermKey } from '@campus/shared/src/todayPriority';
 import { type TodayClass } from '@campus/shared/src/pickNextAction';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { loadPersonalImports } from '../services/personalImports';
@@ -22,6 +23,7 @@ type Snapshot = {
   scope: string;
   status: 'loading' | 'ready' | 'error';
   records: PersonalImportRecord[];
+  refreshing?: boolean;
 };
 
 export function useTodayTimetableData(now: Date) {
@@ -37,7 +39,7 @@ export function useTodayTimetableData(now: Date) {
     if (!scopeKey) return;
     setSnapshot((previous) =>
       previous?.scope === scopeKey && previous.status === 'ready'
-        ? previous
+        ? { ...previous, refreshing: true }
         : { scope: scopeKey, status: 'loading', records: [] },
     );
     try {
@@ -73,14 +75,11 @@ export function useTodayTimetableData(now: Date) {
       };
     }, [load]),
   );
-  const plan = useMemo(
-    () =>
-      buildPersonalToday(visible?.status === 'ready' ? visible.records : [], {
-        schoolId: scope?.schoolId || '',
-        now,
-      }),
-    [visible, scope?.schoolId, now],
-  );
+  const plan = useMemo(() => {
+    const records = visible?.status === 'ready' ? visible.records : [];
+    const schoolId = scope?.schoolId || '';
+    return buildPersonalToday(records, { schoolId, now, termKey: currentTimetableTermKey(records, schoolId, now) });
+  }, [visible, scope?.schoolId, now]);
   const classes: TodayTimetableClass[] = useMemo(
     () =>
       plan.today.flatMap((entry) => {
@@ -102,7 +101,7 @@ export function useTodayTimetableData(now: Date) {
           },
         ];
       }),
-    [plan.today, now],
+    [plan.today],
   );
   const status: TodayTimetableStatus = !scopeKey
     ? 'loading'
@@ -113,5 +112,5 @@ export function useTodayTimetableData(now: Date) {
         : plan.terms.length === 0
           ? 'empty'
           : 'ready';
-  return { status, classes, termKey: plan.termKey, retry: load };
+  return { status, refreshing: visible?.refreshing === true, classes, scope, termKey: plan.termKey, retry: load };
 }

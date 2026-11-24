@@ -1,9 +1,10 @@
-import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, type SnapshotMetadata } from 'firebase/firestore';
 import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { getDb, isFirebaseConfigured } from './firebase';
 import type { MaterialSearchSeed } from './courseMaterials';
 
 export interface HomeCourse {
+  schoolId?: string;
   id: string;
   name: string;
   role: string;
@@ -11,6 +12,8 @@ export interface HomeCourse {
   href?: string;
 }
 export interface HomeTask {
+  /** A school binding confirmed with the membership, work and submission reads. */
+  schoolId?: string;
   kind?: 'assignment' | 'quiz';
   id: string;
   courseId: string;
@@ -82,6 +85,10 @@ export interface HomeData {
 
 const FEEDBACK_LIMIT = 8;
 
+function serverConfirmed({ metadata }: { metadata: SnapshotMetadata }): boolean {
+  return metadata?.fromCache === false && metadata.hasPendingWrites === false;
+}
+
 function dateString(value: unknown): string | null {
   if (!value) return null;
   const timestamp = value as { toDate?: () => Date };
@@ -120,6 +127,8 @@ export async function loadHomeData(uid: string): Promise<HomeData> {
     return [
       {
         id,
+        ...(serverConfirmed(memberships) && serverConfirmed(entry) && typeof row.schoolId === 'string' && row.schoolId
+          ? { schoolId: row.schoolId } : {}),
         name: String(row.name ?? '未命名課程'),
         role: String(row.role ?? 'member'),
         unreadCount: Number(row.unreadCount) || 0,
@@ -166,7 +175,10 @@ export async function loadHomeData(uid: string): Promise<HomeData> {
             }
             if (row.submittedAt) return;
           }
+          if (assignment.status === 'closed') return;
           tasks.push({
+            ...(course.schoolId && serverConfirmed(assignments) && serverConfirmed(entry) && serverConfirmed(submission)
+              ? { schoolId: course.schoolId } : {}),
             kind,
             id: entry.id,
             courseId: course.id,

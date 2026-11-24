@@ -3,6 +3,7 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import { AppState } from 'react-native';
 import type { PersonalImportRecord } from '@campus/shared';
 import { TodayTimetablePanel } from '../components/TodayTimetablePanel';
+import { classCourseworkQuestion } from '../features/nuniCourseworkFollowUp';
 import { loadPersonalImports, type PersonalImportScope } from '../services/personalImports';
 import { loadPersonalTimetable } from '../services/personalTimetable';
 
@@ -20,12 +21,21 @@ jest.mock('@react-navigation/native', () => ({
 
 const onOpenImport = jest.fn();
 const onOpenTimetable = jest.fn();
+const onAskCoursework = jest.fn();
 let nowMs = Date.parse('2026-10-19T00:50:00Z');
 const panel = (refreshKey = 0) => (
   <TodayTimetablePanel
     onOpenImport={onOpenImport}
     onOpenTimetable={onOpenTimetable}
     refreshKey={refreshKey}
+  />
+);
+const askPanel = (assistantAccountId = 'account-a') => (
+  <TodayTimetablePanel
+    onOpenImport={onOpenImport}
+    onOpenTimetable={onOpenTimetable}
+    onAskCoursework={onAskCoursework}
+    assistantAccountId={assistantAccountId}
   />
 );
 const record = (overrides: Partial<PersonalImportRecord> = {}): PersonalImportRecord => ({
@@ -232,4 +242,217 @@ test('finishing the last class preserves access to its details instead of claimi
   expect(view.getByText('主顧 303 · 林老師')).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '查看整週課表' }));
   expect(onOpenTimetable).toHaveBeenCalledWith('115|1');
+});
+
+describe('coursework handoff to the platform assistant', () => {
+  const CURRENT = '問 nuni 這堂課的作業';
+  const NEXT = '問 nuni 下一堂課的作業';
+  const at = (clock: string) => Date.parse(`2026-10-19T${clock}+08:00`);
+  const ask = (view: ReturnType<typeof render>, label: string) =>
+    view.queryByRole('button', { name: label });
+
+  test('the generic prompts are exactly the assistant\'s existing current and next intents', () => {
+    expect(classCourseworkQuestion('現在這堂課有什麼作業？')).toBe('current');
+    expect(classCourseworkQuestion('查下一堂課的作業')).toBe('next');
+  });
+
+  test('an ongoing unique class offers the current-class lookup next to it, with a title-free prompt', async () => {
+    nowMs = at('09:10:00');
+    jest.mocked(loadPersonalImports).mockResolvedValue(
+      ledger([record(), record({ id: 'course-b', title: '資料庫', startTime: '10:20', endTime: '11:00' })]),
+    );
+    const view = render(askPanel());
+    await view.findByText('09:00–10:00 · 上課時段');
+    expect(ask(view, NEXT)).toBeNull();
+    const tree = JSON.stringify(view.toJSON());
+    expect(tree.indexOf('資料結構')).toBeLessThan(tree.indexOf(CURRENT));
+    expect(tree.indexOf(CURRENT)).toBeLessThan(tree.indexOf('資料庫'));
+    const reads = jest.mocked(loadPersonalImports).mock.calls.length;
+    fireEvent.press(view.getByRole('button', { name: CURRENT }));
+    expect(onAskCoursework).toHaveBeenCalledTimes(1);
+    expect(onAskCoursework).toHaveBeenCalledWith('現在這堂課有什麼作業？');
+    expect(onAskCoursework.mock.calls[0][0]).not.toMatch(/資料結構|主顧|林老師/);
+    expect(loadPersonalImports).toHaveBeenCalledTimes(reads);
+  });
+
+  test.each([
+    ['08:29:59', false],
+    ['08:30:00', true],
+    ['08:59:00', true],
+  ])('the next class is offered only within thirty minutes of its start (now %s)', async (clock, offered) => {
+    nowMs = at(clock);
+    const view = render(askPanel());
+    await view.findByText('09:00–10:00 · 下一堂');
+    expect(ask(view, CURRENT)).toBeNull();
+    expect(Boolean(ask(view, NEXT))).toBe(offered);
+    if (offered) {
+      fireEvent.press(view.getByRole('button', { name: NEXT }));
+      expect(onAskCoursework).toHaveBeenCalledTimes(1);
+      expect(onAskCoursework).toHaveBeenCalledWith('查下一堂課的作業');
+    }
+  });
+
+  test('the entry stays unavailable without a handoff, for a different account, or while the account is unresolved', async () => {
+    nowMs = at('08:50:00');
+    const view = render(panel());
+    await view.findByText('09:00–10:00 · 下一堂');
+    expect(ask(view, NEXT)).toBeNull();
+    view.rerender(askPanel('account-b'));
+    expect(ask(view, NEXT)).toBeNull();
+    view.rerender(
+      <TodayTimetablePanel
+        onOpenImport={onOpenImport}
+        onOpenTimetable={onOpenTimetable}
+        onAskCoursework={onAskCoursework}
+      />,
+    );
+    expect(ask(view, NEXT)).toBeNull();
+    view.rerender(askPanel());
+    expect(ask(view, NEXT)).toBeTruthy();
+    mockScope = null;
+    view.rerender(askPanel());
+    expect(ask(view, NEXT)).toBeNull();
+    expect(onAskCoursework).not.toHaveBeenCalled();
+  });
+
+  test('a firebase or guest owner never gets a platform assistant action', async () => {
+    nowMs = at('08:50:00');
+    mockScope = { owner: 'firebase:account-a', schoolId: 'pu' };
+    const view = render(askPanel());
+    await view.findByText('09:00–10:00 · 下一堂');
+    expect(ask(view, NEXT)).toBeNull();
+  });
+
+  test('an explicitly selected older term cannot ask about the current term\'s class', async () => {
+    nowMs = at('09:10:00');
+    jest
+      .mocked(loadPersonalImports)
+      .mockResolvedValue(
+        ledger([record(), record({ id: 'old', academicYear: '114', title: '舊學期課程' })]),
+      );
+    const view = render(askPanel());
+    await view.findByText('資料結構');
+    expect(ask(view, CURRENT)).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name: '查看 114／1 課表' }));
+    expect(view.getByText('舊學期課程')).toBeTruthy();
+    expect(view.getByText('09:00–10:00 · 上課時段')).toBeTruthy();
+    expect(ask(view, CURRENT)).toBeNull();
+    expect(ask(view, NEXT)).toBeNull();
+  });
+
+  test('a newest imported term that is not the current academic term is never targeted', async () => {
+    nowMs = at('08:50:00');
+    jest
+      .mocked(loadPersonalImports)
+      .mockResolvedValue(ledger([record({ academicYear: '116', title: '明年課程' })]));
+    const view = render(askPanel());
+    await view.findByText('明年課程');
+    expect(ask(view, NEXT)).toBeNull();
+  });
+
+  test.each([
+    ['simultaneous starts', '08:50:00', { startTime: '09:00', endTime: '10:00' }],
+    ['a staggered overlap while the first is ongoing', '09:10:00', { startTime: '09:30', endTime: '10:30' }],
+  ])('overlapping classes are ambiguous: %s', async (_name, clock, second) => {
+    nowMs = at(clock);
+    jest.mocked(loadPersonalImports).mockResolvedValue(
+      ledger([record(), record({ id: 'course-b', title: '資料庫', ...second })]),
+    );
+    const view = render(askPanel());
+    await view.findByText('資料庫');
+    expect(view.getByText('資料結構')).toBeTruthy();
+    expect(ask(view, CURRENT)).toBeNull();
+    expect(ask(view, NEXT)).toBeNull();
+    expect(view.getAllByText('上課時間重疊，請核對課表。').length).toBeGreaterThan(0);
+  });
+
+  test('two classes ongoing together have no single class to ask about', async () => {
+    nowMs = at('09:40:00');
+    jest.mocked(loadPersonalImports).mockResolvedValue(
+      ledger([record(), record({ id: 'course-b', title: '資料庫', startTime: '09:30', endTime: '10:30' })]),
+    );
+    const view = render(askPanel());
+    await view.findByText('資料庫');
+    expect(ask(view, CURRENT)).toBeNull();
+  });
+
+  test('an unscheduled course elsewhere in the term does not change which class the assistant names', async () => {
+    nowMs = at('08:50:00');
+    jest.mocked(loadPersonalImports).mockResolvedValue(
+      ledger([record(), record({ id: 'unplaced', title: '未排時間', dayOfWeek: undefined, startTime: undefined, endTime: undefined })]),
+    );
+    const view = render(askPanel());
+    await view.findByText(/1 門課的上課時間未確認/);
+    expect(view.getByText('09:00–10:00 · 下一堂')).toBeTruthy();
+    expect(ask(view, NEXT)).toBeTruthy();
+  });
+
+  test('a course without an academic term is never attributed', async () => {
+    nowMs = at('08:50:00');
+    jest.mocked(loadPersonalImports).mockResolvedValue(ledger([]));
+    jest.mocked(loadPersonalTimetable).mockResolvedValue({
+      courses: [{ id: 'manual', name: '手排課程', day: 1, start: 2, end: 3, teacher: '', room: 'R2', color: 'blue' }],
+      schoolId: 'pu',
+      shareWithFriends: false,
+      updatedAt: new Date(nowMs).toISOString(),
+      meta: { year: '', semester: '', school: '', className: '', credits: 0, title: '' },
+    });
+    const view = render(askPanel());
+    await view.findByText('手排課程');
+    expect(ask(view, NEXT)).toBeNull();
+    expect(ask(view, CURRENT)).toBeNull();
+  });
+
+  test('a stale next-class card cannot send once the class has started, even before the clock tick', async () => {
+    nowMs = at('08:59:50');
+    jest.mocked(loadPersonalImports).mockResolvedValue(
+      ledger([record(), record({ id: 'course-b', title: '資料庫', startTime: '10:30', endTime: '11:00' })]),
+    );
+    const view = render(askPanel());
+    await view.findByText('09:00–10:00 · 下一堂');
+    const stale = view.getByRole('button', { name: NEXT });
+    nowMs = at('09:00:10');
+    fireEvent.press(stale);
+    expect(onAskCoursework).not.toHaveBeenCalled();
+    expect(view.getByRole('alert')).toHaveTextContent(/課堂時間已更新/);
+    // The refreshed card is now the ongoing class and offers the current-class lookup instead.
+    expect(view.getByText('09:00–10:00 · 上課時段')).toBeTruthy();
+    expect(ask(view, NEXT)).toBeNull();
+    fireEvent.press(view.getByRole('button', { name: CURRENT }));
+    expect(onAskCoursework).toHaveBeenCalledTimes(1);
+    expect(onAskCoursework).toHaveBeenCalledWith('現在這堂課有什麼作業？');
+    expect(view.queryByRole('alert')).toBeNull();
+  });
+
+  test('a current-class card cannot send after the class has ended', async () => {
+    nowMs = at('09:59:50');
+    const view = render(askPanel());
+    await view.findByText('09:00–10:00 · 上課時段');
+    const stale = view.getByRole('button', { name: CURRENT });
+    nowMs = at('10:00:10');
+    fireEvent.press(stale);
+    expect(onAskCoursework).not.toHaveBeenCalled();
+    expect(view.queryByRole('button', { name: CURRENT })).toBeNull();
+  });
+
+  test('completed classes never carry the action', async () => {
+    nowMs = at('10:30:00');
+    const view = render(askPanel());
+    await view.findByText('今天的上課時段已結束。');
+    fireEvent.press(view.getByRole('button', { name: '查看已結束的 1 堂課' }));
+    expect(ask(view, CURRENT)).toBeNull();
+    expect(ask(view, NEXT)).toBeNull();
+  });
+
+  test('a changed account scope removes the action immediately and ignores the old card', async () => {
+    nowMs = at('09:10:00');
+    const view = render(askPanel());
+    await view.findByText('09:00–10:00 · 上課時段');
+    const old = view.getByRole('button', { name: CURRENT });
+    mockScope = { owner: 'nuni:account-b', schoolId: 'pu' };
+    view.rerender(askPanel());
+    expect(ask(view, CURRENT)).toBeNull();
+    fireEvent.press(old);
+    expect(onAskCoursework).not.toHaveBeenCalled();
+  });
 });

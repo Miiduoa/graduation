@@ -1,6 +1,6 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
-import { RefreshControl } from 'react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { AppState, RefreshControl } from 'react-native';
 import { askCampusAssistant } from '../features/campusAssistant';
 import StudentTodayScreen from '../screens/StudentTodayScreen';
 import { loadStudentHome } from '../data/studentHome';
@@ -24,8 +24,10 @@ const mockNavigation = { navigate: mockNavigate };
 let mockPersonalizationScope: { owner: string; schoolId: string } | null = null;
 const mockTimetable = {
   status: 'ready' as 'loading' | 'ready' | 'error' | 'empty',
+  scope: { owner: 'firebase:student-a', schoolId: 'school-a' } as { owner: string; schoolId: string } | null,
   classes: [] as TodayClass[],
-  termKey: '115-1',
+  refreshing: false,
+  termKey: '115|1',
   retry: jest.fn(),
 };
 
@@ -72,7 +74,7 @@ function result(name = '資料結構'): Awaited<ReturnType<typeof loadStudentHom
     priority: 1,
     dueAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
   };
-  return { courses: [course], tasks: [task] };
+  return { courses: [course], tasks: [task], tasksComplete: true };
 }
 
 function deferred<T>() {
@@ -107,8 +109,10 @@ beforeEach(() => {
   mockAuth = { user: { uid: 'student-a' }, profile: { uid: 'student-a', schoolId: 'school-a', role: 'student' } };
   mockPersonalizationScope = null;
   mockTimetable.status = 'ready';
+  mockTimetable.scope = { owner: 'firebase:student-a', schoolId: 'school-a' };
   mockTimetable.classes = [];
-  mockTimetable.termKey = '115-1';
+  mockTimetable.refreshing = false;
+  mockTimetable.termKey = '115|1';
   mockTimetable.retry.mockReset().mockResolvedValue(undefined);
   clearSchoolTheme();
   applyTheme('light');
@@ -476,7 +480,7 @@ test('the empty schedule follows OLED mode and keeps the full timetable reachabl
   });
   expect(view.getByText('今天沒有排課。')).toHaveStyle({ color: createDarkTheme().colors.muted });
   fireEvent.press(view.getByText(TODAY_COPY.viewFullTimetable));
-  expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalTimetable', { term: '115-1' });
+  expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalTimetable', { term: '115|1' });
 });
 
 test('one-tap homework uses the real current inbox task instead of a guessed target', async () => {
@@ -757,6 +761,116 @@ test('the header opens the student card before the timetable finishes loading', 
   const view = render(<StudentTodayScreen />);
   fireEvent.press(view.getByLabelText('開啟數位學生證'));
   expect(rootNavigateNested).toHaveBeenCalledWith('我的', 'StudentCard');
+});
+
+test.each(['assignment', 'quiz'] as const)('shows the class deadline before the list and opens the exact %s', async kind => {
+  const dueAt = new Date('2026-11-03T09:20:00+08:00');
+  const data = result();
+  const original = data.tasks[0];
+  data.tasks.push({ ...original, kind, id: 'near', assignmentId: 'near-id', dueAt });
+  mockTimetable.classes = [todayClass({ title: '網路概論' })];
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  const button = await view.findByRole('button', { name: `查看提醒的${kind === 'quiz' ? '測驗' : '作業'}，繳交期末報告` });
+  const headers = view.getAllByRole('header').map(node => node.props.children);
+  expect(headers).toContain('nuni 提醒');
+  expect(headers.indexOf('nuni 提醒')).toBeLessThan(headers.indexOf('待處理'));
+  expect(view.getByText(/網路概論.*09:00.*09:50.*09:20/)).toBeVisible();
+  fireEvent.press(button);
+  expect(mockNavigate).toHaveBeenCalledWith('學習', { initial: false,
+    screen: kind === 'quiz' ? 'QuizTaking' : 'HomeworkSubmit',
+    params: kind === 'quiz'
+      ? { groupId: original.groupId, groupName: original.groupName, quizId: 'near-id', dueAt: dueAt.toISOString() }
+      : { courseId: original.groupId, hwTitle: original.title, hwId: 'near-id', dueAt: dueAt.toISOString(), scrollToSubmit: true },
+  });
+  jest.mocked(loadStudentHome).mockResolvedValue({ ...data, tasks: [original] });
+  fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
+  await waitFor(() => expect(view.queryByText('nuni 提醒')).toBeNull());
+});
+
+test.each(['account', 'school', 'timetable', 'coursework', 'truncated', 'missing-id'] as const)(
+  'hides the deadline reminder once its %s evidence is unavailable', async change => {
+    const data = result();
+    data.tasks[0].dueAt = new Date('2026-11-03T09:20:00+08:00');
+    mockTimetable.classes = [todayClass()];
+    jest.mocked(loadStudentHome).mockResolvedValue(data);
+    const view = render(<StudentTodayScreen />);
+    let button = await view.findByRole('button', { name: '查看提醒的作業，繳交期末報告' });
+    while (button.parent && !button.props.onPress) button = button.parent;
+    const stalePress = button.props.onPress;
+    expect(typeof stalePress).toBe('function');
+    if (change === 'account' || change === 'school') {
+      mockTimetable.scope = change === 'account'
+        ? { owner: 'nuni:student-a', schoolId: 'school-a' }
+        : { owner: 'firebase:student-a', schoolId: 'school-b' };
+    } else if (change === 'timetable') {
+      mockTimetable.status = 'error';
+    } else {
+      if (change === 'coursework') jest.mocked(loadStudentHome).mockRejectedValue(new Error('offline'));
+      if (change === 'truncated') jest.mocked(loadStudentHome).mockResolvedValue({ ...data, tasksComplete: false });
+      if (change === 'missing-id') {
+        jest.mocked(loadStudentHome).mockResolvedValue({ ...data, tasks: [{ ...data.tasks[0], assignmentId: '' }] });
+      }
+      fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
+    }
+    view.rerender(<StudentTodayScreen />);
+    await waitFor(() => expect(view.queryByText('nuni 提醒')).toBeNull());
+    act(() => stalePress());
+    expect(mockNavigate).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['114|1', '116|1', ''])('does not attribute a deadline to an unverified semester %s', async term => {
+  const data = result();
+  data.tasks[0].dueAt = new Date('2026-11-03T09:20:00+08:00');
+  mockTimetable.termKey = term;
+  mockTimetable.classes = [todayClass()];
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  await view.findAllByText('繳交期末報告');
+  expect(view.queryByText('nuni 提醒')).toBeNull();
+});
+
+test('rechecks coursework once on returning to the foreground and withdraws a completed assignment', async () => {
+  const data = result();
+  data.tasks[0].dueAt = new Date('2026-11-03T09:20:00+08:00');
+  mockTimetable.classes = [todayClass()];
+  jest.mocked(loadStudentHome).mockResolvedValueOnce(data);
+  const pending = deferred<ReturnType<typeof result>>();
+  jest.mocked(loadStudentHome).mockReturnValueOnce(pending.promise);
+  const listeners = new Set<(state: string) => void>();
+  const original = AppState.addEventListener;
+  AppState.addEventListener = (_event, listener) => {
+    const callback = listener as (state: string) => void;
+    listeners.add(callback);
+    return { remove: () => { listeners.delete(callback); } };
+  };
+  try {
+    const view = render(<StudentTodayScreen />);
+    await view.findByText('nuni 提醒');
+    act(() => listeners.forEach(listener => listener('background')));
+    expect(view.queryByText('nuni 提醒')).toBeNull();
+    act(() => { for (const listener of listeners) { listener('active'); listener('active'); } });
+    expect(loadStudentHome).toHaveBeenCalledTimes(2);
+    expect(view.queryByText('nuni 提醒')).toBeNull();
+    await act(async () => pending.resolve({ ...data, tasks: [] }));
+    expect(view.queryByText('nuni 提醒')).toBeNull();
+  } finally { AppState.addEventListener = original; }
+});
+
+test('rereads both sources once when the Taipei date changes while focused', async () => {
+  jest.setSystemTime(new Date('2026-11-03T23:59:30+08:00'));
+  const intervals = jest.spyOn(global, 'setInterval');
+  try {
+    const view = render(<StudentTodayScreen />);
+    await view.findAllByText('繳交期末報告');
+    const tick = intervals.mock.calls.find(([, delay]) => delay === 60_000)?.[0];
+    expect(typeof tick).toBe('function');
+    jest.setSystemTime(new Date('2026-11-04T00:00:30+08:00'));
+    await act(async () => { (tick as () => void)(); (tick as () => void)(); });
+    expect(loadStudentHome).toHaveBeenCalledTimes(2);
+    expect(mockTimetable.retry).toHaveBeenCalledTimes(1);
+  } finally { intervals.mockRestore(); }
 });
 
 test('distinguishes a class in progress and shows the timetable before non-urgent work', async () => {

@@ -90,7 +90,7 @@ it.each(profiles)('%s can submit and answer its own timetable without model cons
   noRemoteRead();
 });
 
-it.each(profiles.flatMap(profile => ['查我的待辦', '查我要繳的', '查我的\n成績', '查我的\t學分紀錄']
+it.each(profiles.flatMap(profile => ['今天先做什麼？', '查我的待辦', '查我要繳的', '查我的\n成績', '查我的\t學分紀錄']
   .map(question => [profile, question] as const)))(
   '%s routes %j to work guidance before any local or student reader', async (profile, question) => {
     await open(profile);

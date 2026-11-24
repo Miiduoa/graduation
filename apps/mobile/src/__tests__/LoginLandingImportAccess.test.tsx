@@ -31,14 +31,19 @@ jest.mock('../services/schoolLoginAvailability', () => ({
 jest.mock('../components/SchoolBrowsingControl', () => ({
   SchoolBrowsingControl: () => null,
 }));
+let mockPanelProps: Record<string, unknown> | undefined;
 jest.mock('../components/TodayTimetablePanel', () => ({
-  TodayTimetablePanel: () => require('react').createElement(
-    require('react-native').Text, { testID: 'today-timetable-panel' }, '今天的課表',
-  ),
+  TodayTimetablePanel: (props: Record<string, unknown>) => {
+    mockPanelProps = props;
+    return require('react').createElement(
+      require('react-native').Text, { testID: 'today-timetable-panel' }, '今天的課表',
+    );
+  },
 }));
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockPanelProps = undefined;
   mockProviderAvailable = false;
   mockSchool = { id: 'pu', name: '靜宜大學' };
   mockAuth = {
@@ -203,6 +208,47 @@ it('a verified Google account resumes named tasks before setup without querying 
   expect(mockAuth.signIn).not.toHaveBeenCalled();
   expect(mockAuth.request).not.toHaveBeenCalled();
   expect(mockAuth.bffRequest).not.toHaveBeenCalled();
+});
+
+it('hands only a generic prompt to the existing assistant route for the verified account, without sending or reading', async () => {
+  mockAuth.session = {
+    platformAccountId: 'pa_student', context: 'account-a', isPlatformOperator: false,
+    expiresAt: Date.now() + 60_000,
+  };
+  const view = await landing();
+  expect(mockPanelProps).toMatchObject({ assistantAccountId: 'pa_student' });
+  const ask = mockPanelProps!.onAskCoursework as (prompt: string) => void;
+  for (const prompt of ['現在這堂課有什麼作業？', '查下一堂課的作業']) {
+    ask(prompt);
+    expect(safeNavigate).toHaveBeenLastCalledWith(mockNavigation, 'NuniTimetableAssistant', { prompt });
+  }
+  expect(safeNavigate).toHaveBeenCalledTimes(2);
+  // The general assistant entry is unchanged.
+  await fireEventAsync.press(view.getByRole('button', { name: '開啟課表助理' }));
+  expect(safeNavigate).toHaveBeenLastCalledWith(mockNavigation, 'NuniTimetableAssistant');
+  expect(mockAuth.signIn).not.toHaveBeenCalled();
+  expect(mockAuth.request).not.toHaveBeenCalled();
+  expect(mockAuth.bffRequest).not.toHaveBeenCalled();
+});
+
+it.each([
+  { name: 'signed out', patch: {} },
+  { name: 'account check running', patch: { loading: true } },
+  { name: 'pending logout', patch: { pendingLogout: true } },
+  { name: 'account error', patch: { error: '無法確認登入' } },
+])('does not wire the assistant handoff when %s', async ({ patch }) => {
+  Object.assign(mockAuth, patch);
+  if (patch.loading || patch.pendingLogout || patch.error) {
+    mockAuth.session = {
+      platformAccountId: 'pa_student', context: 'account-a', isPlatformOperator: false,
+      expiresAt: Date.now() + 60_000,
+    };
+  }
+  await landing();
+  expect(mockPanelProps).toBeDefined();
+  expect(mockPanelProps).not.toHaveProperty('onAskCoursework');
+  expect(mockPanelProps!.assistantAccountId).toBeUndefined();
+  expect(safeNavigate).not.toHaveBeenCalled();
 });
 
 it.each([

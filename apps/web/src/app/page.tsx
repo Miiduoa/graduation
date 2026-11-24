@@ -361,6 +361,8 @@ export default function HomePage() {
           />
         ) : (
           <StudentTodayPage
+            platformSession={context && accountId && !sessionLoading && !blocked && !nuni.error
+              ? { accountId, context } : undefined}
             assistant={assistant}
             agent={agent}
             workspaces={workspaces}
