@@ -102,7 +102,7 @@ export async function speak(text: string, opts?: { force?: boolean }): Promise<v
     return;
   }
   try {
-    Speech.stop?.();
+    void Promise.resolve(Speech.stop?.()).catch(() => {});
     Speech.speak(text, { language: 'zh-TW', pitch: 1.0, rate: 1.0 });
   } catch (err) {
     if (__DEV__) console.warn('[voiceNav] speak failed', err);
