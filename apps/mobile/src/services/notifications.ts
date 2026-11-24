@@ -1,3 +1,4 @@
+import { isDormAnnouncementData } from '../utils/dormAnnouncementPush';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
@@ -469,7 +470,7 @@ export function addNotificationReceivedListener(
 ): Notifications.EventSubscription {
   return Notifications.addNotificationReceivedListener((notification) => {
     const data = notification.request.content.data;
-    const category = personalReminderCategory(data);
+    const category = personalReminderCategory(data) ?? (isDormAnnouncementData(data) ? 'dormitory' : null);
     if (category) {
       trackEvent('notification_received', { category });
     } else {
@@ -490,7 +491,7 @@ export function addNotificationResponseReceivedListener(
 ): Notifications.EventSubscription {
   return Notifications.addNotificationResponseReceivedListener((response) => {
     const data = response.notification.request.content.data;
-    const category = personalReminderCategory(data);
+    const category = personalReminderCategory(data) ?? (isDormAnnouncementData(data) ? 'dormitory' : null);
     if (category) {
       trackEvent('notification_clicked', { category });
     } else {
