@@ -993,30 +993,45 @@ test('a pull-to-refresh started during a failed write cannot apply a cache gap o
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
-test('an overlapping list omission leaves the pending failed-write confirmation eligible to apply', async () => {
-  jest.mocked(listBoards).mockResolvedValue([board]);
-  const view = render(<BoardsScreen />);
-  await view.findByText('讀書會');
+test.each([false, 'offline'] as const)(
+  'a list omission fully delivered during failed-subscribe confirmation triggers a second read (%s)',
+  async (secondResult) => {
+    jest.mocked(listBoards).mockResolvedValue([board]);
+    const view = render(<BoardsScreen />);
+    await view.findByText('讀書會');
 
-  const write = deferred();
-  jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
-  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+    const write = deferred();
+    jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
+    fireEvent.press(view.getByLabelText('訂閱讀書會'));
 
-  const reRead = deferred<boolean>();
-  jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => reRead.promise);
-  await act(async () => { write.reject(new Error('offline')); });
-  expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
-  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    const firstConfirm = deferred<boolean>();
+    const secondConfirm = deferred<boolean>();
+    jest.mocked(isSubscribedToBoard)
+      .mockImplementationOnce(() => firstConfirm.promise)
+      .mockImplementationOnce(() => secondConfirm.promise);
+    await act(async () => { write.reject(new Error('offline')); });
+    expect(alertSpy).toHaveBeenCalledWith('訂閱失敗', 'offline');
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
 
-  // The list has a cache gap while the first single-board read is pending.
-  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([]);
-  await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
-  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    // The first read saw a subscription before another device cancelled it.
+    // Both list responses arrive while that first response is still in flight.
+    jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([]);
+    await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+    expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
 
-  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
-  await act(async () => { reRead.resolve(true); });
-  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
-});
+    await act(async () => { firstConfirm.resolve(true); });
+    expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+    await act(async () => {
+      if (secondResult === 'offline') secondConfirm.reject(new Error('offline'));
+      else secondConfirm.resolve(secondResult);
+    });
+    expect(view.getByLabelText(secondResult === false ? '訂閱讀書會' : '取消訂閱讀書會')).toBeTruthy();
+  },
+);
 
 test('a successful write still keeps a later list subscription if the re-check fails', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);

@@ -250,23 +250,16 @@ function BoardsContent() {
         ) {
           deferredListMembership.current.set(id, membership);
         }
-        const keptRollback =
-          awaitingServerConfirm.current.has(id) &&
-          nextConfirmed.has(id) &&
-          !subscribedIds.has(id);
-        // An overlapping list can reflect a server change even when its IDs
-        // arrive before the single-board response. Verify an omission without
-        // treating the capped list as proof of cancellation.
+        // Recheck overlaps regardless of membership: a pending confirmation
+        // can still change the state, even when the list agrees with the rollback.
+        // An omission from the capped list cannot establish cancellation on its own.
         const listed = subscribedIds.has(id);
-        const listedDuringOverlap = listed && overlappingReconciliations.has(id);
         const listClaimsUnkeptSubscription = listed && !nextConfirmed.has(id);
         const listOmitsConfirmed = !listed && nextConfirmed.has(id) && confirmedByBoardRead.current.has(id);
-        const needsConfirmation = listOmitsConfirmed
-          ? overlappingReconciliations.has(id)
-          : keptRollback ||
-            listedDuringOverlap ||
-            listClaimsUnkeptSubscription ||
-            lastSettledWriteSucceeded.current.has(id);
+        const needsConfirmation =
+          overlappingReconciliations.has(id) ||
+          listClaimsUnkeptSubscription ||
+          (!listOmitsConfirmed && lastSettledWriteSucceeded.current.has(id));
         if (
           !pendingSubscriptionCounts.current.has(id) &&
           needsConfirmation &&
