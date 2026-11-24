@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -517,17 +517,19 @@ test('launcher recovers a current-run sidecar after the leader exits before capt
   const { setTimeout: delay } = await import('node:timers/promises');
   const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
 
-  for (const recordKind of ['current run', 'old run', 'mismatched starttime']) {
+  for (const recordKind of ['current run', 'concurrent run', 'old run', 'mismatched starttime']) {
     await t.test(recordKind, { timeout: 14000 }, async () => {
       const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-orphan-sidecar-'));
       const childFile = path.join(dir, 'child.pid');
       const descendantFile = path.join(dir, 'grandchild.pid');
-      const sidecar = path.join(dir, 'selftest.log.pgid');
+      const findSidecar = () => readdirSync(dir).find(name => /^selftest\.log\.pgid\.[a-f0-9]{32}$/.test(name));
       const victim = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
       const victimExited = once(victim, 'exit');
       let launcher;
       let launcherExited;
       let descendant;
+      let concurrent;
+      let concurrentExited;
       try {
         // Suppress child discovery until the leader has exited, including when
         // launcher startup runs faster than the test can send TERM.
@@ -548,9 +550,10 @@ exec /bin/ps "$@"
         });
         launcherExited = once(launcher, 'exit');
         const deadline = Date.now() + 4000;
-        while (!(existsSync(sidecar) && existsSync(descendantFile)) && Date.now() < deadline) {
+        while (!(findSidecar() && existsSync(descendantFile)) && Date.now() < deadline) {
           await delay(15);
         }
+        const sidecar = path.join(dir, findSidecar());
         const [run, leader, start] = readFileSync(sidecar, 'utf8').trim().split(' ');
         assert.match(run, /^[a-f0-9]{32}$/);
         assert.match(start, /^\d+$/);
@@ -566,14 +569,38 @@ exec /bin/ps "$@"
         if (recordKind === 'mismatched starttime') {
           writeFileSync(sidecar, `${run} ${victim.pid} ${BigInt(victimStart) + 1n}\n`);
         }
+        if (recordKind === 'concurrent run') launcher.kill('SIGSTOP');
         process.kill(Number(leader), 'SIGTERM');
         while (existsSync(`/proc/${leader}`) && Date.now() < deadline) await delay(15);
         assert.equal(existsSync(`/proc/${leader}`), false);
+        if (recordKind === 'concurrent run') {
+          concurrent = spawn('bash', [script], {
+            env: {
+              ...process.env,
+              TRONCLASS_RUNTIME_DIR: dir,
+              TRONCLASS_SIGNAL_SELFTEST: '1',
+              TRONCLASS_SELFTEST_CHILD: path.join(dir, 'concurrent-child.pid'),
+              TRONCLASS_SELFTEST_GRANDCHILD: path.join(dir, 'concurrent-grandchild.pid'),
+            },
+            stdio: 'ignore',
+          });
+          concurrentExited = once(concurrent, 'exit');
+          const findConcurrentRecord = () => readdirSync(dir).find(name =>
+            name.startsWith('selftest.log.pgid.') && name !== path.basename(sidecar));
+          const concurrentDeadline = Date.now() + 4000;
+          while (!findConcurrentRecord() && Date.now() < concurrentDeadline) await delay(15);
+          assert.ok(findConcurrentRecord());
+          assert.equal(readFileSync(sidecar, 'utf8').trim(), `${run} ${leader} ${start}`);
+          concurrent.kill('SIGTERM');
+          assert.deepEqual(await concurrentExited, [143, null]);
+          process.kill(descendant, 0);
+          launcher.kill('SIGCONT');
+        }
         const [code, signal] = await launcherExited;
         assert.equal(code, 0);
         assert.equal(signal, null);
         process.kill(victim.pid, 0);
-        if (recordKind === 'current run') {
+        if (recordKind === 'current run' || recordKind === 'concurrent run') {
           const reapDeadline = Date.now() + 1000;
           while (existsSync(`/proc/${descendant}`) && Date.now() < reapDeadline) await delay(15);
           assert.throws(() => process.kill(descendant, 0), { code: 'ESRCH' });
@@ -584,8 +611,71 @@ exec /bin/ps "$@"
         for (const pid of [descendant, victim.pid]) {
           if (pid && existsSync(`/proc/${pid}`)) process.kill(pid, 'SIGKILL');
         }
-        if (launcher && launcher.exitCode === null && launcher.signalCode === null) launcher.kill('SIGTERM');
-        await Promise.all([victimExited, launcherExited]);
+        if (launcher && launcher.exitCode === null && launcher.signalCode === null) {
+          launcher.kill('SIGTERM');
+          launcher.kill('SIGCONT');
+        }
+        if (concurrent && concurrent.exitCode === null && concurrent.signalCode === null) concurrent.kill('SIGTERM');
+        await Promise.all([victimExited, launcherExited, concurrentExited]);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test('launcher cleans up a detached port holder when signalled before assigning the wrapper PID', async (t) => {
+  const { spawn } = await import('node:child_process');
+  const { createServer } = await import('node:net');
+  const { existsSync } = await import('node:fs');
+  const { once } = await import('node:events');
+  const { setTimeout: delay } = await import('node:timers/promises');
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+  const source = readFileSync(script, 'utf8').replace(
+    String.raw`require(\"node:fs\").writeFileSync(process.env.TRONCLASS_SELFTEST_GRANDCHILD,String(process.pid));setInterval(()=>{},1000);`,
+    String.raw`require(\"node:net\").createServer().listen(0,\"127.0.0.1\",function(){require(\"node:fs\").writeFileSync(process.env.TRONCLASS_SELFTEST_GRANDCHILD,process.pid+\" \"+this.address().port);});`,
+  );
+  assert.notEqual(source, readFileSync(script, 'utf8'));
+  for (const [signal, expected] of [['INT', 130], ['TERM', 143]]) {
+    await t.test(signal, { timeout: 12000 }, async () => {
+      const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-before-pid-'));
+      const descendantFile = path.join(dir, 'descendant');
+      const fixture = source.replace('  TRONCLASS_SELFTEST_WRAPPER=$!', () => `
+        deadline=$((SECONDS + 4))
+        until [ -s "$TRONCLASS_SELFTEST_GRANDCHILD" ]; do
+          [ "$SECONDS" -lt "$deadline" ] || exit 1
+          sleep 0.02
+        done
+        rm -- "$TRONCLASS_LAUNCHING_LOG.pgid.$TRONCLASS_RUN_ID"
+        kill -${signal} "$$"
+        TRONCLASS_SELFTEST_WRAPPER=$!`);
+      assert.notEqual(fixture, source);
+      const launcher = spawn('bash', ['-c', fixture, script], {
+        env: {
+          ...process.env,
+          TRONCLASS_RUNTIME_DIR: dir,
+          TRONCLASS_SIGNAL_SELFTEST: '1',
+          TRONCLASS_TEST_DELAY_SPAWN_MS: '300',
+          TRONCLASS_SELFTEST_CHILD: path.join(dir, 'child'),
+          TRONCLASS_SELFTEST_GRANDCHILD: descendantFile,
+        },
+        stdio: 'ignore',
+      });
+      let descendant;
+      try {
+        const exit = await once(launcher, 'exit');
+        let port;
+        [descendant, port] = readFileSync(descendantFile, 'utf8').split(' ').map(Number);
+        assert.deepEqual(exit, [expected, null]);
+        const reapDeadline = Date.now() + 1000;
+        while (existsSync(`/proc/${descendant}`) && Date.now() < reapDeadline) await delay(15);
+        assert.throws(() => process.kill(descendant, 0), { code: 'ESRCH' });
+        const server = createServer().listen(port, '127.0.0.1');
+        await once(server, 'listening');
+        await new Promise(resolve => server.close(resolve));
+      } finally {
+        if (descendant) {
+          try { process.kill(descendant, 'SIGKILL'); } catch { /* already exited */ }
+        }
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -649,7 +739,9 @@ test('launcher cleanup ignores a stale pgid whose start-time does not match', as
   const childPidFile = path.join(dir, 'child.pid');
   const grandchildPidFile = path.join(dir, 'grandchild.pid');
   const victim = spawn('sleep', ['30'], { stdio: 'ignore' });
-  writeFileSync(path.join(dir, 'web.log.pgid'), `${victim.pid} 1\n`);
+  const staleRun = 'aa11bb22cc33dd44ee55ff6677889900';
+  const stale = path.join(dir, `web.log.pgid.${staleRun}`);
+  writeFileSync(stale, `${staleRun} ${victim.pid} 1\n`);
   const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
   try {
     const proc = spawn('bash', [script], {
@@ -667,6 +759,7 @@ test('launcher cleanup ignores a stale pgid whose start-time does not match', as
       if (existsSync(childPidFile) && existsSync(grandchildPidFile)) break;
       await new Promise(resolve => setTimeout(resolve, 50));
     }
+    assert.equal(existsSync(stale), false);
     proc.kill('SIGTERM');
     const exited = await new Promise(resolve => {
       const timer = setTimeout(() => resolve('timeout'), 5000);
@@ -810,7 +903,7 @@ test('launcher cleanup does not kill a previous run from a leftover three-column
       if (existsSync(childPidFile) && existsSync(grandchildPidFile)) break;
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    assert.equal(existsSync(leftover), false);
+    assert.equal(existsSync(leftover), true);
     proc.kill('SIGTERM');
     const exited = await new Promise(resolve => {
       const timer = setTimeout(() => resolve('timeout'), 5000);
