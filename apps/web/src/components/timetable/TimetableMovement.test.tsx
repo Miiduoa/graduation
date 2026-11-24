@@ -137,7 +137,9 @@ describe('workspace safety', () => {
   it.each(['empty', 'partial'])('blocks planning and invitations for a %s own timetable', async (mode) => {
     mocks.load.mockResolvedValue(stored(mode === 'empty' ? [] : [course, { ...course, id: 'pending', day: 0 }]));
     mocks.friends.mockResolvedValue([{ uid: 'bob', name: '小林' }]); mocks.friend.mockResolvedValue(stored());
-    render(<PersonalTimetable />); await screen.findByRole('button', { name: '新增課程' });
+    render(<PersonalTimetable />);
+    if (mode === 'empty') await screen.findByRole('region', { name: '還沒有課表' });
+    else await screen.findByRole('button', { name: '新增課程' });
     expect((screen.getByRole('button', { name: '今天空堂' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: '排讀書時間' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(await screen.findByRole('combobox', { name: '朋友' }), { target: { value: 'bob' } });

@@ -9,6 +9,7 @@ vi.mock('next/navigation', () => ({
 import {
   cleanCourse,
   cleanMeta,
+  courseTimeLabel,
   shareCopiedCopy,
   WEEKDAY_LABELS,
   type PersonalImportRecord,
@@ -462,6 +463,87 @@ describe('personal timetable data retention', () => {
     expect(screen.getByRole('combobox', { name: '上課日' })).toBeTruthy();
   });
 
+  it('groups the week by weekday and identifies each course by its time and room', async () => {
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '一週' }));
+    const week = within(screen.getByRole('region', { name: '一週課程' }));
+    expect(week.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(
+      WEEKDAY_LABELS,
+    );
+    // Empty weekdays stay visible, without placeholder course rows.
+    expect(week.getAllByText('尚無已排課程')).toHaveLength(WEEKDAY_LABELS.length - 2);
+    const time = courseTimeLabel({ day: 1, start: 1, end: 2 }, 'pu');
+    const row = week.getByRole('button', { name: `編輯 原本課程，${WEEKDAY_LABELS[0]} ${time}，教室未填` });
+    expect(Array.from(row.querySelectorAll('time'), (clock) => clock.dateTime).join('–')).toBe(time);
+    expect(row.textContent).toContain('教室未填');
+    const school = week.getByRole('button', {
+      name: `編輯 匯入資料庫，${WEEKDAY_LABELS[1]} ${courseTimeLabel({ day: 2, start: 3, end: 4 }, 'pu')}，教室 主顧303，教師 林老師`,
+    });
+    expect(school.textContent).toContain('主顧303 · 林老師');
+    fireEvent.click(row);
+    expect(screen.getByRole('region', { name: '編輯課程' })).toBeTruthy();
+  });
+
+  it('uses the same agenda rows and verified time labels in the single-day view', async () => {
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '一週' }));
+    const weekRow = within(screen.getByRole('region', { name: '一週課程' })).getByRole('button', {
+      name: /原本課程/,
+    });
+    fireEvent.click(screen.getByRole('button', { name: '單日' }));
+    expect(screen.queryByRole('region', { name: '一週課程' })).toBeNull();
+    const day = within(screen.getByRole('region', { name: '單日課程' }));
+    expect(day.getAllByRole('heading').map((heading) => heading.textContent)).toEqual([
+      WEEKDAY_LABELS[0],
+    ]);
+    const row = day.getByRole('button', { name: /編輯 原本課程/ });
+    expect(row.getAttribute('aria-label')).toBe(weekRow.getAttribute('aria-label'));
+    expect(row.querySelector('time')?.textContent).toBe(
+      weekRow.querySelector('time')?.textContent,
+    );
+    fireEvent.change(screen.getByRole('combobox', { name: '上課日' }), { target: { value: '2' } });
+    expect(
+      within(screen.getByRole('region', { name: '單日課程' })).getByRole('button', {
+        name: /編輯 匯入資料庫/,
+      }),
+    ).toBeTruthy();
+    fireEvent.change(screen.getByRole('combobox', { name: '上課日' }), { target: { value: '4' } });
+    expect(screen.getByText('這天尚無已排定的課程。')).toBeTruthy();
+    expect(screen.queryAllByRole('button', { name: /^編輯 / })).toHaveLength(0);
+  });
+
+  it('keeps imported agenda rows as an import-record action in week and day views', async () => {
+    mocks.records = [
+      {
+        id: 'imported',
+        kind: 'timetable',
+        title: '匯入課程',
+        schoolId: 'pu',
+        academicYear: '115',
+        semester: '1',
+        dayOfWeek: 3,
+        startPeriod: 5,
+        endPeriod: 6,
+        teacher: '王老師',
+        location: 'M101',
+        batchId: 'test',
+        importedAt: '2026-10-25T00:00:00Z',
+        source: { type: 'paste', line: 1, rawText: '' },
+      },
+    ];
+    await ready();
+    for (const view of ['一週', '單日']) {
+      fireEvent.click(screen.getByRole('button', { name: view }));
+      if (view === '單日')
+        fireEvent.change(screen.getByRole('combobox', { name: '上課日' }), { target: { value: '3' } });
+      const row = screen.getByRole('button', { name: /檢視匯入紀錄 匯入課程，.*教室 M101，教師 王老師/ });
+      expect(row.textContent).toContain('M101 · 王老師');
+    }
+    fireEvent.click(screen.getByRole('button', { name: /檢視匯入紀錄 匯入課程/ }));
+    chooseImportEdit();
+    expect(mocks.push).toHaveBeenCalledWith('/import?kind=timetable&campus=pu');
+  });
+
   it('keeps a newly saved manual course visible when adding it from an imported semester', async () => {
     mocks.records = [
       {
@@ -812,7 +894,7 @@ describe('direct timetable editing', () => {
     await ready();
     fireEvent.click(screen.getByRole('button', { name: '單日' }));
     fireEvent.change(screen.getByRole('combobox', { name: '上課日' }), { target: { value: '5' } });
-    expect(screen.getByText(/還沒有課程，可使用上方/)).toBeTruthy();
+    expect(screen.getByText('這天尚無已排定的課程。')).toBeTruthy();
   });
 
   it.each(['unavailable', 'failed'])(

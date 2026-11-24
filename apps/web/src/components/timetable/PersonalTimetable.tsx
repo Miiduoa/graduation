@@ -30,7 +30,6 @@ import {
   type MeetupWindow,
   courseTimeLabel,
   findCourseConflicts,
-  periodRangeLabel,
   type ImportDraft,
   type ImportMode,
   type PersonalCourse,
@@ -61,6 +60,7 @@ import type { AcademicCourse } from '@/lib/academicRecords';
 import { Modal } from '@/components/ui/Modal';
 import { TIMETABLE_COURSE_WORK_LABEL } from '@/lib/todayScreen';
 import { CourseEditor as EditableCourseDialog } from './CourseEditor';
+import { TimetableAgenda } from './TimetableAgenda';
 import { TimetableGrid, UnscheduledCourses } from './TimetableGrid';
 import { validateCourseDraft } from './courseEditorModel';
 import { resolveTimetableCourseWorkExit } from './timetableCourseWorkHref';
@@ -912,53 +912,55 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           </label>
         </div>
       )}
-      <div className={`${styles.toolbar} ${movement.toolbar}`}>
-        <div className={styles.segment} role="group" aria-label="課表顯示方式">
-          <button type="button" aria-pressed={view === 'grid'} onClick={() => setView('grid')}>
-            格子
-          </button>
-          <button type="button" aria-pressed={view === 'week'} onClick={() => setView('week')}>
-            一週
-          </button>
-          <button type="button" aria-pressed={view === 'day'} onClick={() => setView('day')}>
-            單日
-          </button>
-        </div>
-        {view === 'day' && (
-          <label className={styles.field}>
-            上課日
-            <select value={day} onChange={(event) => setDay(Number(event.target.value))}>
-              {WEEKDAY_LABELS.map((label, index) => (
-                <option value={index + 1} key={label}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <button
-          ref={addCourseRef}
-          type="button"
-          className="btn"
-          disabled={busy}
-          onClick={() => openCourse({ ...cleanCourse({ day, start: 1, end: 1 }), name: '' })}
-        >
-          新增課程
-        </button>
-        {uid ? (
+      {!timetableEmpty && (
+        <div className={`${styles.toolbar} ${movement.toolbar}`}>
+          <div className={styles.segment} role="group" aria-label="課表顯示方式">
+            <button type="button" aria-pressed={view === 'grid'} onClick={() => setView('grid')}>
+              格子
+            </button>
+            <button type="button" aria-pressed={view === 'week'} onClick={() => setView('week')}>
+              一週
+            </button>
+            <button type="button" aria-pressed={view === 'day'} onClick={() => setView('day')}>
+              單日
+            </button>
+          </div>
+          {view === 'day' && (
+            <label className={styles.field}>
+              上課日
+              <select value={day} onChange={(event) => setDay(Number(event.target.value))}>
+                {WEEKDAY_LABELS.map((label, index) => (
+                  <option value={index + 1} key={label}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <button
+            ref={addCourseRef}
             type="button"
             className="btn"
-            onClick={() => void copyShare()}
-            disabled={
-              busy || shareBusy || imported.loading || !!imported.error || !shareCourses.length
-            }
-            aria-busy={shareBusy}
+            disabled={busy}
+            onClick={() => openCourse({ ...cleanCourse({ day, start: 1, end: 1 }), name: '' })}
           >
-            {shareBusy ? '正在產生連結…' : '複製分享連結'}
+            新增課程
           </button>
-        ) : null}
-      </div>
+          {uid ? (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void copyShare()}
+              disabled={
+                busy || shareBusy || imported.loading || !!imported.error || !shareCourses.length
+              }
+              aria-busy={shareBusy}
+            >
+              {shareBusy ? '正在產生連結…' : '複製分享連結'}
+            </button>
+          ) : null}
+        </div>
+      )}
       {shareUrl && (
         <label className={styles.field}>
           分享連結
@@ -988,6 +990,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
               匯入我的課表
             </Link>
             <button
+              ref={addCourseRef}
               type="button"
               className="btn"
               disabled={busy}
@@ -1004,63 +1007,14 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
           onEdit={openCourse}
           periodProfile={periodProfile}
         />
-      ) : view === 'week' ? (
-        <div className={`${styles.week} ${movement.week}`} role="region" aria-label="一週課程">
-          {WEEKDAY_LABELS.map((label, index) => {
-            const entries = visibleCourses
-              .filter((course) => course.day === index + 1)
-              .sort((a, b) => a.start - b.start);
-            return (
-              <section className={styles.day} key={label}>
-                <h3>{label}</h3>
-                {entries.length ? (
-                  entries.map((course) => (
-                    <button
-                      type="button"
-                      className={`${styles.course} ${movement.courseCard}`}
-                      key={course.id}
-                      data-course-focus-id={course.id}
-                      onClick={() => openCourse(course)}
-                    >
-                      <time>{courseTimeLabel(course, periodProfile)}</time>
-                      <h4>{course.name}</h4>
-                      <p>{course.room || '教室未填'}</p>
-                    </button>
-                  ))
-                ) : (
-                  <p className={styles.empty}>尚無已排課程</p>
-                )}
-              </section>
-            );
-          })}
-        </div>
       ) : (
-        <ul className={styles.list}>
-          {visibleCourses.every((course) => course.day !== day) && (
-            <li>
-              <p className={styles.empty}>這天還沒有課程，可使用上方「新增課程」開始。</p>
-            </li>
-          )}
-          {visibleCourses
-            .filter((course) => course.day === day)
-            .sort((a, b) => a.start - b.start)
-            .map((course) => (
-              <li key={course.id}>
-                <button
-                  type="button"
-                  className={`${styles.course} ${movement.courseCard}`}
-                  data-course-focus-id={course.id}
-                  onClick={() => openCourse(course)}
-                >
-                  <time>{periodRangeLabel(course.start, course.end, periodProfile)}</time>
-                  <h4>{course.name}</h4>
-                  <p>
-                    {course.teacher || '教師未填'} · {course.room || '教室未填'}
-                  </p>
-                </button>
-              </li>
-            ))}
-        </ul>
+        <TimetableAgenda
+          courses={visibleCourses}
+          day={view === 'day' ? day : undefined}
+          periodProfile={periodProfile}
+          disabled={busy}
+          onOpen={openCourse}
+        />
       )}
 
       <UnscheduledCourses
@@ -1171,54 +1125,58 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         />
       )}
 
-      <section className={styles.panel} aria-label="匯入課表">
-        <h2>匯入課表</h2>
-        <p className={styles.notice}>截圖、文字與檔案都可以先整理成草稿，再逐筆確認。</p>
-        <div className={`${styles.toolbar} ${movement.toolbar}`}>
-          <Link className="btn primary" href={importHref}>
-            匯入截圖或檔案
-          </Link>
-          {uid && (
-            <button type="button" className="btn" onClick={() => void bringSchool()}>
-              從學校課表帶入
-            </button>
-          )}
-        </div>
-        {analyzed.length > 0 && (
-          <div className={styles.draftList}>
-            {analyzed.map((draft, index) => (
-              <label key={draft.id} className={styles.course}>
-                <input
-                  type="checkbox"
-                  checked={draft.selected !== false}
-                  onChange={(event) =>
-                    setDrafts((current) =>
-                      current.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, selected: event.target.checked } : item,
-                      ),
-                    )
-                  }
-                />
-                <strong>{draft.name}</strong>
-                <p>
-                  {courseTimeLabel(draft, periodProfile)} · {draft.teacher} · {draft.room}
-                </p>
-                {draft.flags?.map((flag) => (
-                  <span key={flag.label}>{flag.label} </span>
-                ))}
-              </label>
-            ))}
-            <button
-              type="button"
-              className="btn primary"
-              disabled={busy || !analyzed.some((item) => item.selected !== false)}
-              onClick={() => void confirmImport()}
-            >
-              {TIMETABLE_DEVICE_ONLY_SUBMIT_COPY}
-            </button>
+      {(!timetableEmpty || uid || analyzed.length > 0) && (
+        <section className={styles.panel} aria-label="匯入課表">
+          <h2>匯入課表</h2>
+          <p className={styles.notice}>截圖、文字與檔案都可以先整理成草稿，再逐筆確認。</p>
+          <div className={`${styles.toolbar} ${movement.toolbar}`}>
+            {!timetableEmpty && (
+              <Link className="btn primary" href={importHref}>
+                匯入截圖或檔案
+              </Link>
+            )}
+            {uid && (
+              <button type="button" className="btn" onClick={() => void bringSchool()}>
+                從學校課表帶入
+              </button>
+            )}
           </div>
-        )}
-      </section>
+          {analyzed.length > 0 && (
+            <div className={styles.draftList}>
+              {analyzed.map((draft, index) => (
+                <label key={draft.id} className={styles.course}>
+                  <input
+                    type="checkbox"
+                    checked={draft.selected !== false}
+                    onChange={(event) =>
+                      setDrafts((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, selected: event.target.checked } : item,
+                        ),
+                      )
+                    }
+                  />
+                  <strong>{draft.name}</strong>
+                  <p>
+                    {courseTimeLabel(draft, periodProfile)} · {draft.teacher} · {draft.room}
+                  </p>
+                  {draft.flags?.map((flag) => (
+                    <span key={flag.label}>{flag.label} </span>
+                  ))}
+                </label>
+              ))}
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy || !analyzed.some((item) => item.selected !== false)}
+                onClick={() => void confirmImport()}
+              >
+                {TIMETABLE_DEVICE_ONLY_SUBMIT_COPY}
+              </button>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className={styles.panel} aria-label="幫我安排" ref={planningPanel} tabIndex={-1}>
         <h2>幫我安排</h2>

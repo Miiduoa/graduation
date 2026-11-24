@@ -5,7 +5,6 @@ import {
   cleanCourse,
   courseTimeLabel,
   periodCount,
-  periodDisplayLabel,
   periodLabelAt,
   periodSlots,
   WEEKDAY_LABELS,
@@ -125,7 +124,11 @@ export function TimetableGrid({
               const period = slot.index;
               return (
                 <tr key={period}>
-                  <th scope="row" className={styles.period}><strong>{periodDisplayLabel(period, periodProfile)}</strong><span>{slot.start}</span><span>{slot.end}</span></th>
+                  <th scope="row" className={styles.period}>
+                    <strong>{periodProfile === 'ncku' ? `${slot.label} 節` : `第 ${slot.label} 節`}</strong>
+                    <span>{slot.start}</span>
+                    <span>–{slot.end}</span>
+                  </th>
                   {WEEKDAY_LABELS.map((label, dayIndex) => {
                     const day = dayIndex + 1;
                     const entries = coursesAtSlot(courses, day, period, periodTotal, WEEKDAY_LABELS.length);
