@@ -22,7 +22,7 @@ import {
   type MerchantWorkspaceQueue,
 } from '@/lib/merchantWorkspaceNavigation';
 
-import { createMerchantConfirmations, workspaceKey } from './merchantConfirmation';
+import { createMerchantConfirmations, workspaceDetail, workspaceKey } from './merchantConfirmation';
 
 type Detail = NuniMerchantWorkspaceDetail;
 type SettingDraft = Omit<NuniMerchantSettingsInput, 'termsVersion' | 'expectedVersion'> & {
@@ -185,16 +185,16 @@ export function MerchantOperations({
       }
       const merged =
         changed.current(next, verifiedAccess, revision) ??
-        (beginRead
-          ? null
-          : (localConfirmations?.merge(next, verifiedAccess ? 'read' : 'write').detail ?? null));
+        (localConfirmations
+          ? workspaceDetail(localConfirmations.merge(next, verifiedAccess ? 'read' : 'write'))
+          : null);
       setDetail(merged);
       setFresh(!!merged);
       setMenuConfirmed(false);
       setActivationConfirmed(false);
       return merged;
     },
-    [beginRead, draftKey, drafts, localConfirmations, onMenuConfirmed],
+    [draftKey, drafts, localConfirmations, onMenuConfirmed],
   );
 
   const checkAccess = useCallback(
@@ -240,13 +240,14 @@ export function MerchantOperations({
         if (reconcile || !drafts.get(draftKey)?.uncertain) setError('');
       } catch (failure) {
         if (!active.current || version !== run.current) return;
-        setDetail(null);
         if (
           failure instanceof NuniError &&
           (failure.status === 401 || failure.code === 'SESSION_CHANGED')
         ) {
+          setDetail(null);
           expire.current();
         } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
+          setDetail(null);
           onDenied?.(tenantId, locationId, revision);
           setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
         } else setError('無法確認門市目前的資料。草稿已保留，請重新讀取。');

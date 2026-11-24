@@ -50,6 +50,7 @@ import { useMerchantWorkspaceRoute } from '@/lib/useMerchantWorkspaceRoute';
 
 import {
   createMerchantConfirmations,
+  workspaceDetail,
   workspaceKey,
   type MerchantOverview,
 } from './merchantConfirmation';
@@ -349,7 +350,9 @@ function AccountWorkspace({
       );
       const listedStores =
         stores.status === 'fulfilled' ? stores.value : (confirmed.overview()?.workspaces ?? []);
-      const targets = new Map(listedStores.map((item) => [workspaceKey(item), item]));
+      const targets = new Map<string, Pick<NuniMerchantWorkspaceDetail, 'tenantId' | 'locationId'>>(
+        listedStores.map((item) => [workspaceKey(item), item]),
+      );
       for (const item of confirmed.knownWorkspaces()) {
         const key = workspaceKey(item);
         if (!targets.has(key)) targets.set(key, item);
@@ -390,9 +393,13 @@ function AccountWorkspace({
       publishOverview();
       if ([programs, submitted, stores].some((result) => result.status === 'rejected'))
         setLoadError('目前無法確認店家資料，請重新載入。');
-      else if (accessDenied) setLoadError('目前無法取得部分門市的管理權限，請重新載入。');
-      else if (detailUnavailable)
-        setDetailError('目前無法更新部分門市資料，請重新載入。');
+      setDetailError(
+        accessDenied
+          ? '目前無法取得部分門市的管理權限，請重新載入。'
+          : detailUnavailable
+            ? '目前無法更新部分門市資料，請重新載入。'
+            : '',
+      );
     } catch (error) {
       if (isCurrent()) {
         if (expired(error)) expire();
@@ -508,7 +515,7 @@ function AccountWorkspace({
       const allowed = !confirmed.denied(key);
       if (allowed) setHasVerifiedLocation(true);
       publishOverview();
-      return allowed ? (merged.detail ?? null) : null;
+      return allowed ? workspaceDetail(merged) : null;
     },
     [publishOverview, confirmed],
   );

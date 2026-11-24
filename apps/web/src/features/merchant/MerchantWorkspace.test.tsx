@@ -612,6 +612,46 @@ const continuityStore = {
   sourceLine: null,
 };
 
+it.each([403, 404, 503])(
+  'lets an application draft submit after a known workspace detail returns %s',
+  async (status) => {
+    window.history.replaceState(null, '', '/merchant');
+    let showStore = false;
+    let failDetail = false;
+    mocks.request.mockImplementation((path, context, input) => {
+      if (path === 'merchant-workspaces' && showStore)
+        return Promise.resolve({ workspaces: [continuityStore] });
+      if (path === 'merchant-workspaces/campus-one/location-1')
+        return failDetail
+          ? Promise.reject(new NuniError(status, 'DETAIL_UNAVAILABLE'))
+          : Promise.resolve(continuityStore);
+      return respond(path, context, input);
+    });
+
+    render(<MerchantWorkspace />);
+    await fillApplication();
+    showStore = true;
+    fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：第一門市' }));
+    await screen.findByRole('heading', { name: '餐坊／第一門市', level: 2 });
+
+    failDetail = true;
+    fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+    const error = status === 503 ? /無法更新部分門市資料/ : /無法取得部分門市的管理權限/;
+    expect((await screen.findByText(error)).getAttribute('role')).toBe('status');
+    if (status !== 503)
+      expect(screen.queryByRole('link', { name: '管理門市：第一門市' })).toBeNull();
+
+    const submit = screen.getByRole<HTMLButtonElement>('button', { name: '送出進駐申請' });
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+    await screen.findByRole('heading', { name: '測試餐坊／學生餐廳' });
+    failDetail = false;
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+    expect(screen.queryByText(error)).toBeNull();
+  },
+);
+
 it('keeps an application receipt received inside a store when a reload loses a previously listed row', async () => {
   window.history.replaceState(null, '', '/merchant');
   let showStore = false;

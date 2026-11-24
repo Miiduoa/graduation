@@ -11,10 +11,23 @@ type Source = 'list' | 'read' | 'write';
 type Confirmation = {
   row: NuniMerchantWorkspace;
   detail?: NuniMerchantWorkspaceDetail;
-  availabilityConfirmed: boolean;
   revision: number;
   confirmedBy: Source;
 };
+
+function availabilityOf(row: NuniMerchantWorkspace) {
+  return {
+    activated: row.activated,
+    merchantStatus: row.merchantStatus,
+    locationStatus: row.locationStatus,
+    publicAccess: row.publicAccess,
+  };
+}
+
+export function workspaceDetail({ row, detail }: Confirmation) {
+  // Use the confirmed availability with the detail's settings and expected version.
+  return detail ? { ...detail, ...availabilityOf(row) } : null;
+}
 
 export const workspaceKey = ({
   tenantId,
@@ -59,21 +72,20 @@ export function createMerchantConfirmations() {
       return current;
     }
 
-    // Same-version confirmed writes win over later-started GET snapshots for
-    // availability and missing requirements. Request order is not a timestamp
-    // for the underlying record, but later reads may still refresh live counts.
+    // At the same version, receipts take precedence over reads, and details
+    // take precedence over lists. Request order breaks ties between reads
+    // from the same endpoint.
     if (
       current &&
       version === previousVersion &&
       source !== 'write' &&
-      (current.confirmedBy === 'write' || revision < current.revision)
+      (current.confirmedBy === 'write' ||
+        (current.confirmedBy === 'read' && source === 'list') ||
+        (current.confirmedBy === source && revision < current.revision))
     ) {
       if (!incomingDetail) return current;
       const protectedFields = {
-        activated: current.row.activated,
-        merchantStatus: current.row.merchantStatus,
-        locationStatus: current.row.locationStatus,
-        publicAccess: current.row.publicAccess,
+        ...availabilityOf(current.row),
         missingRequirements: current.row.missingRequirements,
       };
       const detail = { ...incomingDetail, ...protectedFields };
@@ -86,54 +98,16 @@ export function createMerchantConfirmations() {
       return entry;
     }
 
-    if (current && version === previousVersion && source === 'list' && current.detail)
-      return current;
-
-    // Availability writes can share a readiness version with an older snapshot.
-    // A same-version read can still refresh stock counts and other live details,
-    // but must not let an older suspended/open snapshot overwrite a confirmation.
-    const keepAvailability =
-      current &&
-      version === previousVersion &&
-      source !== 'write' &&
-      current.availabilityConfirmed;
-    const availability = keepAvailability
-      ? {
-          activated: current.row.activated,
-          merchantStatus: current.row.merchantStatus,
-          locationStatus: current.row.locationStatus,
-          publicAccess: current.row.publicAccess,
-        }
-      : {
-          activated: next.activated,
-          merchantStatus: next.merchantStatus,
-          locationStatus: next.locationStatus,
-          publicAccess: next.publicAccess,
-        };
     if (!next.missingRequirements.includes('menu')) menus.add(key);
-    const keepMissing = current && version === previousVersion && current.confirmedBy === 'write' && source !== 'write';
-    const missingRequirements = keepMissing
-      ? current.row.missingRequirements
-      : menus.has(key)
-        ? next.missingRequirements.filter((item) => item !== 'menu')
-        : next.missingRequirements;
-    const row = { ...next, ...availability, missingRequirements };
-    const detail = incomingDetail
-      ? { ...incomingDetail, ...availability, missingRequirements }
-      : current?.detail
-        ? { ...current.detail, ...availability, missingRequirements }
-        : undefined;
+    const missingRequirements = menus.has(key)
+      ? next.missingRequirements.filter((item) => item !== 'menu')
+      : next.missingRequirements;
+    const row = { ...next, missingRequirements };
     const entry = {
-      revision: source === 'write' || !current || version > previousVersion ? revision : current.revision,
-      confirmedBy: source === 'write' || !current || version > previousVersion ? source : current.confirmedBy,
+      revision,
+      confirmedBy: source,
       row,
-      detail,
-      availabilityConfirmed:
-        source === 'write' ||
-        !!keepAvailability ||
-        (version > 0 && source === 'list' && next.activated) ||
-        (next.activated &&
-          (next.merchantStatus === 'suspended' || next.locationStatus === 'suspended')),
+      detail: incomingDetail ? { ...incomingDetail, missingRequirements } : current?.detail,
     };
     entries.set(key, entry);
     return entry;

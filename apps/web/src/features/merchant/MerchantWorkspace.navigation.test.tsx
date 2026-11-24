@@ -281,7 +281,7 @@ it.each([
     const storeLink = () => within(locations).queryByRole('link', { name: '管理門市：一樓' });
     if (returnStatus === 403 || returnStatus === 404) {
       expect(storeLink()).toBeNull();
-      expect(screen.getByRole('alert').textContent).toContain('管理權限');
+      expect(screen.getByText(/目前無法取得部分門市的管理權限/).getAttribute('role')).toBe('status');
 
       detailStatus = 503;
       await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
@@ -722,14 +722,34 @@ it.each(['browser Back', 'return link from application progress'])(
   },
 );
 
-it('keeps a newer paused list row when a successful detail returns an older open version', async () => {
+it('uses the successful detail for same-version availability without a write receipt', async () => {
   const open = detail('store-a', true);
+  const paused = { ...open, locationStatus: 'closed', publicAccess: false };
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
+    if (resource === 'merchant-workspaces/campus-one/store-a') return Promise.resolve(paused);
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  const resume = await screen.findByRole<HTMLButtonElement>('button', { name: '恢復接單' });
+  expect(resume.disabled).toBe(false);
+  expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
+  fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+  await screen.findByText('暫停接單');
+});
+
+it('keeps a newer paused list row when a successful detail returns an older open version', async () => {
+  const open = { ...detail('store-a', true), paymentMode: 'online-and-counter' };
   const paused = { ...open, readinessVersion: 2, locationStatus: 'closed', publicAccess: false };
   let row = open;
   const path = 'merchant-workspaces/campus-one/store-a';
   mocks.request.mockImplementation((resource) => {
     if (resource === 'merchant-workspaces') return Promise.resolve({ workspaces: [row] });
     if (resource === path) return Promise.resolve(open);
+    if (resource === `${path}/settings`)
+      return Promise.reject(new NuniError(409, 'CONFLICT'));
     return respond(resource);
   });
   render(<MerchantWorkspace view="workspace" />);
@@ -744,7 +764,18 @@ it('keeps a newer paused list row when a successful detail returns an older open
   expect(mocks.request.mock.calls.filter(([resource]) => resource === path)).toHaveLength(3);
   fireEvent.click(screen.getByRole('link', { name: '管理門市：一樓' }));
   await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+  const resume = await screen.findByRole<HTMLButtonElement>('button', { name: '恢復接單' });
+  expect(resume.disabled).toBe(false);
+  expect(screen.queryByRole('button', { name: '暫停接單' })).toBeNull();
   expect(screen.queryByText(/目前無法取得這間門市的管理權限/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '確認改為櫃檯付款' }));
+  await screen.findByText(/門市資料已變更/);
+  expect(mocks.request).toHaveBeenCalledWith(
+    `${path}/settings`,
+    'context-a',
+    expect.objectContaining({ serviceModes: ['pickup'], expectedVersion: 1 }),
+    'PUT',
+  );
 });
 
 it.each([

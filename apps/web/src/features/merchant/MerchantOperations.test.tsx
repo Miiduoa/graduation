@@ -196,17 +196,20 @@ it('offers a read retry after a detail failure without showing a made-up empty w
   await screen.findByLabelText('付款方式');
 });
 
-it('hides details after a failed refresh and restores the draft on retry', async () => {
+it('retains details and the draft with operations disabled after a failed refresh', async () => {
   await open();
   fireEvent.click(screen.getByLabelText(/我確認營運資訊正確/));
   request.mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'));
   fireEvent.click(button('重新讀取門市狀態'));
   await screen.findByRole('alert');
-  expect(screen.queryByRole('button', { name: '儲存營運設定' })).toBeNull();
-  expect(screen.queryByLabelText('付款方式')).toBeNull();
+  expect(screen.getByText('米飯店／一樓門市')).toBeTruthy();
+  expect(screen.getByLabelText('付款方式')).toBeTruthy();
+  expect(button('儲存營運設定').disabled).toBe(true);
+  fireEvent.click(button('儲存營運設定'));
   expect(request.mock.calls.some(([path]) => path.endsWith('/settings'))).toBe(false);
   fireEvent.click(button('重新讀取門市狀態'));
   await waitFor(() => expect(button('儲存營運設定').disabled).toBe(false));
+  expect(screen.queryByRole('alert')).toBeNull();
 });
 
 it('hides the retained location when its management permission is revoked on refresh', async () => {
@@ -308,7 +311,7 @@ it('keeps a confirmed menu receipt when its following detail read fails', async 
   await screen.findByText('已建立 1 項首次菜單。啟用前請再確認門市資料。');
   await screen.findByRole('alert');
   expect(screen.queryByRole('button', { name: '確認建立並上架菜單' })).toBeNull();
-  expect(screen.queryByRole('button', { name: '確認啟用門市' })).toBeNull();
+  expect(button('確認啟用門市').disabled).toBe(true);
 
   current = { ...current, publishedMenuItems: 0 }; // A published menu can be sold out.
   fireEvent.click(button('重新讀取門市狀態'));
