@@ -152,6 +152,7 @@ export default function ProfilePage() {
   const needsSignIn = !loading && !user && !nuni.loading && !nuni.session && !nuni.error && !nuni.pendingLogout;
   const services: PersonalService[] = [
     { href: '/timetable', label: '我的課表', description: '查看上課時間與教室，整理自己的課表。' },
+    { href: '/events?saved=1', label: '收藏的活動', description: '回到想參加的活動，確認時間與報名方式。' },
     ...(hasSchoolAccount ? [
       { href: '/community/me', label: '我的社群頁', description: '整理公開貼文、媒體與私人收藏。' },
       { href: '/grades?tab=semester', label: '成績紀錄', description: '查詢學期成績與原始紀錄。' },

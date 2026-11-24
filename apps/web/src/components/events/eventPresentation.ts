@@ -5,7 +5,8 @@ import { listPageNumber, listQueryValue, listSearchText, type ServiceListQuery }
 import { campusEventPhase, type CampusEventTime } from '@campus/shared/src/campusEventTime';
 
 export type CampusEventView = 'all' | 'upcoming' | 'ongoing' | 'past' | 'unscheduled';
-export type CampusEventFilters = { q: string; view: CampusEventView; page?: number };
+/** `saved` selects the device-local saved view and is only present when it is on. */
+export type CampusEventFilters = { q: string; view: CampusEventView; page?: number; saved?: boolean };
 export const EVENT_RESTORE_BATCH_SIZE = 10;
 
 export const CAMPUS_EVENT_VIEWS: ReadonlyArray<{ value: CampusEventView; label: string }> = [
@@ -19,10 +20,12 @@ export const CAMPUS_EVENT_VIEWS: ReadonlyArray<{ value: CampusEventView; label: 
 export function readCampusEventFilters(query?: ServiceListQuery): CampusEventFilters {
   const view = listQueryValue(query, 'view');
   const page = listPageNumber(listQueryValue(query, 'page'));
+  const saved = listQueryValue(query, 'saved') === '1';
   return {
     q: listSearchText(listQueryValue(query, 'q')),
     view: CAMPUS_EVENT_VIEWS.some((item) => item.value === view) ? view as CampusEventView : 'all',
     ...(page > 1 ? { page } : {}),
+    ...(saved ? { saved: true } : {}),
   };
 }
 
@@ -34,6 +37,7 @@ export function campusEventFilterQuery(filters: CampusEventFilters): URLSearchPa
     params.set('view', filters.view);
   }
   if (filters.page && filters.page > 1) params.set('page', String(Math.min(100, filters.page)));
+  if (filters.saved) params.set('saved', '1');
   return params;
 }
 

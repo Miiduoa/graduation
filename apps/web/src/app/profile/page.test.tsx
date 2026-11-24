@@ -142,6 +142,7 @@ it('preserves the browsing campus on school records, student card, library and s
   const destinations: Array<[string | RegExp, string, Record<string, string>]> = [
     [/數位學生證/, '/student-card', {}],
     [/我的課表/, '/timetable', {}],
+    [/收藏的活動/, '/events', { saved: '1' }],
     [/我的社群頁/, '/community/me', {}],
     [/成績紀錄/, '/grades', { tab: 'semester' }],
     [/學分規劃/, '/credit-planner', {}],
