@@ -32,7 +32,7 @@ function dateTabStops() {
     .filter((button) => button.tabIndex === 0);
 }
 
-it.each([375, 541])('%ipx 月格完整顯示行程名稱，可展開並直接開啟指定行程', (viewportWidth) => {
+it.each([320, 541])('%ipx 月格可辨識行程名稱、展開並直接開啟指定行程', (viewportWidth) => {
   // JSDOM parses media rules but does not apply them based on viewport width.
   const stylesheet = document.createElement('style');
   stylesheet.textContent = readFileSync(
@@ -81,8 +81,7 @@ it.each([375, 541])('%ipx 月格完整顯示行程名稱，可展開並直接開
       const event = screen.getByRole('button', { name: record.title });
       const title = within(event).getByText(record.title);
       const titleStyle = getComputedStyle(title);
-      expect(titleStyle.display).toBe('block');
-      expect(titleStyle.getPropertyValue('-webkit-line-clamp')).toBe('');
+      expect(titleStyle.display).toBe(viewportWidth <= 540 ? '-webkit-box' : 'block');
       expect(getComputedStyle(event).overflowWrap).toBe('anywhere');
       fireEvent.click(event);
       expect(onEdit).toHaveBeenLastCalledWith(record, event);
@@ -92,6 +91,7 @@ it.each([375, 541])('%ipx 月格完整顯示行程名稱，可展開並直接開
     const edit = screen.getByRole('button', { name: '合成2' });
     fireEvent.click(edit);
     expect(onEdit).toHaveBeenCalledWith(records[2], edit);
+    expect(getComputedStyle(within(edit).getByText('合成2')).display).toBe('block');
     const date = screen.getByRole('button', { name: '2024-03-01' });
     expect(document.getElementById(date.getAttribute('aria-describedby')!)?.textContent).toBe(
       '3 筆行程',

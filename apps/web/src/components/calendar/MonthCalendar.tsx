@@ -117,7 +117,13 @@ export function MonthCalendar({
           ))}
           {days.map((day, index) =>
             day ? (
-              <div className={styles.day} key={day.date}>
+              <div
+                className={styles.day}
+                key={day.date}
+                data-preview={
+                  selectedDate !== day.date && !expanded.includes(day.date) ? '' : undefined
+                }
+              >
                 <button
                   ref={(node) => {
                     if (node) dateButtons.current.set(day.date, node);

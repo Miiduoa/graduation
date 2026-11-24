@@ -81,7 +81,14 @@ function record(
 }
 
 export function seedCalendar() {
+  const longTitle = '跨週行程標題用於驗收'.repeat(20);
   const pu = [
+    {
+      ...record('pu', 'synthetic-multiweek', longTitle, '2028-04-02', '09:00', '10:00', '校園'),
+      endDate: '2028-04-16',
+    },
+    record('pu', 'synthetic-april-noon', '午間討論', '2028-04-09', '12:00', '13:00', '校園'),
+    record('pu', 'synthetic-april-extra', '傍晚討論', '2028-04-09', '17:00', '18:00', '校園'),
     record(
       'pu',
       'synthetic-study',

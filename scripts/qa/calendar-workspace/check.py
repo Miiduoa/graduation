@@ -51,6 +51,66 @@ def day_heading(page, date):
     return page.get_by_role('heading').filter(has_text=date)
 
 
+async def assert_multiweek_titles(page, config, report):
+    title = '跨週行程標題用於驗收' * 20
+    narrow = config['width'] <= 540
+    if not narrow:
+        await page.set_viewport_size({'width': 541, 'height': config['height']})
+
+    await set_month(page, '2028-04')
+    grid = page.get_by_role('region', name='2028-04 月格，週日起始', exact=True)
+    long_events = grid.get_by_role('button', name=title, exact=True)
+    await expect(long_events).to_have_count(15)
+
+    async def title_lines(buttons):
+        return await buttons.evaluate_all("""buttons => buttons.map(button => {
+          const title = button.firstElementChild;
+          const lineHeight = parseFloat(getComputedStyle(title).lineHeight);
+          return {visible: title.clientHeight / lineHeight, full: title.scrollHeight / lineHeight};
+        })""")
+
+    lines = await title_lines(long_events)
+    if not narrow:
+        assert all(row['visible'] > 4 and row['visible'] == row['full'] for row in lines), lines
+        await page.set_viewport_size({'width': config['width'], 'height': config['height']})
+        report['checks'].append('At 541px, every multiweek event title wraps in full')
+        return
+
+    assert all(3.9 <= row['visible'] <= 4.1 and row['full'] > 4 for row in lines), lines
+    day = grid.get_by_role('button', name='2028-04-09', exact=True)
+    cell = day.locator('..')
+    long_event = cell.get_by_role('button', name=title, exact=True)
+    await cell.get_by_role('button', name='還有 1 筆', exact=True).click()
+    expanded, = await title_lines(long_event)
+    assert expanded['visible'] > 4 and expanded['visible'] == expanded['full'], expanded
+    await cell.get_by_role('button', name='傍晚討論', exact=True).click()
+    await expect(page.get_by_label('標題', exact=True)).to_have_value('傍晚討論')
+    await page.get_by_role('button', name='取消', exact=True).click()
+    await cell.get_by_role('button', name='收合', exact=True).click()
+    await long_event.click()
+    await expect(page.get_by_label('標題', exact=True)).to_have_value(title)
+    await page.get_by_role('button', name='取消', exact=True).click()
+
+    await day.click()
+    await expect(day).to_have_attribute('aria-pressed', 'true')
+    heading = page.get_by_role('heading', name='2028-04-09 的行程', exact=True)
+    await expect(heading).to_be_in_viewport(ratio=1)
+    agenda_title = page.get_by_role('heading', name=title, exact=True)
+    await expect(agenda_title).to_be_in_viewport(ratio=0.1)
+    agenda = await agenda_title.evaluate("""title => ({
+      height: title.clientHeight, fullHeight: title.scrollHeight,
+      clamp: getComputedStyle(title).webkitLineClamp
+    })""")
+    assert agenda['height'] == agenda['fullHeight'] and agenda['clamp'] == 'none', agenda
+    selected, = await title_lines(long_event)
+    assert selected['visible'] > 4 and selected['visible'] == selected['full'], selected
+    remaining = await title_lines(long_events)
+    assert sum(row['visible'] > 4.1 for row in remaining) == 1, remaining
+    await day.click()
+    await expect(heading).to_be_in_viewport(ratio=1)
+    report['checks'].append('Narrow multiweek titles have bounded previews, expand in full, open directly and reveal the full day agenda on selection and reselection')
+
+
 async def assert_complete_field_value(page, label, value, text, report):
     field = page.get_by_label(label, exact=True)
     await expect(field).to_have_value(value)
@@ -229,6 +289,7 @@ async def run_scenario(browser, server_url, config):
         query = urlencode({key: config[key] for key in ('theme', 'text', 'motion') if key in config})
         await page.goto(server_url + '/?' + query)
         await expect(page.get_by_role('button', name='新增行程', exact=True)).to_be_enabled()
+        await assert_multiweek_titles(page, config, report)
         await set_month(page, '2028-01')
         await assert_month_controls_fit(page, report)
         await capture('month')

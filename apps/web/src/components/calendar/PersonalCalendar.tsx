@@ -412,6 +412,7 @@ function PersonalCalendarWorkspace({
   const titleRef = useRef<HTMLInputElement | null>(null);
   const createButtonRef = useRef<HTMLButtonElement | null>(null);
   const dayHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const pendingDayReveal = useRef<string | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const pendingFocus = useRef<'editor' | 'return' | 'saved' | null>(null);
   const [editorRevision, setEditorRevision] = useState(0);
@@ -512,6 +513,23 @@ function PersonalCalendarWorkspace({
       createButtonRef.current?.focus({ preventScroll: true });
     }
   }, [paused, mode, editorRevision, month, selectedDate]);
+
+  useLayoutEffect(() => {
+    const requestedDate = pendingDayReveal.current;
+    pendingDayReveal.current = null;
+    if (requestedDate && requestedDate === selectedDate && !paused) {
+      dayHeadingRef.current?.scrollIntoView?.({ block: 'start', behavior: 'instant' });
+    }
+  }, [paused, selectedDate]);
+
+  const selectMonthDay = (date: string) => {
+    if (date === selectedDate) {
+      dayHeadingRef.current?.scrollIntoView?.({ block: 'start', behavior: 'instant' });
+      return;
+    }
+    pendingDayReveal.current = date;
+    setSelectedDate(date);
+  };
 
   const monthEvents = useMemo(
     () => filterPersonalEvents(ledger.records, month),
@@ -850,7 +868,7 @@ function PersonalCalendarWorkspace({
             records={monthEvents}
             month={month}
             selectedDate={selectedDate}
-            onDate={setSelectedDate}
+            onDate={selectMonthDay}
             onMonthChange={changeMonth}
             onEdit={openEdit}
             disabled={!canMutate}
