@@ -711,11 +711,12 @@ it('放大並平移後開啟行程深連結，確認行程列在雙軸皆可見�
     if (this.matches('li[aria-current="true"]')) return new DOMRect(rowLeft, rowTop, 140, 60);
     return originalBounds.call(this);
   });
-  const scroll = vi.spyOn(window, 'scrollBy').mockImplementation((options?: ScrollToOptions) => {
+  const scroll = vi.spyOn(window, 'scrollBy');
+  vi.mocked<(options: ScrollToOptions) => void>(window.scrollBy).mockImplementation((options) => {
     expect(document.activeElement).toBe(document.body);
     if (canScroll) {
-      rowLeft -= options?.left ?? 0;
-      rowTop -= options?.top ?? 0;
+      rowLeft -= options.left ?? 0;
+      rowTop -= options.top ?? 0;
     }
   });
 
