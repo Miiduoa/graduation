@@ -23,7 +23,7 @@ const EARTH_RADIUS = 6_371_008.8;
 const DEG = Math.PI / 180;
 const ALLOWANCE = 0.0004;
 const MAX_WAYS = 128;
-const MAX_VERTICES = 160;
+export const MAX_VERTICES = 160;
 const MAX_POI_OFFSET_METERS = 30;
 const ILLUSTRATIVE_HEIGHT = 12;
 

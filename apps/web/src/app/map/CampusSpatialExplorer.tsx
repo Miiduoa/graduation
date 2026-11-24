@@ -435,17 +435,16 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Safari can fire pagehide before visibilitychange when entering bfcache.
     // Treat that window as suspended even if document.hidden stays false.
     const isBackgrounded = () => pageSuspended.current || document.hidden;
-    const isOffscreen = () => visibility === 'hidden' ||
+    // Measure the visual viewport even when layout already hides the canvas,
+    // so keyboard occlusion is tracked across a subsequent focus change.
+    const isOffscreen = () => measureVisualViewportVisibility() === false ||
+      keyboardOverlayIntersectsCanvas() || visibility === 'hidden' ||
       (visibility === 'unknown' && measureLayoutVisibility() === false) ||
       // A positive IntersectionObserver can be stale after nested modal
       // scrolling. Only override that signal when the dialog's *actual*
       // scrollport has valid measurements and demonstrably clips the canvas.
       // Incomplete layout geometry must not contradict a valid observer.
-      (visibility === 'visible' && measureDialogScrollportVisibility() === false) ||
-      // IntersectionObserver checks layout intersection, not whether a mobile
-      // keyboard has reduced the *visual* viewport over the 3D canvas.
-      // A positive observer entry must never reactivate an obscured WebGL scene.
-      measureVisualViewportVisibility() === false;
+      (visibility === 'visible' && measureDialogScrollportVisibility() === false);
     const isDeferred = () => isOffscreen() || isBackgrounded() || (saveData && !hasDataConsent);
     const defer = () => {
       setDeferredCause(isBackgrounded() ? 'background' :
@@ -628,11 +627,24 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         return null;
       }
     };
+    const keyboardOverlayIntersectsCanvas = (): boolean => {
+      try {
+        if (virtualKeyboard?.overlaysContent !== true) return false;
+        const bounds = virtualKeyboard.boundingRect;
+        if (!bounds || ![bounds.left, bounds.top, bounds.right, bounds.bottom,
+          bounds.width, bounds.height].every(Number.isFinite) ||
+          !(bounds.width > 0 && bounds.height > 0)) return false;
+        // Only the dialog-clipped, on-screen part of the canvas counts as visible.
+        // Overflow hidden by the modal must not pause 3D by itself.
+        return measureVisibilityAgainst(bounds.left, bounds.top, bounds.right, bounds.bottom) === true;
+      } catch {
+        return false;
+      }
+    };
     const isPinchZoomed = (viewport: VisualViewport) =>
       Number.isFinite(viewport.scale) && viewport.scale > 1.01;
     // Manual restart always wins over a visual viewport that may be stale.
     let ignoredViewport: string | null = null;
-    let expiredViewport: string | null = null;
     if (manualStart > 0) {
       try {
         const viewport = window.visualViewport;
@@ -650,39 +662,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       }
       return (element as HTMLElement).isContentEditable === true;
     };
-    const visualViewportMayObscureCanvas = (viewport: VisualViewport): boolean => {
-      // Pinch zoom legitimately leaves parts of the layout outside the visual
-      // viewport and always reports its own resize/scroll events.
-      if (isPinchZoomed(viewport)) return true;
-      try { return isTextEntryTarget(host.ownerDocument.activeElement); }
-      catch { return false; }
-    };
     // Visual geometry handles keyboard coverage; isOffscreen separately checks
     // measured dialog clipping even when a positive observer has become stale.
     // Recovering a hidden observation must prove both intersections together.
     const measureVisualViewportVisibility = (clipToDialog = false): boolean | null => {
       try {
         const viewport = window.visualViewport;
-        if (!viewport) return null;
-        const left = viewport.offsetLeft;
-        const top = viewport.offsetTop;
-        const width = viewport.width;
-        const height = viewport.height;
-        if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
-          return null;
-        }
-        // Some WebViews keep reporting the keyboard-shrunk height after the
-        // keyboard is dismissed and emit no further viewport event. A shrunk
-        // visual viewport is only evidence of an obscured canvas while
-        // something can actually be showing a keyboard or the page is
-        // pinch-zoomed; otherwise treat the geometry as unknown.
-        if (!clipToDialog && !visualViewportMayObscureCanvas(viewport)) return null;
-        const keyboardOpen = measureKeyboardOpen();
-        if (!clipToDialog && !isPinchZoomed(viewport) && keyboardOpen === false) return null;
-        if (expiredViewport !== null) {
-          if (viewportSignature(viewport) !== expiredViewport) expiredViewport = null;
-          else if (!clipToDialog && keyboardOpen === null) return null;
-        }
+        if (!viewport) return keyboardOverlayIntersectsCanvas() ? false : null;
+        const { offsetLeft: left, offsetTop: top, width, height } = viewport;
         // The visitor explicitly restarted 3D while the viewport read this
         // way. Ignore that exact (possibly stale) geometry as an occlusion
         // signal until it changes. It can still prove the canvas is visible
@@ -691,49 +678,31 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           if (viewportSignature(viewport) !== ignoredViewport) ignoredViewport = null;
           else if (!clipToDialog) return null;
         }
-        return measureVisibilityAgainst(left, top, left + width, top + height, clipToDialog);
-      } catch {
+        const visible = measureVisibilityAgainst(left, top, left + width, top + height, clipToDialog);
+        if (clipToDialog) return visible;
+        // Structural signals only: a shrunken visual viewport is not itself
+        // proof that the keyboard still covers the canvas.
+        if (keyboardOverlayIntersectsCanvas()) return false;
+        if (isPinchZoomed(viewport)) return visible;
+        const keyboardOpen = measureKeyboardOpen();
+        const textEntryFocused = isTextEntryTarget(host.ownerDocument.activeElement);
+        // virtualKeyboard reported a closed keyboard. Ignore leftover
+        // shrunken bounds even if a field stays focused.
+        if (keyboardOpen === false) return null;
+        // No editable focus and no keyboard overlap: treat the keyboard as
+        // closed. A stale resize must not keep 3D paused.
+        if (!textEntryFocused) return null;
+        // While an editable is focused and the keyboard API does not clear
+        // it, a visual viewport that excludes the canvas is still occlusion.
+        // Never auto-resume from timers in this state.
+        if (visible === false) return false;
         return null;
-      }
-    };
-    let observerConfirmedVisible = false;
-    let viewportRecheck: number | null = null;
-    const cancelViewportRecheck = () => {
-      if (viewportRecheck !== null) window.clearTimeout(viewportRecheck);
-      viewportRecheck = null;
-    };
-    const getUnconfirmedOcclusion = (): string | null => {
-      if (!observerConfirmedVisible || visibility !== 'visible' || isBackgrounded() ||
-          measureDialogScrollportVisibility() === false || measureKeyboardOpen() !== null) return null;
-      try {
-        const viewport = window.visualViewport;
-        if (!viewport || isPinchZoomed(viewport) || measureVisualViewportVisibility() !== false) return null;
-        return viewportSignature(viewport);
       } catch {
-        return null;
+        return keyboardOverlayIntersectsCanvas() ? false : null;
       }
-    };
-    const scheduleViewportRecheck = () => {
-      const signature = getUnconfirmedOcclusion();
-      if (signature === null) {
-        cancelViewportRecheck();
-        return;
-      }
-      if (viewportRecheck !== null) return;
-      // Without keyboard geometry, a silent open keyboard and a stale
-      // viewport can look identical. Only expire visual-only occlusion after
-      // a fresh positive IO entry and four quiet seconds. Viewport events
-      // reset that evidence, and confirmed keyboard or dialog clipping wins.
-      viewportRecheck = window.setTimeout(() => {
-        viewportRecheck = null;
-        if (!active) return;
-        if (getUnconfirmedOcclusion() === signature) expiredViewport = signature;
-        syncVisibility();
-      }, 4_000);
     };
     const syncVisibility = () => {
       if (!active) return;
-      scheduleViewportRecheck();
       updateVisibility();
       if (!started && !isDeferred()) startWhenVisible();
       else syncPendingStartup();
@@ -802,7 +771,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           const intersects = readIntersection(latest);
           if (intersects === undefined) return;
           visibility = intersects ? 'visible' : 'hidden';
-          observerConfirmedVisible = observing && intersects;
           if (observing) syncVisibility();
         }, { threshold: VIEWPORT_THRESHOLDS });
         // An edge-touch (isIntersecting=true, zero area) and a sliver of
@@ -839,9 +807,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     }
     // Keyboard transitions can move the host without a window event.
     const onVisualViewportChange = () => {
-      observerConfirmedVisible = false;
-      expiredViewport = null;
-      cancelViewportRecheck();
       if (visibility === 'hidden' && measureVisualViewportVisibility(true) === true) {
         // Recover from a stale hidden observer entry after the keyboard moves.
         // A valid intersection with the visual viewport is evidence the host
@@ -851,11 +816,14 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       // Also run when the observer last said "visible": a shrinking mobile
       // viewport can cover the canvas while its layout intersection stays true.
       // Invalid/missing visual geometry is not proof that the host is hidden.
+      // A stale shrunken size is not treated as coverage unless an editable
+      // is focused or virtualKeyboard overlaps the visible canvas.
       syncVisibility();
     };
-    // Dismissing the keyboard (blur) or opening it can change the visual
-    // viewport after the focus event, and some WebViews never report it.
-    // Re-measure right away and again once the keyboard animation settles.
+    // Focus moving into or out of a field can open or close the keyboard
+    // without a viewport event. Re-measure immediately, and once more after
+    // the keyboard animation may have settled. Timers never override the
+    // structural signals (editable focus or virtualKeyboard overlap).
     const focusTimers = new Set<number>();
     const onFocusChange = () => {
       for (const delay of [0, 350]) {
@@ -905,7 +873,6 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     syncVisibility();
     return () => {
       active = false;
-      cancelViewportRecheck();
       if (timeout !== null) window.clearTimeout(timeout);
       for (const id of focusTimers) window.clearTimeout(id);
       focusTimers.clear();
@@ -1168,6 +1135,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
   const previousPoint = model.points[index - 1];
   const nextPoint = model.points[index + 1];
   const [destinationQuery, setDestinationQuery] = useState('');
+  // When the map narrows to one or zero valid POIs, the search controls disappear.
+  // Discard their hidden query so expanding the map cannot restore an invisible stale filter.
+  if (model.points.length <= 1 && destinationQuery !== '') setDestinationQuery('');
   const destinationSearchRef = useRef<HTMLInputElement>(null);
   const searchId = useId();
   const searchStatusId = useId();
@@ -1805,6 +1775,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose, manualS
                     {matchingPoints.length === 0 ? '沒有符合的地點，請調整關鍵字。' : `找到 ${matchingPoints.length} 個地點。`}
                     {currentOutsideSearch ? ' 目前選擇仍保留，搜尋不會變更導航目的地。' : ''}
                   </small>}
+                  {searchTerms.length > 0 && matchingPoints.length === 1 && (
+                    <button className="btn" type="button"
+                      onClick={() => selectPlace(matchingPoints[0].id)}>
+                      選擇：{optionLabels.get(matchingPoints[0].id) ?? matchingPoints[0].name}
+                    </button>
+                  )}
                 </>}
                 <label htmlFor={selectId}>想去哪裡</label>
                 <select id={selectId} value={place?.id ?? ''} onChange={(event) => selectPlace(event.target.value)}>
