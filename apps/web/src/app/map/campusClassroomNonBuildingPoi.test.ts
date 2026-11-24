@@ -1057,6 +1057,27 @@ describe('bilingual timetable lookup uses the existing sourced building identity
 
 describe('official Providence English building-name variants', () => {
   it.each([
+    ['pu-wenxing', 'Bishop Kupfer Hall'],
+    ['pu-library', 'Luking Library'],
+  ])('keeps official alias fields on %s behind another public name', (id, official) => {
+    const location = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === id)!;
+    const collision = { ...location, id: 'synthetic-other-building', name: official };
+    const query = official + ' 303';
+    for (const aliased of [
+      location,
+      { ...location, name: official },
+      { ...location, building: official },
+    ]) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [aliased, collision],
+      })).toMatchObject({ status: 'matched', matchKind: 'primary', matches: [collision] });
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query, locations: [aliased],
+      })).toMatchObject({ status: 'matched', matchKind: 'alias', matches: [aliased] });
+    }
+  });
+
+  it.each([
     ['pu-wenxing', 'Bishop Kupfer Hall', 'Wen Xing Hall'],
     ['pu-library', 'Luking Library', 'Gaesia Library'],
     ['pu-gym', 'John Paul II Stadium', 'John Paul II Sports Hall'],

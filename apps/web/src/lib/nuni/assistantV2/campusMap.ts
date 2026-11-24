@@ -108,11 +108,18 @@ function comparable(value: string): string {
 
 /** Reuse the map's room-to-building and text matching, without decoding a
  * classroom number into a floor or inventing a route. */
-export function campusMapMatch(schoolId: string, query: string, location: CampusMapPlaceLike): CampusMapMatch | null {
-  if (comparable(query) === comparable(location.name)) return 'place';
+export function campusMapMatchDetails(
+  schoolId: string, query: string, location: CampusMapPlaceLike,
+): { match: CampusMapMatch; alias: boolean } | null {
   const room = resolveCampusClassroom({ schoolId, query, locations: [location] });
-  if (room.matches.length === 1) return 'building';
-  return locationMatchesSearch(location, query) ? 'search' : null;
+  const alias = room.matchKind === 'alias';
+  if (comparable(query) === comparable(location.name)) return { match: 'place', alias };
+  if (room.matchKind) return { match: 'building', alias };
+  return locationMatchesSearch(location, query) ? { match: 'search', alias: false } : null;
+}
+
+export function campusMapMatch(schoolId: string, query: string, location: CampusMapPlaceLike): CampusMapMatch | null {
+  return campusMapMatchDetails(schoolId, query, location)?.match ?? null;
 }
 
 export function campusMapResolution(items: readonly CampusMapItem[], partial: boolean): CampusMapRead['resolution'] {

@@ -11,7 +11,7 @@ import {
 import { guardedPublicCampusRead, type PublicCampusReadGuard } from '../../publicCampusReadGuard';
 import { V2Error } from './contracts';
 import {
-  boundedTransitStopMarker, campusMapHref, campusMapMatch, campusMapResolution, campusMapSourcePath,
+  boundedTransitStopMarker, campusMapHref, campusMapMatchDetails, campusMapResolution, campusMapSourcePath,
   parseCampusMapArguments, parseCampusMapResult, validCampusMapSchool, type CampusMapArguments,
   type CampusMapItem, type CampusMapRead, type CampusMapSource,
 } from './campusMap';
@@ -113,20 +113,24 @@ export async function readCampusMap(input: {
   const publishedIds = new Set(unique.map(place => place.id));
   const places = withProvidenceCampusPlaces(schoolId, unique);
   if (!unique.length && hasBundledCampusPlaces(schoolId)) source = 'bundled-providence';
-  const candidates: CampusMapItem[] = [];
+  const matches: { item: CampusMapItem; alias: boolean }[] = [];
   for (const rawPlace of places) {
     const place = safePlace(rawPlace);
     if (!place) { incomplete = true; continue; }
-    const match = campusMapMatch(schoolId, args.query, place);
-    if (!match) continue;
+    const details = campusMapMatchDetails(schoolId, args.query, place);
+    if (!details) continue;
+    const { match, alias } = details;
     const itemSource = publishedIds.has(place.id) ? source : 'bundled-providence';
     const sourceUrl = providencePlaceSourceUrl(schoolId, place);
-    candidates.push({ ...place, schoolId, facilities: place.facilities ?? [],
+    const item: CampusMapItem = { ...place, schoolId, facilities: place.facilities ?? [],
       source: itemSource, sourcePath: campusMapSourcePath(schoolId, itemSource),
       href: campusMapHref(schoolId, args.query, place.id), match,
       verification: sourceUrl ? isProvidencePendingVerification(schoolId, place) ? 'single-source' : 'cross-checked' : 'published',
-      ...(sourceUrl ? { sourceUrl } : {}) });
+      ...(sourceUrl ? { sourceUrl } : {}) };
+    matches.push({ item, alias });
   }
+  const hasPrimary = matches.some(({ item, alias }) => !alias && item.match !== 'search');
+  const candidates = matches.filter(({ alias }) => !hasPrimary || !alias).map(({ item }) => item);
   const rank = { place: 0, building: 1, search: 2 };
   candidates.sort((a, b) => rank[a.match] - rank[b.match] || a.name.localeCompare(b.name, 'zh-Hant') || a.id.localeCompare(b.id));
   const items = candidates.slice(0, args.limit);

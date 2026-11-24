@@ -44,6 +44,7 @@ export type CampusClassroomResolution<T extends CampusMapPlaceLike> = {
   query: string;
   status: 'empty' | 'unmatched' | 'matched' | 'ambiguous';
   matches: readonly T[];
+  matchKind?: 'primary' | 'alias';
 };
 
 function comparisonText(value: unknown): string {
@@ -481,9 +482,15 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     // A sourced clinic, chapel or sports POI must not navigate to another
     // building through an unsourced Firestore `building` override.
     const building = sourcedBuildingLabel(school, published, location.building);
+    // Importing an official alias into a display field does not give it
+    // priority over a different POI whose public name matches the query.
+    const publicName = published ? comparisonText(published.name) : undefined;
+    const matchesPublicName = [location.name, building].some((label) =>
+      (publicName === undefined || comparisonText(label) === publicName) &&
+      nameMatchesRoom(comparable, label),
+    );
     if (
-      nameMatchesRoom(comparable, location.name) ||
-      nameMatchesRoom(comparable, building) ||
+      matchesPublicName ||
       nameMatchesVerifiedCode(school, comparable, location.name) ||
       nameMatchesVerifiedCode(school, comparable, building)
     ) {
@@ -501,5 +508,6 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     query,
     status: matches.length === 1 ? 'matched' : matches.length > 1 ? 'ambiguous' : 'unmatched',
     matches,
+    ...(matches.length ? { matchKind: primaryMatches.length ? 'primary' : 'alias' } : {}),
   };
 }

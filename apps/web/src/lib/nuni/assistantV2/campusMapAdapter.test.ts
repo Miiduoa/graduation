@@ -105,6 +105,27 @@ describe('map reader uses the current page sources', () => {
     expect(await read('任垣樓501', guard(), 'pu', 1)).toMatchObject({ resolution: 'partial', partial: true, items: [{ id: 'first' }] });
   });
 
+  it.each([
+    ['pu-renyuan', 'Anthony Kuo Hall', 'Anthony Kuo Hall 303', false, 'building'],
+    ['pu-renyuan', 'AK', 'AK303', false, 'building'],
+    ['pu-renyuan', 'AK303', 'AK303', false, 'place'],
+    ['pu-wenxing', 'Bishop Kupfer Hall', 'Bishop Kupfer Hall 303', true, 'building'],
+    ['pu-library', 'Luking Library', 'Luking Library', true, 'place'],
+  ])('prefers the direct name over the catalog match for %s (%s)', async (id, name, query, rename, match) => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find(item => item.id === id)!;
+    const catalog = doc(id, { ...place, name: rename ? name : place.name });
+    const direct = doc('imported-building', published({ name }));
+    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([catalog, direct]) as never);
+    expect(await read(query, guard(), 'pu', 1)).toMatchObject({
+      resolution: 'matched', partial: false, items: [{ id: 'imported-building', match }],
+    });
+
+    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([catalog]) as never);
+    expect(await read(query)).toMatchObject({
+      resolution: 'matched', partial: false, items: [{ id, match: rename ? match : 'building' }],
+    });
+  });
+
   it('does not label one fuzzy or single-source place a uniquely verified location', async () => {
     expect(await read('任垣')).toMatchObject({ resolution: 'candidates', items: [{ match: 'search' }] });
     vi.mocked(getDocsFromServer).mockResolvedValue(snapshot() as never);
