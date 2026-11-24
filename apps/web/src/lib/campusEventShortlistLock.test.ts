@@ -22,16 +22,65 @@ it('never mutates storage without a cross-tab lock, including when IndexedDB is 
 
 it('uses the browser Web Lock for the scope and never starts the operation after a lock error', async () => {
   const operation = vi.fn(async () => 7);
-  const request = vi.fn(async (_key: string, callback: () => Promise<number>) => callback());
+  const request = vi.fn(async (_key: string, _options: LockOptions, callback: () => Promise<number>) => callback());
   vi.stubGlobal('navigator', { locks: { request } });
   vi.stubGlobal('indexedDB', undefined);
   await expect(withCampusEventShortlistLock('campus-a', operation)).resolves.toBe(7);
-  expect(request).toHaveBeenCalledWith('campus-a', operation);
+  expect(request).toHaveBeenCalledWith('campus-a', { signal: expect.any(AbortSignal) }, expect.any(Function));
   request.mockRejectedValueOnce(new Error('Lock unavailable'));
   await expect(withCampusEventShortlistLock('campus-a', operation)).rejects.toThrow(
     'Lock unavailable',
   );
   expect(operation).toHaveBeenCalledTimes(1);
+});
+
+it('aborts a queued Web Lock and guards against a late callback', async () => {
+  vi.useFakeTimers();
+  let acquire!: () => Promise<string>;
+  let signal!: AbortSignal;
+  const operation = vi.fn(async () => 'saved');
+  const request = vi.fn((_key: string, options: LockOptions, callback: () => Promise<string>) => {
+    acquire = callback;
+    signal = options.signal!;
+    return new Promise<string>((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    });
+  });
+  vi.stubGlobal('navigator', { locks: { request } });
+  const pending = withCampusEventShortlistLock('events', operation);
+  const rejected = expect(pending).rejects.toThrow('lock acquisition timed out');
+  await vi.advanceTimersByTimeAsync(10_000);
+  await rejected;
+  expect(signal.aborted).toBe(true);
+  expect(() => acquire()).toThrow('lock acquisition timed out');
+  expect(operation).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('does not abort a granted Web Lock even if the mutation takes longer than the deadline', async () => {
+  vi.useFakeTimers();
+  let finish!: (value: string) => void;
+  const operation = vi.fn(() => new Promise<string>((resolve) => { finish = resolve; }));
+  const request = vi.fn(async (_key: string, _options: LockOptions, callback: () => Promise<string>) => callback());
+  vi.stubGlobal('navigator', { locks: { request } });
+  const pending = withCampusEventShortlistLock('events', operation);
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(request.mock.calls[0]?.[1].signal?.aborted).toBe(false);
+  expect(operation).toHaveBeenCalledOnce();
+  finish('saved');
+  await expect(pending).resolves.toBe('saved');
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('clears the acquisition timer and preserves an ordinary Web Lock rejection', async () => {
+  vi.useFakeTimers();
+  const operation = vi.fn(async () => 'saved');
+  const error = new Error('Lock unavailable');
+  const request = vi.fn(async () => { throw error; });
+  vi.stubGlobal('navigator', { locks: { request } });
+  await expect(withCampusEventShortlistLock('events', operation)).rejects.toBe(error);
+  expect(operation).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 it('rejects a blocked IndexedDB open and closes a late connection without writing', async () => {

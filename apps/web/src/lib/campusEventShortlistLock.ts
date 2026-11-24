@@ -5,7 +5,24 @@ export async function withCampusEventShortlistLock<T>(
   key: string,
   operation: () => Promise<T>,
 ): Promise<T> {
-  if (navigator.locks?.request) return navigator.locks.request(key, operation);
+  if (navigator.locks?.request) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), LOCK_WAIT_MS);
+    const timeoutError = () => new Error('Event shortlist lock acquisition timed out');
+    try {
+      return await navigator.locks.request(key, { signal: controller.signal }, () => {
+        // Cancel only queued acquisition, never a mutation that has started.
+        if (controller.signal.aborted) throw timeoutError();
+        clearTimeout(timeout);
+        return operation();
+      });
+    } catch (error) {
+      if (controller.signal.aborted) throw timeoutError();
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
 
   // A readwrite transaction is exclusive across connections to the same object store.
   // This database contains no user data; the list itself stays in the existing localStorage key.

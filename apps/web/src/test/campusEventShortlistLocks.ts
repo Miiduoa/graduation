@@ -7,9 +7,14 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
     value: {
-      request<T>(key: string, operation: () => Promise<T>) {
+      request<T>(key: string, options: LockOptions, operation: () => Promise<T>) {
         const previous = queues.get(key) ?? Promise.resolve();
-        const result = previous.then(operation, operation);
+        const signal = options.signal;
+        const run = () => {
+          if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+          return operation();
+        };
+        const result = previous.then(run, run);
         queues.set(key, result);
         return result;
       },
