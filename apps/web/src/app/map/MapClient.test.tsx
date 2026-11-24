@@ -147,6 +147,14 @@ it('resolves classroom deep links to a unique real building while retaining the 
   expect(map.locations.map((place: MapLocation) => place.id)).toContain('pu-zhugu');
   const destination = new URL(screen.getByRole('link', { name: '從目前位置導航' }).getAttribute('href')!);
   expect(destination.searchParams.get('destination')).toBe(`${map.selected.lat},${map.selected.lng}`);
+  const detail = screen.getByRole('region', { name: '地點詳情' });
+  const apple = within(detail).getByRole('link', { name: '使用 Apple 地圖從目前位置導航' });
+  const appleUrl = new URL(apple.getAttribute('href')!);
+  expect(appleUrl.hostname).toBe('maps.apple.com');
+  expect(appleUrl.searchParams.get('daddr')).toBe(destination.searchParams.get('destination'));
+  expect(appleUrl.searchParams.has('saddr')).toBe(false);
+  expect(appleUrl.searchParams.get('dirflg')).toBe('w');
+  expect(document.getElementById(apple.getAttribute('aria-describedby')!)?.textContent).toContain('並非已核實的校舍入口或室內教室');
   expect(screen.queryByText(/樓層：3|三樓教室|3F/)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '關閉地點詳情' }));
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
@@ -426,6 +434,42 @@ it('marks single-source places as pending and can reset to the whole campus', as
   expect(screen.queryByRole('region', { name: '地點詳情' })).toBeNull();
 });
 
+it.each([
+  ['pu', false], ['pu', true], ['tw-pu', false], ['tw-pu', true],
+] as const)('includes pending source warnings in both providers for a two-point route (school=%s, reverse=%s)', async (school, reverse) => {
+  const parking = PROVIDENCE_CAMPUS_PLACES.find((place) => place.name === 'P1 停車場')!;
+  vi.mocked(loadMapLocations).mockResolvedValue([parking, library]);
+  const ids = reverse ? [library.id, parking.id] : [parking.id, library.id];
+  render(<MapClient school={school} route={ids.join(',')} focus={parking.id} />);
+  await sourceSettled();
+  expect(loadMapLocations).toHaveBeenCalledWith(school);
+  expect(loadMapFavorites).toHaveBeenCalledWith('alice', school);
+  const routeCard = screen.getByRole('region', { name: '步行導航' });
+  for (const name of ['開啟步行導航', '使用 Apple 地圖規劃路線']) {
+    const link = within(routeCard).getByRole('link', { name });
+    const note = document.getElementById(link.getAttribute('aria-describedby')!);
+    expect(note?.textContent).toContain('P1 停車場');
+    expect(note?.textContent).toContain('只有單一資料來源，位置待再次確認');
+    expect(note?.textContent).not.toContain('「蓋夏圖書館」');
+  }
+  const detail = screen.getByRole('region', { name: '地點詳情' });
+  for (const name of ['從目前位置導航', '使用 Apple 地圖從目前位置導航']) {
+    const link = within(detail).getByRole('link', { name });
+    expect(document.getElementById(link.getAttribute('aria-describedby')!)?.textContent)
+      .toContain('只有單一資料來源，位置待再次確認');
+  }
+  fireEvent.click(within(routeCard).getByRole('button', { name: '清除路線' }));
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+});
+
+it('does not apply Providence source warnings to an identically named marker in another campus', async () => {
+  const parking = PROVIDENCE_CAMPUS_PLACES.find((place) => place.name === 'P1 停車場')!;
+  vi.mocked(loadMapLocations).mockResolvedValue([parking, library]);
+  render(<MapClient school="remote-university-12" route={parking.id + ',' + library.id} />);
+  const routeCard = await screen.findByRole('region', { name: '步行導航' });
+  expect(routeCard.textContent).not.toContain('只有單一資料來源');
+});
+
 it('never points an empty non-Providence map back to Providence', async () => {
   vi.mocked(loadMapLocations).mockResolvedValue([]);
   render(<MapClient school="remote-university-12" />);
@@ -448,6 +492,16 @@ it('resolves deep links from loaded places and hands walking directions to a rea
   expect(destination.searchParams.get('origin')).toBe('24.22495,120.56535');
   expect(destination.searchParams.get('destination')).toBe('24.2275,120.5635');
   expect(destination.searchParams.get('travelmode')).toBe('walking');
+  const routeCard = screen.getByRole('region', { name: '步行導航' });
+  const apple = within(routeCard).getByRole('link', { name: '使用 Apple 地圖規劃路線' });
+  const appleUrl = new URL(apple.getAttribute('href')!);
+  expect(appleUrl.hostname).toBe('maps.apple.com');
+  expect(appleUrl.searchParams.get('saddr')).toBe(destination.searchParams.get('origin'));
+  expect(appleUrl.searchParams.get('daddr')).toBe(destination.searchParams.get('destination'));
+  expect(appleUrl.searchParams.get('dirflg')).toBe('w');
+  const routeWarning = document.getElementById(apple.getAttribute('aria-describedby')!);
+  expect(routeWarning?.textContent).toContain('不代表已核實的建築入口');
+  expect(within(routeCard).getByRole('link', { name: '開啟步行導航' }).getAttribute('aria-describedby')).toBe(routeWarning?.id);
   expect(screen.queryByText(/AI 規劃路線|開放中/)).toBeNull();
   expect(screen.getAllByText(/每分鐘 80 公尺/).length).toBeGreaterThan(0);
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('library');
@@ -613,8 +667,103 @@ it('lets visitors choose a campus starting point and destination without locatio
   expect(screen.getByText(/兩地直線距離約/)).toBeTruthy();
   const markerState = JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
   expect(markerState.route.map((entry: MapLocation) => entry.id)).toEqual(['library', 'gate']);
+  const apple = new URL(screen.getByRole('link', { name: '使用 Apple 地圖規劃路線' }).getAttribute('href')!);
+  expect(apple.searchParams.get('saddr')).toBe(url.searchParams.get('origin'));
+  expect(apple.searchParams.get('daddr')).toBe(url.searchParams.get('destination'));
   fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
   expect(screen.queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect(screen.queryByRole('link', { name: '使用 Apple 地圖規劃路線' })).toBeNull();
+});
+
+it.each(['origin', 'destination', 'unchanged'] as const)('revalidates manually chosen endpoints after the campus source syncs (%s)', async (changed) => {
+  state.user = null;
+  const origin = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-gate-osm')!;
+  const destination = PROVIDENCE_CAMPUS_PLACES.find((place) => place.name === '蓋夏圖書館')!;
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" focus={origin.id} />);
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋地點' }), { target: { value: destination.name } });
+  fireEvent.click(screen.getByRole('button', { name: '查看' + destination.name }));
+  const markers = JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(markers.locations.map((place: MapLocation) => place.id)).toContain(origin.id);
+  fireEvent.click(screen.getByRole('button', { name: '設為終點' }));
+  expect(screen.getByRole('region', { name: '步行導航' })).toBeTruthy();
+
+  await act(async () => source.resolve([
+    { ...origin, lat: origin.lat + (changed === 'origin' ? 0.002 : 0) },
+    { ...destination, lat: destination.lat + (changed === 'destination' ? 0.002 : 0) },
+  ]));
+  const login = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
+  const returned = new URL(login.searchParams.get('returnUrl')!, window.location.origin);
+  if (changed === 'unchanged') {
+    expect(screen.getByRole('region', { name: '步行導航' })).toBeTruthy();
+    expect(returned.searchParams.get('route')).toBe(origin.id + ',' + destination.id);
+  } else {
+    expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
+    expect(returned.searchParams.get('route')).toBeNull();
+    expect(screen.getByText(/原先選擇的地點已變更或無法確認/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '設為終點' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '清除待確認路線' }));
+    expect(screen.queryByText(/原先選擇的地點已變更或無法確認/)).toBeNull();
+  }
+});
+
+it.each(['pu', 'tw-pu'])('keeps both login returns in sync with manually changed and cleared routes (%s)', async (school) => {
+  state.user = null;
+  render(<MapClient school={school} route="gate,library" focus="library" />);
+  await sourceSettled();
+  const returnRoutes = () => ['用 Google 帳號收藏', '查看學校帳號的既有收藏'].map((name) => {
+    const login = new URL(screen.getByRole('link', { name }).getAttribute('href')!, window.location.origin);
+    const destination = new URL(login.searchParams.get('returnUrl')!, window.location.origin);
+    expect(destination.searchParams.get('schoolId')).toBe(school);
+    return destination.searchParams.get('route');
+  });
+  expect(returnRoutes()).toEqual(['gate,library', 'gate,library']);
+  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  expect(returnRoutes()).toEqual([null, null]);
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  expect(returnRoutes()).toEqual([null, null]);
+  fireEvent.click(screen.getByRole('button', { name: '取消起點' }));
+  expect(screen.queryByText(/已設定「蓋夏圖書館」為起點/)).toBeNull();
+  expect(returnRoutes()).toEqual([null, null]);
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  expect(screen.queryByRole('button', { name: '設為終點' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為起點' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  fireEvent.click(screen.getByRole('button', { name: '設為終點' }));
+  expect(returnRoutes()).toEqual(['library,gate', 'library,gate']);
+  fireEvent.click(screen.getByRole('button', { name: '清除路線' }));
+  expect(returnRoutes()).toEqual([null, null]);
+});
+
+it('keeps an untouched deep-link route in login returns when the official source fails', async () => {
+  state.user = null;
+  vi.mocked(loadMapLocations).mockRejectedValueOnce(new Error('timeout'));
+  render(<MapClient school="pu" route="gate,library" />);
+  await sourceSettled();
+  expect(screen.getByRole('button', { name: '重新讀取地點資料' })).toBeTruthy();
+  const routes = ['用 Google 帳號收藏', '查看學校帳號的既有收藏'].map((name) => {
+    const login = new URL(screen.getByRole('link', { name }).getAttribute('href')!, window.location.origin);
+    return new URL(login.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('route');
+  });
+  expect(routes).toEqual(['gate,library', 'gate,library']);
+});
+
+it('preserves a pending untouched route link but drops it when the source cannot resolve it', async () => {
+  state.user = null;
+  const source = deferred<MapLocation[]>();
+  vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+  render(<MapClient school="pu" route="gate,unknown" />);
+  const returnRoute = () => {
+    const login = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
+    return new URL(login.searchParams.get('returnUrl')!, window.location.origin).searchParams.get('route');
+  };
+  expect(returnRoute()).toBe('gate,unknown');
+  await act(async () => source.resolve([library, gate]));
+  expect(returnRoute()).toBeNull();
+  expect(screen.queryByRole('region', { name: '步行導航' })).toBeNull();
 });
 
 it('obtains position only on request and orders nearby locations by measured straight-line distance', async () => {

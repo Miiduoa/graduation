@@ -16,12 +16,16 @@
 | 本輪納入 #783 | `e664a72ee80472a3d1d85598c895f89de0638b28`；含雙語服務搜尋與訪客／身分隔離修正 |
 | 本輪工作區增量的整合基底 | `f74d799998b265e4d185af30dfd4b222e0c6676b`；同步上述 `7953ae44`，保留 #768、#783 原始祖先，仍作為本輪工作區變更的比較基準 |
 | 追加 main 前的已驗證工作區候選 | `5514729b5a246fc38dbbe25f69c19ceb107ffcbf`；檔案樹 `3ee34cc1f21aeb57a1d35c7f051826c4cdc37d1b` |
-| 驗證期間追加納入的 main | `5e82f068d9804baaede6e9d5ce59dedd418dd2f4`；#749 官方課程資料時效提醒，是 `7953ae44` 的直接後繼，僅改 `PublicCourseSearch.tsx` 與其測試 |
+| 課程時效整合納入的 main | `5e82f068d9804baaede6e9d5ce59dedd418dd2f4`；#749 官方課程資料時效提醒，是 `7953ae44` 的直接後繼，僅改 `PublicCourseSearch.tsx` 與其測試 |
 | 後續採用的外部整合 | `3ceb81d17b5c7255a3ebbf61a9d50ecedd2b0dc1`；雙親為 `5514729b` 與 `5e82f068`，檔案樹 `fbaec6cac84fa827595646c29f39f3233f0a65a9`；保留其僅在有效結果存在時運作的時效時鐘 |
+| 追加地圖 main 前的已發布候選 | `e89dd33ac50bcb202d3be3dab7cc2cec07b9f650`；單親為 `3ceb81d1`，檔案樹 `ff76c8c7e3e626a69de77642ff17c0ff0ffd81c6`；補課程時效測試與版本文件 |
+| 後續地圖整合納入的 main | `322d42e045c4dfc23f46abe69a6da84046500e6f`；#773 是 `5e82f068` 的直接後繼，僅改 `MapClient.tsx` 與其測試，加入雙地圖服務導航與路線重驗 |
 
-本文件記錄 `f74d7999` 基底上的工作區變更，以及其後透過 `3ceb81d1` 納入 #749 的整合。保留外部整合的產品實作：已接受回覆立即記錄比較時間，只有帶擷取時間的 ready 結果才啟用每分鐘、focus 與 visibility 重新評估，結果離開或元件卸載時清理。勾選課程不改寫擷取時間或匯入來源，也不額外發送查詢。本次後續增量僅補測試與版本文件，不替換外部產品。原工作區瀏覽器證據記錄驗收當下的 Git 基底；實際驗證版本以 355 份來源 SHA-256 為準，包含當時未提交工作樹的修正。
+本文件記錄 `f74d7999` 基底上的工作區變更，以及其後透過 `3ceb81d1` 納入 #749 的整合。保留外部整合的課程產品實作：已接受回覆立即記錄比較時間，只有帶擷取時間的 ready 結果才啟用每分鐘、focus 與 visibility 重新評估，結果離開或元件卸載時清理。勾選課程不改寫擷取時間或匯入來源，也不額外發送查詢。課程整合的後續增量僅補測試與版本文件，不替換外部產品。其後再以 `e89dd33a` 與 `322d42e0` 整合 #773 的地圖行為，維持原工作區功能與資料範圍。原工作區瀏覽器證據記錄驗收當下的 Git 基底；實際驗證版本以 355 份來源 SHA-256 為準，包含當時未提交工作樹的修正。
 
 `5514729b` 的 GitHub 檢查測試的是合成合併 `13bc9e8b423e1c9d902195a318dd0bbea22518cb`（`5514729b` ＋ `7953ae44`），其檔案樹與候選完全相同。main 後來前進到 `5e82f068`；舊檢查不能視為新整合提交已通過 CI。最終提交、CI、合併與部署狀態應以 PR 的精確 head 與檢查結果為準；本機驗證不表示已發布。
+
+`e89dd33a` 的中央 CI snapshot 為 `7f54aa486947cc296eaa90ad53d0cdd8064b4939`，雙親是 `5e82f068` 與 `e89dd33a`，tree 為 `ff76c8c7`。此 snapshot 不包含後來的 main `322d42e0`；其檢查結果不能移轉為 #773 後續合併提交的驗證。
 
 ## 全產品設計原則
 
@@ -209,6 +213,28 @@ node --max-old-space-size=6144 ../../node_modules/typescript/bin/tsc --noEmit --
 ```
 
 新整合提交的瀏覽器重建、遠端 CI、審查與合併狀態仍須依該提交另行記錄；上述 `5514729b` 的遠端綠燈不代表已驗證新 main 的合併結果。
+
+### 追加 #773 的地圖整合驗證
+
+在隔離工作樹以已發布 `e89dd33a` 三方合併 main `322d42e0`，保留雙親來源。保留 #773 的 Google／Apple 步行導航、手選起終點的位置快照重新確認、清除或改選後的登入返回路線，以及未觸碰深鏈在校方來源暫時失敗時的返回資訊。公開靜態地點的來源警語使用 `publicSchool`；遠端地點查詢、收藏、裝置資料範圍及登入返回網址繼續使用原本的 `school`，因此 `tw-pu` 不會被改寫成另一個資料範圍。
+
+兩點路線及詳細地點的 Google／Apple 連結各自共用相應的 `aria-describedby` 警語，仍明確區分地點標記與已核實的建築入口。回歸涵蓋 `pu`／`tw-pu` 兩種 ID、正反向兩點路線、單一來源停車場的警語及已核對圖書館不被誤標；另外確認原 ID 的資料／收藏載入與完整手選、清除、重新選路後的登入返回資訊。
+
+實際本機重跑使用 Node 22.23.5、`maxWorkers=2`：以下 4 檔共 **204 tests 通過、0 skipped**，耗時 12.86 秒；兩個 MapClient 檔 ESLint exit 0、Web TypeScript exit 0、diff whitespace 檢查通過。這是新增 main 後的地圖專項批次，與工作區 478 或課程 128 分開記錄，不相加宣稱不重複的全產品測試數。
+
+```bash
+cd apps/web
+node ../../node_modules/vitest/vitest.mjs run \
+  src/app/map/MapClient.test.tsx \
+  src/app/map/campusClassroomNonBuildingPoi.test.ts \
+  src/lib/nuni/assistantV2/campusMap.test.ts \
+  src/lib/nuni/assistantV2/campusMapAdapter.test.ts --maxWorkers=2
+node ../../node_modules/eslint/bin/eslint.js -c eslint.config.mjs \
+  src/app/map/MapClient.tsx src/app/map/MapClient.test.tsx
+node --max-old-space-size=6144 ../../node_modules/typescript/bin/tsc --noEmit --pretty false
+```
+
+此合併候選的 CI、審查與部署仍須核對其最後發布 head；`e89dd33a` 的既有 run 只證明其原先的合成合併 snapshot。
 
 ## PR 與合併驗收
 
