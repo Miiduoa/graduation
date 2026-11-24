@@ -244,6 +244,19 @@ describe('explicit local study generation', () => {
     expect(FakeWorker.instances).toHaveLength(0);
   });
 
+  it.each(['ကါ', '主\u200e鍵'])('accepts a readable Unicode citation in the main reply and a step (%#)', async (quote) => {
+    const original = passage();
+    const pending = runStudyTutor({
+      passage: { ...original, text: original.text + '\n' + quote },
+      mode: 'exam', signal: new AbortController().signal,
+    });
+    const response = lesson();
+    response.sourceQuote = quote;
+    response.steps![0].sourceQuote = quote;
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(response) });
+    await expect(pending).resolves.toEqual(response);
+  });
+
   it('rejects punctuation-only citations in newly generated lessons and still allows retry', async () => {
     const onTiming = vi.fn();
     const pending = runStudyTutor({
@@ -1301,4 +1314,33 @@ describe('new local self-check answer disclosure boundary', () => {
     await expect(pending).resolves.toEqual(valid);
     expect(worker.terminate).toHaveBeenCalledOnce();
   });
+});
+
+it('accepts every merge-base worker result across Unicode quote and self-check boundaries', async () => {
+  const { runStudyTutor: runBaseline } = await import('../features/nuni/__fixtures__/courseStudyMergeBase/studyTutorRuntime');
+  const samples = ['\ufff9', '\ufffa', '\ufffb', '\u{e0100}', '\u0301', '\u202e', '\u200b',
+    '禰\u{e0100}', 'က္က', 'က္', '禰', '。'];
+  const source = { ...passage(), text: passage().text + samples.join('、') };
+  let accepted = 0;
+  for (const sample of samples) {
+    for (const response of [
+      { ...lesson(), sourceQuote: sample },
+      { ...lesson(), question: sample },
+      { ...lesson(), answer: sample },
+      { ...lesson(), steps: lesson().steps?.map((step) => ({ ...step, sourceQuote: sample })) },
+    ]) {
+      const evaluate = async (run: typeof runStudyTutor) => {
+        const pending = run({ passage: source, mode: 'understand', signal: new AbortController().signal });
+        const worker = lastWorker();
+        worker.emit({ type: 'result', raw: JSON.stringify(response) });
+        return pending.finally(() => expect(worker.terminate).toHaveBeenCalledOnce());
+      };
+      const baseline = await evaluate(runBaseline).catch(() => undefined);
+      if (baseline) {
+        accepted++;
+        await expect(evaluate(runStudyTutor), JSON.stringify(response)).resolves.toEqual(baseline);
+      }
+    }
+  }
+  expect(accepted).toBeGreaterThan(0);
 });

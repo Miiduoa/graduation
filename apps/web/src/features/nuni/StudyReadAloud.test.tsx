@@ -29,6 +29,50 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+// Voice ranking from the merge-base with origin/main.
+function mergeBaseLocaleRank(lang: string): number {
+  const subtags = lang.toLowerCase().replace(/_/g, '-').split('-').slice(1);
+  if (subtags.includes('hans')) return 4;
+  if (subtags.includes('tw')) return 0;
+  if (subtags.includes('hant')) return 1;
+  if (subtags.includes('hk') || subtags.includes('mo')) return 2;
+  return 3;
+}
+
+it.each([
+  ['zh-Hani-CN', 'zh-Hant-HK'],
+  ['zh-Hani-TW', 'zh-CN'],
+  ['zh-Hani-TW', 'zh-Hant-HK'],
+  ['zh-Hant-TW-x-demo', 'zh-Hant-HK'],
+  ['zh-TW-x-latn', 'zh-Hant-HK'],
+  ['zh-TW-x-hans', 'zh-Hant-HK'],
+  ['zh-u-ca-hans', 'zh-CN'],
+  ['zh-t-zh-tw', 'zh-HK'],
+  ['zh-Hant-HK-t-zh-latn', 'zh-Hani-CN'],
+  ['zh-Hant-HK', 'zh-Hani-HK'],
+  ['zh-Hant-MO', 'cmn-MO'],
+  ['Zh_cMN-hAnI_tW-X_DeMo', 'zh-Hant-HK'],
+  ['zh-TW-hans', 'zh-CN'],
+  ['zh-TW-demo', 'zh-Hant-HK'],
+  ['zh-Latn-TW', 'zh-Hant-HK'],
+  ['zh-Latn-TW', 'zh-Hani-TW'],
+  ['cmn_Latn_TW', 'zh-TW'],
+  ['zh-Bopo-TW', 'zh-Hant-HK'],
+  ['zh-Cyrl-TW', 'zh-Hant-HK'],
+  ['zh-Kana-TW', 'zh-Hant-HK'],
+].flatMap(([first, second]) => [[first, second], [second, first]]))(
+  'selects the same installed voice as the merge-base from %s and %s',
+  (first, second) => {
+    voices = [first, second].map((lang) => ({ lang, localService: true }));
+    const expected = voices.reduce((best, candidate) =>
+      mergeBaseLocaleRank(candidate.lang) < mergeBaseLocaleRank(best.lang) ? candidate : best);
+
+    render(<StudyReadAloud text="繁體中文教材" />);
+    fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+    expect((speak.mock.calls[0][0] as Utterance).voice).toBe(expected);
+  },
+);
+
 it('uses an installed Chinese voice and clears playback state on completion', () => {
   const changed = vi.fn();
   render(<StudyReadAloud text="課程原文" onSpeakingChange={changed} />);
@@ -39,15 +83,6 @@ it('uses an installed Chinese voice and clears playback state on completion', ()
   act(() => utterance.onend?.());
   expect(changed).toHaveBeenLastCalledWith(false);
   expect(screen.getByRole('button', { name: '朗讀這一段' })).toBeTruthy();
-});
-
-it('prefers an installed Taiwanese voice over a Simplified Chinese voice listed first', () => {
-  const simplified = { lang: 'zh-CN', localService: true };
-  const taiwanese = { lang: 'zh-Hant-TW', localService: true };
-  voices = [simplified, taiwanese];
-  render(<StudyReadAloud text="繁體中文教材" />);
-  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
-  expect((speak.mock.calls[0][0] as Utterance).voice).toBe(taiwanese);
 });
 
 it('recognizes an installed Mandarin BCP 47 voice even when a Chinese voice precedes it', () => {

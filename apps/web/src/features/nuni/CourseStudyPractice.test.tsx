@@ -68,6 +68,30 @@ function summaryCount(label: string): string | null | undefined {
 beforeEach(() => { vi.clearAllMocks(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+
+it('preserves original practice questions and answers while preserving hint, skip and answer privacy', () => {
+  const invisible = '\u200b\u2060\u0301';
+  const hiddenAnswer = '\u2800\ufe0f';
+  const malformed = [{ ...cards[0], question: invisible, answer: hiddenAnswer }];
+  const handlers = callbacks();
+  render(<Controller deck={malformed} handlers={handlers} />);
+  expect(screen.getByText(invisible)).toBeTruthy();
+  expect(screen.queryByText(hiddenAnswer)).toBeNull();
+  expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看原文提示' }));
+  expect(screen.getByRole('region', { name: '本題原文提示' }).textContent).toContain(malformed[0].sourceText);
+  writeAnswer('我先試答，還需要核對教材');
+  revealAnswer();
+  const answerRegion = screen.getByRole('region', { name: '本題參考回答' });
+  expect(answerRegion.textContent).toContain(hiddenAnswer);
+  expect(screen.getByRole('button', { name: '略過這題' })).toBeTruthy();
+  skip();
+  expect(screen.getByRole('heading', { name: '本輪練習摘要' })).toBeTruthy();
+  expect(handlers.onAction).toHaveBeenCalledWith({ type: 'skip' });
+  expect(malformed[0].question).toBe(invisible);
+  expect(malformed[0].answer).toBe(hiddenAnswer);
+});
+
 it('starts with an independent blank answer and keeps the source and reference answers out of the DOM', () => {
   const handlers = callbacks();
   render(<Controller handlers={handlers} />);
