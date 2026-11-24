@@ -178,6 +178,43 @@ it('uses browser Back and Forward for store navigation while preserving framewor
   expect(mocks.request.mock.calls.filter((call) => call[2])).toHaveLength(0);
 });
 
+it('requires confirmation again after returning to a store with a first-menu draft', async () => {
+  render(<MerchantWorkspace view="workspace" />);
+  const openStore = async () => {
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    await screen.findByLabelText('品項 1 名稱');
+  };
+  const fields = [
+    ['品項 1 名稱', '蔬菜便當'],
+    ['品項 1 售價（元）', '85'],
+    ['品項 1 初始庫存', '20'],
+    ['品項 1 過敏原', '大豆，芝麻'],
+  ];
+  const confirmation = () => screen.getByLabelText(/我已確認品項、元售價/) as HTMLInputElement;
+  const publish = () =>
+    screen.getByRole('button', { name: '確認建立並上架菜單' }) as HTMLButtonElement;
+
+  await openStore();
+  for (const [label, value] of fields) {
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  }
+  fireEvent.click(confirmation());
+  expect(confirmation().checked).toBe(true);
+  expect(publish().disabled).toBe(false);
+
+  fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+  await openStore();
+
+  for (const [label, value] of fields) {
+    expect((screen.getByLabelText(label) as HTMLInputElement).value).toBe(value);
+  }
+  expect(confirmation().checked).toBe(false);
+  expect(publish().disabled).toBe(true);
+  fireEvent.click(confirmation());
+  expect(publish().disabled).toBe(false);
+  expect(mocks.request.mock.calls.filter((call) => call[2])).toHaveLength(0);
+});
+
 it.each(['success', 403, 404, 503, 'timeout'] as const)(
   'hides previous management details on browser Forward until the return read succeeds (%s)',
   async (result) => {

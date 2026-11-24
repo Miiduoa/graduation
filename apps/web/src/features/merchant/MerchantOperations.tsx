@@ -170,6 +170,7 @@ export function MerchantOperations({
   const accept = useCallback((next: Detail, confirmedWrite: boolean) => {
     setDetail(next);
     setFresh(true);
+    setMenuConfirmed(false);
     setActivationConfirmed(false);
     changed.current(next, confirmedWrite);
   }, []);
