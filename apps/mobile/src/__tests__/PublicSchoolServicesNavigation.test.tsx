@@ -113,7 +113,7 @@ jest.mock('../screens/PersonalImportScreen', () => {
 });
 jest.mock('../screens/PersonalTimetableScreen', () => {
   const { Text } = require('react-native');
-  return { __esModule: true, default: () => <Text testID="personal-timetable-screen">整週個人課表</Text> };
+  return { __esModule: true, PublicPersonalTimetable: () => <Text testID="personal-timetable-screen">整週個人課表</Text> };
 });
 jest.mock('../screens/GoogleMapsLikeScreen', () => {
   const { Text } = require('react-native');

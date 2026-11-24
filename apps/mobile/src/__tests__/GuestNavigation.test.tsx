@@ -143,7 +143,7 @@ jest.mock('../screens/PersonalTimetableScreen', () => {
   const { Text } = require('react-native');
   return {
     __esModule: true,
-    default: () => <Text testID="personal-timetable-screen">整週個人課表</Text>,
+    PublicPersonalTimetable: () => <Text testID="personal-timetable-screen">整週個人課表</Text>,
   };
 });
 

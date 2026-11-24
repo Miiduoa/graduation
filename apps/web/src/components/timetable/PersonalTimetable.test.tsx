@@ -1010,6 +1010,19 @@ describe('focus after confirmed timetable changes', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '新增課程' }));
   });
 
+  it('returns focus to the empty timetable action after deleting the only course', async () => {
+    mocks.school.selectedSchoolId = 'ncku';
+    mocks.load.mockResolvedValue({ ...timetable(), schoolId: 'ncku' });
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '一週' }));
+    const week = within(screen.getByRole('region', { name: '一週課程' }));
+    fireEvent.click(week.getByRole('button', { name: /編輯 原本課程/ }));
+    fireEvent.click(screen.getByRole('button', { name: '刪除' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認刪除' }));
+    await editorClosed();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '手動新增課程' }));
+  });
+
   it('keeps default focus restoration when an unchanged editor is cancelled', async () => {
     await ready();
     const opener = savedButton('原本課程');
