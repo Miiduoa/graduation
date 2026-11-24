@@ -1351,26 +1351,29 @@ describe('three-way sentence classification', () => {
       intent: { intent: 'prepare', pendingOnly: false },
     });
     expect(parseTronClassAgentIntent('幫我準備 TronClass 作業')).toEqual({ intent: 'prepare', pendingOnly: false });
-
-    expect(classifyTronClassSentence('玩課雲準備的作業')?.outcome).not.toBe('clearly-write');
-    expect(parseTronClassAgentIntent('玩課雲準備的作業')?.intent).not.toBe('prepare');
-    expect(canAnswerTronClassQuestion('玩課雲準備的作業') === false ||
-      parseTronClassAgentIntent('玩課雲準備的作業')?.intent !== 'prepare').toBe(true);
-    expect(tronClassCompoundClauses('玩課雲準備的作業')).toEqual([]);
-
-    expect(classifyTronClassSentence('玩課雲準備作業')?.outcome).not.toBe('clearly-write');
-    expect(parseTronClassAgentIntent('玩課雲準備作業')?.intent).not.toBe('prepare');
-    expect(canAnswerTronClassQuestion('玩課雲準備作業')).toBe(false);
-    expect(tronClassCompoundClauses('玩課雲準備作業')).toEqual([]);
-    expect(classifyTronClassSentence('玩課雲準備作業')?.outcome).toBe('ambiguous');
-
-    for (const question of ['玩課雲已準備作業', '玩課雲的準備作業']) {
-      expect(classifyTronClassSentence(question)?.outcome).not.toBe('clearly-write');
-      expect(classifyTronClassSentence(question)?.outcome).toBe('ambiguous');
-      expect(parseTronClassAgentIntent(question)?.intent).not.toBe('prepare');
-      expect(canAnswerTronClassQuestion(question)).toBe(false);
-      expect(tronClassCompoundClauses(question)).toEqual([]);
-    }
   });
 
+  it.each([
+    '玩課雲準備的作業',
+    '玩課雲準備作業',
+    '玩課雲已準備作業',
+    '玩課雲的準備作業',
+    '玩課雲尚未準備作業',
+    '玩課雲還沒準備作業',
+    '玩課雲待準備作業',
+  ])('asks for confirmation for descriptive preparation: %s', question => {
+    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('scans a long run of unmatched opening quotes within the 200 ms budget', () => {
+    const question = '查玩課雲作業' + '「'.repeat(980);
+    const started = performance.now();
+    classifyTronClassSentence(question);
+    canAnswerTronClassQuestion(question);
+    tronClassCompoundClauses(question);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
 });
