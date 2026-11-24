@@ -183,6 +183,8 @@ it('PageDown 跨到閏年短月保留焦點，只有選取後才改當日內容'
 });
 
 it.each([
+  { origin: '2028-10-27', key: 'End', expected: '2028-10-28', width: 609, next: null },
+  { origin: '2028-10-23', key: 'Home', expected: '2028-10-22', width: 609, next: null },
   { origin: '2028-09-28', key: 'PageDown', expected: '2028-10-26', width: 541, next: null },
   { origin: '2028-10-27', key: 'ArrowRight', expected: '2028-10-28', width: 609, next: '2028-10-29' },
   { origin: '2028-10-29', key: 'ArrowLeft', expected: '2028-10-28', width: 609, next: '2028-10-27' },
@@ -234,6 +236,9 @@ it.each([
   if (key === 'PageDown') {
     screen.getByRole('region', { name: '2028-09 月格，週日起始' }).scrollLeft = 155;
   }
+  if (key === 'Home') {
+    screen.getByRole('region', { name: '2028-10 月格，週日起始' }).scrollLeft = 87;
+  }
   const scrollAtFocus = vi.fn((event: FocusEvent) => {
     const button = event.target as HTMLElement;
     if (button.getAttribute('aria-label') === expected) {
@@ -247,11 +252,12 @@ it.each([
   } finally {
     document.removeEventListener('focusin', scrollAtFocus);
   }
-  if (next) {
-    expect(horizontalScroll).toHaveBeenCalledExactlyOnceWith(83);
-    expect(scrollAtFocus).toHaveLastReturnedWith(83);
-  } else {
+  if (key === 'PageDown') {
     expect(horizontalScroll).not.toHaveBeenCalled();
+  } else {
+    const expectedScroll = key === 'Home' ? 4 : 83;
+    expect(horizontalScroll).toHaveBeenCalledExactlyOnceWith(expectedScroll);
+    expect(scrollAtFocus).toHaveLastReturnedWith(expectedScroll);
   }
   expect(pageScroll).toHaveBeenCalledExactlyOnceWith({ left: 0, top: 100, behavior: 'instant' });
   expect(onDate).not.toHaveBeenCalled();
@@ -270,7 +276,7 @@ it.each([
     fireEvent.keyDown(focused, { key });
     expect(document.activeElement).toBe(screen.getByRole('button', { name: next }));
     expect(onDate).not.toHaveBeenCalled();
-  } else {
+  } else if (key === 'PageDown') {
     const sunday = within(viewport).getByText('日', { exact: true });
     expect(viewport.scrollLeft).toBe(0);
     expect(sunday.getBoundingClientRect().left).toBeGreaterThanOrEqual(bounds.left);

@@ -120,8 +120,11 @@ export function MonthCalendar({
     event.preventDefault();
     const target = monthCalendarKeyboardDate(date, event.key);
     if (!target || target === date) return;
-    // Horizontal arrows visit every date, including dates in clipped columns.
-    const revealDate = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
+    const revealDate =
+      event.key === 'ArrowLeft' ||
+      event.key === 'ArrowRight' ||
+      event.key === 'Home' ||
+      event.key === 'End';
     if (target.startsWith(`${month}-`)) {
       focusVisibleDate(target, revealDate);
     } else if (onMonthChange) {

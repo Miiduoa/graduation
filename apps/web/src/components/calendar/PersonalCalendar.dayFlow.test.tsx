@@ -415,23 +415,27 @@ it('編輯並儲存既有行程後保留整月列表與其他日期的行程及�
   );
 });
 
-it('在整月列表儲存跨月行程後仍留在目前查看的月份', async () => {
-  const stored = { ...event('crossing', '跨月行程', '2026-10-31'), endDate: '2026-11-02' };
-  seed([stored, event('november-only', '十一月行程', '2026-11-15')]);
-  render(<PersonalCalendar />);
-  await ready();
-  activate(screen.getByRole('button', { name: '列表' }));
-  await screen.findByRole('heading', { name: '十一月行程' });
-  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-11');
-  activate(editEvent(stored.title));
-  fireEvent.change(titleField(), { target: { value: '已修改跨月行程' } });
-  activate(screen.getByRole('button', { name: '儲存修改' }));
-  await screen.findByText('個人行程已更新。');
-  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-11');
-  expect(screen.getByRole('button', { name: '列表' }).getAttribute('aria-pressed')).toBe('true');
-  expect(screen.getByRole('heading', { name: '十一月行程' })).toBeTruthy();
-  expect(screen.getByRole('heading', { name: '已修改跨月行程' })).toBeTruthy();
-});
+it.each([false, true])(
+  '整月列表儲存後，仍跨入當月的行程留在目前月份（改期：%s）',
+  async (reschedule) => {
+    const stored = { ...event('crossing', '跨月行程', '2026-10-31'), endDate: '2026-11-02' };
+    seed([stored, event('november-only', '十一月行程', '2026-11-15')]);
+    render(<PersonalCalendar />);
+    await ready();
+    activate(screen.getByRole('button', { name: '列表' }));
+    await screen.findByRole('heading', { name: '十一月行程' });
+    expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-11');
+    activate(editEvent(stored.title));
+    if (reschedule) fireEvent.change(formDate(), { target: { value: '2026-10-30' } });
+    fireEvent.change(titleField(), { target: { value: '已修改跨月行程' } });
+    activate(screen.getByRole('button', { name: '儲存修改' }));
+    await screen.findByText('個人行程已更新。');
+    expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-11');
+    expect(screen.getByRole('button', { name: '列表' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('heading', { name: '十一月行程' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '已修改跨月行程' })).toBeTruthy();
+  },
+);
 
 it('在單日檢視修改跨月行程標題後保留選取日期、當日其他行程與作業截止', async () => {
   const stored = { ...event('crossing', '跨月行程', '2026-10-31'), endDate: '2026-11-02' };
@@ -512,6 +516,57 @@ it.each([
   expect(title.getBoundingClientRect().top).toBeGreaterThanOrEqual(80);
   expect(title.getBoundingClientRect().bottom).toBeLessThanOrEqual(568);
 });
+
+it.each([false, true])(
+  '編輯器入場動畫結束時依標題的焦點狀態處理頂欄遮擋（焦點已移開：%s）',
+  async (moveFocus) => {
+    const stored = event('existing', '合成行程', '2026-11-14');
+    seed([stored]);
+    render(
+      <>
+        <header data-testid="sticky-header" style={{ position: 'sticky', opacity: 1 }} />
+        <PersonalCalendar />
+      </>,
+    );
+    await ready();
+    activate(screen.getByRole('button', { name: '列表' }));
+    const header = screen.getByTestId('sticky-header');
+    let animationOffset = 4;
+    let pageOffset = 0;
+    vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
+      if (this === header) return new DOMRect(0, 0, 320, 80);
+      if (this.matches('input[type="text"]')) {
+        return new DOMRect(20, 60 + animationOffset - pageOffset, 100, 40);
+      }
+      return new DOMRect(20, 100, 100, 40);
+    });
+    vi.mocked<(options: ScrollToOptions) => void>(window.scrollBy).mockImplementation((options) => {
+      pageOffset += options.top ?? 0;
+    });
+
+    activate(editEvent(stored.title));
+    const title = titleField();
+    expect(document.activeElement).toBe(title);
+    expect(title.getBoundingClientRect().top).toBe(80);
+    if (moveFocus) formDate().focus();
+    vi.mocked(window.scrollBy).mockClear();
+
+    animationOffset = 0;
+    fireEvent.animationEnd(screen.getByRole('region', { name: '編輯行程' }));
+    if (moveFocus) {
+      expect(document.activeElement).toBe(formDate());
+      expect(window.scrollBy).not.toHaveBeenCalled();
+    } else {
+      expect(document.activeElement).toBe(title);
+      expect(window.scrollBy).toHaveBeenCalledExactlyOnceWith({
+        left: 0,
+        top: -4,
+        behavior: 'instant',
+      });
+      expect(title.getBoundingClientRect().top).toBe(80);
+    }
+  },
+);
 
 it('remeasures the focused title after the soft keyboard shrinks the visual viewport', async () => {
   vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(640);
@@ -597,9 +652,14 @@ it('does not scroll the title back when another editor field has focus during a 
   expect(window.scrollBy).not.toHaveBeenCalled();
 });
 
-it.each([false, true])(
-  '在整月列表改期後跟隨新的月份（儲存期間焦點移出編輯器：%s）',
-  async (moveFocus) => {
+it.each([
+  { moveFocus: false, crossing: false },
+  { moveFocus: true, crossing: false },
+  { moveFocus: false, crossing: true },
+  { moveFocus: true, crossing: true },
+])(
+  '在整月列表改期後跟隨新的月份（原行程橫跨兩個月：$crossing，儲存期間焦點移出編輯器：$moveFocus）',
+  async ({ moveFocus, crossing }) => {
     let release: (() => void) | undefined;
     Object.defineProperty(navigator, 'locks', {
       configurable: true,
@@ -612,7 +672,10 @@ it.each([false, true])(
           }),
       },
     });
-    const stored = event('existing', '整月列表改期的合成行程', '2026-11-14');
+    const stored = crossing
+      ? { ...event('existing', '整月列表改期的合成行程', '2026-10-31'), endDate: '2026-11-02' }
+      : event('existing', '整月列表改期的合成行程', '2026-11-14');
+    const destination = crossing ? '2026-10-30' : '2026-12-02';
     seed([stored, event('november-only', '十一月行程', '2026-11-15')]);
     render(<PersonalCalendar />);
     await ready();
@@ -620,7 +683,10 @@ it.each([false, true])(
     await screen.findByRole('heading', { name: '十一月行程' });
     expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-11');
     activate(editEvent(stored.title));
-    fireEvent.change(formDate(), { target: { value: '2026-12-02' } });
+    fireEvent.change(formDate(), { target: { value: destination } });
+    if (crossing) {
+      fireEvent.change(screen.getByLabelText('結束日期（跨日才填）'), { target: { value: '' } });
+    }
     activate(screen.getByRole('button', { name: '儲存修改' }));
     await waitFor(() => expect(release).toBeTypeOf('function'));
     const monthControl = screen.getByLabelText('查看月份') as HTMLInputElement;
@@ -633,13 +699,13 @@ it.each([false, true])(
       release?.();
     });
     await screen.findByText('個人行程已更新。');
-    expect(monthControl.value).toBe('2026-12');
+    expect(monthControl.value).toBe(destination.slice(0, 7));
     expect(screen.getByRole('heading', { name: stored.title })).toBeTruthy();
-    expect(document.activeElement).toBe(moveFocus ? monthControl : dayHeading('2026-12-02'));
+    expect(document.activeElement).toBe(moveFocus ? monthControl : dayHeading(destination));
     expect(readPersonalImports(scope()).find((row) => row.id === stored.id)).toMatchObject({
       id: stored.id,
       source: stored.source,
-      date: '2026-12-02',
+      date: destination,
     });
   },
 );

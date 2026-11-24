@@ -38,6 +38,7 @@ import {
   personalImportSavedNotice,
   type PersonalEventDraft,
   type PersonalImportRecord,
+  type PersonalImportRow,
 } from '@campus/shared';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
@@ -505,11 +506,22 @@ function PersonalCalendarWorkspace({
 
   useEffect(() => {
     if (paused || mode === 'idle') return;
-    const reveal = () => {
+    const revealFocusedEditorTitle = () => {
       const title = titleRef.current;
-      if (title && document.activeElement === title) scrollVerticallyIntoView(title);
+      if (!suspended.current && title && document.activeElement === title) {
+        scrollVerticallyIntoView(title);
+      }
     };
-    return onVisibleViewportChange(reveal);
+    const editor = editorRef.current;
+    const onEditorAnimationEnd = (event: AnimationEvent) => {
+      if (event.target === editor) revealFocusedEditorTitle();
+    };
+    editor?.addEventListener('animationend', onEditorAnimationEnd);
+    const unsubscribeViewport = onVisibleViewportChange(revealFocusedEditorTitle);
+    return () => {
+      editor?.removeEventListener('animationend', onEditorAnimationEnd);
+      unsubscribeViewport();
+    };
   }, [paused, mode, editorRevision]);
 
   useLayoutEffect(() => {
@@ -666,7 +678,7 @@ function PersonalCalendarWorkspace({
     setFormError('');
   };
 
-  const runSave = async (action: () => Promise<void>, success: string) => {
+  const runSave = async (action: (row: PersonalImportRow) => Promise<void>, success: string) => {
     if (!active.current || suspended.current || writing.current) return;
     if (!canMutate || draftIssues.length) {
       setFormError(draftIssues[0]?.message || '請先確認行程內容。');
@@ -678,19 +690,16 @@ function PersonalCalendarWorkspace({
     const savedDate = draft.date;
     const savedMonth = savedDate.slice(0, 7);
     const monthList = calendarView === 'list' && !selectedDate;
-    // An edit follows a changed start date. In a month list, follow only
-    // when the destination differs from both the viewed and original months.
-    const followSavedDate =
-      !baseline ||
-      (monthList
-        ? savedMonth !== month && savedMonth !== baseline.date?.slice(0, 7)
-        : savedDate !== baseline.date);
     writing.current = true;
     setSaving(true);
     setFormError('');
     setNotice('');
     try {
-      await action();
+      const row = personalEventRowFromDraft(draft, scoped.schoolId, baseline);
+      const followSavedDate =
+        !baseline ||
+        (monthList ? filterPersonalEvents([row], month).length === 0 : savedDate !== baseline.date);
+      await action(row);
       if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
       // Preserve navigation during the write even if focus has since returned
       // to the body or revalidation has hidden the editor.
@@ -727,8 +736,7 @@ function PersonalCalendarWorkspace({
   const saveCreate = () => {
     const scoped = { ...scope };
     void runSave(
-      async () => {
-        const row = personalEventRowFromDraft(draft, scoped.schoolId, null);
+      async (row) => {
         await savePersonalImportBatch(
           scoped,
           [row],
@@ -743,8 +751,7 @@ function PersonalCalendarWorkspace({
     if (!baseline) return;
     const scoped = { ...scope };
     const original = baseline;
-    void runSave(async () => {
-      const row = personalEventRowFromDraft(draft, scoped.schoolId, original);
+    void runSave(async (row) => {
       await changePersonalImport(
         scoped,
         original,
