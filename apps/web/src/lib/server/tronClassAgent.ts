@@ -191,9 +191,17 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
           : '可依你開啟的權限查詢 TronClass 課程與作業、整理公告教材、下載教材，並在對話內準備作業。送交、發文與其他校方寫入操作目前尚未開放。',
         steps: [{ id: 'capability', tool: 'select_target', status: query.intent === 'unsupported' ? 'blocked' : 'completed', message: '已核對 Agent 可用功能與授權範圍。' }] });
       }
+      const snapshotRead = (courseId?: number) => ({
+        ...(courseId !== undefined ? { courseId } : {}),
+        include: {
+          homework: query.intent === 'homework' || query.intent === 'prepare',
+          announcements: query.intent === 'announcements' && courseId !== undefined,
+          materials: (query.intent === 'materials' || query.intent === 'download') && courseId !== undefined,
+        },
+      });
       const guardedRead = async (courseId?: number) => {
         await assertScopes(ownerKey, grant, scope);
-        const result = await read(ownerKey, courseId ? { courseId } : {});
+        const result = await read(ownerKey, snapshotRead(courseId));
         if (result.revision !== grant.revision) throw new NuniError(409, 'TRONCLASS_BINDING_CHANGED');
         if (courseId && !result.courses.some((course) => course.id === courseId)) throw new NuniError(403, 'TRONCLASS_COURSE_NOT_FOUND');
         await assertScopes(ownerKey, grant, scope);

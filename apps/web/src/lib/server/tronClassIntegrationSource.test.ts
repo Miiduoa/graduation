@@ -430,4 +430,44 @@ describe('independent TronClass source', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(source.fetchCourses).not.toHaveBeenCalled();
   });
+
+  it('does not dispatch homework when only announcements are requested', async () => {
+    const { reader, source } = setup();
+    const result = await reader('platform:pa_fixture', { courseId: 101, include: { announcements: true } });
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).toHaveBeenCalled();
+    expect(source.fetchActivities).toHaveBeenCalled();
+    expect(vi.mocked(source.fetchActivities).mock.calls.every((call) => call[2] === '')).toBe(true);
+    expect(result.homework).toEqual([]);
+  });
+
+  it('does not dispatch homework when only materials are requested', async () => {
+    const { reader, source } = setup();
+    const result = await reader('platform:pa_fixture', { courseId: 101, include: { materials: true } });
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchActivities).toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+    expect(result.homework).toEqual([]);
+  });
+
+  it('still reads homework when the homework area is requested', async () => {
+    const { reader, source } = setup();
+    const result = await reader('platform:pa_fixture', { include: { homework: true } });
+    expect(source.fetchHomeworkPage).toHaveBeenCalled();
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+    expect(result.homework).toHaveLength(1);
+  });
+
+  it('does not dispatch homework or contents for a courses-only include', async () => {
+    const { reader, source } = setup();
+    const result = await reader('platform:pa_fixture', { include: {} });
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+    expect(result.homework).toEqual([]);
+    expect(result.announcements).toEqual([]);
+    expect(result.materials).toEqual([]);
+    expect(result.courses).toHaveLength(1);
+  });
 });

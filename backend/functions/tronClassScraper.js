@@ -1009,50 +1009,61 @@ function httpError(status) {
   return error;
 }
 
-function homeworkPaginationNumber(value) {
+function homeworkPaginationNumber(value, required = true) {
   if (value === undefined || value === null) return null;
   const parsed = typeof value === 'number' ? value
     : typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : NaN;
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    if (!required) return null;
     throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
   }
   return parsed;
 }
 
-/** @param {TronClassReadOptions} readOptions */
-async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize = 50, readOptions = {}) {
+/** @param {TronClassReadOptions=} readOptions */
+async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize = 50, readOptions) {
+  const strict = readOptions !== undefined;
   const data = await tcFetchJson(
     `${TC_BASE}/api/courses/${courseId}/homework-activities?page=${page}&page_size=${pageSize}`,
     cookies,
-    { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 },
+    strict
+      ? { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 }
+      : {},
   );
   if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.homework_activities)) {
     throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
   }
-  // Invalid metadata is not an absent total: treating it as null can make a
-  // short or empty response appear complete and hide remaining assignments.
-  const total = homeworkPaginationNumber(data.total);
-  const sourcePage = homeworkPaginationNumber(data.page);
-  const sourcePageSize = homeworkPaginationNumber(data.page_size);
-  if ((sourcePage !== null && sourcePage !== page) ||
-    (sourcePageSize !== null && sourcePageSize !== pageSize) ||
-    data.homework_activities.length > pageSize ||
+  // On the integration path, invalid metadata is not an absent total: treating it
+  // as null can make a short or empty response appear complete and hide remaining
+  // assignments. Legacy callers keep the older missing-total compatibility.
+  const total = homeworkPaginationNumber(data.total, strict);
+  const sourcePage = homeworkPaginationNumber(data.page, strict);
+  const sourcePageSize = homeworkPaginationNumber(data.page_size, strict);
+  const requestedPage = homeworkPaginationNumber(page, false);
+  const requestedPageSize = homeworkPaginationNumber(pageSize, false);
+  const pageLimit = !strict && sourcePageSize !== null ? sourcePageSize : (requestedPageSize ?? pageSize);
+  // Compare numerically so a legacy string page still matches a numeric school page.
+  if ((sourcePage !== null && requestedPage !== null && sourcePage !== requestedPage) ||
+    (strict && sourcePageSize !== null && requestedPageSize !== null && sourcePageSize !== requestedPageSize) ||
+    data.homework_activities.length > pageLimit ||
     (total !== null && data.homework_activities.length > total)) {
     throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
   }
   return {
     homework_activities: data.homework_activities,
     total,
-    page: sourcePage ?? page,
-    page_size: sourcePageSize ?? pageSize,
+    page: sourcePage ?? requestedPage ?? page,
+    page_size: sourcePageSize ?? requestedPageSize ?? pageSize,
   };
 }
 
-/** @param {TronClassReadOptions} readOptions */
-async function tcFetchActivitiesRaw(cookies, courseId, query = '', readOptions = {}) {
+/** @param {TronClassReadOptions=} readOptions */
+async function tcFetchActivitiesRaw(cookies, courseId, query = '', readOptions) {
   const suffix = query ? `?${query}` : '';
   const data = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/activities${suffix}`, cookies,
-    { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 });
+    readOptions !== undefined
+      ? { ...checkedReadOptions(readOptions, 8_000), maxResponseBytes: 2 * 1024 * 1024 }
+      : {});
   const activities = data?.activities;
   if (!Array.isArray(activities)) {
     throw httpError(200);

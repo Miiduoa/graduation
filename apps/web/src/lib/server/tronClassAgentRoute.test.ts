@@ -29,10 +29,22 @@ it('authenticates and reauthenticates the same actor, returning private no-store
   const response = await f.request({ action: 'ask', question: 'TronClass 課程' });
   expect(response.status).toBe(200);
   expect(f.authenticate).toHaveBeenCalledTimes(2);
-  expect(f.read).toHaveBeenCalledWith(actor.ownerKey, {});
+  expect(f.read).toHaveBeenCalledWith(actor.ownerKey, {
+    include: { homework: false, announcements: false, materials: false },
+  });
   expect(response.headers.get('cache-control')).toBe('no-store, private');
   expect(response.headers.get('vary')).toContain('Authorization');
   expect(await response.json()).toMatchObject({ source: 'tronclass', revision, grantVersion: grant.version, intent: 'courses' });
+});
+
+it('reads homework data for a homework question', async () => {
+  const f = fixture();
+  const response = await f.request({ action: 'ask', question: 'TronClass 作業' });
+  expect(response.status).toBe(200);
+  expect(f.read).toHaveBeenCalledWith(actor.ownerKey, {
+    include: { homework: true, announcements: false, materials: false },
+  });
+  expect(await response.json()).toMatchObject({ source: 'tronclass', intent: 'homework' });
 });
 
 it('rejects unauthenticated requests before grants or school access', async () => {
