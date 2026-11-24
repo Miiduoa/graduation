@@ -201,6 +201,31 @@ describe('OSM campus walking discovery (not routing approval)', () => {
       .toEqual(['restricted', 'restricted']);
   });
 
+
+  it('keeps indoor endpoints restricted and excludes non-outdoor ways', () => {
+    for (const tags of [
+      { indoor: 'door' }, { indoor: 'yes' }, { indoor: '' },
+      { location: 'indoor' }, { location: 'underground' },
+    ]) {
+      for (const endpoint of [1, 2]) {
+        const input = { ...payload(), elements: [
+          node(1, 10.001, 20.001, endpoint === 1 ? tags : {}),
+          node(2, 10.001, 20.002, endpoint === 2 ? tags : {}),
+          way(101, [1, 2]),
+        ] };
+        expect(parse(input)?.graph.edges[0].access).toBe('restricted');
+      }
+      expect(parse({ ...payload(), elements: [
+        node(1, 10.001, 20.001), node(2, 10.001, 20.002),
+        way(101, [1, 2], tags),
+      ] })?.graph.edges).toEqual([]);
+    }
+    expect(parse({ ...payload(), elements: [
+      node(1, 10.001, 20.001, { entrance: 'main', indoor: 'no' }),
+      node(2, 10.001, 20.002), way(101, [1, 2], { indoor: 'no' }),
+    ] })?.graph.edges[0].access).toBe('unknown');
+  });
+
   it('keeps the sidepath as a candidate and excludes the original way', () => {
     const input = { ...payload(), elements: [...payload().elements,
       way(103, [1, 5], { highway: 'residential', foot: 'use_sidepath' }),
