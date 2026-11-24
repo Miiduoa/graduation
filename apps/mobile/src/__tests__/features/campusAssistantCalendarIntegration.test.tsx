@@ -236,3 +236,40 @@ test('an unresolved school selection cannot create a proposal against its tempor
   expect(view.queryByRole('button', { name: '確認加入個人行事曆' })).toBeNull();
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
 });
+
+test('a teacher selects a real saved class gap and confirms one scoped personal event from the native screen', async () => {
+  const accountId = 'pa_00000000-0000-4000-8000-000000000069';
+  const sessionContext = 'a'.repeat(43);
+  const scope = { owner: 'nuni:' + accountId, schoolId: 'pu' };
+  const permission = jest.fn(async () => ({ scope: 'platform-account', accountId, revision: 1,
+    permissions: { createPersonalEvent: true, prepareFoodOrder: false } }));
+  mockPlatform = { session: { platformAccountId: accountId, context: sessionContext },
+    isSessionCurrent: (id, context) => id === accountId && context === sessionContext,
+    request: jest.fn(), bffRequest: permission };
+  const importedAt = '2026-09-01T05:00:00.000Z';
+  const records = [[1, 2], [5, 6]].map(([startPeriod, endPeriod]) => ({
+    id: 'class-' + startPeriod, kind: 'timetable', schoolId: 'pu', title: '課程' + startPeriod,
+    academicYear: '115', semester: '1', dayOfWeek: 1, startPeriod, endPeriod,
+    batchId: 'courses', importedAt, source: { type: 'paste', line: 1, rawText: '' },
+  }));
+  await originalSet(personalImportStorageKey(scope), JSON.stringify({ version: 1, records,
+    batches: [{ id: 'courses', createdAt: importedAt, count: records.length }] }));
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-09T07:00:00+08:00'));
+  try {
+    const view = render(<CampusAssistantScreen route={{ name: 'NuniTimetableAssistant' }} />);
+    await waitFor(() => expect(view.getByRole('button', { name: '切換工作情境' })).not.toBeDisabled());
+    fireEvent.press(view.getByRole('button', { name: '切換工作情境' }));
+    fireEvent.press(view.getByRole('radio', { name: '教師與助教' }));
+    await send(view, '安排今天10:00到13:00一小時備課');
+    expect(view.getByText(/確認時會重新核對權限/)).toBeTruthy();
+    expect(ledgerWrites()).toHaveLength(0);
+    expect(permission).toHaveBeenCalledWith('assistant-permissions', sessionContext);
+    await act(async () => fireEvent.press(view.getByRole('button', { name: '確認加入個人行事曆' })));
+    expect(view.getByText('已在這台手機保存並核對行程。')).toBeTruthy();
+    const calendar = (await loadPersonalImports(scope)).records.filter(row => row.kind === 'events');
+    expect(calendar).toMatchObject([{ title: '備課', date: '2026-11-09', startTime: '10:10', endTime: '11:10' }]);
+    expect(ledgerWrites()).toHaveLength(1);
+    expect(permission).toHaveBeenCalledTimes(2);
+    expect(mockCallable).not.toHaveBeenCalled();
+  } finally { clock.mockRestore(); }
+});

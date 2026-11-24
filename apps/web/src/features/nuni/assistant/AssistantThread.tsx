@@ -388,7 +388,7 @@ export function AssistantThread({
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.demo ? <p className={styles.sim}>本人帳號展示資料</p> : null}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
-                <AssistantTaskPlan plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states}
+                <AssistantTaskPlan schoolId={schoolId} plan={turn.reply.taskPlan} cards={turn.reply.cards} states={states}
                   retry={taskRetryForTurn ? taskRetryForTurn(turn) : turn.reply.taskRetry}
                   pending={pending || !!onStop}
                   onRetry={onTaskRetry ? stepIds => onTaskRetry(turn, stepIds) : undefined} />

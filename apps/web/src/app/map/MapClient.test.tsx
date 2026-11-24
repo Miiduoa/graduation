@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import MapClient from './MapClient';
+import { getAssistantLibraryCatalog } from '@campus/shared/src/assistantLibraryCatalog';
 import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
 import { loadMapFavorites, loadMapLocations, setMapFavorite, type MapLocation } from './mapService';
 
@@ -72,6 +73,24 @@ beforeEach(() => {
   vi.mocked(loadMapFavorites).mockResolvedValue([]);
   vi.mocked(setMapFavorite).mockResolvedValue(undefined);
   window.history.replaceState({}, '', '/map');
+});
+
+it('resolves the Agent’s official library map link without changing the selected alias for data or favorites', async () => {
+  const school = 'tw-pu';
+  const catalog = getAssistantLibraryCatalog(school)!;
+  // The BFF integration test asserts this same schoolId/query on the returned
+  // map link. Mount the destination with the request parameters used by MapPage.
+  const destination = new URL('/map?' + new URLSearchParams({ schoolId: school, query: catalog.name }), 'https://nuni.invalid');
+  const selectedSchool = destination.searchParams.get('schoolId')!;
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school={selectedSchool} query={destination.searchParams.get('query')!} />);
+  await sourceSettled();
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  expect(screen.getByRole('region', { name: '地點詳情' })).toBeTruthy();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-library');
+  expect(loadMapLocations).toHaveBeenCalledWith(school);
+  expect(loadMapFavorites).toHaveBeenCalledWith('alice', school);
+  expect(setMapFavorite).not.toHaveBeenCalled();
 });
 
 it('requires a new spatial choice when a live map source reuses the focused ID', async () => {

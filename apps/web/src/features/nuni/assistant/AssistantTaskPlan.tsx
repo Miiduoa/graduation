@@ -1,7 +1,8 @@
 import { AssistantReplyLink } from '@/components/AssistantReplyLink';
 import { useEffect, useState } from 'react';
 import { parseAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
-import { getAssistantService } from '@campus/shared/src/assistantServices';
+import { getAssistantLibraryCatalog } from '@campus/shared/src/assistantLibraryCatalog';
+import { assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
 import { getAssistantServiceCapability, parseAssistantTaskPlan, type AssistantTaskStep } from '@campus/shared/src/assistantTaskPlan';
 import { parseAssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
 import { inAppHref } from './copy';
@@ -83,8 +84,9 @@ function displayStep(step: AssistantTaskStep, cards: V2Card[], states: V2ActionS
 }
 
 /** The task list describes results; all confirmations remain in the existing cards. */
-export function AssistantTaskPlan({ plan, cards, states, retry: rawRetry, pending = false, onRetry }: {
+export function AssistantTaskPlan({ plan, schoolId, cards, states, retry: rawRetry, pending = false, onRetry }: {
   plan: unknown;
+  schoolId?: string;
   cards: V2Card[];
   states: V2ActionStates;
   retry?: unknown;
@@ -131,6 +133,9 @@ export function AssistantTaskPlan({ plan, cards, states, retry: rawRetry, pendin
           ['completed', 'partial', 'blocked'].includes(status) &&
           capability?.modes.includes('read') && (!capability.modes.includes('prepare') || step.serviceId === 'events');
         const href = step.href && (status === 'handoff' || readSource) ? inAppHref(step.href) : null;
+        // Derive the external URL from this screen's selected school, never the reply text.
+        const catalog = schoolId && readSource && status === 'completed' && step.serviceId === 'library' &&
+          href === assistantServiceHref('library', schoolId) ? getAssistantLibraryCatalog(schoolId) : null;
         return <li key={step.id} className={styles.step} data-status={status}>
           <span className={styles.number} aria-hidden="true">{index + 1}</span>
           <div className={styles.body}>
@@ -144,6 +149,9 @@ export function AssistantTaskPlan({ plan, cards, states, retry: rawRetry, pendin
               disabled={pending || expired} onClick={() => onRetry([step.id])}>
               重新查詢
             </button>}
+            {catalog && <a className={styles.link} href={catalog.catalogUrl} target="_blank" rel="noopener noreferrer">
+              開啟官方館藏目錄
+            </a>}
             {href && service && <AssistantReplyLink className={styles.link} href={href}>
               {status === 'handoff' ? `開啟${service.label}` : '查看來源'}
             </AssistantReplyLink>}

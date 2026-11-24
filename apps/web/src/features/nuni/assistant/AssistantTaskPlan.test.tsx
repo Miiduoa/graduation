@@ -46,6 +46,18 @@ describe('cross-service task results', () => {
     expect(screen.queryByRole('link', { name: '開啟校園公告' })).toBeNull();
   });
 
+  it('links to the current school’s curated catalog only for its own completed read', () => {
+    const raw = plan(step({ id: 'catalog', serviceId: 'library', status: 'completed', cardIds: undefined,
+      href: '/library?schoolId=pu', summary: 'https://untrusted.example.org/' }));
+    const view = render(<AssistantTaskPlan schoolId="pu" plan={raw} cards={[]} states={{}} />);
+    expect(screen.getByRole('link', { name: '開啟官方館藏目錄' }).getAttribute('href')).toBe('https://webpacx.lib.pu.edu.tw/');
+    expect(screen.getByRole('link', { name: '查看來源' }).getAttribute('href')).toBe('/library?schoolId=pu');
+    view.rerender(<AssistantTaskPlan schoolId="nthu" plan={raw} cards={[]} states={{}} />);
+    expect(screen.queryByRole('link', { name: '開啟官方館藏目錄' })).toBeNull();
+    view.rerender(<AssistantTaskPlan schoolId="pu" plan={plan({ ...raw.steps[0], status: 'blocked' })} cards={[]} states={{}} />);
+    expect(screen.queryByRole('link', { name: '開啟官方館藏目錄' })).toBeNull();
+  });
+
   it('keeps read-source links separate from the existing service handoff', () => {
     const raw = plan(
       step({ id: 'events', label: '查校園活動', serviceId: 'events', status: 'partial', cardIds: undefined,

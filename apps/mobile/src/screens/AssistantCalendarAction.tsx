@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import {
-  assistantCalendarOwner, confirmAssistantCalendarTask, recheckAssistantCalendarTask,
+  assistantCalendarOwner, confirmAssistantCalendarTask, hasAssistantCalendarAvailabilityCheck, recheckAssistantCalendarTask,
   type AssistantCalendarContext, type AssistantCalendarTask,
 } from '../services/assistantCalendarExecution';
 import { mobileAssistantServiceDestination } from '../services/assistantServiceNavigation';
@@ -65,7 +65,9 @@ export function AssistantCalendarAction({ task, context, navigation, disabled, o
     {event.location ? <Text style={{ color: aiTokens.textSecondary }}>地點：{event.location}</Text> : null}
     {task.state === 'review' ? <>
       <Text style={{ color: aiTokens.textSecondary, lineHeight: 23 }}>
-        確認後會加入目前帳號與學校的個人行事曆，並檢查這台手機的個人行程是否重疊。課表與校方排程仍請另外核對。
+        {hasAssistantCalendarAvailabilityCheck(task.proposal)
+          ? '確認時會重新核對權限、這台手機已儲存的課表與個人行程。時段仍可用才會存入你的個人行事曆。'
+          : '確認後會加入目前帳號與學校的個人行事曆，並檢查這台手機的個人行程是否重疊。課表與校方排程仍請另外核對。'}
       </Text>
       <AIButton label="確認加入個人行事曆" disabled={disabled} onPress={() => void execute('confirm')} />
       <AIButton label="先不要" variant="ghost" disabled={disabled} onPress={() => {

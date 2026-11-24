@@ -18,6 +18,7 @@ import { formatPublicCampusRead, parsePublicCampusResult, publicCampusToolKind }
 import { formatLostFoundRead, parseLostFoundResult } from './lostFound';
 import { formatPublicSocialRead, parsePublicSocialResult } from './publicSocial';
 import { formatSchoolInfoRead, parseSchoolInfoResult } from './schoolInfo';
+import { formatLibraryCatalogRead, parseLibraryCatalogResult } from './libraryCatalog';
 import { isRoleWorkspaceTool, parseRoleWorkspaceResult, formatRoleWorkspaceResult,
   roleWorkspaceTaskStatus, ROLE_WORKSPACE_TIMEOUT_MS } from './roleWorkspaceReads';
 import { formatCampusMapRead, parseCampusMapArguments, parseCampusMapResult, type CampusMapRead } from './campusMap';
@@ -170,6 +171,8 @@ function readSummary(operation: CrossServiceOperation, value: unknown, now: numb
     return formatPublicSocialRead(parsePublicSocialResult(value, schoolId, operation.args));
   if (operation.tool === 'get_school_info')
     return formatSchoolInfoRead(parseSchoolInfoResult(value, schoolId, operation.args));
+  if (operation.tool === 'get_library_catalog')
+    return formatLibraryCatalogRead(parseLibraryCatalogResult(value, schoolId, operation.args));
   if (operation.tool === 'get_lost_found')
     return formatLostFoundRead(parseLostFoundResult(value, schoolId, operation.args));
   const campusKind = publicCampusToolKind(operation.tool);
@@ -337,7 +340,7 @@ export async function runCrossService(input: {
     const service = getAssistantService(operation.serviceId)!;
     const step: AssistantTaskStep = { id: operation.id, label: operation.label || service.label,
       serviceId: operation.serviceId, dependsOn: [...operation.dependsOn], status: 'blocked', summary: '' };
-    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'merchant', 'bus', 'cafeteria', 'orders', 'clubs', 'import', 'announcements', 'events', 'lost-found', 'map', 'public-social', 'school-info'].includes(operation.serviceId))
+    if (foreignPublicSource && ['timetable', 'calendar', 'classroom', 'merchant', 'bus', 'cafeteria', 'orders', 'clubs', 'import', 'announcements', 'events', 'lost-found', 'map', 'public-social', 'school-info', 'library'].includes(operation.serviceId))
       step.label += `（${scopeName}）`;
     taskPlan.steps.push(step);
     const dependencies = operation.dependsOn.map(id => taskPlan.steps.find(previous => previous.id === id));
@@ -389,28 +392,43 @@ export async function runCrossService(input: {
           const result = unwrap(value);
           step.status = result.unavailable ? 'blocked' : partial(result) || result.hasTimetableSource === false ? 'partial' : 'completed';
           const sourceSummary = publicCampusToolKind(operation.tool) ||
-            ['get_lost_found', 'get_public_social', 'get_school_info'].includes(operation.tool || '');
+            ['get_lost_found', 'get_public_social', 'get_school_info', 'get_library_catalog'].includes(operation.tool || '');
           step.summary = result.unavailable && !sourceSummary
             ? '目前沒有接通可讀取的來源，這項查詢尚未完成。' : readSummary(operation, value, now, binding.schoolId);
           if (operation.tool === 'get_lost_found') step.href = parseLostFoundResult(value, binding.schoolId, operation.args).href;
           else if (operation.tool === 'get_public_social') step.href = parsePublicSocialResult(value, binding.schoolId, operation.args).href;
           else if (operation.tool === 'get_school_info') step.href = parseSchoolInfoResult(value, binding.schoolId, operation.args).href;
+          else if (operation.tool === 'get_library_catalog') step.href = parseLibraryCatalogResult(value, binding.schoolId, operation.args).href;
           else if (sourceSummary) step.href = assistantServiceHref(operation.serviceId, binding.schoolId) || undefined;
           if (partial(result) && !sourceSummary) step.summary += '\n資料尚未完整讀取，這一步保留為部分完成。';
         }
       } else if (operation.kind === 'map-location') {
         const source = operation.dependsOn.length === 1
           ? request.operations.find(previous => previous.id === operation.dependsOn[0]) : undefined;
-        if (!source || !results.has(source.id) || (operation.mapSource?.kind === 'event'
-          ? source.tool !== 'get_campus_events' : !source.directRead || source.tool !== 'get_schedule')) {
+        if (!source || !results.has(source.id)) {
           step.summary = '尚未確認這次地點查詢對應的來源，沒有猜測地點。';
           continue;
         }
-        const boundEvent = input.eventMapSelections?.[operation.id];
-        if (operation.mapSource?.kind === 'event' && boundEvent) step.label = '查原選定活動的位置';
-        const selected = operation.mapSource?.kind === 'event'
-          ? eventMapSource(results.get(source.id), binding.schoolId, operation.mapSource.index, boundEvent)
-          : nextClassMapSource(results.get(source.id), source.directRead!, binding.schoolId, now);
+        const sourceResult = results.get(source.id);
+        let selected: { query: string; title: string; target?: PublicEventTarget } |
+          { reason: string; target?: PublicEventTarget };
+        let sourceLabel: string;
+        if (operation.mapSource?.kind === 'event' && source.tool === 'get_campus_events') {
+          sourceLabel = '活動地點';
+          const boundEvent = input.eventMapSelections?.[operation.id];
+          if (boundEvent) step.label = '查原選定活動的位置';
+          selected = eventMapSource(sourceResult, binding.schoolId, operation.mapSource.index, boundEvent);
+        } else if (operation.mapSource?.kind === 'library' && source.tool === 'get_library_catalog') {
+          sourceLabel = '官方館名';
+          const { library } = parseLibraryCatalogResult(sourceResult, binding.schoolId);
+          selected = library ? { title: '圖書館', query: library.name } : { reason: '這個校園尚無可核對的官方館名。' };
+        } else if (!operation.mapSource && source.tool === 'get_schedule' && source.directRead) {
+          sourceLabel = '課表教室';
+          selected = nextClassMapSource(sourceResult, source.directRead, binding.schoolId, now);
+        } else {
+          step.summary = '尚未確認這次地點查詢對應的來源，沒有猜測地點。';
+          continue;
+        }
         if ('target' in selected && selected.target)
           input.onEventMapSelection?.(operation.id, parsePublicEventTarget(selected.target));
         if ('reason' in selected) {
@@ -422,7 +440,7 @@ export async function runCrossService(input: {
         const read = parseCampusMapResult(value, binding.schoolId, args);
         results.set(operation.id, value);
         step.status = mapStepStatus(read);
-        step.summary = `${label(selected.title)}｜${operation.mapSource?.kind === 'event' ? '活動地點' : '課表教室'}：${label(selected.query)}\n` + formatCampusMapRead(read);
+        step.summary = `${label(selected.title)}｜${sourceLabel}：${label(selected.query)}\n` + formatCampusMapRead(read);
         const href = taskMapHref(read);
         if (href) step.href = href;
       } else if (operation.kind === 'free-time') {

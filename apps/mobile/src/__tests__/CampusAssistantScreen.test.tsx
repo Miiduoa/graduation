@@ -2246,3 +2246,87 @@ test('a running study brief still names its original task while the next draft i
   expect(field.props.value).toBe('幫我查週末活動');
   expect(request).not.toHaveBeenCalled();
 });
+
+async function selectWorkContext(view: ReturnType<typeof render>, label: string) {
+  await waitForCalendarRecovery(view);
+  fireEvent.press(view.getByRole('button', { name: '切換工作情境' }));
+  fireEvent.press(view.getByRole('radio', { name: label }));
+  await waitForCalendarRecovery(view);
+}
+
+test('work contexts are explicit on the platform route and isolate professional tasks, drafts and chat', async () => {
+  const campus = render(<CampusAssistantScreen />);
+  expect(campus.queryByRole('button', { name: '切換工作情境' })).toBeNull();
+  campus.unmount();
+  setPlatformFixture('member');
+  const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
+  expect(view.getByRole('button', { name: '查下一堂課' })).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '切換工作情境' }));
+  expect(view.getAllByRole('radio')).toHaveLength(6);
+  expect(view.getByRole('radio', { name: '學生與個人' }).props.accessibilityState.checked).toBe(true);
+  fireEvent.press(view.getByRole('radio', { name: '教師與助教' }));
+  await waitForCalendarRecovery(view);
+  expect(view.queryByRole('button', { name: '查下一堂課' })).toBeNull();
+  expect(view.queryByRole('tab', { name: '已儲存計畫' })).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '找明天下午一小時備課' }));
+  expect(request).not.toHaveBeenCalled();
+  request.mockResolvedValueOnce({ content: '已查到備課空檔', source: 'device', hasActions: false });
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
+  expect(request.mock.calls[0][0]).toMatchObject({ taskProfile: 'teacher',
+    scope: { uid: '', schoolId: 'pu' }, messages: [{ role: 'user', content: '找明天下午一小時備課' }] });
+  const originalScope = request.mock.calls[0][0].isCurrent;
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '稍後再安排備課');
+  await selectWorkContext(view, '店家');
+  expect(originalScope()).toBe(false);
+  expect(view.queryByText('已查到備課空檔')).toBeNull();
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  fireEvent.press(view.getByRole('button', { name: '安排明天下午半小時盤點' }));
+  request.mockResolvedValueOnce({ content: '門市工作回覆', source: 'device', hasActions: false });
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
+  expect(request.mock.calls[1][0]).toMatchObject({ taskProfile: 'merchant',
+    messages: [{ role: 'user', content: '安排明天下午半小時盤點' }] });
+  await selectWorkContext(view, '教師與助教');
+  expect(originalScope()).toBe(false);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('稍後再安排備課');
+});
+
+test.each(['account', 'session', 'school'] as const)('work context and drafts reset on %s change', async (change) => {
+  setPlatformFixture('member');
+  const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await selectWorkContext(view, '平台營運');
+  fireEvent.press(view.getByRole('button', { name: '找明天下午半小時維護檢查' }));
+  if (change === 'school') mockSchool = 'nthu';
+  else setPlatformFixture(change === 'account' ? 'other' : 'member', 'new-session');
+  await act(async () => view.rerender(<CampusAssistantScreen route={platformRoute} />));
+  await waitForCalendarRecovery(view);
+  expect(view.getByRole('button', { name: '查下一堂課' })).toBeTruthy();
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  await selectWorkContext(view, '平台營運');
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+});
+
+test('switching work context cannot drop an in-flight answer or an unconfirmed personal calendar preview', async () => {
+  setPlatformFixture('member');
+  const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await selectWorkContext(view, '教師與助教');
+  const lookup = deferred<unknown>();
+  request.mockReturnValueOnce(lookup.promise);
+  fireEvent.press(view.getByRole('button', { name: '安排明天下午一小時備課' }));
+  fireEvent.press(view.getByRole('button', { name: '送出問題' }));
+  expect(view.getByRole('button', { name: '切換工作情境' })).toBeDisabled();
+  await act(async () => lookup.resolve({
+    source: 'device', content: '請核對備課時間', tool: 'calendar-action',
+    calendarTask: { state: 'review', proposal: {
+      owner: 'nuni:member', schoolId: 'pu', mutationId: 'sample-preview',
+      createdAt: '2026-11-23T09:00:00.000Z', event: { date: '2026-11-25',
+        title: '備課', startTime: '13:00', endTime: '14:00', allDay: false },
+    } },
+  }));
+  expect(view.getByRole('button', { name: '切換工作情境' })).toBeDisabled();
+  fireEvent.press(view.getByRole('button', { name: '先不要' }));
+  await selectWorkContext(view, '社團幹部');
+  expect(view.getByRole('button', { name: '安排明天下午一小時社團籌備' })).toBeTruthy();
+  expect(view.queryByRole('button', { name: '確認加入個人行事曆' })).toBeNull();
+  expect(request).toHaveBeenCalledTimes(1);
+});
