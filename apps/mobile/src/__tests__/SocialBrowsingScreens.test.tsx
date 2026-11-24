@@ -657,6 +657,87 @@ test('a successful write still keeps a later list subscription if the re-check f
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 });
 
+test('a list read before a successful unsubscribe cannot restore it after a failed re-check', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  const rows = deferred<typeof board[]>();
+  const subs = deferred<string[]>();
+  jest.mocked(listBoards).mockImplementationOnce(() => rows.promise);
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
+  let refreshPromise!: Promise<void>;
+  await act(async () => {
+    refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+    subs.resolve(['board']);
+  });
+
+  await act(async () => { fireEvent.press(view.getByLabelText('取消訂閱讀書會')); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  jest.mocked(isSubscribedToBoard).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => { rows.resolve([board]); await refreshPromise; });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+});
+
+test('an older failed re-check leaves the newer write’s list membership available', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  const firstRead = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => firstRead.promise);
+  jest.mocked(subscribeToBoard).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+
+  await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+  const unsubscribe = deferred();
+  jest.mocked(unsubscribeFromBoard).mockImplementationOnce(() => unsubscribe.promise);
+  fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
+
+  const subs = deferred<string[]>();
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
+  let refreshPromise!: Promise<void>;
+  await act(async () => {
+    refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+    unsubscribe.resolve();
+  });
+
+  const secondRead = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => secondRead.promise);
+  await act(async () => { subs.resolve(['board']); await refreshPromise; });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+
+  await act(async () => { firstRead.reject(new Error('offline')); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+  await act(async () => { secondRead.reject(new Error('offline')); });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
+test('a successful write clears rollback protection from an earlier failed write', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  jest.mocked(subscribeToBoard).mockRejectedValueOnce(new Error('offline'));
+  jest.mocked(isSubscribedToBoard).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  // Another device unsubscribed after the successful write.
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([]);
+  await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+});
+
 test('a cache-gap list started after a failed write cannot drop the rollback or the in-flight re-read', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);

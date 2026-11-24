@@ -64,6 +64,11 @@ export function BoardsScreen() {
   return <BoardsContent key={JSON.stringify([user?.uid, school?.id])} />;
 }
 
+type SubscriptionListRead = {
+  subscribedIds: ReadonlySet<string>;
+  writeRevisionAtRead: number;
+};
+
 function BoardsContent() {
   const styles = useThemeStyleSheet(createStyles);
   const injectedNav = useCampusSocialStackNav();
@@ -101,7 +106,8 @@ function BoardsContent() {
   // List membership skipped by keepLocal after a successful write. If the
   // follow-up from-server re-check fails, a list that already included a newer
   // subscription must still be applied.
-  const deferredListMembership = useRef(new Map<string, boolean>());
+  const deferredListMembership = useRef(new Map<string, SubscriptionListRead>());
+  const lastSuccessfulUnsubscribeRevision = useRef(new Map<string, number>());
   const reconcileBoardSubscriptionRef = useRef<(boardId: string, uid: string, sid: string) => void>(() => {});
   // Latest tap per board; only its outcome may roll back or alert.
   const latestIntent = useRef(new Map<string, number>());
@@ -131,7 +137,7 @@ function BoardsContent() {
 
   const load = useCallback(async () => {
     const version = ++loadVersion.current;
-    const subscriptionRevisionAtRead = subscriptionRevision.current;
+    const subscriptionRevisionAtStart = subscriptionRevision.current;
     setLoadError('');
     try {
       if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
@@ -140,17 +146,22 @@ function BoardsContent() {
         applySubscribed(() => new Set());
         return;
       }
-      const [rows, subs] = await Promise.all([
+      const [rows, membership] = await Promise.all([
         listBoards(school.id, 120),
-        listSubscribedBoardIds(auth.user.uid, school.id, { throwOnError: true }),
+        listSubscribedBoardIds(auth.user.uid, school.id, { throwOnError: true }).then(
+          (subs): SubscriptionListRead => ({
+            subscribedIds: new Set(subs),
+            writeRevisionAtRead: subscriptionRevision.current,
+          }),
+        ),
       ]);
       if (loadVersion.current !== version) return;
       setBoards(rows);
       const keepLocal = new Set(pendingSubscriptionCounts.current.keys());
       for (const [id, revision] of boardWriteRevision.current) {
-        if (revision > subscriptionRevisionAtRead) keepLocal.add(id);
+        if (revision > subscriptionRevisionAtStart) keepLocal.add(id);
       }
-      const subscribedIds = new Set(subs);
+      const { subscribedIds } = membership;
       for (const id of awaitingServerConfirm.current) {
         // A cache gap that omits a still-confirmed subscription must not
         // overwrite the rollback or invalidate an in-flight from-server re-read.
@@ -158,13 +169,13 @@ function BoardsContent() {
         if (confirmedSubscribedRef.current.has(id) && !subscribedIds.has(id)) keepLocal.add(id);
       }
       const tracked = new Set([
-        ...subs,
+        ...subscribedIds,
         ...keepLocal,
         ...subscribedRef.current,
         ...confirmedSubscribedRef.current,
         ...boardWriteRevision.current.keys(),
       ]);
-      const nextConfirmed = new Set(subs);
+      const nextConfirmed = new Set(subscribedIds);
       for (const id of keepLocal) {
         if (confirmedSubscribedRef.current.has(id)) nextConfirmed.add(id);
         else nextConfirmed.delete(id);
@@ -173,10 +184,13 @@ function BoardsContent() {
       appliedReadRevision.current += 1;
       const applied = appliedReadRevision.current;
       for (const id of tracked) {
-        if (!keepLocal.has(id)) boardServerAppliedRevision.current.set(id, applied);
+        if (!keepLocal.has(id)) {
+          boardServerAppliedRevision.current.set(id, applied);
+          deferredListMembership.current.delete(id);
+        }
       }
       applySubscribed((previous) => {
-        const next = new Set(subs);
+        const next = new Set(subscribedIds);
         for (const id of keepLocal) {
           if (previous.has(id)) next.add(id);
           else next.delete(id);
@@ -185,9 +199,9 @@ function BoardsContent() {
       });
       for (const id of keepLocal) {
         keepLocalFromStaleList.current.add(id);
-        if (lastSettledWriteSucceeded.current.has(id)) {
-          deferredListMembership.current.set(id, subscribedIds.has(id));
-        }
+        // Retain the membership captured when the subscription query resolved,
+        // even if board rows or writes were still in flight at that point.
+        deferredListMembership.current.set(id, membership);
         if (
           !pendingSubscriptionCounts.current.has(id) &&
           lastSettledWriteSucceeded.current.has(id) &&
@@ -225,17 +239,19 @@ function BoardsContent() {
     // latestIntent only moves forward and is never restored after a failed
     // write, so an older re-read cannot clobber a newer one for this board.
     const intentAtStart = latestIntent.current.get(boardId);
+    const deferredMembership = deferredListMembership.current.get(boardId);
+    const canApply = () =>
+      mounted.current &&
+      !pendingSubscriptionCounts.current.has(boardId) &&
+      (boardWriteRevision.current.get(boardId) ?? -1) <= revisionAtRead &&
+      // A list supersedes this re-read only if it applied this board from the server.
+      (boardServerAppliedRevision.current.get(boardId) ?? 0) <= boardServerAppliedAtStart &&
+      latestIntent.current.get(boardId) === intentAtStart;
     try {
       // Read this board only. listSubscribedBoardIds is capped at 100 and
       // must not treat a missing id as "unsubscribed".
       const serverSubscribed = await isSubscribedToBoard(uid, sid, boardId, { fromServer: true });
-      if (!mounted.current) return;
-      if (pendingSubscriptionCounts.current.has(boardId)) return;
-      if ((boardWriteRevision.current.get(boardId) ?? -1) > revisionAtRead) return;
-      // A newer list may have applied other boards while this one stayed local.
-      // Only a list that applied this board from the server supersedes the re-read.
-      if ((boardServerAppliedRevision.current.get(boardId) ?? 0) > boardServerAppliedAtStart) return;
-      if (latestIntent.current.get(boardId) !== intentAtStart) return;
+      if (!canApply()) return;
       const nextConfirmed = new Set(confirmedSubscribedRef.current);
       if (serverSubscribed) nextConfirmed.add(boardId);
       else nextConfirmed.delete(boardId);
@@ -250,17 +266,13 @@ function BoardsContent() {
         return next;
       });
     } catch {
-      const listed = deferredListMembership.current.get(boardId);
+      if (!canApply() || deferredListMembership.current.get(boardId) !== deferredMembership) return;
       deferredListMembership.current.delete(boardId);
       if (
-        listed === true &&
+        deferredMembership?.subscribedIds.has(boardId) &&
+        deferredMembership.writeRevisionAtRead >= (lastSuccessfulUnsubscribeRevision.current.get(boardId) ?? 0) &&
         lastSettledWriteSucceeded.current.has(boardId) &&
-        !confirmedSubscribedRef.current.has(boardId) &&
-        !pendingSubscriptionCounts.current.has(boardId) &&
-        (boardWriteRevision.current.get(boardId) ?? -1) <= revisionAtRead &&
-        (boardServerAppliedRevision.current.get(boardId) ?? 0) <= boardServerAppliedAtStart &&
-        latestIntent.current.get(boardId) === intentAtStart &&
-        mounted.current
+        !confirmedSubscribedRef.current.has(boardId)
       ) {
         const nextConfirmed = new Set(confirmedSubscribedRef.current);
         nextConfirmed.add(boardId);
@@ -370,25 +382,27 @@ function BoardsContent() {
         const remaining = (pendingSubscriptionCounts.current.get(b.id) ?? 1) - 1;
         if (remaining > 0) pendingSubscriptionCounts.current.set(b.id, remaining);
         else pendingSubscriptionCounts.current.delete(b.id);
-        subscriptionRevision.current += 1;
-        const isLatest = latestIntent.current.get(b.id) === intent;
-        // Advance this board's write generation on success or failure so a
-        // pull-to-refresh that started during the write cannot apply a cache
-        // gap over the rollback. Only a newer write supersedes this generation.
-        if (isLatest) {
-          boardWriteRevision.current.set(b.id, subscriptionRevision.current);
+        // A list started during any pending write still needs keepLocal
+        // after that write settles, including when a newer tap settled first.
+        const settledRevision = ++subscriptionRevision.current;
+        boardWriteRevision.current.set(b.id, settledRevision);
+        if (latestIntent.current.get(b.id) === intent) {
           if (failed) {
             lastSettledWriteSucceeded.current.delete(b.id);
             awaitingServerConfirm.current.add(b.id);
           } else {
             lastSettledWriteSucceeded.current.add(b.id);
+            awaitingServerConfirm.current.delete(b.id);
           }
         }
         if (!failed && (lastConfirmedIntent.current.get(b.id) ?? 0) < intent) {
           lastConfirmedIntent.current.set(b.id, intent);
           const nextConfirmed = new Set(confirmedSubscribedRef.current);
           if (target) nextConfirmed.add(b.id);
-          else nextConfirmed.delete(b.id);
+          else {
+            nextConfirmed.delete(b.id);
+            lastSuccessfulUnsubscribeRevision.current.set(b.id, settledRevision);
+          }
           confirmedSubscribedRef.current = nextConfirmed;
         }
         if (mounted.current) setPendingSubscriptions(new Set(pendingSubscriptionCounts.current.keys()));
