@@ -2,7 +2,7 @@ import { resolveNotificationDestination } from '../utils/notificationDestination
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { campusEventShortlistKey, campusEventShortlistOwner } from '@campus/shared/src/campusEventShortlist';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, renderHook, waitFor } from '@testing-library/react-native';
 import {
   AppState,
   Keyboard,
@@ -28,6 +28,7 @@ import { exportAndShareICalFile } from '../services/ical';
 import { safeNavigate } from '../utils/safeNavigate';
 import * as eventRegistration from '../services/eventRegistration';
 import { getRawAppEnv } from '../services/release';
+import { useCampusEventShortlist } from '../state/campusEventShortlist';
 
 let mockUid: string | null = 'student-a';
 let mockSchool = { id: 'pu' };
@@ -1390,4 +1391,42 @@ test('a local read failure offers retry and identical titles reopen their own so
     schoolId: campus.schoolId,
     source: campus.source,
   });
+});
+
+test('an old mobile shortlist press cannot write after switching accounts, returning, or leaving the screen', async () => {
+  mockUid = 'scope-guard-a';
+  const aKey = campusEventShortlistKey('pu', campusEventShortlistOwner(mockUid, null));
+  const bKey = campusEventShortlistKey('pu', campusEventShortlistOwner('scope-guard-b', null));
+  await AsyncStorage.removeItem(aKey);
+  await AsyncStorage.removeItem(bKey);
+  const hook = renderHook(() => useCampusEventShortlist());
+  await waitFor(() => expect(hook.result.current.ready).toBe(true));
+  const previousSave = hook.result.current.setSaved;
+
+  mockUid = 'scope-guard-b';
+  hook.rerender(undefined);
+  await waitFor(() => expect(hook.result.current.ready).toBe(true));
+  await act(async () => {
+    previousSave(event, true);
+  });
+  expect(await AsyncStorage.getItem(aKey)).toBeNull();
+  expect(await AsyncStorage.getItem(bKey)).toBeNull();
+
+  mockUid = 'scope-guard-a';
+  hook.rerender(undefined);
+  await waitFor(() => expect(hook.result.current.ready).toBe(true));
+  await act(async () => {
+    previousSave(event, true);
+  });
+  expect(await AsyncStorage.getItem(aKey)).toBeNull();
+  await act(async () => {
+    hook.result.current.setSaved(event, true);
+  });
+  await waitFor(() => expect(hook.result.current.items).toHaveLength(1));
+  const lastSave = hook.result.current.setSaved;
+  hook.unmount();
+  await act(async () => {
+    lastSave(event, false);
+  });
+  expect(JSON.parse((await AsyncStorage.getItem(aKey))!).items).toHaveLength(1);
 });
