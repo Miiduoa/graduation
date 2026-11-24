@@ -109,10 +109,19 @@ function studyClipboardWriter(): ((text: string) => Promise<void>) | null {
 // iOS/WebKit can ignore or reject textarea.select() on a readonly backup.
 // Apply an explicit range as well; if either API fails, leave the original
 // local text available for long-press selection rather than losing the backup.
-function selectManualCopyText(input: HTMLTextAreaElement) {
+function selectManualCopyText(input: HTMLTextAreaElement): boolean {
   try { input.select(); } catch { /* Try a direct selection range below. */ }
   try { input.setSelectionRange(0, input.value.length); }
   catch { /* The student can still select the unchanged text manually. */ }
+  // Some WebViews silently ignore both calls without throwing. Never tell the
+  // student that the JSON/TXT is selected unless the live input reports it.
+  // Even a reported selection is not proof that the system copied anything.
+  try {
+    return document.activeElement === input && input.value.length > 0 &&
+      input.selectionStart === 0 && input.selectionEnd === input.value.length;
+  } catch {
+    return false;
+  }
 }
 
 function initialMaterial(material?: Material): { source: StudySource | null; error: string } {
@@ -329,6 +338,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   const [confirmClose, setConfirmClose] = useState(false);
   const [pendingSource, setPendingSource] = useState<PendingSource | null>(null);
   const [manualCopyText, setManualCopyText] = useState<string | null>(null);
+  const [manualSelectFeedback, setManualSelectFeedback] = useState('');
   const [manualCopyKind, setManualCopyKind] = useState<ManualCopyKind>('notes');
   const downloadUrl = useRef<string | null>(null);
   const manualCopyInput = useRef<HTMLTextAreaElement>(null);
@@ -539,6 +549,9 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     manualCopyReturnTarget.current = null;
   }, [manualCopyText]);
 
+  // New selectable backups must not inherit a previous export's selection claim.
+  useEffect(() => { setManualSelectFeedback(''); }, [manualCopyText]);
+
   // A cancelled/failed import removes its status button. Return focus to the
   // file picker if its details are open, otherwise to the visible summary.
   useEffect(() => {
@@ -631,10 +644,13 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     // above makes effect reruns after state updates harmless.
   }, [material, selectionSerial, requestSourceReplacement]);
 
-  function downloadFile(contents: () => { blob: Blob; text: string; kind: ManualCopyKind }, filename: string, label: string) {
+  function downloadFile(contents: () => { blob: Blob; text: string; kind: ManualCopyKind }, filename: string, label: string, trigger?: HTMLElement) {
     // A successful download supersedes an older clipboard fallback. If mobile
     // download is blocked, keep that already validated, manually selectable
     // snapshot instead of removing the student's only accessible backup.
+    // Capture the original export control before clicking a temporary Blob
+    // anchor. Mobile browsers may move focus even when that click fails.
+    const exportTrigger = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     const previousManualCopy = manualCopyText;
     const previousManualKind = manualCopyKind;
     invalidateCopyFeedback();
@@ -673,8 +689,10 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
         // progress while TXT is selected offers only the OLD notes.
         if (hasNewExport && preparedFallback) setDownloadBackup(preparedFallback);
       } else if (preparedFallback) {
-        // A first-time blocked download still yields the exact TXT/JSON
-        // export as selectable local text, without requiring another action.
+        // A first-time blocked download moves focus to the selectable backup.
+        // Dismissing it must return keyboard/reader focus to the export button
+        // rather than leaving the student at the start of the whole board.
+        manualCopyReturnTarget.current = exportTrigger;
         setManualCopyKind(preparedFallback.kind);
         setManualCopyText(preparedFallback.text);
       }
@@ -690,17 +708,19 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     }
   }
 
-  function downloadNotes() {
+  function downloadNotes(trigger?: HTMLElement) {
     if (!source || !hasNotes) return;
     downloadFile(() => {
       const text = buildCourseStudyNotes(courseTitle, source, session.passages);
       return { blob: new Blob(['\uFEFF', text], { type: 'text/plain;charset=utf-8' }), text, kind: 'notes' };
-    }, courseStudyNotesFilename(source.title), '本次筆記');
+    }, courseStudyNotesFilename(source.title), '本次筆記', trigger);
   }
 
-  async function copyNotes() {
+  async function copyNotes(trigger?: HTMLElement) {
     if (!source || !hasNotes) return;
-    manualCopyReturnTarget.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Pointer taps on iOS may not focus buttons. Use the actual export control,
+    // not a stale focused note field, for fallback dismissal and keyboard return.
+    manualCopyReturnTarget.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     const request = ++copyRequest.current;
     const text = buildCourseStudyNotes(courseTitle, source, session.passages);
     setDownloadBackup(null);
@@ -728,17 +748,19 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     }
   }
 
-  function downloadPractice() {
+  function downloadPractice(trigger?: HTMLElement) {
     if (!source || !practiceRound) return;
     downloadFile(() => {
       const text = buildCourseStudyPracticeNotes(courseTitle, source.title, practiceRound);
       return { blob: new Blob(['\uFEFF', text], { type: 'text/plain;charset=utf-8' }), text, kind: 'practice' };
-    }, courseStudyPracticeFilename(source.title), '本輪練習紀錄');
+    }, courseStudyPracticeFilename(source.title), '本輪練習紀錄', trigger);
   }
 
-  async function copyPracticeNotes() {
+  async function copyPracticeNotes(trigger?: HTMLElement) {
     if (!source || !practiceRound || practiceRound.revision !== session.revision) return;
-    manualCopyReturnTarget.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Pointer taps on iOS may not focus buttons. Use the actual export control,
+    // not a stale focused note field, for fallback dismissal and keyboard return.
+    manualCopyReturnTarget.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     const request = ++copyRequest.current;
     // Snapshot exactly the current user-visible disclosures at the click.
     const text = buildCourseStudyPracticeNotes(courseTitle, source.title, practiceRound);
@@ -769,8 +791,10 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
 
   // The JSON is the same validated payload as the download, never a reduced notes export.
   // A user gesture is required for clipboard access; failed writes keep a selectable local copy.
-  async function copyProgressText(text: string, kind: 'reading-progress' | 'practice-progress') {
-    manualCopyReturnTarget.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  async function copyProgressText(text: string, kind: 'reading-progress' | 'practice-progress', trigger?: HTMLElement) {
+    // Pointer taps on iOS may not focus buttons. Use the actual export control,
+    // not a stale focused note field, for fallback dismissal and keyboard return.
+    manualCopyReturnTarget.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     const request = ++copyRequest.current;
     setManualCopyText(null);
     setDownloadBackup(null);
@@ -827,32 +851,32 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     }
   }
 
-  function copyReadingProgress() {
+  function copyReadingProgress(trigger?: HTMLElement) {
     if (!source) return;
     try {
       const text = serializeCourseStudyProgress({
         scope, source, position: { sectionIndex, passageIndex, mode }, passages: session.passages,
       });
-      void copyProgressText(text, 'reading-progress');
+      void copyProgressText(text, 'reading-progress', trigger);
     } catch (failure) {
       setDownloadError(failure instanceof Error ? failure.message : '無法整理閱讀進度；原有內容仍保留。');
     }
   }
 
-  function copyPracticeCheckpoint(round: StudyPracticeRound | null) {
+  function copyPracticeCheckpoint(round: StudyPracticeRound | null, trigger?: HTMLElement) {
     if (!source || !round || round.revision !== session.revision) return;
     try {
       const text = serializeStudyPracticeCheckpoint({
         progress: { scope, source, position: { sectionIndex, passageIndex, mode: round.mode }, passages: session.passages },
         round,
       });
-      void copyProgressText(text, 'practice-progress');
+      void copyProgressText(text, 'practice-progress', trigger);
     } catch (failure) {
       setDownloadError(failure instanceof Error ? failure.message : '無法整理練習進度；本輪回答仍保留。');
     }
   }
 
-  function savePracticeCheckpoint(round: StudyPracticeRound | null) {
+  function savePracticeCheckpoint(round: StudyPracticeRound | null, trigger?: HTMLElement) {
     if (!source || !round || round.revision !== session.revision) return;
     let saved: string;
     try {
@@ -866,10 +890,10 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
       return;
     }
     downloadFile(() => ({ blob: new Blob([saved], { type: 'application/json;charset=utf-8' }),
-      text: saved, kind: 'practice-progress' }), courseStudyPracticeCheckpointFilename(source.title), '練習與閱讀進度');
+      text: saved, kind: 'practice-progress' }), courseStudyPracticeCheckpointFilename(source.title), '練習與閱讀進度', trigger);
   }
 
-  function saveProgress() {
+  function saveProgress(trigger?: HTMLElement) {
     if (!source) return;
     let text: string;
     try {
@@ -880,7 +904,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
       return;
     }
     downloadFile(() => ({ blob: new Blob([text], { type: 'application/json;charset=utf-8' }),
-      text, kind: 'reading-progress' }), courseStudyProgressFilename(source.title), '閱讀進度');
+      text, kind: 'reading-progress' }), courseStudyProgressFilename(source.title), '閱讀進度', trigger);
   }
 
   async function chooseProgress(file: File) {
@@ -1181,24 +1205,26 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
           <p className={styles.note}>可以先核對教材，再回到原本的題號、草稿和自評。此狀態只保留在目前分頁；一般閱讀進度檔不包含這輪練習。若開始另一輪練習將取代這輪草稿；關閉、更換教材或重新開始前，請先儲存完整練習備份。</p>
           <div className={styles.actions}>
             <button type="button" className={`${styles.button} ${styles.primary}`} onClick={resumePractice}>繼續這輪練習</button>
-            <button type="button" className={styles.button} onClick={() => savePracticeCheckpoint(pausedRound)}>儲存暫停的練習與閱讀進度</button>
-            <button type="button" className={styles.button} onClick={() => copyPracticeCheckpoint(pausedRound)}>複製暫停的練習與閱讀進度 JSON</button>
+            <button type="button" className={styles.button} onClick={(event) => savePracticeCheckpoint(pausedRound, event.currentTarget)}>儲存暫停的練習與閱讀進度</button>
+            <button type="button" className={styles.button} onClick={(event) => copyPracticeCheckpoint(pausedRound, event.currentTarget)}>複製暫停的練習與閱讀進度 JSON</button>
             <button ref={endPausedPracticeButton} type="button" className={styles.button}
               onClick={() => setPendingPracticeAction('discard')}>結束暫停的練習</button>
           </div>
         </section>}
         {!practiceRound && <div className={styles.actions}>
           {pausedRound?.revision !== session.revision && <>
-            <button type="button" className={styles.button} onClick={saveProgress}>儲存閱讀進度</button>
-            <button type="button" className={styles.button} onClick={copyReadingProgress}>複製閱讀進度 JSON</button>
+            <button type="button" className={styles.button} onClick={(event) => saveProgress(event.currentTarget)}>儲存閱讀進度</button>
+            <button type="button" className={styles.button} onClick={(event) => copyReadingProgress(event.currentTarget)}>複製閱讀進度 JSON</button>
           </>}
-          <button type="button" className={styles.button} disabled={!hasNotes} onClick={downloadNotes}>下載本次筆記</button>
-          <button type="button" className={styles.button} disabled={!hasNotes} onClick={() => { void copyNotes(); }}>複製本次筆記</button>
+          <button type="button" className={styles.button} disabled={!hasNotes} onClick={(event) => downloadNotes(event.currentTarget)}>下載本次筆記</button>
+          <button type="button" className={styles.button} disabled={!hasNotes} onClick={(event) => { void copyNotes(event.currentTarget); }}>複製本次筆記</button>
         </div>}
         {!practiceRound && <p className={styles.note}>進度檔可還原閱讀位置、筆記、講解、試答與問題草稿，也含練習參考回答；文字筆記方便直接閱讀。檔案未加密，請自行保管。</p>}
         {downloadStatus && <p className={styles.note} role="status">{downloadStatus}</p>}
-        {downloadBackup && <button type="button" className={styles.button} onClick={() => {
-          manualCopyReturnTarget.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        {downloadBackup && <button type="button" className={styles.button} onClick={(event) => {
+          // Mobile pointer taps need not focus buttons; the real trigger is
+          // more reliable than document.activeElement for return navigation.
+          manualCopyReturnTarget.current = event.currentTarget;
           setManualCopyKind(downloadBackup.kind);
           setManualCopyText(downloadBackup.text);
           setDownloadError('');
@@ -1213,9 +1239,13 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
           <button type="button" className={styles.button}
             onClick={() => { void retryManualCopy(); }}>再次嘗試複製到剪貼簿</button>
           <button type="button" className={styles.button} onClick={() => {
-            manualCopyInput.current?.focus();
-            if (manualCopyInput.current) selectManualCopyText(manualCopyInput.current);
+            const input = manualCopyInput.current;
+            input?.focus();
+            setManualSelectFeedback(input && selectManualCopyText(input)
+              ? '瀏覽器回報已全選備份文字；請再使用裝置的複製功能，並確認貼上內容。'
+              : '瀏覽器未確認全文已選取；請長按文字手動選取並複製，備份內容仍保留。');
           }}>全選上方文字</button>
+          {manualSelectFeedback && <p className={styles.note} role="status" aria-live="polite">{manualSelectFeedback}</p>}
           <p className={styles.note}>可長按選取文字或按「全選上方文字」，再用手機的「複製」功能。這是本機顯示，不會自動傳送或保存；
             內容可能含教材與個人試答，請注意貼上位置。</p>
           <button type="button" className={styles.button} onClick={() => {
@@ -1255,8 +1285,8 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
         </section>}
         {practiceRound ? <CourseStudyPractice round={practiceRound} onAction={changePractice}
           onExit={() => readPracticeSource()} onReadSource={readPracticeSource}
-          onDownload={downloadPractice} onCopy={copyPracticeNotes} onSave={() => savePracticeCheckpoint(practiceRound)}
-          onCopyCheckpoint={() => copyPracticeCheckpoint(practiceRound)} /> : <>
+          onDownload={downloadPractice} onCopy={copyPracticeNotes} onSave={(trigger) => savePracticeCheckpoint(practiceRound, trigger)}
+          onCopyCheckpoint={(trigger) => copyPracticeCheckpoint(practiceRound, trigger)} /> : <>
         <div className={styles.selectors}>
           <label className={styles.field} htmlFor={sectionId}>閱讀範圍
             <select id={sectionId} value={sectionIndex} onChange={(event) => { invalidateCopyFeedback(); setSectionIndex(Number(event.target.value)); setPassageIndex(0); }}>

@@ -6,6 +6,16 @@ export const STUDY_SESSION_LIMITS = {
   attemptCharacters: 2_000,
 } as const;
 
+type StudyAnswerState = Pick<StudyLesson, 'attempt' | 'answerVisible'>;
+
+export function canReviewStudyAnswer({ attempt }: Pick<StudyAnswerState, 'attempt'>): boolean {
+  return !!attempt.trim();
+}
+
+export function hasRevealedStudyAnswer(response: StudyAnswerState): boolean {
+  return response.answerVisible && canReviewStudyAnswer(response);
+}
+
 export type StudyLesson = StudyTutorTurn & {
   id: number;
   previousLessonId: number | null;

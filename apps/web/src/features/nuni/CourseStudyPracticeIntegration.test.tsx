@@ -283,6 +283,46 @@ it('saves an independent practice checkpoint and restores the exact second-quest
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
+it.each([['\ufff9', true], ['\ufffa\ufffb', true], ['\u200b', false], ['\u2800\u0301', false]])(
+  'preserves legacy practice disclosure according to the original attempt gate (%#)', async (attempt, wasAnswered) => {
+    const downloads = downloadMock();
+    const view = mount();
+    await restore();
+    begin();
+    fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '甲' } });
+    fireEvent.click(screen.getByRole('button', { name: '對照參考回答' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存練習與閱讀進度' }));
+    const stored = JSON.parse(await readBlob(downloads.create.mock.calls[0][0] as Blob));
+    const firstId = stored.practice.cardIds[0];
+    stored.practice.responses[firstId].attempt = attempt;
+    const raw = JSON.stringify(stored);
+    view.unmount();
+
+    mount();
+    const file = new File([raw], '上次練習.campus-practice.json', { type: 'application/json' });
+    Object.defineProperty(file, 'text', { value: async () => raw });
+    fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+    await screen.findByRole('region', { name: '閱讀進度預覽' });
+    fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+
+    expect(value(practiceLabel)).toBe(attempt);
+    const reveal = screen.getByRole('button', { name: wasAnswered ? '收起參考回答' : '對照參考回答',
+      expanded: wasAnswered }) as HTMLButtonElement;
+    expect(reveal.disabled).toBe(!wasAnswered);
+    expect(!!screen.queryByText(first.answer)).toBe(wasAnswered);
+
+    fireEvent.click(screen.getByRole('button', { name: '下載本輪練習' }));
+    const notes = await readBlob(downloads.create.mock.calls[1][0] as Blob);
+    expect(notes).toContain('本輪試答：\n' + (wasAnswered ? attempt : '（尚未作答）'));
+    expect(notes.includes(first.answer)).toBe(wasAnswered);
+    expect(notes).not.toContain(second.answer);
+
+    fireEvent.click(screen.getByRole('button', { name: '儲存練習與閱讀進度' }));
+    const saved = JSON.parse(await readBlob(downloads.create.mock.calls[2][0] as Blob));
+    expect(saved.practice.responses[firstId]).toMatchObject({ attempt, answerVisible: true });
+  },
+);
+
 it('rejects a corrupt practice checkpoint without replacing the existing lecture or round', async () => {
   mount();
   await restore();
