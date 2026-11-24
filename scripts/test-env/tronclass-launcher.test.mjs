@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -75,3 +75,41 @@ for (const scenario of scenarios) {
     assertLauncherEnvironment(scenario);
   });
 }
+
+test('launcher stores session keys in a private temporary directory', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-dir-'));
+  const capture = path.join(dir, 'captured.json');
+  try {
+    writeFileSync(path.join(dir, 'node'), `#!${process.execPath}
+const fs = require('node:fs');
+if (process.argv.includes('-e')) process.exit(0);
+fs.writeFileSync(process.env.TRONCLASS_LAUNCHER_CAPTURE,
+  JSON.stringify({ dir: process.env.TRONCLASS_RUNTIME_DIR ?? null }));
+process.exit(73);
+`, { mode: 0o700 });
+    writeFileSync(path.join(dir, 'java'), `#!${process.execPath}
+process.exit(0);
+`, { mode: 0o700 });
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        TRONCLASS_LAUNCHER_CAPTURE: capture,
+        TMPDIR: dir,
+        HOME: dir,
+      },
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 73, result.stderr);
+    const observed = JSON.parse(readFileSync(capture, 'utf8'));
+    assert.equal(typeof observed.dir, 'string');
+    assert.match(observed.dir, /campus-tronclass-emulator\./);
+    assert.notEqual(observed.dir, path.join(dir, `campus-tronclass-emulator-${process.getuid()}`));
+    const info = statSync(observed.dir);
+    assert.equal(info.mode & 0o777, 0o700);
+    assert.equal(info.isDirectory(), true);
+    assert.equal(lstatSync(observed.dir).isSymbolicLink(), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

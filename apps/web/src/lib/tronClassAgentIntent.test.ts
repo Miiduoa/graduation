@@ -783,4 +783,28 @@ describe('r28 structural regressions and function-word variants', () => {
       intent: 'materials', pendingOnly: false,
     });
   });
+
+  it.each([
+    '查玩課雲作業記得交 PDF',
+    '查玩課雲作業立即交附件',
+    '查玩課雲作業接下來交最新版',
+  ])('treats an unpunctuated write after a write cue as a write in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('keeps negation around every 供…用的 span, not only the last opening', () => {
+    const question = '不要繳交供老師確認玩課雲作業以及供助教確認教材用的資料，只查校園公告';
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('scans a long negated modifier span in linear time', () => {
+    const question = `不要繳交供${'確認'.repeat(450)}玩課雲作業用的資料，只查校園公告`;
+    expect(question.length).toBeLessThanOrEqual(1000);
+    const started = Date.now();
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(200);
+  });
 });
