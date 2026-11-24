@@ -471,6 +471,161 @@ it('rejects non-JSON profile content and a revoked profile cookie in strict mode
   }
 });
 
+it.each([
+  'session=nonempty; Max-Age=0; Path=/',
+  'session=nonempty; Max-Age=-1; Path=/',
+  'session=nonempty; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/',
+  'session=nonempty; Domain=other.example; Path=/',
+  'session=nonempty; Domain=pu.edu.tw; Path=/',
+  'session=nonempty; Path=/api/private',
+  'session=nonempty; Path=/api/profi',
+  'session=nonempty; Path=relative',
+  'session=nonempty; Max-Age=bad; Path=/',
+  'session=nonempty; Expires=invalid; Path=/',
+  'session=nonempty; Path=/; Path=/api',
+  'session="ambiguous"; Path=/',
+])('rejects deleted, invalid or incorrectly scoped strict session cookies (%s)', async (setCookie) => {
+  for (const phase of ['login', 'profile']) {
+    const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+      ? jsonResponse(200, {}, { 'set-cookie': phase === 'login' ? setCookie : 'session=old; Path=/' })
+      : jsonResponse(200, { id: 44, login_name: 's1234567' }, { 'set-cookie': setCookie }));
+    await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+      route: 'student', requireStudentIdentityEvidence: true,
+    })).rejects.toMatchObject({ kind: 'unverified', code: 'IDENTITY_EVIDENCE_UNAVAILABLE' });
+    expect(fetchMock).toHaveBeenCalledTimes(phase === 'login' ? 1 : 2);
+  }
+});
+
+it('rejects multiple strict session updates instead of silently selecting one', async () => {
+  const profile = jsonResponse(200, { id: 44, login_name: 's1234567' });
+  profile.headers.append('set-cookie', 'session=one; Path=/');
+  profile.headers.append('set-cookie', 'session=two; Path=/api');
+  const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+    ? jsonResponse(200, {}, { 'set-cookie': 'session=old; Path=/' }) : profile);
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true,
+  })).rejects.toMatchObject({ kind: 'unverified' });
+});
+
+it('rejects a second live session scope introduced by the profile response', async () => {
+  const fetchMock = vi.fn(async (url: string) => url.endsWith('/api/login')
+    ? jsonResponse(200, {}, { 'set-cookie': 'session=old; Path=/' })
+    : jsonResponse(200, { id: 44, login_name: 's1234567' }, { 'set-cookie': 'session=new; Path=/api' }));
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true,
+  })).rejects.toMatchObject({ kind: 'unverified' });
+});
+
+it('honors strict cookie scope and Max-Age precedence while keeping valid session rotation', async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/api/login')) {
+      const response = jsonResponse(200, {});
+      response.headers.append('set-cookie', 'session=old; Domain=.TronClass.PU.edu.tw; Max-Age=60; Expires=Thu, 01 Jan 1970 00:00:00 GMT');
+      response.headers.append('set-cookie', 'foreign=secret; Domain=other.example; Path=/');
+      response.headers.append('set-cookie', 'private=secret; Path=/api/private');
+      return response;
+    }
+    expect(new Headers(init?.headers).get('Cookie')).toBe('session=old');
+    return jsonResponse(200, { id: 44, login_name: 's1234567' }, { 'set-cookie': 'session=rotated; Path=/api; Max-Age=60' });
+  });
+  await expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true,
+  })).resolves.toMatchObject({ cookies: { session: 'rotated' }, identityEvidence: { subject: '44' } });
+});
+
+it('does not return strict evidence if the session expires while reading the profile body', async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url.endsWith('/api/login')) return jsonResponse(200, {}, { 'set-cookie': 'session=short; Max-Age=1; Path=/' });
+    const response = jsonResponse(200, {});
+    response.text = async () => {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      return JSON.stringify({ id: 44, login_name: 's1234567' });
+    };
+    return response;
+  });
+  const checked = expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true, timeoutMs: 5000,
+  })).rejects.toMatchObject({ kind: 'unverified' });
+  await vi.advanceTimersByTimeAsync(1500);
+  await checked;
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('starts Max-Age at receipt of headers so a delayed login body cannot extend the session', async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async () => {
+    const response = jsonResponse(200, {}, { 'set-cookie': 'session=short; Max-Age=1; Path=/' });
+    response.text = async () => {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      return '{}';
+    };
+    return response;
+  });
+  const checked = expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true, timeoutMs: 5000,
+  })).rejects.toMatchObject({ kind: 'unverified' });
+  await vi.advanceTimersByTimeAsync(1500);
+  await checked;
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it.each([
+  ['login', 'fetch', 'submit'], ['profile', 'fetch', 'verify'],
+  ['login', 'body', 'submit'], ['profile', 'body', 'verify'],
+] as const)('settles the strict %s %s deadline even when transport ignores abort', async (phase, operation, stage) => {
+  vi.useFakeTimers();
+  let release: (() => void) | undefined;
+  let stalledSignal: AbortSignal | null | undefined;
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const isLogin = url.endsWith('/api/login');
+    const response = isLogin
+      ? jsonResponse(200, {}, { 'set-cookie': 'session=valid; Path=/' })
+      : jsonResponse(200, { id: 44, login_name: 's1234567' });
+    if ((isLogin ? 'login' : 'profile') === phase) {
+      stalledSignal = init?.signal;
+      const stalled = new Promise<void>(resolve => { release = resolve; });
+      if (operation === 'fetch') await stalled;
+      else {
+        const text = response.text.bind(response);
+        response.text = async () => { await stalled; return text(); };
+      }
+    }
+    return response;
+  });
+  const checked = expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true, timeoutMs: 1000, hopTimeoutMs: 50,
+  })).rejects.toMatchObject({ kind: 'timeout', route: 'student', stage, code: 'DEADLINE' });
+  await vi.advanceTimersByTimeAsync(50);
+  await checked;
+  expect(stalledSignal?.aborted).toBe(true);
+  expect(fetchMock).toHaveBeenCalledTimes(phase === 'login' ? 1 : 2);
+  release?.();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fetchMock).toHaveBeenCalledTimes(phase === 'login' ? 1 : 2);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('shares the strict total deadline across login and profile hops', async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async (url: string) => {
+    await new Promise(resolve => setTimeout(resolve, 80));
+    return url.endsWith('/api/login')
+      ? jsonResponse(200, {}, { 'set-cookie': 'session=valid; Path=/' })
+      : jsonResponse(200, { id: 44, login_name: 's1234567' });
+  });
+  const checked = expect(createPuCampusGateway({ fetch: fetchMock }).loginTronClass('s1234567', SECRET, {
+    route: 'student', requireStudentIdentityEvidence: true, timeoutMs: 150, hopTimeoutMs: 100,
+  })).rejects.toMatchObject({ kind: 'timeout', route: 'student', stage: 'verify', code: 'DEADLINE' });
+  await vi.advanceTimersByTimeAsync(150);
+  await checked;
+  await vi.advanceTimersByTimeAsync(10);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it('does not enter the legacy CAS fallback or send credentials to a substituted origin for identity evidence', async () => {
   const fetchMock = vi.fn(async () => jsonResponse(400, { error: 'native not available' }));
   const options = { route: 'student' as const, requireStudentIdentityEvidence: true };

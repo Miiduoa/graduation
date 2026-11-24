@@ -156,6 +156,74 @@ test("Google link candidate PostgreSQL and Fastify contract",{timeout:60000},asy
     const closed=await makeActor();await db.transaction(tx=>tx.query("UPDATE platform_accounts SET state='closed' WHERE id=$1",[closed.platformAccountId]));
     await assert.rejects(()=>service.status(closed),{code:"GOOGLE_LINK_INVALID"});
   });
+  await t.test("writes reject malformed current proof and future sessions without changing pending work",async()=>{
+    for(const mode of ["issuer","subject","future"]){
+      const actor=await makeActor(),subject="write-proof-"+randomUUID();
+      let verificationCount=0;
+      const service=createGoogleLinkService({db,verifier:{verify:async()=>{verificationCount++;return verified(subject);}}});
+      const input=await begin(service,actor);
+      const transactions=()=>db.transaction(async tx=>(await tx.query("SELECT * FROM platform_google_link_transactions WHERE platform_account_id=$1",[actor.platformAccountId])).rows);
+      const pending=await transactions();
+      await db.transaction(tx=>mode==="issuer"?
+        tx.query("UPDATE platform_account_credentials SET provider_issuer='https://untrusted.example' WHERE id=$1",[actor.credentialId]):
+        mode==="subject"?tx.query("UPDATE platform_account_credentials SET provider_subject=' padded-subject ' WHERE id=$1",[actor.credentialId]):
+        tx.query("UPDATE platform_account_sessions SET created_at=clock_timestamp()+interval '1 minute' WHERE token_sha256=$1",[actor.sessionHash]));
+      const code=mode==="future"?"GOOGLE_LINK_REAUTH_REQUIRED":"GOOGLE_LINK_INVALID";
+      await assert.rejects(()=>service.status(actor),{code});
+      await assert.rejects(()=>service.start(actor),{code});
+      await assert.rejects(()=>service.complete(actor,input),{code});
+      await assert.rejects(()=>service.cancel(actor,cancelInput(input)),{code});
+      assert.equal(verificationCount,0);assert.deepEqual(await transactions(),pending);assert.deepEqual(await credentials(subject),[]);
+    }
+  });
+  await t.test("writes recheck current proof and future session time after provider verification",async()=>{
+    for(const mode of ["issuer","future"]){
+      const actor=await makeActor(),subject="write-proof-race-"+randomUUID();
+      const service=createGoogleLinkService({db,verifier:{verify:async()=>{
+        await db.transaction(tx=>mode==="issuer"?
+          tx.query("UPDATE platform_account_credentials SET provider_issuer='https://untrusted.example' WHERE id=$1",[actor.credentialId]):
+          tx.query("UPDATE platform_account_sessions SET created_at=clock_timestamp()+interval '1 minute' WHERE token_sha256=$1",[actor.sessionHash]));
+        return verified(subject);
+      }}});
+      const input=await begin(service,actor);
+      const transactions=()=>db.transaction(async tx=>(await tx.query("SELECT * FROM platform_google_link_transactions WHERE platform_account_id=$1",[actor.platformAccountId])).rows);
+      const pending=await transactions();
+      await assert.rejects(()=>service.complete(actor,input),{code:mode==="issuer"?"GOOGLE_LINK_INVALID":"GOOGLE_LINK_REAUTH_REQUIRED"});
+      assert.deepEqual(await transactions(),pending);assert.deepEqual(await credentials(subject),[]);
+    }
+  });
+  await t.test("actual HTTP status-only rollout leaves every link write route absent",async()=>{
+    const actor=await makeActor(),service=createGoogleLinkService({db,verifier:verifier("read-only-fact-"+randomUUID())});
+    let sessionReads=0;
+    const accounts={resolveSession:async authorization=>{
+      sessionReads+=1;assert.equal(authorization,actor.authorization);
+      return {platformAccountId:actor.platformAccountId,credentialId:actor.credentialId};
+    }};
+    const app=Fastify({logger:false});
+    try{
+      assert.equal(registerGoogleLinkRoutes(app,{enabled:true,accounts,service:{status:service.status}}),true);
+      const prefix="/v1/auth/platform/account-links/google/";
+      const read=await app.inject({method:"GET",url:prefix+"status",headers:{authorization:actor.authorization}});
+      assert.equal(read.statusCode,200);
+      assert.deepEqual(read.json(),{platformAccountId:actor.platformAccountId,currentMethod:"apple",methods:["apple"],googleLink:"unavailable"});
+      assert.match(read.headers["cache-control"],/no-store/u);
+      for(const action of ["start","complete","cancel"]){
+        const response=await app.inject({method:"POST",url:prefix+action,headers:{authorization:actor.authorization},payload:{}});
+        assert.equal(response.statusCode,404);
+      }
+      assert.equal(sessionReads,1);
+      const rows=await db.transaction(async tx=>({
+        pending:(await tx.query("SELECT count(*)::integer AS count FROM platform_google_link_transactions WHERE platform_account_id=$1",[actor.platformAccountId])).rows[0].count,
+        credentials:(await tx.query("SELECT count(*)::integer AS count FROM platform_account_credentials WHERE platform_account_id=$1",[actor.platformAccountId])).rows[0].count
+      }));
+      assert.deepEqual(rows,{pending:0,credentials:1});
+      // Seed a completed link through the service fixture; the read-only adapter still reports that fact.
+      await service.complete(actor,await begin(service,actor));
+      const linked=await app.inject({method:"GET",url:prefix+"status",headers:{authorization:actor.authorization}});
+      assert.equal(linked.statusCode,200);
+      assert.deepEqual(linked.json(),{platformAccountId:actor.platformAccountId,currentMethod:"apple",methods:["google","apple"],googleLink:"linked"});
+    }finally{await app.close();}
+  });
   await t.test("actual HTTP route binds to current session instead of request JSON",async()=>{
     const actor=await makeActor(),subject="http-"+randomUUID();
     const service=createGoogleLinkService({db,verifier:verifier(subject)});
@@ -165,7 +233,7 @@ test("Google link candidate PostgreSQL and Fastify contract",{timeout:60000},asy
     }};
     const app=Fastify({logger:false});
     try{
-      assert.equal(registerGoogleLinkRoutes(app,{enabled:true,accounts,service}),true);
+      assert.equal(registerGoogleLinkRoutes(app,{enabled:true,writesEnabled:true,accounts,service}),true);
       const prefix="/v1/auth/platform/account-links/google/";
       const request=(path,payload,authorization=actor.authorization)=>app.inject({method:"POST",url:prefix+path,headers:{authorization},payload});
       const status=(options={})=>app.inject({method:"GET",url:prefix+"status",headers:{authorization:actor.authorization},...options});

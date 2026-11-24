@@ -1,4 +1,5 @@
 import test from "node:test";
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { registerGoogleLinkRoutes,isGoogleLinkRoute } from "./google-link-routes.mjs";
 async function routeChecks(register,classify,hash){
@@ -10,7 +11,7 @@ async function routeChecks(register,classify,hash){
   const act=name=>async(actor,body)=>{calls.push([name,actor,body]);if(failure)throw failure;return {status:name};};
   const service={start:act("start"),complete:act("complete"),cancel:act("cancel"),status:act("status")};
   check(register(app,{enabled:false})===false&&routes.size===0,"disabled");passed.push("disabled by default");
-  check(register(app,{enabled:true,accounts,service,hash})===true&&routes.size===4,"registration");passed.push("three dedicated writes and one read-only status route");
+  check(register(app,{enabled:true,writesEnabled:true,accounts,service,hash})===true&&routes.size===4,"registration");passed.push("three dedicated writes and one read-only status route");
   check(classify("POST",prefix+"complete")&&!classify("GET",prefix+"complete")&&!classify("POST",prefix+"complete/")&&!classify("POST",prefix+"complete?x=y"),"classification");passed.push("exact route classification");
   async function invoke(name,authorization,body,url=prefix+name,extraHeaders={}){
     const r=routes.get(prefix+name),headers={};
@@ -62,4 +63,26 @@ test("isolated Google link route handlers",async t=>{
   const passed=await routeChecks(registerGoogleLinkRoutes,isGoogleLinkRoute,v=>createHash("sha256").update(v).digest("hex"));
   for(const name of passed)t.diagnostic(name);
   if(passed.length!==15)throw Error("missing checks");
+});
+
+test("enabling status alone never registers or offers writes and preserves linked facts",async()=>{
+  for(const writesEnabled of [undefined,false,"true"]){
+    const routes=[];
+    let statusHandler,statusSnapshot;
+    const app={get:(path,_options,handler)=>{routes.push(["GET",path]);statusHandler=handler;},post:(path)=>routes.push(["POST",path])};
+    const options={enabled:true,accounts:{resolveSession:async()=>({platformAccountId:"server-account",credentialId:"server-credential"})},service:{status:async()=>statusSnapshot}};
+    if(writesEnabled!==undefined)options.writesEnabled=writesEnabled;
+    assert.equal(registerGoogleLinkRoutes(app,options),true);
+    assert.deepEqual(routes,[["GET","/v1/auth/platform/account-links/google/status"]]);
+    for(const googleLink of ["available","reauth-required","linked","restricted","unavailable"]){
+      statusSnapshot={platformAccountId:"server-account",currentMethod:"apple",methods:googleLink==="linked"?["google","apple"]:["apple"],googleLink};
+      const request={url:"/v1/auth/platform/account-links/google/status",headers:{authorization:"Platform ps_"+"a".repeat(43)}};
+      const reply={header(){return this;},code(){return this;},send(value){return value;}};
+      assert.deepEqual(await statusHandler(request,reply),{...statusSnapshot,
+        googleLink:["available","reauth-required"].includes(googleLink)?"unavailable":googleLink});
+      assert.equal(statusSnapshot.googleLink,googleLink);
+    }
+  }
+  assert.throws(()=>registerGoogleLinkRoutes({},{enabled:true,writesEnabled:true,
+    accounts:{resolveSession:async()=>({})},service:{status:async()=>({})}}),/dependencies missing/u);
 });

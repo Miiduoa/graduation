@@ -6,9 +6,10 @@ export function isGoogleLinkRoute(method,path){
   return method==="GET"&&path===prefix+"status"||
     method==="POST"&&["start","complete","cancel"].some(action=>path===prefix+action);
 }
-export function registerGoogleLinkRoutes(app,{enabled,accounts,service,hash=nodeHash}={}){
+export function registerGoogleLinkRoutes(app,{enabled,writesEnabled=false,accounts,service,hash=nodeHash}={}){
   if(enabled!==true)return false;
-  if(typeof accounts?.resolveSession!=="function"||["start","complete","cancel","status"].some(x=>typeof service?.[x]!=="function")||typeof hash!=="function")
+  const requiredActions=writesEnabled===true?["start","complete","cancel","status"]:["status"];
+  if(typeof accounts?.resolveSession!=="function"||requiredActions.some(x=>typeof service?.[x]!=="function")||typeof hash!=="function")
     throw Error("Google link candidate dependencies missing");
   const prefix="/v1/auth/platform/account-links/google/";
   const exactKeys=(body,keys)=>{
@@ -24,6 +25,8 @@ export function registerGoogleLinkRoutes(app,{enabled,accounts,service,hash=node
   const unavailable=reply=>error(reply,503,"GOOGLE_LINK_UNAVAILABLE","目前無法完成帳號綁定，請稍後再試。");
   const noStore=reply=>{reply.header("Cache-Control","private, no-store");reply.header("Referrer-Policy","no-referrer");};
   for(const [action,keys,limit] of [["start",[],4096],["complete",["transactionId","nonce","idToken"],20000],["cancel",["transactionId","nonce"],4096],["status",[],4096]]){
+    // Allow the read-only account inventory to roll out without registering any write endpoint.
+    if(action!=="status"&&writesEnabled!==true)continue;
     const path=prefix+action;
     const method=action==="status"?"get":"post";
     app[method](path,{
@@ -43,7 +46,11 @@ export function registerGoogleLinkRoutes(app,{enabled,accounts,service,hash=node
         // Both the resolver and the hash use the exact same bearer material.
         const actor={platformAccountId:resolved.platformAccountId,credentialId:resolved.credentialId,sessionHash:hash(authorization.slice("Platform ".length))};
         if(action!=="status"&&!exactKeys(request.body,keys))return invalid(reply);
-        return action==="start"||action==="status"?await service[action](actor):await service[action](actor,request.body);
+        const result=action==="start"||action==="status"?await service[action](actor):await service[action](actor,request.body);
+        // Report existing links, but never offer a write that this adapter has not registered.
+        if(action==="status"&&writesEnabled!==true&&["available","reauth-required"].includes(result?.googleLink))
+          return {...result,googleLink:"unavailable"};
+        return result;
       }catch(e){
         const code=e&&typeof e==="object"?e.code:undefined;
         if(["PLATFORM_SESSION_INVALID","GOOGLE_LINK_REAUTH_REQUIRED","GOOGLE_LINK_INVALID","PLATFORM_IDENTITY_INVALID"].includes(code))return unauthorized(reply);

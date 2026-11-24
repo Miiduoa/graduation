@@ -145,6 +145,92 @@ function mergeCookies(jar: CookieJar, headers: Headers): CookieJar {
   return next;
 }
 
+type StrictTronClassCookies = Map<string, { value: string; path: string; expiresAt: number | null }>;
+const TRONCLASS_PROFILE_URL = TRONCLASS_ORIGIN + '/api/profile';
+const COOKIE_NAME = /^[!#$%&'*+\-.^_\x60|~0-9A-Za-z]+$/u;
+const COOKIE_VALUE = /^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]*$/u;
+
+function cookiePathMatches(path: string, pathname: string): boolean {
+  return pathname === path || pathname.startsWith(path.endsWith('/') ? path : path + '/');
+}
+
+function strictCookieValues(jar: StrictTronClassCookies, url: string): CookieJar {
+  const target = new URL(url);
+  if (target.origin !== TRONCLASS_ORIGIN) return {};
+  const now = Date.now();
+  return Object.fromEntries([...jar].filter(([name, cookie]) => {
+    if (cookie.expiresAt !== null && cookie.expiresAt <= now) {
+      jar.delete(name);
+      return false;
+    }
+    return cookiePathMatches(cookie.path, target.pathname);
+  }).map(([name, cookie]) => [name, cookie.value]));
+}
+
+/** Native evidence uses its own origin/path/expiry-aware jar; legacy CAS stays unchanged. */
+function mergeStrictTronClassCookies(
+  jar: StrictTronClassCookies, headers: Headers, requestUrl: string, receivedAt: number,
+  context: CampusErrorDetails,
+): void {
+  const reject = () => {
+    throw new PuCampusError('unverified', '目前無法驗證校園帳號', {
+      ...context, code: 'IDENTITY_EVIDENCE_UNAVAILABLE',
+    });
+  };
+  const listed = typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : [];
+  const fallback = headers.get('set-cookie');
+  const lines = listed.length ? listed : fallback ? [fallback] : [];
+  const origin = new URL(requestUrl);
+  let sessionUpdates = 0;
+  for (const line of lines) {
+    const [pair, ...attributes] = line.split(';').map(part => part.trim());
+    const separator = pair.indexOf('=');
+    const name = pair.slice(0, separator);
+    const value = pair.slice(separator + 1);
+    const session = name.toLowerCase() === 'session';
+    if (session && (name !== 'session' || ++sessionUpdates > 1)) reject();
+    const invalid = () => { if (session) reject(); };
+    if (separator <= 0 || !COOKIE_NAME.test(name) || !COOKIE_VALUE.test(value) ||
+        /,\s*[^;,=\s]+=/.test(line)) { invalid(); continue; }
+    const scoped = new Map<string, string>();
+    let malformed = false;
+    for (const attribute of attributes) {
+      const index = attribute.indexOf('=');
+      const key = (index < 0 ? attribute : attribute.slice(0, index)).trim().toLowerCase();
+      if (!['domain', 'path', 'expires', 'max-age'].includes(key)) continue;
+      if (index < 0 || scoped.has(key)) malformed = true;
+      scoped.set(key, index < 0 ? '' : attribute.slice(index + 1).trim());
+    }
+    // A strict identity cookie cannot acquire authority from another host or ambiguous scope.
+    const domain = scoped.get('domain')?.replace(/^\./, '').toLowerCase();
+    const path = scoped.get('path') ?? (origin.pathname.slice(0, origin.pathname.lastIndexOf('/')) || '/');
+    if (malformed || (domain !== undefined && domain !== origin.hostname) || !path.startsWith('/')) {
+      invalid(); continue;
+    }
+    let expiresAt: number | null = null;
+    const maxAge = scoped.get('max-age');
+    if (maxAge !== undefined) {
+      const seconds = Number(maxAge);
+      if (!/^-?\d+$/.test(maxAge) || !Number.isSafeInteger(seconds) ||
+          !Number.isSafeInteger(receivedAt + seconds * 1000)) { invalid(); continue; }
+      expiresAt = seconds <= 0 ? 0 : receivedAt + seconds * 1000;
+    } else if (scoped.has('expires')) {
+      expiresAt = Date.parse(scoped.get('expires')!);
+      if (!Number.isFinite(expiresAt)) { invalid(); continue; }
+    }
+    if (session) {
+      if (!cookiePathMatches(path, '/api/profile')) reject();
+      const previous = jar.get(name);
+      if (previous && (previous.expiresAt === null || previous.expiresAt > Date.now()) && previous.path !== path) {
+        // Two live cookies with the same name and different paths would be ambiguous on the wire.
+        reject();
+      }
+    }
+    if (!value || (expiresAt !== null && expiresAt <= Date.now())) jar.delete(name);
+    else jar.set(name, { value, path, expiresAt });
+  }
+}
+
 export function rewriteAllowedCampusLocation(
   location: string | null | undefined,
   requestUrl: string,
@@ -545,6 +631,7 @@ export function createPuCampusGateway(
       context?: CampusErrorDetails;
       confineOrigin?: string;
       confineOrigins?: readonly string[];
+      strictCookies?: StrictTronClassCookies;
     } = {},
   ): Promise<SentPage> {
     const hostname = normalizeRelayHostname(new URL(url).hostname);
@@ -558,23 +645,51 @@ export function createPuCampusGateway(
     }
     const waitMs = init.timeoutMs ?? timeoutMs;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), waitMs);
     const context = init.context || {};
+    const deadline = Date.now() + waitMs;
+    const deadlineError = () => new PuCampusError('timeout', '學校系統無回應', {
+      ...context, code: 'DEADLINE',
+    });
+    let rejectDeadline: ((error: PuCampusError) => void) | undefined;
+    const expired = init.strictCookies ? new Promise<never>((_resolve, reject) => {
+      rejectDeadline = reject;
+    }) : null;
+    const timer = setTimeout(() => {
+      // Settle independently of transport cooperation, including an unresponsive body reader.
+      rejectDeadline?.(deadlineError());
+      controller.abort();
+    }, waitMs);
+    const assertDeadline = () => {
+      if (init.strictCookies && (controller.signal.aborted || Date.now() >= deadline)) throw deadlineError();
+    };
     try {
       const headers = new Headers(init.headers);
       headers.set('User-Agent', USER_AGENT);
       headers.set('Accept-Language', 'zh-TW,zh;q=0.9');
-      if (init.cookies && Object.keys(init.cookies).length > 0) {
-        headers.set('Cookie', cookieHeader(init.cookies));
+      const cookies = init.strictCookies ? strictCookieValues(init.strictCookies, url) : init.cookies;
+      if (cookies && Object.keys(cookies).length > 0) {
+        headers.set('Cookie', cookieHeader(cookies));
       }
-      const response = await request(url, {
-        method: init.method,
-        headers,
-        body: init.body,
-        redirect: 'manual',
-        signal: controller.signal,
-      });
-      const html = await response.text();
+      const read = async () => {
+        assertDeadline();
+        const response = await request(url, {
+          method: init.method,
+          headers,
+          body: init.body,
+          redirect: 'manual',
+          signal: controller.signal,
+        });
+        const receivedAt = Date.now();
+        try { assertDeadline(); } catch (error) {
+          void response.body?.cancel().catch(() => {});
+          throw error;
+        }
+        const html = await response.text();
+        assertDeadline();
+        return { response, html, receivedAt };
+      };
+      const { response, html, receivedAt } = expired ? await Promise.race([read(), expired]) : await read();
+      assertDeadline();
       const locationHeader = response.headers.get('location');
       const allowedOrigins = init.confineOrigins || (init.confineOrigin ? [init.confineOrigin] : null);
       const location = allowedOrigins
@@ -583,20 +698,20 @@ export function createPuCampusGateway(
           ? normalizeRelayTarget(new URL(locationHeader, url).toString()) ||
             new URL(locationHeader, url).toString()
           : null;
+      if (init.strictCookies) mergeStrictTronClassCookies(init.strictCookies, response.headers, url, receivedAt, context);
+      let json: unknown = null;
+      try { json = JSON.parse(html) as unknown; } catch { /* HTML responses remain valid in compatibility mode. */ }
+      assertDeadline();
       return {
         status: response.status,
         contentType: response.headers.get('content-type'),
         html,
-        cookies: mergeCookies(init.cookies || {}, response.headers),
+        cookies: init.strictCookies
+          ? strictCookieValues(init.strictCookies, TRONCLASS_PROFILE_URL)
+          : mergeCookies(init.cookies || {}, response.headers),
         location,
         url,
-        json: (() => {
-          try {
-            return JSON.parse(html) as unknown;
-          } catch {
-            return null;
-          }
-        })(),
+        json,
       };
     } catch (error) {
       throw classifyCampusFailure(error, context);
@@ -758,6 +873,7 @@ export function createPuCampusGateway(
     timeoutMsRemaining: number,
     unauthorized: 'credentials' | 'missing' = 'missing',
     requireStudentIdentityEvidence = false,
+    strictCookies?: StrictTronClassCookies,
   ): Promise<TronClassSession | null> {
     const profilePage = await send(`${lmsOrigin}/api/profile`, {
       cookies,
@@ -768,6 +884,7 @@ export function createPuCampusGateway(
       },
       timeoutMs: timeoutMsRemaining,
       context: { route, stage: 'verify' },
+      strictCookies,
     });
     if (profilePage.status === 401 || profilePage.status === 403 || profilePage.status === 302) {
       if (unauthorized === 'credentials') {
@@ -969,6 +1086,7 @@ export function createPuCampusGateway(
     async loginTronClass(account, password, options = {}) {
       const started = Date.now();
       const strict = options.requireStudentIdentityEvidence === true;
+      const strictCookies: StrictTronClassCookies | undefined = strict ? new Map() : undefined;
       const budget = strict ? options.timeoutMs ?? DEFAULT_TIMEOUT_MS : options.timeoutMs;
       const hopCap = options.hopTimeoutMs ?? timeoutMs;
       const leftover = () => (budget == null ? hopCap : budget - (Date.now() - started));
@@ -988,6 +1106,7 @@ export function createPuCampusGateway(
           body: JSON.stringify({ user_name: account, password }),
           timeoutMs: remaining(),
           context: { route, stage: 'submit' },
+          strictCookies,
         });
         if (posted.status === 200 && isCredentialPage(posted.html)) {
           throw new PuCampusError('credentials', '學號或密碼錯誤', { route, stage: 'submit' });
@@ -1005,8 +1124,12 @@ export function createPuCampusGateway(
             remaining(),
             'credentials',
             strict,
+            strictCookies,
           );
-          if (session && (!strict || leftover() > 0)) return session;
+          if (strict && leftover() <= 0) throw new PuCampusError('timeout', '學校系統無回應', {
+            route, stage: 'verify', code: 'DEADLINE',
+          });
+          if (session) return session;
           throw new PuCampusError('unverified', strict ? '目前無法驗證校園帳號' : '暫時無法驗證老師身分', {
             route, stage: 'verify', ...(strict ? { code: 'IDENTITY_EVIDENCE_UNAVAILABLE' } : {}),
           });

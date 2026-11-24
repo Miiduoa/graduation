@@ -32,13 +32,15 @@ export function createGoogleLinkService({ db, verifier, crypto = nodeCrypto }) {
     const account = await tx.query(`/* link:account */ SELECT id FROM platform_accounts
       WHERE id=$1 AND state='active' FOR UPDATE`, [actor.platformAccountId]);
     if (account.rows.length !== 1) invalid();
-    const credential = await tx.query(`/* link:credential */ SELECT id,method FROM platform_account_credentials
+    const credential = await tx.query(`/* link:credential */
+      SELECT id,method,provider_issuer,provider_subject,state,verified_at FROM platform_account_credentials
       WHERE id=$1 AND platform_account_id=$2 AND state='active' FOR SHARE`, [actor.credentialId, actor.platformAccountId]);
     // No school password, QA, or operator credential can become a platform login proof by this candidate.
-    if (credential.rows.length !== 1 || !["google","apple"].includes(credential.rows[0].method)) invalid();
+    if (credential.rows.length !== 1 || !trustedCredential(credential.rows[0])) invalid();
     const session = await tx.query(`/* link:session */ SELECT token_sha256 FROM platform_account_sessions
       WHERE token_sha256=$1 AND platform_account_id=$2 AND credential_id=$3
-        AND expires_at>clock_timestamp() AND created_at>clock_timestamp()-interval '5 minutes' FOR SHARE`,
+        AND expires_at>clock_timestamp() AND created_at>clock_timestamp()-interval '5 minutes'
+        AND created_at<=clock_timestamp() FOR SHARE`,
       [actor.sessionHash, actor.platformAccountId, actor.credentialId]);
     if (session.rows.length !== 1) fail("GOOGLE_LINK_REAUTH_REQUIRED", 401);
     const operator = await tx.query(`/* link:operator */ SELECT 1 FROM platform_operator_assignments

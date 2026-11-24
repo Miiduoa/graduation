@@ -6,7 +6,7 @@ function makeFixture(createService, crypto) {
   const actor={platformAccountId:"pa_00000000-0000-4000-8000-000000000001",credentialId:"pac_00000000-0000-4000-8000-000000000001",sessionHash:"a".repeat(64)};
   const googleIssuer="https://accounts.google.com";
   const state={
-    active:true,fresh:true,operator:false,enabled:true,sessionActive:true,credentialActive:true,
+    active:true,fresh:true,operator:false,enabled:true,sessionActive:true,credentialActive:true,sessionFuture:false,
     currentCredential:{id:actor.credentialId,account:actor.platformAccountId,method:"apple",provider_issuer:"https://appleid.apple.com",provider_subject:"apple-subject",state:"active",verified_at:"2026-01-01T00:00:00Z"},
     provider:{issuer:googleIssuer,client_id:"test.apps.googleusercontent.com",jwks_uri:"https://www.googleapis.com/oauth2/v3/certs",authorization_endpoint:"https://accounts.google.com/o/oauth2/v2/auth",token_endpoint:"https://oauth2.googleapis.com/token"},
     transactions:[],credentials:[],identity:{method:"google",providerIssuer:googleIssuer,providerSubject:"google-subject",email:"same@example.test",emailVerified:true},
@@ -18,11 +18,11 @@ function makeFixture(createService, crypto) {
       state.queries.push(tag);
       const one=(v)=>({rows:v?[v]:[]});
       if(tag==="account")return one(state.active&&args[0]===actor.platformAccountId?{id:args[0]}:null);
-      if(tag==="credential")return one(state.credentialActive&&args[0]===actor.credentialId&&args[1]===actor.platformAccountId?{id:args[0],method:"apple"}:null);
-      if(tag==="session")return one(state.sessionActive&&state.fresh&&args[0]===actor.sessionHash?{token_sha256:args[0]}:null);
+      if(tag==="credential")return one(state.credentialActive&&args[0]===actor.credentialId&&args[1]===actor.platformAccountId?{...state.currentCredential}:null);
+      if(tag==="session")return one(state.sessionActive&&state.fresh&&!state.sessionFuture&&args[0]===actor.sessionHash&&args[1]===actor.platformAccountId&&args[2]===actor.credentialId?{token_sha256:args[0]}:null);
       if(tag==="status-account")return one(state.active&&args[0]===actor.platformAccountId?{id:args[0]}:null);
       if(tag==="status-credential")return one(state.credentialActive&&args[0]===actor.credentialId&&args[1]===actor.platformAccountId?{...state.currentCredential}:null);
-      if(tag==="status-session")return one(state.sessionActive&&args[0]===actor.sessionHash&&args[1]===actor.platformAccountId&&args[2]===actor.credentialId?{fresh:state.fresh}:null);
+      if(tag==="status-session")return one(state.sessionActive&&!state.sessionFuture&&args[0]===actor.sessionHash&&args[1]===actor.platformAccountId&&args[2]===actor.credentialId?{fresh:state.fresh}:null);
       if(tag==="status-methods")return {rows:[state.currentCredential,...state.credentials].filter(x=>x.account===args[0]&&["google","apple"].includes(x.method)).slice(0,17)};
       if(tag==="operator")return one(state.operator?{one:1}:null);
       if(tag==="provider")return one(state.enabled?{...state.provider}:null);
@@ -122,6 +122,40 @@ test("Google link candidate behavioral contract", async t => {
   const passed = await exercise(createGoogleLinkService);
   for (const name of passed) t.diagnostic(name);
   if (passed.length !== 15) throw Error("missing checks");
+});
+
+test("link writes require the same trusted current proof as status", async t => {
+  await t.test("malformed current credential cannot start, complete or cancel pending work",async()=>{
+    for(const change of [{method:"school"},{provider_issuer:"https://untrusted.example"},{verified_at:null},
+      {state:"revoked"},{provider_subject:""},{provider_subject:" padded "},
+      {provider_subject:"bad\u0000subject"},{provider_subject:"s".repeat(256)}]){
+      const {actor,state,service,begin}=makeFixture(createGoogleLinkService);
+      const input=await begin(),pending=structuredClone(state.transactions);
+      Object.assign(state.currentCredential,change);
+      await assert.rejects(()=>service.start(actor),{code:"GOOGLE_LINK_INVALID"});
+      await assert.rejects(()=>service.complete(actor,input),{code:"GOOGLE_LINK_INVALID"});
+      await assert.rejects(()=>service.cancel(actor,{transactionId:input.transactionId,nonce:input.nonce}),{code:"GOOGLE_LINK_INVALID"});
+      assert.equal(state.verifyCalls,0);assert.deepEqual(state.transactions,pending);assert.deepEqual(state.credentials,[]);
+    }
+  });
+  await t.test("a future-dated session cannot satisfy freshness for any operation",async()=>{
+    const {actor,state,service,begin}=makeFixture(createGoogleLinkService);
+    const input=await begin(),pending=structuredClone(state.transactions);state.sessionFuture=true;
+    await assert.rejects(()=>service.status(actor),{code:"GOOGLE_LINK_REAUTH_REQUIRED"});
+    await assert.rejects(()=>service.start(actor),{code:"GOOGLE_LINK_REAUTH_REQUIRED"});
+    await assert.rejects(()=>service.complete(actor,input),{code:"GOOGLE_LINK_REAUTH_REQUIRED"});
+    await assert.rejects(()=>service.cancel(actor,{transactionId:input.transactionId,nonce:input.nonce}),{code:"GOOGLE_LINK_REAUTH_REQUIRED"});
+    assert.equal(state.verifyCalls,0);assert.deepEqual(state.transactions,pending);assert.deepEqual(state.credentials,[]);
+  });
+  await t.test("current proof and session time are checked again after remote verification",async()=>{
+    for(const mode of ["credential","session"]){
+      const {actor,state,service,begin}=makeFixture(createGoogleLinkService);
+      const input=await begin(),pending=structuredClone(state.transactions);
+      state.beforeVerify=()=>{if(mode==="credential")state.currentCredential.provider_issuer="https://untrusted.example";else state.sessionFuture=true;};
+      await assert.rejects(()=>service.complete(actor,input),{code:mode==="credential"?"GOOGLE_LINK_INVALID":"GOOGLE_LINK_REAUTH_REQUIRED"});
+      assert.equal(state.verifyCalls,1);assert.deepEqual(state.transactions,pending);assert.deepEqual(state.credentials,[]);
+    }
+  });
 });
 
 test("authenticated login-method inventory", async t => {
