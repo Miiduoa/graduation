@@ -1988,6 +1988,23 @@ function readIntentOf(text: string): TronClassAgentQueryIntent {
   return { intent: 'capabilities', pendingOnly: false };
 }
 
+/** Identify a compound request for a selection reply only. */
+export function isTronClassCompoundDownloadAndPrepare(question: string): boolean {
+  if (typeof question !== 'string' || !question.trim() || question.length > 1000 ||
+    !TRONCLASS_KEYWORD.test(question)) return false;
+  const original = question.normalize('NFKC').trim();
+  if (hasUnclosedQuote(original)) return false;
+  const text = textWithoutQuotedSpans(original);
+  return visibleCommandTokens(text).some(token => {
+    if (!isPrepareActionValue(token.value)) return false;
+    const prefix = text.slice(0, token.start);
+    const connector = ADDITIVE_CUE.exec(prefix);
+    return connector !== null &&
+      readIntentOf(prefix.slice(0, connector.index)).intent === 'download' &&
+      readIntentOf(text.slice(token.start)).intent === 'prepare';
+  });
+}
+
 /**
  * Classify a TronClass sentence as a clearly auto-readable request, a clearly
  * routed write (existing write or planner consent flow), or ambiguous. Ambiguous

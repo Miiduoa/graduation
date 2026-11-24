@@ -215,11 +215,13 @@ describe('scoped deterministic TronClass Agent tools', () => {
   it('does not run either operation in a compound download and prepare request', async () => {
     const f = fixture();
     const result = await f.service.ask(owner, { question: '下載 TronClass「資料庫」教材並準備作業' });
-    expect(result.intent).toBe('unsupported');
+    expect(result).toMatchObject({
+      intent: 'unsupported', snapshot: null, preparation: null, actions: [],
+      steps: [expect.objectContaining({ tool: 'select_target', status: 'blocked' })],
+    });
     expect(result.answer).toContain('先選擇');
     expect(f.read).not.toHaveBeenCalled();
     expect(f.prepare).not.toHaveBeenCalled();
-    expect(result.actions).toEqual([]);
   });
 
   it('rejects a homework ID outside the selected authorized course', async () => {

@@ -6,7 +6,7 @@ import type {
   TronClassAgentCapabilityResult, TronClassAgentReply, TronClassAgentStep,
 } from '../tronClassAgentTypes';
 import { TRONCLASS_AGENT_MAX_ACTIONS } from '../tronClassAgentTypes';
-import { parseTronClassAgentIntent } from '../tronClassAgentIntent';
+import { isTronClassCompoundDownloadAndPrepare, parseTronClassAgentIntent } from '../tronClassAgentIntent';
 import type { TronClassHomeworkItem, TronClassPreparation, TronClassSnapshot } from '../tronClassIntegrationTypes';
 import { tronClassUploadKey } from '../tronClassIntegrationClient';
 import { createTronClassAgentGrantService } from './tronClassAgentGrants';
@@ -161,7 +161,10 @@ export function createTronClassAgentService(dependencies: TronClassAgentDependen
       return result;
     },
     async ask(ownerKey: string, input: TronClassAgentAskInput): Promise<TronClassAgentReply> {
-      const query = parseTronClassAgentIntent(input.question);
+      const query = parseTronClassAgentIntent(input.question) ??
+        (isTronClassCompoundDownloadAndPrepare(input.question)
+          ? { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' } as const
+          : null);
       if (!query || (input.courseId !== undefined && !positiveId(input.courseId)) ||
         (input.homeworkId !== undefined && (!positiveId(input.homeworkId) || !input.courseId || query.intent !== 'prepare'))) {
         throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
