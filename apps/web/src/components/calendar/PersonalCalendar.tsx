@@ -425,6 +425,7 @@ function PersonalCalendarWorkspace({
   const suspended = useRef(paused);
   const writing = useRef(false);
   const requestId = useRef(0);
+  const viewRevision = useRef(0);
   const locatedRequest = useRef<string | null>(null);
   const focusedRequest = useRef<string | null>(null);
   const linkedEventElement = useRef<HTMLLIElement | null>(null);
@@ -477,6 +478,10 @@ function PersonalCalendarWorkspace({
     suspended.current = paused;
     if (paused) pendingFocus.current = null;
   }, [paused]);
+
+  useLayoutEffect(() => {
+    viewRevision.current += 1;
+  }, [month, selectedDate, calendarView]);
 
   useLayoutEffect(() => {
     if (paused || !pendingFocus.current) return;
@@ -594,6 +599,7 @@ function PersonalCalendarWorkspace({
     }
     const ticket = ++requestId.current;
     const scoped = { ...scope };
+    const savedFromView = viewRevision.current;
     writing.current = true;
     setSaving(true);
     setFormError('');
@@ -601,13 +607,13 @@ function PersonalCalendarWorkspace({
     try {
       await action();
       if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
-      // Reveal the saved day only while the user is still editing. Changing the
-      // month after they moved elsewhere would also remove its focused date.
-      // A receipt during identity revalidation still completes the hidden form.
+      // Preserve navigation during the write even if focus has since returned
+      // to the body or revalidation has hidden the editor.
       const continueEditingContext =
-        suspended.current ||
-        editorRef.current?.contains(document.activeElement) ||
-        document.activeElement === document.body;
+        savedFromView === viewRevision.current &&
+        (suspended.current ||
+          editorRef.current?.contains(document.activeElement) ||
+          document.activeElement === document.body);
       if (continueEditingContext) {
         setMonth(draft.date.slice(0, 7));
         setSelectedDate(draft.date);

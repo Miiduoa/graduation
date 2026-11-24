@@ -365,7 +365,7 @@ it('does not steal focus from another control when a pending save completes', as
   expect(readPersonalImports(scope())).toHaveLength(1);
 });
 
-it('handles a completed write receipt while paused without focusing hidden content or reviving the editor', async () => {
+it('preserves the newly selected day when a completed write is acknowledged during revalidation', async () => {
   let acknowledge: (() => void) | undefined;
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
@@ -389,11 +389,15 @@ it('handles a completed write receipt while paused without focusing hidden conte
   );
   const view = render(app);
   await ready();
+  activate(screen.getByRole('button', { name: '2026-11-14' }));
   activate(screen.getByRole('button', { name: '新增行程' }));
   fireEvent.change(titleField(), { target: { value: '重驗期間完成的合成安排' } });
   activate(screen.getByRole('button', { name: '儲存行程' }));
   await waitFor(() => expect(acknowledge).toBeTypeOf('function'));
-  expect(readPersonalImports(scope())).toHaveLength(1);
+  expect(readPersonalImports(scope())).toMatchObject([{ date: '2026-11-14' }]);
+  activate(screen.getByRole('button', { name: '下一月' }));
+  activate(screen.getByRole('button', { name: '2026-12-15' }));
+  expect(dayHeading('2026-12-15')).toBeTruthy();
   state.loading = true;
   view.rerender(
     <>
@@ -417,52 +421,62 @@ it('handles a completed write receipt while paused without focusing hidden conte
   );
   await ready();
   await screen.findByText(personalImportSavedNotice(1));
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-12');
+  expect(dayHeading('2026-12-15')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '2026-12-15' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
   expect(document.activeElement).toBe(outside);
   expect(screen.queryByRole('textbox', { name: '標題' })).toBeNull();
   expect(readPersonalImports(scope())).toHaveLength(1);
 });
 
-it('preserves the newly selected month and date focus when an earlier day finishes saving', async () => {
-  let release: (() => void) | undefined;
-  Object.defineProperty(navigator, 'locks', {
-    configurable: true,
-    value: {
-      request: (_key: string, action: () => unknown) =>
-        new Promise((resolve, reject) => {
-          release = () => {
-            void Promise.resolve().then(action).then(resolve, reject);
-          };
-        }),
-    },
-  });
-  render(<PersonalCalendar />);
-  await ready();
-  activate(screen.getByRole('button', { name: '2026-11-14' }));
-  activate(screen.getByRole('button', { name: '新增行程' }));
-  fireEvent.change(titleField(), { target: { value: '前一月等待保存的合成安排' } });
-  activate(screen.getByRole('button', { name: '儲存行程' }));
-  await waitFor(() => expect(release).toBeTypeOf('function'));
+it.each(['selected date', 'document.body'])(
+  'preserves the newly selected month and date when an earlier day finishes saving with focus on %s',
+  async (focusTarget) => {
+    let release: (() => void) | undefined;
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: {
+        request: (_key: string, action: () => unknown) =>
+          new Promise((resolve, reject) => {
+            release = () => {
+              void Promise.resolve().then(action).then(resolve, reject);
+            };
+          }),
+      },
+    });
+    render(<PersonalCalendar />);
+    await ready();
+    activate(screen.getByRole('button', { name: '2026-11-14' }));
+    activate(screen.getByRole('button', { name: '新增行程' }));
+    fireEvent.change(titleField(), { target: { value: '前一月等待保存的合成安排' } });
+    activate(screen.getByRole('button', { name: '儲存行程' }));
+    await waitFor(() => expect(release).toBeTypeOf('function'));
 
-  activate(screen.getByRole('button', { name: '下一月' }));
-  const dateControl = screen.getByRole('button', { name: '2026-12-15' });
-  activate(dateControl);
-  expect(dayHeading('2026-12-15')).toBeTruthy();
-  expect(document.activeElement).toBe(dateControl);
-  expect(readPersonalImports(scope())).toEqual([]);
+    activate(screen.getByRole('button', { name: '下一月' }));
+    const dateControl = screen.getByRole('button', { name: '2026-12-15' });
+    activate(dateControl);
+    expect(dayHeading('2026-12-15')).toBeTruthy();
+    if (focusTarget === 'document.body') dateControl.blur();
+    const expectedFocus = focusTarget === 'document.body' ? document.body : dateControl;
+    expect(document.activeElement).toBe(expectedFocus);
+    expect(readPersonalImports(scope())).toEqual([]);
 
-  await act(async () => {
-    release?.();
-  });
-  await screen.findByText(personalImportSavedNotice(1));
-  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-12');
-  expect(dayHeading('2026-12-15')).toBeTruthy();
-  expect(dateControl.getAttribute('aria-pressed')).toBe('true');
-  expect(document.activeElement).toBe(dateControl);
-  expect(screen.queryByRole('textbox', { name: '標題' })).toBeNull();
-  expect(readPersonalImports(scope())).toHaveLength(1);
-  expect(readPersonalImports(scope())[0]).toMatchObject({
-    title: '前一月等待保存的合成安排',
-    date: '2026-11-14',
-  });
-  expect(window.confirm).not.toHaveBeenCalled();
-});
+    await act(async () => {
+      release?.();
+    });
+    await screen.findByText(personalImportSavedNotice(1));
+    expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-12');
+    expect(dayHeading('2026-12-15')).toBeTruthy();
+    expect(dateControl.getAttribute('aria-pressed')).toBe('true');
+    expect(document.activeElement).toBe(expectedFocus);
+    expect(screen.queryByRole('textbox', { name: '標題' })).toBeNull();
+    expect(readPersonalImports(scope())).toHaveLength(1);
+    expect(readPersonalImports(scope())[0]).toMatchObject({
+      title: '前一月等待保存的合成安排',
+      date: '2026-11-14',
+    });
+    expect(window.confirm).not.toHaveBeenCalled();
+  },
+);
