@@ -741,7 +741,7 @@ it.each([
   { status: 401, code: 'UNAUTHORIZED', message: '登入或帳號已變更，這次店家資料與草稿已清除。' },
   { status: 409, code: 'SESSION_CHANGED', message: '登入或帳號已變更，這次店家資料與草稿已清除。' },
 ])(
-  'clears the overview when workspaces returns $code and programs returns 404',
+  'reports $code from workspaces without dropping a loaded application',
   async ({ status, code, message }) => {
     let reload = false;
     mocks.request.mockImplementation((path) => {
@@ -757,19 +757,28 @@ it.each([
     reload = true;
     fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
     await screen.findByText(message);
-    expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
+    if (status === 401 || code === 'SESSION_CHANGED') {
+      expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
+      return;
+    }
+    expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
   },
 );
 
-it.each([false, true])(
-  'reports a 503 application list failure and rechecks store access (prior list: %s)',
-  async (previous) => {
+it.each([
+  { status: 503, code: 'UNAVAILABLE', previous: false },
+  { status: 503, code: 'UNAVAILABLE', previous: true },
+  { status: 403, code: 'FORBIDDEN', previous: true },
+  { status: 404, code: 'NOT_FOUND', previous: true },
+])(
+  'reports a $status application list failure and rechecks store access (prior list: $previous)',
+  async ({ status, code, previous }) => {
     let unavailable = !previous;
     const detailPath = 'merchant-workspaces/campus-one/location-1';
     mocks.request.mockImplementation((path, context, input) => {
       if (path === 'merchant-applications')
         return unavailable
-          ? Promise.reject(new NuniError(503, 'UNAVAILABLE'))
+          ? Promise.reject(new NuniError(status, code))
           : Promise.resolve({ applications: [application] });
       if (path === 'merchant-workspaces') return Promise.resolve({ workspaces: [continuityStore] });
       if (path === detailPath) return Promise.resolve(continuityStore);

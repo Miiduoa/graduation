@@ -340,56 +340,50 @@ function AccountWorkspace({
       if (programs.status === 'fulfilled') confirmed.setPrograms(programs.value);
       else if (denied(programs.reason)) confirmed.setPrograms();
       if (submitted.status === 'fulfilled') confirmed.mergeApplications(submitted.value);
-      else if (denied(submitted.reason)) confirmed.hideApplications();
 
       let accessDenied = false;
       let detailUnavailable = false;
-      if (stores.status === 'rejected' && denied(stores.reason)) {
-        confirmed.hideLists();
-      } else {
-        const operations = createMerchantOperations((path, input, method) =>
-          browserRequest(path, context, input, method),
-        );
-        const targets = new Map(
-          stores.status === 'fulfilled'
-            ? stores.value.map((item) => [workspaceKey(item), item])
-            : [],
-        );
-        const pendingTargets = [...visitedLocations.values()].filter(
-          ({ tenantId, locationId }) =>
-            operationDrafts.get(JSON.stringify([tenantId, locationId]))?.uncertain,
-        );
-        const refreshed = await Promise.all(
-          [
-            ...targets.values(),
-            ...pendingTargets.filter((item) => !targets.has(workspaceKey(item))),
-          ].map(async (item) => {
-            const key = workspaceKey(item);
-            if (
-              !confirmed.needsAccessRefresh(key) &&
-              submitted.status === 'fulfilled' &&
-              !operationDrafts.get(JSON.stringify([item.tenantId, item.locationId]))?.uncertain
-            )
-              return;
-            const revision = confirmed.beginRead();
-            try {
-              const detail = await operations.get(item.tenantId, item.locationId);
-              return { key, revision, detail };
-            } catch (error) {
-              if (expired(error)) throw error;
-              if (denied(error)) return { key, revision, detail: null };
-              detailUnavailable = true;
-            }
-          }),
-        );
-        if (!isCurrent()) return;
-        if (stores.status === 'fulfilled') confirmed.mergeWorkspaceList(stores.value, listRevision);
-        for (const result of refreshed) {
-          if (!result) continue;
-          confirmed.verify(result.key, result.revision, !result.detail);
-          if (result.detail) confirmed.merge(result.detail, 'read', result.revision);
-          else accessDenied = true;
-        }
+      const operations = createMerchantOperations((path, input, method) =>
+        browserRequest(path, context, input, method),
+      );
+      const listedStores =
+        stores.status === 'fulfilled' ? stores.value : (confirmed.overview()?.workspaces ?? []);
+      const targets = new Map(listedStores.map((item) => [workspaceKey(item), item]));
+      const pendingTargets = [...visitedLocations.values()].filter(
+        ({ tenantId, locationId }) =>
+          operationDrafts.get(JSON.stringify([tenantId, locationId]))?.uncertain,
+      );
+      const refreshed = await Promise.all(
+        [
+          ...targets.values(),
+          ...pendingTargets.filter((item) => !targets.has(workspaceKey(item))),
+        ].map(async (item) => {
+          const key = workspaceKey(item);
+          if (
+            !confirmed.needsAccessRefresh(key) &&
+            submitted.status === 'fulfilled' &&
+            stores.status === 'fulfilled' &&
+            !operationDrafts.get(JSON.stringify([item.tenantId, item.locationId]))?.uncertain
+          )
+            return;
+          const revision = confirmed.beginRead();
+          try {
+            const detail = await operations.get(item.tenantId, item.locationId);
+            return { key, revision, detail };
+          } catch (error) {
+            if (expired(error)) throw error;
+            if (denied(error)) return { key, revision, detail: null };
+            detailUnavailable = true;
+          }
+        }),
+      );
+      if (!isCurrent()) return;
+      if (stores.status === 'fulfilled') confirmed.mergeWorkspaceList(stores.value, listRevision);
+      for (const result of refreshed) {
+        if (!result) continue;
+        confirmed.verify(result.key, result.revision, !result.detail);
+        if (result.detail) confirmed.merge(result.detail, 'read', result.revision);
+        else accessDenied = true;
       }
       publishOverview();
       if (

@@ -742,6 +742,9 @@ it('keeps a newer paused list row when a successful detail returns an older open
   expect(screen.getByText('暫停接單')).toBeTruthy();
   expect(screen.queryByText('營業中')).toBeNull();
   expect(mocks.request.mock.calls.filter(([resource]) => resource === path)).toHaveLength(3);
+  fireEvent.click(screen.getByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+  expect(screen.queryByText(/目前無法取得這間門市的管理權限/)).toBeNull();
 });
 
 it.each([

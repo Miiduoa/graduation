@@ -13,6 +13,7 @@ type Confirmation = {
   detail?: NuniMerchantWorkspaceDetail;
   availabilityConfirmed: boolean;
   revision: number;
+  confirmedBy: Source;
 };
 
 export const workspaceKey = ({
@@ -42,24 +43,71 @@ export function createMerchantConfirmations() {
     const current = entries.get(key);
     const version = next.readinessVersion ?? 0;
     const previousVersion = current?.row.readinessVersion ?? 0;
+    const incomingDetail = 'applicationId' in next ? next : undefined;
+
+    if (current && version < previousVersion) {
+      // An older successful detail must not replace a newer list or write, but
+      // it should still attach so an authorized manager can open the workspace.
+      if (incomingDetail) {
+        const held = current.detail?.readinessVersion ?? -1;
+        if (!current.detail || held <= version) {
+          const entry = {
+            ...current,
+            detail: {
+              ...incomingDetail,
+              activated: current.row.activated,
+              merchantStatus: current.row.merchantStatus,
+              locationStatus: current.row.locationStatus,
+              publicAccess: current.row.publicAccess,
+              missingRequirements: current.row.missingRequirements,
+              readinessVersion: current.row.readinessVersion ?? incomingDetail.readinessVersion,
+            },
+          };
+          entries.set(key, entry);
+          return entry;
+        }
+      }
+      return current;
+    }
+
+    // Same-version confirmed writes win over later-started GET snapshots for
+    // availability and missing requirements. Request order is not a timestamp
+    // for the underlying record, but later reads may still refresh live counts.
     if (
       current &&
-      (version < previousVersion ||
-        (version === previousVersion &&
-          (revision < current.revision || (source === 'list' && current.detail))))
-    )
+      version === previousVersion &&
+      source !== 'write' &&
+      (current.confirmedBy === 'write' || revision < current.revision)
+    ) {
+      if (!incomingDetail) return current;
+      const protectedFields = {
+        activated: current.row.activated,
+        merchantStatus: current.row.merchantStatus,
+        locationStatus: current.row.locationStatus,
+        publicAccess: current.row.publicAccess,
+        missingRequirements: current.row.missingRequirements,
+      };
+      const detail = { ...incomingDetail, ...protectedFields };
+      const entry = {
+        ...current,
+        row: { ...current.row, ...incomingDetail, ...protectedFields },
+        detail,
+      };
+      entries.set(key, entry);
+      return entry;
+    }
+
+    if (current && version === previousVersion && source === 'list' && current.detail)
       return current;
 
-    const detail = 'applicationId' in next ? next : undefined;
     // Availability writes can share a readiness version with an older snapshot.
-    // A same-version read can still refresh stock counts and other live details.
+    // A same-version read can still refresh stock counts and other live details,
+    // but must not let an older suspended/open snapshot overwrite a confirmation.
     const keepAvailability =
       current &&
       version === previousVersion &&
       source !== 'write' &&
-      current.availabilityConfirmed &&
-      next.merchantStatus !== 'suspended' &&
-      next.locationStatus !== 'suspended';
+      current.availabilityConfirmed;
     const availability = keepAvailability
       ? {
           activated: current.row.activated,
@@ -74,14 +122,23 @@ export function createMerchantConfirmations() {
           publicAccess: next.publicAccess,
         };
     if (!next.missingRequirements.includes('menu')) menus.add(key);
-    const missingRequirements = menus.has(key)
-      ? next.missingRequirements.filter((item) => item !== 'menu')
-      : next.missingRequirements;
+    const keepMissing = current && version === previousVersion && current.confirmedBy === 'write' && source !== 'write';
+    const missingRequirements = keepMissing
+      ? current.row.missingRequirements
+      : menus.has(key)
+        ? next.missingRequirements.filter((item) => item !== 'menu')
+        : next.missingRequirements;
     const row = { ...next, ...availability, missingRequirements };
+    const detail = incomingDetail
+      ? { ...incomingDetail, ...availability, missingRequirements }
+      : current?.detail
+        ? { ...current.detail, ...availability, missingRequirements }
+        : undefined;
     const entry = {
-      revision,
+      revision: source === 'write' || !current || version > previousVersion ? revision : current.revision,
+      confirmedBy: source === 'write' || !current || version > previousVersion ? source : current.confirmedBy,
       row,
-      detail: detail && { ...detail, ...availability, missingRequirements },
+      detail,
       availabilityConfirmed:
         source === 'write' ||
         !!keepAvailability ||
@@ -150,8 +207,12 @@ export function createMerchantConfirmations() {
       delete lists.applications;
       receipts.clear();
     },
+    hideWorkspaces() {
+      delete lists.workspaces;
+    },
     hideLists() {
-      lists = {};
+      delete lists.workspaces;
+      delete lists.programs;
     },
     overview(): MerchantOverview | null {
       if (!Object.keys(lists).length) return null;
