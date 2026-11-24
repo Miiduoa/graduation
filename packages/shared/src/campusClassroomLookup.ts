@@ -317,6 +317,12 @@ const PUBLISHED_PROVIDENCE_ENGLISH_NAMES = new Map<string, readonly string[]>([
   // Official bilingual facilities page (checked 2026-11-24):
   // https://dpcd.pu.edu.tw/p/412-1047-3561.php
   ['pu-library', ['Gaesia Library', 'Luking Library']],
+  // Official university archives campus directory (checked 2026-11-24):
+  // https://c067.pu.edu.tw/p/412-1121-4218.php
+  ['pu-zhishan', ['Zhi Shan Hall']],
+  ['pu-xijia', ['Schultz Hall']],
+  ['pu-sigao', ['St. Bosco Hall']],
+  ['pu-monastery', ['Our Lady of Providence Convent']],
   // campusPois.js uses "Chapel"; the mobile catalog uses the full title.
   ['pu-chapel', ['Chapel', 'Chapel of Our Lady of Providence']],
   ['pu-jingyuan', ['Jingyuan Cafeteria']],
