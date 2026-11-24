@@ -150,8 +150,8 @@ function Assignment({
       </div>
       <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.description || '教師尚未填寫作業說明。'}</p>
       {submitted ? (
-        <div role="status">
-          <p>
+        <div>
+          <p role="status">
             {assignment.grade
               ? '已繳交 · 教師已發布評分'
               : '已繳交 · 等待老師評分'}
@@ -162,8 +162,8 @@ function Assignment({
           {!assignment.grade ?
             <p>作業已收到；老師公布評分後，會顯示在這裡。</p> : null}
           <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.submittedText ?? savedText}</p>
-          {(assignment.attachments?.length ? assignment.attachments : savedAttachments).map((path) => (
-            <PrivateAttachment key={path} path={path} />
+          {(assignment.attachments?.length ? assignment.attachments : savedAttachments).map((path, index) => (
+            <PrivateAttachment key={path} path={path} ordinal={index + 1} />
           ))}
           {assignment.grade ? (
             <div
