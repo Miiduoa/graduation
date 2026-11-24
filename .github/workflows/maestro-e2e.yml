@@ -110,7 +110,15 @@ jobs:
           set -euo pipefail
           # The committed native project contains Firebase and llama-rn integration settings.
           # A clean prebuild discards those settings, so install its declared Pods directly.
-          pod install --deployment --project-directory=ios
+          # Use the lockfile's CocoaPods version, independent of the runner's pod shim.
+          pod_version=$(awk '/^COCOAPODS: / { print $2 }' ios/Podfile.lock)
+          [[ "$pod_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          export PATH="$(brew --prefix ruby)/bin:$PATH"
+          export GEM_HOME="$RUNNER_TEMP/campus-cocoapods"
+          export GEM_PATH="$GEM_HOME"
+          gem install cocoapods --version "$pod_version" --no-document
+          [[ "$("$GEM_HOME/bin/pod" --version)" == "$pod_version" ]]
+          "$GEM_HOME/bin/pod" install --deployment --project-directory=ios
           test -d ios/mobile.xcworkspace
           # The CI simulator must run a self-contained JS bundle. A Debug build
           # skips bundling, and a successful Metro /status or curl download does
