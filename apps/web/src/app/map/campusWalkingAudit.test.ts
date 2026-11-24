@@ -217,6 +217,35 @@ describe('trusted OSM walking segment audit bridge', () => {
     }
   });
 
+
+  it('never promotes indoor or underground endpoints into outdoor routes', () => {
+    for (const tags of [
+      { indoor: 'yes' }, { indoor: 'door' }, { indoor: '' },
+      { location: 'indoor' }, { location: 'underground' },
+      { indoor: 'no', location: 'indoor' },
+    ]) {
+      for (const endpoint of [0, 1]) {
+        const data = candidates();
+        Object.assign(data.nodes[endpoint].tags, tags);
+        const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+        expect(graph.edges[0].access).toBe('restricted');
+        expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+        expect(findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1, now)).toBeNull();
+      }
+      const data = candidates();
+      Object.assign(data.ways[0].tags, tags);
+      const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+      expect(graph.edges.some(edge => edge.osmWayId === 101)).toBe(false);
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+    }
+    const data = candidates();
+    Object.assign(data.nodes[0].tags, { entrance: 'main', indoor: 'no' });
+    expect(findCampusWalkingRoute(
+      applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!,
+      'fixture', bounds, 1, 2, now,
+    )).not.toBeNull();
+  });
+
   it('leaves an ambiguously restricted endpoint closed in both directions', () => {
     const data = parseCampusWalkingOsmCandidates({
       osm3s: { timestamp_osm_base: '2026-11-24T08:00:00Z' },
