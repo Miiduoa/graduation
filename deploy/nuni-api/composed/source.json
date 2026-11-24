@@ -14,7 +14,7 @@
   "sourceFiles": {
     "apps/api/src/course-access/courseAccess.ts": {
       "source": "packages/shared/src/courseAccess.ts",
-      "sha256": "122c8a27fd23e2830bd07fda31283af0986783d5441a9af1e91237cb868780e0"
+      "sha256": "b53da91ca84c7dcdc6b239acb7a68fe33a3675d4e692afcd57ed423100a6a84b"
     },
     "apps/api/src/course-access/routes.ts": {
       "source": "deploy/nuni-api/course-access/routes.ts",
@@ -100,8 +100,8 @@
       "sha256": "b1b7b72c863236b327997921380c4d99ca6c48d8990da43a29714fca110a7648"
     }
   ],
-  "overlayTree": "530a378f0b3df9b282805488521e24c0e03daeb4",
+  "overlayTree": "f20474d2ba6d3dc08f55dbeeceda5b6d751332a3",
   "patchedAppSha256": "ebab4626e20f64204db95528e2cd2819c6270c0d2f0efa6f440aaac9f71a5636",
   "runtimeInventoryScope": "Pinned base analysis only; not a composed API grant receipt",
-  "candidateTree": "83381c1b04e3a603389f562ada17ef11b9d5facf"
+  "candidateTree": "67855adc6365cc320de71ebfe147df205ac609e5"
 }
