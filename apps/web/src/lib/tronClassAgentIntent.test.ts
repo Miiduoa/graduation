@@ -1378,6 +1378,13 @@ describe('three-way sentence classification', () => {
     '玩課雲剛才幫我下載教材',
     '我已經查過玩課雲作業',
     '我查過玩課雲作業',
+    '我查玩課雲作業了',
+    '我看玩課雲作業過了',
+    '我查玩課雲作業了嗎',
+    '我看玩課雲作業過了嗎',
+    '我查玩課雲作業了，查校園公告',
+    '我查玩課雲作業和教材了',
+    '幫我準備 TronClass 作業了',
     '查玩課雲作業，剛下載教材',
     '查玩課雲作業「公告',
     '查玩課雲作業「「公告」',
@@ -1398,6 +1405,26 @@ describe('three-way sentence classification', () => {
       });
     },
   );
+
+  it.each([
+    ['查玩課雲作業', false],
+    ['查玩課雲作業草稿', false],
+    ['查玩課雲尚未繳交的作業', true],
+  ])('keeps the current homework query %s', (question, pendingOnly) => {
+    expect(classifyTronClassSentence(question)).toEqual({
+      outcome: 'clearly-read',
+      intent: { intent: 'homework', pendingOnly },
+    });
+  });
+
+  it('scans repeated negated 把 phrases within the 200 ms budget', () => {
+    const question = '不要把'.repeat(300) + '玩課雲作業';
+    const started = performance.now();
+    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
 
   it('scans nested brackets within the 200 ms budget', () => {
     const question = '查玩課雲作業' + '('.repeat(350) + '教材'.repeat(100) + '.pdf' + ')'.repeat(350);
