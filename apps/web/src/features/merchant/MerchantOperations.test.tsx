@@ -145,7 +145,9 @@ it('keeps the order desk closed when a newer unversioned list arrives before a s
       suspended={false}
       drafts={drafts}
       beginRequest={confirmed.beginRequest}
-      onChanged={confirmed.confirmDetail}
+      onChanged={(detail, verifiedAccess, revision) =>
+        confirmed.confirmDetail(detail, revision, verifiedAccess)
+      }
       onExpired={onExpired}
       confirmedDetail={confirmed.verifiedDetails().get(workspaceKey(suspended)) ?? null}
       navigation={{
