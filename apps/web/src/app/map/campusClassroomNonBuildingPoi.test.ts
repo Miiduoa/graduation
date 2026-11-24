@@ -1083,3 +1083,59 @@ describe('official Providence English building-name variants', () => {
     }
   });
 });
+
+describe('official Providence classroom codes with cross-checked POI identities', () => {
+  it.each([
+    ['pu-renyuan', 'AK', 'Anthony Kuo Hall'],
+    ['pu-boduo', 'SP', 'St. Peter Hall'],
+    ['pu-jingan', 'JA', 'Jing An Hall'],
+    ['pu-fangji', 'SF', 'St. Francis Hall'],
+    ['pu-siyuan', 'SY', 'Si Yuan Hall'],
+    ['pu-gelun', 'TG', 'Theodore Guerin Hall'],
+  ])('resolves %s from the official %s code only to its existing pin', (id, code, english) => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find((item) => item.id === id)!;
+    expect(place).toBeDefined();
+    // Room strings are synthetic and establish no indoor room or entrance.
+    for (const query of [code + '303', code.toLowerCase() + ' 303', code + '3F303',
+      Array.from(code + '303', (char) => String.fromCharCode(char.charCodeAt(0) + 0xfee0)).join('')]) {
+      const result = resolveCampusClassroom({ schoolId: 'pu', query, locations: PROVIDENCE_CAMPUS_PLACES });
+      expect(result.status, query).toBe('matched');
+      expect(result.matches, query).toEqual([place]);
+      expect(result.matches[0], query).toBe(place);
+    }
+    const englishImport = { ...place, name: english };
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: code + '303', locations: [englishImport],
+    }).matches[0]).toBe(englishImport);
+
+    for (const query of [code, code + '3F', code + 'B1F', code + '3Froom303', code + '999999']) {
+      expect(resolveCampusClassroom({ schoolId: 'pu', query, locations: [place] }).status, query)
+        .toBe('unmatched');
+    }
+    for (const invalid of [
+      { ...place, id: 'synthetic-unsourced-hall' },
+      { ...place, name: 'Unverified Hall' },
+      { ...place, lat: place.lat + 1 },
+      { ...place, category: '公車站' },
+      { ...place, schoolId: 'another-school' },
+    ]) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query: code + '303', locations: [invalid],
+      }).status).toBe('unmatched');
+    }
+    expect(resolveCampusClassroom({
+      schoolId: 'pu', query: code + '303', locations: [place, { ...place }],
+    }).status).toBe('unmatched');
+    expect(resolveCampusClassroom({
+      schoolId: 'another-school', query: code + '303', locations: [place],
+    }).status).toBe('unmatched');
+  });
+
+  it('does not guess a location for official codes lacking a verified separate pin', () => {
+    for (const query of ['C303', '1R303', '2R303']) {
+      expect(resolveCampusClassroom({
+        schoolId: 'pu', query, locations: PROVIDENCE_CAMPUS_PLACES,
+      }).status, query).toBe('unmatched');
+    }
+  });
+});
