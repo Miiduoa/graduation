@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Campus requires Chromium but tolerates unavailable system packages; Admin
 # (--fonts-noto-cjk) requires Chromium, system dependencies, and fonts.
-# Bound each stalled apt/download attempt so GitHub's 20-minute runner limit
-# can still report an actual failed installation rather than a hung check.
+# Bound package and browser operations independently so stalled downloads and
+# interrupted package configuration can be retried.
 set -euo pipefail
 
 if [[ $# -gt 1 || ( $# -eq 1 && "$1" != "--fonts-noto-cjk" ) ]]; then
@@ -95,16 +95,38 @@ retry_install() {
   done
 }
 
+prefetch_noble_fonts() {
+  local destination="$1"
+  local sha='7d64b985f6fe128c99eae5610d5c047338e572bdcfb2bb09736be01b824a7f6c'
+  local deb='fonts-noto-cjk_20230817+repack1-3_all.deb'
+  local candidate installed
+  # The runner's regional mirror can stall on this 61 MB package. Only use
+  # this alternative for the exact candidate published in Ubuntu's Noble index.
+  candidate="$(LC_ALL=C apt-cache --no-all-versions show fonts-noto-cjk)" || return 1
+  grep -Fxq "SHA256: $sha" <<< "$candidate" || return 1
+  installed="$(dpkg-query -W -f='${Status} ${Version}' fonts-noto-cjk 2>/dev/null)" || installed=''
+  [[ "$installed" != 'install ok installed 1:20230817+repack1-3' ]] || return 1
+  curl --fail --silent --show-error --proto '=https' --connect-timeout 8 --max-time 75 \
+    --output "$destination" "https://archive.ubuntu.com/ubuntu/pool/main/f/fonts-noto-cjk/$deb" || return 1
+  printf '%s  %s\n' "$sha" "$destination" | sha256sum --check --status
+}
+
 if [[ "${1:-}" == '--fonts-noto-cjk' ]]; then
-  retry_install 'Playwright system dependencies' 180s sudo "$(command -v python)" -m playwright install-deps chromium
+  # A fresh runner can still be unpacking packages after three minutes.
+  retry_install 'Playwright system dependencies' 360s sudo "$(command -v python)" -m playwright install-deps chromium
   # Download as the runner user so the browser remains in that user's cache.
   retry_install 'Playwright Chromium' 180s python -m playwright install chromium
-  # This package is about 61 MB. A 60-second wall-clock limit can repeatedly
-  # interrupt a healthy but slow mirror download before apt finishes it.
-  # Give fonts the same bounded transfer/install window as Chromium.
-  retry_install 'Noto CJK fonts' 180s sudo apt-get \
-    -o Acquire::http::Timeout=45 -o Acquire::https::Timeout=45 \
-    -o Acquire::Retries=3 install -y fonts-noto-cjk
+  # Keep ordinary authenticated apt installation for other candidates and as
+  # fallback if the archive is unreachable or its bytes fail verification.
+  if prefetch_noble_fonts "$attempt_dir/fonts-noto-cjk.deb"; then
+    # APT may re-fetch the same version from its preferred mirror even with a
+    # local path. This verified Noble package has no package dependencies.
+    retry_install 'Noto CJK fonts' 180s sudo dpkg --install "$attempt_dir/fonts-noto-cjk.deb"
+  else
+    retry_install 'Noto CJK fonts' 180s sudo apt-get \
+      -o Acquire::http::Timeout=45 -o Acquire::https::Timeout=45 \
+      -o Acquire::Retries=3 install -y fonts-noto-cjk
+  fi
 else
   retry_install 'Playwright Chromium' 180s python -m playwright install chromium
   if ! retry_install 'Playwright system dependencies' 90s sudo "$(command -v python)" -m playwright install-deps chromium; then
