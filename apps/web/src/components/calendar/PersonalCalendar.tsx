@@ -5,6 +5,7 @@ import { MonthCalendar } from './MonthCalendar';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -515,17 +516,32 @@ function PersonalCalendarWorkspace({
     }
   }, [paused, mode, editorRevision, month, selectedDate]);
 
+  const revealDayAgenda = useCallback(() => {
+    const agenda = dayAgendaRef.current;
+    if (!agenda?.scrollIntoView) return;
+
+    agenda.scrollIntoView({ block: 'start', behavior: 'instant' });
+    const focused = document.activeElement;
+    if (focused && focused !== document.body) {
+      const { top, right, bottom, left } = focused.getBoundingClientRect();
+      if (bottom > 0 && top < window.innerHeight && right > 0 && left < window.innerWidth) {
+        return;
+      }
+    }
+    dayHeadingRef.current?.focus({ preventScroll: true });
+  }, []);
+
   useLayoutEffect(() => {
     const requestedDate = pendingDayReveal.current;
     pendingDayReveal.current = null;
     if (requestedDate && requestedDate === selectedDate && !paused) {
-      dayAgendaRef.current?.scrollIntoView?.({ block: 'start', behavior: 'instant' });
+      revealDayAgenda();
     }
-  }, [paused, selectedDate]);
+  }, [paused, revealDayAgenda, selectedDate]);
 
   const selectMonthDay = (date: string) => {
     if (date === selectedDate) {
-      dayAgendaRef.current?.scrollIntoView?.({ block: 'start', behavior: 'instant' });
+      revealDayAgenda();
       return;
     }
     pendingDayReveal.current = date;

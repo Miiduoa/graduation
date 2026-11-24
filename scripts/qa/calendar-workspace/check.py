@@ -51,6 +51,25 @@ def day_heading(page, date):
     return page.get_by_role('heading').filter(has_text=date)
 
 
+async def assert_keyboard_day_focus(page, key):
+    month_grid = page.get_by_role('region', name='2028-01 月格，週日起始')
+    date_button = month_grid.get_by_role('button', name='2028-01-01', exact=True)
+    await month_grid.focus()
+    await page.keyboard.press('Tab')
+    await expect(date_button).to_be_focused()
+    await page.keyboard.press(key)
+    await expect(date_button).to_have_attribute('aria-pressed', 'true')
+    heading = day_heading(page, '2028-01-01')
+    await expect(heading).to_be_in_viewport()
+    await expect(heading).to_be_focused()
+    await expect(date_button).not_to_be_in_viewport()
+    await page.keyboard.press('Tab')
+    day_list_button = page.get_by_role('button', name='查看整月列表', exact=True)
+    await expect(day_list_button).to_be_focused()
+    await expect(day_list_button).to_be_in_viewport()
+    await expect(date_button).not_to_be_in_viewport()
+
+
 async def assert_multiweek_titles(page, config, report):
     title = '跨週行程標題用於驗收' * 20
     narrow = config['width'] <= 540
@@ -337,6 +356,22 @@ async def run_scenario(browser, server_url, config):
         await page.get_by_role('button', name='取消', exact=True).click()
         report['checks'].append('Creating without a selected day in another month defaults to that month, not today')
 
+        if config.get('text') == '200':
+            await assert_keyboard_day_focus(page, 'Enter')
+            await page.get_by_role('button', name='新增行程', exact=True).click()
+            title_input = page.get_by_label('標題', exact=True)
+            await title_input.fill('選日後保留的草稿')
+            await assert_keyboard_day_focus(page, 'Space')
+            await expect(title_input).to_have_value('選日後保留的草稿')
+            await choose_date(page, '2028-01-02')
+            await expect(day_heading(page, '2028-01-02')).to_be_in_viewport()
+            await expect(title_input).to_have_value('選日後保留的草稿')
+            accepted = await confirm_once(True)
+            await page.get_by_role('button', name='取消', exact=True).click()
+            await expect(title_input).to_have_count(0)
+            assert len(accepted) == 1
+            report['checks'].append('At 320px and 200% text, Enter and Space move focus into the visible day agenda and Tab stays there; keyboard and pointer selection preserve the open draft')
+
         await choose_date(page, '2028-01-18')
         await expect(day_heading(page, '2028-01-18')).to_be_visible()
         await expect(page.get_by_role('heading', name='小組討論與專題進度整理', exact=True)).to_be_visible()
@@ -444,6 +479,7 @@ async def run_scenario(browser, server_url, config):
         await expect(page.get_by_role('button', name='2028-02-29', exact=True)).to_have_attribute('aria-pressed', 'false')
         await page.keyboard.press('Enter')
         await expect(page.get_by_role('button', name='2028-02-29', exact=True)).to_have_attribute('aria-pressed', 'true')
+        await page.get_by_role('button', name='2028-02-29', exact=True).focus()
         await page.keyboard.press('ArrowRight')
         await expect(page.get_by_label('查看月份', exact=True)).to_have_value('2028-03')
         await expect(page.get_by_role('button', name='2028-03-01', exact=True)).to_be_focused()
