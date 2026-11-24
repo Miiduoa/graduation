@@ -2,13 +2,16 @@
 
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
 
+import { SERVICE_CATEGORIES, type ServiceCategory } from '@/lib/campusServices';
+
+const HISTORY_ENTRY_KEY = '__campusSearchHistoryEntry';
 const SEARCH_RETURN_STATE = '__campusSearchResultReturn';
 type ResultKind = 'service' | 'suggested' | 'assistant';
 type SearchReturn = {
   token: string;
   url: string;
   scope: string;
-  filters: string;
+  filters: { query: string; category: ServiceCategory | 'all' };
   href: string;
   kind: ResultKind;
 };
@@ -17,13 +20,11 @@ let observedWindow: Window | undefined;
 let pendingReturn: SearchReturn | null = null;
 let returnSequence = 0;
 const listeners = new Set<() => void>();
-let trackedUrl = '';
-// Arm each search history entry by its token so a later search cannot
-// invalidate an earlier entry, and so same-path bottom navigation is not
-// confused with the remembered result.
-const armedReturnByToken = new Map<string, string>();
+// popstate exposes the arriving entry. Keep its predecessor across router writes and traversals.
+let trackedEntryKey: string | null = null;
+let historyEntrySequence = 0;
+const armedReturnByToken = new Map<string, { searchKey: string; destinationKey: string | null }>();
 let freshlyArmedToken: string | null = null;
-let historyTrackingInstalled = false;
 
 function currentUrl() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -34,54 +35,56 @@ function appUrl(href: string) {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
-function isArmed(saved: SearchReturn) {
-  const href = armedReturnByToken.get(saved.token);
-  return !!href && appUrl(href) === appUrl(saved.href);
+function readEntryKey(state: unknown) {
+  if (!state || typeof state !== 'object') return null;
+  const key = (state as Record<string, unknown>)[HISTORY_ENTRY_KEY];
+  return typeof key === 'string' ? key : null;
 }
 
-function syncTrackedUrl() {
-  trackedUrl = currentUrl();
-}
-
-function onHistoryWrite(kind: 'pushState' | 'replaceState', previousState: unknown, previousUrl: string) {
-  if (kind === 'pushState') {
-    // A new history entry, including a copied search state, must never
-    // inherit an in-flight restore. Only popstate may resume focus.
-    publishReturn(null);
-  }
-  // Only a new history entry (push) can close this search item's restore
-  // arming. replaceState is used to write the marker, for in-place URL
-  // updates, and by tests that simulate a later Back with traverse().
+function onHistoryPush(previousState: unknown, previousPath: string, entryKey: string | null) {
+  // Only a traversal between the linked entries can start another restore.
+  publishReturn(null);
   const leaving = readReturn(previousState);
-  const nextUrl = currentUrl();
-  const leftSearch =
-    !!leaving &&
-    new URL(previousUrl, window.location.origin).pathname === '/search' &&
-    previousUrl !== nextUrl;
-  if (kind === 'pushState' && leftSearch && leaving && leaving.token !== freshlyArmedToken) {
-    armedReturnByToken.delete(leaving.token);
+  const armed = leaving && armedReturnByToken.get(leaving.token);
+  if (leaving && armed?.searchKey === readEntryKey(previousState) && previousPath === '/search') {
+    if (leaving.token === freshlyArmedToken && appUrl(leaving.href) === currentUrl()) {
+      armed.destinationKey = entryKey;
+    } else if (window.location.pathname !== '/search' && leaving.token !== freshlyArmedToken) {
+      armedReturnByToken.delete(leaving.token);
+    }
   }
-  if (leftSearch) freshlyArmedToken = null;
-  syncTrackedUrl();
+  freshlyArmedToken = null;
 }
 
 function installHistoryTracking() {
-  if (historyTrackingInstalled) return;
-  historyTrackingInstalled = true;
-  trackedUrl = currentUrl();
-  const wrap = (method: 'pushState' | 'replaceState') => {
+  trackedEntryKey = readEntryKey(window.history.state);
+  for (const method of ['pushState', 'replaceState'] as const) {
     const original = window.history[method];
-    window.history[method] = function (this: History, data: unknown, unused: string, url?: string | URL | null) {
-      const previousState = window.history.state;
-      const previousUrl = currentUrl();
-      const result = original.call(this, data, unused, url);
-      onHistoryWrite(method, previousState, previousUrl);
-      return result;
+    window.history[method] = function (
+      this: History,
+      data: unknown,
+      unused: string,
+      url?: string | URL | null,
+    ) {
+      const previousState = this.state;
+      const previousPath = window.location.pathname;
+      const push = method === 'pushState';
+      let state = data;
+      if (data == null || Object.getPrototypeOf(data) === Object.prototype) {
+        const fields = { ...(data as Record<string, unknown> | null | undefined) };
+        const previousKey = push ? null : readEntryKey(previousState);
+        if (push || previousKey || fields[SEARCH_RETURN_STATE] || fields[HISTORY_ENTRY_KEY]) {
+          if (push) delete fields[SEARCH_RETURN_STATE];
+          // Replace retains the current entry's identity. Push always creates a new one.
+          fields[HISTORY_ENTRY_KEY] = previousKey ?? `${Date.now()}-${++historyEntrySequence}`;
+          state = fields;
+        }
+      }
+      original.call(this, state, unused, url);
+      trackedEntryKey = readEntryKey(this.state);
+      if (push) onHistoryPush(previousState, previousPath, trackedEntryKey);
     };
-  };
-  wrap('pushState');
-  wrap('replaceState');
-  window.addEventListener('popstate', syncTrackedUrl);
+  }
 }
 
 function readReturn(state: unknown): SearchReturn | null {
@@ -92,11 +95,30 @@ function readReturn(state: unknown): SearchReturn | null {
   return typeof value.token === 'string' &&
     typeof value.url === 'string' &&
     typeof value.scope === 'string' &&
-    typeof value.filters === 'string' &&
+    typeof value.filters?.query === 'string' &&
+    (value.filters.category === 'all' ||
+      SERVICE_CATEGORIES.some(({ id }) => id === value.filters?.category)) &&
     typeof value.href === 'string' &&
     (value.kind === 'service' || value.kind === 'suggested' || value.kind === 'assistant')
     ? (value as SearchReturn)
     : null;
+}
+
+function readCurrentReturn(expected: SearchReturn) {
+  const state = window.history.state;
+  const current = readReturn(state);
+  const armed = armedReturnByToken.get(expected.token);
+  return armed &&
+    readEntryKey(state) === armed.searchKey &&
+    current?.token === expected.token &&
+    current.url === expected.url &&
+    current.url === currentUrl()
+    ? current
+    : null;
+}
+
+function matchesRouterUrl(saved: SearchReturn, queryString: string) {
+  return new URL(saved.url, window.location.origin).searchParams.toString() === queryString;
 }
 
 function publishReturn(value: SearchReturn | null) {
@@ -107,9 +129,22 @@ function publishReturn(value: SearchReturn | null) {
 
 function captureReturn(event: PopStateEvent) {
   const saved = readReturn(event.state);
-  const sameSearchEntry =
-    window.location.pathname === '/search' && saved?.url === currentUrl();
-  publishReturn(sameSearchEntry && saved && isArmed(saved) ? saved : null);
+  const entryKey = readEntryKey(event.state);
+  const departedKey = trackedEntryKey;
+  trackedEntryKey = entryKey;
+  freshlyArmedToken = null;
+  const armed = saved && armedReturnByToken.get(saved.token);
+  publishReturn(
+    saved &&
+      armed &&
+      entryKey === armed.searchKey &&
+      departedKey !== null &&
+      departedKey === armed.destinationKey &&
+      window.location.pathname === '/search' &&
+      saved.url === currentUrl()
+      ? saved
+      : null,
+  );
 }
 
 function cancelPendingReturn() {
@@ -119,9 +154,9 @@ function cancelPendingReturn() {
 }
 
 function subscribeReturn(listener: () => void) {
-  installHistoryTracking();
   if (observedWindow !== window) {
-    observedWindow?.removeEventListener('popstate', captureReturn);
+    installHistoryTracking();
+    observedWindow?.removeEventListener('popstate', captureReturn, true);
     for (const event of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
       observedWindow?.removeEventListener(event, cancelPendingReturn, true);
     }
@@ -129,7 +164,8 @@ function subscribeReturn(listener: () => void) {
     pendingReturn = null;
     // The search page is absent while its destination is open. One session
     // observer records a real history traversal; mounting alone never opts in.
-    window.addEventListener('popstate', captureReturn);
+    // Capture the departing key before router listeners can rewrite the arriving state.
+    window.addEventListener('popstate', captureReturn, true);
     for (const event of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
       window.addEventListener(event, cancelPendingReturn, { capture: true, passive: true });
     }
@@ -145,12 +181,11 @@ export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token' | '
   publishReturn(null);
   if (window.location.pathname !== '/search') return;
   const token = `${Date.now()}-${++returnSequence}`;
-  armedReturnByToken.set(token, value.href);
-  freshlyArmedToken = token;
+  const previousState = window.history.state;
   try {
     window.history.replaceState(
       {
-        ...window.history.state,
+        ...previousState,
         [SEARCH_RETURN_STATE]: {
           ...value,
           token,
@@ -159,6 +194,15 @@ export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token' | '
       },
       '',
     );
+    const searchKey = readEntryKey(window.history.state);
+    if (searchKey) {
+      const previous = readReturn(previousState);
+      if (previous && armedReturnByToken.get(previous.token)?.searchKey === searchKey) {
+        armedReturnByToken.delete(previous.token);
+      }
+      armedReturnByToken.set(token, { searchKey, destinationKey: null });
+      freshlyArmedToken = token;
+    }
   } catch {
     // Opening a service remains available when the browser denies History access.
   }
@@ -166,7 +210,11 @@ export function rememberSearchResultReturn(value: Omit<SearchReturn, 'token' | '
 
 export function clearSearchResultReturn() {
   publishReturn(null);
-  if (!readReturn(window.history.state)) return;
+  const saved = readReturn(window.history.state);
+  if (!saved) return;
+  if (armedReturnByToken.get(saved.token)?.searchKey === readEntryKey(window.history.state)) {
+    armedReturnByToken.delete(saved.token);
+  }
   try {
     const state = { ...window.history.state };
     delete state[SEARCH_RETURN_STATE];
@@ -183,7 +231,8 @@ export function useSearchResultReturn({
   ready,
   blocked,
   queryString,
-  filters,
+  query,
+  category,
 }: {
   directory: RefObject<HTMLDivElement | null>;
   resultsHeading: RefObject<HTMLHeadingElement | null>;
@@ -191,23 +240,29 @@ export function useSearchResultReturn({
   ready: boolean;
   blocked: boolean;
   queryString: string;
-  filters: string;
+  query: string;
+  category: ServiceCategory | 'all';
 }) {
   const historyReturn = useSyncExternalStore(subscribeReturn, getReturn, getServerReturn);
-  const liveState = useRef({ scope, ready, blocked, queryString, filters });
+  const liveState = useRef({ scope, ready, blocked, queryString, query, category });
   useLayoutEffect(() => {
-    liveState.current = { scope, ready, blocked, queryString, filters };
-  }, [blocked, filters, queryString, ready, scope]);
+    liveState.current = { scope, ready, blocked, queryString, query, category };
+  }, [blocked, category, query, queryString, ready, scope]);
+
+  const matchingFilters =
+    historyReturn &&
+    ready &&
+    !blocked &&
+    historyReturn.scope === scope &&
+    readCurrentReturn(historyReturn) &&
+    matchesRouterUrl(historyReturn, queryString)
+      ? historyReturn.filters
+      : null;
 
   useEffect(() => {
     if (!historyReturn || getReturn() !== historyReturn) return;
-    const current = readReturn(window.history.state);
-    if (
-      blocked ||
-      current?.token !== historyReturn.token ||
-      current.url !== currentUrl() ||
-      current.url !== historyReturn.url
-    ) {
+    const current = readCurrentReturn(historyReturn);
+    if (blocked || !current) {
       publishReturn(null);
       return;
     }
@@ -218,8 +273,9 @@ export function useSearchResultReturn({
     }
     // Back may arrive before Next renders its URL or the saved search draft.
     if (
-      new URL(current.url, window.location.origin).searchParams.toString() !== queryString ||
-      current.filters !== filters
+      !matchesRouterUrl(current, queryString) ||
+      current.filters.query !== query ||
+      current.filters.category !== category
     )
       return;
 
@@ -253,18 +309,17 @@ export function useSearchResultReturn({
     // changing the browser's global history.scrollRestoration preference.
     const frame = window.requestAnimationFrame(() => {
       if (getReturn() !== historyReturn) return;
-      const latest = readReturn(window.history.state);
+      const latest = readCurrentReturn(historyReturn);
       const live = liveState.current;
       const focus = document.activeElement;
       if (
         !target.isConnected ||
         !directory.current?.contains(target) ||
-        latest?.token !== historyReturn.token ||
-        latest.url !== historyReturn.url ||
-        latest.url !== currentUrl() ||
+        !latest ||
         latest.scope !== live.scope ||
-        latest.filters !== live.filters ||
-        new URL(latest.url, window.location.origin).searchParams.toString() !== live.queryString ||
+        latest.filters.query !== live.query ||
+        latest.filters.category !== live.category ||
+        !matchesRouterUrl(latest, live.queryString) ||
         !live.ready ||
         live.blocked ||
         (focus !== active && focus !== target && focus !== document.body)
@@ -286,5 +341,17 @@ export function useSearchResultReturn({
       target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [blocked, directory, filters, historyReturn, queryString, ready, resultsHeading, scope]);
+  }, [
+    blocked,
+    category,
+    directory,
+    historyReturn,
+    query,
+    queryString,
+    ready,
+    resultsHeading,
+    scope,
+  ]);
+
+  return matchingFilters;
 }

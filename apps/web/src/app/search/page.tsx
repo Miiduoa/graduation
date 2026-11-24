@@ -107,8 +107,7 @@ function ServiceDirectory() {
       ? filters
       : { query: '', category: 'all' as const };
   const returnScope = JSON.stringify([account.ownerScope, schoolSearch, campusId]);
-  const returnFilters = JSON.stringify([query, category]);
-  useSearchResultReturn({
+  const returningFilters = useSearchResultReturn({
     directory,
     resultsHeading,
     scope: returnScope,
@@ -118,7 +117,8 @@ function ServiceDirectory() {
       account.status === 'signing-out' ||
       selection?.catalogStatus === 'error',
     queryString,
-    filters: returnFilters,
+    query,
+    category,
   });
   useLayoutEffect(() => {
     if (!account.canRemember) return;
@@ -162,6 +162,16 @@ function ServiceDirectory() {
         return;
       historyRestoration.current = null;
     }
+    if (returningFilters) {
+      // A result return uses this entry’s filters even when a later search changed the session draft.
+      restoredFilters.current = { scope: draftScope, queryString };
+      editedFilters.current = null;
+      setFilters({ scope: draftScope, ...returningFilters });
+      setRestoredExpanded(
+        restoreDirectorySearch('search', '/search', storageScope)?.expanded ?? [],
+      );
+      return;
+    }
     if (
       restoredFilters.current?.scope === draftScope &&
       restoredFilters.current.queryString === queryString
@@ -189,7 +199,15 @@ function ServiceDirectory() {
       restoreDirectorySearch('search', window.location.pathname || '/search', storageScope)
         ?.expanded ?? [],
     );
-  }, [account.canRemember, campusReady, confirmedScope, draftScope, queryString, storageScope]);
+  }, [
+    account.canRemember,
+    campusReady,
+    confirmedScope,
+    draftScope,
+    queryString,
+    returningFilters,
+    storageScope,
+  ]);
   const term = query.trim();
   const semanticScope = JSON.stringify([
     account.responseScope,
@@ -341,7 +359,7 @@ function ServiceDirectory() {
     if (!canRemember) return;
     rememberSearchResultReturn({
       scope: returnScope,
-      filters: returnFilters,
+      filters: { query, category },
       href,
       kind,
     });
