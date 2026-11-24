@@ -606,6 +606,53 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         return null;
       }
     };
+    // The on-screen canvas is the host rectangle clipped to the dialog
+    // scrollport. Both the visual-viewport and virtualKeyboard signals use
+    // this same visible area; overflow hidden by the modal must not count.
+    const visibleCanvasRect = (): { left: number; top: number; right: number; bottom: number } | null => {
+      try {
+        const rect = host.getBoundingClientRect();
+        if (![rect.left, rect.top, rect.right, rect.bottom, rect.width, rect.height].every(Number.isFinite) ||
+            rect.width <= 0 || rect.height <= 0 ||
+            rect.right <= rect.left || rect.bottom <= rect.top) return null;
+        let left = rect.left;
+        let top = rect.top;
+        let right = rect.right;
+        let bottom = rect.bottom;
+        if (scrollDialog) {
+          const dialogRect = scrollDialog.getBoundingClientRect();
+          const { clientLeft, clientTop, clientWidth, clientHeight } = scrollDialog;
+          const contentLeft = dialogRect.left + clientLeft;
+          const contentTop = dialogRect.top + clientTop;
+          const contentRight = contentLeft + clientWidth;
+          const contentBottom = contentTop + clientHeight;
+          if (clientWidth > 0 && clientHeight > 0 &&
+              [contentLeft, contentTop, contentRight, contentBottom].every(Number.isFinite)) {
+            left = Math.max(left, contentLeft);
+            top = Math.max(top, contentTop);
+            right = Math.min(right, contentRight);
+            bottom = Math.min(bottom, contentBottom);
+          }
+        }
+        if (!(right > left && bottom > top)) return null;
+        return { left, top, right, bottom };
+      } catch {
+        return null;
+      }
+    };
+    const intersectsVisibleCanvas = (
+      viewLeft: number, viewTop: number, viewRight: number, viewBottom: number,
+    ): boolean | null => {
+      const canvas = visibleCanvasRect();
+      if (!canvas ||
+          ![viewLeft, viewTop, viewRight, viewBottom].every(Number.isFinite) ||
+          viewRight <= viewLeft || viewBottom <= viewTop) return null;
+      const left = Math.max(canvas.left, viewLeft);
+      const top = Math.max(canvas.top, viewTop);
+      const right = Math.min(canvas.right, viewRight);
+      const bottom = Math.min(canvas.bottom, viewBottom);
+      return right > left && bottom > top;
+    };
     const viewportSignature = (viewport: VisualViewport): string =>
       [viewport.offsetLeft, viewport.offsetTop, viewport.width, viewport.height,
         viewport.scale].join(':');
@@ -620,11 +667,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         if (!bounds || ![bounds.left, bounds.top, bounds.right, bounds.bottom,
           bounds.width, bounds.height].every(Number.isFinite) ||
           !(bounds.width > 0 && bounds.height > 0)) return false;
-        // Only the dialog-clipped, on-screen part of the canvas counts as visible.
-        // Overflow hidden by the modal must not pause 3D by itself.
-        // A reported rectangle that actually overlaps is enough; do not require
-        // overlaysContent, which some WebViews omit even for overlay keyboards.
-        return measureVisibilityAgainst(bounds.left, bounds.top, bounds.right, bounds.bottom) === true;
+        // A reported rectangle that actually overlaps the visible canvas is
+        // enough; do not require overlaysContent, which some WebViews omit.
+        return intersectsVisibleCanvas(bounds.left, bounds.top, bounds.right, bounds.bottom) === true;
       } catch {
         return false;
       }
@@ -658,19 +703,25 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         const viewport = window.visualViewport;
         if (!viewport) return keyboardOverlayIntersectsCanvas() ? false : null;
         const { offsetLeft: left, offsetTop: top, width, height } = viewport;
+        // Keyboard overlap must be evaluated even if a manual restart asked
+        // us to ignore this exact viewport size. Clear that cache as soon as
+        // an intersection begins so later focus/viewport checks stay honest.
+        if (keyboardOverlayIntersectsCanvas()) {
+          ignoredViewport = null;
+          if (!clipToDialog) return false;
+        }
         // The visitor explicitly restarted 3D while the viewport read this
-        // way. Ignore that exact (possibly stale) geometry as an occlusion
-        // signal until it changes. It can still prove the canvas is visible
-        // inside both the viewport and dialog after a stale hidden observation.
+        // way. Ignore it as an occlusion signal until it changes, an editable
+        // gains focus, or a keyboard overlaps. Positive geometry can still
+        // recover a hidden observation inside both the viewport and dialog.
         if (ignoredViewport !== null) {
           if (viewportSignature(viewport) !== ignoredViewport) ignoredViewport = null;
           else if (!clipToDialog) return null;
         }
-        const visible = measureVisibilityAgainst(left, top, left + width, top + height, clipToDialog);
+        const visible = intersectsVisibleCanvas(left, top, left + width, top + height);
         if (clipToDialog) return visible;
         // Structural signals only: a shrunken visual viewport is not itself
         // proof that the keyboard still covers the canvas.
-        if (keyboardOverlayIntersectsCanvas()) return false;
         if (isPinchZoomed(viewport)) return visible;
         const textEntryFocused = isTextEntryTarget(host.ownerDocument.activeElement);
         // No input/textarea/contenteditable focus and no keyboard overlap:
@@ -678,7 +729,8 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         if (!textEntryFocused) return null;
         // While an editable is focused, never auto-resume from a closed
         // keyboard rectangle, a grace timer, or leftover shrunken bounds.
-        // Only a visual viewport that once again includes the canvas may resume.
+        // Only a visual viewport that once again includes the visible canvas
+        // (dialog-clipped, same rect as the virtualKeyboard path) may resume.
         if (visible === false) return false;
         return null;
       } catch {
@@ -809,7 +861,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // the keyboard animation may have settled. Timers never override the
     // structural signals (editable focus or virtualKeyboard overlap).
     const focusTimers = new Set<number>();
-    const onFocusChange = () => {
+    const onFocusChange = (event: FocusEvent) => {
+      // A later focus on an input must re-evaluate a shrunken viewport that
+      // was ignored only for the visitor's explicit restart.
+      if (event.type === 'focusin' && event.target instanceof Element &&
+          isTextEntryTarget(event.target)) {
+        ignoredViewport = null;
+      }
       for (const delay of [0, 350]) {
         const id = window.setTimeout(() => {
           focusTimers.delete(id);

@@ -307,17 +307,22 @@ const PUBLISHED_PROVIDENCE_ENGLISH_NAMES = new Map<string, readonly string[]>([
   ['pu-zhugu', ['Providence Hall']],
   ['pu-renyuan', ['Anthony Kuo Hall']],
   ['pu-boduo', ['St. Peter Hall']],
-  ['pu-wenxing', ['Wen Xing Hall']],
+  // Official admissions contact (checked 2026-11-24):
+  // https://hstopu.pu.edu.tw/p/412-1105-1496.php
+  ['pu-wenxing', ['Wen Xing Hall', 'Bishop Kupfer Hall']],
   ['pu-gelun', ['Theodore Guerin Hall']],
   ['pu-fangji', ['St. Francis Hall']],
   ['pu-siyuan', ['Si Yuan Hall']],
   ['pu-jingan', ['Jing An Hall']],
-  ['pu-library', ['Gaesia Library']],
+  // Official bilingual facilities page (checked 2026-11-24):
+  // https://dpcd.pu.edu.tw/p/412-1047-3561.php
+  ['pu-library', ['Gaesia Library', 'Luking Library']],
   // campusPois.js uses "Chapel"; the mobile catalog uses the full title.
   ['pu-chapel', ['Chapel', 'Chapel of Our Lady of Providence']],
   ['pu-jingyuan', ['Jingyuan Cafeteria']],
   ['pu-yiyuan', ['Yiyuan Cafeteria']],
-  ['pu-gym', ['John Paul II Sports Hall']],
+  // Same official facilities page identifies the sports hall as Stadium.
+  ['pu-gym', ['John Paul II Sports Hall', 'John Paul II Stadium']],
   ['pu-health', ['Health Center']],
   ['pu-parking-moto', ['Motorcycle Parking']],
 ]);
