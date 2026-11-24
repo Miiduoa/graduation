@@ -98,7 +98,7 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
     !!firebaseUid && !!lastFirebaseUid.current &&
     firebaseUid !== lastFirebaseUid.current;
   const firebaseSessionLost =
-    firebaseSignedOut && firebaseWasSignedIn.current && !scope && !platform.session;
+    firebaseSignedOut && firebaseWasSignedIn.current && !scope;
   const workspaceUid = (scope && firebaseUid) || lastFirebaseUid.current;
   useLayoutEffect(() => {
     if (firebaseUid && (scope || !lastFirebaseUid.current)) lastFirebaseUid.current = firebaseUid;

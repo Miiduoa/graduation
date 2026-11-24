@@ -644,6 +644,8 @@ it.each([
   ['edit', 'sign out', 'firebase'],
   ['create', 'sign out', 'nuni'],
   ['edit', 'sign out', 'nuni'],
+  ['create', 'sign out before Nuni', 'nuni'],
+  ['edit', 'sign out before Nuni', 'nuni'],
 ] as const)('unmounts the old calendar and rejects a queued %s on Firebase %s with unresolved scope for a %s ledger', async (mode, transition, owner) => {
   mockAuth = { user: { uid: 'student-a' }, loading: false };
   if (owner === 'firebase') {
@@ -674,8 +676,8 @@ it.each([
     : jest.mocked(appendPersonalImports).mock.results[0].value;
 
   mockScope = null;
-  if (transition === 'sign out') {
-    mockSession = null;
+  if (transition !== 'switch') {
+    if (transition === 'sign out') mockSession = null;
     mockNuniLoading = true;
     mockAuth = { user: null, loading: true };
     view.rerender(<PersonalCalendarScreen />);

@@ -253,7 +253,7 @@ export function mutatePersonalImportLedger<T>(
   const previous = locks.get(key) || Promise.resolve();
   const task = previous
     .catch(() => undefined)
-    .then(() => withPersonalImportWriteLock(key, async (assertLockHeld) => {
+    .then(() => withPersonalImportWriteLock(key, async (assertLockHeld, leaseQuotaError) => {
       let hasPersisted = false;
       const assertWritable = () => {
         assertLockHeld();
@@ -284,6 +284,7 @@ export function mutatePersonalImportLedger<T>(
           if (web) {
             writtenRaw = commitWebPersonalImports(
               key, primaryRaw, raw, assertWritable, needsJournal ? { raw: persistedRaw } : undefined,
+              leaseQuotaError,
             );
           } else if (!needsJournal) {
             await AsyncStorage.setItem(key, raw);

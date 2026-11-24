@@ -104,7 +104,7 @@ test('Web leaves the primary ledger intact when the recovery copy cannot be stor
     throw new DOMException('Quota exceeded', 'QuotaExceededError');
   });
   try {
-    await expect(editPersonalImport(scope, ledger.records[0], row('original', '統計'), {
+    await expect(appendPersonalImports(scope, [row('new', '統計')], {
       canContinue: () => true,
     })).rejects.toThrow('Quota exceeded');
     expect(storeBackup).toHaveBeenCalledTimes(1);
@@ -306,6 +306,66 @@ const webLeasePrefix = (key: string) => `campus.personal-imports.write.v1:${sha2
 const legacyWebStage = (key: string, id: string) =>
   `campus.personal-imports.rollback.v1:${sha256(key)}:stage:${Date.now()}:${id}`;
 
+test.each([
+  ['no locks or extra space', 'edit'],
+  ['no locks or extra space', 'delete'],
+  ['room for a verbatim stage', 'edit'],
+  ['no session space', 'delete'],
+] as const)('Web at quota with %s can complete a shrinking %s', async (capacity, operation) => {
+  const cleanup = useWebStorage();
+  const restoreLocks = capacity === 'no locks or extra space'
+    ? withoutWebWriteLocks()
+    : useIndexedDBLocks().restore;
+  const storage = window.localStorage;
+  const stages = window.sessionStorage;
+  const key = personalImportStorageKey(scope);
+  const setItem = Storage.prototype.setItem;
+  let quota: jest.SpyInstance | undefined;
+  try {
+    const title = String.raw`含"引號"和\反斜線`.repeat(20);
+    const { ledger: imported } = await appendPersonalImports(scope, [row('original')]);
+    const ledger = await editPersonalImport(scope, imported.records[0], row('original', title));
+    // Also cover old ledgers that have no space for a new generation field.
+    const original = JSON.stringify(ledger);
+    storage.setItem(key, original);
+    const sessionCapacity = capacity === 'room for a verbatim stage'
+      ? original.length + 'campus.personal-imports.stage.v2:'.length + 36
+      : 0;
+    quota = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage, entry, value,
+    ) {
+      const existing = Object.keys(this).filter((storedKey) => storedKey !== entry);
+      const used = existing.reduce((size, storedKey) =>
+        size + storedKey.length + this.getItem(storedKey)!.length, 0);
+      const limit = this === storage ? key.length + original.length : sessionCapacity;
+      if (used + entry.length + value.length > limit) {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      setItem.call(this, entry, value);
+    });
+    const guard = { canContinue: () => true };
+    const target = title.slice(0, -1);
+    const result = operation === 'edit'
+      ? await editPersonalImport(scope, ledger.records[0], row('original', target), guard)
+      : await deletePersonalImport(scope, ledger.records[0], guard);
+    expect((await loadPersonalImports(scope)).records.map(({ title }) => title))
+      .toEqual(operation === 'edit' ? [target] : []);
+    expect(storage.getItem(key)!.length).toBeLessThan(original.length);
+    if (operation === 'edit') expect(storage.getItem(key)).toBe(JSON.stringify(result));
+    expect(Object.keys(storage)).toEqual([key]);
+    expect(Object.keys(stages)).toEqual([]);
+    expect(result.records).toHaveLength(operation === 'edit' ? 1 : 0);
+    const stageWrites = quota.mock.calls.filter(([entry]) =>
+      entry.startsWith('campus.personal-imports.stage.v2:'));
+    expect(stageWrites.map(([, value]) => value))
+      .toEqual(capacity === 'no locks or extra space' ? [] : [original]);
+  } finally {
+    quota?.mockRestore();
+    restoreLocks();
+    cleanup();
+  }
+});
+
 test.each([false, true])('Web without locks reclaims legacy localStorage stages at quota (other ledger: %s)', async (foreign) => {
   const cleanup = useWebStorage();
   const restoreLocks = withoutWebWriteLocks();
@@ -401,26 +461,39 @@ test('Web without locks preserves another tab’s legacy stage while its write l
   }
 });
 
-test('Web without locks cannot publish after its page invalidates the write lease', async () => {
+test.each([false, true])('Web without locks cannot publish after pagehide at quota: %s', async (atQuota) => {
   const cleanup = useWebStorage();
   const restoreLocks = withoutWebWriteLocks();
   const storage = window.localStorage;
   const key = personalImportStorageKey(scope);
+  let quota: jest.SpyInstance | undefined;
   try {
     const { ledger } = await appendPersonalImports(scope, [row('original')]);
     const before = storage.getItem(key);
+    if (atQuota) {
+      const setItem = Storage.prototype.setItem;
+      quota = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+        this: Storage, entry, value,
+      ) {
+        if (this === storage && entry.startsWith(webLeasePrefix(key))) {
+          throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        }
+        setItem.call(this, entry, value);
+      });
+    }
     await expect(mutatePersonalImportLedger(scope, { canContinue: () => true }, (current) => {
-      expect(Object.keys(storage).some((entry) => entry.startsWith(webLeasePrefix(key)))).toBe(true);
+      expect(Object.keys(storage).some((entry) => entry.startsWith(webLeasePrefix(key)))).toBe(!atQuota);
       window.dispatchEvent(new Event('pagehide'));
       expect(Object.keys(storage).some((entry) => entry.startsWith(webLeasePrefix(key)))).toBe(false);
       return {
-        ledger: { ...current, records: [{ ...current.records[0], title: '不應寫入' }] },
+        ledger: { ...current, records: [], batches: [] },
         result: undefined,
       };
     })).rejects.toThrow('寫入標記已失效');
     expect(storage.getItem(key)).toBe(before);
     await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
   } finally {
+    quota?.mockRestore();
     restoreLocks();
     cleanup();
   }
@@ -559,7 +632,7 @@ test.each([false, true])('Web reclaims an abandoned session stage before a near-
     })).rejects.toThrow('帳號或學校已切換');
     await expect(loadPersonalImports(oldScope)).resolves.toEqual(other);
     const orphan = abandoned!;
-    expect(JSON.parse(JSON.parse(stages.getItem(orphan)!).original).records).toEqual(other.records);
+    expect(JSON.parse(stages.getItem(orphan)!).records).toEqual(other.records);
     lostCleanup.mockRestore();
     let reopened!: typeof import('../services/personalImports');
     jest.isolateModules(() => { reopened = require('../services/personalImports'); });

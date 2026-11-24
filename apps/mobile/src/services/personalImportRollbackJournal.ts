@@ -51,9 +51,15 @@ function sweepExpiredLeases(storage: Storage): void {
   }
 }
 
+type BrowserWrite<T> = (assertLockHeld: () => void, leaseQuotaError?: DOMException) => Promise<T>;
+
+function isQuotaExceeded(error: unknown): error is DOMException {
+  return error instanceof DOMException && error.name === 'QuotaExceededError';
+}
+
 async function writeWithLease<T>(
   ledgerHash: string,
-  write: (assertLockHeld: () => void) => Promise<T>,
+  write: BrowserWrite<T>,
 ): Promise<T> {
   const storage = window.localStorage;
   // Reclaim existing entries before reserving even the small lease at quota.
@@ -64,9 +70,11 @@ async function writeWithLease<T>(
   const lostLease = new Error('匯入資料的寫入標記已失效，請稍後再試。');
   let value = String(Date.now() + leaseDuration);
   let stopped = false;
+  let leaseQuotaError: DOMException | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   const assertLease = () => {
-    if (stopped || !isLiveLease(value) || storage.getItem(leaseKey) !== value) throw lostLease;
+    if (stopped || !isLiveLease(value) ||
+        (!leaseQuotaError && storage.getItem(leaseKey) !== value)) throw lostLease;
   };
   const stop = () => {
     stopped = true;
@@ -79,9 +87,17 @@ async function writeWithLease<T>(
   };
 
   try {
-    storage.setItem(leaseKey, value);
-    assertLease();
     window.addEventListener('pagehide', stop);
+    try {
+      storage.setItem(leaseKey, value);
+    } catch (error) {
+      if (!isQuotaExceeded(error)) throw error;
+      // Without a persisted lease this attempt may only publish a shrinking
+      // replacement atomically. It cannot create or reuse a recovery stage.
+      leaseQuotaError = error;
+    }
+    assertLease();
+    if (leaseQuotaError) return await write(assertLease, leaseQuotaError);
     heartbeat = setInterval(() => {
       try {
         assertLease();
@@ -208,7 +224,7 @@ const noLockCheck = () => {};
 
 export async function withPersonalImportWriteLock<T>(
   key: string,
-  write: (assertLockHeld: () => void) => Promise<T>,
+  write: BrowserWrite<T>,
 ): Promise<T> {
   if (Platform.OS !== 'web') return write(noLockCheck);
   const ledgerHash = sha256(key);
@@ -310,39 +326,57 @@ export function commitWebPersonalImports(
   attempted: string,
   assertWritable: () => void,
   recovery?: { raw: string | null },
+  leaseQuotaError?: DOMException,
 ): string {
   const storage = window.localStorage;
   const id = createPersonalImportId();
   const committed = JSON.stringify({ ...JSON.parse(attempted), webCommit: id });
   const conflict = () => new Error('匯入資料已在另一個分頁更新，請重新載入。');
+  const shrinking = before !== null && attempted.length < before.length;
   const publish = (ownsStage = () => true) => {
-    assertWritable();
-    if (!ownsStage() || storage.getItem(key) !== before) throw conflict();
-    // The primary stays authoritative until this single publication. Its new
-    // generation also retires legacy recovery data without clearing shared keys.
-    storage.setItem(key, committed);
-    if (storage.getItem(key) !== committed) throw conflict();
-    return committed;
+    const replace = (raw: string) => {
+      assertWritable();
+      if (!ownsStage() || storage.getItem(key) !== before) throw conflict();
+      storage.setItem(key, raw);
+      if (storage.getItem(key) !== raw) throw conflict();
+      return raw;
+    };
+    try {
+      // The primary stays authoritative until this single publication. Its new
+      // generation also retires legacy recovery data without clearing shared keys.
+      return replace(committed);
+    } catch (error) {
+      if (!isQuotaExceeded(error) || !shrinking ||
+          storage.getItem(webJournalKey(key)) !== null) throw error;
+      // Pre-generation ledgers may only have room for the replacement bytes.
+      // With no legacy journal the plain ledger is already authoritative.
+      return replace(attempted);
+    }
   };
-  if (!recovery) return publish();
+  if (!recovery && !leaseQuotaError) return publish();
 
-  // A stage is used only by this attempt. Session storage keeps its full copy
-  // out of the origin-wide localStorage budget and out of other tabs' reach.
-  // After a reload the session may survive, but its active attempts do not.
   const stages = window.sessionStorage;
   sweepSessionStages(stages);
+  if (leaseQuotaError) {
+    if (!shrinking) throw leaseQuotaError;
+    return publish();
+  }
+
+  // This attempt owns a private, verbatim copy. Encoding it as a JSON string
+  // would expand every quote and backslash and consume extra session quota.
   const stageKey = stagePrefix + id;
-  const encoded = JSON.stringify({
-    id,
-    original: recovery.raw,
-    before: fingerprint(before),
-    attempted: fingerprint(attempted),
-  } satisfies WebRollback);
+  const encoded = recovery?.raw ?? 'null';
   const ownsStage = () => stages.getItem(stageKey) === encoded;
   assertWritable();
   activeStages.add(stageKey);
   try {
-    stages.setItem(stageKey, encoded);
+    try {
+      stages.setItem(stageKey, encoded);
+    } catch (error) {
+      if (!isQuotaExceeded(error) || !shrinking) throw error;
+      // A single atomic replacement leaves the original intact on failure.
+      return publish();
+    }
     return publish(ownsStage);
   } finally {
     // Stages are private to an attempt and are never read for recovery.

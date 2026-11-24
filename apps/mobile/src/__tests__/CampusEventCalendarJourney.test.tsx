@@ -171,6 +171,7 @@ test.each([
   ['nuni:account-a', '切換'],
   ['firebase:student', '登出'],
   ['nuni:account-a', '登出'],
+  ['nuni:account-a', '先於 Nuni 登出'],
 ])('範圍未解析時，卸載 %s 的舊草稿並撤銷 Firebase %s 時未完成的寫入', async (owner, transition) => {
   if (owner === 'firebase:student') mockPlatformSession = null;
   const original = { owner, schoolId: 'pu' };
@@ -190,7 +191,7 @@ test.each([
   await waitFor(() => expect(setItem).toHaveBeenCalledWith(key, expect.any(String)));
 
   if (transition === '登出') mockPlatformSession = null;
-  mockAuth = transition === '登出'
+  mockAuth = transition !== '切換'
     ? { user: null, loading: false }
     : { user: { uid: 'another-student' }, loading: true };
   mockVerifying = true;
