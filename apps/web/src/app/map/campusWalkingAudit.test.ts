@@ -59,6 +59,37 @@ describe('trusted OSM walking segment audit bridge', () => {
     expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 3, Date.parse('2026-11-27T08:00:01Z'))).toBeNull();
   });
 
+  it('rejects a mixed snapshot even when its outer timestamp is fresh', () => {
+    const data = candidates();
+    for (const osmBaseAt of ['2026-11-20T08:00:00Z', '2026-11-24T07:59:59Z',
+      '2026-11-24T08:00:01Z', '']) {
+      const mixed = { ...data, graph: { ...data.graph, osmBaseAt } };
+      expect(applyCampusWalkingSegmentAudits(mixed, 'fixture', [audit()], now)).toBeNull();
+    }
+    expect(findCampusWalkingRoute(
+      applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!,
+      'fixture', bounds, 1, 2, now,
+    )).not.toBeNull();
+  });
+
+  it('does not promote source revisions newer than the declared snapshot', () => {
+    for (const location of ['way', 'from', 'to']) {
+      const data = candidates();
+      const source = location === 'way' ? data.ways[0] : data.nodes[location === 'from' ? 0 : 1];
+      source.editedAt = '2026-11-24T08:00:01Z';
+      const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [
+        audit(1, 2, { reviewedAt: '2026-11-24T08:00:02Z' }),
+      ], now)!;
+      expect(graph.edges[0].access).toBe('unknown');
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+    }
+    const data = candidates();
+    data.ways[0].editedAt = data.osmBaseAt;
+    expect(applyCampusWalkingSegmentAudits(data, 'fixture', [
+      audit(1, 2, { reviewedAt: data.osmBaseAt }),
+    ], now)?.edges[0].access).toBe('reviewed-open');
+  });
+
   it('keeps other-school, changed node, changed way and wrong order audits closed', () => {
     for (const bad of [
       audit(1, 2, { schoolId: 'other' }),
