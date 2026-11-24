@@ -137,6 +137,20 @@ function BoardsContent() {
     return () => { mounted.current = false; };
   }, []);
 
+  const clearBoardAccess = useCallback(() => {
+    // In-flight confirmations retain the old map. Their results and cleanup
+    // belong to that access period, even if the same board becomes visible again.
+    pendingServerConfirmCounts.current = new Map();
+    awaitingServerConfirm.current.clear();
+    boardServerAppliedRevision.current.clear();
+    keepLocalFromStaleList.current.clear();
+    deferredListMembership.current.clear();
+    confirmedByBoardRead.current.clear();
+    confirmedSubscribedRef.current = new Set();
+    setBoards([]);
+    applySubscribed(() => new Set());
+  }, [applySubscribed]);
+
   const load = useCallback(async () => {
     const version = ++loadVersion.current;
     const subscriptionRevisionAtStart = subscriptionRevision.current;
@@ -147,10 +161,7 @@ function BoardsContent() {
     setLoadError('');
     try {
       if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
-        setBoards([]);
-        confirmedSubscribedRef.current = new Set();
-        confirmedByBoardRead.current.clear();
-        applySubscribed(() => new Set());
+        clearBoardAccess();
         return;
       }
       const [rows, membership] = await Promise.all([
@@ -237,10 +248,7 @@ function BoardsContent() {
       if (loadVersion.current !== version) return;
       const code = (cause as { code?: string })?.code ?? '';
       if (code.endsWith('permission-denied') || code.endsWith('unauthenticated')) {
-        setBoards([]);
-        confirmedSubscribedRef.current = new Set();
-        confirmedByBoardRead.current.clear();
-        applySubscribed(() => new Set());
+        clearBoardAccess();
       }
       setLoadError('暫時無法更新看板。請確認網路與登入狀態，再試一次。');
     } finally {
@@ -249,7 +257,7 @@ function BoardsContent() {
         setRefreshing(false);
       }
     }
-  }, [school?.id, auth.user?.uid, applySubscribed]);
+  }, [school?.id, auth.user?.uid, applySubscribed, clearBoardAccess]);
 
   // Re-read one board's subscription after a failed write without touching the
   // list refresh pipeline (loadVersion, error banner, spinner), so an in-flight
@@ -261,15 +269,16 @@ function BoardsContent() {
     // write, so an older re-read cannot clobber a newer one for this board.
     const intentAtStart = latestIntent.current.get(boardId);
     const deferredMembership = deferredListMembership.current.get(boardId);
+    const pending = pendingServerConfirmCounts.current;
     // Only a successful confirmation occupies the sequence. A newer query that
     // fails must not discard an older successful result.
     const canApply = () =>
       mounted.current &&
+      pendingServerConfirmCounts.current === pending &&
       !pendingSubscriptionCounts.current.has(boardId) &&
       (boardWriteRevision.current.get(boardId) ?? -1) <= revisionAtRead &&
       (boardServerAppliedRevision.current.get(boardId) ?? 0) < readRevision &&
       latestIntent.current.get(boardId) === intentAtStart;
-    const pending = pendingServerConfirmCounts.current;
     pending.set(boardId, (pending.get(boardId) ?? 0) + 1);
     try {
       // Read this board only. listSubscribedBoardIds is capped at 100 and

@@ -740,6 +740,36 @@ test('a late failed-write re-read never restores a board after access is revoked
   expect(view.queryByLabelText('取消訂閱讀書會')).toBeNull();
 });
 
+test.each(['firestore/permission-denied', 'unauthenticated'])(
+  'a confirmation from before %s cannot override the subscription list after access returns',
+  async (code) => {
+    jest.mocked(listBoards).mockResolvedValue([board]);
+    jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+    const view = render(<BoardsScreen />);
+    await view.findByText('讀書會');
+
+    const write = deferred();
+    const reRead = deferred<boolean>();
+    jest.mocked(unsubscribeFromBoard).mockImplementationOnce(() => write.promise);
+    jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => reRead.promise);
+    fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
+    await act(async () => { write.reject(new Error('offline')); });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+    expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+    jest.mocked(listSubscribedBoardIds).mockRejectedValueOnce(Object.assign(new Error('revoked'), { code }));
+    await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+    expect(view.queryByText('讀書會')).toBeNull();
+
+    jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([]);
+    await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+    await act(async () => { reRead.resolve(true); });
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+  },
+);
+
 test('two failed presses before a rerender roll back to the last confirmed state', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const first = deferred();
