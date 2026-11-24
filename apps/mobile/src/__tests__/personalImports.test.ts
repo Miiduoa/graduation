@@ -48,6 +48,7 @@ function useWebStorage() {
   const previousPlatform = Platform.OS;
   Platform.OS = 'web';
   window.localStorage.clear();
+  window.sessionStorage.clear();
   // Expo Web's AsyncStorage uses the same localStorage entries as direct reads.
   const getItem = jest.mocked(AsyncStorage.getItem);
   const setItem = jest.mocked(AsyncStorage.setItem);
@@ -59,6 +60,7 @@ function useWebStorage() {
     getItem.mockImplementation(nativeGet);
     setItem.mockImplementation(nativeSet);
     window.localStorage.clear();
+    window.sessionStorage.clear();
     Platform.OS = previousPlatform;
   };
 }
@@ -114,8 +116,8 @@ test('Web leaves the primary ledger intact when the recovery copy cannot be stor
   }
 });
 
-test('Web IndexedDB locks isolate account and school ledgers while a mutation waits', async () => {
-  const cleanup = useWebStorage();
+function useIndexedDBLocks() {
+  const transactions = new Map<string, { abort: () => void }>();
   const queues = new Map<string, Promise<void>>();
   // Model IndexedDB's readwrite scheduling at database/object-store scope.
   const open = jest.fn((name: string) => {
@@ -127,15 +129,26 @@ test('Web IndexedDB locks isolate account and school ledgers while a mutation wa
           const queueKey = JSON.stringify([name, storeName]);
           const previous = queues.get(queueKey) ?? Promise.resolve();
           let release!: () => void;
-          queues.set(queueKey, new Promise<void>((resolve) => { release = resolve; }));
+          const own = new Promise<void>((resolve) => { release = resolve; });
+          queues.set(queueKey, previous.then(() => own));
           let pending = 0;
+          let aborted = false;
           const transaction = {
+            error: new DOMException('交易中止', 'AbortError'),
             oncomplete: () => {},
+            onabort: () => {},
+            abort: () => {
+              if (aborted) return;
+              aborted = true;
+              release();
+              transaction.onabort();
+            },
             objectStore: () => ({
               get: () => {
                 const read = { onsuccess: () => {} };
                 pending += 1;
                 void previous.then(() => setTimeout(() => {
+                  if (aborted) return;
                   pending -= 1;
                   read.onsuccess();
                   if (pending === 0) {
@@ -147,6 +160,7 @@ test('Web IndexedDB locks isolate account and school ledgers while a mutation wa
               },
             }),
           };
+          transactions.set(name, transaction);
           return transaction;
         },
       },
@@ -156,6 +170,19 @@ test('Web IndexedDB locks isolate account and school ledgers while a mutation wa
   });
   const indexedDB = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB');
   Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: { open } });
+  return {
+    open,
+    abort: (key: string) => transactions.get(`campus.personal-imports.locks:${sha256(key)}`)!.abort(),
+    restore: () => {
+      if (indexedDB) Object.defineProperty(globalThis, 'indexedDB', indexedDB);
+      else Reflect.deleteProperty(globalThis, 'indexedDB');
+    },
+  };
+}
+
+test('Web IndexedDB locks isolate account and school ledgers while a mutation waits', async () => {
+  const cleanup = useWebStorage();
+  const { open, restore } = useIndexedDBLocks();
   let resume!: () => void;
   const paused = new Promise<void>((resolve) => { resume = resolve; });
   let signalStarted!: () => void;
@@ -204,115 +231,214 @@ test('Web IndexedDB locks isolate account and school ledgers while a mutation wa
     clearTimeout(timeout);
     resume();
     await Promise.allSettled([slow, sameLedgerWrite, ...writes]);
-    if (indexedDB) Object.defineProperty(globalThis, 'indexedDB', indexedDB);
-    else Reflect.deleteProperty(globalThis, 'indexedDB');
+    restore();
     cleanup();
   }
 });
 
-test.each(['before rollback', 'before rollback using the legacy primary', 'after rollback checks', 'before publication'])(
-  'Web keeps a newer commit completed %s without Web Locks or IndexedDB',
+test('IndexedDB reclaims an old full stage from another ledger while keeping its active writer’s stage', async () => {
+  const cleanup = useWebStorage();
+  const { restore } = useIndexedDBLocks();
+  const storage = window.localStorage;
+  const stage = (owner: string) => {
+    const key = personalImportStorageKey({ ...scope, owner });
+    return `campus.personal-imports.rollback.v1:${sha256(key)}:stage:${Date.now()}:test`;
+  };
+  const orphan = stage('nuni:closed-tab');
+  const active = stage(scope.owner);
+  const guard = { canContinue: () => true };
+  let resume!: () => void;
+  const paused = new Promise<void>((resolve) => { resume = resolve; });
+  let signalStarted!: () => void;
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  const writer = mutatePersonalImportLedger(scope, guard, async (ledger) => {
+    storage.setItem(active, JSON.stringify(ledger));
+    signalStarted();
+    await paused;
+    expect(storage.getItem(active)).not.toBeNull();
+    storage.removeItem(active);
+    return { ledger, result: undefined };
+  });
+  try {
+    await started;
+    const { ledger } = await appendPersonalImports({ ...scope, owner: 'nuni:other' }, [row('original')]);
+    storage.setItem(orphan, JSON.stringify({ original: JSON.stringify(ledger) }));
+    const write = Storage.prototype.setItem;
+    const quota = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage, key, value,
+    ) {
+      if (storage.getItem(orphan)) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      write.call(this, key, value);
+    });
+    try {
+      await expect(editPersonalImport({ ...scope, owner: 'nuni:other' }, ledger.records[0], row('original', '重試成功'), guard))
+        .resolves.toMatchObject({ records: [{ title: '重試成功' }] });
+      expect(storage.getItem(orphan)).toBeNull();
+      expect(storage.getItem(active)).not.toBeNull();
+    } finally {
+      quota.mockRestore();
+    }
+  } finally {
+    resume();
+    try {
+      await writer;
+    } finally {
+      restore();
+      cleanup();
+    }
+  }
+});
+
+test('an aborted IndexedDB write cannot publish after its failure is reported', async () => {
+  const cleanup = useWebStorage();
+  const { abort, restore } = useIndexedDBLocks();
+  const key = personalImportStorageKey(scope);
+  const guard = { canContinue: () => true };
+  let resume!: () => void;
+  const paused = new Promise<void>((resolve) => { resume = resolve; });
+  let signalStarted!: () => void;
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  let checkpointAfterAbort: Promise<void> | undefined;
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original')], guard);
+    const before = window.localStorage.getItem(key);
+    const write = mutatePersonalImportLedger(scope, guard, async (current, checkpoint) => {
+      signalStarted();
+      await paused;
+      const changed = { ...current, records: [{ ...current.records[0], title: '已中止的寫入' }] };
+      checkpointAfterAbort = checkpoint(changed);
+      await checkpointAfterAbort;
+      return { ledger: changed, result: undefined };
+    });
+    const failed = expect(write).rejects.toThrow('交易中止');
+    await started;
+    abort(key);
+    await failed;
+
+    // The queue has advanced, but no subsequent write has changed the primary.
+    await expect(mutatePersonalImportLedger(scope, guard, (current) => ({
+      ledger: current, result: current,
+    }))).resolves.toEqual(ledger);
+    resume();
+    await paused;
+    expect(checkpointAfterAbort).toBeDefined();
+    await expect(checkpointAfterAbort).rejects.toThrow('交易中止');
+    expect(window.localStorage.getItem(key)).toBe(before);
+    expect(Object.keys(window.sessionStorage)).toEqual([]);
+    await expect(editPersonalImport(scope, ledger.records[0], row('original', '重試成功'), guard))
+      .resolves.toMatchObject({ records: [{ title: '重試成功' }] });
+  } finally {
+    resume();
+    restore();
+    cleanup();
+  }
+});
+
+test.each(['account switched', 'legacy primary changed', 'during cleanup', 'before publication'])(
+  'Web preserves the other tab’s primary and stage without locks when %s',
   async (timing) => {
     const cleanup = useWebStorage();
     expect(navigator.locks).toBeUndefined();
     expect(globalThis.indexedDB).toBeUndefined();
     const storage = window.localStorage;
+    const stages = window.sessionStorage;
     const key = personalImportStorageKey(scope);
     const { ledger } = await appendPersonalImports(scope, [row('original')]);
-    let otherTab!: typeof import('../services/personalImports');
-    jest.isolateModules(() => {
-      otherTab = require('../services/personalImports');
-    });
-    const setItem = jest.mocked(AsyncStorage.setItem);
-    const write = setItem.getMockImplementation()!;
-    const removeItem = Storage.prototype.removeItem;
-    let resume!: () => void;
-    const paused = new Promise<void>((resolve) => { resume = resolve; });
-    let signalStaged!: (stageKey: string) => void;
-    const staged = new Promise<string>((resolve) => { signalStaged = resolve; });
+    const newer = { ...ledger, records: [{ ...ledger.records[0], title: '分頁 B' }] };
+    const newerRaw = JSON.stringify(timing === 'legacy primary changed' ? newer : { ...newer, webCommit: 'tab-b' });
+    let stageKey: string | undefined;
     let verified = true;
-    setItem.mockImplementationOnce(async (storageKey, raw) => {
-      await write(storageKey, raw);
-      signalStaged(storageKey);
-      await paused;
+    const setItem = Storage.prototype.setItem;
+    const removeItem = Storage.prototype.removeItem;
+    const writeSpy = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage, entry, value,
+    ) {
+      setItem.call(this, entry, value);
+      if (this !== stages) return;
+      stageKey = entry;
+      if (timing === 'account switched' || timing === 'during cleanup') verified = false;
+      if (timing !== 'during cleanup') setItem.call(storage, key, newerRaw);
     });
-
-    const rejected = expect(editPersonalImport(scope, ledger.records[0], row('original', '分頁 A'), {
-      canContinue: () => verified,
-    })).rejects.toThrow(timing === 'before publication' ? '已在另一個分頁更新' : '帳號或學校已切換');
-    let cleanupSpy: jest.SpyInstance | undefined;
+    const cleanupSpy = jest.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+      this: Storage, entry,
+    ) {
+      if (this === stages && entry === stageKey) {
+        if (timing === 'during cleanup') setItem.call(storage, key, newerRaw);
+        // Another tab has its own storage area. Its stage is outside this cleanup.
+        setItem.call(storage, `${entry}-other-tab`, '分頁 B 的副本');
+      }
+      removeItem.call(this, entry);
+    });
     try {
-      const stageKey = await staged;
-      let newer = { ...ledger, records: [{ ...ledger.records[0], title: '分頁 B' }] };
-      const newerRaw = JSON.stringify({ ...newer, webCommit: 'tab-b' });
-      const otherStageKey = stageKey + '-tab-b';
-      if (timing === 'before rollback' || timing === 'before publication') {
-        newer = await otherTab.editPersonalImport(scope, ledger.records[0], row('original', '分頁 B'), {
-          canContinue: () => true,
-        });
-      } else if (timing === 'before rollback using the legacy primary') {
-        storage.setItem(key, JSON.stringify(newer));
-      } else {
-        cleanupSpy = jest.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
-          this: Storage,
-          entry,
-        ) {
-          if (entry === stageKey) {
-            // B publishes after A has verified both the primary and its stage.
-            storage.setItem(key, newerRaw);
-            storage.setItem(otherStageKey, '分頁 B 的新副本');
-          }
-          removeItem.call(this, entry);
-        });
-      }
-
-      verified = timing === 'before publication';
-      resume();
-      await rejected;
-      if (timing === 'after rollback checks') {
-        expect(cleanupSpy).toHaveBeenCalledWith(stageKey);
-        expect(storage.getItem(key)).toBe(newerRaw);
-        expect(storage.getItem(otherStageKey)).toBe('分頁 B 的新副本');
-      }
-      await expect(otherTab.loadPersonalImports(scope)).resolves.toEqual(newer);
-      if (timing === 'before publication') {
-        let reloadedTab!: typeof import('../services/personalImports');
-        jest.isolateModules(() => {
-          reloadedTab = require('../services/personalImports');
-        });
-        const setStorageItem = Storage.prototype.setItem;
-        const stagePrefix = stageKey.slice(0, stageKey.indexOf(':stage:') + ':stage:'.length);
-        const quota = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
-          this: Storage,
-          entry,
-          value,
-        ) {
-          // There is enough space for only one full-size recovery copy.
-          if (entry.startsWith(stagePrefix) && Object.keys(this).some((key) => key.startsWith(stagePrefix))) {
-            throw new DOMException('Quota exceeded', 'QuotaExceededError');
-          }
-          setStorageItem.call(this, entry, value);
-        });
-        try {
-          const reloaded = await reloadedTab.loadPersonalImports(scope);
-          const retried = await reloadedTab.editPersonalImport(scope, reloaded.records[0], row('original', '重試成功'), {
-            canContinue: () => true,
-          });
-          expect(retried.records[0].title).toBe('重試成功');
-          await expect(reloadedTab.loadPersonalImports(scope)).resolves.toEqual(retried);
-        } finally {
-          quota.mockRestore();
-        }
-      }
-      expect(storage.getItem(stageKey)).toBeNull();
+      await expect(editPersonalImport(scope, ledger.records[0], row('original', '分頁 A'), {
+        canContinue: () => verified,
+      })).rejects.toThrow(verified && (timing === 'legacy primary changed' || timing === 'before publication')
+        ? '已在另一個分頁更新' : '帳號或學校已切換');
+      expect(stageKey).toBeDefined();
+      expect(stages.getItem(stageKey!)).toBeNull();
+      expect(storage.getItem(`${stageKey}-other-tab`)).toBe('分頁 B 的副本');
+      expect(storage.getItem(key)).toBe(newerRaw);
+      await expect(loadPersonalImports(scope)).resolves.toEqual(newer);
     } finally {
-      resume();
-      await rejected;
-      cleanupSpy?.mockRestore();
+      cleanupSpy.mockRestore();
+      writeSpy.mockRestore();
       cleanup();
     }
   },
 );
+
+test.each([false, true])('Web reclaims an abandoned session stage before a near-quota retry (other ledger: %s)', async (foreign) => {
+  const cleanup = useWebStorage();
+  const stages = window.sessionStorage;
+  const stagePrefix = 'campus.personal-imports.stage.v2:';
+  const { ledger } = await appendPersonalImports(scope, [row('original')]);
+  const oldScope = foreign ? { ...scope, owner: 'nuni:account-b' } : scope;
+  const { ledger: other } = foreign ? await appendPersonalImports(oldScope, [row('other')]) : { ledger };
+  const setItem = Storage.prototype.setItem;
+  let abandoned: string | undefined;
+  let verified = true;
+  const writeSpy = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+    this: Storage, entry, value,
+  ) {
+    if (this === stages && Object.keys(this).some((key) => key.startsWith(stagePrefix))) {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    }
+    setItem.call(this, entry, value);
+    if (this === stages) {
+      abandoned = entry;
+      verified = false;
+    }
+  });
+  const removeItem = Storage.prototype.removeItem;
+  const lostCleanup = jest.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+    this: Storage, entry,
+  ) {
+    if (this !== stages) removeItem.call(this, entry);
+  });
+  try {
+    // Model a terminated page by leaving its full stage in the restored session.
+    await expect(editPersonalImport(oldScope, other.records[0], { ...other.records[0], title: '前次寫入' }, {
+      canContinue: () => verified,
+    })).rejects.toThrow('帳號或學校已切換');
+    await expect(loadPersonalImports(oldScope)).resolves.toEqual(other);
+    const orphan = abandoned!;
+    expect(JSON.parse(JSON.parse(stages.getItem(orphan)!).original).records).toEqual(other.records);
+    lostCleanup.mockRestore();
+    let reopened!: typeof import('../services/personalImports');
+    jest.isolateModules(() => { reopened = require('../services/personalImports'); });
+    const { records: [original] } = await reopened.loadPersonalImports(scope);
+    const retried = await reopened.editPersonalImport(scope, original, { ...original, title: '重試成功' }, {
+      canContinue: () => true,
+    });
+    expect(retried.records[0].title).toBe('重試成功');
+    expect(stages.getItem(orphan)).toBeNull();
+    expect(Object.keys(stages)).toEqual([]);
+  } finally {
+    lostCleanup.mockRestore();
+    writeSpy.mockRestore();
+    cleanup();
+  }
+});
 
 test.each(['a', '校'])('guarded calendar writes support maximum-length account and school IDs (%s)', async (character) => {
   const longScope = { owner: `nuni:${'u'.repeat(128)}`, schoolId: character.repeat(120) };
@@ -497,16 +623,18 @@ test('Web preserves the ledger after revocation and can retry after restart with
   Object.defineProperty(Paths, 'document', {
     get: () => { throw new TypeError('Expo 網頁預覽沒有文件目錄'); },
   });
+  let stageWrite: jest.SpyInstance | undefined;
   try {
     const { ledger } = await appendPersonalImports(scope, [row('original')]);
     const key = personalImportStorageKey(scope);
     const before = window.localStorage.getItem(key);
     let verified = true;
-    const setItem = jest.mocked(AsyncStorage.setItem);
-    const write = setItem.getMockImplementation()!;
-    setItem.mockImplementationOnce(async (storageKey, value) => {
-      await write(storageKey, value);
-      verified = false;
+    const write = Storage.prototype.setItem;
+    stageWrite = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage, storageKey, value,
+    ) {
+      write.call(this, storageKey, value);
+      if (this === window.sessionStorage) verified = false;
     });
     await expect(deletePersonalImport(scope, ledger.records[0], {
       canContinue: () => true,
@@ -514,6 +642,7 @@ test('Web preserves the ledger after revocation and can retry after restart with
     })).rejects.toThrow('目前無法確認行事曆可寫入');
     expect(window.localStorage.getItem(key)).toBe(before);
 
+    stageWrite.mockRestore();
     let restarted!: typeof import('../services/personalImports');
     jest.isolateModules(() => {
       restarted = require('../services/personalImports');
@@ -523,6 +652,7 @@ test('Web preserves the ledger after revocation and can retry after restart with
     await expect(restarted.loadPersonalImports(scope)).resolves.toMatchObject({ records: [] });
     expect(Object.keys(window.localStorage)).toEqual([key]);
   } finally {
+    stageWrite?.mockRestore();
     cleanup();
     Object.defineProperty(Paths, 'document', document);
   }

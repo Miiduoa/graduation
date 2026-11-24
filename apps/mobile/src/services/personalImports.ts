@@ -253,13 +253,15 @@ export function mutatePersonalImportLedger<T>(
   const previous = locks.get(key) || Promise.resolve();
   const task = previous
     .catch(() => undefined)
-    .then(() => withPersonalImportWriteLock(key, async () => {
+    .then(() => withPersonalImportWriteLock(key, async (assertLockHeld) => {
       let hasPersisted = false;
       const assertWritable = () => {
+        assertLockHeld();
         if (!canContinue()) throw new Error('帳號或學校已切換，請重新開啟匯入。');
         if (!hasPersisted && typeof guard !== 'function' && guard.canCommitFirstWrite?.() === false) {
           throw new Error('目前無法確認行事曆可寫入，請稍後再試。');
         }
+        assertLockHeld();
       };
       assertWritable();
       const web = Platform.OS === 'web';
@@ -280,7 +282,7 @@ export function mutatePersonalImportLedger<T>(
         const write = async () => {
           let writtenRaw = raw;
           if (web) {
-            writtenRaw = await commitWebPersonalImports(
+            writtenRaw = commitWebPersonalImports(
               key, primaryRaw, raw, assertWritable, needsJournal ? { raw: persistedRaw } : undefined,
             );
           } else if (!needsJournal) {

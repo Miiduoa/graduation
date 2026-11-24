@@ -5,10 +5,12 @@ import { sha256 } from 'js-sha256';
 import { Platform } from 'react-native';
 
 const markerSuffix = '.rollback.pending';
+const journalPrefix = 'campus.personal-imports.rollback.v1:';
+const legacyStagePattern = /^campus\.personal-imports\.rollback\.v1:([a-f0-9]{64}):stage:\d+:[^:]+$/;
 
 // One atomic browser storage entry contains both the recovery marker and the payload.
 function webJournalKey(key: string) {
-  return `campus.personal-imports.rollback.v1:${sha256(key)}`;
+  return journalPrefix + sha256(key);
 }
 
 type WebRollback = {
@@ -21,12 +23,14 @@ type WebRollback = {
 const fingerprint = (raw: string | null) => sha256(raw ?? 'null');
 
 const lockStore = 'writes';
+const stagePrefix = 'campus.personal-imports.stage.v2:';
+const activeStages = new Set<string>();
 
-async function openWriteLockDatabase(key: string): Promise<IDBDatabase | undefined> {
+async function openWriteLockDatabase(ledgerHash: string): Promise<IDBDatabase | undefined> {
   if (typeof indexedDB === 'undefined') return undefined;
   try {
     return await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(`campus.personal-imports.locks:${sha256(key)}`, 1);
+      const request = indexedDB.open(`campus.personal-imports.locks:${ledgerHash}`, 1);
       request.onupgradeneeded = () => request.result.createObjectStore(lockStore);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
@@ -37,33 +41,129 @@ async function openWriteLockDatabase(key: string): Promise<IDBDatabase | undefin
   }
 }
 
-export async function withPersonalImportWriteLock<T>(key: string, write: () => Promise<T>): Promise<T> {
-  if (Platform.OS !== 'web') return write();
-  const name = webJournalKey(key);
-  if (navigator.locks) return navigator.locks.request(name, write);
+// Older builds staged in origin-wide storage. Only retire those entries
+// while holding the same per-ledger lock an older writer would hold.
+async function sweepLegacyStages(ledgerHash: string): Promise<void> {
+  const storage = window.localStorage;
+  const foreign = new Map<string, string[]>();
+  for (const entry of Object.keys(storage)) {
+    const hash = legacyStagePattern.exec(entry)?.[1];
+    if (!hash) continue;
+    if (hash === ledgerHash) {
+      storage.removeItem(entry);
+    } else {
+      const entries = foreign.get(hash) ?? [];
+      entries.push(entry);
+      foreign.set(hash, entries);
+    }
+  }
+  await Promise.all([...foreign].map(async ([hash, entries]) => {
+    const remove = () => {
+      for (const entry of entries) storage.removeItem(entry);
+    };
+    if (navigator.locks) {
+      await navigator.locks.request(journalPrefix + hash, { ifAvailable: true }, (lock) => {
+        if (lock) remove();
+      });
+      return;
+    }
+    await sweepLegacyIndexedDBStages(hash, remove);
+  }));
+}
+
+async function sweepLegacyIndexedDBStages(hash: string, remove: () => void): Promise<void> {
+  // IndexedDB has no try-lock. Bound the probe so another ledger's active
+  // transaction cannot make this ledger wait for its mutation to finish.
+  let expired = false;
+  let transaction: IDBTransaction | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const probe = async () => {
+    const database = await openWriteLockDatabase(hash);
+    if (!database) return;
+    try {
+      if (expired) return;
+      await new Promise<void>((resolve, reject) => {
+        transaction = database.transaction(lockStore, 'readwrite');
+        transaction.onabort = () => resolve();
+        transaction.oncomplete = () => resolve();
+        transaction.objectStore(lockStore).get('lock').onsuccess = () => {
+          if (expired) return;
+          try {
+            remove();
+          } catch (error) {
+            reject(error);
+          }
+        };
+      });
+    } finally {
+      database.close();
+    }
+  };
+  try {
+    await Promise.race([probe(), new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        expired = true;
+        resolve();
+        try {
+          transaction?.abort();
+        } catch {
+          // The probe already finished.
+        }
+      }, 100);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const noLockCheck = () => {};
+
+export async function withPersonalImportWriteLock<T>(
+  key: string,
+  write: (assertLockHeld: () => void) => Promise<T>,
+): Promise<T> {
+  if (Platform.OS !== 'web') return write(noLockCheck);
+  const ledgerHash = sha256(key);
+  const writeWithCleanup = async (assertLockHeld: () => void) => {
+    await sweepLegacyStages(ledgerHash);
+    assertLockHeld();
+    return write(assertLockHeld);
+  };
+  if (navigator.locks) {
+    return navigator.locks.request(journalPrefix + ledgerHash, () => writeWithCleanup(noLockCheck));
+  }
 
   // IndexedDB serializes readwrite transactions by object store. Use a
   // database per ledger so opening a new ledger also needs no shared upgrade.
-  const database = await openWriteLockDatabase(key);
-  if (!database) return write();
+  const database = await openWriteLockDatabase(ledgerHash);
+  if (!database) return write(noLockCheck);
   try {
     return await new Promise<T>((resolve, reject) => {
       const transaction = database.transaction(lockStore, 'readwrite');
       const store = transaction.objectStore(lockStore);
       let operation: Promise<T> | undefined;
       let finished = false;
+      let aborted: Error | undefined;
+      const assertLockHeld = () => {
+        if (aborted) throw aborted;
+      };
       const keepLock = () => {
         if (finished) return;
         store.get('lock').onsuccess = () => {
+          if (finished) return;
           if (!operation) {
-            operation = write().finally(() => { finished = true; });
+            operation = writeWithCleanup(assertLockHeld).finally(() => { finished = true; });
             // Observe rejection immediately. Deliver the result after releasing the lock.
             void operation.catch(() => undefined);
           }
           keepLock();
         };
       };
-      transaction.onabort = () => reject(transaction.error);
+      transaction.onabort = () => {
+        aborted = transaction.error ?? new Error('匯入資料的寫入鎖定已中止，請稍後再試。');
+        finished = true;
+        reject(aborted);
+      };
       transaction.oncomplete = () => {
         if (operation) operation.then(resolve, reject);
         else reject(new Error('無法取得匯入資料的寫入鎖定。'));
@@ -109,62 +209,60 @@ export function hasWebPersonalImportCommit(raw: string | null): boolean {
   }
 }
 
-const abandonedStageAge = 24 * 60 * 60 * 1000;
+function sweepSessionStages(storage: Storage): void {
+  for (const entry of Object.keys(storage)) {
+    if (entry.startsWith(stagePrefix) && !activeStages.has(entry)) storage.removeItem(entry);
+  }
+}
 
-export async function commitWebPersonalImports(
+export function commitWebPersonalImports(
   key: string,
   before: string | null,
   attempted: string,
   assertWritable: () => void,
   recovery?: { raw: string | null },
-): Promise<string> {
+): string {
   const storage = window.localStorage;
   const id = createPersonalImportId();
   const committed = JSON.stringify({ ...JSON.parse(attempted), webCommit: id });
   const conflict = () => new Error('匯入資料已在另一個分頁更新，請重新載入。');
-  const publish = () => {
+  const publish = (ownsStage = () => true) => {
     assertWritable();
+    if (!ownsStage() || storage.getItem(key) !== before) throw conflict();
     // The primary stays authoritative until this single publication. Its new
     // generation also retires legacy recovery data without clearing shared keys.
     storage.setItem(key, committed);
     if (storage.getItem(key) !== committed) throw conflict();
     return committed;
   };
-  if (!recovery) {
-    if (storage.getItem(key) !== before) throw conflict();
-    return publish();
-  }
+  if (!recovery) return publish();
 
-  const prefix = `${webJournalKey(key)}:stage:`;
-  const now = Date.now();
-  for (const entry of Object.keys(storage)) {
-    if (!entry.startsWith(prefix)) continue;
-    const started = Number(entry.slice(prefix.length).split(':', 1)[0]);
-    // A suspended writer must recheck its stage before publishing.
-    if (started < now - abandonedStageAge) storage.removeItem(entry);
-  }
-
-  const stageKey = `${prefix}${now}:${id}`;
+  // A stage is used only by this attempt. Session storage keeps its full copy
+  // out of the origin-wide localStorage budget and out of other tabs' reach.
+  // After a reload the session may survive, but its active attempts do not.
+  const stages = window.sessionStorage;
+  sweepSessionStages(stages);
+  const stageKey = stagePrefix + id;
   const encoded = JSON.stringify({
     id,
     original: recovery.raw,
     before: fingerprint(before),
     attempted: fingerprint(attempted),
   } satisfies WebRollback);
-  const ownsStage = () => storage.getItem(stageKey) === encoded;
+  const ownsStage = () => stages.getItem(stageKey) === encoded;
+  activeStages.add(stageKey);
   try {
-    await AsyncStorage.setItem(stageKey, encoded);
-    assertWritable();
-    if (!ownsStage() || storage.getItem(key) !== before) throw conflict();
-
-    return publish();
+    stages.setItem(stageKey, encoded);
+    return publish(ownsStage);
   } finally {
     // Stages are private to an attempt and are never read for recovery.
     // Reclaim this stage even if another tab has already published.
     try {
-      if (ownsStage()) storage.removeItem(stageKey);
+      if (ownsStage()) stages.removeItem(stageKey);
     } catch {
       // An abandoned stage is inert and can be reclaimed by a later write.
+    } finally {
+      activeStages.delete(stageKey);
     }
   }
 }
