@@ -1,4 +1,4 @@
-import { fetchWithPerformance, performance } from '../../services/performance';
+import { fetchWithPerformance, performance, type HttpMetric } from '../../services/performance';
 
 describe('fetchWithPerformance', () => {
   const originalFetch = globalThis.fetch;
@@ -11,17 +11,30 @@ describe('fetchWithPerformance', () => {
   });
 
   afterEach(() => {
+    jest.restoreAllMocks();
     globalThis.fetch = originalFetch;
     performance.getDataStore().clear();
   });
+
+  function mockMetric() {
+    const metric: jest.Mocked<HttpMetric> = {
+      setHttpResponseCode: jest.fn(),
+      setRequestPayloadSize: jest.fn(),
+      setResponsePayloadSize: jest.fn(),
+      setResponseContentType: jest.fn(),
+      putAttribute: jest.fn(),
+      start: jest.fn().mockResolvedValue(undefined),
+      stop: jest.fn().mockResolvedValue(undefined),
+    };
+    jest.spyOn(performance, 'newHttpMetric').mockReturnValue(metric);
+    return metric;
+  }
 
   function responseWithLength(length: string | null, status = 200) {
     const response = {
       status,
       headers: {
-        get: jest.fn((name: string) =>
-          name === 'content-length' ? length : 'application/json',
-        ),
+        get: jest.fn((name: string) => (name === 'content-length' ? length : 'application/json')),
       },
       clone: jest.fn(() => {
         throw new Error('response must not be cloned by telemetry');
@@ -35,7 +48,9 @@ describe('fetchWithPerformance', () => {
   it('returns the original response without cloning or consuming its body', async () => {
     const response = responseWithLength('1024');
     const options = { method: 'GET' };
-    await expect(fetchWithPerformance('https://example.test/data', options)).resolves.toBe(response);
+    await expect(fetchWithPerformance('https://example.test/data', options)).resolves.toBe(
+      response,
+    );
     expect(mockFetch).toHaveBeenCalledWith('https://example.test/data', options);
     expect(response.clone).not.toHaveBeenCalled();
     expect(response.text).not.toHaveBeenCalled();
@@ -85,4 +100,136 @@ describe('fetchWithPerformance', () => {
     expect(store.getErrorHttpRequests()).toHaveLength(2);
     expect(performance.getReport().httpStats.errorRate).toBe(0.5);
   });
+
+  it('starts the fetch and returns its response while metric startup is pending', async () => {
+    const metric = mockMetric();
+    let finishStart!: () => void;
+    metric.start.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishStart = resolve;
+      }),
+    );
+    const response = responseWithLength('1024');
+
+    const request = fetchWithPerformance('https://example.test/data');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    await expect(request).resolves.toBe(response);
+    expect(metric.stop).not.toHaveBeenCalled();
+
+    finishStart();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(metric.setHttpResponseCode).toHaveBeenCalledWith(200);
+    expect(metric.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns its response without waiting for metric shutdown', async () => {
+    const metric = mockMetric();
+    let finishStop!: () => void;
+    metric.stop.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishStop = resolve;
+      }),
+    );
+    const response = responseWithLength('1024');
+
+    await expect(fetchWithPerformance('https://example.test/data')).resolves.toBe(response);
+    expect(metric.stop).toHaveBeenCalledTimes(1);
+    finishStop();
+  });
+
+  it.each(['response', 'transport error'] as const)(
+    'measures the time to %s without counting delayed telemetry startup',
+    async (outcome) => {
+      let now = 0;
+      jest.spyOn(Date, 'now').mockImplementation(() => now);
+      const metric = performance.newHttpMetric('https://example.test/data', 'GET');
+      const start = metric.start.bind(metric);
+      let finishStart!: () => void;
+      jest.spyOn(metric, 'start').mockImplementation(() => {
+        void start();
+        return new Promise<void>((resolve) => {
+          finishStart = resolve;
+        });
+      });
+      jest.spyOn(performance, 'newHttpMetric').mockReturnValue(metric);
+      const response = responseWithLength('1024');
+      const networkError = new Error('network unavailable');
+      mockFetch.mockImplementation(async () => {
+        now = 100;
+        if (outcome === 'transport error') throw networkError;
+        return response;
+      });
+
+      const request = fetchWithPerformance('https://example.test/data');
+      if (outcome === 'transport error') await expect(request).rejects.toBe(networkError);
+      else await expect(request).resolves.toBe(response);
+      expect(performance.getDataStore().getHttpMetrics()).toHaveLength(0);
+
+      now = 5000;
+      finishStart();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(performance.getDataStore().getHttpMetrics()[0]).toMatchObject({
+        duration: 100,
+        attributes: {
+          duration_scope: outcome === 'transport error' ? 'transport_failure' : 'response_headers',
+        },
+      });
+      expect(performance.getReport().httpStats.slowRequests).toBe(0);
+    },
+  );
+
+  it.each(['create', 'start', 'headers', 'annotate', 'stop'] as const)(
+    'preserves a successful response when telemetry fails at %s',
+    async (stage) => {
+      const metric = mockMetric();
+      const response = responseWithLength('1024');
+      const failure = new Error(`telemetry ${stage} failed`);
+      if (stage === 'create') {
+        jest.spyOn(performance, 'newHttpMetric').mockImplementation(() => {
+          throw failure;
+        });
+      } else if (stage === 'start') {
+        metric.start.mockRejectedValue(failure);
+      } else if (stage === 'headers') {
+        response.headers.get.mockImplementation(() => {
+          throw failure;
+        });
+      } else if (stage === 'annotate') {
+        metric.setHttpResponseCode.mockImplementation(() => {
+          throw failure;
+        });
+      } else {
+        metric.stop.mockRejectedValue(failure);
+      }
+
+      await expect(fetchWithPerformance('https://example.test/data')).resolves.toBe(response);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(metric.putAttribute).not.toHaveBeenCalledWith('transport_error', 'true');
+      if (stage !== 'create' && stage !== 'start') {
+        expect(metric.stop).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
+
+  it.each(['start', 'annotate', 'stop'] as const)(
+    'preserves the original fetch failure when telemetry fails at %s',
+    async (stage) => {
+      const metric = mockMetric();
+      const networkError = new TypeError('network unavailable');
+      const metricError = new Error('telemetry unavailable');
+      mockFetch.mockRejectedValue(networkError);
+      if (stage === 'start') metric.start.mockRejectedValue(metricError);
+      else if (stage === 'annotate')
+        metric.putAttribute.mockImplementation((name) => {
+          if (name === 'transport_error') throw metricError;
+        });
+      else metric.stop.mockRejectedValue(metricError);
+
+      await expect(fetchWithPerformance('https://example.test/offline')).rejects.toBe(networkError);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      if (stage !== 'start') expect(metric.stop).toHaveBeenCalledTimes(1);
+    },
+  );
 });
