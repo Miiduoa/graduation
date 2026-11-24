@@ -68,7 +68,6 @@ type SubscriptionListRead = {
   subscribedIds: ReadonlySet<string>;
   serverConfirmedIds: ReadonlySet<string>;
   writeRevisionAtDispatch: number;
-  writeRevisionAtDelivery: number;
   serverRevisionAtDispatch: number;
 };
 
@@ -82,6 +81,8 @@ function BoardsContent() {
   const insets = useSafeAreaInsets();
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [subscribed, setSubscribed] = useState<Set<string>>(new Set());
+  const [subscriptionReady, setSubscriptionReady] = useState(false);
+  const subscriptionReadyRef = useRef(false);
   const [filter, setFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -148,6 +149,8 @@ function BoardsContent() {
     // Writes and confirmations from this access period can still settle.
     // Invalidate their results and keep confirmation cleanup on the old map.
     accessGeneration.current += 1;
+    subscriptionReadyRef.current = false;
+    setSubscriptionReady(false);
     pendingServerConfirmCounts.current = new Map();
     pendingSubscriptionCounts.current.clear();
     boardWriteRevision.current.clear();
@@ -306,9 +309,10 @@ function BoardsContent() {
             subscribedIds: new Set(ids),
             serverConfirmedIds: new Set(serverConfirmedIds),
             writeRevisionAtDispatch,
-            writeRevisionAtDelivery: subscriptionRevision.current,
             serverRevisionAtDispatch,
           }, overlappingReconciliations, uid, sid);
+          subscriptionReadyRef.current = true;
+          setSubscriptionReady(true);
         }).catch(handleError),
       ]);
     } catch (cause) {
@@ -370,8 +374,8 @@ function BoardsContent() {
       if (!canApply() || deferredListMembership.current.get(boardId) !== deferredMembership) return;
       deferredListMembership.current.delete(boardId);
       if (
-        deferredMembership?.subscribedIds.has(boardId) &&
-        deferredMembership.writeRevisionAtDelivery >= (lastSuccessfulUnsubscribeRevision.current.get(boardId) ?? 0) &&
+        deferredMembership?.serverConfirmedIds.has(boardId) &&
+        deferredMembership.writeRevisionAtDispatch >= (lastSuccessfulUnsubscribeRevision.current.get(boardId) ?? 0) &&
         lastSettledWriteSucceeded.current.has(boardId) &&
         !confirmedSubscribedRef.current.has(boardId)
       ) {
@@ -440,6 +444,7 @@ function BoardsContent() {
         if (!uid) Alert.alert('請登入', '登入後即可訂閱看板');
         return;
       }
+      if (!subscriptionReadyRef.current) return;
       const generation = accessGeneration.current;
       const wasSub = subscribedRef.current.has(b.id);
       const target = !wasSub;
@@ -626,6 +631,7 @@ function BoardsContent() {
             const b = item.board;
             const isSub = subscribed.has(b.id);
             const isPending = pendingSubscriptions.has(b.id);
+            const subscriptionLabel = subscriptionReady ? (isSub ? '已訂閱' : '訂閱') : '訂閱狀態未確認';
             return (
               <Pressable
                 style={styles.row}
@@ -667,14 +673,17 @@ function BoardsContent() {
                 <Pressable
                   hitSlop={8}
                   accessibilityRole="button"
-                  accessibilityLabel={`${isSub ? '取消訂閱' : '訂閱'}${b.name}`}
-                  accessibilityHint={isPending ? '正在同步訂閱狀態，可再點一次撤銷' : '向伺服器更新本校看板訂閱'}
-                  accessibilityState={{ busy: isPending }}
+                  accessibilityLabel={`${subscriptionReady && isSub ? '取消訂閱' : subscriptionLabel}${b.name}`}
+                  accessibilityHint={subscriptionReady
+                    ? (isPending ? '正在同步訂閱狀態，可再點一次撤銷' : '向伺服器更新本校看板訂閱')
+                    : '重新讀取看板以取得訂閱狀態'}
+                  accessibilityState={{ busy: isPending, disabled: !subscriptionReady }}
+                  disabled={!subscriptionReady}
                   onPress={(e) => {
                     e?.stopPropagation?.();
                     void onToggleSubscribe(b);
                   }}
-                  style={[styles.subBtn, isSub && styles.subBtnOn, isPending && { opacity: 0.65 }]}
+                  style={[styles.subBtn, isSub && styles.subBtnOn, (isPending || !subscriptionReady) && { opacity: 0.65 }]}
                 >
                   <Ionicons
                     name={isSub ? 'notifications' : 'notifications-outline'}
@@ -682,7 +691,7 @@ function BoardsContent() {
                     color={isSub ? theme.colors.onAccent : theme.colors.accent}
                   />
                   <Text style={[styles.subBtnTxt, isSub && { color: theme.colors.onAccent }]}>
-                    {isSub ? '已訂閱' : '訂閱'}
+                    {subscriptionLabel}
                   </Text>
                 </Pressable>
               </Pressable>
