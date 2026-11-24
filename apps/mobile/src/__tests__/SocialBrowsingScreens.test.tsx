@@ -438,7 +438,7 @@ test.each([true, false])('a list started after a failed subscribe verifies its c
   expect(view.getByLabelText('訂閱讀書會').props.accessibilityState.busy).toBe(false);
   expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
 
-  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  jest.mocked(readSubscribedBoardIds).mockResolvedValueOnce({ ids: ['board'], serverConfirmed: false });
   await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
   expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
   expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
@@ -1171,6 +1171,46 @@ test.each([false, true])(
       expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
       expect(isSubscribedToBoard).toHaveBeenCalledTimes(confirmationCount);
     }
+  },
+);
+
+test.each([false, true])(
+  'a fresh server list restores membership while the rollback retry is pending (retry fails: %s)',
+  async (retryFails) => {
+    jest.mocked(listBoards).mockResolvedValue([board]);
+    const view = render(<BoardsScreen />);
+    await view.findByText('讀書會');
+
+    const retry = deferred<boolean>();
+    jest.mocked(subscribeToBoard).mockRejectedValueOnce(new Error('offline'));
+    jest.mocked(isSubscribedToBoard)
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockImplementationOnce(() => retry.promise)
+      .mockRejectedValueOnce(new Error('offline'));
+    await act(async () => { fireEvent.press(view.getByLabelText('訂閱讀書會')); });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+    expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+    const refresh = () => view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+    jest.mocked(readSubscribedBoardIds).mockResolvedValueOnce({
+      ids: ['board'],
+      serverConfirmed: true,
+    });
+    await act(async () => { await refresh(); });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+    expect(view.UNSAFE_getByType(RefreshControl).props.refreshing).toBe(false);
+    expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+    jest.mocked(readSubscribedBoardIds).mockResolvedValueOnce({ ids: [], serverConfirmed: false });
+    await act(async () => { await refresh(); });
+    expect(isSubscribedToBoard).toHaveBeenCalledTimes(3);
+    expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+    await act(async () => {
+      if (retryFails) retry.reject(new Error('offline'));
+      else retry.resolve(false);
+    });
+    expect(view.getByLabelText(retryFails ? '取消訂閱讀書會' : '訂閱讀書會')).toBeTruthy();
   },
 );
 

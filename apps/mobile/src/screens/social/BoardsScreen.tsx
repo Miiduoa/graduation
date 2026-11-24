@@ -212,6 +212,24 @@ function BoardsContent() {
       for (const [id, appliedAt] of boardConfirmationAppliedAt.current) {
         if (appliedAt > serverRevisionAtDispatch) keepLocal.add(id);
       }
+      // Positive membership from a server list dispatched after the writes
+      // settled can update the UI during reconciliation. Keep the overlap out
+      // of list sequencing so an in-flight single-board read can still apply.
+      const keepLocalMembership = new Set(keepLocal);
+      if (membership.serverConfirmed) {
+        for (const id of subscribedIds) {
+          if (
+            keepLocal.has(id) &&
+            !pendingSubscriptionCounts.current.has(id) &&
+            !confirmedByBoardRead.current.has(id) &&
+            (boardWriteRevision.current.get(id) ?? 0) <= membership.writeRevisionAtDispatch &&
+            (boardConfirmationAppliedAt.current.get(id) ?? 0) <= serverRevisionAtDispatch
+          ) {
+            keepLocalMembership.delete(id);
+            deferredListMembership.current.delete(id);
+          }
+        }
+      }
       const tracked = new Set([
         ...subscribedIds,
         ...keepLocal,
@@ -220,7 +238,7 @@ function BoardsContent() {
         ...boardWriteRevision.current.keys(),
       ]);
       const nextConfirmed = new Set(subscribedIds);
-      for (const id of keepLocal) {
+      for (const id of keepLocalMembership) {
         if (confirmedSubscribedRef.current.has(id)) nextConfirmed.add(id);
         else nextConfirmed.delete(id);
       }
@@ -235,7 +253,7 @@ function BoardsContent() {
       }
       applySubscribed((previous) => {
         const next = new Set(subscribedIds);
-        for (const id of keepLocal) {
+        for (const id of keepLocalMembership) {
           if (previous.has(id)) next.add(id);
           else next.delete(id);
         }
@@ -249,6 +267,7 @@ function BoardsContent() {
         // single-board result applies, only another successful read can
         // replace it during reconciliation.
         if (
+          keepLocalMembership.has(id) &&
           !confirmedByBoardRead.current.has(id) &&
           (boardConfirmationAppliedAt.current.get(id) ?? 0) <= membership.serverRevisionAtDispatch
         ) {
@@ -337,15 +356,10 @@ function BoardsContent() {
     } catch {
       if (!canApply() || deferredListMembership.current.get(boardId) !== deferredMembership) return;
       deferredListMembership.current.delete(boardId);
-      // A committed server list dispatched after the write settled can
-      // establish membership even when both the write and confirmation failed.
-      const freshServerMembership =
-        deferredMembership?.serverConfirmed &&
-        deferredMembership.writeRevisionAtDispatch >= (boardWriteRevision.current.get(boardId) ?? 0);
       if (
         deferredMembership?.subscribedIds.has(boardId) &&
         deferredMembership.writeRevisionAtDelivery >= (lastSuccessfulUnsubscribeRevision.current.get(boardId) ?? 0) &&
-        (freshServerMembership || lastSettledWriteSucceeded.current.has(boardId)) &&
+        lastSettledWriteSucceeded.current.has(boardId) &&
         !confirmedSubscribedRef.current.has(boardId)
       ) {
         const nextConfirmed = new Set(confirmedSubscribedRef.current);
