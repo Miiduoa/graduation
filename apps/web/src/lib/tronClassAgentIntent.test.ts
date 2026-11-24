@@ -1204,6 +1204,10 @@ describe('three-way sentence classification', () => {
       '下載 TronClass（期末（公告）說明.pdf）',
       '查玩課雲作業 槑／捎附件予校園老師.pdf',
       '查玩課雲作業（未交',
+      '查玩課雲作業（準備捎予老師）',
+      '準備 TronClass 作業（期末.pdf）',
+      '準備 TronClass 作業（捎予老師）',
+      '查玩課雲作業，校園公告（不要查作業）',
     ]) {
       expect(classifyTronClassSentence(question)?.outcome).not.toBe('clearly-read');
       expect(parseTronClassAgentIntent(question)?.intent).not.toBe('homework');
