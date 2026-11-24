@@ -101,7 +101,7 @@ overrides:
 
 patchedDependencies:
   next@16.4.5:
-    hash: c935e3ab41dc84f000914647cf996e6fafd65122febf1c47bef839b5bf705412
+    hash: d962b4124470bcdfb2bff0fa8480c25e47b07d28637200245378b5d50b218075
     path: patches/next@16.4.5.patch
   query-string@7.1.3:
     hash: 18673359728adac4e68c43b028b1dc802cf37368d1fceccad2be6d645baadc8b
@@ -372,7 +372,7 @@ importers:
         version: 1.9.4
       next:
         specifier: 16.4.5
-        version: 16.4.5(patch_hash=c935e3ab41dc84f000914647cf996e6fafd65122febf1c47bef839b5bf705412)(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@types/node@20.19.30)(babel-plugin-react-compiler@1.0.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+        version: 16.4.5(patch_hash=d962b4124470bcdfb2bff0fa8480c25e47b07d28637200245378b5d50b218075)(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@types/node@20.19.30)(babel-plugin-react-compiler@1.0.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       parse5:
         specifier: 8.1.1
         version: 8.1.1
@@ -18331,7 +18331,7 @@ snapshots:
 
   nested-error-stacks@2.0.1: {}
 
-  next@16.4.5(patch_hash=c935e3ab41dc84f000914647cf996e6fafd65122febf1c47bef839b5bf705412)(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@types/node@20.19.30)(babel-plugin-react-compiler@1.0.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0):
+  next@16.4.5(patch_hash=d962b4124470bcdfb2bff0fa8480c25e47b07d28637200245378b5d50b218075)(@babel/core@7.29.7)(@opentelemetry/api@1.9.0)(@types/node@20.19.30)(babel-plugin-react-compiler@1.0.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0):
     dependencies:
       '@next/env': 16.4.5
       '@swc/helpers': 0.5.23

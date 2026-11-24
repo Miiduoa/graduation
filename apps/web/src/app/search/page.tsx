@@ -27,6 +27,7 @@ import {
   finishSearchFilterArrival,
   getSearchHistoryEntryKey,
   rememberSearchResultReturn,
+  replaceSearchHistoryQuery,
   supersedeSearchResultReturn,
   useSearchResultReturn,
 } from './searchResultReturn';
@@ -158,7 +159,7 @@ function ServiceDirectory() {
       const url = new URL(window.location.href);
       writeCampusServiceFilters(url.searchParams, '', 'all');
       try {
-        window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+        replaceSearchHistoryQuery(url);
       } catch {
         // The current input is still cleared when History access is unavailable.
       }

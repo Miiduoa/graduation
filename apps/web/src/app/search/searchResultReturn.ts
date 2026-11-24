@@ -127,6 +127,16 @@ function cloneHistoryState(
   return { [HISTORY_STATE_PAYLOAD]: cloned, ...readNextHistoryFields(data) };
 }
 
+export function replaceSearchHistoryQuery(url: URL) {
+  const previous = window.history.state;
+  const state = readNextHistoryFields(previous).__NA ? cloneHistoryState(previous) : null;
+  if (state) {
+    // Opt in at the call site so the marker reaches Next in either wrapper order.
+    Object.defineProperty(state, APP_ROUTER_SYNC_HISTORY_QUERY, { value: true });
+  }
+  window.history.replaceState(state, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
 function installHistoryTracking() {
   trackedEntryKey = readEntryKey(window.history.state);
   // History caches the deserialized state for the active entry. Its identity
@@ -153,12 +163,6 @@ function installHistoryTracking() {
       const routerReplace = !push && isRouterHistoryWrite(data, APP_ROUTER_HISTORY_REPLACE);
       const targetUrl = url == null ? null : new URL(url, previousHref);
       const changesPage = targetUrl !== null && targetUrl.pathname !== previousPath;
-      const syncSearchQuery =
-        !push && !routerReplace && previousPath === '/search' &&
-        targetUrl !== null && !changesPage &&
-        targetUrl.origin === window.location.origin &&
-        targetUrl.search !== window.location.search &&
-        Boolean(readNextHistoryFields(data).__NA);
       const replacesPage = !push && changesPage;
       const nextFields = changesPage ? {} : {
         ...(nativeState?.value === previousState ? nativeState?.nextFields : {}),
@@ -206,9 +210,9 @@ function installHistoryTracking() {
           state = fields;
         }
       }
-      if (syncSearchQuery) {
-        // The marker belongs to this write and is omitted by History serialization.
-        if (state === data) state = record ? { ...data } : cloneHistoryState(data);
+      // Forward the caller's opt-in if Next is inside this observer.
+      if (state !== data && data != null &&
+        Object.getOwnPropertyDescriptor(data, APP_ROUTER_SYNC_HISTORY_QUERY)?.value === true) {
         Object.defineProperty(state, APP_ROUTER_SYNC_HISTORY_QUERY, { value: true });
       }
       original.call(this, state, unused, url);

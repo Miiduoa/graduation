@@ -17,15 +17,60 @@ async def check_search_history(origin):
                     {'id': 'nthu', 'name': '國立清華大學', 'status': 'open'},
                 ],
             }))
+            # Development hydration can install the wrappers in either order.
+            # Give the observer the native method and Next a forwarding reference
+            # so this first document exercises Next wrapping the real observer.
+            await page.add_init_script("""(() => {
+              if (location.pathname !== '/search' || sessionStorage.searchHistoryOuterNext) return;
+              sessionStorage.searchHistoryOuterNext = '1';
+              const nativeReplace = history.replaceState.bind(history);
+              let push = history.pushState;
+              let searchReplace;
+              let nextReplace;
+              let installingSearch = false;
+              const forwardReplace = (...args) => (searchReplace ?? nativeReplace)(...args);
+              window.__searchHistoryOptIns = [];
+              Object.defineProperties(history, {
+                pushState: {
+                  configurable: true,
+                  get: () => push,
+                  set(wrapper) {
+                    push = wrapper;
+                    installingSearch = wrapper.name === '';
+                  },
+                },
+                replaceState: {
+                  configurable: true,
+                  get: () => installingSearch
+                    ? nativeReplace : (searchReplace && nextReplace) || forwardReplace,
+                  set(wrapper) {
+                    if (installingSearch) {
+                      searchReplace = wrapper.bind(history);
+                      installingSearch = false;
+                      window.__searchHistoryOuterNext = Boolean(nextReplace);
+                    } else {
+                      nextReplace = wrapper.name === 'replaceState' ? function (state, title, url) {
+                        if (state?.__NA && state[Symbol.for('nuni.app-router.sync-history-query')]) {
+                          window.__searchHistoryOptIns.push(url);
+                        }
+                        return wrapper.call(this, state, title, url);
+                      } : undefined;
+                      window.__searchHistoryOuterNext = Boolean(searchReplace && nextReplace);
+                    }
+                  },
+                },
+              });
+            })()""")
             await page.goto(f'{origin}/search?campus=pu&q=借書&category=campus')
             campus = page.locator('summary[aria-label="切換校園：靜宜大學"]')
-            await expect(campus).to_be_visible()
+            await expect(campus).to_be_visible(timeout=15_000)
             field = page.get_by_role('searchbox', name='想找什麼？', exact=True)
             results = page.locator('#service-search-results')
             library = results.get_by_role('link').filter(
                 has=page.get_by_role('heading', name='圖書館', exact=True),
             )
             await expect(field).to_have_value('借書')
+            await page.wait_for_function("() => window.__searchHistoryOuterNext === true")
             await library.click()
             await page.wait_for_url('**/library?*')
             await page.go_back()
@@ -39,7 +84,9 @@ async def check_search_history(origin):
             assert before['key'] and before['snapshot']['token'], before
             await page.evaluate("""() => {
               if (!history.state.__NA) throw new Error('Expected the real Next history marker');
-              history.replaceState(history.state, '', '?campus=nthu&q=公車');
+              const state = Object.defineProperty({ ...history.state },
+                Symbol.for('nuni.app-router.sync-history-query'), { value: true });
+              history.replaceState(state, '', '?campus=nthu&q=公車');
             }""")
             await expect(page.locator('summary[aria-label="切換校園：國立清華大學"]')).to_be_visible()
             await expect(field).to_have_value('')
@@ -48,6 +95,8 @@ async def check_search_history(origin):
             )
             await expect(page).to_have_url(f'{origin}/search?campus=nthu')
             assert await page.evaluate(metadata) == before
+            # The page's own filter cleanup must opt in before entering Next too.
+            assert '/search?campus=nthu' in await page.evaluate('window.__searchHistoryOptIns')
 
             # A fresh document starts with a Next entry and no search return key.
             await page.goto(f'{origin}/search?campus=pu&q=借書&category=campus')
@@ -100,35 +149,63 @@ async def check_search_history(origin):
                 has=page.get_by_role('heading', name='公車', exact=True),
             )).to_be_visible()
 
+            # With the observer outside Next, its copy must forward explicit intent.
+            replace_search_query = """(query) => {
+              const state = Object.defineProperty({ ...history.state },
+                Symbol.for('nuni.app-router.sync-history-query'), { value: true });
+              history.replaceState(state, '', '?q=' + encodeURIComponent(query));
+            }"""
+            for query in ('借書', '公車'):
+                await page.evaluate(replace_search_query, query)
+                await expect(field).to_have_value(query)
+
+            async def check_pending_navigation(source, target):
+                requested = asyncio.Event()
+                release = asyncio.Event()
+
+                async def delay_navigation(route):
+                    if route.request.headers.get('rsc') == '1':
+                        requested.set()
+                        await release.wait()
+                    await route.continue_()
+
+                destination = f'{target}?campus=all&q=pending-navigation'
+                pattern = f'**{destination}*'
+                await page.route(pattern, delay_navigation)
+                try:
+                    await page.evaluate("(url) => window.next.router.push(url)", destination)
+                    await asyncio.wait_for(requested.wait(), timeout=15)
+                    await expect(page).to_have_url(f'{origin}{source}')
+                    # Match unmarked writes such as replaceStudyQuery.
+                    await page.evaluate("""() => {
+                      if (!history.state?.__NA) {
+                        throw new Error('Expected the real Next history marker');
+                      }
+                      history.replaceState(history.state, '', '?campus=all&q=edited');
+                    }""")
+                    source_path = source.split('?', 1)[0]
+                    await expect(page).to_have_url(f'{origin}{source_path}?campus=all&q=edited')
+                    if source_path == '/search':
+                        await expect(field).to_have_value('公車')
+                        await page.evaluate("""() => {
+                          const state = Object.defineProperty({ ...history.state },
+                            Symbol.for('nuni.app-router.sync-history-query'), { value: true });
+                          history.replaceState(state, '', '?campus=all&q=opted-in');
+                        }""")
+                        await expect(page).to_have_url(f'{origin}/search?campus=all&q=opted-in')
+                finally:
+                    release.set()
+                    await page.unroute(pattern, delay_navigation)
+                await expect(page).to_have_url(f'{origin}{destination}')
+
+            # Next was installed first on this document. Keep the search observer
+            # active while both ordinary and opted-in writes race a navigation.
+            await check_pending_navigation('/search?q=%E5%85%AC%E8%BB%8A', '/library')
+
             # Keep the search observer installed while exercising an off-search query write.
             await page.evaluate("() => window.next.router.push('/library?campus=all')")
             await page.wait_for_url(f'{origin}/library?campus=all')
-            requested = asyncio.Event()
-            release = asyncio.Event()
-
-            async def delay_search_navigation(route):
-                if route.request.headers.get('rsc') == '1':
-                    requested.set()
-                    await release.wait()
-                await route.continue_()
-
-            destination = f'{origin}/search?campus=all&q=pending-navigation'
-            pattern = '**/search?campus=all&q=pending-navigation*'
-            await page.route(pattern, delay_search_navigation)
-            try:
-                await page.evaluate("(url) => window.next.router.push(url)", destination)
-                await asyncio.wait_for(requested.wait(), timeout=15)
-                await expect(page).to_have_url(f'{origin}/library?campus=all')
-                # Match replaceStudyQuery: reuse Next's active state while changing the query.
-                await page.evaluate("""() => {
-                  if (!history.state?.__NA) throw new Error('Expected the real Next history marker');
-                  history.replaceState(history.state, '', '?campus=all&q=edited');
-                }""")
-                await expect(page).to_have_url(f'{origin}/library?campus=all&q=edited')
-            finally:
-                release.set()
-                await page.unroute(pattern, delay_search_navigation)
-            await expect(page).to_have_url(destination)
+            await check_pending_navigation('/library?campus=all', '/search')
         finally:
             await browser.close()
 
