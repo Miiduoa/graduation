@@ -81,6 +81,26 @@ describe('audited outdoor campus walking graph', () => {
     expect(result?.nodes[0]).not.toBe(graph.nodes[0]);
   });
 
+  it('requires a current reviewed incident segment even for same-node arrivals', () => {
+    const edge = graph.edges[0];
+    const single = { ...graph, edges: [edge] };
+    expect(route(single, 1, 1)?.distanceMeters).toBe(0);
+    expect(route(single, 3, 3)).toBeNull();
+    expect(route({ ...single, edges: [] }, 1, 1)).toBeNull();
+    for (const blocked of [
+      { ...edge, access: 'unknown' as const },
+      { ...edge, access: 'restricted' as const },
+      { ...edge, validUntil: '2026-11-24T08:01:00Z' },
+      { ...edge, validUntil: undefined },
+    ]) {
+      expect(route({ ...single, edges: [blocked] }, 1, 1)).toBeNull();
+    }
+    const oneWay = { ...single, edges: [{ ...edge, direction: 'forward' as const }] };
+    expect(route(oneWay, 1, 1)?.distanceMeters).toBe(0);
+    expect(route(oneWay, 2, 2)?.distanceMeters).toBe(0);
+    expect(route(oneWay, 2, 1)).toBeNull();
+  });
+
   it('does not route reviewed-open segments after their review expires', () => {
     const validUntil = '2026-11-25T08:00:00Z';
     const expiry = Date.parse(validUntil);
