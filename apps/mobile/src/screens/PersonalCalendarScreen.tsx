@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Platform,
@@ -9,7 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import {
   buildPersonalEventsCalendar,
   personalEventsOnDate,
@@ -41,6 +41,7 @@ import {
   subscribePersonalImports,
 } from '../services/personalImports';
 import { shareICalContent } from '../services/ical';
+import type { CampusEventCalendarDraft } from '../services/campusEventCalendarDraft';
 import { safeNavigate } from '../utils/safeNavigate';
 import {
   ALL_DAY_REMINDER_HOUR,
@@ -81,6 +82,48 @@ type LoadState =
 
 type FocusParams = { eventId?: string } | undefined;
 
+/** A separate stack entry keeps a campus suggestion from replacing an open personal draft. */
+export function CampusEventCalendarDraftScreen() {
+  const { params } =
+    useRoute<
+      RouteProp<
+        { CampusEventCalendarDraft: { campusEvent: CampusEventCalendarDraft } },
+        'CampusEventCalendarDraft'
+      >
+    >();
+  const scope = usePersonalImportScope();
+  const { school } = useSchool();
+  const campusEvent = params?.campusEvent;
+  const matches =
+    !!scope && scope.owner === campusEvent?.owner && scope.schoolId === campusEvent.schoolId;
+  const expired = useRef(false);
+  useLayoutEffect(() => {
+    if (scope && !matches) expired.current = true;
+  }, [scope, matches]);
+  if (!campusEvent?.draft || (scope && !matches) || expired.current) {
+    return (
+      <Screen>
+        <Text style={{ color: theme.colors.text }}>
+          {scope ? '請回到目前校園的活動頁重新開啟草稿。' : '正在確認帳號與校園…'}
+        </Text>
+      </Screen>
+    );
+  }
+  return (
+    <PersonalCalendarWorkspace
+      key={JSON.stringify([
+        campusEvent.owner,
+        campusEvent.schoolId,
+        campusEvent.source,
+        campusEvent.eventId,
+      ])}
+      scopeKey={personalImportStorageKey(campusEvent)}
+      schoolName={school.name}
+      initialDraft={campusEvent.draft}
+    />
+  );
+}
+
 export default function PersonalCalendarScreen() {
   const scope = usePersonalImportScope();
   const { school } = useSchool();
@@ -101,19 +144,23 @@ function PersonalCalendarWorkspace({
   scopeKey,
   schoolName,
   focusEventId,
+  initialDraft,
 }: {
   scopeKey: string;
   schoolName: string;
   focusEventId?: string;
+  initialDraft?: PersonalEventDraft;
 }) {
   const navigation = useNavigation();
   const scope = usePersonalImportScope();
   const active = useRef(true);
   const requestId = useRef(0);
   const scopeSnapshot = useRef(scopeKey);
-  scopeSnapshot.current = scopeKey;
+  scopeSnapshot.current = scope && personalImportStorageKey(scope) === scopeKey ? scopeKey : '';
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
-  const [month, setMonth] = useState(() => emptyPersonalEventDraft().date.slice(0, 7));
+  const [month, setMonth] = useState(() =>
+    (initialDraft ?? emptyPersonalEventDraft()).date.slice(0, 7),
+  );
   const [calendarView, setCalendarView] = useState<'month' | 'list'>('month');
   const [selectedDate, setSelectedDate] = useState('');
   const changeMonth = (value: string) => {
@@ -125,8 +172,11 @@ function PersonalCalendarWorkspace({
     setMonth(today.slice(0, 7));
     setSelectedDate(today);
   };
-  const [mode, setMode] = useState<'idle' | 'create' | 'edit'>('idle');
-  const [draft, setDraft] = useState<PersonalEventDraft>(() => emptyPersonalEventDraft());
+  const [mode, setMode] = useState<'idle' | 'create' | 'edit'>(initialDraft ? 'create' : 'idle');
+  const [draft, setDraft] = useState<PersonalEventDraft>(
+    () => initialDraft ?? emptyPersonalEventDraft(),
+  );
+  const [fromCampusEvent, setFromCampusEvent] = useState(!!initialDraft);
   const [baseline, setBaseline] = useState<PersonalImportRecord | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
@@ -136,7 +186,7 @@ function PersonalCalendarWorkspace({
   const [reminderBlocked, setReminderBlocked] = useState<string | null>(null);
   const focusedOnce = useRef<string | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     active.current = true;
     return () => {
       active.current = false;
@@ -286,31 +336,37 @@ function PersonalCalendarWorkspace({
 
   const cancelForm = () => {
     setMode('idle');
+    setFromCampusEvent(false);
     setBaseline(null);
     setFormError('');
   };
 
-  const runSave = async (action: () => Promise<void>, success: string) => {
+  const saveLock = useRef(false);
+  const runSave = async (action: () => Promise<string | void>, success = '') => {
+    if (saveLock.current || !isActiveScope()) return;
     if (!canMutate || !scope || draftIssues.length) {
       setFormError(draftIssues[0]?.message || '請先確認行程內容。');
       return;
     }
     const ticket = ++requestId.current;
+    saveLock.current = true;
     setSaving(true);
     setFormError('');
     setNotice('');
     try {
-      await action();
-      if (!isActiveScope() || ticket !== requestId.current) return;
-      setNotice(success);
+      const result = await action();
+      if (!active.current || ticket !== requestId.current) return;
+      setNotice(result || success);
       setMode('idle');
+      setFromCampusEvent(false);
       setBaseline(null);
       setDraft(emptyPersonalEventDraft());
-      await refresh();
+      if (isActiveScope()) await refresh();
     } catch (error) {
       if (!isActiveScope() || ticket !== requestId.current) return;
       setFormError(personalEventSaveError(error));
     } finally {
+      saveLock.current = false;
       if (active.current && ticket === requestId.current) setSaving(false);
     }
   };
@@ -318,13 +374,13 @@ function PersonalCalendarWorkspace({
   const saveCreate = () => {
     if (!scope) return;
     const scoped = { ...scope };
-    void runSave(
-      async () => {
-        const row = personalEventRowFromDraft(draft, scoped.schoolId, null);
-        await appendPersonalImports(scoped, [row], () => isActiveScope());
-      },
-      personalImportSavedNotice(1, load.status === 'ready' && load.syncEnabled),
-    );
+    void runSave(async () => {
+      const row = personalEventRowFromDraft(draft, scoped.schoolId, null);
+      const { added } = await appendPersonalImports(scoped, [row], () => isActiveScope());
+      return added
+        ? personalImportSavedNotice(added, load.status === 'ready' && load.syncEnabled)
+        : '個人行事曆已經有這筆行程。';
+    });
   };
 
   const saveEdit = () => {
@@ -627,8 +683,16 @@ function PersonalCalendarWorkspace({
     );
   };
 
+  // Revalidation briefly hides the workspace while keeping its unsaved edits and receipt in memory.
+  if (initialDraft && !scope) {
+    return (
+      <Screen>
+        <Text style={{ color: theme.colors.muted }}>正在確認帳號與校園…</Text>
+      </Screen>
+    );
+  }
   return (
-    <Screen title="個人行事曆">
+    <Screen title={initialDraft ? undefined : '個人行事曆'}>
       <ScrollView contentContainerStyle={{ gap: 16, paddingBottom: 40 }}>
         <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
           這裡是 {schoolName} 的個人行程，不是學校正式紀錄。
@@ -639,69 +703,68 @@ function PersonalCalendarWorkspace({
         <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20 }}>
           匯入或匯出行事曆檔只是整理自己的安排，不會完成報名，也不會自動設定提醒。提醒需在此裝置另行開啟。
         </Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          <Button text="新增行程" disabled={!canMutate} onPress={openCreate} />
-          <Button
-            text="從截圖或檔案匯入"
-            onPress={() => {
-              safeNavigate(navigation, 'PersonalImport', { kind: 'events' });
-            }}
-          />
-          <Button text="匯出所選月份" disabled={!ready} onPress={exportCurrentList} />
-          {load.status === 'error' ? (
-            <Button
-              text="重試讀取"
-              onPress={() => {
-                void refresh();
-              }}
-            />
-          ) : null}
-        </View>
-        <Text style={{ color: theme.colors.text, fontSize: 18 }}>{month}</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          <Button text="上一月" onPress={() => changeMonth(shiftCalendarMonth(month, -1))} />
-          <Button text="回今天" onPress={goToday} />
-          <Button text="下一月" onPress={() => changeMonth(shiftCalendarMonth(month, 1))} />
-          <Button text="月格" onPress={() => setCalendarView('month')} />
-          <Button
-            text="列表"
-            onPress={() => {
-              setCalendarView('list');
-              setSelectedDate('');
-            }}
-          />
-        </View>
-        {ready && calendarView === 'month' ? (
-          <PersonalMonthCalendar
-            key={month}
-            records={monthEvents}
-            month={month}
-            selectedDate={selectedDate}
-            onDate={setSelectedDate}
-            onEdit={openEdit}
-            disabled={!canMutate}
-          />
-        ) : null}
-        {selectedDate ? (
-          <View>
-            <Text style={{ color: theme.colors.text }}>{selectedDate} 的行程</Text>
-            <Button
-              text="查看整月列表"
-              onPress={() => {
-                setSelectedDate('');
-                setCalendarView('list');
-              }}
-            />
-          </View>
-        ) : null}
+        {!fromCampusEvent && (
+          <>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <Button text="新增行程" disabled={!canMutate} onPress={openCreate} />
+              <Button
+                text="從截圖或檔案匯入"
+                onPress={() => {
+                  safeNavigate(navigation, 'PersonalImport', { kind: 'events' });
+                }}
+              />
+              <Button text="匯出所選月份" disabled={!ready} onPress={exportCurrentList} />
+            </View>
+            <Text style={{ color: theme.colors.text, fontSize: 18 }}>{month}</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <Button text="上一月" onPress={() => changeMonth(shiftCalendarMonth(month, -1))} />
+              <Button text="回今天" onPress={goToday} />
+              <Button text="下一月" onPress={() => changeMonth(shiftCalendarMonth(month, 1))} />
+              <Button text="月格" onPress={() => setCalendarView('month')} />
+              <Button
+                text="列表"
+                onPress={() => {
+                  setCalendarView('list');
+                  setSelectedDate('');
+                }}
+              />
+            </View>
+            {ready && calendarView === 'month' ? (
+              <PersonalMonthCalendar
+                key={month}
+                records={monthEvents}
+                month={month}
+                selectedDate={selectedDate}
+                onDate={setSelectedDate}
+                onEdit={openEdit}
+                disabled={!canMutate}
+              />
+            ) : null}
+            {selectedDate ? (
+              <View>
+                <Text style={{ color: theme.colors.text }}>{selectedDate} 的行程</Text>
+                <Button
+                  text="查看整月列表"
+                  onPress={() => {
+                    setSelectedDate('');
+                    setCalendarView('list');
+                  }}
+                />
+              </View>
+            ) : null}
+          </>
+        )}
         {!scope ? <Text style={{ color: theme.colors.muted }}>正在確認帳號…</Text> : null}
         {load.status === 'loading' ? (
           <Text style={{ color: theme.colors.muted }}>正在讀取行程…</Text>
         ) : null}
         {load.status === 'error' ? (
-          <Text style={{ color: theme.colors.danger }}>
-            {load.message} 讀取失敗時不會清空或覆寫現有資料；暫時無法新增或刪除。
-          </Text>
+          <>
+            <Text style={{ color: theme.colors.danger }}>
+              {load.message} 讀取失敗時不會清空或覆寫現有資料；暫時無法新增或刪除。
+            </Text>
+            <Button text="重試讀取" onPress={() => void refresh()} />
+          </>
         ) : null}
         {notice ? <Text style={{ color: theme.colors.accent }}>{notice}</Text> : null}
         {formError ? <Text style={{ color: theme.colors.danger }}>{formError}</Text> : null}
@@ -718,8 +781,19 @@ function PersonalCalendarWorkspace({
             }}
           >
             <Text style={{ fontSize: 17, fontWeight: '700', color: theme.colors.text }}>
-              {mode === 'create' ? '新增行程' : `編輯 ${baseline?.title || '行程'}`}
+              {fromCampusEvent
+                ? '確認活動行程'
+                : mode === 'create'
+                  ? '新增行程'
+                  : `編輯 ${baseline?.title || '行程'}`}
             </Text>
+            {fromCampusEvent ? (
+              <Text style={{ color: theme.colors.muted }}>
+                {initialDraft?.endTime
+                  ? '已帶入活動頁公布的資料（台灣時間），可修改後儲存。'
+                  : '活動只公布了開始時間（台灣時間）。請填寫你預計離開的時間再儲存。'}
+              </Text>
+            ) : null}
             {field('標題', draft.title, (title) => setDraft({ ...draft, title }))}
             {field('日期（YYYY-MM-DD）', draft.date, (date) => setDraft({ ...draft, date }))}
             {field(
@@ -789,7 +863,7 @@ function PersonalCalendarWorkspace({
           </View>
         )}
 
-        {ready && !events.length ? (
+        {ready && !fromCampusEvent && !events.length ? (
           <Text style={{ color: theme.colors.muted }}>
             {selectedDate ? '這一天還沒有行程。' : '這個月還沒有行程。'}
             按「新增行程」直接建立，或從截圖／檔案匯入。

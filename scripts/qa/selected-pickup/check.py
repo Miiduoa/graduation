@@ -29,7 +29,7 @@ def build_evidence():
     hashes = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in sorted(sources)}
     built = json.loads((OUT / 'build-source-hashes.json').read_text())
     assert hashes == built, 'Source changed after the browser/server bundle; rebuild before verification'
-    for required in ['FoodWorkspace.tsx', 'FoodOrders.tsx', 'FoodPickupAgent.tsx', 'foodPickupEvidence.ts',
+    for required in ['FoodWorkspace.tsx', 'FoodOrders.tsx', 'FoodPickupAgent.tsx', 'NuniNextStep.tsx', 'foodPickupEvidence.ts',
                      'AssistantCards.tsx', 'assistantExecutionJournal.ts', 'assistantCalendarExecution.ts',
                      'assistantV2/handler.ts', 'assistantV2/actions.ts', 'assistantV2/foodPickup.ts',
                      'assistantV2/foodPickupRequest.ts']:
@@ -71,11 +71,16 @@ async def open_preview(page, name, minutes='20'):
     await page.get_by_role('button', name='查看訂單：selected-order', exact=True).click()
     detail = page.get_by_role('region', name='訂單詳情', exact=True)
     await expect(detail).to_be_visible()
-    await expect(detail.get_by_role('region', name='取餐行程安排', exact=True)).to_be_visible()
+    suggestion = detail.get_by_role('region', name='nuni 建議', exact=True)
+    await expect(suggestion).to_be_visible()
+    await expect(suggestion).to_contain_text('合成午餐店')
+    await expect(suggestion).to_contain_text('12:00')
     await ensure_no_write(page)
-    await detail.get_by_role('combobox', name='取餐預留時間').select_option(minutes)
-    preview = detail.get_by_role('button', name='預覽這筆取餐安排', exact=True)
+    await suggestion.get_by_role('combobox', name='取餐預留時間').select_option(minutes)
+    preview = suggestion.get_by_role('button', name='預覽這筆取餐安排', exact=True)
     await expect(preview).to_be_enabled()
+    await suggestion.scroll_into_view_if_needed()
+    await page.screenshot(path=str(OUT / f'{name}-suggestion.png'), full_page=True)
     await preview.click()
     card = detail.get_by_role('article', name='行程確認卡', exact=True)
     await expect(card).to_contain_text('取餐：合成午餐店')
@@ -122,8 +127,8 @@ async def confirm_case(page, name):
                                     and response.request.method == 'POST') as received:
         await card.get_by_role('button', name='重新核對結果', exact=True).click()
     response = await received.value
-    await response.finished()
     assert response.ok
+    assert (await response.json())['status'] == 'verified'
     await expect(card.get_by_role('button', name='重新核對結果', exact=True)).to_be_enabled()
     state = await snapshot(page)
     assert len(state['writes']) == 1

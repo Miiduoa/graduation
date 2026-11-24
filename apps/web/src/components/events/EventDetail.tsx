@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { NuniNextStep } from '@/components/NuniNextStep';
 import { loadCampusEvent, type CampusEvent, type CampusEventSource } from '@/lib/campusEvents';
 import { buildCampusEventCalendar, canExportCampusEvent } from '@/lib/campusEventCalendar';
 import { campusEventPhase, campusEventPhaseLabel } from '@campus/shared/src/campusEventTime';
@@ -11,6 +12,8 @@ import { EventRegistrationPanel } from './EventRegistrationPanel';
 import {
   buildCampusEventDetailHref,
   buildCampusEventListHref,
+  campusEventNextStep,
+  EVENT_ARRIVAL_WINDOW_MS,
   campusEventSourceLabel,
   formatCampusEventDateTime,
   isCampusEventSource,
@@ -69,10 +72,11 @@ export function EventDetail({
   const [noticeState, setNoticeState] = useState({ scope: noticeScope, message: '' });
   const notice = noticeState.scope === noticeScope ? noticeState.message : '';
   const setNotice = (message: string) => setNoticeState({ scope: noticeScope, message });
-  const now = useEventClock();
   const generation = useRef(0);
   const mounted = useRef(false);
   const view = detailForRequest(state, schoolId, eventId, source);
+  const loadedEvent = view.status === 'ready' ? view.event : null;
+  const now = useEventClock(loadedEvent?.calendarTime ?? loadedEvent ?? undefined, EVENT_ARRIVAL_WINDOW_MS);
   const listHref = buildCampusEventListHref(schoolSearch, listFilters);
   const returnPath = source
     ? buildCampusEventDetailHref(eventId, source, schoolSearch, listFilters)
@@ -208,11 +212,13 @@ export function EventDetail({
   }
 
   const event = view.event;
+  const nextStep = campusEventNextStep(event, now);
+  const phase = campusEventPhase(event, now);
   return (
     <article className={styles.detail}>
       <div className={styles.meta}>
-        <span className={styles.phase} data-phase={campusEventPhase(event, now)}>
-          {campusEventPhaseLabel(campusEventPhase(event, now))}
+        <span className={styles.phase} data-phase={phase}>
+          {campusEventPhaseLabel(phase)}
         </span>
         <span>{campusEventSourceLabel(event.source)}</span>
         <time dateTime={event.startsAt || undefined}>
@@ -225,6 +231,11 @@ export function EventDetail({
         {event.organizer ? <span>{event.organizer}</span> : null}
       </div>
       <h2>{event.title}</h2>
+      {nextStep && (
+        <NuniNextStep reason={nextStep.reason}>
+          <Link className="btn" href={nextStep.href}>{nextStep.label}</Link>
+        </NuniNextStep>
+      )}
       {event.description ? <p className={styles.body}>{event.description}</p> : null}
       <div className={styles.detailActions}>
         <Link className="btn" href={listHref}>

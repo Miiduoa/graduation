@@ -10,6 +10,7 @@ import {
   personalEventsOnDate,
   shiftCalendarMonth,
   isCalendarMonth,
+  isPersonalImportDate,
   draftFromPersonalEvent,
   emptyPersonalEventDraft,
   filterPersonalEvents,
@@ -252,6 +253,7 @@ export function PersonalCalendar() {
             context={visible}
             paused={paused}
             requestedEventId={params?.get('eventId') ?? null}
+            requestedDate={explicitSchool === visible.scope.schoolId ? params?.get('date') ?? null : null}
           />
         </div>
       )}
@@ -263,10 +265,12 @@ function PersonalCalendarWorkspace({
   context,
   paused,
   requestedEventId,
+  requestedDate,
 }: {
   context: ReturnType<typeof usePersonalImportScope>;
   paused: boolean;
   requestedEventId: string | null;
+  requestedDate: string | null;
 }) {
   const { user, loading: authLoading } = useAuth();
   const nuni = useOptionalNuniSession();
@@ -373,20 +377,24 @@ function PersonalCalendarWorkspace({
         )
       : undefined;
   const linkedEventDate = linkedEvent?.date;
+  const dayToShow = requestedEventId ? linkedEventDate
+    : requestedDate && isPersonalImportDate(requestedDate) ? requestedDate : null;
+  const calendarRequest = requestedEventId ? `event:${requestedEventId}`
+    : dayToShow ? `date:${dayToShow}` : null;
 
   useEffect(() => {
     locatedRequest.current = null;
     focusedRequest.current = null;
-  }, [requestedEventId]);
+  }, [calendarRequest]);
 
   useEffect(() => {
-    if (paused || !ledger.ready || !requestedEventId || !linkedEventDate) return;
-    if (locatedRequest.current === requestedEventId) return;
-    locatedRequest.current = requestedEventId;
-    setMonth(linkedEventDate.slice(0, 7));
-    setSelectedDate(linkedEventDate);
+    if (paused || !ledger.ready || !calendarRequest || !dayToShow) return;
+    if (locatedRequest.current === calendarRequest) return;
+    locatedRequest.current = calendarRequest;
+    setMonth(dayToShow.slice(0, 7));
+    setSelectedDate(dayToShow);
     setCalendarView('list');
-  }, [paused, ledger.ready, requestedEventId, linkedEventDate]);
+  }, [paused, ledger.ready, calendarRequest, dayToShow]);
 
   useEffect(() => {
     if (

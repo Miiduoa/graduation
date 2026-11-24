@@ -1,4 +1,4 @@
-import { parseTaipeiInstant, taipeiParts } from '@campus/shared/src/taipeiTime';
+import { parseTaipeiInstant, taipeiDayKey } from '@campus/shared/src/taipeiTime';
 import { courseHrefFromData, courseWorkHrefFromData } from './courseWorkLanding';
 import type { HomeTask } from './homeOverview';
 import { sanitizeInternalPath } from './navigation';
@@ -67,12 +67,6 @@ export function courseTaskHref(task: HomeTask): string {
   } catch {
     return fallback;
   }
-}
-
-function taipeiDayKey(value: string | Date | number): string | null {
-  const parts = taipeiParts(value);
-  if (!parts) return null;
-  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
 }
 
 function dueDayKey(task: HomeTask): string | null {

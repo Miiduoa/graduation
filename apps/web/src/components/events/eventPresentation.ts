@@ -3,6 +3,9 @@ import { eventRegistrationLabel, type EventRegistrationState } from '@/lib/campu
 import { schoolLoginHref } from '@/lib/navigation';
 import { listPageNumber, listQueryValue, listSearchText, type ServiceListQuery } from '@/lib/serviceListNavigation';
 import { campusEventPhase, type CampusEventTime } from '@campus/shared/src/campusEventTime';
+import { buildCampusClassroomMapHref, MAX_CAMPUS_CLASSROOM_QUERY_LENGTH } from '@campus/shared/src/campusClassroomLookup';
+import { isPersonalImportDate } from '@campus/shared/src/imports/validation';
+import { taipeiDayKey } from '@campus/shared/src/taipeiTime';
 
 export type CampusEventView = 'all' | 'upcoming' | 'ongoing' | 'past' | 'unscheduled';
 export type CampusEventFilters = { q: string; view: CampusEventView; page?: number };
@@ -61,6 +64,34 @@ export function campusEventSourceLabel(source: CampusEventSource): string {
 
 export function campusEventKey(event: Pick<CampusEvent, 'source' | 'id'>): string {
   return `${event.source}:${event.id}`;
+}
+
+export const EVENT_ARRIVAL_WINDOW_MS = 30 * 60_000;
+const NON_PHYSICAL_LOCATION = /待(?:定|公告|通知)|尚未(?:公布|公告|確定)|未(?:提供|設定)|另行通知|線上|遠距|視訊|\b(?:tba|tbd|online|virtual|zoom|teams|webex|meet)\b|[a-z][a-z\d+.-]*:\/\/|^www\./iu;
+
+export function campusEventNextStep(event: CampusEvent, now: number) {
+  const time = event.calendarTime ?? event;
+  const phase = campusEventPhase(time, now);
+  if (!time.startsAt || (phase !== 'upcoming' && phase !== 'ongoing')) return null;
+  const location = event.location?.trim();
+  const startingSoon = Date.parse(time.startsAt) - now <= EVENT_ARRIVAL_WINDOW_MS;
+  if (startingSoon && location && !NON_PHYSICAL_LOCATION.test(location) &&
+      Array.from(location).length <= MAX_CAMPUS_CLASSROOM_QUERY_LENGTH) {
+    const href = buildCampusClassroomMapHref({ schoolId: event.schoolId, location });
+    if (href) return {
+      reason: `「${event.title}」${phase === 'ongoing' ? '正在進行' : '將在半小時內開始'}，活動地點是「${location}」。`,
+      label: '在校園地圖查地點',
+      href,
+    };
+  }
+  if (phase !== 'upcoming') return null;
+  const date = taipeiDayKey(time.startsAt);
+  if (!date || !isPersonalImportDate(date)) return null;
+  return {
+    reason: `「${event.title}」將於 ${formatCampusEventDateTime(time.startsAt)} 開始，可以先看看當天已經排了哪些行程。`,
+    label: '查看活動當天的個人行程',
+    href: `/calendar?${new URLSearchParams({ schoolId: event.schoolId, date })}`,
+  };
 }
 
 export function formatCampusEventDateTime(value: string | null | undefined): string {
