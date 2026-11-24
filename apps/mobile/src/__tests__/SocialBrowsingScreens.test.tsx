@@ -758,10 +758,38 @@ test('a cache-gap list started after a failed write cannot drop the rollback or 
   // A later pull can still be served from a cache that omits this board.
   jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce([]);
   await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
 
   await act(async () => { reRead.resolve(true); });
   expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
+test.each([false, true])('a refresh retries failed rollback confirmation and applies server membership %s', async (serverSubscribed) => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  jest.mocked(unsubscribeFromBoard).mockRejectedValueOnce(new Error('offline'));
+  jest.mocked(isSubscribedToBoard).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => { fireEvent.press(view.getByLabelText('取消訂閱讀書會')); });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  jest.mocked(isSubscribedToBoard).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  const confirmation = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard).mockImplementationOnce(() => confirmation.promise);
+  await act(async () => { await view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(3);
+  expect(isSubscribedToBoard).toHaveBeenLastCalledWith('alice', 'pu', 'board', { fromServer: true });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  await act(async () => { confirmation.resolve(serverSubscribed); });
+  expect(view.getByLabelText(serverSubscribed ? '取消訂閱讀書會' : '訂閱讀書會')).toBeTruthy();
 });
 
 test('a successful write still applies a later server subscription after a stale in-flight list', async () => {

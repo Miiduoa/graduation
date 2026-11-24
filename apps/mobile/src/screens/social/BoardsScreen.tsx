@@ -103,6 +103,7 @@ function BoardsContent() {
   // After a failed write, keep the rollback until a from-server re-check lands.
   // A later list may still be served from cache and omit the board.
   const awaitingServerConfirm = useRef(new Set<string>());
+  const pendingRollbackConfirmations = useRef(new Map<string, () => boolean>());
   // List membership skipped by keepLocal after a successful write. If the
   // follow-up from-server re-check fails, a list that already included a newer
   // subscription must still be applied.
@@ -202,9 +203,13 @@ function BoardsContent() {
         // Retain the membership captured when the subscription query resolved,
         // even if board rows or writes were still in flight at that point.
         deferredListMembership.current.set(id, membership);
+        const keptRollback =
+          awaitingServerConfirm.current.has(id) &&
+          nextConfirmed.has(id) &&
+          !subscribedIds.has(id);
         if (
           !pendingSubscriptionCounts.current.has(id) &&
-          lastSettledWriteSucceeded.current.has(id) &&
+          (lastSettledWriteSucceeded.current.has(id) || keptRollback) &&
           auth.user?.uid &&
           school?.id
         ) {
@@ -247,6 +252,11 @@ function BoardsContent() {
       // A list supersedes this re-read only if it applied this board from the server.
       (boardServerAppliedRevision.current.get(boardId) ?? 0) <= boardServerAppliedAtStart &&
       latestIntent.current.get(boardId) === intentAtStart;
+    if (awaitingServerConfirm.current.has(boardId)) {
+      // Reuse a pending confirmation only while it can still apply to this board.
+      if (pendingRollbackConfirmations.current.get(boardId)?.()) return;
+      pendingRollbackConfirmations.current.set(boardId, canApply);
+    }
     try {
       // Read this board only. listSubscribedBoardIds is capped at 100 and
       // must not treat a missing id as "unsubscribed".
@@ -286,6 +296,10 @@ function BoardsContent() {
         return;
       }
       // Keep the pre-tap rollback or confirmed write; the next refresh will reconcile.
+    } finally {
+      if (pendingRollbackConfirmations.current.get(boardId) === canApply) {
+        pendingRollbackConfirmations.current.delete(boardId);
+      }
     }
   }, [applySubscribed]);
   reconcileBoardSubscriptionRef.current = reconcileBoardSubscription;
