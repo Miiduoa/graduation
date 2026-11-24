@@ -1247,6 +1247,36 @@ test.each([
   }
 });
 
+test.each(['before', 'attempted'] as const)(
+  'Web keeps the verified primary when a contradictory journal matches %s',
+  async (matched) => {
+    const cleanup = useWebStorage();
+    try {
+      const { ledger } = await appendPersonalImports(scope, [row('original')]);
+      const storage = window.localStorage;
+      const key = personalImportStorageKey(scope);
+      const original = JSON.stringify(ledger);
+      const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+      storage.setItem(key, original);
+      storage.setItem(journal, JSON.stringify({
+        id: 'legacy',
+        original: null,
+        before: sha256(matched === 'before' ? original : 'another ledger'),
+        attempted: sha256(matched === 'attempted' ? original : 'interrupted write'),
+      }));
+
+      await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+      const saved = await appendPersonalImports(scope, [row('new', '新課程')], { canContinue: () => true });
+      expect(saved.ledger.records).toHaveLength(2);
+      expect(saved.ledger.records).toContainEqual(ledger.records[0]);
+      await expect(loadPersonalImports(scope)).resolves.toEqual(saved.ledger);
+      expect(storage.getItem(journal)).toBeNull();
+    } finally {
+      cleanup();
+    }
+  },
+);
+
 test('Web retries from a legacy marked copy and retires it when the new ledger commits', async () => {
   const cleanup = useWebStorage();
   try {

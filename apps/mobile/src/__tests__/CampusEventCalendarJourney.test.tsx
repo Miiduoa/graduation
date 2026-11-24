@@ -173,7 +173,7 @@ test.each([
   ['nuni:account-a', '登出'],
   ['nuni:account-a', '先於 Nuni 登出'],
   ['nuni:account-a', '範圍失效前登出'],
-])('範圍未解析時，卸載 %s 的舊草稿並撤銷 Firebase %s 時未完成的寫入', async (owner, transition) => {
+])('卸載 %s 的舊草稿並撤銷 Firebase %s 時未完成的寫入', async (owner, transition) => {
   if (owner === 'firebase:student') mockPlatformSession = null;
   const original = { owner, schoolId: 'pu' };
   mockScope = original;
@@ -195,25 +195,49 @@ test.each([
   mockAuth = transition !== '切換'
     ? { user: null, loading: false }
     : { user: { uid: 'another-student' }, loading: true };
-  if (transition === '範圍失效前登出') {
-    view.rerender(<Journey />);
-    expect(view.getByLabelText('標題')).toBeTruthy();
-  }
-  mockVerifying = true;
+  mockVerifying = transition !== '範圍失效前登出';
   view.rerender(<Journey />);
-  await view.findByText('請回到目前校園的活動頁重新開啟草稿。');
-  expect(view.queryByLabelText('標題')).toBeNull();
 
   await act(async () => {
     finishWrite();
     expect((await loadPersonalImports(original)).records).toEqual([]);
   });
+  await view.findByText('請回到目前校園的活動頁重新開啟草稿。');
+  expect(view.queryByLabelText('標題')).toBeNull();
   expect(await AsyncStorage.getItem(key)).toBeNull();
 
   mockAuth = { user: { uid: 'student' }, loading: false };
   mockVerifying = false;
   view.rerender(<Journey />);
   expect(view.getByText('請回到目前校園的活動頁重新開啟草稿。')).toBeTruthy();
+  expect(view.queryByLabelText('標題')).toBeNull();
+});
+
+test('Firebase 先登出時，在 Nuni 仍回傳舊範圍期間撤銷排隊的活動草稿寫入', async () => {
+  const view = await openDraft();
+  const key = personalImportStorageKey(mockScope);
+  const getItem = jest.mocked(AsyncStorage.getItem);
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  let finishRead!: (raw: string | null) => void;
+  const pendingRead = new Promise<string | null>((resolve) => { finishRead = resolve; });
+  getItem.mockClear();
+  getItem.mockImplementationOnce(() => pendingRead);
+  setItem.mockClear();
+  fireEvent.press(await view.findByRole('button', { name: '儲存行程', disabled: false }));
+  await waitFor(() => expect(getItem).toHaveBeenCalledWith(key));
+
+  mockAuth = { user: null, loading: false };
+  view.rerender(<Journey />);
+  await act(async () => {
+    finishRead(null);
+  });
+  expect(setItem).not.toHaveBeenCalledWith(key, expect.any(String));
+  expect(await getItem(key)).toBeNull();
+  expect(view.queryByLabelText('標題')).toBeNull();
+  expect(view.getByText('請回到目前校園的活動頁重新開啟草稿。')).toBeTruthy();
+
+  mockVerifying = true;
+  view.rerender(<Journey />);
   expect(view.queryByLabelText('標題')).toBeNull();
 });
 

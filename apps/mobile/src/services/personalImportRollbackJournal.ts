@@ -317,7 +317,10 @@ async function readWebRollback(key: string, verifiedPrimary?: string): Promise<s
     const current = fingerprint(verifiedPrimary ?? await AsyncStorage.getItem(key));
     if (storage.getItem(backupKey) !== encoded) continue;
     if (current !== journal.before && current !== journal.attempted) return undefined;
-    return typeof journal.original === 'string' ? journal.original : 'null';
+    const original = typeof journal.original === 'string' ? journal.original : 'null';
+    // Replacing a verified ledger also requires a fingerprint for the rollback bytes.
+    if (verifiedPrimary !== undefined && fingerprint(original) !== journal.before) return undefined;
+    return original;
   }
 }
 

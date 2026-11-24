@@ -648,7 +648,7 @@ it.each([
   ['edit', 'sign out before Nuni', 'nuni'],
   ['create', 'sign out before scope loss', 'nuni'],
   ['edit', 'sign out before scope loss', 'nuni'],
-] as const)('unmounts the old calendar and rejects a queued %s on Firebase %s with unresolved scope for a %s ledger', async (mode, transition, owner) => {
+] as const)('unmounts the old calendar and rejects a queued %s on Firebase %s for a %s ledger', async (mode, transition, owner) => {
   mockAuth = { user: { uid: 'student-a' }, loading: false };
   if (owner === 'firebase') {
     mockSession = null;
@@ -679,10 +679,6 @@ it.each([
 
   if (transition === 'sign out before scope loss') {
     mockAuth = { user: null, loading: false };
-    view.rerender(<PersonalCalendarScreen />);
-    expect(view.getByLabelText('標題')).toBeTruthy();
-    mockScope = null;
-    mockNuniLoading = true;
   } else if (transition !== 'switch') {
     mockScope = null;
     if (transition === 'sign out') mockSession = null;
@@ -696,11 +692,11 @@ it.each([
     mockAuth = { user: { uid: 'student-b' }, loading: true };
   }
   view.rerender(<PersonalCalendarScreen />);
-  expect(view.queryByLabelText('標題')).toBeNull();
   await act(async () => {
     read.resolve(stored);
     await expect(save).rejects.toThrow('帳號或學校已切換');
   });
+  expect(view.queryByLabelText('標題')).toBeNull();
   expect(setItem).not.toHaveBeenCalledWith(key, expect.any(String));
   expect(await AsyncStorage.getItem(key)).toBe(stored);
 
