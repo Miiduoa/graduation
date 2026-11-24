@@ -1576,14 +1576,15 @@ describe('continuing a search after opening a service', () => {
     expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
   });
 
-  it('keeps an IME draft through native Next replacements of the current URL and fragment', async () => {
+  it('keeps an IME draft through native Next replacements of the current URL, fragment, and equivalent query', async () => {
     const entry = leaveLibrary();
     await go(-1);
     renderAfterFrame();
-    act(() => move('?campus=pu&q=公車#results'));
+    act(() => move('?campus=pu&q=借書%20時間#results'));
     const href = window.location.href;
+    const queryString = new URLSearchParams(window.location.search).toString();
     const search = screen.getByRole<HTMLInputElement>('searchbox');
-    expect(search.value).toBe('公車');
+    expect(search.value).toBe('借書 時間');
 
     fireEvent.compositionStart(search);
     fireEvent.change(search, { target: { value: '公' } });
@@ -1594,6 +1595,13 @@ describe('continuing a search after opening a service', () => {
 
     act(() => window.history.replaceState(window.history.state, '', href));
     expect(window.location.href).toBe(href);
+    expect(search.value).toBe('公');
+
+    const reencodedHref = href.replace('%20', '+');
+    expect(reencodedHref).not.toBe(href);
+    act(() => window.history.replaceState(window.history.state, '', reencodedHref));
+    expect(window.location.href).toBe(reencodedHref);
+    expect(new URLSearchParams(window.location.search).toString()).toBe(queryString);
     expect(search.value).toBe('公');
     expect(window.history.state).toMatchObject({
       __campusSearchHistoryEntry: entry.__campusSearchHistoryEntry,

@@ -158,6 +158,7 @@ function installHistoryTracking() {
       const searchEntry = readSearchEntry(previousState);
       const previousPath = window.location.pathname;
       const previousHref = window.location.href;
+      const previousQueryString = currentQueryString();
       const push = method === 'pushState';
       const routerCommit = push && isRouterHistoryWrite(data, APP_ROUTER_HISTORY_PUSH);
       const routerReplace = !push && isRouterHistoryWrite(data, APP_ROUTER_HISTORY_REPLACE);
@@ -241,18 +242,20 @@ function installHistoryTracking() {
           (typeof url === 'string' && url.trimStart().startsWith('#')) ||
           (previousHref !== nextHref &&
             previousHref.split('#', 1)[0] === nextHref.split('#', 1)[0]);
-        const rewritesNativeState = previousHref === nextHref && incomingNextFields.__NA;
+        const queryString = currentQueryString();
+        // Match the Router's query representation so a native encoding-only rewrite
+        // cannot publish a filter arrival that would replace an in-progress draft.
+        const keepsNativeQuery = incomingNextFields.__NA && previousQueryString === queryString;
         if (
           url != null &&
           previousKey &&
           !changesOnlyFragment &&
-          !rewritesNativeState &&
+          !keepsNativeQuery &&
           !routerReplace
         ) {
-          // Fragment writes and native rewrites of the current URL leave the input draft intact.
           publishReturn(null, {
             entryKey: previousKey,
-            queryString: currentQueryString(),
+            queryString,
             saved: null,
           });
         } else if (arrival && !matchesRouterUrl(arrival.queryString)) {
