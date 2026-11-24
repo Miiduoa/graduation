@@ -6,6 +6,16 @@ import type { PersonalImportRecord } from '@campus/shared';
 import { MonthCalendar } from './MonthCalendar';
 import styles from './MonthCalendar.module.css';
 
+const originalBounds = Element.prototype.getBoundingClientRect;
+
+function mockVisibleDates() {
+  // JSDOM does not lay out the date buttons.
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this.classList.contains(styles.date)) return new DOMRect(40, 100, 44, 44);
+    return originalBounds.call(this);
+  });
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -116,6 +126,7 @@ it('所有日期依順序進入 Tab 導覽，包含未選取的日期', () => {
 });
 
 it('方向鍵移動日期焦點，直到啟用日期才改選日', () => {
+  mockVisibleDates();
   const onDate = vi.fn();
   render(<MonthCalendar {...baseProps} selectedDate="2028-01-12" onDate={onDate} />);
   fireEvent.keyDown(focusDate('2028-01-12'), { key: 'ArrowDown' });
@@ -135,6 +146,7 @@ it('方向鍵移動日期焦點，直到啟用日期才改選日', () => {
 });
 
 it('PageDown 跨到閏年短月保留焦點，只有選取後才改當日內容', () => {
+  mockVisibleDates();
   const onDate = vi.fn();
   function ControlledCalendar() {
     const [month, setMonth] = useState('2028-01');
@@ -170,59 +182,76 @@ it('PageDown 跨到閏年短月保留焦點，只有選取後才改當日內容'
   expect(onDate).toHaveBeenCalledTimes(1);
 });
 
-it('鍵盤換月聚焦週六時只捲動頁面垂直位置，月格仍從週日起始', () => {
-  const originalBounds = Element.prototype.getBoundingClientRect;
+it.each([
+  { origin: '2028-09-28', key: 'PageDown', requested: '2028-10-28' },
+  { origin: '2028-10-26', key: 'ArrowRight', requested: '2028-10-27' },
+])('541px、文字放大至兩倍時從 $origin 按 $key，焦點仍完整可見', ({ origin, key, requested }) => {
+  vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(541);
   vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(640);
-  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(216);
+  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(461);
   vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(616);
+  let scrollY = 0;
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-    if (this.getAttribute('role') === 'region') return new DOMRect(40, 500, 216, 400);
+    if (this.getAttribute('role') === 'region') return new DOMRect(40, 500 - scrollY, 461, 400);
     if (this.classList.contains(styles.weekday)) {
       const index = Array.from(this.parentElement!.children).indexOf(this);
       const viewport = this.closest('[role="region"]')!;
-      return new DOMRect(40 + index * 88 - viewport.scrollLeft, 500, 88, 24);
+      return new DOMRect(40 + index * 88 - viewport.scrollLeft, 500 - scrollY, 88, 24);
     }
-    if (this.getAttribute('aria-label') === '2028-10-28') {
-      return new DOMRect(568, 700, 88, 40);
+    if (this.classList.contains(styles.date)) {
+      const date = new Date(this.getAttribute('aria-label')!);
+      const viewport = this.closest('[role="region"]')!;
+      return new DOMRect(44 + date.getUTCDay() * 88 - viewport.scrollLeft, 700 - scrollY, 80, 40);
     }
     return originalBounds.call(this);
   });
   const horizontalScroll = vi.spyOn(Element.prototype, 'scrollLeft', 'set');
-  const pageScroll = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+  const pageScroll = vi.spyOn(window, 'scrollBy').mockImplementation((options?: ScrollToOptions | number) => {
+    if (typeof options === 'object') scrollY += options.top ?? 0;
+  });
+  const onDate = vi.fn();
 
   function ControlledCalendar() {
-    const [month, setMonth] = useState('2028-09');
-    const [selectedDate, setSelectedDate] = useState('2028-09-28');
+    const [month, setMonth] = useState(origin.slice(0, 7));
     return (
-      <MonthCalendar
-        {...baseProps}
-        month={month}
-        selectedDate={selectedDate}
-        onMonthChange={(next) => {
-          setMonth(next);
-          setSelectedDate('');
-        }}
-      />
+      <>
+        <style>{`.${styles.viewport} { overflow-x: auto; }`}</style>
+        <MonthCalendar
+          {...baseProps}
+          month={month}
+          selectedDate=""
+          onDate={onDate}
+          onMonthChange={setMonth}
+        />
+      </>
     );
   }
   render(<ControlledCalendar />);
-  screen.getByRole('region', { name: '2028-09 月格，週日起始' }).scrollLeft = 200;
+  if (key === 'PageDown') {
+    screen.getByRole('region', { name: '2028-09 月格，週日起始' }).scrollLeft = 155;
+  }
   horizontalScroll.mockClear();
-  fireEvent.keyDown(focusDate('2028-09-28'), { key: 'PageDown' });
+  fireEvent.keyDown(focusDate(origin), { key });
   expect(horizontalScroll).not.toHaveBeenCalled();
   expect(pageScroll).toHaveBeenCalledExactlyOnceWith({ left: 0, top: 100, behavior: 'instant' });
-  expect(screen.getByRole('heading', { name: '2028 / 10' })).toBeTruthy();
-  const saturday = screen.getByRole('button', { name: '2028-10-28' });
-  expect(document.activeElement).toBe(saturday);
+  expect(onDate).not.toHaveBeenCalled();
+
   const viewport = screen.getByRole('region', { name: '2028-10 月格，週日起始' });
+  const bounds = viewport.getBoundingClientRect();
+  const requestedButton = within(viewport).getByRole('button', { name: requested });
+  expect(requestedButton.getBoundingClientRect().right).toBeGreaterThan(bounds.right);
+  const focused = within(viewport).getByRole('button', { name: '2028-10-26' });
+  expect(document.activeElement).toBe(focused);
+  const focusedBounds = focused.getBoundingClientRect();
+  expect(focusedBounds.left).toBeGreaterThanOrEqual(bounds.left);
+  expect(focusedBounds.right).toBeLessThanOrEqual(bounds.right);
+  expect(focusedBounds.top).toBeGreaterThanOrEqual(0);
+  expect(focusedBounds.bottom).toBeLessThanOrEqual(window.innerHeight);
+
   const sunday = within(viewport).getByText('日', { exact: true });
   expect(viewport.scrollLeft).toBe(0);
-  expect(sunday.getBoundingClientRect().left).toBeGreaterThanOrEqual(
-    viewport.getBoundingClientRect().left,
-  );
-  expect(sunday.getBoundingClientRect().right).toBeLessThanOrEqual(
-    viewport.getBoundingClientRect().right,
-  );
+  expect(sunday.getBoundingClientRect().left).toBeGreaterThanOrEqual(bounds.left);
+  expect(sunday.getBoundingClientRect().right).toBeLessThanOrEqual(bounds.right);
 });
 
 it('外部月份或日期更新不搶走目前控制的焦點', () => {

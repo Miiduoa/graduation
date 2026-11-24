@@ -6,7 +6,7 @@ import {
   type PersonalImportRecord,
 } from '@campus/shared';
 import { monthCalendarKeyboardDate } from './monthCalendarNavigation';
-import { scrollVerticallyIntoView } from './calendarScroll';
+import { isHorizontallyVisible, scrollVerticallyIntoView } from './calendarScroll';
 import styles from './MonthCalendar.module.css';
 
 export function MonthCalendar({
@@ -50,9 +50,30 @@ export function MonthCalendar({
     if (!viewport || !sunday || !selectedColumn || viewport.clientWidth <= 0) return;
     scrollWeekIntoView(viewport, sunday, selectedColumn);
   }, []);
-  const focusDateButton = useCallback((button: HTMLButtonElement) => {
-    button.focus({ preventScroll: true });
-    scrollVerticallyIntoView(button);
+  const focusVisibleDate = useCallback((date: string) => {
+    const requested = dateButtons.current.get(date);
+    let target: HTMLElement | null = viewportRef.current;
+    if (requested && isHorizontallyVisible(requested)) {
+      target = requested;
+    } else {
+      const requestedDay = Number(date.slice(-2));
+      const weekStart = requestedDay - new Date(date).getUTCDay();
+      let closestDistance = Infinity;
+      for (const [candidateDate, button] of dateButtons.current) {
+        const candidateDay = Number(candidateDate.slice(-2));
+        const sameWeek =
+          candidateDay >= weekStart && candidateDay < weekStart + MONTH_WEEKDAYS.length;
+        // Prefer keeping focus in the requested week whenever a date there fits.
+        const distance = Math.abs(candidateDay - requestedDay) + (sameWeek ? 0 : 31);
+        if (distance < closestDistance && isHorizontallyVisible(button)) {
+          target = button;
+          closestDistance = distance;
+        }
+      }
+    }
+    if (!target) return;
+    target.focus({ preventScroll: true });
+    scrollVerticallyIntoView(target, { align: target === viewportRef.current ? 'start' : 'nearest' });
   }, []);
 
   useLayoutEffect(() => {
@@ -63,13 +84,11 @@ export function MonthCalendar({
   useLayoutEffect(() => {
     const requested = pendingFocus.current;
     if (!requested || !requested.date.startsWith(`${month}-`)) return;
-    const target = dateButtons.current.get(requested.date);
-    if (!target) return;
     pendingFocus.current = null;
     if (document.activeElement !== requested.origin && document.activeElement !== document.body)
       return;
-    focusDateButton(target);
-  }, [month, focusDateButton]);
+    focusVisibleDate(requested.date);
+  }, [month, focusVisibleDate]);
 
   const moveDate = (event: KeyboardEvent<HTMLButtonElement>, date: string) => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
@@ -90,11 +109,7 @@ export function MonthCalendar({
     const target = monthCalendarKeyboardDate(date, event.key);
     if (!target || target === date) return;
     if (target.startsWith(`${month}-`)) {
-      const button = dateButtons.current.get(target);
-      if (button) {
-        revealWeek(days.findIndex((day) => day?.date === target));
-        focusDateButton(button);
-      }
+      focusVisibleDate(target);
     } else if (onMonthChange) {
       pendingFocus.current = { date: target, origin: event.currentTarget };
       onMonthChange(target.slice(0, 7));
