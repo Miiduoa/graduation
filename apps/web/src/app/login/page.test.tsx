@@ -543,6 +543,7 @@ it('keeps a school task school-only when student ID is not available', () => {
   state.user = null;
   render(<LoginPage />);
   expect(screen.queryByTestId('platform-sign-in')).toBeNull();
+  expect(screen.queryByRole('link', { name: '前往 TronClass 登入' })).toBeNull();
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('連線學校帳號');
   expect(
     screen.getByText('學校帳號登入目前未開放，暫時無法連線這項服務。你原本要開啟的頁面已保留。'),
@@ -1003,6 +1004,7 @@ it.each(['/merchant', '/merchant/apply', '/merchant/workspace'])(
     state.studentId = true;
     render(<LoginPage />);
     expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe(returnUrl);
+    expect(screen.queryByRole('link', { name: '前往 TronClass 登入' })).toBeNull();
     expect(screen.queryByLabelText('學號')).toBeNull();
     expect(screen.queryByLabelText('密碼')).toBeNull();
     expect(replace).not.toHaveBeenCalled();
@@ -1075,6 +1077,19 @@ it('does not prioritize a selected school when its sign-in is unavailable', () =
   expect(screen.queryByLabelText('學號')).toBeNull();
 });
 
+it('opens the external TronClass institution directory without a selected nuni school', () => {
+  state.params = new URLSearchParams();
+  state.user = null;
+  render(<LoginPage />);
+  const directory = screen.getByRole('link', { name: '前往 TronClass 登入' });
+  expect(directory.getAttribute('href')).toBe('https://www.tronclass.com/login');
+  expect(directory.getAttribute('target')).toBe('_blank');
+  expect(directory.getAttribute('rel')).toContain('noreferrer');
+  expect(directory.closest('details')).toBeNull();
+  expect(screen.getByText(/在 TronClass 官網搜尋學校或機構/)).toBeTruthy();
+  expect(screen.queryByLabelText('密碼')).toBeNull();
+});
+
 it('offers the selected school’s official LMS even when in-app school login is closed', () => {
   state.params = new URLSearchParams();
   state.selectedSchoolId = 'fju';
@@ -1088,7 +1103,8 @@ it('offers the selected school’s official LMS even when in-app school login is
 
   state.selectedSchoolId = 'ntu';
   view.rerender(<LoginPage />);
-  expect(screen.queryByRole('link', { name: /TronClass/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /輔大 TronClass/ })).toBeNull();
+  expect(screen.getByRole('link', { name: '前往 TronClass 登入' }).closest('details')).toBeNull();
   expect(signIn).not.toHaveBeenCalled();
 });
 

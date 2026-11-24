@@ -9,6 +9,14 @@ type LearningEntry = {
   links: readonly LearningLink[];
 };
 
+// https://support.tronclass.com/tw/question/login/ publishes this URL.
+// Its current destination is the institution picker at az.tronclass.com/login.
+export const TRONCLASS_LOGIN_DIRECTORY = {
+  label: '前往 TronClass 登入',
+  url: 'https://www.tronclass.com/login',
+  description: '在 TronClass 官網搜尋學校或機構，前往專屬登入頁。此入口不會將課程同步到 nuni。',
+} as const;
+
 // Public destinations confirmed against university LMS or teaching-center pages.
 const platforms: Readonly<Record<string, readonly PlatformLink[] | undefined>> = {
   // https://dorac.pu.edu.tw/p/406-1059-45291,r13.php?Lang=zh-tw

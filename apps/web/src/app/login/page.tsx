@@ -7,7 +7,10 @@ import { SiteShell } from '@/components/SiteShell';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useSearchParams } from 'next/navigation';
-import { getSchoolTronClassEntry } from '@campus/shared/src/schoolLearningPlatforms';
+import {
+  getSchoolTronClassEntry,
+  TRONCLASS_LOGIN_DIRECTORY,
+} from '@campus/shared/src/schoolLearningPlatforms';
 import { isPuEcampusDataFetchEnabled } from '@campus/shared/src/puEcampusDataPolicy';
 import { isPuTeacherAccount } from '@/lib/server/puIdentity';
 import { useAuth } from '@/components/AuthGuard';
@@ -442,6 +445,20 @@ function LoginForm({
         <div className={`${styles.loginLayout} ${loginStyles.methods}`}>
           {schoolFirst ? [schoolSignIn, platformSignIn] : [platformSignIn, schoolSignIn]}
         </div>
+        {!schoolTask && (
+          <p className={loginStyles.continuation}>
+            <a
+              className={styles.backLink}
+              href={TRONCLASS_LOGIN_DIRECTORY.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              referrerPolicy="no-referrer"
+            >
+              {TRONCLASS_LOGIN_DIRECTORY.label} <span aria-hidden="true">↗</span>
+            </a>
+            {TRONCLASS_LOGIN_DIRECTORY.description}
+          </p>
+        )}
         {!schoolTask && <AccountRoleLinks showSchool />}
         <section className={styles.guestAccess} aria-labelledby="guest-access-title">
           <div>

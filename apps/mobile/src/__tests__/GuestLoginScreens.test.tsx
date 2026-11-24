@@ -550,6 +550,21 @@ test('the guest school-login entry always follows the selected university', () =
   expect(view.queryByText(/提供學號直接連線/)).toBeNull();
 });
 
+test('the official TronClass directory opens without a nuni campus or account', async () => {
+  mockSchool = { id: '', name: '', shortName: '' };
+  const view = render(<LoginLandingScreen />);
+  expect(view.queryByTestId('school-tronclass-open')).toBeNull();
+  expect(view.queryByTestId('school-login-start')).toBeNull();
+  expect(view.getByText(/在 TronClass 官網搜尋學校或機構/)).toBeTruthy();
+  const directory = view.getByRole('link', { name: '前往 TronClass 登入' });
+  await act(async () => fireEvent.press(directory));
+  expect(webBrowserOpenWithPuTronClassGate).toHaveBeenCalledTimes(1);
+  expect(webBrowserOpenWithPuTronClassGate).toHaveBeenCalledWith('https://www.tronclass.com/login');
+  expect(signInWithStudentId).not.toHaveBeenCalled();
+  expect(signInWithCredential).not.toHaveBeenCalled();
+  expect(safeNavigate).not.toHaveBeenCalled();
+});
+
 describe('official school TronClass action on the guest landing', () => {
   function enablePuTronClass() {
     Object.assign(Constants.expoConfig!, { extra: { appEnv: 'development', tronClassDataEnabled: true } });
@@ -573,6 +588,7 @@ describe('official school TronClass action on the guest landing', () => {
     const view = render(<LoginLandingScreen />);
     expect(view.getByTestId('school-login-start')).toBeTruthy();
     expect(view.queryByTestId('school-tronclass-open')).toBeNull();
+    expect(view.getByRole('link', { name: '前往 TronClass 登入' })).toBeTruthy();
     enablePuTronClass();
     view.rerender(<LoginLandingScreen />);
     await act(async () => fireEvent.press(view.getByTestId('school-tronclass-open')));

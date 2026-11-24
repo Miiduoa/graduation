@@ -14,7 +14,10 @@ import {
   isSchoolLoginEntryAvailable,
   loadSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
-import { getSchoolTronClassEntry } from '@campus/shared/src/schoolLearningPlatforms';
+import {
+  getSchoolTronClassEntry,
+  TRONCLASS_LOGIN_DIRECTORY,
+} from '@campus/shared/src/schoolLearningPlatforms';
 import {
   webBrowserOpenWithPuTronClassGate,
   webViewShouldAllowRequestUrl,
@@ -33,6 +36,12 @@ async function openStaffLogin(path: '/auth/account?method=school' | '/admin/logi
     await Linking.openURL(url);
   } catch {
     Alert.alert('無法開啟登入頁', `請使用瀏覽器開啟 ${url}`);
+  }
+}
+
+async function openTronClassDirectory() {
+  if (!(await webBrowserOpenWithPuTronClassGate(TRONCLASS_LOGIN_DIRECTORY.url))) {
+    Alert.alert('無法開啟 TronClass 官網', `請使用瀏覽器開啟 ${TRONCLASS_LOGIN_DIRECTORY.url}`);
   }
 }
 
@@ -269,6 +278,16 @@ export default function LoginLandingScreen() {
             </View>
           ) : null}
         </View>
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={TRONCLASS_LOGIN_DIRECTORY.label}
+          accessibilityHint={TRONCLASS_LOGIN_DIRECTORY.description}
+          onPress={() => void openTronClassDirectory()}
+          style={({ pressed }) => [s.workEntry, pressed && s.rowPressed]}
+        >
+          <Text style={s.publicTitle}>{TRONCLASS_LOGIN_DIRECTORY.label} ↗</Text>
+          <Text style={s.importHelp}>{TRONCLASS_LOGIN_DIRECTORY.description}</Text>
+        </Pressable>
         {platformReady && hasSchool ? (
           <View style={s.todayTasks}>
             <TodayTimetablePanel
