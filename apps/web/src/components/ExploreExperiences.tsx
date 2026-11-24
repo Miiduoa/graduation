@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   ASSISTANT_EXPERIENCE_CATEGORIES,
@@ -20,6 +20,10 @@ import { CampusIcon, type CampusIconName } from './CampusIcon';
 import { useSchoolLmsReadonlyEnabled } from './SchoolLmsReadonlyProvider';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { flattenCampusServices, presentCampusService, SERVICE_ACCESS } from '@/lib/campusServices';
+import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
+import { useOptionalAssistantWorkspace } from './AssistantWorkspaceContext';
+import { useDirectoryVisit } from './DirectoryVisit';
 import styles from './ExploreExperiences.module.css';
 
 type Filters = {
@@ -53,17 +57,16 @@ function readFilters(search: URLSearchParams): Filters {
   };
 }
 
+function experienceWorkContext(experience: AssistantExperience, context: Filters['workContext']): AssistantWorkContext {
+  return experience.workContext === 'all' ? context === 'all' ? 'student' : context : experience.workContext;
+}
+
 function experienceHref(
   experience: AssistantExperience,
   scope: string,
   context: Filters['workContext'],
 ) {
-  const workContext =
-    experience.workContext === 'all'
-      ? context === 'all'
-        ? 'student'
-        : context
-      : experience.workContext;
+  const workContext = experienceWorkContext(experience, context);
   const search = new URLSearchParams({
     q: experience.prompt,
     taskProfile: assistantTaskProfileForWorkContext(workContext),
@@ -75,6 +78,11 @@ export function ExploreExperiences() {
   const params = useSearchParams();
   const queryString = params?.toString() ?? '';
   const campusSearch = useCampusNavigationSearch(params);
+  const campus = useCampusBrowseContext({ schoolId: params?.get('schoolId') ?? undefined,
+    campus: params?.get('campus') ?? undefined, school: params?.get('school') ?? undefined });
+  const workspace = useOptionalAssistantWorkspace();
+  const visit = useDirectoryVisit();
+  const content = useRef<HTMLDivElement>(null);
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const id = useId();
   const searchInput = useRef<HTMLInputElement>(null);
@@ -141,8 +149,18 @@ export function ExploreExperiences() {
   const filtering =
     filters.category !== 'all' || filters.workContext !== 'all' || Boolean(filters.query.trim());
 
+  useLayoutEffect(() => {
+    if (!visit?.restoreRow) return;
+    const target = Array.from(content.current?.querySelectorAll<HTMLAnchorElement>('[data-experience-return]') ?? [])
+      .find((link) => link.dataset.experienceReturn === visit.restoreRow);
+    if (!target) return;
+    target.focus({ preventScroll: true });
+    target.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    visit.finishReturn();
+  }, [visit]);
+
   return (
-    <div className={styles.explore}>
+    <div ref={content} className={styles.explore}>
       <section className={styles.finder} aria-label="篩選探索內容">
         <div className={styles.finderRow}>
           <label className={styles.searchField}>
@@ -275,6 +293,12 @@ export function ExploreExperiences() {
                           className={styles.tryLink}
                           href={experienceHref(experience, campusSearch, filters.workContext)}
                           aria-label={`試著問 nuni：${experience.title}`}
+                          onClick={(event) => {
+                            if (!workspace || !isCurrentTabNavigationClick(event, event.currentTarget)) return;
+                            if (workspace.requestEntry({ prompt: experience.prompt,
+                              workContext: experienceWorkContext(experience, filters.workContext), schoolId: campus.schoolId }))
+                              event.preventDefault();
+                          }}
                         >
                           試著問 nuni
                         </Link>
@@ -283,6 +307,18 @@ export function ExploreExperiences() {
                             className={styles.directLink}
                             href={campusServiceHref(availableService.href, campusSearch)}
                             aria-label={`開啟相關服務：${availableService.name}`}
+                            data-experience-return={experience.id}
+                            onClick={(event) => {
+                              if (!isCurrentTabNavigationClick(event, event.currentTarget)) return;
+                              const link = event.currentTarget;
+                              const back = new URLSearchParams(campusSearch);
+                              if (filters.category !== 'all') back.set('category', filters.category);
+                              if (filters.workContext !== 'all') back.set('workContext', filters.workContext);
+                              if (filters.query) back.set('q', filters.query);
+                              visit?.remember({ journey: 'life', source: 'explore', serviceHref: experience.id,
+                                destination: link.pathname + link.search,
+                                returnHref: `/explore${back.size ? `?${back}` : ''}` });
+                            }}
                           >
                             開啟相關服務
                           </Link>

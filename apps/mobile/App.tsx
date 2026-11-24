@@ -71,6 +71,7 @@ import { MeStack } from './src/screens/MeStack';
 import { OnboardingScreen, hasSeenOnboarding } from './src/screens/OnboardingScreen';
 import { PreAuthStack } from './src/screens/PreAuthStack';
 import { hasReadySchoolSession } from './src/app/SchoolSessionBoundary';
+import { AssistantContinuationHost } from './src/components/AssistantContinuationHost';
 import { preAuthLinking } from './src/app/preAuthLinking';
 import { StudentCardLinkHandler } from './src/app/StudentCardLinkHandler';
 import { parseStudentCardDeepLink } from './src/app/studentCardDeepLink';
@@ -620,6 +621,7 @@ function PublicNavigation() {
     >
       <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
         <PreAuthStack />
+        <AssistantContinuationHost navigationRef={publicNavigationRef} />
       </View>
     </NavigationContainer>
   );
@@ -850,6 +852,7 @@ function SchoolNavigation() {
         <NetworkStatusBanner />
         <AppTabNavigator />
         <HeaderDrawerHost />
+        <AssistantContinuationHost navigationRef={rootNavigationRef} hasTabBar />
       </View>
     </NavigationContainer>
   );

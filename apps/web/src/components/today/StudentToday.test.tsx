@@ -128,7 +128,7 @@ it('shows the next class once in the timetable with a keyboard-accessible destin
   expect(screen.queryByText(/為你推薦|智慧|AI 幫你/)).toBeNull();
 });
 
-it('keeps the task entry before the planner and preserves its draft while the day finishes loading', () => {
+it('keeps the first-screen workspace draft mounted while the day finishes loading', () => {
   const assistant = <input aria-label="助理草稿測試" defaultValue="" />;
   const result = view({ skeleton: true, assistant });
   const draft = screen.getByRole('textbox');
@@ -156,7 +156,7 @@ it('keeps the actual day before the task agent and preserves the agent while hom
   expect(button.compareDocumentPosition(planner) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
 });
 
-it('keeps the task entry above the planner and places planning before optional suggestions without resetting drafts', () => {
+it('keeps the workspace before the day and planning before optional suggestions without resetting drafts', () => {
   const agent = <input aria-label="代辦測試" defaultValue="保留原本的安排" />;
   const assistant = <input aria-label="助理草稿測試" defaultValue="接著幫我找教室" />;
   const personalization = <section aria-label="個人化安排">生活與年級偏好</section>;
@@ -165,6 +165,7 @@ it('keeps the task entry above the planner and places planning before optional s
   const conversation = screen.getByRole('textbox', { name: '助理草稿測試' });
   const assistance = screen.getByTestId('today-assistance');
   expect(assistance.contains(planning)).toBe(true);
+  expect(screen.getByTestId('today-workspace-entry').contains(conversation)).toBe(true);
   expect(conversation.compareDocumentPosition(screen.getByTestId('today-unified-flow')) &
     Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(assistance.compareDocumentPosition(screen.getByRole('region', { name: '個人化安排' })) &

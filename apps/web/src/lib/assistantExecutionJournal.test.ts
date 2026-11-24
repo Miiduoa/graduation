@@ -44,6 +44,82 @@ it('keeps an exact calendar recovery card across a fresh module load, without un
   expect(snapshot()).not.toMatch(/history|question|sessionHandle|consent|grade|rawText/);
 });
 
+it.each([true, false])('retains coursework=%s across storage and a fresh module load', async (coursework) => {
+  const value = input();
+  const hinted = { ...value, card: { ...value.card, coursework } };
+  saveAssistantExecutionJournal(scope, hinted, active);
+  const stored = snapshot();
+  expect(JSON.parse(stored!).entries[0].card).toHaveProperty('coursework', coursework);
+  const expected = [{ ...hinted, savedAt: expect.any(String) }];
+  expect(readAssistantExecutionJournal(scope)).toEqual(expected);
+  vi.resetModules();
+  const reloaded = await import('./assistantExecutionJournal');
+  expect(reloaded.readAssistantExecutionJournal(scope)).toEqual(expected);
+  reloaded.saveAssistantExecutionJournal(scope, hinted, active);
+  expect(snapshot()).toBe(stored);
+});
+
+it('keeps legacy cards without a coursework hint distinct from explicit true and false cards', () => {
+  saveAssistantExecutionJournal(scope, input('av2_legacy_event'), active);
+  for (const coursework of [true, false]) {
+    const value = input('av2_coursework_' + coursework);
+    saveAssistantExecutionJournal(scope, { ...value, card: { ...value.card, coursework } }, active);
+  }
+  const entries = readAssistantExecutionJournal(scope);
+  expect(entries).toHaveLength(3);
+  expect(entries[0].card).not.toHaveProperty('coursework');
+  expect(entries[1].card).toHaveProperty('coursework', true);
+  expect(entries[2].card).toHaveProperty('coursework', false);
+  expect(JSON.parse(snapshot()!).entries[0].card).not.toHaveProperty('coursework');
+  const before = snapshot();
+  saveAssistantExecutionJournal(scope, input('av2_legacy_event'), active);
+  expect(snapshot()).toBe(before);
+});
+
+it.each([true, false])('does not change or erase coursework=%s for an existing mutation', (coursework) => {
+  const value = input();
+  saveAssistantExecutionJournal(scope, { ...value, card: { ...value.card, coursework } }, active);
+  const before = snapshot();
+  for (const card of [{ ...value.card, coursework: !coursework }, value.card]) {
+    expect(() => saveAssistantExecutionJournal(scope, { ...value, card }, active)).toThrow('不同確認內容');
+    expect(snapshot()).toBe(before);
+  }
+});
+
+it.each([null, 'true', 'false', 0, 1, {}, []].map(coursework => ({ coursework })))(
+  'rejects malformed coursework=$coursework without erasing recovery evidence', ({ coursework }) => {
+    saveAssistantExecutionJournal(scope, input(), active);
+    const key = storedKey(), before = snapshot();
+    const value = input('av2_malformed_event');
+    expect(() => saveAssistantExecutionJournal(scope, {
+      ...value, card: { ...value.card, coursework },
+    }, active)).toThrow();
+    expect(snapshot()).toBe(before);
+
+    const corrupt = JSON.parse(before!);
+    corrupt.entries[0].card.coursework = coursework;
+    const encoded = JSON.stringify(corrupt);
+    sessionStorage.setItem(key, encoded);
+    expect(() => readAssistantExecutionJournal(scope)).toThrow();
+    expect(() => saveAssistantExecutionJournal(scope, value, active)).toThrow();
+    expect(() => removeAssistantExecutionJournal(scope, input().card.mutationId, active)).toThrow();
+    expect(sessionStorage.getItem(key)).toBe(encoded);
+  },
+);
+
+it('rejects undefined and accessor coursework hints without invoking a getter', () => {
+  const value = input();
+  const getter = vi.fn(() => true);
+  expect(() => saveAssistantExecutionJournal(scope, {
+    ...value, card: { ...value.card, coursework: undefined },
+  }, active)).toThrow();
+  expect(() => saveAssistantExecutionJournal(scope, {
+    ...value, card: Object.defineProperty({ ...value.card }, 'coursework', { enumerable: true, get: getter }),
+  }, active)).toThrow();
+  expect(getter).not.toHaveBeenCalled();
+  expect(sessionStorage.length).toBe(0);
+});
+
 it('returns detached copies and keeps exact duplicate saves byte-for-byte unchanged', () => {
   const value = input();
   saveAssistantExecutionJournal(scope, value, active);
@@ -77,17 +153,18 @@ it('accepts matching UI conversation metadata without persisting it twice', () =
   expect(snapshot()).toBe(before);
 });
 
-it('retains source-bound pickup policy across recovery and rejects unknown policies', () => {
+it.each([undefined, false])('retains source-bound pickup policy with coursework=%s and rejects unknown policies', (coursework) => {
   const value = input();
-  const pickup = { ...value, card: { ...value.card, sourceBound: 'food-pickup' } };
+  const card = coursework === undefined ? value.card : { ...value.card, coursework };
+  const pickup = { ...value, card: { ...card, sourceBound: 'food-pickup' } };
   saveAssistantExecutionJournal(scope, pickup, active);
   expect(readAssistantExecutionJournal(scope)[0].card).toMatchObject({
-    token: value.card.token, args: event, sourceBound: 'food-pickup',
+    ...card, sourceBound: 'food-pickup',
   });
   const before = snapshot();
   expect(() => saveAssistantExecutionJournal(scope, { ...value,
-    card: { ...value.card, sourceBound: 'unverified-order' } }, active)).toThrow();
-  expect(() => saveAssistantExecutionJournal(scope, value, active)).toThrow('不同確認內容');
+    card: { ...card, sourceBound: 'unverified-order' } }, active)).toThrow();
+  expect(() => saveAssistantExecutionJournal(scope, { ...value, card }, active)).toThrow('不同確認內容');
   expect(snapshot()).toBe(before);
 });
 

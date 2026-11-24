@@ -53,6 +53,15 @@ function comparisonText(value: unknown): string {
   return normalizeCampusClassroomQuery(value).normalize('NFKC').toLocaleLowerCase('zh-TW');
 }
 
+/** Two consecutive floor markers without a room are ambiguous, not a room.
+ * For example 3F-4F or 3樓4F can describe a floor range. Do not choose a
+ * building destination from that notation alone. A three-digit room such
+ * as 303F is still valid, and no floor or room position is inferred. */
+function hasOnlyTwoFloorMarkers(suffix: string): boolean {
+  const floor = '(?:b?\\d{1,2}\\s*f|(?:地下|地上)?(?:\\d{1,2}|[一二三四五六七八九十]{1,3})樓)';
+  return new RegExp('^[\\s:：,，·#/–—-]*' + floor + '[\\s,，:：·/–—-]*' + floor + '(?:\\s*(?:教室|室))?$', 'u').test(suffix);
+}
+
 function comparablePublicName(value: unknown): string {
   if (typeof value !== 'string') return '';
   return withoutClassroomControlCharacters(value).normalize('NFKC').toLocaleLowerCase('zh-TW')
@@ -71,7 +80,7 @@ function isRoomSuffix(value: string): boolean {
   const floor = '(?:b?\\d{1,2}\\s*f|(?:地下|地上)?(?:\\d{1,2}|[一二三四五六七八九十]{1,3})樓)';
   // Bare 3F / B1F is a floor designation, even if the generic room
   // pattern could interpret its final F as an alphabetic room suffix.
-  if (new RegExp(`^${floor}(?:\\s*(?:教室|室))?$`, 'u').test(suffix)) return false;
+  if (hasOnlyTwoFloorMarkers(suffix) || new RegExp(`^${floor}(?:\\s*(?:教室|室))?$`, 'u').test(suffix)) return false;
   if (new RegExp(`^${room}$`, 'u').test(suffix)) return true;
   // A timetable may explicitly write floor and room together (3F303 / 3樓303).
   // Accept only an immediately following numeric room, not arbitrary letter suffixes;
@@ -406,11 +415,12 @@ const VERIFIED_PROVIDENCE_CODE_BY_PLACE_ID = new Map<string, string>([
 ]);
 
 function matchesVerifiedCodeRoomSuffix(suffix: string): boolean {
-  return !VERIFIED_CODE_FLOOR_ONLY_SUFFIX.test(suffix) &&
+  return !hasOnlyTwoFloorMarkers(suffix) && !VERIFIED_CODE_FLOOR_ONLY_SUFFIX.test(suffix) &&
     (VERIFIED_CODE_ROOM_SUFFIX.test(suffix) || VERIFIED_CODE_FLOOR_ROOM_SUFFIX.test(suffix));
 }
 
-function matchesSourcedProvidenceCode(query: string, published: CampusMapPlaceLike): boolean {
+function matchesSourcedProvidenceCode(query: string, published: CampusMapPlaceLike | undefined): boolean {
+  if (!published) return false;
   const code = VERIFIED_PROVIDENCE_CODE_BY_PLACE_ID.get(published.id);
   return code !== undefined && query.startsWith(code) &&
     matchesVerifiedCodeRoomSuffix(query.slice(code.length));

@@ -1,6 +1,8 @@
 'use client';
 
 import { AssistantReplyAnchor, AssistantReplyLink } from '@/components/AssistantReplyLink';
+import { useAssistantWorkspaceHandoff } from '@/components/AssistantWorkspaceContext';
+import { assistantTaskProfileForWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
 import { useSearchParams } from 'next/navigation';
 import {
   Suspense,
@@ -92,7 +94,7 @@ export function AssistantConversation({
   groupId,
   initialDraft,
   schoolId,
-  taskProfile = 'student',
+  taskProfile: initialTaskProfile = 'student',
   inline = false,
   inlineDraft,
 }: {
@@ -106,6 +108,8 @@ export function AssistantConversation({
   inlineDraft?: { text: string; setText: Dispatch<SetStateAction<string>> };
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [entryTaskProfile, setEntryTaskProfile] = useState<AssistantRoleProfileId | null>(null);
+  const taskProfile = entryTaskProfile ?? initialTaskProfile;
   const campusDraft = useOptionalCampusDraft('assistant');
   const [localDraft, setLocalDraft] = useState(initialDraft);
   const sharedDraft = !inline && campusDraft.available ? campusDraft : undefined;
@@ -136,6 +140,12 @@ export function AssistantConversation({
     : functionsReady ? ['這週有哪些作業要交？', '如何前往圖書館？', '校園裡有哪些餐廳？']
       : ['你能做什麼？', '查看我的匯入成績', '開啟圖書館'];
   const latestCloudReply = messages.findLastIndex((message) => message.role === 'assistant' && !message.local && !message.publicCourse);
+  useAssistantWorkspaceHandoff(inline, (entry) => {
+    if (pending || request.current) return { ok: false, message: '請先等待目前的回答，或停止後再帶入新問題。原草稿尚未變更。' };
+    if (entry.workContext) setEntryTaskProfile(assistantTaskProfileForWorkContext(entry.workContext));
+    setDraft(entry.prompt);
+    return { ok: true };
+  });
 
   useLayoutEffect(() => {
     // 網址 ?q= 有值且與現有草稿不同：以網址為準覆寫（明確深連結手遞）；無 q 才保留草稿。
@@ -214,7 +224,7 @@ export function AssistantConversation({
             publicCourse: { read: result.read },
           },
         ]);
-        setDraft('');
+        setDraft((current) => current.trim() === content ? '' : current);
         return;
       }
       sessionId.current ??= crypto.randomUUID();
@@ -462,7 +472,7 @@ export function AssistantConversation({
                 : '回覆可能有誤；申請、繳費請以服務頁面的紀錄為準。'}
           </p>
           {inline && pending ? (
-            <button key="stop" type="button" className={home.primary} onClick={stopAsking}>
+            <button key="stop" type="button" className={home.primary} onClick={stopAsking} data-assistant-stop-read="true">
               停止回答
             </button>
           ) : (

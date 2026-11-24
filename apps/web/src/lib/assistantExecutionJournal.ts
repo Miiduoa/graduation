@@ -16,6 +16,7 @@ export type AssistantExecutionJournalCard = {
   schoolId: string;
   destination: string;
   sourceBound?: 'food-pickup';
+  coursework?: boolean;
 };
 
 export type AssistantExecutionJournalEntry = {
@@ -27,7 +28,7 @@ export type AssistantExecutionJournalEntry = {
 const PREFIX = 'campus.assistant-execution.v1:';
 const LIMIT = 16;
 const MAX_BYTES = 64 * 1024;
-const CARD_FIELDS = ['tool', 'token', 'args', 'mutationId', 'schoolId', 'destination', 'sourceBound'];
+const CARD_FIELDS = ['tool', 'token', 'args', 'mutationId', 'schoolId', 'destination', 'sourceBound', 'coursework'];
 
 function invalid(): never {
   throw new Error('待核對的行程紀錄無法確認，原有紀錄仍保留，請先核對後再送出。');
@@ -71,12 +72,14 @@ function calendarCard(raw: unknown, scope: AssistantExecutionJournalScope, conve
       typeof value.destination !== 'string' || !value.destination || value.destination.length > 300 ||
       value.destination !== value.destination.trim() || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value.destination) ||
       (value.sourceBound !== undefined && value.sourceBound !== 'food-pickup') ||
+      (value.coursework !== undefined && typeof value.coursework !== 'boolean') ||
       (value.conversationId !== undefined && value.conversationId !== conversationId)) return invalid();
   return {
     tool: 'propose_personal_event', token: value.token,
     args: parseAssistantCalendarEvent(value.args), mutationId: safeId(value.mutationId, 8),
     schoolId: scope.schoolId, destination: value.destination,
     ...(value.sourceBound === 'food-pickup' ? { sourceBound: value.sourceBound } : {}),
+    ...(typeof value.coursework === 'boolean' ? { coursework: value.coursework } : {}),
   };
 }
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi, type Mock } from 'vitest';
 import { createAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
-import { assertTodayAgentFollowupCapacity, readTodayAgentFollowups, saveTodayAgentFollowup, removeTodayAgentFollowup, todayAgentFollowupStorageKey } from './todayAgentFollowups';
+import { assertTodayAgentFollowupCapacity, readTodayAgentFollowups, saveTodayAgentFollowup, removeTodayAgentFollowup, subscribeTodayAgentFollowups, todayAgentFollowupStorageKey } from './todayAgentFollowups';
 
 const scope = { owner: 'platform:alice', schoolId: 'pu' };
 const context = 'a'.repeat(43);
@@ -15,6 +15,7 @@ function proof(id = 'original-calendar-001') {
   return { input: { issuedContext: context, conversationId: 'original-conversation', card }, receipt };
 }
 let requestLock: Mock<(key: string, action: () => unknown) => Promise<unknown>>;
+const unsubscribe: Array<() => void> = [];
 beforeEach(() => {
   localStorage.clear();
   // One origin-wide lock queue stands in for separate tabs sharing Web Locks.
@@ -26,7 +27,10 @@ beforeEach(() => {
   });
   Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: requestLock } });
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  for (const stop of unsubscribe.splice(0)) stop();
+  vi.restoreAllMocks();
+});
 
 it('preserves the original signed proof across a new login without sharing another account or campus', async () => {
   const { input, receipt } = proof();
@@ -182,4 +186,117 @@ it('checks the capacity inside the lock so competing tabs cannot displace an old
   expect(results.map(result => result.status)).toEqual(['fulfilled', 'rejected']);
   expect(readTodayAgentFollowups(scope)).toHaveLength(24);
   expect(readTodayAgentFollowups(scope).filter(entry => entry.card.mutationId.startsWith('existing-calendar-'))).toHaveLength(23);
+});
+
+it('notifies only the matching account and campus after the stored proof is readable', async () => {
+  const { input, receipt } = proof();
+  const changed = vi.fn(() => expect(readTodayAgentFollowups(scope)).toEqual([{ ...input, verifiedAt: receipt.verifiedAt }]));
+  const otherAccount = vi.fn(), otherCampus = vi.fn();
+  unsubscribe.push(subscribeTodayAgentFollowups(scope, changed),
+    subscribeTodayAgentFollowups({ ...scope, owner: 'platform:bob' }, otherAccount),
+    subscribeTodayAgentFollowups({ ...scope, schoolId: 'nthu' }, otherCampus));
+  expect(changed).not.toHaveBeenCalled();
+  await saveTodayAgentFollowup(scope, input, receipt, () => true);
+  expect(changed).toHaveBeenCalledExactlyOnceWith();
+  expect(otherAccount).not.toHaveBeenCalled();
+  expect(otherCampus).not.toHaveBeenCalled();
+});
+
+it('announces only a scoped key and writer identity without disclosing signed proof or source data', async () => {
+  const { input, receipt } = proof(), writer = Symbol('writer');
+  const received: unknown[] = [];
+  const receive = (event: Event) => { received.push((event as CustomEvent).detail); };
+  window.addEventListener('campus:today-agent-followups-changed', receive);
+  unsubscribe.push(() => window.removeEventListener('campus:today-agent-followups-changed', receive));
+  await saveTodayAgentFollowup(scope, input, receipt, () => true, writer);
+  expect(received).toEqual([{ key: todayAgentFollowupStorageKey(scope), source: writer }]);
+  expect(JSON.stringify(received)).not.toContain(input.card.token);
+  expect(JSON.stringify(received)).not.toContain(input.issuedContext);
+  expect(JSON.stringify(received)).not.toContain(input.card.args.title);
+});
+
+it('emits only for actual changes and not duplicate saves or absent removals', async () => {
+  const { input, receipt } = proof(), changed = vi.fn();
+  unsubscribe.push(subscribeTodayAgentFollowups(scope, changed));
+  await saveTodayAgentFollowup(scope, input, receipt, () => true);
+  expect(changed).toHaveBeenCalledTimes(1);
+  await saveTodayAgentFollowup(scope, input, receipt, () => true);
+  await removeTodayAgentFollowup(scope, 'absent-calendar-001', () => true);
+  expect(changed).toHaveBeenCalledTimes(1);
+  await removeTodayAgentFollowup(scope, input.card.mutationId, () => true);
+  expect(changed).toHaveBeenCalledTimes(2);
+  expect(readTodayAgentFollowups(scope)).toEqual([]);
+  await removeTodayAgentFollowup(scope, input.card.mutationId, () => true);
+  expect(changed).toHaveBeenCalledTimes(2);
+});
+
+it('suppresses only a writer’s own changes while other same-tab readers still refresh', async () => {
+  const a = proof('writer-a-calendar-001'), b = proof('writer-b-calendar-001');
+  const writerA = Symbol('same label'), writerB = Symbol('same label');
+  const readerA = vi.fn(), readerB = vi.fn(), observer = vi.fn();
+  unsubscribe.push(subscribeTodayAgentFollowups(scope, readerA, writerA),
+    subscribeTodayAgentFollowups(scope, readerB, writerB), subscribeTodayAgentFollowups(scope, observer));
+  await saveTodayAgentFollowup(scope, a.input, a.receipt, () => true, writerA);
+  expect(readerA).not.toHaveBeenCalled();
+  expect(readerB).toHaveBeenCalledTimes(1);
+  expect(observer).toHaveBeenCalledTimes(1);
+  await saveTodayAgentFollowup(scope, b.input, b.receipt, () => true, writerB);
+  expect(readerA).toHaveBeenCalledTimes(1);
+  expect(readerB).toHaveBeenCalledTimes(1);
+  expect(observer).toHaveBeenCalledTimes(2);
+  await removeTodayAgentFollowup(scope, b.input.card.mutationId, () => true, writerB);
+  expect(readerA).toHaveBeenCalledTimes(2);
+  expect(readerB).toHaveBeenCalledTimes(1);
+  expect(observer).toHaveBeenCalledTimes(3);
+});
+
+it('unsubscribes without disabling another reader in the same scope', async () => {
+  const { input, receipt } = proof(), detached = vi.fn(), remaining = vi.fn();
+  const stop = subscribeTodayAgentFollowups(scope, detached);
+  unsubscribe.push(stop, subscribeTodayAgentFollowups(scope, remaining));
+  stop();
+  stop();
+  await saveTodayAgentFollowup(scope, input, receipt, () => true);
+  expect(detached).not.toHaveBeenCalled();
+  expect(remaining).toHaveBeenCalledTimes(1);
+});
+
+it.each(['throw', 'unacknowledged'] as const)('does not announce a failed storage save: %s', async failure => {
+  const { input, receipt } = proof(), changed = vi.fn();
+  unsubscribe.push(subscribeTodayAgentFollowups(scope, changed));
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    if (failure === 'throw') throw new DOMException('full', 'QuotaExceededError');
+  });
+  await expect(saveTodayAgentFollowup(scope, input, receipt, () => true)).rejects.toThrow();
+  expect(changed).not.toHaveBeenCalled();
+  expect(readTodayAgentFollowups(scope)).toEqual([]);
+});
+
+it.each(['throw', 'unacknowledged'] as const)('does not announce a failed storage removal: %s', async failure => {
+  const { input, receipt } = proof();
+  await saveTodayAgentFollowup(scope, input, receipt, () => true);
+  const changed = vi.fn();
+  unsubscribe.push(subscribeTodayAgentFollowups(scope, changed));
+  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+    if (failure === 'throw') throw new DOMException('blocked', 'SecurityError');
+  });
+  await expect(removeTodayAgentFollowup(scope, input.card.mutationId, () => true)).rejects.toThrow();
+  expect(changed).not.toHaveBeenCalled();
+  expect(readTodayAgentFollowups(scope)).toEqual([{ ...input, verifiedAt: receipt.verifiedAt }]);
+});
+
+it('treats a same-tab event as invalidation only and ignores unrelated or empty events', () => {
+  const changed = vi.fn();
+  unsubscribe.push(subscribeTodayAgentFollowups(scope, changed));
+  window.dispatchEvent(new Event('campus:today-agent-followups-changed'));
+  window.dispatchEvent(new CustomEvent('campus:today-agent-followups-changed', {
+    detail: { key: todayAgentFollowupStorageKey({ ...scope, owner: 'platform:bob' }) },
+  }));
+  expect(changed).not.toHaveBeenCalled();
+  const { input } = proof();
+  window.dispatchEvent(new CustomEvent('campus:today-agent-followups-changed', {
+    detail: { key: todayAgentFollowupStorageKey(scope), entry: input, status: 'verified' },
+  }));
+  expect(changed).toHaveBeenCalledExactlyOnceWith();
+  expect(readTodayAgentFollowups(scope)).toEqual([]);
 });

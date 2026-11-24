@@ -3,10 +3,12 @@
 import { useId } from 'react';
 import Link from 'next/link';
 import { formatTaipeiDateTime, parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
+import { parseAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
 import type { AssistantCourseworkFollowup } from '@campus/shared/src/assistantCourseworkFollowup';
 import { AssistantCardStack } from '@/features/nuni/assistant/AssistantCards';
 import { AssistantMarkdown } from '@/features/nuni/assistant/AssistantMarkdown';
 import { formatEventWhen } from '@/features/nuni/assistant/copy';
+import { isAssistantCalendarActionReady } from '@/features/nuni/assistant/execution';
 import type { V2ActionStates, V2Card, V2Reply } from '@/features/nuni/assistant/types';
 import type { HomeTask } from '@/lib/homeOverview';
 import styles from './TodayAgentPanel.module.css';
@@ -203,14 +205,27 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
   const attentionCount = otherFollowups.filter(needsFollowup).length;
   const cards = props.reply?.cards ?? [];
   const calendarOnly = cards.every((card) => card.tool === 'propose_personal_event');
+  const states = { ...props.states };
+  // Check the receipt's association before presenting completion or a record
+  // link. This is display validation; only reconciliation can refresh evidence.
+  for (const card of cards) {
+    const state = states[card.mutationId];
+    if (card.tool !== 'propose_personal_event' || state?.status !== 'verified') continue;
+    try {
+      parseAssistantCalendarReceipt(state.receipt, { schoolId: card.schoolId,
+        mutationId: card.mutationId, event: card.args, storage: 'synced' });
+    } catch {
+      states[card.mutationId] = { status: 'unknown',
+        message: '這份回執與目前安排無法核對，請重新核對原操作。' };
+    }
+  }
   const activePlan = cards.some((card) => {
-    const state = props.states[card.mutationId];
-    return !['verified', 'cancelled', 'superseded'].includes(state?.status ?? '') ||
-      (state?.status === 'verified' && (state.local !== 'ready' || !!state.verificationWarning));
+    const state = states[card.mutationId];
+    return !['cancelled', 'superseded'].includes(state?.status ?? '') && !isAssistantCalendarActionReady(state);
   });
-  const unresolved = Object.values(props.states).some((state) =>
+  const unresolved = Object.values(states).some((state) =>
     ['unknown', 'checking', 'executing', 'conflict', 'absent'].includes(state.status) ||
-    (state.status === 'verified' && (state.local !== 'ready' || !!state.verificationWarning)));
+    (state.status === 'verified' && !isAssistantCalendarActionReady(state)));
   const blocked = waiting || tracking || !!props.planningBlocked || !!props.pending || activePlan || unresolved;
   const recoveryTasks = new Map(unique.flatMap(task => {
     const row = clockReady ? recoverableTodayArrangement(task, followups, clock) : null;
@@ -222,13 +237,11 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
       onRecover={task ? () => props.onPlan(task, row.mutationId) : undefined} />;
   };
   const completed = cards.length > 0 && calendarOnly && cards.every((card) =>
-    props.states[card.mutationId]?.status === 'verified');
+    isAssistantCalendarActionReady(states[card.mutationId]));
   const step = completed ? 3 : cards.length ? 2 : 1;
   const sourceReady = !waiting && (tasks.length > 0 || !props.error);
   const detailedCards = cards.filter((card) => {
-    const state = props.states[card.mutationId];
-    return card.tool !== 'propose_personal_event' || state?.status !== 'verified' ||
-      state.local !== 'ready' || !!state.verificationWarning ||
+    return card.tool !== 'propose_personal_event' || !isAssistantCalendarActionReady(states[card.mutationId]) ||
       !followups.some((row) => matchesTrackedCard(row, card));
   });
   const compacted = cards.length - detailedCards.length;
@@ -287,7 +300,8 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
       <p className={styles.description}>
         依作業期限、已同步課表與個人行程找出準備時間，確認後替你加入行事曆。
       </p>
-      {(!props.compact || cards.length > 0 || props.pending === 'plan') && <ol className={styles.progress} aria-label="代辦步驟">
+      {(!props.compact || cards.length > 0 || props.pending === 'plan') &&
+        (!followups.length || cards.length > 0 || props.pending === 'plan') && <ol className={styles.progress} aria-label="代辦步驟">
         {['讀取待辦', '安排空檔', '加入行事曆'].map((label, index) => {
           const done = index === 0 ? sourceReady : index === 1 ? cards.length > 0 : completed;
           const current = !completed && (waiting ? index === 0 : props.pending === 'plan' ? index === 1 : index === step);
@@ -362,7 +376,7 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
         </ul>}
         {calendarOnly ? <AssistantCardStack
           cards={detailedCards}
-          states={props.states}
+          states={states}
           pending={!!props.pending}
           onConfirm={props.onConfirm}
           onCancel={(index) => {
@@ -373,7 +387,7 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
           allowBatchConfirmation={false}
         /> : <p role="alert">這份安排無法核對為個人行程，請重新確認資料。</p>}
         {calendarOnly && cards.map((card, index) => {
-          const action = props.states[card.mutationId];
+          const action = states[card.mutationId];
           return action?.status === 'absent' && !action.retryable ? <div key={card.mutationId} className={styles.message}>
             <p>這份確認已無法繼續。可以請系統核對能否停止原提議，再重新安排。</p>
             <button type="button" className={styles.textButton} disabled={!!props.pending}

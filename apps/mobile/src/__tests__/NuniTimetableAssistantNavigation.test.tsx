@@ -1,5 +1,5 @@
 import React from 'react';
-import { AppState } from 'react-native';
+import { AppState, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { act, cleanupAsync, fireEvent, fireEventAsync, render, renderAsync, waitFor, within } from '@testing-library/react-native/pure';
@@ -20,6 +20,7 @@ import type { StoredTimetable } from '../services/personalTimetable';
 import { savedCampusPlansStorageKey, type SavedCampusPlan } from '../services/savedCampusPlans';
 import { CampusEvidencePlanCard } from '../screens/CampusEvidencePlanCard';
 import { CampusPlanComparisonCard } from '../screens/CampusPlanComparisonCard';
+import { AssistantContinuationHost } from '../components/AssistantContinuationHost';
 
 const account = 'pa_11111111-1111-4111-8111-111111111111';
 let mockSchoolSelectionReady = true;
@@ -199,16 +200,30 @@ test('platform service discovery reaches the real calendar and course workspace 
   const unhandled = jest.fn();
   const screen = render(
     <NuniSessionProvider><NavigationContainer ref={navigation} onUnhandledAction={unhandled}>
-      <PreAuthStack />
+      <View style={{ flex: 1 }}>
+        <PreAuthStack />
+        <AssistantContinuationHost navigationRef={navigation} />
+      </View>
     </NavigationContainer></NuniSessionProvider>,
   );
-  fireEvent.press(await screen.findByRole('button', { name: '開啟課表助理' }));
-  fireEvent.press(await screen.findByRole('button', { name: '查看所有功能' }));
+  await screen.findByRole('button', { name: '開啟課表助理' });
+  act(() => navigation.navigate('Explore'));
+  fireEvent.press(await screen.findByRole('button', { name: '試著問 nuni：下一堂課，從容出發' }));
+  const input = await screen.findByLabelText('詢問校園助理');
+  expect(input.props.value).toBe('下一堂課在哪裡');
+  expect(mockRequest.mock.calls.map(([path]) => path)).toEqual(['sessions/current']);
+  const assistantKey = navigation.getCurrentRoute()?.key;
+  fireEvent.changeText(input, '開啟所有服務');
+  await act(async () => fireEvent.press(screen.getByRole('button', { name: '送出問題' })));
   fireEvent.press(await screen.findByRole('button', { name: '開啟個人行事曆' }));
   expect(navigation.getCurrentRoute()?.name).toBe('PersonalCalendar');
-  act(() => navigation.goBack());
+  fireEvent.press(await screen.findByRole('button', { name: '接著問 nuni' }));
+  expect(navigation.getCurrentRoute()).toMatchObject({ name: 'NuniTimetableAssistant', key: assistantKey });
   fireEvent.press(await screen.findByRole('button', { name: '開啟課程與作業' }));
   expect(navigation.getCurrentRoute()).toMatchObject({ name: 'NuniWorkspace', params: { tab: 'courses' } });
+  fireEvent.press(await screen.findByRole('button', { name: '接著問 nuni' }));
+  expect(navigation.getCurrentRoute()).toMatchObject({ name: 'NuniTimetableAssistant', key: assistantKey });
+  expect(screen.getAllByText('開啟所有服務')).toHaveLength(1);
   const firebase = jest.requireMock('../firebase');
   expect(firebase.getAuthInstance).not.toHaveBeenCalled();
   expect(firebase.getDb).not.toHaveBeenCalled();

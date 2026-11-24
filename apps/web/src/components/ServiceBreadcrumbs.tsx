@@ -22,12 +22,13 @@ export function ServiceBreadcrumbs({ title }: { title?: string }) {
   const params = useSearchParams();
   const context = useCampusNavigationSearch(params);
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
+  const exploration = visit?.origin?.source === 'explore' ? visit.origin : null;
   const section = PRIMARY_DESTINATIONS.find(
     (item) => item.id === primaryNavigationSection(pathname),
-  );
-  if (!pathname || !section || section.href === pathname || section.id === 'today') return null;
+  ) ?? (exploration ? PRIMARY_DESTINATIONS.find((item) => item.id === 'life') : undefined);
+  if (!pathname || !section || (!exploration && (section.href === pathname || section.id === 'today'))) return null;
 
-  const origin = visit?.origin?.journey === section.id ? visit.origin : null;
+  const origin = exploration ?? (visit?.origin?.journey === section.id ? visit.origin : null);
   const services = visibleCampusServices(schoolLmsEnabled);
   const service = services
     .filter((item) => campusServiceMatches(item.href, pathname, params))
@@ -72,7 +73,8 @@ export function ServiceBreadcrumbs({ title }: { title?: string }) {
               }
             }}
           >
-            {origin ? `返回${section.label}目錄` : section.label}
+            {origin?.source === 'explore' ? '返回探索' : origin
+              ? `返回${origin.returnHref.split('?')[0] === '/life' ? '生活' : section.label}目錄` : section.label}
           </Link>
         </li>
         {showParent && parent.name !== currentLabel ? (

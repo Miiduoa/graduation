@@ -7,6 +7,7 @@ import {
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
   type Dispatch,
@@ -28,6 +29,8 @@ import { useAuth } from './AuthGuard';
 import { LoginLink } from './LoginLink';
 import { CampusIcon } from './CampusIcon';
 import { QuickCampusEntry } from './QuickCampusEntry';
+import { useOptionalAssistantWorkspace } from './AssistantWorkspaceContext';
+import { AssistantWorkspaceEntry } from './AssistantWorkspaceEntry';
 import styles from './TodayCampusEntry.module.css';
 import {
   assistantTaskProfileForWorkContext,
@@ -46,7 +49,7 @@ type Account =
   | { kind: 'nuni'; context: string; accountId: string }
   | { kind: 'school'; uid: string; localOwner: string };
 
-type AssistantDraft = { text: string; setText: Dispatch<SetStateAction<string>> };
+type InlineDraft = { text: string; setText: Dispatch<SetStateAction<string>> };
 
 function TodayConversation({
   account,
@@ -54,26 +57,39 @@ function TodayConversation({
   cloudEnabled,
   preferredWorkContext,
   onNavigate,
-  sharedDraft,
+  inlineDraft,
+  paused = false,
 }: {
   account: Account;
   schoolId: string;
   cloudEnabled: boolean;
   preferredWorkContext?: AssistantWorkContext;
   onNavigate?: (href: string) => void;
-  sharedDraft?: AssistantDraft;
+  inlineDraft?: InlineDraft;
+  paused?: boolean;
 }) {
-  const [text, setText] = useState('');
+  const [localText, setLocalText] = useState('');
+  const text = inlineDraft?.text ?? localText;
+  const setText = inlineDraft?.setText ?? setLocalText;
   const [nuniFreeform, setNuniFreeform] = useState(false);
   const canAsk =
     account.kind === 'school' ? areFunctionsConfigured() : !cloudEnabled || nuniFreeform;
   const [searchOpen, setSearchOpen] = useState(false);
   const conversation = useRef<HTMLDivElement>(null);
   const searchId = useId();
-  const draft = sharedDraft ?? { text, setText };
+  const draft = { text, setText };
+  useLayoutEffect(() => {
+    if (!paused) return;
+    // Read requests can be stopped; an already-confirmed mutation keeps its
+    // journal so its outcome can be checked after the identity is verified.
+    const root = conversation.current;
+    stopAssistantVoice(root);
+    root?.querySelectorAll<HTMLButtonElement>('[data-assistant-stop-read]')
+      .forEach((button) => button.click());
+  }, [paused]);
 
   return (
-    <section className={styles.conversation} aria-label="校園助理對話入口">
+    <section className={styles.conversation} aria-label="校園助理對話入口" hidden={paused} inert={paused}>
       <div className={styles.tools}>
         {canAsk && <p className={styles.hint}>語音聽寫可能由瀏覽器的語音服務處理。</p>}
         <button
@@ -139,16 +155,19 @@ export function TodayCampusEntry({
   returnAnchor = 'today-voice-entry',
   preferredWorkContext,
   onNavigate,
-  sharedDraft,
+  inlineDraft,
+  paused = false,
 }: {
   preferredWorkContext?: AssistantWorkContext;
   onNavigate?: (href: string) => void;
-  sharedDraft?: AssistantDraft;
+  inlineDraft?: InlineDraft;
+  paused?: boolean;
   active?: boolean;
   focusRequest?: number;
   returnAnchor?: 'today-voice-entry' | 'campus-assistant-entry';
 } = {}) {
   const entry = useRef<HTMLDivElement>(null);
+  const completedFocusRequest = useRef(0);
   const pathname = usePathname();
   const params = useSearchParams();
   const campusSearch = useCampusNavigationSearch(params);
@@ -158,7 +177,13 @@ export function TodayCampusEntry({
   const returnPath = currentReturnPath(pathname, returnSearch.toString(), `#${returnAnchor}`);
   useEffect(() => {
     const root = entry.current;
-    if (!active || !focusRequest || !root) return;
+    if (paused) {
+      // Rechecking a session must never reclaim focus when it settles. Only a
+      // subsequent explicit open produces another focus request.
+      completedFocusRequest.current = focusRequest;
+      return;
+    }
+    if (!active || !focusRequest || completedFocusRequest.current === focusRequest || !root) return;
     const initialFocus = document.activeElement;
     function focusInput() {
       // A delayed capability response must not take focus after the user has
@@ -168,6 +193,7 @@ export function TodayCampusEntry({
         document.activeElement !== document.body &&
         initialFocus?.isConnected
       ) {
+        completedFocusRequest.current = focusRequest;
         observer.disconnect();
         return;
       }
@@ -176,6 +202,7 @@ export function TodayCampusEntry({
       );
       if (!field) return;
       field.focus({ preventScroll: true });
+      completedFocusRequest.current = focusRequest;
       field.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
       observer.disconnect();
     }
@@ -188,7 +215,7 @@ export function TodayCampusEntry({
     });
     focusInput();
     return () => observer.disconnect();
-  }, [active, focusRequest]);
+  }, [active, paused, focusRequest]);
   return (
     <div ref={entry}>
       <AssistantLinkNavigation.Provider value={onNavigate}>
@@ -196,7 +223,8 @@ export function TodayCampusEntry({
           returnPath={returnPath}
           preferredWorkContext={preferredWorkContext}
           onNavigate={onNavigate}
-          sharedDraft={sharedDraft}
+          inlineDraft={inlineDraft}
+          paused={paused}
         />
       </AssistantLinkNavigation.Provider>
     </div>
@@ -207,12 +235,14 @@ function CampusEntryContent({
   returnPath,
   preferredWorkContext,
   onNavigate,
-  sharedDraft,
+  inlineDraft,
+  paused = false,
 }: {
   returnPath: string;
   preferredWorkContext?: AssistantWorkContext;
   onNavigate?: (href: string) => void;
-  sharedDraft?: AssistantDraft;
+  inlineDraft?: InlineDraft;
+  paused?: boolean;
 }) {
   const hydrated = useClientHydrated();
   const navigateLink = useAssistantLinkNavigation();
@@ -224,6 +254,41 @@ function CampusEntryContent({
   const uid = auth.user?.uid;
   const functionsConfigured = areFunctionsConfigured();
   const platformAvailable = !!session && !nuni.error;
+  const identity = JSON.stringify([
+    uid, session?.context, session?.platformAccountId, enabled, functionsConfigured,
+    Boolean(auth.error), Boolean(nuni.error), nuni.pendingLogout,
+  ]);
+  const [retained, setRetained] = useState<{
+    identity: string; account: Account; schoolId: string;
+  } | null>(null);
+  if (retained && retained.identity !== identity) setRetained(null);
+  const preferSchoolEngine = !enabled && functionsConfigured && !!uid && !auth.error;
+  const account: Account | null =
+    session && !nuni.error && !preferSchoolEngine
+      ? { kind: 'nuni', context: session.context, accountId: session.platformAccountId }
+      : uid && !auth.error
+        ? { kind: 'school', uid, localOwner: session ? 'platform:' + session.platformAccountId : 'school:' + uid }
+        : null;
+  const checking = !hydrated || nuni.loading ||
+    (auth.loading && !(platformAvailable && (enabled || !functionsConfigured))) || campus.status === 'loading';
+  const confirmed = !checking && !paused && !nuni.pendingLogout && account &&
+    campus.status === 'ready' && campus.schoolId
+    ? { identity, account, schoolId: campus.schoolId } : null;
+  if (confirmed && (retained?.identity !== identity || retained.schoolId !== confirmed.schoolId))
+    setRetained(confirmed);
+  const conversationScope = confirmed ?? (paused && retained?.identity === identity ? retained : null);
+  if (conversationScope) return (
+    <TodayConversation
+      preferredWorkContext={preferredWorkContext}
+      onNavigate={onNavigate}
+      inlineDraft={inlineDraft}
+      paused={paused}
+      key={JSON.stringify([identity, conversationScope.account.kind, conversationScope.schoolId])}
+      account={conversationScope.account}
+      schoolId={conversationScope.schoolId}
+      cloudEnabled={enabled}
+    />
+  );
   if (
     !hydrated ||
     nuni.loading ||
@@ -232,19 +297,8 @@ function CampusEntryContent({
     return <p role="status">正在確認登入狀態…</p>;
   if (nuni.pendingLogout) return <p role="status">正在確認登出狀態…</p>;
   if (campus.status === 'loading') return <p role="status">正在確認瀏覽校園…</p>;
-  const preferSchoolEngine = !enabled && functionsConfigured && !!uid && !auth.error;
-  const account: Account | null =
-    session && !nuni.error && !preferSchoolEngine
-      ? { kind: 'nuni', context: session.context, accountId: session.platformAccountId }
-      : uid && !auth.error
-        ? {
-            kind: 'school',
-            uid,
-            localOwner: session ? 'platform:' + session.platformAccountId : 'school:' + uid,
-          }
-        : null;
   if (!account || campus.status !== 'ready' || !campus.schoolId) {
-    const preparedQuestion = sharedDraft?.text.trim();
+    const preparedQuestion = inlineDraft?.text.trim();
     const loginSearch = new URLSearchParams();
     if (preparedQuestion) loginSearch.set('q', preparedQuestion.slice(0, 1000));
     if (campus.schoolId) loginSearch.set('schoolId', campus.schoolId);
@@ -272,29 +326,12 @@ function CampusEntryContent({
           key={JSON.stringify([uid, session?.context, campus.schoolId])}
           onAsk={null}
           onNavigate={onNavigate}
+          inlineDraft={inlineDraft}
         />
       </>
     );
   }
-  return (
-    <TodayConversation
-      preferredWorkContext={preferredWorkContext}
-      onNavigate={onNavigate}
-      sharedDraft={sharedDraft}
-      key={JSON.stringify([
-        uid,
-        session?.context,
-        session?.platformAccountId,
-        account.kind,
-        campus.schoolId,
-        enabled,
-        functionsConfigured,
-      ])}
-      account={account}
-      schoolId={campus.schoolId}
-      cloudEnabled={enabled}
-    />
-  );
+  return <p role="status">正在確認登入與校園…</p>;
 }
 
 export type TodayAssistantHandle = { openAssistant(): void };
@@ -322,6 +359,32 @@ function clearAssistantAnchor(anchor: string) {
 }
 
 export function TodayAssistantDisclosure({
+  ref,
+  onOpenChange,
+  preferredWorkContext,
+}: {
+  preferredWorkContext?: AssistantWorkContext;
+  ref: Ref<TodayAssistantHandle>;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const workspace = useOptionalAssistantWorkspace();
+  return workspace ? (
+    <AssistantWorkspaceEntry
+      workspace={workspace}
+      ref={ref}
+      onOpenChange={onOpenChange}
+      preferredWorkContext={preferredWorkContext}
+    />
+  ) : (
+    <LocalAssistantDisclosure
+      ref={ref}
+      onOpenChange={onOpenChange}
+      preferredWorkContext={preferredWorkContext}
+    />
+  );
+}
+
+function LocalAssistantDisclosure({
   ref,
   onOpenChange,
   preferredWorkContext,
@@ -494,7 +557,7 @@ export function TodayAssistantDisclosure({
               active={opened}
               focusRequest={focusRequest}
               preferredWorkContext={preferredWorkContext}
-              sharedDraft={{ text, setText }}
+              inlineDraft={{ text, setText }}
             />
           )}
         </div>

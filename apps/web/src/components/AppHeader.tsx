@@ -27,6 +27,7 @@ import { PRIMARY_DESTINATIONS, primaryNavigationSection } from '@/lib/primaryNav
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { isCurrentTabNavigationClick } from '@/lib/currentTabNavigation';
 import { observeMobileNavigationInset } from '@/lib/mobileNavigationInset';
+import { useOptionalAssistantWorkspace } from './AssistantWorkspaceContext';
 
 const CampusAssistantEntry = lazy(async () => ({
   default: (await import('./TodayCampusEntry')).TodayCampusEntry,
@@ -50,6 +51,7 @@ type AssistantPanelState = {
 };
 
 function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
+  const workspace = useOptionalAssistantWorkspace();
   const pathname = usePathname();
   const params = useSearchParams();
   const hash = useLocationHash();
@@ -219,7 +221,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
       restoredReturn.current = null;
       return;
     }
-    if (onOpenAssistant || checking || nuni.pendingLogout || campus.status === 'loading') return;
+    if (workspace || onOpenAssistant || checking || nuni.pendingLogout || campus.status === 'loading') return;
     if (restoredReturn.current === currentPage) return;
     restoredReturn.current = currentPage;
     // Resume the visible task after login, without sending a question or starting audio.
@@ -233,6 +235,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
     nuni.pendingLogout,
     campus.status,
     onOpenAssistant,
+    workspace,
   ]);
   return (
     <>
@@ -255,17 +258,21 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
             type="button"
             className={headerStyles.voiceTrigger}
             aria-label="開啟校園助理"
-            aria-controls={onOpenAssistant ? 'today-voice-entry' : 'campus-assistant-entry'}
-            aria-expanded={onOpenAssistant ? assistantExpanded : assistantOpen}
+            data-assistant-workspace-trigger={workspace ? true : undefined}
+            aria-controls={workspace ? 'campus-assistant-workspace' : onOpenAssistant ? 'today-voice-entry' : 'campus-assistant-entry'}
+            aria-expanded={workspace ? workspace.open : onOpenAssistant ? assistantExpanded : assistantOpen}
             onClick={() => {
               closeNavigationPopovers(header.current);
-              if (onOpenAssistant) onOpenAssistant();
+              if (workspace) {
+                if (workspace.open) workspace.minimize();
+                else workspace.openWorkspace();
+              } else if (onOpenAssistant) onOpenAssistant();
               else if (assistantOpen) closeAssistant();
               else openAssistant();
             }}
           >
             <CampusIcon name="social" size={18} />
-            <span>問 nuni</span>
+            <span>{workspace?.hasStarted ? '接續任務' : '問 nuni'}</span>
           </button>
           <CampusServiceMenu />
           <Link
@@ -431,7 +438,13 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
           ))}
         </nav>
         <nav className={headerStyles.workspaceTools} aria-label="工作工具">
-          <Link href={href('/ai-assistant')} aria-current={pathname === '/ai-assistant' ? 'page' : undefined}>
+          <Link href={href('/ai-assistant')} aria-current={pathname === '/ai-assistant' ? 'page' : undefined}
+            data-assistant-workspace-trigger={workspace ? true : undefined}
+            onClick={(event) => {
+              if (!workspace || !isCurrentTabNavigationClick(event, event.currentTarget)) return;
+              event.preventDefault();
+              workspace.openWorkspace();
+            }}>
             <CampusIcon name="social" size={18} />
             <span>助理工作區</span>
           </Link>
@@ -445,7 +458,7 @@ function Header({ onOpenAssistant, assistantExpanded }: HeaderProps) {
           </Link>
         </nav>
       </header>
-      {panel && !onOpenAssistant && (
+      {panel && !onOpenAssistant && !workspace && (
         <section
           key={scope}
           id="campus-assistant-entry"

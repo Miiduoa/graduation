@@ -6,7 +6,7 @@ import {
   type AssistantExperience, type AssistantExperienceCategory,
 } from '@campus/shared/src/assistantExperiences';
 import { ASSISTANT_ROLE_WORKFLOWS, type AssistantWorkContext } from '@campus/shared/src/assistantRoleWorkflows';
-import { assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
+import { getAssistantService } from '@campus/shared/src/assistantServices';
 import { useAuth } from '../state/auth';
 import { useOptionalNuniSession } from '../state/nuniSession';
 import { useSchool } from '../state/school';
@@ -59,14 +59,13 @@ function ExploreContent({ navigation, audience, initialContext }: ServiceScreenP
   };
   const openService = async (experience: AssistantExperience) => {
     setOpenError('');
-    const destination = mobileAssistantServiceDestination(experience.serviceId, audience, navigation);
+    const destination = mobileAssistantServiceDestination(experience.serviceId, audience, navigation, undefined, school.id);
     if (!destination) { setOpenError('現在無法開啟這項服務，請稍後再試。'); return; }
     if (destination.kind === 'native') {
       safeNavigate(navigation, destination.route, destination.params);
       return;
     }
-    const scopedHref = assistantServiceHref(experience.serviceId, school.id, audience === 'platform' ? 'platform' : 'school');
-    try { await Linking.openURL(scopedHref ? `https://nuni.tw${scopedHref}` : destination.url); }
+    try { await Linking.openURL(destination.url); }
     catch { setOpenError('無法開啟網頁，請確認連線後再試。'); }
   };
   return (
@@ -129,7 +128,7 @@ function ExploreContent({ navigation, audience, initialContext }: ServiceScreenP
           <Text style={s.description}>{group.description}</Text>
           {group.items.map((experience) => {
             const service = getAssistantService(experience.serviceId);
-            const destination = mobileAssistantServiceDestination(experience.serviceId, audience, navigation);
+            const destination = mobileAssistantServiceDestination(experience.serviceId, audience, navigation, undefined, school.id);
             return (
               <View key={experience.id} style={s.experience}>
                 <Text accessibilityRole="header" style={s.experienceTitle}>{experience.title}</Text>

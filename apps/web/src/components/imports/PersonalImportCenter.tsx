@@ -458,6 +458,10 @@ function PersonalRecordEditor({
       control?.focus();
       return;
     }
+    // Unchanged imported records must not be rewritten: Enter (and the same
+    // submit path) would otherwise assign a new batch ID and importedAt, and a
+    // later batch undo would miss this row.
+    if (!dirty) return;
     // The form keeps the specific error visible; ConfirmModal handles rejected removals.
     void commit(row).catch(() => {});
   }

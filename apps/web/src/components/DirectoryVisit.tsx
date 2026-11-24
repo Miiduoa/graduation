@@ -6,6 +6,7 @@ import type { ServiceJourney } from '@/lib/serviceJourneys';
 
 type Origin = {
   journey: ServiceJourney;
+  source?: 'explore';
   serviceHref: string;
   destination: string;
   returnHref: string;
@@ -62,10 +63,12 @@ export function DirectoryVisitProvider({ scope, children }: { scope: string | nu
   } else if (visit && visit.route !== route) {
     // Typing can update window.location just before Next acknowledges the URL.
     const leavingDirectory = visit.route !== visit.destination && !visit.returning;
-    const expected = leavingDirectory
+    const returnRoute = route === visit.returnHref || (visit.source === 'explore' && route === visit.from);
+    const exploreBack = visit.source === 'explore' && visit.route === visit.destination && returnRoute;
+    const expected = exploreBack || (leavingDirectory
       ? route === visit.from || route === visit.destination
-      : visit.returning && route === visit.returnHref;
-    setVisit(expected ? { ...visit, route } : null);
+      : visit.returning && returnRoute);
+    setVisit(expected ? { ...visit, route, returning: visit.returning || exploreBack } : null);
   }
 
   return (
@@ -82,7 +85,8 @@ export function DirectoryVisitProvider({ scope, children }: { scope: string | nu
       },
       origin: visit?.scope === scope && route === visit?.destination ? visit : null,
       beginReturn() { setVisit((current) => current && { ...current, returning: true }); },
-      restoreRow: visit?.scope === scope && visit?.returning && visit.returnHref === route
+      restoreRow: visit?.scope === scope && visit?.returning &&
+        (visit.returnHref === route || (visit.source === 'explore' && visit.from === route))
         ? visit.serviceHref : null,
       finishReturn() { setVisit(null); },
     }}>

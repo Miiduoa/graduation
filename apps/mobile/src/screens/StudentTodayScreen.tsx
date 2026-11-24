@@ -11,7 +11,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { QuickCampusEntry } from '../components/QuickCampusEntry';
-import { WorkspaceStart } from '../components/WorkspaceStart';
 import { CampusPersonalization } from '../components/CampusPersonalization';
 import type { MobileQuickAction } from '../services/quickCampusActions';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -240,19 +239,18 @@ export default function StudentTodayScreen() {
     if (scrollToSubmit && row.task) {
       // The task carries its real assignment / quiz ID and destination.
       // If opening fails, the navigation helper explains why; never invent a submit ID.
-      navigateFromInboxTask(navigation, row.task, {
+      return navigateFromInboxTask(navigation, row.task, {
         role: auth.profile?.role,
         isTeachingRole: false,
         scrollToSubmit,
       });
-      return;
     }
     const target = todayCourseWorkNavigateTarget(resolveTimetableClassroomNav({
       // Inbox tasks already carry the real course/group ID; never infer it from a title.
       linkedCourseId: row.courseId,
       courseName: row.courseName,
     }));
-    safeNavigate(navigation, target.screen, target.params);
+    return safeNavigate(navigation, target.screen, target.params);
   };
   const openWeek = () =>
     rootNavigateNested('學習', 'PersonalTimetable', termKey ? { term: termKey } : undefined);
@@ -260,10 +258,9 @@ export default function StudentTodayScreen() {
   const openQuickAction = (quick: MobileQuickAction) => {
     if (quick.destination === '/classroom' && todos.length === 1) {
       // Use the current user's real assignment or quiz, never fabricate a submit id.
-      openTodo(todos[0], true);
-      return;
+      return openTodo(todos[0], true);
     }
-    safeNavigate(navigation, quick.route);
+    return safeNavigate(navigation, quick.route);
   };
   const refresh = async () => {
     const request = ++refreshGeneration.current;
@@ -342,7 +339,16 @@ export default function StudentTodayScreen() {
             </Pressable>
           )}
         </View>
-        <WorkspaceStart navigation={navigation} scope={scope} />
+        <QuickCampusEntry
+          key={scope}
+          uid={uid}
+          schoolId={schoolId}
+          presentation="workspace"
+          navigation={navigation}
+          onOpen={openQuickAction}
+          onOpenAssistantRoute={(route) => safeNavigate(navigation, route)}
+          onExplore={() => safeNavigate(navigation, 'Explore', { workContext: 'student' })}
+        />
         {firstLoad ? (
           <TodaySkeleton styles={s} />
         ) : (
@@ -369,13 +375,6 @@ export default function StudentTodayScreen() {
             {!urgentWorkFirst && todoSection}
           </>
         )}
-        <QuickCampusEntry
-          key={scope}
-          uid={uid}
-          schoolId={schoolId}
-          onOpen={openQuickAction}
-          onOpenAssistantRoute={(route) => safeNavigate(navigation, route)}
-        />
         <CampusPersonalization now={now} />
       </ScrollView>
     </SafeAreaView>

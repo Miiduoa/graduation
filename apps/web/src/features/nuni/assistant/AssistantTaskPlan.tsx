@@ -7,6 +7,7 @@ import { getAssistantServiceCapability, parseAssistantTaskPlan, type AssistantTa
 import { parseAssistantTaskRetry } from '@campus/shared/src/assistantTaskRetry';
 import { inAppHref } from './copy';
 import type { V2ActionState, V2ActionStates, V2Card } from './types';
+import { isAssistantCalendarActionReady } from './execution';
 import styles from './AssistantTaskPlan.module.css';
 
 type DisplayStatus = AssistantTaskStep['status'] | 'working' | 'unknown' | 'stopped';
@@ -23,21 +24,22 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
   stopped: '已停止',
 };
 
+function hasMatchingCalendarReceipt(card: V2Card, state: V2ActionState | undefined): boolean {
+  if (card.tool !== 'propose_personal_event' || state?.status !== 'verified') return false;
+  try {
+    parseAssistantCalendarReceipt(state.receipt, {
+      schoolId: card.schoolId, mutationId: card.mutationId, event: card.args, storage: 'synced',
+    });
+    return true;
+  } catch { return false; }
+}
+
 function actionStatus(card: V2Card, state: V2ActionState | undefined): DisplayStatus {
   if (!state) return 'ready';
-  if (state.status === 'verified') {
-    // Only a receipt for this exact calendar card establishes completion.
-    // A page handoff or a receipt belonging to another task cannot do so.
-    if (card.tool !== 'propose_personal_event') return 'unknown';
-    try {
-      parseAssistantCalendarReceipt(state.receipt, {
-        schoolId: card.schoolId, mutationId: card.mutationId, event: card.args, storage: 'synced',
-      });
-    } catch {
-      return 'unknown';
-    }
-    return state.verificationWarning ? 'unknown' : 'completed';
-  }
+  // Only this calendar card's exact receipt plus local readiness establishes
+  // completion. The same proof also guards partial-success wording below.
+  if (state.status === 'verified')
+    return hasMatchingCalendarReceipt(card, state) && isAssistantCalendarActionReady(state) ? 'completed' : 'unknown';
   if (state.status === 'handoff')
     return card.tool === 'propose_open_page' || card.tool === 'propose_food_order' ? 'handoff' : 'unknown';
   if (state.status === 'executing' || state.status === 'checking') return 'working';
@@ -58,20 +60,22 @@ function displayStep(step: AssistantTaskStep, cards: V2Card[], states: V2ActionS
   }
   const entries = selected.map(([card]) => {
     const state = Object.prototype.hasOwnProperty.call(states, card.mutationId) ? states[card.mutationId] : undefined;
-    return { state, status: actionStatus(card, state) };
+    return { status: actionStatus(card, state), localPending:
+      state?.status === 'verified' && state.local === 'unavailable' && hasMatchingCalendarReceipt(card, state) };
   });
   const count = (status: DisplayStatus) => entries.filter((entry) => entry.status === status).length;
   const completed = count('completed');
   const prefix = completed ? `已讀回核對 ${completed}/${entries.length} 筆個人行程。` : '';
   if (completed === entries.length) {
-    const localPending = entries.some(({ state }) => state?.status === 'verified' && state.local === 'unavailable');
     return { step, status: step.status === 'partial' ? 'partial' : 'completed',
-      summary: prefix + (localPending ? '帳號已儲存，此裝置尚未更新。' : '已加入個人行事曆。') +
+      summary: prefix + '已加入個人行事曆。' +
         (step.status === 'partial' ? `原任務仍有未完成部分：${step.summary}` : '') };
   }
   if (count('working')) return { step, status: 'working', summary: prefix + '正在核對原操作的執行結果。' };
   if (count('unknown')) return { step, status: completed ? 'partial' : 'unknown',
-    summary: prefix + '另有操作結果尚未核對，請從下方確認卡查核原結果。' };
+    summary: prefix + (entries.filter(({ status }) => status === 'unknown').every(({ localPending }) => localPending)
+      ? '帳號已儲存，此裝置尚未更新。請從下方確認卡核對原結果，不需重新建立行程。'
+      : '另有操作結果尚未核對，請從下方確認卡查核原結果。') };
   if (count('stopped') === entries.length) return { step, status: 'stopped',
     summary: '這份提議已撤銷或被新提議取代，沒有刪除已建立的行程。' };
   if (count('handoff') === entries.length) return { step, status: 'handoff',

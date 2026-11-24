@@ -40,6 +40,8 @@ import { assistantPermissionMessage, inAppHref } from './assistant/copy';
 import { parseAssistantCalendarEvent, parseAssistantCalendarExecutionResult } from '@campus/shared/src/assistantExecution';
 import { assertAssistantCalendarLocalReady, mirrorAssistantCalendarReceipt } from '@/lib/assistantCalendarExecution';
 import { readAssistantExecutionJournal, saveAssistantExecutionJournal, removeAssistantExecutionJournal } from '@/lib/assistantExecutionJournal';
+import { assertTodayAgentFollowupCapacity } from '@/lib/todayAgentFollowups';
+import { needsCourseworkTracking, retainAssistantCourseworkTracking } from '@/lib/assistantCourseworkTracking';
 import { accountDemoAssistantIntent, prepareAccountDemoAssistant } from '@/lib/accountDemoAssistant';
 import { answerAssistantLocally } from '@/lib/assistantLocalActions';
 import { answerAssistantPersonalQuestion } from '@/lib/assistantPersonalReads';
@@ -313,6 +315,7 @@ function V2Conversation({
   const [turns, setTurns] = useState<V2Turn[]>([]);
   const [states, setStates] = useState<V2ActionStates>({});
   const actionStates = useRef<V2ActionStates>({});
+  const restoredCalendarCards = useRef(new Set<string>());
   const journalReadyRef = useRef(false);
   const [journalReady, setJournalReady] = useState(false);
   const busy = useRef(false);
@@ -358,6 +361,7 @@ function V2Conversation({
       const entries = readAssistantExecutionJournal(journalScope);
       if (entries.length) {
         const cards: V2Card[] = entries.map((entry) => ({ ...entry.card, conversationId: entry.conversationId }));
+        restoredCalendarCards.current = new Set(cards.map(card => card.mutationId));
         actionStates.current = Object.fromEntries(cards.map((card) => [card.mutationId, {
           status: 'unknown' as const, message: '已找回先前操作，等待核對原行程；不會重新送出。',
         }]));
@@ -674,7 +678,8 @@ function V2Conversation({
           (args.endDate || args.date) !== end.slice(0, 10))
           throw new Error('活動確認內容與重新核對的來源不一致，尚未建立行程。');
         return { tool: raw.tool, args: { ...args }, token: raw.token, mutationId: raw.mutationId,
-          schoolId, destination: raw.destination, conversationId: eventConversation };
+          schoolId, destination: raw.destination, conversationId: eventConversation,
+          ...(typeof raw.coursework === 'boolean' ? { coursework: raw.coursework } : {}) };
       });
       setTurns(previous => [...previous, { question: current,
         ...('discovery' in input ? { campusEventDiscovery: true as const } : {}),
@@ -1009,18 +1014,37 @@ function V2Conversation({
   }
   async function applyCalendarResult(card: V2Card, raw: unknown): Promise<boolean> {
     if (card.schoolId !== schoolId) throw new Error('校園已切換，請重新開啟確認卡。');
+    const lifetime = controller.current;
+    const operationActive = () => !!lifetime && controller.current === lifetime && !lifetime.signal.aborted;
+    if (!operationActive()) return false;
     const result = parseAssistantCalendarExecutionResult(raw, calendarExpectation(card));
     if (result.status === 'verified') {
       let localMessage = '';
+      let verificationWarning = '';
       try {
-        await mirrorAssistantCalendarReceipt(result, localScope, active);
+        await mirrorAssistantCalendarReceipt(result, localScope, operationActive);
       } catch (error) {
         localMessage = error instanceof Error ? error.message : '此裝置尚未更新，請重新核對。';
       }
+      if (!operationActive()) return false;
+      if (!localMessage && needsCourseworkTracking(card, restoredCalendarCards.current.has(card.mutationId))) {
+        try {
+          const followup = await retainAssistantCourseworkTracking({ scope: localScope, context,
+            conversationId: card.conversationId || conversation.current, card, receipt: result,
+            active: operationActive, read: input => send('followup', input) });
+          if (followup && followup.calendar !== 'matching')
+            verificationWarning = '行程的最新狀態仍需確認，原安排與追蹤紀錄已保留。請重新核對或查看行事曆。';
+        } catch (error) {
+          verificationWarning = '行程已核對，但安排追蹤尚未接續。' +
+            (error instanceof Error ? error.message : '請重新核對原操作。');
+        }
+      }
+      if (!operationActive()) return false;
       setAction(card, { status: 'verified', receipt: result,
-        local: localMessage ? 'unavailable' : 'ready', ...(localMessage ? { localMessage } : {}) });
-      if (!localMessage && active()) forgetCalendar(card);
-      return true;
+        local: localMessage ? 'unavailable' : 'ready', ...(localMessage ? { localMessage } : {}),
+        ...(verificationWarning ? { verificationWarning } : {}) });
+      if (!localMessage && !verificationWarning) forgetCalendar(card);
+      return !localMessage && !verificationWarning;
     }
     if (result.status === 'revoked') {
       setAction(card, { status: 'cancelled' });
@@ -1077,6 +1101,8 @@ function V2Conversation({
           const cleared = clearTurnDraft(turn);
           if (!cleared.ok) { setError(cleared.message || '草稿尚未確認清除，這次操作尚未送出。'); break; }
           try {
+            if (card.coursework === true)
+              assertTodayAgentFollowupCapacity(localScope, card.mutationId);
             await assertAssistantCalendarLocalReady(card.args, localScope, active);
             rememberCalendar(card);
           } catch (error) {

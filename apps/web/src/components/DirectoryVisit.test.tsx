@@ -57,7 +57,7 @@ it('returns to the filtered results and focuses the chosen row without forwardin
 it('keeps ordinary breadcrumbs on a deep link, new-tab activation, or a different confirmed account or campus', () => {
   go(target);
   const view = render(<Shell />);
-  expect(screen.getByRole('link', { name: '生活' }).getAttribute('href')).toBe('/life?campus=pu');
+  expect(screen.getByRole('link', { name: '探索' }).getAttribute('href')).toBe('/explore?campus=pu');
   go(source);
   view.rerender(<Shell />);
   fireEvent.click(screen.getByRole('link', { name: '公車' }), { metaKey: true });

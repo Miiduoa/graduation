@@ -99,3 +99,74 @@ it.each([
 ])('matches the existing service directory for %s', (utterance, expected) => {
   expect(getQuickCampusActions(utterance).map(row => row.href)).toContain(expected);
 });
+
+// Match the same public and study journeys as the native app.
+it.each([
+  [
+    "Where is the library?",
+    "/map"
+  ],
+  [
+    "Where is the bus stop?",
+    "/bus"
+  ],
+  [
+    "library catalog",
+    "/library"
+  ],
+  [
+    "class schedule",
+    "/timetable"
+  ],
+  [
+    "homework deadline",
+    "/classroom"
+  ],
+  [
+    "cafeteria menu",
+    "/cafeteria"
+  ],
+  [
+    "campus events",
+    "/events"
+  ],
+  [
+    "lost and found",
+    "/lost-found"
+  ],
+  [
+    "ＢＵＳ arrival",
+    "/bus"
+  ]
+])('finds the same bilingual service for %s', (phrase, href) => {
+  expect(getQuickCampusActions(phrase)[0]?.href).toBe(href);
+});
+
+it.each(['business plan', 'busyness', 'libraryish', 'where is my wallet'])('does not guess from a partial word or ungrounded location (%s)', phrase => {
+  expect(getQuickCampusActions(phrase)).toEqual([]);
+});
+
+it.each([
+  [
+    "class   schedule",
+    "/timetable"
+  ],
+  [
+    "Where’s the library?",
+    "/map"
+  ],
+  [
+    "campus\t events",
+    "/events"
+  ],
+  [
+    "quiz",
+    "/classroom"
+  ],
+  [
+    "quizzes",
+    "/classroom"
+  ]
+])('normalizes spoken and pasted search text %s', (phrase, href) => {
+  expect(getQuickCampusActions(phrase)[0]?.href).toBe(href);
+});

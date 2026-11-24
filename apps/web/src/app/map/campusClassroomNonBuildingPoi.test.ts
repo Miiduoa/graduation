@@ -1231,7 +1231,7 @@ describe('campus archive names for the existing Providence building pins', () =>
 });
 
 describe('floor ranges do not establish a classroom destination', () => {
-  it('keeps floor-plus-room wording and rejects ranges ending in 樓', () => {
+  it('rejects consecutive floor markers for building names and official codes', () => {
     const zhugu = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
     const renyuan = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-renyuan')!;
     expect(zhugu).toBeDefined();
@@ -1244,17 +1244,14 @@ describe('floor ranges do not establish a classroom destination', () => {
       ['AK', renyuan, 'pu'],
       ['主顧樓', hall, 'another-school'],
     ] as const) {
-      for (const suffix of ['3樓4樓', '3樓-4樓']) {
+      for (const suffix of ['3F4F', '3F 4F', '3F-4F', '3F/4F',
+        '3樓4F', '3樓4樓', '3樓-4樓', 'B1F B2F', '３Ｆ４Ｆ', '3F 4F教室']) {
         const query = prefix + suffix;
         const result = resolveCampusClassroom({ schoolId, query, locations: [place] });
         expect(result.status, schoolId + ': ' + query).toBe('unmatched');
         expect(result.matches, query).toEqual([]);
       }
-      const accepted = ['303F', '3F303', '3F 303F', '3樓303', 'B1F12',
-        '3F4F', '3F 4F', '3F-4F', '3F/4F', '3樓4F', '３Ｆ４Ｆ', '3F 4F教室'];
-      // Building names also accept a separated room with an alphabetic prefix.
-      if (prefix !== 'PH' && prefix !== 'AK') accepted.push('B1F B2F');
-      for (const suffix of accepted) {
+      for (const suffix of ['303F', '3F303', '3F 303F', '3樓303', 'B1F12']) {
         const query = prefix + suffix;
         const result = resolveCampusClassroom({ schoolId, query, locations: [place] });
         expect(result.status, query).toBe('matched');
@@ -1290,8 +1287,6 @@ describe('catalog names and codes yield to an exact public name on another place
     }
   });
 });
-
-
 describe('bound Providence alias with public catalogue metadata', () => {
   it('matches bilingual names without changing the supplied place or bound school marker', () => {
     const catalog = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-renyuan')!;
@@ -1303,5 +1298,28 @@ describe('bound Providence alias with public catalogue metadata', () => {
     expect(resolveCampusClassroom({
       schoolId: 'tw-pu', query: 'Anthony Kuo Hall 303', locations: [foreign],
     })).toMatchObject({ status: 'unmatched', matches: [] });
+  });
+
+  it.each([
+    ['PH', 'pu-zhugu', 'primary'],
+    ['Providence Hall ', 'pu-zhugu', 'catalog'],
+    ['AK', 'pu-renyuan', 'alias'],
+    ['Bishop Kupfer Hall ', 'pu-wenxing', 'alias'],
+  ] as const)('keeps %s room lookup scoped while rejecting an ambiguous floor range', (prefix, placeId, matchKind) => {
+    const catalog = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === placeId)!;
+    const local = { ...catalog, schoolId: 'tw-pu' };
+    for (const suffix of ['3F-4F', '3樓4F', 'B1F B2F']) {
+      expect(resolveCampusClassroom({
+        schoolId: 'tw-pu', query: prefix + suffix, locations: [local],
+      }), prefix + suffix).toMatchObject({ status: 'unmatched', matches: [] });
+    }
+    for (const suffix of ['3F303', '303F']) {
+      expect(resolveCampusClassroom({
+        schoolId: 'tw-pu', query: prefix + suffix, locations: [local],
+      }), prefix + suffix).toMatchObject({ status: 'matched', matchKind, matches: [local] });
+      expect(resolveCampusClassroom({
+        schoolId: 'tw-pu', query: prefix + suffix, locations: [{ ...catalog, schoolId: 'pu' }],
+      }), prefix + suffix).toMatchObject({ status: 'unmatched', matches: [] });
+    }
   });
 });

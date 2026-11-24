@@ -1,4 +1,5 @@
 import { AssignmentReplyActions } from './AssignmentReplyActions';
+import { useAssistantContinuation } from '../services/assistantContinuation';
 import { LegacyAssignmentReminders } from './LegacyAssignmentReminders';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
@@ -369,6 +370,9 @@ function AssistantConversation({
     });
   }, [platformContext, platformTimetable, workContext]);
   const current = () => mounted.current && isScopeCurrent() && (!platformTimetable || platformTimetable.isCurrent());
+  const openWithContinuation = useAssistantContinuation(navigation, current);
+  const openServiceRoute = (route: string, params?: Record<string, unknown>) =>
+    openWithContinuation(() => safeNavigate(navigation, route, params));
   const calendarContext = { uid, schoolId, platformTimetable, isCurrent: current };
   const courseworkBatchChecks = useMemo(() => courseworkRequests && !workContext
     ? createNuniCourseworkStudyBatchChecks(courseworkRequests) : undefined, [courseworkRequests, workContext]);
@@ -936,7 +940,7 @@ function AssistantConversation({
     if (verified?.checkedAt !== checkedAt || verified.announcements.status !== 'available') return;
     const source = verified.announcements.items.find((row) => row.source?.kind === item.source?.kind &&
       row.source?.id === item.source?.id && row.title === item.title)?.source;
-    if (source) safeNavigate(navigation, '公告詳情', { id: source.id, sourceKind: source.kind, schoolId });
+    if (source) openServiceRoute('公告詳情', { id: source.id, sourceKind: source.kind, schoolId });
   };
   const scrollToEntry = (event: LayoutChangeEvent) => {
     if (!nearLatest.current) {
@@ -957,11 +961,11 @@ function AssistantConversation({
   const openPlanRoute = (route: CampusPlanRoute) => {
     if (!canStartPlanAction()) return;
     if (platformTimetable) {
-      if (route === '/timetable') safeNavigate(navigation, 'PersonalTimetable');
-      else if (route === '/classroom') safeNavigate(navigation, 'NuniWorkspace', { tab: 'courses' });
+      if (route === '/timetable') openServiceRoute('PersonalTimetable');
+      else if (route === '/classroom') openServiceRoute('NuniWorkspace', { tab: 'courses' });
       return;
     }
-    safeNavigate(navigation, VERIFIED_SERVICE_ROUTES[route].route);
+    openServiceRoute(VERIFIED_SERVICE_ROUTES[route].route);
   };
   const savedPlanTools = canSavePlans ? (
         <SavedCampusPlansPanel
@@ -1022,7 +1026,7 @@ function AssistantConversation({
                 label={deviceStatus?.ready ? '管理手機 AI 模型' : '下載／管理免費 AI 模型'}
                 variant="ghost"
                 disabled={busy || syncBusy}
-                onPress={() => safeNavigate(navigation, 'AIModelManager')}
+                onPress={() => openServiceRoute('AIModelManager')}
               />
               <AIButton
                 label="重新檢查模型狀態"
@@ -1057,7 +1061,7 @@ function AssistantConversation({
           onOpenAnnouncement={navigation?.navigate && currentSense
             ? (item) => openAnnouncement(item, currentSense.checkedAt) : undefined}
           onOpenAnnouncements={navigation?.navigate ? () => {
-            if (current() && !lock.current && !syncLock.current) safeNavigate(navigation, '公告總覽');
+            if (current() && !lock.current && !syncLock.current) openServiceRoute('公告總覽');
           } : undefined}
           onSync={() => void syncCampus()}
           onBrief={() => void briefPlan(TODAY_BRIEF)}
@@ -1222,8 +1226,8 @@ function AssistantConversation({
       {platformTimetable && !workContext && messages.length === 0 && !draft.trim() && !busy && !error ? (
         <AssistantBlock title="我的課表">
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <AIButton label="查看完整課表" variant="ghost" onPress={() => current() && safeNavigate(navigation, 'PersonalTimetable')} />
-            <AIButton label="匯入課表" variant="ghost" onPress={() => current() && safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })} />
+            <AIButton label="查看完整課表" variant="ghost" onPress={() => current() && openServiceRoute('PersonalTimetable')} />
+            <AIButton label="匯入課表" variant="ghost" onPress={() => current() && openServiceRoute('PersonalImport', { kind: 'timetable' })} />
             <AIButton label="查看所有功能" variant="ghost" onPress={() => void send({ kind: 'services', question: '你能做什麼？' })} />
           </View>
         </AssistantBlock>
@@ -1264,7 +1268,7 @@ function AssistantConversation({
             latest={index === messages.length - 1} busy={busy || syncBusy || calendarBusy}
             onAsk={(question) => void send({ kind: 'gap', question })}
             onOpenTimetable={navigation?.navigate
-              ? () => { if (current()) safeNavigate(navigation, 'PersonalTimetable'); } : undefined} />
+              ? () => { if (current()) openServiceRoute('PersonalTimetable'); } : undefined} />
         </View>
       ) : (
         <View key={index} onLayout={(event) => revealReply(index, event)}>
@@ -1287,7 +1291,7 @@ function AssistantConversation({
                 onOpenCatalog={typeof navigation?.navigate === 'function' ? () => {
                   const read = message.publicCourseRead;
                   if (!current() || lock.current || syncLock.current || !read) return;
-                  safeNavigate(navigation, 'CourseCatalog', {
+                  openServiceRoute('CourseCatalog', {
                     publicSchoolId: read.schoolId, filter: { keyword: read.query, ...read.filters }, autoSearch: true,
                   });
                 } : undefined} />
@@ -1307,7 +1311,7 @@ function AssistantConversation({
                   }}
                   onRefresh={() => void send({ kind: 'coursework', question: '重新查詢這門課的作業' })}
                   onOpenAssignment={(workspaceId, assignmentId) => {
-                    if (current()) safeNavigate(navigation, 'NuniWorkspace', {
+                    if (current()) openServiceRoute('NuniWorkspace', {
                       tab: 'courses', workspaceId, assignmentId, assistantAccountId: platformTimetable.accountId,
                     });
                   }}
@@ -1331,9 +1335,9 @@ function AssistantConversation({
                 onAsk={(question) => void send({ kind: 'coursework', question })}
                 onRetry={() => void send({ kind: 'coursework', question: CLASS_WORK })}
                 onCheckClass={() => void send({ kind: 'class', question: message.courseworkRead?.anchor.currentAt ? CURRENT_CLASS : NEXT_CLASS })}
-                onLink={() => current() && safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
+                onLink={() => current() && openServiceRoute('PersonalImport', { kind: 'timetable' })}
                 onOpen={(workspaceId, assignmentId) => {
-                  if (!current() || !safeNavigate(navigation, 'NuniWorkspace', {
+                  if (!current() || !openServiceRoute('NuniWorkspace', {
                     tab: 'courses', workspaceId, assignmentId, assistantAccountId: platformTimetable.accountId,
                   })) return;
                   setMessages((previous) => {
@@ -1358,7 +1362,7 @@ function AssistantConversation({
                   const read = message.savedClassRead;
                   if (!current() || !read || read.uid !== uid || read.schoolId !== schoolId ||
                       (platformTimetable && read.owner !== timetableOwner)) return;
-                  safeNavigate(navigation, 'PersonalTimetable', {
+                  openServiceRoute('PersonalTimetable', {
                     schoolId, courseId: item.courseId, date: item.date, term: item.term,
                     startAt: Date.parse(`${item.date}T${item.startTime}:00+08:00`),
                     reminderScope: JSON.stringify({ owner: timetableOwner, schoolId }),
@@ -1380,7 +1384,7 @@ function AssistantConversation({
                 onOpenRoute={(route) => {
                   if (!current()) return;
                   const destination = VERIFIED_SERVICE_ROUTES[route];
-                  if (current() && destination) safeNavigate(navigation, destination.route);
+                  if (current() && destination) openServiceRoute(destination.route);
                 }}
               />
             ) : (
@@ -1391,6 +1395,7 @@ function AssistantConversation({
             {message.serviceSelection ? (
               <AssistantServiceReply selection={message.serviceSelection}
                 audience={platformTimetable ? 'platform' : uid ? 'campus' : 'guest'}
+                schoolId={schoolId}
                 navigation={navigation} disabled={busy || syncBusy} isCurrent={current} />
             ) : null}
             {message.calendarTask ? (
@@ -1512,10 +1517,10 @@ function AssistantConversation({
                   schoolId={schoolId}
                   isCurrent={current}
                   onOpenService={typeof navigation?.navigate === 'function'
-                    ? () => safeNavigate(navigation, SERVICE_AFTER_WRITE[proposal.toolName])
+                    ? () => openServiceRoute(SERVICE_AFTER_WRITE[proposal.toolName])
                     : undefined}
                   onOpenSettings={typeof navigation?.navigate === 'function'
-                    ? () => safeNavigate(navigation, 'AssistantPermissions')
+                    ? () => openServiceRoute('AssistantPermissions')
                     : undefined}
                 />
               ))}
@@ -1540,7 +1545,7 @@ function AssistantConversation({
               </Text>
             )}
             {message.serviceSelection || message.tool === 'calendar-action' ? null : platformTimetable && message.route === '/timetable/import' ? (
-              <AIButton label="匯入課表" disabled={busy} onPress={() => current() && safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })} />
+              <AIButton label="匯入課表" disabled={busy} onPress={() => current() && openServiceRoute('PersonalImport', { kind: 'timetable' })} />
             ) : (!message.savedClassRead || !message.savedClassRead.classes.length) && !message.plan && !message.localReads?.length && message.route && (!platformTimetable || message.route === '/timetable') && VERIFIED_SERVICE_ROUTES[message.route] ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
                 {message.savedClassRead?.currentAt && index === messages.length - 1 && (
@@ -1553,7 +1558,7 @@ function AssistantConversation({
                   disabled={busy || syncBusy}
                   onPress={() => {
                     const destination = message.route && VERIFIED_SERVICE_ROUTES[message.route];
-                    if (current() && destination) safeNavigate(navigation, destination.route);
+                    if (current() && destination) openServiceRoute(destination.route);
                   }}
                 />
               </View>
@@ -1567,7 +1572,7 @@ function AssistantConversation({
                       label={'查看' + action.label}
                       variant="ghost"
                       disabled={busy || syncBusy}
-                      onPress={() => safeNavigate(navigation, action.route)}
+                      onPress={() => openServiceRoute(action.route)}
                     />
                   ))}
               </View>
@@ -1620,7 +1625,7 @@ function AssistantConversation({
               disabled={busy || syncBusy}
               onPress={() => {
                 if (!current()) return;
-                safeNavigate(navigation, action.route);
+                openServiceRoute(action.route);
               }}
             />
           ))}

@@ -15,6 +15,7 @@ import {
 } from './SelectedSchoolProvider';
 import { DirectoryVisitProvider } from './DirectoryVisit';
 import { PersonalImportSyncBridge } from './imports/PersonalImportSync';
+import { AssistantWorkspaceProvider } from './AssistantWorkspaceProvider';
 
 type Catalog = { schools: BrowseSchool[]; status: 'loading' | 'ready' | 'error' };
 const CATALOG_RETRY_DELAY_MS = 4_000;
@@ -172,7 +173,7 @@ function SchoolPreferences({ children }: { children: ReactNode }) {
     >
       <CampusDraftMount>
         <PersonalImportSyncBridge />
-        {children}
+        <AssistantWorkspaceProvider>{children}</AssistantWorkspaceProvider>
       </CampusDraftMount>
     </SelectedSchoolProvider>
   );

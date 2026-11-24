@@ -134,17 +134,40 @@ test('opens timetable import from the empty timetable state', async () => {
   expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalImport', { kind: 'timetable' });
 });
 
+test('keeps one inline workspace with supported examples and a separate exploration entry', async () => {
+  const view = render(<StudentTodayScreen />);
+  await view.findAllByText('繳交期末報告');
+  expect(view.getAllByLabelText('說出或輸入想做的事')).toHaveLength(1);
+  expect(view.queryByLabelText('想交給 nuni 的事')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '填入需求：這禮拜有哪些待交作業' }));
+  expect(view.getByDisplayValue('這禮拜有哪些待交作業')).toBeTruthy();
+  expect(askCampusAssistant).not.toHaveBeenCalled();
+  fireEvent.press(view.getByRole('button', { name: '探索更多 nuni 用法' }));
+  expect(mockNavigate).toHaveBeenCalledWith('校園', {
+    screen: 'Explore', params: { workContext: 'student' }, initial: false,
+  });
+  expect(askCampusAssistant).not.toHaveBeenCalled();
+});
+
 test('keeps the assistant usable during the first course load without dropping the draft', async () => {
   const first = deferred<ReturnType<typeof result>>();
   jest.mocked(loadStudentHome).mockReturnValueOnce(first.promise);
   const view = render(<StudentTodayScreen />);
   expect(view.getByTestId('today-skeleton')).toBeTruthy();
+  // The task entry is first in both the visual and assistive reading order,
+  // even while coursework is still loading.
+  const loadingOrder = view.root.findAll(() => true);
+  expect(loadingOrder.indexOf(view.getByTestId('today-task-workspace')))
+    .toBeLessThan(loadingOrder.indexOf(view.getByTestId('today-skeleton')));
   const input = view.getByLabelText('說出或輸入想做的事');
   fireEvent.changeText(input, '想找等一下的教室');
   await act(async () => first.resolve(result()));
   expect(view.queryByTestId('today-skeleton')).toBeNull();
   expect(view.getByLabelText('說出或輸入想做的事')).toBe(input);
   expect(view.getByDisplayValue('想找等一下的教室')).toBeTruthy();
+  const readyOrder = view.root.findAll(() => true);
+  expect(readyOrder.indexOf(view.getByTestId('today-task-workspace')))
+    .toBeLessThan(readyOrder.indexOf(view.getByText('今天課表')));
   expect(askCampusAssistant).not.toHaveBeenCalled();
 });
 
