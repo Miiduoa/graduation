@@ -452,11 +452,12 @@ test('launcher refuses a hard-linked log file without truncating the other link'
   }
 });
 
-test('launcher signal stops the logged child, not only the wrapper', async () => {
+test('launcher cleanup kills a process-group descendant after the wrapper exits', async () => {
   const { spawn } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
   const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-signal-'));
   const childPidFile = path.join(dir, 'child.pid');
+  const grandchildPidFile = path.join(dir, 'grandchild.pid');
   const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
   try {
     const proc = spawn('bash', [script], {
@@ -465,6 +466,7 @@ test('launcher signal stops the logged child, not only the wrapper', async () =>
         TRONCLASS_RUNTIME_DIR: dir,
         TRONCLASS_SIGNAL_SELFTEST: '1',
         TRONCLASS_SELFTEST_CHILD: childPidFile,
+        TRONCLASS_SELFTEST_GRANDCHILD: grandchildPidFile,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -473,20 +475,26 @@ test('launcher signal stops the logged child, not only the wrapper', async () =>
     proc.stdout.on('data', chunk => { stdout += chunk; });
     const started = Date.now();
     let childPid;
+    let grandchildPid;
     while (Date.now() - started < 5000) {
       if (existsSync(childPidFile)) {
         childPid = Number(readFileSync(childPidFile, 'utf8').trim());
-        if (Number.isInteger(childPid) && childPid > 0) break;
       }
+      if (existsSync(grandchildPidFile)) {
+        grandchildPid = Number(readFileSync(grandchildPidFile, 'utf8').trim());
+      }
+      if (Number.isInteger(childPid) && childPid > 0 &&
+          Number.isInteger(grandchildPid) && grandchildPid > 0) break;
       await new Promise(resolve => setTimeout(resolve, 50));
     }
     const wrap = /WRAPPER_PID=(\d+)/.exec(stdout);
     assert.ok(wrap, stdout);
     const wrapperPid = Number(wrap[1]);
     assert.ok(childPid && childPid !== wrapperPid, `child=${childPid} wrapper=${wrapperPid}`);
+    assert.ok(grandchildPid && grandchildPid !== childPid, `grandchild=${grandchildPid}`);
     try { process.kill(wrapperPid, 'SIGTERM'); } catch (error) { assert.fail(String(error)); }
     const exited = await new Promise(resolve => {
-      const timer = setTimeout(() => resolve('timeout'), 3000);
+      const timer = setTimeout(() => resolve('timeout'), 5000);
       proc.on('exit', (code, signal) => {
         clearTimeout(timer);
         resolve({ code, signal });
@@ -496,6 +504,7 @@ test('launcher signal stops the logged child, not only the wrapper', async () =>
     await new Promise(resolve => setTimeout(resolve, 200));
     assert.throws(() => process.kill(childPid, 0));
     assert.throws(() => process.kill(wrapperPid, 0));
+    assert.throws(() => process.kill(grandchildPid, 0));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -189,37 +189,70 @@ export TRONCLASS_SESSION_SECRET="$(<"$TRONCLASS_RUNTIME_DIR/tronclass-session.ke
 
 TRONCLASS_EMULATOR_PID=''
 TRONCLASS_WEB_PID=''
-tronclass_signal_tree() {
-  local pid="$1"
-  local sig="$2"
-  [ -n "$pid" ] || return 0
-  # The logged wrapper keeps a detached child in its own process group.
-  # Signal that group first, while /proc still names the wrapper as parent.
-  local child
-  for child in $(ps -o pid= --ppid "$pid" 2>/dev/null); do
-    kill "-$sig" -- "-$child" 2>/dev/null || kill "-$sig" "$child" 2>/dev/null || true
-  done
-  kill "-$sig" "$pid" 2>/dev/null || true
+tronclass_read_pgid() {
+  local file="$1"
+  [ -n "$file" ] && [ -f "$file" ] || return 0
+  local pgid
+  pgid="$(tr -cd '0-9' < "$file")"
+  local self_pgid
+  self_pgid="$(ps -o pgid= -p "$$" 2>/dev/null | tr -cd '0-9')"
+  # Never signal the launcher shell's own group or PID 1.
+  if [ -z "$pgid" ] || [ "$pgid" = "1" ] || [ "$pgid" = "$self_pgid" ]; then
+    return 0
+  fi
+  printf '%s' "$pgid"
 }
 
-tronclass_stop_pid() {
+tronclass_group_alive() {
+  local pgid="$1"
+  [ -n "$pgid" ] || return 1
+  kill -0 -- "-$pgid" 2>/dev/null
+}
+
+tronclass_signal_logged() {
   local pid="$1"
-  local sig="${2:-TERM}"
-  [ -n "$pid" ] || return 0
-  tronclass_signal_tree "$pid" "$sig"
+  local pgid="$2"
+  local sig="$3"
+  if [ -n "$pgid" ]; then
+    kill "-$sig" -- "-$pgid" 2>/dev/null || true
+  fi
+  # Also walk any still-attached wrapper children if the sidecar is missing.
+  local child
+  if [ -n "$pid" ]; then
+    for child in $(ps -o pid= --ppid "$pid" 2>/dev/null); do
+      kill "-$sig" -- "-$child" 2>/dev/null || kill "-$sig" "$child" 2>/dev/null || true
+    done
+    kill "-$sig" "$pid" 2>/dev/null || true
+  fi
+}
+
+tronclass_stop_logged() {
+  local pid="$1"
+  local log="$2"
+  local sig="${3:-TERM}"
+  local pgid=""
+  [ -n "$log" ] && pgid="$(tronclass_read_pgid "${log}.pgid")"
+  [ -n "$pid" ] || [ -n "$pgid" ] || return 0
+  tronclass_signal_logged "$pid" "$pgid" "$sig"
   local i
   for i in $(seq 1 20); do
-    kill -0 "$pid" 2>/dev/null || return 0
+    local wrapper_alive=0 group_alive=0
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && wrapper_alive=1
+    tronclass_group_alive "$pgid" && group_alive=1
+    if [ "$wrapper_alive" -eq 0 ] && [ "$group_alive" -eq 0 ]; then
+      return 0
+    fi
     sleep 0.1
   done
-  tronclass_signal_tree "$pid" KILL
-  wait "$pid" 2>/dev/null || true
+  tronclass_signal_logged "$pid" "$pgid" KILL
+  [ -n "$pid" ] && wait "$pid" 2>/dev/null || true
 }
 
 cleanup() {
   trap - EXIT INT TERM
-  tronclass_stop_pid "$TRONCLASS_WEB_PID" TERM
-  tronclass_stop_pid "$TRONCLASS_EMULATOR_PID" INT
+  tronclass_stop_logged "$TRONCLASS_WEB_PID" "$TRONCLASS_RUNTIME_DIR/web.log" TERM
+  tronclass_stop_logged "$TRONCLASS_EMULATOR_PID" "$TRONCLASS_RUNTIME_DIR/emulators.log" INT
+  tronclass_stop_logged "" "${TRONCLASS_RUNTIME_DIR:+$TRONCLASS_RUNTIME_DIR/selftest.log}" TERM
 }
 trap cleanup EXIT INT TERM
 
@@ -259,6 +292,17 @@ if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
 fs.ftruncateSync(fd, 0);
 const child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd], detached: true });
 fs.closeSync(fd);
+const pgidPath = `${logPath}.pgid`;
+try {
+  try {
+    if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('pgid');
+  } catch (error) {
+    if (error && error.code !== 'ENOENT') throw error;
+  }
+  fs.writeFileSync(pgidPath, String(child.pid), { mode: 0o600, flag: 'w' });
+} catch (error) {
+  process.stderr.write('Unable to record the logged child process group.\n');
+}
 const stop = (signal) => {
   try { process.kill(-child.pid, signal); } catch (error) { /* the group may already have exited */ }
   try { child.kill(signal); } catch (error) { /* the child may have already exited */ }
@@ -304,6 +348,17 @@ if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
 fs.ftruncateSync(fd, 0);
 const child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd], detached: true });
 fs.closeSync(fd);
+const pgidPath = `${logPath}.pgid`;
+try {
+  try {
+    if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('pgid');
+  } catch (error) {
+    if (error && error.code !== 'ENOENT') throw error;
+  }
+  fs.writeFileSync(pgidPath, String(child.pid), { mode: 0o600, flag: 'w' });
+} catch (error) {
+  process.stderr.write('Unable to record the logged child process group.\n');
+}
 const stop = (signal) => {
   try { process.kill(-child.pid, signal); } catch (error) { /* the group may already have exited */ }
   try { child.kill(signal); } catch (error) { /* the child may have already exited */ }
@@ -322,7 +377,7 @@ NODE
 
 if [ "${TRONCLASS_SIGNAL_SELFTEST:-}" = '1' ]; then
   TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/selftest.log" \
-    node -e "const fs=require('node:fs'); fs.writeFileSync(process.env.TRONCLASS_SELFTEST_CHILD, String(process.pid)); setInterval(()=>{}, 1000);" &
+    node -e 'const fs=require("node:fs"); const {spawn}=require("node:child_process"); const g=spawn(process.execPath,["-e","process.on(\"SIGTERM\",()=>{});process.on(\"SIGINT\",()=>{});require(\"node:fs\").writeFileSync(process.env.TRONCLASS_SELFTEST_GRANDCHILD,String(process.pid));setInterval(()=>{},1000);"],{stdio:"ignore"}); fs.writeFileSync(process.env.TRONCLASS_SELFTEST_CHILD,String(process.pid)); process.on("SIGTERM",()=>process.exit(0)); process.on("SIGINT",()=>process.exit(0)); setInterval(()=>{},1000);' &
   echo "WRAPPER_PID=$!"
   unset TRONCLASS_RUN_LOGGED_EXEC
   wait
