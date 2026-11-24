@@ -1,6 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { findCatalogSameSlotChange } from './publicCourseTimetableImport';
 import {
+  clearPersonalImportRollback,
+  preparePersonalImportRollback,
+  readPersonalImportRollback,
+} from './personalImportRollbackJournal';
+import {
   parsePersonalImportSyncState,
   type PersonalImportSyncState,
 } from '@campus/shared/src/imports/sync';
@@ -33,7 +38,6 @@ const empty = (): PersonalImportLedger => ({ version: 1, records: [], batches: [
 const locks = new Map<string, Promise<unknown>>();
 const pendingWrites = new Map<string, Promise<void>>();
 type Recovery = { raw: string | null };
-const pendingRestorations = new Map<string, Recovery>();
 let writeSequence = 0;
 const recoveryKey = (key: string) => `${key}:checkpoint`;
 
@@ -49,9 +53,6 @@ async function readRecovery(
   key: string,
   scope: PersonalImportScope,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
-  const pending = pendingRestorations.get(key);
-  if (pending) return { ...pending, ledger: parseLedger(pending.raw, scope) };
-
   const checkpoint = recoveryKey(key);
   let encoded: string | null;
   try {
@@ -64,44 +65,46 @@ async function readRecovery(
       encoded = await AsyncStorage.getItem(checkpoint);
     } catch (checkpointError) {
       // A legacy wrapped ledger can exceed the row limit even when the primary fits.
-      if (isStorageRowTooLarge(checkpointError)) return null;
-      throw checkpointError;
+      if (!isStorageRowTooLarge(checkpointError)) throw checkpointError;
+      encoded = null;
     }
   }
-  if (encoded === null) return null;
+  if (encoded !== null) {
+    try {
+      // Older builds wrapped the original ledger in a second layer of JSON.
+      const raw: unknown = encoded.trimStart().startsWith('{') ? encoded : JSON.parse(encoded);
+      if (raw === null) return { raw: null, ledger: empty() };
+      if (typeof raw === 'string' && raw.trimStart().startsWith('{')) {
+        return { raw, ledger: parseLedger(raw, scope) };
+      }
+    } catch {
+      // An invalid legacy checkpoint cannot supply the ledger.
+    }
+  }
 
-  try {
-    // Older builds wrapped the original ledger in a second layer of JSON.
-    const raw: unknown = encoded.trimStart().startsWith('{') ? encoded : JSON.parse(encoded);
-    if (raw === null) return { raw: null, ledger: empty() };
-    if (typeof raw === 'string' && raw.trimStart().startsWith('{')) {
-      return { raw, ledger: parseLedger(raw, scope) };
-    }
-  } catch {
-    // An invalid checkpoint cannot supply the ledger. Try the primary.
-  }
-  return null;
+  const journal = readPersonalImportRollback(key);
+  if (journal === undefined) return null;
+  if (journal === 'null') return { raw: null, ledger: empty() };
+  // A marked journal can be the only verified copy. Propagate read/parse errors.
+  if (!journal) throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
+  return { raw: journal, ledger: parseLedger(journal, scope) };
 }
 
 async function restoreLedger(key: string, { raw }: Recovery) {
   if (raw === null) await AsyncStorage.removeItem(key);
   else await AsyncStorage.setItem(key, raw);
   await AsyncStorage.multiRemove([recoveryKey(key)]);
-  pendingRestorations.delete(key);
+  clearPersonalImportRollback(key);
 }
 
 async function rollbackLedger(key: string, raw: string | null) {
-  const recovery = { raw };
-  pendingRestorations.set(key, recovery);
   try {
-    // Only a revoked write needs a durable recovery record. Store the original
-    // bytes directly to avoid growing the row through JSON string escaping.
+    // Preserve the AsyncStorage checkpoint format without JSON string escaping.
     await AsyncStorage.multiSet([[recoveryKey(key), raw ?? 'null']]);
   } catch {
-    // Restoration still has a chance to succeed. Readers have the original
-    // bytes in memory if the primary write fails too.
+    // Try restoring the primary anyway. The journal still holds the verified bytes.
   }
-  await restoreLedger(key, recovery);
+  await restoreLedger(key, { raw });
 }
 
 async function trackWrite(key: string, write: () => Promise<void>) {
@@ -263,11 +266,13 @@ export function mutatePersonalImportLedger<T>(
             await AsyncStorage.setItem(key, raw);
           } else {
             assertWritable();
+            const commit = preparePersonalImportRollback(key, persistedRaw);
             try {
               await AsyncStorage.setItem(key, raw);
               assertWritable();
               await AsyncStorage.multiRemove([recoveryKey(key)]);
               assertWritable();
+              commit();
             } catch (error) {
               await rollbackLedger(key, persistedRaw);
               throw error;

@@ -763,10 +763,15 @@ it.each([
       expect(JSON.parse((await AsyncStorage.getItem(key))!).records).toEqual([]);
       expect(await AsyncStorage.getItem(key + ':checkpoint')).toBe(rebuildFails ? null : stored);
       expect((await loadPersonalImports(scope)).records.map((row) => row.title)).toEqual(['寫入途中重驗']);
-      const { mutatePersonalImportLedger } = jest.requireActual<typeof import('../services/personalImports')>(
-        '../services/personalImports',
-      );
-      await mutatePersonalImportLedger(scope, () => true, (ledger) => ({ ledger, result: undefined }));
+      let restarted!: typeof import('../services/personalImports');
+      jest.isolateModules(() => {
+        restarted = jest.requireActual('../services/personalImports');
+      });
+      expect((await restarted.loadPersonalImports(scope)).records.map((row) => row.title)).toEqual(['寫入途中重驗']);
+      await restarted.mutatePersonalImportLedger(scope, { canContinue: () => true }, (ledger) => ({
+        ledger,
+        result: undefined,
+      }));
     }
     expect(await AsyncStorage.getItem(key)).toBe(stored);
     expect(listener).not.toHaveBeenCalled();

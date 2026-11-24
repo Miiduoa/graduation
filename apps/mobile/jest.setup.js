@@ -78,6 +78,8 @@ jest.mock('expo-constants', () => ({
 }));
 
 // Mock expo-file-system
+const mockDocumentFiles = new Map();
+beforeEach(() => mockDocumentFiles.clear());
 jest.mock('expo-file-system', () => ({
   documentDirectory: 'file:///mock/documents/',
   cacheDirectory: 'file:///mock/cache/',
@@ -87,9 +89,10 @@ jest.mock('expo-file-system', () => ({
   deleteAsync: jest.fn(() => Promise.resolve()),
   getInfoAsync: jest.fn(() => Promise.resolve({ exists: false })),
   makeDirectoryAsync: jest.fn(() => Promise.resolve()),
+  Paths: { document: 'file:///mock/documents' },
   File: class {
-    constructor(uri) {
-      this.uri = uri;
+    constructor(...segments) {
+      this.uri = segments.join('/');
       this.exists = true;
       this.size = 12;
     }
@@ -98,6 +101,23 @@ jest.mock('expo-file-system', () => ({
     }
     async arrayBuffer() {
       return new Uint8Array([1, 2, 3]).buffer;
+    }
+    info() {
+      return { exists: mockDocumentFiles.has(this.uri) };
+    }
+    create() {
+      if (mockDocumentFiles.has(this.uri)) throw new Error('file already exists');
+      mockDocumentFiles.set(this.uri, '');
+    }
+    write(content) {
+      mockDocumentFiles.set(this.uri, content);
+    }
+    textSync() {
+      if (!mockDocumentFiles.has(this.uri)) throw new Error('file does not exist');
+      return mockDocumentFiles.get(this.uri);
+    }
+    delete() {
+      if (!mockDocumentFiles.delete(this.uri)) throw new Error('file does not exist');
     }
   },
 }));

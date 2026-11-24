@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { File } from 'expo-file-system';
 import {
   meetupWindows,
   periodProfileForSchool,
@@ -135,16 +136,18 @@ test('reads the primary ledger when the checkpoint cannot be parsed', async () =
   expect(await loadPersonalImports(scope)).toEqual(ledger);
 });
 
-async function failedDeletionRollback() {
+async function failedDeletionRollback(checkpointWriteFails = false) {
   const key = personalImportStorageKey(scope);
   const checkpoint = key + ':checkpoint';
   const { ledger } = await appendPersonalImports(scope, [row('original')]);
   const originalRaw = await AsyncStorage.getItem(key);
   const setItem = jest.mocked(AsyncStorage.setItem);
   const nativeSetItem = setItem.getMockImplementation()!;
+  const checkpointWriteError = new Error('檢查點寫入失敗');
+  const rejectCheckpointWrite = jest.fn().mockRejectedValue(checkpointWriteError);
   let verified = true;
 
-  // Isolate the deleting process so its in-memory recovery is lost on restart.
+  // Isolate the deleting process so the next instance starts with fresh service state.
   let deleteBeforeRestart!: typeof deletePersonalImport;
   jest.isolateModules(() => {
     deleteBeforeRestart = require('../services/personalImports').deletePersonalImport;
@@ -152,6 +155,9 @@ async function failedDeletionRollback() {
   setItem.mockImplementationOnce(async (storageKey, value) => {
     await nativeSetItem(storageKey, value);
     verified = false;
+    if (checkpointWriteFails) {
+      jest.mocked(AsyncStorage.multiSet).mockImplementationOnce(rejectCheckpointWrite);
+    }
   });
   setItem.mockRejectedValueOnce(new Error('還原寫入失敗'));
   await expect(deleteBeforeRestart(scope, ledger.records[0], {
@@ -161,9 +167,60 @@ async function failedDeletionRollback() {
 
   const deletedRaw = (await AsyncStorage.getItem(key))!;
   expect(JSON.parse(deletedRaw).records).toEqual([]);
-  expect(await AsyncStorage.getItem(checkpoint)).toBe(originalRaw);
+  if (checkpointWriteFails) {
+    expect(rejectCheckpointWrite).toHaveBeenCalledWith([[checkpoint, originalRaw]]);
+  }
+  expect(await AsyncStorage.getItem(checkpoint)).toBe(checkpointWriteFails ? null : originalRaw);
   return { key, checkpoint, ledger, originalRaw, deletedRaw };
 }
+
+test('a restart recovers a revoked deletion after both AsyncStorage rollback writes fail', async () => {
+  const { key, ledger } = await failedDeletionRollback(true);
+  // The imported service here starts with fresh state and the same on-disk data.
+  expect(await loadPersonalImports(scope)).toEqual(ledger);
+  await appendPersonalImports(scope, [row('new', '統計')], { canContinue: () => true });
+  expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['微積分', '統計']);
+  expect(JSON.parse((await AsyncStorage.getItem(key))!).records[0]).toEqual(ledger.records[0]);
+  await deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
+  expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['統計']);
+});
+
+test('a temporary rollback journal read failure blocks reads and writes after restart', async () => {
+  const { key, ledger, deletedRaw } = await failedDeletionRollback(true);
+  const failure = new Error('disk I/O error');
+  const readJournal = jest.spyOn(File.prototype, 'textSync').mockImplementation(() => {
+    throw failure;
+  });
+  try {
+    await expect(loadPersonalImports(scope)).rejects.toBe(failure);
+    await expect(appendPersonalImports(scope, [row('new', '統計')], {
+      canContinue: () => true,
+    })).rejects.toBe(failure);
+    expect(await AsyncStorage.getItem(key)).toBe(deletedRaw);
+  } finally {
+    readJournal.mockRestore();
+  }
+  expect(await loadPersonalImports(scope)).toEqual(ledger);
+});
+
+test('a failed journal preparation leaves the verified ledger intact', async () => {
+  const { ledger } = await appendPersonalImports(scope, [row('original')]);
+  const failure = new Error('disk I/O error');
+  const publish = jest.spyOn(File.prototype, 'create').mockImplementationOnce(() => {
+    throw failure;
+  });
+  try {
+    await expect(deletePersonalImport(scope, ledger.records[0], {
+      canContinue: () => true,
+    })).rejects.toBe(failure);
+    expect(JSON.parse((await AsyncStorage.getItem(personalImportStorageKey(scope)))!)).toEqual(ledger);
+    expect(await loadPersonalImports(scope)).toEqual(ledger);
+    await deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
+    expect((await loadPersonalImports(scope)).records).toEqual([]);
+  } finally {
+    publish.mockRestore();
+  }
+});
 
 const androidRowLimitError = () => new Error('Row too big to fit into CursorWindow');
 

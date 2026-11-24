@@ -54,11 +54,15 @@ jest.mock('../services/personalImportBackupSharing', () => ({
   sharePersonalImportBackup: jest.fn(),
 }));
 jest.mock('expo-file-system', () => ({
+  Paths: { document: 'file:///mock/documents' },
   File: class {
     size = 1000;
     uri: string;
     constructor(value: string) {
       this.uri = value;
+    }
+    info() {
+      return { exists: false };
     }
     async text() {
       return mockFileText();
