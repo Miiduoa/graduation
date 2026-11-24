@@ -677,16 +677,16 @@ function PersonalCalendarWorkspace({
     const ticket = ++requestId.current;
     const scoped = { ...scope };
     const savedFromView = viewRevision.current;
-    const viewedMonth = month;
-    const originalMonth = baseline?.date.slice(0, 7);
-    const savedMonth = draft.date.slice(0, 7);
-    // Stay on the month-list being viewed unless the user rescheduled the
-    // event into a different month than both the original date and the view.
-    const preserveMonthList =
-      mode === 'edit' &&
-      calendarView === 'list' &&
-      !selectedDate &&
-      !(savedMonth !== viewedMonth && originalMonth !== undefined && savedMonth !== originalMonth);
+    const savedDate = draft.date;
+    const savedMonth = savedDate.slice(0, 7);
+    const monthList = calendarView === 'list' && !selectedDate;
+    // An edit follows a changed start date. In a month list, follow only
+    // when the destination differs from both the viewed and original months.
+    const followSavedDate =
+      !baseline ||
+      (monthList
+        ? savedMonth !== month && savedMonth !== baseline.date.slice(0, 7)
+        : savedDate !== baseline.date);
     writing.current = true;
     setSaving(true);
     setFormError('');
@@ -696,19 +696,18 @@ function PersonalCalendarWorkspace({
       if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
       // Preserve navigation during the write even if focus has since returned
       // to the body or revalidation has hidden the editor.
-      const continueEditingContext =
-        savedFromView === viewRevision.current &&
-        (suspended.current ||
-          editorRef.current?.contains(document.activeElement) ||
-          document.activeElement === document.body);
-      if (continueEditingContext) {
-        // A month-list edit must keep the month currently being viewed, even
-        // when the event starts in a previous month.
-        if (!preserveMonthList) {
-          setMonth(draft.date.slice(0, 7));
-          setSelectedDate(draft.date);
+      if (savedFromView === viewRevision.current) {
+        if (followSavedDate) {
+          setMonth(savedMonth);
+          setSelectedDate(savedDate);
         }
-        if (!suspended.current) pendingFocus.current = preserveMonthList ? 'return' : 'saved';
+        if (
+          !suspended.current &&
+          (editorRef.current?.contains(document.activeElement) ||
+            document.activeElement === document.body)
+        ) {
+          pendingFocus.current = followSavedDate || selectedDate ? 'saved' : 'return';
+        }
       }
       setInitialDraft(null);
       setNotice(success);

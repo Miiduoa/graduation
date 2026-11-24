@@ -314,8 +314,10 @@ it.each(['列表', '月格'])(
     expect(titleField().value).toBe('此分頁未儲存的修改');
 
     const latestTitle = '另一分頁已儲存的修改';
+    const current = readPersonalImports(scope()).find((row) => row.id === stored.id);
+    if (!current) throw new Error(`找不到行程 ${stored.id}`);
     await act(async () => {
-      await changePersonalImport(scope(), readPersonalImports(scope())[0], {
+      await changePersonalImport(scope(), current, {
         ...stored,
         title: latestTitle,
       });
@@ -372,11 +374,9 @@ it('shows a saved event on its actual day and restores focus to that day after t
   expect(screen.getByRole('heading', { name: '已保存的合成安排' })).toBeTruthy();
   expect(screen.queryByRole('textbox', { name: '標題' })).toBeNull();
   await waitFor(() => expect(document.activeElement).toBe(dayHeading('2027-02-08')));
-  expect(readPersonalImports(scope())).toHaveLength(1);
-  expect(readPersonalImports(scope())[0]).toMatchObject({
-    title: '已保存的合成安排',
-    date: '2027-02-08',
-  });
+  expect(readPersonalImports(scope())).toMatchObject([
+    { title: '已保存的合成安排', date: '2027-02-08' },
+  ]);
   expect(window.confirm).not.toHaveBeenCalled();
 });
 
@@ -431,6 +431,44 @@ it('在整月列表儲存跨月行程後仍留在目前查看的月份', async (
   expect(screen.getByRole('button', { name: '列表' }).getAttribute('aria-pressed')).toBe('true');
   expect(screen.getByRole('heading', { name: '十一月行程' })).toBeTruthy();
   expect(screen.getByRole('heading', { name: '已修改跨月行程' })).toBeTruthy();
+});
+
+it('在單日檢視修改跨月行程標題後保留選取日期、當日其他行程與作業截止', async () => {
+  const stored = { ...event('crossing', '跨月行程', '2026-10-31'), endDate: '2026-11-02' };
+  seed([stored, event('same-day', '當日其他行程', '2026-11-01')]);
+  vi.mocked(loadNuniCalendarDeadlines).mockResolvedValue([
+    {
+      id: 'same-day-due',
+      title: '當日作業',
+      dueDate: '2026-11-01',
+      courseId: 'course',
+      courseName: '合成課程',
+      href: '/classroom/course/course#assignment-same-day-due',
+      source: 'nuni',
+      sourceLabel: 'nuni 課程',
+    },
+  ]);
+  render(<PersonalCalendar />);
+  await ready();
+  const dateControl = screen.getByRole('button', { name: '2026-11-01' });
+  activate(dateControl);
+  await screen.findByRole('heading', { name: '當日作業' });
+  activate(editEvent(stored.title));
+  fireEvent.change(titleField(), { target: { value: '已修改跨月行程' } });
+  activate(screen.getByRole('button', { name: '儲存修改' }));
+  await screen.findByText('個人行程已更新。');
+
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-11');
+  expect(dateControl.getAttribute('aria-pressed')).toBe('true');
+  expect(dayHeading('2026-11-01')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '當日其他行程' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '當日作業' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '已修改跨月行程' })).toBeTruthy();
+  expect(readPersonalImports(scope()).find((row) => row.id === stored.id)).toMatchObject({
+    title: '已修改跨月行程',
+    date: stored.date,
+    endDate: stored.endDate,
+  });
 });
 
 it.each([
@@ -559,27 +597,52 @@ it('does not scroll the title back when another editor field has focus during a 
   expect(window.scrollBy).not.toHaveBeenCalled();
 });
 
-it('在整月列表把行程改到另一個月後跟隨新的月份', async () => {
-  const stored = event('existing', '整月列表改期的合成行程', '2026-11-14');
-  seed([stored, event('november-only', '十一月行程', '2026-11-15')]);
-  render(<PersonalCalendar />);
-  await ready();
-  activate(screen.getByRole('button', { name: '列表' }));
-  await screen.findByRole('heading', { name: '十一月行程' });
-  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-11');
-  activate(editEvent(stored.title));
-  fireEvent.change(formDate(), { target: { value: '2026-12-02' } });
-  activate(screen.getByRole('button', { name: '儲存修改' }));
-  await screen.findByText('個人行程已更新。');
-  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-12');
-  expect(screen.getByRole('heading', { name: stored.title })).toBeTruthy();
-  await waitFor(() => expect(document.activeElement).toBe(dayHeading('2026-12-02')));
-  expect(readPersonalImports(scope()).find((row) => row.id === stored.id)).toMatchObject({
-    id: stored.id,
-    source: stored.source,
-    date: '2026-12-02',
-  });
-});
+it.each([false, true])(
+  '在整月列表改期後跟隨新的月份（儲存期間焦點移出編輯器：%s）',
+  async (moveFocus) => {
+    let release: (() => void) | undefined;
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: {
+        request: (_key: string, action: () => unknown) =>
+          new Promise((resolve, reject) => {
+            release = () => {
+              void Promise.resolve().then(action).then(resolve, reject);
+            };
+          }),
+      },
+    });
+    const stored = event('existing', '整月列表改期的合成行程', '2026-11-14');
+    seed([stored, event('november-only', '十一月行程', '2026-11-15')]);
+    render(<PersonalCalendar />);
+    await ready();
+    activate(screen.getByRole('button', { name: '列表' }));
+    await screen.findByRole('heading', { name: '十一月行程' });
+    expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2026-11');
+    activate(editEvent(stored.title));
+    fireEvent.change(formDate(), { target: { value: '2026-12-02' } });
+    activate(screen.getByRole('button', { name: '儲存修改' }));
+    await waitFor(() => expect(release).toBeTypeOf('function'));
+    const monthControl = screen.getByLabelText('查看月份') as HTMLInputElement;
+    if (moveFocus) {
+      // jsdom does not implement Tab navigation. Focus an outside control without activating it.
+      monthControl.focus();
+      expect(document.activeElement).toBe(monthControl);
+    }
+    await act(async () => {
+      release?.();
+    });
+    await screen.findByText('個人行程已更新。');
+    expect(monthControl.value).toBe('2026-12');
+    expect(screen.getByRole('heading', { name: stored.title })).toBeTruthy();
+    expect(document.activeElement).toBe(moveFocus ? monthControl : dayHeading('2026-12-02'));
+    expect(readPersonalImports(scope()).find((row) => row.id === stored.id)).toMatchObject({
+      id: stored.id,
+      source: stored.source,
+      date: '2026-12-02',
+    });
+  },
+);
 
 it('follows a rescheduled event into its new month while preserving its identity and provenance', async () => {
   const stored = event('existing', '跨月改期的合成行程', '2026-11-14');
@@ -595,7 +658,7 @@ it('follows a rescheduled event into its new month while preserving its identity
   expect(screen.getByRole('heading', { name: stored.title })).toBeTruthy();
   await waitFor(() => expect(document.activeElement).toBe(dayHeading('2026-12-02')));
   expect(readPersonalImports(scope())).toHaveLength(1);
-  expect(readPersonalImports(scope())[0]).toMatchObject({
+  expect(readPersonalImports(scope()).find((row) => row.id === stored.id)).toMatchObject({
     id: stored.id,
     source: stored.source,
     date: '2026-12-02',
@@ -858,11 +921,9 @@ it.each(['selected date', 'document.body'])(
     expect(dateControl.getAttribute('aria-pressed')).toBe('true');
     expect(document.activeElement).toBe(expectedFocus);
     expect(screen.queryByRole('textbox', { name: '標題' })).toBeNull();
-    expect(readPersonalImports(scope())).toHaveLength(1);
-    expect(readPersonalImports(scope())[0]).toMatchObject({
-      title: '前一月等待保存的合成安排',
-      date: '2026-11-14',
-    });
+    expect(readPersonalImports(scope())).toMatchObject([
+      { title: '前一月等待保存的合成安排', date: '2026-11-14' },
+    ]);
     expect(window.confirm).not.toHaveBeenCalled();
   },
 );
