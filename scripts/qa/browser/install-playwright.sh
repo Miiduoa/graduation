@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Campus requires Chromium but tolerates unavailable system packages; Admin
 # (--fonts-noto-cjk) requires Chromium, system dependencies, and fonts.
-# Bound each stalled apt/download attempt so GitHub's 20-minute runner limit
-# can still report an actual failed installation rather than a hung check.
+# Bound package and browser operations independently so stalled downloads and
+# interrupted package configuration can be retried.
 set -euo pipefail
 
 if [[ $# -gt 1 || ( $# -eq 1 && "$1" != "--fonts-noto-cjk" ) ]]; then
@@ -112,18 +112,21 @@ prefetch_noble_fonts() {
 }
 
 if [[ "${1:-}" == '--fonts-noto-cjk' ]]; then
-  retry_install 'Playwright system dependencies' 180s sudo "$(command -v python)" -m playwright install-deps chromium
+  # A fresh runner can still be unpacking packages after three minutes.
+  retry_install 'Playwright system dependencies' 360s sudo "$(command -v python)" -m playwright install-deps chromium
   # Download as the runner user so the browser remains in that user's cache.
   retry_install 'Playwright Chromium' 180s python -m playwright install chromium
   # Keep ordinary authenticated apt installation for other candidates and as
   # fallback if the archive is unreachable or its bytes fail verification.
-  font_package=fonts-noto-cjk
   if prefetch_noble_fonts "$attempt_dir/fonts-noto-cjk.deb"; then
-    font_package="$attempt_dir/fonts-noto-cjk.deb"
+    # APT may re-fetch the same version from its preferred mirror even with a
+    # local path. This verified Noble package has no package dependencies.
+    retry_install 'Noto CJK fonts' 180s sudo dpkg --install "$attempt_dir/fonts-noto-cjk.deb"
+  else
+    retry_install 'Noto CJK fonts' 180s sudo apt-get \
+      -o Acquire::http::Timeout=45 -o Acquire::https::Timeout=45 \
+      -o Acquire::Retries=3 install -y fonts-noto-cjk
   fi
-  retry_install 'Noto CJK fonts' 180s sudo apt-get \
-    -o Acquire::http::Timeout=45 -o Acquire::https::Timeout=45 \
-    -o Acquire::Retries=3 install -y "$font_package"
 else
   retry_install 'Playwright Chromium' 180s python -m playwright install chromium
   if ! retry_install 'Playwright system dependencies' 90s sudo "$(command -v python)" -m playwright install-deps chromium; then
