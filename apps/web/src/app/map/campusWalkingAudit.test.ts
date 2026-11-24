@@ -77,6 +77,28 @@ describe('trusted OSM walking segment audit bridge', () => {
     expect(data.graph.edges[0].access).toBe('unknown');
   });
 
+  it('rejects graph geometry that does not exactly match audited OSM node identities', () => {
+    const data = candidates();
+    const [first, second, ...rest] = data.graph.nodes;
+    const variants = [
+      [{ ...first, lat: first.lat + 0.001 }, second, ...rest],
+      [{ ...first, lng: first.lng + 0.001 }, second, ...rest],
+      [first, first, ...rest],
+      [first, ...rest],
+      [first, second, ...rest, { ...first, id: 999 }],
+      [{ ...first, id: 999 }, second, ...rest],
+    ];
+    for (const nodes of variants) {
+      const changed = { ...data, graph: { ...data.graph, nodes } };
+      expect(applyCampusWalkingSegmentAudits(changed, 'fixture', [audit()], now)).toBeNull();
+    }
+    // Node order is not an identity change; exact, reordered nodes still work.
+    const reordered = { ...data, graph: { ...data.graph, nodes: [...data.graph.nodes].reverse() } };
+    const graph = applyCampusWalkingSegmentAudits(reordered, 'fixture', [audit()], now)!;
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2)?.nodes).toEqual([first, second]);
+    expect(data.graph.nodes[0]).toEqual(first);
+  });
+
   it('does not let a trusted audit override mapped pedestrian direction', () => {
     const cases: [Record<string, string>, CampusWalkingSegmentAudit['direction'], boolean][] = [
       [{ 'oneway:foot': 'yes' }, 'forward', true],
