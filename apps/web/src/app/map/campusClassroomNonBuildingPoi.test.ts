@@ -1257,3 +1257,21 @@ describe('floor ranges do not establish a classroom destination', () => {
     }
   });
 });
+
+describe('new official codes yield to an exact public name on another place', () => {
+  it('does not unique-match AK303 when a bus stop uses that public name', () => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find((item) => item.id === 'pu-renyuan')!;
+    const stop = { ...place, id: 'synthetic-ak-bus-stop', name: 'AK303', category: '公車站' };
+    const result = resolveCampusClassroom({
+      schoolId: 'pu', query: 'AK303', locations: [place, stop],
+    });
+    expect(result.status).toBe('unmatched');
+    expect(result.matches).toEqual([]);
+    const alone = resolveCampusClassroom({
+      schoolId: 'pu', query: 'AK303', locations: [place],
+    });
+    expect(alone.status).toBe('matched');
+    expect(alone.matches).toEqual([place]);
+  });
+});
+

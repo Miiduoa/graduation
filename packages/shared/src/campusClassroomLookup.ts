@@ -514,10 +514,10 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     const [match] = aliasMatches;
     const published = PUBLISHED_PROVIDENCE_PLACES.get(match.id);
     // A public name can claim the full query even when its place is ineligible
-    // for classroom navigation. Preserve existing verified building-code matches.
+    // for classroom navigation. New official codes must also yield to that name.
+    // Merge-base PH matches are primary, so this alias-only branch does not apply.
     if (
       published &&
-      !matchesSourcedProvidenceCode(comparable, published) &&
       locations.some((location) =>
         location && typeof location === 'object' && location.id !== match.id &&
         comparisonText(location.name) === comparable

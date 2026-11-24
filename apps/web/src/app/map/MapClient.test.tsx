@@ -242,6 +242,26 @@ it.each(['Bishop Kupfer Hall 303', 'Ｂｉｓｈｏｐ  Ｋｕｐｆｅｒ Ｈ�
   },
 );
 
+
+it.each(['AK303', 'ＡＫ３０３'])(
+  'keeps a bus stop named %s searchable without opening the new official code',
+  async (name) => {
+    const hall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-renyuan')!;
+    const source = deferred<MapLocation[]>();
+    vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+    render(<MapClient school="pu" query="AK303" />);
+    const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+    expect(mapState().selected.id).toBe('pu-renyuan');
+
+    const stop = { ...gate, id: 'synthetic-ak-bus-stop', name, category: '公車站' };
+    await act(async () => source.resolve([hall, stop]));
+    const map = mapState();
+    expect(map.selected).toBeNull();
+    expect(map.locations).toContainEqual(expect.objectContaining({ id: stop.id, name }));
+    expect(screen.getByRole('button', { name: `查看${name.replace(/\s+/g, ' ')}` })).toBeTruthy();
+  },
+);
+
 it('never replaces a missing explicit focus with the classroom guess, including after a source update', async () => {
   state.user = null;
   const source = deferred<MapLocation[]>();
