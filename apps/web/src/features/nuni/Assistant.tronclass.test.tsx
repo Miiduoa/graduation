@@ -65,7 +65,7 @@ it('answers in the existing conversation without cloud consent and keeps private
   });
   vi.stubGlobal('fetch', fetch);
   render(<Assistant />);
-  await ask('TronClass 有哪些未交作業');
+  await ask('查 TronClass 有哪些未交作業');
   await screen.findByRole('heading', { name: '私人期中報告' });
   expect(screen.getByText('尚未確認繳交狀態')).toBeTruthy();
   expect(screen.queryByText('尚未繳交')).toBeNull();
@@ -248,7 +248,10 @@ it('sends a single-clause Agent query to the main planner when the integration i
   expect(fetch.mock.calls.filter(([url]) => url === '/api/nuni/assistant/ask').length).toBeGreaterThan(0);
 });
 
-it.each(['玩課雲', '玩課雲作業', '玩課雲作業是我的', '玩課雲有作業。'])(
+it.each([
+  '玩課雲', '玩課雲作業', '玩課雲作業是我的', '玩課雲有作業。',
+  '玩課雲有作業嗎？', '老師的玩課雲作業有哪些？', '查玩課雲公告是不是作業？',
+])(
   'keeps %s on the planner confirmation path without a private read',
   async question => {
     const fetch = vi.fn(async (url: string) => {

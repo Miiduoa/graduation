@@ -37,7 +37,7 @@ function fixture() {
 describe('scoped deterministic TronClass Agent tools', () => {
   it('reads this actor’s pending homework and preserves unknown states', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: 'TronClass 未繳作業有哪些' });
+    const result = await f.service.ask(owner, { question: '查 TronClass 未繳作業有哪些' });
     expect(f.grants.require).toHaveBeenCalledWith(owner, 'readCourseData');
     expect(f.read).toHaveBeenCalledWith(owner, { include: { homework: true, announcements: false, materials: false } });
     expect(result.snapshot?.homework.map((item) => [item.id, item.submitted])).toEqual([[201, false], [203, null]]);
@@ -275,7 +275,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('still requests homework for homework and preparation questions', async () => {
     const f = fixture();
-    await f.service.ask(owner, { question: 'TronClass 未繳作業有哪些' });
+    await f.service.ask(owner, { question: '查 TronClass 未繳作業有哪些' });
     expect(f.read).toHaveBeenCalledWith(owner, { include: { homework: true, announcements: false, materials: false } });
     f.read.mockClear();
     await f.service.ask(owner, { question: '幫我準備 TronClass 期末報告作業', courseId: 101, homeworkId: 201 });

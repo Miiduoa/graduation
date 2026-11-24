@@ -130,7 +130,7 @@ const STATUS_WRITE_COMPOUNDS = [
 const STATUS_PARTICLES = ['有沒有', '有無', '過了嗎', '了沒', '了嗎'];
 const LMS_NAMES = ['玩課雲', '創課', 'tron class', 'tronclass'];
 const READ_PARTICLES = [
-  '有哪些', '哪些', '是否', '一下', '我的', '這週', '本週', '什麼時候', '哪一天',
+  '有哪些', '哪些', '是否', '一下', '我的', '我們的', '這週', '本週', '什麼時候', '哪一天',
   '給我看', '是什麼', '是不是', '就是', '才是', '不是', '只是', '怎麼樣', '怎樣', '如何', '什麼', '哪天', '時候', '有什麼', '有幾份',
   '狀態', '紀錄', '記錄', '情況', '進度', '歷史', '期限', '截止', '截止日期', '截止日', '截止時間',
   'deadline', '日期', '時間',
@@ -1375,11 +1375,6 @@ const READ_QUESTION_WORDS = new Set([
   '可以做什麼', '能做什麼', '有哪些功能', '支援什麼', '支援哪些', '做什麼', 'what can',
 ]);
 
-const QUESTION_PREDICATES = new Set([
-  '有沒有', '有無', '有哪些', '有什麼', '有幾份', '是什麼', '是不是', '什麼時候', '哪一天', '哪天',
-  '可以做什麼', '能做什麼', '有哪些功能', '支援什麼', '支援哪些', 'what can',
-]);
-
 const OBJECT_SPECIFIERS = new Set([
   ...LMS_NAMES,
   '我', '我們', '你', '您', '你們', '他', '她', '它', '他們', '她們',
@@ -1388,7 +1383,7 @@ const OBJECT_SPECIFIERS = new Set([
 ]);
 const OBJECT_ADJUNCTS = new Set([
   ...STATUS_WRITE_COMPOUNDS,
-  '我的', '這週', '本週', '最新', '舊版', '新版', '全部',
+  '我的', '我們的', '這週', '本週', '最新', '舊版', '新版', '全部',
   'pending', 'unsubmitted',
   '最後', '之後', '後面', '前面', '之前', '以前', '以後', '裡面', '中間',
 ]);
@@ -1412,8 +1407,7 @@ type ClausePredicate = {
 };
 type ClauseAnalysis = {
   hasLmsName: boolean;
-  hasQuestionPredicate: boolean;
-  hasExistentialPredicate: boolean;
+  hasUnsupportedOwner: boolean;
   hasBlockedPredicate: boolean;
   predicates: ClausePredicate[];
   trailingQuestion: boolean;
@@ -1423,7 +1417,7 @@ type ClauseAnalysis = {
 
 function predicateKindOf(token: Token): PredicateKind | null {
   const value = token.value.toLowerCase();
-  if (token.kind === 'noun') return null;
+  if (token.kind === 'noun' || READ_QUESTION_WORDS.has(value) || COPULAS.has(value)) return null;
   if (DOWNLOAD_ACTIONS.has(value)) return 'download';
   if (isPrepareActionValue(token.value)) return 'prepare';
   if (isWriteVerbToken(token)) return 'write';
@@ -1506,9 +1500,8 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
   let readGoverns = false;
   let clauseStart = 0;
   let hasLmsName = false;
-  let questionTopicAt = -1;
-  let hasQuestionPredicate = false;
-  let hasExistentialPredicate = false;
+  let hasUnsupportedOwner = false;
+  let inObjectModifier = false;
   let hasBlockedPredicate = false;
 
   const flush = (): void => {
@@ -1517,7 +1510,7 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
       predicates.push(predicate);
     }
     clauses.push({
-      hasLmsName, hasQuestionPredicate, hasExistentialPredicate, hasBlockedPredicate,
+      hasLmsName, hasUnsupportedOwner, hasBlockedPredicate,
       predicates, trailingQuestion, hasQuestionCopula, hasUnknown,
     });
   };
@@ -1537,9 +1530,8 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
     objectEnds = true;
     readGoverns = false;
     hasLmsName = false;
-    questionTopicAt = -1;
-    hasQuestionPredicate = false;
-    hasExistentialPredicate = false;
+    hasUnsupportedOwner = false;
+    inObjectModifier = false;
     hasBlockedPredicate = false;
   };
 
@@ -1621,12 +1613,22 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
     if (COPULAS.has(value)) hasCopula = true;
     if (value === '嗎' || value === '呢' || token.value === '?') trailingQuestion = true;
 
-    const isLms = LMS_NAMES.includes(value);
-    if (isLms && !blockedPrefix && !predicate && baAt < 0) questionTopicAt = index;
-    hasLmsName ||= isLms;
-    hasQuestionPredicate ||= QUESTION_PREDICATES.has(value);
-    hasExistentialPredicate ||= value === '有' && questionTopicAt >= 0 &&
-      previous[index] === questionTopicAt && tokens[next[index]!]?.value !== '的';
+    hasLmsName ||= LMS_NAMES.includes(value);
+    const prev = tokens[previous[index]!];
+    const following = tokens[next[index]!];
+    if (value === '關於' || value === '含') inObjectModifier = true;
+    if (value === '的' || value === '之') {
+      const modifier = prev?.value.toLowerCase() ?? '';
+      // Platform, status, and topic modifiers are already supported object syntax.
+      const statusModifier = prev && isSubmitWriteToken(prev) && statusSuffixes[previous[index]!];
+      const statusAttribute = prev && READ_OBJECT_HEADS.has(modifier) && statusSuffixes[next[index]!]?.governed;
+      const topicModifier = inObjectModifier && (modifier === '含' || READ_OBJECT_HEADS.has(modifier));
+      if (!topicModifier && !statusModifier && !statusAttribute && !LMS_NAMES.includes(modifier) &&
+        !OBJECT_ADJUNCTS.has(modifier)) {
+        hasUnsupportedOwner = true;
+      }
+      inObjectModifier = false;
+    }
 
     if (BA_MARKERS.has(token.value) && !predicate && baAt < 0) {
       baAt = index;
@@ -1634,8 +1636,6 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
     }
 
     const kind = predicateKindOf(token);
-    const prev = tokens[previous[index]!];
-    const following = tokens[next[index]!];
     const suffix = statusSuffixes[index];
     if (kind === 'write' && suffix && baAt < 0) {
       const start = offsets[clauseStart]!;
@@ -1647,9 +1647,6 @@ function analyzeClauses(tokens: Token[]): ClauseAnalysis[] {
       if (!ADDITIVE_CUE.test(tail) && !WRITE_CUE.test(tail) &&
         ((suffix.homework && statusPrefix) || ((suffix.governed || suffix.question || suffix.deadline) &&
           (readGoverns || HOMEWORK_SUBJECT.test(shortPrefix) || LMS_SUBJECT.test(shortPrefix))))) {
-        const beforeStatus = tokens[previous[previous[index]!]!];
-        hasQuestionPredicate ||= suffix.question || prev?.value === '是否' ||
-          ((prev?.value === '已' || prev?.value === '已經') && beforeStatus?.value === '是否');
         if (!predicate) blockedPrefix = true;
         noteObjectToken(token, index);
         continue;
@@ -1758,14 +1755,13 @@ function isDownloadCommand(tokens: Token[], index: number): boolean {
 function hasPositiveReadForm(text: string): boolean {
   const tokens = visibleCommandTokens(text);
   return analyzeClauses(tokens).some(clause => {
-    if (!clause.hasLmsName || clause.hasBlockedPredicate || hasSkippedAction(clause)) return false;
+    if (!clause.hasLmsName || clause.hasUnsupportedOwner || clause.hasBlockedPredicate || hasSkippedAction(clause)) return false;
     const reads = clause.predicates.filter(predicate => predicate.kind === 'read' || predicate.kind === 'download');
-    if (reads.length) return reads.every(predicate => isProvenPredicate(clause, predicate));
-    return clause.hasQuestionPredicate || (clause.hasExistentialPredicate && clause.trailingQuestion);
+    return reads.length > 0 && reads.every(predicate => isProvenPredicate(clause, predicate));
   });
 }
 
-/** A clearly-read clause needs visible request or question syntax and a safe token scan. */
+/** A clearly-read clause needs a proven read or download verb. */
 function isPositivelyProvenRead(text: string): boolean {
   const original = text.normalize('NFKC').trim();
   if (!original || !TRONCLASS_KEYWORD.test(original)) return false;
@@ -1825,7 +1821,8 @@ function wholeRequestAllowsCompoundRead(question: string): boolean {
   if (classifyTronClassSentence(question)?.outcome === 'clearly-write') return false;
   if (hasUnprovenWrite(textWithoutQuotedSpans(original))) return false;
   const routingText = readRoutingText(textWithoutQuotedSpans(original));
-  if (hasDescriptiveAction(routingText)) return false;
+  if (hasDescriptiveAction(routingText) ||
+    analyzeClauses(visibleCommandTokens(routingText)).some(clause => clause.hasUnsupportedOwner)) return false;
   const clauses = splitClauses(routingText);
   if (clauses.length === 0) return false;
   return clauses.every(clauseAllowsCompoundCompanion);
@@ -1888,25 +1885,41 @@ function textWithoutFilenameTokens(text: string): string {
   return chars.join('');
 }
 
-function lastDataTypeIntent(text: string): TronClassAgentIntent | null {
-  const types: { intent: TronClassAgentIntent; pattern: RegExp }[] = [
-    { intent: 'homework', pattern: /作業|homework|assignments?/iu },
-    { intent: 'announcements', pattern: /公告|通知|announcements?|notices?/iu },
-    { intent: 'materials', pattern: /教材|講義|檔案|附件|materials?|handouts?|files?/iu },
-    { intent: 'courses', pattern: /課程|修課|課表|courses?|classes/iu },
-  ];
-  let found: { intent: TronClassAgentIntent; index: number } | null = null;
+const DATA_TYPES = [
+  { intent: 'homework', pattern: /作業|homework|assignments?/iu },
+  { intent: 'announcements', pattern: /公告|通知|announcements?|notices?/iu },
+  { intent: 'materials', pattern: /教材|講義|檔案|附件|materials?|handouts?|files?/iu },
+  { intent: 'courses', pattern: /課程|修課|課表|courses?|classes/iu },
+  { intent: 'unsupported', pattern: /測驗|考試/u },
+  { intent: 'unsupported', pattern: /問卷/u },
+] as const;
+
+function readObjectTarget(text: string) {
   const mask = dataTypeMask(text);
+  let directType: (typeof DATA_TYPES)[number] | undefined;
+  let complementAt = text.length;
+  let sawRead = false;
+  let conflict = false;
   for (const token of tokensFor(text)) {
     if (token.kind === 'filename' || isWhitespaceToken(token) || token.kind === 'punct') continue;
     if (tokenIsProtected(token, mask)) continue;
-    for (const type of types) {
-      if (type.pattern.test(token.value) && (!found || token.start >= found.index)) {
-        found = { intent: type.intent, index: token.start };
-      }
+    const value = token.value.toLowerCase();
+    const kind = predicateKindOf(token);
+    sawRead ||= kind === 'read' || kind === 'download';
+    // In 「查有沒有作業」 the question introduces the object. Once the
+    // object names a data type, a following question can only qualify it.
+    const copula = COPULAS.has(value) || value === '是不是' || value === '是什麼';
+    const questionTail = READ_QUESTION_WORDS.has(value) || value === '有' || value === '嗎' || value === '呢';
+    if (complementAt === text.length && sawRead && (copula || (directType && questionTail))) {
+      complementAt = token.start;
+    }
+    for (const type of DATA_TYPES) {
+      if (!type.pattern.test(token.value)) continue;
+      if (token.start < complementAt) directType = type;
+      else if (type !== directType) conflict = true;
     }
   }
-  return found?.intent ?? null;
+  return { intent: directType?.intent, complementAt, conflict };
 }
 
 export type TronClassAgentQueryIntent = {
@@ -1962,13 +1975,15 @@ function hasNonPrepareQueryCommand(text: string): boolean {
     !isPrepareActionValue(token.value) && (token.kind === 'query' || QUERY_START.has(token.value)));
 }
 
-function readIntentOf(text: string): TronClassAgentQueryIntent {
-  const visible = textWithoutFilenameTokens(text);
+function readIntentOf(text: string, target = readObjectTarget(text)): TronClassAgentQueryIntent {
+  const withoutFilenames = textWithoutFilenameTokens(text);
+  const visible = withoutFilenames.slice(0, target.complementAt);
   if (/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i.test(visible)) {
     return { intent: 'capabilities', pendingOnly: false };
   }
-  const pendingOnly = /(?:未交|未繳|待交|待繳|待提交|尚未(?:交|繳|提交)|還沒(?:交|繳|提交)|沒(?:交|繳)|pending|unsubmitted|not\s+submitted)/i.test(visible);
-  const dataIntent = lastDataTypeIntent(text);
+  const dataIntent = target.intent;
+  const statusText = dataIntent === 'homework' ? withoutFilenames : visible;
+  const pendingOnly = /(?:未交|未繳|待交|待繳|待提交|尚未(?:交|繳|提交)|還沒(?:交|繳|提交)|沒(?:交|繳)|pending|unsubmitted|not\s+submitted)/i.test(statusText);
   if (dataIntent === 'announcements') return { intent: 'announcements', pendingOnly: false };
   const tokens = visibleCommandTokens(text);
   const preparationRequested = hasHonoredPrepareCommand(text) && /(?:作業|homework|assignment)/i.test(visible);
@@ -1976,7 +1991,9 @@ function readIntentOf(text: string): TronClassAgentQueryIntent {
   const downloading = tokens.some((token, index) =>
     DOWNLOAD_ACTIONS.has(token.value.toLowerCase()) && isDownloadCommand(tokens, index));
   if (preparationRequested && downloading) return { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' };
-  if (/(?:測驗|考試|問卷)/.test(visible)) return { intent: 'unsupported', pendingOnly: false };
+  if (dataIntent === 'unsupported' || /測驗|考試|問卷/u.test(visible)) {
+    return { intent: 'unsupported', pendingOnly: false };
+  }
   if (downloading) return { intent: 'download', pendingOnly: false };
   if (dataIntent === 'materials' || dataIntent === 'courses') {
     return { intent: dataIntent, pendingOnly: false };
@@ -2040,7 +2057,11 @@ export function classifyTronClassSentence(question: string): TronClassSentenceCl
   if (writeRoute === 'planner') return { outcome: 'clearly-write', intent: null };
   if (writeRoute === 'unsupported') return { outcome: 'clearly-write', intent: { intent: 'unsupported', pendingOnly: false } };
   if (!TRONCLASS_KEYWORD.test(text)) return { outcome: 'ambiguous' };
-  const intent = readIntentOf(text);
+  const target = readObjectTarget(text);
+  if (target.conflict || analyzeClauses(visibleCommandTokens(text)).some(clause => clause.hasUnsupportedOwner)) {
+    return { outcome: 'ambiguous' };
+  }
+  const intent = readIntentOf(text, target);
   if (hasReadBlockingDecoration(original)) return { outcome: 'ambiguous' };
   if (intent.intent === 'unsupported') {
     return hasPositiveReadForm(text) || hasHonoredPrepareCommand(text)
