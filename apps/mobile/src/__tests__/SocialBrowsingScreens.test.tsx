@@ -631,6 +631,32 @@ test('a newer server list that omits the board beats an older failed-write re-re
   expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
 });
 
+test('a successful write still keeps a later list subscription if the re-check fails', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  const write = deferred();
+  jest.mocked(unsubscribeFromBoard).mockImplementationOnce(() => write.promise);
+  fireEvent.press(view.getByLabelText('取消訂閱讀書會'));
+
+  const subs = deferred<string[]>();
+  jest.mocked(listSubscribedBoardIds).mockImplementationOnce(() => subs.promise);
+  let refreshPromise!: Promise<void>;
+  await act(async () => {
+    refreshPromise = view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+  });
+
+  await act(async () => { write.resolve(); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  jest.mocked(isSubscribedToBoard).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => { subs.resolve(['board']); await refreshPromise; });
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+});
+
 test('a cache-gap list started after a failed write cannot drop the rollback or the in-flight re-read', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);

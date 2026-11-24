@@ -98,6 +98,10 @@ function BoardsContent() {
   // After a failed write, keep the rollback until a from-server re-check lands.
   // A later list may still be served from cache and omit the board.
   const awaitingServerConfirm = useRef(new Set<string>());
+  // List membership skipped by keepLocal after a successful write. If the
+  // follow-up from-server re-check fails, a list that already included a newer
+  // subscription must still be applied.
+  const deferredListMembership = useRef(new Map<string, boolean>());
   const reconcileBoardSubscriptionRef = useRef<(boardId: string, uid: string, sid: string) => void>(() => {});
   // Latest tap per board; only its outcome may roll back or alert.
   const latestIntent = useRef(new Map<string, number>());
@@ -181,6 +185,9 @@ function BoardsContent() {
       });
       for (const id of keepLocal) {
         keepLocalFromStaleList.current.add(id);
+        if (lastSettledWriteSucceeded.current.has(id)) {
+          deferredListMembership.current.set(id, subscribedIds.has(id));
+        }
         if (
           !pendingSubscriptionCounts.current.has(id) &&
           lastSettledWriteSucceeded.current.has(id) &&
@@ -234,6 +241,7 @@ function BoardsContent() {
       else nextConfirmed.delete(boardId);
       confirmedSubscribedRef.current = nextConfirmed;
       awaitingServerConfirm.current.delete(boardId);
+      deferredListMembership.current.delete(boardId);
       applySubscribed((previous) => {
         if (previous.has(boardId) === serverSubscribed) return previous;
         const next = new Set(previous);
@@ -242,7 +250,30 @@ function BoardsContent() {
         return next;
       });
     } catch {
-      // Keep the pre-tap rollback; the next refresh will reconcile.
+      const listed = deferredListMembership.current.get(boardId);
+      deferredListMembership.current.delete(boardId);
+      if (
+        listed === true &&
+        lastSettledWriteSucceeded.current.has(boardId) &&
+        !confirmedSubscribedRef.current.has(boardId) &&
+        !pendingSubscriptionCounts.current.has(boardId) &&
+        (boardWriteRevision.current.get(boardId) ?? -1) <= revisionAtRead &&
+        (boardServerAppliedRevision.current.get(boardId) ?? 0) <= boardServerAppliedAtStart &&
+        latestIntent.current.get(boardId) === intentAtStart &&
+        mounted.current
+      ) {
+        const nextConfirmed = new Set(confirmedSubscribedRef.current);
+        nextConfirmed.add(boardId);
+        confirmedSubscribedRef.current = nextConfirmed;
+        applySubscribed((previous) => {
+          if (previous.has(boardId)) return previous;
+          const next = new Set(previous);
+          next.add(boardId);
+          return next;
+        });
+        return;
+      }
+      // Keep the pre-tap rollback or confirmed write; the next refresh will reconcile.
     }
   }, [applySubscribed]);
   reconcileBoardSubscriptionRef.current = reconcileBoardSubscription;
