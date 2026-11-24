@@ -960,6 +960,7 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | 'ambiguous
     }
     if (token.kind === 'noun' || !isWriteVerbToken(token)) continue;
     if (isWriteNegatedAt(tokens, index)) continue;
+    if (!actionObjectPhraseEndsClause(tokens, index)) continue;
     // Field nouns such as「發布時間」are consumed as nouns and never reach here.
     // Other writes such as「刪除」are never status filters.
     if (!isSubmitWriteToken(token)) return 'unsupported';
@@ -986,7 +987,12 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | 'ambiguous
   }
   const ba = baConstructionState(text);
   if (ba === 'unresolved') return 'ambiguous';
-  if (ba === 'write') return 'unsupported';
+  if (ba === 'write') {
+    const writeIndex = tokens.findIndex((token, index) =>
+      token.kind !== 'noun' && isWriteVerbToken(token) && !isWriteNegatedAt(tokens, index) &&
+      baMarkerIndexInClause(tokens, index) >= 0 && actionObjectPhraseEndsClause(tokens, index));
+    return writeIndex >= 0 ? 'unsupported' : 'ambiguous';
+  }
   return null;
 }
 
@@ -1371,7 +1377,105 @@ const READ_QUESTION_WORDS = new Set([
   '可以做什麼', '能做什麼', '有哪些功能', '支援什麼', '支援哪些', '做什麼', 'what can',
 ]);
 
+const OBJECT_SPECIFIERS = new Set([
+  ...LMS_NAMES,
+  '我', '我們', '你', '您', '你們', '他', '她', '它', '他們', '她們',
+  '這份', '那份', '這個', '那個', '這些', '那些', '全部', '這', '那',
+  'my', 'the', 'a', 'an', 'this', 'that', 'these', 'those', 'all',
+]);
+const OBJECT_ADJUNCTS = new Set([
+  ...STATUS_WRITE_COMPOUNDS,
+  '我的', '這週', '本週', '最新', '舊版', '新版', '全部',
+  'pending', 'unsubmitted',
+]);
+
+function isTrailingClausePunct(token: Token): boolean {
+  return token.kind === 'punct' && /[?。！!]+/u.test(token.value);
+}
+
+function clauseLimitAfter(tokens: Token[], index: number): number {
+  for (let cursor = index + 1; cursor < tokens.length; cursor += 1) {
+    if (isClauseBoundaryToken(tokens[cursor]!)) return cursor;
+  }
+  return tokens.length;
+}
+
+function clauseStartBefore(tokens: Token[], index: number): number {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (isClauseBoundaryToken(tokens[cursor]!)) return cursor + 1;
+  }
+  return 0;
+}
+
+function baMarkerIndexInClause(tokens: Token[], verbIndex: number): number {
+  const start = clauseStartBefore(tokens, verbIndex);
+  for (let cursor = verbIndex - 1; cursor >= start; cursor -= 1) {
+    if (BA_MARKERS.has(tokens[cursor]!.value)) return cursor;
+  }
+  return -1;
+}
+
+/**
+ * A proven imperative's object must end the clause. A specifier such as an LMS
+ * name may use 的/之 to attach a head noun, but a head followed by 的/之 plus
+ * more words is a trailing modifier or relative clause, not the object itself.
+ * Copulas, completion markers, and unknown tokens also disprove the imperative.
+ */
+function complementHasDisallowedResidue(tokens: Token[], start: number, end: number): boolean {
+  let seenHead = false;
+  let pendingDe = false;
+  for (let cursor = start; cursor < end; cursor += 1) {
+    const token = tokens[cursor]!;
+    if (isWhitespaceToken(token) || isTrailingClausePunct(token)) continue;
+    const value = token.value.toLowerCase();
+    if (value === '嗎' || value === '呢' || value === '吧') continue;
+    if (COPULAS.has(value) || ACTION_COMPLETION_MARKERS.has(token.value) || token.kind === 'unknown') {
+      return true;
+    }
+    if (value === '的' || value === '之') {
+      if (seenHead) pendingDe = true;
+      continue;
+    }
+    if (pendingDe) return true;
+    if (OBJECT_SPECIFIERS.has(value) || OBJECT_ADJUNCTS.has(value) || OBJECT_ADJUNCTS.has(token.value)) continue;
+    if (token.kind === 'neg' || DESCRIPTIVE_ACTION_PREFIXES.has(token.value)) continue;
+    // Any other visible word can complete a bare object (教材, 作業, 附件…).
+    seenHead = true;
+  }
+  return pendingDe;
+}
+
+function postVerbalResidueIsRelative(tokens: Token[], start: number, end: number): boolean {
+  for (let cursor = start; cursor < end; cursor += 1) {
+    const token = tokens[cursor]!;
+    if (isWhitespaceToken(token) || isTrailingClausePunct(token)) continue;
+    const value = token.value.toLowerCase();
+    if (value === '嗎' || value === '呢' || value === '吧') continue;
+    if (COPULAS.has(value) || ACTION_COMPLETION_MARKERS.has(token.value) || token.kind === 'unknown') {
+      return true;
+    }
+    // 的/之 after the verb starts a relative clause or trailing modifier, not a verbal particle.
+    if (value === '的' || value === '之') return true;
+  }
+  return false;
+}
+
+function actionObjectPhraseEndsClause(tokens: Token[], index: number): boolean {
+  const baAt = baMarkerIndexInClause(tokens, index);
+  const clauseEnd = clauseLimitAfter(tokens, index);
+  if (baAt >= 0) {
+    return !complementHasDisallowedResidue(tokens, baAt + 1, index) &&
+      !postVerbalResidueIsRelative(tokens, index + 1, clauseEnd);
+  }
+  return !complementHasDisallowedResidue(tokens, index + 1, clauseEnd);
+}
+
+export function tronClassAutoExecuteActionVerbs(): string[] {
+  return [...DOWNLOAD_ACTIONS, ...PREPARE_ACTIONS, ...WRITE_VERB_SET];
+}
+
 function isDownloadCommand(tokens: Token[], index: number): boolean {
+  if (!actionObjectPhraseEndsClause(tokens, index)) return false;
   const next = nextSignificantToken(tokens, index);
   if (next?.value === '的' || next?.value === '之' || (next && STATUS_NOUN.test(next.value))) return false;
 
@@ -1597,7 +1701,7 @@ function prepareWordRole(tokens: Token[], index: number): 'command' | 'modifier'
   if (prev && (prev.value === '的' || prev.value === '之')) return 'modifier';
   if (!prev || isClauseBoundaryToken(prev) || prev.value === '並' ||
     WRITE_HELPERS.has(prev.value) || PREPARE_REQUEST_CUES.has(prev.value)) {
-    return 'command';
+    return actionObjectPhraseEndsClause(tokens, index) ? 'command' : 'doubt';
   }
   return 'doubt';
 }
