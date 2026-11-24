@@ -290,7 +290,7 @@ function isWriteNegatedAt(tokens: Token[], writeAt: number): boolean {
   return false;
 }
 
-const FILE_NAME_AT = /^\S+\.[A-Za-z][A-Za-z0-9]{0,7}(?![A-Za-z0-9])/u;
+const FILE_NAME_AT = /^[^\s，,；;。！!？?\r\n]+\.[A-Za-z][A-Za-z0-9]{0,7}(?![A-Za-z0-9])/u;
 const PUNCT_CHAR = /[，,；;。！!？?\r\n：:()（）\[\]【】《》〈〉「」『』“”‘’"'·…]/u;
 
 function filenameMatchLength(text: string, index: number): number {
@@ -895,11 +895,24 @@ function isPositivelyProvenRead(text: string): boolean {
   return hasReadOrStatusPredicate(original) || hasDomainOrLmsSubstance(original);
 }
 
+function clauseHasUnresolvedTransfer(text: string): boolean {
+  const tokens = tokensFor(text);
+  if (tokens.some(isWriteVerbToken)) return true;
+  const mask = protectedSpanMask(text);
+  const unknown = tokens.some(token => token.kind === 'unknown' && !isWhitespaceToken(token) && !tokenIsProtected(token, mask));
+  const dative = tokens.some(token => token.value === '給' || token.value === '到' || token.value === '至');
+  if (unknown && dative) return true;
+  return tokens.some(token => token.kind === 'unknown' && !isWhitespaceToken(token) &&
+    /^(?:寄|傳|送|轉)$/.test(token.value));
+}
+
 function clauseAllowsCompoundCompanion(clause: string): boolean {
   const text = clause.normalize('NFKC').trim();
   if (!text) return true;
   if (isPositivelyProvenRead(text)) return true;
-  if (OTHER_SERVICE_OR_SCHEDULE.test(text) && !TRONCLASS_KEYWORD.test(text)) return true;
+  if (OTHER_SERVICE_OR_SCHEDULE.test(text) && !TRONCLASS_KEYWORD.test(text)) {
+    return !clauseHasUnresolvedTransfer(text);
+  }
   const bare = text.replace(/[?!.。]+$/u, '').trim();
   if (tronClassExplicitNavigationQuestion(text) || isTronClassNavigationTarget(bare) ||
     isTronClassNavigationTarget(bare.replace(/^(?:(?:請|麻煩)?(?:幫我|替我)?(?:開啟|打開|開|前往|進入))\s*/u, ''))) {

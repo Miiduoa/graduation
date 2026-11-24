@@ -1103,6 +1103,17 @@ describe('three-way sentence classification', () => {
     }
   });
 
+
+  it.each([
+    '查玩課雲作業，寄附件給校園老師',
+    '查玩課雲作業 槑，寄給老師.pdf',
+  ])('does not auto-read when an unknown transfer or punctuated leftover looks like a filename in %s', question => {
+    expect(classifyTronClassSentence(question)?.outcome).not.toBe('clearly-read');
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
   it.each(['不想查玩課雲作業', '不能查玩課雲作業', '不再查玩課雲作業'])(
     'does not auto-read homework from a modal negation in %s',
     question => {
