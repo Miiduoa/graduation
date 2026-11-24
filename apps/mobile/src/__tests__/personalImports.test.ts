@@ -1,7 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
 import {
   meetupWindows,
+  emptyPersonalEventDraft,
+  personalEventRowFromDraft,
   periodProfileForSchool,
   periodTimes,
   planPersonalImport,
@@ -50,6 +53,70 @@ test('append is durable, duplicate-safe, and isolated by account and school', as
     0,
   );
   expect((await loadPersonalImports({ ...scope, schoolId: 'ntu' })).records).toHaveLength(0);
+});
+
+test('Web reads an existing ledger without touching the unsupported Expo document directory', async () => {
+  const { ledger } = await appendPersonalImports(scope, [row('original')]);
+  const originalPlatform = Platform.OS;
+  const document = Object.getOwnPropertyDescriptor(Paths, 'document')!;
+  Platform.OS = 'web';
+  Object.defineProperty(Paths, 'document', {
+    get: () => { throw new TypeError('this.validatePath is not a function'); },
+  });
+  try {
+    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+    await expect(snapshotPersonalImports(scope)).resolves.toEqual(ledger);
+    await expect(deletePersonalImport(scope, ledger.records[0], {
+      canContinue: () => true,
+    })).rejects.toThrow('此平台無法建立匯入資料的還原副本。');
+    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+  } finally {
+    Platform.OS = originalPlatform;
+    Object.defineProperty(Paths, 'document', document);
+  }
+});
+
+test.each(['a', '校'])('guarded calendar writes support maximum-length account and school IDs (%s)', async (character) => {
+  const longScope = { owner: `nuni:${'u'.repeat(128)}`, schoolId: character.repeat(120) };
+  const event = personalEventRowFromDraft({
+    ...emptyPersonalEventDraft(),
+    title: '校園活動',
+    date: '2026-11-25',
+    allDay: true,
+  }, longScope.schoolId);
+  const info = File.prototype.info;
+  const fileInfo = jest.spyOn(File.prototype, 'info').mockImplementation(function (this: File) {
+    const name = this.uri.split('/').pop()!;
+    if (Buffer.byteLength(name) > 255) throw new Error('ENAMETOOLONG');
+    return info.call(this);
+  });
+  const guard = { canContinue: () => true, canCommitFirstWrite: () => true };
+  try {
+    const { ledger: { records: [added] } } = await appendPersonalImports(longScope, [event], guard);
+    const { records: [edited] } = await editPersonalImport(longScope, added, { ...added, title: '更新後的活動' }, guard);
+    expect((await loadPersonalImports(longScope)).records).toEqual([edited]);
+    await deletePersonalImport(longScope, edited, guard);
+    expect((await loadPersonalImports(longScope)).records).toEqual([]);
+    expect(fileInfo).toHaveBeenCalled();
+  } finally {
+    fileInfo.mockRestore();
+  }
+});
+
+test('a marked journal from an older build remains authoritative until a guarded retry commits', async () => {
+  const { ledger } = await appendPersonalImports(scope, [row('original')]);
+  const key = personalImportStorageKey(scope);
+  const legacyName = key.replaceAll(':', '~3a').replaceAll('%', '~25');
+  const payload = new File(Paths.document, `${legacyName}.rollback.json`);
+  const marker = new File(Paths.document, `${legacyName}.rollback.pending`);
+  payload.write(JSON.stringify(ledger));
+  marker.create();
+  await AsyncStorage.removeItem(key);
+
+  await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+  await deletePersonalImport(scope, ledger.records[0], { canContinue: () => true });
+  expect(marker.info().exists).toBe(false);
+  expect((await loadPersonalImports(scope)).records).toEqual([]);
 });
 
 test.each(['append', 'edit', 'delete'] as const)(

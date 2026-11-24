@@ -1,24 +1,38 @@
 import { File, Paths } from 'expo-file-system';
+import { sha256 } from 'js-sha256';
+import { Platform } from 'react-native';
+
+const markerSuffix = '.rollback.pending';
 
 function journalFiles(key: string) {
-  // Escape URI syntax without introducing path separators or ambiguous scope delimiters.
-  const name = key.replace(/[%:~]/g, (character) => `~${character.charCodeAt(0).toString(16)}`);
-  return {
-    payload: new File(Paths.document, `${name}.rollback.json`),
-    marker: new File(Paths.document, `${name}.rollback.pending`),
-  };
+  const directory = Paths.document;
+  // An existing legacy marker remains authoritative until its write commits.
+  // The escaped storage key is ASCII, so its length is also its byte count.
+  const legacyName = key.replace(/[%:~]/g, (character) => `~${character.charCodeAt(0).toString(16)}`);
+  if (legacyName.length + markerSuffix.length <= 255) {
+    const marker = new File(directory, legacyName + markerSuffix);
+    if (marker.info().exists) {
+      return { marker, payload: new File(directory, `${legacyName}.rollback.json`), marked: true };
+    }
+  }
+
+  const name = `personal-imports-${sha256(key)}`;
+  const marker = new File(directory, name + markerSuffix);
+  return { marker, payload: new File(directory, `${name}.rollback.json`), marked: marker.info().exists };
 }
 
 export function readPersonalImportRollback(key: string): string | undefined {
-  const { payload, marker } = journalFiles(key);
-  return marker.info().exists ? payload.textSync() : undefined;
+  // Expo's Web implementation cannot construct a Directory or File.
+  if (Platform.OS === 'web') return undefined;
+  const { payload, marked } = journalFiles(key);
+  return marked ? payload.textSync() : undefined;
 }
 
 export function preparePersonalImportRollback(key: string, raw: string | null): () => void {
-  const { payload, marker } = journalFiles(key);
+  if (Platform.OS === 'web') throw new Error('此平台無法建立匯入資料的還原副本。');
+  const { payload, marker, marked } = journalFiles(key);
   // The document directory survives process restarts and is outside AsyncStorage's quota.
   const encoded = raw ?? 'null';
-  const marked = marker.info().exists;
   // A retry can reuse the verified copy without rewriting it.
   if (!marked || payload.textSync() !== encoded) {
     payload.write(encoded);
@@ -39,8 +53,9 @@ export function preparePersonalImportRollback(key: string, raw: string | null): 
 }
 
 export function clearPersonalImportRollback(key: string): void {
-  const { payload, marker } = journalFiles(key);
-  if (marker.info().exists) marker.delete();
+  if (Platform.OS === 'web') return;
+  const { payload, marker, marked } = journalFiles(key);
+  if (marked) marker.delete();
   discardPayload(payload);
 }
 
