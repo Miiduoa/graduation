@@ -564,6 +564,11 @@ function PersonalCalendarWorkspace({
     }
   };
 
+  const showMonthList = () => {
+    setSelectedDate('');
+    setCalendarView('list');
+  };
+
   const monthEvents = useMemo(
     () => filterPersonalEvents(ledger.records, month),
     [ledger.records, month],
@@ -888,9 +893,7 @@ function PersonalCalendarWorkspace({
               type="button"
               className="btn"
               aria-pressed={calendarView === 'list'}
-              onClick={() => {
-                setCalendarView('list');
-              }}
+              onClick={showMonthList}
             >
               列表
             </button>
@@ -1006,14 +1009,7 @@ function PersonalCalendarWorkspace({
                   <p>{events.length ? `${events.length} 筆個人行程` : '尚無個人行程'}</p>
                 )}
               </div>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  setSelectedDate('');
-                  setCalendarView('list');
-                }}
-              >
+              <button type="button" className="btn" onClick={showMonthList}>
                 查看整月列表
               </button>
             </div>

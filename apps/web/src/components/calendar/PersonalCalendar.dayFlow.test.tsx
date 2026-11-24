@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { personalImportSavedNotice, type PersonalImportRecord } from '@campus/shared';
 import { PersonalCalendar } from './PersonalCalendar';
 import workspaceStyles from './PersonalCalendar.module.css';
+import { loadNuniCalendarDeadlines } from '@/lib/calendarCourseDeadlines';
 import {
   changePersonalImport,
   personalImportsStorageKey,
@@ -70,6 +71,7 @@ const scope = () => ({ owner: `platform:${state.accountId}`, schoolId: state.sch
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.mocked(loadNuniCalendarDeadlines).mockReset().mockResolvedValue([]);
   vi.useFakeTimers({ toFake: ['Date'] });
   // 台灣已經是 11/24；不能用 UTC 日期代替畫面上的「今天」。
   vi.setSystemTime(new Date('2026-11-23T16:30:00.000Z'));
@@ -179,26 +181,59 @@ it.each([
   expect(readPersonalImports(scope())).toEqual([]);
 });
 
-it('keeps the selected day in both views and clears it only when the entire month is requested', async () => {
-  seed([event('one', '合成當日安排', '2026-11-14'), event('two', '合成隔日安排', '2026-11-15')]);
-  render(<PersonalCalendar />);
-  await ready();
-  activate(screen.getByRole('button', { name: '2026-11-14' }));
-  activate(screen.getByRole('button', { name: '列表' }));
-  expect(dayHeading('2026-11-14')).toBeTruthy();
-  expect(screen.getByRole('heading', { name: '合成當日安排' })).toBeTruthy();
-  expect(screen.queryByRole('heading', { name: '合成隔日安排' })).toBeNull();
-  activate(screen.getByRole('button', { name: '月格' }));
-  expect(screen.getByRole('button', { name: '2026-11-14' }).getAttribute('aria-pressed')).toBe(
-    'true',
-  );
-  expect(dayHeading('2026-11-14')).toBeTruthy();
+it.each(['列表', '查看整月列表'])(
+  'clears the day filter for personal events and deadlines when opening the month list via %s',
+  async (entry) => {
+    seed([
+      event('one', '合成當日安排', '2026-11-14'),
+      event('two', '合成隔日安排', '2026-11-15'),
+      event('outside', '合成下月安排', '2026-12-01'),
+    ]);
+    vi.mocked(loadNuniCalendarDeadlines).mockResolvedValue(
+      [
+        { id: 'same-day', title: '合成當日作業', dueDate: '2026-11-14' },
+        { id: 'next-day', title: '合成隔日作業', dueDate: '2026-11-15' },
+        { id: 'next-month', title: '合成下月作業', dueDate: '2026-12-01' },
+      ].map((deadline) => ({
+        ...deadline,
+        courseId: 'course',
+        courseName: '合成課程',
+        href: `/classroom/course/course#assignment-${deadline.id}`,
+        source: 'nuni' as const,
+        sourceLabel: 'nuni 課程',
+      })),
+    );
 
-  activate(screen.getByRole('button', { name: '查看整月列表' }));
-  expect(screen.queryByRole('heading', { name: '2026-11-14 的行程' })).toBeNull();
-  expect(screen.getByRole('heading', { name: '合成當日安排' })).toBeTruthy();
-  expect(screen.getByRole('heading', { name: '合成隔日安排' })).toBeTruthy();
-});
+    render(<PersonalCalendar />);
+    await ready();
+    await screen.findByRole('heading', { name: '合成隔日作業' });
+    activate(screen.getByRole('button', { name: '2026-11-14' }));
+    expect(dayHeading('2026-11-14')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '合成當日安排' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '合成當日作業' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '合成隔日安排' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: '合成隔日作業' })).toBeNull();
+
+    activate(screen.getByRole('button', { name: entry }));
+    expect(screen.getByRole('button', { name: '列表' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByRole('heading', { name: '2026-11-14 的行程' })).toBeNull();
+    const events = within(screen.getByRole('list', { name: '個人行程列表' }));
+    expect(events.getAllByRole('heading').map((heading) => heading.textContent)).toEqual([
+      '合成當日安排',
+      '合成隔日安排',
+    ]);
+    const deadlines = within(screen.getByTestId('calendar-due-list'));
+    expect(deadlines.getAllByRole('heading').map((heading) => heading.textContent)).toEqual([
+      '合成當日作業',
+      '合成隔日作業',
+    ]);
+
+    activate(screen.getByRole('button', { name: '月格' }));
+    expect(screen.getByRole('button', { name: '2026-11-14' }).getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+  },
+);
 
 it('retains a dirty draft when cancellation is declined and discards it without writing after confirmation', async () => {
   render(<PersonalCalendar />);
@@ -314,8 +349,9 @@ it('preserves an unfinished form while changing the visible day and view', async
   activate(screen.getByRole('button', { name: '新增行程' }));
   fireEvent.change(titleField(), { target: { value: '繼續編輯的合成安排' } });
   activate(screen.getByRole('button', { name: '2026-11-15' }));
-  activate(screen.getByRole('button', { name: '列表' }));
   expect(dayHeading('2026-11-15')).toBeTruthy();
+  activate(screen.getByRole('button', { name: '列表' }));
+  expect(screen.queryByRole('heading', { name: '2026-11-15 的行程' })).toBeNull();
   expect(titleField().value).toBe('繼續編輯的合成安排');
   expect(formDate().value).toBe('2026-11-14');
   expect(window.confirm).not.toHaveBeenCalled();
