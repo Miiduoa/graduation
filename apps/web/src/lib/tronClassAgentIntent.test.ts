@@ -294,10 +294,11 @@ describe('write occurrences in TronClass requests', () => {
       ),
     ),
   )('blocks %s in direct and compound requests', command => {
-    expect(parseTronClassAgentIntent(`玩課雲請幫我${command}`))
-      .toEqual({ intent: 'unsupported', pendingOnly: false });
-    expect(parseTronClassAgentIntent(`查玩課雲作業再${command}`))
-      .toEqual({ intent: 'unsupported', pendingOnly: false });
+    const expected = /[了完]$/u.test(command)
+      ? { outcome: 'ambiguous' }
+      : { outcome: 'clearly-write', intent: { intent: 'unsupported', pendingOnly: false } };
+    expect(classifyTronClassSentence(`玩課雲請幫我${command}`)).toEqual(expected);
+    expect(classifyTronClassSentence(`查玩課雲作業再${command}`)).toEqual(expected);
     expect(tronClassCompoundClauses(`查玩課雲作業，請幫我${command}`)).toEqual([]);
     expect(tronClassCompoundClauses(`查玩課雲作業順便${command}，查校園公告`)).toEqual([]);
   });
@@ -306,8 +307,10 @@ describe('write occurrences in TronClass requests', () => {
     '交', '繳了', '交一下', '交完', '繳修訂稿', '交出去', '交交通資訊',
     '把附件交了嗎', '把附件繳交狀態', '把附件上傳截止日',
   ])('blocks the ungoverned submission %s', command => {
-    expect(parseTronClassAgentIntent(`玩課雲作業${command}`))
-      .toEqual({ intent: 'unsupported', pendingOnly: false });
+    const expected = /[了完]/u.test(command)
+      ? { outcome: 'ambiguous' }
+      : { outcome: 'clearly-write', intent: { intent: 'unsupported', pendingOnly: false } };
+    expect(classifyTronClassSentence(`玩課雲作業${command}`)).toEqual(expected);
     expect(tronClassCompoundClauses(`查玩課雲作業，${command}`)).toEqual([]);
   });
 
@@ -1376,6 +1379,19 @@ describe('three-way sentence classification', () => {
     '玩課雲尚未幫我準備作業',
     '玩課雲已下載教材',
     '玩課雲剛才幫我下載教材',
+    '我有去查玩課雲作業',
+    '我有來查玩課雲作業',
+    '我有要查玩課雲作業',
+    '我已經去看玩課雲作業',
+    '我剛去準備玩課雲作業',
+    '我曾來繳交玩課雲作業',
+    '查玩課雲作業好了',
+    '我會查玩課雲作業',
+    '正在繳交玩課雲作業',
+    '他要看玩課雲作業',
+    '我去查玩課雲作業',
+    '查玩課雲作業不要繳交已經看過的附件',
+    '查玩課雲作業不要繳交了',
     '我有看玩課雲作業',
     '我有查玩課雲作業',
     '我有準備玩課雲作業',
@@ -1414,6 +1430,7 @@ describe('three-way sentence classification', () => {
   it.each([
     ['查玩課雲作業', false],
     ['查玩課雲作業草稿', false],
+    ['我現在就要查玩課雲作業', false],
     ['玩課雲有作業嗎', false],
     ['查玩課雲有沒有作業', false],
     ['玩課雲有哪些作業', false],
@@ -1424,6 +1441,22 @@ describe('three-way sentence classification', () => {
       intent: { intent: 'homework', pendingOnly },
     });
   });
+
+  it.each(['有', '已', '已經', '曾', '曾經', '剛', '剛才', '剛剛', '了', '過', '完', '好了'])(
+    'keeps aspect marker %s across intervening words within the 200 ms budget', marker => {
+      const interveners = ['去', '來', '要', '也', '又', '都', '就', '才', '還', '先', '再'];
+      const cuts = interveners.flatMap(first => interveners.map(second => first + second));
+      cuts.push(interveners.join('').repeat(89));
+      const questions = cuts.flatMap(gap =>
+        ['查', '準備', '繳交'].map(verb => `${marker}${gap}幫我${verb}玩課雲作業`));
+      expect(Math.max(...questions.map(question => question.length))).toBeLessThanOrEqual(1000);
+      const started = performance.now();
+      const results = questions.map(question => classifyTronClassSentence(question)?.outcome);
+      const elapsed = performance.now() - started;
+      expect(results).toEqual(questions.map(() => 'ambiguous'));
+      expect(elapsed).toBeLessThan(200);
+    },
+  );
 
   it('scans repeated negated 把 phrases within the 200 ms budget', () => {
     const question = '不要把'.repeat(300) + '玩課雲作業';
