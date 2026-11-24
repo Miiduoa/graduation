@@ -88,14 +88,17 @@ function isRouterPush(data: unknown) {
     Object.getOwnPropertyDescriptor(data, APP_ROUTER_HISTORY_PUSH)?.value === true;
 }
 
-function cloneHistoryState(data: Record<string, unknown>) {
+function cloneHistoryState(data: unknown) {
   const cloned = structuredClone(data);
   if (isHistoryRecord(cloned) || Array.isArray(cloned)) return cloned;
   // Branded values such as Map serialize their payload but drop own properties.
   // Keep the payload intact in a record that can also carry the entry metadata.
   const record: Record<string, unknown> = { [HISTORY_STATE_PAYLOAD]: cloned };
-  for (const key of ['__NA', '__PRIVATE_NEXTJS_INTERNALS_TREE']) {
-    if (key in data) record[key] = data[key];
+  if (data && typeof data === 'object') {
+    const fields = data as Record<string, unknown>;
+    for (const key of ['__NA', '__PRIVATE_NEXTJS_INTERNALS_TREE']) {
+      if (key in fields) record[key] = fields[key];
+    }
   }
   return record;
 }
@@ -115,8 +118,9 @@ function installHistoryTracking() {
       const previousPath = window.location.pathname;
       const push = method === 'pushState';
       const routerCommit = push && isRouterPush(data);
-      // Normalize copied metadata before the browser serializes the new entry.
-      const cloned = !isHistoryRecord(data) && hasSearchHistoryFields(data);
+      // Normalize copies and replacements of keyed entries before serialization.
+      const cloned = data != null && !isHistoryRecord(data) &&
+        ((!push && previousKey !== null) || hasSearchHistoryFields(data));
       let state = cloned ? cloneHistoryState(data) : data;
       if (cloned || state == null || isHistoryRecord(state)) {
         const current = state as Record<string, unknown> | null | undefined;

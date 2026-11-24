@@ -1333,6 +1333,32 @@ describe('continuing a search after opening a service', () => {
     },
   );
 
+  it.each(['map', 'array'] as const)(
+    'restores focus after a same-page replace with a fresh %s',
+    async (shape) => {
+      leaveLibrary();
+      const destinationKey = window.history.state.__campusSearchHistoryEntry;
+      expect(destinationKey).toEqual(expect.any(String));
+      const state = shape === 'map' ? new Map([['view', 'compact']]) : ['compact'];
+      move('?view=compact#results', state);
+      expect(window.location.search).toBe('?view=compact');
+      expect(window.location.hash).toBe('#results');
+      expect(window.history.state.__campusSearchHistoryEntry).toBe(destinationKey);
+      if (shape === 'map') {
+        expect(window.history.state.__campusSearchHistoryPayload).toEqual(state);
+      } else {
+        expect(Array.isArray(window.history.state)).toBe(true);
+        expect(window.history.state[0]).toBe('compact');
+      }
+
+      await go(-1);
+      expect(window.location.pathname).toBe('/search');
+      renderAfterFrame();
+      expect(document.activeElement).toBe(screen.getByRole('link', { name: /^圖書館/ }));
+      expect(scroll).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('does not restore from a destination entry replaced with an unrelated page', async () => {
     leaveLibrary();
     const destinationKey = window.history.state.__campusSearchHistoryEntry;
