@@ -34,15 +34,14 @@ export function tronClassDisabledNavigationQuestion(question: string): string | 
 }
 
 // 與跨服務規劃相同的分隔詞（含「和／與」），確保兩邊切句一致。
-const CLAUSE_SEPARATOR = /(?:然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|[，,；;。！!？?、和與])+/u;
+const CLAUSE_SEPARATOR = /(?:然後|接著|順便|並且|另外|同時|以及|也幫我|再幫我|並幫我|(?<![最之])後|[，,；;。！!？?、和與])+/u;
 
 /**
  * 單一子句才由 TronClass Agent 直接回答。切成兩個以上子句時，整句仍交給原本的
  * 跨服務規劃，其中的玩課雲子句另由 tronClassCompoundClauses 交給 Agent 補充回答。
  */
 function isMultiClauseRequest(question: string): boolean {
-  const clauses = textWithoutQuotedSpans(question.normalize('NFKC')).split(CLAUSE_SEPARATOR).map(part => part.trim()).filter(Boolean);
-  return clauses.length >= 2;
+  return splitClauses(textWithoutQuotedSpans(question.normalize('NFKC'))).length >= 2;
 }
 
 const TRONCLASS_KEYWORD = /(?:\btron\s*class\b|創課|玩課雲)/i;
@@ -105,6 +104,8 @@ const FUNCTION_CUES = [
 const DOMAIN_NOUNS = [
   '作業', '報告', '附件', '檔案', '作品', '心得', '講義', '考卷', '表單',
   '公告', '通知', '教材', '課程', '課表', '修訂稿', '舊版', '新版', '這份', '那份',
+  '發布時間', '發佈時間', '發文時間', '發布日期', '發佈日期', '發文日期',
+  '後面', '後來', '後續', '後方', '後段', '後期', '後天', '後台', '後端', '後排', '後座',
 ];
 const CONJ_CUES = ['以及', '和', '與', '及', '、'];
 const WRITE_COMPOUNDS = [
@@ -138,11 +139,32 @@ function startsKnownWrite(text: string, index: number): boolean {
   return WRITE_COMPOUNDS.some(value => text.startsWith(value, index));
 }
 
+const CLAUSE_BOUNDARY_WORDS = new Set<string>([...CLAUSE_CUES, '以及', '和', '與', '後', '、']);
+
+function isClauseBoundaryToken(token: Token): boolean {
+  return token.kind === 'punct' || CLAUSE_BOUNDARY_WORDS.has(token.value);
+}
+
+function splitClauses(text: string): string[] {
+  const tokens = tokensFor(text);
+  const clauses: string[] = [];
+  let start = 0;
+  for (const token of tokens) {
+    if (!isClauseBoundaryToken(token)) continue;
+    const part = text.slice(start, token.start).trim();
+    if (part) clauses.push(part);
+    start = token.end;
+  }
+  const tail = text.slice(start).trim();
+  if (tail) clauses.push(tail);
+  return clauses;
+}
+
 function currentClauseHasQuery(tokens: Token[]): boolean {
   let start = 0;
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!;
-    if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) start = i + 1;
+    if (isClauseBoundaryToken(token)) start = i + 1;
   }
   return tokens.slice(start).some(token => token.kind === 'query' || QUERY_START.has(token.value));
 }
@@ -188,12 +210,49 @@ function tokenize(text: string): Token[] {
   return tokens;
 }
 
+let cachedTokenText: string | undefined;
+let cachedTokens: Token[] | undefined;
+
+function tokensFor(text: string): Token[] {
+  if (cachedTokenText === text && cachedTokens) return cachedTokens;
+  cachedTokenText = text;
+  cachedTokens = tokenize(text);
+  return cachedTokens;
+}
+
 function tokenCovering(text: string, index: number): Token | undefined {
-  return tokenize(text).find(token => token.start <= index && index < token.end);
+  return tokensFor(text).find(token => token.start <= index && index < token.end);
+}
+
+function clauseRange(tokens: Token[], at: number): { start: number; end: number } {
+  let start = at;
+  let end = at;
+  while (start > 0 && !isClauseBoundaryToken(tokens[start - 1]!)) start -= 1;
+  while (end + 1 < tokens.length && !isClauseBoundaryToken(tokens[end + 1]!)) end += 1;
+  return { start, end };
+}
+
+function isModifierSpanInterior(tokens: Token[], at: number): boolean {
+  const { start, end } = clauseRange(tokens, at);
+  let supply = -1;
+  let supplyEnd = -1;
+  let progressive = -1;
+  let progressiveEnd = -1;
+  for (let i = start; i <= end; i += 1) {
+    const value = tokens[i]!.value;
+    if (value === '供') supply = i;
+    if (value === '用的' || (value === '用' && tokens[i + 1]?.value === '的')) supplyEnd = i;
+    if (value === '正在' || value === '正') progressive = i;
+    if (value === '中') progressiveEnd = i;
+  }
+  if (supply >= 0 && supplyEnd > supply && at > supply && at <= supplyEnd) return true;
+  return progressive >= 0 && progressiveEnd > progressive && at > progressive && at <= progressiveEnd;
 }
 
 function isRelativeQuery(tokens: Token[], token: Token): boolean {
   const at = tokens.indexOf(token);
+  if (at < 0) return false;
+  if (isModifierSpanInterior(tokens, at)) return true;
   const next = tokens[at + 1]?.value;
   const prev = tokens[at - 1]?.value;
   return next === '的' || next === '過' || next === '了' || next === '中' ||
@@ -202,20 +261,24 @@ function isRelativeQuery(tokens: Token[], token: Token): boolean {
 }
 
 function nextNegatedWriteStop(text: string, from: number): number {
-  const rest = text.slice(from);
-  const tokens = tokenize(rest);
+  const tokens = tokensFor(text);
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!;
-    if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) return token.start;
-    if (token.kind === 'cue' && ACTION_CUES.includes(token.value)) return token.start;
-    if (token.kind === 'query' && QUERY_START.has(token.value) && !isRelativeQuery(tokens, token)) return token.start;
-    if (token.kind === 'conj') {
-      const skipped = rest.slice(token.end).match(/^(?:(?:請|幫我|替我|代我|直接|自動)\s*)*/u)?.[0].length ?? 0;
-      const at = token.end + skipped;
-      const write = new RegExp(`^(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})`, 'iu').exec(rest.slice(at));
-      if (write && tokenCovering(rest, at)?.kind !== 'noun') return token.start;
+    if (token.end <= from) continue;
+    if (token.start < from) continue;
+    const offset = token.start - from;
+    if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) return offset;
+    if (token.kind === 'cue' && ACTION_CUES.includes(token.value)) return offset;
+    if (token.kind === 'query' && QUERY_START.has(token.value) && !isRelativeQuery(tokens, token)) {
+      return offset;
     }
-    if (/^(?:and|then|also)\b/i.test(rest.slice(token.start))) return token.start;
+    if (token.kind === 'conj') {
+      const skipped = text.slice(token.end).match(/^(?:(?:請|幫我|替我|代我|直接|自動)\s*)*/u)?.[0].length ?? 0;
+      const at = token.end + skipped;
+      const write = new RegExp(`^(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})`, 'iu').exec(text.slice(at));
+      if (write && tokenCovering(text, at)?.kind !== 'noun') return offset;
+    }
+    if (/^(?:and|then|also)\b/i.test(text.slice(token.start))) return offset;
   }
   return -1;
 }
@@ -289,12 +352,13 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
   for (const match of text.matchAll(WRITE_VERB)) {
     const before = text.slice(0, match.index);
     if (WRITE_NEGATION.test(before)) continue;
+    // Writes hold only at a word boundary. Field nouns such as「發布時間」stay reads.
+    const covering = tokenCovering(text, match.index);
+    if (!covering || covering.start !== match.index || covering.kind === 'noun') continue;
     if (!match[1]) return 'unsupported';
 
     const after = text.slice(match.index + match[0].length).trimStart();
     const segment = before.split(/[,;。?!、:\r\n]/u).at(-1)!.trimStart();
-    // A lone 交／繳 is a write; the same character inside a noun token is not.
-    if ((match[0] === '交' || match[0] === '繳') && tokenCovering(text, match.index)?.kind === 'noun') continue;
     if (ADDITIVE_CUE.test(before)) return STATUS_NOUN.test(after) ? 'planner' : 'unsupported';
     if (WRITE_CUE.test(before)) return 'unsupported';
     if (segment.includes('把')) return 'unsupported';
@@ -399,7 +463,7 @@ export function tronClassCompoundClauses(question: string): string[] {
     !TRONCLASS_KEYWORD.test(readRoutingText(original))) return [];
   // Split the text after negated writes are removed, so 和／與 inside a
   // negated object cannot become their own private-read clauses.
-  const clauses = readRoutingText(textWithoutQuotedSpans(original)).split(CLAUSE_SEPARATOR).map(part => part.trim()).filter(Boolean);
+  const clauses = splitClauses(readRoutingText(textWithoutQuotedSpans(original)));
   const result: string[] = [];
   const seen = new Set<string>();
   let context = false;
@@ -471,11 +535,11 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
     return { intent: 'capabilities', pendingOnly: false };
   }
   const pendingOnly = /(?:未交|未繳|待交|待繳|待提交|尚未(?:交|繳|提交)|還沒(?:交|繳|提交)|沒(?:交|繳)|pending|unsubmitted|not\s+submitted)/i.test(text);
+  const dataIntent = lastDataTypeIntent(text);
+  if (dataIntent === 'announcements') return { intent: 'announcements', pendingOnly: false };
   const preparation = /(?:準備|預覽|草稿|起草|prepare|draft)/i.test(text) && /(?:作業|homework|assignment)/i.test(text);
   if (preparation && /(?:下載|download)/i.test(text)) return { intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions' };
   if (/(?:測驗|考試|問卷)/.test(text)) return { intent: 'unsupported', pendingOnly: false };
-  const dataIntent = lastDataTypeIntent(text);
-  if (dataIntent === 'announcements') return { intent: 'announcements', pendingOnly: false };
   if (/(?:下載|download)/i.test(text)) return { intent: 'download', pendingOnly: false };
   if (dataIntent === 'materials' || dataIntent === 'courses') {
     return { intent: dataIntent, pendingOnly: false };

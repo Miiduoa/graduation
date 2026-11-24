@@ -43,7 +43,6 @@ describe('explicit TronClass command routing', () => {
     ['幫我繳交 TronClass 未交作業', 'unsupported', false],
     ['幫我把 TronClass 未交作業全部繳交', 'unsupported', false],
     ['幫我準備 TronClass 作業並送出', 'unsupported', false],
-    ['TronClass 作業狀態後把附件上傳', 'unsupported', false],
     ['TronClass 查作業狀態：上傳附件', 'unsupported', false],
     ['TronClass 是否已繳交的作業', 'homework', false],
     ['TronClass 我的作業繳交紀錄', 'homework', false],
@@ -305,14 +304,22 @@ describe('write occurrences in TronClass requests', () => {
 
   it.each([
     '查玩課雲作業上傳狀態：截圖',
-    '查玩課雲作業顯示完成後上傳狀態',
-    '準備玩課雲作業後把附件上傳',
     '玩課雲可以做什麼：立即上傳狀態',
     '查玩課雲作業上載狀態文件',
     '查玩課雲作業不要繳交舊版上傳新版',
-    '查玩課雲作業後上傳狀態',
   ])('routes %s as unsupported', question => {
     expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+  });
+
+  it.each([
+    'TronClass 作業狀態後把附件上傳',
+    '查玩課雲作業顯示完成後上傳狀態',
+    '準備玩課雲作業後把附件上傳',
+    '查玩課雲作業後上傳狀態',
+  ])('sends a write after 後 to the planner in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
   });
 
   const cues = ['記得', '立即', '馬上', '再', '然後', '接著', '接下來', '之後', '後', '請', '幫我'];
@@ -626,10 +633,14 @@ describe('r28 structural regressions and function-word variants', () => {
 
   it.each([
     '查玩課雲作業最後交附件',
-    '查玩課雲作業後交附件',
     '查玩課雲作業再交附件',
   ])('blocks the unpunctuated write after a function word in %s', question => {
     expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+  });
+
+  it('sends a later write after 後 to the planner as its own clause', () => {
+    expect(parseTronClassAgentIntent('查玩課雲作業後交附件')).toBeNull();
+    expect(tronClassCompoundClauses('查玩課雲作業後交附件')).toEqual([]);
   });
 
   it('keeps the course read when 交 is inside a course name', () => {
@@ -700,6 +711,50 @@ describe('r28 structural regressions and function-word variants', () => {
   it('tokenizes a long write-heavy string without exponential work', () => {
     const question = `查玩課雲${'必交必繳'.repeat(80)}作業`;
     const started = Date.now();
+    parseTronClassAgentIntent(question);
+    expect(Date.now() - started).toBeLessThan(200);
+  });
+
+  it.each([
+    '查玩課雲作業以及記得交最新版',
+    '查玩課雲作業後記得交 PDF',
+  ])('does not let a later write inherit a query across 以及 or 後 in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('keeps negation around a 供…用的 modifier span that contains a query verb', () => {
+    const question = '不要繳交供老師確認玩課雲作業用的資料，只查校園公告';
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('reads a notice field noun instead of treating 發布 as a write', () => {
+    expect(parseTronClassAgentIntent('查玩課雲公告發布時間')).toEqual({ intent: 'announcements', pendingOnly: false });
+  });
+
+  it('classifies by the last data type before 準備 or 下載', () => {
+    expect(parseTronClassAgentIntent('查玩課雲作業準備區教材下載公告')).toEqual({
+      intent: 'announcements', pendingOnly: false,
+    });
+  });
+
+  it('still blocks a genuine prepare-and-download request', () => {
+    expect(parseTronClassAgentIntent('幫我準備玩課雲作業並下載教材')).toEqual({
+      intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions',
+    });
+  });
+
+  it('keeps 最後 and 之後 from becoming clause cuts', () => {
+    expect(parseTronClassAgentIntent('查玩課雲最後作業')).toEqual({ intent: 'homework', pendingOnly: false });
+    expect(parseTronClassAgentIntent('查玩課雲之後的作業')).toEqual({ intent: 'homework', pendingOnly: false });
+    expect(parseTronClassAgentIntent('查玩課雲作業後面的附件')).toEqual({ intent: 'materials', pendingOnly: false });
+  });
+
+  it('tokenizes a long mixed write string in linear time with a cached pass', () => {
+    const question = `查玩課雲${'必交必繳發布時間務必交'.repeat(200)}作業`;
+    const started = Date.now();
+    parseTronClassAgentIntent(question);
     parseTronClassAgentIntent(question);
     expect(Date.now() - started).toBeLessThan(200);
   });
