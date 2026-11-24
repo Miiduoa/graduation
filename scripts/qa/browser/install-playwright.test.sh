@@ -71,13 +71,40 @@ MOCK
 cat > "$mock_dir/bin/apt-get" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "${MOCK_ROOT:-0}" == 1 && "$*" == *'install -y fonts-noto-cjk' ]]
+[[ "${MOCK_ROOT:-0}" == 1 ]]
+if [[ "${!#}" == */fonts-noto-cjk.deb ]]; then
+  [[ "$*" == *"install -y ${!#}" && "$(cat "${!#}")" == 'Noble font fixture' ]]
+else
+  [[ "$*" == *'install -y fonts-noto-cjk' ]]
+fi
 printf 'apt:%s\n' "$*" >> "$MOCK_LOG"
 count="$(grep -c '^apt:' "$MOCK_LOG" || true)"
 if [[ "${MOCK_SLOW_FONT:-0}" == 1 ]]; then
   /bin/sleep 1.5
 fi
 (( count > MOCK_APT_FAILS ))
+MOCK
+cat > "$mock_dir/bin/apt-cache" <<'MOCK'
+#!/usr/bin/env bash
+[[ "$*" == '--no-all-versions show fonts-noto-cjk' ]] || exit 1
+printf 'Package: fonts-noto-cjk\nSHA256: %s\n' "${MOCK_APT_SHA:-other-candidate}"
+MOCK
+cat > "$mock_dir/bin/dpkg-query" <<'MOCK'
+#!/usr/bin/env bash
+[[ "${MOCK_NOBLE_INSTALLED:-0}" == 1 ]] || exit 1
+printf 'install ok installed 1:20230817+repack1-3'
+MOCK
+cat > "$mock_dir/bin/curl" <<'MOCK'
+#!/usr/bin/env bash
+set -eu
+[[ "${MOCK_ROOT:-0}" == 0 && "$*" == '--fail --silent --show-error --proto =https --connect-timeout 8 --max-time 75 --output '* ]]
+[[ "${!#}" == 'https://archive.ubuntu.com/ubuntu/pool/main/f/fonts-noto-cjk/fonts-noto-cjk_20230817+repack1-3_all.deb' ]]
+printf 'prefetch\n' >> "$MOCK_LOG"
+case "${MOCK_ARCHIVE:-offline}" in
+  ok) printf 'Noble font fixture' > "${@: -2:1}" ;;
+  corrupt) printf 'corrupt' > "${@: -2:1}" ;;
+  offline) exit 22 ;;
+esac
 MOCK
 cat > "$mock_dir/bin/dpkg" <<'MOCK'
 #!/usr/bin/env bash
@@ -277,6 +304,29 @@ bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1
 [[ "$(grep -c '^sleep:' "$MOCK_LOG" || true)" -eq 0 ]]
 export MOCK_SLOW_FONT=0
 
+# Exercise the real SHA-256 check on a small local fixture. Ordinary scenarios
+# above simulate a different candidate without using network or APT metadata.
+official_sha=7d64b985f6fe128c99eae5610d5c047338e572bdcfb2bb09736be01b824a7f6c
+fixture_sha="$(printf 'Noble font fixture' | sha256sum | cut -d' ' -f1)"
+sed "s/$official_sha/$fixture_sha/" "$script_dir/install-playwright.sh" > "$mock_dir/fixture-install.sh"
+export MOCK_APT_SHA="$fixture_sha"
+for mode in ok corrupt offline; do
+  export MOCK_ARCHIVE="$mode"
+  : > "$MOCK_LOG"
+  bash "$mock_dir/fixture-install.sh" --fonts-noto-cjk >/dev/null 2>&1
+  [[ "$(grep -c '^prefetch$' "$MOCK_LOG")" -eq 1 ]]
+  if [[ "$mode" == ok ]]; then
+    grep -q '^apt:.*install -y /.*/fonts-noto-cjk.deb$' "$MOCK_LOG"
+  else
+    grep -q '^apt:.*install -y fonts-noto-cjk$' "$MOCK_LOG"
+  fi
+done
+: > "$MOCK_LOG"
+MOCK_NOBLE_INSTALLED=1 bash "$mock_dir/fixture-install.sh" --fonts-noto-cjk >/dev/null 2>&1
+! grep -q '^prefetch$' "$MOCK_LOG" || exit 1
+grep -q '^apt:.*install -y fonts-noto-cjk$' "$MOCK_LOG"
+unset MOCK_APT_SHA MOCK_ARCHIVE
+
 # Bad parameters fail before any installation attempt.
 : > "$MOCK_LOG"
 if bash "$script_dir/install-playwright.sh" --unsupported >/dev/null 2>&1; then
@@ -412,4 +462,4 @@ assert_recovery_deadlines 1
 [[ "$(grep -c '^python:-m playwright install chromium$' "$MOCK_LOG" || true)" -eq 0 ]]
 grep -q 'could not recover interrupted package configuration' "$mock_dir/repair-output.log"
 
-echo 'Browser installation bounded retry tests: 17/17 passed'
+echo 'Browser installation bounded retry tests: 21/21 passed'
