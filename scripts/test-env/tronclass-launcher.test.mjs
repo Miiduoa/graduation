@@ -152,8 +152,9 @@ process.exit(0);
 });
 
 for (const component of ['child', 'runtime', 'parent']) {
-  for (const phase of ['before', 'during']) {
-    test(`launcher rejects a replaced ${component} ${phase} child permission setting`, () => {
+  const phases = component === 'child' ? ['during open', 'after open'] : ['during creation', 'during descriptor handoff'];
+  for (const phase of phases) {
+    test(`launcher rejects a replaced ${component} ${phase} of the private child`, () => {
       const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-runtime-swap-'));
       const parent = path.join(dir, 'parent');
       const runtime = path.join(parent, 'runtime');
@@ -162,11 +163,11 @@ for (const component of ['child', 'runtime', 'parent']) {
       const replacement = path.join(dir, 'replacement');
       const movedRuntime = component === 'parent' ? path.join(moved, 'runtime') : moved;
       const replacementRuntime = component === 'parent' ? path.join(replacement, 'runtime') : replacement;
-      const mode = file => statSync(file).mode & 0o777;
+      const mode = file => statSync(file).mode & 0o7777;
       try {
         mkdirSync(parent, { mode: 0o750 });
         mkdirSync(runtime, { mode: 0o755 });
-        mkdirSync(replacement, { mode: 0o751 });
+        mkdirSync(replacement, { mode: component === 'child' ? 0o700 : 0o751 });
         if (component === 'parent') mkdirSync(replacementRuntime, { mode: 0o753 });
         const originalModes = [mode(target), mode(runtime)];
         const replacementModes = [mode(replacement), mode(replacementRuntime)];
@@ -176,7 +177,21 @@ import os
 import sys
 
 real_fstat = os.fstat
-real_fchmod = os.fchmod
+real_open = os.open
+real_mkdir = os.mkdir
+real_read = os.read
+
+def open_child(name, flags, *, dir_fd=None):
+    if name.startswith("run-"):
+        parent = os.readlink(f"/proc/self/fd/{dir_fd}")
+        swap(os.path.join(parent, name))
+    return real_open(name, flags, dir_fd=dir_fd)
+
+def mkdir(name, mode, *, dir_fd=None):
+    if name.startswith("run-"):
+        parent = os.readlink(f"/proc/self/fd/{dir_fd}")
+        swap(os.path.join(parent, name))
+    real_mkdir(name, mode, dir_fd=dir_fd)
 
 def swap(child):
     target = child if ${JSON.stringify(component)} == "child" else ${JSON.stringify(target)}
@@ -190,16 +205,21 @@ def fstat(fd):
         swap(child)
     return result
 
-def fchmod(fd, mode):
-    child = os.readlink(f"/proc/self/fd/{fd}")
-    assert child.startswith(${JSON.stringify(runtime + '/run-')})
-    swap(child)
-    real_fchmod(fd, mode)
+def read_handoff(fd, size):
+    result = real_read(fd, size)
+    if fd == 3 and result == b"1":
+        swap(None)
+    return result
 
-if ${JSON.stringify(phase)} == "before":
+phase = ${JSON.stringify(phase)}
+if phase == "after open":
     os.fstat = fstat
+elif phase == "during open":
+    os.open = open_child
+elif phase == "during creation":
+    os.mkdir = mkdir
 else:
-    os.fchmod = fchmod
+    os.read = read_handoff
 sys.argv = sys.argv[2:]
 exec(compile(sys.stdin.read(), "runtime verifier", "exec"))
 `, { mode: 0o700 });
@@ -237,8 +257,8 @@ exec(compile(sys.stdin.read(), "runtime verifier", "exec"))
   }
 }
 
-for (const mode of [0o755, 0o2750]) {
-  test(`launcher starts in a private child of an existing ${mode.toString(8)} runtime directory`, () => {
+for (const mode of [0o700, 0o755, 0o2750]) {
+  test(`launcher preserves an existing ${mode.toString(8)} runtime directory`, () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-runtime-mode-'));
     const runtime = path.join(dir, 'runtime');
     try {
@@ -263,10 +283,10 @@ require('node:child_process').execFileSync(process.execPath, args, { stdio: 'inh
       assert.equal(result.status, 0, result.stderr);
       assert.match(result.stdout, /WRAPPER_PID=/);
       assert.equal(statSync(runtime).mode & 0o7777, mode);
-      const children = readdirSync(runtime);
-      assert.equal(children.length, 1);
-      const child = path.join(runtime, children[0]);
-      assert.equal(statSync(child).mode & 0o7777, 0o700);
+      const children = readdirSync(runtime).filter(name => name.startsWith('run-'));
+      assert.equal(children.length, mode === 0o700 ? 0 : 1);
+      const child = mode === 0o700 ? runtime : path.join(runtime, children[0]);
+      assert.equal(statSync(child).mode & 0o7777, 0o700 | (mode & 0o2000));
       assert.equal(statSync(path.join(child, 'bff-session.key')).mode & 0o777, 0o600);
       assert.equal(statSync(path.join(child, 'tronclass-session.key')).mode & 0o777, 0o600);
     } finally {
@@ -701,7 +721,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const [arg, ...args] = process.argv.slice(2);
 if (arg === '-') {
-  const stdio = args[0]?.includes('.log.') ? [0, 1, 2, 3] : 'inherit';
+  const stdio = args[0]?.includes('.log.') ? [0, 1, 2, 3, 4] : 'inherit';
   const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [arg, ...args], { stdio });
   process.exit(status ?? 1);
 }
@@ -1863,7 +1883,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const [arg, ...args] = process.argv.slice(2);
 if (arg === '-') {
-  const stdio = args[0]?.includes('.log.') ? [0, 1, 2, 3] : 'inherit';
+  const stdio = args[0]?.includes('.log.') ? [0, 1, 2, 3, 4] : 'inherit';
   const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [arg, ...args], { stdio });
   process.exit(status ?? 1);
 }
@@ -1890,6 +1910,8 @@ if (arg.endsWith('/firebase.js')) {
     fs.writeFileSync(path.join(dir, 'web-port'), String(this.address().port));
   });
 } else if (arg.endsWith('/health-tronclass.cjs')) {
+  const pinned = fs.fstatSync(Number(process.env.TRONCLASS_REPORT_DIR_FD));
+  if (!pinned.isDirectory() || pinned.ino !== fs.statSync(dir).ino) process.exit(1);
   writePid('health.pid');
   process.on('SIGTERM', () => process.exit(0));
   process.on('SIGINT', () => process.exit(0));
@@ -1978,7 +2000,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const [arg, ...args] = process.argv.slice(2);
 if (arg === '-') {
-  const stdio = args[0]?.includes('.log.') ? [0, 1, 2, 3] : 'inherit';
+  const stdio = args[0]?.includes('.log.') ? [0, 1, 2, 3, 4] : 'inherit';
   const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [arg, ...args], { stdio });
   process.exit(status ?? 1);
 }

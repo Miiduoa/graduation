@@ -111,18 +111,18 @@ tronclass_physical_dir() {
 }
 if [ -n "$tronclass_runtime_dir" ]; then
   tronclass_runtime_dir="$(tronclass_physical_dir "$tronclass_runtime_dir")" || exit 1
-  TRONCLASS_RUNTIME_DIR="$tronclass_runtime_dir"
-else
-  TRONCLASS_RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/campus-tronclass-emulator.XXXXXX")"
 fi
-TRONCLASS_RUNTIME_DIR="$(python3 -I - "$TRONCLASS_RUNTIME_DIR" "$tronclass_runtime_dir" <<'PYTHON'
+# Keep the verifier alive until Bash has taken its own reference to the same
+# directory. The path is only used to identify and verify the directory entry.
+coproc TRONCLASS_RUNTIME_SETUP {
+  python3 -I - "$tronclass_runtime_dir" "${TMPDIR:-/tmp}" 3<&0 <<'PYTHON'
 import os
 import secrets
 import stat
 import sys
 
-target = os.path.abspath(sys.argv[1])
-specified = bool(sys.argv[2])
+specified = bool(sys.argv[1])
+target = os.path.abspath(sys.argv[1] or sys.argv[2])
 flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 fds = []
 bindings = []
@@ -132,9 +132,12 @@ def identity(info):
 
 def open_directory(name):
     parent_fd = fds[-1]
+    before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
     fd = os.open(name, flags, dir_fd=parent_fd)
     fds.append(fd)
     opened = os.fstat(fd)
+    if identity(before) != identity(opened) or before.st_uid != opened.st_uid:
+        raise OSError("replaced runtime directory")
     bindings.append((parent_fd, name, identity(opened), opened.st_uid))
     return opened
 
@@ -153,38 +156,46 @@ try:
     for name in components:
         opened = open_directory(name)
 
-    if not stat.S_ISDIR(opened.st_mode) or opened.st_uid != os.getuid() or not opened.st_ino:
+    if specified and (opened.st_uid != os.getuid() or not opened.st_ino):
         raise OSError("invalid runtime directory")
     verify_bindings()
-    # Keep shared runtime state in an existing private directory. For other
-    # modes, create a per-launch directory relative to the verified parent.
-    created = not specified
-    if specified and stat.S_IMODE(opened.st_mode) != 0o700:
-        name = "run-" + secrets.token_hex(16)
+
+    # Share existing private directories. For other modes and the default
+    # location, create a private child without changing any directory's mode.
+    if not specified or stat.S_IMODE(opened.st_mode) != 0o700:
+        prefix = "run-" if specified else "campus-tronclass-emulator."
+        name = prefix + secrets.token_hex(16)
+        os.umask(0o077)
         os.mkdir(name, 0o700, dir_fd=fds[-1])
         opened = open_directory(name)
         target = os.path.join(target, name)
-        created = True
+        # setgid inheritance does not grant group access.
+        if opened.st_uid != os.getuid() or stat.S_IMODE(opened.st_mode) not in (0o700, 0o2700):
+            raise OSError("invalid newly created runtime directory")
 
-    # A setgid parent can pass its setgid bit to a newly created directory.
-    if created and (opened.st_uid != os.getuid()
-                    or stat.S_IMODE(opened.st_mode) not in (0o700, 0o2700)):
-        raise OSError("invalid newly created runtime directory")
-
-    # Linux cannot make fchmod conditional on the directory entry. Restrict
-    # it to per-launch directories, with binding checks on both sides.
     verify_bindings()
-    if created:
-        os.fchmod(fds[-1], 0o700)
-        verify_bindings()
-    print(target)
+    descriptor = f"/proc/{os.getpid()}/fd/{fds[-1]}".encode()
+    sys.stdout.buffer.write(os.fsencode(target) + b"\0" + descriptor + b"\0")
+    sys.stdout.buffer.flush()
+    if os.read(3, 1) != b"1":
+        raise OSError("runtime directory descriptor was not transferred")
+    verify_bindings()
 except OSError:
     sys.exit("TRONCLASS_RUNTIME_DIR must be a directory owned by the current user, not a symbolic link or replaced directory.")
 finally:
     for fd in reversed(fds):
         os.close(fd)
 PYTHON
-)"
+}
+runtime_setup_pid="${TRONCLASS_RUNTIME_SETUP_PID:-}"
+if ! { IFS= read -r -d '' TRONCLASS_RUNTIME_DIR &&
+       IFS= read -r -d '' runtime_descriptor &&
+       exec {runtime_fd}<"$runtime_descriptor"; } <&"${TRONCLASS_RUNTIME_SETUP[0]:-}" ||
+   ! printf 1 >&"${TRONCLASS_RUNTIME_SETUP[1]:-}"; then
+  exit 1
+fi
+wait "$runtime_setup_pid"
+unset runtime_descriptor TRONCLASS_REPORT_DIR_FD TRONCLASS_WRITE_RUNTIME_REPORT
 export TRONCLASS_RUNTIME_DIR
 TRONCLASS_RUN_ID="$(openssl rand -hex 16 2>/dev/null || true)"
 if ! printf '%s' "$TRONCLASS_RUN_ID" | grep -Eq '^[0-9a-fA-F]{32}$'; then
@@ -669,7 +680,7 @@ tronclass_run_logged() {
   # subshell that can ignore INT and leave the child holding the port.
   local -a command=(node)
   if [ "${TRONCLASS_RUN_LOGGED_EXEC:-}" = '1' ]; then command=(exec node); fi
-  "${command[@]}" - "$log" "$TRONCLASS_PROJECT_ROOT/scripts/process-identity.sh" "$@" 3>&"$group_journal_fd" <<'NODE'
+  "${command[@]}" - "$log" "$TRONCLASS_PROJECT_ROOT/scripts/process-identity.sh" "$@" 3>&"$group_journal_fd" 4<&"$runtime_fd" <<'NODE'
 const fs = require('node:fs');
 const { spawn, spawnSync } = require('node:child_process');
 const logPath = process.argv[2];
@@ -719,10 +730,14 @@ if (Number.isFinite(delayMs) && delayMs > 0) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
 }
 const runId = process.env.TRONCLASS_RUN_ID || '';
-child = spawn(argv[0], argv.slice(1), {
-  stdio: ['inherit', fd, fd], detached: true,
-  env: { ...process.env, TRONCLASS_LAUNCHED_RUN: runId },
-});
+const stdio = ['inherit', fd, fd];
+const env = { ...process.env, TRONCLASS_LAUNCHED_RUN: runId };
+if (process.env.TRONCLASS_WRITE_RUNTIME_REPORT === '1') {
+  // The wrapper has the directory on fd 4. Pass it as fd 3 to the report process.
+  stdio.push(4);
+  env.TRONCLASS_REPORT_DIR_FD = '3';
+}
+child = spawn(argv[0], argv.slice(1), { stdio, detached: true, env });
 fs.closeSync(fd);
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -856,7 +871,7 @@ unset TRONCLASS_RUN_LOGGED_EXEC
 if [ "${TRONCLASS_VERIFY_RUNTIME:-}" = '1' ] && [ "$TRONCLASS_INTEGRATION_ENABLED" = true ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
   TRONCLASS_LAUNCHING_LOG="$acceptance_log"
-  TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$acceptance_log" node scripts/test-env/verify-tronclass.cjs &
+  TRONCLASS_WRITE_RUNTIME_REPORT=1 TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$acceptance_log" node scripts/test-env/verify-tronclass.cjs &
   TRONCLASS_ACCEPTANCE_PID=$!
   TRONCLASS_ACCEPTANCE_START="$(tronclass_proc_starttime "$TRONCLASS_ACCEPTANCE_PID" 2>/dev/null || true)"
   unset TRONCLASS_LAUNCHING_LOG
@@ -870,7 +885,7 @@ fi
 if [ "${TRONCLASS_CHECK_HEALTH:-}" = '1' ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
   TRONCLASS_LAUNCHING_LOG="$health_log"
-  TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$health_log" node scripts/test-env/health-tronclass.cjs &
+  TRONCLASS_WRITE_RUNTIME_REPORT=1 TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$health_log" node scripts/test-env/health-tronclass.cjs &
   TRONCLASS_HEALTH_PID=$!
   TRONCLASS_HEALTH_START="$(tronclass_proc_starttime "$TRONCLASS_HEALTH_PID" 2>/dev/null || true)"
   unset TRONCLASS_LAUNCHING_LOG
