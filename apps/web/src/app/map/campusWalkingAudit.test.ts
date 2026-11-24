@@ -76,4 +76,48 @@ describe('trusted OSM walking segment audit bridge', () => {
     expect(applyCampusWalkingSegmentAudits(dirty, 'fixture', [audit()], now)?.edges[0].access).toBe('unknown');
     expect(data.graph.edges[0].access).toBe('unknown');
   });
+
+  it('does not let a trusted audit override mapped pedestrian direction', () => {
+    const cases: [Record<string, string>, CampusWalkingSegmentAudit['direction'], boolean][] = [
+      [{ 'oneway:foot': 'yes' }, 'forward', true],
+      [{ 'oneway:foot': 'yes' }, 'reverse', false],
+      [{ 'oneway:foot': 'yes' }, 'both', false],
+      [{ 'oneway:foot': '-1' }, 'reverse', true],
+      [{ 'oneway:foot': '-1' }, 'forward', false],
+      [{ 'foot:backward': 'no' }, 'forward', true],
+      [{ 'foot:backward': 'no' }, 'both', false],
+      [{ 'foot:forward': 'private' }, 'reverse', true],
+      [{ 'foot:forward': 'private' }, 'forward', false],
+      [{ 'access:backward': 'no' }, 'reverse', false],
+      [{ 'oneway:foot': 'yes', 'foot:forward': 'no' }, 'forward', false],
+      [{ 'oneway:foot': 'reversible' }, 'both', false],
+      [{ 'foot:forward:conditional': 'no @ (Mo-Fr)' }, 'forward', false],
+      [{ 'oneway:foot:conditional': 'yes @ (Mo-Fr)' }, 'both', false],
+      [{ oneway: 'yes' }, 'forward', false],
+      [{ oneway: 'yes', 'oneway:foot': 'no' }, 'both', true],
+      [{ highway: 'service', oneway: 'yes' }, 'both', true],
+    ];
+    for (const [tags, direction, allowed] of cases) {
+      const data = parseCampusWalkingOsmCandidates({
+        osm3s: { timestamp_osm_base: '2026-11-24T08:00:00Z' },
+        elements: [...points,
+          { type: 'way', id: 101, nodes: [1, 2], tags: { highway: 'footway', ...tags }, ...revision },
+        ],
+      }, 'fixture', bounds, now)!;
+      const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit(1, 2, { direction })], now)!;
+      expect(graph.edges[0].access).toBe(allowed ? 'reviewed-open' : 'unknown');
+      expect(!!findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2)).toBe(allowed && direction !== 'reverse');
+      expect(!!findCampusWalkingRoute(graph, 'fixture', bounds, 2, 1)).toBe(allowed && direction !== 'forward');
+    }
+  });
+
+  it('leaves an ambiguously restricted endpoint closed in both directions', () => {
+    const data = parseCampusWalkingOsmCandidates({
+      osm3s: { timestamp_osm_base: '2026-11-24T08:00:00Z' },
+      elements: [{ ...points[0], tags: { 'foot:forward:conditional': 'no @ (Mo-Fr)' } }, points[1],
+        { type: 'way', id: 101, nodes: [1, 2], tags: { highway: 'footway' }, ...revision },
+      ],
+    }, 'fixture', bounds, now)!;
+    expect(applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)?.edges[0].access).toBe('unknown');
+  });
 });
