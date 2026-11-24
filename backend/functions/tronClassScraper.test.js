@@ -285,15 +285,25 @@ describe('tronClassScraper', () => {
   });
 
   test.each([
-    [{ total: '1', page: '1', page_size: '50' }, 1],
-    [{ total: 1, page: 1, page_size: 50 }, 1],
-    [{}, null],
-    [{ total: null, page: null, page_size: null }, null],
-  ])('preserves supported numeric and absent homework pagination metadata: %p', async (metadata, total) => {
+    [{ total: '1', page: '1', page_size: '50' }, 1, '1', '50'],
+    [{ total: '002', page: '1', page_size: '50' }, 2, '1', '50'],
+    [{ total: 1, page: 1, page_size: 50 }, 1, 1, 50],
+    [{}, null, 1, 50],
+    [{ total: null, page: null, page_size: null }, null, 1, 50],
+  ])('preserves supported numeric and absent homework pagination metadata: %p', async (metadata, total, page, pageSize) => {
     const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
     mockHttpsResponse({ body: JSON.stringify({ homework_activities: homework, ...metadata }) });
     await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).resolves.toEqual({
-      homework_activities: homework, total, page: 1, page_size: 50,
+      homework_activities: homework, total, page, page_size: pageSize,
+    });
+  });
+
+  test('integration homework page still rejects a padded numeric string total', async () => {
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: [{ id: 20001 }], total: '002', page: 1, page_size: 50 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, {})).rejects.toMatchObject({
+      code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
     });
   });
 

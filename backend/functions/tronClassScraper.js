@@ -989,10 +989,20 @@ function httpError(status) {
 
 function homeworkPaginationNumber(value, required = true) {
   if (value === undefined || value === null) return null;
+  if (!required) {
+    // Legacy callers used Number() so totals such as "002" stay usable.
+    if (typeof value === 'number') {
+      return Number.isSafeInteger(value) && value >= 0 ? value : null;
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value);
+      return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+    }
+    return null;
+  }
   const parsed = typeof value === 'number' ? value
     : typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : NaN;
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    if (!required) return null;
     throw homeworkReadError('TC_HOMEWORK_RESPONSE_INVALID', 502);
   }
   return parsed;
@@ -1032,8 +1042,8 @@ async function tcFetchHomeworkActivitiesPage(cookies, courseId, page, pageSize =
   return {
     homework_activities: data.homework_activities,
     total,
-    page: sourcePage ?? requestedPage ?? page,
-    page_size: sourcePageSize ?? requestedPageSize ?? pageSize,
+    page: strict ? (sourcePage ?? requestedPage ?? page) : (data.page ?? page),
+    page_size: strict ? (sourcePageSize ?? requestedPageSize ?? pageSize) : (data.page_size ?? pageSize),
   };
 }
 
