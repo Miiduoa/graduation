@@ -231,6 +231,23 @@ it('does not start the TronClass clauses after the planner request is stopped', 
   expect(fetch.mock.calls.some(([url]) => url === '/api/tronclass/agent')).toBe(false);
 });
 
+it('sends a single-clause Agent query to the main planner when the integration is off', async () => {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => { void init;
+    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url === '/api/tronclass/agent') return json({ error: 'TRONCLASS_DISABLED', message: '整合已停用' }, 503);
+    if (url === '/api/nuni/assistant/ask') return json({ answer: '跨服務規劃結果', steps: [], cards: [] });
+    return json({ answer: '', steps: [], cards: [] });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<Assistant />);
+  fireEvent.click(await screen.findByRole('checkbox'));
+  await ask('查玩課雲外交課程');
+  await screen.findByText('跨服務規劃結果');
+  expect(screen.queryByText('整合已停用')).toBeNull();
+  expect(fetch.mock.calls.some(([url]) => url === '/api/tronclass/agent')).toBe(true);
+  expect(fetch.mock.calls.filter(([url]) => url === '/api/nuni/assistant/ask').length).toBeGreaterThan(0);
+});
+
 it.each(['玩課雲', '玩課雲作業'])('falls back to the school LMS link for %s when the Agent is disabled', async question => {
   const fetch = vi.fn(async (url: string) => {
     if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });

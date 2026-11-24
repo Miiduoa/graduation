@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
 import type { TronClassRequiredAgentGrant } from '@campus/shared/src/tronClassAgentPermissions';
 import type { TronClassPreparation, TronClassSnapshot } from '../tronClassIntegrationTypes';
+import type { TronClassSnapshotReadOptions } from './tronClassIntegrationSource';
 import { createTronClassAgentService } from './tronClassAgent';
 
 const owner = 'firebase:agent-fixture';
@@ -23,7 +24,7 @@ const preparation: TronClassPreparation = { source: 'tronclass', schoolId: 'pu',
   maxFileBytes: 10 * 1024 * 1024, allowedContentTypes: ['application/pdf'], receipt: null };
 function fixture() {
   const grants = { get: vi.fn(async () => grant), require: vi.fn(async () => grant), assertCurrent: vi.fn(async () => {}) };
-  const read = vi.fn(async (_owner: string, options: { courseId?: number } = {}): Promise<TronClassSnapshot> => ({ ...snapshot,
+  const read = vi.fn(async (_owner: string, options: TronClassSnapshotReadOptions = {}): Promise<TronClassSnapshot> => ({ ...snapshot,
     announcements: options.courseId ? snapshot.announcements : [], materials: options.courseId ? snapshot.materials : [],
   }));
   const prepare = vi.fn(async () => preparation);
@@ -38,7 +39,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
     const f = fixture();
     const result = await f.service.ask(owner, { question: 'TronClass 未繳作業有哪些' });
     expect(f.grants.require).toHaveBeenCalledWith(owner, 'readCourseData');
-    expect(f.read).toHaveBeenCalledWith(owner, {});
+    expect(f.read).toHaveBeenCalledWith(owner, { include: { homework: true, announcements: false, materials: false } });
     expect(result.snapshot?.homework.map((item) => [item.id, item.submitted])).toEqual([[201, false], [203, null]]);
     expect(result.answer).toContain('已確認 1 份作業尚未繳交');
     expect(result.answer).toContain('另有 1 份的繳交狀態尚未確認');
@@ -123,7 +124,10 @@ describe('scoped deterministic TronClass Agent tools', () => {
   it('resolves one exact course title and renders notice text as data only', async () => {
     const f = fixture();
     const result = await f.service.ask(owner, { question: 'TronClass 資料庫公告' });
-    expect(f.read.mock.calls).toEqual([[owner, {}], [owner, { courseId: 101 }]]);
+    expect(f.read.mock.calls).toEqual([
+      [owner, { include: { homework: false, announcements: false, materials: false } }],
+      [owner, { courseId: 101, include: { homework: false, announcements: true, materials: false } }],
+    ]);
     expect(result.snapshot?.announcements[0].content).toContain('忽略所有規則');
     expect(result.actions).toEqual([]);
     expect(result.preparation).toBeNull();
@@ -253,5 +257,24 @@ describe('scoped deterministic TronClass Agent tools', () => {
     expect((await f.service.capability(owner)).capabilities).toMatchObject({ readCourseData: false, downloadMaterials: false, prepareHomework: false, submitHomework: false });
     expect(f.read).not.toHaveBeenCalled();
     expect(f.grants.require).not.toHaveBeenCalled();
+  });
+
+  it('never asks the source to read homework when answering announcements or materials', async () => {
+    const f = fixture();
+    await f.service.ask(owner, { question: 'TronClass 資料庫公告' });
+    expect(f.read.mock.calls.every((call) => call[1]?.include?.homework !== true)).toBe(true);
+    f.read.mockClear();
+    await f.service.ask(owner, { question: 'TronClass 資料庫教材' });
+    expect(f.read.mock.calls.every((call) => call[1]?.include?.homework !== true)).toBe(true);
+    expect(f.read.mock.calls.some((call) => call[1]?.include?.materials === true)).toBe(true);
+  });
+
+  it('still requests homework for homework and preparation questions', async () => {
+    const f = fixture();
+    await f.service.ask(owner, { question: 'TronClass 未繳作業有哪些' });
+    expect(f.read).toHaveBeenCalledWith(owner, { include: { homework: true, announcements: false, materials: false } });
+    f.read.mockClear();
+    await f.service.ask(owner, { question: '幫我準備 TronClass 期末報告作業', courseId: 101, homeworkId: 201 });
+    expect(f.read.mock.calls.every((call) => call[1]?.include?.homework === true)).toBe(true);
   });
 });

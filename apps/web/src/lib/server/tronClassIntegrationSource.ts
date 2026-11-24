@@ -205,6 +205,7 @@ function visibleSourceRows(rows: unknown[]): unknown[] {
 async function readContents(
   source: Source, cookies: Record<string, string>, course: TronClassCourseSummary,
   check: () => Promise<void>, read: ReadStep,
+  include: { announcements?: boolean; materials?: boolean } = { announcements: true, materials: true },
 ): Promise<CourseContents> {
   await check();
   const load = async (request: (options: LmsReadOptions) => Promise<LmsReadResult<unknown[]>>) => {
@@ -215,16 +216,21 @@ async function readContents(
     }
     catch (error) { rethrowSession(error); return { ok: false as const, status: schoolHttpStatus(error) }; }
   };
+  const skipped = { ok: true as const, value: [] as unknown[] };
+  const needAnnouncements = include.announcements === true;
+  const needMaterials = include.materials === true;
+  // Activity announcements live on the course activity feed, so announcement
+  // reads still request it; courseware is only needed for materials.
   const [activities, courseware, notices] = await Promise.all([
-    load(options => source.fetchActivities(cookies, course.id, '', options)),
-    load(options => source.fetchActivities(cookies, course.id, 'type=courseware_activity', options)),
-    load(options => source.fetchCourseAnnouncements(cookies, course.id, options)),
+    needAnnouncements || needMaterials ? load(options => source.fetchActivities(cookies, course.id, '', options)) : skipped,
+    needMaterials ? load(options => source.fetchActivities(cookies, course.id, 'type=courseware_activity', options)) : skipped,
+    needAnnouncements ? load(options => source.fetchCourseAnnouncements(cookies, course.id, options)) : skipped,
   ]);
   await check();
   for (const response of [activities, courseware, notices]) if (!response.ok) requireAuthorized(response.status);
   const errors: TronClassSyncError[] = [];
-  if (!activities.ok || (!courseware.ok && courseware.status !== 404)) errors.push(courseError(course, 'materials'));
-  if (!notices.ok && notices.status !== 404) errors.push(courseError(course, 'announcements'));
+  if (needMaterials && (!activities.ok || (!courseware.ok && courseware.status !== 404))) errors.push(courseError(course, 'materials'));
+  if (needAnnouncements && !notices.ok && notices.status !== 404) errors.push(courseError(course, 'announcements'));
   for (const result of [activities, courseware, notices]) {
     if (result.ok && (!Array.isArray(result.value) || result.value.length > MAX_FEED_ITEMS)) {
       throw new NuniError(502, 'TRONCLASS_INVALID_SOURCE');
@@ -357,37 +363,70 @@ export function createTronClassCourseIndexReader(dependencies: TronClassReaderDe
     }), signal);
 }
 
+export type TronClassSnapshotReadOptions = {
+  courseId?: number;
+  include?: {
+    homework?: boolean;
+    announcements?: boolean;
+    materials?: boolean;
+  };
+};
+
+/** When include is omitted, keep the existing sync shape: homework always, course contents only for a selected course. */
+export function resolveSnapshotInclude(options: TronClassSnapshotReadOptions): {
+  homework: boolean; announcements: boolean; materials: boolean;
+} {
+  if (options.include) {
+    return {
+      homework: options.include.homework === true,
+      announcements: options.include.announcements === true,
+      materials: options.include.materials === true,
+    };
+  }
+  return {
+    homework: true,
+    announcements: options.courseId !== undefined,
+    materials: options.courseId !== undefined,
+  };
+}
+
 export function createTronClassIntegrationReader(dependencies: TronClassReaderDependencies = {}) {
   const operation = createTronClassCourseOperation(dependencies);
-  return async (ownerKey: string, options: { courseId?: number } = {}, signal?: AbortSignal): Promise<TronClassSnapshot> => {
+  return async (ownerKey: string, options: TronClassSnapshotReadOptions = {}, signal?: AbortSignal): Promise<TronClassSnapshot> => {
     if (options.courseId !== undefined && positiveId(options.courseId) !== options.courseId) {
       throw new NuniError(422, 'TRONCLASS_INVALID_INPUT');
     }
     return operation(ownerKey, async ({ binding, courses, errors: courseErrors, check, read, source, now }) => {
+      const include = resolveSnapshotInclude(options);
       const errors: TronClassSyncError[] = [...courseErrors];
       if (options.courseId && !courses.some((course) => course.id === options.courseId)) {
         throw new NuniError(403, 'TRONCLASS_COURSE_NOT_FOUND');
       }
       const selected = options.courseId
         ? courses.filter((course) => course.id === options.courseId) : courses.slice(0, MAX_OVERVIEW_COURSES);
-      if (!options.courseId && courses.length > MAX_OVERVIEW_COURSES) {
+      if (include.homework && !options.courseId && courses.length > MAX_OVERVIEW_COURSES) {
         errors.push({ courseId: null, area: 'homework', message: `這次整理前 ${MAX_OVERVIEW_COURSES} 門課的作業；選擇個別課程可讀取該課完整清單。` });
       }
       const homework: TronClassHomeworkItem[] = [];
-      let cursor = 0;
-      let stopped = false;
-      const worker = async () => {
-        try {
-          while (!stopped && cursor < selected.length) {
-            const course = selected[cursor++];
-            const result = await readHomework(source, binding.cookies, course, check, read);
-            homework.push(...result.homework);
-            errors.push(...result.errors);
-          }
-        } catch (error) { stopped = true; throw error; }
-      };
-      await Promise.all(Array.from({ length: Math.min(3, selected.length) }, worker));
-      const contents = options.courseId ? await readContents(source, binding.cookies, selected[0], check, read)
+      if (include.homework) {
+        let cursor = 0;
+        let stopped = false;
+        const worker = async () => {
+          try {
+            while (!stopped && cursor < selected.length) {
+              const course = selected[cursor++];
+              const result = await readHomework(source, binding.cookies, course, check, read);
+              homework.push(...result.homework);
+              errors.push(...result.errors);
+            }
+          } catch (error) { stopped = true; throw error; }
+        };
+        await Promise.all(Array.from({ length: Math.min(3, selected.length) }, worker));
+      }
+      const contents = (include.announcements || include.materials) && options.courseId
+        ? await readContents(source, binding.cookies, selected[0], check, read, {
+          announcements: include.announcements, materials: include.materials,
+        })
         : { announcements: [], materials: [], errors: [] };
       errors.push(...contents.errors);
       return {

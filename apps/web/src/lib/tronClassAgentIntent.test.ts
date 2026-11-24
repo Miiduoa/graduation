@@ -43,7 +43,6 @@ describe('explicit TronClass command routing', () => {
     ['幫我繳交 TronClass 未交作業', 'unsupported', false],
     ['幫我把 TronClass 未交作業全部繳交', 'unsupported', false],
     ['幫我準備 TronClass 作業並送出', 'unsupported', false],
-    ['TronClass 作業狀態後把附件上傳', 'unsupported', false],
     ['TronClass 查作業狀態：上傳附件', 'unsupported', false],
     ['TronClass 是否已繳交的作業', 'homework', false],
     ['TronClass 我的作業繳交紀錄', 'homework', false],
@@ -59,6 +58,9 @@ describe('explicit TronClass command routing', () => {
     '翻譯「下載 TronClass 教材」',
     '教我如何使用 TronClass',
     '不要讀取我的 TronClass 作業',
+    '不要看玩課雲作業',
+    '不要顯示玩課雲作業',
+    '不要確認玩課雲作業',
     '不用幫我下載 TronClass 講義',
     'TronClass 怎麼登入',
     '如何下載 TronClass 教材',
@@ -302,14 +304,22 @@ describe('write occurrences in TronClass requests', () => {
 
   it.each([
     '查玩課雲作業上傳狀態：截圖',
-    '查玩課雲作業顯示完成後上傳狀態',
-    '準備玩課雲作業後把附件上傳',
     '玩課雲可以做什麼：立即上傳狀態',
     '查玩課雲作業上載狀態文件',
     '查玩課雲作業不要繳交舊版上傳新版',
-    '查玩課雲作業後上傳狀態',
   ])('routes %s as unsupported', question => {
     expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+  });
+
+  it.each([
+    'TronClass 作業狀態後把附件上傳',
+    '查玩課雲作業顯示完成後上傳狀態',
+    '準備玩課雲作業後把附件上傳',
+    '查玩課雲作業後上傳狀態',
+  ])('sends a write after 後 to the planner in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
   });
 
   const cues = ['記得', '立即', '馬上', '再', '然後', '接著', '接下來', '之後', '後', '請', '幫我'];
@@ -469,5 +479,308 @@ describe('write occurrences in TronClass requests', () => {
     '不要上傳截圖只要查玩課雲作業狀態',
   ])('keeps the TronClass status read when a source cue remains after negation in %s', question => {
     expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'homework', pendingOnly: false });
+  });
+
+  it.each([
+    '玩課雲請把附件放入作業區',
+    '玩課雲請把附件：放到作業區',
+    '玩課雲請將附件：貼上作業區',
+    '玩課雲把檔案塞進作業區',
+    '玩課雲把報告投入作業區',
+  ])('blocks placement of a submission object in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+  });
+
+  it.each([
+    '查玩課雲作業，請把附件放入作業區',
+    '查玩課雲作業，請把附件：放到作業區',
+    '查玩課雲作業，請將附件：貼上作業區',
+  ])('suppresses a compound read for placement in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '不要把玩課雲作業貼上，只要校園公告',
+    '不要繳交玩課雲作業，查作業狀態',
+    '不要繳交這份和玩課雲作業附件，只查校園公告',
+    '不要將玩課雲附件放入，只要校園公告',
+    '不要提交這份與玩課雲作業，改查校園公告',
+  ])('does not inherit a TronClass source from a negated write in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('does not turn a negated object into a homework read beside another TronClass clause', () => {
+    expect(tronClassCompoundClauses('查玩課雲公告，不要繳交這份和作業附件')).toEqual(['查玩課雲公告']);
+    expect(tronClassCompoundClauses('不要繳交這份和玩課雲作業附件，只查校園公告，查創課教材')).toEqual(['查創課教材']);
+  });
+
+  it.each([
+    '請解釋「玩課雲作業」',
+    '備註：「查玩課雲作業」',
+    '這句「玩課雲作業」是什麼意思',
+  ])('does not authorize a private read from a quoted or explained mention in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+  });
+
+  it.each([
+    '查玩課雲跨文化交流課程',
+    '查玩課雲交流區公告',
+    '查玩課雲交通資訊作業說明',
+    '查玩課雲交響樂課程',
+    '查玩課雲交換生課程',
+    '查玩課雲外交課程',
+  ])('keeps the course or notice read in %s', question => {
+    const parsed = parseTronClassAgentIntent(question);
+    expect(parsed?.intent).not.toBe('unsupported');
+    expect(parsed?.intent).toBeTruthy();
+  });
+
+  it.each([
+    '不要繳交調查報告和玩課雲作業附件，只查校園公告',
+    '不要繳交我剛查看的玩課雲作業，只查校園公告',
+    '不要繳交我剛查看的玩課雲作業',
+  ])('does not treat a query character inside a negated object as a new read in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('keeps a legitimate later TronClass read after a negated object that contains 查 or 看', () => {
+    expect(tronClassCompoundClauses('不要繳交調查報告和玩課雲作業附件，只查校園公告，查創課教材')).toEqual(['查創課教材']);
+  });
+
+  it.each([
+    '原文是 ‘查玩課雲作業’',
+    '`查玩課雲作業`',
+    '備註：「查玩課雲作業」',
+    '請解釋「玩課雲作業」',
+  ])('does not authorize a private read from a quoted mention in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+  });
+
+  it.each([
+    '不要繳交審查過的玩課雲作業，只查校園公告',
+    '不要繳交這份和交換報告以及玩課雲作業附件，只查校園公告',
+  ])('does not treat 查 or 交 inside a word as a clause or write boundary in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('keeps a later TronClass read after a negated object that contains 審查 or 交換', () => {
+    expect(tronClassCompoundClauses('不要繳交審查過的玩課雲作業，只查校園公告，查創課教材')).toEqual(['查創課教材']);
+    expect(tronClassCompoundClauses('不要繳交這份和交換報告以及玩課雲作業附件，只查校園公告，查創課教材')).toEqual(['查創課教材']);
+  });
+
+  it.each([
+    '查玩課雲標題含「作業」的公告',
+    '查玩課雲標題含『作業』的公告',
+    '查玩課雲標題含“作業”的公告',
+    '查玩課雲標題含`作業`的公告',
+    '查玩課雲關於作業的公告',
+    '查玩課雲公告「作業繳交提醒」',
+  ])('classifies a notice by its head word even when homework is mentioned in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'announcements', pendingOnly: false });
+  });
+
+  it('does not treat 查 inside 檢查 as a new read after a negated write', () => {
+    expect(parseTronClassAgentIntent('不要繳交檢查玩課雲作業用的附件，只查校園公告')).toBeNull();
+    expect(tronClassCompoundClauses('不要繳交檢查玩課雲作業用的附件，只查校園公告，查創課教材')).toEqual(['查創課教材']);
+  });
+});
+
+describe('r28 structural regressions and function-word variants', () => {
+  it.each([
+    '請勿讀玩課雲作業',
+    '不要讀玩課雲作業',
+    '別讀玩課雲作業',
+    '不要看玩課雲作業',
+    '不要顯示玩課雲作業',
+    '不要確認玩課雲作業',
+  ])('does not authorize a negated read in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+  });
+
+  it.each([
+    '查玩課雲作業準備區公告',
+    '查玩課雲關於作業的公告',
+    '查玩課雲公告「作業，繳交提醒」',
+    '查玩課雲公告「作業繳交提醒」',
+  ])('classifies %s as a notice after resolving the data type', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'announcements', pendingOnly: false });
+  });
+
+  it('keeps a later notice or material read after a relative query inside a negated write', () => {
+    expect(parseTronClassAgentIntent('不要繳交我剛查看過的玩課雲作業，只查校園公告')).toBeNull();
+    expect(tronClassCompoundClauses('不要繳交我剛查看過的玩課雲作業，只查校園公告')).toEqual([]);
+    expect(tronClassCompoundClauses('不要繳交我剛查看過的玩課雲作業，只查校園公告，查創課教材')).toEqual(['查創課教材']);
+  });
+
+  it.each([
+    '查玩課雲作業，最後交附件',
+    '查玩課雲作業，後交附件',
+    '查玩課雲作業，再交附件',
+  ])('keeps a write after a function word with the planner in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '查玩課雲作業最後交附件',
+    '查玩課雲作業再交附件',
+  ])('blocks the unpunctuated write after a function word in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'unsupported', pendingOnly: false });
+  });
+
+  it('sends a later write after 後 to the planner as its own clause', () => {
+    expect(parseTronClassAgentIntent('查玩課雲作業後交附件')).toBeNull();
+    expect(tronClassCompoundClauses('查玩課雲作業後交附件')).toEqual([]);
+  });
+
+  it('keeps the course read when 交 is inside a course name', () => {
+    expect(parseTronClassAgentIntent('查玩課雲外交課程')?.intent).toBe('courses');
+  });
+
+  it('still prepares a homework draft when the last data type is homework', () => {
+    expect(parseTronClassAgentIntent('幫我準備 TronClass 資料庫作業')).toEqual({ intent: 'prepare', pendingOnly: false });
+  });
+
+  const functionPrefixes = ['剛', '剛才', '已經', '已', '最後', '後', '所'];
+  const functionSuffixes = ['過', '了', '的'];
+  const queryVerbs = ['查', '看', '讀'];
+  const negations = ['不要', '請勿', '別'];
+
+  it.each(
+    negations.flatMap(negation => queryVerbs.flatMap(verb => [
+      `${negation}${verb}玩課雲作業`,
+      ...functionPrefixes.map(prefix => `${negation}${prefix}${verb}玩課雲作業`),
+      ...functionSuffixes.map(suffix => `${negation}${verb}${suffix}玩課雲作業`),
+    ])),
+  )('fuzz: a negated query with a function word does not authorize %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+  });
+
+  it.each(
+    ['最後', '後', '再', '也', '並', '已'].flatMap(prefix =>
+      ['交', '繳'].map(verb => `查玩課雲作業，${prefix}${verb}附件`)),
+  )('fuzz: a write after a function word stays with the planner in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each(
+    ['剛查看過的', '剛查看的', '已查看過的', '所查看的', '剛才看過的', '正在查看中的'].map(
+      relative => `不要繳交我${relative}玩課雲作業，只查校園公告`,
+    ),
+  )('fuzz: a relative query inside a negated object does not start a read in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '請勿調閱玩課雲作業',
+    '不要繳交供確認玩課雲作業用的資料，只查校園公告',
+  ])('does not authorize a negated or attributive read in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each([
+    '查玩課雲作業，務必交 PDF',
+    '查玩課雲作業，快交最新版',
+  ])('does not let a later write inherit a previous clause query in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('keeps a homework read when 交 is inside a course name', () => {
+    expect(parseTronClassAgentIntent('查玩課雲外交作業')).toEqual({ intent: 'homework', pendingOnly: false });
+  });
+
+  it('classifies a notice that mentions a download area by the last data type', () => {
+    expect(parseTronClassAgentIntent('查玩課雲資料庫課程下載區公告')).toEqual({ intent: 'announcements', pendingOnly: false });
+  });
+
+  it('tokenizes a long write-heavy string without exponential work', () => {
+    const question = `查玩課雲${'必交必繳'.repeat(80)}作業`;
+    const started = Date.now();
+    parseTronClassAgentIntent(question);
+    expect(Date.now() - started).toBeLessThan(200);
+  });
+
+  it.each([
+    '查玩課雲作業以及記得交最新版',
+    '查玩課雲作業後記得交 PDF',
+  ])('does not let a later write inherit a query across 以及 or 後 in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('keeps negation around a 供…用的 modifier span that contains a query verb', () => {
+    const question = '不要繳交供老師確認玩課雲作業用的資料，只查校園公告';
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('reads a notice field noun instead of treating 發布 as a write', () => {
+    expect(parseTronClassAgentIntent('查玩課雲公告發布時間')).toEqual({ intent: 'announcements', pendingOnly: false });
+  });
+
+  it('classifies by the last data type before 準備 or 下載', () => {
+    expect(parseTronClassAgentIntent('查玩課雲作業準備區教材下載公告')).toEqual({
+      intent: 'announcements', pendingOnly: false,
+    });
+  });
+
+  it('still blocks a genuine prepare-and-download request', () => {
+    expect(parseTronClassAgentIntent('幫我準備玩課雲作業並下載教材')).toEqual({
+      intent: 'unsupported', pendingOnly: false, unsupportedReason: 'multiple_actions',
+    });
+  });
+
+  it('keeps 最後 and 之後 from becoming clause cuts', () => {
+    expect(parseTronClassAgentIntent('查玩課雲最後作業')).toEqual({ intent: 'homework', pendingOnly: false });
+    expect(parseTronClassAgentIntent('查玩課雲之後的作業')).toEqual({ intent: 'homework', pendingOnly: false });
+    expect(parseTronClassAgentIntent('查玩課雲作業後面的附件')).toEqual({ intent: 'materials', pendingOnly: false });
+  });
+
+  it('tokenizes a long mixed write string in linear time with a cached pass', () => {
+    // Stay within the 1,000-character router limit so this actually exercises tokenize.
+    const question = `查玩課雲${'必交必繳發布時間務必轉交'.repeat(80)}作業`;
+    expect(question.length).toBeLessThanOrEqual(1000);
+    const started = Date.now();
+    parseTronClassAgentIntent(question);
+    parseTronClassAgentIntent(question);
+    expect(Date.now() - started).toBeLessThan(200);
+  });
+
+  it.each([
+    '查玩課雲作業，記得轉交 PDF',
+    '查玩課雲作業及記得交 PDF',
+  ])('treats a write compound or 及-clause write as a write in %s', question => {
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('keeps negation around a 供…用的 span that contains 和', () => {
+    const question = '不要繳交供老師和助教確認玩課雲作業用的資料，只查校園公告';
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('classifies a preparation-area or download-area read by the last data type', () => {
+    expect(parseTronClassAgentIntent('查玩課雲作業準備區下載說明教材')).toEqual({
+      intent: 'materials', pendingOnly: false,
+    });
+    expect(parseTronClassAgentIntent('查玩課雲課程下載區教材')).toEqual({
+      intent: 'materials', pendingOnly: false,
+    });
   });
 });
