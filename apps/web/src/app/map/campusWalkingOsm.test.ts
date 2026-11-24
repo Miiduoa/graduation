@@ -140,6 +140,22 @@ describe('OSM campus walking discovery (not routing approval)', () => {
     }
   });
 
+  it('uses known member scope before rejecting ways with fewer than two nodes', () => {
+    const input = payload();
+    const elements = [...input.elements, node(6, 10.015, 20.002)];
+    for (const id of [0, 103]) {
+      expect(parse({ ...input, elements: [...elements, way(id, [6])] })).toEqual(parse(input));
+      for (const references of [[1], [999], []]) {
+        expect(parse({ ...input, elements: [...elements, way(id, references)] })).toBeNull();
+      }
+    }
+    const outsideWay = way(103, [6]);
+    const campusWay = way(103, [1, 2]);
+    for (const duplicates of [[outsideWay, campusWay], [campusWay, outsideWay]]) {
+      expect(parse({ ...input, elements: [...elements, ...duplicates] })).toBeNull();
+    }
+  });
+
   it('charges the segment budget only for retained ways', () => {
     const input = payload();
     const outside = [node(6, 10.015, 20.002), node(7, 10.016, 20.002)];

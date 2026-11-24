@@ -150,7 +150,7 @@ export function parseCampusWalkingOsmCandidates(
   const wayScopes = new Map<number, boolean>();
   const ways = new Map<number, CandidateWay>();
   for (const item of rawWays) {
-    if (!Array.isArray(item.nodes) || item.nodes.length < 2) return null;
+    if (!Array.isArray(item.nodes)) return null;
     const ids: unknown[] = item.nodes;
     let hasCampusNode = false;
     let hasOutsideNode = false;
@@ -163,8 +163,9 @@ export function parseCampusWalkingOsmCandidates(
       if (scope === undefined) hasMissingNode = true;
     }
 
-    // Use all known members to determine scope before handling broken references.
-    if (hasMissingNode && (hasCampusNode || !hasOutsideNode)) return null;
+    // Use all known members to determine scope before handling incomplete ways.
+    const incomplete = ids.length < 2 || hasMissingNode;
+    if (incomplete && (hasCampusNode || !hasOutsideNode)) return null;
     const validReferences = ids.every(positiveId);
     if (!validReferences && hasCampusNode) return null;
     if (!positiveId(item.id)) {
@@ -177,7 +178,7 @@ export function parseCampusWalkingOsmCandidates(
       ways.delete(item.id);
       continue;
     }
-    if (hasMissingNode || !validReferences) continue;
+    if (incomplete || !validReferences) continue;
     const rev = revision(item, baseMs);
     if (!rev || !HIGHWAYS.includes(rev.tags.highway)) {
       if (hasCampusNode) return null;
