@@ -124,3 +124,34 @@ test.each([
 test.each(['business plan', 'busyness', 'libraryish', 'where is my wallet'])('does not infer a campus service from a partial word or ungrounded location (%s)', phrase => {
   expect(getMobileQuickActions(phrase)).toEqual([]);
 });
+
+// Dictation and pasted text can contain repeated spaces or typographic apostrophes.
+test.each([
+  [
+    "class   schedule",
+    "/timetable",
+    "PersonalTimetable"
+  ],
+  [
+    "Where’s the library?",
+    "/map",
+    "MapV2"
+  ],
+  [
+    "campus\t events",
+    "/events",
+    "活動總覽"
+  ],
+  [
+    "quiz",
+    "/classroom",
+    "CoursesHome"
+  ],
+  [
+    "quizzes",
+    "/classroom",
+    "CoursesHome"
+  ]
+])('normalizes spoken and pasted search text %s', (phrase, destination, route) => {
+  expect(getMobileQuickActions(phrase)[0]).toMatchObject({ destination, route });
+});
