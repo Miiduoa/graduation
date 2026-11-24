@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import Link from 'next/link';
 import { NuniError } from '@campus/shared/src/nuni';
 import { merchantWorkspaceStateLabel, type NuniMerchantWorkspace } from '@campus/shared/src/nuniMerchant';
@@ -80,6 +80,39 @@ const isUnknown = (failure: unknown) =>
 
 const detailReadError = '無法確認門市目前的資料。草稿已保留，請重新讀取。';
 
+const initialAccess = {
+  entryVerified: false,
+  loading: true,
+  readUnavailable: false,
+  fresh: false,
+};
+
+type AccessAction =
+  | { type: 'entry-reset' | 'read-started' | 'read-finished' | 'verified' | 'locked' }
+  | { type: 'read-failed'; afterWrite: boolean };
+
+function accessReducer(state: typeof initialAccess, action: AccessAction): typeof initialAccess {
+  switch (action.type) {
+    case 'entry-reset':
+      return { ...state, entryVerified: false, readUnavailable: false };
+    case 'read-started':
+      return { ...state, readUnavailable: false, loading: true, fresh: false };
+    case 'read-finished':
+      return { ...state, loading: false };
+    case 'verified':
+      return { ...state, entryVerified: true, fresh: true, readUnavailable: false };
+    case 'locked':
+      return { ...state, fresh: false };
+    case 'read-failed':
+      return {
+        ...state,
+        entryVerified: !action.afterWrite && state.entryVerified,
+        fresh: false,
+        readUnavailable: true,
+      };
+  }
+}
+
 export function MerchantOperations({
   context,
   tenantId,
@@ -136,11 +169,9 @@ export function MerchantOperations({
     [context],
   );
   const [loadedDetail, setDetail] = useState<Detail | null>(null);
-  const [entryVerified, setEntryVerified] = useState(false);
+  const [{ entryVerified, loading, readUnavailable, fresh }, updateAccess] =
+    useReducer(accessReducer, initialAccess);
   const detail = entryVerified ? (confirmedDetail === undefined ? loadedDetail : confirmedDetail) : null;
-  const [loading, setLoading] = useState(true);
-  const [readUnavailable, setReadUnavailable] = useState(false);
-  const [fresh, setFresh] = useState(false);
   const [busy, setBusy] = useState<Action | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState<{
@@ -237,7 +268,7 @@ export function MerchantOperations({
       setMenuConfirmed(false);
       setActivationConfirmed(false);
     },
-    [beginRequest],
+    [beginRequest, setDetail, setMenuConfirmed, setActivationConfirmed],
   );
 
   const accept = (next: Detail, revision: number) => {
@@ -261,12 +292,15 @@ export function MerchantOperations({
       if (updateView) {
         accessRevision.current = Math.max(accessRevision.current, revoked);
         entryAccessRevision.current = 0;
-        setFresh(false);
+        updateAccess({ type: 'locked' });
         setError('目前無法取得這間門市的管理權限。請重新讀取，或返回我的門市。');
       }
       return true;
     },
-    [beginRequest, draftKey, localConfirmations, locationId, onDenied, tenantId],
+    [
+      beginRequest, draftKey, localConfirmations, locationId, onDenied, tenantId,
+      setDetail, setNotice, setError, updateAccess,
+    ],
   );
 
   const expireSession = useCallback(
@@ -281,11 +315,11 @@ export function MerchantOperations({
       localConfirmations.clear();
       setNotice(null);
       setDetail(null);
-      setFresh(false);
+      updateAccess({ type: 'locked' });
       expire.current();
       return true;
     },
-    [localConfirmations],
+    [localConfirmations, setNotice, setDetail, updateAccess],
   );
 
   const confirmEntry = useCallback(
@@ -299,13 +333,11 @@ export function MerchantOperations({
       entryAccessRevision.current = revision;
       showDetail(detail);
       if (reveal) {
-        setFresh(true);
-        setEntryVerified(true);
-        setReadUnavailable(false);
+        updateAccess({ type: 'verified' });
         setError((current) => current === detailReadError ? '' : current);
       }
     },
-    [showDetail],
+    [showDetail, setError, updateAccess],
   );
 
   const checkAccess = useCallback(
@@ -346,9 +378,7 @@ export function MerchantOperations({
       // response can advance access past the revocation already being handled.
       pendingAccessRead.current = revision;
       accessRevision.current = Math.max(accessRevision.current, observedRevocation.current);
-      setReadUnavailable(false);
-      setLoading(true);
-      setFresh(false);
+      updateAccess({ type: 'read-started' });
       try {
         const next = await operations.get(tenantId, locationId);
         if (!active.current || session !== sessionRun.current) return;
@@ -364,14 +394,11 @@ export function MerchantOperations({
             confirmedRevision > Math.max(failedReadRevision.current, observedRevocation.current) &&
             (beginRequest ? getConfirmedDetail?.(draftKey) : localConfirmations.detailFor(draftKey))
           ) {
-            setEntryVerified(true);
-            setFresh(true);
-            setReadUnavailable(false);
+            updateAccess({ type: 'verified' });
             setError((current) => current === detailReadError ? '' : current);
             return;
           }
-          if (afterWrite) setEntryVerified(false);
-          setReadUnavailable(true);
+          updateAccess({ type: 'read-failed', afterWrite });
           setError(detailReadError);
           return;
         }
@@ -396,19 +423,18 @@ export function MerchantOperations({
           // entry access after this read failed.
           failedReadRevision.current = revision;
           entryAccessRevision.current = 0;
-          if (afterWrite) setEntryVerified(false);
-          setFresh(false);
-          setReadUnavailable(true);
+          updateAccess({ type: 'read-failed', afterWrite });
           setError(detailReadError);
         }
       } finally {
         if (pendingAccessRead.current === revision) pendingAccessRead.current = 0;
-        if (current()) setLoading(false);
+        if (current()) updateAccess({ type: 'read-finished' });
       }
     },
     [
       operations, tenantId, locationId, confirmDetail, confirmEntry, drafts, draftKey,
       expireSession, revokeDetail, nextRevision, beginRequest, getConfirmedDetail, localConfirmations,
+      setError, setUncertain, updateAccess,
     ],
   );
   useLayoutEffect(() => {
@@ -421,8 +447,7 @@ export function MerchantOperations({
   }, [suspended, drafts, draftKey]);
   const verifyEntry = useCallback(() => {
     entryAccessRevision.current = 0;
-    setEntryVerified(false);
-    setReadUnavailable(false);
+    updateAccess({ type: 'entry-reset' });
     let checkingAccess = true;
     if (lock.current) {
       // Verify access now, and refresh controls again after the write settles.
@@ -436,13 +461,12 @@ export function MerchantOperations({
     return () => {
       checkingAccess = false;
     };
-  }, [checkAccess, read]);
+  }, [checkAccess, read, updateAccess]);
 
   useLayoutEffect(() => {
     visibleRef.current = visible;
     if (!visible || suspended) {
-      setEntryVerified(false);
-      setReadUnavailable(false);
+      updateAccess({ type: 'entry-reset' });
       return;
     }
     const retire = verifyEntry();
