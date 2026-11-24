@@ -101,6 +101,32 @@ interface HttpMetric {
   stop(measurement?: { durationMs: number }): Promise<void>;
 }
 
+// HTTP telemetry must never retain signed URLs, query parameters, credentials,
+// or path segments that may contain student identifiers and access tokens.
+function httpMetricOrigin(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    if ((url.protocol === 'https:' || url.protocol === 'http:') && url.host) {
+      return `${url.protocol}//${url.host}`;
+    }
+  } catch {
+    // Relative or malformed URLs must not fall back to logging raw input.
+  }
+  return '[unknown-origin]';
+}
+
+function httpErrorKind(error: unknown): string {
+  if (!(error instanceof Error)) return 'UnknownError';
+  switch (error.name) {
+    case 'AbortError':
+    case 'TimeoutError':
+    case 'TypeError':
+      return error.name;
+    default:
+      return 'Error';
+  }
+}
+
 // Mock HTTP metric
 class MockHttpMetric implements HttpMetric {
   private url: string;
@@ -337,7 +363,7 @@ class PerformanceService {
    * Create a new HTTP metric
    */
   newHttpMetric(url: string, httpMethod: string): HttpMetric {
-    return new MockHttpMetric(url, httpMethod);
+    return new MockHttpMetric(httpMetricOrigin(url), httpMethod);
   }
 
   /**
@@ -580,7 +606,7 @@ export async function fetchWithPerformance(
       metric.setHttpResponseCode(0);
       metric.putAttribute('duration_scope', 'transport_failure');
       metric.putAttribute('transport_error', 'true');
-      metric.putAttribute('error', String(error));
+      metric.putAttribute('error_kind', httpErrorKind(error));
     });
     throw error;
   }

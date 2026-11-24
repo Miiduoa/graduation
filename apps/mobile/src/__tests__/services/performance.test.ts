@@ -101,6 +101,37 @@ describe('fetchWithPerformance', () => {
     expect(performance.getReport().httpStats.errorRate).toBe(0.5);
   });
 
+  it('records only the HTTP origin without changing the requested URL', async () => {
+    const url = 'https://example.test:8443/private/student-123?token=secret#fragment';
+    const response = responseWithLength('20');
+    await expect(fetchWithPerformance(url)).resolves.toBe(response);
+    expect(mockFetch).toHaveBeenCalledWith(url, {});
+    const metric = performance.getDataStore().getHttpMetrics()[0];
+    expect(metric.url).toBe('https://example.test:8443');
+    expect(JSON.stringify(metric)).not.toMatch(/student-123|secret|fragment/);
+  });
+
+  it.each([
+    ['https://user:password@example.test/private', 'https://example.test'],
+    ['/private?token=secret', '[unknown-origin]'],
+    ['data:text/plain,secret', '[unknown-origin]'],
+    ['not a valid URL secret', '[unknown-origin]'],
+  ])('does not retain credentials or unsafe URL input (%s)', async (url, expected) => {
+    const metric = performance.newHttpMetric(url, 'GET');
+    await metric.start();
+    await metric.stop();
+    expect(performance.getDataStore().getHttpMetrics()[0].url).toBe(expected);
+  });
+
+  it('records an error category instead of the potentially sensitive error message', async () => {
+    const error = new TypeError('Network failure for https://example.test/private?token=secret');
+    mockFetch.mockRejectedValueOnce(error);
+    await expect(fetchWithPerformance('https://example.test/private')).rejects.toBe(error);
+    const metric = performance.getDataStore().getHttpMetrics()[0];
+    expect(metric.attributes).toMatchObject({ transport_error: 'true', error_kind: 'TypeError' });
+    expect(JSON.stringify(metric)).not.toMatch(/secret|private/);
+  });
+
   it('starts the fetch and returns its response while metric startup is pending', async () => {
     const metric = mockMetric();
     let finishStart!: () => void;
