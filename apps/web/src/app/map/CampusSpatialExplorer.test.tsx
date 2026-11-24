@@ -2640,7 +2640,7 @@ it.each(['startup', 'resume'])('keeps WebGL blocked during %s while the keyboard
   }
 });
 
-it.each(['startup', 'resume'])('keeps WebGL blocked during %s when choosing a unique search result before the viewport rebounds', async (phase) => {
+it.each(['startup', 'resume'])('resumes 3D during %s after choosing a unique search result even if the viewport stays shrunken', async (phase) => {
   vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: undefined } }));
   const viewport = Object.assign(new EventTarget(), {
     width: window.innerWidth, height: window.innerHeight, offsetLeft: 0, offsetTop: 0, scale: 1,
@@ -2670,6 +2670,7 @@ it.each(['startup', 'resume'])('keeps WebGL blocked during %s when choosing a un
     act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
     expect(document.activeElement).toBe(field);
     if (phase === 'resume') expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    if (phase === 'startup') expect(scene.create).not.toHaveBeenCalled();
     scene.setActive.mockClear();
 
     const choice = dialog.getByRole('button', { name: /^選擇：本校圖書館/ });
@@ -2680,22 +2681,18 @@ it.each(['startup', 'resume'])('keeps WebGL blocked during %s when choosing a un
     expect(document.activeElement).toBe(choice);
     expect(picker.value).toBe('library');
     expect(dialog.getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    // Focus left the search field for a non-editable button and there is no
+    // virtualKeyboard overlap, so a leftover shrunken viewport must not block 3D.
     await act(async () => vi.advanceTimersByTimeAsync(0));
-    expect(scene.create).toHaveBeenCalledTimes(phase === 'startup' ? 0 : 1);
-    expect(scene.setActive).not.toHaveBeenCalledWith(true);
-
-    await act(async () => vi.advanceTimersByTimeAsync(349));
-    if (phase === 'resume') {
-      // An event reporting continued occlusion keeps the geometry authoritative.
-      act(() => viewport.dispatchEvent(new Event('scroll')));
-      await act(async () => vi.advanceTimersByTimeAsync(10_000));
-    }
-    expect(scene.create).toHaveBeenCalledTimes(phase === 'startup' ? 0 : 1);
-    expect(scene.setActive).not.toHaveBeenCalledWith(true);
-
-    viewport.height = window.innerHeight;
-    await act(async () => { viewport.dispatchEvent(new Event('resize')); });
+    expect(viewport.height).toBe(200);
     expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(dialog.queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    expect(document.activeElement).toBe(choice);
+    expect(viewport.height).toBe(200);
     expect(scene.setActive).toHaveBeenLastCalledWith(true);
   } finally {
     vi.useRealTimers();
@@ -2736,6 +2733,72 @@ it('pauses for an overlay keyboard that intersects the canvas without resizing t
     expect(scene.create).toHaveBeenCalledTimes(1);
   } finally {
     bounds.mockRestore();
+  }
+});
+
+it('resumes 3D after the keyboard closes even when a later stale viewport resize keeps the shrunken height', async () => {
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: undefined } }));
+  const { viewport, dialog, graphics, bounds, field } = await openKeyboardCoveredScene();
+  try {
+    hideKeyboard(field);
+    await waitFor(() => expect(scene.setActive).toHaveBeenLastCalledWith(true));
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+
+    // A lagging WebView may still emit the old keyboard-sized geometry once.
+    // That stale resize must not re-arm occlusion after the field has blurred.
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    expect(document.activeElement === field).toBe(false);
+    expect(viewport.height).toBe(200);
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+it('does not pause for an overlay keyboard that only intersects the dialog-clipped canvas', async () => {
+  const keyboard = Object.assign(new EventTarget(), {
+    overlaysContent: true, boundingRect: new DOMRect(),
+  });
+  vi.stubGlobal('navigator', Object.create(navigator, { virtualKeyboard: { value: keyboard } }));
+  const viewport = Object.assign(new EventTarget(), {
+    width: window.innerWidth, height: 800, offsetLeft: 0, offsetTop: 0, scale: 1,
+  });
+  vi.stubGlobal('visualViewport', viewport);
+  render(<CampusSpatialExplorer school="other-school" locations={places}
+    selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const graphics = within(dialog).getByRole('group', { name: '校園地點空間圖' });
+  const hostBounds = vi.spyOn(graphics, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 150, 320, 200));
+  const dialogBounds = vi.spyOn(dialog, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 0, 320, 250));
+  Object.defineProperties(dialog, {
+    clientLeft: { configurable: true, value: 0 },
+    clientTop: { configurable: true, value: 0 },
+    clientWidth: { configurable: true, value: 320 },
+    clientHeight: { configurable: true, value: 250 },
+  });
+  try {
+    act(() => intersection?.([observerEntry(graphics, true)], {} as IntersectionObserver));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+
+    // Keyboard covers only the canvas overflow hidden by the dialog (y=250–350).
+    keyboard.boundingRect = new DOMRect(0, 260, 320, 200);
+    act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(true);
+    expect(within(dialog).queryByRole('button', { name: '重新啟動立體畫面' })).toBeNull();
+
+    // The same keyboard overlapping the visible, dialog-clipped canvas pauses 3D.
+    keyboard.boundingRect = new DOMRect(0, 200, 320, 200);
+    act(() => keyboard.dispatchEvent(new Event('geometrychange')));
+    expect(scene.setActive).toHaveBeenLastCalledWith(false);
+    expect(within(dialog).getByRole('button', { name: '重新啟動立體畫面' })).toBeTruthy();
+  } finally {
+    hostBounds.mockRestore();
+    dialogBounds.mockRestore();
   }
 });
 

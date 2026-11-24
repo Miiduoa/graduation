@@ -718,8 +718,13 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     const keyboardOverlayIntersectsCanvas = (): boolean => {
       try {
         if (virtualKeyboard?.overlaysContent !== true) return false;
-        const { left, top, right, bottom } = virtualKeyboard.boundingRect;
-        return measureVisibilityAgainst(left, top, right, bottom, false) === true;
+        const bounds = virtualKeyboard.boundingRect;
+        if (!bounds || ![bounds.left, bounds.top, bounds.right, bounds.bottom,
+          bounds.width, bounds.height].every(Number.isFinite) ||
+          !(bounds.width > 0 && bounds.height > 0)) return false;
+        // Only the dialog-clipped, on-screen part of the canvas counts as visible.
+        // Overflow hidden by the modal must not pause 3D by itself.
+        return measureVisibilityAgainst(bounds.left, bounds.top, bounds.right, bounds.bottom) === true;
       } catch {
         return false;
       }
@@ -745,13 +750,12 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       }
       return (element as HTMLElement).isContentEditable === true;
     };
-    let keyboardViewportObscuresCanvas = false;
     // A positive observer entry already reflects dialog clipping. Only
     // recovery from a stale hidden entry also checks the dialog scrollport.
     const measureVisualViewportVisibility = (clipToDialog = false): boolean | null => {
       try {
         const viewport = window.visualViewport;
-        if (!viewport) return keyboardViewportObscuresCanvas ? false : null;
+        if (!viewport) return keyboardOverlayIntersectsCanvas() ? false : null;
         const { offsetLeft: left, offsetTop: top, width, height } = viewport;
         // The visitor explicitly restarted 3D while the viewport read this
         // way. Ignore that exact (possibly stale) geometry until it changes.
@@ -761,20 +765,25 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
         }
         const visible = measureVisibilityAgainst(left, top, left + width, top + height, clipToDialog);
         if (clipToDialog) return visible;
-        const keyboardOpen = measureKeyboardOpen();
-        if (visible === true || keyboardOpen === false) keyboardViewportObscuresCanvas = false;
-        // Focus can move to a button before the keyboard finishes closing.
-        // Keep using viewport geometry until it shows the canvas again.
-        if (keyboardViewportObscuresCanvas) return false;
+        // Structural signals only: a shrunken visual viewport is not itself
+        // proof that the keyboard still covers the canvas.
+        if (keyboardOverlayIntersectsCanvas()) return false;
         if (isPinchZoomed(viewport)) return visible;
-        if (visible === false && keyboardOpen !== false &&
-            (keyboardOpen === true || isTextEntryTarget(host.ownerDocument.activeElement))) {
-          keyboardViewportObscuresCanvas = true;
-          return false;
-        }
+        const keyboardOpen = measureKeyboardOpen();
+        const textEntryFocused = isTextEntryTarget(host.ownerDocument.activeElement);
+        // virtualKeyboard reported a closed keyboard. Ignore leftover
+        // shrunken bounds even if a field stays focused.
+        if (keyboardOpen === false) return null;
+        // No editable focus and no keyboard overlap: treat the keyboard as
+        // closed. A stale resize must not keep 3D paused.
+        if (!textEntryFocused) return null;
+        // While an editable is focused and the keyboard API does not clear
+        // it, a visual viewport that excludes the canvas is still occlusion.
+        // Never auto-resume from timers in this state.
+        if (visible === false) return false;
         return null;
       } catch {
-        return keyboardViewportObscuresCanvas ? false : null;
+        return keyboardOverlayIntersectsCanvas() ? false : null;
       }
     };
     const syncVisibility = () => {
@@ -855,9 +864,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       catch { /* Observer and page events still report visibility. */ }
     }
     // Keyboard transitions can move the host without a window event.
-    let keyboardViewportRevision = 0;
     const onVisualViewportChange = () => {
-      keyboardViewportRevision += 1;
       if (visibility === 'hidden' && measureVisualViewportVisibility(true) === true) {
         // Recover from a stale hidden observer entry after the keyboard moves.
         // A valid intersection with the visual viewport is evidence the host
@@ -867,31 +874,20 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       // Also run when the observer last said "visible": a shrinking mobile
       // viewport can cover the canvas while its layout intersection stays true.
       // Invalid/missing visual geometry is not proof that the host is hidden.
+      // A stale shrunken size is not treated as coverage unless an editable
+      // is focused or virtualKeyboard overlaps the visible canvas.
       syncVisibility();
     };
-    // Dismissing the keyboard (blur) or opening it can change the visual
-    // viewport after the focus event, and some WebViews never report it.
-    // Re-measure right away and again once the keyboard animation settles.
+    // Focus moving into or out of a field can open or close the keyboard
+    // without a viewport event. Re-measure immediately, and once more after
+    // the keyboard animation may have settled. Timers never override the
+    // structural signals (editable focus or virtualKeyboard overlap).
     const focusTimers = new Set<number>();
-    const keyboardDismissalGraceMs = 350;
-    const onFocusChange = (event: FocusEvent) => {
-      const textEntry = event.target instanceof Element && isTextEntryTarget(event.target);
-      if (textEntry) keyboardViewportRevision += 1;
-      const revision = keyboardViewportRevision;
-      const leavingTextEntry = textEntry && event.type === 'focusout';
-      for (const delay of [0, keyboardDismissalGraceMs]) {
+    const onFocusChange = () => {
+      for (const delay of [0, 350]) {
         const id = window.setTimeout(() => {
           focusTimers.delete(id);
-          if (!active) return;
-          // A silent WebView can keep its keyboard-shrunken bounds after blur.
-          // Give the viewport time to report the dismissal before dropping them.
-          if (delay === keyboardDismissalGraceMs && leavingTextEntry &&
-              revision === keyboardViewportRevision &&
-              !isTextEntryTarget(host.ownerDocument.activeElement) &&
-              measureKeyboardOpen() !== true) {
-            keyboardViewportObscuresCanvas = false;
-          }
-          syncVisibility();
+          if (active) syncVisibility();
         }, delay);
         focusTimers.add(id);
       }
