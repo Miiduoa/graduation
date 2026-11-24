@@ -134,6 +134,10 @@ if ! printf '%s' "$TRONCLASS_RUN_ID" | grep -Eq '^[0-9a-fA-F]{32}$'; then
   exit 1
 fi
 export TRONCLASS_RUN_ID
+# Globals: cleanup() may run from the EXIT trap after main returns.
+web_log="$TRONCLASS_RUNTIME_DIR/web.log.$TRONCLASS_RUN_ID"
+emulator_log="$TRONCLASS_RUNTIME_DIR/emulators.log.$TRONCLASS_RUN_ID"
+selftest_log="$TRONCLASS_RUNTIME_DIR/selftest.log.$TRONCLASS_RUN_ID"
 echo "RUN_ID=$TRONCLASS_RUN_ID"
 # Install signal traps before any leftover sidecar is opened. Full cleanup
 # replaces these once the process-group helpers are defined.
@@ -409,9 +413,6 @@ tronclass_stop_logged() {
 cleanup() {
   local sig="${1:-}"
   trap - EXIT INT TERM
-  local web_log="$TRONCLASS_RUNTIME_DIR/web.log"
-  local emulator_log="$TRONCLASS_RUNTIME_DIR/emulators.log"
-  local selftest_log="$TRONCLASS_RUNTIME_DIR/selftest.log"
   local child launch_signal=TERM pending_cleaned=''
   if [ -n "${TRONCLASS_LAUNCHING_LOG:-}" ]; then
     [ "$TRONCLASS_LAUNCHING_LOG" != "$emulator_log" ] || launch_signal=INT
@@ -481,7 +482,7 @@ done
 # Other runs' records are only inspected for staleness, never for signalling.
 # A group can outlive its leader, so keep a matching record while it exists.
 # Unreadable or unparseable leftovers are not live-run records; just remove them.
-for stale_sidecar in "$TRONCLASS_RUNTIME_DIR"/*.log.pgid "$TRONCLASS_RUNTIME_DIR"/*.log.pgid.*; do
+for stale_sidecar in "$TRONCLASS_RUNTIME_DIR"/*.log.pgid "$TRONCLASS_RUNTIME_DIR"/*.log.pgid.* "$TRONCLASS_RUNTIME_DIR"/*.log.*.pgid.*; do
   if [ -L "$stale_sidecar" ] || [ ! -f "$stale_sidecar" ]; then
     rm -f -- "$stale_sidecar" 2>/dev/null || true
     continue
@@ -700,8 +701,8 @@ NODE
 }
 
 if [ "${TRONCLASS_SIGNAL_SELFTEST:-}" = '1' ]; then
-  TRONCLASS_LAUNCHING_LOG="$TRONCLASS_RUNTIME_DIR/selftest.log"
-  TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/selftest.log" \
+  TRONCLASS_LAUNCHING_LOG="$selftest_log"
+  TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$selftest_log" \
     node -e 'const fs=require("node:fs"); const {spawn}=require("node:child_process"); const g=spawn(process.execPath,["-e","process.on(\"SIGTERM\",()=>{});process.on(\"SIGINT\",()=>{});require(\"node:fs\").writeFileSync(process.env.TRONCLASS_SELFTEST_GRANDCHILD,String(process.pid));setInterval(()=>{},1000);"],{stdio:"ignore"}); fs.writeFileSync(process.env.TRONCLASS_SELFTEST_CHILD,String(process.pid)); process.on("SIGTERM",()=>process.exit(0)); process.on("SIGINT",()=>process.exit(0)); setInterval(()=>{},1000);' &
   TRONCLASS_SELFTEST_WRAPPER=$!
   unset TRONCLASS_LAUNCHING_LOG
@@ -717,8 +718,8 @@ fi
 
 # Keep Firebase data in the running emulator; restarting Next retains it.
 # Do not automatically export school sessions after a live binding test.
-TRONCLASS_LAUNCHING_LOG="$TRONCLASS_RUNTIME_DIR/emulators.log"
-TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/emulators.log" \
+TRONCLASS_LAUNCHING_LOG="$emulator_log"
+TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$emulator_log" \
   node node_modules/firebase-tools/lib/bin/firebase.js emulators:start \
   --project "$TEST_PROJECT_ID" --config firebase.test.json --only auth,firestore &
 TRONCLASS_EMULATOR_PID=$!
@@ -728,34 +729,34 @@ TRONCLASS_EMULATOR_RECORD="$(tronclass_capture_child_record "$TRONCLASS_EMULATOR
 TRONCLASS_EMULATOR_READY=false
 for _ in $(seq 1 90); do
   if ! kill -0 "$TRONCLASS_EMULATOR_PID" 2>/dev/null; then
-    echo "Emulator startup failed; inspect $TRONCLASS_RUNTIME_DIR/emulators.log" >&2
+    echo "Emulator startup failed; inspect $emulator_log" >&2
     exit 1
   fi
-  if grep -q 'All emulators ready' "$TRONCLASS_RUNTIME_DIR/emulators.log"; then
+  if grep -q 'All emulators ready' "$emulator_log"; then
     TRONCLASS_EMULATOR_READY=true
     break
   fi
   sleep 1
 done
 if [ "$TRONCLASS_EMULATOR_READY" != true ]; then
-  echo "Emulator startup timed out; inspect $TRONCLASS_RUNTIME_DIR/emulators.log" >&2
+  echo "Emulator startup timed out; inspect $emulator_log" >&2
   exit 1
 fi
 
-tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/seed.log" node scripts/test-env/seed.cjs --missing-only
+tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/seed.log.$TRONCLASS_RUN_ID" node scripts/test-env/seed.cjs --missing-only
 node scripts/build-functions-shared.cjs
 node scripts/import-ai/prepare-assets.mjs
 echo "Full Web: $WEB_PUBLIC_ORIGIN/login?returnUrl=%2Ftronclass&schoolId=pu&reconnect=school"
 echo "Use the local test student sign-in button."
-echo "Logs: $TRONCLASS_RUNTIME_DIR."
+echo "Logs: $TRONCLASS_RUNTIME_DIR (suffix: .$TRONCLASS_RUN_ID)."
 if [ "$TRONCLASS_INTEGRATION_ENABLED" = true ]; then
   echo 'School binding is for single-user local use only. Enter school credentials in the TronClass form.'
 else
   echo 'School binding is disabled. Use synthetic fixtures only.'
 fi
 cd apps/web
-TRONCLASS_LAUNCHING_LOG="$TRONCLASS_RUNTIME_DIR/web.log"
-TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/web.log" \
+TRONCLASS_LAUNCHING_LOG="$web_log"
+TRONCLASS_RUN_LOGGED_EXEC=1 tronclass_run_logged "$web_log" \
   node ../../node_modules/next/dist/bin/next dev --webpack -p "$TEST_WEB_PORT" -H "$TEST_HOST" &
 TRONCLASS_WEB_PID=$!
 unset TRONCLASS_LAUNCHING_LOG
@@ -763,12 +764,12 @@ unset TRONCLASS_RUN_LOGGED_EXEC
 TRONCLASS_WEB_RECORD="$(tronclass_capture_child_record "$TRONCLASS_WEB_PID" || true)"
 if [ "${TRONCLASS_VERIFY_RUNTIME:-}" = '1' ] && [ "$TRONCLASS_INTEGRATION_ENABLED" = true ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
-  tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/acceptance.log" node scripts/test-env/verify-tronclass.cjs
+  tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/acceptance.log.$TRONCLASS_RUN_ID" node scripts/test-env/verify-tronclass.cjs
   echo "Verified real emulator authentication and Firestore persistence; see $TRONCLASS_RUNTIME_DIR/acceptance.json."
 fi
 if [ "${TRONCLASS_CHECK_HEALTH:-}" = '1' ]; then
   cd "$TRONCLASS_PROJECT_ROOT"
-  tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/health.log" node scripts/test-env/health-tronclass.cjs
+  tronclass_run_logged "$TRONCLASS_RUNTIME_DIR/health.log.$TRONCLASS_RUN_ID" node scripts/test-env/health-tronclass.cjs
   echo "Verified read-only health and login page requests; see $TRONCLASS_RUNTIME_DIR/health.json."
 fi
 wait "$TRONCLASS_WEB_PID"
