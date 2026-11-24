@@ -109,9 +109,12 @@ function useCalendarAccount(scope: PersonalImportScope | null) {
       : null;
   const nuniRevalidating = platform.loading && !platform.session && !sessionRejected;
   const knownOwner = scope?.owner ?? (firebaseChanged ? null : observedOwner);
-  // Revoke the workspace when Firebase confirms logout even if Nuni still resolves its scope.
+  // Firebase logout revokes authenticated workspaces even while Nuni still resolves
+  // the previous account. A device guest scope has no Firebase session to revoke.
   const ownerSignedOut = (owner: string | undefined) =>
-    firebaseSignedOut && (!!lastFirebaseUid.current || !!owner?.startsWith('firebase:'));
+    firebaseSignedOut &&
+    (!!owner?.startsWith('firebase:') ||
+      (!!lastFirebaseUid.current && !!owner?.startsWith('nuni:')));
   return { knownOwner, loggingOut, sessionRejected, firebaseChanged, ownerSignedOut, workspaceUid, nuniRevalidating };
 }
 
@@ -166,6 +169,8 @@ export function CampusEventCalendarDraftScreen() {
         campusEvent.eventId,
       ])}
       scopeKey={personalImportStorageKey(campusEvent)}
+      scope={scope}
+      writesRevoked={false}
       schoolName={school.name}
       initialDraft={campusEvent.draft}
     />
@@ -195,7 +200,9 @@ export default function PersonalCalendarScreen() {
     useCalendarAccount(scope);
   const { school, schoolId, selectionReady } = useSchool();
   const route = useRoute();
-  const key = scope && !ownerSignedOut(scope.owner) ? personalImportStorageKey(scope) : '';
+  const writesRevoked = loggingOut || sessionRejected || ownerSignedOut(scope?.owner);
+  const verifiedScope = writesRevoked ? null : scope;
+  const key = verifiedScope ? personalImportStorageKey(verifiedScope) : '';
   const lastReadyKey = useRef(key);
   const knownSchoolId = school?.id || schoolId || '';
   const schoolCleared = !!selectionReady && !knownSchoolId;
@@ -219,6 +226,8 @@ export default function PersonalCalendarScreen() {
     <PersonalCalendarWorkspace
       key={JSON.stringify([workspaceKey, workspaceUid])}
       scopeKey={workspaceKey === 'pending' ? '' : workspaceKey}
+      scope={verifiedScope}
+      writesRevoked={writesRevoked}
       schoolName={school?.name || '未指定校園'}
       focusEventId={focusEventId}
     />
@@ -227,25 +236,26 @@ export default function PersonalCalendarScreen() {
 
 function PersonalCalendarWorkspace({
   scopeKey,
+  scope,
+  writesRevoked,
   schoolName,
   focusEventId,
   initialDraft,
 }: {
   scopeKey: string;
+  scope: PersonalImportScope | null;
+  writesRevoked: boolean;
   schoolName: string;
   focusEventId?: string;
   initialDraft?: PersonalEventDraft;
 }) {
   const navigation = useNavigation();
-  const scope = usePersonalImportScope();
-  const platformSession = useNuniSession();
-  const loggingOut = !!platformSession.pendingLogout || (!platformSession.session && !!platformSession.error);
   const active = useRef(true);
   const readSequence = useRef(0);
   const latestRead = useRef({ ledger: 0, reminders: 0 });
   const resolvedKey = scope ? personalImportStorageKey(scope) : '';
-  const verifiedKey = resolvedKey === scopeKey && !loggingOut ? resolvedKey : '';
-  const currentScope = useRef({ resolvedKey, verifiedKey, loggingOut });
+  const verifiedKey = resolvedKey === scopeKey && !writesRevoked ? resolvedKey : '';
+  const currentScope = useRef({ resolvedKey, verifiedKey, writesRevoked });
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
   const ready = load.status === 'ready';
   const ledgerReady = useRef(ready);
@@ -286,9 +296,9 @@ function PersonalCalendarWorkspace({
 
   useLayoutEffect(() => {
     // A return to the same account and school still starts a new verification.
-    currentScope.current = { resolvedKey, verifiedKey, loggingOut };
+    currentScope.current = { resolvedKey, verifiedKey, writesRevoked };
     setReminderBusyId(null);
-  }, [resolvedKey, verifiedKey, loggingOut]);
+  }, [resolvedKey, verifiedKey, writesRevoked]);
 
   useLayoutEffect(() => {
     ledgerReady.current = ready;
@@ -472,8 +482,8 @@ function PersonalCalendarWorkspace({
     // Only an operation admitted while verified may continue through revalidation.
     const canContinue = () => {
       const latest = currentScope.current;
-      return active.current && !latest.loggingOut &&
-        (!latest.resolvedKey || latest.resolvedKey === expected);
+      return active.current && !latest.writesRevoked &&
+        (!latest.resolvedKey || latest.verifiedKey === expected);
     };
     // A destructive confirmation belongs to a single uninterrupted verification.
     const guard: PersonalImportWriteGuard = {

@@ -54,9 +54,13 @@ let mockSession: { platformAccountId: string } | null = {
 let mockNuniLoading = false;
 let mockSessionError = '';
 let mockAuth: { user: { uid: string } | null; loading: boolean };
+let mockUseLiveScope = false;
 
 jest.mock('../state/personalImportScope', () => ({
-  usePersonalImportScope: () => mockScope,
+  usePersonalImportScope: () =>
+    mockUseLiveScope
+      ? jest.requireActual('../state/personalImportScope').usePersonalImportScope()
+      : mockScope,
 }));
 jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({
@@ -138,6 +142,7 @@ jest.mock('../services/personalEventReminderJournal', () => {
 });
 
 beforeEach(async () => {
+  mockUseLiveScope = false;
   mockScope = {
     owner: 'nuni:pa_11111111-1111-4111-8111-111111111111',
     schoolId: 'pu',
@@ -705,6 +710,38 @@ it.each([
   view.rerender(<PersonalCalendarScreen />);
   await waitUntilEditable(view);
   expect(view.queryByLabelText('標題')).toBeNull();
+});
+
+it('loads and saves the guest ledger on the same screen after Firebase and Nuni sign out', async () => {
+  mockUseLiveScope = true;
+  mockAuth = { user: { uid: 'student-a' }, loading: false };
+  const accountScope = mockScope!;
+  const guestScope = { owner: 'guest:device', schoolId: accountScope.schoolId };
+  const today = emptyPersonalEventDraft();
+  await appendPersonalImports(guestScope, [
+    personalEventRowFromDraft({ ...today, title: '既有訪客行程', allDay: true }, guestScope.schoolId),
+  ]);
+  const view = render(<PersonalCalendarScreen />);
+  await fillDraft(view, '登出前的帳號草稿');
+
+  // Firebase finishes first while Nuni still supplies the old account.
+  mockAuth = { user: null, loading: false };
+  view.rerender(<PersonalCalendarScreen />);
+  expect(view.queryByLabelText('標題')).toBeNull();
+
+  mockSession = null;
+  view.rerender(<PersonalCalendarScreen />);
+  await waitUntilEditable(view);
+  fireEvent.press(view.getByText('列表'));
+  expect(view.getByText('既有訪客行程')).toBeTruthy();
+
+  await fillDraft(view, '登出後新增的訪客行程');
+  fireEvent.press(view.getByRole('button', { name: '儲存行程' }));
+  await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
+  expect((await loadPersonalImports(guestScope)).records.map(({ title }) => title)).toEqual(
+    expect.arrayContaining(['既有訪客行程', '登出後新增的訪客行程']),
+  );
+  expect((await loadPersonalImports(accountScope)).records).toEqual([]);
 });
 
 it.each(['during revalidation', 'after revalidation'])(
