@@ -308,33 +308,39 @@ const PUBLISHED_PROVIDENCE_ENGLISH_NAMES = new Map<string, readonly string[]>([
   ['pu-zhugu', ['Providence Hall']],
   ['pu-renyuan', ['Anthony Kuo Hall']],
   ['pu-boduo', ['St. Peter Hall']],
-  // Official admissions contact (checked 2026-11-24):
-  // https://hstopu.pu.edu.tw/p/412-1105-1496.php
-  ['pu-wenxing', ['Wen Xing Hall', 'Bishop Kupfer Hall']],
+  ['pu-wenxing', ['Wen Xing Hall']],
   ['pu-gelun', ['Theodore Guerin Hall']],
   ['pu-fangji', ['St. Francis Hall']],
   ['pu-siyuan', ['Si Yuan Hall']],
   ['pu-jingan', ['Jing An Hall']],
+  ['pu-library', ['Gaesia Library']],
+  // campusPois.js uses "Chapel"; the mobile catalog uses the full title.
+  ['pu-chapel', ['Chapel', 'Chapel of Our Lady of Providence']],
+  ['pu-jingyuan', ['Jingyuan Cafeteria']],
+  ['pu-yiyuan', ['Yiyuan Cafeteria']],
+  ['pu-gym', ['John Paul II Sports Hall']],
+  ['pu-health', ['Health Center']],
+  ['pu-parking-moto', ['Motorcycle Parking']],
+]);
+
+// Additional official names serve as fallbacks when a primary match is absent.
+const PROVIDENCE_ENGLISH_ALIASES = new Map<string, readonly string[]>([
+  // Official admissions contact (checked 2026-11-24):
+  // https://hstopu.pu.edu.tw/p/412-1105-1496.php
+  ['pu-wenxing', ['Bishop Kupfer Hall']],
   // Official bilingual facilities page (checked 2026-11-24):
   // https://dpcd.pu.edu.tw/p/412-1047-3561.php
-  ['pu-library', ['Gaesia Library', 'Luking Library']],
+  ['pu-library', ['Luking Library']],
+  ['pu-gym', ['John Paul II Stadium']],
   // Official university archives campus directory (checked 2026-11-24):
   // https://c067.pu.edu.tw/p/412-1121-4218.php
   ['pu-zhishan', ['Zhi Shan Hall']],
   ['pu-xijia', ['Schultz Hall']],
   ['pu-sigao', ['St. Bosco Hall']],
   ['pu-monastery', ['Our Lady of Providence Convent']],
-  // campusPois.js uses "Chapel"; the mobile catalog uses the full title.
-  ['pu-chapel', ['Chapel', 'Chapel of Our Lady of Providence']],
-  ['pu-jingyuan', ['Jingyuan Cafeteria']],
-  ['pu-yiyuan', ['Yiyuan Cafeteria']],
-  // Same official facilities page identifies the sports hall as Stadium.
-  ['pu-gym', ['John Paul II Sports Hall', 'John Paul II Stadium']],
-  ['pu-health', ['Health Center']],
-  ['pu-parking-moto', ['Motorcycle Parking']],
 ]);
 
-function officialSourcedNames(published: CampusMapPlaceLike): string[] {
+function primarySourcedNames(published: CampusMapPlaceLike): string[] {
   const names = [published.name];
   const catalogEnglish = PUBLISHED_PROVIDENCE_ENGLISH_NAMES.get(published.id);
   if (catalogEnglish) names.push(...catalogEnglish);
@@ -348,7 +354,8 @@ function officialSourcedNames(published: CampusMapPlaceLike): string[] {
 function isSourcedBuildingLabel(school: string, published: CampusMapPlaceLike, suppliedLabel: unknown): boolean {
   const label = comparisonText(suppliedLabel);
   if (!label) return false;
-  if (officialSourcedNames(published).some((name) => comparisonText(name) === label)) return true;
+  const names = [...primarySourcedNames(published), ...(PROVIDENCE_ENGLISH_ALIASES.get(published.id) ?? [])];
+  if (names.some((name) => comparisonText(name) === label)) return true;
   return VERIFIED_CLASSROOM_BUILDING_CODES.some(
     (entry) =>
       entry.schoolId === school &&
@@ -482,22 +489,16 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     // A sourced clinic, chapel or sports POI must not navigate to another
     // building through an unsourced Firestore `building` override.
     const building = sourcedBuildingLabel(school, published, location.building);
-    // Importing an official alias into a display field does not give it
-    // priority over a different POI whose public name matches the query.
-    const publicName = published ? comparisonText(published.name) : undefined;
-    const matchesPublicName = [location.name, building].some((label) =>
-      (publicName === undefined || comparisonText(label) === publicName) &&
-      nameMatchesRoom(comparable, label),
-    );
+    const primaryNames = published ? primarySourcedNames(published) : [location.name, building];
     if (
-      matchesPublicName ||
+      primaryNames.some((name) => nameMatchesRoom(comparable, name)) ||
       nameMatchesVerifiedCode(school, comparable, location.name) ||
       nameMatchesVerifiedCode(school, comparable, building)
     ) {
       primaryMatches.push(location);
     } else if (
       published &&
-      (officialSourcedNames(published).some((name) => nameMatchesRoom(comparable, name)) ||
+      (PROVIDENCE_ENGLISH_ALIASES.get(published.id)?.some((name) => nameMatchesRoom(comparable, name)) ||
         matchesSourcedProvidenceCode(comparable, published))
     ) {
       aliasMatches.push(location);
