@@ -258,12 +258,28 @@ describe('tronClassScraper', () => {
     expect(https.request).toHaveBeenCalledTimes(1);
   });
 
-  test.each([
-    { homework_activities: [{ id: 20001 }], total: 0 },
-    { homework_activities: Array.from({ length: 51 }, (_, index) => ({ id: 20001 + index })), total: 51 },
-  ])('rejects contradictory or oversized homework pages: %p', async response => {
-    mockHttpsResponse({ body: JSON.stringify(response) });
+  test('rejects a homework page longer than the requested page size', async () => {
+    const homework = Array.from({ length: 51 }, (_, index) => ({ id: 20001 + index }));
+    mockHttpsResponse({ body: JSON.stringify({ homework_activities: homework, total: 51 }) });
     await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1)).rejects.toMatchObject({
+      code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
+    });
+  });
+
+  test('integration homework page rejects an array longer than the reported total', async () => {
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: [{ id: 20001 }], total: 0, page: 1, page_size: 50 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1, 50, {})).rejects.toMatchObject({
+      code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
+    });
+  });
+
+  test('integration homework page rejects a school page number that differs from the request', async () => {
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: [{ id: 20001 }], total: 1, page: 1, page_size: 50 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 2, 50, {})).rejects.toMatchObject({
       code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
     });
   });
@@ -490,6 +506,26 @@ describe('tronClassScraper', () => {
     });
     await expect(tcFetchHomeworkActivitiesPage({}, 10001, 1, 50, {})).rejects.toMatchObject({
       code: 'TC_HOMEWORK_RESPONSE_INVALID', status: 502,
+    });
+  });
+
+  test('legacy homework page keeps a valid array when the school page number differs from the request', async () => {
+    const homework = [{ id: 20001, title: '期末專題提案', submitted: false }];
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: homework, total: 1, page: 1, page_size: 50 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 2, 50)).resolves.toEqual({
+      homework_activities: homework, total: 1, page: 1, page_size: 50,
+    });
+  });
+
+  test('legacy homework page keeps a valid array longer than the reported total', async () => {
+    const homework = [{ id: 20001 }, { id: 20002 }];
+    mockHttpsResponse({
+      body: JSON.stringify({ homework_activities: homework, total: 1, page: 1, page_size: 50 }),
+    });
+    await expect(tcFetchHomeworkActivitiesPage({ session: 'cookie' }, 10001, 1, 50)).resolves.toEqual({
+      homework_activities: homework, total: 1, page: 1, page_size: 50,
     });
   });
 
