@@ -912,6 +912,9 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
           ignoredViewportRef.current = viewportSignature(viewport);
         }
       } catch { /* Partial WebViews: nothing to ignore. */ }
+      // An explicit overlay tap must not stay blocked by a stale hidden
+      // observer entry after the keyboard has already been dismissed.
+      if (visibility === 'hidden') visibility = 'unknown';
       syncVisibility();
     };
     const container = sceneContainer.current;
