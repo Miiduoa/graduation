@@ -77,27 +77,11 @@ const NEGATION_SOURCE = TRONCLASS_NEGATORS
   })
   .join('|');
 const MAX_COMPOUND_TRONCLASS_CLAUSES = 3;
-const PLACEMENT_VERB_SOURCE = '放[入到進上]|貼[上到入]|丟[到給入]|塞[入進到]|投[入進到]|搬[到去]';
-const SUBMIT_VERB_SOURCE = [
-  '重新(?:繳交|提交|上傳|上載)|繳交|提交|送出|交出|上傳|上載',
-  '補交|補繳|遲交|重交|重繳|上繳|遞交|呈交|交付|繳回|交回|附上|夾帶|送件|寄出',
-  // Object may come before the verb, as in「把附件回傳／傳給老師」.
-  '回傳|傳給|傳到|傳回|傳送|傳去|送給|送到|寄給|寄到|遞給|遞到|轉給|轉到|轉寄',
-  PLACEMENT_VERB_SOURCE,
-  '\\b(?:submit|upload|resubmit|hand\\s+in|turn\\s+in|send\\s+(?:in|to|back)|forward)\\b',
-  // Short verbs also form commands with a preceding object or no object.
-  '[交繳]',
-].join('|');
-const OTHER_WRITE_VERB_SOURCE = '發[佈布文]|回[覆復]|留言|刪除|撤回|填答|評分|簽到|簽退|點名|退選|選課|\\b(?:delete|post|reply|withdraw)\\b';
 const PREFIX_ANCHOR_WINDOW = 160;
 
 function suffixForEndAnchor(text: string): string {
   return text.length <= PREFIX_ANCHOR_WINDOW ? text : text.slice(-PREFIX_ANCHOR_WINDOW);
 }
-const WRITE_NEGATION_SOURCE = `(?:${NEGATION_SOURCE})\\s*(?:(?:幫我|替我|代我|自動|直接)\\s*)*`;
-// 把／將 may place the object before the verb:「不要把玩課雲作業貼上」.
-const NEGATED_BA_FILL = '(?:(?:把|將)\\s*(?:(?![，,；;。！!？?\\r\\n]|然後|接著|接下來|順便|並且|另外|同時).){0,40}?)?';
-const NEGATED_WRITE_SOURCE = `${WRITE_NEGATION_SOURCE}${NEGATED_BA_FILL}(?:${SUBMIT_VERB_SOURCE}|${OTHER_WRITE_VERB_SOURCE})`;
 const NOUN_COMPOUNDS = [
   '交通資訊', '交通', '交流', '交換', '交易', '交際', '交響', '交友', '交集', '交往',
   '外交',
@@ -138,6 +122,7 @@ const STATUS_WRITE_COMPOUNDS = [
   '沒提交', '沒繳交', '沒繳', '沒交',
   '待提交', '待繳交', '待繳', '待交',
 ];
+const STATUS_PARTICLES = ['有沒有', '有無', '過了嗎', '了沒', '了嗎'];
 
 const DOMAIN_NOUNS = [
   '作業', '報告', '附件', '檔案', '作品', '心得', '講義', '考卷', '表單',
@@ -155,7 +140,8 @@ const WRITE_COMPOUNDS = [
   '補交', '補繳', '遲交', '重交', '重繳', '上繳', '遞交', '呈交', '交付', '繳回', '交回',
   '轉交', '代交', '面交', '附上', '夾帶', '送件', '寄出', '回傳', '傳給', '傳到', '傳回',
   '傳送', '傳去', '送給', '送到', '寄給', '寄到', '遞給', '遞到', '轉給', '轉到', '轉寄',
-  '放入', '放到', '放進', '放上', '貼上', '貼到', '丟到', '塞進', '投入', '搬到',
+  '放入', '放到', '放進', '放上', '貼上', '貼到', '貼入', '丟到', '丟給', '丟入',
+  '塞入', '塞進', '塞到', '投入', '投進', '投到', '搬到', '搬去',
 ];
 const OTHER_WRITE_VERBS = [
   '發布', '發佈', '發文', '回覆', '回復', '留言', '刪除', '撤回', '填答', '評分',
@@ -166,6 +152,17 @@ const OTHER_WRITE_VERBS = [
 ];
 const WRITE_VERB_SET = new Set<string>([...WRITE_COMPOUNDS, ...OTHER_WRITE_VERBS, '交', '繳']);
 const WRITE_COMPOUND_SET = new Set(WRITE_COMPOUNDS);
+const WRITE_VERB_PATTERN_SOURCE = [...WRITE_VERB_SET]
+  .slice()
+  .sort((a, b) => b.length - a.length)
+  .map(value => {
+    const source = escapeRegex(value).replace(/ /g, '\\s+');
+    return /[A-Za-z']/.test(value) ? `\\b${source}\\b` : source;
+  })
+  .join('|');
+const WRITE_NEGATION_SOURCE = `(?:${NEGATION_SOURCE})\\s*(?:(?:幫我|替我|代我|自動|直接)\\s*)*`;
+const NEGATED_BA_FILL = '(?:(?:把|將)\\s*(?:(?![，,；;。！!？?\\r\\n]|然後|接著|接下來|順便|並且|另外|同時).){0,40}?)?';
+const NEGATED_WRITE_SOURCE = `${WRITE_NEGATION_SOURCE}${NEGATED_BA_FILL}(?:${WRITE_VERB_PATTERN_SOURCE})`;
 const BA_MARKERS = new Set(['把', '將']);
 const BA_OBJECT_WORDS = new Set([
   '附件', '檔案', '檔', '文件', '作業', '報告', '截圖', '作品', '心得', '講義', '考卷', '表單', '修訂稿',
@@ -181,6 +178,7 @@ type Token = { value: string; start: number; end: number; kind: TokenKind };
 const LEXICON: { value: string; kind: TokenKind }[] = [
   ...WRITE_COMPOUNDS.map(value => ({ value, kind: 'write' as const })),
   ...STATUS_WRITE_COMPOUNDS.map(value => ({ value, kind: 'other' as const })),
+  ...STATUS_PARTICLES.map(value => ({ value, kind: 'other' as const })),
   ...OTHER_WRITE_VERBS.map(value => ({ value, kind: 'write' as const })),
   ...DOMAIN_NOUNS.map(value => ({ value, kind: 'noun' as const })),
   ...NOUN_COMPOUNDS.map(value => ({ value, kind: 'noun' as const })),
@@ -502,12 +500,12 @@ const GOVERNED_STATUS = new RegExp(
 const SUBMISSION_QUESTION = new RegExp(`^(?:了沒|了嗎|沒|過了嗎)${STATUS_BOUNDARY_SOURCE}`, 'u');
 const DEADLINE_SUFFIX_SOURCE = `(?:作業\\s*(?:的\\s*)?)?(?:期限|截止(?:日(?:期)?|時間)?|deadline\\b)(?:\\s*(?:是)?(?:什麼時候|哪一天|哪天|嗎|呢))?${STATUS_BOUNDARY_SOURCE}`;
 const SUBMISSION_DEADLINE = new RegExp(`^${DEADLINE_SUFFIX_SOURCE}`, 'iu');
-const SUBMISSION_DEADLINE_QUERY = new RegExp(`(?:${SUBMIT_VERB_SOURCE})\\s*${DEADLINE_SUFFIX_SOURCE}`, 'iu');
+const SUBMISSION_DEADLINE_QUERY = new RegExp(`(?:${WRITE_VERB_PATTERN_SOURCE})\\s*${DEADLINE_SUFFIX_SOURCE}`, 'iu');
 const HOMEWORK_STATUS_SUFFIX = new RegExp(
   `^\\s*(?:的?作業)?\\s*的?(?:有哪些)?(?:${STATUS_BOUNDARY_SOURCE}|\\s*(?=${CLAUSE_SEPARATOR.source}|${NEGATED_WRITE_SOURCE}))`, 'iu',
 );
 const STATUS_EXPLANATION = new RegExp(
-  `((?:${SUBMIT_VERB_SOURCE})${STATUS_NOUN_SOURCE})\\s*(?:如何|怎麼樣)${STATUS_BOUNDARY_SOURCE}`, 'giu',
+  `((?:${WRITE_VERB_PATTERN_SOURCE})${STATUS_NOUN_SOURCE})\\s*(?:如何|怎麼樣)${STATUS_BOUNDARY_SOURCE}`, 'giu',
 );
 
 const LMS_SUBJECT = new RegExp(`^${LMS_SOURCE}\\s*(?:的\\s*)?$`, 'iu');
@@ -542,7 +540,7 @@ function isBaClausePunct(token: Token): boolean {
 }
 
 /** Classify each occurrence using its own context in the original request. */
-function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
+function writeCommandRoute(text: string): 'planner' | 'unsupported' | 'ambiguous' | null {
   const tokens = tokensFor(text);
   let lastPunctEnd = 0;
   let clauseHasBa = false;
@@ -583,26 +581,31 @@ function writeCommandRoute(text: string): 'planner' | 'unsupported' | null {
     }
     return 'unsupported';
   }
-  // 把／將 clauses can use a transfer verb that the list above has not named yet.
-  // If the object is a submission item and a transfer or placement verb follows, treat it as a write.
-  if (hasBaObjectWrite(text)) return 'unsupported';
+  const ba = baConstructionState(text);
+  if (ba === 'unresolved') return 'ambiguous';
+  if (ba === 'write') return 'unsupported';
   return null;
 }
 
-function baSpanIsWrite(tokens: Token[], baAt: number, end: number): boolean {
+
+function baSpanKind(tokens: Token[], baAt: number, end: number): 'write' | 'query' | 'unresolved' | 'none' {
   let objectAt = -1;
   for (let index = baAt + 1; index < end; index += 1) {
     const token = tokens[index]!;
     if (isWhitespaceToken(token) || token.value === ':' || token.value === '：') continue;
-    if (BA_OBJECT_WORDS.has(token.value)) {
+    if (BA_OBJECT_WORDS.has(token.value) || token.kind === 'noun') {
       objectAt = index;
       break;
     }
+    if (isWriteVerbToken(token) || token.kind === 'query' || QUERY_START.has(token.value) ||
+      isClauseBoundaryToken(token) || isBaClausePunct(token)) {
+      break;
+    }
   }
-  if (objectAt < 0) return false;
-  let sawContent = false;
-  let sawQuery = false;
+  if (objectAt < 0) return 'none';
   let sawWrite = false;
+  let sawQuery = false;
+  let sawContent = false;
   for (let index = objectAt + 1; index < end; index += 1) {
     const token = tokens[index]!;
     if (isWhitespaceToken(token) || token.value === ':' || token.value === '：') continue;
@@ -610,23 +613,101 @@ function baSpanIsWrite(tokens: Token[], baAt: number, end: number): boolean {
     if (isWriteVerbToken(token)) sawWrite = true;
     else if (token.kind === 'query' || QUERY_START.has(token.value)) sawQuery = true;
   }
-  if (!sawContent || sawWrite) return true;
-  return !sawQuery;
+  if (sawWrite && !sawQuery) return 'write';
+  if (sawQuery && !sawWrite) return 'query';
+  if (sawWrite && sawQuery) return 'unresolved';
+  if (!sawContent) return 'unresolved';
+  return 'unresolved';
 }
 
-function hasBaObjectWrite(text: string): boolean {
+function baConstructionState(text: string): 'write' | 'query' | 'none' | 'unresolved' {
   const tokens = tokensFor(text);
   let baAt = -1;
+  let result: 'write' | 'query' | 'none' = 'none';
+  const finish = (end: number): 'unresolved' | null => {
+    if (baAt < 0) return null;
+    const kind = baSpanKind(tokens, baAt, end);
+    baAt = -1;
+    if (kind === 'unresolved') return 'unresolved';
+    if (kind === 'write') result = 'write';
+    else if (kind === 'query' && result !== 'write') result = 'query';
+    return null;
+  };
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]!;
     if (isBaClausePunct(token)) {
-      if (baAt >= 0 && baSpanIsWrite(tokens, baAt, index)) return true;
-      baAt = -1;
+      if (finish(index) === 'unresolved') return 'unresolved';
       continue;
     }
     if (BA_MARKERS.has(token.value) && !isWriteNegatedAt(tokens, index)) baAt = index;
   }
-  return baAt >= 0 && baSpanIsWrite(tokens, baAt, tokens.length);
+  if (finish(tokens.length) === 'unresolved') return 'unresolved';
+  return result;
+}
+
+type NegationScan = 'clear' | 'negated-write' | 'negated-query' | 'unresolved';
+
+function isClauseScanBoundary(token: Token): boolean {
+  return token.kind === 'punct' || (token.kind === 'cue' && (CLAUSE_CUES.includes(token.value) || ACTION_CUES.includes(token.value)));
+}
+
+/** Single-pass linear scan: every negator in the clause is considered; never jump to the clause end. */
+function scanNegation(tokens: Token[], interior: boolean[]): NegationScan {
+  let result: NegationScan = 'clear';
+  let pending: 'open' | 'ba' | null = null;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (isClauseScanBoundary(token)) {
+      if (pending) return 'unresolved';
+      continue;
+    }
+    if (isNegatorToken(token)) {
+      if (pending === 'open') return 'unresolved';
+      pending = pending ?? 'open';
+      continue;
+    }
+    if (!pending) continue;
+    if (isWhitespaceToken(token) || token.value === ':' || token.value === '：') continue;
+    if (WRITE_HELPERS.has(token.value)) continue;
+    if (BA_MARKERS.has(token.value)) {
+      pending = 'ba';
+      continue;
+    }
+    if (pending === 'ba' && (BA_OBJECT_WORDS.has(token.value) || token.kind === 'noun' || token.kind === 'other' || token.kind === 'cue')) {
+      continue;
+    }
+    if (interior[index] && !isWriteVerbToken(token) && token.kind !== 'query' && !QUERY_START.has(token.value)) {
+      continue;
+    }
+    if (isWriteVerbToken(token)) {
+      if (result !== 'negated-query') result = 'negated-write';
+      pending = null;
+      continue;
+    }
+    if (token.kind === 'query' || QUERY_START.has(token.value)) {
+      result = 'negated-query';
+      pending = null;
+      continue;
+    }
+    if (pending === 'ba') continue;
+    return 'unresolved';
+  }
+  if (pending) return 'unresolved';
+  return result;
+}
+
+function writeLexiconAndRegexDisagree(text: string): boolean {
+  const tokens = tokensFor(text);
+  const pattern = new RegExp(WRITE_VERB_PATTERN_SOURCE, 'giu');
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const writeToken = tokens.some(token => token.start === start && token.end === end && isWriteVerbToken(token));
+    const consumedAsNonWrite = tokens.some(token =>
+      token.start <= start && token.end >= end && (token.kind === 'noun' || token.kind === 'other'));
+    if (!writeToken && !consumedAsNonWrite) return true;
+  }
+  return false;
 }
 
 function isNegatedWriteFrom(tokens: Token[], negAt: number): boolean {
@@ -646,41 +727,7 @@ function isNegatedWriteFrom(tokens: Token[], negAt: number): boolean {
   return false;
 }
 
-function isNegatedQueryFrom(tokens: Token[], negAt: number, interior: boolean[]): boolean {
-  let seenBa = false;
-  for (let index = negAt + 1; index < tokens.length; index += 1) {
-    const token = tokens[index]!;
-    if (isWhitespaceToken(token) || token.value === ':' || token.value === '：') continue;
-    if (token.kind === 'punct' || (token.kind === 'cue' && CLAUSE_CUES.includes(token.value))) return false;
-    if (token.kind === 'cue' && ACTION_CUES.includes(token.value)) return false;
-    if (BA_MARKERS.has(token.value)) {
-      seenBa = true;
-      continue;
-    }
-    if (WRITE_HELPERS.has(token.value) || token.kind === 'cue') continue;
-    if (interior[index]) continue;
-    if (isWriteVerbToken(token)) return false;
-    if (token.kind === 'query' || QUERY_START.has(token.value)) return true;
-    if (seenBa) continue;
-    return false;
-  }
-  return false;
-}
 
-function clauseHasNegatedQuery(tokens: Token[], interior: boolean[]): boolean {
-  for (let index = 0; index < tokens.length; index += 1) {
-    if (!isNegatorToken(tokens[index]!)) continue;
-    if (isNegatedWriteFrom(tokens, index)) continue;
-    if (isNegatedQueryFrom(tokens, index, interior)) return true;
-    // Skip to the next clause so repeated 不要把… without a write is linear.
-    while (index + 1 < tokens.length &&
-      tokens[index + 1]!.kind !== 'punct' &&
-      !(tokens[index + 1]!.kind === 'cue' && CLAUSE_CUES.includes(tokens[index + 1]!.value))) {
-      index += 1;
-    }
-  }
-  return false;
-}
 
 
 function textWithoutQuotedSpans(text: string): string {
@@ -700,7 +747,8 @@ function authorizesPrivateRead(original: string): boolean {
   if (keywordOnlyInsideQuotes(original)) return false;
   const tokens = tokensFor(original);
   const interior = modifierInteriorIndex(tokens);
-  if (clauseHasNegatedQuery(tokens, interior)) return false;
+  const negation = scanNegation(tokens, interior);
+  if (negation === 'negated-query' || negation === 'unresolved') return false;
   // Terminal status questions ask for the current state.
   const explanationText = original.replace(STATUS_EXPLANATION, '$1');
   return !(/(?:翻譯|翻成|translate|改寫|潤飾|rewrite|舉例|例句|範例|示範|解釋|釋義|備註|字串|這句|這段|什麼意思|意思是什麼|怎麼|如何|教我|說明一下|\bhow\s+(?:to|do|can)|\bwhat\s+(?:is|does)|\bexample)/i.test(explanationText) ||
@@ -714,9 +762,7 @@ function authorizesPrivateRead(original: string): boolean {
  * the original planner instead of reading beside an unhandled write.
  */
 function wholeRequestAllowsCompoundRead(question: string): boolean {
-  const original = question.normalize('NFKC').trim();
-  const unquoted = textWithoutQuotedSpans(original);
-  return !writeCommandRoute(unquoted) && authorizesPrivateRead(original);
+  return classifyTronClassSentence(question)?.outcome === 'clearly-read';
 }
 
 /**
@@ -786,23 +832,12 @@ export type TronClassAgentQueryIntent = {
   unsupportedReason?: 'multiple_actions';
 };
 
-/**
- * This router sees only the user's current message. Course descriptions, notices,
- * history and model output must never be passed to it as commands.
- */
-export function parseTronClassAgentIntent(question: string): TronClassAgentQueryIntent | null {
-  if (typeof question !== 'string' || !question.trim() || question.length > 1000 ||
-    !TRONCLASS_KEYWORD.test(question)) return null;
-  const original = question.normalize('NFKC').trim();
-  if (isExistingTronClassNavigation(original)) return null;
-  const unquoted = textWithoutQuotedSpans(original);
-  const writeRoute = writeCommandRoute(unquoted);
-  if (!authorizesPrivateRead(original)) return null;
-  if (writeRoute === 'planner' || isMultiClauseRequest(original)) return null;
-  if (writeRoute) return { intent: 'unsupported', pendingOnly: false };
-  const text = textWithoutQuotedSpans(readRoutingText(original));
-  // Keywords that only appeared inside a negated write or a quotation do not authorize a private read.
-  if (!TRONCLASS_KEYWORD.test(text)) return null;
+export type TronClassSentenceClass =
+  | { outcome: 'clearly-read'; intent: TronClassAgentQueryIntent }
+  | { outcome: 'clearly-write'; intent: TronClassAgentQueryIntent | null }
+  | { outcome: 'ambiguous' };
+
+function readIntentOf(text: string): TronClassAgentQueryIntent {
   if (/(?:能做什麼|可以做什麼|有哪些功能|支援什麼|支援哪些|功能範圍|代理權限|what\s+can|capabilit)/i.test(text)) {
     return { intent: 'capabilities', pendingOnly: false };
   }
@@ -823,6 +858,55 @@ export function parseTronClassAgentIntent(question: string): TronClassAgentQuery
   if (SUBMISSION_DEADLINE_QUERY.test(text)) return { intent: 'homework', pendingOnly: false };
   if (dataIntent) return { intent: dataIntent, pendingOnly: false };
   return { intent: 'capabilities', pendingOnly: false };
+}
+
+/**
+ * Classify a TronClass sentence as a clearly auto-readable request, a clearly
+ * routed write (existing write or planner consent flow), or ambiguous. Ambiguous
+ * requests never auto-read homework and never auto-write; they stay with the
+ * existing planner / consent prompt so the student can confirm.
+ */
+export function classifyTronClassSentence(question: string): TronClassSentenceClass | null {
+  if (typeof question !== 'string' || !question.trim() || question.length > 1000 ||
+    !TRONCLASS_KEYWORD.test(question)) return null;
+  const original = question.normalize('NFKC').trim();
+  if (isExistingTronClassNavigation(original)) return null;
+  const unquoted = textWithoutQuotedSpans(original);
+  const tokens = tokensFor(original);
+  const interior = modifierInteriorIndex(tokens);
+  if (scanNegation(tokens, interior) === 'unresolved') return { outcome: 'ambiguous' };
+  if (baConstructionState(unquoted) === 'unresolved') return { outcome: 'ambiguous' };
+  if (writeLexiconAndRegexDisagree(unquoted)) return { outcome: 'ambiguous' };
+  const writeRoute = writeCommandRoute(unquoted);
+  if (writeRoute === 'ambiguous') return { outcome: 'ambiguous' };
+  if (!authorizesPrivateRead(original)) {
+    // Translation, quotation, explanation, or a negated query is not a write
+    // command, even if a write-verb token appears as an example word.
+    return { outcome: 'ambiguous' };
+  }
+  if (writeRoute === 'planner') return { outcome: 'clearly-write', intent: null };
+  if (writeRoute === 'unsupported') return { outcome: 'clearly-write', intent: { intent: 'unsupported', pendingOnly: false } };
+  const text = textWithoutQuotedSpans(readRoutingText(original));
+  if (!TRONCLASS_KEYWORD.test(text)) return { outcome: 'ambiguous' };
+  const intent = readIntentOf(text);
+  if (intent.intent === 'unsupported' || intent.intent === 'prepare') {
+    return { outcome: 'clearly-write', intent };
+  }
+  return { outcome: 'clearly-read', intent };
+}
+
+/**
+ * This router sees only the user's current message. Course descriptions, notices,
+ * history and model output must never be passed to it as commands.
+ */
+export function parseTronClassAgentIntent(question: string): TronClassAgentQueryIntent | null {
+  const classified = classifyTronClassSentence(question);
+  if (!classified || classified.outcome === 'ambiguous') return null;
+  // Multi-clause requests stay with the planner; clearly-read clauses may still
+  // be supplemented through tronClassCompoundClauses.
+  if (isMultiClauseRequest(question.normalize('NFKC').trim())) return null;
+  if (classified.outcome === 'clearly-write') return classified.intent;
+  return classified.intent;
 }
 
 export function canAnswerTronClassQuestion(question: string): boolean {
