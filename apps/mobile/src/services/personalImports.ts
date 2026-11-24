@@ -5,6 +5,7 @@ import {
   clearPersonalImportRollback,
   commitWebPersonalImports,
   hasWebPersonalImportCommit,
+  parsePersonalImportStorageJson,
   personalImportCheckpointKey,
   preparePersonalImportRollback,
   readPersonalImportRollback,
@@ -57,6 +58,7 @@ function isStorageRowTooLarge(error: unknown): boolean {
 async function readRecovery(
   key: string,
   scope: PersonalImportScope,
+  webPrimary: string | null,
 ): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
   const checkpoint = personalImportCheckpointKey(key);
   let encoded: string | null;
@@ -92,9 +94,15 @@ async function readRecovery(
   const journal = await readPersonalImportRollback(key);
   if (journal === undefined) return null;
   if (journal === 'null') return { raw: null, ledger: empty() };
-  // A marked journal can be the only verified copy. Propagate read/parse errors.
-  if (!journal) throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
-  return { raw: journal, ledger: parseLedger(journal, scope) };
+  try {
+    if (!journal) throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
+    return { raw: journal, ledger: parseLedger(journal, scope) };
+  } catch (error) {
+    // A corrupt Web journal can be skipped when the primary is a verified ledger.
+    if (!webPrimary) throw error;
+    parseLedger(webPrimary, scope);
+    return null;
+  }
 }
 
 async function restoreLedger(key: string, { raw }: Recovery) {
@@ -165,7 +173,7 @@ export async function loadPersonalImports(
     const sequence = writeSequence;
     const web = Platform.OS === 'web';
     const webPrimary = web ? await AsyncStorage.getItem(key) : null;
-    const recovery = hasWebPersonalImportCommit(webPrimary) ? null : await readRecovery(key, scope);
+    const recovery = hasWebPersonalImportCommit(webPrimary) ? null : await readRecovery(key, scope, webPrimary);
     if (sequence !== writeSequence) continue;
     if (recovery) return recovery.ledger;
     if (web) return parseLedger(webPrimary, scope);
@@ -181,7 +189,7 @@ function parseLedger(raw: string | null, scope: PersonalImportScope): PersonalIm
   if (!raw) return empty();
   let value: PersonalImportLedger;
   try {
-    const { webCommit: _webCommit, ...ledger } = JSON.parse(raw);
+    const { webCommit: _webCommit, ...ledger } = parsePersonalImportStorageJson(raw);
     value = ledger as PersonalImportLedger;
   } catch {
     throw new Error('儲存的匯入資料無法讀取，請保留此裝置上的資料並稍後重試。');
@@ -266,7 +274,7 @@ export function mutatePersonalImportLedger<T>(
       assertWritable();
       const web = Platform.OS === 'web';
       const webPrimary = web ? await AsyncStorage.getItem(key) : null;
-      const recovery = hasWebPersonalImportCommit(webPrimary) ? null : await readRecovery(key, scope);
+      const recovery = hasWebPersonalImportCommit(webPrimary) ? null : await readRecovery(key, scope, webPrimary);
       let primaryRaw = web || recovery ? webPrimary : await AsyncStorage.getItem(key);
       let persistedRaw = recovery ? recovery.raw : primaryRaw;
       const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);

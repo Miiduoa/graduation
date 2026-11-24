@@ -366,9 +366,16 @@ test.each([
   }
 });
 
-test.each(['journal', 'checkpoint', 'both'] as const)(
-  'Web at quota publishes a one-character edit over legacy recovery (%s)',
-  async (recovery) => {
+test.each([
+  ['journal', '中斷寫入', '原本標'],
+  ['checkpoint', '中斷寫入', '原本標'],
+  ['both', '中斷寫入', '原本標'],
+  ['journal', '中斷寫', '原本標'],
+  ['checkpoint', '中斷寫', '原本標'],
+  ['none', '原本標題', '更新標題'],
+] as const)(
+  'Web at quota publishes with %s recovery, primary title %s, and edited title %s',
+  async (recovery, primaryTitle, editedTitle) => {
     const cleanup = useWebStorage();
     const restoreLocks = withoutWebWriteLocks();
     const storage = window.localStorage;
@@ -382,11 +389,12 @@ test.each(['journal', 'checkpoint', 'both'] as const)(
     try {
       const { ledger } = await appendPersonalImports(scope, [row('original', '原本標題')]);
       const original = JSON.stringify(ledger);
-      // Recovery must win before the edit. Equal-length titles keep the quota boundary exact.
-      const primary = original.replace('原本標題', '中斷寫入');
+      const primary = original.replace('原本標題', primaryTitle);
+      const hasJournal = recovery === 'journal' || recovery === 'both';
+      const hasCheckpoint = recovery === 'checkpoint' || recovery === 'both';
       storage.setItem(key, primary);
-      if (recovery !== 'checkpoint') storage.setItem(journal, original);
-      if (recovery !== 'journal') storage.setItem(checkpoint, original);
+      if (hasJournal) storage.setItem(journal, original);
+      if (hasCheckpoint) storage.setItem(checkpoint, original);
       multiGet.mockImplementation(async (keys) =>
         keys.map((entry) => [entry, storage.getItem(entry)]));
       await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
@@ -403,7 +411,7 @@ test.each(['journal', 'checkpoint', 'both'] as const)(
       const guard = { canContinue: () => true };
       const edit = () => mutatePersonalImportLedger(scope, guard, (current) => {
         // Keep revision metadata fixed to exercise exactly one character of headroom.
-        const edited = { ...current, records: [{ ...current.records[0], title: '原本標' }] };
+        const edited = { ...current, records: [{ ...current.records[0], title: editedTitle }] };
         return { ledger: edited, result: edited };
       });
       await expect(edit()).rejects.toMatchObject({ name: 'QuotaExceededError' });
@@ -412,11 +420,13 @@ test.each(['journal', 'checkpoint', 'both'] as const)(
 
       primaryCapacity = primary.length;
       const edited = await edit();
-      expect(edited.records[0].title).toBe('原本標');
-      expect(storage.getItem(key)).toHaveLength(primaryCapacity);
+      expect(edited.records[0].title).toBe(editedTitle);
+      expect(storage.getItem(key)).toHaveLength(JSON.stringify(edited).length);
       await expect(loadPersonalImports(scope)).resolves.toEqual(edited);
-      expect(storage.getItem(journal)).toBe(recovery === 'checkpoint' ? null : original);
-      expect(storage.getItem(checkpoint)).toBe(recovery === 'journal' ? null : original);
+      expect(storage.getItem(journal)).toBe(hasJournal ? original : null);
+      expect(storage.getItem(checkpoint)).toBe(hasCheckpoint ? original : null);
+      expect(quota.mock.calls.some(([entry]) =>
+        entry.startsWith('campus.personal-imports.stage.v2:'))).toBe(false);
       expect(Object.keys(window.sessionStorage)).toEqual([]);
     } finally {
       quota?.mockRestore();
@@ -926,6 +936,35 @@ test('Web preserves the ledger after revocation and can retry after restart with
     stageWrite?.mockRestore();
     cleanup();
     Object.defineProperty(Paths, 'document', document);
+  }
+});
+
+test.each([
+  '{"version":1,',
+  '{"version":1,"records":[]}',
+  '{"id":"legacy","original":null}',
+])('Web can read and edit a valid primary with a corrupt journal (%s)', async (corrupt) => {
+  const cleanup = useWebStorage();
+  try {
+    const { ledger } = await appendPersonalImports(scope, [row('original')]);
+    const storage = window.localStorage;
+    const key = personalImportStorageKey(scope);
+    const journal = `campus.personal-imports.rollback.v1:${sha256(key)}`;
+    storage.setItem(key, JSON.stringify(ledger));
+    storage.setItem(journal, corrupt);
+
+    await expect(loadPersonalImports(scope)).resolves.toEqual(ledger);
+    storage.removeItem(key);
+    await expect(loadPersonalImports(scope)).rejects.toThrow('儲存的匯入資料無法讀取');
+    storage.setItem(key, JSON.stringify(ledger));
+
+    const edited = await editPersonalImport(scope, ledger.records[0], row('original', '已更新'), {
+      canContinue: () => true,
+    });
+    expect(edited.records[0].title).toBe('已更新');
+    await expect(loadPersonalImports(scope)).resolves.toEqual(edited);
+  } finally {
+    cleanup();
   }
 });
 

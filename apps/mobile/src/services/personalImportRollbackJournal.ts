@@ -7,9 +7,10 @@ import { Platform } from 'react-native';
 const markerSuffix = '.rollback.pending';
 const journalPrefix = 'campus.personal-imports.rollback.v1:';
 const legacyStagePattern = /^campus\.personal-imports\.rollback\.v1:([a-f0-9]{64}):stage:\d+:[^:]+$/;
-// Legacy ledger writers use JSON.stringify with no trailing whitespace.
-// Reserve one JSON whitespace character for a commit that only fits in place.
-const compactWebCommit = '\t';
+// Older compact commits use trailing JSON whitespace. New compact commits
+// store the ledger version under a reserved key of the same length.
+const legacyCompactWebCommit = '\t';
+const compactVersionKey = '$commit';
 
 export const personalImportCheckpointKey = (key: string) => `${key}:checkpoint`;
 
@@ -97,7 +98,7 @@ async function writeWithLease<T>(
       storage.setItem(leaseKey, value);
     } catch (error) {
       if (!isQuotaExceeded(error)) throw error;
-      // Without a persisted lease this attempt may only publish a shrinking
+      // Without a persisted lease this attempt may only publish an in-place
       // replacement atomically. It cannot create or reuse a recovery stage.
       leaseQuotaError = error;
     }
@@ -291,14 +292,20 @@ async function readWebRollback(key: string): Promise<string | undefined> {
   for (;;) {
     const encoded = storage.getItem(backupKey);
     if (encoded === null) return undefined;
-    const journal = JSON.parse(encoded) as WebRollback | { version: number } | null;
+    let journal: WebRollback | { version: number } | null;
+    try {
+      journal = JSON.parse(encoded);
+    } catch {
+      // The ledger reader can fall back to a valid primary when these bytes are corrupt.
+      return encoded;
+    }
     // Older Web builds stored the ledger bytes directly.
     if (journal === null || (typeof journal === 'object' && 'version' in journal)) return encoded;
     if (!journal || typeof journal !== 'object' || !('id' in journal) ||
         typeof journal.id !== 'string' || typeof journal.before !== 'string' ||
         typeof journal.attempted !== 'string' ||
         (journal.original !== null && typeof journal.original !== 'string')) {
-      throw new Error('儲存的匯入資料還原副本無法讀取，請稍後重試。');
+      return encoded;
     }
     const current = fingerprint(await AsyncStorage.getItem(key));
     if (storage.getItem(backupKey) !== encoded) continue;
@@ -308,13 +315,23 @@ async function readWebRollback(key: string): Promise<string | undefined> {
   }
 }
 
+export function parsePersonalImportStorageJson(raw: string) {
+  const value = JSON.parse(raw);
+  if (Platform.OS === 'web' && value?.[compactVersionKey] === 1 && !('version' in value)) {
+    const { [compactVersionKey]: version, ...ledger } = value;
+    return { version, ...ledger };
+  }
+  return value;
+}
+
 export function hasWebPersonalImportCommit(raw: string | null): boolean {
   if (!raw) return false;
   try {
     const value = JSON.parse(raw);
+    if (value?.[compactVersionKey] === 1 && !('version' in value)) return true;
     return value?.version === 1 && (
       typeof value.webCommit === 'string' ||
-      (raw.endsWith(compactWebCommit) && raw === JSON.stringify(value) + compactWebCommit)
+      (raw.endsWith(legacyCompactWebCommit) && raw === JSON.stringify(value) + legacyCompactWebCommit)
     );
   } catch {
     // The ledger parser reports invalid primary data if there is no recovery copy.
@@ -340,7 +357,7 @@ export function commitWebPersonalImports(
   const id = createPersonalImportId();
   const committed = JSON.stringify({ ...JSON.parse(attempted), webCommit: id });
   const conflict = () => new Error('匯入資料已在另一個分頁更新，請重新載入。');
-  const shrinking = before !== null && attempted.length < before.length;
+  const fitsInPlace = before !== null && attempted.length <= before.length;
   const publish = (ownsStage = () => true) => {
     const replace = (raw: string) => {
       assertWritable();
@@ -354,22 +371,25 @@ export function commitWebPersonalImports(
       // generation also retires legacy recovery data without clearing shared keys.
       return replace(committed);
     } catch (error) {
-      if (!isQuotaExceeded(error) || !shrinking) throw error;
+      if (!isQuotaExceeded(error)) throw error;
       // Publish the marker with the ledger in one write so both legacy recovery
       // formats are superseded even when there is no room for a new field.
       const hasLegacyRecovery = storage.getItem(webJournalKey(key)) !== null ||
         storage.getItem(personalImportCheckpointKey(key)) !== null;
-      return replace(hasLegacyRecovery ? attempted + compactWebCommit : attempted);
+      if (!hasLegacyRecovery) return replace(attempted);
+      const { version, ...ledger } = JSON.parse(attempted);
+      return replace(JSON.stringify({ [compactVersionKey]: version, ...ledger }));
     }
   };
   if (!recovery && !leaseQuotaError) return publish();
 
-  const stages = window.sessionStorage;
-  sweepSessionStages(stages);
   if (leaseQuotaError) {
-    if (!shrinking) throw leaseQuotaError;
+    if (!fitsInPlace) throw leaseQuotaError;
     return publish();
   }
+
+  const stages = window.sessionStorage;
+  sweepSessionStages(stages);
 
   // This attempt owns a private, verbatim copy. Encoding it as a JSON string
   // would expand every quote and backslash and consume extra session quota.
@@ -382,7 +402,7 @@ export function commitWebPersonalImports(
     try {
       stages.setItem(stageKey, encoded);
     } catch (error) {
-      if (!isQuotaExceeded(error) || !shrinking) throw error;
+      if (!isQuotaExceeded(error) || !fitsInPlace) throw error;
       // A single atomic replacement leaves the original intact on failure.
       return publish();
     }
