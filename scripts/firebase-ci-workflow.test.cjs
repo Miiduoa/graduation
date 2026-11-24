@@ -225,6 +225,44 @@ test('production workflows fail closed unless the run is on main', () => {
   assertFailsOffMain(announcements.jobs.sync.steps[0]);
 });
 
+test('production build-only dispatch runs both guarded builds without creating a draft or submitting', () => {
+  const release = parseWorkflow('release.yml');
+  const input = release.on.workflow_dispatch.inputs.build_only_sha;
+  assert.equal(input.required, false);
+  assert.equal(input.type, 'string');
+  const verify = release.jobs.preflight.steps.find(
+    (step) => step.run === 'node scripts/verify-eas-build.mjs --dispatch',
+  );
+  assert.equal(verify.env.BUILD_ONLY_SHA, '${{ inputs.build_only_sha }}');
+  assert.equal(verify.env.SUBMIT_TO_STORE, '${{ inputs.submit }}');
+  for (const name of ['build-ios', 'build-android']) {
+    const build = release.jobs[name];
+    assert.equal(build.needs, 'preflight');
+    const submit = build.steps.find((step) => step.run?.includes('eas submit --platform'));
+    assert.equal(submit.if, "inputs.submit && inputs.profile == 'production'");
+  }
+  const condition = release.jobs['create-release'].if;
+  const inputs = { profile: 'production', platform: 'all', submit: false };
+  const needs = Object.fromEntries(
+    ['preflight', 'build-ios', 'build-android'].map((job) => [job, { result: 'success' }]),
+  );
+  // Evaluate the same successful build once from the manual workflow and once from the CLI.
+  const checkDraft = () =>
+    vm.runInNewContext(
+      condition
+        .replaceAll('needs.build-ios', 'needs["build-ios"]')
+        .replaceAll('needs.build-android', 'needs["build-android"]'),
+      {
+        inputs,
+        needs,
+        always: () => true,
+      },
+    );
+  assert.equal(checkDraft(), true);
+  inputs.build_only_sha = sourceCommit;
+  assert.equal(checkDraft(), false);
+});
+
 test('installer recovery gates use the same pinned Ubuntu runtime as real browser installation', () => {
   const supportedRunner = workflow.jobs['build-web']['runs-on'];
   assert.match(supportedRunner, /^ubuntu-\d+\.\d+$/);
