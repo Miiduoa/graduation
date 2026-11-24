@@ -183,6 +183,57 @@ it('PageDown 跨到閏年短月保留焦點，只有選取後才改當日內容'
   expect(onDate).toHaveBeenCalledTimes(1);
 });
 
+it.each([false, true])('跨月進場動畫結束後只揭露仍有焦點的日期（焦點已移開：%s）', (focusMoved) => {
+  Object.defineProperty(window, 'visualViewport', {
+    configurable: true,
+    value: { offsetTop: 0, offsetLeft: 0, width: 320, height: 400 },
+  });
+  let animationOffset = 3;
+  let pageOffset = 0;
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this.id === 'sticky-topbar') return new DOMRect(0, 0, 320, 64);
+    if (this.getAttribute('aria-label') === '2028-02-01') {
+      return new DOMRect(40, 62 + animationOffset - pageOffset, 44, 44);
+    }
+    return originalBounds.call(this);
+  });
+  const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation((options?: ScrollToOptions | number) => {
+    if (typeof options === 'object') pageOffset += options.top ?? 0;
+  });
+
+  function ControlledCalendar() {
+    const [month, setMonth] = useState('2028-01');
+    return (
+      <>
+        <header id="sticky-topbar" style={{ position: 'sticky', top: 0, opacity: 1 }}>
+          <button type="button">其他控制項</button>
+        </header>
+        <MonthCalendar {...baseProps} month={month} onMonthChange={setMonth} />
+      </>
+    );
+  }
+
+  const { container } = render(<ControlledCalendar />);
+  fireEvent.keyDown(focusDate('2028-01-31'), { key: 'ArrowRight' });
+  const target = screen.getByRole('button', { name: '2028-02-01' });
+  expect(document.activeElement).toBe(target);
+  expect(scrollBy).not.toHaveBeenCalled();
+
+  const active = focusMoved ? screen.getByRole('button', { name: '其他控制項' }) : target;
+  if (focusMoved) act(() => active.focus());
+  animationOffset = 0;
+  expect(target.getBoundingClientRect().top).toBe(62);
+  fireEvent.animationEnd(container.querySelector(`.${styles.grid}`)!);
+
+  expect(document.activeElement).toBe(active);
+  if (focusMoved) {
+    expect(scrollBy).not.toHaveBeenCalled();
+  } else {
+    expect(scrollBy).toHaveBeenCalledExactlyOnceWith({ left: 0, top: -2, behavior: 'instant' });
+    expect(target.getBoundingClientRect().top).toBe(64);
+  }
+});
+
 it.each([
   { origin: '2028-10-27', key: 'End', expected: '2028-10-28', width: 609, next: null },
   { origin: '2028-10-23', key: 'Home', expected: '2028-10-22', width: 609, next: null },

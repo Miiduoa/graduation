@@ -6,7 +6,12 @@ import {
   type PersonalImportRecord,
 } from '@campus/shared';
 import { monthCalendarKeyboardDate } from './monthCalendarNavigation';
-import { focusWhenRevealed, focusWhenVisible, retryFocusOnViewportChange } from './calendarScroll';
+import {
+  focusWhenRevealed,
+  focusWhenVisible,
+  retryFocusOnViewportChange,
+  revealForFocus,
+} from './calendarScroll';
 import styles from './MonthCalendar.module.css';
 
 export function MonthCalendar({
@@ -66,6 +71,27 @@ export function MonthCalendar({
     if (pendingFocus.current?.date.startsWith(`${month}-`)) return;
     revealWeek(selectedCellIndex);
   }, [month, selectedDate, selectedCellIndex, dateRevealRevision, revealWeek]);
+
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    const viewport = viewportRef.current;
+    if (!grid || !viewport) return;
+
+    // The entrance transform can hide a date after keyboard focus has already moved to it.
+    const revealFocusedDate = (event: AnimationEvent) => {
+      if (event.target !== grid) return;
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLButtonElement &&
+        active.classList.contains(styles.date) &&
+        grid.contains(active)
+      ) {
+        revealForFocus(active, viewport);
+      }
+    };
+    grid.addEventListener('animationend', revealFocusedDate);
+    return () => grid.removeEventListener('animationend', revealFocusedDate);
+  }, [month]);
 
   const moveDate = useCallback((event: KeyboardEvent | globalThis.KeyboardEvent, focusedDate?: string) => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
