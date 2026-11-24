@@ -112,13 +112,16 @@ export async function readCampusMap(input: {
   const unique = published.filter(place => ids.get(place.id) === 1);
   if (unique.length !== published.length) incomplete = true;
   const publishedIds = new Set(unique.map(place => place.id));
-  const places = withProvidenceCampusPlaces(schoolId, unique);
+  const places = withProvidenceCampusPlaces(schoolId, unique).flatMap(rawPlace => {
+    const place = safePlace(rawPlace);
+    if (place) return [place];
+    incomplete = true;
+    return [];
+  });
   if (!unique.length && hasBundledCampusPlaces(schoolId)) source = 'bundled-providence';
   const matches: { item: CampusMapItem; alias: boolean }[] = [];
-  for (const rawPlace of places) {
-    const place = safePlace(rawPlace);
-    if (!place) { incomplete = true; continue; }
-    const details = campusMapMatchDetails(schoolId, args.query, place);
+  for (const place of places) {
+    const details = campusMapMatchDetails(schoolId, args.query, place, places);
     if (!details) continue;
     const { match, alias } = details;
     const itemSource = publishedIds.has(place.id) ? source : 'bundled-providence';

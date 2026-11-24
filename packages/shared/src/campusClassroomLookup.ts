@@ -10,13 +10,14 @@ export const MAX_CAMPUS_CLASSROOM_QUERY_LENGTH = 120;
  * 120-character query cap or a trailing `/ Temporary` can be sliced away. */
 export const MAX_CAMPUS_CATEGORY_LENGTH = 2000;
 
+function withoutClassroomControlCharacters(text: string): string {
+  return text.replace(/[\p{Cc}\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/gu, ' ');
+}
+
 /** Keep the supplied room wording; normalization for matching happens separately. */
 export function normalizeCampusClassroomQuery(value: unknown): string {
   if (typeof value !== 'string') return '';
-  const text = value
-    .replace(/[\p{Cc}\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const text = withoutClassroomControlCharacters(value).replace(/\s+/g, ' ').trim();
   return Array.from(text).slice(0, MAX_CAMPUS_CLASSROOM_QUERY_LENGTH).join('').trim();
 }
 
@@ -51,9 +52,15 @@ function comparisonText(value: unknown): string {
   return normalizeCampusClassroomQuery(value).normalize('NFKC').toLocaleLowerCase('zh-TW');
 }
 
+function comparablePublicName(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return withoutClassroomControlCharacters(value).normalize('NFKC').toLocaleLowerCase('zh-TW')
+    .replace(/\s+/g, ' ').trim();
+}
+
 export function campusPlaceNameMatchesQuery(name: string, query: string): boolean {
-  const comparableQuery = comparisonText(query);
-  return Boolean(comparableQuery) && comparisonText(name) === comparableQuery;
+  const comparableQuery = comparablePublicName(query);
+  return Boolean(comparableQuery) && comparablePublicName(name) === comparableQuery;
 }
 
 /** This only recognizes a suffix as room wording; it does not decode its building or floor. */
@@ -423,15 +430,19 @@ function nameMatchesVerifiedCode(school: string, query: string, suppliedName: un
  * The caller supplies only the current school's published map locations. This helper never
  * loads a fallback campus, guesses an alphabetic building code, or derives a floor from a room
  * number. A result refers to the original POI object and its existing coordinates.
+ * Callers that classify individual candidates can supply the full campus batch
+ * as publicNameLocations so exact public names still take precedence.
  */
 export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
   schoolId,
   query: rawQuery,
   locations,
+  publicNameLocations = locations,
 }: {
   schoolId: string | null | undefined;
   query: unknown;
   locations: readonly T[];
+  publicNameLocations?: readonly CampusMapPlaceLike[];
 }): CampusClassroomResolution<T> {
   const query = normalizeCampusClassroomQuery(rawQuery);
   if (!query) return { query, status: 'empty', matches: [] };
@@ -522,11 +533,12 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
       );
     // A public name can claim the full query even when its place is ineligible
     // for classroom navigation. Catalog-only names and codes yield to that name.
+    const publicNameQuery = comparablePublicName(rawQuery);
     if (
       !matchesPublicLabelOrLegacyCode &&
-      locations.some((location) =>
+      publicNameLocations.some((location) =>
         location && typeof location === 'object' && location.id !== match.id &&
-        comparisonText(location.name) === comparable
+        comparablePublicName(location.name) === publicNameQuery
       )
     ) {
       return { query, status: 'unmatched', matches: [] };

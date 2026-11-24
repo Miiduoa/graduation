@@ -137,6 +137,71 @@ describe('map reader uses the current page sources', () => {
     });
   });
 
+  it.each([
+    ['Anthony Kuo Hall 303', 'Anthony Kuo Hall 303', 'pu-renyuan'],
+    ['Anthony Kuo Hall 303', 'Ａｎｔｈｏｎｙ Kuo Hall  303', 'pu-renyuan'],
+    ['AK303', 'AK303', 'pu-renyuan'],
+    ['AK303', 'ak３０３', 'pu-renyuan'],
+    ['Bishop Kupfer Hall 303', 'Bishop Kupfer Hall 303', 'pu-wenxing'],
+  ])('gives an exact public stop name precedence over the catalog match for %s', async (query, name, id) => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find(item => item.id === id)!;
+    const hall = doc(id, place);
+    const stop = doc('same-name-stop', published({ name, category: '公車站', transitStopIds: ['stop-303'] }));
+    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([hall, stop]) as never);
+    expect(await read(query)).toMatchObject({
+      resolution: 'matched', partial: false, items: [{ id: 'same-name-stop', match: 'place' }],
+    });
+
+    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([hall]) as never);
+    expect(await read(query)).toMatchObject({
+      resolution: 'matched', partial: false, items: [{ id, match: 'building' }],
+    });
+  });
+
+  it('keeps the catalog building when a longer stop name only starts with the full query', async () => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find(item => item.id === 'pu-renyuan')!;
+    const query = 'Anthony Kuo Hall' + '-'.repeat(101) + '303';
+    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([
+      doc(place.id, place),
+      doc('longer-stop', published({ name: query + ' 往臺中', category: '公車站' })),
+    ]) as never);
+    expect(await read(query)).toMatchObject({
+      resolution: 'ambiguous', partial: false, items: [
+        { id: place.id, match: 'building' }, { id: 'longer-stop', match: 'search' },
+      ],
+    });
+  });
+
+  it('validates catalog text matches as search when an exact public stop name takes precedence', async () => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find(item => item.id === 'pu-renyuan')!;
+    const query = 'Anthony Kuo Hall 303';
+    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([
+      doc(place.id, { ...place, description: query }),
+      doc('same-name-stop', published({ name: query, category: '公車站' })),
+    ]) as never);
+    expect(await read(query)).toMatchObject({
+      resolution: 'ambiguous', partial: false, items: [
+        { id: 'same-name-stop', match: 'place' }, { id: place.id, match: 'search' },
+      ],
+    });
+  });
+
+  it.each([
+    ['PH303', 'pu-zhugu'],
+    ['任垣樓303', 'pu-renyuan'],
+  ])('preserves the existing building match alongside an exact public stop name for %s', async (query, id) => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find(item => item.id === id)!;
+    vi.mocked(getDocsFromServer).mockResolvedValue(snapshot([
+      doc(id, place),
+      doc('same-name-stop', published({ name: query, category: '公車站' })),
+    ]) as never);
+    expect(await read(query)).toMatchObject({
+      resolution: 'ambiguous', partial: false, items: [
+        { id: 'same-name-stop', match: 'place' }, { id, match: 'building' },
+      ],
+    });
+  });
+
   it('preserves a published building text match alongside a place with the same name', async () => {
     const place = PROVIDENCE_CAMPUS_PLACES.find(item => item.id === 'pu-wenxing')!;
     const name = 'Bishop Kupfer Hall';

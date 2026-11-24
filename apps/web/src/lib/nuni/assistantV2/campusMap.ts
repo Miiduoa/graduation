@@ -1,4 +1,4 @@
-import { resolveCampusClassroom } from '@campus/shared/src/campusClassroomLookup';
+import { campusPlaceNameMatchesQuery, resolveCampusClassroom } from '@campus/shared/src/campusClassroomLookup';
 import { getOfficialCampusMapUrl } from '@campus/shared/src/campusMapLookup';
 import {
   isProvidencePendingVerification,
@@ -102,17 +102,14 @@ export function boundedTransitStopMarker(place: object): { transitStopIds: strin
   return hasMarker ? { transitStopIds: [...BOUNDED_TRANSIT_STOP_MARKER] } : {};
 }
 
-function comparable(value: string): string {
-  return value.normalize('NFKC').toLocaleLowerCase('zh-TW').replace(/\s+/g, ' ').trim();
-}
-
 /** Reuse the map's room-to-building and text matching, without decoding a
  * classroom number into a floor or inventing a route. */
 export function campusMapMatchDetails(
   schoolId: string, query: string, location: CampusMapPlaceLike,
+  publicNameLocations: readonly CampusMapPlaceLike[] = [location],
 ): { match: CampusMapMatch; alias: boolean } | null {
-  if (comparable(query) === comparable(location.name)) return { match: 'place', alias: false };
-  const room = resolveCampusClassroom({ schoolId, query, locations: [location] });
+  if (campusPlaceNameMatchesQuery(location.name, query)) return { match: 'place', alias: false };
+  const room = resolveCampusClassroom({ schoolId, query, locations: [location], publicNameLocations });
   if (room.matchKind) return { match: 'building', alias: room.matchKind === 'alias' };
   return locationMatchesSearch(location, query) ? { match: 'search', alias: false } : null;
 }
@@ -168,11 +165,6 @@ export function parseCampusMapResult(raw: unknown, schoolId: string, requested: 
         ...(item.building !== undefined ? { building: clean(item.building, 120) } : {}),
         ...(item.floor !== undefined ? { floor: clean(item.floor, 80) } : {}),
         ...boundedTransitStopMarker(item) } as CampusMapItem;
-      const details = campusMapMatchDetails(schoolId, args.query, parsed);
-      const validMatch = details && (parsed.match === details.match ||
-        (parsed.match === 'search' && details.alias && locationMatchesSearch(parsed, args.query)));
-      if (new Set(parsed.facilities).size !== parsed.facilities.length || !validMatch)
-        throw new Error('Invalid map match');
       const sourceUrl = providencePlaceSourceUrl(schoolId, parsed);
       const verification = sourceUrl ? isProvidencePendingVerification(schoolId, parsed) ? 'single-source' : 'cross-checked' : 'published';
       if (parsed.verification !== verification || item.sourceUrl !== (sourceUrl ?? undefined) ||
@@ -188,6 +180,13 @@ export function parseCampusMapResult(raw: unknown, schoolId: string, requested: 
       if (sourceUrl) parsed.sourceUrl = sourceUrl;
       return parsed;
     });
+    for (const item of items) {
+      const details = campusMapMatchDetails(schoolId, args.query, item, items);
+      const validMatch = details && (item.match === details.match ||
+        (item.match === 'search' && details.alias && locationMatchesSearch(item, args.query)));
+      if (new Set(item.facilities).size !== item.facilities.length || !validMatch)
+        throw new Error('Invalid map match');
+    }
     if (new Set(items.map(item => item.id)).size !== items.length ||
         value.resolution !== campusMapResolution(items, value.partial)) throw new Error('Invalid map coverage');
     return { version: 1, kind: 'map', schoolId, query: args.query, limit: args.limit, checkedAt,
