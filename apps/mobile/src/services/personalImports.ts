@@ -154,7 +154,7 @@ function parseLedger(raw: string | null, scope: PersonalImportScope): PersonalIm
   return value;
 }
 
-/** A verified operation may require uninterrupted verification through its first durable write. */
+/** A verified operation may require uninterrupted verification through its first commit. */
 export type PersonalImportWriteGuard =
   | (() => boolean)
   | {
@@ -205,19 +205,28 @@ export function mutatePersonalImportLedger<T>(
           if (typeof guard === 'function') {
             await AsyncStorage.setItem(key, raw);
           } else {
+            const recoveryEntry: [string, string] = [recoveryKey(key), JSON.stringify(persistedRaw)];
             // Persist the last verified bytes before dispatching the uncancellable native write.
-            await AsyncStorage.multiSet([[recoveryKey(key), JSON.stringify(persistedRaw)]]);
+            await AsyncStorage.multiSet([recoveryEntry]);
             let dispatched = false;
+            let clearingCheckpoint = false;
             try {
               assertWritable();
               dispatched = true;
               await AsyncStorage.setItem(key, raw);
               assertWritable();
+              clearingCheckpoint = true;
               await AsyncStorage.multiRemove([recoveryKey(key)]);
+              assertWritable();
             } catch (error) {
-              // If restoration fails, the durable checkpoint remains authoritative for readers.
-              if (dispatched) await restoreCheckpoint(key, persistedRaw);
-              else await AsyncStorage.multiRemove([recoveryKey(key)]);
+              if (dispatched) {
+                // Cleanup may have removed the backup. Put it back before attempting restoration
+                // so readers still see the last verified ledger if restoration fails.
+                if (clearingCheckpoint) await AsyncStorage.multiSet([recoveryEntry]);
+                await restoreCheckpoint(key, persistedRaw);
+              } else {
+                await AsyncStorage.multiRemove([recoveryKey(key)]);
+              }
               throw error;
             }
           }

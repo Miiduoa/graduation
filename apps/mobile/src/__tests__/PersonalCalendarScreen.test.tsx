@@ -643,26 +643,44 @@ it.each(['during revalidation', 'after recovery'])(
   },
 );
 
-it.each([false, true])('preserves the event after native deletion loses verification (restoration fails: %s)', async (restoreFails) => {
+it.each([
+  ['setItem', false],
+  ['setItem', true],
+  ['multiRemove', false],
+  ['multiRemove', true],
+] as const)('preserves the event when deletion loses verification during %s (restoration fails: %s)', async (phase, restoreFails) => {
   const view = await fillAndSave('寫入途中重驗');
   const scope = mockScope!;
   const key = personalImportStorageKey(scope);
   const stored = await AsyncStorage.getItem(key);
   const setItem = jest.mocked(AsyncStorage.setItem);
   const nativeSetItem = setItem.getMockImplementation()!;
-  const write = deferred<void>();
+  const pending = deferred<void>();
+  const started = jest.fn();
+  const multiRemove = jest.mocked(AsyncStorage.multiRemove);
+  const nativeMultiRemove = multiRemove.getMockImplementation()!;
   setItem.mockClear();
-  setItem.mockImplementationOnce(async (storageKey, value) => {
-    await write.promise;
-    await nativeSetItem(storageKey, value);
-  });
+  if (phase === 'setItem') {
+    setItem.mockImplementationOnce(async (storageKey, value) => {
+      started();
+      await pending.promise;
+      await nativeSetItem(storageKey, value);
+    });
+  } else {
+    setItem.mockImplementationOnce(nativeSetItem);
+    multiRemove.mockImplementationOnce(async (keys) => {
+      started();
+      await pending.promise;
+      await nativeMultiRemove(keys);
+    });
+  }
   if (restoreFails) setItem.mockRejectedValueOnce(new Error('還原寫入失敗'));
   const listener = jest.fn();
   const unsubscribe = subscribePersonalImports(listener);
   try {
     fireEvent.press(view.getByText('寫入途中重驗'));
     fireEvent.press(view.getByText('刪除這筆'));
-    await waitFor(() => expect(setItem).toHaveBeenCalledWith(key, expect.any(String)));
+    await waitFor(() => expect(started).toHaveBeenCalledTimes(1));
     expect(JSON.parse(setItem.mock.calls[0][1]).records).toEqual([]);
     const deletion = jest.mocked(deletePersonalImport).mock.results[0].value;
 
@@ -672,7 +690,7 @@ it.each([false, true])('preserves the event after native deletion loses verifica
     view.rerender(<PersonalCalendarScreen />);
     const read = loadPersonalImports(scope);
     await act(async () => {
-      write.resolve();
+      pending.resolve();
       await expect(deletion).rejects.toThrow(
         restoreFails ? '還原寫入失敗' : '目前無法確認行事曆可寫入',
       );
@@ -692,6 +710,7 @@ it.each([false, true])('preserves the event after native deletion loses verifica
     expect(listener).not.toHaveBeenCalled();
     expect(view.queryByText('已刪除這筆個人行程。')).toBeNull();
   } finally {
+    pending.resolve();
     unsubscribe();
   }
 });

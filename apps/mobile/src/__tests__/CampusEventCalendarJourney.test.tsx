@@ -7,7 +7,12 @@ import EventScreen from '../screens/EventDetailAiFirstScreen';
 import EventsScreen from '../screens/EventsListAiFirstScreen';
 import { CampusEventCalendarDraftScreen } from '../screens/PersonalCalendarScreen';
 import { loadCampusEvent, loadCampusEventPage } from '../services/publicCampusContent';
-import { loadPersonalImports, personalImportStorageKey, type PersonalImportScope } from '../services/personalImports';
+import {
+  loadPersonalImports,
+  personalImportStorageKey,
+  subscribePersonalImports,
+  type PersonalImportScope,
+} from '../services/personalImports';
 
 jest.unmock('@react-navigation/native');
 jest.mock('../state/auth', () => ({
@@ -195,6 +200,47 @@ test.each(['firebase:student', 'nuni:account-a'])('Firebase 已切換且範圍�
   view.rerender(<Journey />);
   expect(view.getByText('請回到目前校園的活動頁重新開啟草稿。')).toBeTruthy();
   expect(view.queryByLabelText('標題')).toBeNull();
+});
+
+test('清除檢查點時 Firebase 已切換，還原舊帳本且不發出變更通知', async () => {
+  const original = mockScope;
+  const view = await openDraft();
+  const key = personalImportStorageKey(original);
+  const multiRemove = jest.mocked(AsyncStorage.multiRemove);
+  const nativeMultiRemove = multiRemove.getMockImplementation()!;
+  const clearing = jest.fn();
+  let finishCleanup!: () => void;
+  const pendingCleanup = new Promise<void>((resolve) => { finishCleanup = resolve; });
+  multiRemove.mockImplementationOnce(async (keys) => {
+    clearing(keys);
+    await pendingCleanup;
+    await nativeMultiRemove(keys);
+  });
+  const listener = jest.fn();
+  const unsubscribe = subscribePersonalImports(listener);
+  try {
+    fireEvent.press(await view.findByRole('button', { name: '儲存行程', disabled: false }));
+    await waitFor(() => expect(clearing).toHaveBeenCalledWith([key + ':checkpoint']));
+    expect(JSON.parse((await AsyncStorage.getItem(key))!).records).toHaveLength(1);
+    expect(listener).not.toHaveBeenCalled();
+
+    mockAuth = { user: { uid: 'another-student' }, loading: true };
+    mockVerifying = true;
+    view.rerender(<Journey />);
+    await view.findByText('請回到目前校園的活動頁重新開啟草稿。');
+    expect(view.queryByLabelText('標題')).toBeNull();
+
+    const read = loadPersonalImports(original);
+    await act(async () => {
+      finishCleanup();
+      expect((await read).records).toEqual([]);
+    });
+    expect(await AsyncStorage.getItem(key)).toBeNull();
+    expect(listener).not.toHaveBeenCalled();
+  } finally {
+    finishCleanup();
+    unsubscribe();
+  }
 });
 
 test('同帳校驗證期間隱藏內容，返回後保留編輯與取消狀態', async () => {
