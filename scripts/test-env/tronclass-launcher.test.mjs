@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -1014,6 +1014,61 @@ test('launcher cleanup ignores a stale pgid whose start-time does not match', as
   }
 });
 
+test('launcher ignores a replaced current-run record for an unmarked live group', { timeout: 12000 }, async () => {
+  const { spawn } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const { once } = await import('node:events');
+  const { setTimeout: delay } = await import('node:timers/promises');
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-replaced-sidecar-'));
+  const script = fileURLToPath(new URL('./tronclass.sh', import.meta.url));
+  const childFile = path.join(dir, 'child.pid');
+  const grandchildFile = path.join(dir, 'grandchild.pid');
+  const victim = spawn('env', ['-u', 'TRONCLASS_LAUNCHED_RUN', 'sleep', '30'], { detached: true, stdio: 'ignore' });
+  const victimExited = once(victim, 'exit');
+  const launcher = spawn('bash', [script], {
+    env: { ...process.env, TRONCLASS_RUNTIME_DIR: dir, TRONCLASS_SIGNAL_SELFTEST: '1',
+      TRONCLASS_SELFTEST_CHILD: childFile, TRONCLASS_SELFTEST_GRANDCHILD: grandchildFile },
+    stdio: 'ignore',
+  });
+  const launcherExited = once(launcher, 'exit');
+  let child;
+  let grandchild;
+  try {
+    const deadline = Date.now() + 4000;
+    let sidecar;
+    while (Date.now() < deadline) {
+      sidecar = readdirSync(dir).find(name => /^selftest\.log\.([a-f0-9]{32})\.pgid\.\1$/.test(name));
+      if (sidecar && existsSync(childFile) && existsSync(grandchildFile)) break;
+      await delay(15);
+    }
+    assert.ok(sidecar && existsSync(childFile) && existsSync(grandchildFile));
+    child = Number(readFileSync(childFile, 'utf8'));
+    grandchild = Number(readFileSync(grandchildFile, 'utf8'));
+    const record = path.join(dir, sidecar);
+    const [run] = readFileSync(record, 'utf8').trim().split(' ');
+    const victimStat = readFileSync(`/proc/${victim.pid}/stat`, 'utf8');
+    const fields = victimStat.slice(victimStat.lastIndexOf(')') + 1).trim().split(/\s+/);
+    assert.equal(fields[2], String(victim.pid));
+    const replaced = path.join(dir, 'replacement');
+    writeFileSync(replaced, `${run} ${victim.pid} ${fields[19]}\n`, { mode: 0o600 });
+    renameSync(replaced, record);
+
+    assert.ok(launcher.kill('SIGTERM'));
+    assert.deepEqual(await launcherExited, [143, null]);
+    process.kill(-victim.pid, 0);
+    assert.throws(() => process.kill(child, 0), { code: 'ESRCH' });
+    assert.throws(() => process.kill(grandchild, 0), { code: 'ESRCH' });
+  } finally {
+    launcher.kill('SIGTERM');
+    victim.kill('SIGKILL');
+    await Promise.all([launcherExited, victimExited]);
+    for (const pid of [child, grandchild]) {
+      if (pid && existsSync(`/proc/${pid}`)) process.kill(pid, 'SIGKILL');
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('launcher still stops the group when the pgid sidecar is a symbolic link', async () => {
   const { spawn } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
@@ -1651,8 +1706,7 @@ if (arg && arg.endsWith('/firebase.js')) {
   detached.unref();
 }
 `, { mode: 0o700 });
-  // Pause the helpers in their final polling round so escalation is tested
-  // while discovery helpers are still running.
+  // Pause the helpers until the parent has escalated while discovery is active.
   const shellHooks = marker('cleanup-hooks.bash');
   writeFileSync(shellHooks, `kill() {
   if [[ "$1" == -0 && -n "\${spawn_deadline:-}" && "$BASHPID" != "$$" &&
@@ -1660,7 +1714,19 @@ if (arg && arg.endsWith('/firebase.js')) {
         "$EPOCHSECONDS" -ge "$((spawn_deadline - 1))" && -z "\${paused_cleanup:-}" ]]; then
     paused_cleanup=1
     printf '%s\\n' "$BASHPID" >> "$TRONCLASS_RUNTIME_DIR/helpers-paused"
-    sleep 1.3
+    local cutoff=$((\${EPOCHREALTIME/./} + 1800000)) name pid complete
+    while [[ "\${EPOCHREALTIME/./}" -lt "$cutoff" ]]; do
+      complete=1
+      for name in web emulator health detached; do
+        read -r pid < "$TRONCLASS_RUNTIME_DIR/$name.pid" || true
+        if ! grep -Fqx -- "-- $pid" "$TRONCLASS_RUNTIME_DIR/launcher-kills" 2>/dev/null; then
+          complete=0
+          break
+        fi
+      done
+      [[ "$complete" = 0 ]] || break
+      sleep 0.02
+    done
     printf '%s\\n' "$BASHPID" >> "$TRONCLASS_RUNTIME_DIR/helpers-finished"
   fi
   if [[ "$1" == -KILL && "$BASHPID" == "$$" ]]; then
@@ -1705,7 +1771,7 @@ if (arg && arg.endsWith('/firebase.js')) {
     assert.deepEqual(finished, paused, 'cleanup helpers completed after the shared deadline');
     const kills = readFileSync(marker('launcher-kills'), 'utf8').trim().split('\n');
     for (const pid of pids) {
-      assert.ok(kills.includes(`-- -${pid}`), `launcher omitted SIGKILL to group ${pid}`);
+      assert.ok(kills.includes(`-- ${pid}`), `launcher omitted SIGKILL to verified member ${pid}`);
       assert.throws(() => process.kill(-pid, 0), { code: 'ESRCH' }, `group ${pid} still alive`);
     }
   } finally {

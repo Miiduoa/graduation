@@ -310,7 +310,7 @@ tronclass_signal_record() {
   [ -n "$parsed" ] || return 0
   read -r run pid start <<< "$parsed"
   [ "$run" = "${TRONCLASS_RUN_ID:-}" ] || return 0
-  proc_signal_group "$pid" "$start" "TRONCLASS_LAUNCHED_RUN=$run" "$sig"
+  proc_signal_marked_group "$pid" "$start" "TRONCLASS_LAUNCHED_RUN=$run" "$sig" || true
 }
 
 tronclass_group_alive_record() {
@@ -319,8 +319,7 @@ tronclass_group_alive_record() {
   parsed="$(tronclass_parse_record "$record" "$TRONCLASS_RUN_ID" 2>/dev/null || true)"
   [ -n "$parsed" ] || return 1
   read -r run pid start <<< "$parsed"
-  proc_group_leader_matches "$pid" "$start" ||
-    proc_group_members "$pid" "$start" "TRONCLASS_LAUNCHED_RUN=$run"
+  proc_signal_marked_group "$pid" "$start" "TRONCLASS_LAUNCHED_RUN=$run"
 }
 
 tronclass_stop_logged() {
@@ -405,7 +404,7 @@ tronclass_stop_logged() {
     tronclass_signal_record "$record" "$sig"
   done
   tronclass_signal_wrapper "$wrapper" "$wrapper_start" "$sig"
-  local wrapper_exit_polls=0
+  local orphan_deadline=0 current_time
   while :; do
     tronclass_discover_groups
     local wrapper_alive=0 group_alive=0 leader_alive=0 run pid start
@@ -415,7 +414,7 @@ tronclass_stop_logged() {
       if tronclass_group_alive_record "$record"; then
         group_alive=1
         read -r run pid start <<< "$record"
-        if proc_group_leader_matches "$pid" "$start"; then leader_alive=1; fi
+        if proc_group_leader_matches "$pid" "$start" "TRONCLASS_LAUNCHED_RUN=$run"; then leader_alive=1; fi
       fi
     done
     if [ "$wrapper_alive" -eq 0 ] && [ "$group_alive" -eq 0 ]; then
@@ -424,8 +423,9 @@ tronclass_stop_logged() {
     [ "$EPOCHSECONDS" -lt "$spawn_deadline" ] || break
     # Preserve the short grace period for orphaned group descendants.
     if [ "$wrapper_alive" -eq 0 ] && [ "$leader_alive" -eq 0 ]; then
-      wrapper_exit_polls=$((wrapper_exit_polls + 1))
-      [ "$wrapper_exit_polls" -lt 20 ] || break
+      current_time="${EPOCHREALTIME/./}"
+      [ "$orphan_deadline" -ne 0 ] || orphan_deadline=$((current_time + 1900000))
+      [ "$current_time" -lt "$orphan_deadline" ] || break
     fi
     sleep 0.1
   done
@@ -446,10 +446,11 @@ cleanup() {
     [ -n "$cleanup_records" ] || return 0
     local journal record
     for journal in "$cleanup_records"/*; do
-      [ -f "$journal" ] || continue
+      local contents
+      contents="$(tronclass_read_regular_file "$journal")" || continue
       while IFS= read -r record; do
         tronclass_signal_record "$record" KILL
-      done < "$journal"
+      done <<< "$contents"
     done
   }
   TRONCLASS_CLEANUP_DEADLINE=$((EPOCHSECONDS + 6))
@@ -524,19 +525,37 @@ tronclass_read_regular_file() {
   local file="$1"
   node - "$file" <<'NODE'
 const fs = require('node:fs');
-const path = process.argv[2];
+const file = process.argv[2];
+const directory = require('node:path').dirname(file);
+const uid = BigInt(process.getuid());
+const isPrivateDir = info => info.isDirectory() && info.uid === uid && (info.mode & 0o777n) === 0o700n;
+const isRecord = info => info.isFile() && info.nlink === 1n && info.uid === uid && (info.mode & 0o777n) === 0o600n;
+const sameInode = (left, right) => left.dev === right.dev && left.ino === right.ino;
+const sameRecord = (left, right) => isRecord(right) && sameInode(left, right) &&
+  left.ctimeNs === right.ctimeNs && left.mtimeNs === right.mtimeNs;
+const statOptions = { bigint: true };
 let fd;
+let before;
+let parent;
 try {
-  fd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
+  parent = fs.lstatSync(directory, statOptions);
+  before = fs.lstatSync(file, statOptions);
+  if (!isPrivateDir(parent) || !isRecord(before)) process.exit(1);
+  fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
 } catch (error) {
   process.exit(1);
 }
 try {
-  const info = fs.fstatSync(fd);
-  if (!info.isFile() || info.nlink !== 1) process.exit(1);
+  const info = fs.fstatSync(fd, statOptions);
+  if (!sameRecord(before, info)) process.exit(1);
   const buf = Buffer.alloc(4096);
   const n = fs.readSync(fd, buf, 0, buf.length, 0);
+  const currentParent = fs.lstatSync(directory, statOptions);
+  if (n === buf.length || !sameRecord(info, fs.lstatSync(file, statOptions)) ||
+    !isPrivateDir(currentParent) || !sameInode(parent, currentParent)) process.exit(1);
   process.stdout.write(buf.subarray(0, n));
+} catch (error) {
+  process.exitCode = 1;
 } finally {
   fs.closeSync(fd);
 }
@@ -583,8 +602,7 @@ for stale_sidecar in "$TRONCLASS_RUNTIME_DIR"/*.log.pgid "$TRONCLASS_RUNTIME_DIR
     continue
   fi
   if [ "$stale_run" = "$TRONCLASS_RUN_ID" ] ||
-    proc_group_leader_matches "$stale_pid" "$stale_start" ||
-    proc_group_members "$stale_pid" "$stale_start" "TRONCLASS_LAUNCHED_RUN=$stale_run"; then
+    proc_signal_marked_group "$stale_pid" "$stale_start" "TRONCLASS_LAUNCHED_RUN=$stale_run"; then
     continue
   fi
   rm -f -- "$stale_sidecar" 2>/dev/null || true
@@ -595,10 +613,11 @@ tronclass_run_logged() {
   shift
   # Backgrounded calls exec so $! is this Node wrapper, not a Bash function
   # subshell that can ignore INT and leave the child holding the port.
-  if [ "${TRONCLASS_RUN_LOGGED_EXEC:-}" = '1' ]; then
-    exec node - "$log" "$@" <<'NODE'
+  local -a command=(node)
+  if [ "${TRONCLASS_RUN_LOGGED_EXEC:-}" = '1' ]; then command=(exec node); fi
+  "${command[@]}" - "$log" "$@" <<'NODE'
 const fs = require('node:fs');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const logPath = process.argv[2];
 const argv = process.argv.slice(3);
 function refuseLog() {
@@ -629,12 +648,9 @@ let childIdentity;
 let pendingSignal = null;
 const stop = (signal) => {
   if (!child) { pendingSignal = signal; return; }
-  try {
-    const live = readIdentity(child.pid);
-    if (live.group === String(child.pid) && live.start === childIdentity?.start) {
-      process.kill(-child.pid, signal);
-    }
-  } catch (error) { /* cleanup also checks for surviving group members */ }
+  if (!childIdentity) return;
+  spawnSync('bash', ['-c', 'source scripts/process-identity.sh && proc_signal_marked_group "$@"',
+    'signal-process-group', String(child.pid), childIdentity.start, `TRONCLASS_LAUNCHED_RUN=${runId}`, signal.slice(3)]);
 };
 process.on('SIGINT', () => stop('SIGINT'));
 process.on('SIGTERM', () => stop('SIGTERM'));
@@ -661,11 +677,6 @@ try {
   const startTime = childIdentity.start;
   if (!startTime || childIdentity.group !== String(child.pid)) throw new Error('group identity');
   if (!/^[0-9a-fA-F]{32}$/.test(runId)) throw new Error('run-id');
-  try {
-    if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('symlink target');
-  } catch (error) {
-    if (error && error.code !== 'ENOENT') throw error;
-  }
   const tmpPath = path.join(path.dirname(pgidPath), `.pgid-${process.pid}-${crypto.randomBytes(8).toString('hex')}.tmp`);
   const tmpFd = fs.openSync(tmpPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
   try {
@@ -673,127 +684,13 @@ try {
     if (!tmpStat.isFile() || tmpStat.nlink !== 1 || tmpStat.uid !== process.getuid()) throw new Error('tmp');
     fs.writeSync(tmpFd, `${runId} ${child.pid} ${startTime}\n`);
     fs.fsyncSync(tmpFd);
+    // Publish without replacing an existing record, including symlinks.
+    const namedTmp = fs.lstatSync(tmpPath);
+    if (namedTmp.dev !== tmpStat.dev || namedTmp.ino !== tmpStat.ino) throw new Error('replaced tmp');
+    fs.linkSync(tmpPath, pgidPath);
   } finally {
     fs.closeSync(tmpFd);
-  }
-  try {
-    if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('symlink target');
-  } catch (error) {
-    if (error && error.code !== 'ENOENT') throw error;
-  }
-  fs.renameSync(tmpPath, pgidPath);
-  const verifyFd = fs.openSync(pgidPath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
-  try {
-    const info = fs.fstatSync(verifyFd);
-    if (!info.isFile() || info.nlink !== 1) throw new Error('nlink');
-  } finally {
-    fs.closeSync(verifyFd);
-  }
-} catch (error) {
-  process.stderr.write('Unable to record the logged child process group.\n');
-}
-if (pendingSignal) stop(pendingSignal);
-child.on('exit', (code, signal) => {
-  if (signal) {
-    try { process.kill(process.pid, signal); } catch (error) { process.exit(1); }
-    return;
-  }
-  process.exit(code ?? 1);
-});
-NODE
-  fi
-  node - "$log" "$@" <<'NODE'
-const fs = require('node:fs');
-const { spawn } = require('node:child_process');
-const logPath = process.argv[2];
-const argv = process.argv.slice(3);
-function refuseLog() {
-  process.stderr.write('Refusing a symbolic link or unusable log file.\n');
-  process.exit(1);
-}
-try {
-  const existing = fs.lstatSync(logPath);
-  if (!existing.isFile() || existing.nlink !== 1 || existing.uid !== process.getuid()) refuseLog();
-} catch (error) {
-  if (error && error.code !== 'ENOENT') refuseLog();
-}
-const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW;
-let fd;
-try {
-  fd = fs.openSync(logPath, flags, 0o600);
-} catch (error) {
-  refuseLog();
-}
-const info = fs.fstatSync(fd);
-if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
-  fs.closeSync(fd);
-  refuseLog();
-}
-fs.ftruncateSync(fd, 0);
-let child = null;
-let childIdentity;
-let pendingSignal = null;
-const stop = (signal) => {
-  if (!child) { pendingSignal = signal; return; }
-  try {
-    const live = readIdentity(child.pid);
-    if (live.group === String(child.pid) && live.start === childIdentity?.start) {
-      process.kill(-child.pid, signal);
-    }
-  } catch (error) { /* cleanup also checks for surviving group members */ }
-};
-process.on('SIGINT', () => stop('SIGINT'));
-process.on('SIGTERM', () => stop('SIGTERM'));
-const delayMs = Number(process.env.TRONCLASS_TEST_DELAY_SPAWN_MS || 0);
-if (Number.isFinite(delayMs) && delayMs > 0) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
-}
-const runId = process.env.TRONCLASS_RUN_ID || '';
-child = spawn(argv[0], argv.slice(1), {
-  stdio: ['inherit', fd, fd], detached: true,
-  env: { ...process.env, TRONCLASS_LAUNCHED_RUN: runId },
-});
-fs.closeSync(fd);
-const path = require('node:path');
-const crypto = require('node:crypto');
-function readIdentity(pid) {
-  const raw = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-  const rest = raw.slice(raw.lastIndexOf(')') + 1).trim().split(/\s+/);
-  return { group: rest[2], start: rest[19] };
-}
-const pgidPath = `${logPath}.pgid.${runId}`;
-try {
-  childIdentity = readIdentity(child.pid);
-  const startTime = childIdentity.start;
-  if (!startTime || childIdentity.group !== String(child.pid)) throw new Error('group identity');
-  if (!/^[0-9a-fA-F]{32}$/.test(runId)) throw new Error('run-id');
-  try {
-    if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('symlink target');
-  } catch (error) {
-    if (error && error.code !== 'ENOENT') throw error;
-  }
-  const tmpPath = path.join(path.dirname(pgidPath), `.pgid-${process.pid}-${crypto.randomBytes(8).toString('hex')}.tmp`);
-  const tmpFd = fs.openSync(tmpPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
-  try {
-    const tmpStat = fs.fstatSync(tmpFd);
-    if (!tmpStat.isFile() || tmpStat.nlink !== 1 || tmpStat.uid !== process.getuid()) throw new Error('tmp');
-    fs.writeSync(tmpFd, `${runId} ${child.pid} ${startTime}\n`);
-    fs.fsyncSync(tmpFd);
-  } finally {
-    fs.closeSync(tmpFd);
-  }
-  try {
-    if (fs.lstatSync(pgidPath).isSymbolicLink()) throw new Error('symlink target');
-  } catch (error) {
-    if (error && error.code !== 'ENOENT') throw error;
-  }
-  fs.renameSync(tmpPath, pgidPath);
-  const verifyFd = fs.openSync(pgidPath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
-  try {
-    const info = fs.fstatSync(verifyFd);
-    if (!info.isFile() || info.nlink !== 1) throw new Error('nlink');
-  } finally {
-    fs.closeSync(verifyFd);
+    fs.unlinkSync(tmpPath);
   }
 } catch (error) {
   process.stderr.write('Unable to record the logged child process group.\n');

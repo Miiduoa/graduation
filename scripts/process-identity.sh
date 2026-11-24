@@ -15,10 +15,12 @@ proc_identity() {
 }
 
 proc_group_leader_matches() {
-  local group="$1" start="$2"
+  local group="$1" start="$2" marker="$3"
   local proc_group proc_start proc_state
-  [[ "$group" != 1 ]] && proc_identity "$group" &&
-    [[ "$proc_group" == "$group" && "$proc_start" == "$start" ]]
+  [[ "$group" != 1 && -n "$marker" ]] && proc_identity "$group" &&
+    [[ "$proc_group" == "$group" && "$proc_start" == "$start" && "$proc_state" != Z && "$proc_state" != X ]] &&
+    grep -zFxq -- "$marker" "/proc/$group/environ" 2>/dev/null &&
+    proc_identity "$group" && [[ "$proc_group" == "$group" && "$proc_start" == "$start" ]]
 }
 
 proc_group_members() {
@@ -40,24 +42,16 @@ proc_group_members() {
   [[ -n "$signal" ]]
 }
 
-proc_signal_group() {
-  local group="$1" start="$2" marker="$3" signal="$4"
-  if proc_group_leader_matches "$group" "$start"; then
-    kill "-$signal" -- "-$group" 2>/dev/null || true
-  else
-    proc_group_members "$group" "$start" "$marker" "$signal"
-  fi
-}
-
-# Privileged cleanup validates a live leader and signals only marked members.
-# The launcher uses proc_signal_group for its already-verified group records.
+# A live leader must belong to this run before any member is signalled.
+# Signal marked members individually, including when the leader has exited.
 proc_signal_marked_group() {
-  local group="$1" start="$2" marker="$3" signal="$4"
+  local group="$1" start="$2" marker="$3" signal="${4:-}"
   local proc_group proc_start proc_state
   if proc_identity "$group"; then
-    [[ "$proc_group" == "$group" && "$proc_start" == "$start" ]] || return 0
+    [[ "$proc_group" == "$group" && "$proc_start" == "$start" ]] || return 1
     if [[ "$proc_state" != Z && "$proc_state" != X ]]; then
-      grep -zFxq -- "$marker" "/proc/$group/environ" 2>/dev/null || return 0
+      proc_group_leader_matches "$group" "$start" "$marker" || return 1
+      [[ -n "$signal" ]] || return 0
     fi
   fi
   proc_group_members "$group" "$start" "$marker" "$signal"
