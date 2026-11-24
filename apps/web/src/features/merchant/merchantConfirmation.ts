@@ -83,18 +83,21 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     return revision;
   }
 
+  function listedMembership() {
+    // Denial revokes positive membership while a confirmed empty list stays authoritative.
+    if (listedRevision > listRevocation || listedWorkspaces?.size === 0) return listedWorkspaces;
+  }
+
   function merge(next: NuniMerchantWorkspace, revision: number) {
     const key = workspaceKey(next);
     if (revision <= Math.max(listRevocation, revokedThrough(key))) return;
     const entry = entries.get(key) ?? { confirmedRevision: 0 };
-    // Access ordering tracks successful requests independently of the winning readiness version.
-    entry.confirmedRevision = Math.max(entry.confirmedRevision, revision);
     const floor = revokedVersionFloors.get(key);
     // Revocation removes the data, but a retry still needs a current readiness version.
     if (floor !== undefined && next.readinessVersion !== undefined && next.readinessVersion < floor) {
-      entries.set(key, entry);
       return;
     }
+    entry.confirmedRevision = Math.max(entry.confirmedRevision, revision);
     const observation = latestObservation(entry.row, next, revision);
     const row = { ...observation, version: observation.version ?? floor };
     // The receipt remains usable until a winning observation reports that menu is missing.
@@ -109,9 +112,11 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
 
   function confirmDetail(next: NuniMerchantWorkspaceDetail, revision: number, verifiesAccess: boolean) {
     const key = workspaceKey(next);
+    const version = entries.get(key)?.row?.version;
+    // A stale detail must not confirm access or supersede an outstanding denial.
+    if (version !== undefined && next.readinessVersion < version) return detailFor(key);
     const entry = merge(next, revision);
     if (entry) {
-      // A successful read can confirm access independently of its readiness version.
       if (next.readinessVersion === entry.row?.version) {
         entry.detail = latestObservation(entry.detail, next, revision);
       }
@@ -181,9 +186,10 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   }
 
   return {
-    // Undefined means no confirmed list. Detail denials only revoke renderable observations.
-    listedWorkspaceTenants: () =>
-      listedWorkspaces && new Set([...listedWorkspaces.values()].map(({ tenantId }) => tenantId)),
+    listedWorkspaceTenants() {
+      const membership = listedMembership();
+      return membership && new Set([...membership.values()].map(({ tenantId }) => tenantId));
+    },
     hasApplicationList: () => lists.applications !== undefined,
     verifiedDetails() {
       const details = new Map<string, NuniMerchantWorkspaceDetail>();
@@ -224,7 +230,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
           // Preserve a newer confirmation and its existing access state.
           if ((entries.get(key)?.confirmedRevision ?? 0) > revision) {
             revocations.set(key, revokedThrough(key));
-            if (listedWorkspaces?.has(key) || (includeVerifiedWorkspaces && hasVerifiedAccess(key))) {
+            if (listedMembership()?.has(key) || (includeVerifiedWorkspaces && hasVerifiedAccess(key))) {
               retainedWorkspaceKeys.add(key);
             }
           } else {
@@ -234,10 +240,9 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
           }
         }
         listRevocation = revision;
-        listedWorkspaces = undefined;
         includeVerifiedWorkspaces = false;
       } else if (revision > listRevocation) {
-        // A verified direct entry can fill in only when list membership is unknown.
+        // Direct-entry fallback is available until the first successful list.
         includeVerifiedWorkspaces = listedWorkspaces === undefined;
       }
     },
@@ -285,19 +290,19 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       return [...found.values()];
     },
     overview(): MerchantOverview | null {
-      const keys = new Set(listedWorkspaces?.keys() ?? retainedWorkspaceKeys);
+      const membership = listedMembership();
+      const keys = new Set(membership?.keys() ?? retainedWorkspaceKeys);
       if (includeVerifiedWorkspaces) {
         for (const [key, entry] of entries) {
           if (entry.row && hasVerifiedAccess(key)) keys.add(key);
         }
       }
-      if (!Object.keys(lists).length && !listedWorkspaces && !keys.size && !receipts.size) return null;
+      if (!Object.keys(lists).length && !membership && !keys.size && !receipts.size) return null;
       return {
         programs: lists.programs ?? [],
         workspaces: [...keys].flatMap((key) => {
           const row = entries.get(key)?.row?.value;
-          const listedAfterRevocation =
-            listedWorkspaces?.has(key) && listedRevision > revokedThrough(key);
+          const listedAfterRevocation = membership?.has(key) && listedRevision > revokedThrough(key);
           return row && (listedAfterRevocation || hasVerifiedAccess(key)) ? [row] : [];
         }),
         applications: [
@@ -308,7 +313,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     },
     verifiedListedRows() {
       const rows = new Map<string, NuniMerchantWorkspace>();
-      for (const key of listedWorkspaces?.keys() ?? []) {
+      for (const key of listedMembership()?.keys() ?? []) {
         const row = entries.get(key)?.row?.value;
         if (row && hasVerifiedAccess(key)) rows.set(key, row);
       }

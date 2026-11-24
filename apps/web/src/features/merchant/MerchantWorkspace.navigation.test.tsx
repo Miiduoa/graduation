@@ -979,6 +979,48 @@ it.each([403, 404])('does not restore a pause notice after list denial %s and re
   expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
 });
 
+it.each([403, 404])('revokes access and the pause notice after stale detail precedes list denial %s', async (status) => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const open = { ...detail('store-a', true), readinessVersion: 6 };
+  const paused = { ...open, readinessVersion: 7, locationStatus: 'closed', publicAccess: false };
+  let denyList!: (error: NuniError) => void;
+  const pendingList = new Promise<never>((_, reject) => {
+    denyList = reject;
+  });
+  const readList = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [open] })
+    .mockReturnValueOnce(pendingList);
+  const readDetail = vi.fn()
+    .mockResolvedValueOnce(open)
+    .mockResolvedValueOnce(open)
+    .mockResolvedValue({ ...open, readinessVersion: 7 });
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === path) return readDetail();
+    if (resource === `${path}/availability`) return Promise.resolve(paused);
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  fireEvent.click(await screen.findByRole('button', { name: '暫停接單' }));
+  await screen.findByText('門市狀態已更新：暫停接單。');
+
+  await act(async () => window.history.back());
+  await waitFor(() => expect(readList).toHaveBeenCalledTimes(2));
+  await act(async () => window.history.forward());
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+  await screen.findByText('暫停接單');
+
+  await act(async () => denyList(new NuniError(status, 'DENIED')));
+  expect(screen.queryByRole('heading', { name: '餐坊／一樓', level: 2 })).toBeNull();
+  expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取門市狀態' }));
+  await screen.findByText('營業中');
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '暫停接單' }).disabled).toBe(false);
+  expect(screen.queryByText('門市狀態已更新：暫停接單。')).toBeNull();
+});
+
 it.each([
   { status: 403, beforeReceipt: true },
   { status: 404, beforeReceipt: true },
@@ -1765,6 +1807,44 @@ it('keeps a confirmed empty store list when both the list and detail refresh fai
   expect(readDetail).toHaveBeenCalledTimes(3);
   expect(screen.queryByText('餐坊／一樓')).toBeNull();
   expect(screen.queryByRole('link', { name: /管理門市：一樓/ })).toBeNull();
+});
+
+it.each([403, 404])('keeps a confirmed empty list through denial %s and a later 503', async (status) => {
+  const path = 'merchant-workspaces/campus-one/store-a';
+  const store = detail();
+  const readList = vi.fn()
+    .mockResolvedValueOnce({ workspaces: [store] })
+    .mockResolvedValueOnce({ workspaces: [] })
+    .mockRejectedValueOnce(new NuniError(status, 'DENIED'))
+    .mockRejectedValueOnce(new NuniError(503, 'UNAVAILABLE'))
+    .mockResolvedValue({ workspaces: [store] });
+  const readDetail = vi.fn().mockResolvedValue(store);
+  mocks.request.mockImplementation((resource) => {
+    if (resource === 'merchant-workspaces') return readList();
+    if (resource === path) return readDetail();
+    return respond(resource);
+  });
+
+  render(<MerchantWorkspace view="workspace" />);
+  fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+  await screen.findByRole('heading', { name: '餐坊／一樓', level: 2 });
+  fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+  await screen.findByText(/目前沒有已核准的門市/);
+  await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(2));
+
+  const reload = async (expectedDetailReads: number) => {
+    fireEvent.click(await screen.findByRole('button', { name: '重新載入' }));
+    await waitFor(() => expect(readDetail).toHaveBeenCalledTimes(expectedDetailReads));
+    await screen.findByText('目前無法確認店家資料，請重新載入。');
+  };
+  await reload(3);
+  expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+  await reload(4);
+  expect(screen.queryByRole('link', { name: '管理門市：一樓' })).toBeNull();
+  expect(screen.getByText(/目前沒有已核准的門市/)).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  await screen.findByRole('link', { name: '管理門市：一樓' });
 });
 
 it('adopts a pending empty list after a newer list and detail refresh return 503', async () => {
