@@ -1363,6 +1363,14 @@ describe('three-way sentence classification', () => {
     expect(canAnswerTronClassQuestion('玩課雲準備作業')).toBe(false);
     expect(tronClassCompoundClauses('玩課雲準備作業')).toEqual([]);
     expect(classifyTronClassSentence('玩課雲準備作業')?.outcome).toBe('ambiguous');
+
+    for (const question of ['玩課雲已準備作業', '玩課雲的準備作業']) {
+      expect(classifyTronClassSentence(question)?.outcome).not.toBe('clearly-write');
+      expect(classifyTronClassSentence(question)?.outcome).toBe('ambiguous');
+      expect(parseTronClassAgentIntent(question)?.intent).not.toBe('prepare');
+      expect(canAnswerTronClassQuestion(question)).toBe(false);
+      expect(tronClassCompoundClauses(question)).toEqual([]);
+    }
   });
 
 });
