@@ -76,9 +76,17 @@ export const excludesWalkingWay = (tags: Tags) =>
   !!(tags.area && tags.area !== 'no') ||
   !!(tags.indoor && tags.indoor !== 'no') || tags.location === 'underground';
 
+// Product policy: an unrecognised or purpose-limited access value needs
+// further review, not a blanket walking approval. Retain the conservative
+// treatment of conflicting general and pedestrian-specific restrictions.
+// https://wiki.openstreetmap.org/wiki/Key:access
+const OPEN_ACCESS_VALUES = new Set(['yes', 'designated', 'permissive']);
+const hasNonPublicAccess = (value: string | undefined): boolean =>
+  value !== undefined && !OPEN_ACCESS_VALUES.has(value);
+
 const restrictsWalking = (tags: Tags) =>
-  ['no', 'private', 'customers', 'permit', 'destination'].includes(tags.foot ?? '') ||
-  ['no', 'private', 'customers', 'permit', 'destination'].includes(tags.access ?? '') ||
+  hasNonPublicAccess(tags.foot) ||
+  hasNonPublicAccess(tags.access) ||
   !!(tags.barrier && tags.barrier !== 'no') ||
   !!tags['access:conditional'] || !!tags['foot:conditional'] || !!tags['opening_hours'];
 
