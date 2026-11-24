@@ -192,7 +192,7 @@ it('keeps a checkpoint replaced during sync and refuses to publish from the earl
   await expect(withPersonalImportSyncLock(scope, async (state) => {
     expect(state.records.map(({ title }) => title)).toEqual(['資料庫']);
     localStorage.setItem(checkpoint, replacement);
-    return { state: { ...state, sync: { ...state.sync, enabled: true } }, result: undefined };
+    return { state: { ...state, sync: { enabled: true, base: state.sync?.base ?? null } }, result: undefined };
   })).rejects.toThrow();
   expect(localStorage.getItem(key)).toBeNull();
   expect(localStorage.getItem(checkpoint)).toBe(replacement);
