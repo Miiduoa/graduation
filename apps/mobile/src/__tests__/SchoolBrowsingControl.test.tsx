@@ -107,3 +107,21 @@ test('the school-switch sheet respects a live change in motion preferences', asy
   expect(view.UNSAFE_getByType(Modal).props.animationType).toBe('none');
   expect(view.getByTestId('school-picker-option-pu')).toBeTruthy();
 });
+
+test('large text leaves room for a bilingual result and cancel control while typing', async () => {
+  const dimensions = jest.spyOn(require('react-native'), 'useWindowDimensions');
+  dimensions.mockReturnValue({ width: 390, height: 844, scale: 3, fontScale: 2.4 });
+  try {
+    const onCancel = jest.fn();
+    const view = render(<SchoolBrowsingControl destination={{ title: '圖書館', onChoose: jest.fn(), onCancel }} />);
+    await view.findByTestId('school-picker-option-pu');
+    const search = view.getByTestId('school-picker-search');
+    fireEvent(search, 'focus');
+    fireEvent.changeText(search, 'Providence');
+    expect(view.queryByText('選擇校園 · 圖書館')).toBeNull();
+    expect(view.getByText('1 所學校')).toBeTruthy();
+    expect(view.getByText('Providence University')).toBeTruthy();
+    fireEvent.press(view.getByLabelText('取消開啟圖書館'));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  } finally { dimensions.mockRestore(); }
+});

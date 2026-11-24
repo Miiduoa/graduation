@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { School } from '@campus/shared/src';
@@ -41,6 +42,8 @@ export function SchoolBrowsingControl({
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [searchFocused, setSearchFocused] = useState(false);
+  const { fontScale, height } = useWindowDimensions();
+  const compactSearch = searchFocused && (fontScale >= 1.5 || height < 520);
   const searchInput = useRef<TextInput>(null);
   const resultsList = useRef<FlatList<School>>(null);
   const picking = useRef(false);
@@ -78,62 +81,79 @@ export function SchoolBrowsingControl({
     else setOpen(false);
   };
 
+  const closeControl = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={destination ? `取消開啟${destination.title}` : '關閉校園選擇'}
+      onPress={closePicker}
+      style={({ pressed }) => [s.button, pressed && s.pressed]}
+    >
+      <Text style={s.buttonText}>{destination ? '取消' : '關閉'}</Text>
+    </Pressable>
+  );
+
   const picker = (
     <SafeAreaView style={s.modal}>
       <KeyboardAvoidingView
         style={s.modalContent}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={s.modalHeading}>
-          <Text accessibilityRole="header" style={s.modalTitle}>
-            {destination ? `選擇校園 · ${destination.title}` : '選擇瀏覽校園'}
+        {!compactSearch && (
+          <View style={s.modalHeading}>
+            <Text accessibilityRole="header" style={s.modalTitle}>
+              {destination ? `選擇校園 · ${destination.title}` : '選擇瀏覽校園'}
+            </Text>
+            {closeControl}
+          </View>
+        )}
+        {!compactSearch && (
+          <Text style={s.pickerNote}>
+            {destination
+              ? `選擇學校後，直接開啟該校的${destination.title}。`
+              : '切換公開校園資訊，已登入的學校帳號與個人資料權限會維持原設定。'}
           </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={destination ? `取消開啟${destination.title}` : '關閉校園選擇'}
-            onPress={closePicker}
-            style={({ pressed }) => [s.button, pressed && s.pressed]}
+        )}
+        <View style={compactSearch && s.compactSearchBar}>
+          <View
+            style={[
+              s.searchBox,
+              compactSearch && s.compactSearchBox,
+              searchFocused && s.searchFocused,
+            ]}
           >
-            <Text style={s.buttonText}>{destination ? '取消' : '關閉'}</Text>
-          </Pressable>
-        </View>
-        <Text style={s.pickerNote}>
-          {destination
-            ? `選擇學校後，直接開啟該校的${destination.title}。`
-            : '切換公開校園資訊，已登入的學校帳號與個人資料權限會維持原設定。'}
-        </Text>
-        <View style={[s.searchBox, searchFocused && s.searchFocused]}>
-          <TextInput
-            testID="school-picker-search"
-            ref={searchInput}
-            accessibilityLabel="搜尋學校"
-            placeholder="搜尋學校名稱或代碼"
-            placeholderTextColor={theme.colors.muted}
-            value={query}
-            onChangeText={setQuery}
-            onFocus={() => setSearchFocused(true)}
-            onBlur={() => setSearchFocused(false)}
-            onSubmitEditing={() => Keyboard.dismiss()}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardAppearance={theme.mode}
-            selectionColor={theme.colors.accent}
-            returnKeyType="search"
-            style={s.search}
-          />
-          {query.length ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="清除學校搜尋"
-              onPress={() => {
-                setQuery('');
-                searchInput.current?.focus();
-              }}
-              style={({ pressed }) => [s.clearSearch, pressed && s.pressed]}
-            >
-              <Text style={s.buttonText}>清除</Text>
-            </Pressable>
-          ) : null}
+            <TextInput
+              testID="school-picker-search"
+              ref={searchInput}
+              accessibilityLabel="搜尋學校"
+              placeholder="搜尋學校名稱或代碼"
+              placeholderTextColor={theme.colors.muted}
+              value={query}
+              onChangeText={setQuery}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
+              onSubmitEditing={() => Keyboard.dismiss()}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardAppearance={theme.mode}
+              selectionColor={theme.colors.accent}
+              returnKeyType="search"
+              style={s.search}
+            />
+            {query.length ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="清除學校搜尋"
+                onPress={() => {
+                  setQuery('');
+                  searchInput.current?.focus();
+                }}
+                style={({ pressed }) => [s.clearSearch, pressed && s.pressed]}
+              >
+                <Text style={s.buttonText}>{compactSearch ? '×' : '清除'}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {compactSearch && closeControl}
         </View>
         {directory === null && !error ? (
           <View style={{ padding: 28, gap: 12 }}>
@@ -162,7 +182,7 @@ export function SchoolBrowsingControl({
         ) : (
           <View style={s.results}>
             <Text accessibilityLiveRegion="polite" style={s.resultCaption}>
-              {matches.length} 所學校 · 點選後切換公開資訊
+              {matches.length} 所學校{compactSearch ? '' : ' · 點選後切換公開資訊'}
             </Text>
             <FlatList
               ref={resultsList}
@@ -228,7 +248,7 @@ export function SchoolBrowsingControl({
             />
           </View>
         )}
-        {!destination && (
+        {!destination && !compactSearch && (
           <View style={s.modalFooter}>
             <Pressable
               accessibilityRole="button"
@@ -368,6 +388,14 @@ const createStyles = () =>
       borderRadius: 6,
     },
     buttonText: { color: theme.colors.accent, fontSize: 14, lineHeight: 22, fontWeight: '600' },
+    compactSearchBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginHorizontal: 12,
+      paddingVertical: 8,
+      gap: 4,
+    },
+    compactSearchBox: { flex: 1, minWidth: 0, marginHorizontal: 0 },
     searchBox: {
       marginHorizontal: 18,
       flexDirection: 'row',
