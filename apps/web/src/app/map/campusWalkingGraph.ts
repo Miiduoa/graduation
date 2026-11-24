@@ -12,7 +12,7 @@ export type WalkingEdge = {
 };
 export type CampusWalkingGraph = {
   schoolId: string;
-  osmBaseAt?: string;
+  osmBaseAt: string;
   nodes: readonly WalkingNode[];
   edges: readonly WalkingEdge[];
 };
@@ -49,9 +49,11 @@ const MAX_OSM_LAG_MS = 2 * DAY_MS;
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 function utcMillis(value: string | undefined) {
-  if (!value) return NaN;
+  // Match the OSM parser and audit bridge: no local-time, date-only or
+  // calendar-normalized timestamps can establish freshness or expiry.
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)) return NaN;
   const ms = Date.parse(value);
-  return Number.isFinite(ms) ? ms : NaN;
+  return Number.isFinite(ms) && new Date(ms).toISOString().replace('.000Z', 'Z') === value ? ms : NaN;
 }
 
 export function osmSnapshotIsFresh(osmBaseAt: string | undefined, now: number) {
@@ -72,7 +74,7 @@ export function findCampusWalkingRoute(
   if (!schoolId || graph.schoolId !== schoolId || !validId(start) || !validId(end) ||
       graph.nodes.length > 2000 || graph.edges.length > 4000 ||
       !Number.isFinite(now) ||
-      (graph.osmBaseAt !== undefined && !osmSnapshotIsFresh(graph.osmBaseAt, now)) ||
+      !osmSnapshotIsFresh(graph.osmBaseAt, now) ||
       ![bounds.south, bounds.north, bounds.west, bounds.east].every(Number.isFinite) ||
       bounds.south < -90 || bounds.north > 90 || bounds.west < -180 || bounds.east > 180 ||
       bounds.south >= bounds.north || bounds.west >= bounds.east) return null;

@@ -44,7 +44,7 @@ describe('OSM campus walking discovery (not routing approval)', () => {
       [1, 2, 'unknown'], [2, 3, 'restricted'], [4, 5, 'unknown'],
     ]);
     expect(findCampusWalkingRoute(result.graph, 'fixture', bounds, 1, 2, now)).toBeNull();
-    const currentExpiry = new Date(now + 60_000).toISOString();
+    const currentExpiry = new Date(now + 60_000).toISOString().replace('.000Z', 'Z');
     const unreviewed = {
       ...result.graph,
       edges: result.graph.edges.map(edge => ({ ...edge, validUntil: currentExpiry })),
