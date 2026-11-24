@@ -1328,4 +1328,29 @@ describe('three-way sentence classification', () => {
       }
     }
   });
+
+  it('does not auto-prepare when 草稿 is a noun or a prepare command shares the sentence with a query', () => {
+    expect(classifyTronClassSentence('查玩課雲作業草稿')).toEqual({
+      outcome: 'clearly-read',
+      intent: { intent: 'homework', pendingOnly: false },
+    });
+    expect(parseTronClassAgentIntent('查玩課雲作業草稿')).toEqual({ intent: 'homework', pendingOnly: false });
+    expect(canAnswerTronClassQuestion('查玩課雲作業草稿')).toBe(true);
+    expect(tronClassCompoundClauses('查玩課雲作業草稿')).toEqual([]);
+
+    const mixed = '查玩課雲公告，準備作業，查校園公告';
+    expect(classifyTronClassSentence(mixed)?.outcome).not.toBe('clearly-read');
+    expect(classifyTronClassSentence(mixed)?.outcome).not.toBe('clearly-write');
+    expect(parseTronClassAgentIntent(mixed)).toBeNull();
+    expect(parseTronClassAgentIntent(mixed)?.intent).not.toBe('prepare');
+    expect(canAnswerTronClassQuestion(mixed)).toBe(false);
+    expect(tronClassCompoundClauses(mixed)).toEqual([]);
+
+    expect(classifyTronClassSentence('幫我準備 TronClass 作業')).toEqual({
+      outcome: 'clearly-write',
+      intent: { intent: 'prepare', pendingOnly: false },
+    });
+    expect(parseTronClassAgentIntent('幫我準備 TronClass 作業')).toEqual({ intent: 'prepare', pendingOnly: false });
+  });
+
 });
