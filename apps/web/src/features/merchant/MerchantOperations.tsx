@@ -176,7 +176,7 @@ export function MerchantOperations({
   }, []);
 
   const read = useCallback(
-    async (reconcile = true) => {
+    async (reconcile = true, confirmedWrite = false) => {
       readAfterWrite.current = false;
       const version = ++run.current;
       setLoading(true);
@@ -184,7 +184,7 @@ export function MerchantOperations({
       try {
         const next = await operations.get(tenantId, locationId);
         if (!active.current || version !== run.current) return;
-        accept(next, false);
+        accept(next, confirmedWrite);
         if (!readAfterWrite.current) setEntryVerified(true);
         // A count of zero cannot prove a non-idempotent menu request failed:
         // an existing menu may have no remaining sellable stock.
@@ -635,7 +635,7 @@ export function MerchantOperations({
                         setNotice(
                           `已建立 ${receipt.createdItems} 項首次菜單。啟用前請再確認門市資料。`,
                         );
-                        await read();
+                        await read(true, true);
                       });
                     }}
                   >

@@ -307,10 +307,23 @@ function AccountWorkspace({
     setLoading(true);
     setLoadError('');
     try {
-      const data = await loadMerchantOverview(
-        (path, input) => browserRequest(path, context, input),
-        view,
-      );
+      let programsUnavailable = false;
+      const data = await loadMerchantOverview(async (path, input) => {
+        try {
+          return await browserRequest(path, context, input);
+        } catch (error) {
+          if (
+            path !== 'merchant-onboarding-programs' ||
+            !(error instanceof NuniError) ||
+            expired(error) ||
+            ![403, 404].includes(error.status)
+          )
+            throw error;
+          // The store and application requests still determine access to their records.
+          programsUnavailable = true;
+          return { programs: [] };
+        }
+      }, view);
       if (!isCurrent()) return;
       const operations = createMerchantOperations((path, input, method) =>
         browserRequest(path, context, input, method),
@@ -356,6 +369,7 @@ function AccountWorkspace({
               : data.applications,
           workspaces,
         });
+        if (programsUnavailable) setLoadError('目前無法確認店家資料，請重新載入。');
       }
     } catch (error) {
       if (isCurrent()) {

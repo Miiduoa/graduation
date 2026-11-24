@@ -586,7 +586,9 @@ it.each([
   { scenario: 'no programs remain open', refreshedPrograms: [] },
   { scenario: 'only another program remains open', refreshedPrograms: programs.slice(1) },
   { scenario: 'the return read temporarily fails', refreshedPrograms: null },
-])('retries after a store visit when $scenario', async ({ refreshedPrograms }) => {
+  { scenario: 'the programs endpoint returns 404', refreshedPrograms: null, programStatus: 404 },
+  { scenario: 'the programs endpoint returns 403', refreshedPrograms: null, programStatus: 403 },
+])('retries after a store visit when $scenario', async ({ refreshedPrograms, programStatus }) => {
   window.history.replaceState(null, '', '/merchant');
   const store = {
     tenantId: 'campus-one',
@@ -627,7 +629,9 @@ it.each([
     if (path === 'merchant-onboarding-programs')
       return openPrograms
         ? Promise.resolve({ programs: openPrograms })
-        : Promise.reject(new NuniError(0, 'NETWORK_ERROR'));
+        : Promise.reject(new NuniError(programStatus ?? 0, 'UPSTREAM_ERROR'));
+    if (path === 'merchant-applications' && !input && showStore)
+      return Promise.resolve({ applications: [application] });
     if (path === 'merchant-workspaces' && showStore)
       return Promise.resolve({ workspaces: [store] });
     if (path === 'merchant-workspaces/campus-one/location-1') return Promise.resolve(store);
@@ -666,6 +670,8 @@ it.each([
   expect(window.location.pathname).toBe('/merchant');
   await waitFor(() => expect(programReads()).toBe(readsBeforeReturn + 1));
   if (!refreshedPrograms) await screen.findByText('目前無法確認店家資料，請重新載入。');
+  expect(screen.getByRole('link', { name: '管理門市：第一門市' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
   await screen.findByText(/尚未確認是否收件/);
   expect((screen.getByLabelText('對外品牌名稱') as HTMLInputElement).value).toBe('更新餐坊');
   const retry = screen.getByRole('button', { name: '重試同一份申請' });
@@ -677,3 +683,29 @@ it.each([
   expect(writes[0][2]).toMatchObject({ brandName: '更新餐坊' });
   expect(writes[1][2]).toEqual(writes[0][2]);
 });
+
+it.each([
+  { status: 403, code: 'FORBIDDEN', message: '目前無法確認店家資料，請重新載入。' },
+  { status: 404, code: 'NOT_FOUND', message: '目前無法確認店家資料，請重新載入。' },
+  { status: 401, code: 'UNAUTHORIZED', message: '登入或帳號已變更，這次店家資料與草稿已清除。' },
+  { status: 409, code: 'SESSION_CHANGED', message: '登入或帳號已變更，這次店家資料與草稿已清除。' },
+])(
+  'clears the overview when workspaces returns $code and programs returns 404',
+  async ({ status, code, message }) => {
+    let reload = false;
+    mocks.request.mockImplementation((path) => {
+      if (reload && path === 'merchant-onboarding-programs')
+        return Promise.reject(new NuniError(404, 'NOT_FOUND'));
+      if (reload && path === 'merchant-workspaces')
+        return Promise.reject(new NuniError(status, code));
+      if (path === 'merchant-applications') return Promise.resolve({ applications: [application] });
+      return respond(path);
+    });
+    render(<MerchantWorkspace />);
+    await screen.findByRole('heading', { name: '測試餐坊／學生餐廳' });
+    reload = true;
+    fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+    await screen.findByText(message);
+    expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
+  },
+);
