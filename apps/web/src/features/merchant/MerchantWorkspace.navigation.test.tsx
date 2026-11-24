@@ -111,7 +111,7 @@ it('preserves the verified workspace and queue through sign-in without forwardin
   expect(mocks.request).not.toHaveBeenCalled();
 });
 
-it('opens a specific real store directly even when this account has demonstration data', async () => {
+it('returns from a directly opened real store to the reloadable real list when demo data exists', async () => {
   mocks.demo = true;
   window.history.replaceState(null, '', href('store-b'));
   render(<MerchantWorkspace view="workspace" />);
@@ -120,6 +120,15 @@ it('opens a specific real store directly even when this account has demonstratio
   expect(mocks.request.mock.calls.map(([path]) => path)).toEqual([
     'merchant-workspaces/campus-one/store-b',
   ]);
+  fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+  await screen.findByRole('link', { name: '管理門市：二樓' });
+  expect(screen.queryByText('本人示範門市')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  await waitFor(() =>
+    expect(
+      mocks.request.mock.calls.filter(([path]) => path === 'merchant-workspaces'),
+    ).toHaveLength(2),
+  );
 });
 
 it.each([
@@ -339,6 +348,7 @@ it.each(['before returning', 'during the return read'])(
     mocks.request.mockImplementation((path) => {
       if (path.endsWith('/availability')) return write;
       if (path === 'merchant-workspaces') return staleList;
+      if (path === 'merchant-workspaces/campus-one/store-a') return Promise.resolve(paused);
       return respond(path);
     });
 
@@ -380,6 +390,39 @@ it.each(['before returning', 'during the return read'])(
   },
 );
 
+it.each(['success', 'failure'] as const)(
+  'reconciles a confirmed pause on manual reload when the detail read ends in %s',
+  async (result) => {
+    const open = detail('store-a', true);
+    const paused = { ...open, locationStatus: 'closed', publicAccess: false };
+    let detailRead = () => Promise.resolve(open);
+    mocks.request.mockImplementation((path) => {
+      if (path === 'merchant-workspaces/campus-one/store-a') return detailRead();
+      if (path === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
+      if (path.endsWith('/availability')) return Promise.resolve(paused);
+      return respond(path);
+    });
+    render(<MerchantWorkspace view="workspace" />);
+    fireEvent.click(await screen.findByRole('link', { name: '管理門市：一樓' }));
+    const pause = await screen.findByRole('button', { name: '暫停接單' });
+    detailRead = () => Promise.resolve(paused);
+    fireEvent.click(pause);
+    await screen.findByText('門市狀態已更新：暫停接單。');
+    fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
+    await screen.findByText('暫停接單');
+    await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
+
+    const readLatest = vi.fn(() =>
+      result === 'success' ? Promise.resolve(open) : Promise.reject(new Error('network')),
+    );
+    detailRead = readLatest;
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+    expect(readLatest).toHaveBeenCalledOnce();
+    expect(screen.getByText(result === 'success' ? '營業中' : '暫停接單')).toBeTruthy();
+    expect(screen.queryByText(result === 'success' ? '暫停接單' : '營業中')).toBeNull();
+  },
+);
+
 it('lets a later successful store read replace a confirmed paused snapshot on the list', async () => {
   active = true;
   const open = detail('store-a', true);
@@ -393,6 +436,7 @@ it('lets a later successful store read replace a confirmed paused snapshot on th
   mocks.request.mockImplementation((path) => {
     if (path.endsWith('/availability')) return Promise.resolve(paused);
     if (path === 'merchant-workspaces') return Promise.resolve({ workspaces: [open] });
+    if (path === 'merchant-workspaces/campus-one/store-a') return Promise.resolve(paused);
     return respond(path);
   });
   fireEvent.click(pause);
@@ -409,8 +453,15 @@ it('lets a later successful store read replace a confirmed paused snapshot on th
   });
   fireEvent.click(screen.getByRole('link', { name: '管理門市：一樓' }));
   await screen.findByText('營業中');
+  mocks.request.mockImplementation((path) => {
+    if (path === 'merchant-workspaces/campus-one/store-a')
+      return Promise.reject(new Error('network'));
+    if (path === 'merchant-workspaces') return Promise.resolve({ workspaces: [paused] });
+    return respond(path);
+  });
   fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
   await screen.findByRole('link', { name: '管理門市：一樓' });
+  await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
   expect(screen.getByText('營業中')).toBeTruthy();
   expect(screen.queryByText('暫停接單')).toBeNull();
 });

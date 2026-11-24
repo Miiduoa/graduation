@@ -27,6 +27,7 @@ import {
   type MerchantOverviewView,
   type NuniMerchantApplicationInput,
 } from '@campus/shared/src/nuniMerchant';
+import { createMerchantOperations } from '@campus/shared/src/nuniMerchantOperations';
 import {
   merchantApplicationNextStep,
   merchantOverviewNextStep,
@@ -37,6 +38,7 @@ import { clearAllFoodPendingForAccount } from '@/features/food/foodPersistence';
 import type { FoodDraftCache } from '@/features/food/foodState';
 import {
   merchantApplicationsHref,
+  merchantLocationsHref,
   merchantWorkspaceHref,
   type MerchantWorkspaceLocation,
 } from '@/lib/merchantWorkspaceNavigation';
@@ -148,6 +150,7 @@ function MerchantWorkspaceContent({ view }: { view: MerchantOverviewView }) {
         view={view}
         location={navigation.location}
         showApplications={navigation.showApplications}
+        showLocations={navigation.showLocations}
         onNavigate={navigation.navigate}
         returnLocationRef={returnLocationRef}
         context={auth.session.context}
@@ -177,7 +180,9 @@ function MerchantWorkspaceContent({ view }: { view: MerchantOverviewView }) {
               ? merchantWorkspaceHref(navigation.location)
               : navigation.showApplications
                 ? merchantApplicationsHref
-                : entry.path
+                : navigation.showLocations
+                  ? merchantLocationsHref
+                  : entry.path
           }
         />
       )}
@@ -208,6 +213,7 @@ function AccountWorkspace({
   view,
   location,
   showApplications,
+  showLocations,
   onNavigate,
   returnLocationRef,
   context,
@@ -220,6 +226,7 @@ function AccountWorkspace({
   view: MerchantOverviewView;
   location: MerchantWorkspaceLocation;
   showApplications: boolean;
+  showLocations: boolean;
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   returnLocationRef: React.RefObject<string | null>;
   context: string;
@@ -255,11 +262,16 @@ function AccountWorkspace({
   const locationsHeading = useRef<HTMLHeadingElement>(null);
   const applicationsHeading = useRef<HTMLHeadingElement>(null);
   const listPath = view === 'overview' ? '/merchant' : '/merchant/workspace';
-  const listHref = useRef(listPath);
-  useLayoutEffect(() => {
-    if (location.status === 'list')
-      listHref.current = showApplications ? merchantApplicationsHref : listPath;
-  }, [location.status, showApplications, listPath]);
+  const [hasVerifiedLocation, setHasVerifiedLocation] = useState(false);
+  const [listHref, setListHref] = useState<string | null>(null);
+  if (location.status === 'list') {
+    const href = showApplications
+      ? merchantApplicationsHref
+      : showLocations
+        ? merchantLocationsHref
+        : listPath;
+    if (href !== listHref) setListHref(href);
+  }
   const generation = useRef(0);
   const listUpdates = useRef<OverviewUpdates | null>(null);
   // A confirmed write must survive the list loader unmounting during navigation.
@@ -287,6 +299,9 @@ function AccountWorkspace({
   }, [onExpired]);
   const load = useCallback(async () => {
     const run = ++generation.current;
+    const confirmed = confirmedWorkspaces.current;
+    const initialSnapshots = new Map(confirmed);
+    const isCurrent = () => mounted.current && enabled.current && run === generation.current;
     const updates: OverviewUpdates = { workspaces: new Map() };
     listUpdates.current = updates;
     setLoading(true);
@@ -296,12 +311,35 @@ function AccountWorkspace({
         (path, input) => browserRequest(path, context, input),
         view,
       );
-      if (mounted.current && enabled.current && run === generation.current) {
+      if (!isCurrent()) return;
+      const operations = createMerchantOperations((path, input, method) =>
+        browserRequest(path, context, input, method),
+      );
+      const refreshed = new Map<string, Overview['workspaces'][number]>();
+      await Promise.all(
+        data.workspaces.map(async ({ tenantId, locationId }) => {
+          const key = `${tenantId}:${locationId}`;
+          const snapshot = initialSnapshots.get(key);
+          if (!snapshot || confirmed.get(key) !== snapshot) return;
+          try {
+            refreshed.set(key, await operations.get(tenantId, locationId));
+          } catch (error) {
+            if (expired(error)) throw error;
+          }
+        }),
+      );
+      if (isCurrent()) {
         const { application } = updates;
-        const confirmed = confirmedWorkspaces.current;
         const workspaces = data.workspaces.map((item) => {
           const key = `${item.tenantId}:${item.locationId}`;
-          return confirmed.get(key) ?? updates.workspaces.get(key) ?? item;
+          const snapshot = confirmed.get(key);
+          const detail = refreshed.get(key);
+          // A receipt or detail accepted during this reload takes precedence.
+          if (detail && snapshot === initialSnapshots.get(key)) {
+            confirmed.set(key, detail);
+            return detail;
+          }
+          return snapshot ?? updates.workspaces.get(key) ?? item;
         });
         const authorizedKeys = new Set(
           data.workspaces.map((item) => `${item.tenantId}:${item.locationId}`),
@@ -320,7 +358,7 @@ function AccountWorkspace({
         });
       }
     } catch (error) {
-      if (mounted.current && enabled.current && run === generation.current) {
+      if (isCurrent()) {
         if (expired(error)) expire();
         else {
           if (error instanceof NuniError && [403, 404].includes(error.status)) {
@@ -446,6 +484,30 @@ function AccountWorkspace({
     }
   }
 
+  const onWorkspaceChanged = useCallback(
+    (detail: Overview['workspaces'][number], confirmedWrite: boolean) => {
+      if (!mounted.current || !enabled.current) return;
+      setHasVerifiedLocation(true);
+      const key = `${detail.tenantId}:${detail.locationId}`;
+      if (confirmedWrite || confirmedWorkspaces.current.has(key))
+        confirmedWorkspaces.current.set(key, detail);
+      listUpdates.current?.workspaces.set(key, detail);
+      setOverview((current) =>
+        current
+          ? {
+              ...current,
+              workspaces: current.workspaces.map((workspace) =>
+                workspace.tenantId === detail.tenantId && workspace.locationId === detail.locationId
+                  ? detail
+                  : workspace,
+              ),
+            }
+          : current,
+      );
+    },
+    [],
+  );
+
   const withOperations = (content?: ReactNode) => (
     <>
       {[...visitedLocations].map(([key, store]) => (
@@ -463,31 +525,13 @@ function AccountWorkspace({
               ? {
                   section: selectedLocation.section,
                   queue: selectedLocation.queue,
-                  backHref: listHref.current,
+                  backHref: listHref ?? (hasVerifiedLocation ? merchantLocationsHref : listPath),
                   onNavigate,
                 }
               : undefined
           }
           onExpired={expire}
-          onChanged={(detail, confirmedWrite) => {
-            if (!mounted.current || !enabled.current) return;
-            if (confirmedWrite || confirmedWorkspaces.current.has(key))
-              confirmedWorkspaces.current.set(key, detail);
-            listUpdates.current?.workspaces.set(key, detail);
-            setOverview((current) =>
-              current
-                ? {
-                    ...current,
-                    workspaces: current.workspaces.map((workspace) =>
-                      workspace.tenantId === detail.tenantId &&
-                      workspace.locationId === detail.locationId
-                        ? detail
-                        : workspace,
-                    ),
-                  }
-                : current,
-            );
-          }}
+          onChanged={onWorkspaceChanged}
         />
       ))}
       {content}
@@ -905,7 +949,7 @@ function AccountWorkspace({
     </MerchantListLoader>
   );
   return withOperations(
-    showApplications ? (
+    showApplications || showLocations || hasVerifiedLocation ? (
       nativeList
     ) : (
       <AccountDemoDiningPanel

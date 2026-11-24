@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { isCurrentTabNavigationClick } from './currentTabNavigation';
 import {
   merchantApplicationsHref,
+  merchantLocationsHref,
   merchantWorkspaceHref,
   readMerchantWorkspaceLocation,
   type MerchantWorkspaceLocation,
@@ -38,6 +39,7 @@ export function useMerchantWorkspaceRoute(enabled: boolean) {
     ? readMerchantWorkspaceLocation(params)
     : { status: 'list' };
   const showApplications = location.status === 'list' && isApplicationsView(params);
+  const showLocations = location.status === 'list' && params?.get('view') === 'locations';
   const navigate = useCallback((event: MouseEvent<HTMLAnchorElement>) => {
     if (!isCurrentTabNavigationClick(event, event.currentTarget)) return;
     const destination = new URL(event.currentTarget.href);
@@ -56,7 +58,9 @@ export function useMerchantWorkspaceRoute(enabled: boolean) {
         ? merchantWorkspaceHref(target)
         : isApplicationsView(destination.searchParams)
           ? merchantApplicationsHref
-          : '/merchant/workspace';
+          : destination.searchParams.get('view') === 'locations'
+            ? merchantLocationsHref
+            : '/merchant/workspace';
     try {
       if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== href) {
         const state = { ...window.history.state };
@@ -73,5 +77,5 @@ export function useMerchantWorkspaceRoute(enabled: boolean) {
       // A real link remains usable when the browser denies History access.
     }
   }, []);
-  return { location, showApplications, hydrated: url !== null, navigate };
+  return { location, showApplications, showLocations, hydrated: url !== null, navigate };
 }
