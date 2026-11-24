@@ -706,40 +706,51 @@ it.each(['可視視窗平移', '頁面捲動'])('行程深連結等待%s，確�
 
   let rowLeft = 40;
   let rowTop = 420;
-  let canScroll = false;
   vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {
     if (this.matches('li[aria-current="true"]')) return new DOMRect(rowLeft, rowTop, 140, 60);
     return originalBounds.call(this);
   });
   const scroll = vi.spyOn(window, 'scrollBy');
-  vi.mocked<(options: ScrollToOptions) => void>(window.scrollBy).mockImplementation((options) => {
-    expect(document.activeElement).toBe(document.body);
-    if (canScroll) {
-      rowLeft -= options.left ?? 0;
-      rowTop -= options.top ?? 0;
-    }
-  });
+  scroll.mockImplementation(() => {});
 
   render(<PersonalCalendar />);
   const list = await screen.findByRole('list', { name: '個人行程列表' });
   expect(within(list).getAllByRole('heading', { name: target.title })).toHaveLength(2);
-  const row = list.querySelector('li[aria-current="true"]');
+  const row = list.querySelector('li[aria-current="true"]')!;
   expect(row).toBeTruthy();
+  const scrollIntoView = vi.fn();
+  Object.defineProperty(row, 'scrollIntoView', { value: scrollIntoView });
   expect(scroll).toHaveBeenCalledExactlyOnceWith({ left: -220, top: 160, behavior: 'instant' });
   expect(document.activeElement).toBe(document.body);
 
+  const scrollView = source === '頁面捲動'
+    ? () => fireEvent.scroll(document)
+    : () => viewport.dispatchEvent(new Event('scroll'));
   if (source === '頁面捲動') {
     rowLeft = 260;
     rowTop = 260;
-    fireEvent.scroll(document);
+    scrollView();
+    expect(row?.getBoundingClientRect()).toMatchObject({ left: 260, right: 400, top: 260, bottom: 320 });
   } else {
-    canScroll = true;
-    viewport.dispatchEvent(new Event('scroll'));
+    viewport.offsetTop = 420;
+    scrollView();
+    expect(document.activeElement).toBe(document.body);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    viewport.offsetLeft = 40;
+    viewport.offsetTop = 80;
+    scrollView();
+    expect(document.activeElement).toBe(document.body);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    viewport.offsetTop = 420;
+    scrollView();
   }
-  expect(row?.getBoundingClientRect()).toMatchObject({ left: 260, right: 400, top: 260, bottom: 320 });
   expect(document.activeElement).toBe(row);
-  viewport.dispatchEvent(new Event('scroll'));
-  expect(scroll).toHaveBeenCalledTimes(source === '頁面捲動' ? 1 : 2);
+  expect(scroll).toHaveBeenCalledTimes(1);
+  expect(scrollIntoView).not.toHaveBeenCalled();
 });
 
 it.each([

@@ -24,15 +24,15 @@ export function visibleViewport() {
   };
 }
 
-export function onVisibleViewportChange(listener: () => void) {
+export function onVisibleViewportChange(onResize: () => void, onScroll = onResize) {
   const viewport = window.visualViewport;
-  window.addEventListener('resize', listener);
-  viewport?.addEventListener('resize', listener);
-  viewport?.addEventListener('scroll', listener);
+  window.addEventListener('resize', onResize);
+  viewport?.addEventListener('resize', onResize);
+  viewport?.addEventListener('scroll', onScroll, { passive: true });
   return () => {
-    window.removeEventListener('resize', listener);
-    viewport?.removeEventListener('resize', listener);
-    viewport?.removeEventListener('scroll', listener);
+    window.removeEventListener('resize', onResize);
+    viewport?.removeEventListener('resize', onResize);
+    viewport?.removeEventListener('scroll', onScroll);
   };
 }
 
@@ -226,10 +226,10 @@ export function stillOwnsFocus(origin: Element | null, allowBodyFallback = false
 }
 
 export function onFocusRetryOpportunity(retry: (mode: 'reveal' | 'visible') => void) {
-  const unsubscribe = onVisibleViewportChange(() => retry('reveal'));
   // Element scroll events do not bubble. Capture page and nested scrolls
   // without issuing more scroll commands while the user is moving the view.
   const onScroll = () => retry('visible');
+  const unsubscribe = onVisibleViewportChange(() => retry('reveal'), onScroll);
   window.addEventListener('scroll', onScroll, { capture: true, passive: true });
   return () => {
     unsubscribe();
