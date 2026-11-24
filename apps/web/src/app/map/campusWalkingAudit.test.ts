@@ -77,6 +77,32 @@ describe('trusted OSM walking segment audit bridge', () => {
     expect(data.graph.edges[0].access).toBe('unknown');
   });
 
+  it('excludes a stale candidate edge when the source way directs pedestrians to a sidepath', () => {
+    const data = candidates();
+    data.ways[0].tags.foot = 'use_sidepath';
+    const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+    expect(graph.edges.map(e => e.osmWayId)).toEqual([102]);
+    expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2)).toBeNull();
+  });
+
+  it.each(['way', 'from', 'to'] as const)(
+    'rechecks the source %s when the graph restriction is overwritten',
+    source => {
+      const data = candidates();
+      const edge = data.graph.edges[2];
+      if (source !== 'way') {
+        delete data.ways[1].tags.access;
+        const endpoint = data.nodes.find(node => node.id === edge[source])!;
+        endpoint.tags.barrier = 'gate';
+      }
+      expect(edge.access).toBe('restricted');
+      edge.access = 'unknown';
+      const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit(3, 4, { osmWayId: 102 })], now)!;
+      expect(graph.edges[2].access).toBe('restricted');
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 3, 4)).toBeNull();
+    },
+  );
+
   it('rejects graph geometry that does not exactly match audited OSM node identities', () => {
     const data = candidates();
     const [first, second, ...rest] = data.graph.nodes;

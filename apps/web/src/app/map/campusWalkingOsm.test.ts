@@ -69,6 +69,17 @@ describe('OSM campus walking discovery (not routing approval)', () => {
       .toEqual(['restricted', 'restricted']);
   });
 
+  it('keeps the sidepath as a candidate and excludes the original way', () => {
+    const input = { ...payload(), elements: [...payload().elements,
+      way(103, [1, 5], { highway: 'residential', foot: 'use_sidepath' }),
+      way(104, [1, 4, 5], { footway: 'sidewalk' }),
+    ] };
+    const result = parse(input)!;
+    expect(result.ways.find(w => w.id === 103)?.tags.foot).toBe('use_sidepath');
+    expect(result.graph.edges.filter(e => e.osmWayId >= 103).map(e => [e.osmWayId, e.from, e.to]))
+      .toEqual([[104, 1, 4], [104, 4, 5]]);
+  });
+
   it('rejects incomplete, stale and malformed responses', () => {
     const input = payload();
     expect(parse({ ...input, remark: 'runtime error' })).toBeNull();

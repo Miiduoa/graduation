@@ -71,11 +71,20 @@ function revision(value: Record<string, unknown>, baseMs: number): Revision | nu
   return { version: value.version, editedAt, tags };
 }
 
-const restricted = (tags: Tags) =>
+export const excludesWalkingWay = (tags: Tags) =>
+  tags.foot === 'use_sidepath' ||
+  !!(tags.area && tags.area !== 'no') ||
+  !!(tags.indoor && tags.indoor !== 'no') || tags.location === 'underground';
+
+const restrictsWalking = (tags: Tags) =>
   ['no', 'private', 'customers', 'permit', 'destination'].includes(tags.foot ?? '') ||
   ['no', 'private', 'customers', 'permit', 'destination'].includes(tags.access ?? '') ||
   !!(tags.barrier && tags.barrier !== 'no') ||
   !!tags['access:conditional'] || !!tags['foot:conditional'] || !!tags['opening_hours'];
+
+export function hasWalkingRestriction(way: Tags, from: Tags, to: Tags): boolean {
+  return restrictsWalking(way) || restrictsWalking(from) || restrictsWalking(to);
+}
 
 /** Reject partial, stale or malformed Overpass JSON. Exact OSM node identity,
  * not coordinate proximity, defines connectivity. Out-of-bounds segments are
@@ -121,9 +130,7 @@ export function parseCampusWalkingOsmCandidates(
   const seen = new Set<string>();
   for (const way of ways.values()) {
     if (way.nodes.some(id => !nodes.has(id))) return null;
-    // A highway area or indoor feature is not an explicit outdoor path.
-    if ((way.tags.area && way.tags.area !== 'no') ||
-        (way.tags.indoor && way.tags.indoor !== 'no') || way.tags.location === 'underground') continue;
+    if (excludesWalkingWay(way.tags)) continue;
     for (let i = 1; i < way.nodes.length; i += 1) {
       const a = nodes.get(way.nodes[i - 1])!;
       const b = nodes.get(way.nodes[i])!;
@@ -134,7 +141,7 @@ export function parseCampusWalkingOsmCandidates(
       // "both" is a placeholder on a non-routable edge, not a direction audit.
       // Preserve all tags/revisions above for explicit review before promotion.
       edges.push({ from: a.id, to: b.id, osmWayId: way.id, direction: 'both',
-        access: restricted(way.tags) || restricted(a.tags) || restricted(b.tags) ? 'restricted' : 'unknown' });
+        access: hasWalkingRestriction(way.tags, a.tags, b.tags) ? 'restricted' : 'unknown' });
     }
   }
   const inside = [...nodes.values()].filter(n => inBounds(n, bounds));

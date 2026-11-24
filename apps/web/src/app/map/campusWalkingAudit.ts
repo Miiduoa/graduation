@@ -1,5 +1,5 @@
 import type { CampusWalkingGraph, WalkingEdge, WalkingNode } from './campusWalkingGraph';
-import type { CampusWalkingOsmCandidates } from './campusWalkingOsm';
+import { excludesWalkingWay, hasWalkingRestriction, type CampusWalkingOsmCandidates } from './campusWalkingOsm';
 
 type ReviewedNode = WalkingNode & { version: number };
 export type CampusWalkingSegmentAudit = {
@@ -104,19 +104,26 @@ export function applyCampusWalkingSegmentAudits(
     reviews.set(segment, audit);
   }
 
-  const edges: WalkingEdge[] = candidates.graph.edges.map(edge => {
-    // Never promote an OSM-tagged restriction, even with an older open audit.
-    // Reject any pre-promoted input rather than inheriting untrusted access.
-    const blocked: WalkingEdge = { ...edge, access: edge.access === 'restricted' ? 'restricted' : 'unknown' };
-    if (edge.access !== 'unknown') return blocked;
-    const segment = key(edge.osmWayId, edge.from, edge.to);
-    const audit = reviews.get(segment);
-    if (!audit || duplicates.has(segment)) return blocked;
+  const eligibleEdges = candidates.graph.edges.filter(edge => {
+    const way = ways.get(edge.osmWayId);
+    return !way || !excludesWalkingWay(way.tags);
+  });
+  const edges: WalkingEdge[] = eligibleEdges.map(edge => {
     const from = nodes.get(edge.from);
     const to = nodes.get(edge.to);
     const way = ways.get(edge.osmWayId);
-    if (!from || !to || !way ||
-        !matchesNode(audit.from, from) || !matchesNode(audit.to, to) ||
+    // Never promote an OSM-tagged restriction, even with an older open audit.
+    if (edge.access === 'restricted' ||
+        (way && from && to && hasWalkingRestriction(way.tags, from.tags, to.tags))) {
+      return { ...edge, access: 'restricted' };
+    }
+    // Reject any pre-promoted input rather than inheriting untrusted access.
+    const blocked: WalkingEdge = { ...edge, access: 'unknown' };
+    if (!from || !to || !way || edge.access !== 'unknown') return blocked;
+    const segment = key(edge.osmWayId, edge.from, edge.to);
+    const audit = reviews.get(segment);
+    if (!audit || duplicates.has(segment)) return blocked;
+    if (!matchesNode(audit.from, from) || !matchesNode(audit.to, to) ||
         audit.wayVersion !== way.version ||
         !way.nodes.some((id, i) => id === edge.from && way.nodes[i + 1] === edge.to) ||
         !['both', 'forward', 'reverse'].includes(audit.direction) ||
