@@ -239,10 +239,15 @@ it('今天依台灣日期標示，禁止編輯時仍可查看日期', () => {
 
 it('重新開啟窄月格時完整露出已選日期，僅調整月格的水平捲動', () => {
   const originalBounds = Element.prototype.getBoundingClientRect;
-  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(216);
+  vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(264);
   vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(616);
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-    if (this.getAttribute('role') === 'region') return new DOMRect(40, 500, 216, 400);
+    if (this.getAttribute('role') === 'region') return new DOMRect(40, 500, 264, 400);
+    if (this.classList.contains(styles.weekday)) {
+      const index = Array.from(this.parentElement!.children).indexOf(this);
+      const viewport = this.closest('[role="region"]')!;
+      return new DOMRect(40 + index * 88 - viewport.scrollLeft, 500, 88, 24);
+    }
     if (this.getAttribute('aria-label') === '2028-01-18') {
       const viewport = this.closest('[role="region"]')!;
       return new DOMRect(40 + 176 - viewport.scrollLeft, 600, 88, 96);
@@ -264,7 +269,7 @@ it('重新開啟窄月格時完整露出已選日期，僅調整月格的水平�
   );
   const viewport = screen.getByRole('region', { name: '2028-01 月格，週日起始' });
   const selected = screen.getByRole('button', { name: '2028-01-18' });
-  expect(viewport.scrollLeft).toBe(48);
+  expect(viewport.scrollLeft).toBe(0);
   expect(selected.getBoundingClientRect().left).toBeGreaterThanOrEqual(
     viewport.getBoundingClientRect().left,
   );
@@ -284,7 +289,7 @@ it('重新開啟窄月格時完整露出已選日期，僅調整月格的水平�
       <MonthCalendar {...baseProps} selectedDate="2028-01-18" onDate={onDate} />
     </>,
   );
-  expect(screen.getByRole('region', { name: '2028-01 月格，週日起始' }).scrollLeft).toBe(48);
+  expect(screen.getByRole('region', { name: '2028-01 月格，週日起始' }).scrollLeft).toBe(0);
   expect(document.activeElement).toBe(switcher);
   expect(pageScroll).not.toHaveBeenCalled();
 });
@@ -299,13 +304,13 @@ it('外部選日移到左側時只捲回必要距離，不搶焦點或重設已�
   const outside = screen.getByRole('button', { name: '回今天' });
   outside.focus();
   const viewport = screen.getByRole('region', { name: '2028-01 月格，週日起始' });
-  const selected = screen.getByRole('button', { name: '2028-01-23' });
   Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 216 });
   Object.defineProperty(viewport, 'scrollWidth', { configurable: true, value: 616 });
   viewport.scrollLeft = 200;
   vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(new DOMRect(40, 500, 216, 400));
-  vi.spyOn(selected, 'getBoundingClientRect').mockImplementation(
-    () => new DOMRect(40 - viewport.scrollLeft, 600, 88, 96),
+  const sunday = within(viewport).getByText('日', { exact: true });
+  vi.spyOn(sunday, 'getBoundingClientRect').mockImplementation(
+    () => new DOMRect(40 - viewport.scrollLeft, 500, 88, 24),
   );
   const pageScroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
 

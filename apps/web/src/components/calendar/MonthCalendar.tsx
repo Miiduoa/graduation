@@ -12,6 +12,7 @@ export function MonthCalendar({
   records,
   month,
   selectedDate,
+  dateRevealRevision = 0,
   onDate,
   onEdit,
   onMonthChange,
@@ -20,6 +21,7 @@ export function MonthCalendar({
   records: readonly PersonalImportRecord[];
   month: string;
   selectedDate: string;
+  dateRevealRevision?: number;
   onDate: (date: string) => void;
   onEdit: (event: PersonalImportRecord, trigger?: HTMLButtonElement) => void;
   onMonthChange?: (month: string) => void;
@@ -34,30 +36,32 @@ export function MonthCalendar({
   const today = emptyPersonalEventDraft().date;
   const descriptionId = useId();
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
   const dateButtons = useRef(new Map<string, HTMLButtonElement>());
   const pendingFocus = useRef<{ date: string; origin: HTMLButtonElement } | null>(null);
   const days = useMemo(() => buildMonthCalendar(records, month), [records, month]);
+  const selectedCellIndex = days.findIndex((day) => day?.date === selectedDate);
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
-    const selected = dateButtons.current.get(selectedDate);
-    if (!viewport || !selected || viewport.clientWidth <= 0) return;
+    const weekdayColumns = gridRef.current?.children;
+    const sunday = weekdayColumns?.[0];
+    const selectedColumn = weekdayColumns?.[Math.max(0, selectedCellIndex) % MONTH_WEEKDAYS.length];
+    if (!viewport || !sunday || !selectedColumn || viewport.clientWidth <= 0) return;
     const maxScroll = viewport.scrollWidth - viewport.clientWidth;
     if (maxScroll <= 0) return;
-    const bounds = viewport.getBoundingClientRect();
-    const dateBounds = selected.getBoundingClientRect();
-    const left = bounds.left + viewport.clientLeft;
-    const right = left + viewport.clientWidth;
-    const adjustment =
-      dateBounds.left < left
-        ? dateBounds.left - left
-        : dateBounds.right > right
-          ? dateBounds.right - right
-          : 0;
-    // Returning from the list creates a new viewport at scrollLeft=0. Reveal only
-    // the selected column; keep focus and the page's vertical position untouched.
-    if (adjustment !== 0)
-      viewport.scrollLeft = Math.max(0, Math.min(maxScroll, viewport.scrollLeft + adjustment));
-  }, [month, selectedDate]);
+
+    const viewportLeft = viewport.getBoundingClientRect().left + viewport.clientLeft;
+    const weekStart = sunday.getBoundingClientRect().left - viewportLeft + viewport.scrollLeft;
+    const columnEnd =
+      selectedColumn.getBoundingClientRect().right - viewportLeft + viewport.scrollLeft;
+    // Keep Sunday fully visible. When the span overflows, its start also gives
+    // the selected column the most space available without clipping Sunday.
+    const target = Math.min(
+      Math.max(viewport.scrollLeft, columnEnd - viewport.clientWidth),
+      weekStart,
+    );
+    viewport.scrollLeft = Math.max(0, Math.min(maxScroll, target));
+  }, [month, selectedDate, selectedCellIndex, dateRevealRevision]);
 
   useLayoutEffect(() => {
     const requested = pendingFocus.current;
@@ -114,7 +118,7 @@ export function MonthCalendar({
         aria-describedby={`${descriptionId}-keyboard`}
         tabIndex={0}
       >
-        <div className={styles.grid}>
+        <div ref={gridRef} className={styles.grid}>
           {MONTH_WEEKDAYS.map((day) => (
             <div className={styles.weekday} key={day}>
               <span className={styles.srOnly}>週</span>

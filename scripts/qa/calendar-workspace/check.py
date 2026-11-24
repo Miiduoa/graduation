@@ -4,6 +4,7 @@ import hashlib
 import http.server
 import json
 import threading
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
@@ -221,23 +222,38 @@ async def assert_complete_field_value(page, label, value, text, report):
                 f'{label} text is clipped by an ancestor vertically: {state}')
 
 
-async def assert_selected_day_revealed(page, date, previous_scroll_y, report):
+async def assert_weekday_columns(page, date, report):
     button = page.get_by_role('button', name=date, exact=True)
     state = await button.evaluate('''button => {
       const viewport = button.closest('[role="region"]');
-      const outer = viewport.getBoundingClientRect();
-      const rect = button.getBoundingClientRect();
-      return {date: button.getAttribute('aria-label'),
-        left: rect.left, right: rect.right, width: rect.width,
-        visibleLeft: outer.left + viewport.clientLeft,
-        visibleRight: outer.left + viewport.clientLeft + viewport.clientWidth,
+      const grid = button.parentElement.parentElement;
+      const date = button.getAttribute('aria-label');
+      const column = new Date(date + 'T00:00:00Z').getUTCDay();
+      const sunday = grid.children[0].getBoundingClientRect();
+      const selected = grid.children[column].getBoundingClientRect();
+      const visibleLeft = viewport.getBoundingClientRect().left + viewport.clientLeft;
+      return {date, column, sundayLeft: sunday.left, sundayRight: sunday.right,
+        selectedLeft: selected.left, selectedRight: selected.right,
+        visibleLeft, visibleRight: visibleLeft + viewport.clientWidth,
         scrollLeft: viewport.scrollLeft, clientWidth: viewport.clientWidth,
-        scrollWidth: viewport.scrollWidth, windowScrollY: window.scrollY};
+        windowScrollY: window.scrollY};
     }''')
     report.setdefault('selectedDayVisibility', []).append(state)
-    assert state['width'] > 0, f'Selected day is not rendered: {state}'
-    assert state['left'] >= state['visibleLeft'] - 1 and state['right'] <= state['visibleRight'] + 1, (
-        f'Selected day is only partly visible after returning to month view: {state}')
+    assert state['sundayRight'] > state['sundayLeft']
+    assert state['sundayLeft'] >= state['visibleLeft'] - 1
+    assert state['sundayRight'] <= state['visibleRight'] + 1, f'Sunday column is clipped: {state}'
+    if state['selectedRight'] - state['sundayLeft'] <= state['clientWidth']:
+        assert state['selectedLeft'] >= state['visibleLeft'] - 1
+        assert state['selectedRight'] <= state['visibleRight'] + 1, (
+            f'The selected column fits with Sunday but is clipped: {state}')
+    else:
+        assert abs(state['visibleLeft'] - state['sundayLeft']) <= 1, (
+            f'The overflowing week should start at Sunday: {state}')
+    return state
+
+
+async def assert_selected_day_revealed(page, date, previous_scroll_y, report):
+    state = await assert_weekday_columns(page, date, report)
     assert abs(state['windowScrollY'] - previous_scroll_y) <= 1, (
         f'Revealing the selected day unexpectedly scrolled the whole page: {previous_scroll_y} -> {state}')
     await expect(page.get_by_role('button', name='月格', exact=True)).to_be_focused()
@@ -344,8 +360,26 @@ async def run_scenario(browser, server_url, config):
 
     try:
         query = urlencode({key: config[key] for key in ('theme', 'text', 'motion') if key in config})
+        await page.clock.set_fixed_time(datetime.fromisoformat('2028-01-01T12:00:00+08:00'))
         await page.goto(server_url + '/?' + query)
         await expect(page.get_by_role('button', name='新增行程', exact=True)).to_be_enabled()
+        await set_month(page, '2027-12')
+        previous_grid = page.get_by_role('region', name='2027-12 月格，週日起始')
+        await previous_grid.evaluate('viewport => { viewport.scrollLeft = viewport.scrollWidth; }')
+        await page.get_by_role('button', name='回今天', exact=True).click()
+        today = page.get_by_role('button', name='2028-01-01', exact=True)
+        await expect(today).to_have_attribute('aria-current', 'date')
+        await expect(today).to_have_attribute('aria-pressed', 'true')
+        today_columns = await assert_weekday_columns(page, '2028-01-01', report)
+        assert today_columns['column'] == 6
+        if config.get('text') == '200':
+            assert today_columns['selectedRight'] - today_columns['sundayLeft'] > today_columns['clientWidth']
+            today_grid = page.get_by_role('region', name='2028-01 月格，週日起始')
+            await today_grid.evaluate('viewport => { viewport.scrollLeft = viewport.scrollWidth; }')
+            await page.get_by_role('button', name='回今天', exact=True).click()
+            await assert_weekday_columns(page, '2028-01-01', report)
+        report['checks'].append('Returning from another month to Saturday preserves Sunday and shows the selected column as far as the viewport permits')
+
         await assert_multiweek_titles(page, config, report)
         await set_month(page, '2028-01')
         await assert_month_controls_fit(page, report)
@@ -389,7 +423,7 @@ async def run_scenario(browser, server_url, config):
         # Do not click or focus the selected date first: that would let the
         # browser repair the product's horizontal position and hide a regression.
         await assert_selected_day_revealed(page, '2028-01-18', scroll_before_month, report)
-        report['checks'].append('Returning to month view fully reveals the selected day inside the horizontal viewport without taking focus from the view control')
+        report['checks'].append('Returning to month view preserves Sunday and shows the selected column as far as the viewport permits without moving focus')
         await capture('day')
 
         await page.get_by_role('button', name='新增行程', exact=True).click()

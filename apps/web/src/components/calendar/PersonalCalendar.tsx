@@ -338,6 +338,7 @@ function PersonalCalendarWorkspace({
   const [month, setMonth] = useState(() => emptyPersonalEventDraft().date.slice(0, 7));
   const [calendarView, setCalendarView] = useState<'month' | 'list'>('month');
   const [selectedDate, setSelectedDate] = useState('');
+  const [dateRevealRevision, setDateRevealRevision] = useState(0);
   const [dues, setDues] = useState<{
     uid: string | null;
     items: CalendarCourseDeadline[];
@@ -404,6 +405,7 @@ function PersonalCalendarWorkspace({
     const today = emptyPersonalEventDraft().date;
     setMonth(today.slice(0, 7));
     setSelectedDate(today);
+    if (today === selectedDate) setDateRevealRevision((revision) => revision + 1);
   };
   const [mode, setMode] = useState<'idle' | 'create' | 'edit'>('idle');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -526,7 +528,13 @@ function PersonalCalendarWorkspace({
     const focused = document.activeElement;
     if (focused && focused !== document.body) {
       const { top, right, bottom, left } = focused.getBoundingClientRect();
-      if (bottom > 0 && top < window.innerHeight && right > 0 && left < window.innerWidth) {
+      const region = focused.closest<HTMLElement>('[role="region"]');
+      const regionLeft = region ? region.getBoundingClientRect().left + region.clientLeft : 0;
+      const visibleLeft = Math.max(0, regionLeft);
+      const visibleRight = region?.clientWidth
+        ? Math.min(window.innerWidth, regionLeft + region.clientWidth)
+        : window.innerWidth;
+      if (bottom > 0 && top < window.innerHeight && right > visibleLeft && left < visibleRight) {
         return;
       }
     }
@@ -539,15 +547,15 @@ function PersonalCalendarWorkspace({
     if (requestedDate && requestedDate === selectedDate && !paused) {
       revealDayAgenda();
     }
-  }, [paused, revealDayAgenda, selectedDate]);
+  }, [paused, revealDayAgenda, selectedDate, dateRevealRevision]);
 
   const selectMonthDay = (date: string) => {
-    if (date === selectedDate) {
-      revealDayAgenda();
-      return;
-    }
     pendingDayReveal.current = date;
-    setSelectedDate(date);
+    if (date === selectedDate) {
+      setDateRevealRevision((revision) => revision + 1);
+    } else {
+      setSelectedDate(date);
+    }
   };
 
   const monthEvents = useMemo(
@@ -887,6 +895,7 @@ function PersonalCalendarWorkspace({
             records={monthEvents}
             month={month}
             selectedDate={selectedDate}
+            dateRevealRevision={dateRevealRevision}
             onDate={selectMonthDay}
             onMonthChange={changeMonth}
             onEdit={openEdit}
