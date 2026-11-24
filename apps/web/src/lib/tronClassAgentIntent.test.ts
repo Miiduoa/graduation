@@ -49,7 +49,6 @@ describe('explicit TronClass navigation', () => {
     '前往玩課雲查作業截止',
     '進入 TronClass 看成績',
     'open TronClass 看有什麼作業',
-    '玩課雲作業',
   ])('keeps the single-clause query %s eligible for Agent routing', question => {
     expect(tronClassExplicitNavigationQuestion(question)).toBeNull();
     expect(canAnswerTronClassQuestion(question)).toBe(true);
@@ -63,17 +62,17 @@ describe('explicit TronClass command routing', () => {
     ['幫我查 TronClass 未交作業不要繳交', 'homework', true],
     ['請再查一下 TronClass 尚未提交的作業', 'homework', true],
     ['列出 tron class 課程', 'courses', false],
-    ['玩課雲的公告', 'announcements', false],
-    ['創課教材', 'materials', false],
+    ['查玩課雲的公告', 'announcements', false],
+    ['列出創課教材', 'materials', false],
     ['幫我下載 TronClass 講義', 'download', false],
     ['TronClass Agent 可以做什麼', 'capabilities', false],
-    ['TronClass 作業繳交狀態', 'homework', false],
+    ['查 TronClass 作業繳交狀態', 'homework', false],
     ['幫我繳交 TronClass 未交作業', 'unsupported', false],
     ['幫我把 TronClass 未交作業全部繳交', 'unsupported', false],
     ['幫我準備 TronClass 作業並送出', 'unsupported', false],
     ['TronClass 查作業狀態：上傳附件', 'unsupported', false],
     ['TronClass 是否已繳交的作業', 'homework', false],
-    ['TronClass 我的作業繳交紀錄', 'homework', false],
+    ['查 TronClass 我的作業繳交紀錄', 'homework', false],
     ['幫我回覆 TronClass 討論', 'unsupported', false],
     ['TronClass 問卷填答', 'unsupported', false],
   ] as const)('routes %s without model-chosen tools', (question, intent, pendingOnly) => {
@@ -144,7 +143,7 @@ describe('TronClass clauses inside a multi-clause request', () => {
     ['查玩課雲未交作業和校園公告', ['查玩課雲未交作業']],
     ['查玩課雲未交作業，查交通資訊', ['查玩課雲未交作業']],
     ['幫我查 TronClass 未交作業，然後查公車', ['幫我查 TronClass 未交作業']],
-    ['TronClass 未交作業，還沒交的作業', ['TronClass 未交作業']],
+    ['查 TronClass 未交作業，還沒交的作業', ['查 TronClass 未交作業']],
   ])('answers the TronClass part of %s with the Agent', (question, expected) => {
     expect(canAnswerTronClassQuestion(question)).toBe(false);
     expect(tronClassCompoundClauses(question)).toEqual(expected);
@@ -272,9 +271,9 @@ describe('write occurrences in TronClass requests', () => {
   });
 
   it.each([
-    '玩課雲作業交了嗎', '查玩課雲交作業期限', '玩課雲交作業截止日',
+    '玩課雲作業交了嗎', '查玩課雲交作業期限', '玩課雲交作業截止日是哪天',
     '查玩課雲作業繳交期限', '玩課雲作業上傳截止日是哪天',
-    '查玩課雲繳交截止日期', '查玩課雲上傳期限', '玩課雲繳交截止時間',
+    '查玩課雲繳交截止日期', '查玩課雲上傳期限', '玩課雲繳交截止時間是什麼時候',
     '查玩課雲作業上傳 deadline', '查玩課雲作業已交的',
     '不要補交附件只要查玩課雲作業狀態', '不要繳作業只查玩課雲作業狀態',
   ])('keeps the homework read %s', question => {
@@ -432,11 +431,11 @@ describe('write occurrences in TronClass requests', () => {
     `玩課雲顯示一下我的作業繳交進度${tail}`,
   ))('allows the complete status query %s', question => {
     expect(parseTronClassAgentIntent(question)).toEqual({ intent: 'homework', pendingOnly: false });
-    expect(tronClassCompoundClauses(`${question}，校園公告`)).toEqual([question.replace(/？$/, '')]);
+    expect(tronClassCompoundClauses(`${question}，校園公告`)).toEqual([question.normalize('NFKC')]);
   });
 
   it.each([
-    '玩課雲作業上傳情況',
+    '查玩課雲作業上傳情況',
     '玩課雲作業查一下繳交進度',
     '玩課雲看我的作業提交紀錄',
     '玩課雲列出作業上載狀態',
@@ -476,7 +475,7 @@ describe('write occurrences in TronClass requests', () => {
     expect(tronClassCompoundClauses('玩課雲我的作業交了沒，查校園公告')).toEqual(['玩課雲我的作業交了沒']);
     expect(parseTronClassAgentIntent('玩課雲 翻譯 submit 這個字')).toBeNull();
     expect(tronClassCompoundClauses('翻譯 submit 這個字，查玩課雲作業')).toEqual([]);
-    expect(parseTronClassAgentIntent('玩課雲不要上傳附件')?.intent).toBe('capabilities');
+    expect(classifyTronClassSentence('玩課雲不要上傳附件')).toEqual({ outcome: 'ambiguous' });
   });
 
   it.each([
@@ -1418,6 +1417,42 @@ describe('three-way sentence classification', () => {
     expect(tronClassCompoundClauses(question)).toEqual([]);
   });
 
+  it.each([
+    '玩課雲作業是我的',
+    '玩課雲有作業。',
+    '玩課雲作業',
+    '玩課雲的公告',
+    '創課教材',
+    'TronClass 作業繳交狀態',
+    'TronClass 我的作業繳交紀錄',
+    'TronClass 未交作業，還沒交的作業',
+    '玩課雲作業上傳情況',
+    '玩課雲交作業截止日',
+    '玩課雲繳交截止時間',
+    '玩課雲有作業「有哪些」',
+    '玩課雲有作業（嗎？）',
+    '查的玩課雲作業',
+    '玩課雲有作業，查校園公告',
+  ])('requires a visible read request or question in %s', question => {
+    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it('does not supplement a compound request containing an LMS declaration', () => {
+    const question = '看玩課雲公告，玩課雲作業是我的';
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(tronClassCompoundClauses(question)).toEqual([]);
+  });
+
+  it.each(['有作業嗎', '查有沒有作業', '有哪些作業', '有作業？'])(
+    'keeps the question %s with an explicit LMS context', clause => {
+      const question = `開啟玩課雲，${clause}`;
+      expect(tronClassCompoundClauses(question)).toEqual([`玩課雲${clause.normalize('NFKC')}`]);
+    },
+  );
+
   it.each(['請幫我準備 TronClass 作業', '幫我準備 TronClass 作業'])(
     'honors a current preparation request: %s', question => {
       expect(classifyTronClassSentence(question)).toEqual({
@@ -1432,6 +1467,8 @@ describe('three-way sentence classification', () => {
     ['查玩課雲作業草稿', false],
     ['我現在就要查玩課雲作業', false],
     ['玩課雲有作業嗎', false],
+    ['玩課雲有作業嗎？', false],
+    ['玩課雲有作業？', false],
     ['查玩課雲有沒有作業', false],
     ['玩課雲有哪些作業', false],
     ['查玩課雲尚未繳交的作業', true],
