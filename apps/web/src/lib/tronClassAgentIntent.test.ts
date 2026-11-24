@@ -1351,6 +1351,18 @@ describe('three-way sentence classification', () => {
       intent: { intent: 'prepare', pendingOnly: false },
     });
     expect(parseTronClassAgentIntent('幫我準備 TronClass 作業')).toEqual({ intent: 'prepare', pendingOnly: false });
+
+    expect(classifyTronClassSentence('玩課雲準備的作業')?.outcome).not.toBe('clearly-write');
+    expect(parseTronClassAgentIntent('玩課雲準備的作業')?.intent).not.toBe('prepare');
+    expect(canAnswerTronClassQuestion('玩課雲準備的作業') === false ||
+      parseTronClassAgentIntent('玩課雲準備的作業')?.intent !== 'prepare').toBe(true);
+    expect(tronClassCompoundClauses('玩課雲準備的作業')).toEqual([]);
+
+    expect(classifyTronClassSentence('玩課雲準備作業')?.outcome).not.toBe('clearly-write');
+    expect(parseTronClassAgentIntent('玩課雲準備作業')?.intent).not.toBe('prepare');
+    expect(canAnswerTronClassQuestion('玩課雲準備作業')).toBe(false);
+    expect(tronClassCompoundClauses('玩課雲準備作業')).toEqual([]);
+    expect(classifyTronClassSentence('玩課雲準備作業')?.outcome).toBe('ambiguous');
   });
 
 });
