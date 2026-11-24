@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs } from './tronClassAgentIntent';
+import { canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs, tronClassReadRequestVerbs } from './tronClassAgentIntent';
 
 /** Unknown leftover tokens now make a sentence ambiguous (confirmation), which is acceptable. */
 function expectAuthorizedOrAmbiguous(
@@ -1528,6 +1528,72 @@ describe('three-way sentence classification', () => {
     const elapsed = performance.now() - started;
     expect(results).toEqual(questions.map(() => 'ambiguous'));
     expect(elapsed).toBeLessThan(200);
+  });
+
+
+  it('requires confirmation for a subject before every auto-executing verb within the 200 ms budget', () => {
+    const subjects = ['他', '老師', '作業的老師'];
+    const questions: string[] = [];
+    for (const verb of tronClassAutoExecuteActionVerbs()) {
+      const latin = /[A-Za-z]/.test(verb);
+      for (const subject of subjects) {
+        questions.push(latin
+          ? `${subject} please ${verb} TronClass 作業`
+          : `${subject}幫我${verb}玩課雲作業`);
+      }
+    }
+    questions.push('他幫我準備玩課雲作業', '玩課雲作業的老師幫我準備作業');
+    expect(questions.length).toBeGreaterThan(100);
+    expect(Math.max(...questions.map(question => question.length))).toBeLessThanOrEqual(1000);
+    const started = performance.now();
+    const results = questions.map(question => classifyTronClassSentence(question)?.outcome ?? null);
+    const elapsed = performance.now() - started;
+    expect(results).toEqual(questions.map(() => 'ambiguous'));
+    expect(elapsed).toBeLessThan(200);
+  });
+
+  it('requires confirmation for read verb + object + 的 + noun within the 200 ms budget', () => {
+    const objects = ['玩課雲作業', '玩課雲教材', 'TronClass 講義'];
+    const nouns = ['老師', '紀錄', '時間', '情況'];
+    const questions: string[] = [];
+    for (const verb of tronClassReadRequestVerbs()) {
+      for (const object of objects) {
+        for (const noun of nouns) {
+          questions.push(/[A-Za-z]/.test(verb)
+          ? `${verb} ${object}的${noun}`
+          : `${verb}${object}的${noun}`);
+        }
+      }
+    }
+    questions.push('查玩課雲作業的老師');
+    expect(questions.length).toBeGreaterThan(20);
+    expect(Math.max(...questions.map(question => question.length))).toBeLessThanOrEqual(1000);
+    const started = performance.now();
+    const results = questions.map(question => classifyTronClassSentence(question)?.outcome ?? null);
+    const elapsed = performance.now() - started;
+    expect(results).toEqual(questions.map(() => 'ambiguous'));
+    expect(elapsed).toBeLessThan(200);
+  });
+
+  it.each([
+    '繳交玩課雲作業的老師嗎？',
+    '繳交玩課雲作業的老師？',
+    '繳交玩課雲作業的老師嗎',
+    '他幫我準備玩課雲作業嗎？',
+    '查玩課雲作業的老師嗎？',
+  ])('does not treat a skipped action plus a question particle as a read: %s', question => {
+    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(canAnswerTronClassQuestion(question)).toBe(false);
+  });
+
+  it('scans repeated unproven writes with trailing modifiers in linear time within the 200 ms budget', () => {
+    const question = '玩課雲' + '刪除作業的老師'.repeat(80);
+    expect(question.length).toBeLessThanOrEqual(1000);
+    const started = performance.now();
+    expect(classifyTronClassSentence(question)).toEqual({ outcome: 'ambiguous' });
+    expect(parseTronClassAgentIntent(question)).toBeNull();
+    expect(performance.now() - started).toBeLessThan(200);
   });
 
   it.each([
