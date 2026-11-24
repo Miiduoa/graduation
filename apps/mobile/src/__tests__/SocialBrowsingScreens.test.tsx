@@ -1168,6 +1168,45 @@ test.each([true, false])('a failed newer confirmation preserves an older confirm
   expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
 });
 
+test('a list captured before a confirmed cancellation cannot be retained again when board rows arrive', async () => {
+  jest.mocked(listBoards).mockResolvedValue([board]);
+  const view = render(<BoardsScreen />);
+  await view.findByText('讀書會');
+
+  const write = deferred();
+  jest.mocked(subscribeToBoard).mockImplementationOnce(() => write.promise);
+  fireEvent.press(view.getByLabelText('訂閱讀書會'));
+
+  const refresh = () => view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+  await act(async () => { await refresh(); });
+
+  const firstRead = deferred<boolean>();
+  const secondRead = deferred<boolean>();
+  jest.mocked(isSubscribedToBoard)
+    .mockImplementationOnce(() => firstRead.promise)
+    .mockImplementationOnce(() => secondRead.promise);
+  await act(async () => { write.resolve(); });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('取消訂閱讀書會')).toBeTruthy();
+
+  const rows = deferred<typeof board[]>();
+  jest.mocked(listBoards).mockImplementationOnce(() => rows.promise);
+  jest.mocked(listSubscribedBoardIds).mockResolvedValueOnce(['board']);
+  let refreshPromise!: Promise<void>;
+  await act(async () => { refreshPromise = refresh(); });
+
+  await act(async () => { firstRead.resolve(false); });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  await act(async () => { rows.resolve([board]); await refreshPromise; });
+  expect(isSubscribedToBoard).toHaveBeenCalledTimes(2);
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+
+  await act(async () => { secondRead.reject(new Error('offline')); });
+  expect(view.getByLabelText('訂閱讀書會')).toBeTruthy();
+});
+
 test('two native presses before a rerender toggle from the newest choice', async () => {
   jest.mocked(listBoards).mockResolvedValue([board]);
   const view = render(<BoardsScreen />);

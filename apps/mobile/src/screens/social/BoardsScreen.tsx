@@ -67,6 +67,7 @@ export function BoardsScreen() {
 type SubscriptionListRead = {
   subscribedIds: ReadonlySet<string>;
   writeRevisionAtRead: number;
+  serverRevisionAtRead: number;
 };
 
 function BoardsContent() {
@@ -85,7 +86,7 @@ function BoardsContent() {
   const [composeOpen, setComposeOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const loadVersion = useRef(0);
-  // Order single-board queries at dispatch and list snapshots when applied.
+  // Order query dispatch, snapshot capture, and result application.
   const serverReadRevision = useRef(0);
   // Writes still in flight per board (several may be queued while offline).
   const pendingSubscriptionCounts = useRef(new Map<string, number>());
@@ -95,6 +96,9 @@ function BoardsContent() {
   const boardWriteRevision = useRef(new Map<string, number>());
   // Last server read that applied membership for this board.
   const boardServerAppliedRevision = useRef(new Map<string, number>());
+  // Completion order is separate from dispatch order: a confirmation can
+  // start before a list snapshot and still supersede it when it succeeds.
+  const boardConfirmationAppliedAt = useRef(new Map<string, number>());
   // Subscriptions whose current membership came from a single-board server read.
   const confirmedByBoardRead = useRef(new Set<string>());
   // A list started before this board's last successful write used keepLocal.
@@ -143,6 +147,7 @@ function BoardsContent() {
     pendingServerConfirmCounts.current = new Map();
     awaitingServerConfirm.current.clear();
     boardServerAppliedRevision.current.clear();
+    boardConfirmationAppliedAt.current.clear();
     keepLocalFromStaleList.current.clear();
     deferredListMembership.current.clear();
     confirmedByBoardRead.current.clear();
@@ -170,6 +175,7 @@ function BoardsContent() {
           (subs): SubscriptionListRead => ({
             subscribedIds: new Set(subs),
             writeRevisionAtRead: subscriptionRevision.current,
+            serverRevisionAtRead: serverReadRevision.current,
           }),
         ),
       ]);
@@ -216,9 +222,12 @@ function BoardsContent() {
       });
       for (const id of keepLocal) {
         keepLocalFromStaleList.current.add(id);
-        // Retain the membership captured when the subscription query resolved,
-        // even if board rows or writes were still in flight at that point.
-        deferredListMembership.current.set(id, membership);
+        // A confirmation may have already invalidated this snapshot while
+        // the board rows were still loading. It can trigger a new server read
+        // below, but cannot serve as a fallback for that read.
+        if ((boardConfirmationAppliedAt.current.get(id) ?? 0) <= membership.serverRevisionAtRead) {
+          deferredListMembership.current.set(id, membership);
+        }
         const keptRollback =
           awaitingServerConfirm.current.has(id) &&
           nextConfirmed.has(id) &&
@@ -286,6 +295,7 @@ function BoardsContent() {
       const serverSubscribed = await isSubscribedToBoard(uid, sid, boardId, { fromServer: true });
       if (!canApply()) return;
       boardServerAppliedRevision.current.set(boardId, readRevision);
+      boardConfirmationAppliedAt.current.set(boardId, ++serverReadRevision.current);
       const nextConfirmed = new Set(confirmedSubscribedRef.current);
       if (serverSubscribed) {
         nextConfirmed.add(boardId);
