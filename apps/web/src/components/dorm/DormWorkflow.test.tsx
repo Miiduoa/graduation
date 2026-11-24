@@ -740,10 +740,7 @@ it('discards a repair photo URL when Firebase changes while reading the photo', 
 });
 
 it.each(['account', 'school'])('drops a selection made after the file picker’s %s changed', async (scope) => {
-  let picker!: HTMLInputElement;
-  const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) {
-    picker = this;
-  });
+  const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
   const read = vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader) {
     Object.defineProperty(this, 'result', { value: 'data:image/jpeg;base64,dGVzdA==' });
     this.dispatchEvent(new Event('load'));
@@ -752,6 +749,9 @@ it.each(['account', 'school'])('drops a selection made after the file picker’s
     const draft = { title: '維修', description: '門鎖損壞', category: '其他', location: '宿舍' };
     const view = render(<DormWorkflow schoolId="pu" uid={signInAs('alice')} draft={draft} />);
     fireEvent.click(await screen.findByRole('button', { name: '新增照片（0/3）' }));
+    expect(click).toHaveBeenCalledOnce();
+    const picker = click.mock.contexts[0];
+    if (!(picker instanceof HTMLInputElement)) throw new Error('Expected the photo picker to be an input');
     expect(picker.type).toBe('file');
     if (scope === 'account') api.uid = 'bob';
     else view.rerender(<DormWorkflow schoolId="ntnu" uid="alice" draft={draft} />);
