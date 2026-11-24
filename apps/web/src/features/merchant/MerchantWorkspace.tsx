@@ -384,6 +384,7 @@ function AccountWorkspace({
       );
       if (!isCurrent()) return;
       if (stores.status === 'fulfilled') confirmed.mergeWorkspaceList(stores.value, listRevision);
+      else confirmed.useVerifiedWorkspacesOnListFailure(!denied(stores.reason));
       for (const result of refreshed) {
         if (!result) continue;
         confirmed.verify(result.key, result.revision, !result.detail);
