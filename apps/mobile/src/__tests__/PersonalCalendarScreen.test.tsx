@@ -1,6 +1,6 @@
 import React from 'react';
 import { Alert } from 'react-native';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   personalImportSavedNotice,
@@ -15,6 +15,22 @@ import {
   loadPersonalImports,
   personalImportStorageKey,
 } from '../services/personalImports';
+
+jest.mock('../services/personalImports', () => {
+  const actual = jest.requireActual('../services/personalImports') as typeof import('../services/personalImports');
+  return {
+    ...actual,
+    appendPersonalImports: jest.fn((...args: Parameters<typeof actual.appendPersonalImports>) =>
+      actual.appendPersonalImports(...args),
+    ),
+    editPersonalImport: jest.fn((...args: Parameters<typeof actual.editPersonalImport>) =>
+      actual.editPersonalImport(...args),
+    ),
+    deletePersonalImport: jest.fn((...args: Parameters<typeof actual.deletePersonalImport>) =>
+      actual.deletePersonalImport(...args),
+    ),
+  };
+});
 
 let mockScope: { owner: string; schoolId: string } | null = {
   owner: 'nuni:pa_11111111-1111-4111-8111-111111111111',
@@ -107,6 +123,8 @@ beforeEach(async () => {
   mockListReminders.mockResolvedValue({});
   mockOpenReminderSettings.mockReset();
   await AsyncStorage.clear();
+  jest.mocked(appendPersonalImports).mockClear();
+
   jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
     const confirm = buttons?.find(
       (button) => button.style === 'destructive' || button.text === '刪除',
@@ -417,4 +435,72 @@ it('選取單日後仍匯出所選整月，包含跨月活動並保留原始起�
   expect(content).toContain('DTEND;VALUE=DATE:20261002');
   expect(content).toContain('SUMMARY:月內合成');
   expect(content).not.toContain('SUMMARY:其他月份');
+});
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function fillDraft(view: ReturnType<typeof render>, title: string) {
+  await waitUntilEditable(view);
+  fireEvent.press(view.getByRole('button', { name: '新增行程' }));
+  await waitFor(() => expect(view.getByLabelText('標題')).toBeTruthy());
+  fireEvent.changeText(view.getByLabelText('標題'), title);
+  fireEvent.changeText(view.getByLabelText('日期（YYYY-MM-DD）'), '2026-10-20');
+  fireEvent.changeText(view.getByLabelText('開始時間（HH:MM）'), '09:00');
+  fireEvent.changeText(view.getByLabelText('結束時間（HH:MM）'), '10:00');
+}
+
+it('finishes a started save while the account is briefly revalidated', async () => {
+  const view = renderCalendar();
+  await fillDraft(view, '重驗後仍要存下');
+  const write = deferred<Awaited<ReturnType<typeof appendPersonalImports>>>();
+  const actual = jest.requireActual('../services/personalImports') as typeof import('../services/personalImports');
+  jest.mocked(appendPersonalImports).mockImplementationOnce(() => write.promise);
+  fireEvent.press(view.getByRole('button', { name: '儲存行程' }));
+  await waitFor(() => expect(appendPersonalImports).toHaveBeenCalled());
+  const [, rows] = jest.mocked(appendPersonalImports).mock.calls[0];
+  mockScope = null;
+  view.rerender(<PersonalCalendarScreen />);
+  await act(async () => {
+    write.resolve(await actual.appendPersonalImports(mockScope ?? { owner: 'nuni:pa_11111111-1111-4111-8111-111111111111', schoolId: 'pu' }, rows));
+  });
+  mockScope = {
+    owner: 'nuni:pa_11111111-1111-4111-8111-111111111111',
+    schoolId: 'pu',
+  };
+  view.rerender(<PersonalCalendarScreen />);
+  await waitFor(() => expect(view.getByText(personalImportSavedNotice(1))).toBeTruthy());
+  const ledger = await loadPersonalImports(mockScope);
+  expect(ledger.records).toHaveLength(1);
+  expect(ledger.records[0]?.title).toBe('重驗後仍要存下');
+});
+
+it('shows a save error if the write fails while the account is briefly revalidated', async () => {
+  const view = renderCalendar();
+  await fillDraft(view, '重驗失敗要看見錯誤');
+  const write = deferred<Awaited<ReturnType<typeof appendPersonalImports>>>();
+  jest.mocked(appendPersonalImports).mockImplementationOnce(() => write.promise);
+  fireEvent.press(view.getByRole('button', { name: '儲存行程' }));
+  await waitFor(() => expect(appendPersonalImports).toHaveBeenCalled());
+  mockScope = null;
+  view.rerender(<PersonalCalendarScreen />);
+  await act(async () => {
+    write.reject(new Error('網路中斷'));
+  });
+  expect(view.getByText('網路中斷')).toBeTruthy();
+  mockScope = {
+    owner: 'nuni:pa_11111111-1111-4111-8111-111111111111',
+    schoolId: 'pu',
+  };
+  view.rerender(<PersonalCalendarScreen />);
+  await waitFor(() => expect(view.getByText('網路中斷')).toBeTruthy());
+  expect(view.getByLabelText('標題').props.value).toBe('重驗失敗要看見錯誤');
+  expect(view.queryByText(personalImportSavedNotice(1))).toBeNull();
 });

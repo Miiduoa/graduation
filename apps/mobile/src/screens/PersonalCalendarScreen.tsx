@@ -129,11 +129,16 @@ export default function PersonalCalendarScreen() {
   const { school } = useSchool();
   const route = useRoute();
   const key = scope ? personalImportStorageKey(scope) : '';
+  const lastReadyKey = useRef(key);
+  if (key) lastReadyKey.current = key;
+  // Keep the same workspace through a brief revalidation so an in-flight save
+  // can finish or surface an error instead of silently dropping the draft.
+  const workspaceKey = key || lastReadyKey.current || 'pending';
   const focusEventId = (route.params as FocusParams)?.eventId;
   return (
     <PersonalCalendarWorkspace
-      key={key || 'pending'}
-      scopeKey={key}
+      key={workspaceKey}
+      scopeKey={workspaceKey === 'pending' ? '' : workspaceKey}
       schoolName={school?.name || '未指定校園'}
       focusEventId={focusEventId}
     />
@@ -156,7 +161,9 @@ function PersonalCalendarWorkspace({
   const active = useRef(true);
   const requestId = useRef(0);
   const scopeSnapshot = useRef(scopeKey);
-  scopeSnapshot.current = scope && personalImportStorageKey(scope) === scopeKey ? scopeKey : '';
+  // An empty scope is a brief revalidation of the same workspace, not a switch.
+  scopeSnapshot.current =
+    !scope || personalImportStorageKey(scope) === scopeKey ? scopeKey : '';
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
   const [month, setMonth] = useState(() =>
     (initialDraft ?? emptyPersonalEventDraft()).date.slice(0, 7),
@@ -298,6 +305,12 @@ function PersonalCalendarWorkspace({
 
   const isActiveScope = () =>
     !!scope && active.current && scopeSnapshot.current === personalImportStorageKey(scope);
+  const stillThisScope = (scoped?: { owner: string; schoolId: string }) => {
+    if (!active.current) return false;
+    if (!scope) return true;
+    if (!scoped) return isActiveScope();
+    return scope.owner === scoped.owner && scope.schoolId === scoped.schoolId;
+  };
 
   useEffect(() => {
     if (!focusEventId || load.status !== 'ready' || !scope) return;
@@ -342,9 +355,17 @@ function PersonalCalendarWorkspace({
   };
 
   const saveLock = useRef(false);
-  const runSave = async (action: () => Promise<string | void>, success = '') => {
-    if (saveLock.current || !isActiveScope()) return;
-    if (!canMutate || !scope || draftIssues.length) {
+  const runSave = async (
+    scoped: { owner: string; schoolId: string },
+    action: () => Promise<string | void>,
+    success = '',
+  ) => {
+    if (saveLock.current) return;
+    if (!stillThisScope(scoped)) {
+      setFormError('目前無法確認登入狀態，請稍後再儲存。');
+      return;
+    }
+    if (!canMutate || draftIssues.length) {
       setFormError(draftIssues[0]?.message || '請先確認行程內容。');
       return;
     }
@@ -356,14 +377,16 @@ function PersonalCalendarWorkspace({
     try {
       const result = await action();
       if (!active.current || ticket !== requestId.current) return;
+      if (!stillThisScope(scoped)) return;
       setNotice(result || success);
       setMode('idle');
       setFromCampusEvent(false);
       setBaseline(null);
       setDraft(emptyPersonalEventDraft());
-      if (isActiveScope()) await refresh();
+      if (scope) await refresh();
     } catch (error) {
-      if (!isActiveScope() || ticket !== requestId.current) return;
+      if (!active.current || ticket !== requestId.current) return;
+      if (scope && !stillThisScope(scoped)) return;
       setFormError(personalEventSaveError(error));
     } finally {
       saveLock.current = false;
@@ -372,11 +395,14 @@ function PersonalCalendarWorkspace({
   };
 
   const saveCreate = () => {
-    if (!scope) return;
+    if (!scope) {
+      setFormError('目前無法確認登入狀態，請稍後再儲存。');
+      return;
+    }
     const scoped = { ...scope };
-    void runSave(async () => {
+    void runSave(scoped, async () => {
       const row = personalEventRowFromDraft(draft, scoped.schoolId, null);
-      const { added } = await appendPersonalImports(scoped, [row], () => isActiveScope());
+      const { added } = await appendPersonalImports(scoped, [row], () => stillThisScope(scoped));
       return added
         ? personalImportSavedNotice(added, load.status === 'ready' && load.syncEnabled)
         : '個人行事曆已經有這筆行程。';
@@ -384,12 +410,15 @@ function PersonalCalendarWorkspace({
   };
 
   const saveEdit = () => {
-    if (!scope || !baseline) return;
+    if (!scope || !baseline) {
+      setFormError('目前無法確認登入狀態，請稍後再儲存。');
+      return;
+    }
     const scoped = { ...scope };
     const original = baseline;
-    void runSave(async () => {
+    void runSave(scoped, async () => {
       const row = personalEventRowFromDraft(draft, scoped.schoolId, original);
-      await editPersonalImport(scoped, original, row, () => isActiveScope());
+      await editPersonalImport(scoped, original, row, () => stillThisScope(scoped));
     }, '個人行程已更新。');
   };
 
@@ -407,17 +436,19 @@ function PersonalCalendarWorkspace({
           setSaving(true);
           setFormError('');
           setNotice('');
-          void deletePersonalImport(scoped, original, () => isActiveScope())
+          void deletePersonalImport(scoped, original, () => stillThisScope(scoped))
             .then(async () => {
-              if (!isActiveScope() || ticket !== requestId.current) return;
+              if (!active.current || ticket !== requestId.current) return;
+              if (!stillThisScope(scoped)) return;
               setNotice('已刪除這筆個人行程。');
               setMode('idle');
               setBaseline(null);
               setDraft(emptyPersonalEventDraft());
-              await refresh();
+              if (scope) await refresh();
             })
             .catch((error) => {
-              if (!isActiveScope() || ticket !== requestId.current) return;
+              if (!active.current || ticket !== requestId.current) return;
+              if (scope && !stillThisScope(scoped)) return;
               setFormError(personalEventSaveError(error));
             })
             .finally(() => {
@@ -683,8 +714,9 @@ function PersonalCalendarWorkspace({
     );
   };
 
-  // Revalidation briefly hides the workspace while keeping its unsaved edits and receipt in memory.
-  if (initialDraft && !scope) {
+  // Revalidation may hide an idle workspace, but never hide an open draft, an
+  // in-flight save, or the error/receipt that tells the user what happened.
+  if (initialDraft && !scope && !saving && !formError) {
     return (
       <Screen>
         <Text style={{ color: theme.colors.muted }}>正在確認帳號與校園…</Text>
