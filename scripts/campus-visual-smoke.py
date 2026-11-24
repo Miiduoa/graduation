@@ -1494,19 +1494,20 @@ async def check_assistant_return_journey(page):
     original = page.url
     trigger = page.get_by_role('button', name='開啟校園助理', exact=True)
     await trigger.click()
-    dialog = page.get_by_role('dialog', name='校園助理', exact=True)
-    await expect(dialog).to_be_visible()
-    field = dialog.get_by_role('searchbox', name='想做什麼？', exact=True)
+    workspace = page.get_by_role('region', name='校園助理', exact=True)
+    await expect(workspace).to_be_visible()
+    await expect(page.get_by_role('dialog', name='校園助理', exact=True)).to_have_count(0)
+    field = workspace.get_by_role('searchbox', name='想做什麼？', exact=True)
     await expect(field).to_be_focused()
     assert page.url == original, 'Opening the assistant must keep the current task URL'
     await field.fill('明天下課後想去圖書館')
     await field.press('Escape')
-    await expect(dialog).not_to_be_visible()
+    await expect(workspace).not_to_be_visible()
     await expect(trigger).to_be_focused()
     await trigger.click()
     await expect(field).to_have_value('明天下課後想去圖書館')
     await expect(finder).to_have_value('借書')
-    login = dialog.get_by_role('link', name='登入後，接著詢問校園助理', exact=True)
+    login = workspace.get_by_role('link', name='登入後，接著詢問校園助理', exact=True)
     login_href = await login.get_attribute('href')
     login_url = urlparse(login_href)
     login_query = parse_qs(login_url.query)
@@ -1520,22 +1521,45 @@ async def check_assistant_return_journey(page):
     assert '明天下課後' not in login_href, 'Typed draft must not be added to the login URL'
     await no_overflow(page)
     await page.screenshot(path=str(OUT / 'assistant-life-mobile.png'), full_page=True, animations='disabled')
+    document_start = await page.evaluate('performance.timeOrigin')
     await login.click()
     await expect(page.get_by_role('heading', name='登入', exact=True)).to_be_visible()
+    assert await page.evaluate('performance.timeOrigin') != document_start, 'Login intentionally reloads the document'
     await page.get_by_role('link', name='不登入，繼續瀏覽', exact=True).click()
-    await expect(page.get_by_role('dialog', name='校園助理', exact=True)).to_be_visible()
+    await expect(workspace).to_be_visible()
+    # Drafts live only in this document's memory; the login reload must not
+    # restore the previous private draft through storage or the return URL.
+    await expect(field).to_have_value('')
     await expect(page.get_by_role('searchbox', name='快速找服務', exact=True)).to_have_value('借書')
-    await page.get_by_role('button', name='關閉校園助理', exact=True).click()
-    await expect(page.get_by_role('dialog', name='校園助理', exact=True)).not_to_be_visible()
+    await workspace.get_by_role('button', name='收合', exact=True).click()
+    await expect(workspace).not_to_be_visible()
     assert urlparse(page.url).fragment == '', 'Closing a restored panel must clear only its resume anchor'
+    assert urlparse(page.url).path == '/life' and parse_qs(urlparse(page.url).query) == task
     # A fresh visit to the same task must not reopen the old panel.
     await page.reload(wait_until='load')
-    await expect(page.get_by_role('dialog', name='校園助理', exact=True)).to_have_count(0)
+    await expect(workspace).to_have_count(0)
+    await expect(finder).to_have_value('借書')
     await goto_path(page, '/?campus=pu')
+    home_field = page.get_by_role('textbox', name='想完成的事', exact=True)
+    await expect(home_field).to_be_visible()
+    await expect(home_field).to_have_value('')
+    await home_field.fill('查公車到站時間')
     await page.get_by_role('button', name='開啟校園助理', exact=True).click()
-    disclosure = page.locator('#today-voice-entry')
-    await expect(disclosure).to_have_attribute('open', '')
-    await expect(disclosure.get_by_role('searchbox', name='想做什麼？', exact=True)).to_be_focused()
+    await expect(workspace).to_be_visible()
+    await expect(field).to_be_focused()
+    await expect(field).to_have_value('查公車到站時間')
+    await field.fill('查公車到站時間與圖書館')
+    await workspace.get_by_role('button', name='收合', exact=True).click()
+    await expect(workspace).not_to_be_visible()
+    await expect(home_field).to_have_value('查公車到站時間與圖書館')
+    await no_overflow(page)
+    await page.screenshot(path=str(OUT / 'assistant-home-shared-draft-mobile.png'), full_page=True, animations='disabled')
+    await page.get_by_role('form', name='開始校園任務', exact=True).get_by_role(
+        'button', name='接續任務', exact=True,
+    ).click()
+    await expect(workspace).to_be_visible()
+    await expect(field).to_be_focused()
+    await expect(field).to_have_value('查公車到站時間與圖書館')
     assert urlparse(page.url).path == '/'
 
 
@@ -1641,7 +1665,7 @@ async def main():
             results.append('mobile bottom navigation leaves footer actions reachable')
             await page.set_viewport_size({'width': 390, 'height': 844})
             await check_assistant_return_journey(page)
-            results.append('assistant opens in place, keeps the draft on close, and resumes the campus task when returning from the login page')
+            results.append('nonmodal assistant preserves the directory and draft through minimize and login return, and shares the home draft in both directions')
             await goto_path(page, '/life?campus=pu')
 
             search = page.get_by_role('searchbox', name='快速找服務')

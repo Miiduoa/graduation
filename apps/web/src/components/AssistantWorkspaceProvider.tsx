@@ -243,14 +243,18 @@ export function AssistantWorkspaceProvider({ children }: { children: ReactNode }
   const routeKey = `${pathname ?? ''}?${params?.toString() ?? ''}`;
   const lastLocation = useRef<{ routeKey: string; hash: string; scopeKey: string } | null>(null);
   useEffect(() => {
+    // App Router may commit pushState after this render's hash snapshot. Read
+    // the committed destination before deciding to collapse, or a login-return
+    // anchor can be mistaken for a normal route change and cleared by minimize.
+    const committedHash = window.location.hash;
     const previous = lastLocation.current;
-    lastLocation.current = { routeKey, hash, scopeKey };
+    lastLocation.current = { routeKey, hash: committedHash, scopeKey };
     const changed =
       !previous ||
       previous.routeKey !== routeKey ||
-      previous.hash !== hash ||
+      previous.hash !== committedHash ||
       previous.scopeKey !== scopeKey;
-    if (isAssistantAnchor(hash)) {
+    if (isAssistantAnchor(committedHash)) {
       // Returning from login only opens the composer. It never submits a draft.
       if (!paused && (changed || !state.hasStarted)) openWorkspace();
     } else if (changed && previous && previous.routeKey !== routeKey) {

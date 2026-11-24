@@ -202,6 +202,23 @@ function tree(showOriginal = true) {
   );
 }
 
+// Next commits navigation with History during the layout phase. It does not
+// emit hashchange before parent passive effects inspect the new pathname.
+function NextLocationCommit({ href }: { href: string }) {
+  useLayoutEffect(() => {
+    window.history.replaceState({}, '', href);
+  }, [href]);
+  return <Page />;
+}
+
+function nextTree(href: string) {
+  return (
+    <AssistantWorkspaceProvider>
+      <NextLocationCommit href={href} />
+    </AssistantWorkspaceProvider>
+  );
+}
+
 async function openWorkspace(label = '開啟助理') {
   const trigger = screen.getByRole('button', { name: label });
   trigger.focus();
@@ -597,6 +614,48 @@ it('waits for identity checking before opening a login-return fragment', async (
   await screen.findByRole('textbox', { name: '助理輸入' });
   expect(state.resolveReplies).toHaveLength(0);
 });
+
+it.each([
+  ['#campus-assistant-entry', false],
+  ['#today-voice-entry', false],
+  ['#campus-assistant-entry', true],
+  ['#today-voice-entry', true],
+] as const)(
+  'preserves the committed Next login-return anchor %s while checking=%s',
+  async (anchor, checking) => {
+    state.pathname = '/login';
+    state.search = '';
+    state.context = null;
+    state.uid = null;
+    window.history.replaceState({}, '', '/login');
+    const view = render(nextTree('/login'));
+    expect(state.mounts).toBe(0);
+
+    state.pathname = '/life';
+    state.search = 'campus=pu';
+    state.context = 'returned-session';
+    state.nuniLoading = checking;
+    state.campusStatus = checking ? 'loading' : 'ready';
+    state.schoolId = checking ? null : 'pu';
+    const destination = '/life?campus=pu' + anchor;
+    view.rerender(nextTree(destination));
+    // No hashchange event is dispatched: this reproduces the committed URL
+    // arriving after Provider rendered with the previous empty hash snapshot.
+    expect(window.location.hash).toBe(anchor);
+    if (checking) {
+      expect(state.workspace!.open).toBe(false);
+      expect(state.mounts).toBe(0);
+      state.nuniLoading = false;
+      state.campusStatus = 'ready';
+      state.schoolId = 'pu';
+      view.rerender(nextTree(destination));
+    }
+    await screen.findByRole('textbox', { name: '助理輸入' });
+    expect(state.workspace!.open).toBe(true);
+    expect(state.mounts).toBe(1);
+    expect(state.resolveReplies).toHaveLength(0);
+  },
+);
 
 it('does not refocus a retained login-return workspace after a same-user refresh', async () => {
   window.history.replaceState({}, '', '/?campus=pu#campus-assistant-entry');

@@ -16,7 +16,7 @@
 | 本輪納入 #783 | `e664a72ee80472a3d1d85598c895f89de0638b28`；含雙語服務搜尋與訪客／身分隔離修正 |
 | 同步最後 main 的整合基底 | `f74d799998b265e4d185af30dfd4b222e0c6676b`；保留 #768、#783 原始祖先，檔案樹與本機已驗證的整合結果一致 |
 
-本文件記錄上述整合提交上的工作區變更。瀏覽器證據中的 `gitHead` 是驗證當下的本機整合基底 `94f7ec74461776ca8e52e654287a41b78e1ef957`；產品與 fixture 的實際驗證版本以 355 份來源 SHA-256 為準，已逐一核對最後內容一致。最終提交、CI、合併與部署狀態應以後續 PR 的精確 head 與檢查結果為準；文件中的本機驗證不表示已發布。
+本文件記錄上述整合提交上的工作區變更。瀏覽器證據記錄驗收當下的 Git 基底；產品與 fixture 的實際驗證版本以 355 份來源 SHA-256 為準，包含未提交工作樹的修正，已逐一核對最後內容一致。最終提交、CI、合併與部署狀態應以後續 PR 的精確 head 與檢查結果為準；文件中的本機驗證不表示已發布。
 
 ## 全產品設計原則
 
@@ -37,6 +37,7 @@
 - 同校園的一般換頁、篩選與返回不清除對話。前往結果頁時收合工作區，保留來源頁的導覽條件；再次打開能接續。
 - inline 對話把問題放在主要位置，只留一個工作情境選單；完整雲端資料說明放在可展開設定內，同意勾選保持可見。既有權限、待確認卡片、草稿保護、停止、重試與完整頁面流程繼續使用原引擎。
 - 訪客沿用校園服務搜尋；不把公開服務入口假裝成私人課務查詢。服務搜尋的草稿可與首頁接續，工作區草稿不另寫入服務目錄的返回紀錄。
+- 登入返回使用已提交網址的錨點判斷是否重開工作區，避免 App Router 更新早於 hash 訂閱時把返回意圖清掉。登入的完整頁面跳轉會清空記憶體草稿；返回仍保留服務分類／搜尋條件並開啟助理。
 
 ### Mobile：Today 的主要任務入口
 
@@ -159,22 +160,23 @@ fixture 使用實際 Provider、首頁、頁首、TodayCampusEntry、Conversatio
 
 ### 本輪驗證紀錄
 
-以下為最後整合工作樹的本機驗證。Web 474 項是一次執行的去重結果；Provider 與真實 Conversation 的最後重跑都是其中子集，不另加總。地圖是另一個回歸批次，亦不與其他批次相加宣稱整個產品的測試總數。提交後的 GitHub CI 與審查仍須對應最後 head。
+以下為最後整合工作樹的本機驗證。Web 478 項是一次執行的去重結果；Provider 與真實 Conversation 的最後重跑都是其中子集，不另加總。地圖是另一個回歸批次，亦不與其他批次相加宣稱整個產品的測試總數。提交後的 GitHub CI 與審查仍須對應最後 head。
 
 | 批次 | 已回報結果 | 證據限制 |
 | --- | --- | --- |
-| Web 工作區與直接相關回歸 | 18 檔、474 tests 通過，0 skipped | Node 22.23.5、`maxWorkers=2`，單次去重執行 |
-| Provider 最後重跑 | 32／32 通過 | 最後 callback 依賴與測試寫法調整後重跑；屬於上述子集 |
+| Web 工作區與直接相關回歸 | 18 檔、478 tests 通過，0 skipped | Node 22.23.5、`maxWorkers=2`，單次去重執行 |
+| Provider 與登入返回回歸 | 36／36 通過 | 包含 4 個 Next 導覽提交時序案例；隔離載入舊版時 4 個皆失敗，新版通過，屬於上述子集 |
 | 真實工作區 Conversation 最後重跑 | 7／7 通過 | 包含同 session 恢復不搶焦點、遲來回覆，以及待確認卡片換頁後不重送；傳輸仍為合成資料 |
 | Mobile 入口回歸 | 91 tests 通過 | 原生元件測試，不等於實機驗收 |
 | 既有地圖與相關回歸 | 192 tests 通過 | 獨立回歸批次，不表示所有學校資料與真實導航已驗證 |
 | Web TypeScript 與 production build | 最後 `next build` exit 0，型別檢查及路由產生完成 | 不等於正式部署或真實登入／後端驗收 |
 | 變更 Web 檔靜態檢查 | 16 個變更檔 ESLint exit 0、0 errors；diff whitespace 檢查通過 | `CampusProviders` 有 2 個既有 warnings，未宣稱零警告 |
 | Chromium 真實元件 fixture | 6／6 情境、36 個流程檢查通過，30 張截圖 | 合成身分與傳輸；不代表 Next server、真後端、Safari 或原生裝置 |
+| 正式建置的助理返回旅程 | `campus-visual-smoke.py` 中完整返回流程通過，page errors 0 | 使用真正 Next standalone 與合成服務；驗證返回、網址／分類、重載清稿、首頁雙向草稿及焦點，不代表正式帳號登入或全部服務；本機整份 campus-visual 在未修改的離線模擬遇到版本差異，保留原斷言並交由 CI 版本驗證 |
 
-瀏覽器六個情境分別為 1440px 桌面淺色、390px 手機淺色、320px 深色、320px／200% 文字、系統減少動態且站內旗標關閉，以及站內減少動態且系統無偏好。全部沒有 console warning／error、page error、非預期／外部網路或水平溢位。355 份來源的 SHA-256 在執行前後及最後複核一致，兩份 React／DOM runtime manifest 也一致。
+瀏覽器六個情境分別為 1440px 桌面淺色、390px 手機淺色、320px 深色、320px／200% 文字、系統減少動態且站內旗標關閉，以及站內減少動態且系統無偏好。全部沒有 console warning／error、page error、非預期／外部網路或水平溢位。355 份來源的 SHA-256 在執行前後及最後複核一致，兩份 React／DOM runtime manifest 也一致。本機工具版本為 Playwright 1.56／Chromium 141；CI 工作流固定 Playwright 1.57，遠端結果須依最後 head 另行核對。
 
-完整產物為 `artifacts/ai-workspace/results.json`、`source-sha256.json` 及 30 張截圖。來源 manifest SHA-256：`5bfa0a018df2ee3f422c00dc84730c32a47a53a2a971d0644632ec2f99fd7062`；結果 SHA-256：`c8956f91f130333303d6d8681b6570f7be11b4228079303111b06a96d12ae38f`。
+完整產物為 `artifacts/ai-workspace/results.json`、`source-sha256.json` 及 30 張截圖。來源 manifest SHA-256：`638d4a92a14b3220b1a8d696f8949e6d5b5d0b812e1df978d247d4d282e2c57d`；結果 SHA-256：`476134a0c68d3f105712bb7979322655b557096cf0fdf6c8b491615a00404831`。
 
 可隨原始碼審閱的畫面：[桌面首頁](evidence/ai-workspace-20261124/desktop-home.png)、[手機回答與草稿](evidence/ai-workspace-20261124/phone-answer.png)、[320px 深色訪客服務搜尋](evidence/ai-workspace-20261124/small-dark-guest-search.png)。畫面保留合成資料與未連正式服務的標示。
 
