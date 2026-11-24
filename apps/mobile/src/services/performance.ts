@@ -185,6 +185,10 @@ interface HttpMetricData {
   timestamp: number;
 }
 
+function isFailedHttpMetric(metric: HttpMetricData): boolean {
+  return metric.responseCode >= 400 || metric.attributes.transport_error === 'true';
+}
+
 // Performance data store for analytics
 class PerformanceDataStore {
   private traces: TraceData[] = [];
@@ -228,7 +232,7 @@ class PerformanceDataStore {
   }
 
   getErrorHttpRequests(): HttpMetricData[] {
-    return this.httpMetrics.filter((m) => m.responseCode >= 400);
+    return this.httpMetrics.filter(isFailedHttpMetric);
   }
 
   clear(): void {
@@ -264,7 +268,7 @@ class PerformanceDataStore {
           : 0,
       errorRate:
         this.httpMetrics.length > 0
-          ? this.httpMetrics.filter((m) => m.responseCode >= 400).length / this.httpMetrics.length
+          ? this.httpMetrics.filter(isFailedHttpMetric).length / this.httpMetrics.length
           : 0,
       slowRequests: this.httpMetrics.filter((m) => m.duration > 1000).length,
     };
@@ -515,15 +519,26 @@ export async function fetchWithPerformance(
     httpMetric.setHttpResponseCode(response.status);
     httpMetric.setResponseContentType(response.headers.get('content-type') ?? 'unknown');
 
-    // Clone response to read size
-    const clone = response.clone();
-    const text = await clone.text();
-    httpMetric.setResponsePayloadSize(text.length);
+    // Observe headers only: cloning and draining a response blocks callers,
+    // buffers large bodies, and can indefinitely delay streaming responses.
+    // Content-Length is the server-declared byte count, not decoded body size.
+    const contentLength = response.headers.get('content-length')?.trim();
+    const declaredBytes = contentLength && /^\d+$/.test(contentLength)
+      ? Number(contentLength)
+      : NaN;
+    if (Number.isSafeInteger(declaredBytes) && declaredBytes >= 0) {
+      httpMetric.setResponsePayloadSize(declaredBytes);
+      httpMetric.putAttribute('response_size_source', 'content-length');
+    } else {
+      httpMetric.putAttribute('response_size_source', 'unknown');
+    }
+    httpMetric.putAttribute('duration_scope', 'response_headers');
 
     await httpMetric.stop();
     return response;
   } catch (error) {
     httpMetric.setHttpResponseCode(0);
+    httpMetric.putAttribute('transport_error', 'true');
     httpMetric.putAttribute('error', String(error));
     await httpMetric.stop();
     throw error;
