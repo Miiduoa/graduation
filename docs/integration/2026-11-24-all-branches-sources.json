@@ -1,9 +1,9 @@
 {
   "repository": "Miiduoa/graduation",
-  "captured_at": "2026-11-23T23:21:53Z",
-  "captured_at_taipei": "2026-11-24T07:21:53+08:00",
+  "captured_at": "2026-11-24T01:45:20Z",
+  "captured_at_taipei": "2026-11-24T09:45:20+08:00",
   "base_main": "15bdca30796646d93263ddf8442eca248aa196b4",
-  "previous_integration": "98af9155665be9c52b2140a95084a9e95a45b3e1",
+  "previous_integration": "7a6a3f2598d51c98ccd40a4bed4017e734a2101d",
   "branches": [
     {
       "branch": "dependabot/npm_and_yarn/backend/functions/functions-patch-minor-fb4b230888",
@@ -34,6 +34,11 @@
       "branch": "feat/calendar-day-flow-20261123",
       "sha": "5646e7197e40fe19ece15e016282bcda506d726a",
       "pull_request": 752
+    },
+    {
+      "branch": "feat/cross-platform-interaction-20261124",
+      "sha": "d011eecdee150e946b76375b40884fc46fb26dbd",
+      "pull_request": 759
     },
     {
       "branch": "feat/merchant-workspace-continuity-20261123",
@@ -67,12 +72,12 @@
     },
     {
       "branch": "feat/tronclass-native-submit-20261113",
-      "sha": "b1e99ec2a12bd401960aa98165722279d17a2eff",
+      "sha": "5f8c016cffcb60cbc0d6d7ff3782577d5778fcf4",
       "pull_request": 616
     },
     {
       "branch": "fix/campus-spatial-offscreen-webgl-start-20261119",
-      "sha": "e6e446dd14c84283b3a8bd9bdbad81ac4c28ef37",
+      "sha": "ecd68d1c5647a5bbbc32ee45993e3a632a726c2c",
       "pull_request": 722
     },
     {
@@ -91,13 +96,18 @@
       "pull_request": 749
     },
     {
+      "branch": "fix/providence-classroom-bilingual-catalog-20261124",
+      "sha": "b46782fd23226758b92cce056641bc7e5981aef1",
+      "pull_request": 758
+    },
+    {
       "branch": "integration/all-branches-20261121",
       "sha": "a3447cb016b7180d976884468e1c497a0cbfa7ff",
       "pull_request": 738
     },
     {
       "branch": "integration/all-branches-20261123",
-      "sha": "98af9155665be9c52b2140a95084a9e95a45b3e1",
+      "sha": "7a6a3f2598d51c98ccd40a4bed4017e734a2101d",
       "pull_request": 753
     },
     {
