@@ -223,6 +223,25 @@ it('reconsiders an automatic classroom when a later source introduces ambiguity'
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
 });
 
+it.each(['Bishop Kupfer Hall 303', 'Ｂｉｓｈｏｐ  Ｋｕｐｆｅｒ Ｈａｌｌ ３０３'])(
+  'keeps the bus stop %s searchable without automatically opening the classroom alias',
+  async (name) => {
+    const hall = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-wenxing')!;
+    const source = deferred<MapLocation[]>();
+    vi.mocked(loadMapLocations).mockReturnValueOnce(source.promise);
+    render(<MapClient school="pu" query="Bishop Kupfer Hall 303" />);
+    const mapState = () => JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+    expect(mapState().selected.id).toBe('pu-wenxing');
+
+    const stop = { ...gate, id: 'synthetic-bus-stop', name, category: '公車站' };
+    await act(async () => source.resolve([hall, stop]));
+    const map = mapState();
+    expect(map.selected).toBeNull();
+    expect(map.locations).toContainEqual(expect.objectContaining({ id: stop.id, name }));
+    expect(screen.getByRole('button', { name: `查看${name.replace(/\s+/g, ' ')}` })).toBeTruthy();
+  },
+);
+
 it('never replaces a missing explicit focus with the classroom guess, including after a source update', async () => {
   state.user = null;
   const source = deferred<MapLocation[]>();

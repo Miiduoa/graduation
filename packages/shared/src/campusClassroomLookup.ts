@@ -51,6 +51,11 @@ function comparisonText(value: unknown): string {
   return normalizeCampusClassroomQuery(value).normalize('NFKC').toLocaleLowerCase('zh-TW');
 }
 
+export function campusPlaceNameMatchesQuery(name: string, query: string): boolean {
+  const comparableQuery = comparisonText(query);
+  return Boolean(comparableQuery) && comparisonText(name) === comparableQuery;
+}
+
 /** This only recognizes a suffix as room wording; it does not decode its building or floor. */
 function isRoomSuffix(value: string): boolean {
   const suffix = value.replace(/^[\s:：,，·#/–—-]+/, '').trim();
@@ -505,6 +510,22 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
     }
   }
   const matches = primaryMatches.length > 0 ? primaryMatches : aliasMatches;
+  if (primaryMatches.length === 0 && aliasMatches.length === 1) {
+    const [match] = aliasMatches;
+    const published = PUBLISHED_PROVIDENCE_PLACES.get(match.id);
+    // A public name can claim the full query even when its place is ineligible
+    // for classroom navigation. Preserve existing verified building-code matches.
+    if (
+      published &&
+      !matchesSourcedProvidenceCode(comparable, published) &&
+      locations.some((location) =>
+        location && typeof location === 'object' && location.id !== match.id &&
+        comparisonText(location.name) === comparable
+      )
+    ) {
+      return { query, status: 'unmatched', matches: [] };
+    }
+  }
   return {
     query,
     status: matches.length === 1 ? 'matched' : matches.length > 1 ? 'ambiguous' : 'unmatched',
