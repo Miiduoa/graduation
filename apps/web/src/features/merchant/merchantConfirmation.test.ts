@@ -90,7 +90,7 @@ it('learns the version floor from an older request without replacing the winning
   expect(confirmed.overview()?.workspaces).toMatchObject([sameVersion]);
 });
 
-it('preserves a newer application receipt until a subsequent denial', () => {
+it('preserves a newer application receipt through older list responses until a subsequent denial', () => {
   const confirmed = createMerchantConfirmations(new Map());
   const receipt = {
     tenantId: 'campus-one',
@@ -107,9 +107,15 @@ it('preserves a newer application receipt until a subsequent denial', () => {
   const write = confirmed.beginRequest();
   expect(confirmed.confirmApplication(receipt, write)).toBe(true);
   expect(confirmed.rejectApplications(earlierList)).toBe(false);
+  confirmed.mergeApplications([], earlierList);
   expect(confirmed.overview()?.applications).toEqual([receipt]);
 
   expect(confirmed.rejectApplications(confirmed.beginRequest())).toBe(true);
   expect(confirmed.overview()).toBeNull();
   expect(confirmed.confirmApplication(receipt, write)).toBe(false);
+
+  const delayedWrite = confirmed.beginRequest();
+  confirmed.mergeApplications([], confirmed.beginRequest());
+  expect(confirmed.confirmApplication(receipt, delayedWrite)).toBe(false);
+  expect(confirmed.overview()?.applications).toEqual([]);
 });

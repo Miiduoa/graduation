@@ -258,7 +258,10 @@ function AccountWorkspace({
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [applyingAgain, setApplyingAgain] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState('');
+  const [receivedApplicationId, setReceivedApplicationId] = useState<string | null>(null);
+  const notice = receivedApplicationId
+    ? '申請已收件。審核通過後仍需完成營運設定，才會開放店家服務。'
+    : '';
   const [submitError, setSubmitError] = useState('');
   const [pending, setPending] = useState<NuniMerchantApplicationInput | null>(null);
   const selectedLocation = location.status === 'selected' ? location : null;
@@ -304,8 +307,12 @@ function AccountWorkspace({
     ++generation.current;
   }, []);
   const publishOverview = useCallback(() => {
+    const nextOverview = confirmed.overview();
+    setReceivedApplicationId((id) =>
+      id && nextOverview?.applications.some((row) => row.applicationId === id) ? id : null,
+    );
     setWorkspaceSnapshot({
-      overview: confirmed.overview(),
+      overview: nextOverview,
       details: confirmed.verifiedDetails(),
       listedStatuses: confirmed.listedStatuses(),
       revocations: confirmed.workspaceRevocations(),
@@ -318,6 +325,7 @@ function AccountWorkspace({
     publishOverview();
   }, [confirmed, publishOverview]);
   const expire = useCallback(() => {
+    if (!mounted.current || !enabled.current) return;
     enabled.current = false;
     ++sessionGeneration.current;
     invalidate();
@@ -325,6 +333,7 @@ function AccountWorkspace({
     setInvalidSession(true);
     setDraft(emptyDraft());
     setPending(null);
+    setSubmitError('');
     void onExpired();
   }, [clearOverview, invalidate, onExpired]);
   const load = useCallback(async () => {
@@ -374,7 +383,6 @@ function AccountWorkspace({
           }),
           (error) => {
             if (denied(error) && confirmed.rejectApplications(listRevision)) {
-              setNotice('');
               publishOverview();
             }
           },
@@ -495,7 +503,7 @@ function AccountWorkspace({
     event.preventDefault();
     if (!enabled.current || busyRef.current || !overview || submissionBlocked) return;
     setSubmitError('');
-    setNotice('');
+    setReceivedApplicationId(null);
     let payload: NuniMerchantApplicationInput;
     try {
       payload =
@@ -537,7 +545,7 @@ function AccountWorkspace({
       publishOverview();
       setPending(null);
       setDraft(emptyDraft());
-      if (accepted) setNotice('申請已收件。審核通過後仍需完成營運設定，才會開放店家服務。');
+      if (accepted) setReceivedApplicationId(application.applicationId);
     } catch (error) {
       if (!isSameSession()) return;
       if (expired(error)) expire();

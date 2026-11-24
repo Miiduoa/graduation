@@ -685,7 +685,7 @@ it.each([403, 404, 503])(
   },
 );
 
-it('keeps an application receipt received inside a store when a reload loses a previously listed row', async () => {
+it('keeps review progress for an application received inside a store until a list denial', async () => {
   window.history.replaceState(null, '', '/merchant');
   let showStore = false;
   let listedApplications: (typeof application)[] = [];
@@ -722,10 +722,6 @@ it('keeps an application receipt received inside a store when a reload loses a p
   fireEvent.click(screen.getByRole('link', { name: '返回我的門市' }));
   await waitFor(() => expect(screen.queryByText('正在載入店家資料…')).toBeNull());
   expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
-  listedApplications = [];
-  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
-  expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
-
   const applications = screen.getByRole('region', { name: '申請進度' });
   listedApplications = [{ ...application, state: 'under-review', reviewerNote: '已開始審核' }];
   await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
@@ -948,4 +944,89 @@ it.each([
   }
   await act(async () => finishStores({ workspaces: [continuityStore] }));
   expect(screen.queryByRole('link', { name: '管理門市：第一門市' })).toBeNull();
+});
+
+it.each([
+  { status: 401, code: 'UNAUTHORIZED', forwardFirst: false },
+  { status: 409, code: 'SESSION_CHANGED', forwardFirst: true },
+])('expires on a retired detail response with $code (Forward first: $forwardFirst)', async ({
+  status,
+  code,
+  forwardFirst,
+}) => {
+  let rejectDetail!: (error: NuniError) => void;
+  const readRetiredDetail = vi.fn(
+    () =>
+      new Promise<never>((_, reject) => {
+        rejectDetail = reject;
+      }),
+  );
+  let returning = false;
+  mocks.request.mockImplementation((path) => {
+    if (path === 'merchant-workspaces' || path === 'merchant-applications') {
+      if (returning) return Promise.reject(new NuniError(503, 'UNAVAILABLE'));
+      return path === 'merchant-workspaces'
+        ? Promise.resolve({ workspaces: [continuityStore] })
+        : Promise.resolve({ applications: [{ ...application, reviewerNote: '請補營業登記資料' }] });
+    }
+    if (path === 'merchant-workspaces/campus-one/location-1')
+      return returning ? Promise.resolve(continuityStore) : readRetiredDetail();
+    return respond(path);
+  });
+
+  window.history.replaceState(null, '', '/merchant');
+  render(<MerchantWorkspace />);
+  await screen.findByText('審核說明：請補營業登記資料');
+  fireEvent.click(screen.getByRole('link', { name: '管理門市：第一門市' }));
+  await waitFor(() => expect(readRetiredDetail).toHaveBeenCalledTimes(1));
+  returning = true;
+  await act(async () => window.history.back());
+  await screen.findByText('目前無法確認店家資料，請重新載入。');
+  expect(screen.getByText('審核說明：請補營業登記資料')).toBeTruthy();
+
+  if (forwardFirst) {
+    await act(async () => window.history.forward());
+    await screen.findByRole('heading', { name: '餐坊／第一門市', level: 2 });
+  }
+  await act(async () => rejectDetail(new NuniError(status, code)));
+  await screen.findByText('登入或帳號已變更，這次店家資料與草稿已清除。');
+  expect(mocks.auth.refresh).toHaveBeenCalledTimes(1);
+
+  await act(async () => forwardFirst ? window.history.back() : window.history.forward());
+  await waitFor(() =>
+    expect(window.location.pathname).toBe(forwardFirst ? '/merchant' : '/merchant/workspace'),
+  );
+  expect(screen.queryByRole('heading', { name: '餐坊／第一門市', level: 2 })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新載入店家資料' }));
+  if (!forwardFirst) await act(async () => window.history.back());
+  await screen.findByText('目前無法確認店家資料，請重新載入。');
+  expect(screen.queryByText('審核說明：請補營業登記資料')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
+});
+
+it('removes a submitted application and its review note after a successful empty list', async () => {
+  window.history.replaceState(null, '', '/merchant');
+  let listedApplications: (typeof application)[] = [];
+  mocks.request.mockImplementation((path, context, input) =>
+    path === 'merchant-applications' && !input
+      ? Promise.resolve({ applications: listedApplications })
+      : respond(path, context, input),
+  );
+
+  render(<MerchantWorkspace />);
+  await fillApplication();
+  fireEvent.click(screen.getByRole('button', { name: '送出進駐申請' }));
+  await screen.findByText(/申請已收件/);
+  expect(screen.getByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeTruthy();
+
+  listedApplications = [{ ...application, state: 'needs-information', reviewerNote: '請補營業登記資料' }];
+  fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
+  await screen.findByText('審核說明：請補營業登記資料');
+
+  listedApplications = [];
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新載入' })));
+  expect(screen.getByText('你還沒有送出進駐申請。')).toBeTruthy();
+  expect(screen.queryByText(/申請已收件/)).toBeNull();
+  expect(screen.queryByRole('heading', { name: '測試餐坊／學生餐廳' })).toBeNull();
+  expect(screen.queryByText('審核說明：請補營業登記資料')).toBeNull();
 });

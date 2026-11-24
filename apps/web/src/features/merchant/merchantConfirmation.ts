@@ -46,7 +46,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
   let listedWorkspaces: Map<string, Pick<NuniMerchantWorkspace, 'tenantId' | 'locationId'>> | undefined;
   let includeVerifiedWorkspaces = false;
   const retainedWorkspaceKeys = new Set<string>();
-  const receipts = new Map<string, NuniMerchantApplication>();
+  const receipts = new Map<string, Observation<NuniMerchantApplication>>();
   const entries = new Map<string, WorkspaceObservations>();
   let listRevocation = 0;
   let listedRevision = 0;
@@ -142,7 +142,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     const previous = new Map(lists.applications?.map((row) => [row.applicationId, row]));
     lists.applications = rows.map((row) => {
       const receipt = receipts.get(row.applicationId);
-      const current = receipt ?? previous.get(row.applicationId);
+      const current = receipt?.value ?? previous.get(row.applicationId);
       if (!current || current.tenantId !== row.tenantId) return row;
       const older = Date.parse(row.submittedAt) < Date.parse(current.submittedAt);
       const regressedToSubmitted =
@@ -150,9 +150,13 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
         current.state !== 'submitted' &&
         row.state === 'submitted';
       const merged = older || regressedToSubmitted ? current : row;
-      if (receipt) receipts.set(row.applicationId, merged);
+      if (receipt) receipts.set(row.applicationId, { ...receipt, value: merged });
       return merged;
     });
+    // The successful list owns membership through its request revision.
+    for (const [id, receipt] of receipts) {
+      if (receipt.revision <= revision) receipts.delete(id);
+    }
   }
 
   return {
@@ -232,9 +236,10 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
     },
     confirmApplication(receipt: NuniMerchantApplication, revision: number) {
       if (revision <= applicationRevocation) return false;
-      const current =
-        receipts.get(receipt.applicationId) ??
-        lists.applications?.find((row) => row.applicationId === receipt.applicationId);
+      const listed = lists.applications?.find((row) => row.applicationId === receipt.applicationId);
+      if (revision <= applicationListRevision) return listed?.tenantId === receipt.tenantId;
+      const previous = receipts.get(receipt.applicationId);
+      const current = previous?.value ?? listed;
       const useCurrent =
         current &&
         current.tenantId === receipt.tenantId &&
@@ -242,7 +247,10 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
           (Date.parse(current.submittedAt) === Date.parse(receipt.submittedAt) &&
             current.state !== 'submitted' &&
             receipt.state === 'submitted'));
-      receipts.set(receipt.applicationId, useCurrent ? current : receipt);
+      receipts.set(receipt.applicationId, {
+        value: useCurrent ? current : receipt,
+        revision: Math.max(revision, previous?.revision ?? 0),
+      });
       applicationReceiptRevision = Math.max(applicationReceiptRevision, revision);
       return true;
     },
@@ -277,7 +285,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
           return row && (listedAfterRevocation || hasVerifiedAccess(key)) ? [row] : [];
         }),
         applications: [
-          ...[...receipts.values()].reverse(),
+          ...[...receipts.values()].reverse().map(({ value }) => value),
           ...(lists.applications ?? []).filter((row) => !receipts.has(row.applicationId)),
         ],
       };
@@ -299,6 +307,7 @@ export function createMerchantConfirmations(drafts: ReadonlyMap<string, { menuRe
       return verified.has(key) || revocations.has(key) || !!entry?.detail;
     },
     clear() {
+      for (const draft of drafts.values()) draft.menuReceipt = null;
       lists = {};
       listedWorkspaces = undefined;
       includeVerifiedWorkspaces = false;

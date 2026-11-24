@@ -235,6 +235,23 @@ export function MerchantOperations({
     [beginRequest, draftKey, localConfirmations, locationId, onDenied, tenantId],
   );
 
+  const expireSession = useCallback(
+    (failure: unknown) => {
+      if (
+        !(failure instanceof NuniError) ||
+        (failure.status !== 401 && failure.code !== 'SESSION_CHANGED')
+      )
+        return false;
+      // Session invalidation applies even after navigation retires the request's view.
+      localConfirmations.clear();
+      setDetail(null);
+      setFresh(false);
+      expire.current();
+      return true;
+    },
+    [localConfirmations],
+  );
+
   const checkAccess = useCallback(
     async (current: () => boolean, verifiesEntry = false) => {
       const session = sessionRun.current;
@@ -245,14 +262,13 @@ export function MerchantOperations({
         if (active.current && session === sessionRun.current) confirmDetail(next, true, revision);
       } catch (failure) {
         if (!active.current || session !== sessionRun.current || !(failure instanceof NuniError)) return;
-        if (failure.status === 401 || failure.code === 'SESSION_CHANGED') {
-          if (current()) expire.current();
-        } else if ([403, 404].includes(failure.status)) {
+        if (expireSession(failure)) return;
+        if ([403, 404].includes(failure.status)) {
           revokeDetail(revision, current() && revision >= accessRevision.current);
         }
       }
     },
-    [confirmDetail, nextRevision, locationId, operations, revokeDetail, tenantId],
+    [confirmDetail, expireSession, nextRevision, locationId, operations, revokeDetail, tenantId],
   );
 
   const read = useCallback(
@@ -286,15 +302,8 @@ export function MerchantOperations({
       } catch (failure) {
         // Navigation retires view updates while the request still belongs to this session.
         if (!active.current || session !== sessionRun.current) return;
-        if (
-          failure instanceof NuniError &&
-          (failure.status === 401 || failure.code === 'SESSION_CHANGED')
-        ) {
-          if (current()) {
-            setDetail(null);
-            expire.current();
-          }
-        } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
+        if (expireSession(failure)) return;
+        if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
           revokeDetail(revision, current());
         } else if (current()) {
           // A failed read cannot reconcile a revocation that arrived while it was pending.
@@ -306,7 +315,10 @@ export function MerchantOperations({
         if (current()) setLoading(false);
       }
     },
-    [operations, tenantId, locationId, confirmDetail, showDetail, drafts, draftKey, revokeDetail, nextRevision],
+    [
+      operations, tenantId, locationId, confirmDetail, showDetail, drafts, draftKey,
+      expireSession, revokeDetail, nextRevision,
+    ],
   );
   useLayoutEffect(() => {
     if (!suspended) {
@@ -363,6 +375,7 @@ export function MerchantOperations({
   ) {
     if (!active.current || lock.current || loading || uncertain || !fresh || !detail) return;
     lock.current = true;
+    const session = sessionRun.current;
     const mutation = ++mutationRun.current;
     const version = ++run.current;
     const current = () => active.current && version === run.current;
@@ -384,15 +397,9 @@ export function MerchantOperations({
       await task(current, revision);
       if (current() && !visibleRef.current) await checkAccess(current);
     } catch (failure) {
-      if (!current()) return;
-      if (
-        failure instanceof NuniError &&
-        (failure.status === 401 || failure.code === 'SESSION_CHANGED')
-      ) {
-        setDetail(null);
-        setFresh(false);
-        expire.current();
-      } else if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
+      if (!active.current || session !== sessionRun.current) return;
+      if (expireSession(failure) || !current()) return;
+      if (failure instanceof NuniError && [403, 404].includes(failure.status)) {
         revokeDetail(revision, true);
       } else if (failure instanceof NuniError && failure.status === 409) {
         if (action === 'menu') setMenuBlocked(true);
