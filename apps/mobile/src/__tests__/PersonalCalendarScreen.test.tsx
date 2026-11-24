@@ -491,6 +491,58 @@ async function fillDraft(view: ReturnType<typeof render>, title: string) {
   fireEvent.changeText(view.getByLabelText('結束時間（HH:MM）'), '10:00');
 }
 
+it.each(['availability', 'write'])('blocks an old export after same-account revalidation during %s', async (phase) => {
+  const view = await fillAndSave('等待匯出的行程');
+  const scope = mockScope!;
+  const pending = deferred<void>();
+  const started = jest.fn();
+  const remove = jest.fn();
+  const write = jest.fn(async () => {
+    if (phase === 'write') {
+      started();
+      await pending.promise;
+    }
+    return { uri: 'file:///old-export.ics', remove };
+  });
+  const share = jest.fn(async () => undefined);
+  const actual = jest.requireActual<typeof import('../services/ical')>('../services/ical');
+  const exportMock = jest.mocked(shareICalContent);
+  exportMock.mockClear();
+  exportMock.mockImplementationOnce((content, filename, active) => actual.shareICalContent(
+    content, filename, active, {
+      isAvailable: async () => {
+        if (phase === 'availability') {
+          started();
+          await pending.promise;
+        }
+        return true;
+      },
+      write,
+      share,
+    },
+  ));
+
+  fireEvent.press(view.getByText('匯出所選月份'));
+  await waitFor(() => expect(started).toHaveBeenCalledTimes(1));
+  mockScope = null;
+  view.rerender(<PersonalCalendarScreen />);
+  mockScope = scope;
+  view.rerender(<PersonalCalendarScreen />);
+  await waitFor(() => expect(view.getByRole('button', { name: '匯出所選月份' })).toBeEnabled());
+
+  await act(async () => {
+    pending.resolve();
+    await expect(exportMock.mock.results[0].value).rejects.toThrow('匯出已停止');
+  });
+  expect(share).not.toHaveBeenCalled();
+  expect(write).toHaveBeenCalledTimes(phase === 'write' ? 1 : 0);
+  expect(remove).toHaveBeenCalledTimes(phase === 'write' ? 1 : 0);
+
+  fireEvent.press(view.getByText('匯出所選月份'));
+  await waitFor(() => expect(exportMock).toHaveBeenCalledTimes(2));
+  expect(exportMock.mock.calls[1][2]?.()).toBe(true);
+});
+
 it('finishes a started save while the account is briefly revalidated', async () => {
   const view = renderCalendar();
   await fillDraft(view, '重驗後仍要存下');

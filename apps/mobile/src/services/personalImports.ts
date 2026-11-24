@@ -37,20 +37,37 @@ const pendingRestorations = new Map<string, Recovery>();
 let writeSequence = 0;
 const recoveryKey = (key: string) => `${key}:checkpoint`;
 
-async function readRecovery(key: string): Promise<Recovery | null> {
+async function readRecovery(
+  key: string,
+  scope: PersonalImportScope,
+): Promise<(Recovery & { ledger: PersonalImportLedger }) | null> {
   const pending = pendingRestorations.get(key);
-  if (pending) return pending;
+  if (pending) return { ...pending, ledger: parseLedger(pending.raw, scope) };
+
+  let encoded: string | null;
   try {
-    const [[, encoded]] = await AsyncStorage.multiGet([recoveryKey(key)]);
-    if (encoded === null) return null;
-    if (encoded.trimStart()[0] === '{') return { raw: encoded };
+    [[, encoded]] = await AsyncStorage.multiGet([recoveryKey(key)]);
+  } catch (error) {
+    // Android AsyncStorage forwards the SQLite exception message without its class.
+    // A legacy wrapped ledger can exceed the row limit even when the primary fits.
+    if (
+      error instanceof Error &&
+      /^(?:SQLiteBlobTooBigException\b|Row too big to fit into CursorWindow\b)/.test(error.message)
+    ) {
+      return null;
+    }
+    throw error;
+  }
+  if (encoded === null) return null;
+
+  try {
     // Older builds wrapped the original ledger in a second layer of JSON.
-    const raw: unknown = JSON.parse(encoded);
-    if (typeof raw === 'string') return { raw };
-    if (raw === null) return { raw: null };
+    const raw: unknown = encoded.trimStart().startsWith('{') ? encoded : JSON.parse(encoded);
+    if (raw === null || (typeof raw === 'string' && raw.trimStart().startsWith('{'))) {
+      return { raw, ledger: parseLedger(raw, scope) };
+    }
   } catch {
-    // An oversized legacy checkpoint can fail Android's per-row read even
-    // when the primary ledger still fits. Let the caller read the primary.
+    // An invalid checkpoint cannot supply the ledger. Try the primary.
   }
   return null;
 }
@@ -122,9 +139,9 @@ export async function loadPersonalImports(
       continue;
     }
     const sequence = writeSequence;
-    const recovery = await readRecovery(key);
+    const recovery = await readRecovery(key, scope);
     if (sequence !== writeSequence) continue;
-    if (recovery) return parseLedger(recovery.raw, scope);
+    if (recovery) return recovery.ledger;
     const [stored] = await Promise.allSettled([AsyncStorage.getItem(key)]);
     // A guarded write or a recovery may have changed the authoritative bytes during these reads.
     if (sequence !== writeSequence) continue;
@@ -217,9 +234,9 @@ export function mutatePersonalImportLedger<T>(
         }
       };
       assertWritable();
-      const recovery = await readRecovery(key);
+      const recovery = await readRecovery(key, scope);
       let persistedRaw = recovery ? recovery.raw : await AsyncStorage.getItem(key);
-      const current = parseLedger(persistedRaw, scope);
+      const current = recovery?.ledger ?? parseLedger(persistedRaw, scope);
       assertWritable();
       if (recovery) {
         await trackWrite(key, () => restoreLedger(key, recovery));

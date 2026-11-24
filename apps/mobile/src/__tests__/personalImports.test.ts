@@ -86,7 +86,10 @@ test.each(['append', 'edit', 'delete'] as const)(
   },
 );
 
-test('reads the primary ledger when a legacy checkpoint exceeds the Android row limit', async () => {
+test.each([
+  'SQLiteBlobTooBigException',
+  'Row too big to fit into CursorWindow requiredPos=0, totalRows=1',
+])('reads the primary ledger when a legacy checkpoint exceeds the Android row limit (%s)', async (message) => {
   const key = personalImportStorageKey(scope);
   const checkpoint = key + ':checkpoint';
   const limit = 2 * 1024 * 1024;
@@ -104,7 +107,7 @@ test('reads the primary ledger when a legacy checkpoint exceeds the Android row 
   const multiGet = jest.mocked(AsyncStorage.multiGet).mockImplementation(async (keys) => {
     const entries = await nativeMultiGet(keys);
     if (entries.some(([, value]) => value !== null && byteLength(value) > limit)) {
-      throw new Error('SQLiteBlobTooBigException');
+      throw new Error(message);
     }
     return entries;
   });
@@ -116,6 +119,55 @@ test('reads the primary ledger when a legacy checkpoint exceeds the Android row 
   } finally {
     multiGet.mockImplementation(nativeMultiGet);
   }
+});
+
+test('reads the primary ledger when the checkpoint cannot be parsed', async () => {
+  const { ledger } = await appendPersonalImports(scope, [row('original')]);
+  await AsyncStorage.setItem(personalImportStorageKey(scope) + ':checkpoint', '{"version":1,');
+  expect(await loadPersonalImports(scope)).toEqual(ledger);
+});
+
+test('a temporary checkpoint read failure after restart blocks reads and guarded writes until recovery', async () => {
+  const key = personalImportStorageKey(scope);
+  const checkpoint = key + ':checkpoint';
+  const { ledger } = await appendPersonalImports(scope, [row('original')]);
+  const originalRaw = await AsyncStorage.getItem(key);
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  const nativeSetItem = setItem.getMockImplementation()!;
+  let verified = true;
+
+  // Isolate the deleting process so its in-memory recovery is lost on restart.
+  let deleteBeforeRestart!: typeof deletePersonalImport;
+  jest.isolateModules(() => {
+    deleteBeforeRestart = require('../services/personalImports').deletePersonalImport;
+  });
+  setItem.mockImplementationOnce(async (storageKey, value) => {
+    await nativeSetItem(storageKey, value);
+    verified = false;
+  });
+  setItem.mockRejectedValueOnce(new Error('還原寫入失敗'));
+  await expect(deleteBeforeRestart(scope, ledger.records[0], {
+    canContinue: () => true,
+    canCommitFirstWrite: () => verified,
+  })).rejects.toThrow('還原寫入失敗');
+
+  const deletedRaw = (await AsyncStorage.getItem(key))!;
+  expect(JSON.parse(deletedRaw).records).toEqual([]);
+  expect(await AsyncStorage.getItem(checkpoint)).toBe(originalRaw);
+
+  const failure = new Error('disk I/O error');
+  const multiGet = jest.mocked(AsyncStorage.multiGet);
+  multiGet.mockRejectedValueOnce(failure).mockRejectedValueOnce(failure);
+  const guard = { canContinue: () => true };
+  await expect(loadPersonalImports(scope)).rejects.toBe(failure);
+  await expect(appendPersonalImports(scope, [row('new', '統計')], guard)).rejects.toBe(failure);
+  expect(await AsyncStorage.getItem(key)).toBe(deletedRaw);
+  expect(await AsyncStorage.getItem(checkpoint)).toBe(originalRaw);
+
+  expect(await loadPersonalImports(scope)).toEqual(ledger);
+  await appendPersonalImports(scope, [row('new', '統計')], guard);
+  expect((await loadPersonalImports(scope)).records.map(({ title }) => title)).toEqual(['微積分', '統計']);
+  expect(await AsyncStorage.getItem(checkpoint)).toBeNull();
 });
 
 const creditStates = [

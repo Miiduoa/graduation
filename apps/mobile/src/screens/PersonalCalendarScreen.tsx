@@ -399,7 +399,6 @@ function PersonalCalendarWorkspace({
   );
   const draftIssues = personalEventDraftIssues(draftRow);
   const canMutate = !!verifiedKey && ready && !saving;
-  const isActiveScope = () => active.current && !!currentScope.current.verifiedKey;
 
   useEffect(() => {
     if (!focusEventId || load.status !== 'ready' || !scope) return;
@@ -551,7 +550,8 @@ function PersonalCalendarWorkspace({
 
   const exportRecords = async (target: PersonalImportRecord[], filename: string) => {
     if (load.status !== 'ready' || !scope) return;
-    const scopedKey = personalImportStorageKey(scope);
+    const isCurrent = beginVerifiedOperation(personalImportStorageKey(scope));
+    if (!isCurrent) return;
     try {
       const result = buildPersonalEventsCalendar(target, {
         calendarName: `${schoolName} 個人行程`,
@@ -560,15 +560,11 @@ function PersonalCalendarWorkspace({
         setNotice('目前沒有可匯出的行程。');
         return;
       }
-      await shareICalContent(
-        result.content,
-        filename,
-        () => isActiveScope() && currentScope.current.verifiedKey === scopedKey,
-      );
-      if (!isActiveScope() || currentScope.current.verifiedKey !== scopedKey) return;
+      await shareICalContent(result.content, filename, isCurrent);
+      if (!isCurrent()) return;
       setNotice(personalEventExportNotice(result.eventCount));
     } catch (error) {
-      if (!isActiveScope() || currentScope.current.verifiedKey !== scopedKey) return;
+      if (!isCurrent()) return;
       setFormError(personalEventSaveError(error));
     }
   };
