@@ -41,6 +41,7 @@ import {
   loadPersonalImports,
   personalImportStorageKey,
   subscribePersonalImports,
+  type PersonalImportScope,
 } from '../services/personalImports';
 import { shareICalContent } from '../services/ical';
 import type { CampusEventCalendarDraft } from '../services/campusEventCalendarDraft';
@@ -211,12 +212,13 @@ function PersonalCalendarWorkspace({
   const platformSession = useNuniSession();
   const loggingOut = !!platformSession.pendingLogout || (!platformSession.session && !!platformSession.error);
   const active = useRef(true);
-  const requestId = useRef(0);
-  const scopeSnapshot = useRef(scopeKey);
-  // An empty scope is a brief revalidation of the same workspace, not a switch.
-  scopeSnapshot.current =
-    !scope || personalImportStorageKey(scope) === scopeKey ? scopeKey : '';
+  const readSequence = useRef(0);
+  const resolvedKey = scope ? personalImportStorageKey(scope) : '';
+  const verifiedKey = resolvedKey === scopeKey && !loggingOut ? resolvedKey : '';
+  const currentScope = useRef({ resolvedKey, verifiedKey, loggingOut });
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
+  const ready = load.status === 'ready';
+  const ledgerReady = useRef(ready);
   const [month, setMonth] = useState(() =>
     (initialDraft ?? emptyPersonalEventDraft()).date.slice(0, 7),
   );
@@ -252,6 +254,16 @@ function PersonalCalendarWorkspace({
     };
   }, []);
 
+  useLayoutEffect(() => {
+    currentScope.current = { resolvedKey, verifiedKey, loggingOut };
+    // Invalidate reads across revalidation even when the workspace key stays the same.
+    readSequence.current += 1;
+  }, [resolvedKey, verifiedKey, loggingOut]);
+
+  useLayoutEffect(() => {
+    ledgerReady.current = ready;
+  }, [ready]);
+
   const refreshReminders = useCallback(async () => {
     if (!scope) {
       setReminders({});
@@ -261,12 +273,12 @@ function PersonalCalendarWorkspace({
     const expected = personalImportStorageKey(scope);
     try {
       const entries = await listPersonalEventReminderEntries(scope);
-      if (!active.current || scopeSnapshot.current !== expected) return;
+      if (!active.current || currentScope.current.verifiedKey !== expected) return;
       setReminders(entries);
       const runtime = getPersonalEventReminderRuntimeFailure(scope);
       setReminderBlocked(runtime?.message ?? null);
     } catch (error) {
-      if (!active.current || scopeSnapshot.current !== expected) return;
+      if (!active.current || currentScope.current.verifiedKey !== expected) return;
       if (error instanceof PersonalEventReminderJournalCorruptError) {
         // Preserve corrupt raw storage; do not replace with empty success.
         setReminderBlocked(reminderStatusCopy('corrupt_blocked'));
@@ -280,21 +292,26 @@ function PersonalCalendarWorkspace({
   }, [scope]);
 
   const refresh = useCallback(async () => {
+    if (!active.current) return;
     if (!scope) {
-      setLoad({ status: 'loading' });
+      if (!currentScope.current.verifiedKey) setLoad({ status: 'loading' });
       return;
     }
     const expected = personalImportStorageKey(scope);
+    if (currentScope.current.verifiedKey !== expected) return;
+    // Focus, storage notifications and mutation completions all supersede older reads.
+    const sequence = ++readSequence.current;
+    const isCurrentRead = () => active.current && sequence === readSequence.current;
     try {
       const ledger = await loadPersonalImports(scope);
-      if (!active.current || scopeSnapshot.current !== expected) return;
+      if (!isCurrentRead()) return;
       setLoad({
         status: 'ready',
         records: ledger.records,
         syncEnabled: !!ledger.sync?.enabled,
       });
     } catch (error) {
-      if (!active.current || scopeSnapshot.current !== expected) return;
+      if (!isCurrentRead()) return;
       setLoad({
         status: 'error',
         message:
@@ -311,21 +328,21 @@ function PersonalCalendarWorkspace({
       void refresh();
       if (!scope) return undefined;
       const unsubLedger = subscribePersonalImports((change) => {
-        if (personalImportStorageKey(change.scope) === scopeSnapshot.current) void refresh();
+        if (personalImportStorageKey(change.scope) === currentScope.current.verifiedKey) void refresh();
       });
       const unsubJournal = subscribePersonalEventReminderJournal((changed) => {
         if (
           scope &&
           changed.owner === scope.owner &&
           changed.schoolId === scope.schoolId &&
-          personalImportStorageKey(scope) === scopeSnapshot.current
+          personalImportStorageKey(scope) === currentScope.current.verifiedKey
         ) {
           void refreshReminders();
         }
       });
       // Runtime failure publication is not a reconcile trigger — UI only.
       const unsubRuntime = subscribePersonalEventReminderRuntimeFailure((failure) => {
-        if (!active.current || personalImportStorageKey(scope) !== scopeSnapshot.current) return;
+        if (!active.current || personalImportStorageKey(scope) !== currentScope.current.verifiedKey) return;
         if (failure && failure.owner === scope.owner && failure.schoolId === scope.schoolId) {
           setReminderBlocked(failure.message);
         } else {
@@ -352,18 +369,8 @@ function PersonalCalendarWorkspace({
     mode === 'edit' ? baseline : null,
   );
   const draftIssues = personalEventDraftIssues(draftRow);
-  const ready = load.status === 'ready';
-  const canMutate = !!scope && ready && !saving;
-
-  const isActiveScope = () =>
-    !!scope && active.current && scopeSnapshot.current === personalImportStorageKey(scope);
-  const stillThisScope = (scoped?: { owner: string; schoolId: string }) => {
-    if (!active.current) return false;
-    if (loggingOut) return false;
-    if (!scope) return true;
-    if (!scoped) return isActiveScope();
-    return scope.owner === scoped.owner && scope.schoolId === scoped.schoolId;
-  };
+  const canMutate = !!verifiedKey && ready && !saving;
+  const isActiveScope = () => active.current && !!currentScope.current.verifiedKey;
 
   useEffect(() => {
     if (!focusEventId || load.status !== 'ready' || !scope) return;
@@ -407,43 +414,45 @@ function PersonalCalendarWorkspace({
     setFormError('');
   };
 
-  const saveLock = useRef(false);
-  const runSave = async (
-    scoped: { owner: string; schoolId: string },
-    action: () => Promise<string | void>,
-    success = '',
+  const mutationLock = useRef(false);
+  const runMutation = async (
+    scoped: PersonalImportScope,
+    action: (canContinue: () => boolean) => Promise<string>,
+    requestedScope = currentScope.current,
   ) => {
-    if (saveLock.current) return;
-    if (!stillThisScope(scoped)) {
-      setFormError('目前無法確認登入狀態，請稍後再儲存。');
+    if (!active.current || mutationLock.current) return;
+    const expected = personalImportStorageKey(scoped);
+    if (
+      requestedScope !== currentScope.current ||
+      requestedScope.verifiedKey !== expected ||
+      !ledgerReady.current
+    ) {
+      setFormError('目前無法確認行事曆可寫入，請稍後再試。');
       return;
     }
-    if (!canMutate || draftIssues.length) {
-      setFormError(draftIssues[0]?.message || '請先確認行程內容。');
-      return;
-    }
-    const ticket = ++requestId.current;
-    saveLock.current = true;
+
+    // Only an operation admitted while verified may continue through revalidation.
+    const canContinue = () => {
+      const latest = currentScope.current;
+      return active.current && !latest.loggingOut &&
+        (!latest.resolvedKey || latest.resolvedKey === expected);
+    };
+    mutationLock.current = true;
     setSaving(true);
     setFormError('');
     setNotice('');
     try {
-      const result = await action();
-      if (!active.current || ticket !== requestId.current) return;
-      if (!stillThisScope(scoped)) return;
-      setNotice(result || success);
-      setMode('idle');
-      setFromCampusEvent(false);
-      setBaseline(null);
+      const result = await action(canContinue);
+      if (!canContinue()) return;
+      setNotice(result);
+      cancelForm();
       setDraft(emptyPersonalEventDraft());
-      if (scope) await refresh();
+      await refresh();
     } catch (error) {
-      if (!active.current || ticket !== requestId.current) return;
-      if (scope && !stillThisScope(scoped)) return;
-      setFormError(personalEventSaveError(error));
+      if (canContinue()) setFormError(personalEventSaveError(error));
     } finally {
-      saveLock.current = false;
-      if (active.current && ticket === requestId.current) setSaving(false);
+      mutationLock.current = false;
+      if (active.current) setSaving(false);
     }
   };
 
@@ -452,10 +461,13 @@ function PersonalCalendarWorkspace({
       setFormError('目前無法確認登入狀態，請稍後再儲存。');
       return;
     }
-    const scoped = { ...scope };
-    void runSave(scoped, async () => {
-      const row = personalEventRowFromDraft(draft, scoped.schoolId, null);
-      const { added } = await appendPersonalImports(scoped, [row], () => stillThisScope(scoped));
+    if (draftIssues.length) {
+      setFormError(draftIssues[0].message);
+      return;
+    }
+    void runMutation(scope, async (canContinue) => {
+      const row = personalEventRowFromDraft(draft, scope.schoolId, null);
+      const { added } = await appendPersonalImports(scope, [row], canContinue);
       return added
         ? personalImportSavedNotice(added, load.status === 'ready' && load.syncEnabled)
         : '個人行事曆已經有這筆行程。';
@@ -467,46 +479,34 @@ function PersonalCalendarWorkspace({
       setFormError('目前無法確認登入狀態，請稍後再儲存。');
       return;
     }
-    const scoped = { ...scope };
-    const original = baseline;
-    void runSave(scoped, async () => {
-      const row = personalEventRowFromDraft(draft, scoped.schoolId, original);
-      await editPersonalImport(scoped, original, row, () => stillThisScope(scoped));
-    }, '個人行程已更新。');
+    if (draftIssues.length) {
+      setFormError(draftIssues[0].message);
+      return;
+    }
+    void runMutation(scope, async (canContinue) => {
+      const row = personalEventRowFromDraft(draft, scope.schoolId, baseline);
+      await editPersonalImport(scope, baseline, row, canContinue);
+      return '個人行程已更新。';
+    });
   };
 
   const removeSelected = () => {
     if (!scope || !baseline || !canMutate) return;
+    const confirmationScope = currentScope.current;
     Alert.alert('刪除行程？', `確定刪除「${baseline.title}」？刪除後無法復原。`, [
       { text: '取消', style: 'cancel' },
       {
         text: '刪除',
         style: 'destructive',
         onPress: () => {
-          const ticket = ++requestId.current;
-          const scoped = { ...scope };
-          const original = baseline;
-          setSaving(true);
-          setFormError('');
-          setNotice('');
-          void deletePersonalImport(scoped, original, () => stillThisScope(scoped))
-            .then(async () => {
-              if (!active.current || ticket !== requestId.current) return;
-              if (!stillThisScope(scoped)) return;
-              setNotice('已刪除這筆個人行程。');
-              setMode('idle');
-              setBaseline(null);
-              setDraft(emptyPersonalEventDraft());
-              if (scope) await refresh();
-            })
-            .catch((error) => {
-              if (!active.current || ticket !== requestId.current) return;
-              if (scope && !stillThisScope(scoped)) return;
-              setFormError(personalEventSaveError(error));
-            })
-            .finally(() => {
-              if (active.current && ticket === requestId.current) setSaving(false);
-            });
+          void runMutation(
+            scope,
+            async (canContinue) => {
+              await deletePersonalImport(scope, baseline, canContinue);
+              return '已刪除這筆個人行程。';
+            },
+            confirmationScope,
+          );
         },
       },
     ]);
@@ -526,12 +526,12 @@ function PersonalCalendarWorkspace({
       await shareICalContent(
         result.content,
         filename,
-        () => isActiveScope() && scopeSnapshot.current === scopedKey,
+        () => isActiveScope() && currentScope.current.verifiedKey === scopedKey,
       );
-      if (!isActiveScope() || scopeSnapshot.current !== scopedKey) return;
+      if (!isActiveScope() || currentScope.current.verifiedKey !== scopedKey) return;
       setNotice(personalEventExportNotice(result.eventCount));
     } catch (error) {
-      if (!isActiveScope() || scopeSnapshot.current !== scopedKey) return;
+      if (!isActiveScope() || currentScope.current.verifiedKey !== scopedKey) return;
       setFormError(personalEventSaveError(error));
     }
   };

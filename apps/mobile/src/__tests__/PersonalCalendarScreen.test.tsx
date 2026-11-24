@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   personalImportSavedNotice,
   emptyPersonalEventDraft,
+  personalEventRowFromDraft,
   type PersonalImportRecord,
 } from '@campus/shared';
 import PersonalCalendarScreen from '../screens/PersonalCalendarScreen';
@@ -12,6 +13,7 @@ import { shareICalContent } from '../services/ical';
 jest.mock('../services/ical', () => ({ shareICalContent: jest.fn(async () => undefined) }));
 import {
   appendPersonalImports,
+  deletePersonalImport,
   loadPersonalImports,
   personalImportStorageKey,
 } from '../services/personalImports';
@@ -20,6 +22,7 @@ jest.mock('../services/personalImports', () => {
   const actual = jest.requireActual('../services/personalImports') as typeof import('../services/personalImports');
   return {
     ...actual,
+    loadPersonalImports: jest.fn(actual.loadPersonalImports),
     appendPersonalImports: jest.fn((...args: Parameters<typeof actual.appendPersonalImports>) =>
       actual.appendPersonalImports(...args),
     ),
@@ -147,6 +150,7 @@ beforeEach(async () => {
   mockOpenReminderSettings.mockReset();
   await AsyncStorage.clear();
   jest.mocked(appendPersonalImports).mockClear();
+  jest.mocked(deletePersonalImport).mockClear();
 
   jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
     const confirm = buttons?.find(
@@ -488,11 +492,11 @@ it('finishes a started save while the account is briefly revalidated', async () 
   jest.mocked(appendPersonalImports).mockImplementationOnce(() => write.promise);
   fireEvent.press(view.getByRole('button', { name: '儲存行程' }));
   await waitFor(() => expect(appendPersonalImports).toHaveBeenCalled());
-  const [, rows] = jest.mocked(appendPersonalImports).mock.calls[0];
+  const [scope, rows, canContinue] = jest.mocked(appendPersonalImports).mock.calls[0];
   mockScope = null;
   view.rerender(<PersonalCalendarScreen />);
   await act(async () => {
-    write.resolve(await actual.appendPersonalImports(mockScope ?? { owner: 'nuni:pa_11111111-1111-4111-8111-111111111111', schoolId: 'pu' }, rows));
+    write.resolve(await actual.appendPersonalImports(scope, rows, canContinue));
   });
   mockScope = {
     owner: 'nuni:pa_11111111-1111-4111-8111-111111111111',
@@ -526,6 +530,96 @@ it('shows a save error if the write fails while the account is briefly revalidat
   await waitFor(() => expect(view.getByText('網路中斷')).toBeTruthy());
   expect(view.getByLabelText('標題').props.value).toBe('重驗失敗要看見錯誤');
   expect(view.queryByText(personalImportSavedNotice(1))).toBeNull();
+});
+
+it.each(['during revalidation', 'after revalidation'])(
+  'rejects a delete confirmation opened before revalidation and accepted %s',
+  async (when) => {
+    const view = await fillAndSave('待確認的行程');
+    const scope = mockScope!;
+    const alert = jest.mocked(Alert.alert);
+    alert.mockImplementationOnce(() => undefined);
+    fireEvent.press(view.getByText('待確認的行程'));
+    fireEvent.press(view.getByText('刪除這筆'));
+    const confirm = alert.mock.lastCall?.[2]?.find((button) => button.style === 'destructive');
+    expect(confirm?.onPress).toBeDefined();
+
+    mockScope = null;
+    view.rerender(<PersonalCalendarScreen />);
+    if (when === 'after revalidation') {
+      mockScope = scope;
+      view.rerender(<PersonalCalendarScreen />);
+      await waitUntilEditable(view);
+    }
+    await act(async () => {
+      confirm?.onPress?.();
+    });
+
+    expect(deletePersonalImport).not.toHaveBeenCalled();
+    expect((await loadPersonalImports(scope)).records.map((row) => row.title)).toEqual([
+      '待確認的行程',
+    ]);
+  },
+);
+
+it('ignores a pre-revalidation read that resolves after the recovered calendar loads', async () => {
+  const scope = mockScope!;
+  const empty = await loadPersonalImports(scope);
+  const read = deferred<typeof empty>();
+  jest.mocked(loadPersonalImports).mockImplementationOnce(() => read.promise);
+  const view = renderCalendar();
+  mockScope = null;
+  view.rerender(<PersonalCalendarScreen />);
+  await appendPersonalImports(scope, [
+    personalEventRowFromDraft(
+      { ...emptyPersonalEventDraft(), title: '重新驗證後的行程', date: '2026-10-20', allDay: true },
+      scope.schoolId,
+      null,
+    ),
+  ]);
+  mockScope = scope;
+  view.rerender(<PersonalCalendarScreen />);
+  await waitFor(() => expect(view.getByText('重新驗證後的行程')).toBeTruthy());
+
+  await act(async () => {
+    read.resolve(empty);
+  });
+  expect(view.getByText('重新驗證後的行程')).toBeTruthy();
+});
+
+it('ignores an older ledger notification read after a delete refresh', async () => {
+  const view = await fillAndSave('稍後要刪除的行程');
+  const scope = mockScope!;
+  const stale = await loadPersonalImports(scope);
+  const read = deferred<typeof stale>();
+  const actual = jest.requireActual<typeof import('../services/personalImports')>(
+    '../services/personalImports',
+  );
+  jest.mocked(loadPersonalImports).mockImplementationOnce(() => read.promise);
+  await act(async () => {
+    await actual.mutatePersonalImportLedger(scope, () => true, (ledger) => ({
+      ledger: { ...ledger, records: ledger.records.map((row) => ({ ...row, location: '新地點' })) },
+      result: undefined,
+    }));
+  });
+  // Refresh the edit target to the exact persisted revision while the older read is pending.
+  await act(async () => {
+    await actual.mutatePersonalImportLedger(scope, () => true, () => ({
+      ledger: stale,
+      result: undefined,
+    }));
+  });
+  fireEvent.press(view.getByText('稍後要刪除的行程'));
+  fireEvent.press(view.getByText('刪除這筆'));
+  await waitFor(() => {
+    expect(view.getByText('已刪除這筆個人行程。')).toBeTruthy();
+    expect(view.queryByText('稍後要刪除的行程')).toBeNull();
+  });
+
+  await act(async () => {
+    read.resolve(stale);
+  });
+  expect(view.queryByText('稍後要刪除的行程')).toBeNull();
 });
 
 it("hides the previous owner's calendar while logout is pending", async () => {
