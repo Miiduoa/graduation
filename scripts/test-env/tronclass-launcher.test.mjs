@@ -424,3 +424,30 @@ test('launcher refuses a symbolic link log file', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+test('launcher refuses a hard-linked log file without truncating the other link', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-log-hl-'));
+  const runtime = path.join(dir, 'runtime');
+  mkdirSync(runtime, { mode: 0o700 });
+  writeSessionKey(path.join(runtime, 'bff-session.key'));
+  writeSessionKey(path.join(runtime, 'tronclass-session.key'));
+  const outside = path.join(dir, 'outside.log');
+  writeFileSync(outside, 'preserve-hard-link');
+  linkSync(outside, path.join(runtime, 'emulators.log'));
+  try {
+    writeForwardingNodeStub(dir);
+    const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        TMPDIR: dir,
+        HOME: dir,
+        TRONCLASS_RUNTIME_DIR: runtime,
+      },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stderr}\n${result.stdout}`, /symbolic link or unusable log/i);
+    assert.equal(readFileSync(outside, 'utf8'), 'preserve-hard-link');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

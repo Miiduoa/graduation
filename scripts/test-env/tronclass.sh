@@ -205,20 +205,29 @@ const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const logPath = process.argv[2];
 const argv = process.argv.slice(3);
-const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW;
+function refuseLog() {
+  process.stderr.write('Refusing a symbolic link or unusable log file.\n');
+  process.exit(1);
+}
+try {
+  const existing = fs.lstatSync(logPath);
+  if (!existing.isFile() || existing.nlink !== 1 || existing.uid !== process.getuid()) refuseLog();
+} catch (error) {
+  if (error && error.code !== 'ENOENT') refuseLog();
+}
+const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW;
 let fd;
 try {
   fd = fs.openSync(logPath, flags, 0o600);
 } catch (error) {
-  process.stderr.write('Refusing a symbolic link or unusable log file.\n');
-  process.exit(1);
+  refuseLog();
 }
 const info = fs.fstatSync(fd);
 if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid()) {
   fs.closeSync(fd);
-  process.stderr.write('Refusing a symbolic link or unusable log file.\n');
-  process.exit(1);
+  refuseLog();
 }
+fs.ftruncateSync(fd, 0);
 const child = spawn(argv[0], argv.slice(1), { stdio: ['inherit', fd, fd] });
 fs.closeSync(fd);
 const stop = (signal) => {
