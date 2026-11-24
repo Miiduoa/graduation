@@ -187,6 +187,30 @@ describe('trusted OSM walking segment audit bridge', () => {
     }
   });
 
+  it('does not audit cached ways outside the walking discovery allowlist', () => {
+    for (const highway of ['motorway', 'motorway_link', 'construction', 'proposed', 'cycleway', '']) {
+      const data = candidates();
+      data.ways[0].tags.highway = highway;
+      const graph = applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!;
+      expect(graph.edges.some(edge => edge.osmWayId === 101)).toBe(false);
+      expect(findCampusWalkingRoute(graph, 'fixture', bounds, 1, 2, now)).toBeNull();
+    }
+    const missing = candidates();
+    delete missing.ways[0].tags.highway;
+    expect(findCampusWalkingRoute(
+      applyCampusWalkingSegmentAudits(missing, 'fixture', [audit()], now)!,
+      'fixture', bounds, 1, 2, now,
+    )).toBeNull();
+    for (const highway of ['footway', 'path', 'pedestrian', 'steps', 'service', 'living_street', 'residential']) {
+      const data = candidates();
+      data.ways[0].tags.highway = highway;
+      expect(findCampusWalkingRoute(
+        applyCampusWalkingSegmentAudits(data, 'fixture', [audit()], now)!,
+        'fixture', bounds, 1, 2, now,
+      )).not.toBeNull();
+    }
+  });
+
   it('excludes a stale candidate edge when the source way directs pedestrians to a sidepath', () => {
     const data = candidates();
     data.ways[0].tags.foot = 'use_sidepath';
