@@ -86,17 +86,28 @@ type LoadState =
 
 type FocusParams = { eventId?: string } | undefined;
 
-function useCalendarAccount() {
+function useCalendarAccount(scope: PersonalImportScope | null) {
   const platform = useNuniSession();
   const legacy = useAuth();
+  const firebaseUid = legacy.user?.uid;
+  const lastFirebaseUid = useRef(firebaseUid);
+  // Firebase and Nuni can resolve independently during an account transition.
+  const firebaseChanged =
+    !!firebaseUid && !!lastFirebaseUid.current &&
+    firebaseUid !== lastFirebaseUid.current;
+  const workspaceUid = (scope && firebaseUid) || lastFirebaseUid.current;
+  useLayoutEffect(() => {
+    if (firebaseUid && (scope || !lastFirebaseUid.current)) lastFirebaseUid.current = firebaseUid;
+  }, [firebaseUid, scope]);
   const loggingOut = !!platform.pendingLogout;
   const sessionRejected = !platform.session && !!platform.error;
-  const knownOwner = platform.session
+  const observedOwner = platform.session
     ? `nuni:${platform.session.platformAccountId}`
-    : !sessionRejected && legacy.user?.uid
-      ? `firebase:${legacy.user.uid}`
+    : !sessionRejected && firebaseUid
+      ? `firebase:${firebaseUid}`
       : null;
-  return { knownOwner, loggingOut, sessionRejected };
+  const knownOwner = scope?.owner ?? (firebaseChanged ? null : observedOwner);
+  return { knownOwner, loggingOut, sessionRejected, firebaseChanged, workspaceUid };
 }
 
 /** A separate stack entry keeps a campus suggestion from replacing an open personal draft. */
@@ -109,7 +120,7 @@ export function CampusEventCalendarDraftScreen() {
       >
     >();
   const scope = usePersonalImportScope();
-  const { knownOwner, loggingOut, sessionRejected } = useCalendarAccount();
+  const { knownOwner, loggingOut, sessionRejected, firebaseChanged } = useCalendarAccount(scope);
   const { school, schoolId, selectionReady } = useSchool();
   const campusEvent = params?.campusEvent;
   const knownSchoolId = school?.id || schoolId || '';
@@ -119,7 +130,8 @@ export function CampusEventCalendarDraftScreen() {
   const ownerChanged = !!knownOwner && knownOwner !== campusEvent?.owner;
   const scopeChanged =
     !!scope && (scope.owner !== campusEvent?.owner || scope.schoolId !== campusEvent.schoolId);
-  const invalidated = ownerChanged || scopeChanged || schoolChanged || sessionRejected || schoolCleared;
+  const invalidated =
+    firebaseChanged || ownerChanged || scopeChanged || schoolChanged || sessionRejected || schoolCleared;
   const expired = useRef(false);
   useLayoutEffect(() => {
     if (invalidated) expired.current = true;
@@ -170,7 +182,8 @@ function parsePersonalImportKey(key: string): { owner: string; schoolId: string 
 
 export default function PersonalCalendarScreen() {
   const scope = usePersonalImportScope();
-  const { knownOwner, loggingOut, sessionRejected } = useCalendarAccount();
+  const { knownOwner, loggingOut, sessionRejected, firebaseChanged, workspaceUid } =
+    useCalendarAccount(scope);
   const { school, schoolId, selectionReady } = useSchool();
   const route = useRoute();
   const key = scope ? personalImportStorageKey(scope) : '';
@@ -178,7 +191,7 @@ export default function PersonalCalendarScreen() {
   const knownSchoolId = school?.id || schoolId || '';
   const schoolCleared = !!selectionReady && !knownSchoolId;
   const staleSticky = (() => {
-    if (loggingOut || sessionRejected || schoolCleared) return true;
+    if (firebaseChanged || loggingOut || sessionRejected || schoolCleared) return true;
     const previous = parsePersonalImportKey(lastReadyKey.current);
     if (!previous) return false;
     if (knownOwner && previous.owner !== knownOwner) return true;
@@ -195,7 +208,7 @@ export default function PersonalCalendarScreen() {
   const focusEventId = (route.params as FocusParams)?.eventId;
   return (
     <PersonalCalendarWorkspace
-      key={workspaceKey}
+      key={JSON.stringify([workspaceKey, workspaceUid])}
       scopeKey={workspaceKey === 'pending' ? '' : workspaceKey}
       schoolName={school?.name || '未指定校園'}
       focusEventId={focusEventId}

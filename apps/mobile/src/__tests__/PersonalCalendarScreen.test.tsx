@@ -16,6 +16,7 @@ jest.mock('../services/ical', () => ({ shareICalContent: jest.fn(async () => und
 import {
   appendPersonalImports,
   deletePersonalImport,
+  editPersonalImport,
   loadPersonalImports,
   personalImportStorageKey,
   subscribePersonalImports,
@@ -50,6 +51,7 @@ let mockSession: { platformAccountId: string } | null = {
   platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
 };
 let mockSessionError = '';
+let mockAuth: { user: { uid: string } | null; loading: boolean };
 
 jest.mock('../state/personalImportScope', () => ({
   usePersonalImportScope: () => mockScope,
@@ -66,7 +68,7 @@ jest.mock('../state/school', () => ({
   useSchool: () => ({ school: mockSchool, schoolId: mockSchool.id, selectionReady: true }),
 }));
 jest.mock('../state/auth', () => ({
-  useAuth: () => ({ user: null, loading: false }),
+  useAuth: () => mockAuth,
 }));
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void | (() => void)) =>
@@ -142,6 +144,7 @@ beforeEach(async () => {
     platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
   };
   mockSessionError = '';
+  mockAuth = { user: null, loading: false };
   mockSchool = { id: 'pu', name: '靜宜大學' };
   mockNavigate.mockReset();
   mockEnableTimed.mockReset();
@@ -154,6 +157,7 @@ beforeEach(async () => {
   await AsyncStorage.clear();
   jest.mocked(appendPersonalImports).mockClear();
   jest.mocked(deletePersonalImport).mockClear();
+  jest.mocked(editPersonalImport).mockClear();
 
   jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
     const confirm = buttons?.find(
@@ -535,6 +539,49 @@ it('shows a save error if the write fails while the account is briefly revalidat
   expect(view.queryByText(personalImportSavedNotice(1))).toBeNull();
 });
 
+it.each(['create', 'edit'])('unmounts the old calendar and rejects a queued %s when Firebase changes while Nuni remains signed in', async (mode) => {
+  mockAuth = { user: { uid: 'student-a' }, loading: false };
+  const scope = mockScope!;
+  const key = personalImportStorageKey(scope);
+  const originalTitle = '原本的行程';
+  const view = mode === 'edit' ? await fillAndSave(originalTitle) : renderCalendar();
+  if (mode === 'edit') {
+    fireEvent.press(view.getByText(originalTitle));
+    fireEvent.changeText(view.getByLabelText('標題'), '舊帳號的草稿');
+  } else {
+    await fillDraft(view, '舊帳號的草稿');
+  }
+  const stored = await AsyncStorage.getItem(key);
+  const read = deferred<string | null>();
+  const getItem = jest.mocked(AsyncStorage.getItem);
+  getItem.mockClear();
+  getItem.mockImplementationOnce(() => read.promise);
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  setItem.mockClear();
+  fireEvent.press(view.getByRole('button', { name: mode === 'edit' ? '儲存修改' : '儲存行程' }));
+  await waitFor(() => expect(getItem).toHaveBeenCalledWith(key));
+  const save = mode === 'edit'
+    ? jest.mocked(editPersonalImport).mock.results[0].value
+    : jest.mocked(appendPersonalImports).mock.results[0].value;
+
+  mockAuth = { user: { uid: 'student-b' }, loading: true };
+  mockScope = null;
+  view.rerender(<PersonalCalendarScreen />);
+  expect(view.queryByLabelText('標題')).toBeNull();
+  await act(async () => {
+    read.resolve(stored);
+    await expect(save).rejects.toThrow('帳號或學校已切換');
+  });
+  expect(setItem).not.toHaveBeenCalledWith(key, expect.any(String));
+  expect(await AsyncStorage.getItem(key)).toBe(stored);
+
+  mockAuth = { user: { uid: 'student-a' }, loading: false };
+  mockScope = scope;
+  view.rerender(<PersonalCalendarScreen />);
+  await waitUntilEditable(view);
+  expect(view.queryByLabelText('標題')).toBeNull();
+});
+
 it.each(['during revalidation', 'after revalidation'])(
   'rejects a delete confirmation opened before revalidation and accepted %s',
   async (when) => {
@@ -596,7 +643,7 @@ it.each(['during revalidation', 'after recovery'])(
   },
 );
 
-it('preserves the event when verification changes after native deletion was dispatched', async () => {
+it.each([false, true])('preserves the event after native deletion loses verification (restoration fails: %s)', async (restoreFails) => {
   const view = await fillAndSave('寫入途中重驗');
   const scope = mockScope!;
   const key = personalImportStorageKey(scope);
@@ -609,6 +656,7 @@ it('preserves the event when verification changes after native deletion was disp
     await write.promise;
     await nativeSetItem(storageKey, value);
   });
+  if (restoreFails) setItem.mockRejectedValueOnce(new Error('還原寫入失敗'));
   const listener = jest.fn();
   const unsubscribe = subscribePersonalImports(listener);
   try {
@@ -625,10 +673,21 @@ it('preserves the event when verification changes after native deletion was disp
     const read = loadPersonalImports(scope);
     await act(async () => {
       write.resolve();
-      await expect(deletion).rejects.toThrow('目前無法確認行事曆可寫入');
+      await expect(deletion).rejects.toThrow(
+        restoreFails ? '還原寫入失敗' : '目前無法確認行事曆可寫入',
+      );
     });
 
     expect((await read).records.map((row) => row.title)).toEqual(['寫入途中重驗']);
+    expect(setItem.mock.calls).toEqual([[key, expect.any(String)], [key, stored]]);
+    if (restoreFails) {
+      expect(JSON.parse((await AsyncStorage.getItem(key))!).records).toEqual([]);
+      expect((await loadPersonalImports(scope)).records.map((row) => row.title)).toEqual(['寫入途中重驗']);
+      const { mutatePersonalImportLedger } = jest.requireActual<typeof import('../services/personalImports')>(
+        '../services/personalImports',
+      );
+      await mutatePersonalImportLedger(scope, () => true, (ledger) => ({ ledger, result: undefined }));
+    }
     expect(await AsyncStorage.getItem(key)).toBe(stored);
     expect(listener).not.toHaveBeenCalled();
     expect(view.queryByText('已刪除這筆個人行程。')).toBeNull();

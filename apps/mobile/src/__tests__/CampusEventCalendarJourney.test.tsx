@@ -160,9 +160,9 @@ test.each([
   expect((await loadPersonalImports(original)).records).toHaveLength(0);
 });
 
-test('Firebase 已切換帳號但個人資料仍在載入時，卸載舊草稿並撤銷未完成的寫入', async () => {
-  mockPlatformSession = null;
-  const original = { owner: 'firebase:student', schoolId: 'pu' };
+test.each(['firebase:student', 'nuni:account-a'])('Firebase 已切換且範圍未解析時，卸載 %s 的舊草稿並撤銷未完成的寫入', async (owner) => {
+  if (owner === 'firebase:student') mockPlatformSession = null;
+  const original = { owner, schoolId: 'pu' };
   mockScope = original;
   const view = await openDraft();
   const key = personalImportStorageKey(original);
