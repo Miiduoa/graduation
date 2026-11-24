@@ -1051,6 +1051,16 @@ describe('three-way sentence classification', () => {
     }
   });
 
+  it('still auto-reads a download whose file name contains a lone 不', () => {
+    expect(classifyTronClassSentence('下載 TronClass 不存在.pdf')).toEqual({
+      outcome: 'clearly-read',
+      intent: { intent: 'download', pendingOnly: false },
+    });
+    expect(parseTronClassAgentIntent('下載 TronClass 不存在.pdf')).toEqual({
+      intent: 'download', pendingOnly: false,
+    });
+  });
+
   it('treats an unresolved prefix negator as confirmation, not an auto-read', () => {
     for (const question of [
       '這不重要不要把玩課雲外交作業列出，只查校園公告',

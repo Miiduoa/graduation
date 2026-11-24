@@ -655,6 +655,7 @@ function isClauseScanBoundary(token: Token): boolean {
 function scanNegation(tokens: Token[], interior: boolean[]): NegationScan {
   let result: NegationScan = 'clear';
   let pending: 'open' | 'ba' | null = null;
+  let lastNegator: string | null = null;
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]!;
     if (isClauseScanBoundary(token)) {
@@ -664,6 +665,7 @@ function scanNegation(tokens: Token[], interior: boolean[]): NegationScan {
     if (isNegatorToken(token)) {
       if (pending === 'open') return 'unresolved';
       pending = pending ?? 'open';
+      lastNegator = token.value;
       continue;
     }
     if (!pending) continue;
@@ -690,6 +692,12 @@ function scanNegation(tokens: Token[], interior: boolean[]): NegationScan {
       continue;
     }
     if (pending === 'ba') continue;
+    // A lone 不／未／沒 inside a file or title (不存在.pdf) is not a speech-act negator.
+    if (pending === 'open' && (lastNegator === '不' || lastNegator === '未' || lastNegator === '沒')) {
+      pending = null;
+      lastNegator = null;
+      continue;
+    }
     return 'unresolved';
   }
   if (pending) return 'unresolved';
