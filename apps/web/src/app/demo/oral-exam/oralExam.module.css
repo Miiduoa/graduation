@@ -2,10 +2,9 @@
   display: grid;
   gap: 8px;
   margin-bottom: 24px;
-  padding: 16px 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius, 12px);
-  background: color-mix(in srgb, var(--brand) 8%, var(--surface));
+  padding: 12px 16px;
+  border-inline-start: 3px solid var(--brand);
+  background: var(--bg-soft);
 }
 
 .banner strong {
@@ -30,17 +29,16 @@
   align-items: center;
   min-height: 44px;
   padding: 8px 14px;
-  border: 1px solid var(--border-strong, var(--border));
-  border-radius: 999px;
-  background: var(--surface);
+  border-bottom: 2px solid var(--border);
+  background: transparent;
   color: var(--text);
   font-size: var(--font-label-size, 14px);
 }
 
 .roles a[aria-current='page'] {
-  background: var(--brand);
   border-color: var(--brand);
-  color: var(--on-brand, #fff);
+  color: var(--brand);
+  font-weight: 700;
 }
 
 .grid {
@@ -57,16 +55,15 @@
 .card {
   display: grid;
   gap: 10px;
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius, 12px);
-  background: var(--surface);
+  padding-block: 18px;
+  border-top: 1px solid var(--border);
+  align-content: start;
 }
 
 .card h2,
 .card h3 {
   margin: 0;
-  font-size: 18px;
+  font: 600 1.25rem / 1.45 var(--font-heading);
 }
 
 .card p,

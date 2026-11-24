@@ -6,9 +6,8 @@
 .card {
   display: grid;
   gap: 12px;
-  padding: clamp(16px, 3vw, 28px);
-  border: 1px solid var(--border, #d7dce2);
-  border-radius: 16px;
+  padding-block: 20px;
+  border-top: 1px solid var(--border);
   overflow-wrap: anywhere;
 }
 .card h2,
@@ -21,7 +20,7 @@
   gap: 8px;
 }
 .muted {
-  color: var(--text-secondary, #626870);
+  color: var(--muted);
   font-size: 0.9rem;
 }
 .field {
@@ -59,7 +58,7 @@
   cursor: default;
 }
 .stack :is(button, input, textarea, a):focus-visible {
-  outline: 3px solid var(--primary, #496cd0);
+  outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
 .card p {

@@ -103,7 +103,6 @@ export function TronClassWorkspace() {
   return (
     <SiteShell
       title="TronClass"
-      subtitle="課程、作業與教材，在同一個地方處理。"
       schoolName="靜宜大學"
     >
       <div className={styles.workspace}>

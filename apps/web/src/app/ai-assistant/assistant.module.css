@@ -1,5 +1,5 @@
 .conversation {
-  max-width: 1080px;
+  max-width: 60rem;
   margin: 0 auto;
 }
 .messages,
@@ -30,14 +30,13 @@
   cursor: pointer;
 }
 .empty {
-  padding: 32px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding: clamp(18px, 3vw, 32px) 0;
+  border-block: 1px solid var(--border);
 }
 .empty h2 {
   margin: 0 0 12px;
-  font-size: 24px;
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  font-family: var(--font-heading);
 }
 .empty p,
 .note {
@@ -48,21 +47,24 @@
   margin-top: 12px;
 }
 .exampleQuestions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  display: grid;
+  gap: 0 16px;
   margin-top: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
 }
 .exampleQuestions button {
-  min-height: 40px;
-  padding: 8px 12px;
+  min-height: 44px;
+  padding: 10px 4px;
   font: inherit;
   font-size: 13px;
-  border-radius: 999px;
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  background: var(--panel);
+  border-radius: 0;
+  border: 0;
+  color: var(--brand);
+  background: transparent;
   cursor: pointer;
+  border-block-end: 1px solid var(--border);
+  text-align: start;
+  overflow-wrap: anywhere;
 }
 .voiceRow {
   display: flex;
@@ -76,19 +78,20 @@
 .suggestions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 4px 18px;
   margin-top: 20px;
 }
 .serviceLinks a,
 .suggestions button {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
+  color: var(--brand);
   min-height: 44px;
-  padding: 10px 14px;
-  border-radius: var(--radius-sm);
+  padding: 8px 2px;
   font: inherit;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 .messages {
   display: flex;
@@ -98,14 +101,14 @@
 .question,
 .answer {
   min-width: 0;
-  padding: 24px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 12px 0;
 }
 .question {
-  margin-left: 48px;
   background: var(--accent-soft);
+  align-self: flex-end;
+  max-width: 88%;
+  padding: 12px 16px;
+  border-inline-start: 2px solid var(--brand);
 }
 .author {
   font-size: 12px;
@@ -210,10 +213,10 @@
   .empty,
   .question,
   .answer {
-    padding: 18px;
+    padding: 14px 0;
   }
   .question {
-    margin-left: 18px;
+    padding: 12px;
   }
   .submitRow {
     align-items: flex-start;
@@ -225,10 +228,8 @@
 
 .sense {
   margin: 4px 0 30px;
-  padding: clamp(18px, 3vw, 28px);
-  border: 1px solid var(--border);
-  border-radius: 24px;
-  background: var(--panel);
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--border-strong);
 }
 .senseHeader,
 .senseItemTop,
@@ -243,18 +244,13 @@
   align-items: center;
   margin-bottom: 22px;
 }
-.eyebrow {
-  color: var(--brand2, var(--muted));
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0.1em;
-}
 .senseHeader h2 {
   margin: 6px 0;
   color: var(--text);
   font-size: clamp(21px, 3vw, 27px);
-  letter-spacing: -0.035em;
+  letter-spacing: normal;
   line-height: 1.25;
+  font-family: var(--font-heading);
 }
 .senseHeader p,
 .senseFootnote {
@@ -266,10 +262,10 @@
 .refresh,
 .actionSecondary {
   flex-shrink: 0;
-  min-height: 40px;
+  min-height: 44px;
   padding: 8px 13px;
   border: 1px solid var(--border-strong);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
   font: inherit;
@@ -280,38 +276,39 @@
 .senseGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 0 22px;
 }
 .senseItem {
   min-width: 0;
-  min-height: 270px;
   display: flex;
   flex-direction: column;
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--surface);
+  padding: 14px 0 0;
+  border-top: 1px solid var(--border-strong);
 }
 .senseItemTop {
   align-items: center;
-  margin-bottom: 18px;
+  margin-bottom: 4px;
   font-size: 13px;
   font-weight: 700;
 }
 .senseItemTop a {
   flex-shrink: 0;
-  color: var(--brand2, var(--text));
+  color: var(--brand);
   text-decoration: none;
   font-size: 12px;
   font-weight: 550;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
 }
 .senseMetric {
   color: var(--text);
   font-size: 32px;
-  font-weight: 760;
+  font-weight: 600;
   line-height: 1.3;
   letter-spacing: -0.045em;
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-heading);
 }
 .senseMetric small {
   font-size: 12px;
@@ -356,15 +353,18 @@
 .senseAsk {
   align-self: flex-start;
   margin-top: auto;
-  padding: 11px 0 0;
+  padding: 8px 0;
   border: 0;
   background: transparent;
-  color: var(--brand2, var(--text));
+  color: var(--brand);
   font: inherit;
   font-weight: 650;
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
 }
 .senseFootnote {
   margin-top: 14px;
@@ -372,7 +372,7 @@
 .senseUnavailable {
   padding: 18px;
   border: 1px dashed var(--border-strong);
-  border-radius: 14px;
+  border-radius: var(--radius-sm);
   color: var(--muted);
   font-size: 13px;
   line-height: 1.6;
@@ -381,8 +381,8 @@
   margin: 18px 0 0;
   padding: 18px;
   border: 1px solid var(--border-strong);
-  border-radius: 16px;
-  background: var(--panel);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
 }
 .actionHeader {
   align-items: center;
@@ -438,12 +438,12 @@
   align-items: center;
 }
 .actionPrimary {
-  min-height: 42px;
+  min-height: 44px;
   padding: 10px 15px;
   border: 0;
-  border-radius: 12px;
-  background: var(--brand2, var(--text));
-  color: var(--surface);
+  border-radius: var(--radius-sm);
+  background: var(--brand);
+  color: var(--on-brand);
   font: inherit;
   font-size: 13px;
   font-weight: 700;
@@ -481,13 +481,12 @@
   }
   .senseItem:last-child {
     grid-column: 1 / -1;
-    min-height: 180px;
+    min-height: auto;
   }
 }
 @media (max-width: 600px) {
   .sense {
-    padding: 16px;
-    border-radius: 20px;
+    padding: 0 0 12px;
   }
   .senseHeader {
     flex-wrap: wrap;
@@ -501,10 +500,10 @@
     min-height: 0;
   }
   .senseItem {
-    padding: 16px;
+    padding: 12px 0 4px;
   }
   .senseAsk {
-    padding-top: 18px;
+    padding-top: 8px;
   }
   .actionHeader {
     flex-direction: column;
@@ -515,5 +514,16 @@
   }
   .actionControls {
     flex-wrap: wrap;
+  }
+}
+.answer {
+  border-bottom: 1px solid var(--border);
+  padding-block-end: 20px;
+}
+@media (hover: hover) {
+  .exampleQuestions button:hover,
+  .senseAsk:hover {
+    color: var(--brand);
+    background: var(--accent-soft);
   }
 }

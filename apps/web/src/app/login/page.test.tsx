@@ -314,7 +314,7 @@ it.each([
   const platform = screen.getByTestId('platform-sign-in');
   const school = container.querySelector('details[aria-label="學校帳號登入"]')!;
   expect(platform.getAttribute('data-return-url')).toBe(destination);
-  expect(screen.getByText('登入後會回到你原本的頁面，接著完成剛才的事。')).toBeTruthy();
+  expect(screen.getByText('登入後會返回原本的頁面。')).toBeTruthy();
   expect(school.hasAttribute('open')).toBe(false);
   expect(platform.compareDocumentPosition(school) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.queryByRole('textbox', { name: '學號' })).toBeNull();

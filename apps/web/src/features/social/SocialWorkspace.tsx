@@ -55,7 +55,7 @@ export function SocialWorkspace() {
   const returnUrl = `/social${browseQuery.size ? `?${browseQuery}` : ''}`;
   const loginHref = `/classroom/login?returnUrl=${encodeURIComponent(returnUrl)}`;
   return (
-    <SiteShell title="跨校公開交流" subtitle="從一個想法、一個問題，開始和不同校園的人交流。">
+    <SiteShell title="跨校公開交流">
       {auth.session ? (
         <Workspace
           key={`${auth.session.platformAccountId}:${auth.session.context}`}
@@ -122,21 +122,23 @@ function Workspace({
       {suspended && <p role="status">正在重新確認登入狀態…</p>}
       <div hidden={suspended} className={styles.stack}>
         <nav className={styles.tabs} aria-label="公開交流分類">
-          <Button
-            variant={tab === 'feed' ? 'primary' : 'default'}
+          <button
+            type="button"
+            className={styles.tabButton}
             aria-pressed={tab === 'feed'}
             onClick={() => setTab('feed')}
           >
             公開動態
-          </Button>
-          <Button
-            variant={tab === 'safety' ? 'primary' : 'default'}
+          </button>
+          <button
+            type="button"
+            className={styles.tabButton}
             aria-pressed={tab === 'safety'}
             onClick={() => setTab('safety')}
           >
             封鎖與檢舉
-          </Button>
-          <Link className={styles.link} href="/community">
+          </button>
+          <Link className={styles.tabLink} href="/community">
             校內交流
           </Link>
         </nav>
@@ -158,13 +160,13 @@ function Workspace({
                 onChanged={() => setRevision((value) => value + 1)}
               />
             </div>
-            <aside className={styles.stack}>
-              <section className={styles.panel}>
+            <aside className={styles.rail}>
+              <section className={styles.railSection}>
                 <h2>看看其他校園</h2>
                 <SchoolSelector />
                 <p className={styles.muted}>選校只會篩選公開看板，不會取得校籍或校務權限。</p>
               </section>
-              <section className={`${styles.panel} ${styles.stack}`}>
+              <section className={styles.railSection}>
                 <h2>公開發表前</h2>
                 <p className={styles.muted}>
                   這裡的內容可由不同校園的帳號閱讀。不要分享學號、電話或他人的私人資料。
@@ -315,26 +317,37 @@ function Feed({
   const items = [...earlier, ...(resource.value?.items ?? [])];
   return (
     <section className={styles.stack} aria-label="公開貼文">
-      <div className={styles.metadata}>
+      <div className={styles.feedHeader}>
         <h2>最新公開動態</h2>
-        <Button onClick={onChanged} disabled={resource.loading}>
+        <Button variant="ghost" onClick={onChanged} disabled={resource.loading}>
           更新動態
         </Button>
       </div>
-      {items.map((post) => (
-        <Post key={`${post.tenantId}/${post.id}`} {...client} post={post} onChanged={onChanged} />
-      ))}
+      {items.length > 0 && (
+        <div className={styles.feedStream}>
+          {items.map((post) => (
+            <Post
+              key={`${post.tenantId}/${post.id}`}
+              {...client}
+              post={post}
+              onChanged={onChanged}
+            />
+          ))}
+        </div>
+      )}
       {resource.loading && <p role="status">正在載入公開動態…</p>}
       {resource.error && (
         <div className={styles.panel}>
           <p className={styles.error} role="alert">
             {resource.error}
           </p>
-          <Button onClick={resource.reload}>重新載入動態</Button>
+          <div className={styles.actions}>
+            <Button onClick={resource.reload}>重新載入動態</Button>
+          </div>
         </div>
       )}
       {resource.value && items.length === 0 && (
-        <div className={styles.panel}>
+        <div className={styles.emptyStream}>
           <h3>還沒有公開貼文</h3>
           <p className={styles.muted}>有適合跨校分享的消息或問題，可以選一個公開看板開始交流。</p>
         </div>
@@ -365,12 +378,12 @@ function Post({
   const mutation = useSocialMutation(client.context, client.enabled, client.onExpired);
   return (
     <article
-      className={`${styles.panel} ${styles.post}`}
+      className={styles.post}
       aria-label={`${post.author.displayName}的公開貼文`}
     >
-      <div>
-        <div className={styles.metadata}>
-          <strong>
+      <div className={styles.postHeader}>
+        <div className={styles.postMeta}>
+          <strong className={styles.postAuthor}>
             {post.author.displayName}
             {post.author.isSelf ? ' · 你' : ''}
           </strong>
@@ -378,7 +391,7 @@ function Post({
             {date(post.publishedAt)}
           </time>
         </div>
-        <p className={styles.muted}>
+        <p className={styles.postBoard}>
           {post.tenantName} · {post.communityName}
         </p>
       </div>
@@ -498,7 +511,7 @@ function Safety(client: Client) {
   const mutation = useSocialMutation(client.context, client.enabled, client.onExpired);
   return (
     <div className={styles.layout}>
-      <section className={styles.panel}>
+      <section className={styles.safetySection}>
         <h2>我的檢舉</h2>
         <p className={styles.muted}>
           顯示最近 100 筆檢舉。待處理代表已收到，並不表示已有處理結果。
@@ -528,7 +541,7 @@ function Safety(client: Client) {
           ))}
         </ul>
       </section>
-      <section className={styles.panel}>
+      <section className={styles.safetySection}>
         <h2>已封鎖的帳號</h2>
         <p className={styles.muted}>這裡只列出你封鎖的帳號。</p>
         {blocks.loading && <p role="status">正在讀取封鎖名單…</p>}

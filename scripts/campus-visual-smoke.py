@@ -942,7 +942,7 @@ async def check_unsigned_today(page, campus='pu'):
     await expect(today.get_by_role('heading', name='今天', exact=True)).to_be_visible()
     await expect(today.locator('header p').first).to_have_text(TODAY_DATE)
     needs_school = campus == 'all'
-    title = '先選擇你的校園。' if needs_school else '先把課表放進來。'
+    title = '選擇課表所屬校園' if needs_school else '建立第一份課表'
     welcome = today.get_by_role('region', name=title, exact=True)
     await expect(welcome).to_be_visible()
     if needs_school:
@@ -1252,14 +1252,14 @@ async def check_career_directory_return(page):
     )).to_have_count(0)
     breadcrumb = page.get_by_role('navigation', name='目前位置', exact=True)
     await expect(breadcrumb).to_have_count(1)
-    back = breadcrumb.get_by_role('link', name='生活', exact=True)
+    back = breadcrumb.get_by_role('link', name='返回生活目錄', exact=True)
     await expect(back).to_have_count(1)
     await expect(back).to_be_visible()
     await expect(page.get_by_role('navigation', name='麵包屑', exact=True)).to_have_count(0)
     await expect(page.locator('main a[href="/life"]')).to_have_count(0)
     back_destination = urlparse(await back.get_attribute('href'))
     assert back_destination.path == '/life'
-    assert parse_qs(back_destination.query) == scope
+    assert parse_qs(back_destination.query) == {**scope, 'group': ['resources'], 'q': ['校內工讀']}
     await no_overflow(page)
     await page.screenshot(
         path=str(OUT / 'career-from-life-mobile.png'), full_page=True, animations='disabled',
@@ -1311,7 +1311,7 @@ async def check_home_personalization(page):
         await apply.focus()
         await apply.press('Enter')
         await expect(form).to_have_count(0)
-        await expect(page.get_by_role('heading', name='接下來可以做', exact=True)).to_be_visible()
+        await expect(page.get_by_role('heading', name='依偏好推薦的服務', exact=True)).to_be_visible()
         edit = page.get_by_role('button', name='調整安排', exact=True)
         await expect(edit).to_be_focused()
         recommendations = page.get_by_role('list', name='為你推薦的下一步')
@@ -1330,12 +1330,12 @@ async def check_home_personalization(page):
         await expect(stage).to_have_value('year-4')
         await cancel.click()
         await page.reload(wait_until='load')
-        await expect(page.get_by_role('heading', name='接下來可以做', exact=True)).to_be_visible()
+        await expect(page.get_by_role('heading', name='依偏好推薦的服務', exact=True)).to_be_visible()
         await expect(form).to_have_count(0)
         await goto_path(page, '/?campus=nthu')
         await check_unsigned_today(page, 'nthu')
         await goto_path(page, '/?campus=pu')
-        await expect(page.get_by_role('heading', name='接下來可以做', exact=True)).to_be_visible()
+        await expect(page.get_by_role('heading', name='依偏好推薦的服務', exact=True)).to_be_visible()
     finally:
         await page.evaluate('''({key, previous}) => {
             if (previous === null) localStorage.removeItem(key);
@@ -1373,9 +1373,9 @@ async def check_home_font_preference(page):
             await goto_path(page, '/?campus=pu')
             await check_unsigned_today(page)
             today = page.get_by_test_id('student-today')
-            welcome = page.get_by_role('region', name='先把課表放進來。', exact=True)
+            welcome = page.get_by_role('region', name='建立第一份課表', exact=True)
             elements = {
-                'welcome title': welcome.get_by_role('heading', name='先把課表放進來。', exact=True),
+                'welcome title': welcome.get_by_role('heading', name='建立第一份課表', exact=True),
                 'welcome body': welcome.locator('p').first,
                 'welcome action': welcome.get_by_role('link', name='匯入我的課表', exact=True),
                 'page title': today.get_by_role('heading', name='今天', exact=True),
@@ -1870,7 +1870,7 @@ async def main():
             results.append('home titles, copy and actions grow with the large-text preference at 320/768/1440px')
             await expect(page.locator('html')).to_have_attribute('data-reduced-motion', 'true')
             assert await page.locator('body').evaluate(
-                'el => getComputedStyle(el).backgroundColor === "rgb(246, 247, 245)"'
+                'el => getComputedStyle(el).backgroundColor === "rgb(250, 248, 242)"'
             ), 'Explicit light theme must remain light'
             await no_overflow(page)
             await page.screenshot(path=str(OUT / 'home-large-text.png'), full_page=True, animations='disabled')

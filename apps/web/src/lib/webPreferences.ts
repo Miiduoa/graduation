@@ -284,7 +284,7 @@ export function applyWebAppearancePreferences(
   root.style.setProperty('--font-label-size', fontScale.label);
   root.style.setProperty('--font-label-sm-size', fontScale.labelSm);
   doc.querySelectorAll?.('meta[name="theme-color"]').forEach((meta) => {
-    meta.setAttribute('content', dark ? '#000000' : '#f6f7f5');
+    meta.setAttribute('content', dark ? '#000000' : '#faf8f2');
     meta.removeAttribute('media');
   });
 }

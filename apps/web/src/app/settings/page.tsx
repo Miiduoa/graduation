@@ -1319,7 +1319,7 @@ function SettingsContent({
   };
 
   return (
-    <SiteShell title="設定" subtitle="讓校園生活，照你的習慣安排。">
+    <SiteShell title="設定">
       <div className={styles.layout}>
         <aside className={styles.sidebar}>
           <nav

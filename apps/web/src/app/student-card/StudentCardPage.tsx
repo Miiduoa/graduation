@@ -98,7 +98,7 @@ export function StudentCardPage() {
   );
   const card = !user || user.isAnonymous ? (
     <section className={styles.message}>
-      <h2>把學號放進隨身卡片</h2>
+      <h2>登入查看數位學生證</h2>
       <p>使用學校帳號登入後，可查看個人資料並取得學號驗證碼。</p>
       <Link
         className={styles.button}
@@ -303,8 +303,7 @@ function Wallet({
         </p>
       </div>
       <aside className={styles.guide}>
-        <p className={styles.eyebrow}>出示時</p>
-        <h2>需要的時候，才顯示</h2>
+        <h2>如何出示學號</h2>
         <ol>
           <li>
             <strong>取得一組限時驗證碼</strong>

@@ -119,8 +119,8 @@ export default function DashboardPage() {
 
   return (
     <RequireAdmin>
-      <h1 style={{ marginTop: 0 }}>教學儀表板（學生儀表板／預警／搜尋）</h1>
-      <p style={{ color: '#3C3C43', lineHeight: 1.6 }}>
+      <h2>教學儀表板（學生儀表板／預警／搜尋）</h2>
+      <p style={{ color: 'var(--muted)', lineHeight: 1.6 }}>
         對應 view <code>reporting_student_dashboard</code>、<code>reporting_at_risk_students</code> 與 RPC <code>search_course</code>。
       </p>
 
@@ -142,7 +142,7 @@ export default function DashboardPage() {
       <section style={{ marginTop: 20 }}>
         <h2 style={{ fontSize: 16 }}>課程整體統計（aggregated student dashboard）</h2>
         {!summary ? (
-          <p style={{ color: '#8E8E93' }}>請選課。</p>
+          <p style={{ color: 'var(--muted)' }}>請選課。</p>
         ) : (
           <div
             style={{
@@ -164,12 +164,12 @@ export default function DashboardPage() {
       <section style={{ marginTop: 32 }}>
         <h2 style={{ fontSize: 16 }}>預警學員（warn/critical）</h2>
         {atRisk.length === 0 ? (
-          <p style={{ color: '#8E8E93' }}>目前沒有預警學員。</p>
+          <p style={{ color: 'var(--muted)' }}>目前沒有預警學員。</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={tableStyle}>
               <thead>
-                <tr style={{ background: '#F2F2F7' }}>
+                <tr style={{ background: 'var(--bg-soft)' }}>
                   <th style={cellStyle}>學號／profile</th>
                   <th style={cellStyle}>加權</th>
                   <th style={cellStyle}>21d 簽到</th>
@@ -183,7 +183,7 @@ export default function DashboardPage() {
                 {atRisk.map((r) => (
                   <tr
                     key={r.student_id}
-                    style={{ background: r.risk_level === 'critical' ? '#fee2e2' : '#fef3c7' }}>
+                    style={{ background: r.risk_level === 'critical' ? 'var(--danger-soft)' : 'var(--warning-soft)' }}>
                     <td style={{ ...cellStyle, fontFamily: 'monospace', fontSize: 11 }}>{r.student_id}</td>
                     <td style={cellStyle}>{Number(r.weighted_percent ?? 0).toFixed(1)}%</td>
                     <td style={cellStyle}>{r.recent_attendances}</td>
@@ -194,9 +194,9 @@ export default function DashboardPage() {
                       <span
                         style={{
                           padding: '2px 8px',
-                          borderRadius: 999,
-                          background: r.risk_level === 'critical' ? 'var(--danger)' : 'var(--warning)',
-                          color: '#fff',
+                          borderRadius: 4,
+                          background: r.risk_level === 'critical' ? 'var(--danger-soft)' : 'var(--warning-soft)',
+                          color: r.risk_level === 'critical' ? 'var(--danger)' : 'var(--warning)',
                           fontSize: 11,
                           fontWeight: 700,
                         }}>
@@ -234,10 +234,10 @@ export default function DashboardPage() {
             {hits.map((h) => (
               <li
                 key={`${h.kind}-${h.record_id}`}
-                style={{ padding: 10, marginBottom: 6, border: '1px solid #E5E5EA', borderRadius: 8, background: '#fff' }}>
+                style={{ padding: 10, marginBottom: 6, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface)' }}>
                 <strong>[{h.kind}]</strong> {h.title}
-                <div style={{ fontSize: 12, color: '#8E8E93' }}>{h.snippet}</div>
-                <div style={{ fontSize: 11, color: '#AEAEB2' }}>{new Date(h.touched_at).toLocaleString()}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{h.snippet}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(h.touched_at).toLocaleString()}</div>
               </li>
             ))}
           </ul>
@@ -249,19 +249,19 @@ export default function DashboardPage() {
 
 function Card({ label, value }: { label: string; value: string | number }) {
   return (
-    <div style={{ padding: 12, background: '#F2F2F7', borderRadius: 10, border: '1px solid #E5E5EA' }}>
-      <div style={{ fontSize: 12, color: '#8E8E93' }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: '#1C1C1E' }}>{value}</div>
+    <div style={{ padding: 12, background: 'var(--bg-soft)', borderRadius: 10, border: '1px solid var(--border)' }}>
+      <div style={{ fontSize: 12, color: 'var(--muted)' }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)' }}>{value}</div>
     </div>
   );
 }
 
 const selectStyle: React.CSSProperties = {
-  padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 14,
+  padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border-strong)', fontSize: 14,
 };
 const btnStyle: React.CSSProperties = {
   padding: '10px 14px', borderRadius: 10, border: '1px solid var(--brand)',
-  background: 'var(--brand)', color: '#fff', fontWeight: 700, cursor: 'pointer',
+  background: 'var(--brand)', color: 'var(--on-brand)', fontWeight: 700, cursor: 'pointer',
 };
 const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 13 };
-const cellStyle: React.CSSProperties = { padding: 8, border: '1px solid #E5E5EA', textAlign: 'left' };
+const cellStyle: React.CSSProperties = { padding: 8, border: '1px solid var(--border)', textAlign: 'left' };

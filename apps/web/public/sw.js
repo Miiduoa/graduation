@@ -1,4 +1,4 @@
-const STATIC_CACHE = 'campus-static-v3';
+const STATIC_CACHE = 'campus-static-v4';
 const PUBLIC_ASSETS = [
   '/offline.html',
   '/manifest.json',

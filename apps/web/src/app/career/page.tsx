@@ -166,7 +166,7 @@ function CareerContent({ schoolId, schoolName }: { schoolId: string; schoolName:
 export default function CareerPage() {
   const campus = useCampusBrowseContext();
   return (
-    <SiteShell title="職涯" subtitle="校內工讀、實習學分與校園徵才，從校方消息掌握下一步。">
+    <SiteShell title="職涯" subtitle="查詢校內工讀、實習學分與徵才公告。">
       <div className={styles.page}>
         {campus.status === 'ready' && campus.schoolId ? (
           <CareerContent

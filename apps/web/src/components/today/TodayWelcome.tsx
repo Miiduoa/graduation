@@ -37,10 +37,10 @@ export function TodayWelcome({
   const params = new URL(timetableHref, 'https://campus.local').searchParams;
   const campusSearch = serviceSearch ?? buildCampusNavigationSearch(params);
   const title = needsSchool
-    ? '先選擇你的校園。'
+    ? '選擇課表所屬校園'
     : hasTimetable
-      ? '課表準備好了。'
-      : '先把課表放進來。';
+      ? '本週課表'
+      : '建立第一份課表';
 
   return (
     <section className={styles.welcome} aria-labelledby="today-welcome-title">
@@ -48,7 +48,7 @@ export function TodayWelcome({
         <h2 id="today-welcome-title">{title}</h2>
         <p className={styles.description}>
           {needsSchool
-            ? '選好學校，再整理課表；也可以先使用下方公開服務。'
+            ? '選擇學校後就能建立課表。校園服務也開放訪客使用。'
             : hasTimetable
               ? '查看本週的上課時間與教室。'
               : '匯入課表截圖或檔案，下次打開就能查看上課時間與教室。'}

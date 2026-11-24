@@ -292,7 +292,7 @@ it('gives a guest one setup action and one sign-in instead of repeated locked se
 it('replaces confirmed empty setup with one starting point while keeping signed-in notifications', () => {
   view({ timetableStatus: 'empty', lmsUnconnected: true });
   const start = screen.getByTestId('next-action');
-  expect(within(start).getByRole('heading', { name: '先把課表放進來。' })).toBeTruthy();
+  expect(within(start).getByRole('heading', { name: '建立第一份課表' })).toBeTruthy();
   expect(screen.getAllByRole('link', { name: '匯入我的課表' })).toHaveLength(1);
   expect(screen.getByRole('link', { name: '加入 nuni 課程' }).getAttribute('href')).toBe(
     '/classroom?campus=pu',
@@ -313,13 +313,13 @@ it('keeps course information when only the personal timetable needs setup', () =
 
 it('does not turn partially loaded course data into onboarding or a claim of no assignments', () => {
   const result = view({ timetableStatus: 'empty', refreshing: true });
-  expect(screen.queryByRole('region', { name: '先把課表放進來。' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '建立第一份課表' })).toBeNull();
   expect(screen.queryByText('目前沒有今日或即將到期的作業。')).toBeNull();
   expect(screen.getByText('正在確認作業與期限…')).toBeTruthy();
   result.rerender(todayElement({ timetableStatus: 'ready', refreshing: true }));
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
   result.rerender(todayElement({ timetableStatus: 'empty', todos: [todo()] }));
-  expect(screen.queryByRole('region', { name: '先把課表放進來。' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '建立第一份課表' })).toBeNull();
   expect(screen.getByTestId('next-action').textContent).toContain('作業三 繳交');
   expect(screen.getByRole('link', { name: TODAY_COPY.goSubmit })).toBeTruthy();
 });
@@ -327,7 +327,7 @@ it('does not turn partially loaded course data into onboarding or a claim of no 
 it('keeps read failures recoverable instead of covering them with setup', () => {
   const retry = vi.fn();
   view({ timetableStatus: 'empty', todosError: '作業暫時讀不到', onRetryTodos: retry });
-  expect(screen.queryByRole('region', { name: '先把課表放進來。' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '建立第一份課表' })).toBeNull();
   expect(screen.getByRole('alert').textContent).toBe('作業暫時讀不到');
   fireEvent.click(screen.getByRole('button', { name: TODAY_COPY.retry }));
   expect(retry).toHaveBeenCalledOnce();
@@ -376,8 +376,8 @@ it('keeps public services after real coursework and updates their campus without
 
 it('opens the existing week for a guest without classes on Sunday instead of restarting setup', () => {
   view({ unsigned: true, timetableStatus: 'ready', classes: [], todos: [] });
-  expect(screen.getByRole('heading', { name: '課表準備好了。' })).toBeTruthy();
-  expect(screen.queryByRole('heading', { name: '先把課表放進來。' })).toBeNull();
+  expect(screen.getByRole('heading', { name: '本週課表' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '建立第一份課表' })).toBeNull();
   expect(screen.getByRole('link', { name: '查看這週課表' }).getAttribute('href')).toBe(
     '/timetable?campus=pu',
   );
@@ -721,7 +721,7 @@ it.each(['pending', 'empty', 'error'] as const)(
 it('keeps a guest timetable error recoverable without suggesting it has never been created', () => {
   const retry = vi.fn();
   view({ unsigned: true, timetableStatus: 'error', onRetryTimetable: retry });
-  expect(screen.queryByRole('heading', { name: '先把課表放進來。' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: '建立第一份課表' })).toBeNull();
   expect(screen.getByRole('alert').textContent).toBe(TODAY_COPY.timetableUnavailable);
   fireEvent.click(screen.getByRole('button', { name: TODAY_COPY.retry }));
   expect(retry).toHaveBeenCalledOnce();

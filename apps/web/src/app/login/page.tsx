@@ -234,7 +234,7 @@ function LoginForm({
           {error && <p role="alert" className={styles.errorNotice}>{error}</p>}
         </section>}
         {!schoolTask && destination !== '/' && (
-          <p className={loginStyles.continuation}>登入後會回到你原本的頁面，接著完成剛才的事。</p>
+          <p className={loginStyles.continuation}>登入後會返回原本的頁面。</p>
         )}
         <div className={`${styles.loginLayout} ${loginStyles.methods}`}>
           {!hideGoogle && (
@@ -258,7 +258,6 @@ function LoginForm({
             <summary>
               <div className={styles.methodHeading}>
                 <div>
-                  <span className={styles.methodEyebrow}>學校帳號 · 本人授權</span>
                   <h2>{schoolTask ? '確認你的學校帳號' : '需要校務資料時再連線'}</h2>
                 </div>
                 <span className={styles.methodStatus}>依服務開放</span>
@@ -380,7 +379,6 @@ function LoginForm({
               <p role="status">{STUDENT_ID_PREPARING_COPY}</p>
             )}
             <div className={styles.importRoute}>
-              <span className={styles.methodEyebrow}>另一種方式 · 各校適用</span>
               <h3>不使用學號，也能匯入課表</h3>
               <p>可自行匯入課表、成績與活動</p>
               <p>

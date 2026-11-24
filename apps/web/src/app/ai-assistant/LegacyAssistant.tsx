@@ -501,7 +501,7 @@ function AssistantRoute() {
 
 export default function AssistantPage({ children }: { children?: ReactNode }) {
   return (
-    <SiteShell title="助理" subtitle="從一個問題開始，找到需要的資訊。">
+    <SiteShell title="助理">
       {children}
       <Suspense fallback={<p role="status">載入中…</p>}>
         <AssistantRoute />

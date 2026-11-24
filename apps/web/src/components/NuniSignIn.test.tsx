@@ -149,7 +149,7 @@ it('shows the Google button only when the backend says Google is available', asy
 });
 it('uses one Google flow for a first account and a returning account', async () => {
   render(<NuniSignIn />);
-  expect(screen.getByText(/第一次使用？透過 Google 繼續即可建立帳號/)).toBeTruthy();
+  expect(screen.getByText(/首次登入會建立帳號/)).toBeTruthy();
   expect(await screen.findByRole('button', { name: '使用 Google 帳號繼續' })).toBeTruthy();
   expect(screen.queryByLabelText('密碼')).toBeNull();
   expect(screen.queryByRole('button', { name: '註冊' })).toBeNull();

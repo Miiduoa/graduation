@@ -1,24 +1,25 @@
+/* Sections are a ruled index: plain labels on one baseline rule, the current
+   section marked by a heavier underline rather than a filled pill. */
 .navigation {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 4px 20px;
   margin: 0 0 24px;
-  padding-bottom: 16px;
   border-bottom: 1px solid var(--border);
 }
 
 .sections {
   display: flex;
+  flex: 1 1 auto;
   flex-wrap: nowrap;
-  align-items: center;
-  gap: 2px;
+  align-items: stretch;
+  gap: 4px;
   min-width: 0;
   margin: 0;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: calc(var(--radius-lg) + 2px);
-  background: var(--panel);
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
   list-style: none;
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -34,26 +35,39 @@
 
 .section,
 .importAction {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
   min-height: 44px;
   min-width: 44px;
-  padding: 10px 14px;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   font-size: var(--font-body-sm-size);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.4;
   text-decoration: none;
   overflow-wrap: anywhere;
   -webkit-tap-highlight-color: transparent;
   transition:
     color var(--motion-fast) var(--ease-out),
-    background-color var(--motion-fast) var(--ease-out),
-    border-color var(--motion-fast) var(--ease-out),
-    box-shadow var(--motion-fast) var(--ease-out),
-    transform var(--motion-fast) var(--ease-out);
+    background-color var(--motion-fast) var(--ease-out);
+}
+
+/* The underline sits on the navigation rule, so it reads as part of it. */
+.section::after,
+.importAction::after {
+  content: '';
+  position: absolute;
+  inset-inline: 12px;
+  bottom: -1px;
+  height: 3px;
+  background: var(--brand);
+  transform: scaleX(0);
+  transition: transform var(--motion-fast) var(--ease-out);
 }
 
 .section {
@@ -63,21 +77,29 @@
 }
 
 .section[aria-current='page'] {
-  color: var(--brand);
-  background: var(--surface);
-  border-color: var(--border);
-  box-shadow: var(--shadow-sm);
+  color: var(--text);
   font-weight: 650;
+}
+
+.section[aria-current='page']::after,
+.importAction[aria-current='page']::after {
+  transform: scaleX(1);
 }
 
 .importAction {
   gap: 8px;
   margin-inline-start: auto;
   color: var(--brand);
-  background: var(--surface);
-  border-color: var(--border);
   font-weight: 600;
   white-space: nowrap;
+}
+
+.importAction::before {
+  content: '';
+  position: absolute;
+  inset-block: 10px;
+  inset-inline-start: -10px;
+  border-inline-start: 1px solid var(--border);
 }
 
 .importAction > svg {
@@ -86,68 +108,88 @@
 
 .importAction[aria-current='page'] {
   color: var(--text);
-  background: var(--accent-soft);
-  border-color: var(--brand);
 }
 
 .section:focus-visible,
 .importAction:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -3px;
 }
 
 @media (hover: hover) and (pointer: fine) {
   .section:not([aria-current='page']):hover {
     color: var(--text);
-    background: var(--surface-tint);
+    background: var(--bg-soft);
   }
 
   .importAction:hover {
     color: var(--text);
-    background: var(--accent-soft);
-    border-color: var(--border-strong);
+    background: var(--bg-soft);
+  }
+
+  .section:not([aria-current='page']):hover::after,
+  .importAction:not([aria-current='page']):hover::after {
+    transform: scaleX(1);
+    background: var(--border-strong);
   }
 }
 
 .navigation .section:active,
 .navigation .importAction:active {
   background: var(--accent-soft);
-  color: var(--brand);
-  transform: translateY(1px);
+  color: var(--text);
 }
 
 @media (max-width: 600px) {
   .navigation {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 0 8px;
     margin-bottom: 20px;
   }
 
   .sections {
-    width: 100%;
+    padding-inline: 0;
   }
 
   .importAction {
-    justify-self: end;
     margin-inline-start: 0;
+  }
+
+  .importAction::before {
+    display: none;
   }
 
   .section {
     padding-inline: 10px;
   }
+
+  .section::after {
+    inset-inline: 10px;
+  }
+}
+
+@media (forced-colors: active) {
+  .section::after,
+  .importAction::after {
+    background: Highlight;
+  }
+
+  .section[aria-current='page'],
+  .importAction[aria-current='page'] {
+    color: Highlight;
+  }
 }
 
 :global([data-reduced-motion='true']) .navigation :is(.section, .importAction),
-:global([data-reduced-motion='true']) .navigation :is(.section, .importAction):active {
+:global([data-reduced-motion='true']) .navigation :is(.section, .importAction)::after {
   transition: none;
-  transform: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .navigation :is(.section, .importAction),
-  .navigation :is(.section, .importAction):active {
+  .navigation :is(.section, .importAction)::after {
     transition: none;
-    transform: none;
   }
 }

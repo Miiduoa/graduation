@@ -396,7 +396,7 @@ function ServiceDirectory() {
     );
   }
   return (
-    <SiteShell title="所有服務" subtitle="先選常用服務，或直接搜尋你要做的事。">
+    <SiteShell title="所有服務">
       <div ref={directory} className={styles.directory}>
         <form
           className={styles.searchPanel}

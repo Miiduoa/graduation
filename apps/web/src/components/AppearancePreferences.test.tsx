@@ -75,7 +75,7 @@ it('matches the browser chrome to the chosen theme and follows later system chan
       setPreferences({ theme: 'light' });
       window.dispatchEvent(new StorageEvent('storage', { key: webPreferencesStorageKey }));
     });
-    expect(metas.every((meta) => meta.content === '#f6f7f5')).toBe(true);
+    expect(metas.every((meta) => meta.content === '#faf8f2')).toBe(true);
     act(() => {
       setPreferences({ theme: 'system' });
       window.dispatchEvent(new StorageEvent('storage', { key: webPreferencesStorageKey }));
@@ -85,7 +85,7 @@ it('matches the browser chrome to the chosen theme and follows later system chan
       systemDark = false;
       change?.();
     });
-    expect(metas.every((meta) => meta.content === '#f6f7f5')).toBe(true);
+    expect(metas.every((meta) => meta.content === '#faf8f2')).toBe(true);
   } finally {
     metas.forEach((meta) => meta.remove());
   }

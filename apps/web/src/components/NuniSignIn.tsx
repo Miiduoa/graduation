@@ -77,11 +77,7 @@ export function NuniSignIn({
     <section className={styles.loginHelp} aria-labelledby="platform-sign-in-title">
       <h2 id="platform-sign-in-title">用 Google 帳號登入</h2>
       <p>{purpose}</p>
-      <p>不需要先登入學校，也不要求學號或學校信箱。</p>
-      <p>
-        第一次使用？透過 Google 繼續即可建立帳號，不必另外設定密碼。之後請使用同一個 Google
-        帳號登入。
-      </p>
+      <p>首次登入會建立帳號，之後請使用同一個 Google 帳號。無需學號或學校信箱。</p>
       {issue && <p role="alert">這次登入沒有完成，請重新登入。</p>}
       {auth.loading ? (
         <p role="status">正在確認帳號…</p>

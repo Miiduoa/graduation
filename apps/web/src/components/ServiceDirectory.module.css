@@ -215,7 +215,24 @@
 }
 .groups {
   display: grid;
-  gap: 28px;
+  gap: 32px;
+}
+.group {
+  display: grid;
+  grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr);
+  column-gap: 32px;
+  align-items: start;
+  padding-top: 12px;
+  border-top: 2px solid var(--text);
+}
+.group > .sectionHeading {
+  margin: 0;
+}
+.group > .serviceList {
+  border-top: 0;
+}
+.group > .serviceList > .serviceRow:first-child {
+  border-top: 0;
 }
 .sectionHeading {
   display: flex;
@@ -227,6 +244,7 @@
 }
 .sectionHeading :is(h2, h3) {
   margin: 0;
+  overflow-wrap: anywhere;
   font-size: var(--font-h3-size);
   font-weight: 650;
 }
@@ -245,15 +263,15 @@
   margin-top: 4px;
   margin-bottom: 4px;
 }
-/* Services are flat rows divided by hairlines, not stacked cards. */
+/* A service index: one ruled row per entry with name, summary and access
+   state held in fixed columns so the list scans like a printed table. */
 .serviceList {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 32px;
+  grid-template-columns: minmax(0, 1fr);
   list-style: none;
   padding: 0;
   margin: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-strong);
 }
 .serviceRow {
   min-width: 0;
@@ -261,14 +279,19 @@
 }
 .service {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
+  grid-template-columns: 2rem minmax(0, 1fr) minmax(5.5rem, 9.5rem) 1.125rem;
+  grid-template-areas: 'icon body access go';
+  align-items: start;
+  column-gap: 16px;
   min-height: 72px;
   padding: 14px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   transition: background-color var(--motion-fast) var(--ease-out);
 }
+.service > .icon { grid-area: icon; }
+.service > .serviceBody { grid-area: body; }
+.service > .access { grid-area: access; }
+.service > svg { grid-area: go; margin-top: 3px; }
 .service > svg {
   color: var(--muted);
   flex-shrink: 0;
@@ -276,17 +299,17 @@
 .icon {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
+  justify-content: flex-start;
+  width: 2rem;
+  height: 1.5em;
   color: var(--brand);
-  background: var(--accent-soft);
-  border-radius: var(--radius-sm);
 }
-/* The suggested starting point is marked by a filled icon as well as text. */
-.serviceRow[data-recommended] .icon {
-  color: var(--on-brand);
-  background: var(--brand);
+/* The suggested starting point carries a rule beside its row as well as text. */
+.serviceRow[data-recommended] {
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+.serviceRow[data-recommended] .service {
+  padding-inline-start: 14px;
 }
 .serviceBody {
   min-width: 0;
@@ -312,9 +335,12 @@
   overflow-wrap: anywhere;
 }
 .access {
+  min-width: 0;
+  padding-inline-start: 12px;
+  border-inline-start: 1px solid var(--border);
   color: var(--muted);
   font-size: var(--font-label-sm-size);
-  line-height: 1.5;
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 .recommended {
@@ -324,7 +350,7 @@
   line-height: 1.5;
 }
 .related {
-  margin: -6px 8px 0 calc(38px + 14px + 8px);
+  margin: -6px 8px 0 calc(2rem + 16px + 8px);
 }
 .related summary {
   min-height: 44px;
@@ -440,6 +466,14 @@
 .related summary:active {
   color: var(--brand);
 }
+@media (max-width: 900px) {
+  .group {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .group > .sectionHeading {
+    margin-bottom: 4px;
+  }
+}
 @media (max-width: 700px) {
   .directory {
     gap: 14px;
@@ -451,24 +485,33 @@
   .categories {
     max-width: none;
   }
-  .serviceList {
-    grid-template-columns: 1fr;
-  }
   .service {
+    grid-template-columns: 1.75rem minmax(0, 1fr) 1.125rem;
+    grid-template-areas:
+      'icon body go'
+      '. access .';
     min-height: 64px;
-    gap: 12px;
+    column-gap: 12px;
+    row-gap: 2px;
     padding: 10px 4px;
   }
   .icon {
-    width: 36px;
-    height: 36px;
+    width: 1.75rem;
+  }
+  .access {
+    padding-inline-start: 0;
+    border-inline-start: 0;
   }
   .related {
-    margin-left: calc(36px + 12px + 4px);
+    margin-left: calc(1.75rem + 12px + 4px);
     margin-right: 4px;
   }
   .groups {
     gap: 16px;
+  }
+  .group {
+    grid-template-columns: minmax(0, 1fr);
+    padding-top: 8px;
   }
   /* The category name is enough on phones; the one-line blurb only pushes
      the first service down. */
@@ -491,15 +534,17 @@
   .resultsHeading { margin-block: 0; }
   .service {
     min-height: 60px;
-    gap: 10px;
+    column-gap: 10px;
     padding-inline: 2px;
   }
   .icon {
-    width: 32px;
-    height: 32px;
+    width: 1.5rem;
+  }
+  .service {
+    grid-template-columns: 1.5rem minmax(0, 1fr) 1.125rem;
   }
   .related {
-    margin-left: calc(32px + 10px + 2px);
+    margin-left: calc(1.5rem + 10px + 2px);
     margin-right: 2px;
   }
   .categories button {
@@ -536,8 +581,12 @@
   .categories button[aria-pressed='true'] {
     color: Highlight;
   }
-  .serviceRow[data-recommended] .icon {
-    border: 1px solid Highlight;
+  .serviceRow[data-recommended] {
+    box-shadow: none;
+    border-inline-start: 3px solid Highlight;
+  }
+  .group {
+    border-top-color: CanvasText;
   }
   .searchField:focus-within,
   .resultsTitle:focus {

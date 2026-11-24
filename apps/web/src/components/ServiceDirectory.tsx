@@ -143,12 +143,12 @@ function ServiceRow({
           <div className={styles.serviceTitle}>
             <Heading id={`${id}-name`}>{service.name}</Heading>
             {recommended && <span className={styles.recommended}>從這裡開始</span>}
-            <span id={`${id}-access`} className={styles.access}>
-              {SERVICE_ACCESS[service.access]}
-            </span>
           </div>
           <p id={`${id}-description`}>{service.text}</p>
         </div>
+        <span id={`${id}-access`} className={styles.access}>
+          {SERVICE_ACCESS[service.access]}
+        </span>
         <CampusIcon name="arrow" size={18} />
       </Link>
       {children.length > 0 && (
@@ -315,7 +315,7 @@ export function ServiceDirectory({
       journey,
       serviceHref,
       destination: campusServiceHref(serviceHref, scope).split('#', 1)[0]!,
-      returnHref: campusServiceHref('/' + journey, returnParams.toString()),
+      returnHref: campusServiceHref(journey === 'life' ? '/life' : '/connect', returnParams.toString()),
     });
     try {
       window.history.replaceState(
@@ -536,7 +536,7 @@ export function ServiceDirectory({
               );
               if (services.length === 0) return null;
               return (
-                <section key={group.id} aria-labelledby={`${id}-${group.id}`}>
+                <section key={group.id} className={styles.group} aria-labelledby={`${id}-${group.id}`}>
                   <div className={`${styles.sectionHeading} ${styles.groupHeading}`}>
                     <div>
                       <h3 id={`${id}-${group.id}`}>{group.label}</h3>

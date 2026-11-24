@@ -5,19 +5,18 @@
 }
 
 .panel {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  padding: clamp(20px, 3vw, 30px);
-  border-radius: var(--radius);
+  padding: clamp(18px, 3vw, 28px) 0;
   min-width: 0;
   overflow-wrap: anywhere;
+  border-top: 1px solid var(--border-strong);
 }
 
 .panel h2 {
-  font-size: 1.3125rem;
+  font-size: clamp(1.25rem, 2.5vw, 1.625rem);
   font-weight: 600;
   line-height: 1.4;
   margin: 0 0 12px;
+  font-family: var(--font-heading);
 }
 
 .muted {
@@ -69,10 +68,9 @@
 .notice {
   margin: 0;
   padding: 12px 14px;
-  border-radius: var(--radius-sm);
   background: var(--panel);
-  border: 1px solid var(--border);
   line-height: 1.7;
+  border-inline-start: 2px solid var(--border-strong);
 }
 
 .error {
@@ -100,7 +98,7 @@
 
 .list {
   display: grid;
-  gap: 16px;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;

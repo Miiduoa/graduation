@@ -280,7 +280,6 @@ export function TodayAgentPanel(props: TodayAgentPanelProps) {
     <section className={styles.panel} data-compact={props.compact || undefined} aria-labelledby={titleId}>
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>nuni 代辦</p>
           <h2 id={titleId} className={styles.title}>替待辦安排時間</h2>
         </div>
         <Link className={styles.settings} href="/settings?section=assistant">代辦權限</Link>

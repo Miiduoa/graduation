@@ -6,16 +6,14 @@
 
 .browse {
   margin-bottom: 1.5rem;
-  padding: clamp(16px, 3vw, 24px);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding: 4px 0 20px;
+  border-bottom: 1px solid var(--border-strong);
 }
 
 .filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 0 14px;
 }
 
 .filters button {
@@ -24,21 +22,21 @@
   justify-content: center;
   gap: 8px;
   min-height: 44px;
-  padding: 10px 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 8px 3px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
   font: inherit;
   font-size: 0.875rem;
   cursor: pointer;
   white-space: nowrap;
+  border-bottom: 2px solid transparent;
 }
 
 .filters button[aria-pressed='true'] {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: currentColor;
+  color: var(--brand);
   font-weight: 600;
 }
 
@@ -91,10 +89,8 @@
 }
 
 .status {
-  padding: clamp(24px, 4vw, 40px);
-  background: var(--accent-soft);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding: 12px 18px;
+  border-inline-start: 3px solid var(--brand);
 }
 
 .status h2,
@@ -147,23 +143,20 @@
 
 .dateTile {
   display: grid;
-  justify-items: center;
-  align-content: center;
+  justify-items: start;
+  align-content: start;
   gap: 0.125rem;
-  min-height: 5rem;
-  padding: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--accent-soft);
-  color: var(--accent);
+  padding: 4px 0;
+  color: var(--brand);
   font-size: 0.8125rem;
 }
 
 .dateTile strong {
-  font-size: 1.75rem;
-  line-height: 1.2;
+  font-size: 2.25rem;
+  line-height: 1.05;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
+  font-family: var(--font-heading);
 }
 
 .itemContent {
@@ -237,10 +230,8 @@
   display: grid;
   gap: 14px;
   margin-top: 28px;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 20px 0;
+  border-top: 1px solid var(--border-strong);
 }
 
 .registrationMeta {
@@ -275,9 +266,10 @@
 
 .detail h2 {
   margin: 0;
-  font-size: clamp(1.5rem, 3vw, 1.75rem);
+  font-size: clamp(1.5rem, 4vw, 2.2rem);
   line-height: 1.5;
   font-weight: 600;
+  font-family: var(--font-heading);
 }
 
 .body {
@@ -294,12 +286,12 @@
 
 @media (max-width: 480px) {
   .item {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.75rem;
+    grid-template-columns: 3.25rem minmax(0, 1fr);
+    gap: .65rem;
   }
 
   .dateTile {
-    display: none;
+    display: grid;
   }
 
   .toolbar > button {
@@ -307,6 +299,13 @@
   }
 
   .filters button {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
+  }
+}
+
+@media (hover: hover) {
+  .filters button:hover {
+    color: var(--brand);
+    background: var(--accent-soft);
   }
 }

@@ -453,8 +453,8 @@ it.each([
       },
     ];
     render(<HomePage />);
-    expect(screen.getByRole('heading', { name: '先把課表放進來。' })).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: '課表準備好了。' })).toBeNull();
+    expect(screen.getByRole('heading', { name: '建立第一份課表' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '本週課表' })).toBeNull();
     expect(screen.getAllByRole('link', { name: '匯入我的課表' })).toHaveLength(1);
   },
 );
@@ -598,12 +598,12 @@ it('waits for the assignment response after courses arrive before choosing an em
   });
   render(<HomePage />);
   expect(await screen.findByText('正在確認作業與期限…')).toBeTruthy();
-  expect(screen.queryByRole('region', { name: '先把課表放進來。' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '建立第一份課表' })).toBeNull();
   expect(screen.queryByText('目前沒有今日或即將到期的作業。')).toBeNull();
   await act(async () => finish(data('剛讀到的課程')));
   expect(screen.getByTestId('next-action').textContent).toContain('剛讀到的課程 作業');
   expect(screen.queryByText('正在確認作業與期限…')).toBeNull();
-  expect(screen.queryByRole('region', { name: '先把課表放進來。' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '建立第一份課表' })).toBeNull();
 });
 
 it('keeps confirmed setup and service links focused while a complete account snapshot refreshes', async () => {

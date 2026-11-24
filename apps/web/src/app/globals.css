@@ -13,7 +13,9 @@ textarea::placeholder {
   --font-ui:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang TC', 'Noto Sans TC',
     'Noto Sans CJK TC', 'Microsoft JhengHei', sans-serif;
+  --font-heading: 'Songti TC', 'Noto Serif TC', 'PMingLiU', Georgia, serif;
   --on-brand: #ffffff;
+  --nuni-mark-filter: none;
   --page-width: 1264px;
   --mobile-nav-height: 72px;
   --mobile-nav-offset: var(
@@ -22,37 +24,38 @@ textarea::placeholder {
   );
   --page-padding-inline: 48px;
   --page-padding-block: 46px;
-  --page-title-size: clamp(25px, 3vw, 38px);
+  --page-title-size: calc(clamp(2.125rem, 3.8vw, 3.25rem) + var(--font-h1-size) - 1.5rem);
   --motion-fast: 140ms;
   --motion-normal: 200ms;
   --motion-enter: 220ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   /* ── Backgrounds ── */
-  --bg: #f6f7f5;
-  --bg-soft: #eef1ed;
+  --bg: #faf8f2;
+  --bg-soft: #f1efe7;
 
   /* ── Surfaces ── */
-  --surface: #ffffff;
-  --surface-strong: #ffffff;
+  --surface: #fffdf8;
+  --surface-strong: #fffdf8;
   --surface-raised: #ffffff;
   --surface-tint: rgba(255, 255, 255, 0.6);
-  --panel: #eeefea;
-  --panel2: #e6ece5;
+  --panel: #efede4;
+  --panel2: #e6e4da;
 
   /* ── Text ── */
-  --text: #202b26;
-  --muted: #59645d;
-  --muted-light: #68746b;
+  --text: #24251f;
+  --muted: #5e6057;
+  --muted-light: #686b60;
 
   /* ── Borders & Separators ── */
-  --border: #dfe4de;
-  --border-strong: #b2bcb1;
+  --border: #dedbd0;
+  --border-strong: #a7a89b;
+  --control-border: #858779;
 
   /* ── Brand ── */
-  --brand: #314d40;
-  --brand2: #4b6957;
-  --accent-soft: #e6ece5;
+  --brand: #214c3d;
+  --brand2: #345e4c;
+  --accent-soft: #e5ede5;
 
   /* ── Status ── */
   --success: #386146;
@@ -106,9 +109,9 @@ textarea::placeholder {
 
   /* ── Border Radius ── */
   --radius-xs: 4px;
-  --radius-sm: 10px;
-  --radius: 12px;
-  --radius-lg: 18px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
   --radius-pill: 999px;
 
   /* ── Spacing ── */
@@ -147,23 +150,25 @@ textarea::placeholder {
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     --on-brand: #0b140e;
+    --nuni-mark-filter: brightness(0) invert(86%);
     color-scheme: dark;
     --bg: #000000;
     --bg-soft: #080808;
-    --surface: #111111;
-    --surface-strong: #191919;
-    --surface-raised: #232323;
+    --surface: #151614;
+    --surface-strong: #1b1c19;
+    --surface-raised: #252621;
     --surface-tint: rgba(255, 255, 255, 0.06);
-    --panel: #141414;
-    --panel2: #1e1e1e;
-    --text: #f2f3f1;
-    --muted: #a5aaa7;
-    --muted-light: #929994;
-    --border: #2b2b2b;
-    --border-strong: #464646;
-    --brand: #a9c6a3;
-    --brand2: #a9c6a3;
-    --accent-soft: rgba(169, 198, 163, 0.16);
+    --panel: #181916;
+    --panel2: #24251f;
+    --text: #f2f0e8;
+    --muted: #b3b4aa;
+    --muted-light: #9b9e93;
+    --border: #34362f;
+    --border-strong: #55584e;
+    --control-border: #777a6f;
+    --brand: #b6d0b9;
+    --brand2: #ccddce;
+    --accent-soft: rgba(182, 208, 185, 0.14);
     --success: #a6ca9e;
     --success-soft: rgba(48, 209, 88, 0.16);
     --danger: #efac9a;
@@ -201,23 +206,25 @@ textarea::placeholder {
 
 :root[data-theme='dark'] {
   --on-brand: #0b140e;
+  --nuni-mark-filter: brightness(0) invert(86%);
   color-scheme: dark;
   --bg: #000000;
   --bg-soft: #080808;
-  --surface: #111111;
-  --surface-strong: #191919;
-  --surface-raised: #232323;
+  --surface: #151614;
+  --surface-strong: #1b1c19;
+  --surface-raised: #252621;
   --surface-tint: rgba(255, 255, 255, 0.06);
-  --panel: #141414;
-  --panel2: #1e1e1e;
-  --text: #f2f3f1;
-  --muted: #a5aaa7;
-  --muted-light: #929994;
-  --border: #2b2b2b;
-  --border-strong: #464646;
-  --brand: #a9c6a3;
-  --brand2: #a9c6a3;
-  --accent-soft: rgba(169, 198, 163, 0.16);
+  --panel: #181916;
+  --panel2: #24251f;
+  --text: #f2f0e8;
+  --muted: #b3b4aa;
+  --muted-light: #9b9e93;
+  --border: #34362f;
+  --border-strong: #55584e;
+  --control-border: #777a6f;
+  --brand: #b6d0b9;
+  --brand2: #ccddce;
+  --accent-soft: rgba(182, 208, 185, 0.14);
   --success: #a6ca9e;
   --success-soft: rgba(48, 209, 88, 0.16);
   --danger: #efac9a;
@@ -250,6 +257,10 @@ textarea::placeholder {
   --today-afternoon: linear-gradient(135deg, #a9c6a3 0%, #5856d6 100%);
   --today-evening: linear-gradient(135deg, #30d158 0%, #5ac8fa 100%);
   --today-night: linear-gradient(135deg, #1c1c1e 0%, #2c2c2e 100%);
+}
+
+img[src='/icons/mark.svg'] {
+  filter: var(--nuni-mark-filter);
 }
 
 /* ============================
@@ -623,16 +634,10 @@ button {
   align-items: flex-end;
   justify-content: space-between;
   gap: 20px;
-  padding: 24px 26px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: none;
+  padding-block: 8px 24px;
+  border-bottom: 1px solid var(--border-strong);
 }
 
-:root[data-theme='dark'] .pageHead {
-  background: var(--surface);
-}
 
 .pageHeadCopy {
   max-width: 720px;
@@ -647,14 +652,11 @@ button {
   font-weight: 600;
 }
 
-/* iOS Large Title：weight 700 / letter-spacing 微負 / line-height 1.05 */
 .h1 {
   margin: 0;
-  font-size: clamp(28px, 5vw, 42px);
-  line-height: 1.05;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font: 600 var(--page-title-size) / 1.2 var(--font-heading);
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .sub {
@@ -677,26 +679,11 @@ button {
    Card Component
    ============================ */
 
-/* 平面卡片：邊框分層，hover 僅微調邊框色 */
+/* Sections share the page margin and a ruled edge with the daily planner. */
 .card {
   position: relative;
-  overflow: hidden;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 22px;
-  box-shadow: none;
-  transition: border-color var(--motion-fast) ease;
-}
-
-:root[data-theme='dark'] .card {
-  background: var(--surface);
-  border-color: var(--border);
-}
-
-.card:hover {
-  border-color: var(--border-strong);
-  box-shadow: none;
+  padding-block: 20px;
+  border-block-start: 1px solid var(--border);
 }
 
 /* ============================
@@ -709,20 +696,17 @@ button {
   justify-content: center;
   gap: 7px;
   min-height: 44px;
-  padding: 0 18px;
+  padding: 6px 16px;
+  border: 1px solid var(--control-border);
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
   background: var(--surface);
-  box-shadow: none;
   color: var(--text);
   cursor: pointer;
-  font-weight: 600;
-  font-size: var(--font-body-size);
-  letter-spacing: -0.01em;
+  font: 600 var(--font-body-size) / 1.45 var(--font-ui);
+  text-align: center;
   transition:
     background-color var(--motion-fast) ease,
-    border-color var(--motion-fast) ease,
-    opacity var(--motion-fast) ease;
+    border-color var(--motion-fast) ease;
 }
 
 :where(:root[data-theme='dark']) .btn {
@@ -731,7 +715,7 @@ button {
 
 .btn:hover {
   background: var(--panel);
-  border-color: var(--border-strong);
+  border-color: var(--control-border);
   box-shadow: none;
   transform: none;
 }
@@ -805,7 +789,7 @@ button {
   min-height: 48px;
   padding: 0 16px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border);
   background: var(--surface);
   box-shadow: none;
   color: var(--text);
@@ -2938,7 +2922,7 @@ select.input option {
   .pageHead {
     flex-direction: column;
     align-items: flex-start;
-    padding: 20px 20px 22px;
+    padding-block: 8px 18px;
   }
 
   .pageHeadMeta {
@@ -3008,23 +2992,10 @@ select.input option {
     gap: 16px;
   }
 
-  .card {
-    padding: 18px;
-    border-radius: var(--radius);
-  }
-
   .metricGrid,
   .surfaceGrid,
   .tileGrid {
     grid-template-columns: 1fr;
-  }
-
-  .pageHead {
-    border-radius: var(--radius);
-  }
-
-  .h1 {
-    font-size: clamp(26px, 10vw, 36px);
   }
 
   .shellActions {
@@ -3370,20 +3341,11 @@ select,
 textarea {
   color: var(--text);
   background-color: var(--surface);
-  border-color: var(--border-strong);
+  border-color: var(--control-border);
 }
 :where(button, input, textarea, select, summary, a):focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
-}
-.card {
-  border-radius: var(--radius);
-  box-shadow: none;
-}
-.card:hover {
-  transform: none;
-  box-shadow: none;
-  border-color: var(--border-strong);
 }
 
 .footer {
@@ -3419,7 +3381,7 @@ textarea {
   :root {
     --page-padding-inline: 20px;
     --page-padding-block: 28px;
-    --page-title-size: 27px;
+    --page-title-size: calc(2rem + var(--font-h1-size) - 1.5rem);
   }
 }
 @media (prefers-reduced-motion: reduce) {
