@@ -177,7 +177,7 @@ it('keeps the planner activity list as the ordinal source after its TronClass su
   try {
     render(<Assistant />);
     fireEvent.click(await screen.findByRole('checkbox'));
-    await ask('查近期活動和玩課雲未交作業');
+    await ask('查近期活動和查玩課雲未交作業');
     await screen.findByRole('heading', { name: '私人期中報告' });
     await waitFor(() => expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true));
     await ask('把第二個加入行程');
@@ -198,7 +198,7 @@ it('keeps the planner reply and adds no disabled notice when the TronClass integ
   vi.stubGlobal('fetch', fetch);
   render(<Assistant />);
   fireEvent.click(await screen.findByRole('checkbox'));
-  await ask('TronClass 未交作業，教材有哪些，查公車');
+  await ask('查 TronClass 未交作業，查公車');
   await screen.findByText('跨服務規劃結果');
   await waitFor(() => expect(fetch.mock.calls.filter(([url]) => url === '/api/tronclass/agent')).toHaveLength(1));
   await act(async () => { await Promise.resolve(); });
@@ -248,21 +248,23 @@ it('sends a single-clause Agent query to the main planner when the integration i
   expect(fetch.mock.calls.filter(([url]) => url === '/api/nuni/assistant/ask').length).toBeGreaterThan(0);
 });
 
-it.each(['玩課雲', '玩課雲作業'])('falls back to the school LMS link for %s when the Agent is disabled', async question => {
-  const fetch = vi.fn(async (url: string) => {
-    if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
-    if (url === '/api/tronclass/agent') return json({ error: 'TRONCLASS_DISABLED', message: '整合已停用' }, 503);
-    throw new Error(`Unexpected request: ${url}`);
-  });
-  vi.stubGlobal('fetch', fetch);
-  render(<Assistant />);
-  await ask(question);
-  const link = await screen.findByRole('link', { name: /^開啟玩課雲作業/ });
-  expect(link.getAttribute('href')).toBe('/school-lms?schoolId=pu');
-  expect(fetch.mock.calls.some(([url]) => url === '/api/tronclass/agent')).toBe(true);
-  expect(screen.queryByText('整合已停用')).toBeNull();
-  expect(fetch.mock.calls.some(([url]) => url === '/api/nuni/assistant/ask')).toBe(false);
-});
+it.each(['玩課雲', '玩課雲作業', '玩課雲作業是我的', '玩課雲有作業。'])(
+  'keeps %s on the planner confirmation path without a private read',
+  async question => {
+    const fetch = vi.fn(async (url: string) => {
+      if (url.endsWith('/capability')) return json({ enabled: true, ready: true, version: 2 });
+      if (url === '/api/tronclass/agent') return json(base);
+      if (url === '/api/nuni/assistant/ask') return json({ answer: '請確認是否要查詢玩課雲作業。', steps: [], cards: [] });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    render(<Assistant />);
+    fireEvent.click(await screen.findByRole('checkbox'));
+    await ask(question);
+    await screen.findByText('請確認是否要查詢玩課雲作業。');
+    expect(fetch.mock.calls.some(([url]) => url === '/api/tronclass/agent')).toBe(false);
+  },
+);
 
 it('continues an ambiguous material request with a verified course selection', async () => {
   const calls: Record<string, unknown>[] = [];
@@ -274,10 +276,10 @@ it('continues an ambiguous material request with a verified course selection', a
         answer: '這門課目前沒有教材。', snapshot: { ...base.snapshot!, homework: [] } });
   }));
   render(<Assistant cloudEnabled={false} />);
-  await ask('TronClass 教材');
+  await ask('查 TronClass 教材');
   fireEvent.click(await screen.findByRole('button', { name: /私人資訊管理課程.*選擇這門課繼續/ }));
   await screen.findByText('這門課目前沒有教材。');
-  expect(calls[1]).toEqual({ action: 'ask', question: 'TronClass 教材', courseId: 12 });
+  expect(calls[1]).toEqual({ action: 'ask', question: '查 TronClass 教材', courseId: 12 });
 });
 
 it('shows opt-in after a permission denial without granting or reading implicitly', async () => {
@@ -289,7 +291,7 @@ it('shows opt-in after a permission denial without granting or reading implicitl
   });
   vi.stubGlobal('fetch', fetch);
   render(<Assistant cloudEnabled={false} />);
-  await ask('TronClass 未交作業');
+  await ask('查 TronClass 未交作業');
   expect(await screen.findByRole('heading', { name: 'TronClass 助理權限' })).toBeTruthy();
   const read = await screen.findByRole('checkbox', { name: /讀取課程、作業/ }) as HTMLInputElement;
   expect(read.checked).toBe(false);
@@ -354,14 +356,14 @@ it('discards previous account results and cancels its Agent request on a session
     return new Promise<Response>(resolve => { finish = resolve; });
   }));
   const view = render(<Assistant cloudEnabled={false} />);
-  await ask('TronClass 未交作業');
+  await ask('查 TronClass 未交作業');
   await waitFor(() => expect(finish).toBeTypeOf('function'));
   state.context = 'b'.repeat(43); state.accountId = 'bob';
   view.rerender(<Assistant cloudEnabled={false} />);
   expect(signal?.aborted).toBe(true);
   await act(async () => finish(json(base)));
   expect(screen.queryByRole('heading', { name: '私人期中報告' })).toBeNull();
-  expect(screen.queryByText('TronClass 未交作業')).toBeNull();
+  expect(screen.queryByText('查 TronClass 未交作業')).toBeNull();
 });
 
 it('cancels student-source downloads on a role change and requires a new query after switching back', async () => {
@@ -429,7 +431,7 @@ it('aborts an earlier turn’s pending download after permissions are revoked in
   render(<Assistant cloudEnabled={false} />);
   await ask('下載 TronClass 講義');
   await waitFor(() => expect(finishDownload).toBeTypeOf('function'));
-  await ask('TronClass 作業');
+  await ask('查 TronClass 作業');
   await screen.findByRole('heading', { name: '私人期中報告' });
   fireEvent.click(screen.getAllByRole('button', { name: '管理 TronClass 助理權限' })[1]);
   fireEvent.click(await screen.findByRole('checkbox', { name: /讀取課程、作業/ }));
@@ -473,7 +475,7 @@ it('discards an old pending ask through revoke and regrant, while a fresh reques
   const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:fresh-grant');
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   render(<Assistant cloudEnabled={false} />);
-  await ask('TronClass 作業');
+  await ask('查 TronClass 作業');
   fireEvent.click(await screen.findByRole('button', { name: '管理 TronClass 助理權限' }));
   await screen.findByRole('checkbox', { name: /讀取課程、作業/ });
   await ask('下載 TronClass 講義');
@@ -522,7 +524,7 @@ it.each(['denied', 'updated'] as const)('invalidates an old pending file when a 
   render(<Assistant cloudEnabled={false} />);
   await ask('下載 TronClass 講義');
   await waitFor(() => expect(finishDownload).toBeTypeOf('function'));
-  await ask('TronClass 課程');
+  await ask('查 TronClass 課程');
   await screen.findByText(observed === 'denied' ? '授權已在其他地方關閉。' : '已依更新後的權限查詢課程。');
   expect(pendingSignal?.aborted).toBe(true);
   await act(async () => finishDownload(downloadedFile()));
