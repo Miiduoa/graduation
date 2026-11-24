@@ -39,13 +39,73 @@ describe('scoped deterministic TronClass Agent tools', () => {
     const f = fixture();
     const result = await f.service.ask(owner, { question: '查 TronClass 未繳作業有哪些' });
     expect(f.grants.require).toHaveBeenCalledWith(owner, 'readCourseData');
-    expect(f.read).toHaveBeenCalledWith(owner, { include: { homework: true, announcements: false, materials: false } });
+    expect(f.read.mock.calls).toEqual([
+      [owner, { include: { homework: false, announcements: false, materials: false } }],
+      [owner, { include: { homework: true, announcements: false, materials: false } }],
+    ]);
     expect(result.snapshot?.homework.map((item) => [item.id, item.submitted])).toEqual([[201, false], [203, null]]);
     expect(result.answer).toContain('已確認 1 份作業尚未繳交');
     expect(result.answer).toContain('另有 1 份的繳交狀態尚未確認');
     expect(result.snapshot?.announcements).toEqual([]);
     expect(result.steps).toContainEqual(expect.objectContaining({ tool: 'read_homework', status: 'completed' }));
     expect(f.beforeResult).toHaveBeenCalledOnce();
+  });
+
+  it.each(['查玩課雲『外交』作業', '查玩課雲外交作業', '查玩課雲「PS101」作業'])(
+    'resolves the course index before any private read for %s', async (question) => {
+      const f = fixture();
+      const courses = [{ ...course, name: '外交', code: 'PS101' }, snapshot.courses[1]];
+      f.read.mockImplementation(async (_owner, options) => {
+        if (!options?.include?.homework) return { ...snapshot, courses, homework: [] };
+        if (options.courseId !== 101) throw new NuniError(403, 'TRONCLASS_COURSE_ACCESS_DENIED');
+        return { ...snapshot, courses, homework: [{ ...homework, courseName: '外交' }] };
+      });
+
+      const result = await f.service.ask(owner, { question });
+      expect(f.read.mock.calls).toEqual([
+        [owner, { include: { homework: false, announcements: false, materials: false } }],
+        [owner, { courseId: 101, include: { homework: true, announcements: false, materials: false } }],
+      ]);
+      expect(result.snapshot?.courses).toEqual([courses[0]]);
+      expect(result.snapshot?.homework).toEqual([{ ...homework, courseName: '外交' }]);
+    },
+  );
+
+  it.each([
+    '查玩課雲『外交』作業',
+    '查玩課雲外交作業',
+    '查玩課雲「資料庫實習」作業',
+    '查玩課雲「資料庫」「外交」作業',
+  ])('requests confirmation without reading other homework for %s', async (question) => {
+    const f = fixture();
+    const result = await f.service.ask(owner, { question });
+    expect(result.selection).toBe('course');
+    expect(result.snapshot?.homework).toEqual([]);
+    expect(f.read.mock.calls).toEqual([
+      [owner, { include: { homework: false, announcements: false, materials: false } }],
+    ]);
+  });
+
+  it('requires course selection when multiple courses share the requested name', async () => {
+    const f = fixture();
+    f.read.mockResolvedValue({ ...snapshot, courses: [course, { ...course, id: 102 }] });
+    const result = await f.service.ask(owner, { question: '查玩課雲「資料庫」作業' });
+    expect(result.selection).toBe('course');
+    expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
+      include: { homework: false, announcements: false, materials: false },
+    });
+  });
+
+  it('does not resolve a seemingly unique name from an incomplete course index', async () => {
+    const f = fixture();
+    f.read.mockResolvedValue({ ...snapshot, partial: true,
+      errors: [{ courseId: null, area: 'courses', message: '課程索引尚未讀完' }] });
+    const result = await f.service.ask(owner, { question: '查玩課雲「資料庫」作業' });
+    expect(result.selection).toBe('course');
+    expect(result.snapshot?.homework).toEqual([]);
+    expect(f.read).toHaveBeenCalledExactlyOnceWith(owner, {
+      include: { homework: false, announcements: false, materials: false },
+    });
   });
 
   it('requires read permission before school access', async () => {

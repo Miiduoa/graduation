@@ -1669,7 +1669,7 @@ function analyzeClauses(tokens: Token[], splitAdditive = false): ClauseAnalysis[
       continue;
     }
     if (kind) {
-      const followsPredicate = predicate !== null;
+      const followsPredicate: boolean = predicate !== null;
       if (predicate) {
         predicate.objectEndsClause = objectEnds;
         predicates.push(predicate);
@@ -1977,6 +1977,41 @@ function readObjectTarget(text: string, inspectRawClauses = false) {
 export function hasTronClassReadTargetConflict(question: string): boolean {
   if (typeof question !== 'string' || question.length > 1000 || !TRONCLASS_KEYWORD.test(question)) return false;
   return readObjectTarget(question.normalize('NFKC').trim(), true).conflict;
+}
+
+const HOMEWORK_OVERVIEW_WORDS = new Set([
+  ...LMS_NAMES, ...CLAUSE_REQUEST_HELPERS, ...STATUS_WRITE_COMPOUNDS,
+  '我的', '我們的', '全部', '的', '之', '作業', '功課', 'homework', 'assignment', 'assignments',
+  '課程', 'course', 'courses', '未', '尚未', '還沒', '待', 'pending', 'unsubmitted',
+  '一下', '有', '嗎', '呢', ...READ_QUESTION_WORDS,
+  '狀態', '紀錄', '記錄', '情況', '進度', '歷史', ...STATUS_PARTICLES,
+  '繳交狀態', '提交狀態', '截止', '截止日', '截止日期', '截止時間', '期限', 'deadline',
+  '我想', '我要', '我', '想', '要', '可以', '能不能', '把', '將', 'my', 'the', 'all',
+]);
+
+/** A cross-course read requires a question with no unresolved target text. */
+export function isTronClassHomeworkOverview(question: string): boolean {
+  const text = question.normalize('NFKC').trim().replace(/所有/g, '全部');
+  return typographicQuoteSpans(text).length === 0 && tokensFor(text).every(token => {
+    const predicate = predicateKindOf(token);
+    return !token.value.trim() || token.kind === 'punct' || predicate === 'read' || predicate === 'prepare' ||
+      HOMEWORK_OVERVIEW_WORDS.has(token.value.toLowerCase()) ||
+      (predicate === 'write' && matchesStatusSuffix(text, token.end) !== undefined);
+  });
+}
+
+/** Resolve an unquoted course only when its full name accounts for the target text. */
+export function matchesTronClassHomeworkCourse(question: string, name: string): boolean {
+  const target = name.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, '');
+  const text = question.normalize('NFKC').toLocaleLowerCase();
+  if (target.length < 2 || !text.replace(/\s+/g, '').includes(target)) return false;
+  const literal = new RegExp(Array.from(target, escapeRegex).join('\\s*'), 'u');
+  return isTronClassHomeworkOverview(text.replace(literal, ' '));
+}
+
+export function tronClassQuotedTargets(question: string): string[] {
+  const text = question.normalize('NFKC');
+  return typographicQuoteSpans(text).map(span => text.slice(span.inner, span.close));
 }
 
 export type TronClassAgentQueryIntent = {

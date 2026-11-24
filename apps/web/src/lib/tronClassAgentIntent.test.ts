@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTronClassCompoundDownloadAndPrepare, canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs, tronClassReadRequestVerbs } from './tronClassAgentIntent';
+import { matchesTronClassHomeworkCourse, isTronClassHomeworkOverview, isTronClassCompoundDownloadAndPrepare, canAnswerTronClassQuestion, parseTronClassAgentIntent, tronClassExplicitNavigationQuestion, tronClassCompoundClauses, TRONCLASS_NEGATORS, classifyTronClassSentence, tronClassAutoExecuteActionVerbs, tronClassReadRequestVerbs } from './tronClassAgentIntent';
 
 /** Unknown leftover tokens now make a sentence ambiguous (confirmation), which is acceptable. */
 function expectAuthorizedOrAmbiguous(
@@ -29,6 +29,30 @@ function expectWriteOrAmbiguous(question: string): void {
   }
   expect(tronClassCompoundClauses(question)).toEqual([]);
 }
+
+describe('TronClass homework overview scope', () => {
+  it.each([
+    '查 TronClass 未繳作業有哪些', '列出所有玩課雲作業', '幫我準備 TronClass 作業',
+    '查玩課雲作業繳交狀態', '查玩課雲作業繳交期限', '查玩課雲我的作業交了沒',
+  ])(
+    'recognizes an unqualified request in %s', question => {
+      expect(isTronClassHomeworkOverview(question)).toBe(true);
+    },
+  );
+
+  it.each(['查玩課雲外交作業', '查玩課雲「資料庫」作業', '查玩課雲「全部」作業'])(
+    'preserves target text in %s', question => {
+      expect(parseTronClassAgentIntent(question)?.intent).toBe('homework');
+      expect(isTronClassHomeworkOverview(question)).toBe(false);
+    },
+  );
+
+  it('requires the full unquoted course name to account for the remaining target text', () => {
+    const question = '查玩課雲資料庫實習作業';
+    expect(matchesTronClassHomeworkCourse(question, '資料庫')).toBe(false);
+    expect(matchesTronClassHomeworkCourse(question, '資料庫實習')).toBe(true);
+  });
+});
 
 describe('explicit TronClass navigation', () => {
   it.each(['開啟玩課雲作業', '前往玩課雲作業頁', '進入 TronClass 頁面', 'open TronClass 作業'])(
