@@ -397,6 +397,14 @@ test('launcher refuses a hard-linked session key file', () => {
   }
 });
 
+const logTestRunId = '1234567890abcdef'.repeat(2);
+
+function stubLogTestRunId(dir) {
+  writeFileSync(path.join(dir, 'openssl'), `#!/bin/bash
+echo ${logTestRunId}
+`, { mode: 0o700 });
+}
+
 test('launcher refuses a symbolic link log file', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-launcher-log-'));
   const runtime = path.join(dir, 'runtime');
@@ -405,8 +413,9 @@ test('launcher refuses a symbolic link log file', () => {
   writeSessionKey(path.join(runtime, 'tronclass-session.key'));
   const outside = path.join(dir, 'outside.log');
   writeFileSync(outside, 'preserve-me');
-  symlinkSync(outside, path.join(runtime, 'emulators.log'));
+  symlinkSync(outside, path.join(runtime, `emulators.log.${logTestRunId}`));
   try {
+    stubLogTestRunId(dir);
     writeForwardingNodeStub(dir);
     const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
       encoding: 'utf8',
@@ -432,8 +441,9 @@ test('launcher refuses a hard-linked log file without truncating the other link'
   writeSessionKey(path.join(runtime, 'tronclass-session.key'));
   const outside = path.join(dir, 'outside.log');
   writeFileSync(outside, 'preserve-hard-link');
-  linkSync(outside, path.join(runtime, 'emulators.log'));
+  linkSync(outside, path.join(runtime, `emulators.log.${logTestRunId}`));
   try {
+    stubLogTestRunId(dir);
     writeForwardingNodeStub(dir);
     const result = spawnSync('bash', [fileURLToPath(new URL('./tronclass.sh', import.meta.url))], {
       encoding: 'utf8',
@@ -448,6 +458,124 @@ test('launcher refuses a hard-linked log file without truncating the other link'
     assert.match(`${result.stderr}\n${result.stdout}`, /symbolic link or unusable log/i);
     assert.equal(readFileSync(outside, 'utf8'), 'preserve-hard-link');
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('concurrent launchers keep their logs and emulator readiness isolated', { timeout: 20000 }, async () => {
+  const { spawn } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const { default: process } = await import('node:process');
+  const { once } = await import('node:events');
+  const { setTimeout: delay } = await import('node:timers/promises');
+  const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-concurrent-logs-'));
+  const script = fileURLToPath(import.meta.resolve('./tronclass.sh'));
+  const launchers = [];
+  const waitFor = async (condition, description) => {
+    const deadline = Date.now() + 5000;
+    while (!condition() && Date.now() < deadline) await delay(20);
+    assert.ok(condition(), description);
+  };
+  const launch = label => {
+    const proc = spawn('bash', [script], {
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH}`,
+        BASH_ENV: path.join(dir, 'bash-env'),
+        TRONCLASS_RUNTIME_DIR: dir,
+        TRONCLASS_LOG_TEST_LABEL: label,
+        TRONCLASS_SIGNAL_SELFTEST: '0',
+        TRONCLASS_VERIFY_RUNTIME: '0',
+        TRONCLASS_CHECK_HEALTH: '0',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const exited = once(proc, 'exit');
+    const launcher = { proc, exited, output: '' };
+    for (const stream of [proc.stdout, proc.stderr]) {
+      stream.on('data', chunk => { launcher.output += chunk; });
+    }
+    launchers.push(launcher);
+    return launcher;
+  };
+  const logPath = (launcher, name) => path.join(dir, `${name}.log.${launcher.output.match(/RUN_ID=([a-f0-9]{32})/)?.[1]}`);
+  const marker = name => path.join(dir, name);
+  try {
+    writeForwardingNodeStub(dir);
+    writeSessionKey(path.join(dir, 'bff-session.key'));
+    writeSessionKey(path.join(dir, 'tronclass-session.key'));
+    writeFileSync(marker('bash-env'), `
+grep() {
+  command grep "$@"
+  local status=$?
+  if [[ "$TRONCLASS_LOG_TEST_LABEL" = second && "\${2:-}" = 'All emulators ready' && "$status" = 1 ]]; then
+    touch "$TRONCLASS_RUNTIME_DIR/second-unready"
+  fi
+  return "$status"
+}
+`);
+    writeFileSync(marker('node'), `#!${process.execPath}
+const fs = require('node:fs');
+const path = require('node:path');
+const [arg, ...args] = process.argv.slice(2);
+if (arg === '-') {
+  const { status } = require('node:child_process').spawnSync(${JSON.stringify(process.execPath)}, [arg, ...args], { stdio: 'inherit' });
+  process.exit(status ?? 1);
+}
+const { TRONCLASS_RUNTIME_DIR: dir, TRONCLASS_LOG_TEST_LABEL: label } = process.env;
+const marker = name => path.join(dir, name);
+if (arg.endsWith('/firebase.js')) {
+  console.log(label + ' emulator started');
+  if (label === 'first') console.log('All emulators ready');
+  let continued = false;
+  setInterval(() => {
+    if (continued || !fs.existsSync(marker(label + '-continue'))) return;
+    continued = true;
+    console.log(label === 'first' ? 'first emulator still writing' : 'All emulators ready');
+  }, 20);
+} else if (arg.endsWith('/seed.cjs')) {
+  fs.writeFileSync(marker(label + '-seeded'), '');
+} else if (arg.endsWith('/next')) {
+  console.log(label + ' web started');
+  let continued = false;
+  setInterval(() => {
+    if (continued || label !== 'first' || !fs.existsSync(marker('first-continue'))) return;
+    continued = true;
+    console.log('first web still writing');
+  }, 20);
+}
+`, { mode: 0o700 });
+
+    const first = launch('first');
+    await waitFor(() => existsSync(logPath(first, 'web')), 'first launcher reached web startup');
+    const firstEmulatorLog = logPath(first, 'emulators');
+    const firstWebLog = logPath(first, 'web');
+    await waitFor(() => readFileSync(firstWebLog, 'utf8').includes('first web started'), 'first web wrote its log');
+    const firstEmulatorStart = readFileSync(firstEmulatorLog, 'utf8');
+    assert.match(firstEmulatorStart, /first emulator started\nAll emulators ready/);
+
+    const second = launch('second');
+    const secondEmulatorLog = () => logPath(second, 'emulators');
+    await waitFor(() => existsSync(secondEmulatorLog()) &&
+      readFileSync(secondEmulatorLog(), 'utf8').includes('second emulator started') &&
+      existsSync(marker('second-unready')), 'second launcher checked readiness while its emulator was unready');
+    assert.equal(existsSync(marker('second-seeded')), false);
+    assert.equal(readFileSync(firstEmulatorLog, 'utf8'), firstEmulatorStart);
+
+    writeFileSync(marker('second-continue'), '');
+    await waitFor(() => existsSync(logPath(second, 'web')), 'second launcher reached web startup after its own ready message');
+    assert.ok(existsSync(marker('second-seeded')));
+    assert.ok(second.proc.kill('SIGTERM'));
+    assert.deepEqual(await second.exited, [143, null]);
+
+    writeFileSync(marker('first-continue'), '');
+    await waitFor(() => readFileSync(firstEmulatorLog, 'utf8').includes('first emulator still writing'), 'first emulator can still write after second cleanup');
+    assert.ok(readFileSync(firstEmulatorLog, 'utf8').startsWith(firstEmulatorStart));
+    await waitFor(() => readFileSync(firstWebLog, 'utf8').includes('first web still writing'), 'first web can still write after second cleanup');
+    assert.equal(readFileSync(firstWebLog, 'utf8'), 'first web started\nfirst web still writing\n');
+  } finally {
+    for (const { proc } of launchers) proc.kill('SIGTERM');
+    await Promise.all(launchers.map(({ exited }) => exited));
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -522,7 +650,7 @@ test('launcher recovers a current-run sidecar after the leader exits before capt
       const dir = mkdtempSync(path.join(tmpdir(), 'tronclass-orphan-sidecar-'));
       const childFile = path.join(dir, 'child.pid');
       const descendantFile = path.join(dir, 'grandchild.pid');
-      const findSidecar = () => readdirSync(dir).find(name => /^selftest\.log\.pgid\.[a-f0-9]{32}$/.test(name));
+      const findSidecar = () => readdirSync(dir).find(name => /^selftest\.log\.([a-f0-9]{32})\.pgid\.\1$/.test(name));
       const victim = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
       const victimExited = once(victim, 'exit');
       let launcher;
@@ -586,7 +714,7 @@ exec /bin/ps "$@"
           });
           concurrentExited = once(concurrent, 'exit');
           const findConcurrentRecord = () => readdirSync(dir).find(name =>
-            name.startsWith('selftest.log.pgid.') && name !== path.basename(sidecar));
+            /^selftest\.log\.([a-f0-9]{32})\.pgid\.\1$/.test(name) && name !== path.basename(sidecar));
           const concurrentDeadline = Date.now() + 4000;
           while (!findConcurrentRecord() && Date.now() < concurrentDeadline) await delay(15);
           assert.ok(findConcurrentRecord());
@@ -1025,7 +1153,7 @@ fs.fsyncSync = fd => {
     await waitFor(() => existsSync(opened) && readFileSync(opened, 'utf8'), 'first wrapper opened its temporary file');
     const active = readFileSync(opened, 'utf8');
     const [run] = readFileSync(active, 'utf8').trim().split(' ');
-    const firstRecord = path.join(dir, `selftest.log.pgid.${run}`);
+    const firstRecord = path.join(dir, `selftest.log.${run}.pgid.${run}`);
     assert.equal(existsSync(firstRecord), false);
 
     const writer = spawn('true');
@@ -1036,7 +1164,7 @@ fs.fsyncSync = fd => {
     symlinkSync(active, stale[2]);
 
     const second = launch('second');
-    const records = () => readdirSync(dir).filter(name => /^selftest\.log\.pgid\.[a-f0-9]{32}$/.test(name));
+    const records = () => readdirSync(dir).filter(name => /^selftest\.log\.([a-f0-9]{32})\.pgid\.\1$/.test(name));
     await waitFor(() => existsSync(second.childFile) && records().length === 1, 'second launcher published its own record');
     assert.ok(lstatSync(active).isFile());
     assert.deepEqual(readdirSync(dir).filter(name => name.startsWith(`.pgid-${writer.pid}-`)), []);
@@ -1173,16 +1301,17 @@ test('launcher exits with 143 when the wrapper stalls before spawning', async ()
     stdio: ['ignore', 'pipe', 'ignore'],
   });
   let wrapperLine = '';
+  const selftestLogExists = () => readdirSync(dir).some(name => /^selftest\.log\.[a-f0-9]{32}$/.test(name));
   proc.stdout.on('data', chunk => { wrapperLine += String(chunk); });
   let timer;
   try {
     const startupDeadline = Date.now() + 5000;
     while (Date.now() < startupDeadline) {
-      if (/WRAPPER_PID=\d+/.test(wrapperLine) && existsSync(path.join(dir, 'selftest.log'))) break;
+      if (/WRAPPER_PID=\d+/.test(wrapperLine) && selftestLogExists()) break;
       await new Promise(resolve => setTimeout(resolve, 20));
     }
     assert.match(wrapperLine, /WRAPPER_PID=\d+/);
-    assert.ok(existsSync(path.join(dir, 'selftest.log')));
+    assert.ok(selftestLogExists());
     assert.equal(existsSync(childPidFile), false);
     const exited = new Promise((resolve, reject) => {
       timer = setTimeout(() => reject(new Error('Launcher cleanup timed out')), 12000);
