@@ -230,7 +230,7 @@ async function readContents(
   for (const response of [activities, courseware, notices]) if (!response.ok) requireAuthorized(response.status);
   const errors: TronClassSyncError[] = [];
   if (needMaterials && (!activities.ok || (!courseware.ok && courseware.status !== 404))) errors.push(courseError(course, 'materials'));
-  if (needAnnouncements && !notices.ok && notices.status !== 404) errors.push(courseError(course, 'announcements'));
+  if (needAnnouncements && (!activities.ok || (!notices.ok && notices.status !== 404))) errors.push(courseError(course, 'announcements'));
   for (const result of [activities, courseware, notices]) {
     if (result.ok && (!Array.isArray(result.value) || result.value.length > MAX_FEED_ITEMS)) {
       throw new NuniError(502, 'TRONCLASS_INVALID_SOURCE');
@@ -248,9 +248,9 @@ async function readContents(
   for (const raw of visibleSourceRows(notices.ok ? notices.value : [])) addAnnouncement(announcement(raw, course, 'course'));
   const activityRows = visibleSourceRows([...(activities.ok ? activities.value : []), ...(courseware.ok ? courseware.value : [])]);
   for (const raw of activityRows) {
-    const item = material(raw, course);
+    const item = needMaterials ? material(raw, course) : null;
     if (item && !seenMaterials.has(item.id)) { seenMaterials.add(item.id); materials.push(item); }
-    if (isAnnouncementActivityType(record(raw).type)) addAnnouncement(announcement(raw, course, 'activity'));
+    if (needAnnouncements && isAnnouncementActivityType(record(raw).type)) addAnnouncement(announcement(raw, course, 'activity'));
   }
   return { announcements, materials, errors };
 }

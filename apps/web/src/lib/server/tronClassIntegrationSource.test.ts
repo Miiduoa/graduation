@@ -441,6 +441,35 @@ describe('independent TronClass source', () => {
     expect(result.homework).toEqual([]);
   });
 
+  it('keeps course notices and reports incomplete announcements when the activity feed is unavailable', async () => {
+    const { reader, source } = setup();
+    vi.mocked(source.fetchActivities).mockResolvedValue({ ok: false, status: 503 });
+    vi.mocked(source.fetchCourseAnnouncements).mockResolvedValue({ ok: true, value: [
+      { id: 501, course_id: 101, title: '課程公告' },
+    ] });
+    const result = await reader('platform:pa_fixture', { courseId: 101, include: { announcements: true } });
+    expect(result).toMatchObject({
+      partial: true, errors: [{ courseId: 101, area: 'announcements' }],
+      announcements: [{ title: '課程公告' }], materials: [],
+    });
+  });
+
+  it.each(['announcements', 'materials'] as const)('only projects %s from a mixed activity feed', async (area) => {
+    const { reader, source } = setup();
+    vi.mocked(source.fetchActivities).mockImplementation(async (_cookie, _course, query) => ({
+      ok: true, value: query ? [] : [
+        { id: 301, course_id: 101, title: '講義', type: 'material' },
+        { id: 401, course_id: 101, title: '活動公告', type: 'announcement' },
+      ],
+    }));
+    const result = await reader('platform:pa_fixture', { courseId: 101, include: { [area]: true } });
+    expect(result).toMatchObject({
+      partial: false, errors: [],
+      announcements: area === 'announcements' ? [{ title: '活動公告' }] : [],
+      materials: area === 'materials' ? [{ title: '講義' }] : [],
+    });
+  });
+
   it('does not dispatch homework when only materials are requested', async () => {
     const { reader, source } = setup();
     const result = await reader('platform:pa_fixture', { courseId: 101, include: { materials: true } });
