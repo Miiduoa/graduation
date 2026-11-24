@@ -26,7 +26,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 it('authenticates and reauthenticates the same actor, returning private no-store data', async () => {
   const f = fixture();
-  const response = await f.request({ action: 'ask', question: 'TronClass 課程' });
+  const response = await f.request({ action: 'ask', question: '查 TronClass 課程' });
   expect(response.status).toBe(200);
   expect(f.authenticate).toHaveBeenCalledTimes(2);
   expect(f.read).toHaveBeenCalledWith(actor.ownerKey, {
@@ -39,7 +39,7 @@ it('authenticates and reauthenticates the same actor, returning private no-store
 
 it('reads homework data for a homework question', async () => {
   const f = fixture();
-  const response = await f.request({ action: 'ask', question: 'TronClass 作業' });
+  const response = await f.request({ action: 'ask', question: '查 TronClass 作業' });
   expect(response.status).toBe(200);
   expect(f.read).toHaveBeenCalledWith(actor.ownerKey, {
     include: { homework: true, announcements: false, materials: false },
@@ -50,18 +50,18 @@ it('reads homework data for a homework question', async () => {
 it('rejects unauthenticated requests before grants or school access', async () => {
   const f = fixture();
   f.authenticate.mockRejectedValue(new NuniError(401, 'SIGN_IN_REQUIRED'));
-  expect((await f.request({ action: 'ask', question: 'TronClass 作業' })).status).toBe(401);
+  expect((await f.request({ action: 'ask', question: '查 TronClass 作業' })).status).toBe(401);
   expect(f.grants.require).not.toHaveBeenCalled();
   expect(f.read).not.toHaveBeenCalled();
 });
 
 it.each([
-  { action: 'ask', question: 'TronClass 課程', ownerKey: 'firebase:other' },
+  { action: 'ask', question: '查 TronClass 課程', ownerKey: 'firebase:other' },
   { action: 'ask', question: 'TronClass 教材', url: 'https://other.test' },
-  { action: 'ask', question: 'TronClass 作業', courseId: '101' },
-  { action: 'ask', question: 'TronClass 作業', homeworkId: 201 },
-  { action: 'ask', question: 'TronClass 作業', courseId: -1 },
-  { action: 'ask', question: 'TronClass 作業', grantVersion: grant.version },
+  { action: 'ask', question: '查 TronClass 作業', courseId: '101' },
+  { action: 'ask', question: '查 TronClass 作業', homeworkId: 201 },
+  { action: 'ask', question: '查 TronClass 作業', courseId: -1 },
+  { action: 'ask', question: '查 TronClass 作業', grantVersion: grant.version },
   { action: 'ask', question: '一般問題' },
   { action: 'ask', question: 'TronClass '.repeat(150) },
   { action: 'prepare', courseId: 101, homeworkId: 201, confirmed: true },
@@ -86,7 +86,7 @@ it('rejects query parameters and oversized JSON before accessing private data', 
 it('discards source output if the nuni session changes or expires during a read', async () => {
   const f = fixture();
   f.authenticate.mockResolvedValueOnce(actor).mockResolvedValueOnce({ ...actor, ownerKey: 'firebase:other' });
-  const response = await f.request({ action: 'ask', question: 'TronClass 作業' });
+  const response = await f.request({ action: 'ask', question: '查 TronClass 作業' });
   expect(response.status).toBe(409);
   expect(await response.json()).toMatchObject({ error: 'SESSION_CHANGED' });
   expect(f.grants.require).toHaveBeenCalledWith(actor.ownerKey, 'readCourseData');
@@ -95,7 +95,7 @@ it('discards source output if the nuni session changes or expires during a read'
 it('does not expose upstream cookies, passwords or raw exception bodies', async () => {
   const f = fixture();
   f.read.mockRejectedValue(new Error('Cookie: private-cookie Password: secret-school-password'));
-  const response = await f.request({ action: 'ask', question: 'TronClass 作業' });
+  const response = await f.request({ action: 'ask', question: '查 TronClass 作業' });
   expect(response.status).toBe(503);
   expect(await response.text()).not.toMatch(/private-cookie|secret-school-password/);
 });
@@ -103,7 +103,7 @@ it('does not expose upstream cookies, passwords or raw exception bodies', async 
 it('shows grant denial as a permission error instead of fetching school data', async () => {
   const f = fixture();
   f.grants.require.mockRejectedValue(new NuniError(403, 'TRONCLASS_AGENT_PERMISSION_REQUIRED'));
-  const response = await f.request({ action: 'ask', question: 'TronClass 作業' });
+  const response = await f.request({ action: 'ask', question: '查 TronClass 作業' });
   expect(response.status).toBe(403);
   expect(await response.json()).toMatchObject({ error: 'TRONCLASS_AGENT_PERMISSION_REQUIRED', message: expect.stringContaining('權限') });
   expect(f.read).not.toHaveBeenCalled();

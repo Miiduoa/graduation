@@ -51,7 +51,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
   it('requires read permission before school access', async () => {
     const f = fixture();
     f.grants.require.mockRejectedValue(new NuniError(403, 'TRONCLASS_AGENT_PERMISSION_REQUIRED'));
-    await expect(f.service.ask(owner, { question: 'TronClass 課程' })).rejects.toMatchObject({ status: 403 });
+    await expect(f.service.ask(owner, { question: '查 TronClass 課程' })).rejects.toMatchObject({ status: 403 });
     expect(f.read).not.toHaveBeenCalled();
   });
 
@@ -75,7 +75,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
       f.grants.assertCurrent.mockRejectedValue(new NuniError(403, 'TRONCLASS_AGENT_PERMISSION_REQUIRED'));
       return snapshot;
     });
-    await expect(f.service.ask(owner, { question: 'TronClass 未繳作業' })).rejects.toMatchObject({ status: 403 });
+    await expect(f.service.ask(owner, { question: '查 TronClass 未繳作業' })).rejects.toMatchObject({ status: 403 });
   });
 
   it('checks grants again after final nuni authentication', async () => {
@@ -83,19 +83,19 @@ describe('scoped deterministic TronClass Agent tools', () => {
     f.beforeResult.mockImplementation(async () => {
       f.grants.assertCurrent.mockRejectedValue(new NuniError(409, 'TRONCLASS_AGENT_PERMISSION_CHANGED'));
     });
-    await expect(f.service.ask(owner, { question: 'TronClass 課程' })).rejects.toMatchObject({ status: 409 });
+    await expect(f.service.ask(owner, { question: '查 TronClass 課程' })).rejects.toMatchObject({ status: 409 });
   });
 
   it('rejects a result from a new school binding', async () => {
     const f = fixture();
     f.read.mockResolvedValue({ ...snapshot, revision: 'c'.repeat(32) });
-    await expect(f.service.ask(owner, { question: 'TronClass 課程' })).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
+    await expect(f.service.ask(owner, { question: '查 TronClass 課程' })).rejects.toMatchObject({ code: 'TRONCLASS_BINDING_CHANGED' });
   });
 
   it('does not mistake an incomplete empty list for all assignments being submitted', async () => {
     const f = fixture();
     f.read.mockResolvedValue({ ...snapshot, homework: [], partial: true, errors: [{ courseId: 101, area: 'homework', message: '未讀完' }] });
-    const result = await f.service.ask(owner, { question: 'TronClass 未繳作業' });
+    const result = await f.service.ask(owner, { question: '查 TronClass 未繳作業' });
     expect(result.snapshot?.partial).toBe(true);
     expect(result.answer).toContain('不能據此判定全部作業已繳交');
   });
@@ -103,7 +103,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
   it('bounds action choices without rejecting a complete large source snapshot', async () => {
     const f = fixture();
     f.read.mockResolvedValue({ ...snapshot, homework: Array.from({ length: 501 }, (_, index) => ({ ...homework, id: 201 + index })) });
-    const result = await f.service.ask(owner, { question: 'TronClass 未交作業' });
+    const result = await f.service.ask(owner, { question: '查 TronClass 未交作業' });
     expect(result.snapshot?.homework).toHaveLength(501);
     expect(result.snapshot?.partial).toBe(false);
     expect(result.actions).toHaveLength(500);
@@ -113,7 +113,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('asks for an actual course choice instead of picking the first course', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: 'TronClass 公告' });
+    const result = await f.service.ask(owner, { question: '查 TronClass 公告' });
     expect(result.selection).toBe('course');
     expect(result.snapshot?.courses).toHaveLength(2);
     expect(result.snapshot?.homework).toEqual([]);
@@ -123,7 +123,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('resolves one exact course title and renders notice text as data only', async () => {
     const f = fixture();
-    const result = await f.service.ask(owner, { question: 'TronClass「資料庫」公告' });
+    const result = await f.service.ask(owner, { question: '查 TronClass「資料庫」公告' });
     expect(f.read.mock.calls).toEqual([
       [owner, { include: { homework: false, announcements: false, materials: false } }],
       [owner, { courseId: 101, include: { homework: false, announcements: true, materials: false } }],
@@ -151,7 +151,7 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('never downloads automatically from a partial listing or a materials-only question', async () => {
     const f = fixture();
-    const display = await f.service.ask(owner, { question: 'TronClass「資料庫」教材' });
+    const display = await f.service.ask(owner, { question: '查 TronClass「資料庫」教材' });
     expect(display.actions[0]).toMatchObject({ automatic: false });
     f.read.mockResolvedValue({ ...snapshot, partial: true });
     await expect(f.service.ask(owner, { question: '下載 TronClass 講義.pdf', courseId: 101 })).rejects.toMatchObject({
@@ -263,10 +263,10 @@ describe('scoped deterministic TronClass Agent tools', () => {
 
   it('never asks the source to read homework when answering announcements or materials', async () => {
     const f = fixture();
-    await f.service.ask(owner, { question: 'TronClass「資料庫」公告' });
+    await f.service.ask(owner, { question: '查 TronClass「資料庫」公告' });
     expect(f.read.mock.calls.every((call) => call[1]?.include?.homework !== true)).toBe(true);
     f.read.mockClear();
-    await f.service.ask(owner, { question: 'TronClass「資料庫」教材' });
+    await f.service.ask(owner, { question: '查 TronClass「資料庫」教材' });
     expect(f.read.mock.calls.every((call) => call[1]?.include?.homework !== true)).toBe(true);
     expect(f.read.mock.calls.some((call) => call[1]?.include?.materials === true)).toBe(true);
   });
